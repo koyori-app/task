@@ -20,6 +20,7 @@
     "vue-router": "^5.0.6"
   },
   "devDependencies": {
+    "rolldown": "1.0.0-rc.18",
     "vite-plus": "catalog:"
   },
   "packageManager": "pnpm@10.33.2"
