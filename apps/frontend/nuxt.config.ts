@@ -3,4 +3,7 @@ export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
   devtools: { enabled: true },
   modules: ["@nuxtjs/seo", "@pinia/nuxt", "@nuxtjs/google-fonts"],
+  nitro: {
+    preset: 'bun'
+  }
 });
