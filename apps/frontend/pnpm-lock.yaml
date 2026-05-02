@@ -42,6 +42,9 @@ importers:
       nuxt:
         specifier: ^4.4.4
         version: 4.4.4(@babel/core@7.29.0)(@babel/plugin-syntax-jsx@7.28.6(@babel/core@7.29.0))(@parcel/watcher@2.5.6)(@types/node@25.6.0)(@vue/compiler-sfc@3.5.33)(cac@6.7.14)(db0@0.3.4)(esbuild@0.28.0)(ioredis@5.10.1)(magicast@0.5.2)(oxlint@1.61.0(oxlint-tsgolint@0.22.0))(pinia@3.0.4(typescript@6.0.3)(vue@3.5.33(typescript@6.0.3)))(rolldown@1.0.0-rc.18)(rollup-plugin-visualizer@7.0.1(rolldown@1.0.0-rc.18)(rollup@4.60.2))(rollup@4.60.2)(srvx@0.11.15)(terser@5.46.2)(typescript@6.0.3)(vite@7.3.2(@types/node@25.6.0)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.2)(yaml@2.8.4))(yaml@2.8.4)
+      nuxt-umami:
+        specifier: 3.2.1
+        version: 3.2.1(magicast@0.5.2)
       pinia:
         specifier: ^3.0.4
         version: 3.0.4(typescript@6.0.3)(vue@3.5.33(typescript@6.0.3))
@@ -4622,6 +4625,9 @@ packages:
   nuxt-site-config@4.0.8:
     resolution: {integrity: sha512-H7wHoOJ5Z6ZnTqD5vUugaKkWZbejZ9kGmzpr2dheOaC6RdT8JafCfMrmJG7W+cyJiJJ3YmzL+bzPBW2bW6MExA==}
 
+  nuxt-umami@3.2.1:
+    resolution: {integrity: sha512-82cf3kcrMn4Iq0rJ2Blfl48AqLWqRubEpxOinOoxqW7taZAd5SgZcCdCj7y4qXSt0W5DhBYgaq4IboyGFHoVUQ==}
+
   nuxt@4.4.4:
     resolution: {integrity: sha512-r9E3PYo+uJazltAmjm0TwFW3MQ++Wd//2uRZgCyqkt7VSAVJ5KnRRwUF7JktK/NZbLYAUDiV3tgqE9ZYbHbymA==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -5124,6 +5130,9 @@ packages:
     resolution: {integrity: sha512-K6bL457owpvWONc7hsjFxo3HDC9s6IzhRqShW0w9JSKelPGfRbkHD558UQTn/NH1cvrXVHygKyC7fExFmRketg==}
     peerDependencies:
       vue: '>= 3.4.0'
+
+  request-ip@3.3.0:
+    resolution: {integrity: sha512-cA6Xh6e0fDBBBwH77SLJaJPBmD3nWVAcF9/XAcsrIHdjhFzFiB5aNQFytdjCGPezU3ROwrR11IddKAM08vohxA==}
 
   resolve-from@5.0.0:
     resolution: {integrity: sha512-qYg9KP24dD5qka9J47d0aVky0N+b4fTU89LN9iDnjB5waksiC49rvMB0PrUJQGoTmH50XPiqOvAjDfaijGxYZw==}
@@ -10397,6 +10406,13 @@ snapshots:
       - vue
       - zod
 
+  nuxt-umami@3.2.1(magicast@0.5.2):
+    dependencies:
+      '@nuxt/kit': 3.21.4(magicast@0.5.2)
+      request-ip: 3.3.0
+    transitivePeerDependencies:
+      - magicast
+
   nuxt@4.4.4(@babel/core@7.29.0)(@babel/plugin-syntax-jsx@7.28.6(@babel/core@7.29.0))(@parcel/watcher@2.5.6)(@types/node@25.6.0)(@vue/compiler-sfc@3.5.33)(cac@6.7.14)(db0@0.3.4)(esbuild@0.28.0)(ioredis@5.10.1)(magicast@0.5.2)(oxlint@1.61.0(oxlint-tsgolint@0.22.0))(pinia@3.0.4(typescript@6.0.3)(vue@3.5.33(typescript@6.0.3)))(rolldown@1.0.0-rc.18)(rollup-plugin-visualizer@7.0.1(rolldown@1.0.0-rc.18)(rollup@4.60.2))(rollup@4.60.2)(srvx@0.11.15)(terser@5.46.2)(typescript@6.0.3)(vite@7.3.2(@types/node@25.6.0)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.2)(yaml@2.8.4))(yaml@2.8.4):
     dependencies:
       '@dxup/nuxt': 0.4.1(magicast@0.5.2)(typescript@6.0.3)
@@ -11274,6 +11290,8 @@ snapshots:
       vue: 3.5.33(typescript@6.0.3)
     transitivePeerDependencies:
       - '@vue/composition-api'
+
+  request-ip@3.3.0: {}
 
   resolve-from@5.0.0: {}
 

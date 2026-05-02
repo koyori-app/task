@@ -8,7 +8,8 @@ export default defineNuxtConfig({
     "@nuxtjs/seo",
     "@pinia/nuxt",
     "@nuxtjs/google-fonts",
-    "@vueuse/nuxt"
+    "@vueuse/nuxt",
+    "nuxt-umami"
   ],
   css: ['~/assets/css/tailwind.css'],
   vite: {
