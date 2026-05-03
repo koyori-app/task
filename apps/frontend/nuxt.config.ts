@@ -17,6 +17,9 @@ export default defineNuxtConfig({
     plugins: [
       tailwindcss(),
     ],
+    server: {
+      allowedHosts: true
+    }
   },
   nitro: {
     preset: 'bun'
