@@ -11,6 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+backend = { path = "../" }
 
 [dependencies.sea-orm-migration]
 features = [
@@ -20,4 +21,4 @@ features = [
     "runtime-tokio-rustls",  # `ASYNC_RUNTIME` feature
     "sqlx-postgres",         # `DATABASE_DRIVER` feature
 ]
-version = "2.0.0"
+version = "2.0.0-rc.38"
