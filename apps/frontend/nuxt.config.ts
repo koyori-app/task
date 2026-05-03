@@ -9,7 +9,8 @@ export default defineNuxtConfig({
     "@pinia/nuxt",
     "@nuxtjs/google-fonts",
     "@vueuse/nuxt",
-    "nuxt-umami"
+    "nuxt-umami",
+    "@artmizu/nuxt-prometheus"
   ],
   css: ['~/assets/css/tailwind.css'],
   vite: {
