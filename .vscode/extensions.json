@@ -1,5 +1,7 @@
 {
     "recommendations": [
-        "1YiB.rust-bundle"
+        "1YiB.rust-bundle",
+        "bradlc.vscode-tailwindcss",
+        "vue.volar"
     ]
 }
