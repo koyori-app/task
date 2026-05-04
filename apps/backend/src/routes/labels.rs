@@ -1,3 +1,8 @@
-pub fn routes() -> axum::Router {
-    axum::Router::new().route("/labels", axum::routing::get(crate::handlers::labels::get_labels))
+use axum::routing::get;
+use utoipa_axum::router::OpenApiRouter;
+
+use crate::AppState;
+
+pub fn routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::<AppState>::new().route("/", get(crate::handlers::labels::get_labels))
 }

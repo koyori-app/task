@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-axum = "0.8.8"
+axum = { version = "0.8.8", features = ["macros"] }
 sea-orm = { version = "2.0.0-rc.38", features = [
     "sqlx-postgres",
     "runtime-tokio-rustls",
@@ -22,3 +22,5 @@ utoipa-axum = "0.2.0"
 utoipa-scalar = { version = "0.3.0", features = ["axum"] }
 axum_session = { version = "0.20.0" }
 axum_session_redispool = { version = "0.11.0" }
+dotenvy = "0.15"
+config = "0.15.22"
