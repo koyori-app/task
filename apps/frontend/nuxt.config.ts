@@ -58,6 +58,12 @@ export default defineNuxtConfig({
     compressPublicAssets: true,
   },
   typescript: {
+    tsConfig: {
+      vueCompilerOptions: {
+        checkUnknownComponents: true,
+      },
+    },
+    sharedTsConfig: {},
     nodeTsConfig: {
       include: [
         '../buildSrc/**/*.ts',
