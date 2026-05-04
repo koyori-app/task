@@ -1,11 +1,7 @@
 <script setup lang="ts">
-import type { LucideIcon } from "lucide-vue-next"
-import { PhCaretRight } from '@phosphor-icons/vue'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
+import type { LucideIcon } from 'lucide-vue-next';
+import { PhCaretRight } from '@phosphor-icons/vue';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -15,20 +11,20 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-} from '@/components/ui/sidebar'
+} from '@/components/ui/sidebar';
 
 defineProps<{
   items: {
-    title: string
-    url: string
-    icon?: LucideIcon
-    isActive?: boolean
+    title: string;
+    url: string;
+    icon?: LucideIcon;
+    isActive?: boolean;
     items?: {
-      title: string
-      url: string
-    }[]
-  }[]
-}>()
+      title: string;
+      url: string;
+    }[];
+  }[];
+}>();
 </script>
 
 <template>
@@ -47,7 +43,9 @@ defineProps<{
             <SidebarMenuButton :tooltip="item.title">
               <component :is="item.icon" v-if="item.icon" />
               <span>{{ item.title }}</span>
-              <PhCaretRight class="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+              <PhCaretRight
+                class="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90"
+              />
             </SidebarMenuButton>
           </CollapsibleTrigger>
           <CollapsibleContent>

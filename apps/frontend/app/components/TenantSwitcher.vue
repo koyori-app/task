@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { Component } from "vue"
+import type { Component } from 'vue';
 
-import { PhCaretUpDown, PhPlus } from '@phosphor-icons/vue'
-import { ref } from "vue"
+import { PhCaretUpDown, PhPlus } from '@phosphor-icons/vue';
+import { ref } from 'vue';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,25 +11,25 @@ import {
   DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+} from '@/components/ui/dropdown-menu';
 
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-} from '@/components/ui/sidebar'
+} from '@/components/ui/sidebar';
 
 const props = defineProps<{
   tenants: {
-    name: string
-    logo: Component
-    plan: string
-  }[]
-}>()
+    name: string;
+    logo: Component;
+    plan: string;
+  }[];
+}>();
 
-const { isMobile } = useSidebar()
-const activeTenant = ref(props.tenants[0]!)
+const { isMobile } = useSidebar();
+const activeTenant = ref(props.tenants[0]!);
 </script>
 
 <template>
@@ -41,7 +41,9 @@ const activeTenant = ref(props.tenants[0]!)
             size="lg"
             class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
           >
-            <div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+            <div
+              class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground"
+            >
               <component :is="activeTenant.logo" class="size-4" />
             </div>
             <div class="grid flex-1 text-left text-sm leading-tight">
@@ -59,9 +61,7 @@ const activeTenant = ref(props.tenants[0]!)
           :side="isMobile ? 'bottom' : 'right'"
           :side-offset="4"
         >
-          <DropdownMenuLabel class="text-xs text-muted-foreground">
-            Teams
-          </DropdownMenuLabel>
+          <DropdownMenuLabel class="text-xs text-muted-foreground"> Teams </DropdownMenuLabel>
           <DropdownMenuItem
             v-for="(tenant, index) in tenants"
             :key="tenant.name"
@@ -79,9 +79,7 @@ const activeTenant = ref(props.tenants[0]!)
             <div class="flex size-6 items-center justify-center rounded-md border bg-transparent">
               <PhPlus class="size-4" />
             </div>
-            <div class="font-medium text-muted-foreground">
-              Add tenant
-            </div>
+            <div class="font-medium text-muted-foreground">Add tenant</div>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
