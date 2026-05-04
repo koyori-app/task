@@ -1,9 +1,9 @@
-import tailwindcss from "@tailwindcss/vite";
-import { config } from "./buildSrc/setting";
+import tailwindcss from '@tailwindcss/vite';
+import { config } from './buildSrc/setting';
 
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
-  compatibilityDate: "2025-07-15",
+  compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
   experimental: {
     typedPages: true,
@@ -19,15 +19,15 @@ export default defineNuxtConfig({
     dirs: [],
   },
   modules: [
-    "@nuxtjs/seo",
-    "@pinia/nuxt",
-    "@nuxtjs/google-fonts",
-    "@vueuse/nuxt",
-    "nuxt-umami",
-    "@artmizu/nuxt-prometheus",
+    '@nuxtjs/seo',
+    '@pinia/nuxt',
+    '@nuxtjs/google-fonts',
+    '@vueuse/nuxt',
+    'nuxt-umami',
+    '@artmizu/nuxt-prometheus',
   ],
   site: {
-    defaultLocale: "ja-JP",
+    defaultLocale: 'ja-JP',
   },
   umami: {
     host: config.UMAMI_HOST,
@@ -36,17 +36,17 @@ export default defineNuxtConfig({
   // ref: https://nuxtseo.com/docs/seo-utils/guides/nuxt-config-seo-meta#usage
   seo: {
     meta: {
-      charset: "utf-8",
-      applicationName: "Task",
+      charset: 'utf-8',
+      applicationName: 'Task',
       // ogp
-      ogSiteName: "Task",
-      ogLocale: "ja_JP",
-      ogType: "website",
+      ogSiteName: 'Task',
+      ogLocale: 'ja_JP',
+      ogType: 'website',
       ogUrl: config.APP_URL,
-      ogTitle: "Task",
+      ogTitle: 'Task',
     },
   },
-  css: ["~/assets/css/tailwind.css"],
+  css: ['~/assets/css/tailwind.css'],
   vite: {
     plugins: [tailwindcss()],
     server: {
@@ -54,12 +54,16 @@ export default defineNuxtConfig({
     },
   },
   nitro: {
-    preset: "bun",
+    preset: 'bun',
     compressPublicAssets: true,
   },
   typescript: {
     nodeTsConfig: {
-      include: ["../buildSrc/**/*.ts"],
+      include: [
+        '../buildSrc/**/*.ts',
+        // vite plus only
+        '../vite.config.ts',
+      ],
     },
   },
 });
