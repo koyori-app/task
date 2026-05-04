@@ -1,27 +1,65 @@
-import tailwindcss from '@tailwindcss/vite'
+import tailwindcss from "@tailwindcss/vite";
+import { config } from "./buildSrc/setting";
 
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
   devtools: { enabled: true },
+  experimental: {
+    typedPages: true,
+  },
+  future: {
+    compatibilityVersion: 5,
+  },
+  imports: {
+    scan: false,
+    dirs: [],
+  },
+  components: {
+    dirs: [],
+  },
   modules: [
     "@nuxtjs/seo",
     "@pinia/nuxt",
     "@nuxtjs/google-fonts",
     "@vueuse/nuxt",
     "nuxt-umami",
-    "@artmizu/nuxt-prometheus"
+    "@artmizu/nuxt-prometheus",
   ],
-  css: ['~/assets/css/tailwind.css'],
+  site: {
+    defaultLocale: "ja-JP",
+  },
+  umami: {
+    host: config.UMAMI_HOST,
+    id: config.UMAMI_WEBSITE_ID,
+  },
+  // ref: https://nuxtseo.com/docs/seo-utils/guides/nuxt-config-seo-meta#usage
+  seo: {
+    meta: {
+      charset: "utf-8",
+      applicationName: "Task",
+      // ogp
+      ogSiteName: "Task",
+      ogLocale: "ja_JP",
+      ogType: "website",
+      ogUrl: config.APP_URL,
+      ogTitle: "Task",
+    },
+  },
+  css: ["~/assets/css/tailwind.css"],
   vite: {
-    plugins: [
-      tailwindcss(),
-    ],
+    plugins: [tailwindcss()],
     server: {
-      allowedHosts: true
-    }
+      allowedHosts: true,
+    },
   },
   nitro: {
-    preset: 'bun'
-  }
+    preset: "bun",
+    compressPublicAssets: true,
+  },
+  typescript: {
+    nodeTsConfig: {
+      include: ["../buildSrc/**/*.ts"],
+    },
+  },
 });
