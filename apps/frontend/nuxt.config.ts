@@ -60,6 +60,7 @@ export default defineNuxtConfig({
         'lucide-vue-next', // 可能なら廃止したい
         '@phosphor-icons/vue',
         'reka-ui',
+        '@tanstack/vue-table'
       ]
     }
   },
