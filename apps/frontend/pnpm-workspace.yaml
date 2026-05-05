@@ -3,7 +3,6 @@ allowBuilds:
   esbuild: true
   sharp: true
   vue-demi: true
-saveExact: true
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@latest
   vite-plus: latest
@@ -18,3 +17,4 @@ peerDependencyRules:
   allowedVersions:
     vite: '*'
     vitest: '*'
+saveExact: true
