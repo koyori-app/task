@@ -16,6 +16,7 @@
     "@phosphor-icons/vue": "2.2.1",
     "@pinia/nuxt": "0.11.3",
     "@takumi-rs/core": "1.1.2",
+    "@tanstack/vue-table": "8.21.3",
     "arkenv": "0.11.0",
     "arktype": "2.2.0",
     "class-variance-authority": "0.7.1",
