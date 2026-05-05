@@ -39,9 +39,7 @@ jobs:
       - name: Upload artifact for GitHub Pages
         uses: actions/upload-pages-artifact@v1
         with:
-          path: .output/public
-        # run from the docs directory so the path is relative to docs/
-        working-directory: docs
+          path: docs/.output/public
 
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v1
