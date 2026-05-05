@@ -52,6 +52,16 @@ export default defineNuxtConfig({
     server: {
       allowedHosts: true,
     },
+    optimizeDeps: {
+      include: [
+        'class-variance-authority',
+        'clsx',
+        'tailwind-merge',
+        'lucide-vue-next', // 可能なら廃止したい
+        '@phosphor-icons/vue',
+        'reka-ui',
+      ]
+    }
   },
   nitro: {
     preset: 'bun',
