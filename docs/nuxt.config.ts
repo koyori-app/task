@@ -16,5 +16,21 @@ export default defineNuxtConfig({
       },
     ],
   },
+    vite: {
+    optimizeDeps: {
+      include: [
+        'debug', // CJS
+        'mermaid',
+        '@vue/devtools-core',
+        '@vue/devtools-kit',
+      ]
+    }
+  },
   compatibilityDate: '2024-07-06',
+  nitro: {
+    prerender: {
+      // Don't fail the whole generate process on prerender errors
+      failOnError: false,
+    },
+  },
 });
