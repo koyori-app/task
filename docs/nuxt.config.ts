@@ -1,7 +1,7 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   site: {
-    url: 'https://docs.tasks.akarinext.org'
+    url: 'https://docs.tasks.akarinext.org',
   },
   devtools: { enabled: true },
   modules: ['nuxt-component-meta'],
@@ -16,15 +16,15 @@ export default defineNuxtConfig({
       },
     ],
   },
-    vite: {
+  vite: {
     optimizeDeps: {
       include: [
         'debug', // CJS
         'mermaid',
         '@vue/devtools-core',
         '@vue/devtools-kit',
-      ]
-    }
+      ],
+    },
   },
   compatibilityDate: '2024-07-06',
   nitro: {
