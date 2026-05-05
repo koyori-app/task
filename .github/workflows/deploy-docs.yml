@@ -1,0 +1,47 @@
+name: Deploy Docs to GitHub Pages
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install pnpm
+        run: corepack prepare pnpm@latest --activate
+
+      - name: Install dependencies
+        run: pnpm install
+        working-directory: docs
+
+      - name: Generate static site
+        run: pnpm generate
+        working-directory: docs
+
+      - name: Upload artifact for GitHub Pages
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: .output/public
+        # run from the docs directory so the path is relative to docs/
+        working-directory: docs
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v1
