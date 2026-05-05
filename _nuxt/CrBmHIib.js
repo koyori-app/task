@@ -1,0 +1,1 @@
+import{Ni as e,_i as t,bi as n,j as r,ji as i}from"#entry";var a={},o={class:`w-full overflow-y-auto [&:not(:first-child)]:mt-6 [&:not(:last-child)]:mb-6`},s={class:`w-full`};function c(r,a){return i(),n(`div`,o,[t(`table`,s,[e(r.$slots,`default`)])])}var l=Object.assign(r(a,[[`render`,c]]),{__name:`ProseTable`});export{l as default};

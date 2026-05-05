@@ -1,0 +1,1 @@
+function e(e){return Array.isArray(e)?e:[e]}import.meta.url.replace(/\/app\/.*$/,`/`);export{e as t};

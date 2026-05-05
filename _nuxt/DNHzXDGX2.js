@@ -1,0 +1,1 @@
+import{t as e}from"./CV3EoHsp.js";import{Ci as t,Ji as n,Ni as r,bi as i,ji as a,qi as o}from"#entry";var s=t({__name:`Card`,props:{class:{type:[Boolean,null,String,Object,Array]}},setup(t){let s=t;return(t,c)=>(a(),i(`div`,{class:n(o(e)(`rounded-lg border bg-card text-card-foreground shadow-xs`,s.class))},[r(t.$slots,`default`)],2))}});export{s as t};

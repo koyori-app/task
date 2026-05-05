@@ -1,1 +1,0 @@
-import{d as r,c as n,r as o,n as l,u as t,b as c,o as p}from"./D1CCrpmu.js";const m=r({__name:"CardHeader",props:{class:{type:[Boolean,null,String,Object,Array]}},setup(e){const s=e;return(a,d)=>(p(),n("div",{class:l(t(c)("flex flex-col gap-y-1.5 p-6",s.class))},[o(a.$slots,"default")],2))}});export{m as _};

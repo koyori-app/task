@@ -1,0 +1,1 @@
+import{Ci as e,Ei as t,h as n}from"#entry";var r=e({props:{use:{type:Function,default:void 0},unwrap:{type:[Boolean,String],default:!1}},render(e){return t(n,e)}}),i=Object.assign(r,{__name:`ContentSlot`});export{i as default};

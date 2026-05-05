@@ -1,0 +1,1 @@
+import{Ni as e,bi as t,j as n,ji as r}from"#entry";var i={},a={class:`divide-y [&:not(:first-child)]:mt-6`};function o(n,i){return r(),t(`div`,a,[e(n.$slots,`default`)])}var s=Object.assign(n(i,[[`render`,o]]),{__name:`FieldGroup`});export{s as default};

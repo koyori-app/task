@@ -1,0 +1,1 @@
+import{Yr as e,Zr as t}from"#entry";function n(n){let{navigation:r}=e(),i=[],a=n.split(/[/#]/g).filter(e=>e!==``),o=``,s=r.value;if(!s)return[];let{locale:c}=t();for(let e=0;e<a.length;e++){let t=a[e].replace(`.html`,``);o+=`/${t}`;let n=s?.find(e=>e._path===o);s=n?.children,e===0&&t===c.value||i.push({title:n?.title??t,href:o})}return i}export{n as t};

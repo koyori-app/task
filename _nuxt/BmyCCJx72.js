@@ -1,0 +1,1 @@
+import{Ci as e,Ei as t}from"#entry";var n=e({name:`DocumentDrivenNotFound`,render(){return t(`div`,`Document not found`)}}),r=Object.assign(n,{__name:`DocumentDrivenNotFound`});export{r as default};

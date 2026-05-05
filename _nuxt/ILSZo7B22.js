@@ -1,0 +1,1 @@
+import{Ci as e,Li as t,gi as n,wi as r}from"#entry";import i from"./C3miHE6K2.js";var a=e({name:`Markdown`,extends:i,setup(e){let{parent:i}=r(),{between:a,default:o}=t();return{fallbackSlot:o,tags:n(()=>typeof e.unwrap==`string`?e.unwrap.split(` `):[`*`]),between:a,parent:i}}}),o=Object.assign(a,{__name:`Markdown`});export{o as default};

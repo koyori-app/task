@@ -1,1 +1,0 @@
-import{_ as o,o as s,c as t,r}from"./D1CCrpmu.js";const n={},c={class:"font-semibold"};function a(e,_){return s(),t("strong",c,[r(e.$slots,"default")])}const f=Object.assign(o(n,[["render",a]]),{__name:"ProseStrong"});export{f as default};

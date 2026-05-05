@@ -1,0 +1,1 @@
+import{Ci as e,Ei as t,Li as n,ji as r,vi as i}from"#entry";import{t as a}from"./pmPvCQZQ2.js";var o=Object.assign(e({__name:`CodeGroup`,props:{inStack:{type:Boolean,default:!1},sync:{}},setup(e){let o=n();function s(){let n=o?.default?.()||[];return t(a,{variant:`card`,inStack:e.inStack,sync:e.sync},()=>n)}return(e,t)=>(r(),i(s))}}),{__name:`CodeGroup`});export{o as default};

@@ -1,0 +1,1 @@
+import{Ni as e,bi as t,j as n,ji as r}from"#entry";var i={};function a(n,i){return r(),t(`thead`,null,[e(n.$slots,`default`)])}var o=Object.assign(n(i,[[`render`,a]]),{__name:`ProseThead`});export{o as default};

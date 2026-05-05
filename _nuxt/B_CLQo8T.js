@@ -1,0 +1,1 @@
+import{Ni as e,bi as t,j as n,ji as r}from"#entry";var i={},a={class:`border-l-2 pl-6 italic [&:not(:first-child)]:mt-6`};function o(n,i){return r(),t(`blockquote`,a,[e(n.$slots,`default`)])}var s=Object.assign(n(i,[[`render`,o]]),{__name:`ProseBlockquote`});export{s as default};

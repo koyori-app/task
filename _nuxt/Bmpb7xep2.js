@@ -1,0 +1,1 @@
+import{Ci as e,Ni as t,Vi as n,ji as r,vi as i}from"#entry";import{t as a}from"./Cjj3dN9j2.js";var o=Object.assign(e({__name:`Callout`,props:{icon:{},to:{},target:{}},setup(e){return(o,s)=>{let c=a;return r(),i(c,{icon:e.icon,to:e.to,target:e.target},{default:n(()=>[t(o.$slots,`default`)]),_:3},8,[`icon`,`to`,`target`])}}}),{__name:`Callout`});export{o as default};

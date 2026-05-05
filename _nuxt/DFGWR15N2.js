@@ -1,0 +1,1 @@
+import{t as e}from"./CV3EoHsp.js";import{Ci as t,Ji as n,Ni as r,bi as i,ji as a,qi as o}from"#entry";var s=t({__name:`CardHeader`,props:{class:{type:[Boolean,null,String,Object,Array]}},setup(t){let s=t;return(t,c)=>(a(),i(`div`,{class:n(o(e)(`flex flex-col gap-y-1.5 p-6`,s.class))},[r(t.$slots,`default`)],2))}});export{s as t};

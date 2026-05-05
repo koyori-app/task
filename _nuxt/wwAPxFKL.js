@@ -1,0 +1,1 @@
+import{Ni as e,bi as t,j as n,ji as r}from"#entry";var i={},a={class:`ml-6 list-decimal [&:not(:first-child)]:mt-6 [&:not(:last-child)]:mb-6 [&>li:not(:first-child)]:mt-2`};function o(n,i){return r(),t(`ol`,a,[e(n.$slots,`default`)])}var s=Object.assign(n(i,[[`render`,o]]),{__name:`ProseOl`});export{s as default};

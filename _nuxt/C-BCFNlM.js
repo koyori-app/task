@@ -1,1 +1,0 @@
-import{_ as t,o as r,c as o,r as s}from"./D1CCrpmu.js";const n={},c={class:"border px-4 py-2 text-left font-bold [&[align=center]]:text-center [&[align=right]]:text-right"};function a(e,l){return r(),o("th",c,[s(e.$slots,"default")])}const f=Object.assign(t(n,[["render",a]]),{__name:"ProseTh"});export{f as default};

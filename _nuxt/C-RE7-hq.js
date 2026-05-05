@@ -1,0 +1,1 @@
+import{Ni as e,bi as t,j as n,ji as r}from"#entry";var i={},a={class:`border px-4 py-2 text-left font-bold [&[align=center]]:text-center [&[align=right]]:text-right`};function o(n,i){return r(),t(`th`,a,[e(n.$slots,`default`)])}var s=Object.assign(n(i,[[`render`,o]]),{__name:`ProseTh`});export{s as default};

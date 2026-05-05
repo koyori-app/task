@@ -1,0 +1,1 @@
+import{bi as e,j as t,ji as n}from"#entry";var r={},i={class:`[&:not(:first-child)]:mt-6`};function a(t,r){return n(),e(`hr`,i)}var o=Object.assign(t(r,[[`render`,a]]),{__name:`ProseHr`});export{o as default};

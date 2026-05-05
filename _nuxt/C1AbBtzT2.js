@@ -1,0 +1,1 @@
+import{Ci as e,Ei as t}from"#entry";var n=e({name:`DocumentDrivenEmpty`,props:{value:{type:Object,required:!0}},render({value:e}){return t(`div`,void 0,[t(`p`,`Document is empty`),t(`p`,`Add content to it by opening ${e._source}/${e._file} file.`)])}}),r=Object.assign(n,{__name:`DocumentDrivenEmpty`});export{r as default};
