@@ -205,9 +205,9 @@ function copy(id: string) {
     <div class="flex items-center py-4">
       <Input
         class="max-w-sm"
-        placeholder="Filter emails..."
-        :model-value="table.getColumn('email')?.getFilterValue() as string"
-        @update:model-value=" table.getColumn('email')?.setFilterValue($event)"
+        placeholder="Filter titles..."
+        :model-value="table.getColumn('title')?.getFilterValue() as string"
+        @update:model-value=" table.getColumn('title')?.setFilterValue($event)"
       />
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
