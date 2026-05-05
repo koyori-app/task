@@ -1,0 +1,1 @@
+import{_ as t,o as e,c as o,r as c}from"./CySWvUbY.js";const l={},r={class:"ml-6 list-disc [&:not(:first-child)]:mt-6 [&:not(:last-child)]:mb-6 [&>li:not(:first-child)]:mt-2"};function n(s,a){return e(),o("ul",r,[c(s.$slots,"default")])}const _=Object.assign(t(l,[["render",n]]),{__name:"ProseUl"});export{_ as default};

@@ -1,0 +1,1 @@
+import{_ as t,o as r,c as s,r as n}from"./CySWvUbY.js";const o={},c={class:"border px-4 py-2 text-left [&[align=center]]:text-center [&[align=right]]:text-right"};function a(e,_){return r(),s("td",c,[n(e.$slots,"default")])}const d=Object.assign(t(o,[["render",a]]),{__name:"ProseTd"});export{d as default};
