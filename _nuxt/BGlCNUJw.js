@@ -1,0 +1,1 @@
+import{_ as s,o as t,c as o,s as a,r as c}from"./D1CCrpmu.js";const l={},r={class:"w-full overflow-y-auto [&:not(:first-child)]:mt-6 [&:not(:last-child)]:mb-6"},n={class:"w-full"};function _(e,d){return t(),o("div",r,[a("table",n,[c(e.$slots,"default")])])}const i=Object.assign(s(l,[["render",_]]),{__name:"ProseTable"});export{i as default};

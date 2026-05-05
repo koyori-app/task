@@ -1,0 +1,1 @@
+import{_ as o,o as t,c as s,r as c}from"./D1CCrpmu.js";const r={},l={class:"border-l-2 pl-6 italic [&:not(:first-child)]:mt-6"};function n(e,a){return t(),s("blockquote",l,[c(e.$slots,"default")])}const i=Object.assign(o(r,[["render",n]]),{__name:"ProseBlockquote"});export{i as default};

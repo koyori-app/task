@@ -1,0 +1,1 @@
+import{_ as e,o as s,c}from"./D1CCrpmu.js";const r={},t={class:"[&:not(:first-child)]:mt-6"};function o(n,_){return s(),c("hr",t)}const f=Object.assign(e(r,[["render",o]]),{__name:"ProseHr"});export{f as default};

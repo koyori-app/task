@@ -1,1 +1,0 @@
-import{_ as r,o as s,c as t,r as o}from"./CySWvUbY.js";const c={},n={class:"even:bg-muted/50 m-0 border-t p-0"};function a(e,_){return s(),t("tr",n,[o(e.$slots,"default")])}const l=Object.assign(r(c,[["render",a]]),{__name:"ProseTr"});export{l as default};

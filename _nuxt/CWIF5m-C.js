@@ -1,0 +1,1 @@
+import{l as f,p as m}from"./D1CCrpmu.js";function g(o){const{navigation:i}=f(),l=[],r=o.split(/[/#]/g).filter(e=>e!=="");let t="",n=i.value;if(!n)return[];const{locale:c}=m();for(let e=0;e<r.length;e++){const s=r[e].replace(".html","");t+=`/${s}`;const a=n?.find(u=>u._path===t);n=a?.children,e===0&&s===c.value||l.push({title:a?.title??s,href:t})}return l}export{g as u};

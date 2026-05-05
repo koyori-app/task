@@ -1,0 +1,1 @@
+import{_ as s,o,c as t,r}from"./D1CCrpmu.js";const c={},n={class:"[&>ol]:!mt-2 [&>ul]:!mt-2"};function a(e,_){return o(),t("li",n,[r(e.$slots,"default")])}const i=Object.assign(s(c,[["render",a]]),{__name:"ProseLi"});export{i as default};
