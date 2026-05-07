@@ -5,6 +5,12 @@ import { config } from './buildSrc/setting';
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
+  // ブラウザは同一オリジンで /api にアクセスし、Vite がバックエンドへ転送する（localhost:3400 の直叩き回避）
+  runtimeConfig: {
+    public: {
+      apiBase: '/api',
+    },
+  },
   experimental: {
     typedPages: true,
   },
@@ -51,6 +57,13 @@ export default defineNuxtConfig({
     plugins: [tailwindcss()],
     server: {
       allowedHosts: true,
+      proxy: {
+        '/api': {
+          target: 'http://127.0.0.1:3400',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api/, ''),
+        },
+      },
     },
     optimizeDeps: {
       include: [

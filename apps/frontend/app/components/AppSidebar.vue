@@ -56,10 +56,15 @@ const data = {
   ],
   navMain: [
     {
+      title: 'Labels',
+      url: '/labels',
+      icon: SquareTerminal,
+      isActive: true,
+    },
+    {
       title: 'Playground',
       url: '#',
       icon: SquareTerminal,
-      isActive: true,
       items: [
         {
           title: 'History',
