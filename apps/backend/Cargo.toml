@@ -26,3 +26,5 @@ axum_session = { version = "0.20.0" }
 axum_session_redispool = { version = "0.11.0" }
 dotenvy = "0.15"
 config = "0.15.22"
+axum-valid = "0.24.0"
+validator = { version = "0.20.0", features = ["derive"] }
