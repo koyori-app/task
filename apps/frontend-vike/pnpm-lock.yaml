@@ -13,19 +13,25 @@ importers:
         version: 10.52.0(vue@3.5.34(typescript@6.0.3))
       '@universal-middleware/core':
         specifier: ^0.4.17
-        version: 0.4.17(hono@4.12.18)(srvx@0.11.15)
+        version: 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)
+      '@vikejs/elysia':
+        specifier: 0.2.0
+        version: 0.2.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vike@0.4.259(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0)))
       '@vikejs/hono':
         specifier: ^0.2.0
-        version: 0.2.0(hono@4.12.18)(srvx@0.11.15)(vike@0.4.259(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0)))
+        version: 0.2.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vike@0.4.259(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0)))
+      elysia:
+        specifier: 1.4.28
+        version: 1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3)
       hono:
         specifier: ^4.12.18
         version: 4.12.18
       vike:
         specifier: 0.4.259
-        version: 0.4.259(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0))
+        version: 0.4.259(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0))
       vike-vue:
         specifier: ^0.9.11
-        version: 0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0)))(vue@3.5.34(typescript@6.0.3))
+        version: 0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0)))(vue@3.5.34(typescript@6.0.3))
       vue:
         specifier: ^3.5.34
         version: 3.5.34(typescript@6.0.3)
@@ -164,6 +170,9 @@ packages:
 
   '@blazediff/core@1.9.1':
     resolution: {integrity: sha512-ehg3jIkYKulZh+8om/O25vkvSsXXwC+skXmyA87FFx6A/45eqOkZsBltMw/TVteb0mloiGT8oGRTcjRAz66zaA==}
+
+  '@borewit/text-codec@0.2.2':
+    resolution: {integrity: sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ==}
 
   '@brillout/import@0.2.6':
     resolution: {integrity: sha512-1GUTmADc8trUC1YSW2lp9r6PmwluMoEyHajnE1kxVdbKGD0wJOlq/DvTWMUqLtBDCnQR+n//qgMtz6HwA/lotA==}
@@ -850,6 +859,9 @@ packages:
       pinia:
         optional: true
 
+  '@sinclair/typebox@0.34.49':
+    resolution: {integrity: sha512-brySQQs7Jtn0joV8Xh9ZV/hZb9Ozb0pmazDIASBkYKCjXrXU3mpcFahmK/z4YDhGkQvP9mWJbVyahdtU5wQA+A==}
+
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
@@ -1041,6 +1053,13 @@ packages:
     peerDependencies:
       '@testing-library/dom': '>=7.21.4'
 
+  '@tokenizer/inflate@0.4.1':
+    resolution: {integrity: sha512-2mAv+8pkG6GIZiF1kNg1jAjh27IDxEPKwdGul3snfztFerfPGI1LjDezZp3i7BElXompqEtPmoPx6c2wgtWsOA==}
+    engines: {node: '>=18'}
+
+  '@tokenizer/token@0.3.0':
+    resolution: {integrity: sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A==}
+
   '@tybys/wasm-util@0.10.2':
     resolution: {integrity: sha512-RoBvJ2X0wuKlWFIjrwffGw1IqZHKQqzIchKaadZZfnNpsAYp2mM0h36JtPCjNDAHGgYez/15uMBpfGwchhiMgg==}
 
@@ -1126,6 +1145,9 @@ packages:
       srvx:
         optional: true
 
+  '@universal-middleware/elysia@0.6.4':
+    resolution: {integrity: sha512-M+Amena5LwwbHRFqxMc7AzEp8ROGwOyV8vxdmsQA0qd42JljlvnNVDngP3jHyHVBb6oWsyheoSGSRB8lkWY2pA==}
+
   '@universal-middleware/express@0.4.26':
     resolution: {integrity: sha512-zPtCWn4/kObx+Rd7UMpqjb1VP9qDzJEeb/oeN96nZv2b+wHvF9KKck9tftziuzeUYazjYrQ+Ug+aKVC6C7ndUw==}
 
@@ -1134,6 +1156,12 @@ packages:
 
   '@universal-middleware/node@0.1.0':
     resolution: {integrity: sha512-I03mkOhw0Ka28MtALkpoGJYE8YYSJxmq/iambaqKGXxlFXgLI/VXlw0LmX9iansUzbolNq4hWFMfHyNp2xb4jA==}
+
+  '@vikejs/elysia@0.2.0':
+    resolution: {integrity: sha512-DQaQCwE7IeRqhLR5J8z5qHcwqrOhzEy3oJgaF3B2NlEyuudGVcBAUIiMNLOGRXprfpgafP+I6RCXOkulFT7vIA==}
+    peerDependencies:
+      elysia: ^1.0.0
+      vike: ^0.4.255
 
   '@vikejs/hono@0.2.0':
     resolution: {integrity: sha512-kM0CLN+qmjkJTvtHEHo7KiEbqnLAhibn7jqNWzlsfKXVjN0VIkY1U0E9hU7zIWYkxw6KCA2kNDt6IVRRixBsKw==}
@@ -1407,6 +1435,10 @@ packages:
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
 
+  cookie@1.1.1:
+    resolution: {integrity: sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ==}
+    engines: {node: '>=18'}
+
   css.escape@1.5.1:
     resolution: {integrity: sha512-YUifsXXuknHlUsmlgyY0PKzgPOr7/FjCePfHNt0jxm83wHZi44VDMQ7/fGNkjY3/jV1MC+1CmZbaHzugyeRtpg==}
 
@@ -1469,6 +1501,21 @@ packages:
   electron-to-chromium@1.5.353:
     resolution: {integrity: sha512-kOrWphBi8TOZyiJZqsgqIle0lw+tzmnQK83pV9dZUd01Nm2POECSyFQMAuarzZdYqQW7FH9RaYOuaRo3h+bQ3w==}
 
+  elysia@1.4.28:
+    resolution: {integrity: sha512-Vrx8sBnvq8squS/3yNBzR1jBXI+SgmnmvwawPjNuEHndUe5l1jV2Gp6JJ4ulDkEB8On6bWmmuyPpA+bq4t+WYg==}
+    peerDependencies:
+      '@sinclair/typebox': '>= 0.34.0 < 1'
+      '@types/bun': '>= 1.2.0'
+      exact-mirror: '>= 0.0.9'
+      file-type: '>= 20.0.0'
+      openapi-types: '>= 12.0.0'
+      typescript: '>= 5.0.0'
+    peerDependenciesMeta:
+      '@types/bun':
+        optional: true
+      typescript:
+        optional: true
+
   enhanced-resolve@5.21.2:
     resolution: {integrity: sha512-xe9vQb5kReirPUxgQrXA3ihgbCqssmTiM7cOZ+Gzu+VeGWgpV98lLZvp0dl4yriyAePcewxGUs9UpKD8PET9KQ==}
     engines: {node: '>=10.13.0'}
@@ -1523,9 +1570,20 @@ packages:
   estree-walker@3.0.3:
     resolution: {integrity: sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==}
 
+  exact-mirror@1.0.0:
+    resolution: {integrity: sha512-tB6QSwlyUDZh22vS4ytBjmTvpMJ7eNNqSUtH4w7TpQsE7//V+MsdWUhO0B1UptzStDFHQBCxfJPtDDiVaFfRyQ==}
+    peerDependencies:
+      typebox: '>= 1.1.0'
+    peerDependenciesMeta:
+      typebox:
+        optional: true
+
   expect-type@1.3.0:
     resolution: {integrity: sha512-knvyeauYhqjOYvQ66MznSMs83wmHrCycNEN6Ao+2AeYEfxUIkuiVxdEa1qlGEPK+We3n0THiDciYSsCcgW/DoA==}
     engines: {node: '>=12.0.0'}
+
+  fast-decode-uri-component@1.0.1:
+    resolution: {integrity: sha512-WKgKWg5eUxvRZGwW8FvfbaH7AXSh2cL+3j5fMGzUMCxWBJ3dV3a7Wz8y2f/uQ0e3B6WmodD3oS54jTQ9HVTIIg==}
 
   fdir@6.5.0:
     resolution: {integrity: sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==}
@@ -1535,6 +1593,10 @@ packages:
     peerDependenciesMeta:
       picomatch:
         optional: true
+
+  file-type@22.0.1:
+    resolution: {integrity: sha512-ww5Mhre0EE+jmBvOXTmXAbEMuZE7uX4a3+oRCQFNj8w++g3ev913N6tXQz0XTXbueQ5TWQfm6BdaViEHHn8bhA==}
+    engines: {node: '>=22'}
 
   filesize@10.1.6:
     resolution: {integrity: sha512-sJslQKU2uM33qH5nqewAwVB2QgR6w1aMNsYUp3aN5rMRyXEwJGmZvaWzeJFNTOXWlHQyBFCWrdj3fV/fsTOX8w==}
@@ -1613,6 +1675,9 @@ packages:
   https-proxy-agent@5.0.1:
     resolution: {integrity: sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA==}
     engines: {node: '>= 6'}
+
+  ieee754@1.2.1:
+    resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
 
   indent-string@4.0.0:
     resolution: {integrity: sha512-EdDDZu4A2OyIK7Lr/2zG+w5jmbuk1DVBnEwREQvBzspBJkCEbRa8GxU1lghYcaGJCnRWibjDXlq779X1/y5xwg==}
@@ -1803,6 +1868,9 @@ packages:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
 
+  memoirist@0.4.0:
+    resolution: {integrity: sha512-zxTgA0mSYELa66DimuNQDvyLq36AwDlTuVRbnQtB+VuTcKWm5Qc4z3WkSpgsFWHNhexqkIooqpv4hdcqrX5Nmg==}
+
   min-indent@1.0.1:
     resolution: {integrity: sha512-I9jwMn07Sy/IwOj3zVkVik2JTvgpaykDZEigL6Rx6N9LbMywwUSMtxET+7lVoDLLd3O3IXwJwvuuns8UB/HeAg==}
     engines: {node: '>=4'}
@@ -1859,6 +1927,9 @@ packages:
   open@10.2.0:
     resolution: {integrity: sha512-YgBpdJHPyQ2UE5x+hlSXcnejzAvD0b22U2OuAP+8OnlJT+PjWPxtgmGqKKc+RgTM63U9gN0YzrYc71R2WT/hTA==}
     engines: {node: '>=18'}
+
+  openapi-types@12.1.3:
+    resolution: {integrity: sha512-N4YtSYJqghVu4iek2ZUvcN/0aqH1kRDuNqzcycDxhOUpg7GdvLa2F3DgS6yBNhInhv2r/6I0Flkn7CqL8+nIcw==}
 
   oxc-parser@0.104.0:
     resolution: {integrity: sha512-sIEpobLwe7KhW1JdTvBJkNDgjJarHNsx+Q37iRNyASvmlDOD+f8Qirvwp6nFNz7Q5q3JcsJ1dpKM+oMPTDF/dw==}
@@ -2082,6 +2153,10 @@ packages:
     resolution: {integrity: sha512-laJTa3Jb+VQpaC6DseHhF7dXVqHTfJPCRDaEbid/drOhgitgYku/letMUqOXFoWV0zIIUbjpdH2t+tYj4bQMRQ==}
     engines: {node: '>=8'}
 
+  strtok3@10.3.5:
+    resolution: {integrity: sha512-ki4hZQfh5rX0QDLLkOCj+h+CVNkqmp/CMf8v8kZpkNVK6jGQooMytqzLZYUVYIZcFZ6yDB70EfD8POcFXiF5oA==}
+    engines: {node: '>=18'}
+
   supports-color@7.2.0:
     resolution: {integrity: sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw==}
     engines: {node: '>=8'}
@@ -2133,6 +2208,10 @@ packages:
   token-stream@1.0.0:
     resolution: {integrity: sha512-VSsyNPPW74RpHwR8Fc21uubwHY7wMDeJLys2IX5zJNih+OnAnaifKHo+1LHT7DAdloQ7apeaaWg8l7qnf/TnEg==}
 
+  token-types@6.1.2:
+    resolution: {integrity: sha512-dRXchy+C0IgK8WPC6xvCHFRIWYUbqqdEIKPaKo/AcTUNzwLTK6AH7RjdLWsEZcAN/TBdtfUw3PYEgPr5VPr6ww==}
+    engines: {node: '>=14.16'}
+
   totalist@3.0.1:
     resolution: {integrity: sha512-sf4i37nQ2LBx4m3wB74y+ubopq6W/dIzXg0FDGjsYnZHVa1Da8FH853wlL2gtUhg+xJXjfk3kUZS3BRoQeoQBQ==}
     engines: {node: '>=6'}
@@ -2173,6 +2252,10 @@ packages:
 
   ufo@1.6.4:
     resolution: {integrity: sha512-JFNbkD1Svwe0KvGi8GOeLcP4kAWQ609twvCdcHxq1oSL8svv39ZuSvajcD8B+5D0eL4+s1Is2D/O6KN3qcTeRA==}
+
+  uint8array-extras@1.5.0:
+    resolution: {integrity: sha512-rvKSBiC5zqCCiDZ9kAOszZcDvdAHwwIKJG33Ykj43OKcWsnmcBRL09YTU4nOeHZ8Y2a7l1MgTd08SBe9A8Qj6A==}
+    engines: {node: '>=18'}
 
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
@@ -2498,6 +2581,8 @@ snapshots:
   '@bcoe/v8-coverage@1.0.2': {}
 
   '@blazediff/core@1.9.1': {}
+
+  '@borewit/text-codec@0.2.2': {}
 
   '@brillout/import@0.2.6': {}
 
@@ -2947,6 +3032,8 @@ snapshots:
       '@sentry/core': 10.52.0
       vue: 3.5.34(typescript@6.0.3)
 
+  '@sinclair/typebox@0.34.49': {}
+
   '@standard-schema/spec@1.1.0': {}
 
   '@storybook/addon-a11y@10.3.6(storybook@10.3.6(@testing-library/dom@10.4.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))':
@@ -3134,6 +3221,15 @@ snapshots:
     dependencies:
       '@testing-library/dom': 10.4.1
 
+  '@tokenizer/inflate@0.4.1':
+    dependencies:
+      debug: 4.4.3
+      token-types: 6.1.2
+    transitivePeerDependencies:
+      - supports-color
+
+  '@tokenizer/token@0.3.0': {}
+
   '@tybys/wasm-util@0.10.2':
     dependencies:
       tslib: 2.8.1
@@ -3181,12 +3277,12 @@ snapshots:
     optionalDependencies:
       srvx: 0.11.15
 
-  '@universal-deploy/vite@0.1.9(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0))':
+  '@universal-deploy/vite@0.1.9(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0))':
     dependencies:
       '@universal-deploy/netlify': 0.2.2(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0))
       '@universal-deploy/node': 0.1.6(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0))
       '@universal-deploy/store': 0.2.1(srvx@0.11.15)
-      '@universal-middleware/express': 0.4.26(hono@4.12.18)(srvx@0.11.15)
+      '@universal-middleware/express': 0.4.26(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)
       magic-string: 0.30.21
       rou3: 0.8.1
     optionalDependencies:
@@ -3202,18 +3298,18 @@ snapshots:
       - hono
       - srvx
 
-  '@universal-middleware/core@0.4.17(hono@4.12.18)(srvx@0.11.15)':
+  '@universal-middleware/core@0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)':
     dependencies:
       regexparam: 3.0.0
       tough-cookie: 6.0.1
     optionalDependencies:
+      elysia: 1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3)
       hono: 4.12.18
       srvx: 0.11.15
 
-  '@universal-middleware/express@0.4.26(hono@4.12.18)(srvx@0.11.15)':
+  '@universal-middleware/elysia@0.6.4(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)':
     dependencies:
-      '@universal-middleware/core': 0.4.17(hono@4.12.18)(srvx@0.11.15)
-      '@universal-middleware/node': 0.1.0(hono@4.12.18)(srvx@0.11.15)
+      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -3225,9 +3321,10 @@ snapshots:
       - hono
       - srvx
 
-  '@universal-middleware/hono@0.4.21(hono@4.12.18)(srvx@0.11.15)':
+  '@universal-middleware/express@0.4.26(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)':
     dependencies:
-      '@universal-middleware/core': 0.4.17(hono@4.12.18)(srvx@0.11.15)
+      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)
+      '@universal-middleware/node': 0.1.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -3239,9 +3336,9 @@ snapshots:
       - hono
       - srvx
 
-  '@universal-middleware/node@0.1.0(hono@4.12.18)(srvx@0.11.15)':
+  '@universal-middleware/hono@0.4.21(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)':
     dependencies:
-      '@universal-middleware/core': 0.4.17(hono@4.12.18)(srvx@0.11.15)
+      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -3253,11 +3350,40 @@ snapshots:
       - hono
       - srvx
 
-  '@vikejs/hono@0.2.0(hono@4.12.18)(srvx@0.11.15)(vike@0.4.259(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0)))':
+  '@universal-middleware/node@0.1.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)':
     dependencies:
-      '@universal-middleware/hono': 0.4.21(hono@4.12.18)(srvx@0.11.15)
+      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)
+    transitivePeerDependencies:
+      - '@cloudflare/workers-types'
+      - '@hattip/core'
+      - '@types/express'
+      - '@webroute/route'
+      - elysia
+      - fastify
+      - h3
+      - hono
+      - srvx
+
+  '@vikejs/elysia@0.2.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vike@0.4.259(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0)))':
+    dependencies:
+      '@universal-middleware/elysia': 0.6.4(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)
+      elysia: 1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3)
+      vike: 0.4.259(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0))
+    transitivePeerDependencies:
+      - '@cloudflare/workers-types'
+      - '@hattip/core'
+      - '@types/express'
+      - '@webroute/route'
+      - fastify
+      - h3
+      - hono
+      - srvx
+
+  '@vikejs/hono@0.2.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vike@0.4.259(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0)))':
+    dependencies:
+      '@universal-middleware/hono': 0.4.21(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)
       hono: 4.12.18
-      vike: 0.4.259(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0))
+      vike: 0.4.259(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0))
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -3586,6 +3712,8 @@ snapshots:
 
   convert-source-map@2.0.0: {}
 
+  cookie@1.1.1: {}
+
   css.escape@1.5.1: {}
 
   csstype@3.2.3: {}
@@ -3626,6 +3754,18 @@ snapshots:
       gopd: 1.2.0
 
   electron-to-chromium@1.5.353: {}
+
+  elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3):
+    dependencies:
+      '@sinclair/typebox': 0.34.49
+      cookie: 1.1.1
+      exact-mirror: 1.0.0
+      fast-decode-uri-component: 1.0.1
+      file-type: 22.0.1
+      memoirist: 0.4.0
+      openapi-types: 12.1.3
+    optionalDependencies:
+      typescript: 6.0.3
 
   enhanced-resolve@5.21.2:
     dependencies:
@@ -3716,11 +3856,24 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.9
 
+  exact-mirror@1.0.0: {}
+
   expect-type@1.3.0: {}
+
+  fast-decode-uri-component@1.0.1: {}
 
   fdir@6.5.0(picomatch@4.0.4):
     optionalDependencies:
       picomatch: 4.0.4
+
+  file-type@22.0.1:
+    dependencies:
+      '@tokenizer/inflate': 0.4.1
+      strtok3: 10.3.5
+      token-types: 6.1.2
+      uint8array-extras: 1.5.0
+    transitivePeerDependencies:
+      - supports-color
 
   filesize@10.1.6: {}
 
@@ -3793,6 +3946,8 @@ snapshots:
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
+
+  ieee754@1.2.1: {}
 
   indent-string@4.0.0: {}
 
@@ -3953,6 +4108,8 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
+  memoirist@0.4.0: {}
+
   min-indent@1.0.1: {}
 
   minimatch@10.2.5:
@@ -3996,6 +4153,8 @@ snapshots:
       define-lazy-prop: 3.0.0
       is-inside-container: 1.0.0
       wsl-utils: 0.1.0
+
+  openapi-types@12.1.3: {}
 
   oxc-parser@0.104.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0):
     dependencies:
@@ -4272,6 +4431,10 @@ snapshots:
     dependencies:
       min-indent: 1.0.1
 
+  strtok3@10.3.5:
+    dependencies:
+      '@tokenizer/token': 0.3.0
+
   supports-color@7.2.0:
     dependencies:
       has-flag: 4.0.0
@@ -4307,6 +4470,12 @@ snapshots:
 
   token-stream@1.0.0: {}
 
+  token-types@6.1.2:
+    dependencies:
+      '@borewit/text-codec': 0.2.2
+      '@tokenizer/token': 0.3.0
+      ieee754: 1.2.1
+
   totalist@3.0.1: {}
 
   tough-cookie@6.0.1:
@@ -4331,6 +4500,8 @@ snapshots:
 
   ufo@1.6.4: {}
 
+  uint8array-extras@1.5.0: {}
+
   undici-types@6.21.0: {}
 
   universalify@2.0.1: {}
@@ -4352,18 +4523,18 @@ snapshots:
     dependencies:
       react: 19.2.6
 
-  vike-vue@0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0)))(vue@3.5.34(typescript@6.0.3)):
+  vike-vue@0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0)))(vue@3.5.34(typescript@6.0.3)):
     dependencies:
       magic-string: 0.30.21
       oxc-parser: 0.104.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)
       oxc-walker: 0.6.0(oxc-parser@0.104.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0))
-      vike: 0.4.259(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0))
+      vike: 0.4.259(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0))
       vue: 3.5.34(typescript@6.0.3)
     transitivePeerDependencies:
       - '@emnapi/core'
       - '@emnapi/runtime'
 
-  vike@0.4.259(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0)):
+  vike@0.4.259(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0)):
     dependencies:
       '@babel/core': 7.29.0
       '@babel/types': 7.29.0
@@ -4372,9 +4543,9 @@ snapshots:
       '@brillout/picocolors': 1.0.30
       '@brillout/vite-plugin-server-entry': 0.7.18
       '@universal-deploy/store': 0.2.1(srvx@0.11.15)
-      '@universal-deploy/vite': 0.1.9(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0))
-      '@universal-middleware/core': 0.4.17(hono@4.12.18)(srvx@0.11.15)
-      '@universal-middleware/node': 0.1.0(hono@4.12.18)(srvx@0.11.15)
+      '@universal-deploy/vite': 0.1.9(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)(vite@8.0.12(@types/node@20.19.40)(esbuild@0.28.0)(jiti@2.7.0))
+      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)
+      '@universal-middleware/node': 0.1.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(hono@4.12.18)(srvx@0.11.15)
       cac: 6.7.14
       convert-route: 1.1.1
       es-module-lexer: 1.7.0
