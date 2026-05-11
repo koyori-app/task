@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@sentry/vue": "^10.52.0",
+    "@unhead/vue": "3.1.0",
     "@universal-middleware/core": "^0.4.17",
     "@vikejs/elysia": "0.2.0",
     "@vikejs/hono": "^0.2.0",
