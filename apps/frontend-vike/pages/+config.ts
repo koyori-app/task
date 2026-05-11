@@ -6,10 +6,11 @@ import vikeVue from "vike-vue/config";
 
 const config: Config = {
   // https://vike.dev/head-tags
+  extends: [vikeVue],
   title: "My Vike App",
   description: "Demo showcasing Vike",
+  lang: "ja",
 
-  extends: [vikeVue],
 };
 
 export default config;
