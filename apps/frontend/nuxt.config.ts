@@ -11,6 +11,7 @@ export default defineNuxtConfig({
       apiBase: '/api',
     },
   },
+  builder: 'vite',
   experimental: {
     typedPages: true,
   },
