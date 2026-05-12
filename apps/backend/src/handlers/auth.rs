@@ -5,6 +5,7 @@ use sea_orm::prelude::Uuid;
 use serde::Deserialize;
 use validator::Validate;
 
+use crate::entities;
 use crate::{AppState, entities::users};
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
@@ -66,7 +67,7 @@ pub async fn register(State(state): State<AppState>, Valid(Json(payload)): Valid
     let user = users::ActiveModel {
         id: Set(Uuid::new_v4()),
         username: Set(username),
-        bio: Set(String::new()),
+        bio: Set(Some(String::new())),
         avatar_url: Set(None),
         email: Set(email),
         password_hash: Set(Some(password_hash)),
@@ -78,6 +79,19 @@ pub async fn register(State(state): State<AppState>, Valid(Json(payload)): Valid
         .expect("insert user");
 
     Json("Register successful".to_string())
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    get,
+    path = "/me",
+    responses(
+        (status = 200, description = "Current user info", body = entities::users::Model)
+    )
+)]
+pub async fn me(State(state): State<AppState>) -> Json<entities::users::Model> {
+    // Implementation for fetching current user info
+    todo!()
 }
 
 #[axum::debug_handler]

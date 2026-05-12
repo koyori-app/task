@@ -9,4 +9,5 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(crate::handlers::auth::login))
         .routes(routes!(crate::handlers::auth::register))
         .routes(routes!(crate::handlers::auth::logout))
+        .routes(routes!(crate::handlers::auth::me))
 }
