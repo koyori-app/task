@@ -1,4 +1,4 @@
-import { createTodoHandler } from "./create-todo-handler";
+import { createTodoHandler } from "./middlewares/create-todo-handler";
 import vike from "@vikejs/hono";
 import { Hono } from "hono";
 
