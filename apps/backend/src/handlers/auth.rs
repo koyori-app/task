@@ -6,6 +6,7 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::entities;
+use crate::utils::auth::{AuthError, create_password_hash};
 use crate::{AppState, entities::users};
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
@@ -54,15 +55,14 @@ pub struct RegisterRequest {
         (status = 200, description = "Register successful", body = String)
     )
 )]
-pub async fn register(State(state): State<AppState>, Valid(Json(payload)): Valid<Json<RegisterRequest>>) -> Json<String> {
+pub async fn register(State(state): State<AppState>, Valid(Json(payload)): Valid<Json<RegisterRequest>>) -> Result<Json<String>, AuthError> {
     let RegisterRequest {
         username,
         email,
         password,
     } = payload;
 
-    let password_hash =
-        bcrypt::hash(password, bcrypt::DEFAULT_COST).expect("bcrypt hash");
+    let password_hash = create_password_hash(&password)?;
 
     let user = users::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -78,7 +78,7 @@ pub async fn register(State(state): State<AppState>, Valid(Json(payload)): Valid
         .await
         .expect("insert user");
 
-    Json("Register successful".to_string())
+    Ok(Json("Register successful".to_string()))
 }
 
 #[axum::debug_handler]
