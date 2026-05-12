@@ -1,5 +1,5 @@
-import { createTodoHandler } from "./middlewares/create-todo-handler";
-import { settingInjector } from "./middlewares/setting-injector";
+import { createTodoHandler } from "#/middlewares/create-todo-handler";
+import { settingInjector } from "#/middlewares/setting-injector";
 import vike from '@vikejs/elysia';
 import { Elysia } from 'elysia';
 

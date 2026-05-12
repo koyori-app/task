@@ -3,7 +3,7 @@ import {
   MiddlewareOrder,
   type UniversalMiddleware,
 } from "@universal-middleware/core";
-import { appEnvSettings } from "../settings/env";
+import { appEnvSettings } from "#/settings/env";
 
 type AppSettings = {
   env: typeof appEnvSettings;

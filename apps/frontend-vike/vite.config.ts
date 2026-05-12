@@ -19,6 +19,15 @@ export default defineConfig({
       disable: false
     }
   }), tailwindcss(), vue()],
+  resolve: {
+    alias: {
+      "#": path.resolve(dirname, "server"),
+      "@/assets": path.resolve(dirname, "assets"),
+      "@/components": path.resolve(dirname, "components"),
+      "@/pages": path.resolve(dirname, "pages"),
+      "@/sentry.browser.config": path.resolve(dirname, "sentry.browser.config.ts"),
+    },
+  },
   build: {
     sourcemap: true
   },
