@@ -56,6 +56,18 @@ pub fn argon2_params() -> Result<Argon2<'static>, AuthError> {
     ))
 }
 
+/// パスワードをハッシュ化する関数
+///
+/// Argon2idアルゴリズムを使用し、ランダムなソルトを生成してハッシュ化します。
+/// 
+/// # Arguments
+/// * `password` - ハッシュ化するパスワードの文字列
+/// 
+/// # Errors
+/// * `AuthError::Internal` - ハッシュ化プロセスでエラーが発生した場合に返されます。
+/// 
+/// # Returns
+/// * `Ok(String)` - ハッシュ化されたパスワードを含む文字
 pub fn create_password_hash(password: &str) -> Result<String, AuthError> {
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = argon2_params()?;
@@ -65,4 +77,20 @@ pub fn create_password_hash(password: &str) -> Result<String, AuthError> {
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("password hash: {e}")))?;
 
     Ok(hash.to_string())
+}
+
+/// セッショントークンを作成する関数
+///
+/// ランダムな32バイトを生成し、Base64エンコードしてセッショントークンを作成します。
+/// 
+/// # Errors
+/// * `AuthError::Internal` - セッショントークン作成プロセスでエラーが発生した場合に返されます。
+/// 
+/// # Returns
+/// * `Ok(String)` - セッショントークンを含む文字列
+pub fn create_session_token() -> Result<String, AuthError> {
+    let mut bytes = [0; 32];
+    OsRng.fill_bytes(&mut bytes);
+    let token = URL_SAFE_NO_PAD.encode(bytes);
+    Ok(token)
 }
