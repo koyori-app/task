@@ -31,3 +31,5 @@ validator = { version = "0.20.0", features = ["derive"] }
 sentry = { version = "0.48.2", features = ["tower-axum-matched-path"] }
 tower = "0.5.2"
 argon2 = "0.5.3"
+anyhow = "1.0.102"
+thiserror = "2.0.10"

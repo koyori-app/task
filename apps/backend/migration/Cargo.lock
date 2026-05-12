@@ -686,6 +686,7 @@ dependencies = [
 name = "backend"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "argon2",
  "axum",
  "axum-valid",
@@ -698,6 +699,7 @@ dependencies = [
  "sentry",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tower",
  "tower-http",
