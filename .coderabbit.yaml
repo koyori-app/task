@@ -1,0 +1,102 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: ja-JP
+tone_instructions: ""
+early_access: false
+enable_free_tier: true
+
+reviews:
+    profile: assertive
+    request_changes_workflow: false
+    high_level_summary: true
+    high_level_summary_placeholder: "@coderabbitai summary"
+    auto_title_placeholder: "@coderabbitai"
+    review_status: true
+    collapse_walkthrough: false
+    sequence_diagrams: true
+    abort_on_close: true
+    auto_review:
+        enabled: true
+        auto_incremental_review: true
+        ignore_title_keywords: []
+        labels: []
+        drafts: false
+        base_branches: []
+    path_filters:
+        - "!**/target/**"
+        - "!**/.nuxt/**"
+        - "!**/.output/**"
+        - "!**/dist/**"
+        - "!**/coverage/**"
+        - "!apps/frontend/app/utils/openapi/**"
+    path_instructions:
+        -
+            path: apps/backend/**/*.rs
+            instructions: |
+                Rust / Axum / SeaORM のバックエンドです。認証・認可、テナント境界、SQL の正しさ、エラーハンドリング、非同期処理の安全性を優先して確認してください。ハンドラーは薄く保ち、共有 DTO、エンティティ、OpenAPI に影響する変更は必ず波及範囲を指摘してください。マイグレーションやスキーマ変更では、API 定義との整合性も確認してください。
+        -
+            path: apps/frontend/app/**/*.vue
+            instructions: |
+                Nuxt 4 / Vue 3 の画面です。状態管理の重複、不要なクライアントサイド状態、アクセシビリティ、既存コンポーネントの一貫性を確認してください。OpenAPI 由来の型や API 呼び出しは backend の仕様と整合しているかを見てください。
+        -
+            path: apps/frontend/app/**/*.ts
+            instructions: |
+                Nuxt の composable / utility です。型安全性、API クライアントの使い方、SSR / CSR の境界、エラー処理を確認してください。生成済み OpenAPI クライアントを手編集する変更は避け、backend の変更が必要なら再生成手順まで確認してください。
+        -
+            path: docs/**/*.md
+            instructions: |
+                ドキュメントは構造と読みやすさを重視し、見出し階層、リンク切れ、手順の抜けを確認してください。生成物はレビュー対象にせず、ソースの Markdown のみを重視してください。
+        -
+            path: .github/workflows/*.yml
+            instructions: |
+                GitHub Actions の変更は、トリガー条件、権限、キャッシュ、シークレットの扱い、失敗時の挙動を重点的に確認してください。
+
+    tools:
+        clippy:
+            enabled: true
+        markdownlint:
+            enabled: true
+        actionlint:
+            enabled: true
+        biome:
+            enabled: true
+
+knowledge_base:
+    code_guidelines:
+        enabled: true
+        filePatterns:
+            - apps/backend/**/README.md
+            - apps/frontend/AGENTS.md
+            - apps/frontend/GEMINI.md
+            - docs/README.md
+
+code_generation:
+    docstrings:
+        language: en-US
+        path_instructions:
+            -
+                path: apps/backend/**/*.rs
+                instructions: |
+                    Generate concise English docstrings that explain intent, invariants, and non-obvious behavior. Prefer Rust doc comments for public items only.
+            -
+                path: apps/frontend/app/**/*.vue
+                instructions: |
+                    Keep generated comments in concise English and only add them when the code is not self-explanatory.
+            -
+                path: apps/frontend/app/**/*.ts
+                instructions: |
+                    Keep generated comments in concise English and only add them when the code is not self-explanatory.
+    unit_tests:
+        path_instructions:
+            -
+                path: apps/backend/**/*.rs
+                instructions: |
+                    Favor focused Rust tests close to the code under test. Cover auth, tenant scoping, validation, and query behavior when relevant.
+            -
+                path: apps/frontend/app/**/*.vue
+                instructions: |
+                    Prefer small, behavior-focused tests around component state and rendered output. Do not invent test infrastructure that is not already present.
+            -
+                path: apps/frontend/app/**/*.ts
+                instructions: |
+                    Prefer small, behavior-focused tests around composables and utilities. Do not invent test infrastructure that is not already present.
