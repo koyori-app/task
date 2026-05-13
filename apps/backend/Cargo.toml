@@ -28,3 +28,5 @@ dotenvy = "0.15"
 config = "0.15.22"
 axum-valid = "0.24.0"
 validator = { version = "0.20.0", features = ["derive"] }
+sentry = { version = "0.48.2", features = ["tower-axum-matched-path"] }
+tower = "0.5.2"
