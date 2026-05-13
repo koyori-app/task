@@ -1,6 +1,6 @@
 use argon2::{
     Argon2,
-    password_hash::{PasswordHasher, SaltString, rand_core::{OsRng, RngCore}},
+    password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
 };
 
 use axum::{
@@ -21,6 +21,8 @@ pub struct ServerError {
 pub enum AuthError {
     #[error("internal error")]
     Internal(#[from] anyhow::Error),
+    #[error("forbidden")]
+    Forbidden,
 }
 
 impl IntoResponse for AuthError {
@@ -36,6 +38,13 @@ impl IntoResponse for AuthError {
                 )
                     .into_response()
             }
+            AuthError::Forbidden => (
+                StatusCode::FORBIDDEN,
+                Json(ServerError {
+                    message: "forbidden".into(),
+                }),
+            )
+                .into_response(),
         }
     }
 }
