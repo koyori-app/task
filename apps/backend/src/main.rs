@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .sync(&db)
         .await?;
 
-    let redis_client = backend::RedisConnection::new(&settings.redis_url);
+    let redis_client = backend::utils::redis::RedisConnection::new(&settings.redis_url);
     let state = AppState { db, redis_client };
     run(state).await;
 
