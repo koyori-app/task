@@ -1,18 +1,24 @@
-use axum::{body::Body, http::Request, routing::get};
+use axum::{body::Body, http::Request, routing::get, http::{HeaderValue, Method}};
 use sentry::integrations::tower::NewSentryLayer;
 use tower::ServiceBuilder;
-use axum::routing::get;
 use axum_session::{SameSite, SessionConfig, SessionLayer, SessionStore};
 use axum_session_redispool::SessionRedisPool;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowHeaders, AllowOrigin, Any, CorsLayer};
 use utoipa_scalar::{Scalar, Servable};
 
-use crate::AppState;
+use crate::{AppState, settings};
 
 pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
+    let is_prod = std::env::var("RUST_ENV").unwrap_or_default() == "production";
+    let settings = settings::load_settings();
+
     let session_config = SessionConfig::default()
-        .with_secure(false) // 開発環境ではセキュアクッキーを無効にする
-        .with_cookie_same_site(SameSite::None); // SameSite属性をNoneに設定
+        .with_secure(is_prod) // 本番では secure=true にする
+        .with_cookie_same_site(if is_prod {
+            SameSite::None
+        } else {
+            SameSite::Lax
+        });
 
     let session_store = SessionStore::<SessionRedisPool>::new(
         Some(state.redis_client.conn.clone().into()),
@@ -26,10 +32,13 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .merge(crate::routes::create_routes())
         .split_for_parts();
 
+    // Allow credentials and mirror the request origin/headers so we don't send
+    // wildcard `*` which is disallowed when `Access-Control-Allow-Credentials` is true.
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_origin(settings.allow_origin.parse::<HeaderValue>().unwrap())
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+        .allow_headers(AllowHeaders::mirror_request())
+        .allow_credentials(true);
 
     let app = router
         .merge(Scalar::with_url("/scalar", openapi.clone()))
