@@ -9,7 +9,7 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::entities;
-use crate::utils::auth::{AuthError, create_password_hash};
+use crate::utils::auth::{AuthError, create_password_hash, verify_password};
 use crate::{AppState, entities::users};
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
@@ -36,12 +36,13 @@ pub async fn login(session: Session<SessionRedisPool>, State(state): State<AppSt
     let LoginRequest { email, password } = payload;
 
     let user = users::Entity::find().filter(users::Column::Email.eq(email)).one(&state.db).await.unwrap();
-    let password_hash = create_password_hash(&password);
 
-    if let (Some(user), Ok(password_hash)) = (user, password_hash) {
-        if user.password_hash.as_deref() == Some(&password_hash) {
-            session.set("user_id", user.id);
-            return Ok(Json("Login successful".to_string()));
+    if let Some(user) = user {
+        if let Some(stored_hash) = user.password_hash.as_deref() {
+            if verify_password(&password, stored_hash)? {
+                session.set("user_id", user.id);
+                return Ok(Json("Login successful".to_string()));
+            }
         }
     }
 

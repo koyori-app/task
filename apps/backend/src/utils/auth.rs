@@ -1,6 +1,6 @@
 use argon2::{
     Argon2,
-    password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 
 use axum::{
@@ -87,4 +87,14 @@ pub fn create_password_hash(password: &str) -> Result<String, AuthError> {
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("password hash: {e}")))?;
 
     Ok(hash.to_string())
+}
+
+pub fn verify_password(password: &str, password_hash: &str) -> Result<bool, AuthError> {
+    let parsed_hash = PasswordHash::new(password_hash)
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!("invalid password hash: {e}")))?;
+
+    let argon2 = argon2_params()?;
+    Ok(argon2
+        .verify_password(password.as_bytes(), &parsed_hash)
+        .is_ok())
 }
