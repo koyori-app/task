@@ -5,6 +5,7 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 pub struct Settings {
     pub database_url: String,
+    pub sentry_dsn: String,
 }
 
 pub fn load_settings() -> Settings {
