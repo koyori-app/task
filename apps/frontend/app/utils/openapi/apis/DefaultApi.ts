@@ -14,10 +14,28 @@
 
 import * as runtime from '../runtime';
 import {
+    type LoginRequest,
+    LoginRequestFromJSON,
+    LoginRequestToJSON,
+} from '../models/LoginRequest';
+import {
     type Model,
     ModelFromJSON,
     ModelToJSON,
 } from '../models/Model';
+import {
+    type RegisterRequest,
+    RegisterRequestFromJSON,
+    RegisterRequestToJSON,
+} from '../models/RegisterRequest';
+
+export interface LoginOperationRequest {
+    loginRequest: LoginRequest;
+}
+
+export interface RegisterOperationRequest {
+    registerRequest: RegisterRequest;
+}
 
 /**
  * 
@@ -33,7 +51,7 @@ export class DefaultApi extends runtime.BaseAPI {
         const headerParameters: runtime.HTTPHeaders = {};
 
 
-        let urlPath = `/labels`;
+        let urlPath = `/v1/labels`;
 
         return {
             path: urlPath,
@@ -56,6 +74,178 @@ export class DefaultApi extends runtime.BaseAPI {
      */
     async getLabels(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Array<Model>> {
         const response = await this.getLabelsRaw(initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for login without sending the request
+     */
+    async loginRequestOpts(requestParameters: LoginOperationRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['loginRequest'] == null) {
+            throw new runtime.RequiredError(
+                'loginRequest',
+                'Required parameter "loginRequest" was null or undefined when calling login().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+
+        let urlPath = `/v1/auth/login`;
+
+        return {
+            path: urlPath,
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+            body: LoginRequestToJSON(requestParameters['loginRequest']),
+        };
+    }
+
+    /**
+     */
+    async loginRaw(requestParameters: LoginOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<string>> {
+        const requestOptions = await this.loginRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        if (this.isJsonMime(response.headers.get('content-type'))) {
+            return new runtime.JSONApiResponse<string>(response);
+        } else {
+            return new runtime.TextApiResponse(response) as any;
+        }
+    }
+
+    /**
+     */
+    async login(requestParameters: LoginOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<string> {
+        const response = await this.loginRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for logout without sending the request
+     */
+    async logoutRequestOpts(): Promise<runtime.RequestOpts> {
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+
+        let urlPath = `/v1/auth/logout`;
+
+        return {
+            path: urlPath,
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     */
+    async logoutRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<string>> {
+        const requestOptions = await this.logoutRequestOpts();
+        const response = await this.request(requestOptions, initOverrides);
+
+        if (this.isJsonMime(response.headers.get('content-type'))) {
+            return new runtime.JSONApiResponse<string>(response);
+        } else {
+            return new runtime.TextApiResponse(response) as any;
+        }
+    }
+
+    /**
+     */
+    async logout(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<string> {
+        const response = await this.logoutRaw(initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for me without sending the request
+     */
+    async meRequestOpts(): Promise<runtime.RequestOpts> {
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+
+        let urlPath = `/v1/auth/me`;
+
+        return {
+            path: urlPath,
+            method: 'GET',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     */
+    async meRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Model>> {
+        const requestOptions = await this.meRequestOpts();
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => ModelFromJSON(jsonValue));
+    }
+
+    /**
+     */
+    async me(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Model> {
+        const response = await this.meRaw(initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for register without sending the request
+     */
+    async registerRequestOpts(requestParameters: RegisterOperationRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['registerRequest'] == null) {
+            throw new runtime.RequiredError(
+                'registerRequest',
+                'Required parameter "registerRequest" was null or undefined when calling register().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+
+        let urlPath = `/v1/auth/register`;
+
+        return {
+            path: urlPath,
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+            body: RegisterRequestToJSON(requestParameters['registerRequest']),
+        };
+    }
+
+    /**
+     */
+    async registerRaw(requestParameters: RegisterOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<string>> {
+        const requestOptions = await this.registerRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        if (this.isJsonMime(response.headers.get('content-type'))) {
+            return new runtime.JSONApiResponse<string>(response);
+        } else {
+            return new runtime.TextApiResponse(response) as any;
+        }
+    }
+
+    /**
+     */
+    async register(requestParameters: RegisterOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<string> {
+        const response = await this.registerRaw(requestParameters, initOverrides);
         return await response.value();
     }
 

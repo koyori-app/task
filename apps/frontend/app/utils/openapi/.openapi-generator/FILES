@@ -1,8 +1,12 @@
 apis/DefaultApi.ts
 apis/index.ts
 docs/DefaultApi.md
+docs/LoginRequest.md
 docs/Model.md
+docs/RegisterRequest.md
 index.ts
+models/LoginRequest.ts
 models/Model.ts
+models/RegisterRequest.ts
 models/index.ts
 runtime.ts
