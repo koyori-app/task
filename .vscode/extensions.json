@@ -1,7 +1,11 @@
 {
     "recommendations": [
-        "1YiB.rust-bundle",
+        "rust-lang.rust-analyzer",
+        "serayuzgur.crates",
+        "swellaby.vscode-rust-test-adapter",
+        "tamasfe.even-better-toml",
         "bradlc.vscode-tailwindcss",
-        "vue.volar"
+        "vue.volar",
+        "github.vscode-github-actions",
     ]
 }
