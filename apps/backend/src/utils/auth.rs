@@ -1,7 +1,8 @@
 use argon2::{
     Argon2,
-    password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
+    password_hash::{PasswordHasher, SaltString, rand_core::{OsRng, RngCore}},
 };
+
 use axum::{
     Json,
     http::StatusCode,
@@ -77,20 +78,4 @@ pub fn create_password_hash(password: &str) -> Result<String, AuthError> {
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("password hash: {e}")))?;
 
     Ok(hash.to_string())
-}
-
-/// セッショントークンを作成する関数
-///
-/// ランダムな32バイトを生成し、Base64エンコードしてセッショントークンを作成します。
-/// 
-/// # Errors
-/// * `AuthError::Internal` - セッショントークン作成プロセスでエラーが発生した場合に返されます。
-/// 
-/// # Returns
-/// * `Ok(String)` - セッショントークンを含む文字列
-pub fn create_session_token() -> Result<String, AuthError> {
-    let mut bytes = [0; 32];
-    OsRng.fill_bytes(&mut bytes);
-    let token = URL_SAFE_NO_PAD.encode(bytes);
-    Ok(token)
 }
