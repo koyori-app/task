@@ -34,4 +34,5 @@ argon2 = "0.5.3"
 anyhow = "1.0.102"
 thiserror = "2.0.10"
 base64 = "=0.22.1"
-deadpool-redis = "0.23.0"
+redis_pool = "0.10.0"
+redis = { version = "1.2.1", features = ["tokio-comp"] }

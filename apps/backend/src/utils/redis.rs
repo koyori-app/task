@@ -1,14 +1,14 @@
-use deadpool_redis::{Config, Pool, Runtime};
+use redis_pool::SingleRedisPool;
 
 #[derive(Clone)]
 pub struct RedisConnection {
-    pub conn: Pool,
+    pub conn: SingleRedisPool,
 }
 
 impl RedisConnection {
     pub fn new(url: &str) -> Self {
-        let cfg = Config::from_url(url);
-        let pool = cfg.create_pool(Some(Runtime::Tokio1)).unwrap();
+        let client = redis::Client::open(url).unwrap();
+        let pool = SingleRedisPool::from(client);
         Self { conn: pool }
     }
 }
