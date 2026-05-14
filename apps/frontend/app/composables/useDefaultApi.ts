@@ -9,6 +9,7 @@ export function useDefaultApi(): DefaultApi {
   return new DefaultApi(
     new Configuration({
       basePath: runtimeConfig.public.apiBase,
+      credentials: 'include',
     }),
   );
 }
