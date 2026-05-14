@@ -20,6 +20,7 @@ pub struct Model {
     pub email: String,
     #[sea_orm(nullable)]
     #[schema(nullable, ignore)]
+    #[serde(skip_serializing)]
     pub password_hash: Option<String>,
 }
 
