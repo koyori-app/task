@@ -15,7 +15,6 @@ export type CurrentUser = {
   bio: string | null;
   avatar_url: string | null;
   email: string;
-  password_hash?: string | null;
 };
 
 async function readResponseMessage(response: Response): Promise<string> {
