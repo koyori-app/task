@@ -6,6 +6,6 @@
         "tamasfe.even-better-toml",
         "bradlc.vscode-tailwindcss",
         "vue.volar",
-        "github.vscode-github-actions",
+        "github.vscode-github-actions"
     ]
 }
