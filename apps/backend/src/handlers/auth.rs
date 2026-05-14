@@ -122,6 +122,7 @@ pub async fn me(State(state): State<AppState>, auth: AuthUser) -> Result<Json<en
         (status = 200, description = "Logout successful", body = String)
     )
 )]
-pub async fn logout(State(state): State<AppState>) -> Json<String> {
-    Json("Hello, world!".to_string())
+pub async fn logout(State(state): State<AppState>, session: Session<SessionRedisPool>, auth: AuthUser) -> Result<Json<String>, AuthError> {
+    session.remove("user_id");
+    Ok(Json("Logout successful".to_string()))
 }
