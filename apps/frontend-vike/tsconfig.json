@@ -17,9 +17,7 @@
     "esModuleInterop": true,
     "paths": {
       "#/*": ["./server/*"],
-      "@/assets/*": ["./assets/*"],
-      "@/components/*": ["./components/*"],
-      "@/pages/*": ["./pages/*"],
+      "@/*": ["./src/*"],
       "@/sentry.browser.config": ["./sentry.browser.config.ts"]
     }
   },
