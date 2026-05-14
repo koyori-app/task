@@ -9,6 +9,7 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::entities;
+use crate::extractors::AuthUser;
 use crate::utils::auth::{AuthError, create_password_hash, verify_password};
 use crate::{AppState, entities::users};
 
@@ -108,9 +109,9 @@ pub async fn register(session: Session<SessionRedisPool>, State(state): State<Ap
         (status = 200, description = "Current user info", body = entities::users::Model)
     )
 )]
-pub async fn me(State(state): State<AppState>) -> Json<entities::users::Model> {
-    // Implementation for fetching current user info
-    todo!()
+pub async fn me(State(state): State<AppState>, auth: AuthUser) -> Result<Json<entities::users::Model>, AuthError> {
+    let user = users::Entity::find_by_id(auth.user_id).one(&state.db).await.unwrap();
+    Ok(Json(user.unwrap()))
 }
 
 #[axum::debug_handler]
