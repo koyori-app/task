@@ -10,6 +10,7 @@ overrides:
   vitest: 'catalog:'
 peerDependencyRules:
   allowAny:
+    - '@vitest/coverage-v8'
     - vite
     - vitest
   allowedVersions:

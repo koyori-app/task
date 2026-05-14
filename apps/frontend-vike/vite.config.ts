@@ -27,11 +27,9 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '#': path.resolve(dirname, 'server'),
-      '@/assets': path.resolve(dirname, 'src/assets'),
-      '@/components': path.resolve(dirname, 'src/components'),
-      '@/pages': path.resolve(dirname, 'src/pages'),
       '@/sentry.browser.config': path.resolve(dirname, 'sentry.browser.config.ts'),
+      '#': path.resolve(dirname, 'server'),
+      '@': path.resolve(dirname, 'src'),
     },
   },
   build: {
