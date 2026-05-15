@@ -4,6 +4,7 @@ use utoipa::ToSchema; // Scalar/OpenAPI用
 
 #[derive(Clone, Serialize, Debug, PartialEq, DeriveEntityModel, Eq, ToSchema)]
 #[sea_orm(table_name = "users")]
+#[schema(as=crate::entities::users::Model)]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)] // auto_incrementを無効にする
     #[schema(value_type = String, format="uuid")] // OpenAPIでUUIDとして扱うための属性
