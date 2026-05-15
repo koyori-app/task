@@ -16,6 +16,7 @@
     "@universal-middleware/core": "0.4.17",
     "@vikejs/elysia": "0.2.0",
     "@vikejs/hono": "0.2.0",
+    "@vueuse/core": "14.3.0",
     "arkenv": "0.11.0",
     "arktype": "2.2.0",
     "class-variance-authority": "0.7.1",
