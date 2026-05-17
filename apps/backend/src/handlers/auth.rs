@@ -10,6 +10,7 @@ use validator::Validate;
 
 use crate::entities;
 use crate::extractors::{AuthUser, CurrentUser};
+use crate::openapi::{CredentialErrors, InternalOnlyError, SessionAuthErrors, UnauthorizedErrors};
 use crate::utils::auth::{AuthError, create_password_hash, verify_password};
 use crate::{AppState, entities::users};
 
@@ -29,7 +30,8 @@ pub struct LoginRequest {
     path = "/login",
     request_body = LoginRequest,
     responses(
-        (status = 200, description = "Login successful", body = String)
+        (status = 200, description = "Login successful", body = String),
+        CredentialErrors,
     )
 )]
 pub async fn login(
@@ -71,7 +73,8 @@ pub struct RegisterRequest {
     path = "/register",
     request_body = RegisterRequest,
     responses(
-        (status = 200, description = "Register successful", body = String)
+        (status = 200, description = "Register successful", body = String),
+        InternalOnlyError,
     )
 )]
 pub async fn register(
@@ -111,7 +114,8 @@ pub async fn register(
     get,
     path = "/me",
     responses(
-        (status = 200, description = "Current user info", body = entities::users::Model)
+        (status = 200, description = "Current user info", body = entities::users::Model),
+        SessionAuthErrors,
     )
 )]
 pub async fn me(
@@ -126,7 +130,8 @@ pub async fn me(
     post,
     path = "/logout",
     responses(
-        (status = 200, description = "Logout successful", body = String)
+        (status = 200, description = "Logout successful", body = String),
+        UnauthorizedErrors,
     )
 )]
 pub async fn logout(

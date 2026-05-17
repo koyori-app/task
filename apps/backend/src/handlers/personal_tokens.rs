@@ -2,6 +2,7 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::dto::personal_tokens::{CreatePersonalTokenResponse, PersonalTokenResponse};
+use crate::openapi::SessionAuthErrors;
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
 struct CreatePersonalTokenRequest {
@@ -15,7 +16,8 @@ struct CreatePersonalTokenRequest {
     path = "/",
     request_body = CreatePersonalTokenRequest,
     responses(
-        (status = 200, description = "Personal token created", body = CreatePersonalTokenResponse)
+        (status = 200, description = "Personal token created", body = CreatePersonalTokenResponse),
+        SessionAuthErrors,
     )
 )]
 pub async fn create_personal_token() {
@@ -29,7 +31,8 @@ pub async fn create_personal_token() {
     path = "/{id}",
     params(("id" = String, Path, description = "Personal token ID")),
     responses(
-        (status = 200, description = "Personal token found", body = PersonalTokenResponse)
+        (status = 200, description = "Personal token found", body = PersonalTokenResponse),
+        SessionAuthErrors,
     )
 )]
 pub async fn get_personal_token() {
@@ -43,7 +46,8 @@ pub async fn get_personal_token() {
     path = "/{id}",
     params(("id" = String, Path, description = "Personal token ID")),
     responses(
-        (status = 200, description = "Personal token revoked", body = PersonalTokenResponse)
+        (status = 200, description = "Personal token revoked", body = PersonalTokenResponse),
+        SessionAuthErrors,
     )
 )]
 pub async fn revoke_personal_token() {
@@ -56,7 +60,8 @@ pub async fn revoke_personal_token() {
     delete,
     path = "/",
     responses(
-        (status = 200, description = "All personal tokens revoked", body = [PersonalTokenResponse])
+        (status = 200, description = "All personal tokens revoked", body = [PersonalTokenResponse]),
+        SessionAuthErrors,
     )
 )]
 pub async fn revoke_all_personal_tokens() {

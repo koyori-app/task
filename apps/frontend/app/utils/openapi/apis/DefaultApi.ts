@@ -29,6 +29,11 @@ import {
     CreatePersonalTokenResponseToJSON,
 } from '../models/CreatePersonalTokenResponse';
 import {
+    type Login403Response,
+    Login403ResponseFromJSON,
+    Login403ResponseToJSON,
+} from '../models/Login403Response';
+import {
     type LoginRequest,
     LoginRequestFromJSON,
     LoginRequestToJSON,

@@ -32,10 +32,12 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     .await
     .unwrap();
 
-    let (router, openapi) = utoipa_axum::router::OpenApiRouter::new()
+    let (router, mut openapi) = utoipa_axum::router::OpenApiRouter::new()
         .route("/", get(|| async { "Hello, world!" }))
         .merge(crate::routes::create_routes())
         .split_for_parts();
+
+    crate::openapi::register_schemas(&mut openapi);
 
     // Allow credentials and mirror the request origin/headers so we don't send
     // wildcard `*` which is disallowed when `Access-Control-Allow-Credentials` is true.

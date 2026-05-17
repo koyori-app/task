@@ -16,12 +16,13 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
 use serde::Serialize;
+use utoipa::ToSchema;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tracing::debug;
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct ServerError {
     pub message: String,
 }

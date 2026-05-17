@@ -54,10 +54,11 @@ impl FromRequestParts<AppState> for CurrentUser {
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         let user_id = user_id_from_session(parts, state).await?;
+        // ユーザーが存在しない場合は401 Unauthorizedを返す
         let user = users::Entity::find_by_id(user_id)
             .one(&state.db)
             .await?
-            .ok_or(AuthError::Forbidden)?;
+            .ok_or(AuthError::Unauthorized)?;
         Ok(CurrentUser(user))
     }
 }
