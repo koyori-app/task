@@ -37,7 +37,7 @@ impl From<personal_tokens::Model> for PersonalTokenResponse {
 }
 
 /// PAT 作成時のレスポンス（平文トークンはこの応答でのみ返却）
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct CreatePersonalTokenResponse {
     pub token: String,
     #[schema(value_type = String, format = "uuid")]
