@@ -162,7 +162,7 @@ async function example() {
 
   const body = {
     // string | Personal token ID
-    id: id_example,
+    id: 38400000-8cf0-11bd-b23e-10b96e4ef00d,
   } satisfies GetPersonalTokenRequest;
 
   try {
@@ -542,7 +542,7 @@ async function example() {
 
   const body = {
     // string | Personal token ID
-    id: id_example,
+    id: 38400000-8cf0-11bd-b23e-10b96e4ef00d,
   } satisfies RevokePersonalTokenRequest;
 
   try {

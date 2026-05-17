@@ -1,4 +1,6 @@
+use axum::extract::Path;
 use serde::Deserialize;
+use uuid::Uuid;
 use validator::Validate;
 
 use crate::dto::personal_tokens::{CreatePersonalTokenResponse, PersonalTokenResponse};
@@ -29,13 +31,13 @@ pub async fn create_personal_token() {
 #[utoipa::path(
     get,
     path = "/{id}",
-    params(("id" = String, Path, description = "Personal token ID")),
+    params(("id" = Uuid, Path, description = "Personal token ID")),
     responses(
         (status = 200, description = "Personal token found", body = PersonalTokenResponse),
         SessionAuthErrors,
     )
 )]
-pub async fn get_personal_token() {
+pub async fn get_personal_token(Path(_id): Path<Uuid>) {
     todo!()
 }
 
@@ -44,13 +46,13 @@ pub async fn get_personal_token() {
 #[utoipa::path(
     delete,
     path = "/{id}",
-    params(("id" = String, Path, description = "Personal token ID")),
+    params(("id" = Uuid, Path, description = "Personal token ID")),
     responses(
         (status = 200, description = "Personal token revoked", body = PersonalTokenResponse),
         SessionAuthErrors,
     )
 )]
-pub async fn revoke_personal_token() {
+pub async fn revoke_personal_token(Path(_id): Path<Uuid>) {
     todo!()
 }
 
