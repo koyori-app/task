@@ -16,9 +16,10 @@ sea-orm = { version = "2.0.0-rc.38", features = [
 ] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-tokio = { version = "1.52.1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.52.1", features = ["macros", "rt-multi-thread", "net", "signal"] }
 tracing = "0.1"
-utoipa = "5.4.0"
+utoipa = { version = "5.4.0", features = ["uuid"] }
+uuid = { version = "1", features = ["serde"] }
 utoipa-axum = "0.2.0"
 utoipa-scalar = { version = "0.3.0", features = ["axum"] }
 tower-http = { version = "0.6", features = ["cors"] }
@@ -30,3 +31,15 @@ axum-valid = "0.24.0"
 validator = { version = "0.20.0", features = ["derive"] }
 sentry = { version = "0.48.2", features = ["tower-axum-matched-path"] }
 tower = "0.5.2"
+argon2 = "0.5.3"
+anyhow = "1.0.102"
+thiserror = "2.0.10"
+base64 = "0.22.1"
+redis_pool = "0.10.0"
+redis = { version = "1.2.1", features = ["tokio-comp"] }
+hmac = "0.13"
+sha2 = "0.11"
+rand = "0.10"
+subtle = "2.4"
+strum = { version = "0.28.0", features = ["derive"] }
+strum_macros = "0.28"
