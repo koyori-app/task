@@ -7,4 +7,7 @@ export const appEnvSettings = arkenv({
   // Umami Analytics
   "UMAMI_HOST?": "string.url",
   "UMAMI_WEBSITE_ID?": "string.uuid.v4",
+
+  // Sentry
+  "FORCE_ENABLE_IN_DEV?": "boolean",
 });

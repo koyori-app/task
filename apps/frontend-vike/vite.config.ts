@@ -1,7 +1,9 @@
 /// <reference types="vitest/config" />
+import dotenv from 'dotenv';
 import vue from '@vitejs/plugin-vue';
 import tailwindcss from '@tailwindcss/vite';
 import { sentryVitePlugin } from '@sentry/vite-plugin';
+import { analyzer, unstableRolldownAdapter } from 'vite-bundle-analyzer'
 /// <reference types="@batijs/core/types" />
 
 import vike from 'vike/plugin';
@@ -13,15 +15,30 @@ import { playwright } from '@vitest/browser-playwright';
 const dirname =
   typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 
-// More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
-export default defineConfig({
-  plugins: [
-    vike(),
-    sentryVitePlugin({
+dotenv.config({ path: path.resolve(dirname, '.env') });
+
+const sentryEnabled =
+  process.env.NODE_ENV?.includes('prod') ||
+  process.env.FORCE_ENABLE_IN_DEV === 'true';
+
+// console.log('FORCE_ENABLE_IN_DEV: ', process.env.FORCE_ENABLE_IN_DEV === 'true');
+// console.log('sentryEnabled: ', sentryEnabled);
+const sentryPlugin = sentryEnabled
+  ? sentryVitePlugin({
       sourcemaps: {
         disable: false,
       },
-    }),
+    })
+  : undefined;
+
+// More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
+
+export default defineConfig({
+  // Standalone build UI (vite build). Embedded client uses +onCreateApp inject.
+  plugins: [
+    unstableRolldownAdapter(analyzer()),
+    vike(),
+    ...(sentryPlugin ? [sentryPlugin] : []),
     tailwindcss(),
     vue(),
   ],
@@ -32,8 +49,21 @@ export default defineConfig({
       '@': path.resolve(dirname, 'src'),
     },
   },
+  optimizeDeps: {
+    include: ['vue', 'reka-ui', 'lucide-vue-next', '@phosphor-icons/vue'],
+  },
+  server: {
+    warmup: {
+      clientFiles: [
+        './src/pages/+Layout.vue',
+        // './src/pages/index/+Page.vue'
+        ],
+    },
+  },
   build: {
     sourcemap: true,
+    rolldownOptions: {
+    },
   },
   test: {
     maxWorkers: 4,
