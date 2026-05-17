@@ -39,11 +39,14 @@ pub async fn login(session: Session<SessionRedisPool>, State(state): State<AppSt
     let user = users::Entity::find().filter(users::Column::Email.eq(email)).one(&state.db).await.unwrap();
 
     if let Some(user) = user {
-        if let Some(stored_hash) = user.password_hash.as_deref() {
-            if verify_password(&password, stored_hash)? {
-                session.set("user_id", user.id);
-                return Ok(Json("Login successful".to_string()));
+        match user.password_hash.as_str() {
+            stored_hash => {
+                if verify_password(&password, stored_hash)? {
+                    session.set("user_id", user.id);
+                    return Ok(Json("Login successful".to_string()));
+                }
             }
+            _ => (),
         }
     }
 
@@ -88,7 +91,7 @@ pub async fn register(session: Session<SessionRedisPool>, State(state): State<Ap
         bio: Set(Some(String::new())),
         avatar_url: Set(None),
         email: Set(email),
-        password_hash: Set(Some(password_hash)),
+        password_hash: Set(password_hash),
     };
 
     users::Entity::insert(user.clone())

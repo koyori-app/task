@@ -19,10 +19,9 @@ pub struct Model {
     pub avatar_url: Option<String>,
     #[schema(value_type = String, format="email")]
     pub email: String,
-    #[sea_orm(nullable)]
-    #[schema(nullable, ignore)]
+    #[schema(ignore)]
     #[serde(skip_serializing)]
-    pub password_hash: Option<String>,
+    pub password_hash: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
