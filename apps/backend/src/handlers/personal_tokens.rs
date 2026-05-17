@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use validator::Validate;
 
-use crate::entities;
+use crate::dto::personal_tokens::{CreatePersonalTokenResponse, PersonalTokenResponse};
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
 struct CreatePersonalTokenRequest {
@@ -12,10 +12,10 @@ struct CreatePersonalTokenRequest {
 #[axum::debug_handler]
 #[utoipa::path(
     post,
-    path = "/personal_tokens",
+    path = "/",
     request_body = CreatePersonalTokenRequest,
     responses(
-        (status = 200, description = "Personal token created", body = entities::personal_tokens::Model)
+        (status = 200, description = "Personal token created", body = CreatePersonalTokenResponse)
     )
 )]
 pub async fn create_personal_token() {
@@ -26,9 +26,10 @@ pub async fn create_personal_token() {
 #[axum::debug_handler]
 #[utoipa::path(
     get,
-    path = "/personal_tokens/{id}",
+    path = "/{id}",
+    params(("id" = String, Path, description = "Personal token ID")),
     responses(
-        (status = 200, description = "Personal token found", body = entities::personal_tokens::Model)
+        (status = 200, description = "Personal token found", body = PersonalTokenResponse)
     )
 )]
 pub async fn get_personal_token() {
@@ -39,9 +40,10 @@ pub async fn get_personal_token() {
 #[axum::debug_handler]
 #[utoipa::path(
     delete,
-    path = "/personal_tokens/{id}",
+    path = "/{id}",
+    params(("id" = String, Path, description = "Personal token ID")),
     responses(
-        (status = 200, description = "Personal token revoked", body = entities::personal_tokens::Model)
+        (status = 200, description = "Personal token revoked", body = PersonalTokenResponse)
     )
 )]
 pub async fn revoke_personal_token() {
@@ -52,9 +54,9 @@ pub async fn revoke_personal_token() {
 #[axum::debug_handler]
 #[utoipa::path(
     delete,
-    path = "/personal_tokens",
+    path = "/",
     responses(
-        (status = 200, description = "All personal tokens revoked", body = Vec<entities::personal_tokens::Model>)
+        (status = 200, description = "All personal tokens revoked", body = [PersonalTokenResponse])
     )
 )]
 pub async fn revoke_all_personal_tokens() {
