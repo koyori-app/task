@@ -1,7 +1,6 @@
 use config::{Config, Environment};
 use serde::Deserialize;
 
-
 #[derive(Debug, Deserialize)]
 pub struct Settings {
     pub database_url: String,
@@ -18,9 +17,9 @@ fn default_allow_origin() -> String {
 pub fn load_settings() -> Settings {
     dotenvy::dotenv().ok();
     let settings = Config::builder()
-    .add_source(Environment::default())
-    .build()
-    .unwrap();
+        .add_source(Environment::default())
+        .build()
+        .unwrap();
 
     settings.try_deserialize().unwrap()
 }

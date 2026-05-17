@@ -1,8 +1,13 @@
-use axum::{body::Body, http::Request, routing::get, http::{HeaderValue, Method}};
-use sentry::integrations::tower::NewSentryLayer;
-use tower::ServiceBuilder;
+use axum::{
+    body::Body,
+    http::Request,
+    http::{HeaderValue, Method},
+    routing::get,
+};
 use axum_session::{SameSite, SessionConfig, SessionLayer, SessionStore};
 use axum_session_redispool::SessionRedisPool;
+use sentry::integrations::tower::NewSentryLayer;
+use tower::ServiceBuilder;
 use tower_http::cors::{AllowHeaders, CorsLayer};
 use utoipa_scalar::{Scalar, Servable};
 

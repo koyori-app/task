@@ -36,7 +36,7 @@ pub async fn get_personal_token() {
 }
 
 // 対象ユーザーの特定のパーソナルアクセストークンを失効させる
-#[axum::debug_handler] 
+#[axum::debug_handler]
 #[utoipa::path(
     delete,
     path = "/personal_tokens/{id}",

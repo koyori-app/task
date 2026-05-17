@@ -1,13 +1,13 @@
-use sea_orm::DatabaseConnection;
 use crate::utils::redis::RedisConnection;
+use sea_orm::DatabaseConnection;
 
 pub mod entities;
+pub mod extractors;
 pub mod handlers;
 pub mod routes;
 pub mod server;
 pub mod settings;
 pub mod utils;
-pub mod extractors;
 
 #[derive(Clone)]
 pub struct AppState {

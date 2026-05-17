@@ -1,10 +1,21 @@
-use serde::{Deserialize, Serialize};
 use sea_orm::FromJsonQueryResult;
-use strum_macros::{Display, EnumString, EnumIter};
+use serde::{Deserialize, Serialize};
+use strum_macros::{Display, EnumIter, EnumString};
 use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, 
-         Display, EnumString, EnumIter, ToSchema)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    EnumIter,
+    ToSchema,
+)]
 #[strum(serialize_all = "snake_case")]
 pub enum Scope {
     #[strum(serialize = "read:user")]
@@ -19,16 +30,7 @@ pub enum Scope {
 }
 
 /// JSON カラム用の `Vec<Scope>` ラッパ（SeaORM エンティティ向け）。
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    FromJsonQueryResult,
-    ToSchema,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult, ToSchema)]
 #[serde(transparent)]
 pub struct ScopeList(pub Vec<Scope>);
 
@@ -37,4 +39,3 @@ impl From<Scope> for sea_orm::Value {
         sea_orm::Value::String(Some(source.to_string()))
     }
 }
-
