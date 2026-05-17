@@ -1,7 +1,8 @@
 use argon2::{
     Argon2,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::{self, OsRng}},
 };
+use rand_core::RngCore;
 
 use axum::{
     Json,
@@ -11,6 +12,11 @@ use axum::{
 use serde::Serialize;
 use thiserror::Error;
 use tracing::debug;
+use hmac::{Hmac, KeyInit, Mac};
+use sha2::Sha256;
+use subtle::ConstantTimeEq;
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
 #[derive(Serialize)]
 pub struct ServerError {
@@ -97,4 +103,48 @@ pub fn verify_password(password: &str, password_hash: &str) -> Result<bool, Auth
     Ok(argon2
         .verify_password(password.as_bytes(), &parsed_hash)
         .is_ok())
+}
+
+// --- Personal token helpers ---
+type HmacSha256 = Hmac<Sha256>;
+
+/// 生成したトークン本体と、それをDBに保存するためのハッシュを返す。
+/// トークン本体はランダムなバイト列をBase64URLでエンコードしたもの。
+pub fn generate_personal_token() -> Result<(String, String), AuthError> {
+    // 32バイトのランダム値
+    let mut buf = [0u8; 32];
+    OsRng.fill_bytes(&mut buf);
+    let token = URL_SAFE_NO_PAD.encode(&buf);
+
+    let token_hash = create_personal_token_hash(&token)?;
+    Ok((token, token_hash))
+}
+
+/// サーバー側で保持するトークンのハッシュを作る。
+/// 簡易的には HMAC-SHA256(secret, token) を Base64URL でエンコードして保存する。
+pub fn create_personal_token_hash(token: &str) -> Result<String, AuthError> {
+    let secret = std::env::var("PERSONAL_TOKEN_SECRET")
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!("token secret missing: {e}")))?;
+
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!("hmac init: {e}")))?;
+    mac.update(token.as_bytes());
+    let result = mac.finalize().into_bytes();
+    Ok(URL_SAFE_NO_PAD.encode(result.as_slice()))
+}
+
+/// 受信したトークンを、DB にある `stored_hash` と比較して検証する。
+pub fn verify_personal_token(token: &str, stored_hash: &str) -> Result<bool, AuthError> {
+    let computed = create_personal_token_hash(token)?;
+    
+    let computed_bytes = computed.as_bytes();
+    let stored_bytes = stored_hash.as_bytes();
+
+    // 長さが違う場合でも、すぐに false を返さずダミーの比較を行うか、
+    // そもそもハッシュ関数の出力なので長さが同じはずであることを前提にする。
+    if computed_bytes.len() != stored_bytes.len() {
+        return Ok(false);
+    }
+
+    Ok(computed_bytes.ct_eq(stored_bytes).into())
 }

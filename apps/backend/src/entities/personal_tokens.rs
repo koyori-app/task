@@ -1,6 +1,7 @@
 use sea_orm::entity::prelude::*;
-use sentry::types::Uuid;
 use utoipa::ToSchema;
+
+use crate::entities::scopes::ScopeList;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, ToSchema)]
 #[sea_orm(table_name = "personal_tokens")]
@@ -10,10 +11,19 @@ pub struct Model {
     #[schema(value_type = String, format="uuid")]  // OpenAPIでUUIDとして扱うための属性
     pub id: Uuid,
     pub name: String,
-    pub token: String,
+    pub token_last_four: String,
+    #[sea_orm(indexed)]
+    #[schema(ignore)]
+    #[serde(skip_serializing)]
+    pub token_hash: String,
+    #[schema(value_type = String, format="date-time", nullable)]
+    pub expires_at: Option<DateTimeWithTimeZone>,
+    #[schema(value_type = String, format="date-time", nullable)]
+    pub last_used_at: Option<DateTimeWithTimeZone>,
     pub revoked: bool,
     #[schema(value_type = String, format="uuid")]
     pub user_id: Uuid,
+    pub scopes: ScopeList,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

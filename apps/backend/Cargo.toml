@@ -36,3 +36,9 @@ thiserror = "2.0.10"
 base64 = "0.22.1"
 redis_pool = "0.10.0"
 redis = { version = "1.2.1", features = ["tokio-comp"] }
+hmac = "0.13"
+sha2 = "0.11"
+rand = "0.10"
+subtle = "2.4"
+strum = { version = "0.28.0", features = ["derive"] }
+strum_macros = "0.28"
