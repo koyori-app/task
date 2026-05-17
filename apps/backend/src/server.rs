@@ -15,7 +15,7 @@ use crate::{AppState, settings};
 
 pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let is_prod = std::env::var("RUST_ENV").unwrap_or_default() == "production";
-    let settings = settings::load_settings();
+    let settings = settings::load_settings()?;
 
     let session_config = SessionConfig::default()
         .with_secure(is_prod) // 本番では secure=true にする

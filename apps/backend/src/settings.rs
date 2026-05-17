@@ -14,12 +14,13 @@ fn default_allow_origin() -> String {
     "http://localhost:3000".to_string()
 }
 
-pub fn load_settings() -> Settings {
+pub fn load_settings() -> Result<Settings, anyhow::Error> {
     dotenvy::dotenv().ok();
     let settings = Config::builder()
         .add_source(Environment::default())
-        .build()
-        .unwrap();
+        .build()?;
 
-    settings.try_deserialize().unwrap()
+    settings
+        .try_deserialize()
+        .map_err(|e| anyhow::anyhow!("failed to deserialize settings: {e}"))
 }
