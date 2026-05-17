@@ -2,10 +2,10 @@ use crate::{settings::Settings, utils::redis::RedisConnection};
 use sea_orm::DatabaseConnection;
 
 pub mod dto;
-pub mod openapi;
 pub mod entities;
 pub mod extractors;
 pub mod handlers;
+pub mod openapi;
 pub mod routes;
 pub mod server;
 pub mod settings;

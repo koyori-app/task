@@ -1,11 +1,7 @@
 use argon2::{
     Argon2,
-    password_hash::{
-        PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
-        rand_core::{self, OsRng},
-    },
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
-use rand_core::RngCore;
 
 use axum::{
     Json,
@@ -16,11 +12,11 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
 use serde::Serialize;
-use utoipa::ToSchema;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tracing::debug;
+use utoipa::ToSchema;
 
 #[derive(Serialize, ToSchema)]
 pub struct ServerError {
