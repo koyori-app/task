@@ -32,7 +32,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     .await
     .unwrap();
 
-    let (mut router, openapi) = utoipa_axum::router::OpenApiRouter::new()
+    let (router, openapi) = utoipa_axum::router::OpenApiRouter::new()
         .route("/", get(|| async { "Hello, world!" }))
         .merge(crate::routes::create_routes())
         .split_for_parts();
@@ -52,10 +52,20 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .layer(cors)
         .layer(ServiceBuilder::new().layer(NewSentryLayer::<Request<Body>>::new_from_top())); // Bind a new Hub per request, to ensure correct error <> request correlation
 
-    println!("Listening on http://0.0.0.0:3400");
+    let addr = "0.0.0.0:3400";
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    println!("Listening on http://{addr}");
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3400").await?;
-    axum::serve(listener, app.into_make_service()).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
     Ok(())
+}
+
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to install Ctrl+C handler");
+    println!("Shutting down...");
 }
