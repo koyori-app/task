@@ -14,20 +14,43 @@
 
 import * as runtime from '../runtime';
 import {
+    type CrateEntitiesLabelsModel,
+    CrateEntitiesLabelsModelFromJSON,
+    CrateEntitiesLabelsModelToJSON,
+} from '../models/CrateEntitiesLabelsModel';
+import {
+    type CrateEntitiesUsersModel,
+    CrateEntitiesUsersModelFromJSON,
+    CrateEntitiesUsersModelToJSON,
+} from '../models/CrateEntitiesUsersModel';
+import {
+    type CreatePersonalTokenResponse,
+    CreatePersonalTokenResponseFromJSON,
+    CreatePersonalTokenResponseToJSON,
+} from '../models/CreatePersonalTokenResponse';
+import {
     type LoginRequest,
     LoginRequestFromJSON,
     LoginRequestToJSON,
 } from '../models/LoginRequest';
 import {
-    type Model,
-    ModelFromJSON,
-    ModelToJSON,
-} from '../models/Model';
+    type PersonalTokenResponse,
+    PersonalTokenResponseFromJSON,
+    PersonalTokenResponseToJSON,
+} from '../models/PersonalTokenResponse';
 import {
     type RegisterRequest,
     RegisterRequestFromJSON,
     RegisterRequestToJSON,
 } from '../models/RegisterRequest';
+
+export interface CreatePersonalTokenRequest {
+    body: object;
+}
+
+export interface GetPersonalTokenRequest {
+    id: string;
+}
 
 export interface LoginOperationRequest {
     loginRequest: LoginRequest;
@@ -37,10 +60,59 @@ export interface RegisterOperationRequest {
     registerRequest: RegisterRequest;
 }
 
+export interface RevokePersonalTokenRequest {
+    id: string;
+}
+
 /**
  * 
  */
 export class DefaultApi extends runtime.BaseAPI {
+
+    /**
+     * Creates request options for createPersonalToken without sending the request
+     */
+    async createPersonalTokenRequestOpts(requestParameters: CreatePersonalTokenRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['body'] == null) {
+            throw new runtime.RequiredError(
+                'body',
+                'Required parameter "body" was null or undefined when calling createPersonalToken().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+
+        let urlPath = `/v1/personal_tokens`;
+
+        return {
+            path: urlPath,
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+            body: requestParameters['body'] as any,
+        };
+    }
+
+    /**
+     */
+    async createPersonalTokenRaw(requestParameters: CreatePersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<CreatePersonalTokenResponse>> {
+        const requestOptions = await this.createPersonalTokenRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => CreatePersonalTokenResponseFromJSON(jsonValue));
+    }
+
+    /**
+     */
+    async createPersonalToken(requestParameters: CreatePersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<CreatePersonalTokenResponse> {
+        const response = await this.createPersonalTokenRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
 
     /**
      * Creates request options for getLabels without sending the request
@@ -63,17 +135,60 @@ export class DefaultApi extends runtime.BaseAPI {
 
     /**
      */
-    async getLabelsRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Array<Model>>> {
+    async getLabelsRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Array<CrateEntitiesLabelsModel>>> {
         const requestOptions = await this.getLabelsRequestOpts();
         const response = await this.request(requestOptions, initOverrides);
 
-        return new runtime.JSONApiResponse(response, (jsonValue) => jsonValue.map(ModelFromJSON));
+        return new runtime.JSONApiResponse(response, (jsonValue) => jsonValue.map(CrateEntitiesLabelsModelFromJSON));
     }
 
     /**
      */
-    async getLabels(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Array<Model>> {
+    async getLabels(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Array<CrateEntitiesLabelsModel>> {
         const response = await this.getLabelsRaw(initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for getPersonalToken without sending the request
+     */
+    async getPersonalTokenRequestOpts(requestParameters: GetPersonalTokenRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling getPersonalToken().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+
+        let urlPath = `/v1/personal_tokens/{id}`;
+        urlPath = urlPath.replace('{id}', encodeURIComponent(String(requestParameters['id'])));
+
+        return {
+            path: urlPath,
+            method: 'GET',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     */
+    async getPersonalTokenRaw(requestParameters: GetPersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<PersonalTokenResponse>> {
+        const requestOptions = await this.getPersonalTokenRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => PersonalTokenResponseFromJSON(jsonValue));
+    }
+
+    /**
+     */
+    async getPersonalToken(requestParameters: GetPersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<PersonalTokenResponse> {
+        const response = await this.getPersonalTokenRaw(requestParameters, initOverrides);
         return await response.value();
     }
 
@@ -186,16 +301,16 @@ export class DefaultApi extends runtime.BaseAPI {
 
     /**
      */
-    async meRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Model>> {
+    async meRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<CrateEntitiesUsersModel>> {
         const requestOptions = await this.meRequestOpts();
         const response = await this.request(requestOptions, initOverrides);
 
-        return new runtime.JSONApiResponse(response, (jsonValue) => ModelFromJSON(jsonValue));
+        return new runtime.JSONApiResponse(response, (jsonValue) => CrateEntitiesUsersModelFromJSON(jsonValue));
     }
 
     /**
      */
-    async me(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Model> {
+    async me(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<CrateEntitiesUsersModel> {
         const response = await this.meRaw(initOverrides);
         return await response.value();
     }
@@ -246,6 +361,84 @@ export class DefaultApi extends runtime.BaseAPI {
      */
     async register(requestParameters: RegisterOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<string> {
         const response = await this.registerRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for revokeAllPersonalTokens without sending the request
+     */
+    async revokeAllPersonalTokensRequestOpts(): Promise<runtime.RequestOpts> {
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+
+        let urlPath = `/v1/personal_tokens`;
+
+        return {
+            path: urlPath,
+            method: 'DELETE',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     */
+    async revokeAllPersonalTokensRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Array<PersonalTokenResponse>>> {
+        const requestOptions = await this.revokeAllPersonalTokensRequestOpts();
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => jsonValue.map(PersonalTokenResponseFromJSON));
+    }
+
+    /**
+     */
+    async revokeAllPersonalTokens(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Array<PersonalTokenResponse>> {
+        const response = await this.revokeAllPersonalTokensRaw(initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for revokePersonalToken without sending the request
+     */
+    async revokePersonalTokenRequestOpts(requestParameters: RevokePersonalTokenRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling revokePersonalToken().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+
+        let urlPath = `/v1/personal_tokens/{id}`;
+        urlPath = urlPath.replace('{id}', encodeURIComponent(String(requestParameters['id'])));
+
+        return {
+            path: urlPath,
+            method: 'DELETE',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     */
+    async revokePersonalTokenRaw(requestParameters: RevokePersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<PersonalTokenResponse>> {
+        const requestOptions = await this.revokePersonalTokenRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => PersonalTokenResponseFromJSON(jsonValue));
+    }
+
+    /**
+     */
+    async revokePersonalToken(requestParameters: RevokePersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<PersonalTokenResponse> {
+        const response = await this.revokePersonalTokenRaw(requestParameters, initOverrides);
         return await response.value();
     }
 

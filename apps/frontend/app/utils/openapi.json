@@ -67,7 +67,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Model"
+                  "$ref": "#/components/schemas/crate.entities.users.Model"
                 }
               }
             }
@@ -113,8 +113,107 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Model"
+                    "$ref": "#/components/schemas/crate.entities.labels.Model"
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/personal_tokens": {
+      "post": {
+        "operationId": "create_personal_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePersonalTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Personal token created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatePersonalTokenResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "revoke_all_personal_tokens",
+        "responses": {
+          "200": {
+            "description": "All personal tokens revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PersonalTokenResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/personal_tokens/{id}": {
+      "get": {
+        "operationId": "get_personal_token",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Personal token ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Personal token found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalTokenResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "revoke_personal_token",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Personal token ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Personal token revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalTokenResponse"
                 }
               }
             }
@@ -125,6 +224,63 @@
   },
   "components": {
     "schemas": {
+      "CreatePersonalTokenRequest": {
+        "type": "object"
+      },
+      "CreatePersonalTokenResponse": {
+        "type": "object",
+        "description": "PAT 作成時のレスポンス（平文トークンはこの応答でのみ返却）",
+        "required": [
+          "token",
+          "id",
+          "name",
+          "token_last_four",
+          "expires_at",
+          "last_used_at",
+          "revoked",
+          "user_id",
+          "scopes"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "scopes": {
+            "$ref": "#/components/schemas/ScopeList"
+          },
+          "token": {
+            "type": "string"
+          },
+          "token_last_four": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "LoginRequest": {
         "type": "object",
         "required": [
@@ -142,7 +298,94 @@
           }
         }
       },
-      "Model": {
+      "PersonalTokenResponse": {
+        "type": "object",
+        "description": "PAT のメタデータ（平文トークン・ハッシュは含まない）",
+        "required": [
+          "id",
+          "name",
+          "token_last_four",
+          "expires_at",
+          "last_used_at",
+          "revoked",
+          "user_id",
+          "scopes"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "scopes": {
+            "$ref": "#/components/schemas/ScopeList"
+          },
+          "token_last_four": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": [
+          "username",
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "format": "password"
+          },
+          "username": {
+            "type": "string",
+            "format": "username"
+          }
+        }
+      },
+      "Scope": {
+        "type": "string",
+        "enum": [
+          "read:user",
+          "write:user",
+          "admin:all"
+        ]
+      },
+      "ScopeList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Scope"
+        },
+        "description": "JSON カラム用の `Vec<Scope>` ラッパ（SeaORM エンティティ向け）。"
+      },
+      "crate.entities.labels.Model": {
         "type": "object",
         "required": [
           "id",
@@ -172,21 +415,33 @@
           }
         }
       },
-      "RegisterRequest": {
+      "crate.entities.users.Model": {
         "type": "object",
         "required": [
+          "id",
           "username",
-          "email",
-          "password"
+          "email"
         ],
         "properties": {
+          "avatar_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bio": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "email": {
             "type": "string",
             "format": "email"
           },
-          "password": {
+          "id": {
             "type": "string",
-            "format": "password"
+            "format": "uuid"
           },
           "username": {
             "type": "string",
