@@ -3,7 +3,7 @@ use sentry::integrations::tower::NewSentryLayer;
 use tower::ServiceBuilder;
 use axum_session::{SameSite, SessionConfig, SessionLayer, SessionStore};
 use axum_session_redispool::SessionRedisPool;
-use tower_http::cors::{AllowHeaders, AllowOrigin, Any, CorsLayer};
+use tower_http::cors::{AllowHeaders, CorsLayer};
 use utoipa_scalar::{Scalar, Servable};
 
 use crate::{AppState, settings};
