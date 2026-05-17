@@ -1,7 +1,7 @@
 <!-- https://vike.dev/Layout -->
 
 <script setup lang="ts">
-import AppSidebar from '@/components/sidebar/AppSidebar.vue';
+import AppSidebarSkeleton from '@/components/sidebar/AppSidebarSkeleton.vue';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -12,11 +12,21 @@ import {
 } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
+import { defineAsyncComponent } from 'vue';
+
+const AppSidebar = defineAsyncComponent(
+  () => import('@/components/sidebar/AppSidebar.vue'),
+);
 </script>
 
 <template>
   <SidebarProvider>
-    <AppSidebar />
+    <Suspense>
+      <AppSidebar />
+      <template #fallback>
+        <AppSidebarSkeleton />
+      </template>
+    </Suspense>
     <SidebarInset>
       <header
         class="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12"
