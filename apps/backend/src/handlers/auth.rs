@@ -103,7 +103,7 @@ pub async fn register(
     users::Entity::insert(user.clone())
         .exec(&state.db)
         .await
-        .expect("insert user");
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!("insert user: {e}")))?;
 
     session.set("user_id", user_id);
     Ok(Json("Register successful".to_string()))
