@@ -1,4 +1,4 @@
-use crate::utils::redis::RedisConnection;
+use crate::{settings::Settings, utils::redis::RedisConnection};
 use sea_orm::DatabaseConnection;
 
 pub mod dto;
@@ -13,6 +13,7 @@ pub mod utils;
 
 #[derive(Clone)]
 pub struct AppState {
+    pub settings: Settings,
     pub db: DatabaseConnection,
     pub redis_client: RedisConnection,
 }

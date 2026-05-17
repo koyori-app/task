@@ -11,11 +11,11 @@ use tower::ServiceBuilder;
 use tower_http::cors::{AllowHeaders, CorsLayer};
 use utoipa_scalar::{Scalar, Servable};
 
-use crate::{AppState, settings};
+use crate::AppState;
 
 pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let is_prod = std::env::var("RUST_ENV").unwrap_or_default() == "production";
-    let settings = settings::load_settings()?;
+    let settings = &state.settings;
 
     let session_config = SessionConfig::default()
         .with_secure(is_prod) // 本番では secure=true にする
@@ -42,7 +42,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     // Allow credentials and mirror the request origin/headers so we don't send
     // wildcard `*` which is disallowed when `Access-Control-Allow-Credentials` is true.
     let cors = CorsLayer::new()
-        .allow_origin(settings.allow_origin.parse::<HeaderValue>().unwrap())
+        .allow_origin(settings.allow_origin.parse::<HeaderValue>()?)
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers(AllowHeaders::mirror_request())
         .allow_credentials(true);

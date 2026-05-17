@@ -3,7 +3,7 @@ use backend::{AppState, server::run};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings = backend::settings::load_settings()?;
-    let _guard = if let Some(sentry_dsn) = settings.sentry_dsn {
+    let _guard = if let Some(ref sentry_dsn) = settings.sentry_dsn {
         Some(sentry::init(sentry::ClientOptions {
             dsn: Some(sentry_dsn.parse()?),
             release: sentry::release_name!(),
@@ -21,7 +21,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let redis_client = backend::utils::redis::RedisConnection::new(&settings.redis_url);
     redis_client.ping().await?;
-    let state = AppState { db, redis_client };
+    let state = AppState {
+        settings,
+        db,
+        redis_client,
+    };
     run(state).await?;
 
     Ok(())
