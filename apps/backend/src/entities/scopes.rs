@@ -8,10 +8,13 @@ use utoipa::ToSchema;
 #[strum(serialize_all = "snake_case")]
 pub enum Scope {
     #[strum(serialize = "read:user")]
+    #[serde(rename = "read:user")]
     ReadUser,
     #[strum(serialize = "write:user")]
+    #[serde(rename = "write:user")]
     WriteUser,
     #[strum(serialize = "admin:all")]
+    #[serde(rename = "admin:all")]
     AdminAll,
 }
 
@@ -35,4 +38,3 @@ impl From<Scope> for sea_orm::Value {
     }
 }
 
-impl sea_orm::TryGetableFromJson for Scope {}
