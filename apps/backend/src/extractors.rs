@@ -1,32 +1,63 @@
-use axum::{
-    extract::FromRequestParts,
-    http::{request::Parts, StatusCode},
-};
+use std::ops::Deref;
+
+use axum::{extract::FromRequestParts, http::request::Parts};
 use axum_session_redispool::SessionRedisPool;
-use sea_orm::sqlx::types::uuid;
+use sea_orm::{EntityTrait, prelude::Uuid};
+
+use crate::{AppState, entities::users, utils::auth::AuthError};
+
 type Session = axum_session::Session<SessionRedisPool>;
-pub struct AuthUser {
-    pub user_id: uuid::Uuid,
+
+async fn user_id_from_session(parts: &mut Parts, state: &AppState) -> Result<Uuid, AuthError> {
+    let session = Session::from_request_parts(parts, state)
+        .await
+        .map_err(|_| AuthError::Internal(anyhow::anyhow!("session layer missing")))?;
+
+    session
+        .get::<Uuid>("user_id")
+        .ok_or(AuthError::Unauthorized)
 }
 
-impl<S> FromRequestParts<S> for AuthUser
-where
-    S: Send + Sync,
-{
-    type Rejection = (StatusCode, &'static str);
+/// 認証済みユーザーの ID のみ（DB アクセスなし）
+pub struct AuthUser {
+    pub user_id: Uuid,
+}
 
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-// 1. セッションをリクエストから取得
-        let session = Session::from_request_parts(parts, state)
-            .await
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Session layer missing"))?;
+impl FromRequestParts<AppState> for AuthUser {
+    type Rejection = AuthError;
 
-        // 2. セッションからユーザーIDを抽出
-        if let Some(user_id) = session.get::<uuid::Uuid>("user_id") {
-            Ok(AuthUser { user_id })
-        } else {
-            // 3. なければ401 (Unauthorized) を返す
-            Err((StatusCode::UNAUTHORIZED, "Login required"))
-        }
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let user_id = user_id_from_session(parts, state).await?;
+        Ok(AuthUser { user_id })
+    }
+}
+
+/// 認証済みユーザーの DB レコード（ハンドラで毎回取得する必要なし）
+pub struct CurrentUser(pub users::Model);
+
+impl Deref for CurrentUser {
+    type Target = users::Model;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl FromRequestParts<AppState> for CurrentUser {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let user_id = user_id_from_session(parts, state).await?;
+        let user = users::Entity::find_by_id(user_id)
+            .one(&state.db)
+            .await?
+            .ok_or(AuthError::Forbidden)?;
+        Ok(CurrentUser(user))
     }
 }

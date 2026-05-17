@@ -1,6 +1,9 @@
 use argon2::{
     Argon2,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::{self, OsRng}},
+    password_hash::{
+        PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+        rand_core::{self, OsRng},
+    },
 };
 use rand_core::RngCore;
 
@@ -9,14 +12,14 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde::Serialize;
-use thiserror::Error;
-use tracing::debug;
-use hmac::{Hmac, KeyInit, Mac};
-use sha2::Sha256;
-use subtle::ConstantTimeEq;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use hmac::{Hmac, KeyInit, Mac};
+use serde::Serialize;
+use sha2::Sha256;
+use subtle::ConstantTimeEq;
+use thiserror::Error;
+use tracing::debug;
 
 #[derive(Serialize)]
 pub struct ServerError {
@@ -27,6 +30,8 @@ pub struct ServerError {
 pub enum AuthError {
     #[error("internal error")]
     Internal(#[from] anyhow::Error),
+    #[error("unauthorized")]
+    Unauthorized,
     #[error("forbidden")]
     Forbidden,
 }
@@ -50,6 +55,13 @@ impl IntoResponse for AuthError {
                 )
                     .into_response()
             }
+            AuthError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                Json(ServerError {
+                    message: "unauthorized".into(),
+                }),
+            )
+                .into_response(),
             AuthError::Forbidden => (
                 StatusCode::FORBIDDEN,
                 Json(ServerError {
@@ -81,13 +93,13 @@ pub fn argon2_params() -> Result<Argon2<'static>, AuthError> {
 /// パスワードをハッシュ化する関数
 ///
 /// Argon2idアルゴリズムを使用し、ランダムなソルトを生成してハッシュ化します。
-/// 
+///
 /// # Arguments
 /// * `password` - ハッシュ化するパスワードの文字列
-/// 
+///
 /// # Errors
 /// * `AuthError::Internal` - ハッシュ化プロセスでエラーが発生した場合に返されます。
-/// 
+///
 /// # Returns
 /// * `Ok(String)` - ハッシュ化されたパスワードを含む文字
 pub fn create_password_hash(password: &str) -> Result<String, AuthError> {
@@ -142,7 +154,7 @@ pub fn create_personal_token_hash(token: &str) -> Result<String, AuthError> {
 /// 受信したトークンを、DB にある `stored_hash` と比較して検証する。
 pub fn verify_personal_token(token: &str, stored_hash: &str) -> Result<bool, AuthError> {
     let computed = create_personal_token_hash(token)?;
-    
+
     let computed_bytes = computed.as_bytes();
     let stored_bytes = stored_hash.as_bytes();
 

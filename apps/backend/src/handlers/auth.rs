@@ -9,7 +9,7 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::entities;
-use crate::extractors::AuthUser;
+use crate::extractors::{AuthUser, CurrentUser};
 use crate::utils::auth::{AuthError, create_password_hash, verify_password};
 use crate::{AppState, entities::users};
 
@@ -115,14 +115,10 @@ pub async fn register(
     )
 )]
 pub async fn me(
-    State(state): State<AppState>,
-    auth: AuthUser,
+    State(_): State<AppState>,
+    user: CurrentUser,
 ) -> Result<Json<entities::users::Model>, AuthError> {
-    let user = users::Entity::find_by_id(auth.user_id)
-        .one(&state.db)
-        .await
-        .unwrap();
-    Ok(Json(user.unwrap()))
+    Ok(Json(user.0))
 }
 
 #[axum::debug_handler]
@@ -134,9 +130,9 @@ pub async fn me(
     )
 )]
 pub async fn logout(
-    State(state): State<AppState>,
     session: Session<SessionRedisPool>,
-    auth: AuthUser,
+    State(_): State<AppState>,
+    _auth: AuthUser,
 ) -> Result<Json<String>, AuthError> {
     session.remove("user_id");
     Ok(Json("Logout successful".to_string()))
