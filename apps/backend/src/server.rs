@@ -49,9 +49,9 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
 
     let app = router
         .merge(Scalar::with_url("/scalar", openapi.clone()))
-        .layer(SessionLayer::new(session_store))
         .with_state(state)
         .layer(cors)
+        .layer(SessionLayer::new(session_store))
         .layer(ServiceBuilder::new().layer(NewSentryLayer::<Request<Body>>::new_from_top())); // Bind a new Hub per request, to ensure correct error <> request correlation
 
     let addr = "0.0.0.0:3400";
