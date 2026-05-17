@@ -1,9 +1,9 @@
 use sea_orm::entity::prelude::*;
 use utoipa::ToSchema;
-
+use serde::Serialize;
 use crate::entities::scopes::ScopeList;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, ToSchema)]
+#[derive(Clone, Debug, Serialize, PartialEq, DeriveEntityModel, Eq, ToSchema)]
 #[sea_orm(table_name = "personal_tokens")]
 #[schema(as=crate::entities::personal_tokens::Model)]
 pub struct Model {
