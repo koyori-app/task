@@ -1,10 +1,10 @@
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use axum_session::Session;
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
-use sea_orm::{ColumnTrait, QueryFilter};
-use sea_orm::{ActiveValue::Set, EntityTrait};
 use sea_orm::prelude::Uuid;
+use sea_orm::{ActiveValue::Set, EntityTrait};
+use sea_orm::{ColumnTrait, QueryFilter};
 use serde::Deserialize;
 use validator::Validate;
 
@@ -15,7 +15,6 @@ use crate::{AppState, entities::users};
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
 pub struct LoginRequest {
-
     #[schema(value_type = String, format="email")]
     #[validate(email)]
     pub email: String,
@@ -33,24 +32,24 @@ pub struct LoginRequest {
         (status = 200, description = "Login successful", body = String)
     )
 )]
-pub async fn login(session: Session<SessionRedisPool>, State(state): State<AppState>, Valid(Json(payload)): Valid<Json<LoginRequest>>) -> Result<Json<String>, AuthError> {
+pub async fn login(
+    session: Session<SessionRedisPool>,
+    State(state): State<AppState>,
+    Valid(Json(payload)): Valid<Json<LoginRequest>>,
+) -> Result<Json<String>, AuthError> {
     let LoginRequest { email, password } = payload;
 
-    let user = users::Entity::find().filter(users::Column::Email.eq(email)).one(&state.db).await.unwrap();
-
-    if let Some(user) = user {
-        match user.password_hash.as_str() {
-            stored_hash => {
-                if verify_password(&password, stored_hash)? {
-                    session.set("user_id", user.id);
-                    return Ok(Json("Login successful".to_string()));
-                }
-            }
-            _ => (),
-        }
+    let user = users::Entity::find()
+        .filter(users::Column::Email.eq(email))
+        .one(&state.db)
+        .await?
+        .ok_or(AuthError::Forbidden)?;
+    if verify_password(&password, &user.password_hash)? {
+        session.set("user_id", user.id);
+        Ok(Json("Login successful".to_string()))
+    } else {
+        Err(AuthError::Forbidden)
     }
-
-    Err(AuthError::Forbidden)
 }
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
@@ -75,7 +74,11 @@ pub struct RegisterRequest {
         (status = 200, description = "Register successful", body = String)
     )
 )]
-pub async fn register(session: Session<SessionRedisPool>, State(state): State<AppState>, Valid(Json(payload)): Valid<Json<RegisterRequest>>) -> Result<Json<String>, AuthError> {
+pub async fn register(
+    session: Session<SessionRedisPool>,
+    State(state): State<AppState>,
+    Valid(Json(payload)): Valid<Json<RegisterRequest>>,
+) -> Result<Json<String>, AuthError> {
     let RegisterRequest {
         username,
         email,
@@ -99,7 +102,6 @@ pub async fn register(session: Session<SessionRedisPool>, State(state): State<Ap
         .await
         .expect("insert user");
 
-
     session.set("user_id", user_id);
     Ok(Json("Register successful".to_string()))
 }
@@ -112,8 +114,14 @@ pub async fn register(session: Session<SessionRedisPool>, State(state): State<Ap
         (status = 200, description = "Current user info", body = entities::users::Model)
     )
 )]
-pub async fn me(State(state): State<AppState>, auth: AuthUser) -> Result<Json<entities::users::Model>, AuthError> {
-    let user = users::Entity::find_by_id(auth.user_id).one(&state.db).await.unwrap();
+pub async fn me(
+    State(state): State<AppState>,
+    auth: AuthUser,
+) -> Result<Json<entities::users::Model>, AuthError> {
+    let user = users::Entity::find_by_id(auth.user_id)
+        .one(&state.db)
+        .await
+        .unwrap();
     Ok(Json(user.unwrap()))
 }
 
@@ -125,7 +133,11 @@ pub async fn me(State(state): State<AppState>, auth: AuthUser) -> Result<Json<en
         (status = 200, description = "Logout successful", body = String)
     )
 )]
-pub async fn logout(State(state): State<AppState>, session: Session<SessionRedisPool>, auth: AuthUser) -> Result<Json<String>, AuthError> {
+pub async fn logout(
+    State(state): State<AppState>,
+    session: Session<SessionRedisPool>,
+    auth: AuthUser,
+) -> Result<Json<String>, AuthError> {
     session.remove("user_id");
     Ok(Json("Logout successful".to_string()))
 }

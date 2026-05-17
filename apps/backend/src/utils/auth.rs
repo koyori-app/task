@@ -31,6 +31,12 @@ pub enum AuthError {
     Forbidden,
 }
 
+impl From<sea_orm::DbErr> for AuthError {
+    fn from(err: sea_orm::DbErr) -> Self {
+        AuthError::Internal(err.into())
+    }
+}
+
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
         match self {
