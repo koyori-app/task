@@ -1,14 +1,16 @@
-use std::time::Duration;
+//! SMTPクライアントを提供するモジュール
 
-/// SMTPクライアントを提供するモジュール
-
+use lettre::Tokio1Executor;
 use lettre::message::{Mailbox, Message, MultiPart, SinglePart};
 use lettre::{AsyncSmtpTransport, AsyncTransport, transport::smtp::authentication::Credentials};
-use lettre::Tokio1Executor;
+use std::time::Duration;
 use tokio::time::timeout;
 
+/// SMTP送信タイムアウト（秒）
+const SMTP_SEND_TIMEOUT_SECS: u64 = 30;
+
 /// SMTPクライアントの構造体
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SmtpClient {
     mailer: AsyncSmtpTransport<Tokio1Executor>,
 }
@@ -16,47 +18,47 @@ pub struct SmtpClient {
 /// SmtpClientの実装
 impl SmtpClient {
     /// 新しいSMTPクライアントを作成する関数
-    /// 
+    ///
     /// # Arguments
     /// * `smtp_server` - SMTPサーバーのアドレス
     /// * `smtp_port` - SMTPサーバーのポート番号
     /// * `username` - SMTPサーバーの認証に使用するユーザー名
     /// * `password` - SMTPサーバーの認証に使用するパスワード
-    /// 
+    ///
     ///  # Examples
-    /// 
+    ///
     ///  ```no_run
     /// use backend::utils::smtp::SmtpClient;
     ///
     /// let smtp_client = SmtpClient::new("smtp.example.com", 587, "user", "pass").unwrap();
     /// ```
     pub fn new(
-        smtp_server: &str, 
-        smtp_port: u16, 
-        username: &str, 
-        password: &str
+        smtp_server: &str,
+        smtp_port: u16,
+        username: &str,
+        password: &str,
     ) -> Result<Self, lettre::transport::smtp::Error> {
         let creds = Credentials::new(username.to_string(), password.to_string());
-        
+
         let mailer = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(smtp_server)?
             .port(smtp_port)
             .credentials(creds)
             .build();
-            
+
         Ok(SmtpClient { mailer })
     }
 
     /// メールを送信する関数
-    /// 
+    ///
     /// # Arguments
     /// * `from` - 送信元のメールアドレス
     /// * `to` - 送信先のメールアドレス
     /// * `subject` - メールの件名
     /// * `body_text` - メールのテキスト形式の本文
     /// * `body_html` - メールのHTML形式の本文（オプション）
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```no_run
     /// use backend::utils::smtp::SmtpClient;
     ///
@@ -81,7 +83,6 @@ impl SmtpClient {
         body_text: &str,
         body_html: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        
         let builder = Message::builder()
             .from(from.parse::<Mailbox>()?)
             .to(to.parse::<Mailbox>()?)
@@ -97,10 +98,13 @@ impl SmtpClient {
         };
 
         // 送信処理にタイムアウトを30秒に設定
-        let _ = timeout(Duration::from_secs(30), self.mailer.send(email))
-            .await
-            .map_err(|_| "SMTP send timeout")?;
-        
+        timeout(
+            Duration::from_secs(SMTP_SEND_TIMEOUT_SECS),
+            self.mailer.send(email),
+        )
+        .await
+        .map_err(|_| "SMTP send timeout")??;
+
         Ok(())
     }
 }

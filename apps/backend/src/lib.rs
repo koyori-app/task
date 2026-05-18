@@ -1,4 +1,7 @@
-use crate::{settings::Settings, utils::{redis::RedisConnection, smtp::SmtpClient}};
+use crate::{
+    settings::Settings,
+    utils::{redis::RedisConnection, smtp::SmtpClient},
+};
 use sea_orm::DatabaseConnection;
 
 pub mod dto;
@@ -17,5 +20,5 @@ pub struct AppState {
     pub settings: Settings,
     pub db: DatabaseConnection,
     pub redis_client: RedisConnection,
-    pub smtp_client: SmtpClient
+    pub smtp_client: SmtpClient,
 }
