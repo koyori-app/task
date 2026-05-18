@@ -1,7 +1,7 @@
 use config::{Config, Environment};
 use serde::Deserialize;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Settings {
     pub database_url: String,
     pub redis_url: String,
