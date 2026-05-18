@@ -22,7 +22,9 @@ impl SmtpClient {
     /// 
     ///  # Examples
     /// 
-    ///  ```
+    ///  ```no_run
+    /// use backend::utils::smtp::SmtpClient;
+    ///
     /// let smtp_client = SmtpClient::new("smtp.example.com", 587, "user", "pass").unwrap();
     /// ```
     pub fn new(
@@ -52,16 +54,22 @@ impl SmtpClient {
     /// 
     /// # Examples
     /// 
+    /// ```no_run
+    /// use backend::utils::smtp::SmtpClient;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = SmtpClient::new("smtp.example.com", 587, "user", "pass")?;
+    /// client.send_email(
+    ///     "sender@example.com",
+    ///     "receiver@example.com",
+    ///     "Hello from Async Rust!",
+    ///     "This is a test email sent asynchronously.",
+    ///     Some("<p>This is a <b>test</b> email sent asynchronously.</p>"),
+    /// ).await?;
+    /// # Ok(())
+    /// # }
     /// ```
-    ///client.send_email(
-    ///    "sender@example.com",
-    ///    "receiver@example.com",
-    ///    "Hello from Async Rust!",
-    ///    "This is a test email sent asynchronously.",
-    ///    Some("<p>This is a <b>test</b> email sent asynchronously.</p>"),
-    ///).await?;
-    /// ```
-    /// 
     pub async fn send_email(
         &self,
         from: &str,
