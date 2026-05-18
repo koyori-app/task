@@ -8,6 +8,11 @@ pub struct Settings {
     pub sentry_dsn: Option<String>,
     #[serde(default = "default_allow_origin")]
     pub allow_origin: String,
+    pub smtp_server: String,
+    pub smtp_port: u16,
+    pub smtp_username: String,
+    pub smtp_password: String,
+    pub smtp_from: String,
 }
 
 fn default_allow_origin() -> String {
