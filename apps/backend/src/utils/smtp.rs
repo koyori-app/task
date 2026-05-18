@@ -17,17 +17,13 @@ pub struct SmtpClient {
 
 /// SmtpClientの実装
 impl SmtpClient {
-    /// 新しいSMTPクライアントを作成する関数
+    /// Creates a new SMTP client configured for STARTTLS using the supplied server, port, and credentials.
     ///
-    /// # Arguments
-    /// * `smtp_server` - SMTPサーバーのアドレス
-    /// * `smtp_port` - SMTPサーバーのポート番号
-    /// * `username` - SMTPサーバーの認証に使用するユーザー名
-    /// * `password` - SMTPサーバーの認証に使用するパスワード
+    /// The client is configured to use an async STARTTLS SMTP transport; returned errors indicate failures building that transport.
     ///
-    ///  # Examples
+    /// # Examples
     ///
-    ///  ```no_run
+    /// ```no_run
     /// use backend::utils::smtp::SmtpClient;
     ///
     /// let smtp_client = SmtpClient::new("smtp.example.com", 587, "user", "pass").unwrap();
@@ -48,14 +44,18 @@ impl SmtpClient {
         Ok(SmtpClient { mailer })
     }
 
-    /// メールを送信する関数
+    /// Send an email using the client's configured SMTP transport.
     ///
-    /// # Arguments
-    /// * `from` - 送信元のメールアドレス
-    /// * `to` - 送信先のメールアドレス
-    /// * `subject` - メールの件名
-    /// * `body_text` - メールのテキスト形式の本文
-    /// * `body_html` - メールのHTML形式の本文（オプション）
+    /// This builds a `lettre::message::Message` from the provided `from`, `to`, `subject`,
+    /// and body parts, and sends it via the client's async SMTP transport. If `body_html` is
+    /// `Some`, the message is sent as a multipart/alternative containing both plain text and HTML;
+    /// otherwise it is sent as plain text only. The entire send operation is subject to the
+    /// module-wide timeout (`SMTP_SEND_TIMEOUT_SECS`) and will fail if that timeout elapses.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if address parsing fails, message construction fails, the SMTP send
+    /// fails, or the send operation times out.
     ///
     /// # Examples
     ///

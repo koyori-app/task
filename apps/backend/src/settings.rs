@@ -15,6 +15,16 @@ pub struct Settings {
     pub smtp_from: String,
 }
 
+/// Default CORS allow origin used when no `allow_origin` setting is provided.
+///
+/// The function returns the fixed origin string `http://localhost:3000`.
+///
+/// # Examples
+///
+/// ```
+/// let origin = default_allow_origin();
+/// assert_eq!(origin, "http://localhost:3000");
+/// ```
 fn default_allow_origin() -> String {
     "http://localhost:3000".to_string()
 }
