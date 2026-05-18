@@ -1,19 +1,26 @@
 use axum::{
-    body::Body,
-    http::Request,
-    http::{HeaderValue, Method},
-    routing::get,
+    body::Body, http::{HeaderValue, Method, Request}, middleware, routing::get
 };
 use axum_session::{SameSite, SessionConfig, SessionLayer, SessionStore};
 use axum_session_redispool::SessionRedisPool;
 use sentry::integrations::tower::NewSentryLayer;
 use tower::ServiceBuilder;
 use tower_http::cors::{AllowHeaders, CorsLayer};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa_scalar::{Scalar, Servable};
 
-use crate::AppState;
+use crate::{AppState, middlewares::logging::logging_middleware};
+
+
 
 pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
+        tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new(
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
+        ))
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let is_prod = std::env::var("RUST_ENV").unwrap_or_default() == "production";
     let settings = &state.settings;
 
@@ -51,6 +58,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .merge(Scalar::with_url("/scalar", openapi.clone()))
         .with_state(state)
         .layer(cors)
+        .layer(middleware::from_fn(logging_middleware))
         .layer(SessionLayer::new(session_store))
         .layer(ServiceBuilder::new().layer(NewSentryLayer::<Request<Body>>::new_from_top())); // Bind a new Hub per request, to ensure correct error <> request correlation
 
