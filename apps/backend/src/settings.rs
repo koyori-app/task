@@ -1,13 +1,18 @@
 use config::{Config, Environment};
 use serde::Deserialize;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Settings {
     pub database_url: String,
     pub redis_url: String,
     pub sentry_dsn: Option<String>,
     #[serde(default = "default_allow_origin")]
     pub allow_origin: String,
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_username: String,
+    pub smtp_password: String,
+    pub smtp_from: String,
 }
 
 fn default_allow_origin() -> String {

@@ -1,4 +1,4 @@
-use backend::{AppState, server::run};
+use backend::{AppState, server::run, utils::smtp::SmtpClient};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -19,12 +19,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .sync(&db)
         .await?;
 
+    let smtp_client = SmtpClient::new(
+        &settings.smtp_host,
+        settings.smtp_port,
+        &settings.smtp_username,
+        &settings.smtp_password,
+         )
+     .map_err(|err| {
+         std::io::Error::other(format!(
+             "SMTP client initialization failed. If email is required in this environment, check smtp_host/smtp_port/smtp_username/smtp_password. Underlying error: {err}"
+         ))
+     })?;
     let redis_client = backend::utils::redis::RedisConnection::new(&settings.redis_url);
     redis_client.ping().await?;
     let state = AppState {
         settings,
         db,
         redis_client,
+        smtp_client,
     };
     run(state).await?;
 
