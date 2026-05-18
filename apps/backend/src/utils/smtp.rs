@@ -1,8 +1,11 @@
+use std::time::Duration;
+
 /// SMTPクライアントを提供するモジュール
 
 use lettre::message::{Mailbox, Message, MultiPart, SinglePart};
 use lettre::{AsyncSmtpTransport, AsyncTransport, transport::smtp::authentication::Credentials};
 use lettre::Tokio1Executor;
+use tokio::time::timeout;
 
 /// SMTPクライアントの構造体
 #[derive(Clone, Debug)]
@@ -93,7 +96,10 @@ impl SmtpClient {
             None => builder.singlepart(SinglePart::plain(body_text.to_string()))?,
         };
 
-        self.mailer.send(email).await?;
+        // 送信処理にタイムアウトを30秒に設定
+        let _ = timeout(Duration::from_secs(30), self.mailer.send(email))
+            .await
+            .map_err(|_| "SMTP send timeout")?;
         
         Ok(())
     }
