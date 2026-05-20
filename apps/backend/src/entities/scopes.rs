@@ -29,7 +29,7 @@ pub enum Scope {
     AdminAll,
 }
 
-/// JSON カラム用の `Vec<Scope>` ラッパ（SeaORM エンティティ向け）。
+/// アクセストークン等に付与する権限スコープのリスト。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult, ToSchema)]
 #[serde(transparent)]
 pub struct ScopeList(pub Vec<Scope>);

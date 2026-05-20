@@ -13,10 +13,17 @@ pub struct Settings {
     pub smtp_username: String,
     pub smtp_password: String,
     pub smtp_from: String,
+    /// 認証メールに載せるリンクのベース URL（例: `http://localhost:3000`）。末尾に `/verify-email?token=…` を付与します。
+    #[serde(default = "default_email_verification_app_url")]
+    pub email_verification_app_url: String,
 }
 
 fn default_allow_origin() -> String {
     "http://localhost:3000".to_string()
+}
+
+fn default_email_verification_app_url() -> String {
+    default_allow_origin()
 }
 
 pub fn load_settings() -> Result<Settings, anyhow::Error> {

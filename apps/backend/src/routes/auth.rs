@@ -8,6 +8,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
         // routes!マクロは一つのエンドポイントのメソッドをまとめてルーティングするためのマクロっぽい...?同じメソッドを複数定義しようとするとエラーになる。
         .routes(routes!(crate::handlers::auth::login))
         .routes(routes!(crate::handlers::auth::register))
+        .routes(routes!(crate::handlers::auth::verify_email))
+        .routes(routes!(crate::handlers::auth::resend_verification_email))
         .routes(routes!(crate::handlers::auth::logout))
         .routes(routes!(crate::handlers::auth::me))
 }

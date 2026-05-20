@@ -21,8 +21,11 @@ use thiserror::Error;
 use tracing::debug;
 use utoipa::ToSchema;
 
+/// API 共通のエラー応答ボディ。
+
 #[derive(Serialize, ToSchema)]
 pub struct ServerError {
+    #[schema(example = "invalid-credentials")]
     pub message: String,
 }
 
@@ -32,8 +35,22 @@ pub enum AuthError {
     Internal(#[from] anyhow::Error),
     #[error("unauthorized")]
     Unauthorized,
+    #[error("invalid credentials")]
+    InvalidCredentials,
     #[error("forbidden")]
     Forbidden,
+    #[error("email not verified")]
+    EmailNotVerified,
+    #[error("invalid verification token")]
+    InvalidVerificationToken,
+    #[error("no such user")]
+    UserNotFound,
+    #[error("email already verified")]
+    EmailAlreadyVerified,
+    #[error("duplicate email")]
+    DuplicateEmail,
+    #[error("too many requests")]
+    TooManyRequests,
 }
 
 impl From<sea_orm::DbErr> for AuthError {
@@ -62,10 +79,59 @@ impl IntoResponse for AuthError {
                 }),
             )
                 .into_response(),
+            AuthError::InvalidCredentials => (
+                StatusCode::UNAUTHORIZED,
+                Json(ServerError {
+                    message: "invalid-credentials".into(),
+                }),
+            )
+                .into_response(),
             AuthError::Forbidden => (
                 StatusCode::FORBIDDEN,
                 Json(ServerError {
                     message: "forbidden".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::EmailNotVerified => (
+                StatusCode::FORBIDDEN,
+                Json(ServerError {
+                    message: "email-not-verified".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::InvalidVerificationToken => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError {
+                    message: "invalid-verification-token".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::UserNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(ServerError {
+                    message: "not-found".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::EmailAlreadyVerified => (
+                StatusCode::CONFLICT,
+                Json(ServerError {
+                    message: "email-already-verified".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::DuplicateEmail => (
+                StatusCode::CONFLICT,
+                Json(ServerError {
+                    message: "email-already-exists".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::TooManyRequests => (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(ServerError {
+                    message: "too-many-requests".into(),
                 }),
             )
                 .into_response(),
@@ -121,6 +187,13 @@ pub fn verify_password(password: &str, password_hash: &str) -> Result<bool, Auth
     Ok(argon2
         .verify_password(password.as_bytes(), &parsed_hash)
         .is_ok())
+}
+
+/// メール認証用トークンを生成する。
+pub fn generate_email_verification_token() -> String {
+    let mut buf = [0u8; 32];
+    OsRng.fill_bytes(&mut buf);
+    URL_SAFE_NO_PAD.encode(buf)
 }
 
 // --- Personal token helpers ---

@@ -1,4 +1,4 @@
-//! OpenAPI 用の共通型。
+//! OpenAPI コンポーネント登録。
 
 pub mod responses;
 
@@ -6,9 +6,12 @@ use utoipa::openapi::OpenApi;
 use utoipa::{PartialSchema, ToSchema};
 
 pub use crate::utils::auth::ServerError;
-pub use responses::{CredentialErrors, InternalOnlyError, SessionAuthErrors, UnauthorizedErrors};
+pub use responses::{
+    CredentialErrors, InternalOnlyError, RegisterErrors, ResendVerificationErrors,
+    SessionAuthErrors, UnauthorizedErrors, VerifyEmailErrors,
+};
 
-/// `IntoResponses` 経由で参照されるが path body からは収集されないスキーマを登録する。
+/// スキーマのうち、ハンドラだけでは OpenAPI に載らないものを登録する。
 pub fn register_schemas(openapi: &mut OpenApi) {
     let components = openapi
         .components
