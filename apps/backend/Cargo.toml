@@ -39,6 +39,7 @@ thiserror = "2.0.10"
 base64 = "0.22.1"
 redis_pool = "0.10.0"
 redis = { version = "1.2.1", features = ["tokio-comp"] }
+url = "2.5"
 urlencoding = "2.1"
 hmac = "0.13"
 sha2 = "0.11"
