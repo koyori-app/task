@@ -290,10 +290,11 @@ pub async fn logout(
 }
 
 fn build_verify_url(settings: &Settings, token: &str) -> String {
+    let encoded = urlencoding::encode(token);
     format!(
         "{}/verify-email?token={}",
         settings.email_verification_app_url.trim_end_matches('/'),
-        token
+        encoded
     )
 }
 
