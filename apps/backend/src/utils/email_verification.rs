@@ -1,8 +1,45 @@
 //! メール認証トークンを Redis に保持する（TTL で有効期限）。
+//!
+//! `user->token` と `token->user` は Lua で原子的に更新し、再送時の旧トークン無効化と
+//! 消費時の逆マッピング削除が同時リクエストでも崩れないようにする。
+
+use std::sync::LazyLock;
 
 use uuid::Uuid;
 
 use super::redis::RedisConnection;
+
+/// 再送時: 旧 token キー削除 → 新 token/user キー SET を一括実行。
+static STORE_TOKEN_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
+    redis::Script::new(
+        r#"
+        local old_token = redis.call('GET', KEYS[1])
+        if old_token then
+            redis.call('DEL', ARGV[1] .. old_token)
+        end
+        redis.call('SET', KEYS[2], ARGV[2], 'EX', tonumber(ARGV[4]))
+        redis.call('SET', KEYS[1], ARGV[3], 'EX', tonumber(ARGV[4]))
+        return 1
+        "#,
+    )
+});
+
+/// 消費時: GETDEL 後、user->token が当該トークンのときだけ user キーを削除。
+static CONSUME_TOKEN_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
+    redis::Script::new(
+        r#"
+        local user_id = redis.call('GETDEL', KEYS[1])
+        if not user_id then
+            return nil
+        end
+        local user_key = ARGV[1] .. user_id
+        if redis.call('GET', user_key) == ARGV[2] then
+            redis.call('DEL', user_key)
+        end
+        return user_id
+        "#,
+    )
+});
 
 /// 認証リンクの有効期限（秒）。約 15 分。
 pub const TOKEN_TTL_SECS: u64 = 15 * 60;
@@ -25,39 +62,19 @@ pub async fn store_token(
         .map_err(|e| anyhow::anyhow!("redis acquire failed: {e}"))?;
 
     let user_key = format!("{KEY_USER}{user_id}");
-
-    let old_token: Option<String> = redis::cmd("GET")
-        .arg(&user_key)
-        .query_async(&mut conn)
-        .await
-        .map_err(|e| anyhow::anyhow!("redis GET user->token: {e}"))?;
-
-    if let Some(ref t) = old_token {
-        let _: () = redis::cmd("DEL")
-            .arg(format!("{KEY_TOKEN}{t}"))
-            .query_async(&mut conn)
-            .await
-            .map_err(|e| anyhow::anyhow!("redis DEL old token: {e}"))?;
-    }
-
     let token_key = format!("{KEY_TOKEN}{token}");
-    let _: () = redis::cmd("SET")
-        .arg(&token_key)
-        .arg(user_id.to_string())
-        .arg("EX")
-        .arg(TOKEN_TTL_SECS)
-        .query_async(&mut conn)
-        .await
-        .map_err(|e| anyhow::anyhow!("redis SET token: {e}"))?;
+    let ttl = TOKEN_TTL_SECS.to_string();
 
-    let _: () = redis::cmd("SET")
-        .arg(&user_key)
+    let _: i32 = STORE_TOKEN_SCRIPT
+        .key(&user_key)
+        .key(&token_key)
+        .arg(KEY_TOKEN)
+        .arg(user_id.to_string())
         .arg(token)
-        .arg("EX")
-        .arg(TOKEN_TTL_SECS)
-        .query_async(&mut conn)
+        .arg(&ttl)
+        .invoke_async(&mut conn)
         .await
-        .map_err(|e| anyhow::anyhow!("redis SET user->token: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("redis store_token script: {e}"))?;
 
     Ok(())
 }
@@ -74,11 +91,13 @@ pub async fn consume_token(
         .map_err(|e| anyhow::anyhow!("redis acquire failed: {e}"))?;
 
     let token_key = format!("{KEY_TOKEN}{token}");
-    let raw: Option<String> = redis::cmd("GETDEL")
-        .arg(&token_key)
-        .query_async(&mut conn)
+    let raw: Option<String> = CONSUME_TOKEN_SCRIPT
+        .key(&token_key)
+        .arg(KEY_USER)
+        .arg(token)
+        .invoke_async(&mut conn)
         .await
-        .map_err(|e| anyhow::anyhow!("redis GETDEL token: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("redis consume_token script: {e}"))?;
 
     let Some(s) = raw else {
         return Ok(None);
@@ -86,13 +105,6 @@ pub async fn consume_token(
 
     let uid = Uuid::parse_str(s.trim())
         .map_err(|e| anyhow::anyhow!("invalid user id in redis: {e}"))?;
-
-    let user_key = format!("{KEY_USER}{uid}");
-    let _: () = redis::cmd("DEL")
-        .arg(&user_key)
-        .query_async(&mut conn)
-        .await
-        .map_err(|e| anyhow::anyhow!("redis DEL user->token: {e}"))?;
 
     Ok(Some(uid))
 }
