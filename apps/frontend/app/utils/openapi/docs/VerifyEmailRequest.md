@@ -1,23 +1,23 @@
 
-# ServerError
+# VerifyEmailRequest
 
-API 共通のエラー応答ボディ。
+メールでの本人確認時に送信する情報。
 
 ## Properties
 
 Name | Type
 ------------ | -------------
-`message` | string
+`token` | string
 
 ## Example
 
 ```typescript
-import type { ServerError } from ''
+import type { VerifyEmailRequest } from ''
 
 // TODO: Update the object below with actual values
 const example = {
-  "message": invalid-credentials,
-} satisfies ServerError
+  "token": null,
+} satisfies VerifyEmailRequest
 
 console.log(example)
 
@@ -26,7 +26,7 @@ const exampleJSON: string = JSON.stringify(example)
 console.log(exampleJSON)
 
 // Parse the JSON string back to an object
-const exampleParsed = JSON.parse(exampleJSON) as ServerError
+const exampleParsed = JSON.parse(exampleJSON) as VerifyEmailRequest
 console.log(exampleParsed)
 ```
 

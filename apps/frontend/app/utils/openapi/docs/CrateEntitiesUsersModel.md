@@ -9,6 +9,7 @@ Name | Type
 `avatarUrl` | string
 `bio` | string
 `email` | string
+`emailVerified` | boolean
 `id` | string
 `username` | string
 
@@ -22,6 +23,7 @@ const example = {
   "avatarUrl": null,
   "bio": null,
   "email": null,
+  "emailVerified": null,
   "id": null,
   "username": null,
 } satisfies CrateEntitiesUsersModel

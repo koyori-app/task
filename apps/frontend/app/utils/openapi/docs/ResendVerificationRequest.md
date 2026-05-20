@@ -1,23 +1,22 @@
 
-# ServerError
+# ResendVerificationRequest
 
-API 共通のエラー応答ボディ。
 
 ## Properties
 
 Name | Type
 ------------ | -------------
-`message` | string
+`email` | string
 
 ## Example
 
 ```typescript
-import type { ServerError } from ''
+import type { ResendVerificationRequest } from ''
 
 // TODO: Update the object below with actual values
 const example = {
-  "message": invalid-credentials,
-} satisfies ServerError
+  "email": null,
+} satisfies ResendVerificationRequest
 
 console.log(example)
 
@@ -26,7 +25,7 @@ const exampleJSON: string = JSON.stringify(example)
 console.log(exampleJSON)
 
 // Parse the JSON string back to an object
-const exampleParsed = JSON.parse(exampleJSON) as ServerError
+const exampleParsed = JSON.parse(exampleJSON) as ResendVerificationRequest
 console.log(exampleParsed)
 ```
 

@@ -58,7 +58,7 @@ export interface PersonalTokenResponse {
      */
     revoked: boolean;
     /**
-     * JSON カラム用の `Vec<Scope>` ラッパ（SeaORM エンティティ向け）。
+     * アクセストークン等に付与する権限スコープのリスト。
      * @type {Array<Scope>}
      * @memberof PersonalTokenResponse
      */

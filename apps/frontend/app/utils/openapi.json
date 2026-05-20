@@ -16,6 +16,7 @@
   "paths": {
     "/v1/auth/login": {
       "post": {
+        "summary": "ログイン",
         "operationId": "login",
         "requestBody": {
           "content": {
@@ -28,28 +29,43 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "Login successful",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
+          "204": {
+            "description": "ログインに成功しました（本文なし）"
           },
-          "403": {
-            "description": "Forbidden",
+          "401": {
+            "description": "メールアドレスまたはパスワードが正しくありません",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "メールアドレスの確認が済んでいないためログインできません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": [
+                    "message"
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -57,17 +73,19 @@
             }
           },
           "500": {
-            "description": "Internal server error",
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -79,30 +97,26 @@
     },
     "/v1/auth/logout": {
       "post": {
+        "summary": "ログアウト",
         "operationId": "logout",
         "responses": {
-          "200": {
-            "description": "Logout successful",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
+          "204": {
+            "description": "ログアウトしました（本文なし）"
           },
           "401": {
-            "description": "Unauthorized",
+            "description": "ログインまたはセッションが必要です",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -110,17 +124,19 @@
             }
           },
           "500": {
-            "description": "Internal server error",
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -132,10 +148,11 @@
     },
     "/v1/auth/me": {
       "get": {
+        "summary": "ログイン中ユーザー情報",
         "operationId": "me",
         "responses": {
           "200": {
-            "description": "Current user info",
+            "description": "現在のアカウント情報",
             "content": {
               "application/json": {
                 "schema": {
@@ -145,17 +162,19 @@
             }
           },
           "401": {
-            "description": "Unauthorized",
+            "description": "ログインまたはセッションが必要です",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -163,17 +182,19 @@
             }
           },
           "403": {
-            "description": "Forbidden",
+            "description": "この操作は許可されていません",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -181,17 +202,19 @@
             }
           },
           "500": {
-            "description": "Internal server error",
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -203,6 +226,7 @@
     },
     "/v1/auth/register": {
       "post": {
+        "summary": "新規登録",
         "operationId": "register",
         "requestBody": {
           "content": {
@@ -215,8 +239,8 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "Register successful",
+          "201": {
+            "description": "アカウントが作成されました。続けて送信されたメールで認証してください。",
             "content": {
               "text/plain": {
                 "schema": {
@@ -225,18 +249,216 @@
               }
             }
           },
-          "500": {
-            "description": "Internal server error",
+          "409": {
+            "description": "このメールアドレスはすでに登録されています",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": [
+                    "message"
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "invalid-credentials"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/resend-verification-email": {
+      "post": {
+        "summary": "認証メールの再送",
+        "operationId": "resend_verification_email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendVerificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "認証メールを送信しました",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "入力されたメールアドレスのアカウントが見つかりませんでした",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": [
+                    "message"
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "invalid-credentials"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "このアカウントではメール認証はもう完了しています",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": [
+                    "message"
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "invalid-credentials"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "しばらくしてから再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": [
+                    "message"
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "invalid-credentials"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": [
+                    "message"
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "invalid-credentials"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/verify-email": {
+      "post": {
+        "summary": "メールアドレスの確認",
+        "operationId": "verify_email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyEmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "メールアドレスの確認が完了しました",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "認証用リンクが無効か、または有効期限切れです",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": [
+                    "message"
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "invalid-credentials"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": [
+                    "message"
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -248,10 +470,11 @@
     },
     "/v1/labels": {
       "get": {
+        "summary": "ラベル一覧",
         "operationId": "get_labels",
         "responses": {
           "200": {
-            "description": "Labels list",
+            "description": "すべてのラベル",
             "content": {
               "application/json": {
                 "schema": {
@@ -262,12 +485,33 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": [
+                    "message"
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "invalid-credentials"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
     },
     "/v1/personal_tokens": {
       "post": {
+        "summary": "パーソナルアクセストークンを発行",
         "operationId": "create_personal_token",
         "requestBody": {
           "content": {
@@ -281,7 +525,7 @@
         },
         "responses": {
           "200": {
-            "description": "Personal token created",
+            "description": "発行したトークンの情報",
             "content": {
               "application/json": {
                 "schema": {
@@ -291,17 +535,19 @@
             }
           },
           "401": {
-            "description": "Unauthorized",
+            "description": "ログインまたはセッションが必要です",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -309,17 +555,19 @@
             }
           },
           "403": {
-            "description": "Forbidden",
+            "description": "この操作は許可されていません",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -327,17 +575,19 @@
             }
           },
           "500": {
-            "description": "Internal server error",
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -347,10 +597,11 @@
         }
       },
       "delete": {
+        "summary": "すべての個人用トークンを取り消し",
         "operationId": "revoke_all_personal_tokens",
         "responses": {
           "200": {
-            "description": "All personal tokens revoked",
+            "description": "現在アクティブなトークンの一覧（空になり得ます）",
             "content": {
               "application/json": {
                 "schema": {
@@ -363,17 +614,19 @@
             }
           },
           "401": {
-            "description": "Unauthorized",
+            "description": "ログインまたはセッションが必要です",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -381,17 +634,19 @@
             }
           },
           "403": {
-            "description": "Forbidden",
+            "description": "この操作は許可されていません",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -399,17 +654,19 @@
             }
           },
           "500": {
-            "description": "Internal server error",
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -421,12 +678,13 @@
     },
     "/v1/personal_tokens/{id}": {
       "get": {
+        "summary": "指定したトークンを参照",
         "operationId": "get_personal_token",
         "parameters": [
           {
             "name": "id",
             "in": "path",
-            "description": "Personal token ID",
+            "description": "トークンの識別子",
             "required": true,
             "schema": {
               "type": "string",
@@ -436,7 +694,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Personal token found",
+            "description": "トークンの状態",
             "content": {
               "application/json": {
                 "schema": {
@@ -446,17 +704,19 @@
             }
           },
           "401": {
-            "description": "Unauthorized",
+            "description": "ログインまたはセッションが必要です",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -464,17 +724,19 @@
             }
           },
           "403": {
-            "description": "Forbidden",
+            "description": "この操作は許可されていません",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -482,17 +744,19 @@
             }
           },
           "500": {
-            "description": "Internal server error",
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -502,12 +766,13 @@
         }
       },
       "delete": {
+        "summary": "指定したトークンを取り消し",
         "operationId": "revoke_personal_token",
         "parameters": [
           {
             "name": "id",
             "in": "path",
-            "description": "Personal token ID",
+            "description": "トークンの識別子",
             "required": true,
             "schema": {
               "type": "string",
@@ -517,7 +782,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Personal token revoked",
+            "description": "取り消し後の状態",
             "content": {
               "application/json": {
                 "schema": {
@@ -527,17 +792,19 @@
             }
           },
           "401": {
-            "description": "Unauthorized",
+            "description": "ログインまたはセッションが必要です",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -545,17 +812,19 @@
             }
           },
           "403": {
-            "description": "Forbidden",
+            "description": "この操作は許可されていません",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -563,17 +832,19 @@
             }
           },
           "500": {
-            "description": "Internal server error",
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
                   "required": [
                     "message"
                   ],
                   "properties": {
                     "message": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "invalid-credentials"
                     }
                   }
                 }
@@ -732,6 +1003,18 @@
           }
         }
       },
+      "ResendVerificationRequest": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        }
+      },
       "Scope": {
         "type": "string",
         "enum": [
@@ -745,16 +1028,31 @@
         "items": {
           "$ref": "#/components/schemas/Scope"
         },
-        "description": "JSON カラム用の `Vec<Scope>` ラッパ（SeaORM エンティティ向け）。"
+        "description": "アクセストークン等に付与する権限スコープのリスト。"
       },
       "ServerError": {
         "type": "object",
+        "description": "API 共通のエラー応答ボディ。",
         "required": [
           "message"
         ],
         "properties": {
           "message": {
-            "type": "string"
+            "type": "string",
+            "example": "invalid-credentials"
+          }
+        }
+      },
+      "VerifyEmailRequest": {
+        "type": "object",
+        "description": "メールでの本人確認時に送信する情報。",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "メールまたはアプリにお知らせした認証用文字列です。"
           }
         }
       },
@@ -793,7 +1091,8 @@
         "required": [
           "id",
           "username",
-          "email"
+          "email",
+          "email_verified"
         ],
         "properties": {
           "avatar_url": {
@@ -811,6 +1110,10 @@
           "email": {
             "type": "string",
             "format": "email"
+          },
+          "email_verified": {
+            "type": "boolean",
+            "description": "メールアドレスの確認が済んでいるかどうか"
           },
           "id": {
             "type": "string",

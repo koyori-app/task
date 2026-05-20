@@ -29,10 +29,10 @@ import {
     CreatePersonalTokenResponseToJSON,
 } from '../models/CreatePersonalTokenResponse';
 import {
-    type Login403Response,
-    Login403ResponseFromJSON,
-    Login403ResponseToJSON,
-} from '../models/Login403Response';
+    type Login401Response,
+    Login401ResponseFromJSON,
+    Login401ResponseToJSON,
+} from '../models/Login401Response';
 import {
     type LoginRequest,
     LoginRequestFromJSON,
@@ -48,6 +48,16 @@ import {
     RegisterRequestFromJSON,
     RegisterRequestToJSON,
 } from '../models/RegisterRequest';
+import {
+    type ResendVerificationRequest,
+    ResendVerificationRequestFromJSON,
+    ResendVerificationRequestToJSON,
+} from '../models/ResendVerificationRequest';
+import {
+    type VerifyEmailRequest,
+    VerifyEmailRequestFromJSON,
+    VerifyEmailRequestToJSON,
+} from '../models/VerifyEmailRequest';
 
 export interface CreatePersonalTokenRequest {
     body: object;
@@ -65,8 +75,16 @@ export interface RegisterOperationRequest {
     registerRequest: RegisterRequest;
 }
 
+export interface ResendVerificationEmailRequest {
+    resendVerificationRequest: ResendVerificationRequest;
+}
+
 export interface RevokePersonalTokenRequest {
     id: string;
+}
+
+export interface VerifyEmailOperationRequest {
+    verifyEmailRequest: VerifyEmailRequest;
 }
 
 /**
@@ -104,6 +122,7 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * パーソナルアクセストークンを発行
      */
     async createPersonalTokenRaw(requestParameters: CreatePersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<CreatePersonalTokenResponse>> {
         const requestOptions = await this.createPersonalTokenRequestOpts(requestParameters);
@@ -113,6 +132,7 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * パーソナルアクセストークンを発行
      */
     async createPersonalToken(requestParameters: CreatePersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<CreatePersonalTokenResponse> {
         const response = await this.createPersonalTokenRaw(requestParameters, initOverrides);
@@ -139,6 +159,7 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * ラベル一覧
      */
     async getLabelsRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Array<CrateEntitiesLabelsModel>>> {
         const requestOptions = await this.getLabelsRequestOpts();
@@ -148,6 +169,7 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * ラベル一覧
      */
     async getLabels(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Array<CrateEntitiesLabelsModel>> {
         const response = await this.getLabelsRaw(initOverrides);
@@ -182,6 +204,7 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * 指定したトークンを参照
      */
     async getPersonalTokenRaw(requestParameters: GetPersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<PersonalTokenResponse>> {
         const requestOptions = await this.getPersonalTokenRequestOpts(requestParameters);
@@ -191,6 +214,7 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * 指定したトークンを参照
      */
     async getPersonalToken(requestParameters: GetPersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<PersonalTokenResponse> {
         const response = await this.getPersonalTokenRaw(requestParameters, initOverrides);
@@ -227,23 +251,20 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * ログイン
      */
-    async loginRaw(requestParameters: LoginOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<string>> {
+    async loginRaw(requestParameters: LoginOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<void>> {
         const requestOptions = await this.loginRequestOpts(requestParameters);
         const response = await this.request(requestOptions, initOverrides);
 
-        if (this.isJsonMime(response.headers.get('content-type'))) {
-            return new runtime.JSONApiResponse<string>(response);
-        } else {
-            return new runtime.TextApiResponse(response) as any;
-        }
+        return new runtime.VoidApiResponse(response);
     }
 
     /**
+     * ログイン
      */
-    async login(requestParameters: LoginOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<string> {
-        const response = await this.loginRaw(requestParameters, initOverrides);
-        return await response.value();
+    async login(requestParameters: LoginOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<void> {
+        await this.loginRaw(requestParameters, initOverrides);
     }
 
     /**
@@ -266,23 +287,20 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * ログアウト
      */
-    async logoutRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<string>> {
+    async logoutRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<void>> {
         const requestOptions = await this.logoutRequestOpts();
         const response = await this.request(requestOptions, initOverrides);
 
-        if (this.isJsonMime(response.headers.get('content-type'))) {
-            return new runtime.JSONApiResponse<string>(response);
-        } else {
-            return new runtime.TextApiResponse(response) as any;
-        }
+        return new runtime.VoidApiResponse(response);
     }
 
     /**
+     * ログアウト
      */
-    async logout(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<string> {
-        const response = await this.logoutRaw(initOverrides);
-        return await response.value();
+    async logout(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<void> {
+        await this.logoutRaw(initOverrides);
     }
 
     /**
@@ -305,6 +323,7 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * ログイン中ユーザー情報
      */
     async meRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<CrateEntitiesUsersModel>> {
         const requestOptions = await this.meRequestOpts();
@@ -314,6 +333,7 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * ログイン中ユーザー情報
      */
     async me(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<CrateEntitiesUsersModel> {
         const response = await this.meRaw(initOverrides);
@@ -350,6 +370,7 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * 新規登録
      */
     async registerRaw(requestParameters: RegisterOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<string>> {
         const requestOptions = await this.registerRequestOpts(requestParameters);
@@ -363,9 +384,61 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * 新規登録
      */
     async register(requestParameters: RegisterOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<string> {
         const response = await this.registerRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for resendVerificationEmail without sending the request
+     */
+    async resendVerificationEmailRequestOpts(requestParameters: ResendVerificationEmailRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['resendVerificationRequest'] == null) {
+            throw new runtime.RequiredError(
+                'resendVerificationRequest',
+                'Required parameter "resendVerificationRequest" was null or undefined when calling resendVerificationEmail().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+
+        let urlPath = `/v1/auth/resend-verification-email`;
+
+        return {
+            path: urlPath,
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+            body: ResendVerificationRequestToJSON(requestParameters['resendVerificationRequest']),
+        };
+    }
+
+    /**
+     * 認証メールの再送
+     */
+    async resendVerificationEmailRaw(requestParameters: ResendVerificationEmailRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<string>> {
+        const requestOptions = await this.resendVerificationEmailRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        if (this.isJsonMime(response.headers.get('content-type'))) {
+            return new runtime.JSONApiResponse<string>(response);
+        } else {
+            return new runtime.TextApiResponse(response) as any;
+        }
+    }
+
+    /**
+     * 認証メールの再送
+     */
+    async resendVerificationEmail(requestParameters: ResendVerificationEmailRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<string> {
+        const response = await this.resendVerificationEmailRaw(requestParameters, initOverrides);
         return await response.value();
     }
 
@@ -389,6 +462,7 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * すべての個人用トークンを取り消し
      */
     async revokeAllPersonalTokensRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Array<PersonalTokenResponse>>> {
         const requestOptions = await this.revokeAllPersonalTokensRequestOpts();
@@ -398,6 +472,7 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * すべての個人用トークンを取り消し
      */
     async revokeAllPersonalTokens(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Array<PersonalTokenResponse>> {
         const response = await this.revokeAllPersonalTokensRaw(initOverrides);
@@ -432,6 +507,7 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * 指定したトークンを取り消し
      */
     async revokePersonalTokenRaw(requestParameters: RevokePersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<PersonalTokenResponse>> {
         const requestOptions = await this.revokePersonalTokenRequestOpts(requestParameters);
@@ -441,9 +517,61 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * 指定したトークンを取り消し
      */
     async revokePersonalToken(requestParameters: RevokePersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<PersonalTokenResponse> {
         const response = await this.revokePersonalTokenRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for verifyEmail without sending the request
+     */
+    async verifyEmailRequestOpts(requestParameters: VerifyEmailOperationRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['verifyEmailRequest'] == null) {
+            throw new runtime.RequiredError(
+                'verifyEmailRequest',
+                'Required parameter "verifyEmailRequest" was null or undefined when calling verifyEmail().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+
+        let urlPath = `/v1/auth/verify-email`;
+
+        return {
+            path: urlPath,
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+            body: VerifyEmailRequestToJSON(requestParameters['verifyEmailRequest']),
+        };
+    }
+
+    /**
+     * メールアドレスの確認
+     */
+    async verifyEmailRaw(requestParameters: VerifyEmailOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<string>> {
+        const requestOptions = await this.verifyEmailRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        if (this.isJsonMime(response.headers.get('content-type'))) {
+            return new runtime.JSONApiResponse<string>(response);
+        } else {
+            return new runtime.TextApiResponse(response) as any;
+        }
+    }
+
+    /**
+     * メールアドレスの確認
+     */
+    async verifyEmail(requestParameters: VerifyEmailOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<string> {
+        const response = await this.verifyEmailRaw(requestParameters, initOverrides);
         return await response.value();
     }
 

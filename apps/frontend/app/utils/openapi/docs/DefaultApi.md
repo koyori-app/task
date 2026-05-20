@@ -4,15 +4,17 @@ All URIs are relative to *http://localhost*
 
 | Method | HTTP request | Description |
 |------------- | ------------- | -------------|
-| [**createPersonalToken**](DefaultApi.md#createpersonaltoken) | **POST** /v1/personal_tokens |  |
-| [**getLabels**](DefaultApi.md#getlabels) | **GET** /v1/labels |  |
-| [**getPersonalToken**](DefaultApi.md#getpersonaltoken) | **GET** /v1/personal_tokens/{id} |  |
-| [**login**](DefaultApi.md#loginoperation) | **POST** /v1/auth/login |  |
-| [**logout**](DefaultApi.md#logout) | **POST** /v1/auth/logout |  |
-| [**me**](DefaultApi.md#me) | **GET** /v1/auth/me |  |
-| [**register**](DefaultApi.md#registeroperation) | **POST** /v1/auth/register |  |
-| [**revokeAllPersonalTokens**](DefaultApi.md#revokeallpersonaltokens) | **DELETE** /v1/personal_tokens |  |
-| [**revokePersonalToken**](DefaultApi.md#revokepersonaltoken) | **DELETE** /v1/personal_tokens/{id} |  |
+| [**createPersonalToken**](DefaultApi.md#createpersonaltoken) | **POST** /v1/personal_tokens | パーソナルアクセストークンを発行 |
+| [**getLabels**](DefaultApi.md#getlabels) | **GET** /v1/labels | ラベル一覧 |
+| [**getPersonalToken**](DefaultApi.md#getpersonaltoken) | **GET** /v1/personal_tokens/{id} | 指定したトークンを参照 |
+| [**login**](DefaultApi.md#loginoperation) | **POST** /v1/auth/login | ログイン |
+| [**logout**](DefaultApi.md#logout) | **POST** /v1/auth/logout | ログアウト |
+| [**me**](DefaultApi.md#me) | **GET** /v1/auth/me | ログイン中ユーザー情報 |
+| [**register**](DefaultApi.md#registeroperation) | **POST** /v1/auth/register | 新規登録 |
+| [**resendVerificationEmail**](DefaultApi.md#resendverificationemail) | **POST** /v1/auth/resend-verification-email | 認証メールの再送 |
+| [**revokeAllPersonalTokens**](DefaultApi.md#revokeallpersonaltokens) | **DELETE** /v1/personal_tokens | すべての個人用トークンを取り消し |
+| [**revokePersonalToken**](DefaultApi.md#revokepersonaltoken) | **DELETE** /v1/personal_tokens/{id} | 指定したトークンを取り消し |
+| [**verifyEmail**](DefaultApi.md#verifyemailoperation) | **POST** /v1/auth/verify-email | メールアドレスの確認 |
 
 
 
@@ -20,7 +22,7 @@ All URIs are relative to *http://localhost*
 
 > CreatePersonalTokenResponse createPersonalToken(body)
 
-
+パーソナルアクセストークンを発行
 
 ### Example
 
@@ -76,10 +78,10 @@ No authorization required
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-| **200** | Personal token created |  -  |
-| **401** | Unauthorized |  -  |
-| **403** | Forbidden |  -  |
-| **500** | Internal server error |  -  |
+| **200** | 発行したトークンの情報 |  -  |
+| **401** | ログインまたはセッションが必要です |  -  |
+| **403** | この操作は許可されていません |  -  |
+| **500** | サーバー側で問題が発生しました。時間をおいて再度お試しください |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
 
@@ -88,7 +90,7 @@ No authorization required
 
 > Array&lt;CrateEntitiesLabelsModel&gt; getLabels()
 
-
+ラベル一覧
 
 ### Example
 
@@ -136,7 +138,8 @@ No authorization required
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-| **200** | Labels list |  -  |
+| **200** | すべてのラベル |  -  |
+| **500** | サーバー側で問題が発生しました。時間をおいて再度お試しください |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
 
@@ -145,7 +148,7 @@ No authorization required
 
 > PersonalTokenResponse getPersonalToken(id)
 
-
+指定したトークンを参照
 
 ### Example
 
@@ -161,7 +164,7 @@ async function example() {
   const api = new DefaultApi();
 
   const body = {
-    // string | Personal token ID
+    // string | トークンの識別子
     id: 38400000-8cf0-11bd-b23e-10b96e4ef00d,
   } satisfies GetPersonalTokenRequest;
 
@@ -182,7 +185,7 @@ example().catch(console.error);
 
 | Name | Type | Description  | Notes |
 |------------- | ------------- | ------------- | -------------|
-| **id** | `string` | Personal token ID | [Defaults to `undefined`] |
+| **id** | `string` | トークンの識別子 | [Defaults to `undefined`] |
 
 ### Return type
 
@@ -201,19 +204,19 @@ No authorization required
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-| **200** | Personal token found |  -  |
-| **401** | Unauthorized |  -  |
-| **403** | Forbidden |  -  |
-| **500** | Internal server error |  -  |
+| **200** | トークンの状態 |  -  |
+| **401** | ログインまたはセッションが必要です |  -  |
+| **403** | この操作は許可されていません |  -  |
+| **500** | サーバー側で問題が発生しました。時間をおいて再度お試しください |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
 
 
 ## login
 
-> string login(loginRequest)
+> login(loginRequest)
 
-
+ログイン
 
 ### Example
 
@@ -254,7 +257,7 @@ example().catch(console.error);
 
 ### Return type
 
-**string**
+`void` (Empty response body)
 
 ### Authorization
 
@@ -263,24 +266,25 @@ No authorization required
 ### HTTP request headers
 
 - **Content-Type**: `application/json`
-- **Accept**: `text/plain`, `application/json`
+- **Accept**: `application/json`
 
 
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-| **200** | Login successful |  -  |
-| **403** | Forbidden |  -  |
-| **500** | Internal server error |  -  |
+| **204** | ログインに成功しました（本文なし） |  -  |
+| **401** | メールアドレスまたはパスワードが正しくありません |  -  |
+| **403** | メールアドレスの確認が済んでいないためログインできません |  -  |
+| **500** | サーバー側で問題が発生しました。時間をおいて再度お試しください |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
 
 
 ## logout
 
-> string logout()
+> logout()
 
-
+ログアウト
 
 ### Example
 
@@ -313,7 +317,7 @@ This endpoint does not need any parameter.
 
 ### Return type
 
-**string**
+`void` (Empty response body)
 
 ### Authorization
 
@@ -322,15 +326,15 @@ No authorization required
 ### HTTP request headers
 
 - **Content-Type**: Not defined
-- **Accept**: `text/plain`, `application/json`
+- **Accept**: `application/json`
 
 
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-| **200** | Logout successful |  -  |
-| **401** | Unauthorized |  -  |
-| **500** | Internal server error |  -  |
+| **204** | ログアウトしました（本文なし） |  -  |
+| **401** | ログインまたはセッションが必要です |  -  |
+| **500** | サーバー側で問題が発生しました。時間をおいて再度お試しください |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
 
@@ -339,7 +343,7 @@ No authorization required
 
 > CrateEntitiesUsersModel me()
 
-
+ログイン中ユーザー情報
 
 ### Example
 
@@ -387,10 +391,10 @@ No authorization required
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-| **200** | Current user info |  -  |
-| **401** | Unauthorized |  -  |
-| **403** | Forbidden |  -  |
-| **500** | Internal server error |  -  |
+| **200** | 現在のアカウント情報 |  -  |
+| **401** | ログインまたはセッションが必要です |  -  |
+| **403** | この操作は許可されていません |  -  |
+| **500** | サーバー側で問題が発生しました。時間をおいて再度お試しください |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
 
@@ -399,7 +403,7 @@ No authorization required
 
 > string register(registerRequest)
 
-
+新規登録
 
 ### Example
 
@@ -455,8 +459,78 @@ No authorization required
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-| **200** | Register successful |  -  |
-| **500** | Internal server error |  -  |
+| **201** | アカウントが作成されました。続けて送信されたメールで認証してください。 |  -  |
+| **409** | このメールアドレスはすでに登録されています |  -  |
+| **500** | サーバー側で問題が発生しました。時間をおいて再度お試しください |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
+
+
+## resendVerificationEmail
+
+> string resendVerificationEmail(resendVerificationRequest)
+
+認証メールの再送
+
+### Example
+
+```ts
+import {
+  Configuration,
+  DefaultApi,
+} from '';
+import type { ResendVerificationEmailRequest } from '';
+
+async function example() {
+  console.log("🚀 Testing  SDK...");
+  const api = new DefaultApi();
+
+  const body = {
+    // ResendVerificationRequest
+    resendVerificationRequest: ...,
+  } satisfies ResendVerificationEmailRequest;
+
+  try {
+    const data = await api.resendVerificationEmail(body);
+    console.log(data);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+// Run the test
+example().catch(console.error);
+```
+
+### Parameters
+
+
+| Name | Type | Description  | Notes |
+|------------- | ------------- | ------------- | -------------|
+| **resendVerificationRequest** | [ResendVerificationRequest](ResendVerificationRequest.md) |  | |
+
+### Return type
+
+**string**
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+- **Content-Type**: `application/json`
+- **Accept**: `text/plain`, `application/json`
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | 認証メールを送信しました |  -  |
+| **404** | 入力されたメールアドレスのアカウントが見つかりませんでした |  -  |
+| **409** | このアカウントではメール認証はもう完了しています |  -  |
+| **429** | しばらくしてから再度お試しください |  -  |
+| **500** | サーバー側で問題が発生しました。時間をおいて再度お試しください |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
 
@@ -465,7 +539,7 @@ No authorization required
 
 > Array&lt;PersonalTokenResponse&gt; revokeAllPersonalTokens()
 
-
+すべての個人用トークンを取り消し
 
 ### Example
 
@@ -513,10 +587,10 @@ No authorization required
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-| **200** | All personal tokens revoked |  -  |
-| **401** | Unauthorized |  -  |
-| **403** | Forbidden |  -  |
-| **500** | Internal server error |  -  |
+| **200** | 現在アクティブなトークンの一覧（空になり得ます） |  -  |
+| **401** | ログインまたはセッションが必要です |  -  |
+| **403** | この操作は許可されていません |  -  |
+| **500** | サーバー側で問題が発生しました。時間をおいて再度お試しください |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
 
@@ -525,7 +599,7 @@ No authorization required
 
 > PersonalTokenResponse revokePersonalToken(id)
 
-
+指定したトークンを取り消し
 
 ### Example
 
@@ -541,7 +615,7 @@ async function example() {
   const api = new DefaultApi();
 
   const body = {
-    // string | Personal token ID
+    // string | トークンの識別子
     id: 38400000-8cf0-11bd-b23e-10b96e4ef00d,
   } satisfies RevokePersonalTokenRequest;
 
@@ -562,7 +636,7 @@ example().catch(console.error);
 
 | Name | Type | Description  | Notes |
 |------------- | ------------- | ------------- | -------------|
-| **id** | `string` | Personal token ID | [Defaults to `undefined`] |
+| **id** | `string` | トークンの識別子 | [Defaults to `undefined`] |
 
 ### Return type
 
@@ -581,10 +655,77 @@ No authorization required
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-| **200** | Personal token revoked |  -  |
-| **401** | Unauthorized |  -  |
-| **403** | Forbidden |  -  |
-| **500** | Internal server error |  -  |
+| **200** | 取り消し後の状態 |  -  |
+| **401** | ログインまたはセッションが必要です |  -  |
+| **403** | この操作は許可されていません |  -  |
+| **500** | サーバー側で問題が発生しました。時間をおいて再度お試しください |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
+
+
+## verifyEmail
+
+> string verifyEmail(verifyEmailRequest)
+
+メールアドレスの確認
+
+### Example
+
+```ts
+import {
+  Configuration,
+  DefaultApi,
+} from '';
+import type { VerifyEmailOperationRequest } from '';
+
+async function example() {
+  console.log("🚀 Testing  SDK...");
+  const api = new DefaultApi();
+
+  const body = {
+    // VerifyEmailRequest
+    verifyEmailRequest: ...,
+  } satisfies VerifyEmailOperationRequest;
+
+  try {
+    const data = await api.verifyEmail(body);
+    console.log(data);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+// Run the test
+example().catch(console.error);
+```
+
+### Parameters
+
+
+| Name | Type | Description  | Notes |
+|------------- | ------------- | ------------- | -------------|
+| **verifyEmailRequest** | [VerifyEmailRequest](VerifyEmailRequest.md) |  | |
+
+### Return type
+
+**string**
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+- **Content-Type**: `application/json`
+- **Accept**: `text/plain`, `application/json`
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | メールアドレスの確認が完了しました |  -  |
+| **400** | 認証用リンクが無効か、または有効期限切れです |  -  |
+| **500** | サーバー側で問題が発生しました。時間をおいて再度お試しください |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
 

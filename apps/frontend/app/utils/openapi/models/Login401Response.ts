@@ -16,30 +16,30 @@ import { mapValues } from '../runtime';
 /**
  * API 共通のエラー応答ボディ。
  * @export
- * @interface ServerError
+ * @interface Login401Response
  */
-export interface ServerError {
+export interface Login401Response {
     /**
      * 
      * @type {string}
-     * @memberof ServerError
+     * @memberof Login401Response
      */
     message: string;
 }
 
 /**
- * Check if a given object implements the ServerError interface.
+ * Check if a given object implements the Login401Response interface.
  */
-export function instanceOfServerError(value: object): value is ServerError {
+export function instanceOfLogin401Response(value: object): value is Login401Response {
     if (!('message' in value) || value['message'] === undefined) return false;
     return true;
 }
 
-export function ServerErrorFromJSON(json: any): ServerError {
-    return ServerErrorFromJSONTyped(json, false);
+export function Login401ResponseFromJSON(json: any): Login401Response {
+    return Login401ResponseFromJSONTyped(json, false);
 }
 
-export function ServerErrorFromJSONTyped(json: any, ignoreDiscriminator: boolean): ServerError {
+export function Login401ResponseFromJSONTyped(json: any, ignoreDiscriminator: boolean): Login401Response {
     if (json == null) {
         return json;
     }
@@ -49,11 +49,11 @@ export function ServerErrorFromJSONTyped(json: any, ignoreDiscriminator: boolean
     };
 }
 
-export function ServerErrorToJSON(json: any): ServerError {
-    return ServerErrorToJSONTyped(json, false);
+export function Login401ResponseToJSON(json: any): Login401Response {
+    return Login401ResponseToJSONTyped(json, false);
 }
 
-export function ServerErrorToJSONTyped(value?: ServerError | null, ignoreDiscriminator: boolean = false): any {
+export function Login401ResponseToJSONTyped(value?: Login401Response | null, ignoreDiscriminator: boolean = false): any {
     if (value == null) {
         return value;
     }
