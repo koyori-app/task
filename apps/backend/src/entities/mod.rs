@@ -3,3 +3,4 @@ pub mod personal_tokens;
 pub mod scopes;
 pub mod tenants;
 pub mod users;
+pub mod verification_email_outbox;

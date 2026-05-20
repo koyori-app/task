@@ -9,14 +9,18 @@ use tower_http::cors::{AllowHeaders, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa_scalar::{Scalar, Servable};
 
-use crate::{AppState, middlewares::logging::logging_middleware};
+use crate::{
+    AppState, middlewares::logging::logging_middleware,
+    utils::verification_email_outbox,
+};
 
 
 
 pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
+            std::env::var("RUST_LOG")
+                .unwrap_or_else(|_| "info,sqlx=warn".into()),
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -53,6 +57,11 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers(AllowHeaders::mirror_request())
         .allow_credentials(true);
+
+    let worker_state = state.clone();
+    tokio::spawn(async move {
+        verification_email_outbox::run_worker(worker_state).await;
+    });
 
     let app = router
         .merge(Scalar::with_url("/scalar", openapi.clone()))

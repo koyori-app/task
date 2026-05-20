@@ -3,7 +3,7 @@ use axum_session::Session;
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
 use sea_orm::prelude::Uuid;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, TransactionTrait};
 use sea_orm::{ColumnTrait, QueryFilter};
 use serde::Deserialize;
 use validator::Validate;
@@ -14,12 +14,11 @@ use crate::openapi::{
     CredentialErrors, RegisterErrors, ResendVerificationErrors, SessionAuthErrors,
     UnauthorizedErrors, VerifyEmailErrors,
 };
-use crate::settings::Settings;
 use crate::utils::auth::{
     AuthError, create_password_hash, generate_email_verification_token, verify_password,
 };
 use crate::utils::db::is_postgres_unique_violation;
-use crate::utils::{email_verification, smtp::SmtpClient};
+use crate::utils::{email_verification, verification_email_outbox};
 use crate::{AppState, entities::users};
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
@@ -118,8 +117,9 @@ pub async fn register(
         password_hash: Set(password_hash),
     };
 
+    let txn = state.db.begin().await?;
     users::Entity::insert(user.clone())
-        .exec(&state.db)
+        .exec(&txn)
         .await
         .map_err(|e| {
             if is_postgres_unique_violation(&e) {
@@ -129,17 +129,15 @@ pub async fn register(
             }
         })?;
 
-    email_verification::store_token(&state.redis_client, user_id, &verification_token)
+    verification_email_outbox::enqueue(&txn, user_id, email.clone(), verification_token)
         .await
-        .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis store verification token: {e}")))?;
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!("enqueue verification email: {e}")))?;
 
-    send_verification_email(
-        &state.smtp_client,
-        &email,
-        &state.settings,
-        &verification_token,
-    )
-    .await?;
+    txn.commit()
+        .await
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!("commit register transaction: {e}")))?;
+
+    verification_email_outbox::wake_worker(state);
     Ok((
         StatusCode::CREATED,
         Json("Register successful".to_string()),
@@ -241,11 +239,11 @@ pub async fn resend_verification_email(
     }
 
     let token = generate_email_verification_token();
-    email_verification::store_token(&state.redis_client, user.id, &token)
+    verification_email_outbox::enqueue(&state.db, user.id, email.clone(), token)
         .await
-        .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis store verification token: {e}")))?;
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!("enqueue verification email: {e}")))?;
 
-    send_verification_email(&state.smtp_client, &email, &state.settings, &token).await?;
+    verification_email_outbox::wake_worker(state);
 
     Ok(Json(format!(
         "確認メールを再送しました（同一メールアドレスへの再送は{}秒に1回までです）。",
@@ -289,34 +287,3 @@ pub async fn logout(
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn build_verify_url(settings: &Settings, token: &str) -> String {
-    let encoded = urlencoding::encode(token);
-    format!(
-        "{}/verify-email?token={}",
-        settings.email_verification_app_url.trim_end_matches('/'),
-        encoded
-    )
-}
-
-async fn send_verification_email(
-    smtp: &SmtpClient,
-    email: &str,
-    settings: &Settings,
-    token: &str,
-) -> Result<(), AuthError> {
-    let verify_url = build_verify_url(settings, token);
-    let mins = email_verification::TOKEN_TTL_SECS / 60;
-    smtp.send_email(
-        email,
-        "メール認証",
-        &format!(
-            "以下のリンクからアプリを開き、表示に従ってメールアドレスの確認を完了してください（有効期限は約{mins}分です）。\n{verify_url}",
-        ),
-        Some(&format!(
-            "<p>以下のリンクからアプリを開き、表示に従ってメールアドレスの確認を完了してください（有効期限は約{mins}分です）。</p><p><a href=\"{verify_url}\">{verify_url}</a></p>",
-        )),
-    )
-    .await
-    .map_err(|e| AuthError::Internal(anyhow::anyhow!("send verification email: {e}")))?;
-    Ok(())
-}
