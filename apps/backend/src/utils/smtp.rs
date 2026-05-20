@@ -13,6 +13,7 @@ const SMTP_SEND_TIMEOUT_SECS: u64 = 30;
 #[derive(Clone)]
 pub struct SmtpClient {
     mailer: AsyncSmtpTransport<Tokio1Executor>,
+    smtp_from: String,
 }
 
 /// SmtpClientの実装
@@ -24,19 +25,28 @@ impl SmtpClient {
     /// * `smtp_port` - SMTPサーバーのポート番号
     /// * `username` - SMTPサーバーの認証に使用するユーザー名
     /// * `password` - SMTPサーバーの認証に使用するパスワード
+    /// * `smtp_from` - メールの送信元アドレス（設定の `smtp_from` と同じ値を渡す想定）
     ///
     ///  # Examples
     ///
     ///  ```no_run
     /// use backend::utils::smtp::SmtpClient;
     ///
-    /// let smtp_client = SmtpClient::new("smtp.example.com", 587, "user", "pass").unwrap();
+    /// let smtp_client = SmtpClient::new(
+    ///     "smtp.example.com",
+    ///     587,
+    ///     "user",
+    ///     "pass",
+    ///     "noreply@example.com",
+    /// )
+    /// .unwrap();
     /// ```
     pub fn new(
         smtp_server: &str,
         smtp_port: u16,
         username: &str,
         password: &str,
+        smtp_from: &str,
     ) -> Result<Self, lettre::transport::smtp::Error> {
         let creds = Credentials::new(username.to_string(), password.to_string());
 
@@ -45,13 +55,15 @@ impl SmtpClient {
             .credentials(creds)
             .build();
 
-        Ok(SmtpClient { mailer })
+        Ok(SmtpClient {
+            mailer,
+            smtp_from: smtp_from.to_string(),
+        })
     }
 
     /// メールを送信する関数
     ///
     /// # Arguments
-    /// * `from` - 送信元のメールアドレス
     /// * `to` - 送信先のメールアドレス
     /// * `subject` - メールの件名
     /// * `body_text` - メールのテキスト形式の本文
@@ -64,9 +76,9 @@ impl SmtpClient {
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = SmtpClient::new("smtp.example.com", 587, "user", "pass")?;
+    /// let client =
+    ///     SmtpClient::new("smtp.example.com", 587, "user", "pass", "sender@example.com")?;
     /// client.send_email(
-    ///     "sender@example.com",
     ///     "receiver@example.com",
     ///     "Hello from Async Rust!",
     ///     "This is a test email sent asynchronously.",
@@ -77,14 +89,13 @@ impl SmtpClient {
     /// ```
     pub async fn send_email(
         &self,
-        from: &str,
         to: &str,
         subject: &str,
         body_text: &str,
         body_html: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let builder = Message::builder()
-            .from(from.parse::<Mailbox>()?)
+            .from(self.smtp_from.parse::<Mailbox>()?)
             .to(to.parse::<Mailbox>()?)
             .subject(subject);
 

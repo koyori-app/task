@@ -24,7 +24,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         settings.smtp_port,
         &settings.smtp_username,
         &settings.smtp_password,
-         )
+        &settings.smtp_from,
+    )
      .map_err(|err| {
          std::io::Error::other(format!(
              "SMTP client initialization failed. If email is required in this environment, check smtp_host/smtp_port/smtp_username/smtp_password. Underlying error: {err}"
