@@ -63,16 +63,11 @@ pub fn wake_worker(state: AppState) {
 }
 
 /// 起動時からポーリングで未送信行を処理する。
+///
+/// 各サイクルは「処理 → 待機」の順。再起動直後の pending を最大30秒待たせない。
 pub async fn run_worker(state: AppState) {
-    let mut idle = true;
+    let mut idle;
     loop {
-        let delay = if idle {
-            POLL_INTERVAL_IDLE
-        } else {
-            POLL_INTERVAL_ACTIVE
-        };
-        tokio::time::sleep(delay).await;
-
         match process_pending(&state).await {
             Ok(n) => idle = n == 0,
             Err(e) => {
@@ -80,6 +75,13 @@ pub async fn run_worker(state: AppState) {
                 idle = false;
             }
         }
+
+        let delay = if idle {
+            POLL_INTERVAL_IDLE
+        } else {
+            POLL_INTERVAL_ACTIVE
+        };
+        tokio::time::sleep(delay).await;
     }
 }
 
