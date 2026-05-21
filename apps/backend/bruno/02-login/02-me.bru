@@ -1,0 +1,31 @@
+meta {
+  name: 5. 自分の情報
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/v1/auth/me
+  body: none
+  auth: none
+}
+
+
+vars:pre-request {
+  baseUrl: http://localhost:3400
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  
+  test("email should be verified", function() {
+    expect(res.body.email_verified).to.equal(true);
+  });
+}
+
+docs {
+  直前のログインで保存されたセッション Cookie が必要。
+}
+​

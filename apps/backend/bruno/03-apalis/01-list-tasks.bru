@@ -1,0 +1,30 @@
+meta {
+  name: 認証メールジョブ一覧
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/queues/verification_email/tasks?limit=10
+  body: none
+  auth: none
+}
+
+script:post-response {
+  const tasks = res.body;
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    console.log("ジョブが空です。メールの token を Env に貼るか、再送後に再実行してください。");
+    return;
+  }
+  const latest = tasks[tasks.length - 1];
+  let args = latest.args ?? latest.data;
+  if (typeof args === "string") {
+    try { args = JSON.parse(args); } catch (_) {}
+  }
+  if (args && args.token) {
+    bru.setVar("verificationToken", args.token);
+    console.log("verificationToken を設定しました");
+  } else {
+    console.log("token が見つかりません。Board (/) またはメールを確認してください。");
+  }
+}

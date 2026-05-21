@@ -1,0 +1,27 @@
+meta {
+  name: 3. （確認）未認証ではログイン不可
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/v1/auth/login
+  body: json
+  auth: none
+}
+
+headers {
+  content-type: application/json
+}
+
+body:json {
+  {
+    "email": "{{email}}",
+    "password": "{{password}}"
+  }
+}
+
+docs {
+  メール確認前に実行すると 403 email-not-verified が返る想定。
+  確認後は 4. ログイン を使う。
+}

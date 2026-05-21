@@ -1,0 +1,37 @@
+meta {
+  name: 2. メールアドレス確認
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/v1/auth/verify-email
+  body: json
+  auth: none
+}
+
+headers {
+  content-type: application/json
+}
+
+body:json {
+  {
+    "token": "{{verificationToken}}"
+  }
+}
+
+vars:pre-request {
+  verificationToken: "{{verificationToken}}"
+  baseUrl: "{{baseUrl}}"
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.status).to.equal(200);
+  });
+}
+
+docs {
+  事前に Env の verificationToken を設定すること。
+  メール例: http://localhost:3000/verify-email?token=XXXX
+}
