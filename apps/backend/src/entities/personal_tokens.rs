@@ -1,7 +1,7 @@
 use sea_orm::entity::prelude::*;
 use utoipa::ToSchema;
 
-use crate::entities::scopes::Scope;
+use crate::entities::scopes::ScopeList;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, ToSchema)]
 #[sea_orm(table_name = "personal_tokens")]
@@ -23,6 +23,7 @@ pub struct Model {
     pub revoked: bool,
     #[schema(value_type = String, format="uuid")]
     pub user_id: Uuid,
+    pub scopes: ScopeList,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
