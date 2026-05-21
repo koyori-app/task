@@ -3,7 +3,7 @@ use axum_session::Session;
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
 use sea_orm::prelude::Uuid;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, TransactionTrait};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use sea_orm::{ColumnTrait, QueryFilter};
 use serde::Deserialize;
 use validator::Validate;
@@ -17,7 +17,7 @@ use crate::openapi::{
 use crate::utils::auth::{
     AuthError, create_password_hash, generate_email_verification_token, verify_password,
 };
-use crate::utils::db::is_postgres_unique_violation;
+use crate::utils::db::{is_postgres_unique_violation, with_transaction};
 use crate::utils::{email_verification, verification_email_outbox};
 use crate::{AppState, entities::users};
 
@@ -117,25 +117,29 @@ pub async fn register(
         password_hash: Set(password_hash),
     };
 
-    let txn = state.db.begin().await?;
-    users::Entity::insert(user.clone())
-        .exec(&txn)
-        .await
-        .map_err(|e| {
-            if is_postgres_unique_violation(&e) {
-                AuthError::DuplicateEmail
-            } else {
-                AuthError::Internal(anyhow::anyhow!("insert user: {e}"))
-            }
-        })?;
+    with_transaction::<(), AuthError, _>(&state.db, |txn| {
+        Box::pin(async move {
+            users::Entity::insert(user.clone())
+                .exec(txn)
+                .await
+                .map_err(|e| {
+                    if is_postgres_unique_violation(&e) {
+                        AuthError::DuplicateEmail
+                    } else {
+                        AuthError::Internal(anyhow::anyhow!("insert user: {e}"))
+                    }
+                })?;
 
-    verification_email_outbox::enqueue(&txn, user_id, email.clone(), verification_token)
-        .await
-        .map_err(|e| AuthError::Internal(anyhow::anyhow!("enqueue verification email: {e}")))?;
+            verification_email_outbox::enqueue(txn, user_id, email.clone(), verification_token)
+                .await
+                .map_err(|e| {
+                    AuthError::Internal(anyhow::anyhow!("enqueue verification email: {e}"))
+                })?;
 
-    txn.commit()
-        .await
-        .map_err(|e| AuthError::Internal(anyhow::anyhow!("commit register transaction: {e}")))?;
+            Ok(())
+        })
+    })
+    .await?;
 
     verification_email_outbox::wake_worker(state);
     Ok((

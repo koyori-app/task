@@ -5,6 +5,9 @@ use sea_orm::entity::prelude::*;
 pub enum OutboxStatus {
     #[sea_orm(string_value = "pending")]
     Pending,
+    /// ワーカーが送信中（他ワーカーとの二重処理防止）
+    #[sea_orm(string_value = "processing")]
+    Processing,
     #[sea_orm(string_value = "sent")]
     Sent,
     #[sea_orm(string_value = "failed")]
@@ -28,6 +31,9 @@ pub struct Model {
     #[sea_orm(nullable)]
     pub last_error: Option<String>,
     pub created_at: DateTimeWithTimeZone,
+    /// ワーカーが processing にした時刻（クラッシュ後の再取得用）
+    #[sea_orm(nullable)]
+    pub claimed_at: Option<DateTimeWithTimeZone>,
     #[sea_orm(nullable)]
     pub sent_at: Option<DateTimeWithTimeZone>,
 }
