@@ -4,7 +4,7 @@
 
 use utoipa::IntoResponses;
 
-use crate::utils::auth::ServerError;
+use crate::error::ServerError;
 
 #[derive(IntoResponses)]
 pub enum SessionAuthErrors {

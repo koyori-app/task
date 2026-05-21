@@ -1,8 +1,8 @@
 use axum::{Json, extract::State};
 use sea_orm::EntityTrait;
 
+use crate::error::AppError;
 use crate::openapi::InternalOnlyError;
-use crate::utils::auth::AuthError;
 use crate::{AppState, entities};
 
 #[axum::debug_handler]
@@ -21,10 +21,8 @@ use crate::{AppState, entities};
 )]
 pub async fn get_labels(
     State(state): State<AppState>,
-) -> Result<Json<Vec<entities::labels::Model>>, AuthError> {
-    let labels = entities::labels::Entity::find()
-        .all(&state.db)
-        .await
-        .map_err(AuthError::from)?;
+) -> Result<Json<Vec<entities::labels::Model>>, AppError> {
+    // DB 障害時は 500 を返す
+    let labels = entities::labels::Entity::find().all(&state.db).await?;
     Ok(Json(labels))
 }

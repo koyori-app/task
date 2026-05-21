@@ -14,20 +14,12 @@ use axum::{
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
-use serde::Serialize;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tracing::debug;
-use utoipa::ToSchema;
 
-/// API 共通のエラー応答ボディ。
-
-#[derive(Serialize, ToSchema)]
-pub struct ServerError {
-    #[schema(example = "invalid-credentials")]
-    pub message: String,
-}
+use crate::error::{ServerError, internal_server_error};
 
 #[derive(Debug, Error)]
 pub enum AuthError {
@@ -64,13 +56,7 @@ impl IntoResponse for AuthError {
         match self {
             AuthError::Internal(e) => {
                 debug!("auth error: {:#?}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ServerError {
-                        message: "internal-error".into(),
-                    }),
-                )
-                    .into_response()
+                internal_server_error().into_response()
             }
             AuthError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,

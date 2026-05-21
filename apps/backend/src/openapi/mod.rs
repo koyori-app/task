@@ -5,7 +5,7 @@ pub mod responses;
 use utoipa::openapi::OpenApi;
 use utoipa::{PartialSchema, ToSchema};
 
-pub use crate::utils::auth::ServerError;
+pub use crate::error::ServerError;
 pub use responses::{
     CredentialErrors, InternalOnlyError, RegisterErrors, ResendVerificationErrors,
     SessionAuthErrors, UnauthorizedErrors, VerifyEmailErrors,

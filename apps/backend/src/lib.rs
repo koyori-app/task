@@ -5,6 +5,7 @@ use crate::{
 use sea_orm::DatabaseConnection;
 
 pub mod dto;
+pub mod error;
 pub mod entities;
 pub mod extractors;
 pub mod handlers;
