@@ -15,7 +15,8 @@ use crate::openapi::{
     UnauthorizedErrors, VerifyEmailErrors,
 };
 use crate::utils::auth::{
-    AuthError, create_password_hash, generate_email_verification_token, verify_password,
+    AuthError, DUMMY_PASSWORD_HASH, create_password_hash, generate_email_verification_token,
+    verify_password,
 };
 use crate::utils::db::{is_postgres_unique_violation, with_transaction};
 use crate::utils::{email_verification, verification_email_outbox};
@@ -52,11 +53,19 @@ pub async fn login(
     let user = users::Entity::find()
         .filter(users::Column::Email.eq(email))
         .one(&state.db)
-        .await?
-        .ok_or(AuthError::InvalidCredentials)?;
-    if !verify_password(&password, &user.password_hash)? {
+        .await?;
+
+    let password_hash = user
+        .as_ref()
+        .map(|u| u.password_hash.as_str())
+        .unwrap_or(DUMMY_PASSWORD_HASH);
+
+    if !verify_password(&password, password_hash)? {
         return Err(AuthError::InvalidCredentials);
     }
+
+    let user = user.ok_or(AuthError::InvalidCredentials)?;
+
     if !user.email_verified {
         return Err(AuthError::EmailNotVerified);
     }

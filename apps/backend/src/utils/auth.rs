@@ -165,6 +165,11 @@ pub fn create_password_hash(password: &str) -> Result<String, AuthError> {
     Ok(hash.to_string())
 }
 
+/// 存在しないユーザー向けのダミーハッシュ。ログイン時に常に Argon2 検証を走らせ、
+/// メールアドレスの有無による応答時間差（タイミング攻撃）を抑える。
+pub const DUMMY_PASSWORD_HASH: &str =
+    "$argon2id$v=19$m=131072,t=3,p=2$0UUArODQDWduujvFlpWtKg$GDp6SlCwV4PIue/EfTr+nJVjlFnycyxtCfnJMnjlIjU";
+
 pub fn verify_password(password: &str, password_hash: &str) -> Result<bool, AuthError> {
     let parsed_hash = PasswordHash::new(password_hash)
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("invalid password hash: {e}")))?;
@@ -224,4 +229,15 @@ pub fn verify_personal_token(token: &str, stored_hash: &str) -> Result<bool, Aut
     }
 
     Ok(computed_bytes.ct_eq(stored_bytes).into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dummy_password_hash_is_valid_argon2() {
+        assert!(PasswordHash::new(DUMMY_PASSWORD_HASH).is_ok());
+        assert!(!verify_password("wrong-password", DUMMY_PASSWORD_HASH).unwrap());
+    }
 }
