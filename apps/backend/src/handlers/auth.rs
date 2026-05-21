@@ -18,8 +18,10 @@ use crate::utils::auth::{
     AuthError, DUMMY_PASSWORD_HASH, create_password_hash, generate_email_verification_token,
     verify_password,
 };
+use crate::jobs::VerificationEmailJob;
+use crate::jobs::verification_email;
 use crate::utils::db::{is_postgres_unique_violation, with_transaction};
-use crate::utils::{email_verification, verification_email_outbox};
+use crate::utils::email_verification;
 use crate::{AppState, entities::users};
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
@@ -139,18 +141,21 @@ pub async fn register(
                     }
                 })?;
 
-            verification_email_outbox::enqueue(txn, user_id, email.clone(), verification_token)
-                .await
-                .map_err(|e| {
-                    AuthError::Internal(anyhow::anyhow!("enqueue verification email: {e}"))
-                })?;
-
             Ok(())
         })
     })
     .await?;
 
-    verification_email_outbox::wake_worker(state);
+    verification_email::enqueue(
+        state.verification_email_storage.as_ref(),
+        VerificationEmailJob {
+            user_id,
+            email: email.clone(),
+            token: verification_token,
+        },
+    )
+    .await
+    .map_err(|e| AuthError::Internal(anyhow::anyhow!("enqueue verification email: {e}")))?;
     Ok((
         StatusCode::CREATED,
         Json("Register successful".to_string()),
@@ -252,11 +257,16 @@ pub async fn resend_verification_email(
     }
 
     let token = generate_email_verification_token();
-    verification_email_outbox::enqueue(&state.db, user.id, email.clone(), token)
-        .await
-        .map_err(|e| AuthError::Internal(anyhow::anyhow!("enqueue verification email: {e}")))?;
-
-    verification_email_outbox::wake_worker(state);
+    verification_email::enqueue(
+        state.verification_email_storage.as_ref(),
+        VerificationEmailJob {
+            user_id: user.id,
+            email: email.clone(),
+            token,
+        },
+    )
+    .await
+    .map_err(|e| AuthError::Internal(anyhow::anyhow!("enqueue verification email: {e}")))?;
 
     Ok(Json(format!(
         "確認メールを再送しました（同一メールアドレスへの再送は{}秒に1回までです）。",

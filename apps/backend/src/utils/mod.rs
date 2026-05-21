@@ -4,4 +4,3 @@ pub mod email_verification;
 pub mod redis;
 pub mod smtp;
 pub mod verification_email_delivery;
-pub mod verification_email_outbox;

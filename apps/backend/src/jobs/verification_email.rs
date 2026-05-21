@@ -1,0 +1,79 @@
+//! 認証メール送信ジョブ（Apalis + PostgreSQL）
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use apalis::prelude::{
+    BackoffConfig, BoxDynError, Data, IntervalStrategy, StrategyBuilder, TaskSink,
+};
+use apalis_postgres::{Config, JsonCodec, PostgresStorage, PgPool};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::utils::{email_verification, verification_email_delivery};
+use crate::{AppState, settings::Settings};
+
+pub const QUEUE_NAME: &str = "verification_email";
+pub const MAX_RETRIES: usize = 8;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationEmailJob {
+    pub user_id: Uuid,
+    pub email: String,
+    pub token: String,
+}
+
+pub type VerificationEmailStorage = PostgresStorage<
+    VerificationEmailJob,
+    apalis_postgres::CompactType,
+    JsonCodec<apalis_postgres::CompactType>,
+    apalis_postgres::PgNotify,
+>;
+
+pub fn build_storage(pool: &PgPool, _settings: &Settings) -> VerificationEmailStorage {
+    let config = Config::new(QUEUE_NAME).with_poll_interval(
+        StrategyBuilder::new()
+            .apply(
+                IntervalStrategy::new(Duration::from_secs(2))
+                    .with_backoff(BackoffConfig::default()),
+            )
+            .build(),
+    );
+    PostgresStorage::new_with_notify(pool, &config)
+}
+
+pub async fn setup(
+    pool: &PgPool,
+    settings: &Settings,
+) -> Result<Arc<VerificationEmailStorage>, sqlx::Error> {
+    PostgresStorage::setup(pool).await?;
+    Ok(Arc::new(build_storage(pool, settings)))
+}
+
+pub async fn enqueue(
+    storage: &VerificationEmailStorage,
+    job: VerificationEmailJob,
+) -> Result<(), anyhow::Error> {
+    let mut storage = storage.clone();
+    storage
+        .push(job)
+        .await
+        .map_err(|e| anyhow::anyhow!("push verification email job: {e}"))?;
+    Ok(())
+}
+
+pub async fn process(job: VerificationEmailJob, state: Data<AppState>) -> Result<(), BoxDynError> {
+    email_verification::store_token(&state.redis_client, job.user_id, &job.token).await?;
+    verification_email_delivery::send_verification_email(
+        &state.smtp_client,
+        &job.email,
+        &state.settings,
+        &job.token,
+    )
+    .await?;
+    Ok(())
+}
+
+pub fn worker_concurrency(settings: &Settings) -> usize {
+    settings.verification_email_worker_concurrency.max(1)
+}

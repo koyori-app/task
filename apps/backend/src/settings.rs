@@ -22,6 +22,13 @@ pub struct Settings {
         message = "email_verification_app_url must be a valid http or https base URL"
     ))]
     pub email_verification_app_url: String,
+    /// 認証メール Apalis ワーカーの並列度
+    #[serde(default = "default_verification_email_worker_concurrency")]
+    pub verification_email_worker_concurrency: usize,
+}
+
+fn default_verification_email_worker_concurrency() -> usize {
+    1
 }
 
 fn default_allow_origin() -> String {
@@ -99,6 +106,7 @@ mod tests {
             smtp_password: String::new(),
             smtp_from: String::new(),
             email_verification_app_url: url.to_string(),
+            verification_email_worker_concurrency: 1,
         }
         .validate()
         .is_ok()

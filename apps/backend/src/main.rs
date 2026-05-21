@@ -33,11 +33,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
      })?;
     let redis_client = backend::utils::redis::RedisConnection::new(&settings.redis_url);
     redis_client.ping().await?;
+
+    let pg_pool = backend::jobs::setup_pool(&settings.database_url).await?;
+    let verification_email_storage =
+        backend::jobs::setup_verification_email_storage(&pg_pool, &settings).await?;
+
     let state = AppState {
         settings,
         db,
+        pg_pool,
         redis_client,
         smtp_client,
+        verification_email_storage,
     };
     run(state).await?;
 

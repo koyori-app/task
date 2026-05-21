@@ -48,3 +48,7 @@ subtle = "2.4"
 strum = { version = "0.28.0", features = ["derive"] }
 strum_macros = "0.28"
 lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport","tokio1", "tokio1-rustls-tls"] }
+apalis = { version = "1.0.0-rc.9", features = ["limit", "retry", "tracing"] }
+apalis-postgres = { version = "1.0.0-rc.8", default-features = false, features = ["migrate", "tokio-comp", "time"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "time"] }
+apalis-board = { version = "1.0.0-rc.8", features = ["axum", "ui", "events"] }
