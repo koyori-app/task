@@ -21,6 +21,20 @@ pub struct VerificationEmailJob {
     pub user_id: Uuid,
     pub email: String,
     pub token: String,
+    /// トークン発行世代（Unix ミリ秒）。`store_token` はこれより新しい世代のみ反映する。
+    #[serde(default)]
+    pub issued_at: u64,
+}
+
+impl VerificationEmailJob {
+    pub fn new(user_id: Uuid, email: String, token: String) -> Self {
+        Self {
+            user_id,
+            email,
+            token,
+            issued_at: chrono::Utc::now().timestamp_millis() as u64,
+        }
+    }
 }
 
 pub type VerificationEmailStorage = PostgresStorage<
@@ -63,7 +77,17 @@ pub async fn enqueue(
 }
 
 pub async fn process(job: VerificationEmailJob, state: Data<AppState>) -> Result<(), BoxDynError> {
-    email_verification::store_token(&state.redis_client, job.user_id, &job.token).await?;
+    let stored = email_verification::store_token(
+        &state.redis_client,
+        job.user_id,
+        &job.token,
+        job.issued_at,
+    )
+    .await?;
+    if !stored {
+        // 再送などでより新しい世代が既に Redis にある。旧ジョブのリトライは送信しない。
+        return Ok(());
+    }
     verification_email_delivery::send_verification_email(
         &state.smtp_client,
         &job.email,

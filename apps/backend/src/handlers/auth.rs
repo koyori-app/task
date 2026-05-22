@@ -151,11 +151,7 @@ pub async fn register(
 
     verification_email::enqueue(
         state.verification_email_storage.as_ref(),
-        VerificationEmailJob {
-            user_id,
-            email: email.clone(),
-            token: verification_token,
-        },
+        VerificationEmailJob::new(user_id, email.clone(), verification_token),
     )
     .await
     .map_err(|e| AuthError::Internal(anyhow::anyhow!("enqueue verification email: {e}")))?;
@@ -262,11 +258,7 @@ pub async fn resend_verification_email(
     let token = generate_email_verification_token();
     verification_email::enqueue(
         state.verification_email_storage.as_ref(),
-        VerificationEmailJob {
-            user_id: user.id,
-            email: email.clone(),
-            token,
-        },
+        VerificationEmailJob::new(user.id, email.clone(), token),
     )
     .await
     .map_err(|e| AuthError::Internal(anyhow::anyhow!("enqueue verification email: {e}")))?;
