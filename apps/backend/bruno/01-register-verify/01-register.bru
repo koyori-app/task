@@ -23,8 +23,8 @@ body:json {
 }
 
 vars:pre-request {
-  baseUrl: http://localhost:3400
-  username: yupix
+  baseUrl: "{{baseUrl}}"
+  username: "{{username}}"
   email: "{{email}}"
   password: "{{password}}"
 }
