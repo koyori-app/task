@@ -1,9 +1,15 @@
 //! メールアドレスの正規化（trim + ASCII 小文字）。
 
-/// 前後空白を除去し、ASCII 小文字に揃える。
+/// メールアドレスを登録・照合用に正規化する。
 ///
 /// ドメイン部は RFC 上ケース非依存。ローカル部の Unicode 大文字小文字は変換しない
-/// （一般的な Web サービスと同様に全体を小文字化する）。
+/// （一般的な Web サービスと同様に全体を `to_ascii_lowercase` する）。
+///
+/// # Arguments
+/// * `email` - 正規化前のメールアドレス（前後に空白があってもよい）
+///
+/// # Returns
+/// * トリム済み・ASCII 小文字化済みの文字列（DB 保存および検索に使う）
 pub fn normalize_email(email: &str) -> String {
     email.trim().to_ascii_lowercase()
 }

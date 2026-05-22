@@ -68,9 +68,23 @@ const KEY_USER: &str = "email_verify:u:";
 const KEY_GEN: &str = "email_verify:gen:";
 const KEY_RESEND: &str = "email_verify:resend:e:";
 
-/// トークンを Redis に保存する。`issued_at` が現在世代以上のときのみ反映する。
+/// 認証トークンを Redis に保存する（Lua で原子的に user/token/世代を更新）。
 ///
-/// より新しい世代が既にある場合は `Ok(false)`（上書き・メール送信をスキップすべき）。
+/// Redis の現世代より `issued_at` が小さい場合は更新せず、Apalis リトライによる
+/// 古いジョブの上書きを防ぐ。同じ `issued_at` の再実行は冪等に再反映できる。
+///
+/// # Arguments
+/// * `redis` - トークン・世代キーを保持する Redis 接続
+/// * `user_id` - 認証対象ユーザー ID
+/// * `token` - 保存する認証トークン文字列
+/// * `issued_at` - ジョブの発行世代（Unix ミリ秒。大きいほど新しい）
+///
+/// # Returns
+/// * `Ok(true)` - トークンと世代を反映した
+/// * `Ok(false)` - より新しい世代が既にあるためスキップした（メール送信も不要）
+///
+/// # Errors
+/// * Redis 接続・Lua スクリプト実行に失敗した場合
 pub async fn store_token(
     redis: &RedisConnection,
     user_id: Uuid,
@@ -134,7 +148,18 @@ pub async fn consume_token(
     Ok(Some(uid))
 }
 
-/// メールアドレス単位で再送クールダウンを取る。取れたら `true`、取れなければレート制限で `false`。
+/// メールアドレス単位で再送クールダウン枠を取得する（`SET NX`）。
+///
+/// # Arguments
+/// * `redis` - クールダウンキーを保持する Redis 接続
+/// * `email` - 対象メールアドレス（内部で [`super::email::normalize_email`] する）
+///
+/// # Returns
+/// * `Ok(true)` - 枠を取得できた（再送 API が続行してよい）
+/// * `Ok(false)` - [`RESEND_COOLDOWN_SECS`] 以内に再送済み（429 相当）
+///
+/// # Errors
+/// * Redis 接続・コマンド実行に失敗した場合
 pub async fn try_acquire_resend_slot(redis: &RedisConnection, email: &str) -> Result<bool, anyhow::Error> {
     let mut conn = redis
         .conn
