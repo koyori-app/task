@@ -21,6 +21,7 @@ use crate::utils::auth::{
 use crate::jobs::VerificationEmailJob;
 use crate::jobs::verification_email;
 use crate::utils::db::{is_postgres_unique_violation, with_transaction};
+use crate::utils::email::normalize_email;
 use crate::utils::email_verification;
 use crate::{AppState, entities::users};
 
@@ -51,9 +52,10 @@ pub async fn login(
     Valid(Json(payload)): Valid<Json<LoginRequest>>,
 ) -> Result<StatusCode, AuthError> {
     let LoginRequest { email, password } = payload;
+    let email = normalize_email(&email);
 
     let user = users::Entity::find()
-        .filter(users::Column::Email.eq(email))
+        .filter(users::Column::Email.eq(&email))
         .one(&state.db)
         .await?;
 
@@ -113,6 +115,7 @@ pub async fn register(
         email,
         password,
     } = payload;
+    let email = normalize_email(&email);
 
     let password_hash = create_password_hash(&password)?;
     let verification_token = generate_email_verification_token();
@@ -237,7 +240,7 @@ pub async fn resend_verification_email(
     State(state): State<AppState>,
     Valid(Json(payload)): Valid<Json<ResendVerificationRequest>>,
 ) -> Result<Json<String>, AuthError> {
-    let email = payload.email.trim().to_string();
+    let email = normalize_email(&payload.email);
 
     if !email_verification::try_acquire_resend_slot(&state.redis_client, &email)
         .await

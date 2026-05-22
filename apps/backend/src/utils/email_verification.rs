@@ -7,6 +7,7 @@ use std::sync::LazyLock;
 
 use uuid::Uuid;
 
+use super::email::normalize_email;
 use super::redis::RedisConnection;
 
 /// 再送時: 旧 token キー削除 → 新 token/user キー SET を一括実行。
@@ -117,10 +118,7 @@ pub async fn try_acquire_resend_slot(redis: &RedisConnection, email: &str) -> Re
         .await
         .map_err(|e| anyhow::anyhow!("redis acquire failed: {e}"))?;
 
-    let key = format!(
-        "{KEY_RESEND}{}",
-        email.trim().to_ascii_lowercase()
-    );
+    let key = format!("{KEY_RESEND}{}", normalize_email(email));
 
     let set_ok: Option<String> = redis::cmd("SET")
         .arg(&key)
