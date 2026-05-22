@@ -32,17 +32,17 @@ use crate::{
 };
 
 pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
-    let broadcaster = TracingBroadcaster::create();
-    let board_tracing = TracingSubscriber::new(&broadcaster).layer().with_filter(
-        tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "info,sqlx=warn".into()),
-        ),
+    let log_filter = tracing_subscriber::EnvFilter::new(
+        std::env::var("RUST_LOG").unwrap_or_else(|_| "info,sqlx=warn".into()),
     );
 
+    let broadcaster = TracingBroadcaster::create();
+    let board_tracing = TracingSubscriber::new(&broadcaster)
+        .layer()
+        .with_filter(log_filter.clone());
+
     tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "info,sqlx=warn".into()),
-        ))
+        .with(log_filter)
         .with(tracing_subscriber::fmt::layer())
         .with(board_tracing)
         .init();
