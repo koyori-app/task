@@ -14,19 +14,29 @@ use super::email::normalize_email;
 use super::redis::RedisConnection;
 
 /// 世代チェック後、旧 token キー削除 → 新 token/user/gen キー SET を一括実行。
-/// 返却: 1 = 反映した, 0 = より新しい世代が既にあるためスキップ。
+/// 返却: 1 = 反映した, 0 = より新しい世代、または同世代で別トークンのためスキップ。
 static STORE_TOKEN_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
     redis::Script::new(
         r#"
         local user_key = KEYS[1]
         local gen_key = KEYS[2]
         local token_key = KEYS[3]
+        local new_token = ARGV[3]
         local issued_at = tonumber(ARGV[5])
         local ttl = tonumber(ARGV[4])
 
         local current_gen = redis.call('GET', gen_key)
-        if current_gen and tonumber(current_gen) > issued_at then
-            return 0
+        if current_gen then
+            local current_gen_num = tonumber(current_gen)
+            if current_gen_num > issued_at then
+                return 0
+            end
+            if current_gen_num == issued_at then
+                local current_token = redis.call('GET', user_key)
+                if current_token ~= new_token then
+                    return 0
+                end
+            end
         end
 
         local old_token = redis.call('GET', user_key)
@@ -71,7 +81,8 @@ const KEY_RESEND: &str = "email_verify:resend:e:";
 /// 認証トークンを Redis に保存する（Lua で原子的に user/token/世代を更新）。
 ///
 /// Redis の現世代より `issued_at` が小さい場合は更新せず、Apalis リトライによる
-/// 古いジョブの上書きを防ぐ。同じ `issued_at` の再実行は冪等に再反映できる。
+/// 古いジョブの上書きを防ぐ。同じ `issued_at` かつ同じ `token` のときだけ冪等に再反映する
+/// （同一ミリ秒で別トークンが発行された場合はスキップ）。
 ///
 /// # Arguments
 /// * `redis` - トークン・世代キーを保持する Redis 接続
@@ -81,7 +92,7 @@ const KEY_RESEND: &str = "email_verify:resend:e:";
 ///
 /// # Returns
 /// * `Ok(true)` - トークンと世代を反映した
-/// * `Ok(false)` - より新しい世代が既にあるためスキップした（メール送信も不要）
+/// * `Ok(false)` - より新しい世代、または同世代の別トークンが既にあるためスキップした
 ///
 /// # Errors
 /// * Redis 接続・Lua スクリプト実行に失敗した場合
