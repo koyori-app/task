@@ -23,6 +23,10 @@ pub struct Settings {
     ))]
     pub email_verification_app_url: String,
     /// 認証メール Apalis ワーカーの並列度
+    #[validate(range(
+        min = 1,
+        message = "verification_email_worker_concurrency must be >= 1"
+    ))]
     #[serde(default = "default_verification_email_worker_concurrency")]
     pub verification_email_worker_concurrency: usize,
 }
