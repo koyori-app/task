@@ -43,6 +43,9 @@ pub enum AuthError {
     DuplicateEmail,
     #[error("too many requests")]
     TooManyRequests,
+    /// 認証メールジョブのキュー投入に失敗した（未認証ユーザーは残し再送 API で回復する）。
+    #[error("verification email enqueue failed")]
+    VerificationEmailEnqueueFailed(#[source] anyhow::Error),
 }
 
 impl From<sea_orm::DbErr> for AuthError {
@@ -121,6 +124,16 @@ impl IntoResponse for AuthError {
                 }),
             )
                 .into_response(),
+            AuthError::VerificationEmailEnqueueFailed(e) => {
+                debug!("verification email enqueue failed: {:#?}", e);
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ServerError {
+                        message: "verification-email-enqueue-failed".into(),
+                    }),
+                )
+                    .into_response()
+            }
         }
     }
 }

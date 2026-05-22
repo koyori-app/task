@@ -154,7 +154,8 @@ pub async fn register(
         VerificationEmailJob::new(user_id, email.clone(), verification_token),
     )
     .await
-    .map_err(|e| AuthError::Internal(anyhow::anyhow!("enqueue verification email: {e}")))?;
+    .map_err(AuthError::VerificationEmailEnqueueFailed)?;
+
     Ok((
         StatusCode::CREATED,
         Json("Register successful".to_string()),
@@ -261,7 +262,7 @@ pub async fn resend_verification_email(
         VerificationEmailJob::new(user.id, email.clone(), token),
     )
     .await
-    .map_err(|e| AuthError::Internal(anyhow::anyhow!("enqueue verification email: {e}")))?;
+    .map_err(AuthError::VerificationEmailEnqueueFailed)?;
 
     Ok(Json(format!(
         "確認メールを再送しました（同一メールアドレスへの再送は{}秒に1回までです）。",

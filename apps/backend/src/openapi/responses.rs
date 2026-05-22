@@ -46,6 +46,11 @@ pub enum RegisterErrors {
     )]
     Conflict(#[to_schema] ServerError),
     #[response(
+        status = 503,
+        description = "認証メールの送信準備に失敗しました。アカウントは作成済みのため、認証メールの再送をお試しください"
+    )]
+    VerificationEmailUnavailable(#[to_schema] ServerError),
+    #[response(
         status = 500,
         description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
     )]
@@ -98,6 +103,11 @@ pub enum ResendVerificationErrors {
     Conflict(#[to_schema] ServerError),
     #[response(status = 429, description = "しばらくしてから再度お試しください")]
     TooManyRequests(#[to_schema] ServerError),
+    #[response(
+        status = 503,
+        description = "認証メールの送信準備に失敗しました。しばらくしてから再送をお試しください"
+    )]
+    VerificationEmailUnavailable(#[to_schema] ServerError),
     #[response(
         status = 500,
         description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
