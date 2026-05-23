@@ -62,7 +62,14 @@ export default defineConfig({
   },
   build: {
     sourcemap: true,
-    rolldownOptions: {
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes('reka-ui') || id.includes('@floating-ui')) {
+            return 'vendor-reka';
+          }
+        },
+      },
     },
   },
   test: {
