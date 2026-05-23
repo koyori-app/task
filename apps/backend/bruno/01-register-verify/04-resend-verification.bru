@@ -1,0 +1,30 @@
+meta {
+  name: （任意）認証メール再送
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/v1/auth/resend-verification-email
+  body: json
+  auth: none
+}
+
+headers {
+  content-type: application/json
+}
+
+body:json {
+  {
+    "email": "{{email}}"
+  }
+}
+
+vars:pre-request {
+  baseUrl: "{{baseUrl}}"
+}
+
+docs {
+  同一メールアドレスは 60 秒に 1 回まで。
+}
+​

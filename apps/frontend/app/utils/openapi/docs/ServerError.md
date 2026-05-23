@@ -1,6 +1,7 @@
 
 # ServerError
 
+API 共通のエラー応答ボディ。
 
 ## Properties
 
@@ -15,7 +16,7 @@ import type { ServerError } from ''
 
 // TODO: Update the object below with actual values
 const example = {
-  "message": null,
+  "message": invalid-credentials,
 } satisfies ServerError
 
 console.log(example)

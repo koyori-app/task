@@ -1,0 +1,18 @@
+meta {
+  name: 6. ログアウト
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/v1/auth/logout
+  body: none
+  auth: none
+}
+
+tests {
+  test("should return 204", function() {
+    expect(res.status).to.equal(204);
+  });
+}
+​

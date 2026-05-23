@@ -38,6 +38,12 @@ export interface CrateEntitiesUsersModel {
      */
     email: string;
     /**
+     * メールアドレスの確認が済んでいるかどうか
+     * @type {boolean}
+     * @memberof CrateEntitiesUsersModel
+     */
+    emailVerified: boolean;
+    /**
      * 
      * @type {string}
      * @memberof CrateEntitiesUsersModel
@@ -56,6 +62,7 @@ export interface CrateEntitiesUsersModel {
  */
 export function instanceOfCrateEntitiesUsersModel(value: object): value is CrateEntitiesUsersModel {
     if (!('email' in value) || value['email'] === undefined) return false;
+    if (!('emailVerified' in value) || value['emailVerified'] === undefined) return false;
     if (!('id' in value) || value['id'] === undefined) return false;
     if (!('username' in value) || value['username'] === undefined) return false;
     return true;
@@ -74,6 +81,7 @@ export function CrateEntitiesUsersModelFromJSONTyped(json: any, ignoreDiscrimina
         'avatarUrl': json['avatar_url'] == null ? undefined : json['avatar_url'],
         'bio': json['bio'] == null ? undefined : json['bio'],
         'email': json['email'],
+        'emailVerified': json['email_verified'],
         'id': json['id'],
         'username': json['username'],
     };
@@ -93,6 +101,7 @@ export function CrateEntitiesUsersModelToJSONTyped(value?: CrateEntitiesUsersMod
         'avatar_url': value['avatarUrl'],
         'bio': value['bio'],
         'email': value['email'],
+        'email_verified': value['emailVerified'],
         'id': value['id'],
         'username': value['username'],
     };

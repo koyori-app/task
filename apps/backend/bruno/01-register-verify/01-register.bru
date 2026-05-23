@@ -1,0 +1,36 @@
+meta {
+  name: 1. 新規登録
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/v1/auth/register
+  body: json
+  auth: none
+}
+
+headers {
+  content-type: application/json
+}
+
+body:json {
+  {
+    "username": "{{username}}",
+    "email": "{{email}}",
+    "password": "{{password}}"
+  }
+}
+
+vars:pre-request {
+  baseUrl: "{{baseUrl}}"
+  username: "{{username}}"
+  email: "{{email}}"
+  password: "{{password}}"
+}
+
+tests {
+  test("should return 201", function() {
+    expect(res.status).to.equal(201);
+  });
+}

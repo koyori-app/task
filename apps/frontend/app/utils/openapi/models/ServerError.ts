@@ -14,7 +14,7 @@
 
 import { mapValues } from '../runtime';
 /**
- * 
+ * API 共通のエラー応答ボディ。
  * @export
  * @interface ServerError
  */

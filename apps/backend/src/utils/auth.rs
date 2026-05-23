@@ -14,17 +14,12 @@ use axum::{
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
-use serde::Serialize;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tracing::debug;
-use utoipa::ToSchema;
 
-#[derive(Serialize, ToSchema)]
-pub struct ServerError {
-    pub message: String,
-}
+use crate::error::{ServerError, internal_server_error};
 
 #[derive(Debug, Error)]
 pub enum AuthError {
@@ -32,8 +27,25 @@ pub enum AuthError {
     Internal(#[from] anyhow::Error),
     #[error("unauthorized")]
     Unauthorized,
+    #[error("invalid credentials")]
+    InvalidCredentials,
     #[error("forbidden")]
     Forbidden,
+    #[error("email not verified")]
+    EmailNotVerified,
+    #[error("invalid verification token")]
+    InvalidVerificationToken,
+    #[error("no such user")]
+    UserNotFound,
+    #[error("email already verified")]
+    EmailAlreadyVerified,
+    #[error("duplicate email")]
+    DuplicateEmail,
+    #[error("too many requests")]
+    TooManyRequests,
+    /// 認証メールジョブのキュー投入に失敗した（未認証ユーザーは残し再送 API で回復する）。
+    #[error("verification email enqueue failed")]
+    VerificationEmailEnqueueFailed(#[source] anyhow::Error),
 }
 
 impl From<sea_orm::DbErr> for AuthError {
@@ -47,18 +59,19 @@ impl IntoResponse for AuthError {
         match self {
             AuthError::Internal(e) => {
                 debug!("auth error: {:#?}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ServerError {
-                        message: "internal-error".into(),
-                    }),
-                )
-                    .into_response()
+                internal_server_error().into_response()
             }
             AuthError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 Json(ServerError {
                     message: "unauthorized".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::InvalidCredentials => (
+                StatusCode::UNAUTHORIZED,
+                Json(ServerError {
+                    message: "invalid-credentials".into(),
                 }),
             )
                 .into_response(),
@@ -69,6 +82,58 @@ impl IntoResponse for AuthError {
                 }),
             )
                 .into_response(),
+            AuthError::EmailNotVerified => (
+                StatusCode::FORBIDDEN,
+                Json(ServerError {
+                    message: "email-not-verified".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::InvalidVerificationToken => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError {
+                    message: "invalid-verification-token".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::UserNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(ServerError {
+                    message: "not-found".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::EmailAlreadyVerified => (
+                StatusCode::CONFLICT,
+                Json(ServerError {
+                    message: "email-already-verified".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::DuplicateEmail => (
+                StatusCode::CONFLICT,
+                Json(ServerError {
+                    message: "email-already-exists".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::TooManyRequests => (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(ServerError {
+                    message: "too-many-requests".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::VerificationEmailEnqueueFailed(e) => {
+                debug!("verification email enqueue failed: {:#?}", e);
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ServerError {
+                        message: "verification-email-enqueue-failed".into(),
+                    }),
+                )
+                    .into_response()
+            }
         }
     }
 }
@@ -113,6 +178,11 @@ pub fn create_password_hash(password: &str) -> Result<String, AuthError> {
     Ok(hash.to_string())
 }
 
+/// 存在しないユーザー向けのダミーハッシュ。ログイン時に常に Argon2 検証を走らせ、
+/// メールアドレスの有無による応答時間差（タイミング攻撃）を抑える。
+pub const DUMMY_PASSWORD_HASH: &str =
+    "$argon2id$v=19$m=131072,t=3,p=2$0UUArODQDWduujvFlpWtKg$GDp6SlCwV4PIue/EfTr+nJVjlFnycyxtCfnJMnjlIjU";
+
 pub fn verify_password(password: &str, password_hash: &str) -> Result<bool, AuthError> {
     let parsed_hash = PasswordHash::new(password_hash)
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("invalid password hash: {e}")))?;
@@ -121,6 +191,13 @@ pub fn verify_password(password: &str, password_hash: &str) -> Result<bool, Auth
     Ok(argon2
         .verify_password(password.as_bytes(), &parsed_hash)
         .is_ok())
+}
+
+/// メール認証用トークンを生成する。
+pub fn generate_email_verification_token() -> String {
+    let mut buf = [0u8; 32];
+    OsRng.fill_bytes(&mut buf);
+    URL_SAFE_NO_PAD.encode(buf)
 }
 
 // --- Personal token helpers ---
@@ -165,4 +242,15 @@ pub fn verify_personal_token(token: &str, stored_hash: &str) -> Result<bool, Aut
     }
 
     Ok(computed_bytes.ct_eq(stored_bytes).into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dummy_password_hash_is_valid_argon2() {
+        assert!(PasswordHash::new(DUMMY_PASSWORD_HASH).is_ok());
+        assert!(!verify_password("wrong-password", DUMMY_PASSWORD_HASH).unwrap());
+    }
 }

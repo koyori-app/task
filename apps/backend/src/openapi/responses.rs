@@ -1,41 +1,116 @@
-//! OpenAPI ドキュメント専用のレスポンス型（実行時には `AuthError` を使用）。
+//! OpenAPI 用の共通レスポンス型（ランタイムの `IntoResponse` とは別定義）。
 
 #![allow(dead_code)]
 
 use utoipa::IntoResponses;
 
-use crate::utils::auth::ServerError;
+use crate::error::ServerError;
 
-/// セッション認証必須 API の共通エラー（401 / 403 / 500）
 #[derive(IntoResponses)]
 pub enum SessionAuthErrors {
-    #[response(status = 401, description = "Unauthorized")]
+    #[response(status = 401, description = "ログインまたはセッションが必要です")]
     Unauthorized(#[to_schema] ServerError),
-    #[response(status = 403, description = "Forbidden")]
+    #[response(status = 403, description = "この操作は許可されていません")]
     Forbidden(#[to_schema] ServerError),
-    #[response(status = 500, description = "Internal server error")]
+    #[response(
+        status = 500,
+        description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
+    )]
     Internal(#[to_schema] ServerError),
 }
 
-/// ログイン等、認証前 API のエラー（403 / 500）
 #[derive(IntoResponses)]
 pub enum CredentialErrors {
-    #[response(status = 403, description = "Forbidden")]
-    Forbidden(#[to_schema] ServerError),
-    #[response(status = 500, description = "Internal server error")]
+    #[response(
+        status = 401,
+        description = "メールアドレスまたはパスワードが正しくありません"
+    )]
+    InvalidCredentials(#[to_schema] ServerError),
+    #[response(
+        status = 403,
+        description = "メールアドレスの確認が済んでいないためログインできません"
+    )]
+    EmailNotVerified(#[to_schema] ServerError),
+    #[response(
+        status = 500,
+        description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
+    )]
     Internal(#[to_schema] ServerError),
 }
 
-/// 認証必須だが 403 を返さない API のエラー（401 / 500）
+#[derive(IntoResponses)]
+pub enum RegisterErrors {
+    #[response(
+        status = 409,
+        description = "このメールアドレスはすでに登録されています"
+    )]
+    Conflict(#[to_schema] ServerError),
+    #[response(
+        status = 503,
+        description = "認証メールの送信準備に失敗しました。アカウントは作成済みのため、認証メールの再送をお試しください"
+    )]
+    VerificationEmailUnavailable(#[to_schema] ServerError),
+    #[response(
+        status = 500,
+        description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
+    )]
+    Internal(#[to_schema] ServerError),
+}
+
+#[derive(IntoResponses)]
+pub enum VerifyEmailErrors {
+    #[response(
+        status = 400,
+        description = "認証用リンクが無効か、または有効期限切れです"
+    )]
+    InvalidToken(#[to_schema] ServerError),
+    #[response(
+        status = 500,
+        description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
+    )]
+    Internal(#[to_schema] ServerError),
+}
+
 #[derive(IntoResponses)]
 pub enum UnauthorizedErrors {
-    #[response(status = 401, description = "Unauthorized")]
+    #[response(status = 401, description = "ログインまたはセッションが必要です")]
     Unauthorized(#[to_schema] ServerError),
-    #[response(status = 500, description = "Internal server error")]
+    #[response(
+        status = 500,
+        description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
+    )]
     Internal(#[to_schema] ServerError),
 }
 
-/// 内部エラーのみ（500）
 #[derive(IntoResponses)]
-#[response(status = 500, description = "Internal server error")]
+#[response(
+    status = 500,
+    description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
+)]
 pub struct InternalOnlyError(#[to_schema] ServerError);
+
+#[derive(IntoResponses)]
+pub enum ResendVerificationErrors {
+    #[response(
+        status = 404,
+        description = "入力されたメールアドレスのアカウントが見つかりませんでした"
+    )]
+    NotFound(#[to_schema] ServerError),
+    #[response(
+        status = 409,
+        description = "このアカウントではメール認証はもう完了しています"
+    )]
+    Conflict(#[to_schema] ServerError),
+    #[response(status = 429, description = "しばらくしてから再度お試しください")]
+    TooManyRequests(#[to_schema] ServerError),
+    #[response(
+        status = 503,
+        description = "認証メールの送信準備に失敗しました。しばらくしてから再送をお試しください"
+    )]
+    VerificationEmailUnavailable(#[to_schema] ServerError),
+    #[response(
+        status = 500,
+        description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
+    )]
+    Internal(#[to_schema] ServerError),
+}

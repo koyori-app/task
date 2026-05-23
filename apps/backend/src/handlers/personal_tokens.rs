@@ -7,18 +7,20 @@ use crate::dto::personal_tokens::{CreatePersonalTokenResponse, PersonalTokenResp
 use crate::openapi::SessionAuthErrors;
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-struct CreatePersonalTokenRequest {
-    // フィールドは後で定義
-}
+struct CreatePersonalTokenRequest {}
 
-// 対象ユーザーの新しいパーソナルアクセストークンを作成する
 #[axum::debug_handler]
 #[utoipa::path(
     post,
     path = "/",
+    summary = "パーソナルアクセストークンを発行",
     request_body = CreatePersonalTokenRequest,
     responses(
-        (status = 200, description = "Personal token created", body = CreatePersonalTokenResponse),
+        (
+            status = 200,
+            description = "発行したトークンの情報",
+            body = CreatePersonalTokenResponse
+        ),
         SessionAuthErrors,
     )
 )]
@@ -26,14 +28,18 @@ pub async fn create_personal_token() {
     todo!()
 }
 
-// 対象ユーザーの特定のパーソナルアクセストークンを取得する
 #[axum::debug_handler]
 #[utoipa::path(
     get,
     path = "/{id}",
-    params(("id" = Uuid, Path, description = "Personal token ID")),
+    summary = "指定したトークンを参照",
+    params(("id" = Uuid, Path, description = "トークンの識別子")),
     responses(
-        (status = 200, description = "Personal token found", body = PersonalTokenResponse),
+        (
+            status = 200,
+            description = "トークンの状態",
+            body = PersonalTokenResponse
+        ),
         SessionAuthErrors,
     )
 )]
@@ -41,14 +47,18 @@ pub async fn get_personal_token(Path(_id): Path<Uuid>) {
     todo!()
 }
 
-// 対象ユーザーの特定のパーソナルアクセストークンを失効させる
 #[axum::debug_handler]
 #[utoipa::path(
     delete,
     path = "/{id}",
-    params(("id" = Uuid, Path, description = "Personal token ID")),
+    summary = "指定したトークンを取り消し",
+    params(("id" = Uuid, Path, description = "トークンの識別子")),
     responses(
-        (status = 200, description = "Personal token revoked", body = PersonalTokenResponse),
+        (
+            status = 200,
+            description = "取り消し後の状態",
+            body = PersonalTokenResponse
+        ),
         SessionAuthErrors,
     )
 )]
@@ -56,13 +66,17 @@ pub async fn revoke_personal_token(Path(_id): Path<Uuid>) {
     todo!()
 }
 
-// 対象ユーザーの全てのパーソナルアクセストークンを失効させる
 #[axum::debug_handler]
 #[utoipa::path(
     delete,
     path = "/",
+    summary = "すべての個人用トークンを取り消し",
     responses(
-        (status = 200, description = "All personal tokens revoked", body = [PersonalTokenResponse]),
+        (
+            status = 200,
+            description = "現在アクティブなトークンの一覧（空になり得ます）",
+            body = [PersonalTokenResponse]
+        ),
         SessionAuthErrors,
     )
 )]

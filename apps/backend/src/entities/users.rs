@@ -17,8 +17,11 @@ pub struct Model {
     #[sea_orm(nullable)]
     #[schema(nullable)]
     pub avatar_url: Option<String>,
+    #[sea_orm(unique)]
     #[schema(value_type = String, format="email")]
     pub email: String,
+    /// メールアドレスの確認が済んでいるかどうか
+    pub email_verified: bool,
     #[schema(ignore)]
     #[serde(skip_serializing)]
     pub password_hash: String,
