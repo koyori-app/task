@@ -73,13 +73,15 @@ async fn validate_project_ids(
         return Err(AppError::BadRequest);
     }
 
+    let unique_ids: std::collections::HashSet<Uuid> = project_ids.iter().copied().collect();
+
     let count = projects::Entity::find()
         .filter(projects::Column::TenantId.eq(tenant_id))
-        .filter(projects::Column::Id.is_in(project_ids.to_vec()))
+        .filter(projects::Column::Id.is_in(unique_ids.iter().copied().collect::<Vec<_>>()))
         .count(&state.db)
         .await?;
 
-    if count != project_ids.len() as u64 {
+    if count != unique_ids.len() as u64 {
         return Err(AppError::Forbidden);
     }
     Ok(())
