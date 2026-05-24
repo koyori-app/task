@@ -53,7 +53,7 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ['vue', 'reka-ui', 'lucide-vue-next', '@phosphor-icons/vue'],
+    include: ['vue', 'reka-ui', '@lucide/vue', '@phosphor-icons/vue'],
   },
   server: {
     warmup: {
