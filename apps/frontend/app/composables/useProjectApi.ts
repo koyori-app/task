@@ -20,7 +20,7 @@ export type UpdateProjectPayload = {
 export function useProjectApi(tenantId: string) {
   const runtimeConfig = useRuntimeConfig();
   const apiBase = String(runtimeConfig.public.apiBase ?? '/api').replace(/\/$/, '');
-  const base = `${apiBase}/v1/tenants/${tenantId}/projects`;
+  const base = `${apiBase}/v1/tenants/${encodeURIComponent(tenantId)}/projects`;
 
   async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
     const res = await fetch(url, {
@@ -40,9 +40,12 @@ export function useProjectApi(tenantId: string) {
     list: () => request<Project[]>(base),
     create: (payload: CreateProjectPayload) =>
       request<Project>(base, { method: 'POST', body: JSON.stringify(payload) }),
-    get: (id: string) => request<Project>(`${base}/${id}`),
+    get: (id: string) => request<Project>(`${base}/${encodeURIComponent(id)}`),
     update: (id: string, payload: UpdateProjectPayload) =>
-      request<Project>(`${base}/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
-    remove: (id: string) => request<void>(`${base}/${id}`, { method: 'DELETE' }),
+      request<Project>(`${base}/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    remove: (id: string) => request<void>(`${base}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   };
 }

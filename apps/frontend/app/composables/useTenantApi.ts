@@ -45,9 +45,12 @@ export function useTenantApi() {
     list: () => request<Tenant[]>(base),
     create: (payload: CreateTenantPayload) =>
       request<Tenant>(base, { method: 'POST', body: JSON.stringify(payload) }),
-    get: (id: string) => request<Tenant>(`${base}/${id}`),
+    get: (id: string) => request<Tenant>(`${base}/${encodeURIComponent(id)}`),
     update: (id: string, payload: UpdateTenantPayload) =>
-      request<Tenant>(`${base}/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
-    remove: (id: string) => request<void>(`${base}/${id}`, { method: 'DELETE' }),
+      request<Tenant>(`${base}/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    remove: (id: string) => request<void>(`${base}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   };
 }

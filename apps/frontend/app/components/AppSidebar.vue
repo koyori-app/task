@@ -65,8 +65,10 @@ const tenantItems = computed(() =>
   tenants.value.map((t) => ({ id: t.id, name: t.name, display_id: t.display_id })),
 );
 
+// TODO: project-detail ルート（app/pages）定義後に NavProjects を有効化し、
+// NuxtLink で { name: 'project-detail', params: { projectId } } 等の実ルートを渡す
 const projectItems = computed(() =>
-  projects.value.map((p) => ({ name: p.name, url: '#', id: p.id })),
+  projects.value.map((p) => ({ name: p.name, url: '', id: p.id })),
 );
 
 async function loadProjects(tenantId: string) {
@@ -113,7 +115,8 @@ async function onTenantChange(tenantId: string) {
     </SidebarHeader>
     <SidebarContent>
       <NavMain :items="navMain" />
-      <NavProjects :projects="projectItems" />
+      <!-- TODO: プロジェクト詳細ページのルート未定義のため NavProjects を無効化（'#' プレースホルダー回避） -->
+      <!-- <NavProjects :projects="projectItems" /> -->
     </SidebarContent>
     <SidebarFooter>
       <NavUser
