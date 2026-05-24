@@ -12,7 +12,7 @@ import {
   PieChart,
   Settings2,
   SquareTerminal,
-} from 'lucide-vue-next';
+} from '@lucide/vue';
 import NavMain from '@/components/sidebar/NavMain.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
 import NavUser from '@/components/sidebar/NavUser.vue';
