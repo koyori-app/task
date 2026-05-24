@@ -25,6 +25,7 @@ pub struct CreateProjectRequest {
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateProjectRequest {
+    #[validate(length(min = 1))]
     pub name: Option<String>,
     pub description: Option<String>,
     #[validate(length(max = 8))]

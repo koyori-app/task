@@ -25,6 +25,7 @@ pub struct CreateTenantRequest {
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateTenantRequest {
+    #[validate(length(min = 1))]
     pub name: Option<String>,
     pub description: Option<String>,
     pub icon_url: Option<String>,

@@ -185,6 +185,7 @@ pub async fn add_member(
     request_body = UpdateMemberRequest,
     responses(
         (status = 200, description = "更新後のメンバー", body = project_members::Model),
+        (status = 409, description = "最後のAdminは降格できません", body = ServerError),
         CrudErrors,
     )
 )]
@@ -220,6 +221,7 @@ pub async fn update_member(
     ),
     responses(
         (status = 204, description = "削除しました"),
+        (status = 409, description = "最後のAdminは削除できません", body = ServerError),
         CrudErrors,
     )
 )]
