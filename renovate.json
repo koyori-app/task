@@ -8,7 +8,7 @@
   "labels": ["dependencies"],
   "packageRules": [
     {
-      "matchManagers": ["npm"],
+      "matchManagers": ["pnpm"],
       "matchUpdateTypes": ["minor", "patch"],
       "automerge": true
     },
