@@ -7,10 +7,7 @@ import { Elysia } from 'elysia';
 function getApp() {
   const app = new Elysia();
 
-  // In dev, Vite serves public/ automatically. In prod, serve built client assets.
-  if (process.env.NODE_ENV === 'production') {
-    app.use(staticPlugin({ assets: 'dist/client', prefix: '/' }));
-  }
+  app.use(staticPlugin({ assets: 'server/public', prefix: '/static-assets' }));
 
   vike(app, [settingInjector, createTodoHandler]);
 
