@@ -1,23 +1,28 @@
 
-# ServerError
+# CreateProjectRequest
 
-API 共通のエラー応答ボディ。
 
 ## Properties
 
 Name | Type
 ------------ | -------------
-`message` | string
+`description` | string
+`iconEmoji` | string
+`iconUrl` | string
+`name` | string
 
 ## Example
 
 ```typescript
-import type { ServerError } from ''
+import type { CreateProjectRequest } from ''
 
 // TODO: Update the object below with actual values
 const example = {
-  "message": internal-error,
-} satisfies ServerError
+  "description": null,
+  "iconEmoji": null,
+  "iconUrl": null,
+  "name": null,
+} satisfies CreateProjectRequest
 
 console.log(example)
 
@@ -26,7 +31,7 @@ const exampleJSON: string = JSON.stringify(example)
 console.log(exampleJSON)
 
 // Parse the JSON string back to an object
-const exampleParsed = JSON.parse(exampleJSON) as ServerError
+const exampleParsed = JSON.parse(exampleJSON) as CreateProjectRequest
 console.log(exampleParsed)
 ```
 

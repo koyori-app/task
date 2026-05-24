@@ -1,18 +1,14 @@
 <script setup lang="ts">
-import type { Component } from 'vue';
-
-import { PhCaretUpDown, PhPlus } from '@phosphor-icons/vue';
-import { ref } from 'vue';
+import { PhBuildings, PhCaretUpDown, PhPlus } from '@phosphor-icons/vue';
+import { ref, watch } from 'vue';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-
 import {
   SidebarMenu,
   SidebarMenuButton,
@@ -22,14 +18,37 @@ import {
 
 const props = defineProps<{
   tenants: {
+    id: string;
     name: string;
-    logo: Component;
-    plan: string;
+    display_id: string;
   }[];
 }>();
 
+const emit = defineEmits<{
+  (e: 'change', tenantId: string): void;
+}>();
+
 const { isMobile } = useSidebar();
-const activeTenant = ref(props.tenants[0]!);
+const activeTenant = ref(props.tenants[0] ?? null);
+
+watch(
+  () => props.tenants,
+  (list) => {
+    if (!activeTenant.value && list.length > 0) {
+      activeTenant.value = list[0]!;
+    } else if (
+      activeTenant.value &&
+      !list.find((t) => t.id === activeTenant.value!.id)
+    ) {
+      activeTenant.value = list[0] ?? null;
+    }
+  },
+);
+
+function select(tenant: (typeof props.tenants)[number]) {
+  activeTenant.value = tenant;
+  emit('change', tenant.id);
+}
 </script>
 
 <template>
@@ -44,13 +63,13 @@ const activeTenant = ref(props.tenants[0]!);
             <div
               class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground"
             >
-              <component :is="activeTenant.logo" class="size-4" />
+              <PhBuildings class="size-4" />
             </div>
             <div class="grid flex-1 text-left text-sm leading-tight">
               <span class="truncate font-medium">
-                {{ activeTenant.name }}
+                {{ activeTenant?.name ?? 'テナントなし' }}
               </span>
-              <span class="truncate text-xs">{{ activeTenant.plan }}</span>
+              <span class="truncate text-xs">{{ activeTenant?.display_id ?? '' }}</span>
             </div>
             <PhCaretUpDown class="ml-auto" />
           </SidebarMenuButton>
@@ -61,25 +80,24 @@ const activeTenant = ref(props.tenants[0]!);
           :side="isMobile ? 'bottom' : 'right'"
           :side-offset="4"
         >
-          <DropdownMenuLabel class="text-xs text-muted-foreground"> Teams </DropdownMenuLabel>
+          <DropdownMenuLabel class="text-xs text-muted-foreground">テナント</DropdownMenuLabel>
           <DropdownMenuItem
-            v-for="(tenant, index) in tenants"
-            :key="tenant.name"
+            v-for="tenant in tenants"
+            :key="tenant.id"
             class="gap-2 p-2"
-            @click="activeTenant = tenant"
+            @click="select(tenant)"
           >
             <div class="flex size-6 items-center justify-center rounded-sm border">
-              <component :is="tenant.logo" class="size-3.5 shrink-0" />
+              <PhBuildings class="size-3.5 shrink-0" />
             </div>
             {{ tenant.name }}
-            <!-- <DropdownMenuShortcut>⌘{{ index + 1 }}</DropdownMenuShortcut> -->
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem class="gap-2 p-2">
+          <DropdownMenuItem class="gap-2 p-2" disabled>
             <div class="flex size-6 items-center justify-center rounded-md border bg-transparent">
               <PhPlus class="size-4" />
             </div>
-            <div class="font-medium text-muted-foreground">Add tenant</div>
+            <div class="font-medium text-muted-foreground">テナントを追加</div>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

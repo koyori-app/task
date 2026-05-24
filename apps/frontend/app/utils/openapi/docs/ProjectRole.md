@@ -1,23 +1,20 @@
 
-# ServerError
+# ProjectRole
 
-API 共通のエラー応答ボディ。
 
 ## Properties
 
 Name | Type
 ------------ | -------------
-`message` | string
 
 ## Example
 
 ```typescript
-import type { ServerError } from ''
+import type { ProjectRole } from ''
 
 // TODO: Update the object below with actual values
 const example = {
-  "message": internal-error,
-} satisfies ServerError
+} satisfies ProjectRole
 
 console.log(example)
 
@@ -26,7 +23,7 @@ const exampleJSON: string = JSON.stringify(example)
 console.log(exampleJSON)
 
 // Parse the JSON string back to an object
-const exampleParsed = JSON.parse(exampleJSON) as ServerError
+const exampleParsed = JSON.parse(exampleJSON) as ProjectRole
 console.log(exampleParsed)
 ```
 

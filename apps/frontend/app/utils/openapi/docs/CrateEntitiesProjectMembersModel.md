@@ -1,23 +1,28 @@
 
-# ServerError
+# CrateEntitiesProjectMembersModel
 
-API 共通のエラー応答ボディ。
 
 ## Properties
 
 Name | Type
 ------------ | -------------
-`message` | string
+`id` | string
+`projectId` | string
+`role` | [ProjectRole](ProjectRole.md)
+`userId` | string
 
 ## Example
 
 ```typescript
-import type { ServerError } from ''
+import type { CrateEntitiesProjectMembersModel } from ''
 
 // TODO: Update the object below with actual values
 const example = {
-  "message": internal-error,
-} satisfies ServerError
+  "id": null,
+  "projectId": null,
+  "role": null,
+  "userId": null,
+} satisfies CrateEntitiesProjectMembersModel
 
 console.log(example)
 
@@ -26,7 +31,7 @@ const exampleJSON: string = JSON.stringify(example)
 console.log(exampleJSON)
 
 // Parse the JSON string back to an object
-const exampleParsed = JSON.parse(exampleJSON) as ServerError
+const exampleParsed = JSON.parse(exampleJSON) as CrateEntitiesProjectMembersModel
 console.log(exampleParsed)
 ```
 

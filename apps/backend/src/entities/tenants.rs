@@ -1,7 +1,7 @@
 use sea_orm::entity::prelude::*;
 use utoipa::ToSchema; // Scalar/OpenAPI用
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, ToSchema)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, ToSchema, serde::Serialize)]
 #[sea_orm(table_name = "tenants")]
 #[schema(as=crate::entities::tenants::Model)]
 pub struct Model {
