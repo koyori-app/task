@@ -11,6 +11,11 @@ pub struct PersonalTokenResponse {
     pub id: Uuid,
     pub name: String,
     pub token_last_four: String,
+    #[schema(value_type = String, format = "uuid")]
+    pub tenant_id: Uuid,
+    #[schema(value_type = Vec<String>, format = "uuid", nullable)]
+    pub project_ids: Option<Vec<Uuid>>,
+    pub scopes: ScopeList,
     #[schema(value_type = String, format = "date-time", nullable)]
     pub expires_at: Option<DateTimeWithTimeZone>,
     #[schema(value_type = String, format = "date-time", nullable)]
@@ -18,15 +23,21 @@ pub struct PersonalTokenResponse {
     pub revoked: bool,
     #[schema(value_type = String, format = "uuid")]
     pub user_id: Uuid,
-    pub scopes: ScopeList,
 }
 
 impl From<personal_tokens::Model> for PersonalTokenResponse {
     fn from(model: personal_tokens::Model) -> Self {
+        let project_ids = model
+            .allowed_project_ids
+            .as_ref()
+            .and_then(personal_tokens::parse_allowed_project_ids);
+
         Self {
             id: model.id,
             name: model.name,
             token_last_four: model.token_last_four,
+            tenant_id: model.tenant_id,
+            project_ids,
             expires_at: model.expires_at,
             last_used_at: model.last_used_at,
             revoked: model.revoked,
@@ -44,6 +55,11 @@ pub struct CreatePersonalTokenResponse {
     pub id: Uuid,
     pub name: String,
     pub token_last_four: String,
+    #[schema(value_type = String, format = "uuid")]
+    pub tenant_id: Uuid,
+    #[schema(value_type = Vec<String>, format = "uuid", nullable)]
+    pub project_ids: Option<Vec<Uuid>>,
+    pub scopes: ScopeList,
     #[schema(value_type = String, format = "date-time", nullable)]
     pub expires_at: Option<DateTimeWithTimeZone>,
     #[schema(value_type = String, format = "date-time", nullable)]
@@ -51,7 +67,6 @@ pub struct CreatePersonalTokenResponse {
     pub revoked: bool,
     #[schema(value_type = String, format = "uuid")]
     pub user_id: Uuid,
-    pub scopes: ScopeList,
 }
 
 impl CreatePersonalTokenResponse {
@@ -62,6 +77,8 @@ impl CreatePersonalTokenResponse {
             id: metadata.id,
             name: metadata.name,
             token_last_four: metadata.token_last_four,
+            tenant_id: metadata.tenant_id,
+            project_ids: metadata.project_ids,
             expires_at: metadata.expires_at,
             last_used_at: metadata.last_used_at,
             revoked: metadata.revoked,
