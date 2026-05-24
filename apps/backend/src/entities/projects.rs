@@ -12,6 +12,12 @@ pub struct Model {
     pub description: String,
     #[schema(value_type = String, format="uuid")]
     pub tenant_id: Uuid,
+    #[sea_orm(nullable)]
+    #[schema(nullable)]
+    pub icon_emoji: Option<String>,
+    #[sea_orm(nullable)]
+    #[schema(nullable)]
+    pub icon_url: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

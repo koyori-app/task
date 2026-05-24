@@ -17,12 +17,16 @@ pub struct CreateProjectRequest {
     pub name: String,
     #[serde(default)]
     pub description: String,
+    pub icon_emoji: Option<String>,
+    pub icon_url: Option<String>,
 }
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateProjectRequest {
     pub name: Option<String>,
     pub description: Option<String>,
+    pub icon_emoji: Option<String>,
+    pub icon_url: Option<String>,
 }
 
 async fn require_tenant_owner(
@@ -64,6 +68,8 @@ pub async fn create_project(
         name: Set(payload.name),
         description: Set(payload.description),
         tenant_id: Set(tenant_id),
+        icon_emoji: Set(payload.icon_emoji),
+        icon_url: Set(payload.icon_url),
     };
     let model = project.insert(&state.db).await?;
     Ok((StatusCode::CREATED, Json(model)))
@@ -155,6 +161,12 @@ pub async fn update_project(
     }
     if let Some(description) = payload.description {
         active.description = Set(description);
+    }
+    if let Some(icon_emoji) = payload.icon_emoji {
+        active.icon_emoji = Set(Some(icon_emoji));
+    }
+    if let Some(icon_url) = payload.icon_url {
+        active.icon_url = Set(Some(icon_url));
     }
     let updated = active.update(&state.db).await?;
     Ok(Json(updated))
