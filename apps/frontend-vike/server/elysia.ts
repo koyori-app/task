@@ -1,10 +1,13 @@
 import { createTodoHandler } from "#/middlewares/create-todo-handler";
 import { settingInjector } from "#/middlewares/setting-injector";
+import { staticPlugin } from '@elysiajs/static';
 import vike from '@vikejs/elysia';
 import { Elysia } from 'elysia';
 
 function getApp() {
   const app = new Elysia();
+
+  app.use(staticPlugin({ assets: 'public', prefix: '/' }));
 
   vike(app, [settingInjector, createTodoHandler]);
 
