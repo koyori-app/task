@@ -7,7 +7,7 @@ import { Elysia } from 'elysia';
 function getApp() {
   const app = new Elysia();
 
-  app.use(staticPlugin({ assets: 'public', prefix: '/' }));
+  app.use(staticPlugin({ assets: 'server/public', prefix: '/static-assets' }));
 
   vike(app, [settingInjector, createTodoHandler]);
 
