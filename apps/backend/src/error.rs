@@ -22,6 +22,10 @@ pub struct ServerError {
 pub enum AppError {
     #[error("internal error")]
     Internal(#[from] anyhow::Error),
+    #[error("not found")]
+    NotFound,
+    #[error("forbidden")]
+    Forbidden,
 }
 
 impl From<sea_orm::DbErr> for AppError {
@@ -37,6 +41,20 @@ impl IntoResponse for AppError {
                 debug!("app error: {:#?}", e);
                 internal_server_error().into_response()
             }
+            AppError::NotFound => (
+                StatusCode::NOT_FOUND,
+                Json(ServerError {
+                    message: "not-found".into(),
+                }),
+            )
+                .into_response(),
+            AppError::Forbidden => (
+                StatusCode::FORBIDDEN,
+                Json(ServerError {
+                    message: "forbidden".into(),
+                }),
+            )
+                .into_response(),
         }
     }
 }

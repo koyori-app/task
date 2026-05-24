@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { LucideIcon } from 'lucide-vue-next';
 import { PhFolder, PhShare, PhDotsThree, PhTrash } from '@phosphor-icons/vue';
 
 import {
@@ -21,9 +20,9 @@ import {
 
 defineProps<{
   projects: {
+    id: string;
     name: string;
     url: string;
-    icon: LucideIcon;
   }[];
 }>();
 
@@ -34,10 +33,10 @@ const { isMobile } = useSidebar();
   <SidebarGroup class="group-data-[collapsible=icon]:hidden">
     <SidebarGroupLabel>Projects</SidebarGroupLabel>
     <SidebarMenu>
-      <SidebarMenuItem v-for="item in projects" :key="item.name">
+      <SidebarMenuItem v-for="item in projects" :key="item.id">
         <SidebarMenuButton as-child>
           <a :href="item.url">
-            <component :is="item.icon" />
+            <PhFolder />
             <span>{{ item.name }}</span>
           </a>
         </SidebarMenuButton>
@@ -69,10 +68,10 @@ const { isMobile } = useSidebar();
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
-      <SidebarMenuItem>
-        <SidebarMenuButton class="text-sidebar-foreground/70">
+      <SidebarMenuItem v-if="projects.length === 0">
+        <SidebarMenuButton class="text-sidebar-foreground/70" disabled>
           <PhDotsThree class="text-sidebar-foreground/70" />
-          <span>More</span>
+          <span>プロジェクトなし</span>
         </SidebarMenuButton>
       </SidebarMenuItem>
     </SidebarMenu>

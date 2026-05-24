@@ -2,17 +2,12 @@
 import type { SidebarProps } from '@/components/ui/sidebar';
 
 import {
-  AudioWaveform,
   BookOpen,
   Bot,
-  Command,
-  Frame,
-  GalleryVerticalEnd,
-  Map,
-  PieChart,
   Settings2,
   SquareTerminal,
 } from 'lucide-vue-next';
+import { ref, onMounted, computed } from 'vue';
 import NavMain from '@/components/NavMain.vue';
 import NavProjects from '@/components/NavProjects.vue';
 import NavUser from '@/components/NavUser.vue';
@@ -25,158 +20,105 @@ import {
   SidebarHeader,
   SidebarRail,
 } from '@/components/ui/sidebar';
+import { useTenantApi, type Tenant } from '@/composables/useTenantApi';
+import { useProjectApi, type Project } from '@/composables/useProjectApi';
+import { useAuthApi } from '@/composables/useAuthApi';
 
 const props = withDefaults(defineProps<SidebarProps>(), {
   collapsible: 'icon',
 });
 
-// This is sample data.
-const data = {
-  user: {
-    name: 'shadcn',
-    email: 'm@example.com',
-    avatar: '/avatars/shadcn.jpg',
+const navMain = [
+  {
+    title: 'Labels',
+    url: '/labels',
+    icon: SquareTerminal,
+    isActive: true,
   },
-  teams: [
-    {
-      name: 'Acme Inc',
-      logo: GalleryVerticalEnd,
-      plan: 'Enterprise',
-    },
-    {
-      name: 'Acme Corp.',
-      logo: AudioWaveform,
-      plan: 'Startup',
-    },
-    {
-      name: 'Evil Corp.',
-      logo: Command,
-      plan: 'Free',
-    },
-  ],
-  navMain: [
-    {
-      title: 'Labels',
-      url: '/labels',
-      icon: SquareTerminal,
-      isActive: true,
-    },
-    {
-      title: 'Playground',
-      url: '#',
-      icon: SquareTerminal,
-      items: [
-        {
-          title: 'History',
-          url: '#',
-        },
-        {
-          title: 'Starred',
-          url: '#',
-        },
-        {
-          title: 'Settings',
-          url: '#',
-        },
-      ],
-    },
-    {
-      title: 'Models',
-      url: '#',
-      icon: Bot,
-      items: [
-        {
-          title: 'Genesis',
-          url: '#',
-        },
-        {
-          title: 'Explorer',
-          url: '#',
-        },
-        {
-          title: 'Quantum',
-          url: '#',
-        },
-      ],
-    },
-    {
-      title: 'Documentation',
-      url: '#',
-      icon: BookOpen,
-      items: [
-        {
-          title: 'Introduction',
-          url: '#',
-        },
-        {
-          title: 'Get Started',
-          url: '#',
-        },
-        {
-          title: 'Tutorials',
-          url: '#',
-        },
-        {
-          title: 'Changelog',
-          url: '#',
-        },
-      ],
-    },
-    {
-      title: 'Settings',
-      url: '#',
-      icon: Settings2,
-      items: [
-        {
-          title: 'General',
-          url: '#',
-        },
-        {
-          title: 'Team',
-          url: '#',
-        },
-        {
-          title: 'Billing',
-          url: '#',
-        },
-        {
-          title: 'Limits',
-          url: '#',
-        },
-      ],
-    },
-  ],
-  projects: [
-    {
-      name: 'Design Engineering',
-      url: '#',
-      icon: Frame,
-    },
-    {
-      name: 'Sales & Marketing',
-      url: '#',
-      icon: PieChart,
-    },
-    {
-      name: 'Travel',
-      url: '#',
-      icon: Map,
-    },
-  ],
-};
+  {
+    title: 'Documentation',
+    url: '#',
+    icon: BookOpen,
+    items: [
+      { title: 'Introduction', url: '#' },
+      { title: 'Get Started', url: '#' },
+    ],
+  },
+  {
+    title: 'Settings',
+    url: '#',
+    icon: Settings2,
+    items: [
+      { title: 'General', url: '#' },
+      { title: 'Team', url: '#' },
+      { title: 'Billing', url: '#' },
+    ],
+  },
+];
+
+const currentUser = ref<{ name: string; email: string; avatar: string } | null>(null);
+const tenants = ref<Tenant[]>([]);
+const activeTenantId = ref<string | null>(null);
+const projects = ref<Project[]>([]);
+
+const tenantItems = computed(() =>
+  tenants.value.map((t) => ({ id: t.id, name: t.name, display_id: t.display_id })),
+);
+
+const projectItems = computed(() =>
+  projects.value.map((p) => ({ name: p.name, url: '#', id: p.id })),
+);
+
+async function loadProjects(tenantId: string) {
+  try {
+    const api = useProjectApi(tenantId);
+    projects.value = await api.list();
+  } catch {
+    projects.value = [];
+  }
+}
+
+onMounted(async () => {
+  const authApi = useAuthApi();
+  const tenantApi = useTenantApi();
+
+  try {
+    const user = await authApi.getCurrentUser();
+    currentUser.value = { name: user.username, email: user.email, avatar: '' };
+  } catch {
+    // 未ログイン時はデフォルト表示のまま
+  }
+
+  try {
+    tenants.value = await tenantApi.list();
+    if (tenants.value.length > 0) {
+      activeTenantId.value = tenants.value[0]!.id;
+      await loadProjects(activeTenantId.value);
+    }
+  } catch {
+    // テナント取得失敗時はプロジェクト一覧も空のまま
+  }
+});
+
+async function onTenantChange(tenantId: string) {
+  activeTenantId.value = tenantId;
+  await loadProjects(tenantId);
+}
 </script>
 
 <template>
   <Sidebar v-bind="props">
     <SidebarHeader>
-      <TenantSwitcher :tenants="data.teams" />
+      <TenantSwitcher :tenants="tenantItems" @change="onTenantChange" />
     </SidebarHeader>
     <SidebarContent>
-      <NavMain :items="data.navMain" />
-      <NavProjects :projects="data.projects" />
+      <NavMain :items="navMain" />
+      <NavProjects :projects="projectItems" />
     </SidebarContent>
     <SidebarFooter>
-      <NavUser :user="data.user" />
+      <NavUser
+        :user="currentUser ?? { name: '—', email: '', avatar: '' }"
+      />
     </SidebarFooter>
     <SidebarRail />
   </Sidebar>

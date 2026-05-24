@@ -7,7 +7,7 @@ use utoipa::{PartialSchema, ToSchema};
 
 pub use crate::error::ServerError;
 pub use responses::{
-    CredentialErrors, InternalOnlyError, RegisterErrors, ResendVerificationErrors,
+    CredentialErrors, CrudErrors, InternalOnlyError, RegisterErrors, ResendVerificationErrors,
     SessionAuthErrors, UnauthorizedErrors, VerifyEmailErrors,
 };
 

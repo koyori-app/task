@@ -90,6 +90,21 @@ pub enum UnauthorizedErrors {
 pub struct InternalOnlyError(#[to_schema] ServerError);
 
 #[derive(IntoResponses)]
+pub enum CrudErrors {
+    #[response(status = 401, description = "ログインまたはセッションが必要です")]
+    Unauthorized(#[to_schema] ServerError),
+    #[response(status = 403, description = "この操作は許可されていません")]
+    Forbidden(#[to_schema] ServerError),
+    #[response(status = 404, description = "リソースが見つかりません")]
+    NotFound(#[to_schema] ServerError),
+    #[response(
+        status = 500,
+        description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
+    )]
+    Internal(#[to_schema] ServerError),
+}
+
+#[derive(IntoResponses)]
 pub enum ResendVerificationErrors {
     #[response(
         status = 404,
