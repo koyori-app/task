@@ -27,10 +27,12 @@ pub struct PersonalTokenResponse {
 
 impl From<personal_tokens::Model> for PersonalTokenResponse {
     fn from(model: personal_tokens::Model) -> Self {
+        // parse 失敗時は Some(vec![]) にフォールバック（None = 全許可にしないため）
         let project_ids = model
             .allowed_project_ids
             .as_ref()
-            .and_then(|v| personal_tokens::parse_allowed_project_ids(v).ok().flatten());
+            .map(|v| personal_tokens::parse_allowed_project_ids(v).unwrap_or(Some(vec![])))
+            .flatten();
 
         Self {
             id: model.id,
