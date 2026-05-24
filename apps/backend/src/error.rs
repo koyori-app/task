@@ -26,6 +26,8 @@ pub enum AppError {
     NotFound,
     #[error("forbidden")]
     Forbidden,
+    #[error("conflict")]
+    Conflict,
 }
 
 impl From<sea_orm::DbErr> for AppError {
@@ -52,6 +54,13 @@ impl IntoResponse for AppError {
                 StatusCode::FORBIDDEN,
                 Json(ServerError {
                     message: "forbidden".into(),
+                }),
+            )
+                .into_response(),
+            AppError::Conflict => (
+                StatusCode::CONFLICT,
+                Json(ServerError {
+                    message: "conflict".into(),
                 }),
             )
                 .into_response(),

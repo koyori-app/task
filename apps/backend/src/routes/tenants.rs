@@ -17,6 +17,14 @@ pub fn routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(crate::handlers::projects::create_project))
                 .routes(routes!(crate::handlers::projects::get_project))
                 .routes(routes!(crate::handlers::projects::update_project))
-                .routes(routes!(crate::handlers::projects::delete_project)),
+                .routes(routes!(crate::handlers::projects::delete_project))
+                .nest(
+                    "/{project_id}/members",
+                    OpenApiRouter::<AppState>::new()
+                        .routes(routes!(crate::handlers::project_members::list_members))
+                        .routes(routes!(crate::handlers::project_members::add_member))
+                        .routes(routes!(crate::handlers::project_members::update_member))
+                        .routes(routes!(crate::handlers::project_members::remove_member)),
+                ),
         )
 }
