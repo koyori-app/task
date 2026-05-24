@@ -148,10 +148,9 @@ pub async fn create_personal_token(
     .insert(&state.db)
     .await?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(CreatePersonalTokenResponse::new(token_value, model)),
-    ))
+    let resp = CreatePersonalTokenResponse::new(token_value, model)
+        .map_err(|e| AppError::Internal(e.into()))?;
+    Ok((StatusCode::CREATED, Json(resp)))
 }
 
 #[axum::debug_handler]
@@ -176,7 +175,9 @@ pub async fn get_personal_token(
 ) -> Result<Json<PersonalTokenResponse>, AppError> {
     auth.require_session()?;
     let token = get_owned_token(&state, id, auth.user_id).await?;
-    Ok(Json(PersonalTokenResponse::from(token)))
+    let resp = PersonalTokenResponse::try_from(token)
+        .map_err(|e| AppError::Internal(e.into()))?;
+    Ok(Json(resp))
 }
 
 #[axum::debug_handler]
