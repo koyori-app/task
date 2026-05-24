@@ -19,7 +19,12 @@ use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tracing::debug;
 
+use chrono::Utc;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+use crate::entities::personal_tokens::{self, Entity as PersonalTokenEntity};
 use crate::error::{ServerError, internal_server_error};
+use sea_orm::DatabaseConnection;
 
 #[derive(Debug, Error)]
 pub enum AuthError {
@@ -226,6 +231,44 @@ pub fn create_personal_token_hash(token: &str) -> Result<String, AuthError> {
     mac.update(token.as_bytes());
     let result = mac.finalize().into_bytes();
     Ok(URL_SAFE_NO_PAD.encode(result.as_slice()))
+}
+
+/// 平文 PAT を HMAC ハッシュ化する（DB 保存・lookup 用）。
+pub fn hash_personal_token(token: &str) -> Result<String, AuthError> {
+    create_personal_token_hash(token)
+}
+
+/// DB から取得した PAT レコード（認証成功時）。
+pub type PersonalTokenRecord = personal_tokens::Model;
+
+/// Bearer トークンを検証し、有効な PAT レコードを返す。
+pub async fn authenticate_personal_token(
+    db: &DatabaseConnection,
+    token_plaintext: &str,
+) -> Result<PersonalTokenRecord, AuthError> {
+    let token_hash = hash_personal_token(token_plaintext)?;
+
+    let token = PersonalTokenEntity::find()
+        .filter(personal_tokens::Column::TokenHash.eq(token_hash))
+        .one(db)
+        .await?
+        .ok_or(AuthError::Unauthorized)?;
+
+    if !verify_personal_token(token_plaintext, &token.token_hash)? {
+        return Err(AuthError::Unauthorized);
+    }
+
+    if token.revoked {
+        return Err(AuthError::Unauthorized);
+    }
+
+    if let Some(expires) = &token.expires_at {
+        if expires < &Utc::now().fixed_offset() {
+            return Err(AuthError::Unauthorized);
+        }
+    }
+
+    Ok(token)
 }
 
 /// 受信したトークンを、DB にある `stored_hash` と比較して検証する。
