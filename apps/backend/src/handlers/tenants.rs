@@ -5,7 +5,7 @@ use sea_orm::prelude::Uuid;
 use serde::Deserialize;
 use validator::Validate;
 
-use crate::entities::tenants;
+use crate::entities::{scopes::Scope, tenants};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -74,6 +74,7 @@ pub async fn list_tenants(
     State(state): State<AppState>,
     auth: AuthUser,
 ) -> Result<Json<Vec<tenants::Model>>, AppError> {
+    auth.require_scope(Scope::AdminTenant)?;
     let tenants = tenants::Entity::find()
         .filter(tenants::Column::OwnerId.eq(auth.user_id))
         .all(&state.db)
@@ -97,6 +98,8 @@ pub async fn get_tenant(
     auth: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<tenants::Model>, AppError> {
+    auth.require_scope(Scope::AdminTenant)?;
+    auth.ensure_tenant_access(&state, id, None).await?;
     let tenant = tenants::Entity::find_by_id(id)
         .one(&state.db)
         .await?
@@ -125,6 +128,8 @@ pub async fn update_tenant(
     Path(id): Path<Uuid>,
     Valid(Json(payload)): Valid<Json<UpdateTenantRequest>>,
 ) -> Result<Json<tenants::Model>, AppError> {
+    auth.require_scope(Scope::AdminTenant)?;
+    auth.ensure_tenant_access(&state, id, None).await?;
     let tenant = tenants::Entity::find_by_id(id)
         .one(&state.db)
         .await?
