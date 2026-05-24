@@ -13,7 +13,7 @@ use validator::Validate;
 
 use crate::entities::{project_members, projects, tenants, users};
 use crate::entities::project_members::ProjectRole;
-use crate::error::AppError;
+use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::AppState;
@@ -88,6 +88,15 @@ async fn find_member(
         .ok_or(AppError::NotFound)
 }
 
+async fn count_admins(state: &AppState, project_id: Uuid) -> Result<u64, AppError> {
+    use sea_orm::PaginatorTrait;
+    Ok(project_members::Entity::find()
+        .filter(project_members::Column::ProjectId.eq(project_id))
+        .filter(project_members::Column::Role.eq(ProjectRole::Admin))
+        .count(&state.db)
+        .await?)
+}
+
 #[axum::debug_handler]
 #[utoipa::path(
     get,
@@ -127,6 +136,7 @@ pub async fn list_members(
     request_body = AddMemberRequest,
     responses(
         (status = 201, description = "追加されたメンバー", body = project_members::Model),
+        (status = 409, description = "既にメンバーとして登録済み", body = ServerError),
         CrudErrors,
     )
 )]
@@ -185,8 +195,14 @@ pub async fn update_member(
     Valid(Json(payload)): Valid<Json<UpdateMemberRequest>>,
 ) -> Result<Json<project_members::Model>, AppError> {
     require_project_admin(&state, tenant_id, project_id, auth.user_id).await?;
-    let member = find_member(&state, project_id, member_user_id).await?;
-    let mut active: project_members::ActiveModel = member.into();
+    let current = find_member(&state, project_id, member_user_id).await?;
+    if current.role == ProjectRole::Admin
+        && payload.role != ProjectRole::Admin
+        && count_admins(&state, project_id).await? <= 1
+    {
+        return Err(AppError::Conflict);
+    }
+    let mut active: project_members::ActiveModel = current.into();
     active.role = Set(payload.role);
     let updated = active.update(&state.db).await?;
     Ok(Json(updated))
@@ -214,6 +230,9 @@ pub async fn remove_member(
 ) -> Result<StatusCode, AppError> {
     require_project_admin(&state, tenant_id, project_id, auth.user_id).await?;
     let member = find_member(&state, project_id, member_user_id).await?;
+    if member.role == ProjectRole::Admin && count_admins(&state, project_id).await? <= 1 {
+        return Err(AppError::Conflict);
+    }
     project_members::Entity::delete_by_id(member.id)
         .exec(&state.db)
         .await?;

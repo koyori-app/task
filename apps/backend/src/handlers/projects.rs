@@ -5,7 +5,7 @@ use sea_orm::prelude::Uuid;
 use serde::Deserialize;
 use validator::Validate;
 
-use crate::entities::{projects, tenants};
+use crate::entities::{project_members, projects, tenants};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -31,6 +31,22 @@ pub struct UpdateProjectRequest {
     pub icon_emoji: Option<String>,
     #[validate(url)]
     pub icon_url: Option<String>,
+    #[serde(default)]
+    pub clear_icon_emoji: bool,
+    #[serde(default)]
+    pub clear_icon_url: bool,
+}
+
+async fn is_tenant_owner(
+    state: &AppState,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, AppError> {
+    let tenant = tenants::Entity::find_by_id(tenant_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(tenant.owner_id == user_id)
 }
 
 async fn require_tenant_owner(
@@ -38,14 +54,33 @@ async fn require_tenant_owner(
     tenant_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), AppError> {
-    let tenant = tenants::Entity::find_by_id(tenant_id)
+    if is_tenant_owner(state, tenant_id, user_id).await? {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
+}
+
+async fn require_project_readable(
+    state: &AppState,
+    tenant_id: Uuid,
+    project_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    if is_tenant_owner(state, tenant_id, user_id).await? {
+        return Ok(());
+    }
+    let is_member = project_members::Entity::find()
+        .filter(project_members::Column::ProjectId.eq(project_id))
+        .filter(project_members::Column::UserId.eq(user_id))
         .one(&state.db)
         .await?
-        .ok_or(AppError::NotFound)?;
-    if tenant.owner_id != user_id {
-        return Err(AppError::Forbidden);
+        .is_some();
+    if is_member {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
     }
-    Ok(())
 }
 
 #[axum::debug_handler]
@@ -95,9 +130,29 @@ pub async fn list_projects(
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
 ) -> Result<Json<Vec<projects::Model>>, AppError> {
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
+    if is_tenant_owner(&state, tenant_id, auth.user_id).await? {
+        let list = projects::Entity::find()
+            .filter(projects::Column::TenantId.eq(tenant_id))
+            .all(&state.db)
+            .await?;
+        return Ok(Json(list));
+    }
+
+    let member_project_ids: Vec<Uuid> = project_members::Entity::find()
+        .filter(project_members::Column::UserId.eq(auth.user_id))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|m| m.project_id)
+        .collect();
+
+    if member_project_ids.is_empty() {
+        return Err(AppError::Forbidden);
+    }
+
     let list = projects::Entity::find()
         .filter(projects::Column::TenantId.eq(tenant_id))
+        .filter(projects::Column::Id.is_in(member_project_ids))
         .all(&state.db)
         .await?;
     Ok(Json(list))
@@ -122,7 +177,7 @@ pub async fn get_project(
     auth: AuthUser,
     Path((tenant_id, id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<projects::Model>, AppError> {
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
+    require_project_readable(&state, tenant_id, id, auth.user_id).await?;
     let project = projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))
         .one(&state.db)
@@ -150,7 +205,7 @@ pub async fn update_project(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, id)): Path<(Uuid, Uuid)>,
-    Json(payload): Json<UpdateProjectRequest>,
+    Valid(Json(payload)): Valid<Json<UpdateProjectRequest>>,
 ) -> Result<Json<projects::Model>, AppError> {
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
     let project = projects::Entity::find_by_id(id)
@@ -166,10 +221,14 @@ pub async fn update_project(
     if let Some(description) = payload.description {
         active.description = Set(description);
     }
-    if let Some(icon_emoji) = payload.icon_emoji {
+    if payload.clear_icon_emoji {
+        active.icon_emoji = Set(None);
+    } else if let Some(icon_emoji) = payload.icon_emoji {
         active.icon_emoji = Set(Some(icon_emoji));
     }
-    if let Some(icon_url) = payload.icon_url {
+    if payload.clear_icon_url {
+        active.icon_url = Set(None);
+    } else if let Some(icon_url) = payload.icon_url {
         active.icon_url = Set(Some(icon_url));
     }
     let updated = active.update(&state.db).await?;

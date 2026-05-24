@@ -122,7 +122,7 @@ pub async fn update_tenant(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(id): Path<Uuid>,
-    Json(payload): Json<UpdateTenantRequest>,
+    Valid(Json(payload)): Valid<Json<UpdateTenantRequest>>,
 ) -> Result<Json<tenants::Model>, AppError> {
     let tenant = tenants::Entity::find_by_id(id)
         .one(&state.db)
