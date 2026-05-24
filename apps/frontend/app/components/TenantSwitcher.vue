@@ -36,6 +36,11 @@ watch(
   (list) => {
     if (!activeTenant.value && list.length > 0) {
       activeTenant.value = list[0]!;
+    } else if (
+      activeTenant.value &&
+      !list.find((t) => t.id === activeTenant.value!.id)
+    ) {
+      activeTenant.value = list[0] ?? null;
     }
   },
 );
