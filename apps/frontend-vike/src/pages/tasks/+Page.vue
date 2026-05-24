@@ -16,7 +16,7 @@ import {
   useVueTable,
 } from '@tanstack/vue-table'
 import { createReusableTemplate } from '@vueuse/core'
-import { ArrowUpDown, ChevronDown, MoreHorizontal } from 'lucide-vue-next'
+import { ArrowUpDown, ChevronDown, MoreHorizontal } from '@lucide/vue'
 import { h, ref } from 'vue'
 
 import { valueUpdater } from '@/components/ui/table/utils'

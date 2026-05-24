@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { LucideIcon } from 'lucide-vue-next';
+import type { LucideIcon } from '@lucide/vue';
 import { PhFolder, PhShare, PhDotsThree, PhTrash } from '@phosphor-icons/vue';
 
 import {
