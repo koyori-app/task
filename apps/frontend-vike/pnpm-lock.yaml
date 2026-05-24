@@ -27,6 +27,9 @@ importers:
       '@sentry/vue':
         specifier: 10.52.0
         version: 10.52.0(vue@3.5.34(typescript@6.0.3))
+      '@tanstack/vue-table':
+        specifier: 8.21.3
+        version: 8.21.3(vue@3.5.34(typescript@6.0.3))
       '@unhead/vue':
         specifier: 3.1.0
         version: 3.1.0(@voidzero-dev/vite-plus-core@0.1.21)(esbuild@0.28.0)(lightningcss@1.32.0)(rolldown@1.0.1)(typescript@6.0.3)(vue@3.5.34(typescript@6.0.3))
@@ -1818,8 +1821,18 @@ packages:
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
 
+  '@tanstack/table-core@8.21.3':
+    resolution: {integrity: sha512-ldZXEhOBb8Is7xLs01fR3YEc3DERiz5silj8tnGkFZytt1abEvl/GhUmCE0PMLaMPTa3Jk4HbKmRlHmu+gCftg==}
+    engines: {node: '>=12'}
+
   '@tanstack/virtual-core@3.14.0':
     resolution: {integrity: sha512-JLANqGy/D6k4Ujmh8Tr25lGimuOXNiaVyXaCAZS0W+1390sADdGnyUdSWNIfd49gebtIxGMij4IktRVzrdr12Q==}
+
+  '@tanstack/vue-table@8.21.3':
+    resolution: {integrity: sha512-rusRyd77c5tDPloPskctMyPLFEQUeBzxdQ+2Eow4F7gDPlPOB1UnnhzfpdvqZ8ZyX2rRNGmqNnQWm87OI2OQPw==}
+    engines: {node: '>=12'}
+    peerDependencies:
+      vue: '>=3.2'
 
   '@tanstack/vue-virtual@3.13.24':
     resolution: {integrity: sha512-A0k2qF0zFSUStXSZkGXABouXr2Tw2Ztl/cVIYG9qy84uR8W7UNjAcX3DvzBS3YnDcwvLxab8v7dbmYBZ39itDA==}
@@ -5345,7 +5358,14 @@ snapshots:
       tailwindcss: 4.3.0
       vite: '@voidzero-dev/vite-plus-core@0.1.21(@types/node@20.19.37)(@vitejs/devtools@0.1.24)(esbuild@0.28.0)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)'
 
+  '@tanstack/table-core@8.21.3': {}
+
   '@tanstack/virtual-core@3.14.0': {}
+
+  '@tanstack/vue-table@8.21.3(vue@3.5.34(typescript@6.0.3))':
+    dependencies:
+      '@tanstack/table-core': 8.21.3
+      vue: 3.5.34(typescript@6.0.3)
 
   '@tanstack/vue-virtual@3.13.24(vue@3.5.34(typescript@6.0.3))':
     dependencies:
