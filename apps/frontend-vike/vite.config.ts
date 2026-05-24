@@ -4,6 +4,8 @@ import vue from '@vitejs/plugin-vue';
 import tailwindcss from '@tailwindcss/vite';
 import { sentryVitePlugin } from '@sentry/vite-plugin';
 import { analyzer, unstableRolldownAdapter } from 'vite-bundle-analyzer'
+
+const analyze = process.env.ANALYZE === 'true';
 /// <reference types="@batijs/core/types" />
 
 import vike from 'vike/plugin';
@@ -36,7 +38,7 @@ const sentryPlugin = sentryEnabled
 export default defineConfig({
   // Standalone build UI (vite build). Embedded client uses +onCreateApp inject.
   plugins: [
-    unstableRolldownAdapter(analyzer()),
+    ...(analyze ? [unstableRolldownAdapter(analyzer())] : []),
     vike(),
     ...(sentryPlugin ? [sentryPlugin] : []),
     tailwindcss(),
@@ -61,7 +63,7 @@ export default defineConfig({
     },
   },
   build: {
-    sourcemap: true,
+    sourcemap: analyze || process.env.NODE_ENV !== 'production',
     rollupOptions: {
       output: {
         manualChunks(id: string) {
