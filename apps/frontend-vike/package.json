@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@elysiajs/static": "1.4.10",
+    "@lucide/vue": "1.16.0",
     "@phosphor-icons/vue": "2.2.1",
     "@sentry/vue": "10.52.0",
     "@tanstack/vue-table": "8.21.3",
@@ -27,7 +28,6 @@
     "dotenv": "17.4.2",
     "elysia": "1.4.28",
     "hono": "4.12.18",
-    "lucide-vue-next": "1.0.0",
     "reka-ui": "2.9.7",
     "tailwind-merge": "3.6.0",
     "vike": "0.4.259",
