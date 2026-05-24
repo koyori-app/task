@@ -17,7 +17,9 @@ pub struct CreateProjectRequest {
     pub name: String,
     #[serde(default)]
     pub description: String,
+    #[validate(length(max = 8))]
     pub icon_emoji: Option<String>,
+    #[validate(url)]
     pub icon_url: Option<String>,
 }
 
@@ -25,7 +27,9 @@ pub struct CreateProjectRequest {
 pub struct UpdateProjectRequest {
     pub name: Option<String>,
     pub description: Option<String>,
+    #[validate(length(max = 8))]
     pub icon_emoji: Option<String>,
+    #[validate(url)]
     pub icon_url: Option<String>,
 }
 
@@ -192,12 +196,11 @@ pub async fn delete_project(
     Path((tenant_id, id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
-    let project = projects::Entity::find_by_id(id)
+    projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
-    let _ = project;
     projects::Entity::delete_by_id(id).exec(&state.db).await?;
     Ok(StatusCode::NO_CONTENT)
 }

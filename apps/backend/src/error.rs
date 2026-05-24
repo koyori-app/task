@@ -32,6 +32,10 @@ pub enum AppError {
 
 impl From<sea_orm::DbErr> for AppError {
     fn from(err: sea_orm::DbErr) -> Self {
+        let msg = err.to_string();
+        if msg.contains("duplicate key") || msg.contains("UNIQUE constraint failed") {
+            return AppError::Conflict;
+        }
         AppError::Internal(err.into())
     }
 }

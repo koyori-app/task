@@ -75,29 +75,6 @@ pub(crate) async fn require_project_admin(
     }
 }
 
-async fn require_project_member_or_tenant_owner(
-    state: &AppState,
-    tenant_id: Uuid,
-    project_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    let _ = get_project_in_tenant(state, tenant_id, project_id).await?;
-    if is_tenant_owner(state, tenant_id, user_id).await? {
-        return Ok(());
-    }
-    let is_member = project_members::Entity::find()
-        .filter(project_members::Column::ProjectId.eq(project_id))
-        .filter(project_members::Column::UserId.eq(user_id))
-        .one(&state.db)
-        .await?
-        .is_some();
-    if is_member {
-        Ok(())
-    } else {
-        Err(AppError::Forbidden)
-    }
-}
-
 async fn find_member(
     state: &AppState,
     project_id: Uuid,
@@ -130,7 +107,7 @@ pub async fn list_members(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Vec<project_members::Model>>, AppError> {
-    require_project_member_or_tenant_owner(&state, tenant_id, project_id, auth.user_id).await?;
+    require_project_admin(&state, tenant_id, project_id, auth.user_id).await?;
     let members = project_members::Entity::find()
         .filter(project_members::Column::ProjectId.eq(project_id))
         .all(&state.db)
@@ -160,7 +137,6 @@ pub async fn add_member(
     Valid(Json(payload)): Valid<Json<AddMemberRequest>>,
 ) -> Result<(StatusCode, Json<project_members::Model>), AppError> {
     require_project_admin(&state, tenant_id, project_id, auth.user_id).await?;
-    let _ = get_project_in_tenant(&state, tenant_id, project_id).await?;
 
     users::Entity::find_by_id(payload.user_id)
         .one(&state.db)
