@@ -30,7 +30,7 @@ impl From<personal_tokens::Model> for PersonalTokenResponse {
         let project_ids = model
             .allowed_project_ids
             .as_ref()
-            .and_then(personal_tokens::parse_allowed_project_ids);
+            .and_then(|v| personal_tokens::parse_allowed_project_ids(v).ok().flatten());
 
         Self {
             id: model.id,

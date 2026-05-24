@@ -103,6 +103,9 @@ impl AuthUser {
                         }
                     }
                     verify_project_in_tenant(state, tenant_id, project_id).await?;
+                } else if allowed_project_ids.is_some() {
+                    // プロジェクト制限付き PAT はテナント全体操作（project_id=None）を禁止
+                    return Err(AppError::Forbidden);
                 }
                 Ok(())
             }
@@ -188,10 +191,11 @@ impl FromRequestParts<AppState> for AuthUser {
                 method: AuthMethod::PersonalToken {
                     token_id: record.id,
                     tenant_id: record.tenant_id,
-                    allowed_project_ids: record
-                        .allowed_project_ids
-                        .as_ref()
-                        .and_then(crate::entities::personal_tokens::parse_allowed_project_ids),
+                    allowed_project_ids: match record.allowed_project_ids.as_ref() {
+                        None => None,
+                        Some(v) => crate::entities::personal_tokens::parse_allowed_project_ids(v)
+                            .map_err(|e| AuthError::Internal(anyhow::anyhow!("allowed_project_ids parse error: {e}")))?,
+                    },
                     scopes: record.scopes.clone(),
                 },
             })

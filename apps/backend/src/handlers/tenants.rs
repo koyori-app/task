@@ -6,6 +6,7 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::entities::{scopes::Scope, tenants};
+use crate::extractors::AuthMethod;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -75,10 +76,22 @@ pub async fn list_tenants(
     auth: AuthUser,
 ) -> Result<Json<Vec<tenants::Model>>, AppError> {
     auth.require_scope(Scope::AdminTenant)?;
-    let tenants = tenants::Entity::find()
-        .filter(tenants::Column::OwnerId.eq(auth.user_id))
-        .all(&state.db)
-        .await?;
+    let tenants = match &auth.method {
+        AuthMethod::Session => {
+            tenants::Entity::find()
+                .filter(tenants::Column::OwnerId.eq(auth.user_id))
+                .all(&state.db)
+                .await?
+        }
+        AuthMethod::PersonalToken { tenant_id, .. } => {
+            // PAT はバインドされた単一テナントのみ返す
+            tenants::Entity::find_by_id(*tenant_id)
+                .one(&state.db)
+                .await?
+                .into_iter()
+                .collect()
+        }
+    };
     Ok(Json(tenants))
 }
 
@@ -168,6 +181,8 @@ pub async fn delete_tenant(
     auth: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
+    auth.require_scope(Scope::AdminTenant)?;
+    auth.ensure_tenant_access(&state, id, None).await?;
     let tenant = tenants::Entity::find_by_id(id)
         .one(&state.db)
         .await?

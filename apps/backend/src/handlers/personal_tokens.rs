@@ -230,7 +230,6 @@ pub async fn revoke_all_personal_tokens(
 
     personal_tokens::Entity::update_many()
         .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
-        .filter(personal_tokens::Column::UserId.eq(auth.user_id))
         .filter(personal_tokens::Column::TenantId.eq(payload.confirm_tenant_id))
         .filter(personal_tokens::Column::Revoked.eq(false))
         .exec(&state.db)
