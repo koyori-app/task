@@ -7,6 +7,7 @@ use axum_valid::Valid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
 };
+use sea_orm::sea_query::Expr;
 use sea_orm::prelude::{DateTimeWithTimeZone, Uuid};
 use serde::Deserialize;
 use validator::Validate;
@@ -69,7 +70,7 @@ async fn validate_project_ids(
     project_ids: &[Uuid],
 ) -> Result<(), AppError> {
     if project_ids.is_empty() {
-        return Ok(());
+        return Err(AppError::BadRequest);
     }
 
     let count = projects::Entity::find()
@@ -123,9 +124,11 @@ pub async fn create_personal_token(
         validate_project_ids(&state, payload.tenant_id, project_ids).await?;
     }
 
-    let (token_plaintext, token_hash) = auth::generate_personal_token()
+    let (token_plaintext, _) = auth::generate_personal_token()
         .map_err(|e| AppError::Internal(e.into()))?;
     let token_value = format!("pat_{token_plaintext}");
+    let token_hash = auth::create_personal_token_hash(&token_value)
+        .map_err(|e| AppError::Internal(e.into()))?;
 
     let allowed_project_ids = payload.project_ids.map(|ids| serde_json::json!(ids));
 
@@ -225,18 +228,13 @@ pub async fn revoke_all_personal_tokens(
     auth.require_session()?;
     require_tenant_owner(&state, payload.confirm_tenant_id, auth.user_id).await?;
 
-    let tokens = personal_tokens::Entity::find()
+    personal_tokens::Entity::update_many()
+        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
         .filter(personal_tokens::Column::UserId.eq(auth.user_id))
         .filter(personal_tokens::Column::TenantId.eq(payload.confirm_tenant_id))
         .filter(personal_tokens::Column::Revoked.eq(false))
-        .all(&state.db)
+        .exec(&state.db)
         .await?;
-
-    for token in tokens {
-        let mut active: personal_tokens::ActiveModel = token.into();
-        active.revoked = Set(true);
-        active.update(&state.db).await?;
-    }
 
     Ok(StatusCode::NO_CONTENT)
 }

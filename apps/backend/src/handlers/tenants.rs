@@ -98,7 +98,7 @@ pub async fn get_tenant(
     auth: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<tenants::Model>, AppError> {
-    auth.require_scope(Scope::AdminTenant)?;
+    auth.require_scope(Scope::ReadProject)?;
     auth.ensure_tenant_access(&state, id, None).await?;
     let tenant = tenants::Entity::find_by_id(id)
         .one(&state.db)

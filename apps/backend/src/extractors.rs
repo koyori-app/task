@@ -5,7 +5,7 @@ use axum::{
     http::{header::AUTHORIZATION, request::Parts},
 };
 use axum_session_redispool::SessionRedisPool;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, prelude::Uuid};
+use sea_orm::{ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait, prelude::Uuid};
 
 use crate::{
     AppState,
@@ -159,21 +159,14 @@ async fn session_has_tenant_access(
             Err(AppError::Forbidden)
         }
     } else {
-        let member_rows = project_members::Entity::find()
+        let is_member = project_members::Entity::find()
+            .join(JoinType::InnerJoin, project_members::Relation::Projects.def())
             .filter(project_members::Column::UserId.eq(user_id))
-            .all(&state.db)
-            .await?;
-        if member_rows.is_empty() {
-            return Err(AppError::Forbidden);
-        }
-        let project_ids: Vec<Uuid> = member_rows.into_iter().map(|m| m.project_id).collect();
-        let in_tenant = projects::Entity::find()
             .filter(projects::Column::TenantId.eq(tenant_id))
-            .filter(projects::Column::Id.is_in(project_ids))
             .one(&state.db)
             .await?
             .is_some();
-        if in_tenant {
+        if is_member {
             Ok(())
         } else {
             Err(AppError::Forbidden)
