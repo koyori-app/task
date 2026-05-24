@@ -16,7 +16,7 @@ import type { Login401Response } from ''
 
 // TODO: Update the object below with actual values
 const example = {
-  "message": invalid-credentials,
+  "message": internal-error,
 } satisfies Login401Response
 
 console.log(example)

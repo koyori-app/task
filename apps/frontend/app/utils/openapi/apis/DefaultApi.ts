@@ -14,10 +14,30 @@
 
 import * as runtime from '../runtime';
 import {
+    type AddMemberRequest,
+    AddMemberRequestFromJSON,
+    AddMemberRequestToJSON,
+} from '../models/AddMemberRequest';
+import {
     type CrateEntitiesLabelsModel,
     CrateEntitiesLabelsModelFromJSON,
     CrateEntitiesLabelsModelToJSON,
 } from '../models/CrateEntitiesLabelsModel';
+import {
+    type CrateEntitiesProjectMembersModel,
+    CrateEntitiesProjectMembersModelFromJSON,
+    CrateEntitiesProjectMembersModelToJSON,
+} from '../models/CrateEntitiesProjectMembersModel';
+import {
+    type CrateEntitiesProjectsModel,
+    CrateEntitiesProjectsModelFromJSON,
+    CrateEntitiesProjectsModelToJSON,
+} from '../models/CrateEntitiesProjectsModel';
+import {
+    type CrateEntitiesTenantsModel,
+    CrateEntitiesTenantsModelFromJSON,
+    CrateEntitiesTenantsModelToJSON,
+} from '../models/CrateEntitiesTenantsModel';
 import {
     type CrateEntitiesUsersModel,
     CrateEntitiesUsersModelFromJSON,
@@ -28,6 +48,16 @@ import {
     CreatePersonalTokenResponseFromJSON,
     CreatePersonalTokenResponseToJSON,
 } from '../models/CreatePersonalTokenResponse';
+import {
+    type CreateProjectRequest,
+    CreateProjectRequestFromJSON,
+    CreateProjectRequestToJSON,
+} from '../models/CreateProjectRequest';
+import {
+    type CreateTenantRequest,
+    CreateTenantRequestFromJSON,
+    CreateTenantRequestToJSON,
+} from '../models/CreateTenantRequest';
 import {
     type Login401Response,
     Login401ResponseFromJSON,
@@ -54,17 +84,74 @@ import {
     ResendVerificationRequestToJSON,
 } from '../models/ResendVerificationRequest';
 import {
+    type UpdateMemberRequest,
+    UpdateMemberRequestFromJSON,
+    UpdateMemberRequestToJSON,
+} from '../models/UpdateMemberRequest';
+import {
+    type UpdateProjectRequest,
+    UpdateProjectRequestFromJSON,
+    UpdateProjectRequestToJSON,
+} from '../models/UpdateProjectRequest';
+import {
+    type UpdateTenantRequest,
+    UpdateTenantRequestFromJSON,
+    UpdateTenantRequestToJSON,
+} from '../models/UpdateTenantRequest';
+import {
     type VerifyEmailRequest,
     VerifyEmailRequestFromJSON,
     VerifyEmailRequestToJSON,
 } from '../models/VerifyEmailRequest';
 
+export interface AddMemberOperationRequest {
+    tenantId: string;
+    projectId: string;
+    addMemberRequest: AddMemberRequest;
+}
+
 export interface CreatePersonalTokenRequest {
     body: object;
 }
 
+export interface CreateProjectOperationRequest {
+    tenantId: string;
+    createProjectRequest: CreateProjectRequest;
+}
+
+export interface CreateTenantOperationRequest {
+    createTenantRequest: CreateTenantRequest;
+}
+
+export interface DeleteProjectRequest {
+    tenantId: string;
+    id: string;
+}
+
+export interface DeleteTenantRequest {
+    id: string;
+}
+
 export interface GetPersonalTokenRequest {
     id: string;
+}
+
+export interface GetProjectRequest {
+    tenantId: string;
+    id: string;
+}
+
+export interface GetTenantRequest {
+    id: string;
+}
+
+export interface ListMembersRequest {
+    tenantId: string;
+    projectId: string;
+}
+
+export interface ListProjectsRequest {
+    tenantId: string;
 }
 
 export interface LoginOperationRequest {
@@ -75,12 +162,36 @@ export interface RegisterOperationRequest {
     registerRequest: RegisterRequest;
 }
 
+export interface RemoveMemberRequest {
+    tenantId: string;
+    projectId: string;
+    userId: string;
+}
+
 export interface ResendVerificationEmailRequest {
     resendVerificationRequest: ResendVerificationRequest;
 }
 
 export interface RevokePersonalTokenRequest {
     id: string;
+}
+
+export interface UpdateMemberOperationRequest {
+    tenantId: string;
+    projectId: string;
+    userId: string;
+    updateMemberRequest: UpdateMemberRequest;
+}
+
+export interface UpdateProjectOperationRequest {
+    tenantId: string;
+    id: string;
+    updateProjectRequest: UpdateProjectRequest;
+}
+
+export interface UpdateTenantOperationRequest {
+    id: string;
+    updateTenantRequest: UpdateTenantRequest;
 }
 
 export interface VerifyEmailOperationRequest {
@@ -91,6 +202,69 @@ export interface VerifyEmailOperationRequest {
  * 
  */
 export class DefaultApi extends runtime.BaseAPI {
+
+    /**
+     * Creates request options for addMember without sending the request
+     */
+    async addMemberRequestOpts(requestParameters: AddMemberOperationRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['tenantId'] == null) {
+            throw new runtime.RequiredError(
+                'tenantId',
+                'Required parameter "tenantId" was null or undefined when calling addMember().'
+            );
+        }
+
+        if (requestParameters['projectId'] == null) {
+            throw new runtime.RequiredError(
+                'projectId',
+                'Required parameter "projectId" was null or undefined when calling addMember().'
+            );
+        }
+
+        if (requestParameters['addMemberRequest'] == null) {
+            throw new runtime.RequiredError(
+                'addMemberRequest',
+                'Required parameter "addMemberRequest" was null or undefined when calling addMember().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+
+        let urlPath = `/v1/tenants/{tenant_id}/projects/{project_id}/members`;
+        urlPath = urlPath.replace('{tenant_id}', encodeURIComponent(String(requestParameters['tenantId'])));
+        urlPath = urlPath.replace('{project_id}', encodeURIComponent(String(requestParameters['projectId'])));
+
+        return {
+            path: urlPath,
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+            body: AddMemberRequestToJSON(requestParameters['addMemberRequest']),
+        };
+    }
+
+    /**
+     * プロジェクトメンバーを追加
+     */
+    async addMemberRaw(requestParameters: AddMemberOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<CrateEntitiesProjectMembersModel>> {
+        const requestOptions = await this.addMemberRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => CrateEntitiesProjectMembersModelFromJSON(jsonValue));
+    }
+
+    /**
+     * プロジェクトメンバーを追加
+     */
+    async addMember(requestParameters: AddMemberOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<CrateEntitiesProjectMembersModel> {
+        const response = await this.addMemberRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
 
     /**
      * Creates request options for createPersonalToken without sending the request
@@ -137,6 +311,204 @@ export class DefaultApi extends runtime.BaseAPI {
     async createPersonalToken(requestParameters: CreatePersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<CreatePersonalTokenResponse> {
         const response = await this.createPersonalTokenRaw(requestParameters, initOverrides);
         return await response.value();
+    }
+
+    /**
+     * Creates request options for createProject without sending the request
+     */
+    async createProjectRequestOpts(requestParameters: CreateProjectOperationRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['tenantId'] == null) {
+            throw new runtime.RequiredError(
+                'tenantId',
+                'Required parameter "tenantId" was null or undefined when calling createProject().'
+            );
+        }
+
+        if (requestParameters['createProjectRequest'] == null) {
+            throw new runtime.RequiredError(
+                'createProjectRequest',
+                'Required parameter "createProjectRequest" was null or undefined when calling createProject().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+
+        let urlPath = `/v1/tenants/{tenant_id}/projects`;
+        urlPath = urlPath.replace('{tenant_id}', encodeURIComponent(String(requestParameters['tenantId'])));
+
+        return {
+            path: urlPath,
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+            body: CreateProjectRequestToJSON(requestParameters['createProjectRequest']),
+        };
+    }
+
+    /**
+     * プロジェクトを作成
+     */
+    async createProjectRaw(requestParameters: CreateProjectOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<CrateEntitiesProjectsModel>> {
+        const requestOptions = await this.createProjectRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => CrateEntitiesProjectsModelFromJSON(jsonValue));
+    }
+
+    /**
+     * プロジェクトを作成
+     */
+    async createProject(requestParameters: CreateProjectOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<CrateEntitiesProjectsModel> {
+        const response = await this.createProjectRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for createTenant without sending the request
+     */
+    async createTenantRequestOpts(requestParameters: CreateTenantOperationRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['createTenantRequest'] == null) {
+            throw new runtime.RequiredError(
+                'createTenantRequest',
+                'Required parameter "createTenantRequest" was null or undefined when calling createTenant().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+
+        let urlPath = `/v1/tenants`;
+
+        return {
+            path: urlPath,
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+            body: CreateTenantRequestToJSON(requestParameters['createTenantRequest']),
+        };
+    }
+
+    /**
+     * テナントを作成
+     */
+    async createTenantRaw(requestParameters: CreateTenantOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<CrateEntitiesTenantsModel>> {
+        const requestOptions = await this.createTenantRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => CrateEntitiesTenantsModelFromJSON(jsonValue));
+    }
+
+    /**
+     * テナントを作成
+     */
+    async createTenant(requestParameters: CreateTenantOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<CrateEntitiesTenantsModel> {
+        const response = await this.createTenantRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for deleteProject without sending the request
+     */
+    async deleteProjectRequestOpts(requestParameters: DeleteProjectRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['tenantId'] == null) {
+            throw new runtime.RequiredError(
+                'tenantId',
+                'Required parameter "tenantId" was null or undefined when calling deleteProject().'
+            );
+        }
+
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling deleteProject().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+
+        let urlPath = `/v1/tenants/{tenant_id}/projects/{id}`;
+        urlPath = urlPath.replace('{tenant_id}', encodeURIComponent(String(requestParameters['tenantId'])));
+        urlPath = urlPath.replace('{id}', encodeURIComponent(String(requestParameters['id'])));
+
+        return {
+            path: urlPath,
+            method: 'DELETE',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     * プロジェクトを削除
+     */
+    async deleteProjectRaw(requestParameters: DeleteProjectRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<void>> {
+        const requestOptions = await this.deleteProjectRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.VoidApiResponse(response);
+    }
+
+    /**
+     * プロジェクトを削除
+     */
+    async deleteProject(requestParameters: DeleteProjectRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<void> {
+        await this.deleteProjectRaw(requestParameters, initOverrides);
+    }
+
+    /**
+     * Creates request options for deleteTenant without sending the request
+     */
+    async deleteTenantRequestOpts(requestParameters: DeleteTenantRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling deleteTenant().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+
+        let urlPath = `/v1/tenants/{id}`;
+        urlPath = urlPath.replace('{id}', encodeURIComponent(String(requestParameters['id'])));
+
+        return {
+            path: urlPath,
+            method: 'DELETE',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     * テナントを削除
+     */
+    async deleteTenantRaw(requestParameters: DeleteTenantRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<void>> {
+        const requestOptions = await this.deleteTenantRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.VoidApiResponse(response);
+    }
+
+    /**
+     * テナントを削除
+     */
+    async deleteTenant(requestParameters: DeleteTenantRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<void> {
+        await this.deleteTenantRaw(requestParameters, initOverrides);
     }
 
     /**
@@ -218,6 +590,239 @@ export class DefaultApi extends runtime.BaseAPI {
      */
     async getPersonalToken(requestParameters: GetPersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<PersonalTokenResponse> {
         const response = await this.getPersonalTokenRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for getProject without sending the request
+     */
+    async getProjectRequestOpts(requestParameters: GetProjectRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['tenantId'] == null) {
+            throw new runtime.RequiredError(
+                'tenantId',
+                'Required parameter "tenantId" was null or undefined when calling getProject().'
+            );
+        }
+
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling getProject().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+
+        let urlPath = `/v1/tenants/{tenant_id}/projects/{id}`;
+        urlPath = urlPath.replace('{tenant_id}', encodeURIComponent(String(requestParameters['tenantId'])));
+        urlPath = urlPath.replace('{id}', encodeURIComponent(String(requestParameters['id'])));
+
+        return {
+            path: urlPath,
+            method: 'GET',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     * プロジェクトを取得
+     */
+    async getProjectRaw(requestParameters: GetProjectRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<CrateEntitiesProjectsModel>> {
+        const requestOptions = await this.getProjectRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => CrateEntitiesProjectsModelFromJSON(jsonValue));
+    }
+
+    /**
+     * プロジェクトを取得
+     */
+    async getProject(requestParameters: GetProjectRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<CrateEntitiesProjectsModel> {
+        const response = await this.getProjectRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for getTenant without sending the request
+     */
+    async getTenantRequestOpts(requestParameters: GetTenantRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling getTenant().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+
+        let urlPath = `/v1/tenants/{id}`;
+        urlPath = urlPath.replace('{id}', encodeURIComponent(String(requestParameters['id'])));
+
+        return {
+            path: urlPath,
+            method: 'GET',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     * テナントを取得
+     */
+    async getTenantRaw(requestParameters: GetTenantRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<CrateEntitiesTenantsModel>> {
+        const requestOptions = await this.getTenantRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => CrateEntitiesTenantsModelFromJSON(jsonValue));
+    }
+
+    /**
+     * テナントを取得
+     */
+    async getTenant(requestParameters: GetTenantRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<CrateEntitiesTenantsModel> {
+        const response = await this.getTenantRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for listMembers without sending the request
+     */
+    async listMembersRequestOpts(requestParameters: ListMembersRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['tenantId'] == null) {
+            throw new runtime.RequiredError(
+                'tenantId',
+                'Required parameter "tenantId" was null or undefined when calling listMembers().'
+            );
+        }
+
+        if (requestParameters['projectId'] == null) {
+            throw new runtime.RequiredError(
+                'projectId',
+                'Required parameter "projectId" was null or undefined when calling listMembers().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+
+        let urlPath = `/v1/tenants/{tenant_id}/projects/{project_id}/members`;
+        urlPath = urlPath.replace('{tenant_id}', encodeURIComponent(String(requestParameters['tenantId'])));
+        urlPath = urlPath.replace('{project_id}', encodeURIComponent(String(requestParameters['projectId'])));
+
+        return {
+            path: urlPath,
+            method: 'GET',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     * プロジェクトメンバー一覧
+     */
+    async listMembersRaw(requestParameters: ListMembersRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Array<CrateEntitiesProjectMembersModel>>> {
+        const requestOptions = await this.listMembersRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => jsonValue.map(CrateEntitiesProjectMembersModelFromJSON));
+    }
+
+    /**
+     * プロジェクトメンバー一覧
+     */
+    async listMembers(requestParameters: ListMembersRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Array<CrateEntitiesProjectMembersModel>> {
+        const response = await this.listMembersRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for listProjects without sending the request
+     */
+    async listProjectsRequestOpts(requestParameters: ListProjectsRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['tenantId'] == null) {
+            throw new runtime.RequiredError(
+                'tenantId',
+                'Required parameter "tenantId" was null or undefined when calling listProjects().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+
+        let urlPath = `/v1/tenants/{tenant_id}/projects`;
+        urlPath = urlPath.replace('{tenant_id}', encodeURIComponent(String(requestParameters['tenantId'])));
+
+        return {
+            path: urlPath,
+            method: 'GET',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     * プロジェクト一覧
+     */
+    async listProjectsRaw(requestParameters: ListProjectsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Array<CrateEntitiesProjectsModel>>> {
+        const requestOptions = await this.listProjectsRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => jsonValue.map(CrateEntitiesProjectsModelFromJSON));
+    }
+
+    /**
+     * プロジェクト一覧
+     */
+    async listProjects(requestParameters: ListProjectsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Array<CrateEntitiesProjectsModel>> {
+        const response = await this.listProjectsRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for listTenants without sending the request
+     */
+    async listTenantsRequestOpts(): Promise<runtime.RequestOpts> {
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+
+        let urlPath = `/v1/tenants`;
+
+        return {
+            path: urlPath,
+            method: 'GET',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     * 自分のテナント一覧
+     */
+    async listTenantsRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Array<CrateEntitiesTenantsModel>>> {
+        const requestOptions = await this.listTenantsRequestOpts();
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => jsonValue.map(CrateEntitiesTenantsModelFromJSON));
+    }
+
+    /**
+     * 自分のテナント一覧
+     */
+    async listTenants(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Array<CrateEntitiesTenantsModel>> {
+        const response = await this.listTenantsRaw(initOverrides);
         return await response.value();
     }
 
@@ -392,6 +997,66 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * Creates request options for removeMember without sending the request
+     */
+    async removeMemberRequestOpts(requestParameters: RemoveMemberRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['tenantId'] == null) {
+            throw new runtime.RequiredError(
+                'tenantId',
+                'Required parameter "tenantId" was null or undefined when calling removeMember().'
+            );
+        }
+
+        if (requestParameters['projectId'] == null) {
+            throw new runtime.RequiredError(
+                'projectId',
+                'Required parameter "projectId" was null or undefined when calling removeMember().'
+            );
+        }
+
+        if (requestParameters['userId'] == null) {
+            throw new runtime.RequiredError(
+                'userId',
+                'Required parameter "userId" was null or undefined when calling removeMember().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+
+        let urlPath = `/v1/tenants/{tenant_id}/projects/{project_id}/members/{user_id}`;
+        urlPath = urlPath.replace('{tenant_id}', encodeURIComponent(String(requestParameters['tenantId'])));
+        urlPath = urlPath.replace('{project_id}', encodeURIComponent(String(requestParameters['projectId'])));
+        urlPath = urlPath.replace('{user_id}', encodeURIComponent(String(requestParameters['userId'])));
+
+        return {
+            path: urlPath,
+            method: 'DELETE',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     * プロジェクトメンバーを削除
+     */
+    async removeMemberRaw(requestParameters: RemoveMemberRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<void>> {
+        const requestOptions = await this.removeMemberRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.VoidApiResponse(response);
+    }
+
+    /**
+     * プロジェクトメンバーを削除
+     */
+    async removeMember(requestParameters: RemoveMemberRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<void> {
+        await this.removeMemberRaw(requestParameters, initOverrides);
+    }
+
+    /**
      * Creates request options for resendVerificationEmail without sending the request
      */
     async resendVerificationEmailRequestOpts(requestParameters: ResendVerificationEmailRequest): Promise<runtime.RequestOpts> {
@@ -521,6 +1186,195 @@ export class DefaultApi extends runtime.BaseAPI {
      */
     async revokePersonalToken(requestParameters: RevokePersonalTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<PersonalTokenResponse> {
         const response = await this.revokePersonalTokenRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for updateMember without sending the request
+     */
+    async updateMemberRequestOpts(requestParameters: UpdateMemberOperationRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['tenantId'] == null) {
+            throw new runtime.RequiredError(
+                'tenantId',
+                'Required parameter "tenantId" was null or undefined when calling updateMember().'
+            );
+        }
+
+        if (requestParameters['projectId'] == null) {
+            throw new runtime.RequiredError(
+                'projectId',
+                'Required parameter "projectId" was null or undefined when calling updateMember().'
+            );
+        }
+
+        if (requestParameters['userId'] == null) {
+            throw new runtime.RequiredError(
+                'userId',
+                'Required parameter "userId" was null or undefined when calling updateMember().'
+            );
+        }
+
+        if (requestParameters['updateMemberRequest'] == null) {
+            throw new runtime.RequiredError(
+                'updateMemberRequest',
+                'Required parameter "updateMemberRequest" was null or undefined when calling updateMember().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+
+        let urlPath = `/v1/tenants/{tenant_id}/projects/{project_id}/members/{user_id}`;
+        urlPath = urlPath.replace('{tenant_id}', encodeURIComponent(String(requestParameters['tenantId'])));
+        urlPath = urlPath.replace('{project_id}', encodeURIComponent(String(requestParameters['projectId'])));
+        urlPath = urlPath.replace('{user_id}', encodeURIComponent(String(requestParameters['userId'])));
+
+        return {
+            path: urlPath,
+            method: 'PUT',
+            headers: headerParameters,
+            query: queryParameters,
+            body: UpdateMemberRequestToJSON(requestParameters['updateMemberRequest']),
+        };
+    }
+
+    /**
+     * プロジェクトメンバーの権限を変更
+     */
+    async updateMemberRaw(requestParameters: UpdateMemberOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<CrateEntitiesProjectMembersModel>> {
+        const requestOptions = await this.updateMemberRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => CrateEntitiesProjectMembersModelFromJSON(jsonValue));
+    }
+
+    /**
+     * プロジェクトメンバーの権限を変更
+     */
+    async updateMember(requestParameters: UpdateMemberOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<CrateEntitiesProjectMembersModel> {
+        const response = await this.updateMemberRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for updateProject without sending the request
+     */
+    async updateProjectRequestOpts(requestParameters: UpdateProjectOperationRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['tenantId'] == null) {
+            throw new runtime.RequiredError(
+                'tenantId',
+                'Required parameter "tenantId" was null or undefined when calling updateProject().'
+            );
+        }
+
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling updateProject().'
+            );
+        }
+
+        if (requestParameters['updateProjectRequest'] == null) {
+            throw new runtime.RequiredError(
+                'updateProjectRequest',
+                'Required parameter "updateProjectRequest" was null or undefined when calling updateProject().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+
+        let urlPath = `/v1/tenants/{tenant_id}/projects/{id}`;
+        urlPath = urlPath.replace('{tenant_id}', encodeURIComponent(String(requestParameters['tenantId'])));
+        urlPath = urlPath.replace('{id}', encodeURIComponent(String(requestParameters['id'])));
+
+        return {
+            path: urlPath,
+            method: 'PUT',
+            headers: headerParameters,
+            query: queryParameters,
+            body: UpdateProjectRequestToJSON(requestParameters['updateProjectRequest']),
+        };
+    }
+
+    /**
+     * プロジェクトを更新
+     */
+    async updateProjectRaw(requestParameters: UpdateProjectOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<CrateEntitiesProjectsModel>> {
+        const requestOptions = await this.updateProjectRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => CrateEntitiesProjectsModelFromJSON(jsonValue));
+    }
+
+    /**
+     * プロジェクトを更新
+     */
+    async updateProject(requestParameters: UpdateProjectOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<CrateEntitiesProjectsModel> {
+        const response = await this.updateProjectRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for updateTenant without sending the request
+     */
+    async updateTenantRequestOpts(requestParameters: UpdateTenantOperationRequest): Promise<runtime.RequestOpts> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling updateTenant().'
+            );
+        }
+
+        if (requestParameters['updateTenantRequest'] == null) {
+            throw new runtime.RequiredError(
+                'updateTenantRequest',
+                'Required parameter "updateTenantRequest" was null or undefined when calling updateTenant().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+
+        let urlPath = `/v1/tenants/{id}`;
+        urlPath = urlPath.replace('{id}', encodeURIComponent(String(requestParameters['id'])));
+
+        return {
+            path: urlPath,
+            method: 'PUT',
+            headers: headerParameters,
+            query: queryParameters,
+            body: UpdateTenantRequestToJSON(requestParameters['updateTenantRequest']),
+        };
+    }
+
+    /**
+     * テナントを更新
+     */
+    async updateTenantRaw(requestParameters: UpdateTenantOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<CrateEntitiesTenantsModel>> {
+        const requestOptions = await this.updateTenantRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => CrateEntitiesTenantsModelFromJSON(jsonValue));
+    }
+
+    /**
+     * テナントを更新
+     */
+    async updateTenant(requestParameters: UpdateTenantOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<CrateEntitiesTenantsModel> {
+        const response = await this.updateTenantRaw(requestParameters, initOverrides);
         return await response.value();
     }
 
