@@ -5,7 +5,6 @@ import tailwindcss from '@tailwindcss/vite';
 import { sentryVitePlugin } from '@sentry/vite-plugin';
 import { analyzer, unstableRolldownAdapter } from 'vite-bundle-analyzer'
 
-const analyze = process.env.ANALYZE === 'true';
 /// <reference types="@batijs/core/types" />
 
 import vike from 'vike/plugin';
@@ -18,6 +17,8 @@ const dirname =
   typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 
 dotenv.config({ path: path.resolve(dirname, '.env') });
+
+const analyze = process.env.ANALYZE === 'true';
 
 const sentryEnabled =
   process.env.NODE_ENV?.includes('prod') ||
