@@ -5,7 +5,7 @@ use sea_orm::prelude::Uuid;
 use serde::Deserialize;
 use validator::Validate;
 
-use crate::entities::{project_members, projects, scopes::Scope, tenants};
+use crate::entities::{drive_folders, project_members, projects, scopes::Scope, tenants};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -114,6 +114,25 @@ pub async fn create_project(
         icon_url: Set(payload.icon_url),
     };
     let model = project.insert(&state.db).await?;
+
+    let drive_folder = drive_folders::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        name: Set(model.name.clone()),
+        parent_id: Set(None),
+        tenant_id: Set(tenant_id),
+        project_id: Set(Some(model.id)),
+        created_by: Set(auth.user_id),
+        created_at: Set(Default::default()),
+    };
+    if let Err(e) = drive_folder.insert(&state.db).await {
+        tracing::error!(
+            error = %e,
+            project_id = %model.id,
+            "failed to create project drive folder"
+        );
+        return Err(AppError::Internal(e.into()));
+    }
+
     Ok((StatusCode::CREATED, Json(model)))
 }
 

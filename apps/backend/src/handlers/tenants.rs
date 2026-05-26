@@ -1,6 +1,6 @@
 use axum::{Json, extract::{Path, State}, http::StatusCode};
 use axum_valid::Valid;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, QueryFilter, ColumnTrait};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use sea_orm::prelude::Uuid;
 use serde::Deserialize;
 use validator::Validate;
@@ -58,6 +58,7 @@ pub async fn create_tenant(
         description: Set(payload.description),
         icon_url: Set(payload.icon_url),
         owner_id: Set(auth.user_id),
+        drive_quota_bytes: Set(None),
     };
     let model = tenant.insert(&state.db).await?;
     Ok((StatusCode::CREATED, Json(model)))
