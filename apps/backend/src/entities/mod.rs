@@ -1,3 +1,6 @@
+pub mod drive_files;
+pub mod drive_folder_shares;
+pub mod drive_folders;
 pub mod labels;
 pub mod personal_tokens;
 pub mod project_members;
