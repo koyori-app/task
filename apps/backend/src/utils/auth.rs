@@ -15,7 +15,6 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
-use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tracing::debug;
 
@@ -260,21 +259,6 @@ pub async fn authenticate_personal_token(
     Ok(token)
 }
 
-/// 受信したトークンを、DB にある `stored_hash` と比較して検証する。
-pub fn verify_personal_token(token: &str, stored_hash: &str, secret: &str) -> Result<bool, AuthError> {
-    let computed = create_personal_token_hash(token, secret)?;
-
-    let computed_bytes = computed.as_bytes();
-    let stored_bytes = stored_hash.as_bytes();
-
-    // 長さが違う場合でも、すぐに false を返さずダミーの比較を行うか、
-    // そもそもハッシュ関数の出力なので長さが同じはずであることを前提にする。
-    if computed_bytes.len() != stored_bytes.len() {
-        return Ok(false);
-    }
-
-    Ok(computed_bytes.ct_eq(stored_bytes).into())
-}
 
 #[cfg(test)]
 mod tests {
