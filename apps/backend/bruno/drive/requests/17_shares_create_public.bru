@@ -1,0 +1,43 @@
+meta {
+  name: 17 共有作成（公開リンク）
+  type: http
+  seq: 17
+}
+
+post {
+  url: {{base_url}}/v1/tenants/{{tenant_id}}/drive/folders/{{folder_id}}/shares
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+headers {
+  content-type: application/json
+  accept: application/json
+}
+
+body:json {
+  {
+    "type": "public_link",
+    "permission": "viewer",
+    "expires_at": null
+  }
+}
+
+tests {
+  test("status 201", function() {
+    expect(res.status).to.equal(201);
+  });
+}
+
+script:post-response {
+  if (res.status === 201 && res.body && res.body.share_token) {
+    bru.setVar("share_token", res.body.share_token);
+    if (res.body.id) {
+      bru.setVar("share_id", res.body.id);
+    }
+  }
+}

@@ -1,0 +1,25 @@
+meta {
+  name: 15 共有一覧
+  type: http
+  seq: 15
+}
+
+get {
+  url: {{base_url}}/v1/tenants/{{tenant_id}}/drive/folders/{{folder_id}}/shares
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+headers {
+  accept: application/json
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+}

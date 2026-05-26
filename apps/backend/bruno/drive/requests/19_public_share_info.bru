@@ -1,0 +1,24 @@
+meta {
+  name: 19 公開リンク・フォルダ情報
+  type: http
+  seq: 19
+}
+
+get {
+  url: {{base_url}}/v1/drive/share/{{share_token}}
+  body: none
+  auth: none
+}
+
+headers {
+  accept: application/json
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("has folder name", function() {
+    expect(res.body).to.have.property("name");
+  });
+}

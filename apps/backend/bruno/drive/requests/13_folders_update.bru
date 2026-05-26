@@ -1,0 +1,32 @@
+meta {
+  name: 13 フォルダ更新
+  type: http
+  seq: 13
+}
+
+patch {
+  url: {{base_url}}/v1/tenants/{{tenant_id}}/drive/folders/{{folder_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+headers {
+  content-type: application/json
+  accept: application/json
+}
+
+body:json {
+  {
+    "name": "bruno-test-folder-renamed"
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+}

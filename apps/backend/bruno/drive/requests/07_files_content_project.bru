@@ -1,0 +1,21 @@
+meta {
+  name: 07 ファイル配信（プロジェクト・要認証）
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{base_url}}/v1/drive/files/{{file_id}}/content
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+tests {
+  test("status 200 or 403", function() {
+    expect([200, 403]).to.include(res.status);
+  });
+}

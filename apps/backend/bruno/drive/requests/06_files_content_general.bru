@@ -1,0 +1,17 @@
+meta {
+  name: 06 ファイル配信（一般・認証不要）
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{base_url}}/v1/drive/files/{{file_id}}/content
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+}

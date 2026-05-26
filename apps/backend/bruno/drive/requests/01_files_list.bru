@@ -1,0 +1,29 @@
+meta {
+  name: 01 ファイル一覧
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/v1/tenants/{{tenant_id}}/drive/files?limit=50&offset=0
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+headers {
+  accept: application/json
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("has files array", function() {
+    expect(res.body).to.have.property("files");
+    expect(res.body.files).to.be.an("array");
+  });
+}
