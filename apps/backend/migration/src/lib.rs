@@ -3,6 +3,7 @@ pub use sea_orm_migration::prelude::*;
 mod m20260524080400_create_project_members;
 mod m20260524080500_add_icon_to_projects;
 mod m20260524100000_add_role_check;
+mod m20260524120000_add_pat_tenant_binding;
 
 pub struct Migrator;
 
@@ -13,6 +14,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260524080400_create_project_members::Migration),
             Box::new(m20260524080500_add_icon_to_projects::Migration),
             Box::new(m20260524100000_add_role_check::Migration),
+            Box::new(m20260524120000_add_pat_tenant_binding::Migration),
         ]
     }
 }

@@ -11,7 +11,7 @@ use sea_orm::prelude::Uuid;
 use serde::Deserialize;
 use validator::Validate;
 
-use crate::entities::{project_members, projects, tenants, users};
+use crate::entities::{project_members, projects, scopes::Scope, tenants, users};
 use crate::entities::project_members::ProjectRole;
 use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
@@ -116,6 +116,8 @@ pub async fn list_members(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Vec<project_members::Model>>, AppError> {
+    auth.require_scope(Scope::ReadProject)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_project_admin(&state, tenant_id, project_id, auth.user_id).await?;
     let members = project_members::Entity::find()
         .filter(project_members::Column::ProjectId.eq(project_id))
@@ -146,6 +148,8 @@ pub async fn add_member(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<AddMemberRequest>>,
 ) -> Result<(StatusCode, Json<project_members::Model>), AppError> {
+    auth.require_scope(Scope::WriteProject)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_project_admin(&state, tenant_id, project_id, auth.user_id).await?;
 
     users::Entity::find_by_id(payload.user_id)
@@ -195,6 +199,8 @@ pub async fn update_member(
     Path((tenant_id, project_id, member_user_id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateMemberRequest>>,
 ) -> Result<Json<project_members::Model>, AppError> {
+    auth.require_scope(Scope::WriteProject)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_project_admin(&state, tenant_id, project_id, auth.user_id).await?;
     let current = find_member(&state, project_id, member_user_id).await?;
     if current.role == ProjectRole::Admin
@@ -230,6 +236,8 @@ pub async fn remove_member(
     auth: AuthUser,
     Path((tenant_id, project_id, member_user_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
+    auth.require_scope(Scope::WriteProject)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_project_admin(&state, tenant_id, project_id, auth.user_id).await?;
     let member = find_member(&state, project_id, member_user_id).await?;
     if member.role == ProjectRole::Admin && count_admins(&state, project_id).await? <= 1 {

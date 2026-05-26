@@ -5,7 +5,8 @@ use sea_orm::prelude::Uuid;
 use serde::Deserialize;
 use validator::Validate;
 
-use crate::entities::tenants;
+use crate::entities::{scopes::Scope, tenants};
+use crate::extractors::AuthMethod;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -47,6 +48,8 @@ pub async fn create_tenant(
     auth: AuthUser,
     Valid(Json(payload)): Valid<Json<CreateTenantRequest>>,
 ) -> Result<(StatusCode, Json<tenants::Model>), AppError> {
+    // PAT はテナントにバインドされているため、新規テナント作成はセッション専用とする
+    auth.require_session()?;
     let id = Uuid::new_v4();
     let tenant = tenants::ActiveModel {
         id: Set(id),
@@ -74,10 +77,27 @@ pub async fn list_tenants(
     State(state): State<AppState>,
     auth: AuthUser,
 ) -> Result<Json<Vec<tenants::Model>>, AppError> {
-    let tenants = tenants::Entity::find()
-        .filter(tenants::Column::OwnerId.eq(auth.user_id))
-        .all(&state.db)
-        .await?;
+    // テナント一覧は ensure_tenant_owner/access 不要。
+    // Session: OwnerId フィルタで自分のテナントのみ取得。
+    // PAT: バインドされた tenant_id の単一テナントのみ返す。
+    // フィルタ自体が認可を兼ねているため追加チェックは不要。
+    auth.require_scope(Scope::AdminTenant)?;
+    let tenants = match &auth.method {
+        AuthMethod::Session => {
+            tenants::Entity::find()
+                .filter(tenants::Column::OwnerId.eq(auth.user_id))
+                .all(&state.db)
+                .await?
+        }
+        AuthMethod::PersonalToken { tenant_id, .. } => {
+            // PAT はバインドされた単一テナントのみ返す
+            tenants::Entity::find_by_id(*tenant_id)
+                .one(&state.db)
+                .await?
+                .into_iter()
+                .collect()
+        }
+    };
     Ok(Json(tenants))
 }
 
@@ -97,13 +117,11 @@ pub async fn get_tenant(
     auth: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<tenants::Model>, AppError> {
-    let tenant = tenants::Entity::find_by_id(id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if tenant.owner_id != auth.user_id {
-        return Err(AppError::Forbidden);
-    }
+    // テナント情報の取得はオーナー専用操作。
+    // ensure_tenant_access（オーナーとメンバー双方を通過させる）ではなく
+    // ensure_tenant_owner を使い、プロジェクトメンバーを排除する。
+    auth.require_scope(Scope::AdminTenant)?;
+    let tenant = auth.ensure_tenant_owner(&state, id).await?;
     Ok(Json(tenant))
 }
 
@@ -125,13 +143,11 @@ pub async fn update_tenant(
     Path(id): Path<Uuid>,
     Valid(Json(payload)): Valid<Json<UpdateTenantRequest>>,
 ) -> Result<Json<tenants::Model>, AppError> {
-    let tenant = tenants::Entity::find_by_id(id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if tenant.owner_id != auth.user_id {
-        return Err(AppError::Forbidden);
-    }
+    // テナント設定の変更はオーナー専用操作。
+    // ensure_tenant_access ではなく ensure_tenant_owner を使い、
+    // プロジェクトメンバーによる誤操作を防ぐ。
+    auth.require_scope(Scope::AdminTenant)?;
+    let tenant = auth.ensure_tenant_owner(&state, id).await?;
 
     let mut active: tenants::ActiveModel = tenant.into();
     if let Some(name) = payload.name {
@@ -163,13 +179,11 @@ pub async fn delete_tenant(
     auth: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
-    let tenant = tenants::Entity::find_by_id(id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if tenant.owner_id != auth.user_id {
-        return Err(AppError::Forbidden);
-    }
+    // テナント削除はオーナー専用操作。
+    // ensure_tenant_access ではなく ensure_tenant_owner を使い、
+    // プロジェクトメンバーによる削除を防ぐ。
+    auth.require_scope(Scope::AdminTenant)?;
+    auth.ensure_tenant_owner(&state, id).await?;
     tenants::Entity::delete_by_id(id).exec(&state.db).await?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -28,6 +28,8 @@ pub enum AppError {
     Forbidden,
     #[error("conflict")]
     Conflict,
+    #[error("bad request")]
+    BadRequest,
 }
 
 impl From<sea_orm::DbErr> for AppError {
@@ -65,6 +67,13 @@ impl IntoResponse for AppError {
                 StatusCode::CONFLICT,
                 Json(ServerError {
                     message: "conflict".into(),
+                }),
+            )
+                .into_response(),
+            AppError::BadRequest => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError {
+                    message: "bad-request".into(),
                 }),
             )
                 .into_response(),

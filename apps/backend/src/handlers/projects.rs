@@ -5,7 +5,7 @@ use sea_orm::prelude::Uuid;
 use serde::Deserialize;
 use validator::Validate;
 
-use crate::entities::{project_members, projects, tenants};
+use crate::entities::{project_members, projects, scopes::Scope, tenants};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -102,6 +102,8 @@ pub async fn create_project(
     Path(tenant_id): Path<Uuid>,
     Valid(Json(payload)): Valid<Json<CreateProjectRequest>>,
 ) -> Result<(StatusCode, Json<projects::Model>), AppError> {
+    auth.require_scope(Scope::WriteProject)?;
+    auth.ensure_tenant_access(&state, tenant_id, None).await?;
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
     let project = projects::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -131,6 +133,8 @@ pub async fn list_projects(
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
 ) -> Result<Json<Vec<projects::Model>>, AppError> {
+    auth.require_scope(Scope::ReadProject)?;
+    auth.ensure_tenant_access(&state, tenant_id, None).await?;
     if is_tenant_owner(&state, tenant_id, auth.user_id).await? {
         let list = projects::Entity::find()
             .filter(projects::Column::TenantId.eq(tenant_id))
@@ -178,6 +182,8 @@ pub async fn get_project(
     auth: AuthUser,
     Path((tenant_id, id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<projects::Model>, AppError> {
+    auth.require_scope(Scope::ReadProject)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(id)).await?;
     require_project_readable(&state, tenant_id, id, auth.user_id).await?;
     let project = projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))
@@ -208,6 +214,8 @@ pub async fn update_project(
     Path((tenant_id, id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateProjectRequest>>,
 ) -> Result<Json<projects::Model>, AppError> {
+    auth.require_scope(Scope::WriteProject)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(id)).await?;
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
     let project = projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))
@@ -255,6 +263,8 @@ pub async fn delete_project(
     auth: AuthUser,
     Path((tenant_id, id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
+    auth.require_scope(Scope::WriteProject)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(id)).await?;
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
     projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))

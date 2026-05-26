@@ -15,11 +15,15 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
-use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tracing::debug;
 
+use chrono::Utc;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+use crate::entities::personal_tokens::{self, Entity as PersonalTokenEntity};
 use crate::error::{ServerError, internal_server_error};
+use sea_orm::DatabaseConnection;
 
 #[derive(Debug, Error)]
 pub enum AuthError {
@@ -203,24 +207,18 @@ pub fn generate_email_verification_token() -> String {
 // --- Personal token helpers ---
 type HmacSha256 = Hmac<Sha256>;
 
-/// 生成したトークン本体と、それをDBに保存するためのハッシュを返す。
-/// トークン本体はランダムなバイト列をBase64URLでエンコードしたもの。
-pub fn generate_personal_token() -> Result<(String, String), AuthError> {
-    // 32バイトのランダム値
+/// `pat_<base64url>` 形式のトークンと、DBに保存するHMACハッシュを返す。
+pub fn generate_personal_token(secret: &str) -> Result<(String, String), AuthError> {
     let mut buf = [0u8; 32];
     OsRng.fill_bytes(&mut buf);
-    let token = URL_SAFE_NO_PAD.encode(&buf);
-
-    let token_hash = create_personal_token_hash(&token)?;
+    let token = format!("pat_{}", URL_SAFE_NO_PAD.encode(&buf));
+    let token_hash = create_personal_token_hash(&token, secret)?;
     Ok((token, token_hash))
 }
 
 /// サーバー側で保持するトークンのハッシュを作る。
-/// 簡易的には HMAC-SHA256(secret, token) を Base64URL でエンコードして保存する。
-pub fn create_personal_token_hash(token: &str) -> Result<String, AuthError> {
-    let secret = std::env::var("PERSONAL_TOKEN_SECRET")
-        .map_err(|e| AuthError::Internal(anyhow::anyhow!("token secret missing: {e}")))?;
-
+/// HMAC-SHA256(secret, token) を Base64URL でエンコードして返す。
+pub fn create_personal_token_hash(token: &str, secret: &str) -> Result<String, AuthError> {
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("hmac init: {e}")))?;
     mac.update(token.as_bytes());
@@ -228,21 +226,36 @@ pub fn create_personal_token_hash(token: &str) -> Result<String, AuthError> {
     Ok(URL_SAFE_NO_PAD.encode(result.as_slice()))
 }
 
-/// 受信したトークンを、DB にある `stored_hash` と比較して検証する。
-pub fn verify_personal_token(token: &str, stored_hash: &str) -> Result<bool, AuthError> {
-    let computed = create_personal_token_hash(token)?;
+/// DB から取得した PAT レコード（認証成功時）。
+pub type PersonalTokenRecord = personal_tokens::Model;
 
-    let computed_bytes = computed.as_bytes();
-    let stored_bytes = stored_hash.as_bytes();
+/// Bearer トークンを検証し、有効な PAT レコードを返す。
+pub async fn authenticate_personal_token(
+    db: &DatabaseConnection,
+    secret: &str,
+    token_plaintext: &str,
+) -> Result<PersonalTokenRecord, AuthError> {
+    let token_hash = create_personal_token_hash(token_plaintext, secret)?;
 
-    // 長さが違う場合でも、すぐに false を返さずダミーの比較を行うか、
-    // そもそもハッシュ関数の出力なので長さが同じはずであることを前提にする。
-    if computed_bytes.len() != stored_bytes.len() {
-        return Ok(false);
+    let token = PersonalTokenEntity::find()
+        .filter(personal_tokens::Column::TokenHash.eq(token_hash))
+        .one(db)
+        .await?
+        .ok_or(AuthError::Unauthorized)?;
+
+    if token.revoked {
+        return Err(AuthError::Unauthorized);
     }
 
-    Ok(computed_bytes.ct_eq(stored_bytes).into())
+    if let Some(expires) = &token.expires_at {
+        if expires < &Utc::now().fixed_offset() {
+            return Err(AuthError::Unauthorized);
+        }
+    }
+
+    Ok(token)
 }
+
 
 #[cfg(test)]
 mod tests {
