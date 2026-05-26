@@ -1,6 +1,11 @@
 use crate::{
     settings::Settings,
-    utils::{redis::RedisConnection, smtp::SmtpClient},
+    utils::{
+        redis::RedisConnection,
+        smtp::SmtpClient,
+        drive::DriveConfig,
+        storage::StorageBackend,
+    },
 };
 use sea_orm::DatabaseConnection;
 
@@ -31,4 +36,6 @@ pub struct AppState {
     pub redis_client: RedisConnection,
     pub smtp_client: SmtpClient,
     pub verification_email_storage: Arc<VerificationEmailStorage>,
+    pub storage: Arc<dyn StorageBackend>,
+    pub drive_config: DriveConfig,
 }

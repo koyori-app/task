@@ -38,6 +38,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let verification_email_storage =
         backend::jobs::setup_verification_email_storage(&pg_pool, &settings).await?;
 
+    let storage = backend::utils::storage::setup_storage().await.map_err(|e| {
+        std::io::Error::other(format!(
+            "storage backend initialization failed (STORAGE_BACKEND / S3_* / LOCAL_UPLOAD_DIR): {e}"
+        ))
+    })?;
+
     let state = AppState {
         settings,
         db,
@@ -45,6 +51,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         redis_client,
         smtp_client,
         verification_email_storage,
+        storage,
+        drive_config: backend::utils::drive::DriveConfig::from_env(),
     };
     run(state).await?;
 
