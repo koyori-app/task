@@ -48,6 +48,8 @@ pub async fn create_tenant(
     auth: AuthUser,
     Valid(Json(payload)): Valid<Json<CreateTenantRequest>>,
 ) -> Result<(StatusCode, Json<tenants::Model>), AppError> {
+    // PAT はテナントにバインドされているため、新規テナント作成はセッション専用とする
+    auth.require_session()?;
     let id = Uuid::new_v4();
     let tenant = tenants::ActiveModel {
         id: Set(id),
