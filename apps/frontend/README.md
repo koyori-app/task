@@ -1,75 +1,60 @@
-# Nuxt Minimal Starter
+Generated with [vike.dev/new](https://vike.dev/new) ([version 627](https://www.npmjs.com/package/create-vike/v/0.0.627)) using this command:
 
-Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
-
-## Setup
-
-Make sure to install dependencies:
-
-```bash
-# npm
-npm install
-
-# pnpm
-pnpm install
-
-# yarn
-yarn install
-
-# bun
-bun install
+```sh
+pnpm create vike@latest --vue --tailwindcss --hono --sentry --storybook
 ```
 
-## Development Server
+## Contents
 
-Start the development server on `http://localhost:3000`:
+- [Vike](#vike)
+  - [Plus files](#plus-files)
+  - [Routing](#routing)
+  - [SSR](#ssr)
+  - [HTML Streaming](#html-streaming)
+- [Sentry Browser / Error Tracking & Performance Monitoring](#sentry-browser--error-tracking--performance-monitoring)
 
-```bash
-# npm
-npm run dev
+## Vike
 
-# pnpm
-pnpm dev
+This app is ready to start. It's powered by [Vike](https://vike.dev) and [Vue](https://vuejs.org/guide/quick-start.html).
 
-# yarn
-yarn dev
+### Plus files
 
-# bun
-bun run dev
-```
+[The + files are the interface](https://vike.dev/config) between Vike and your code.
 
-## Production
+- [`+config.ts`](https://vike.dev/settings) — Settings (e.g. `<title>`)
+- [`+Page.vue`](https://vike.dev/Page) — The `<Page>` component
+- [`+data.ts`](https://vike.dev/data) — Fetching data (for your `<Page>` component)
+- [`+Layout.vue`](https://vike.dev/Layout) — The `<Layout>` component (wraps your `<Page>` components)
+- [`+Head.vue`](https://vike.dev/Head) - Sets `<head>` tags
+- [`/pages/_error/+Page.vue`](https://vike.dev/error-page) — The error page (rendered when an error occurs)
+- [`+onPageTransitionStart.ts`](https://vike.dev/onPageTransitionStart) and `+onPageTransitionEnd.ts` — For page transition animations
 
-Build the application for production:
+### Routing
 
-```bash
-# npm
-npm run build
+[Vike's built-in router](https://vike.dev/routing) lets you choose between:
 
-# pnpm
-pnpm build
+- [Filesystem Routing](https://vike.dev/filesystem-routing) (the URL of a page is determined based on where its `+Page.vue` file is located on the filesystem)
+- [Route Strings](https://vike.dev/route-string)
+- [Route Functions](https://vike.dev/route-function)
 
-# yarn
-yarn build
+### SSR
 
-# bun
-bun run build
-```
+SSR is enabled by default. You can [disable it](https://vike.dev/ssr) for all or specific pages.
 
-Locally preview production build:
+### HTML Streaming
 
-```bash
-# npm
-npm run preview
+You can [enable/disable HTML streaming](https://vike.dev/stream) for all or specific pages.
 
-# pnpm
-pnpm preview
+## Sentry Browser / Error Tracking & Performance Monitoring
 
-# yarn
-yarn preview
+This app is integrated with [Sentry](https://sentry.io) for error tracking.
 
-# bun
-bun run preview
-```
+> \[!NOTE]
+> Sentry Error Tracking is **only activated in production** (`import.meta.env.PROD === true`)!
 
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+**Testing Sentry** receiving Errors:
+
+1. Build & Start the app `pnpm build && pnpm preview`.
+2. open Testpage in browser: http://localhost:3000/sentry.
+3. check your [Sentry Dashboard](https://sentry.io) for new Errors.
+

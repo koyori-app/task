@@ -1,18 +1,27 @@
 {
-  // https://nuxt.com/docs/guide/concepts/typescript
-  "files": [],
-  "references": [
-    {
-      "path": "./.nuxt/tsconfig.app.json"
-    },
-    {
-      "path": "./.nuxt/tsconfig.server.json"
-    },
-    {
-      "path": "./.nuxt/tsconfig.shared.json"
-    },
-    {
-      "path": "./.nuxt/tsconfig.node.json"
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "lib": [
+      "DOM",
+      "DOM.Iterable",
+      "ESNext"
+    ],
+    "types": [
+      "vite/client"
+    ],
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "paths": {
+      "#/*": ["./server/*"],
+      "@/*": ["./src/*"],
+      "@/sentry.browser.config": ["./sentry.browser.config.ts"]
     }
+  },
+  "exclude": [
+    "dist"
   ]
 }

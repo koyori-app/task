@@ -1,17 +1,16 @@
 allowBuilds:
-  '@parcel/watcher': true
+  '@sentry/cli': true
   esbuild: true
-  sharp: true
-  vue-demi: true
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@latest
-  vite-plus: latest
-  vitest: npm:@voidzero-dev/vite-plus-test@latest
+  vite: npm:@voidzero-dev/vite-plus-core@0.1.21
+  vite-plus: 0.1.21
+  vitest: npm:@voidzero-dev/vite-plus-test@0.1.21
 overrides:
   vite: 'catalog:'
   vitest: 'catalog:'
 peerDependencyRules:
   allowAny:
+    - '@vitest/coverage-v8'
     - vite
     - vitest
   allowedVersions:
