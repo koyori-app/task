@@ -207,14 +207,11 @@ pub fn generate_email_verification_token() -> String {
 // --- Personal token helpers ---
 type HmacSha256 = Hmac<Sha256>;
 
-/// 生成したトークン本体と、それをDBに保存するためのハッシュを返す。
-/// トークン本体はランダムなバイト列をBase64URLでエンコードしたもの。
+/// `pat_<base64url>` 形式のトークンと、DBに保存するHMACハッシュを返す。
 pub fn generate_personal_token(secret: &str) -> Result<(String, String), AuthError> {
-    // 32バイトのランダム値
     let mut buf = [0u8; 32];
     OsRng.fill_bytes(&mut buf);
-    let token = URL_SAFE_NO_PAD.encode(&buf);
-
+    let token = format!("pat_{}", URL_SAFE_NO_PAD.encode(&buf));
     let token_hash = create_personal_token_hash(&token, secret)?;
     Ok((token, token_hash))
 }

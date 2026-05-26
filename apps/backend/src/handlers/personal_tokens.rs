@@ -127,10 +127,7 @@ pub async fn create_personal_token(
     }
 
     let secret = &state.settings.personal_token_secret;
-    let (token_plaintext, _) = auth::generate_personal_token(secret)
-        .map_err(|e| AppError::Internal(e.into()))?;
-    let token_value = format!("pat_{token_plaintext}");
-    let token_hash = auth::create_personal_token_hash(&token_value, secret)
+    let (token_value, token_hash) = auth::generate_personal_token(secret)
         .map_err(|e| AppError::Internal(e.into()))?;
 
     let allowed_project_ids = payload.project_ids.map(|ids| serde_json::json!(ids));
