@@ -29,8 +29,8 @@ pub struct Settings {
     ))]
     #[serde(default = "default_verification_email_worker_concurrency")]
     pub verification_email_worker_concurrency: usize,
-    /// PAT の HMAC-SHA256 署名に使う秘密鍵。起動時に必須。32文字以上を推奨。
-    #[validate(length(min = 1, message = "PERSONAL_TOKEN_SECRET is required"))]
+    /// PAT の HMAC-SHA256 署名に使う秘密鍵。起動時に必須。32バイト以上（256ビット）が必要。
+    #[validate(length(min = 32, message = "PERSONAL_TOKEN_SECRET must be at least 32 characters"))]
     pub personal_token_secret: String,
 }
 
@@ -114,7 +114,7 @@ mod tests {
             smtp_from: String::new(),
             email_verification_app_url: url.to_string(),
             verification_email_worker_concurrency: 1,
-            personal_token_secret: "test-secret".to_string(),
+            personal_token_secret: "a".repeat(32),
         }
         .validate()
         .is_ok()
