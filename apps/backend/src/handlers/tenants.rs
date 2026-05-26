@@ -77,6 +77,10 @@ pub async fn list_tenants(
     State(state): State<AppState>,
     auth: AuthUser,
 ) -> Result<Json<Vec<tenants::Model>>, AppError> {
+    // テナント一覧は ensure_tenant_owner/access 不要。
+    // Session: OwnerId フィルタで自分のテナントのみ取得。
+    // PAT: バインドされた tenant_id の単一テナントのみ返す。
+    // フィルタ自体が認可を兼ねているため追加チェックは不要。
     auth.require_scope(Scope::AdminTenant)?;
     let tenants = match &auth.method {
         AuthMethod::Session => {
@@ -113,6 +117,9 @@ pub async fn get_tenant(
     auth: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<tenants::Model>, AppError> {
+    // テナント情報の取得はオーナー専用操作。
+    // ensure_tenant_access（オーナーとメンバー双方を通過させる）ではなく
+    // ensure_tenant_owner を使い、プロジェクトメンバーを排除する。
     auth.require_scope(Scope::AdminTenant)?;
     let tenant = auth.ensure_tenant_owner(&state, id).await?;
     Ok(Json(tenant))
@@ -136,6 +143,9 @@ pub async fn update_tenant(
     Path(id): Path<Uuid>,
     Valid(Json(payload)): Valid<Json<UpdateTenantRequest>>,
 ) -> Result<Json<tenants::Model>, AppError> {
+    // テナント設定の変更はオーナー専用操作。
+    // ensure_tenant_access ではなく ensure_tenant_owner を使い、
+    // プロジェクトメンバーによる誤操作を防ぐ。
     auth.require_scope(Scope::AdminTenant)?;
     let tenant = auth.ensure_tenant_owner(&state, id).await?;
 
@@ -169,6 +179,9 @@ pub async fn delete_tenant(
     auth: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
+    // テナント削除はオーナー専用操作。
+    // ensure_tenant_access ではなく ensure_tenant_owner を使い、
+    // プロジェクトメンバーによる削除を防ぐ。
     auth.require_scope(Scope::AdminTenant)?;
     auth.ensure_tenant_owner(&state, id).await?;
     tenants::Entity::delete_by_id(id).exec(&state.db).await?;
