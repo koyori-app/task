@@ -20,18 +20,16 @@ pub fn tenant_drive_routes() -> OpenApiRouter<AppState> {
     let upload_limit = DriveConfig::from_env().upload_max_bytes;
 
     OpenApiRouter::<AppState>::new()
-        .routes(routes!(crate::handlers::drive_files::list_files))
+        .routes(routes!(
+            crate::handlers::drive_files::list_files,
+            crate::handlers::drive_files::upload_file,
+        ))
         .routes(routes!(crate::handlers::drive_files::get_drive_usage))
         .routes(routes!(crate::handlers::drive_files::update_drive_quota))
         .routes(routes!(crate::handlers::drive_files::get_file))
         .routes(routes!(crate::handlers::drive_files::update_file))
         .routes(routes!(crate::handlers::drive_files::delete_file))
-        .route(
-            "/files",
-            axum::routing::post(crate::handlers::drive_files::upload_file).layer(
-                RequestBodyLimitLayer::new(upload_limit as usize),
-            ),
-        )
+        .layer(RequestBodyLimitLayer::new(upload_limit as usize))
 }
 
 pub fn public_routes() -> OpenApiRouter<AppState> {
