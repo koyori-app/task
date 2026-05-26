@@ -44,7 +44,7 @@ pub fn validate_share_target_xor(
     share_token: Option<&str>,
 ) -> Result<(), DbErr> {
     let has_user = shared_with_user_id.is_some();
-    let has_token = share_token.is_some_and(|t| !t.is_empty());
+    let has_token = share_token.is_some();
     if has_user == has_token {
         return Err(DbErr::Custom(
             "drive_folder_shares: exactly one of shared_with_user_id or share_token must be set (CHECK constraint)".into(),

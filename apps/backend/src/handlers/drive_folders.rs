@@ -490,9 +490,6 @@ pub async fn get_public_share_folder(
     Path(token): Path<String>,
 ) -> Result<Json<PublicFolderResponse>, AppError> {
     let share = load_active_share_by_token(&state, &token).await?;
-    if share.share_token.is_none() {
-        return Err(AppError::NotFound);
-    }
     let folder = drive_folders::Entity::find_by_id(share.folder_id)
         .one(&state.db)
         .await?
@@ -521,9 +518,6 @@ pub async fn list_public_share_files(
     Path(token): Path<String>,
 ) -> Result<Json<Vec<drive_files::Model>>, AppError> {
     let share = load_active_share_by_token(&state, &token).await?;
-    if share.share_token.is_none() {
-        return Err(AppError::NotFound);
-    }
     let files = drive_files::Entity::find()
         .filter(drive_files::Column::FolderId.eq(share.folder_id))
         .all(&state.db)

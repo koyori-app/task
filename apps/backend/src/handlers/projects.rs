@@ -1,6 +1,6 @@
 use axum::{Json, extract::{Path, State}, http::StatusCode};
 use axum_valid::Valid;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, QueryFilter, ColumnTrait};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, QueryFilter, ColumnTrait, TransactionTrait};
 use sea_orm::prelude::Uuid;
 use serde::Deserialize;
 use validator::Validate;
@@ -113,7 +113,8 @@ pub async fn create_project(
         icon_emoji: Set(payload.icon_emoji),
         icon_url: Set(payload.icon_url),
     };
-    let model = project.insert(&state.db).await?;
+    let txn = state.db.begin().await?;
+    let model = project.insert(&txn).await?;
 
     let drive_folder = drive_folders::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -124,14 +125,8 @@ pub async fn create_project(
         created_by: Set(auth.user_id),
         created_at: Set(Default::default()),
     };
-    if let Err(e) = drive_folder.insert(&state.db).await {
-        tracing::error!(
-            error = %e,
-            project_id = %model.id,
-            "failed to create project drive folder"
-        );
-        return Err(AppError::Internal(e.into()));
-    }
+    drive_folder.insert(&txn).await?;
+    txn.commit().await?;
 
     Ok((StatusCode::CREATED, Json(model)))
 }

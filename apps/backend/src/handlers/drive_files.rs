@@ -220,7 +220,7 @@ async fn can_access_file_content(
         return Ok(());
     }
 
-    let project_id = file.project_id.ok_or(AppError::Forbidden)?;
+    let project_id = file.project_id.expect("checked is_none above");
 
     if let Some(token) = share_token.filter(|t| !t.is_empty()) {
         if let Some(folder_id) = file.folder_id {
@@ -431,7 +431,7 @@ pub async fn upload_file(
         size: Set(size as i64),
         mime_type: Set(mime_type),
         storage_type: Set(current_storage_type()),
-        storage_key: Set(storage_key),
+        storage_key: Set(storage_key.clone()),
         tenant_id: Set(tenant_id),
         project_id: Set(folder_project_id),
         uploader_id: Set(auth.user_id),
@@ -439,7 +439,13 @@ pub async fn upload_file(
         created_at: Set(Utc::now().fixed_offset()),
     };
 
-    let saved = model.insert(&state.db).await?;
+    let saved = match model.insert(&state.db).await {
+        Ok(m) => m,
+        Err(e) => {
+            let _ = state.storage.delete(&storage_key).await;
+            return Err(e.into());
+        }
+    };
     Ok((StatusCode::CREATED, Json(drive_file_response(&saved))))
 }
 
@@ -537,14 +543,11 @@ pub async fn delete_file(
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
 
     let file = load_tenant_file(&state, tenant_id, id).await?;
-    state
-        .storage
-        .delete(&file.storage_key)
-        .await
-        .map_err(storage_to_app_error)?;
+    let storage_key = file.storage_key.clone();
     drive_files::Entity::delete_by_id(id)
         .exec(&state.db)
         .await?;
+    let _ = state.storage.delete(&storage_key).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
