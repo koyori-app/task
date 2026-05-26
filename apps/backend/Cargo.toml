@@ -5,7 +5,7 @@ edition = "2024"
 default-run = "backend"
 
 [dependencies]
-axum = { version = "0.8.8", features = ["macros"] }
+axum = { version = "0.8.8", features = ["macros", "multipart"] }
 sea-orm = { version = "2.0.0-rc.38", features = [
     "sqlx-postgres",
     "runtime-tokio-rustls",
@@ -16,14 +16,14 @@ sea-orm = { version = "2.0.0-rc.38", features = [
 ] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-tokio = { version = "1.52.1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+tokio = { version = "1.52.1", features = ["fs", "io-util", "macros", "rt-multi-thread", "net", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 utoipa = { version = "5.4.0", features = ["uuid"] }
 uuid = { version = "1", features = ["serde"] }
 utoipa-axum = "0.2.0"
 utoipa-scalar = { version = "0.3.0", features = ["axum"] }
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.6", features = ["cors", "limit"] }
 axum_session = { version = "0.20.0" }
 axum_session_redispool = { version = "0.11.0" }
 dotenvy = "0.15"
@@ -52,3 +52,11 @@ apalis = { version = "1.0.0-rc.9", features = ["limit", "retry", "tracing"] }
 apalis-postgres = { version = "1.0.0-rc.8", default-features = false, features = ["migrate", "tokio-comp", "time"] }
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "time"] }
 apalis-board = { version = "1.0.0-rc.8", features = ["axum", "ui", "events"] }
+async-trait = "0.1"
+bytes = "1"
+futures = "0.3"
+tokio-util = { version = "0.7", features = ["io"] }
+aws-config = "1"
+aws-credential-types = "1"
+aws-sdk-s3 = "1"
+mime_guess = "2"
