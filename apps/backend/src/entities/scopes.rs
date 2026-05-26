@@ -8,6 +8,10 @@ pub enum Scope {
     ReadProject,
     #[serde(rename = "write:project")]
     WriteProject,
+    #[serde(rename = "read:drive")]
+    ReadDrive,
+    #[serde(rename = "write:drive")]
+    WriteDrive,
     #[serde(rename = "admin:tenant")]
     AdminTenant,
 }
@@ -17,6 +21,8 @@ impl Scope {
         match self {
             Scope::ReadProject => "read:project",
             Scope::WriteProject => "write:project",
+            Scope::ReadDrive => "read:drive",
+            Scope::WriteDrive => "write:drive",
             Scope::AdminTenant => "admin:tenant",
         }
     }
@@ -25,6 +31,8 @@ impl Scope {
         match s {
             "read:project" => Some(Scope::ReadProject),
             "write:project" => Some(Scope::WriteProject),
+            "read:drive" => Some(Scope::ReadDrive),
+            "write:drive" => Some(Scope::WriteDrive),
             "admin:tenant" => Some(Scope::AdminTenant),
             _ => None,
         }
@@ -44,7 +52,9 @@ pub struct ScopeList(pub Vec<Scope>);
 
 impl ScopeList {
     pub fn has_scope(&self, scope: Scope) -> bool {
-        self.0.contains(&scope) || self.0.contains(&Scope::AdminTenant)
+        self.0.contains(&scope)
+            || self.0.contains(&Scope::AdminTenant)
+            || (scope == Scope::ReadDrive && self.0.contains(&Scope::WriteDrive))
     }
 }
 
