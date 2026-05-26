@@ -218,7 +218,7 @@ impl FromRequestParts<AppState> for AuthUser {
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         if let Some(token) = bearer_token_from_parts(parts) {
-            let record = authenticate_personal_token(&state.db, &token).await?;
+            let record = authenticate_personal_token(&state.db, &state.settings.personal_token_secret, &token).await?;
             Ok(AuthUser {
                 user_id: record.user_id,
                 method: AuthMethod::PersonalToken {

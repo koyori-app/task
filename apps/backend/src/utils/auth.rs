@@ -210,22 +210,19 @@ type HmacSha256 = Hmac<Sha256>;
 
 /// 生成したトークン本体と、それをDBに保存するためのハッシュを返す。
 /// トークン本体はランダムなバイト列をBase64URLでエンコードしたもの。
-pub fn generate_personal_token() -> Result<(String, String), AuthError> {
+pub fn generate_personal_token(secret: &str) -> Result<(String, String), AuthError> {
     // 32バイトのランダム値
     let mut buf = [0u8; 32];
     OsRng.fill_bytes(&mut buf);
     let token = URL_SAFE_NO_PAD.encode(&buf);
 
-    let token_hash = create_personal_token_hash(&token)?;
+    let token_hash = create_personal_token_hash(&token, secret)?;
     Ok((token, token_hash))
 }
 
 /// サーバー側で保持するトークンのハッシュを作る。
-/// 簡易的には HMAC-SHA256(secret, token) を Base64URL でエンコードして保存する。
-pub fn create_personal_token_hash(token: &str) -> Result<String, AuthError> {
-    let secret = std::env::var("PERSONAL_TOKEN_SECRET")
-        .map_err(|e| AuthError::Internal(anyhow::anyhow!("token secret missing: {e}")))?;
-
+/// HMAC-SHA256(secret, token) を Base64URL でエンコードして返す。
+pub fn create_personal_token_hash(token: &str, secret: &str) -> Result<String, AuthError> {
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("hmac init: {e}")))?;
     mac.update(token.as_bytes());
@@ -239,9 +236,10 @@ pub type PersonalTokenRecord = personal_tokens::Model;
 /// Bearer トークンを検証し、有効な PAT レコードを返す。
 pub async fn authenticate_personal_token(
     db: &DatabaseConnection,
+    secret: &str,
     token_plaintext: &str,
 ) -> Result<PersonalTokenRecord, AuthError> {
-    let token_hash = create_personal_token_hash(token_plaintext)?;
+    let token_hash = create_personal_token_hash(token_plaintext, secret)?;
 
     let token = PersonalTokenEntity::find()
         .filter(personal_tokens::Column::TokenHash.eq(token_hash))
@@ -263,8 +261,8 @@ pub async fn authenticate_personal_token(
 }
 
 /// 受信したトークンを、DB にある `stored_hash` と比較して検証する。
-pub fn verify_personal_token(token: &str, stored_hash: &str) -> Result<bool, AuthError> {
-    let computed = create_personal_token_hash(token)?;
+pub fn verify_personal_token(token: &str, stored_hash: &str, secret: &str) -> Result<bool, AuthError> {
+    let computed = create_personal_token_hash(token, secret)?;
 
     let computed_bytes = computed.as_bytes();
     let stored_bytes = stored_hash.as_bytes();
