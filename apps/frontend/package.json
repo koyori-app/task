@@ -8,7 +8,9 @@
     "prod": "vike build && node ./dist/server/index.mjs",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
-    "openapi:generate": "openapi-generator-cli generate -i ./openapi.json -g typescript-fetch -o ./src/generated/api"
+    "openapi:generate": "openapi-generator-cli generate -i ./openapi.json -g typescript-fetch -o ./src/generated/api",
+    "openapi:export": "cargo run --manifest-path ../backend/Cargo.toml --bin export_openapi -- ./openapi.json",
+    "openapi": "pnpm run openapi:export && pnpm run openapi:generate"
   },
   "dependencies": {
     "@elysiajs/static": "1.4.10",
