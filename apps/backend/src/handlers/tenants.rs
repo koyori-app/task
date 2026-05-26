@@ -111,15 +111,8 @@ pub async fn get_tenant(
     auth: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<tenants::Model>, AppError> {
-    auth.require_scope(Scope::ReadProject)?;
-    auth.ensure_tenant_access(&state, id, None).await?;
-    let tenant = tenants::Entity::find_by_id(id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if tenant.owner_id != auth.user_id {
-        return Err(AppError::Forbidden);
-    }
+    auth.require_scope(Scope::AdminTenant)?;
+    let tenant = auth.ensure_tenant_owner(&state, id).await?;
     Ok(Json(tenant))
 }
 
@@ -142,14 +135,7 @@ pub async fn update_tenant(
     Valid(Json(payload)): Valid<Json<UpdateTenantRequest>>,
 ) -> Result<Json<tenants::Model>, AppError> {
     auth.require_scope(Scope::AdminTenant)?;
-    auth.ensure_tenant_access(&state, id, None).await?;
-    let tenant = tenants::Entity::find_by_id(id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if tenant.owner_id != auth.user_id {
-        return Err(AppError::Forbidden);
-    }
+    let tenant = auth.ensure_tenant_owner(&state, id).await?;
 
     let mut active: tenants::ActiveModel = tenant.into();
     if let Some(name) = payload.name {
@@ -182,14 +168,7 @@ pub async fn delete_tenant(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
     auth.require_scope(Scope::AdminTenant)?;
-    auth.ensure_tenant_access(&state, id, None).await?;
-    let tenant = tenants::Entity::find_by_id(id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if tenant.owner_id != auth.user_id {
-        return Err(AppError::Forbidden);
-    }
+    auth.ensure_tenant_owner(&state, id).await?;
     tenants::Entity::delete_by_id(id).exec(&state.db).await?;
     Ok(StatusCode::NO_CONTENT)
 }

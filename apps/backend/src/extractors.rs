@@ -77,6 +77,39 @@ impl AuthUser {
         }
     }
 
+    /// テナントオーナー専用操作向け。PAT 境界チェック + オーナー確認を一括実施し、
+    /// テナントモデルを返す（呼び出し側で再取得不要）。
+    /// `ensure_tenant_access` + `owner_id` 二重チェックの代替として使用する。
+    pub async fn ensure_tenant_owner(
+        &self,
+        state: &AppState,
+        tenant_id: Uuid,
+    ) -> Result<tenants::Model, AppError> {
+        // PAT は自テナント以外への操作を禁止
+        if let AuthMethod::PersonalToken {
+            tenant_id: pat_tenant,
+            allowed_project_ids,
+            ..
+        } = &self.method
+        {
+            if tenant_id != *pat_tenant {
+                return Err(AppError::Forbidden);
+            }
+            // プロジェクト制限付き PAT はテナント全体操作不可
+            if allowed_project_ids.is_some() {
+                return Err(AppError::Forbidden);
+            }
+        }
+        let tenant = tenants::Entity::find_by_id(tenant_id)
+            .one(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if tenant.owner_id != self.user_id {
+            return Err(AppError::Forbidden);
+        }
+        Ok(tenant)
+    }
+
     /// テナント / プロジェクト境界チェック。
     pub async fn ensure_tenant_access(
         &self,
