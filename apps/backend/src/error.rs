@@ -30,6 +30,12 @@ pub enum AppError {
     Conflict,
     #[error("bad request")]
     BadRequest,
+    #[error("gone")]
+    Gone,
+    #[error("unprocessable entity")]
+    UnprocessableEntity,
+    #[error("content too large")]
+    ContentTooLarge,
 }
 
 impl From<sea_orm::DbErr> for AppError {
@@ -74,6 +80,27 @@ impl IntoResponse for AppError {
                 StatusCode::BAD_REQUEST,
                 Json(ServerError {
                     message: "bad-request".into(),
+                }),
+            )
+                .into_response(),
+            AppError::Gone => (
+                StatusCode::GONE,
+                Json(ServerError {
+                    message: "gone".into(),
+                }),
+            )
+                .into_response(),
+            AppError::UnprocessableEntity => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ServerError {
+                    message: "unprocessable-entity".into(),
+                }),
+            )
+                .into_response(),
+            AppError::ContentTooLarge => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(ServerError {
+                    message: "content-too-large".into(),
                 }),
             )
                 .into_response(),

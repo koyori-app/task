@@ -1,0 +1,17 @@
+meta {
+  name: 08 ファイル配信（共有トークン）
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{base_url}}/v1/drive/files/{{file_id}}/content?token={{share_token}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("status 200 or 403 or 404", function() {
+    expect([200, 403, 404]).to.include(res.status);
+  });
+}

@@ -1,0 +1,41 @@
+meta {
+  name: 16 共有作成（ユーザー指定）
+  type: http
+  seq: 16
+}
+
+post {
+  url: {{base_url}}/v1/tenants/{{tenant_id}}/drive/folders/{{folder_id}}/shares
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+headers {
+  content-type: application/json
+  accept: application/json
+}
+
+body:json {
+  {
+    "type": "user",
+    "user_id": "{{user_id}}",
+    "permission": "viewer",
+    "expires_at": null
+  }
+}
+
+tests {
+  test("status 201", function() {
+    expect(res.status).to.equal(201);
+  });
+}
+
+script:post-response {
+  if (res.status === 201 && res.body && res.body.id) {
+    bru.setVar("share_id", res.body.id);
+  }
+}

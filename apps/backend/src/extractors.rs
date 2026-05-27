@@ -210,6 +210,24 @@ async fn session_has_tenant_access(
     }
 }
 
+/// 認証任意（未認証は `None`）。コンテンツ配信などで使用。
+pub struct OptionalAuthUser(pub Option<AuthUser>);
+
+impl FromRequestParts<AppState> for OptionalAuthUser {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        match AuthUser::from_request_parts(parts, state).await {
+            Ok(auth) => Ok(OptionalAuthUser(Some(auth))),
+            Err(AuthError::Unauthorized) => Ok(OptionalAuthUser(None)),
+            Err(e) => Err(e),
+        }
+    }
+}
+
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = AuthError;
 

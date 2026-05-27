@@ -14,6 +14,9 @@ pub struct Model {
     pub icon_url: String,
     #[schema(value_type = String, format="uuid")]
     pub owner_id: Uuid,
+    #[sea_orm(nullable)]
+    #[schema(nullable)]
+    pub drive_quota_bytes: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

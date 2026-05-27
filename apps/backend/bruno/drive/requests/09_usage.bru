@@ -1,0 +1,28 @@
+meta {
+  name: 09 使用量取得
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{base_url}}/v1/tenants/{{tenant_id}}/drive/usage
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+headers {
+  accept: application/json
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("has used_bytes", function() {
+    expect(res.body).to.have.property("used_bytes");
+  });
+}

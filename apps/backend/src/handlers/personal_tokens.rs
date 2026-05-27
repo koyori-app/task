@@ -103,6 +103,7 @@ async fn get_owned_token(
 #[utoipa::path(
     post,
     path = "/",
+    tag = "Personal Tokens",
     summary = "パーソナルアクセストークンを発行",
     request_body = CreatePersonalTokenRequest,
     responses(
@@ -157,6 +158,7 @@ pub async fn create_personal_token(
 #[utoipa::path(
     get,
     path = "/{id}",
+    tag = "Personal Tokens",
     summary = "指定したトークンを参照",
     params(("id" = Uuid, Path, description = "トークンの識別子")),
     responses(
@@ -184,6 +186,7 @@ pub async fn get_personal_token(
 #[utoipa::path(
     delete,
     path = "/{id}",
+    tag = "Personal Tokens",
     summary = "指定したトークンを取り消し",
     params(("id" = Uuid, Path, description = "トークンの識別子")),
     responses(
@@ -214,6 +217,7 @@ pub async fn revoke_personal_token(
 #[utoipa::path(
     delete,
     path = "/revoke-all",
+    tag = "Personal Tokens",
     summary = "テナント配下のすべての個人用トークンを取り消し",
     request_body = RevokeAllPersonalTokensRequest,
     responses(

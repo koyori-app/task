@@ -1,0 +1,35 @@
+meta {
+  name: 04 ファイル更新
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{base_url}}/v1/tenants/{{tenant_id}}/drive/files/{{file_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+headers {
+  content-type: application/json
+  accept: application/json
+}
+
+body:json {
+  {
+    "name": "bruno-sample-renamed.txt"
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("name updated", function() {
+    expect(res.body.name).to.equal("bruno-sample-renamed.txt");
+  });
+}

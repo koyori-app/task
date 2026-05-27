@@ -1,0 +1,21 @@
+meta {
+  name: 14 フォルダ削除
+  type: http
+  seq: 14
+}
+
+delete {
+  url: {{base_url}}/v1/tenants/{{tenant_id}}/drive/folders/{{folder_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+tests {
+  test("status 204 or 409", function() {
+    expect([204, 409]).to.include(res.status);
+  });
+}

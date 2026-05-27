@@ -1,4 +1,6 @@
 pub mod auth;
+pub mod drive;
+pub mod storage;
 pub mod db;
 pub mod email;
 pub mod email_verification;

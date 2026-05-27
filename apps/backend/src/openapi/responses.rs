@@ -105,6 +105,41 @@ pub enum CrudErrors {
 }
 
 #[derive(IntoResponses)]
+pub enum DriveFolderErrors {
+    #[response(status = 401, description = "ログインまたはセッションが必要です")]
+    Unauthorized(#[to_schema] ServerError),
+    #[response(status = 403, description = "この操作は許可されていません")]
+    Forbidden(#[to_schema] ServerError),
+    #[response(status = 404, description = "リソースが見つかりません")]
+    NotFound(#[to_schema] ServerError),
+    #[response(status = 409, description = "フォルダ内にファイルまたはサブフォルダが存在します")]
+    Conflict(#[to_schema] ServerError),
+    #[response(
+        status = 422,
+        description = "リクエストは受理できません（例: editor 権限は Phase 2 以降）"
+    )]
+    UnprocessableEntity(#[to_schema] ServerError),
+    #[response(
+        status = 500,
+        description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
+    )]
+    Internal(#[to_schema] ServerError),
+}
+
+#[derive(IntoResponses)]
+pub enum PublicShareErrors {
+    #[response(status = 404, description = "共有リンクが見つかりません")]
+    NotFound(#[to_schema] ServerError),
+    #[response(status = 410, description = "共有リンクの有効期限が切れています")]
+    Gone(#[to_schema] ServerError),
+    #[response(
+        status = 500,
+        description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
+    )]
+    Internal(#[to_schema] ServerError),
+}
+
+#[derive(IntoResponses)]
 pub enum ResendVerificationErrors {
     #[response(
         status = 404,

@@ -1,0 +1,21 @@
+meta {
+  name: 05 ファイル削除
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{base_url}}/v1/tenants/{{tenant_id}}/drive/files/{{file_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+tests {
+  test("status 204", function() {
+    expect(res.status).to.equal(204);
+  });
+}

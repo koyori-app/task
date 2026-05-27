@@ -11,6 +11,10 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(crate::handlers::tenants::update_tenant))
         .routes(routes!(crate::handlers::tenants::delete_tenant))
         .nest(
+            "/{tenant_id}/drive/folders",
+            crate::routes::drive::tenant_folder_routes(),
+        )
+        .nest(
             "/{tenant_id}/projects",
             OpenApiRouter::<AppState>::new()
                 .routes(routes!(crate::handlers::projects::list_projects))
@@ -26,5 +30,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::project_members::update_member))
                         .routes(routes!(crate::handlers::project_members::remove_member)),
                 ),
+        )
+        .nest(
+            "/{tenant_id}/drive",
+            crate::routes::drive::tenant_drive_routes(),
         )
 }

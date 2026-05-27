@@ -1,11 +1,11 @@
 use axum::{Json, extract::{Path, State}, http::StatusCode};
 use axum_valid::Valid;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, QueryFilter, ColumnTrait};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, QueryFilter, ColumnTrait, TransactionTrait};
 use sea_orm::prelude::Uuid;
 use serde::Deserialize;
 use validator::Validate;
 
-use crate::entities::{project_members, projects, scopes::Scope, tenants};
+use crate::entities::{drive_folders, project_members, projects, scopes::Scope, tenants};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -88,6 +88,7 @@ async fn require_project_readable(
 #[utoipa::path(
     post,
     path = "/",
+    tag = "Projects",
     summary = "プロジェクトを作成",
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     request_body = CreateProjectRequest,
@@ -113,7 +114,21 @@ pub async fn create_project(
         icon_emoji: Set(payload.icon_emoji),
         icon_url: Set(payload.icon_url),
     };
-    let model = project.insert(&state.db).await?;
+    let txn = state.db.begin().await?;
+    let model = project.insert(&txn).await?;
+
+    let drive_folder = drive_folders::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        name: Set(model.name.clone()),
+        parent_id: Set(None),
+        tenant_id: Set(tenant_id),
+        project_id: Set(Some(model.id)),
+        created_by: Set(auth.user_id),
+        created_at: Set(Default::default()),
+    };
+    drive_folder.insert(&txn).await?;
+    txn.commit().await?;
+
     Ok((StatusCode::CREATED, Json(model)))
 }
 
@@ -121,6 +136,7 @@ pub async fn create_project(
 #[utoipa::path(
     get,
     path = "/",
+    tag = "Projects",
     summary = "プロジェクト一覧",
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     responses(
@@ -167,6 +183,7 @@ pub async fn list_projects(
 #[utoipa::path(
     get,
     path = "/{id}",
+    tag = "Projects",
     summary = "プロジェクトを取得",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -197,6 +214,7 @@ pub async fn get_project(
 #[utoipa::path(
     put,
     path = "/{id}",
+    tag = "Projects",
     summary = "プロジェクトを更新",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -248,6 +266,7 @@ pub async fn update_project(
 #[utoipa::path(
     delete,
     path = "/{id}",
+    tag = "Projects",
     summary = "プロジェクトを削除",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),

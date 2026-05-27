@@ -1,4 +1,6 @@
 pub mod auth;
+pub mod drive_files;
+pub mod drive_folders;
 pub mod labels;
 pub mod personal_tokens;
 pub mod project_members;
