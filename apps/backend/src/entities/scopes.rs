@@ -14,6 +14,14 @@ pub enum Scope {
     WriteDrive,
     #[serde(rename = "admin:tenant")]
     AdminTenant,
+    #[serde(rename = "read:task")]
+    ReadTask,
+    #[serde(rename = "write:task")]
+    WriteTask,
+    #[serde(rename = "read:milestone")]
+    ReadMilestone,
+    #[serde(rename = "write:milestone")]
+    WriteMilestone,
 }
 
 impl Scope {
@@ -24,6 +32,10 @@ impl Scope {
             Scope::ReadDrive => "read:drive",
             Scope::WriteDrive => "write:drive",
             Scope::AdminTenant => "admin:tenant",
+            Scope::ReadTask => "read:task",
+            Scope::WriteTask => "write:task",
+            Scope::ReadMilestone => "read:milestone",
+            Scope::WriteMilestone => "write:milestone",
         }
     }
 
@@ -34,6 +46,10 @@ impl Scope {
             "read:drive" => Some(Scope::ReadDrive),
             "write:drive" => Some(Scope::WriteDrive),
             "admin:tenant" => Some(Scope::AdminTenant),
+            "read:task" => Some(Scope::ReadTask),
+            "write:task" => Some(Scope::WriteTask),
+            "read:milestone" => Some(Scope::ReadMilestone),
+            "write:milestone" => Some(Scope::WriteMilestone),
             _ => None,
         }
     }
@@ -55,6 +71,8 @@ impl ScopeList {
         self.0.contains(&scope)
             || self.0.contains(&Scope::AdminTenant)
             || (scope == Scope::ReadDrive && self.0.contains(&Scope::WriteDrive))
+            || (scope == Scope::ReadTask && self.0.contains(&Scope::WriteTask))
+            || (scope == Scope::ReadMilestone && self.0.contains(&Scope::WriteMilestone))
     }
 }
 

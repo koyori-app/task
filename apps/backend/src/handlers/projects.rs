@@ -21,6 +21,28 @@ pub struct CreateProjectRequest {
     pub icon_emoji: Option<String>,
     #[validate(url)]
     pub icon_url: Option<String>,
+    /// プロジェクトキー（例: ENG, BACK）。省略時はプロジェクト名から自動生成。
+    pub key: Option<String>,
+}
+
+fn generate_project_key(name: &str) -> String {
+    let upper: String = name
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .map(|c| c.to_ascii_uppercase())
+        .take(10)
+        .collect();
+    if upper.is_empty() {
+        "PROJ".to_string()
+    } else {
+        upper
+    }
+}
+
+fn validate_project_key(key: &str) -> bool {
+    let chars: Vec<char> = key.chars().collect();
+    if chars.len() < 2 || chars.len() > 10 { return false; }
+    chars[0].is_ascii_uppercase() && chars[1..].iter().all(|c| c.is_ascii_alphanumeric() && c.is_ascii_uppercase() || c.is_ascii_digit())
 }
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
@@ -106,6 +128,11 @@ pub async fn create_project(
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
+    let key = match payload.key {
+        Some(k) if validate_project_key(&k) => k,
+        Some(_) => return Err(AppError::BadRequest),
+        None => generate_project_key(&payload.name),
+    };
     let project = projects::ActiveModel {
         id: Set(Uuid::new_v4()),
         name: Set(payload.name),
@@ -113,6 +140,7 @@ pub async fn create_project(
         tenant_id: Set(tenant_id),
         icon_emoji: Set(payload.icon_emoji),
         icon_url: Set(payload.icon_url),
+        key: Set(key),
     };
     let txn = state.db.begin().await?;
     let model = project.insert(&txn).await?;

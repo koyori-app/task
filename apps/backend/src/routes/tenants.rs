@@ -29,6 +29,52 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::project_members::add_member))
                         .routes(routes!(crate::handlers::project_members::update_member))
                         .routes(routes!(crate::handlers::project_members::remove_member)),
+                )
+                .nest(
+                    "/{project_id}/tasks",
+                    OpenApiRouter::<AppState>::new()
+                        .routes(routes!(crate::handlers::tasks::list_tasks))
+                        .routes(routes!(crate::handlers::tasks::create_task))
+                        .routes(routes!(crate::handlers::tasks::get_task))
+                        .routes(routes!(crate::handlers::tasks::update_task))
+                        .routes(routes!(crate::handlers::tasks::delete_task))
+                        .routes(routes!(crate::handlers::tasks::archive_task))
+                        .routes(routes!(crate::handlers::tasks::unarchive_task))
+                        .routes(routes!(crate::handlers::tasks::list_assignees))
+                        .routes(routes!(crate::handlers::tasks::add_assignee))
+                        .routes(routes!(crate::handlers::tasks::update_assignee))
+                        .routes(routes!(crate::handlers::tasks::remove_assignee))
+                        .routes(routes!(crate::handlers::tasks::list_relations))
+                        .routes(routes!(crate::handlers::tasks::add_relation))
+                        .routes(routes!(crate::handlers::tasks::remove_relation)),
+                )
+                .nest(
+                    "/{project_id}/statuses",
+                    OpenApiRouter::<AppState>::new()
+                        .routes(routes!(crate::handlers::statuses::list_statuses))
+                        .routes(routes!(crate::handlers::statuses::create_status))
+                        .routes(routes!(crate::handlers::statuses::update_status))
+                        .routes(routes!(crate::handlers::statuses::reorder_statuses))
+                        .routes(routes!(crate::handlers::statuses::delete_status)),
+                )
+                .nest(
+                    "/{project_id}/milestones",
+                    OpenApiRouter::<AppState>::new()
+                        .routes(routes!(crate::handlers::milestones::list_milestones))
+                        .routes(routes!(crate::handlers::milestones::create_milestone))
+                        .routes(routes!(crate::handlers::milestones::get_milestone))
+                        .routes(routes!(crate::handlers::milestones::update_milestone))
+                        .routes(routes!(crate::handlers::milestones::delete_milestone)),
+                )
+                .nest(
+                    "/{project_id}/labels",
+                    OpenApiRouter::<AppState>::new()
+                        .routes(routes!(crate::handlers::labels::list_labels))
+                        .routes(routes!(crate::handlers::labels::create_label))
+                        .routes(routes!(crate::handlers::labels::update_label))
+                        .routes(routes!(crate::handlers::labels::delete_label))
+                        .routes(routes!(crate::handlers::labels::export_labels))
+                        .routes(routes!(crate::handlers::labels::import_labels)),
                 ),
         )
         .nest(
