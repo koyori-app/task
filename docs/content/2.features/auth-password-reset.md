@@ -41,6 +41,7 @@ pw_reset:rl:{email}  → "1"（存在するだけで意味あり）  TTL: RATE_L
 - `t:` / `u:` ペアはメール認証（`email_verify:`）と同じ双方向マッピング構造
 - 同一ユーザーへの二重発行時は Lua スクリプトで旧トークンを原子的に無効化する
 - `rl:` キーで送信レートを制限する（メールアドレス単位）
+- `rl:` キーに使うメールアドレスは必ず正規化する（小文字変換 + 前後空白トリム）
 
 ### 2.2 セッション無効化のための `users` テーブル追加
 
@@ -56,14 +57,14 @@ pub sessions_revoked_at: Option<DateTimeUtc>,
 パスワードリセット・変更完了時に `now()` を設定する。`AuthUser` エクストラクタはセッション発行時刻と比較し、セッションが古ければ `401` を返す。
 
 ```rust
-// session に発行時刻を保存
+// session に発行時刻をミリ秒精度で保存
 session.set("user_id", user.id);
-session.set("issued_at", Utc::now().timestamp());
+session.set("issued_at_ms", Utc::now().timestamp_millis());
 
-// AuthUser エクストラクタで確認
-let issued_at = session.get::<i64>("issued_at").unwrap_or(0);
+// AuthUser エクストラクタで確認（ミリ秒精度で比較してタイミング競合を防ぐ）
+let issued_at_ms = session.get::<i64>("issued_at_ms").unwrap_or(0);
 if let Some(revoked_at) = user.sessions_revoked_at {
-    if issued_at < revoked_at.timestamp() {
+    if issued_at_ms < revoked_at.timestamp_millis() {
         return Err(AuthError::Unauthorized);
     }
 }
@@ -116,8 +117,8 @@ Request: { "current_password": "...", "new_password": "..." }
 → new_password をバリデーション（8 文字以上）
 → Argon2id でハッシュ化
 → users.password_hash を UPDATE
-→ users.sessions_revoked_at を now() に UPDATE
-→ 現在のセッションのみ即時削除（session.remove("user_id")）
+→ users.sessions_revoked_at を now() に UPDATE（他のセッションは次回リクエスト時に遅延無効化）
+→ 現在のセッションは即時削除（session.destroy()）
 → 200 OK（次のリクエストで再ログインを促す）
 ```
 

@@ -95,7 +95,7 @@ CREATE INDEX idx_passkeys_user ON passkeys(user_id);
    → Redis の challenge を削除
 ```
 
-`POST /auth/passkeys/registration/start` レスポンス例:
+`POST /v1/auth/passkeys/registration/start` レスポンス例:
 
 ```json
 {
@@ -115,7 +115,7 @@ CREATE INDEX idx_passkeys_user ON passkeys(user_id);
 }
 ```
 
-`POST /auth/passkeys/registration/finish` リクエスト:
+`POST /v1/auth/passkeys/registration/finish` リクエスト:
 
 ```json
 {
@@ -147,7 +147,7 @@ CREATE INDEX idx_passkeys_user ON passkeys(user_id);
    → 200 OK
 ```
 
-`POST /auth/passkeys/authentication/start` レスポンス例:
+`POST /v1/auth/passkeys/authentication/start` レスポンス例:
 
 ```json
 {

@@ -201,7 +201,8 @@ impl FromRequestParts<AppState> for HalfAuthedUser {
     type Rejection = AuthError;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
-        let user_id = user_id_from_session(parts, state).await?;  // PAT は不可
+        let session = session_from_request_parts(parts, state).await?;  // PAT は不可（セッションのみ）
+        let user_id = session.get::<Uuid>("user_id").ok_or(AuthError::Unauthorized)?;
         let half_authed = session.get::<bool>("half_authed").unwrap_or(false);
         if !half_authed {
             return Err(AuthError::Forbidden);
@@ -299,7 +300,7 @@ half_authed セッション + { "requires_2fa_setup": true }
 | `POST` | `/v1/auth/2fa/verify` | half_authed セッション | ログイン後の TOTP / リカバリーコード検証 |
 | `DELETE` | `/v1/auth/2fa/totp` | セッション必須 | 2FA 無効化（コード要求） |
 | `POST` | `/v1/auth/2fa/recovery-codes/regenerate` | セッション必須 | リカバリーコード再生成（コード要求） |
-| `POST` | `/v1/tenants/{id}/require-2fa` | テナントオーナー | テナント 2FA 強制ポリシー変更 |
+| `POST` | `/v1/tenants/{tenant_id}/require-2fa` | テナントオーナー | テナント 2FA 強制ポリシー変更 |
 
 ---
 

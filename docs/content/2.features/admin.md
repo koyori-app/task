@@ -116,6 +116,9 @@ CREATE INDEX idx_audit_logs_action ON audit_logs(action);
 CREATE INDEX idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
 CREATE INDEX idx_audit_logs_tenant ON audit_logs(tenant_id);
 CREATE INDEX idx_audit_logs_created ON audit_logs(created_at DESC);
+
+-- audit_logs は append-only。アプリロールへの UPDATE/DELETE を剥奪する
+REVOKE UPDATE, DELETE ON audit_logs FROM app_role;
 ```
 
 ---
@@ -132,6 +135,7 @@ CREATE INDEX idx_audit_logs_created ON audit_logs(created_at DESC);
     → 管理者が 0 人の場合のみ:
         → users WHERE email = $email → is_admin = true に UPDATE
         → audit_logs に action="user.admin.grant", actor_type="system" を INSERT
+          （metadata には user_id のみ記録。メールアドレスは含めない）
 ```
 
 > **安全ガード**: 管理者が既に存在する場合はブートストラップを実行しない。これにより、運用中に環境変数が誤設定されても意図しない権限付与が発生しない。初期構築後は `BOOTSTRAP_ADMIN_EMAIL` を環境変数から削除することを推奨する。
@@ -232,7 +236,7 @@ if user.is_suspended {
 { "reason": "初期管理者設定" }
 
 // user.password_reset
-{ "reset_email": "support@example.com", "original_email": "user@example.com" }
+{ "target_user_id": "uuid", "send_to": "support-relay@example.com" }
 
 // user.2fa.reset
 { "reason": "ユーザーがデバイスを紛失" }
@@ -241,7 +245,7 @@ if user.is_suspended {
 { "before": "Member", "after": "Admin" }
 
 // auth.login.failure
-{ "email": "user@example.com", "reason": "invalid_password" }
+{ "reason": "invalid_password" }
 
 // tenant.delete
 { "tenant_name": "Example Corp" }
