@@ -80,8 +80,8 @@ CREATE INDEX idx_passkeys_user ON passkeys(user_id);
 
 ## 4. 登録フロー（Registration Ceremony）
 
-```
-1. POST /auth/passkeys/registration/start
+```text
+1. POST /v1/auth/passkeys/registration/start
    ← ユーザーはセッション済み（既存アカウントにパスキーを追加）
    → サーバーが PublicKeyCredentialCreationOptions を生成
    → challenge を Redis に保存（TTL: 5 分）
@@ -89,7 +89,7 @@ CREATE INDEX idx_passkeys_user ON passkeys(user_id);
 2. フロントエンドが navigator.credentials.create(options) を呼び出す
    → ユーザーが Touch ID / Face ID / セキュリティキーで認証
 
-3. POST /auth/passkeys/registration/finish
+3. POST /v1/auth/passkeys/registration/finish
    → サーバーが challenge 検証・署名検証・公開鍵検証
    → passkeys テーブルに INSERT
    → Redis の challenge を削除
@@ -130,15 +130,15 @@ CREATE INDEX idx_passkeys_user ON passkeys(user_id);
 
 セッションなしでパスキーだけでログインできる。
 
-```
-1. POST /auth/passkeys/authentication/start  （公開エンドポイント）
+```text
+1. POST /v1/auth/passkeys/authentication/start  （公開エンドポイント）
    Request: { "email": "user@example.com" }  （省略可：Conditional UI 用）
    → サーバーが PublicKeyCredentialRequestOptions を生成
    → challenge を Redis に保存（TTL: 5 分）
 
 2. フロントエンドが navigator.credentials.get(options) を呼び出す
 
-3. POST /auth/passkeys/authentication/finish  （公開エンドポイント）
+3. POST /v1/auth/passkeys/authentication/finish  （公開エンドポイント）
    → サーバーが challenge・署名・sign_count を検証
    → sign_count が DB の値以下なら 401（リプレイ攻撃）
    → sign_count を UPDATE
@@ -216,7 +216,7 @@ CREATE INDEX idx_passkeys_user ON passkeys(user_id);
 
 ### ログイン画面への追加
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │ ログイン                                     │
 ├─────────────────────────────────────────────┤
@@ -231,11 +231,11 @@ CREATE INDEX idx_passkeys_user ON passkeys(user_id);
 
 ### セキュリティ設定画面
 
-```
+```text
 /settings/security
 ```
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │ パスキー                                     │
 ├─────────────────────────────────────────────┤

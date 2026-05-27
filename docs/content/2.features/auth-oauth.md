@@ -121,8 +121,8 @@ OAUTH_OIDC_CLIENT_SECRET=...
 
 ## 5. OAuth フロー（Authorization Code + PKCE）
 
-```
-1. クライアントが GET /auth/oauth/{provider} をリクエスト
+```text
+1. クライアントが GET /v1/auth/oauth/{provider} をリクエスト
 2. バックエンドが生成:
    - code_verifier  (32 バイト乱数, base64url)
    - code_challenge (SHA-256(code_verifier), base64url)
@@ -132,7 +132,7 @@ OAUTH_OIDC_CLIENT_SECRET=...
    ?response_type=code&client_id=...&scope=...
     &redirect_uri=...&state={state}&code_challenge={ch}&code_challenge_method=S256
 5. ユーザーがプロバイダーで認可
-6. プロバイダーが GET /auth/oauth/{provider}/callback?code={code}&state={state} へリダイレクト
+6. プロバイダーが GET /v1/auth/oauth/{provider}/callback?code={code}&state={state} へリダイレクト
 7. バックエンドが state を検証 (Redis から取得して一致確認、即削除)
 8. code + code_verifier でトークンエンドポイントへ POST → access_token 取得
 9. プロバイダーの userinfo API を叩いてユーザー情報を取得
@@ -147,7 +147,7 @@ OAUTH_OIDC_CLIENT_SECRET=...
 
 コールバック受信時、プロバイダーから `provider_user_id` と `provider_email` を受け取る。
 
-```
+```text
 A) oauth_connections に (provider, provider_user_id) が存在する
    → 既存ユーザーとしてログイン。access_token を更新。
 
@@ -174,7 +174,7 @@ users::ActiveModel {
     id: Set(Uuid::new_v4()),
     username: Set(derive_username_from_provider(provider_info)),
     email: Set(provider_email),
-    email_verified: Set(true),   // プロバイダーが検証済みとみなす
+    email_verified: Set(provider_info.email_verified.unwrap_or(false)), // プロバイダーの検証フラグを反映
     password_hash: Set(None),    // OAuth ユーザーはパスワードなし
     bio: Set(Some(String::new())),
     avatar_url: Set(provider_info.avatar_url),
@@ -189,19 +189,19 @@ users::ActiveModel {
 
 ### 連携（ログイン済みユーザーが追加 OAuth を接続する）
 
-1. ログイン済みで `GET /auth/oauth/{provider}` をリクエスト（セッションあり）
+1. ログイン済みで `GET /v1/auth/oauth/{provider}` をリクエスト（セッションあり）
 2. コールバック受信後、現在のセッションユーザーに oauth_connections を追加
 3. 同じプロバイダーが既に連携済みなら `409`
 
 ### 解除
 
-```
-DELETE /auth/oauth/connections/{provider}
+```text
+DELETE /v1/auth/oauth/connections/{provider}
 ```
 
 **ガード**: 最後の認証手段を解除できない:
 
-```
+```text
 (oauth_connections が 1 件のみ) AND (password_hash IS NULL)
 → 403: パスワードを設定してから解除してください
 ```
@@ -259,7 +259,7 @@ DELETE /auth/oauth/connections/{provider}
 
 ### ログイン画面
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │ ログイン                                     │
 ├─────────────────────────────────────────────┤
@@ -277,11 +277,11 @@ DELETE /auth/oauth/connections/{provider}
 
 ### アカウント設定「連携済みサービス」
 
-```
+```text
 /settings/account
 ```
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │ 連携済みサービス                              │
 ├─────────────────────────────────────────────┤
