@@ -96,4 +96,4 @@ pub enum Scope {
 
 ### タスク連番 ID
 
-プロジェクト内で `#1`, `#2`, ... の連番を振る。`project_task_counters` テーブルで `SELECT ... FOR UPDATE` によりアトミックに採番。API の `GET /tasks/{id}` は UUID と `#N` どちらでも受け付ける。
+プロジェクト内で `ENG-1`, `ENG-2`, ... の連番を振る（`KEY` はプロジェクトキー）。`project_task_counters` テーブルで `SELECT ... FOR UPDATE` によりアトミックに採番。API の `GET /tasks/{id}` は UUID と `KEY-N` どちらでも受け付ける。GitHub の `#N`（Issue 番号）と区別するためこの形式を採用。
