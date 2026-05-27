@@ -14,7 +14,7 @@ use chrono::Utc;
 use futures::{SinkExt, channel::mpsc as fmpsc};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect,
+    QueryOrder, QuerySelect, TransactionTrait,
 };
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
@@ -248,22 +248,6 @@ async fn can_access_file_content(
     Err(AppError::Forbidden)
 }
 
-async fn ensure_quota_for_upload(
-    state: &AppState,
-    tenant: &tenants::Model,
-    new_size: u64,
-) -> Result<(), AppError> {
-    let quota = effective_quota(tenant, &state.drive_config);
-    let Some(quota) = quota else {
-        return Ok(());
-    };
-    let used = tenant_used_bytes(&state.db, tenant.id).await?;
-    if used.saturating_add(new_size as i64) > quota {
-        return Err(AppError::ContentTooLarge);
-    }
-    Ok(())
-}
-
 fn list_limit(limit: u32) -> u32 {
     limit.clamp(1, MAX_LIST_LIMIT)
 }
@@ -425,34 +409,46 @@ pub async fn upload_file(
                     let _ = state.storage.delete(&storage_key).await;
                     return Err(AppError::ContentTooLarge);
                 }
-                if let Err(e) = ensure_quota_for_upload(&state, &tenant, actual_size).await {
-                    let _ = state.storage.delete(&storage_key).await;
-                    return Err(e);
+                // テナント行を FOR UPDATE でロックしてクォータ確定チェックと INSERT をアトミックに実行。
+                // 並行アップロードが同時にクォータチェックを通過してしまう競合を防ぐ。
+                let result: Result<drive_files::Model, AppError> = async {
+                    let txn = state.db.begin().await?;
+                    let tenant_q = tenants::Entity::find_by_id(tenant_id)
+                        .lock_exclusive()
+                        .one(&txn)
+                        .await?
+                        .ok_or(AppError::NotFound)?;
+                    let used_now = tenant_used_bytes(&txn, tenant_id).await?;
+                    if let Some(q) = effective_quota(&tenant_q, &state.drive_config) {
+                        if used_now.saturating_add(actual_size as i64) > q {
+                            return Err(AppError::ContentTooLarge);
+                        }
+                    }
+                    let model = drive_files::ActiveModel {
+                        id: Set(file_id),
+                        name: Set(name),
+                        size: Set(actual_size as i64),
+                        mime_type: Set(mime_type),
+                        storage_type: Set(current_storage_type()),
+                        storage_key: Set(storage_key.clone()),
+                        tenant_id: Set(tenant_id),
+                        project_id: Set(folder_project_id),
+                        uploader_id: Set(auth.user_id),
+                        folder_id: Set(folder_id),
+                        created_at: Set(Utc::now().fixed_offset()),
+                    };
+                    let saved = model.insert(&txn).await?;
+                    txn.commit().await?;
+                    Ok(saved)
                 }
-
-                let model = drive_files::ActiveModel {
-                    id: Set(file_id),
-                    name: Set(name),
-                    size: Set(actual_size as i64),
-                    mime_type: Set(mime_type),
-                    storage_type: Set(current_storage_type()),
-                    storage_key: Set(storage_key.clone()),
-                    tenant_id: Set(tenant_id),
-                    project_id: Set(folder_project_id),
-                    uploader_id: Set(auth.user_id),
-                    folder_id: Set(folder_id),
-                    created_at: Set(Utc::now().fixed_offset()),
-                };
-
-                let saved = match model.insert(&state.db).await {
-                    Ok(m) => m,
+                .await;
+                match result {
+                    Ok(saved) => return Ok((StatusCode::CREATED, Json(drive_file_response(&saved)))),
                     Err(e) => {
                         let _ = state.storage.delete(&storage_key).await;
-                        return Err(e.into());
+                        return Err(e);
                     }
-                };
-
-                return Ok((StatusCode::CREATED, Json(drive_file_response(&saved))));
+                }
             }
             Some("name") => {
                 let text = field

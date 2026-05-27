@@ -2,7 +2,7 @@
 
 use std::env;
 
-use sea_orm::{ColumnTrait, EntityTrait, ExprTrait, QueryFilter, QuerySelect};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, QueryFilter, QuerySelect};
 use sea_orm::prelude::Uuid;
 
 use crate::entities::{drive_files, tenants};
@@ -64,16 +64,16 @@ fn mb_to_bytes(mb: i64) -> i64 {
 }
 
 /// テナントの有効クォータ（バイト）。`None` = 無制限。
+/// システム上限（`system_max_quota_bytes`）が設定されている場合は常にその値でキャップする。
 pub fn effective_quota(tenant: &tenants::Model, config: &DriveConfig) -> Option<i64> {
-    match tenant.drive_quota_bytes {
-        Some(q) => Some(q),
-        None => {
-            if config.default_quota_bytes == 0 {
-                None
-            } else {
-                Some(config.default_quota_bytes)
-            }
-        }
+    let requested = tenant.drive_quota_bytes.unwrap_or(config.default_quota_bytes);
+    let requested_opt = if requested == 0 { None } else { Some(requested) };
+    let system_max_opt = config.system_max_bytes_opt();
+    match (requested_opt, system_max_opt) {
+        (Some(q), Some(max)) => Some(std::cmp::Ord::min(q, max)),
+        (None, Some(max)) => Some(max),
+        (Some(q), None) => Some(q),
+        (None, None) => None,
     }
 }
 
@@ -81,8 +81,8 @@ pub fn content_url(file_id: Uuid) -> String {
     format!("/v1/drive/files/{file_id}/content")
 }
 
-pub async fn tenant_used_bytes(
-    db: &sea_orm::DatabaseConnection,
+pub async fn tenant_used_bytes<C: ConnectionTrait>(
+    db: &C,
     tenant_id: Uuid,
 ) -> Result<i64, AppError> {
     let sum = drive_files::Entity::find()
