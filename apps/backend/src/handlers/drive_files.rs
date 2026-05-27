@@ -248,6 +248,49 @@ async fn can_access_file_content(
     Err(AppError::Forbidden)
 }
 
+/// プロジェクトファイルのメタデータ読み取り権限を確認する。
+/// project_id が NULL（テナントレベルファイル）は常に許可。
+/// プロジェクトファイルはテナントオーナー、プロジェクトメンバー、フォルダ共有受信者のみ許可。
+async fn authorize_file_access(
+    state: &AppState,
+    file: &drive_files::Model,
+    user: &AuthUser,
+) -> Result<(), AppError> {
+    let Some(project_id) = file.project_id else {
+        return Ok(());
+    };
+    if is_tenant_owner(state, file.tenant_id, user.user_id).await? {
+        return Ok(());
+    }
+    if is_project_member(state, project_id, user.user_id).await? {
+        return Ok(());
+    }
+    if let Some(folder_id) = file.folder_id {
+        if folder_has_user_share(state, folder_id, user.user_id).await? {
+            return Ok(());
+        }
+    }
+    Err(AppError::Forbidden)
+}
+
+/// プロジェクトファイルの書き込み権限を確認する（共有受信者は読み取り専用のため除外）。
+async fn authorize_file_write(
+    state: &AppState,
+    file: &drive_files::Model,
+    user: &AuthUser,
+) -> Result<(), AppError> {
+    let Some(project_id) = file.project_id else {
+        return Ok(());
+    };
+    if is_tenant_owner(state, file.tenant_id, user.user_id).await? {
+        return Ok(());
+    }
+    if is_project_member(state, project_id, user.user_id).await? {
+        return Ok(());
+    }
+    Err(AppError::Forbidden)
+}
+
 fn list_limit(limit: u32) -> u32 {
     limit.clamp(1, MAX_LIST_LIMIT)
 }
@@ -277,6 +320,20 @@ pub async fn list_files(
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
 
     let limit = list_limit(query.limit);
+
+    // フォルダ指定時: そのフォルダがプロジェクト配下なら ACL を確認する
+    if let Some(folder_id) = query.folder_id {
+        let folder = load_folder_in_tenant(&state, tenant_id, folder_id).await?;
+        if let Some(project_id) = folder.project_id {
+            if !is_tenant_owner(&state, tenant_id, auth.user_id).await?
+                && !is_project_member(&state, project_id, auth.user_id).await?
+                && !folder_has_user_share(&state, folder_id, auth.user_id).await?
+            {
+                return Err(AppError::Forbidden);
+            }
+        }
+    }
+
     let mut selector = drive_files::Entity::find()
         .filter(drive_files::Column::TenantId.eq(tenant_id))
         .order_by_desc(drive_files::Column::CreatedAt);
@@ -377,7 +434,17 @@ pub async fn upload_file(
                     loop {
                         match field.chunk().await {
                             Ok(Some(bytes)) => {
-                                counter.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                                let new_count = counter.fetch_add(bytes.len() as u64, Ordering::Relaxed)
+                                    + bytes.len() as u64;
+                                if new_count > max_bytes {
+                                    // 上限超過: エラーを送ってストリームを早期終了
+                                    let _ = tx
+                                        .send(Err(StorageError::Other(
+                                            "upload size limit exceeded".into(),
+                                        )))
+                                        .await;
+                                    return;
+                                }
                                 if tx.send(Ok(bytes)).await.is_err() {
                                     return;
                                 }
@@ -398,11 +465,12 @@ pub async fn upload_file(
                     state.storage.upload(&storage_key, byte_stream, 0, &mime_type),
                     pump
                 );
-                upload_result.map_err(storage_to_app_error)?;
 
                 let actual_size = byte_count.load(Ordering::Relaxed);
 
-                // アップロード後にサイズ・クォータを確定チェック
+                // サイズチェックを upload_result より先に行う。
+                // 早期中断時は upload_result がエラーになるが、
+                // actual_size > max_bytes の判定で正確な 413 を返す。
                 if actual_size == 0 {
                     let _ = state.storage.delete(&storage_key).await;
                     return Err(AppError::BadRequest);
@@ -411,6 +479,8 @@ pub async fn upload_file(
                     let _ = state.storage.delete(&storage_key).await;
                     return Err(AppError::ContentTooLarge);
                 }
+
+                upload_result.map_err(storage_to_app_error)?;
                 // テナント行を FOR UPDATE でロックしてクォータ確定チェックと INSERT をアトミックに実行。
                 // 並行アップロードが同時にクォータチェックを通過してしまう競合を防ぐ。
                 let result: Result<drive_files::Model, AppError> = async {
@@ -502,6 +572,7 @@ pub async fn get_file(
     auth.require_scope(Scope::ReadDrive)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     let file = load_tenant_file(&state, tenant_id, id).await?;
+    authorize_file_access(&state, &file, &auth).await?;
     Ok(Json(drive_file_response(&file)))
 }
 
@@ -531,6 +602,7 @@ pub async fn update_file(
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
 
     let file = load_tenant_file(&state, tenant_id, id).await?;
+    authorize_file_write(&state, &file, &auth).await?;
     let mut active: drive_files::ActiveModel = file.into();
 
     if let Some(name) = payload.name {
@@ -576,6 +648,7 @@ pub async fn delete_file(
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
 
     let file = load_tenant_file(&state, tenant_id, id).await?;
+    authorize_file_write(&state, &file, &auth).await?;
     let storage_key = file.storage_key.clone();
     drive_files::Entity::delete_by_id(id)
         .exec(&state.db)
