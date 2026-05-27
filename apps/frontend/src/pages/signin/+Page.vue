@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { Login02 } from "@/components/ui/login-02"
+import SignIn from "@/components/auth/SignIn.vue"
 </script>
 
 <template>
-  <Login02 />
+  <SignIn />
 </template>

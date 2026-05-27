@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { PhStack } from "@phosphor-icons/vue"
-import LoginForm from "./LoginForm.vue"
+import SignInForm from "./SignInForm.vue"
+
+defineOptions({ name: "SignIn" })
 </script>
 
 <template>
@@ -16,7 +18,7 @@ import LoginForm from "./LoginForm.vue"
       </div>
       <div class="flex flex-1 items-center justify-center">
         <div class="w-full max-w-xs">
-          <LoginForm />
+          <SignInForm />
         </div>
       </div>
     </div>
