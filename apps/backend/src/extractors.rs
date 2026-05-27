@@ -237,6 +237,13 @@ impl FromRequestParts<AppState> for AuthUser {
     ) -> Result<Self, Self::Rejection> {
         if let Some(token) = bearer_token_from_parts(parts) {
             let record = authenticate_personal_token(&state.db, &state.settings.personal_token_secret, &token).await?;
+            let user = users::Entity::find_by_id(record.user_id)
+                .one(&state.db)
+                .await?
+                .ok_or(AuthError::Unauthorized)?;
+            if user.is_suspended {
+                return Err(AuthError::Suspended);
+            }
             Ok(AuthUser {
                 user_id: record.user_id,
                 method: AuthMethod::PersonalToken {
@@ -252,11 +259,45 @@ impl FromRequestParts<AppState> for AuthUser {
             })
         } else {
             let user_id = user_id_from_session(parts, state).await?;
+            let user = users::Entity::find_by_id(user_id)
+                .one(&state.db)
+                .await?
+                .ok_or(AuthError::Unauthorized)?;
+            if user.is_suspended {
+                return Err(AuthError::Suspended);
+            }
             Ok(AuthUser {
                 user_id,
                 method: AuthMethod::Session,
             })
         }
+    }
+}
+
+/// 管理者専用エクストラクタ（セッション認証のみ）
+pub struct AdminUser {
+    pub user_id: Uuid,
+}
+
+impl FromRequestParts<AppState> for AdminUser {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let user_id = user_id_from_session(parts, state).await?;
+        let user = users::Entity::find_by_id(user_id)
+            .one(&state.db)
+            .await?
+            .ok_or(AuthError::Unauthorized)?;
+        if user.is_suspended {
+            return Err(AuthError::Suspended);
+        }
+        if !user.is_admin {
+            return Err(AuthError::Forbidden);
+        }
+        Ok(AdminUser { user_id })
     }
 }
 

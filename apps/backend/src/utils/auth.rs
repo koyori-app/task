@@ -47,6 +47,8 @@ pub enum AuthError {
     DuplicateEmail,
     #[error("too many requests")]
     TooManyRequests,
+    #[error("account suspended")]
+    Suspended,
     /// 認証メールジョブのキュー投入に失敗した（未認証ユーザーは残し再送 API で回復する）。
     #[error("verification email enqueue failed")]
     VerificationEmailEnqueueFailed(#[source] anyhow::Error),
@@ -125,6 +127,13 @@ impl IntoResponse for AuthError {
                 StatusCode::TOO_MANY_REQUESTS,
                 Json(ServerError {
                     message: "too-many-requests".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::Suspended => (
+                StatusCode::FORBIDDEN,
+                Json(ServerError {
+                    message: "account-suspended".into(),
                 }),
             )
                 .into_response(),
