@@ -356,7 +356,4 @@ impl StorageBackend for S3StorageBackend {
         Ok(Box::pin(stream))
     }
 
-    async fn public_url(&self, key: &str) -> String {
-        format!("{}/{}", self.public_base_url, key)
-    }
 }

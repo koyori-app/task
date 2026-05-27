@@ -37,7 +37,4 @@ pub trait StorageBackend: Send + Sync {
 
     /// ストリーミングダウンロード（プロキシ配信用）。
     async fn get_stream(&self, key: &str) -> Result<ByteStream, StorageError>;
-
-    /// クライアント向けコンテンツ URL（API パス）。
-    async fn public_url(&self, key: &str) -> String;
 }
