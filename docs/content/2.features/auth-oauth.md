@@ -57,15 +57,16 @@ pub struct Model {
 |--------|-----|------|------|
 | `id` | UUID | PK | |
 | `user_id` | UUID | NOT NULL, FK→users CASCADE | |
-| `provider` | VARCHAR | NOT NULL | `github` / `gitlab` / `google` / `oidc:{issuer}` |
+| `provider` | VARCHAR | NOT NULL | `github` / `gitlab` / `gitlab_selfhosted` / `google` / `oidc:{issuer}` |
 | `provider_user_id` | VARCHAR | NOT NULL | プロバイダー側の不変ユーザー ID |
 | `provider_email` | VARCHAR | NULLABLE | プロバイダーが返したメール（参照用。主キーとして使わない） |
+| `instance_url` | VARCHAR | NULLABLE | GitLab self-hosted のインスタンス URL（例: `https://gitlab.example.com`）。クラウド版は NULL |
 | `access_token_enc` | TEXT | NULLABLE | AES-256-GCM 暗号化 |
 | `refresh_token_enc` | TEXT | NULLABLE | AES-256-GCM 暗号化 |
 | `token_expires_at` | TIMESTAMPTZ | NULLABLE | |
 | `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
 | `updated_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
-| — | — | UNIQUE(provider, provider_user_id) | |
+| — | — | UNIQUE(provider, provider_user_id, instance_url) | self-hosted 複数インスタンス対応 |
 
 ---
 
@@ -80,12 +81,13 @@ CREATE TABLE oauth_connections (
     provider VARCHAR NOT NULL,
     provider_user_id VARCHAR NOT NULL,
     provider_email VARCHAR,
+    instance_url VARCHAR,
     access_token_enc TEXT,
     refresh_token_enc TEXT,
     token_expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (provider, provider_user_id)
+    UNIQUE (provider, provider_user_id, instance_url)
 );
 
 CREATE INDEX idx_oauth_connections_user ON oauth_connections(user_id);
@@ -99,6 +101,7 @@ CREATE INDEX idx_oauth_connections_user ON oauth_connections(user_id);
 |------------|--------------|------|------|
 | GitHub | `github` | OAuth 2.0 | GitHub Apps とは別。`user:email` スコープのみ |
 | GitLab.com | `gitlab` | OAuth 2.0 | `read_user` スコープ |
+| GitLab self-hosted | `gitlab_selfhosted` | OAuth 2.0 | ユーザーがインスタンス URL を入力（§4a 参照） |
 | Google | `google` | OIDC | `openid email profile` スコープ |
 | 汎用 OIDC | `oidc:{issuer}` | OIDC Discovery | Okta・Entra ID・Keycloak 等に対応 |
 
@@ -109,6 +112,8 @@ OAUTH_GITHUB_CLIENT_ID=...
 OAUTH_GITHUB_CLIENT_SECRET=...
 OAUTH_GITLAB_CLIENT_ID=...
 OAUTH_GITLAB_CLIENT_SECRET=...
+OAUTH_GITLAB_SELFHOSTED_CLIENT_ID=...
+OAUTH_GITLAB_SELFHOSTED_CLIENT_SECRET=...
 OAUTH_GOOGLE_CLIENT_ID=...
 OAUTH_GOOGLE_CLIENT_SECRET=...
 # 汎用 OIDC（複数設定可）
@@ -116,6 +121,30 @@ OAUTH_OIDC_ISSUER_URL=https://accounts.example.com
 OAUTH_OIDC_CLIENT_ID=...
 OAUTH_OIDC_CLIENT_SECRET=...
 ```
+
+### §4a. GitLab self-hosted フロー
+
+GitLab.com と異なり、OAuth エンドポイントがインスタンスごとに異なる。
+
+```text
+1. ユーザーがログイン画面で「GitLab self-hosted でログイン」を選択し、
+   インスタンス URL（例: https://gitlab.example.com）を入力
+
+2. GET /v1/auth/oauth/gitlab_selfhosted?instance_url={url} をリクエスト
+   → バックエンドが instance_url を Redis の state に紐付けて保存
+   → 認可 URL: {instance_url}/oauth/authorize?...
+
+3. コールバック: GET /v1/auth/oauth/gitlab_selfhosted/callback
+   → state から instance_url を復元
+   → トークンエンドポイント: {instance_url}/oauth/token
+   → ユーザー情報: {instance_url}/api/v4/user
+   → oauth_connections.instance_url に保存
+
+4. 同一ユーザーが複数の self-hosted インスタンスを接続可能
+   （UNIQUE(provider, provider_user_id, instance_url) で識別）
+```
+
+**OAuth アプリの事前登録**: self-hosted 利用には、対象インスタンスに管理者がシステムの OAuth アプリ（Client ID / Secret）を登録しておく必要がある。`callback URL` は `{APP_BASE_URL}/v1/auth/oauth/gitlab_selfhosted/callback` に統一する。
 
 ---
 
@@ -307,5 +336,4 @@ DELETE /v1/auth/oauth/connections/{provider}
 | 項目 | 内容 |
 |------|------|
 | テナント単位 OIDC | 企業向けに Okta 等を「テナント独自の IdP」として設定できるようにするか（SaaS 標準機能） |
-| GitLab self-hosted | インスタンス URL をユーザーが入力して接続できるようにするか |
 | アカウント統合 UI | メール競合時に「ログインして連携」を seamless に誘導するフロー設計 |
