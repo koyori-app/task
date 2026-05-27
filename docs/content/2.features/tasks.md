@@ -16,187 +16,650 @@ icon: lucide:check-square
 プロジェクト横断で利用できるタスク管理のコア機能仕様。  
 担当者・締切・工数追跡・ガントチャートを軸に、チームの作業可視化と進捗管理を実現する。
 
----
-
-## 2. タスク基本情報
-
-### 2.1 タイトル
-
-- 必須項目
-- 最大文字数: 255文字
-- インライン編集対応（クリックして即編集）
-
-### 2.2 概要（説明）
-
-- マークダウン対応のリッチテキストエディタ
-- コードブロック、テーブル、チェックリスト対応
-- @メンション（担当者を本文中でタグ付け）
-
-### 2.3 優先順位
-
-以下の6段階を選択式で設定する:
-
-| 優先度 | 表示ラベル | 色 |
-|--------|-----------|-----|
-| P0 | 🔥 炎上 | 赤（点滅） |
-| P1 | 🚨 Critical | 赤 |
-| P2 | 🔴 High | オレンジ |
-| P3 | 🟡 Medium | 黄 |
-| P4 | 🟢 Low | 緑 |
-| P5 | ⚪ 雑魚 | グレー |
+ストレージ統合は既存の [Drive機能](/features/drive) を利用する。
 
 ---
 
-## 3. 担当者
+## 2. スコープ
 
-- 複数の担当者を設定可能（上限なし）
-- ユーザー検索・サジェスト対応
-- 主担当（Primary）と副担当（Secondary）を区別できる
-- 担当者はカレンダービューに紐付く（→ セクション 6 参照）
-- 担当者変更時はWebhookでnotifyされる（→ セクション 11 参照）
+### Phase A（MVP）— バックエンド
 
----
-
-## 4. 締切
-
-締切は **仮締め** と **Deadline** の2種類を設定できる。
-
-| 項目 | 説明 |
+| 機能 | 内容 |
 |------|------|
-| **仮締め（Soft Deadline）** | 作業の目標完了日。超過してもタスクは自動クローズされない。アラート表示あり。 |
-| **Deadline（Hard Deadline）** | 最終期限。超過したタスクは `overdue` ステータスへ遷移し、担当者へ通知される。 |
+| タスク CRUD | 作成・取得・更新・削除 |
+| 担当者管理 | Primary / Secondary の複数アサイン |
+| 締切管理 | 仮締め（Soft）/ Deadline（Hard）の 2 種 |
+| 優先順位 | 6 段階（炎上 〜 雑魚） |
+| 作業時間追跡 | タイマー起動 / 停止・手動ログ入力 |
+| 親子・依存関係 | サブタスク階層 / blocks / blocked_by |
+| マイルストーン | プロジェクト単位で作成・タスク紐付け |
+| ラベル | プロジェクト単位で作成・エクスポート / インポート |
+| ファイル添付 | Drive と統合 |
+| Webhook | created / updated（差分のみ）/ deleted |
 
-- 両日付ともカレンダービューへ反映される
-- 仮締め ≦ Deadline の制約バリデーションあり
-- 日時（タイムゾーン付き）または日付のみを選択可能
+### Phase B — フロントエンド（Phase A 完全完了後に着手）
+
+| 機能 | 内容 |
+|------|------|
+| タスク一覧 / 詳細 | ボード・リスト・テーブル表示 |
+| カレンダービュー | 月 / 週 / 日の 3 モード |
+| ガントチャート | イナズマ線付き（計画 vs 実績） |
+| 依存関係グラフ | Relations タブ |
+| ラベル管理 UI | エクスポート / インポート |
+| ファイル添付プレビュー | 画像 / 動画 |
+| Webhook 設定画面 | |
 
 ---
 
-## 5. 作業時間追跡
+## 3. データモデル
 
-### 5.1 見積もり工数
+### 3.1 `tasks` テーブル
 
-- 時間単位（例: 2h、1.5h）または日単位（例: 0.5d）で入力
-- タスク作成時・開始時・任意のタイミングで更新可能
-
-### 5.2 実績工数
-
-- タイマー機能（Start / Pause / Stop）
-- 手動入力も可能（ログエントリー形式）
-- ログエントリー: 日付・時間・メモの組み合わせ
-
+```rust
+// entities/tasks.rs
+pub struct Model {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub title: String,
+    pub description: Option<String>,       // Markdown テキスト
+    pub status: TaskStatus,                // enum
+    pub priority: TaskPriority,            // enum
+    pub progress_pct: i16,                 // 0–100
+    pub parent_task_id: Option<Uuid>,      // 自己参照（ルートタスクは None）
+    pub milestone_id: Option<Uuid>,
+    pub soft_deadline: Option<DateTimeUtc>,
+    pub hard_deadline: Option<DateTimeUtc>,
+    pub estimated_minutes: Option<i32>,    // 見積もり工数（分単位で保持）
+    pub created_by: Uuid,
+    pub created_at: DateTimeUtc,
+    pub updated_at: DateTimeUtc,
+    pub deleted_at: Option<DateTimeUtc>,   // ソフトデリート
+}
 ```
-例:
-  2026-05-27  2h  設計レビュー対応
-  2026-05-28  1.5h  実装
+
+| カラム | 型 | 制約 | 説明 |
+|--------|-----|------|------|
+| `id` | UUID | PK | |
+| `project_id` | UUID | NOT NULL, FK→projects CASCADE | |
+| `title` | VARCHAR(255) | NOT NULL | |
+| `description` | TEXT | NULLABLE | Markdown |
+| `status` | VARCHAR | NOT NULL DEFAULT 'open' | `open` / `in_progress` / `blocked` / `done` / `overdue` |
+| `priority` | VARCHAR | NOT NULL DEFAULT 'medium' | `critical_fire` / `critical` / `high` / `medium` / `low` / `trivial` |
+| `progress_pct` | SMALLINT | NOT NULL DEFAULT 0 CHECK (0–100) | |
+| `parent_task_id` | UUID | NULLABLE, FK→tasks SET NULL | 自己参照 |
+| `milestone_id` | UUID | NULLABLE, FK→milestones SET NULL | |
+| `soft_deadline` | TIMESTAMPTZ | NULLABLE | |
+| `hard_deadline` | TIMESTAMPTZ | NULLABLE | |
+| `estimated_minutes` | INT | NULLABLE | |
+| `created_by` | UUID | NOT NULL, FK→users | |
+| `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+| `updated_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+| `deleted_at` | TIMESTAMPTZ | NULLABLE | ソフトデリート |
+
+> **優先順位 enum の DB 値マッピング**:
+> `炎上` → `critical_fire`, `Critical` → `critical`, `High` → `high`,
+> `Medium` → `medium`, `Low` → `low`, `雑魚` → `trivial`
+
+> **ソフトデリート**: `deleted_at IS NOT NULL` のタスクは全クエリで自動除外する。
+> 物理削除は管理者 API のみ提供（Phase A 対象外）。
+
+### 3.2 `task_assignees` テーブル
+
+```rust
+// entities/task_assignees.rs
+pub struct Model {
+    pub id: Uuid,
+    pub task_id: Uuid,
+    pub user_id: Uuid,
+    pub role: AssigneeRole,   // primary | secondary
+    pub assigned_at: DateTimeUtc,
+}
 ```
 
-### 5.3 工数サマリー
+| カラム | 型 | 制約 | 説明 |
+|--------|-----|------|------|
+| `id` | UUID | PK | |
+| `task_id` | UUID | NOT NULL, FK→tasks CASCADE | |
+| `user_id` | UUID | NOT NULL, FK→users CASCADE | |
+| `role` | VARCHAR | NOT NULL DEFAULT 'secondary' | `primary` / `secondary` |
+| `assigned_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+| — | — | UNIQUE(task_id, user_id) | 同一ユーザーの重複防止 |
 
-- 見積 vs 実績の差異をプログレスバーで表示
-- 超過した場合は警告色でハイライト
-- チーム全体の工数はガントチャートおよびレポート画面で集計表示
+### 3.3 `task_relations` テーブル
+
+```rust
+// entities/task_relations.rs
+pub struct Model {
+    pub id: Uuid,
+    pub blocker_task_id: Uuid,   // blocks 側
+    pub blocked_task_id: Uuid,   // blocked_by 側
+    pub created_at: DateTimeUtc,
+}
+```
+
+| カラム | 型 | 制約 | 説明 |
+|--------|-----|------|------|
+| `id` | UUID | PK | |
+| `blocker_task_id` | UUID | NOT NULL, FK→tasks CASCADE | ブロックする側 |
+| `blocked_task_id` | UUID | NOT NULL, FK→tasks CASCADE | ブロックされる側 |
+| `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+| — | — | UNIQUE(blocker_task_id, blocked_task_id) | 重複防止 |
+| — | — | CHECK(blocker_task_id <> blocked_task_id) | 自己参照防止 |
+
+> **循環依存の検出**: タスク A → B のリレーション追加時、B から A への到達パスを探索し、循環が検出された場合は `409 Conflict` を返す。
+
+### 3.4 `time_logs` テーブル
+
+```rust
+// entities/time_logs.rs
+pub struct Model {
+    pub id: Uuid,
+    pub task_id: Uuid,
+    pub user_id: Uuid,
+    pub logged_minutes: i32,         // 実績工数（分単位）
+    pub logged_at: NaiveDate,        // 作業日
+    pub note: Option<String>,
+    pub created_at: DateTimeUtc,
+}
+```
+
+| カラム | 型 | 制約 | 説明 |
+|--------|-----|------|------|
+| `id` | UUID | PK | |
+| `task_id` | UUID | NOT NULL, FK→tasks CASCADE | |
+| `user_id` | UUID | NOT NULL, FK→users CASCADE | |
+| `logged_minutes` | INT | NOT NULL CHECK (> 0) | |
+| `logged_at` | DATE | NOT NULL | |
+| `note` | TEXT | NULLABLE | |
+| `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+
+> **タイマー**: アクティブなタイマーはインメモリ（Redis or DB）で管理。Stop 時に `time_logs` へ書き込む。同一ユーザーが同じタスクで複数タイマーを同時起動するとエラー（`409`）。
+
+### 3.5 `milestones` テーブル
+
+```rust
+// entities/milestones.rs
+pub struct Model {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub due_date: NaiveDate,
+    pub created_by: Uuid,
+    pub created_at: DateTimeUtc,
+    pub updated_at: DateTimeUtc,
+}
+```
+
+| カラム | 型 | 制約 | 説明 |
+|--------|-----|------|------|
+| `id` | UUID | PK | |
+| `project_id` | UUID | NOT NULL, FK→projects CASCADE | |
+| `name` | VARCHAR(255) | NOT NULL | |
+| `description` | TEXT | NULLABLE | |
+| `due_date` | DATE | NOT NULL | |
+| `created_by` | UUID | NOT NULL, FK→users | |
+| `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+| `updated_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+
+### 3.6 `labels` テーブル（既存 + `project_id` 追加）
+
+既存の `labels` テーブルはグローバルスコープになっているため、`project_id` カラムを追加してプロジェクト単位で管理する。
+
+```rust
+// entities/labels.rs（更新後）
+pub struct Model {
+    pub id: Uuid,
+    pub project_id: Uuid,          // 追加
+    pub name: String,
+    pub description: String,
+    pub color: String,             // hex (#e11d48)
+    pub icon_url: Option<String>,
+}
+```
+
+| カラム | 型 | 制約 | 説明 |
+|--------|-----|------|------|
+| `project_id` | UUID | NOT NULL, FK→projects CASCADE | **新規追加** |
+| — | — | UNIQUE(project_id, name) | プロジェクト内で名称重複禁止 |
+
+### 3.7 `task_labels` テーブル
+
+| カラム | 型 | 制約 | 説明 |
+|--------|-----|------|------|
+| `task_id` | UUID | NOT NULL, FK→tasks CASCADE | |
+| `label_id` | UUID | NOT NULL, FK→labels CASCADE | |
+| — | — | PRIMARY KEY(task_id, label_id) | |
+
+> **クロスプロジェクト制約**: `task.project_id = label.project_id` をアプリ層で検証。別プロジェクトのラベルを付与しようとすると `400 Bad Request`。
+
+### 3.8 `task_attachments` テーブル
+
+Drive の `drive_files` をタスクへ紐付ける中間テーブル。
+
+| カラム | 型 | 制約 | 説明 |
+|--------|-----|------|------|
+| `task_id` | UUID | NOT NULL, FK→tasks CASCADE | |
+| `drive_file_id` | UUID | NOT NULL, FK→drive_files CASCADE | |
+| `attached_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+| — | — | PRIMARY KEY(task_id, drive_file_id) | |
+
+### 3.9 `webhooks` テーブル
+
+| カラム | 型 | 制約 | 説明 |
+|--------|-----|------|------|
+| `id` | UUID | PK | |
+| `project_id` | UUID | NOT NULL, FK→projects CASCADE | |
+| `url` | VARCHAR(2048) | NOT NULL | 送信先 URL |
+| `secret` | VARCHAR | NOT NULL | HMAC-SHA256 署名用シークレット |
+| `events` | VARCHAR[] | NOT NULL | 有効にするイベント一覧 |
+| `is_active` | BOOLEAN | NOT NULL DEFAULT true | 連続失敗時に自動 false |
+| `created_by` | UUID | NOT NULL, FK→users | |
+| `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+
+### 3.10 `webhook_deliveries` テーブル
+
+| カラム | 型 | 制約 | 説明 |
+|--------|-----|------|------|
+| `id` | UUID | PK | |
+| `webhook_id` | UUID | NOT NULL, FK→webhooks CASCADE | |
+| `event` | VARCHAR | NOT NULL | イベント名 |
+| `payload` | JSONB | NOT NULL | 送信ペイロード |
+| `status_code` | INT | NULLABLE | HTTP レスポンスコード |
+| `attempt` | SMALLINT | NOT NULL DEFAULT 1 | リトライ回数（最大 5） |
+| `delivered_at` | TIMESTAMPTZ | NULLABLE | 成功時のみ |
+| `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
 
 ---
 
-## 6. カレンダービュー
+## 4. アクセス制御
 
-- 担当者ごと、またはプロジェクト全体で表示を切り替え可能
-- **月表示 / 週表示 / 日表示** の3モード
-- タスクバーの表示内容:
-  - タスク名
-  - 優先度アイコン
-  - 仮締め（破線バー）
-  - Deadline（実線バー）
-- タスクをドラッグして締切を変更可能
-- 担当者フィルター: 特定メンバーの作業のみ表示
+### 4.1 アクセスルール
 
----
+| 操作 | 権限 |
+|------|------|
+| タスク閲覧 | プロジェクトメンバー **または** テナントオーナー |
+| タスク作成 / 更新 / 削除 | プロジェクトメンバー **または** テナントオーナー |
+| タスク削除（物理） | テナントオーナーのみ（Phase A 対象外） |
+| ラベル管理 | プロジェクトメンバー **または** テナントオーナー |
+| Webhook 設定 | テナントオーナーのみ |
 
-## 7. ガントチャート
+### 4.2 スコープ
 
-### 7.1 基本機能
+既存の Scope enum に以下を追加する:
 
-- タスク・マイルストーンを時系列バーで表示
-- ズームレベル: 日 / 週 / 月 / 四半期
-- バーのドラッグで開始日・終了日を変更
-- 依存関係（ブロッキング）を矢印で表示（→ セクション 9 参照）
-
-### 7.2 イナズマ線（Progress Line）
-
-- **イナズマ線**: 現在の「計画進捗」と「実績進捗」のずれを視覚化する折れ線
-- 表示ルール:
-  - 今日の日付を基準線（Today Line）として表示
-  - 各タスクの進捗率（%）をもとに、計画ラインから実績ポイントへ折れ線を引く
-  - 計画より進んでいる（右に折れる）: 青
-  - 計画より遅れている（左に折れる）: 赤
-- 進捗率はタスク詳細画面で手動入力（0〜100%）
-
-### 7.3 マイルストーンの表示
-
-- ◆ ダイヤモンドアイコンでガントチャート上に表示
-- 期日を超過している場合は赤色表示
+```rust
+pub enum Scope {
+    // 既存
+    ReadProject,
+    WriteProject,
+    // 追加
+    ReadTask,
+    WriteTask,
+    ReadMilestone,
+    WriteMilestone,
+    ManageWebhook,
+}
+```
 
 ---
 
-## 8. マイルストーン
+## 5. マイグレーション
 
-- プロジェクトに複数設定可能
-- 設定項目:
-  - 名称
-  - 期日
-  - 説明
-  - 関連タスク（複数紐付け）
-- マイルストーン一覧画面での進捗表示（関連タスクの完了率をプログレスバーで）
-- ガントチャートと連動（→ セクション 7.3 参照）
+マイグレーションは既存パターン（raw SQL + `sea_orm_migration`）に従う。
+
+```rust
+// migration/src/m20260527_000000_create_tasks.rs
+
+async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+    let sql = r#"
+        CREATE TABLE milestones (
+            id UUID PRIMARY KEY,
+            project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            name VARCHAR(255) NOT NULL,
+            description TEXT,
+            due_date DATE NOT NULL,
+            created_by UUID NOT NULL REFERENCES users(id),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+        CREATE TABLE tasks (
+            id UUID PRIMARY KEY,
+            project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            status VARCHAR NOT NULL DEFAULT 'open',
+            priority VARCHAR NOT NULL DEFAULT 'medium',
+            progress_pct SMALLINT NOT NULL DEFAULT 0 CHECK (progress_pct BETWEEN 0 AND 100),
+            parent_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
+            milestone_id UUID REFERENCES milestones(id) ON DELETE SET NULL,
+            soft_deadline TIMESTAMPTZ,
+            hard_deadline TIMESTAMPTZ,
+            estimated_minutes INT CHECK (estimated_minutes > 0),
+            created_by UUID NOT NULL REFERENCES users(id),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            deleted_at TIMESTAMPTZ,
+            CONSTRAINT soft_before_hard CHECK (
+                soft_deadline IS NULL OR hard_deadline IS NULL OR soft_deadline <= hard_deadline
+            )
+        );
+
+        CREATE TABLE task_assignees (
+            id UUID PRIMARY KEY,
+            task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            role VARCHAR NOT NULL DEFAULT 'secondary',
+            assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (task_id, user_id)
+        );
+
+        CREATE TABLE task_relations (
+            id UUID PRIMARY KEY,
+            blocker_task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            blocked_task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (blocker_task_id, blocked_task_id),
+            CHECK (blocker_task_id <> blocked_task_id)
+        );
+
+        CREATE TABLE time_logs (
+            id UUID PRIMARY KEY,
+            task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            logged_minutes INT NOT NULL CHECK (logged_minutes > 0),
+            logged_at DATE NOT NULL,
+            note TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+        CREATE TABLE task_labels (
+            task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            label_id UUID NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+            PRIMARY KEY (task_id, label_id)
+        );
+
+        CREATE TABLE task_attachments (
+            task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            drive_file_id UUID NOT NULL REFERENCES drive_files(id) ON DELETE CASCADE,
+            attached_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (task_id, drive_file_id)
+        );
+
+        CREATE TABLE webhooks (
+            id UUID PRIMARY KEY,
+            project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            url VARCHAR(2048) NOT NULL,
+            secret VARCHAR NOT NULL,
+            events VARCHAR[] NOT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT true,
+            created_by UUID NOT NULL REFERENCES users(id),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+        CREATE TABLE webhook_deliveries (
+            id UUID PRIMARY KEY,
+            webhook_id UUID NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+            event VARCHAR NOT NULL,
+            payload JSONB NOT NULL,
+            status_code INT,
+            attempt SMALLINT NOT NULL DEFAULT 1,
+            delivered_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+        -- labels テーブルへ project_id を追加
+        ALTER TABLE labels ADD COLUMN project_id UUID REFERENCES projects(id) ON DELETE CASCADE;
+
+        CREATE INDEX idx_tasks_project_id ON tasks(project_id) WHERE deleted_at IS NULL;
+        CREATE INDEX idx_tasks_parent ON tasks(parent_task_id) WHERE parent_task_id IS NOT NULL;
+        CREATE INDEX idx_tasks_milestone ON tasks(milestone_id) WHERE milestone_id IS NOT NULL;
+        CREATE INDEX idx_task_assignees_user ON task_assignees(user_id);
+        CREATE INDEX idx_time_logs_task ON time_logs(task_id);
+        CREATE INDEX idx_time_logs_user_date ON time_logs(user_id, logged_at);
+    "#;
+    // ...
+}
+```
 
 ---
 
-## 9. 親子関係 / 依存関係
+## 6. API 設計
 
-### 9.1 親子タスク（サブタスク）
+全エンドポイントはセッション認証または PAT 認証が必須（既存の `AuthUser` extractor を流用）。  
+URL の基底パスは `/v1/tenants/{tenant_id}/projects/{project_id}` 。
 
-- 親タスクに複数のサブタスクを追加可能
-- ネストは複数階層対応（例: タスク → サブタスク → サブサブタスク）
-- 親タスクの進捗率は子タスクの完了率から自動計算
+### 6.1 タスク API
 
-### 9.2 ブロッキング（依存関係）
+| メソッド | パス | スコープ | 説明 |
+|---------|------|---------|------|
+| `GET` | `/tasks` | ReadTask | タスク一覧 |
+| `POST` | `/tasks` | WriteTask | タスク作成 |
+| `GET` | `/tasks/{task_id}` | ReadTask | タスク取得 |
+| `PUT` | `/tasks/{task_id}` | WriteTask | タスク更新 |
+| `DELETE` | `/tasks/{task_id}` | WriteTask | タスク削除（ソフト） |
 
-- `blocks` / `blocked by` の双方向設定
-- 複数のタスクを同時にブロック可能
-- ブロックされたタスクはステータスに `blocked` バッジを表示
+#### GET `/tasks` クエリパラメータ
 
-### 9.3 依存関係グラフ
+| パラメータ | 型 | デフォルト | 説明 |
+|-----------|-----|---------|------|
+| `status` | string? | — | フィルター: `open` / `in_progress` / `done` / ... |
+| `priority` | string? | — | フィルター: `high` / `medium` / ... |
+| `assignee_id` | UUID? | — | 担当者でフィルター |
+| `milestone_id` | UUID? | — | マイルストーンでフィルター |
+| `label_id` | UUID? | — | ラベルでフィルター |
+| `parent_task_id` | UUID? | — | 子タスク一覧に使用 |
+| `limit` | u32 | 50 | 最大 200 |
+| `offset` | u32 | 0 | |
 
-- タスク詳細画面の「Relations」タブからグラフ表示
-- ノード: タスク、エッジ: 依存関係
-- ズームイン・パン操作対応
-- 完了タスクはグレーアウト表示
-
----
-
-## 10. ラベル
-
-### 10.1 基本仕様
-
-- 1タスクに複数ラベルを付与可能
-- ラベルはプロジェクト単位で作成・管理
-- ラベル設定項目:
-  - 名称（最大50文字）
-  - 色（カラーピッカー）
-  - 説明（任意）
-
-### 10.2 エクスポート / インポート
-
-- **エクスポート**: プロジェクトのラベル一覧をJSONまたはCSVで出力
-- **インポート**: 他プロジェクトのエクスポートファイルを取り込み、ラベルを複製
-- インポート時の重複処理:
-  - 同名ラベルが存在する場合: スキップ or 上書き（選択式）
-
-エクスポート形式（JSON例）:
+レスポンス:
 
 ```json
 {
+  "tasks": [
+    {
+      "id": "uuid",
+      "title": "ログイン機能を実装する",
+      "status": "in_progress",
+      "priority": "high",
+      "progress_pct": 40,
+      "assignees": [
+        { "user_id": "uuid", "role": "primary" }
+      ],
+      "soft_deadline": "2026-06-01T00:00:00Z",
+      "hard_deadline": "2026-06-10T00:00:00Z",
+      "estimated_minutes": 120,
+      "labels": [{ "id": "uuid", "name": "feature", "color": "#2563eb" }],
+      "milestone_id": "uuid",
+      "parent_task_id": null,
+      "subtask_count": 3,
+      "created_at": "2026-05-27T10:00:00Z",
+      "updated_at": "2026-05-27T12:00:00Z"
+    }
+  ],
+  "total": 42
+}
+```
+
+#### POST `/tasks` リクエスト
+
+```json
+{
+  "title": "ログイン機能を実装する",
+  "description": "## 概要\nメール+パスワード認証を実装する",
+  "priority": "high",
+  "soft_deadline": "2026-06-01T00:00:00Z",
+  "hard_deadline": "2026-06-10T00:00:00Z",
+  "estimated_minutes": 120,
+  "assignees": [
+    { "user_id": "uuid", "role": "primary" }
+  ],
+  "label_ids": ["uuid"],
+  "milestone_id": "uuid",
+  "parent_task_id": null
+}
+```
+
+#### PUT `/tasks/{task_id}` リクエスト
+
+すべてのフィールドは optional（PATCH 的な動作）。`null` を渡すとフィールドをクリア。
+
+```json
+{
+  "title": "ログイン機能を実装する（OAuth対応含む）",
+  "priority": "critical",
+  "progress_pct": 60,
+  "hard_deadline": null
+}
+```
+
+### 6.2 担当者 API
+
+| メソッド | パス | スコープ | 説明 |
+|---------|------|---------|------|
+| `GET` | `/tasks/{task_id}/assignees` | ReadTask | 担当者一覧 |
+| `POST` | `/tasks/{task_id}/assignees` | WriteTask | 担当者追加 |
+| `PUT` | `/tasks/{task_id}/assignees/{user_id}` | WriteTask | ロール変更 |
+| `DELETE` | `/tasks/{task_id}/assignees/{user_id}` | WriteTask | 担当者削除 |
+
+`POST` リクエスト:
+
+```json
+{ "user_id": "uuid", "role": "secondary" }
+```
+
+### 6.3 作業時間追跡 API
+
+| メソッド | パス | スコープ | 説明 |
+|---------|------|---------|------|
+| `GET` | `/tasks/{task_id}/time-logs` | ReadTask | ログ一覧 |
+| `POST` | `/tasks/{task_id}/time-logs` | WriteTask | 手動ログ追加 |
+| `DELETE` | `/tasks/{task_id}/time-logs/{log_id}` | WriteTask | ログ削除 |
+| `POST` | `/tasks/{task_id}/timer/start` | WriteTask | タイマー開始 |
+| `POST` | `/tasks/{task_id}/timer/stop` | WriteTask | タイマー停止→ログ生成 |
+
+手動ログ `POST` リクエスト:
+
+```json
+{
+  "logged_minutes": 90,
+  "logged_at": "2026-05-27",
+  "note": "設計レビュー対応"
+}
+```
+
+タイマー停止レスポンス（生成されたログを返す）:
+
+```json
+{
+  "id": "uuid",
+  "logged_minutes": 47,
+  "logged_at": "2026-05-27",
+  "note": null
+}
+```
+
+工数サマリー取得:
+
+```
+GET /tasks/{task_id}/time-logs/summary
+```
+
+```json
+{
+  "estimated_minutes": 120,
+  "actual_minutes": 90,
+  "remaining_minutes": 30,
+  "is_over": false,
+  "by_user": [
+    { "user_id": "uuid", "minutes": 90 }
+  ]
+}
+```
+
+### 6.4 親子・依存関係 API
+
+| メソッド | パス | スコープ | 説明 |
+|---------|------|---------|------|
+| `GET` | `/tasks/{task_id}/relations` | ReadTask | 関係一覧（blocks / blocked_by / subtasks） |
+| `POST` | `/tasks/{task_id}/relations` | WriteTask | 関係追加 |
+| `DELETE` | `/tasks/{task_id}/relations/{relation_id}` | WriteTask | 関係削除 |
+
+`POST` リクエスト:
+
+```json
+{ "type": "blocks", "target_task_id": "uuid" }
+```
+
+`type` は `blocks` または `blocked_by`。循環依存が発生する場合は `409 Conflict`。
+
+`GET` レスポンス:
+
+```json
+{
+  "subtasks": [{ "id": "uuid", "title": "..." }],
+  "blocks": [{ "id": "uuid", "title": "...", "relation_id": "uuid" }],
+  "blocked_by": [{ "id": "uuid", "title": "...", "relation_id": "uuid" }]
+}
+```
+
+### 6.5 ファイル添付 API
+
+| メソッド | パス | スコープ | 説明 |
+|---------|------|---------|------|
+| `GET` | `/tasks/{task_id}/attachments` | ReadTask | 添付ファイル一覧 |
+| `POST` | `/tasks/{task_id}/attachments` | WriteTask | ファイル添付（Drive ファイルを紐付け） |
+| `DELETE` | `/tasks/{task_id}/attachments/{file_id}` | WriteTask | 添付解除（Drive ファイル本体は残る） |
+
+`POST` リクエスト（既存の Drive ファイルを紐付ける）:
+
+```json
+{ "drive_file_id": "uuid" }
+```
+
+アップロードと同時に添付する場合は Drive API でアップロードして `drive_file_id` を取得してから本 API を叩く。
+
+### 6.6 マイルストーン API
+
+| メソッド | パス | スコープ | 説明 |
+|---------|------|---------|------|
+| `GET` | `/milestones` | ReadMilestone | 一覧 |
+| `POST` | `/milestones` | WriteMilestone | 作成 |
+| `GET` | `/milestones/{milestone_id}` | ReadMilestone | 取得（関連タスク一覧・完了率を含む） |
+| `PUT` | `/milestones/{milestone_id}` | WriteMilestone | 更新 |
+| `DELETE` | `/milestones/{milestone_id}` | WriteMilestone | 削除（タスクの `milestone_id` は NULL にリセット） |
+
+`GET /milestones/{milestone_id}` レスポンス:
+
+```json
+{
+  "id": "uuid",
+  "name": "v1.0 リリース",
+  "description": "MVP 機能の完成",
+  "due_date": "2026-07-01",
+  "progress_pct": 33,
+  "task_counts": { "total": 12, "done": 4 },
+  "created_at": "2026-05-27T10:00:00Z"
+}
+```
+
+### 6.7 ラベル API
+
+| メソッド | パス | スコープ | 説明 |
+|---------|------|---------|------|
+| `GET` | `/labels` | ReadTask | プロジェクトのラベル一覧 |
+| `POST` | `/labels` | WriteTask | ラベル作成 |
+| `PUT` | `/labels/{label_id}` | WriteTask | ラベル更新 |
+| `DELETE` | `/labels/{label_id}` | WriteTask | ラベル削除（task_labels も CASCADE 削除） |
+| `GET` | `/labels/export` | ReadTask | ラベル一覧を JSON でエクスポート |
+| `POST` | `/labels/import` | WriteTask | JSON からラベルをインポート |
+
+`GET /labels/export` レスポンス（`Content-Type: application/json`, `Content-Disposition: attachment`）:
+
+```json
+{
+  "version": 1,
   "labels": [
     { "name": "bug", "color": "#e11d48", "description": "不具合報告" },
     { "name": "feature", "color": "#2563eb", "description": "新機能" }
@@ -204,192 +667,299 @@ icon: lucide:check-square
 }
 ```
 
+`POST /labels/import` リクエスト（上記 JSON をそのまま送信）:
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `on_conflict` | `"skip"` \| `"overwrite"` | 同名ラベルの扱い（デフォルト `"skip"`） |
+
+レスポンス:
+
+```json
+{
+  "created": 3,
+  "skipped": 1,
+  "overwritten": 0
+}
+```
+
+### 6.8 Webhook API
+
+| メソッド | パス | スコープ | 説明 |
+|---------|------|---------|------|
+| `GET` | `/webhooks` | ManageWebhook | Webhook 一覧 |
+| `POST` | `/webhooks` | ManageWebhook | Webhook 作成 |
+| `PUT` | `/webhooks/{webhook_id}` | ManageWebhook | Webhook 更新 |
+| `DELETE` | `/webhooks/{webhook_id}` | ManageWebhook | Webhook 削除 |
+| `GET` | `/webhooks/{webhook_id}/deliveries` | ManageWebhook | 配信履歴 |
+
+`POST /webhooks` リクエスト:
+
+```json
+{
+  "url": "https://example.com/webhook",
+  "secret": "my-secret-token",
+  "events": ["task.created", "task.updated", "task.deleted"]
+}
+```
+
 ---
 
-## 11. ファイル添付
+## 7. Webhook ペイロード仕様
 
-- 1タスクに複数ファイルを添付可能
-- ファイルサイズ上限: 100MB / ファイル（Drive機能の `UPLOAD_MAX_SIZE_MB` に準ずる）
-- すべての形式を受け付ける
-- **プレビュー対応**:
-  - 画像（PNG, JPG, GIF, WebP, SVG）: インラインサムネイル + フルサイズモーダル
-  - 動画（MP4, MOV, WebM）: インラインプレーヤー（再生/一時停止/シーク）
-  - PDF: ページプレビュー
-  - その他: ダウンロードリンクのみ
-- ファイルストレージはDriveを利用（タスクへの添付はPhase 2の[Drive仕様](/features/drive)参照）
+リクエストヘッダー:
 
----
+```
+X-Task-Event: task.created
+X-Task-Signature: sha256=<HMAC-SHA256-hex>
+Content-Type: application/json
+```
 
-## 12. Webhook連携
+署名検証（受信側):
 
-### 12.1 設定
+```
+HMAC-SHA256(secret, raw_request_body) == X-Task-Signature の値
+```
 
-- プロジェクト設定画面でWebhook URLを登録（複数登録可）
-- シークレットキーによるリクエスト署名（HMAC-SHA256）
-- イベントごとに有効/無効を個別設定可能
-
-### 12.2 イベント一覧
-
-| イベント | トリガー |
-|---------|--------|
-| `task.created` | タスクが新規作成されたとき |
-| `task.updated` | タスクのいずれかのフィールドが変更されたとき |
-| `task.deleted` | タスクが削除されたとき |
-
-### 12.3 ペイロード仕様
-
-#### task.created
+### task.created
 
 ```json
 {
   "event": "task.created",
   "timestamp": "2026-05-27T10:00:00Z",
-  "project_id": "proj_abc",
+  "project_id": "uuid",
   "task": {
-    "id": "task_xyz",
-    "title": "タスクタイトル",
+    "id": "uuid",
+    "title": "ログイン機能を実装する",
     "priority": "high",
-    "assignees": ["user_1", "user_2"],
-    "soft_deadline": "2026-06-01",
-    "hard_deadline": "2026-06-10",
-    "created_by": "user_1"
+    "status": "open",
+    "assignees": [{ "user_id": "uuid", "role": "primary" }],
+    "soft_deadline": "2026-06-01T00:00:00Z",
+    "hard_deadline": "2026-06-10T00:00:00Z",
+    "label_ids": ["uuid"],
+    "milestone_id": null,
+    "parent_task_id": null,
+    "created_by": "uuid"
   }
 }
 ```
 
-#### task.updated
+### task.updated
 
-変更されたフィールド名と変更前後の値のみを含む（差分形式）:
+変更されたフィールドのみ差分で送信する:
 
 ```json
 {
   "event": "task.updated",
   "timestamp": "2026-05-27T11:30:00Z",
-  "project_id": "proj_abc",
-  "task_id": "task_xyz",
+  "project_id": "uuid",
+  "task_id": "uuid",
+  "updated_by": "uuid",
   "changes": [
-    {
-      "field": "priority",
-      "old_value": "medium",
-      "new_value": "high"
-    },
-    {
-      "field": "assignees",
-      "old_value": ["user_1"],
-      "new_value": ["user_1", "user_2"]
-    }
-  ],
-  "updated_by": "user_3"
+    { "field": "priority", "old_value": "medium", "new_value": "high" },
+    { "field": "status",   "old_value": "open",   "new_value": "in_progress" }
+  ]
 }
 ```
 
-#### task.deleted
+### task.deleted
 
 ```json
 {
   "event": "task.deleted",
   "timestamp": "2026-05-27T12:00:00Z",
-  "project_id": "proj_abc",
-  "task_id": "task_xyz",
-  "deleted_by": "user_1"
+  "project_id": "uuid",
+  "task_id": "uuid",
+  "deleted_by": "uuid"
 }
 ```
 
-### 12.4 リトライ
+### リトライ
 
-- HTTPレスポンスが2xx以外の場合: 指数バックオフで最大5回リトライ
-- 連続失敗時はWebhookを自動無効化し、管理者へ通知
-
----
-
-## 13. データモデル（概略）
-
-```
-Task
-├── id                  : UUID
-├── title               : string (required)
-├── description         : markdown text
-├── priority            : enum [炎上, critical, high, medium, low, 雑魚]
-├── status              : enum [open, in_progress, blocked, done, overdue]
-├── progress_pct        : integer 0-100
-├── assignees[]         : User[]
-│   └── role            : enum [primary, secondary]
-├── soft_deadline       : datetime?
-├── hard_deadline       : datetime?
-├── estimated_hours     : float?
-├── time_logs[]         : TimeLog[]
-│   ├── date            : date
-│   ├── hours           : float
-│   └── note            : string?
-├── labels[]            : Label[]
-├── attachments[]       : DriveFile[]  // Drive機能と共通
-├── parent_task_id      : UUID?
-├── sub_tasks[]         : Task[]
-├── blocked_by[]        : Task[]
-├── blocks[]            : Task[]
-├── milestone_id        : UUID?
-├── project_id          : UUID
-└── timestamps          : { created_at, updated_at, deleted_at? }
-
-Milestone
-├── id                  : UUID
-├── name                : string
-├── due_date            : date
-├── description         : text?
-├── project_id          : UUID
-└── related_tasks[]     : Task[]
-
-Label
-├── id                  : UUID
-├── name                : string
-├── color               : hex string
-├── description         : string?
-└── project_id          : UUID
-```
+- `2xx` 以外のレスポンス: 指数バックオフで最大 5 回リトライ
+  - 1 回目: 即時, 2 回目: 30s, 3 回目: 5m, 4 回目: 30m, 5 回目: 2h
+- 5 回連続失敗: `webhooks.is_active = false` に設定し、テナントオーナーへメール通知
+- 配信履歴は `webhook_deliveries` テーブルに保存（90 日後に自動パージ）
 
 ---
 
-## 14. 実装方針
+## 8. フロントエンド UI 設計
+
+**Phase B で実装。Phase A（バックエンド）完全完了後に着手すること。**
+
+### 8.1 ページ構成（vike + Vue）
+
+```
+/tenants/{tenant_id}/projects/{project_id}/tasks          # タスク一覧（ボード / リスト）
+/tenants/{tenant_id}/projects/{project_id}/tasks/{id}     # タスク詳細
+/tenants/{tenant_id}/projects/{project_id}/calendar       # カレンダービュー
+/tenants/{tenant_id}/projects/{project_id}/gantt          # ガントチャート
+/tenants/{tenant_id}/projects/{project_id}/milestones     # マイルストーン一覧
+/tenants/{tenant_id}/projects/{project_id}/labels         # ラベル管理
+/tenants/{tenant_id}/projects/{project_id}/settings/webhooks  # Webhook 設定
+```
+
+### 8.2 タスク詳細レイアウト
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ ← プロジェクト名  /  タスクタイトル                  [完了にする] │
+├────────────────────────────────────┬─────────────────────────────┤
+│                                    │ 担当者                       │
+│  # ログイン機能を実装する           │   🧑 田中（Primary）         │
+│                                    │   🧑 鈴木（Secondary）       │
+│  ## 概要                           │                             │
+│  メール+パスワード認証を実装する    │ 優先度  🔴 High              │
+│                                    │ ステータス  In Progress      │
+│  - [ ] JWT 発行                    │ 進捗率  [████░░░░░] 40%      │
+│  - [x] DB スキーマ                 │                             │
+│                                    │ 仮締め  2026-06-01          │
+│  ─────────────────────────────     │ Deadline  2026-06-10        │
+│                                    │                             │
+│  📎 添付ファイル                   │ 見積  2h                    │
+│  [🖼 screen.png] [📄 spec.pdf]     │ 実績  1h30m  ▶ タイマー     │
+│                                    │                             │
+│  💬 コメント（Phase 2）            │ ラベル  [feature] [auth]    │
+│                                    │ マイルストーン  v1.0         │
+│  ─────────────────────────────     │                             │
+│  🔗 Relations                      │ 親タスク  #42 認証基盤       │
+│  blocks: #55, #56                  │                             │
+│  blocked by: #38                   │ ─────────────────────────── │
+│                                    │ サブタスク                   │
+│  [グラフで表示]                    │   □ #60 JWT実装              │
+│                                    │   □ #61 テスト              │
+└────────────────────────────────────┴─────────────────────────────┘
+```
+
+### 8.3 カレンダービュー
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ [月] [週] [日]    ← 2026年6月 →    担当者: [全員 ▼]            │
+├────────┬────────┬────────┬────────┬────────┬────────┬────────────┤
+│  月    │  火    │  水    │  木    │  金    │  土    │  日        │
+├────────┼────────┼────────┼────────┼────────┼────────┼────────────┤
+│        │        │  1     │  2     │  3     │  4     │  5         │
+│        │        │ ░░ JWT │▓▓▓▓▓▓▓│▓▓▓▓▓   │        │            │
+│        │        │        │←─DB──→│        │        │            │
+├────────┼────────┼────────┼────────┼────────┼────────┼────────────┤
+│  8     │  9     │ 10     │ 11     │ 12     │ 13     │ 14         │
+│        │        │        │        │ ★v1.0  │        │            │
+└────────┴────────┴────────┴────────┴────────┴────────┴────────────┘
+
+░░ = 仮締めタスク（破線）  ▓▓ = Deadline タスク（実線）  ★ = マイルストーン
+```
+
+### 8.4 ガントチャート + イナズマ線
+
+```
+タスク名           │ 5/27 │ 6/01 │ 6/05 │ 6/10 │
+───────────────────┼──────┼──────┼──────┼──────┤
+DB スキーマ        │██████│      │      │      │
+JWT 実装           │  ░░░░│█████ │      │      │
+テスト             │      │      │░░░░░ │▓▓▓▓▓ │
+───────────────────┼──────┼──────┼──────┼──────┤
+♦ v1.0 リリース   │      │      │      │  ◆   │
+                   │      │  ↑   │      │      │
+                   │      │TODAY │      │      │
+
+イナズマ線（赤 = 遅延）:
+  DB スキーマ: 計画100% → 実績100%  → 右に折れる（青）
+  JWT 実装:    計画 60% → 実績 40%  → 左に折れる（赤）
+```
+
+### 8.5 コンポーネント構成
+
+| コンポーネント | ファイル | 説明 |
+|--------------|---------|------|
+| `TaskListPage` | `pages/tasks/+Page.vue` | タスク一覧（ボード / リスト切替） |
+| `TaskDetailPage` | `pages/tasks/[id]/+Page.vue` | タスク詳細 |
+| `TaskCard` | `components/tasks/TaskCard.vue` | ボード用カード |
+| `TaskDetailPanel` | `components/tasks/TaskDetailPanel.vue` | 詳細右ペイン |
+| `AssigneeSelector` | `components/tasks/AssigneeSelector.vue` | 担当者選択 |
+| `TimerWidget` | `components/tasks/TimerWidget.vue` | タイマー UI |
+| `RelationsGraph` | `components/tasks/RelationsGraph.vue` | 依存関係グラフ（D3.js） |
+| `CalendarPage` | `pages/calendar/+Page.vue` | カレンダービュー |
+| `GanttPage` | `pages/gantt/+Page.vue` | ガントチャート |
+| `GanttBar` | `components/gantt/GanttBar.vue` | バー描画 |
+| `ProgressLine` | `components/gantt/ProgressLine.vue` | イナズマ線描画（Canvas） |
+| `MilestoneDiamond` | `components/gantt/MilestoneDiamond.vue` | マイルストーン ◆ |
+| `LabelManager` | `pages/labels/+Page.vue` | ラベル管理（エクスポート / インポート UI） |
+| `WebhookSettings` | `pages/settings/webhooks/+Page.vue` | Webhook 設定 |
+
+---
+
+## 9. セキュリティ
+
+| 脅威 | 対策 |
+|------|------|
+| 他プロジェクトのタスクへのアクセス | 全エンドポイントで `project_id` の所属チェック |
+| 非メンバーによるタスク閲覧 | `project_members` テーブルでメンバー確認、非メンバーは `403` |
+| Webhook シークレットの漏洩 | DB には平文保存、GET レスポンスでは `***` にマスク |
+| 循環依存によるグラフ探索無限ループ | `task_relations` 追加時にサーバー側で BFS/DFS で循環検出 |
+| XSS（description の Markdown） | フロントエンドは `DOMPurify` でサニタイズしてから描画 |
+| タイマーの多重起動 | `timer_sessions` レコードに `UNIQUE(task_id, user_id)` で DB レベル保護 |
+
+---
+
+## 10. 実装方針
 
 **バックエンド完全完了後にフロントエンドへ移行する。**
 
 ### Phase A — バックエンド
 
-| # | 内容 |
-|---|------|
-| 1 | `tasks` / `task_assignees` / `time_logs` テーブル + マイグレーション |
-| 2 | タスク CRUD API（作成・取得・更新・削除） |
-| 3 | 担当者・優先順位・締切（soft/hard）の設定 API |
-| 4 | 作業時間追跡 API（タイマー開始/停止・手動ログ） |
-| 5 | 親子・ブロッキング関係 API |
-| 6 | `milestones` / `labels` テーブル + CRUD API |
-| 7 | ラベルのエクスポート / インポート API |
-| 8 | ファイル添付（Drive機能との統合） |
-| 9 | Webhook送信基盤（created / updated差分 / deleted） |
-| 10 | 全エンドポイントの動作確認（Phase A 完了条件） |
+| # | 内容 | 完了条件 |
+|---|------|---------|
+| 1 | マイグレーション（全テーブル作成、`labels` に `project_id` 追加） | `sea_orm_migration run` が正常完了 |
+| 2 | エンティティ定義（`tasks`, `task_assignees`, `task_relations`, `time_logs`, `milestones`, `task_labels`, `task_attachments`, `webhooks`） | コンパイル通過 |
+| 3 | タスク CRUD API | Scalar で動作確認 |
+| 4 | 担当者 API | 同上 |
+| 5 | 作業時間追跡 API（手動ログ + タイマー） | 同上 |
+| 6 | 親子・依存関係 API（循環検出含む） | 同上 |
+| 7 | ファイル添付 API（Drive 統合） | 同上 |
+| 8 | マイルストーン API | 同上 |
+| 9 | ラベル API（プロジェクトスコープ + エクスポート / インポート） | 同上 |
+| 10 | Webhook 送信基盤（非同期 Job + リトライ + 自動無効化） | 同上 |
+| 11 | `pnpm openapi` でクライアント再生成、型エラーなし | — |
 
 ### Phase B — フロントエンド（Phase A 完了後に着手）
 
 | # | 内容 |
 |---|------|
-| 11 | `pnpm openapi` でクライアント再生成 |
-| 12 | タスク一覧・詳細画面 |
-| 13 | カレンダービュー（月/週/日） |
-| 14 | ガントチャート + イナズマ線 |
-| 15 | 依存関係グラフ（Relationsタブ） |
-| 16 | ラベル管理画面（エクスポート/インポート UI） |
-| 17 | ファイル添付プレビュー（画像/動画） |
-| 18 | Webhook設定画面 |
+| 12 | タスク一覧（ボード / リスト表示） |
+| 13 | タスク詳細画面（右ペイン構成） |
+| 14 | 担当者セレクタ + タイマーウィジェット |
+| 15 | カレンダービュー（月 / 週 / 日） |
+| 16 | ガントチャート + イナズマ線（Canvas 描画） |
+| 17 | 依存関係グラフ（D3.js） |
+| 18 | ラベル管理 UI（エクスポート / インポート） |
+| 19 | Webhook 設定画面 |
 
 ---
 
-## 15. 未決事項 / 今後の検討
+## 11. 決定事項ログ
+
+| 項目 | 決定内容 | 決定日 |
+|------|---------|--------|
+| 削除方式 | ソフトデリート（`deleted_at`）。物理削除は管理者 API で別途提供（Phase A 対象外） | 2026-05-27 |
+| 工数単位 | 分単位で DB 保存。表示時に h/m 変換 | 2026-05-27 |
+| 優先順位の DB 値 | 日本語ではなく英語スラッグ（`critical_fire` / `trivial` 等）で保存 | 2026-05-27 |
+| ラベルスコープ | 既存グローバルテーブルへ `project_id` カラムを追加してプロジェクト単位化 | 2026-05-27 |
+| ファイル添付方式 | Drive ファイルへの参照（中間テーブル）。Drive 本体は残し、添付解除のみ | 2026-05-27 |
+| Webhook シークレットの表示 | GET レスポンスではマスク（`***`）、作成時のみ平文返却 | 2026-05-27 |
+| イナズマ線の描画 | Canvas API を使用。進捗率は手動入力（サブタスク自動計算は Phase 2） | 2026-05-27 |
+| 実装順序 | バックエンド完全完了 → フロントエンド着手。並行実装は禁止 | 2026-05-27 |
+
+---
+
+## 12. 未決事項 / 今後の検討
 
 | 項目 | 内容 |
 |------|------|
+| タイマーのストレージ | Redis vs DB の `timer_sessions` テーブル（現在は DB で計画） |
 | 繰り返しタスク | 定期スケジュールの自動生成（週次・月次など） |
 | タスクテンプレート | よく使う設定を雛形化して再利用 |
+| コメント機能 | タスク上のスレッドコメント（Phase 2） |
 | 通知設定の詳細化 | 各ユーザーが受け取るアラートの粒度を個別設定 |
-| API公開 | REST / GraphQL API の外部公開範囲 |
-| モバイル対応 | カレンダー・ガントのモバイル表示最適化 |
-| ガントのイナズマ線精度 | 進捗率の自動計算（サブタスク完了率 vs 手動入力の選択） |
+| ガントのイナズマ線自動計算 | サブタスク完了率から進捗率を自動算出（現在は手動） |
+| Webhook の署名アルゴリズム選択 | HMAC-SHA256 固定か、アルゴリズム選択を許容するか |
