@@ -106,7 +106,7 @@ export default defineConfig({
   fmt: {
     singleQuote: true,
     trailingComma: 'all',
-    ignorePatterns: ['content/**/*.md'],
+    ignorePatterns: ['content/**/*.md', 'src/components/ui/**'],
   },
   lint: { options: { typeAware: true, typeCheck: true } },
 });
