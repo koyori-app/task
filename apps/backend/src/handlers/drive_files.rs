@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use axum::{
     Json,
     body::Body,
@@ -8,7 +11,7 @@ use axum::{
 use axum_valid::Valid;
 use bytes::Bytes;
 use chrono::Utc;
-use futures::stream;
+use futures::{SinkExt, channel::mpsc as fmpsc};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder, QuerySelect,
@@ -25,7 +28,8 @@ use crate::error::AppError;
 use crate::extractors::{AuthUser, OptionalAuthUser};
 use crate::openapi::CrudErrors;
 use crate::utils::drive::{
-    content_url, current_storage_type, effective_quota, guess_mime, tenant_used_bytes,
+    content_url, current_storage_type, effective_quota, guess_mime, is_tenant_owner,
+    tenant_used_bytes,
 };
 use crate::utils::storage::{ByteStream, StorageError};
 use crate::AppState;
@@ -128,14 +132,6 @@ async fn load_folder_in_tenant(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)
-}
-
-async fn is_tenant_owner(state: &AppState, tenant_id: Uuid, user_id: Uuid) -> Result<bool, AppError> {
-    let tenant = tenants::Entity::find_by_id(tenant_id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(tenant.owner_id == user_id)
 }
 
 async fn is_project_member(
@@ -344,11 +340,9 @@ pub async fn upload_file(
         .await?
         .ok_or(AppError::NotFound)?;
 
+    // 'name' と 'folder_id' は 'file' フィールドより前に送ること（ストリーミング設計の前提）。
     let mut display_name: Option<String> = None;
     let mut folder_id: Option<Uuid> = None;
-    let mut file_bytes: Option<Bytes> = None;
-    let mut original_filename: Option<String> = None;
-    let mut content_type: Option<String> = None;
 
     while let Some(field) = multipart
         .next_field()
@@ -357,13 +351,108 @@ pub async fn upload_file(
     {
         match field.name() {
             Some("file") => {
-                original_filename = field.file_name().map(str::to_string);
-                content_type = field.content_type().map(str::to_string);
-                let data = field
-                    .bytes()
-                    .await
-                    .map_err(|e| AppError::Internal(e.into()))?;
-                file_bytes = Some(data);
+                let original_filename = field.file_name().map(str::to_string);
+                let content_type = field.content_type().map(str::to_string);
+
+                let name = display_name
+                    .or_else(|| original_filename.clone())
+                    .ok_or(AppError::BadRequest)?;
+                let mime_type = content_type.unwrap_or_else(|| {
+                    guess_mime(original_filename.as_deref().unwrap_or(&name))
+                });
+
+                // クォータ事前チェック（既に上限に達していれば即拒否）
+                let used = tenant_used_bytes(&state.db, tenant_id).await?;
+                if let Some(q) = effective_quota(&tenant, &state.drive_config) {
+                    if used >= q {
+                        return Err(AppError::ContentTooLarge);
+                    }
+                }
+
+                let folder_project_id = if let Some(fid) = folder_id {
+                    let folder = load_folder_in_tenant(&state, tenant_id, fid).await?;
+                    folder.project_id
+                } else {
+                    None
+                };
+
+                // Field<'a> は 'static でないため stream::unfold 不可。
+                // mpsc channel の Receiver は 'static なので ByteStream として使える。
+                // tokio::join! で pump と upload を同タスク内で並行実行する。
+                let byte_count = Arc::new(AtomicU64::new(0));
+                let counter = byte_count.clone();
+                let max_bytes = state.drive_config.upload_max_bytes;
+
+                let (mut tx, rx) = fmpsc::channel::<Result<Bytes, StorageError>>(8);
+                let byte_stream: ByteStream = Box::pin(rx);
+
+                let pump = async move {
+                    let mut field = field;
+                    loop {
+                        match field.chunk().await {
+                            Ok(Some(bytes)) => {
+                                counter.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                                if tx.send(Ok(bytes)).await.is_err() {
+                                    return;
+                                }
+                            }
+                            Ok(None) => break,
+                            Err(e) => {
+                                let _ = tx.send(Err(StorageError::Other(e.to_string()))).await;
+                                return;
+                            }
+                        }
+                    }
+                };
+
+                let file_id = Uuid::new_v4();
+                let storage_key = file_id.to_string();
+
+                let (upload_result, _) = tokio::join!(
+                    state.storage.upload(&storage_key, byte_stream, 0, &mime_type),
+                    pump
+                );
+                upload_result.map_err(storage_to_app_error)?;
+
+                let actual_size = byte_count.load(Ordering::Relaxed);
+
+                // アップロード後にサイズ・クォータを確定チェック
+                if actual_size == 0 {
+                    let _ = state.storage.delete(&storage_key).await;
+                    return Err(AppError::BadRequest);
+                }
+                if actual_size > max_bytes {
+                    let _ = state.storage.delete(&storage_key).await;
+                    return Err(AppError::ContentTooLarge);
+                }
+                if let Err(e) = ensure_quota_for_upload(&state, &tenant, actual_size).await {
+                    let _ = state.storage.delete(&storage_key).await;
+                    return Err(e);
+                }
+
+                let model = drive_files::ActiveModel {
+                    id: Set(file_id),
+                    name: Set(name),
+                    size: Set(actual_size as i64),
+                    mime_type: Set(mime_type),
+                    storage_type: Set(current_storage_type()),
+                    storage_key: Set(storage_key.clone()),
+                    tenant_id: Set(tenant_id),
+                    project_id: Set(folder_project_id),
+                    uploader_id: Set(auth.user_id),
+                    folder_id: Set(folder_id),
+                    created_at: Set(Utc::now().fixed_offset()),
+                };
+
+                let saved = match model.insert(&state.db).await {
+                    Ok(m) => m,
+                    Err(e) => {
+                        let _ = state.storage.delete(&storage_key).await;
+                        return Err(e.into());
+                    }
+                };
+
+                return Ok((StatusCode::CREATED, Json(drive_file_response(&saved))));
             }
             Some("name") => {
                 let text = field
@@ -381,8 +470,7 @@ pub async fn upload_file(
                     .map_err(|e| AppError::Internal(e.into()))?;
                 if !text.is_empty() {
                     folder_id = Some(
-                        Uuid::parse_str(text.trim())
-                            .map_err(|_| AppError::BadRequest)?,
+                        Uuid::parse_str(text.trim()).map_err(|_| AppError::BadRequest)?,
                     );
                 }
             }
@@ -390,63 +478,7 @@ pub async fn upload_file(
         }
     }
 
-    let data = file_bytes.ok_or(AppError::BadRequest)?;
-    let size = data.len() as u64;
-    if size == 0 {
-        return Err(AppError::BadRequest);
-    }
-    if size > state.drive_config.upload_max_bytes {
-        return Err(AppError::ContentTooLarge);
-    }
-
-    ensure_quota_for_upload(&state, &tenant, size).await?;
-
-    let folder_project_id = if let Some(fid) = folder_id {
-        let folder = load_folder_in_tenant(&state, tenant_id, fid).await?;
-        folder.project_id
-    } else {
-        None
-    };
-
-    let name = display_name
-        .or(original_filename.clone())
-        .ok_or(AppError::BadRequest)?;
-    let mime_type = content_type.unwrap_or_else(|| {
-        guess_mime(original_filename.as_deref().unwrap_or(&name))
-    });
-
-    let file_id = Uuid::new_v4();
-    let storage_key = file_id.to_string();
-    let byte_stream: ByteStream = Box::pin(stream::once(async move { Ok(data) }));
-
-    state
-        .storage
-        .upload(&storage_key, byte_stream, size, &mime_type)
-        .await
-        .map_err(storage_to_app_error)?;
-
-    let model = drive_files::ActiveModel {
-        id: Set(file_id),
-        name: Set(name),
-        size: Set(size as i64),
-        mime_type: Set(mime_type),
-        storage_type: Set(current_storage_type()),
-        storage_key: Set(storage_key.clone()),
-        tenant_id: Set(tenant_id),
-        project_id: Set(folder_project_id),
-        uploader_id: Set(auth.user_id),
-        folder_id: Set(folder_id),
-        created_at: Set(Utc::now().fixed_offset()),
-    };
-
-    let saved = match model.insert(&state.db).await {
-        Ok(m) => m,
-        Err(e) => {
-            let _ = state.storage.delete(&storage_key).await;
-            return Err(e.into());
-        }
-    };
-    Ok((StatusCode::CREATED, Json(drive_file_response(&saved))))
+    Err(AppError::BadRequest) // 'file' フィールドなし
 }
 
 #[axum::debug_handler]

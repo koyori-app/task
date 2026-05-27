@@ -19,11 +19,12 @@ use crate::entities::{
     drive_files, drive_folder_shares, drive_folders,
     drive_folder_shares::{SharePermission, validate_share_target_xor},
     scopes::Scope,
-    tenants, users,
+    users,
 };
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::{DriveFolderErrors, PublicShareErrors};
+use crate::utils::drive::is_tenant_owner;
 use crate::AppState;
 
 const SHARE_TOKEN_LEN: usize = 32;
@@ -96,14 +97,6 @@ async fn get_folder_in_tenant(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)
-}
-
-async fn is_tenant_owner(state: &AppState, tenant_id: Uuid, user_id: Uuid) -> Result<bool, AppError> {
-    let tenant = tenants::Entity::find_by_id(tenant_id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(tenant.owner_id == user_id)
 }
 
 async fn require_folder_share_admin(

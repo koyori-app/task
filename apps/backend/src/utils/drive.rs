@@ -7,6 +7,7 @@ use sea_orm::prelude::Uuid;
 
 use crate::entities::{drive_files, tenants};
 use crate::error::AppError;
+use crate::AppState;
 
 /// Drive 関連の環境変数設定。
 #[derive(Clone, Debug)]
@@ -106,6 +107,19 @@ pub fn current_storage_type() -> crate::entities::drive_files::StorageType {
         "s3" => crate::entities::drive_files::StorageType::S3,
         _ => crate::entities::drive_files::StorageType::Local,
     }
+}
+
+/// テナントオーナー判定（drive_files / drive_folders の共通ヘルパー）。
+pub async fn is_tenant_owner(
+    state: &AppState,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, AppError> {
+    let tenant = tenants::Entity::find_by_id(tenant_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(tenant.owner_id == user_id)
 }
 
 pub fn guess_mime(filename: &str) -> String {
