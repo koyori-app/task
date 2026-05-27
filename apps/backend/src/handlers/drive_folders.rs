@@ -209,6 +209,7 @@ fn parse_share_permission(permission: &str) -> Result<SharePermission, AppError>
 #[utoipa::path(
     get,
     path = "/",
+    tag = "Drive Folders",
     summary = "ドライブフォルダ一覧",
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     responses(
@@ -234,6 +235,7 @@ pub async fn list_folders(
 #[utoipa::path(
     post,
     path = "/",
+    tag = "Drive Folders",
     summary = "ドライブフォルダ作成",
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     request_body = CreateFolderRequest,
@@ -271,6 +273,7 @@ pub async fn create_folder(
 #[utoipa::path(
     patch,
     path = "/{folder_id}",
+    tag = "Drive Folders",
     summary = "ドライブフォルダ更新（名前変更・移動）",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -319,6 +322,7 @@ pub async fn update_folder(
 #[utoipa::path(
     delete,
     path = "/{folder_id}",
+    tag = "Drive Folders",
     summary = "ドライブフォルダ削除",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -352,6 +356,7 @@ pub async fn delete_folder(
 #[utoipa::path(
     get,
     path = "/{folder_id}/shares",
+    tag = "Drive Shares",
     summary = "フォルダ共有一覧",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -382,6 +387,7 @@ pub async fn list_shares(
 #[utoipa::path(
     post,
     path = "/{folder_id}/shares",
+    tag = "Drive Shares",
     summary = "フォルダ共有作成",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -438,6 +444,7 @@ pub async fn create_share(
 #[utoipa::path(
     delete,
     path = "/{folder_id}/shares/{share_id}",
+    tag = "Drive Shares",
     summary = "フォルダ共有取り消し",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -471,6 +478,7 @@ pub async fn delete_share(
 #[utoipa::path(
     get,
     path = "/v1/drive/share/{token}",
+    tag = "Drive Shares",
     summary = "公開リンクでフォルダメタデータ取得（認証不要）",
     params(("token" = String, Path, description = "共有トークン")),
     responses(
@@ -499,6 +507,7 @@ pub async fn get_public_share_folder(
 #[utoipa::path(
     get,
     path = "/v1/drive/share/{token}/files",
+    tag = "Drive Shares",
     summary = "公開リンク経由でファイル一覧取得（認証不要）",
     params(("token" = String, Path, description = "共有トークン")),
     responses(

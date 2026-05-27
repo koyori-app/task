@@ -9,6 +9,7 @@ use crate::{AppState, entities};
 #[utoipa::path(
     get,
     path = "/",
+    tag = "Labels",
     summary = "ラベル一覧",
     responses(
         (

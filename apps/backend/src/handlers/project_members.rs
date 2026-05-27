@@ -101,6 +101,7 @@ async fn count_admins(state: &AppState, project_id: Uuid) -> Result<u64, AppErro
 #[utoipa::path(
     get,
     path = "/",
+    tag = "Project Members",
     summary = "プロジェクトメンバー一覧",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -130,6 +131,7 @@ pub async fn list_members(
 #[utoipa::path(
     post,
     path = "/",
+    tag = "Project Members",
     summary = "プロジェクトメンバーを追加",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -180,6 +182,7 @@ pub async fn add_member(
 #[utoipa::path(
     put,
     path = "/{user_id}",
+    tag = "Project Members",
     summary = "プロジェクトメンバーの権限を変更",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -219,6 +222,7 @@ pub async fn update_member(
 #[utoipa::path(
     delete,
     path = "/{user_id}",
+    tag = "Project Members",
     summary = "プロジェクトメンバーを削除",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),

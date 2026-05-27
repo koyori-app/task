@@ -36,6 +36,7 @@ pub struct UpdateTenantRequest {
 #[utoipa::path(
     post,
     path = "/",
+    tag = "Tenants",
     summary = "テナントを作成",
     request_body = CreateTenantRequest,
     responses(
@@ -68,6 +69,7 @@ pub async fn create_tenant(
 #[utoipa::path(
     get,
     path = "/",
+    tag = "Tenants",
     summary = "自分のテナント一覧",
     responses(
         (status = 200, description = "テナント一覧", body = [tenants::Model]),
@@ -106,6 +108,7 @@ pub async fn list_tenants(
 #[utoipa::path(
     get,
     path = "/{id}",
+    tag = "Tenants",
     summary = "テナントを取得",
     params(("id" = Uuid, Path, description = "テナントID")),
     responses(
@@ -130,6 +133,7 @@ pub async fn get_tenant(
 #[utoipa::path(
     put,
     path = "/{id}",
+    tag = "Tenants",
     summary = "テナントを更新",
     params(("id" = Uuid, Path, description = "テナントID")),
     request_body = UpdateTenantRequest,
@@ -168,6 +172,7 @@ pub async fn update_tenant(
 #[utoipa::path(
     delete,
     path = "/{id}",
+    tag = "Tenants",
     summary = "テナントを削除",
     params(("id" = Uuid, Path, description = "テナントID")),
     responses(

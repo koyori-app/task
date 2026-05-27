@@ -88,6 +88,7 @@ async fn require_project_readable(
 #[utoipa::path(
     post,
     path = "/",
+    tag = "Projects",
     summary = "プロジェクトを作成",
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     request_body = CreateProjectRequest,
@@ -135,6 +136,7 @@ pub async fn create_project(
 #[utoipa::path(
     get,
     path = "/",
+    tag = "Projects",
     summary = "プロジェクト一覧",
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     responses(
@@ -181,6 +183,7 @@ pub async fn list_projects(
 #[utoipa::path(
     get,
     path = "/{id}",
+    tag = "Projects",
     summary = "プロジェクトを取得",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -211,6 +214,7 @@ pub async fn get_project(
 #[utoipa::path(
     put,
     path = "/{id}",
+    tag = "Projects",
     summary = "プロジェクトを更新",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -262,6 +266,7 @@ pub async fn update_project(
 #[utoipa::path(
     delete,
     path = "/{id}",
+    tag = "Projects",
     summary = "プロジェクトを削除",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),

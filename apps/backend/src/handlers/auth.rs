@@ -39,6 +39,7 @@ pub struct LoginRequest {
 #[utoipa::path(
     post,
     path = "/login",
+    tag = "Auth",
     summary = "ログイン",
     request_body = LoginRequest,
     responses(
@@ -95,6 +96,7 @@ pub struct RegisterRequest {
 #[utoipa::path(
     post,
     path = "/register",
+    tag = "Auth",
     summary = "新規登録",
     request_body = RegisterRequest,
     responses(
@@ -174,6 +176,7 @@ pub struct VerifyEmailRequest {
 #[utoipa::path(
     post,
     path = "/verify-email",
+    tag = "Auth",
     summary = "メールアドレスの確認",
     request_body = VerifyEmailRequest,
     responses(
@@ -226,6 +229,7 @@ pub struct ResendVerificationRequest {
 #[utoipa::path(
     post,
     path = "/resend-verification-email",
+    tag = "Auth",
     summary = "認証メールの再送",
     request_body = ResendVerificationRequest,
     responses(
@@ -274,6 +278,7 @@ pub async fn resend_verification_email(
 #[utoipa::path(
     get,
     path = "/me",
+    tag = "Auth",
     summary = "ログイン中ユーザー情報",
     responses(
         (status = 200, description = "現在のアカウント情報", body = entities::users::Model),
@@ -291,6 +296,7 @@ pub async fn me(
 #[utoipa::path(
     post,
     path = "/logout",
+    tag = "Auth",
     summary = "ログアウト",
     responses(
         (status = 204, description = "ログアウトしました（本文なし）"),

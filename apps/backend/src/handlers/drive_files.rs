@@ -256,6 +256,7 @@ fn list_limit(limit: u32) -> u32 {
 #[utoipa::path(
     get,
     path = "/files",
+    tag = "Drive Files",
     summary = "ドライブファイル一覧",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -302,6 +303,7 @@ pub async fn list_files(
 #[utoipa::path(
     post,
     path = "/files",
+    tag = "Drive Files",
     summary = "ドライブファイルアップロード",
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     request_body(content_type = "multipart/form-data"),
@@ -481,6 +483,7 @@ pub async fn upload_file(
 #[utoipa::path(
     get,
     path = "/files/{id}",
+    tag = "Drive Files",
     summary = "ドライブファイルメタデータ取得",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -506,6 +509,7 @@ pub async fn get_file(
 #[utoipa::path(
     patch,
     path = "/files/{id}",
+    tag = "Drive Files",
     summary = "ドライブファイル更新",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -552,6 +556,7 @@ pub async fn update_file(
 #[utoipa::path(
     delete,
     path = "/files/{id}",
+    tag = "Drive Files",
     summary = "ドライブファイル削除",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
@@ -583,6 +588,7 @@ pub async fn delete_file(
 #[utoipa::path(
     get,
     path = "/files/{id}/content",
+    tag = "Drive Files",
     summary = "ドライブファイル内容配信",
     params(
         ("id" = Uuid, Path, description = "ファイルID"),
@@ -633,6 +639,7 @@ pub async fn get_file_content(
 #[utoipa::path(
     get,
     path = "/usage",
+    tag = "Drive Files",
     summary = "ドライブ使用量・クォータ取得",
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     responses(
@@ -667,6 +674,7 @@ pub async fn get_drive_usage(
 #[utoipa::path(
     patch,
     path = "/quota",
+    tag = "Drive Files",
     summary = "ドライブクォータ設定",
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     request_body = UpdateQuotaRequest,
