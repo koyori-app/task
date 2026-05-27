@@ -586,21 +586,48 @@ GET /tasks/{task_id}/time-logs/summary
 | `POST` | `/tasks/{task_id}/relations` | WriteTask | 関係追加 |
 | `DELETE` | `/tasks/{task_id}/relations/{relation_id}` | WriteTask | 関係削除 |
 
-`POST` リクエスト:
+#### ブロッキング関係の方向性
+
+ブロッキング関係は **どちらのタスクからでも設定できる**。`type` フィールドで方向を指定する。
+
+| `type` | 意味 | 作成されるレコード |
+|--------|------|-------------------|
+| `"blocks"` | 現在のタスクが `target` をブロックする | `blocker=現タスク`, `blocked=target` |
+| `"blocked_by"` | 現在のタスクは `target` にブロックされている | `blocker=target`, `blocked=現タスク` |
+
+**例: タスク A がタスク B をブロックしている場合**
+
+タスク A の画面から設定する場合（「私が B をブロックしている」）:
 
 ```json
-{ "type": "blocks", "target_task_id": "uuid" }
+POST /tasks/{task_a_id}/relations
+{ "type": "blocks", "target_task_id": "{task_b_id}" }
 ```
 
-`type` は `blocks` または `blocked_by`。循環依存が発生する場合は `409 Conflict`。
+タスク B の画面から設定する場合（「私は A にブロックされている」）:
 
-`GET` レスポンス:
+```json
+POST /tasks/{task_b_id}/relations
+{ "type": "blocked_by", "target_task_id": "{task_a_id}" }
+```
+
+どちらも `task_relations` テーブルに同一レコード（`blocker=A`, `blocked=B`）が1件だけ作成される。重複登録は `409 Conflict`。
+
+循環依存（A→B→C→A）が発生する場合も `409 Conflict`。
+
+#### `GET` レスポンス
+
+タスク A から見た場合:
 
 ```json
 {
   "subtasks": [{ "id": "uuid", "title": "..." }],
-  "blocks": [{ "id": "uuid", "title": "...", "relation_id": "uuid" }],
-  "blocked_by": [{ "id": "uuid", "title": "...", "relation_id": "uuid" }]
+  "blocks": [
+    { "id": "{task_b_id}", "title": "タスク B", "status": "blocked", "relation_id": "uuid" }
+  ],
+  "blocked_by": [
+    { "id": "{task_c_id}", "title": "タスク C", "status": "done", "relation_id": "uuid" }
+  ]
 }
 ```
 
