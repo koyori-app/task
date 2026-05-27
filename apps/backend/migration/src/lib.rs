@@ -17,6 +17,9 @@ mod m20260527060000_create_task_assignees;
 mod m20260527070000_create_task_relations;
 mod m20260527080000_add_project_id_to_labels;
 mod m20260527090000_create_task_labels;
+mod m20260527100000_add_admin_fields_to_users;
+mod m20260527110000_create_audit_logs;
+mod m20260528190000_add_drive_system_max_quota_mb;
 mod m20260603_add_unique_task_assignees;
 
 pub struct Migrator;
@@ -42,6 +45,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260527070000_create_task_relations::Migration),
             Box::new(m20260527080000_add_project_id_to_labels::Migration),
             Box::new(m20260527090000_create_task_labels::Migration),
+            Box::new(m20260527100000_add_admin_fields_to_users::Migration),
+            Box::new(m20260527110000_create_audit_logs::Migration),
+            Box::new(m20260528190000_add_drive_system_max_quota_mb::Migration),
             Box::new(m20260603_add_unique_task_assignees::Migration),
         ]
     }
