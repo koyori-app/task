@@ -25,6 +25,8 @@ pub struct Model {
     #[schema(ignore)]
     #[serde(skip_serializing)]
     pub password_hash: String,
+    pub is_admin: bool,
+    pub is_suspended: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
