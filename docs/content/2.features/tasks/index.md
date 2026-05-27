@@ -24,7 +24,8 @@ icon: lucide:layout-list
 | 6 | **カスタムフィールド**（プロジェクト固有属性） | [tasks/custom-fields](/features/tasks/custom-fields) | 1 |
 | 7 | **検索・バルク・ビュー・添付**（全文検索・一括更新・保存フィルター・Drive連携） | [tasks/extensions](/features/tasks/extensions) | 1, (Drive) |
 | 8 | **自動化**（トリガー→アクションエンジン） | [tasks/automation](/features/tasks/automation) | 1, 4, 5 |
-| 9 | **GitHub 連携**（PR・コミット・自動クローズ） | [tasks/github](/features/tasks/github) | 1, 8 |
+| 9a | **GitHub App 基盤**（インストール・認証情報管理・Webhook 受信インフラ） | [tasks/github-app](/features/tasks/github-app) | なし（PR 1 と並行可） |
+| 9b | **GitHub↔タスク連携**（PR・コミット・自動クローズ） | [tasks/github-tasks](/features/tasks/github-tasks) | 1, 8, 9a |
 | 10 | **Webhook**（外部向けイベント送信） | [tasks/webhooks](/features/tasks/webhooks) | 1 |
 | — | **フロントエンド** | 各仕様書末尾の「Phase B」節 | 1〜10 すべて完了後 |
 
@@ -47,7 +48,9 @@ icon: lucide:layout-list
     │                                          ↓
     ├──[8 自動化] ←──────────────────────[4, 5]
     │       │
-    └──[9 GitHub 連携] ←──────────────────[8]
+    │       └──[9b GitHub↔タスク連携] ←──[8, 9a]
+    │
+    ├──[9a GitHub App 基盤]（並行可）
     │
     └──[10 Webhook]（並行可）
 ```
@@ -58,7 +61,7 @@ icon: lucide:layout-list
 
 1. **バックエンド完全完了後にフロントエンドへ移行する**（並行実装禁止）
 2. 各 PR は依存 PR がマージ済みであることを前提とする
-3. 依存関係のない PR（2・3・6・10）は並行して進めてよい
+3. 依存関係のない PR（2・3・6・9a・10）は並行して進めてよい
 4. フロントエンドは全バックエンド PR がマージされてから `pnpm openapi` で型を再生成して着手
 
 ---
