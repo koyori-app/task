@@ -95,6 +95,9 @@ impl StorageBackend for LocalStorageBackend {
     }
 
     async fn public_url(&self, key: &str) -> String {
+        // ローカルバックエンドでは storage_key == file_id（UUID 文字列）のため
+        // `/v1/drive/files/{file_id}/content` として正しい URL になる。
+        // storage_key の生成は drive_files ハンドラで `file_id.to_string()` を使用。
         format!("/v1/drive/files/{key}/content")
     }
 }
