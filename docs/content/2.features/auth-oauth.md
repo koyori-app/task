@@ -238,7 +238,7 @@ DELETE /v1/auth/oauth/connections/{provider}
 { "password": "new-password-min-8" }
 ```
 
-> 既にパスワードが設定されている場合は `409`。変更は既存の `/v1/auth/change-password` を使用。
+> 既にパスワードが設定されている場合は `409`。変更は `/v1/auth/password/change` を使用（[パスワードリセット仕様書](/features/auth-password-reset) §4 参照）。
 
 ---
 

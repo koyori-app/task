@@ -127,19 +127,21 @@ CREATE INDEX idx_audit_logs_created ON audit_logs(created_at DESC);
 ```text
 起動時:
   BOOTSTRAP_ADMIN_EMAIL が設定されている
-    → users WHERE email = $email → is_admin = true に UPDATE
-    → audit_logs に action="user.admin.grant", actor_type="system" を INSERT
-    → 環境変数をログ出力後、以降は参照しない（毎起動ごとに再実行）
+    → users WHERE is_admin = true の件数を確認
+    → 管理者が 1 人以上存在する場合: ブートストラップをスキップ（ログ出力のみ）
+    → 管理者が 0 人の場合のみ:
+        → users WHERE email = $email → is_admin = true に UPDATE
+        → audit_logs に action="user.admin.grant", actor_type="system" を INSERT
 ```
 
-> **運用上の注意**: ブートストラップ後は `BOOTSTRAP_ADMIN_EMAIL` 環境変数を削除することを推奨する。毎起動で上書きするため、変数が残っていても害はないが、意図しない権限付与を防ぐために明示的に削除するのがベストプラクティス。
+> **安全ガード**: 管理者が既に存在する場合はブートストラップを実行しない。これにより、運用中に環境変数が誤設定されても意図しない権限付与が発生しない。初期構築後は `BOOTSTRAP_ADMIN_EMAIL` を環境変数から削除することを推奨する。
 
 ---
 
 ## 5. AdminUser エクストラクタ
 
 ```rust
-/// is_admin = true のユーザー専用エクストラクタ。
+/// is_admin = true のユーザー専用エクストラクタ。セッション認証のみ受理（PAT 不可）。
 pub struct AdminUser {
     pub user_id: Uuid,
 }
@@ -151,6 +153,9 @@ impl FromRequestParts<AppState> for AdminUser {
         let auth = AuthUser::from_request_parts(parts, state)
             .await
             .map_err(|_| AppError::Unauthorized)?;
+
+        // 管理者操作はセッション認証のみ。PAT は権限範囲外として 403。
+        auth.require_session().map_err(|_| AppError::Forbidden)?;
 
         let user = users::Entity::find_by_id(auth.user_id)
             .one(&state.db)
@@ -166,7 +171,7 @@ impl FromRequestParts<AppState> for AdminUser {
 }
 ```
 
-管理者専用エンドポイントはすべて `AdminUser` エクストラクタを使用する。非管理者は `403 Forbidden`。
+管理者専用エンドポイントはすべて `AdminUser` エクストラクタを使用する。非管理者・PAT 認証は `403 Forbidden`。
 
 `AuthUser` エクストラクタには `is_suspended` チェックを追加する:
 
@@ -185,6 +190,10 @@ if user.is_suspended {
 
 ### 6.1 アクション一覧
 
+#### Phase A（本 PR で必須実装）
+
+管理者が行う操作のみを記録する。
+
 | アクション | resource_type | トリガー |
 |-----------|--------------|---------|
 | `user.admin.grant` | `user` | 管理者フラグ付与 |
@@ -198,24 +207,23 @@ if user.is_suspended {
 | `user.passkey.delete` | `user` | パスキー強制削除（管理者操作） |
 | `user.oauth.disconnect` | `user` | OAuth 連携強制解除（管理者操作） |
 | `tenant.delete` | `tenant` | テナント強制削除（管理者のみ） |
-| `tenant.owner.transfer` | `tenant` | オーナー移譲 |
-| `project.member.add` | `project` | プロジェクトメンバー追加 |
-| `project.member.remove` | `project` | プロジェクトメンバー除外 |
-| `project.member.role.change` | `project` | プロジェクト内ロール変更 |
-| `project.delete` | `project` | プロジェクト削除 |
-| `auth.login.success` | `user` | ログイン成功 |
-| `auth.login.failure` | `user` | ログイン失敗（email から特定できた場合） |
-| `auth.2fa.enable` | `user` | 2FA 有効化 |
-| `auth.2fa.disable` | `user` | 2FA 無効化 |
-| `auth.passkey.add` | `user` | パスキー登録 |
-| `auth.passkey.remove` | `user` | パスキー削除 |
-| `auth.oauth.connect` | `user` | OAuth 連携 |
-| `auth.oauth.disconnect` | `user` | OAuth 連携解除 |
-| `auth.pat.create` | `user` | PAT 作成 |
-| `auth.pat.delete` | `user` | PAT 削除 |
-| `github.integration.connect` | `project` | GitHub 連携設定 |
-| `github.integration.disconnect` | `project` | GitHub 連携解除 |
 | `system.settings.update` | `system` | システム設定変更 |
+
+#### Phase B（後続 PR で追加）
+
+一般ユーザーの重要操作まで監査対象を拡大する。各イベントは対応機能の PR と同時に実装する。
+
+| アクション | resource_type | 対応機能 |
+|-----------|--------------|---------|
+| `auth.login.success` / `auth.login.failure` | `user` | 認証基盤 |
+| `auth.2fa.enable` / `auth.2fa.disable` | `user` | 2FA |
+| `auth.passkey.add` / `auth.passkey.remove` | `user` | パスキー |
+| `auth.oauth.connect` / `auth.oauth.disconnect` | `user` | OAuth |
+| `auth.pat.create` / `auth.pat.delete` | `user` | PAT |
+| `tenant.owner.transfer` | `tenant` | テナント管理 |
+| `project.member.add` / `project.member.remove` / `project.member.role.change` | `project` | プロジェクト管理 |
+| `project.delete` | `project` | プロジェクト管理 |
+| `github.integration.connect` / `github.integration.disconnect` | `project` | GitHub 連携 |
 
 ### 6.2 `metadata` フィールドの構造例
 

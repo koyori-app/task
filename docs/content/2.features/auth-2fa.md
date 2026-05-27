@@ -165,15 +165,51 @@ CREATE INDEX idx_recovery_codes_user ON recovery_codes(user_id);
 [half_authed=false]  ← 通常の認証済み状態
 ```
 
-### AuthUser extractor の実装要件
+### エクストラクタ責務分離設計
 
-`apps/backend/src/extractors.rs` の `AuthUser` extractor は以下を必ず検査すること:
+`apps/backend/src/extractors.rs` に以下 3 つのエクストラクタを定義する。既存の `AuthUser` を直接変更すると PAT 認証経路や既存 API に影響が及ぶため、責務を分離して段階的に追加する。
 
-1. セッションから `user_id` を取得（未存在 → `401 Unauthorized`）
-2. セッションから `half_authed` フラグを取得し、`true` であれば **`403 Forbidden`** を返す
-3. `half_authed` が `false`（または存在しない）場合のみ認証済みユーザーとして通過させる
+| エクストラクタ | 受理する認証 | `half_authed` 確認 | 用途 |
+|--------------|------------|-------------------|------|
+| `AuthUser` | セッション / PAT | セッション時のみ確認 | 通常の保護済み API 全般 |
+| `HalfAuthedUser` | セッションのみ | `true` を必須とする | `/v1/auth/2fa/verify` のみ |
+| `AdminUser` | セッションのみ | `false` を必須とする | `/v1/admin/**` |
 
-`/v1/auth/2fa/verify` エンドポイントのみ `half_authed: true` セッションを受け付ける専用 extractor（`HalfAuthedUser`）を使用すること。
+**`AuthUser` への変更方針:**
+
+- PAT 認証の場合は `half_authed` チェックをスキップ（PAT はセッションを持たず、常に完全認証扱い）
+- セッション認証の場合のみ `half_authed` フラグを確認し、`true` なら `403`
+
+```rust
+// AuthUser::from_request_parts 内（セッション認証パスのみ追加）
+let half_authed = session.get::<bool>("half_authed").unwrap_or(false);
+if half_authed {
+    return Err(AuthError::Forbidden);
+}
+```
+
+**`HalfAuthedUser` エクストラクタ:**
+
+`/v1/auth/2fa/verify` 専用。`half_authed: true` のセッションのみ受理し、`false` または PAT は `403`。
+
+```rust
+pub struct HalfAuthedUser {
+    pub user_id: Uuid,
+}
+
+impl FromRequestParts<AppState> for HalfAuthedUser {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+        let user_id = user_id_from_session(parts, state).await?;  // PAT は不可
+        let half_authed = session.get::<bool>("half_authed").unwrap_or(false);
+        if !half_authed {
+            return Err(AuthError::Forbidden);
+        }
+        Ok(HalfAuthedUser { user_id })
+    }
+}
+```
 
 ---
 

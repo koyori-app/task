@@ -91,10 +91,13 @@ if let Some(revoked_at) = user.sessions_revoked_at {
 
 3. POST /v1/auth/password-reset/complete  （公開）
    Request: { "token": "...", "new_password": "..." }
+   → new_password をバリデーション（8 文字以上）← 先に検証してトークン消費を防ぐ
+     → 不正: 400 Bad Request（トークンはまだ有効のまま）
+   → Redis でトークンの存在確認（消費しない）
+     → 無効・期限切れ: 400 Bad Request
+   → Argon2id でハッシュを生成（消費前に計算を完了させる）
    → Redis からトークンを消費（GETDEL）→ user_id を取得
-   → 無効・期限切れ: 400 Bad Request
-   → new_password をバリデーション（8 文字以上）
-   → Argon2id でハッシュ化
+     → 消費失敗（並行リクエストで先に消費された）: 400 Bad Request
    → users.password_hash を UPDATE
    → users.sessions_revoked_at を now() に UPDATE
    → 200 OK
