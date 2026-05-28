@@ -5,6 +5,8 @@ pub mod storage;
 pub mod db;
 pub mod email;
 pub mod email_verification;
+pub mod password_reset;
+pub mod password_reset_delivery;
 pub mod redis;
 pub mod smtp;
 pub mod verification_email_delivery;

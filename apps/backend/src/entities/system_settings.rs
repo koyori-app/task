@@ -9,6 +9,7 @@ pub struct Model {
     pub singleton: bool,
     pub user_registration_enabled: bool,
     pub drive_default_quota_mb: i64,
+    pub drive_system_max_quota_mb: i64,
     #[schema(value_type = String, format = "date-time")]
     pub updated_at: DateTimeUtc,
 }

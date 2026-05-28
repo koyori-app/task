@@ -1,3 +1,8 @@
+pub mod admin_audit;
+pub mod admin_audit_logs;
+pub mod admin_settings;
+pub mod admin_tenants;
+pub mod admin_users;
 pub mod auth;
 pub mod drive_files;
 pub mod drive_folders;
