@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use axum::{Json, extract::{Path, State}, http::StatusCode};
 use axum_valid::Valid;
 use sea_orm::{
@@ -137,7 +139,7 @@ pub async fn create_milestone(
         description: Set(payload.description),
         due_date: Set(payload.due_date),
         created_by: Set(auth.user_id),
-        created_at: Set(Default::default()),
+        created_at: Set(chrono::Utc::now()),
         updated_at: Set(Default::default()),
     }
     .insert(&state.db)
@@ -184,7 +186,7 @@ pub async fn get_milestone(
     let total = all_tasks.len();
     let done = if total > 0 {
         // Fetch done statuses for this project
-        let done_statuses: Vec<Uuid> = crate::entities::project_statuses::Entity::find()
+        let done_statuses: HashSet<Uuid> = crate::entities::project_statuses::Entity::find()
             .filter(crate::entities::project_statuses::Column::ProjectId.eq(project_id))
             .filter(crate::entities::project_statuses::Column::IsDoneState.eq(true))
             .all(&state.db)
@@ -192,7 +194,10 @@ pub async fn get_milestone(
             .into_iter()
             .map(|s| s.id)
             .collect();
-        all_tasks.iter().filter(|t| done_statuses.contains(&t.status_id)).count()
+        all_tasks
+            .iter()
+            .filter(|t| done_statuses.contains(&t.status_id))
+            .count()
     } else {
         0
     };

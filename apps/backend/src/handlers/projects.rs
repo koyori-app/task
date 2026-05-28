@@ -41,9 +41,15 @@ fn generate_project_key(name: &str) -> String {
 
 fn validate_project_key(key: &str) -> bool {
     let chars: Vec<char> = key.chars().collect();
-    if chars.len() < 2 || chars.len() > 10 { return false; }
-    chars[0].is_ascii_uppercase() && chars[1..].iter().all(|c| c.is_ascii_alphanumeric() && c.is_ascii_uppercase() || c.is_ascii_digit())
+    (chars.len() >= 2 && chars.len() <= 10)
+        && chars[0].is_ascii_uppercase()
+        && chars[1..].iter().all(|c| {
+            c.is_ascii_alphanumeric() && (c.is_ascii_uppercase() || c.is_ascii_digit())
+        })
 }
+
+const INVALID_PROJECT_KEY_MESSAGE: &str =
+    "key は 2〜10 文字で、先頭は大文字英字、残りは大文字英字または数字で入力してください（例: ENG, BACK）";
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateProjectRequest {
@@ -130,7 +136,7 @@ pub async fn create_project(
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
     let key = match payload.key {
         Some(k) if validate_project_key(&k) => k,
-        Some(_) => return Err(AppError::BadRequest),
+        Some(_) => return Err(AppError::BadRequestDetail(INVALID_PROJECT_KEY_MESSAGE.into())),
         None => generate_project_key(&payload.name),
     };
     let project = projects::ActiveModel {

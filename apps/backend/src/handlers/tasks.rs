@@ -2,7 +2,8 @@ use axum::{Json, extract::{Path, Query, State}, http::StatusCode};
 use axum_valid::Valid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection,
-    EntityTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait, prelude::Uuid,
+    EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
+    prelude::Uuid,
 };
 use sea_orm::sea_query::LockType;
 use serde::{Deserialize, Serialize};
@@ -299,11 +300,17 @@ pub async fn list_tasks(
         _ => query.order_by_desc(tasks::Column::CreatedAt),
     };
 
-    let all = query.all(&state.db).await?;
-    let total = all.len() as u64;
-    let limit = q.limit.min(200) as usize;
-    let tasks_page = all.into_iter().skip(q.offset as usize).take(limit).collect();
-    Ok(Json(TaskListResponse { tasks: tasks_page, total }))
+    let limit = q.limit.min(200);
+    let total = query.clone().count(&state.db).await?;
+    let tasks_page = query
+        .offset(q.offset)
+        .limit(limit)
+        .all(&state.db)
+        .await?;
+    Ok(Json(TaskListResponse {
+        tasks: tasks_page,
+        total,
+    }))
 }
 
 #[axum::debug_handler]

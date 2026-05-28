@@ -1,9 +1,10 @@
 use axum::{Json, extract::{Path, State}, http::StatusCode};
 use axum_valid::Valid;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    TransactionTrait, prelude::Uuid,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
+    QueryOrder, TransactionTrait, prelude::Uuid,
 };
+use sea_orm::sea_query::Expr;
 use serde::Deserialize;
 use utoipa::ToSchema;
 use validator::Validate;
@@ -181,6 +182,14 @@ pub async fn update_status(
         .await?
         .ok_or(AppError::NotFound)?;
     let mut active: project_statuses::ActiveModel = status.into();
+    if payload.is_default == Some(true) {
+        project_statuses::Entity::update_many()
+            .col_expr(project_statuses::Column::IsDefault, Expr::value(false))
+            .filter(project_statuses::Column::ProjectId.eq(project_id))
+            .filter(project_statuses::Column::Id.ne(id))
+            .exec(&state.db)
+            .await?;
+    }
     if let Some(v) = payload.name { active.name = Set(v); }
     if let Some(v) = payload.color { active.color = Set(v); }
     if let Some(v) = payload.position { active.position = Set(v); }
@@ -272,13 +281,15 @@ pub async fn delete_status(
     let task_count = tasks::Entity::find()
         .filter(tasks::Column::StatusId.eq(id))
         .filter(tasks::Column::DeletedAt.is_null())
-        .all(&state.db)
-        .await?
-        .len();
+        .count(&state.db)
+        .await?;
 
     if task_count > 0 {
         let migrate_to = q.migrate_to_status_id
             .ok_or(AppError::BadRequest)?;
+        if migrate_to == id {
+            return Err(AppError::BadRequest);
+        }
         // Verify target status belongs to same project
         project_statuses::Entity::find_by_id(migrate_to)
             .filter(project_statuses::Column::ProjectId.eq(project_id))

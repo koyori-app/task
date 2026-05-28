@@ -18,7 +18,14 @@ impl MigrationTrait for Migration {
             )
         "#;
         let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
-        manager.get_connection().execute(stmt).await.map(|_| ())
+        manager.get_connection().execute(stmt).await?;
+
+        let index_sql = r#"
+            CREATE INDEX IF NOT EXISTS idx_task_relations_blocked_task_id
+                ON task_relations (blocked_task_id);
+        "#;
+        let index_stmt = Statement::from_string(manager.get_database_backend(), index_sql.to_owned());
+        manager.get_connection().execute(index_stmt).await.map(|_| ())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {

@@ -1,7 +1,8 @@
 use axum::{Json, extract::{Path, State}, http::StatusCode};
 use axum_valid::Valid;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, prelude::Uuid,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+    prelude::Uuid,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -72,9 +73,11 @@ pub struct LabelExport {
     pub labels: Vec<LabelExportItem>,
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
+#[derive(Validate, Serialize, Deserialize, ToSchema)]
 pub struct LabelExportItem {
+    #[validate(length(min = 1, max = 100))]
     pub name: String,
+    #[validate(length(max = 7))]
     pub color: String,
     pub description: String,
 }
@@ -296,11 +299,13 @@ pub async fn import_labels(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
+    let txn = state.db.begin().await?;
     for item in &payload.labels {
+        item.validate().map_err(|_| AppError::BadRequest)?;
         let existing = labels::Entity::find()
             .filter(labels::Column::ProjectId.eq(project_id))
             .filter(labels::Column::Name.eq(&item.name))
-            .one(&state.db)
+            .one(&txn)
             .await?;
 
         match existing {
@@ -309,7 +314,7 @@ pub async fn import_labels(
                     let mut active: labels::ActiveModel = l.into();
                     active.color = Set(item.color.clone());
                     active.description = Set(item.description.clone());
-                    active.update(&state.db).await?;
+                    active.update(&txn).await?;
                 }
             }
             None => {
@@ -321,11 +326,12 @@ pub async fn import_labels(
                     icon_url: Set(None),
                     project_id: Set(Some(project_id)),
                 }
-                .insert(&state.db)
+                .insert(&txn)
                 .await?;
             }
         }
     }
+    txn.commit().await?;
 
     let list = labels::Entity::find()
         .filter(labels::Column::ProjectId.eq(project_id))
