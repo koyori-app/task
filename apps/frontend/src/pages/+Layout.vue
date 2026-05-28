@@ -12,15 +12,18 @@ import {
 } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
-import { defineAsyncComponent } from 'vue';
+import { usePageContext } from 'vike-vue/usePageContext';
+import { computed, defineAsyncComponent } from 'vue';
 
-const AppSidebar = defineAsyncComponent(
-  () => import('@/components/sidebar/AppSidebar.vue'),
-);
+const pageContext = usePageContext();
+const isAuthPage = computed(() => ['/signin', '/signup'].includes(pageContext.urlPathname));
+
+const AppSidebar = defineAsyncComponent(() => import('@/components/sidebar/AppSidebar.vue'));
 </script>
 
 <template>
-  <SidebarProvider>
+  <slot v-if="isAuthPage" />
+  <SidebarProvider v-else>
     <Suspense>
       <AppSidebar />
       <template #fallback>
