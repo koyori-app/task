@@ -1,5 +1,4 @@
 use backend::{AppState, server::run, utils::smtp::SmtpClient};
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -50,6 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 起動時: システム上限を超過しているテナントを警告ログに出力
     if let Some(system_max) = drive_config.system_max_bytes_opt() {
         use backend::entities::tenants;
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
         let violators = tenants::Entity::find()
             .filter(tenants::Column::DriveQuotaBytes.gt(system_max))
             .all(&db)
@@ -67,6 +67,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // BOOTSTRAP_ADMIN_EMAIL: 管理者ゼロ時のみ対象ユーザーを昇格
     if let Some(ref email) = settings.bootstrap_admin_email {
         use backend::entities::{audit_logs, users};
+        use sea_orm::{
+            ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait,
+            QueryFilter,
+        };
         let admin_count = users::Entity::find()
             .filter(users::Column::IsAdmin.eq(true))
             .count(&db)
@@ -83,13 +87,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 let log = audit_logs::ActiveModel {
                     id: Set(uuid::Uuid::new_v4()),
-                    actor_id: Set(Some(user.id)),
+                    actor_id: Set(None),
                     actor_type: Set("system".to_string()),
-                    action: Set("bootstrap_admin".to_string()),
+                    action: Set("user.admin.grant".to_string()),
                     resource_type: Set("user".to_string()),
                     resource_id: Set(user.id.to_string()),
                     tenant_id: Set(None),
-                    metadata: Set(None),
+                    metadata: Set(Some(serde_json::json!({ "user_id": user.id.to_string() }))),
                     ip_address: Set(None),
                     user_agent: Set(None),
                     created_at: Set(chrono::Utc::now()),

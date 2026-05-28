@@ -131,6 +131,8 @@ pub async fn register(
         email: Set(email.clone()),
         email_verified: Set(false),
         password_hash: Set(password_hash),
+        is_admin: Set(false),
+        is_suspended: Set(false),
     };
 
     with_transaction::<(), AuthError, _>(&state.db, |txn| {
