@@ -24,7 +24,7 @@ defineOptions({ name: "SignIn" })
     </div>
     <div class="bg-muted relative hidden lg:block">
       <img
-        src="/static-assets/placeholder.svg"
+        src="/placeholder.svg"
         alt="Image"
         class="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
       >
