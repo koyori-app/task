@@ -9,9 +9,9 @@ use utoipa::{PartialSchema, ToSchema};
 
 pub use crate::error::ServerError;
 pub use responses::{
-    CredentialErrors, CrudErrors, DriveFolderErrors, InternalOnlyError, PublicShareErrors,
-    RegisterErrors, ResendVerificationErrors, SessionAuthErrors, UnauthorizedErrors,
-    VerifyEmailErrors,
+    CredentialErrors, CrudErrors, DriveFolderErrors, InternalOnlyError, OAuthErrors,
+    PublicShareErrors, RegisterErrors, ResendVerificationErrors, SessionAuthErrors,
+    UnauthorizedErrors, VerifyEmailErrors,
 };
 
 /// スキーマのうち、ハンドラだけでは OpenAPI に載らないものを登録する。
