@@ -8,7 +8,8 @@ use axum::{
 use axum_valid::Valid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    EntityTrait, ExprTrait, PaginatorTrait, QueryFilter, Statement, TransactionTrait,
+    EntityTrait, ExecResult, ExprTrait, PaginatorTrait, QueryFilter, Statement, TransactionTrait,
+    Value,
 };
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
@@ -68,6 +69,15 @@ pub struct AdminPasswordResetResponse {
     pub message: String,
 }
 
+async fn execute_bound<C: ConnectionTrait>(
+    conn: &C,
+    sql: &str,
+    values: Vec<Value>,
+) -> Result<ExecResult, AppError> {
+    let stmt = Statement::from_sql_and_values(conn.get_database_backend(), sql, values);
+    Ok(conn.execute_raw(stmt).await?)
+}
+
 async fn table_exists(db: &DatabaseConnection, table: &str) -> Result<bool, AppError> {
     let sql = format!(
         "SELECT EXISTS (
@@ -100,26 +110,40 @@ async fn column_exists(db: &DatabaseConnection, table: &str, column: &str) -> Re
 
 async fn revoke_user_sessions(db: &DatabaseConnection, user_id: Uuid) -> Result<(), AppError> {
     if column_exists(db, "users", "sessions_revoked_at").await? {
-        let sql = format!(
-            "UPDATE users SET sessions_revoked_at = NOW() WHERE id = '{user_id}'"
-        );
-        db.execute_unprepared(&sql).await?;
+        execute_bound(
+            db,
+            "UPDATE users SET sessions_revoked_at = NOW() WHERE id = ?",
+            vec![user_id.into()],
+        )
+        .await?;
     }
     Ok(())
 }
 
 async fn reset_2fa_for_user(db: &DatabaseConnection, user_id: Uuid) -> Result<(), AppError> {
     if table_exists(db, "totp_credentials").await? {
-        let sql = format!("DELETE FROM totp_credentials WHERE user_id = '{user_id}'");
-        db.execute_unprepared(&sql).await?;
+        execute_bound(
+            db,
+            "DELETE FROM totp_credentials WHERE user_id = ?",
+            vec![user_id.into()],
+        )
+        .await?;
     }
     if table_exists(db, "recovery_codes").await? {
-        let sql = format!("DELETE FROM recovery_codes WHERE user_id = '{user_id}'");
-        db.execute_unprepared(&sql).await?;
+        execute_bound(
+            db,
+            "DELETE FROM recovery_codes WHERE user_id = ?",
+            vec![user_id.into()],
+        )
+        .await?;
     }
     if column_exists(db, "users", "totp_enabled").await? {
-        let sql = format!("UPDATE users SET totp_enabled = false WHERE id = '{user_id}'");
-        db.execute_unprepared(&sql).await?;
+        execute_bound(
+            db,
+            "UPDATE users SET totp_enabled = false WHERE id = ?",
+            vec![user_id.into()],
+        )
+        .await?;
     }
     revoke_user_sessions(db, user_id).await?;
     Ok(())
@@ -147,16 +171,28 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
     let txn = db.begin().await?;
 
     if table_exists(db, "task_assignees").await? {
-        let sql = format!("DELETE FROM task_assignees WHERE user_id = '{user_id}'");
-        txn.execute_unprepared(&sql).await?;
+        execute_bound(
+            &txn,
+            "DELETE FROM task_assignees WHERE user_id = ?",
+            vec![user_id.into()],
+        )
+        .await?;
     }
     if table_exists(db, "tasks").await? {
-        let sql = format!("DELETE FROM tasks WHERE created_by = '{user_id}'");
-        txn.execute_unprepared(&sql).await?;
+        execute_bound(
+            &txn,
+            "DELETE FROM tasks WHERE created_by = ?",
+            vec![user_id.into()],
+        )
+        .await?;
     }
     if table_exists(db, "milestones").await? {
-        let sql = format!("DELETE FROM milestones WHERE created_by = '{user_id}'");
-        txn.execute_unprepared(&sql).await?;
+        execute_bound(
+            &txn,
+            "DELETE FROM milestones WHERE created_by = ?",
+            vec![user_id.into()],
+        )
+        .await?;
     }
 
     drive_files::Entity::delete_many()
@@ -553,13 +589,12 @@ pub async fn delete_passkey(
         return Err(AppError::NotFound);
     }
 
-    let sql = format!(
-        "DELETE FROM passkeys WHERE id = '{passkey_id}' AND user_id = '{id}'"
-    );
-    let result = state
-        .db
-        .execute_unprepared(&sql)
-        .await?;
+    let result = execute_bound(
+        &state.db,
+        "DELETE FROM passkeys WHERE id = ? AND user_id = ?",
+        vec![passkey_id.into(), id.into()],
+    )
+    .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound);
@@ -609,14 +644,12 @@ pub async fn delete_oauth(
         return Err(AppError::NotFound);
     }
 
-    let provider_escaped = provider.replace('\'', "''");
-    let sql = format!(
-        "DELETE FROM oauth_connections WHERE user_id = '{id}' AND provider = '{provider_escaped}'"
-    );
-    let result = state
-        .db
-        .execute_unprepared(&sql)
-        .await?;
+    let result = execute_bound(
+        &state.db,
+        "DELETE FROM oauth_connections WHERE user_id = ? AND provider = ?",
+        vec![id.into(), provider.clone().into()],
+    )
+    .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound);
