@@ -2,6 +2,7 @@ pub mod auth;
 pub mod bootstrap_admin;
 pub mod validation;
 pub mod drive;
+pub mod oauth;
 pub mod storage;
 pub mod db;
 pub mod email;
