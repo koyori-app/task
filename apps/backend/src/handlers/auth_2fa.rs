@@ -15,7 +15,8 @@ use crate::{
     entities::{recovery_codes, tenants, totp_credentials, users},
     error::AppError,
     extractors::{AuthUser, HalfAuthedUser, LoggedInUser},
-    openapi::SessionAuthErrors,
+    error::ServerError,
+    openapi::{CrudErrors, SessionAuthErrors},
     utils::{
         auth::AuthError,
         totp::{
@@ -128,7 +129,7 @@ async fn verify_user_totp_or_recovery(
     if let Some(recovery) = recovery_code {
         let normalized = normalize_recovery_code(recovery);
         let candidate_hash =
-            hash_recovery_code(&normalized, &state.settings.personal_token_secret)?;
+            hash_recovery_code(&normalized, &state.settings.recovery_code_secret)?;
         let codes = recovery_codes::Entity::find()
             .filter(recovery_codes::Column::UserId.eq(user_id))
             .filter(recovery_codes::Column::UsedAt.is_null())
@@ -241,20 +242,30 @@ pub async fn totp_verify_setup(
     user: LoggedInUser,
     Valid(Json(payload)): Valid<Json<TotpCodeRequest>>,
 ) -> Result<Json<VerifySetupResponse>, AuthError> {
+    let user_model = load_user(&state, user.user_id).await?;
+    if user_model.totp_enabled {
+        return Err(AuthError::TwoFactorAlreadyEnabled);
+    }
+
     let cred = totp_credentials::Entity::find_by_id(user.user_id)
         .one(&state.db)
         .await?
         .ok_or(AuthError::TwoFactorNotEnabled)?;
+    if cred.is_verified {
+        return Err(AuthError::TwoFactorAlreadyEnabled);
+    }
+
+    totp::check_2fa_lockout(&state.redis_client, user.user_id).await?;
 
     let secret =
         decrypt_totp_secret(&cred.secret_enc, &state.settings.totp_encryption_key)?;
-    let user_model = load_user(&state, user.user_id).await?;
     if !verify_totp_code(
         &secret,
         &state.settings.totp_issuer,
         &user_model.email,
         payload.code.trim(),
     )? {
+        totp::record_2fa_failure(&state.redis_client, user.user_id).await?;
         return Err(AuthError::InvalidTwoFactorCode);
     }
 
@@ -271,7 +282,7 @@ pub async fn totp_verify_setup(
         .await?;
 
     for code in &codes {
-        let hash = hash_recovery_code(code, &state.settings.personal_token_secret)?;
+        let hash = hash_recovery_code(code, &state.settings.recovery_code_secret)?;
         recovery_codes::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user.user_id),
@@ -283,7 +294,7 @@ pub async fn totp_verify_setup(
         .await?;
     }
 
-    let mut user_active: users::ActiveModel = load_user(&state, user.user_id).await?.into();
+    let mut user_active: users::ActiveModel = user_model.into();
     user_active.totp_enabled = Set(true);
     user_active.update(&txn).await?;
 
@@ -404,7 +415,7 @@ pub async fn regenerate_recovery_codes(
         .exec(&txn)
         .await?;
     for code in &codes {
-        let hash = hash_recovery_code(code, &state.settings.personal_token_secret)?;
+        let hash = hash_recovery_code(code, &state.settings.recovery_code_secret)?;
         recovery_codes::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(auth.user_id),
@@ -430,7 +441,8 @@ pub async fn regenerate_recovery_codes(
     request_body = Require2faPolicyRequest,
     responses(
         (status = 200, description = "更新後のテナント", body = tenants::Model),
-        SessionAuthErrors,
+        (status = 404, description = "テナントが見つかりません", body = ServerError),
+        CrudErrors,
     )
 )]
 pub async fn set_tenant_require_2fa(
