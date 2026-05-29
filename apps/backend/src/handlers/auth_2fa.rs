@@ -4,7 +4,8 @@ use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, JoinType, QueryFilter,
+    QuerySelect, RelationTrait, TransactionTrait,
 };
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,7 @@ use validator::Validate;
 
 use crate::{
     AppState,
-    entities::{recovery_codes, tenants, totp_credentials, users},
+    entities::{project_members, projects, recovery_codes, tenants, totp_credentials, users},
     error::AppError,
     extractors::{AuthUser, HalfAuthedUser, LoggedInUser},
     error::ServerError,
@@ -52,16 +53,21 @@ async fn user_must_setup_2fa(
     if user_has_active_2fa(db, user_id).await? {
         return Ok(false);
     }
-    let owned = tenants::Entity::find()
+    let in_required_tenant = tenants::Entity::find()
         .filter(tenants::Column::OwnerId.eq(user_id))
         .filter(tenants::Column::Require2fa.eq(true))
         .one(db)
         .await?
-        .is_some();
-    if owned {
-        return Ok(true);
-    }
-    Ok(false)
+        .is_some()
+        || project_members::Entity::find()
+            .join(JoinType::InnerJoin, project_members::Relation::Projects.def())
+            .join(JoinType::InnerJoin, projects::Relation::Tenants.def())
+            .filter(project_members::Column::UserId.eq(user_id))
+            .filter(tenants::Column::Require2fa.eq(true))
+            .one(db)
+            .await?
+            .is_some();
+    Ok(in_required_tenant)
 }
 
 pub async fn login_2fa_flags(
