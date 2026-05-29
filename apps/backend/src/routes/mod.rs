@@ -12,14 +12,7 @@ pub fn create_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new().nest(
         "/v1",
         OpenApiRouter::new()
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-            .nest("/labels", crate::routes::labels::routes())
-=======
             .nest("/admin", crate::routes::admin::routes())
->>>>>>> 591de1bf (feat(admin): implement Phase A admin management API)
->>>>>>> 7886cd5c (feat(admin): implement Phase A admin management API)
             .nest("/auth", crate::routes::auth::routes())
             .nest("/personal_tokens", crate::routes::personal_tokens::routes())
             .nest("/tenants", crate::routes::tenants::routes())
