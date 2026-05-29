@@ -300,6 +300,7 @@ pub async fn totp_verify_setup(
 
     txn.commit().await?;
 
+    clear_2fa_attempts(&state.redis_client, user.user_id).await?;
     session.set("half_authed", false);
 
     Ok(Json(VerifySetupResponse {
