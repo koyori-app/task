@@ -87,10 +87,8 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .allow_credentials(true);
 
     let email_storage = state.verification_email_storage.as_ref().clone();
-    let pw_reset_storage = state.password_reset_email_storage.as_ref().clone();
     let board_api = ApiBuilder::new(Router::new())
         .register(email_storage)
-        .register(pw_reset_storage)
         .build();
 
     let email_worker_storage = state.verification_email_storage.as_ref().clone();

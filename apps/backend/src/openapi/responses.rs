@@ -188,6 +188,8 @@ pub enum ResendVerificationErrors {
 
 #[derive(IntoResponses)]
 pub enum PasswordResetRequestErrors {
+    #[response(status = 400, description = "リクエストが不正です")]
+    BadRequest(#[to_schema] ServerError),
     #[response(status = 429, description = "しばらくしてから再度お試しください")]
     TooManyRequests(#[to_schema] ServerError),
     #[response(status = 503, description = "リセットメールの送信準備に失敗しました")]

@@ -16,7 +16,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use chrono::Utc;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -187,7 +187,7 @@ impl IntoResponse for AuthError {
             )
                 .into_response(),
             AuthError::PasswordResetEmailEnqueueFailed(e) => {
-                debug!("password reset email enqueue failed: {:#?}", e);
+                warn!("password reset email enqueue failed: {:#?}", e);
                 (
                     StatusCode::SERVICE_UNAVAILABLE,
                     Json(ServerError {
