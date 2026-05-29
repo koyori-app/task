@@ -24,6 +24,7 @@ mod m20260528190000_add_drive_system_max_quota_mb;
 mod m20260529100000_oauth_connections;
 mod m20260601160000_add_sessions_revoked_at_to_users;
 mod m20260603_add_unique_task_assignees;
+mod m20260529100000_auth_2fa;
 
 pub struct Migrator;
 
@@ -39,6 +40,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260525020000_create_drive_folders::Migration),
             Box::new(m20260525030000_create_drive_files::Migration),
             Box::new(m20260525040000_create_drive_folder_shares::Migration),
+<<<<<<< HEAD
             Box::new(m20260527010000_add_key_to_projects::Migration),
             Box::new(m20260527020000_create_project_task_counters::Migration),
             Box::new(m20260527030000_create_project_statuses::Migration),
@@ -55,6 +57,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260529100000_oauth_connections::Migration),
             Box::new(m20260601160000_add_sessions_revoked_at_to_users::Migration),
             Box::new(m20260603_add_unique_task_assignees::Migration),
+=======
+            Box::new(m20260529100000_auth_2fa::Migration),
+>>>>>>> 90f8813a (feat(auth-2fa): add migration and entities for TOTP 2FA)
         ]
     }
 }

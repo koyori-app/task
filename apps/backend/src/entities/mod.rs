@@ -5,7 +5,12 @@ pub mod drive_files;
 pub mod drive_folder_shares;
 pub mod drive_folders;
 pub mod labels;
+<<<<<<< HEAD
 pub mod milestones;
+=======
+pub mod recovery_codes;
+pub mod totp_credentials;
+>>>>>>> 90f8813a (feat(auth-2fa): add migration and entities for TOTP 2FA)
 pub mod personal_tokens;
 pub mod project_members;
 pub mod project_statuses;
