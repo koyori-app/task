@@ -8,7 +8,6 @@ use axum_session::Session;
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
 use chrono::Utc;
-use reqwest::Client;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
 };
@@ -190,13 +189,6 @@ pub struct SetPasswordRequest {
     pub password: String,
 }
 
-fn http_client() -> Client {
-    Client::builder()
-        .user_agent("task-oauth-backend")
-        .build()
-        .expect("reqwest client")
-}
-
 #[axum::debug_handler]
 #[utoipa::path(
     get,
@@ -314,9 +306,8 @@ pub async fn oauth_callback(
     let credentials = get_credentials(&provider, settings).map_err(OAuthError::Internal)?;
     let redirect_uri = settings.callback_url(&provider);
 
-    let http = http_client();
     let token = exchange_code(
-        &http,
+        &state.http_client,
         &endpoints,
         &credentials,
         &query.code,
@@ -326,7 +317,12 @@ pub async fn oauth_callback(
     .await
     .map_err(OAuthError::Internal)?;
 
-    let provider_info = fetch_user_info(&http, &provider, &endpoints, &token.access_token)
+    let provider_info = fetch_user_info(
+        &state.http_client,
+        &provider,
+        &endpoints,
+        &token.access_token,
+    )
         .await
         .map_err(OAuthError::Internal)?;
 

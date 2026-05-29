@@ -41,4 +41,5 @@ pub struct AppState {
     pub storage: Arc<dyn StorageBackend>,
     pub drive_config: DriveConfig,
     pub oauth_settings: OAuthSettings,
+    pub http_client: reqwest::Client,
 }

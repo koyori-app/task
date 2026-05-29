@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod bootstrap_admin;
+pub mod http;
 pub mod validation;
 pub mod drive;
 pub mod oauth;
