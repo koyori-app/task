@@ -1,2 +1,4 @@
 .env
 *.rdb
+docs/.retype
+retype.manifest
