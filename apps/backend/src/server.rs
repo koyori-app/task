@@ -27,7 +27,10 @@ use utoipa_scalar::{Scalar, Servable};
 
 use crate::{
     AppState,
-    jobs::verification_email::{self, MAX_RETRIES, QUEUE_NAME},
+    jobs::{
+        password_reset_email::{self, MAX_RETRIES as PW_RESET_MAX_RETRIES, QUEUE_NAME as PW_RESET_QUEUE},
+        verification_email::{self, MAX_RETRIES, QUEUE_NAME},
+    },
     middlewares::logging::logging_middleware,
 };
 
@@ -84,8 +87,10 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .allow_credentials(true);
 
     let email_storage = state.verification_email_storage.as_ref().clone();
+    let pw_reset_storage = state.password_reset_email_storage.as_ref().clone();
     let board_api = ApiBuilder::new(Router::new())
         .register(email_storage)
+        .register(pw_reset_storage)
         .build();
 
     let email_worker_storage = state.verification_email_storage.as_ref().clone();
@@ -99,11 +104,27 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .data(worker_state)
         .build(verification_email::process);
 
+    let pw_reset_worker_storage = state.password_reset_email_storage.as_ref().clone();
+    let pw_reset_worker_state = state.clone();
+    let pw_reset_worker = WorkerBuilder::new(format!("{PW_RESET_QUEUE}-worker"))
+        .backend(pw_reset_worker_storage)
+        .retry(RetryPolicy::retries(PW_RESET_MAX_RETRIES))
+        .enable_tracing()
+        .concurrency(password_reset_email::worker_concurrency(settings))
+        .data(pw_reset_worker_state)
+        .build(password_reset_email::process);
+
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let worker_shutdown = shutdown_rx.clone();
-    let worker_handle = tokio::spawn(async move {
+    let pw_reset_shutdown = shutdown_rx.clone();
+    let email_worker_handle = tokio::spawn(async move {
         email_worker
             .run_until(wait_for_shutdown(worker_shutdown))
+            .await
+    });
+    let pw_reset_worker_handle = tokio::spawn(async move {
+        pw_reset_worker
+            .run_until(wait_for_shutdown(pw_reset_shutdown))
             .await
     });
 
@@ -138,10 +159,15 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
 
-    match worker_handle.await {
+    match email_worker_handle.await {
         Ok(Ok(())) => info!("verification email worker stopped"),
         Ok(Err(e)) => warn!("verification email worker error: {e}"),
         Err(e) => warn!("verification email worker join error: {e}"),
+    }
+    match pw_reset_worker_handle.await {
+        Ok(Ok(())) => info!("password reset email worker stopped"),
+        Ok(Err(e)) => warn!("password reset email worker error: {e}"),
+        Err(e) => warn!("password reset email worker join error: {e}"),
     }
 
     Ok(())

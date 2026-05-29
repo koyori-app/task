@@ -58,6 +58,18 @@ pub enum AuthError {
     TwoFactorAlreadyEnabled,
     #[error("2fa not enabled")]
     TwoFactorNotEnabled,
+    #[error("password reset email enqueue failed")]
+    PasswordResetEmailEnqueueFailed(#[source] anyhow::Error),
+    #[error("invalid password reset token")]
+    InvalidPasswordResetToken,
+    #[error("password reset token not found")]
+    PasswordResetTokenNotFound,
+    #[error("invalid current password")]
+    InvalidCurrentPassword,
+    #[error("password not set")]
+    PasswordNotSet,
+    #[error("invalid new password")]
+    InvalidNewPassword,
 }
 
 impl From<sea_orm::DbErr> for AuthError {
@@ -172,6 +184,41 @@ impl IntoResponse for AuthError {
                 Json(ServerError {
                     message: "2fa-not-enabled".into(),
                 }),
+            )
+                .into_response(),
+            AuthError::PasswordResetEmailEnqueueFailed(e) => {
+                debug!("password reset email enqueue failed: {:#?}", e);
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ServerError {
+                        message: "password-reset-email-enqueue-failed".into(),
+                    }),
+                )
+                    .into_response()
+            }
+            AuthError::InvalidPasswordResetToken => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError { message: "invalid-password-reset-token".into() }),
+            )
+                .into_response(),
+            AuthError::PasswordResetTokenNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(ServerError { message: "password-reset-token-not-found".into() }),
+            )
+                .into_response(),
+            AuthError::InvalidCurrentPassword => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError { message: "invalid-current-password".into() }),
+            )
+                .into_response(),
+            AuthError::PasswordNotSet => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError { message: "password-not-set".into() }),
+            )
+                .into_response(),
+            AuthError::InvalidNewPassword => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError { message: "invalid-new-password".into() }),
             )
                 .into_response(),
         }
