@@ -49,6 +49,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http_client = backend::utils::http::create_http_client().map_err(|err| {
         std::io::Error::other(format!("HTTP client initialization failed: {err}"))
     })?;
+    let webauthn = backend::utils::webauthn::build_webauthn(&settings).map_err(|e| {
+        std::io::Error::other(format!(
+            "WebAuthn initialization failed (email_verification_app_url / WEBAUTHN_RP_ID): {e}"
+        ))
+    })?;
 
     // 起動時: システム上限を超過しているテナントを警告ログに出力
     if let Some(system_max) = drive_config.system_max_bytes_opt() {
@@ -83,6 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         drive_config,
         oauth_settings,
         http_client,
+        webauthn,
     };
     run(state).await?;
 

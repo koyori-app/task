@@ -5,11 +5,8 @@ pub mod drive_files;
 pub mod drive_folder_shares;
 pub mod drive_folders;
 pub mod labels;
-<<<<<<< HEAD
 pub mod milestones;
-=======
 pub mod passkeys;
->>>>>>> ea7a2e53 (feat(auth): add passkeys table migration and SeaORM entity)
 pub mod personal_tokens;
 pub mod project_members;
 pub mod project_statuses;

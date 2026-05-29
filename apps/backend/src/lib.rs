@@ -27,6 +27,7 @@ pub mod middlewares;
 use std::sync::Arc;
 
 use apalis_postgres::PgPool;
+use webauthn_rs::prelude::Webauthn;
 
 use crate::jobs::VerificationEmailStorage;
 
@@ -42,4 +43,5 @@ pub struct AppState {
     pub drive_config: DriveConfig,
     pub oauth_settings: OAuthSettings,
     pub http_client: reqwest::Client,
+    pub webauthn: Arc<Webauthn>,
 }

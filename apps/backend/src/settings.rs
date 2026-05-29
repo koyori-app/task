@@ -34,6 +34,8 @@ pub struct Settings {
     pub personal_token_secret: String,
     /// 起動時に管理者昇格するユーザーのメールアドレス（管理者ゼロ時のみ有効）。
     pub bootstrap_admin_email: Option<String>,
+    /// WebAuthn RP ID（省略時は `email_verification_app_url` のホスト名）
+    pub webauthn_rp_id: Option<String>,
 }
 
 fn default_verification_email_worker_concurrency() -> usize {
@@ -118,6 +120,7 @@ mod tests {
             verification_email_worker_concurrency: 1,
             personal_token_secret: "a".repeat(32),
             bootstrap_admin_email: None,
+            webauthn_rp_id: None,
         }
         .validate()
         .is_ok()
