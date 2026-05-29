@@ -6,6 +6,7 @@ use sea_orm::{
 };
 use sea_orm::sea_query::Expr;
 use serde::Deserialize;
+use std::collections::HashSet;
 use utoipa::ToSchema;
 use validator::Validate;
 
@@ -143,7 +144,7 @@ pub async fn create_status(
         position: Set(payload.position),
         is_default: Set(payload.is_default),
         is_done_state: Set(payload.is_done_state),
-        created_at: Set(Default::default()),
+        created_at: Set(chrono::Utc::now()),
     }
     .insert(&state.db)
     .await?;
@@ -223,6 +224,20 @@ pub async fn reorder_statuses(
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
+
+    let existing = project_statuses::Entity::find()
+        .filter(project_statuses::Column::ProjectId.eq(project_id))
+        .all(&state.db)
+        .await?;
+    if payload.ids.len() != existing.len() {
+        return Err(AppError::BadRequest);
+    }
+    let existing_ids: HashSet<Uuid> = existing.iter().map(|s| s.id).collect();
+    if payload.ids.len() != payload.ids.iter().collect::<HashSet<_>>().len()
+        || payload.ids.iter().any(|id| !existing_ids.contains(id))
+    {
+        return Err(AppError::BadRequest);
+    }
 
     let txn = state.db.begin().await?;
     for (pos, sid) in payload.ids.iter().enumerate() {

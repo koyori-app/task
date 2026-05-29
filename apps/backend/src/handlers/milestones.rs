@@ -140,7 +140,7 @@ pub async fn create_milestone(
         due_date: Set(payload.due_date),
         created_by: Set(auth.user_id),
         created_at: Set(chrono::Utc::now()),
-        updated_at: Set(Default::default()),
+        updated_at: Set(chrono::Utc::now()),
     }
     .insert(&state.db)
     .await?;

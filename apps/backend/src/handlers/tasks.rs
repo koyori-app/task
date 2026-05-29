@@ -1,9 +1,9 @@
 use axum::{Json, extract::{Path, Query, State}, http::StatusCode};
 use axum_valid::Valid;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection,
-    EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
-    prelude::Uuid,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait,
+    DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
+    TransactionTrait, prelude::Uuid,
 };
 use sea_orm::sea_query::LockType;
 use serde::{Deserialize, Serialize};
@@ -126,15 +126,42 @@ async fn next_seq_id(db: &sea_orm::DatabaseTransaction, project_id: Uuid) -> Res
 
 // ─── BFS cycle detection ─────────────────────────────────────────────────
 
-async fn would_create_cycle(
-    db: &DatabaseConnection,
+async fn would_create_cycle<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
     blocker: Uuid,
     blocked: Uuid,
 ) -> Result<bool, AppError> {
-    let all_rels = task_relations::Entity::find().all(db).await?;
+    let project_task_ids: HashSet<Uuid> = tasks::Entity::find()
+        .filter(tasks::Column::ProjectId.eq(project_id))
+        .filter(tasks::Column::DeletedAt.is_null())
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    let task_id_vec: Vec<Uuid> = project_task_ids.iter().copied().collect();
+    if task_id_vec.is_empty() {
+        return Ok(false);
+    }
+    let all_rels = task_relations::Entity::find()
+        .filter(
+            Condition::any()
+                .add(task_relations::Column::BlockerTaskId.is_in(task_id_vec.clone()))
+                .add(task_relations::Column::BlockedTaskId.is_in(task_id_vec)),
+        )
+        .all(db)
+        .await?;
     let mut graph: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
     for rel in &all_rels {
-        graph.entry(rel.blocker_task_id).or_default().push(rel.blocked_task_id);
+        if project_task_ids.contains(&rel.blocker_task_id)
+            && project_task_ids.contains(&rel.blocked_task_id)
+        {
+            graph
+                .entry(rel.blocker_task_id)
+                .or_default()
+                .push(rel.blocked_task_id);
+        }
     }
     let mut visited: HashSet<Uuid> = HashSet::new();
     let mut queue: VecDeque<Uuid> = VecDeque::new();
@@ -300,7 +327,7 @@ pub async fn list_tasks(
         _ => query.order_by_desc(tasks::Column::CreatedAt),
     };
 
-    let limit = q.limit.min(200);
+    let limit = std::cmp::min(q.limit, 200);
     let total = query.clone().count(&state.db).await?;
     let tasks_page = query
         .offset(q.offset)
@@ -364,8 +391,8 @@ pub async fn create_task(
         estimated_minutes: Set(payload.estimated_minutes),
         is_archived: Set(false),
         created_by: Set(auth.user_id),
-        created_at: Set(Default::default()),
-        updated_at: Set(Default::default()),
+        created_at: Set(chrono::Utc::now()),
+        updated_at: Set(chrono::Utc::now()),
         deleted_at: Set(None),
     }
     .insert(&txn)
@@ -377,7 +404,7 @@ pub async fn create_task(
             task_id: Set(model.id),
             user_id: Set(a.user_id),
             role: Set(a.role.clone()),
-            assigned_at: Set(Default::default()),
+            assigned_at: Set(chrono::Utc::now()),
         }
         .insert(&txn)
         .await?;
@@ -454,7 +481,14 @@ pub async fn update_task(
     let mut active: tasks::ActiveModel = task.into();
     if let Some(v) = payload.title { active.title = Set(v); }
     if let Some(v) = payload.description { active.description = Set(Some(v)); }
-    if let Some(v) = payload.status_id { active.status_id = Set(v); }
+    if let Some(v) = payload.status_id {
+        project_statuses::Entity::find_by_id(v)
+            .filter(project_statuses::Column::ProjectId.eq(project_id))
+            .one(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        active.status_id = Set(v);
+    }
     if let Some(v) = payload.priority { active.priority = Set(v); }
     if let Some(v) = payload.progress_pct { active.progress_pct = Set(v); }
     if payload.clear_parent_task_id { active.parent_task_id = Set(None); }
@@ -641,7 +675,7 @@ pub async fn add_assignee(
         task_id: Set(task.id),
         user_id: Set(payload.user_id),
         role: Set(payload.role),
-        assigned_at: Set(Default::default()),
+        assigned_at: Set(chrono::Utc::now()),
     }
     .insert(&state.db)
     .await?;
@@ -851,7 +885,8 @@ pub async fn add_relation(
         _ => return Err(AppError::BadRequest),
     };
 
-    if would_create_cycle(&state.db, blocker, blocked).await? {
+    let txn = state.db.begin().await?;
+    if would_create_cycle(&txn, project_id, blocker, blocked).await? {
         return Err(AppError::Conflict);
     }
 
@@ -859,10 +894,11 @@ pub async fn add_relation(
         id: Set(Uuid::new_v4()),
         blocker_task_id: Set(blocker),
         blocked_task_id: Set(blocked),
-        created_at: Set(Default::default()),
+        created_at: Set(chrono::Utc::now()),
     }
-    .insert(&state.db)
+    .insert(&txn)
     .await?;
+    txn.commit().await?;
 
     Ok((StatusCode::CREATED, Json(rel)))
 }

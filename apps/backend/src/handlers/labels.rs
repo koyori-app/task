@@ -77,7 +77,7 @@ pub struct LabelExport {
 pub struct LabelExportItem {
     #[validate(length(min = 1, max = 100))]
     pub name: String,
-    #[validate(length(max = 7))]
+    #[validate(length(min = 7, max = 7))]
     pub color: String,
     pub description: String,
 }
@@ -337,13 +337,5 @@ pub async fn import_labels(
         .filter(labels::Column::ProjectId.eq(project_id))
         .all(&state.db)
         .await?;
-    Ok(Json(list))
-}
-
-// Legacy route kept for /v1/labels (global, no project scope)
-pub async fn get_labels(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<labels::Model>>, AppError> {
-    let list = labels::Entity::find().all(&state.db).await?;
     Ok(Json(list))
 }

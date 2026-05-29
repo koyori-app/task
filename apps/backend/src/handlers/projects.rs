@@ -9,6 +9,7 @@ use crate::entities::{drive_folders, project_members, projects, scopes::Scope, t
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
+use crate::utils::db::is_postgres_unique_violation;
 use crate::AppState;
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
@@ -134,22 +135,44 @@ pub async fn create_project(
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
-    let key = match payload.key {
-        Some(k) if validate_project_key(&k) => k,
+    let explicit_key = payload.key;
+    let mut key = match explicit_key.as_ref() {
+        Some(k) if validate_project_key(k) => k.clone(),
         Some(_) => return Err(AppError::BadRequestDetail(INVALID_PROJECT_KEY_MESSAGE.into())),
-        None => generate_project_key(&payload.name),
-    };
-    let project = projects::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        name: Set(payload.name),
-        description: Set(payload.description),
-        tenant_id: Set(tenant_id),
-        icon_emoji: Set(payload.icon_emoji),
-        icon_url: Set(payload.icon_url),
-        key: Set(key),
+        None => {
+            let generated = generate_project_key(&payload.name);
+            if validate_project_key(&generated) {
+                generated
+            } else {
+                "PROJ".to_string()
+            }
+        }
     };
     let txn = state.db.begin().await?;
-    let model = project.insert(&txn).await?;
+    let model = loop {
+        let project = projects::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            name: Set(payload.name.clone()),
+            description: Set(payload.description.clone()),
+            tenant_id: Set(tenant_id),
+            icon_emoji: Set(payload.icon_emoji.clone()),
+            icon_url: Set(payload.icon_url.clone()),
+            key: Set(key.clone()),
+        };
+        match project.insert(&txn).await {
+            Ok(model) => break model,
+            Err(e) if explicit_key.is_none() && is_postgres_unique_violation(&e) => {
+                let suffix = Uuid::new_v4().simple().to_string();
+                let suffix = &suffix[..4];
+                let max_base = 10usize.saturating_sub(suffix.len()).max(2);
+                key = format!("{}{}", &key[..key.len().min(max_base)], suffix);
+                if !validate_project_key(&key) {
+                    return Err(AppError::Conflict);
+                }
+            }
+            Err(e) => return Err(e.into()),
+        }
+    };
 
     let drive_folder = drive_folders::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -158,7 +181,7 @@ pub async fn create_project(
         tenant_id: Set(tenant_id),
         project_id: Set(Some(model.id)),
         created_by: Set(auth.user_id),
-        created_at: Set(Default::default()),
+        created_at: Set(chrono::Utc::now().into()),
     };
     drive_folder.insert(&txn).await?;
     txn.commit().await?;
