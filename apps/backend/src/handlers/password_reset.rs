@@ -17,10 +17,7 @@ use crate::openapi::{
     PasswordChangeErrors, PasswordResetCompleteErrors, PasswordResetRequestErrors,
     PasswordResetVerifyErrors,
 };
-use crate::utils::auth::{
-    AuthError, DUMMY_PASSWORD_HASH, create_password_hash, generate_email_verification_token,
-    verify_password,
-};
+use crate::utils::auth::{AuthError, DUMMY_PASSWORD_HASH, create_password_hash, verify_password};
 use crate::utils::email::normalize_email;
 use crate::utils::password_reset;
 use crate::{AppState, entities::users};
@@ -82,10 +79,7 @@ pub async fn password_reset_request(
         .one(&state.db)
         .await?
     {
-        let token = generate_email_verification_token();
-        if let Err(e) = password_reset::store_token(&state.redis_client, user.id, &token).await {
-            warn!(user_id = %user.id, error = ?e, "password reset token store failed");
-        } else if let Err(e) = password_reset_email::enqueue(
+        if let Err(e) = password_reset_email::enqueue(
             state.password_reset_email_storage.as_ref(),
             PasswordResetEmailJob::new(user.id, email),
         )
