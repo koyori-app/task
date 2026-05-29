@@ -64,46 +64,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // BOOTSTRAP_ADMIN_EMAIL: 管理者ゼロ時のみ対象ユーザーを昇格
     if let Some(ref email) = settings.bootstrap_admin_email {
-        use backend::entities::{audit_logs, users};
-        use sea_orm::{
-            ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait,
-            QueryFilter,
-        };
-        let admin_count = users::Entity::find()
-            .filter(users::Column::IsAdmin.eq(true))
-            .count(&db)
-            .await?;
-        if admin_count == 0 {
-            if let Some(user) = users::Entity::find()
-                .filter(users::Column::Email.eq(email.as_str()))
-                .one(&db)
-                .await?
-            {
-                let mut active: users::ActiveModel = user.clone().into();
-                active.is_admin = Set(true);
-                active.update(&db).await?;
-
-                let log = audit_logs::ActiveModel {
-                    id: Set(uuid::Uuid::new_v4()),
-                    actor_id: Set(None),
-                    actor_type: Set("system".to_string()),
-                    action: Set("user.admin.grant".to_string()),
-                    resource_type: Set("user".to_string()),
-                    resource_id: Set(user.id.to_string()),
-                    tenant_id: Set(None),
-                    metadata: Set(Some(serde_json::json!({ "user_id": user.id.to_string() }))),
-                    ip_address: Set(None),
-                    user_agent: Set(None),
-                    created_at: Set(chrono::Utc::now()),
-                };
-                log.insert(&db).await?;
-                tracing::info!(user_id = %user.id, email = %email, "bootstrap: promoted to admin");
-            } else {
-                tracing::warn!(email = %email, "BOOTSTRAP_ADMIN_EMAIL set but no matching user found");
-            }
-        }
+        backend::utils::bootstrap_admin::bootstrap_admin_email(&db, email).await?;
     }
 
     let state = AppState {

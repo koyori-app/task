@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 use crate::entities::{
-    drive_files, drive_folder_shares, drive_folders, milestones, personal_tokens, project_members,
-    task_assignees, tasks, tenants, users,
+    drive_files, drive_folder_shares, drive_folders, personal_tokens, project_members, tenants,
+    users,
 };
 use crate::error::AppError;
 use crate::extractors::AdminUser;
@@ -146,20 +146,18 @@ async fn ensure_not_last_admin(db: &DatabaseConnection, target_id: Uuid) -> Resu
 async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(), AppError> {
     let txn = db.begin().await?;
 
-    task_assignees::Entity::delete_many()
-        .filter(task_assignees::Column::UserId.eq(user_id))
-        .exec(&txn)
-        .await?;
-
-    tasks::Entity::delete_many()
-        .filter(tasks::Column::CreatedBy.eq(user_id))
-        .exec(&txn)
-        .await?;
-
-    milestones::Entity::delete_many()
-        .filter(milestones::Column::CreatedBy.eq(user_id))
-        .exec(&txn)
-        .await?;
+    if table_exists(db, "task_assignees").await? {
+        let sql = format!("DELETE FROM task_assignees WHERE user_id = '{user_id}'");
+        txn.execute_unprepared(&sql).await?;
+    }
+    if table_exists(db, "tasks").await? {
+        let sql = format!("DELETE FROM tasks WHERE created_by = '{user_id}'");
+        txn.execute_unprepared(&sql).await?;
+    }
+    if table_exists(db, "milestones").await? {
+        let sql = format!("DELETE FROM milestones WHERE created_by = '{user_id}'");
+        txn.execute_unprepared(&sql).await?;
+    }
 
     drive_files::Entity::delete_many()
         .filter(drive_files::Column::UploaderId.eq(user_id))

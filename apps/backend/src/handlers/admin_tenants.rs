@@ -7,9 +7,11 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, prelude::Uuid};
 use serde::Serialize;
 use utoipa::ToSchema;
 
+use sea_orm::{ConnectionTrait, Statement};
+
 use crate::{
     AppState,
-    entities::{projects, tasks, tenants},
+    entities::{projects, tenants},
     error::AppError,
     extractors::AdminUser,
     handlers::admin_audit::record_audit,
@@ -27,8 +29,30 @@ pub struct AdminProjectListResponse {
 }
 
 #[derive(Serialize, ToSchema)]
+pub struct AdminTaskRow {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub title: String,
+}
+
+#[derive(Serialize, ToSchema)]
 pub struct AdminTaskListResponse {
-    pub tasks: Vec<tasks::Model>,
+    pub tasks: Vec<AdminTaskRow>,
+}
+
+async fn table_exists(db: &sea_orm::DatabaseConnection, table: &str) -> Result<bool, AppError> {
+    let sql = format!(
+        "SELECT EXISTS (
+            SELECT FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = '{table}'
+        )"
+    );
+    let row = db
+        .query_one_raw(Statement::from_string(db.get_database_backend(), sql))
+        .await?;
+    Ok(row
+        .and_then(|r| r.try_get_by_index::<bool>(0).ok())
+        .unwrap_or(false))
 }
 
 #[axum::debug_handler]
@@ -177,11 +201,30 @@ pub async fn list_tenant_project_tasks(
     if !project_exists {
         return Err(AppError::NotFound);
     }
-    let tasks = tasks::Entity::find()
-        .filter(tasks::Column::ProjectId.eq(project_id))
-        .filter(tasks::Column::DeletedAt.is_null())
-        .order_by_desc(tasks::Column::CreatedAt)
-        .all(&state.db)
+    if !table_exists(&state.db, "tasks").await? {
+        return Ok(Json(AdminTaskListResponse { tasks: vec![] }));
+    }
+
+    let sql = format!(
+        "SELECT id, project_id, title FROM tasks
+         WHERE project_id = '{project_id}' AND deleted_at IS NULL
+         ORDER BY created_at DESC"
+    );
+    let rows = state
+        .db
+        .query_all_raw(Statement::from_string(state.db.get_database_backend(), sql))
         .await?;
+
+    let tasks = rows
+        .into_iter()
+        .filter_map(|row| {
+            Some(AdminTaskRow {
+                id: row.try_get_by_index(0).ok()?,
+                project_id: row.try_get_by_index(1).ok()?,
+                title: row.try_get_by_index(2).ok()?,
+            })
+        })
+        .collect();
+
     Ok(Json(AdminTaskListResponse { tasks }))
 }
