@@ -162,7 +162,7 @@ pub async fn create_project(
         match project.insert(&txn).await {
             Ok(model) => break model,
             Err(e) if explicit_key.is_none() && is_postgres_unique_violation(&e) => {
-                let suffix = Uuid::new_v4().simple().to_string();
+                let suffix = Uuid::new_v4().simple().to_string().to_ascii_uppercase();
                 let suffix = &suffix[..4];
                 let max_base = 10usize.saturating_sub(suffix.len()).max(2);
                 key = format!("{}{}", &key[..key.len().min(max_base)], suffix);
