@@ -52,6 +52,16 @@ pub enum AuthError {
     /// 認証メールジョブのキュー投入に失敗した（未認証ユーザーは残し再送 API で回復する）。
     #[error("verification email enqueue failed")]
     VerificationEmailEnqueueFailed(#[source] anyhow::Error),
+    #[error("bad request")]
+    BadRequest,
+    #[error("passkey not found")]
+    PasskeyNotFound,
+    #[error("passkey limit exceeded")]
+    PasskeyLimitExceeded,
+    #[error("cannot remove last authentication method")]
+    LastAuthMethod,
+    #[error("webauthn error")]
+    WebAuthn(#[from] webauthn_rs::prelude::WebauthnError),
 }
 
 impl From<sea_orm::DbErr> for AuthError {
@@ -143,6 +153,44 @@ impl IntoResponse for AuthError {
                     StatusCode::SERVICE_UNAVAILABLE,
                     Json(ServerError {
                         message: "verification-email-enqueue-failed".into(),
+                    }),
+                )
+                    .into_response()
+            }
+            AuthError::BadRequest => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError {
+                    message: "bad-request".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::PasskeyNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(ServerError {
+                    message: "passkey-not-found".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::PasskeyLimitExceeded => (
+                StatusCode::CONFLICT,
+                Json(ServerError {
+                    message: "passkey-limit-exceeded".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::LastAuthMethod => (
+                StatusCode::FORBIDDEN,
+                Json(ServerError {
+                    message: "last-auth-method".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::WebAuthn(e) => {
+                debug!("webauthn error: {e:?}");
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ServerError {
+                        message: "webauthn-error".into(),
                     }),
                 )
                     .into_response()

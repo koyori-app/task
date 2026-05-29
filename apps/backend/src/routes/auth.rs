@@ -17,4 +17,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(crate::handlers::oauth::list_connections))
         .routes(routes!(crate::handlers::oauth::disconnect_connection))
         .routes(routes!(crate::handlers::oauth::set_initial_password))
+        .routes(routes!(crate::handlers::passkeys::registration_start))
+        .routes(routes!(crate::handlers::passkeys::registration_finish))
+        .routes(routes!(crate::handlers::passkeys::authentication_start))
+        .routes(routes!(crate::handlers::passkeys::authentication_finish))
+        .routes(routes!(crate::handlers::passkeys::list_passkeys))
+        .routes(routes!(crate::handlers::passkeys::rename_passkey))
+        .routes(routes!(crate::handlers::passkeys::delete_passkey))
 }

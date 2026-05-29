@@ -28,7 +28,7 @@ pub fn register_schemas(openapi: &mut OpenApi) {
 /// Scalar のグループ表示順とタグ説明を定義する。
 fn register_tags(openapi: &mut OpenApi) {
     openapi.tags = Some(vec![
-        TagBuilder::new().name("Auth").description(Some("認証・セッション管理")).build(),
+        TagBuilder::new().name("Auth").description(Some("認証・セッション・パスキー管理")).build(),
         TagBuilder::new().name("Tenants").description(Some("テナント管理")).build(),
         TagBuilder::new().name("Projects").description(Some("プロジェクト管理")).build(),
         TagBuilder::new().name("Project Members").description(Some("プロジェクトメンバー管理")).build(),
