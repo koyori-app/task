@@ -14,12 +14,15 @@ use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
-use webauthn_rs::prelude::{CredentialID, Passkey, PublicKeyCredential, RegisterPublicKeyCredential};
+use webauthn_rs::prelude::{
+    CredentialID, DiscoverableKey, Passkey, PublicKeyCredential, RegisterPublicKeyCredential,
+};
 
 use crate::entities::{passkeys as passkey_entity, users};
 use crate::extractors::{AuthUser, CurrentUser};
 use crate::openapi::SessionAuthErrors;
 use crate::utils::auth::AuthError;
+use crate::utils::db::is_postgres_unique_violation;
 use crate::utils::email::normalize_email;
 use crate::utils::passkey_challenges;
 use crate::utils::passkeys::{
@@ -69,6 +72,7 @@ pub struct PasskeyAuthenticationStartRequest {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct PasskeyAuthenticationFinishRequest {
+    pub challenge_id: Uuid,
     #[schema(value_type = Object)]
     pub credential: serde_json::Value,
 }
@@ -85,6 +89,41 @@ fn exclude_credentials(passkeys: &[Passkey]) -> Option<Vec<CredentialID>> {
     } else {
         Some(passkeys.iter().map(|p| p.cred_id().clone()).collect())
     }
+}
+
+fn challenge_response(
+    rcr: impl Serialize,
+    challenge_id: Uuid,
+) -> Result<Json<serde_json::Value>, AuthError> {
+    let mut value =
+        serde_json::to_value(&rcr).map_err(|e| AuthError::Internal(anyhow::anyhow!(e)))?;
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert(
+            "challenge_id".to_string(),
+            serde_json::Value::String(challenge_id.to_string()),
+        );
+    }
+    Ok(Json(value))
+}
+
+/// メール指定時: ユーザー不在・未確認・パスキー無しでも同一形状のダミーチャレンジを返す。
+async fn passkeys_for_email_auth(
+    db: &sea_orm::DatabaseConnection,
+    email: &str,
+) -> Result<Vec<Passkey>, AuthError> {
+    let user = users::Entity::find()
+        .filter(users::Column::Email.eq(email))
+        .one(db)
+        .await?;
+
+    let Some(user) = user.filter(|u| u.email_verified) else {
+        return Ok(vec![]);
+    };
+
+    let passkeys = load_user_passkeys(db, user.id)
+        .await
+        .map_err(AuthError::Internal)?;
+    Ok(passkeys)
 }
 
 #[axum::debug_handler]
@@ -165,15 +204,11 @@ pub async fn registration_finish(
         .webauthn
         .finish_passkey_registration(&credential, &reg_state)?;
 
-    let cred_id = passkey.cred_id().to_vec();
-    if find_by_credential_id(&state.db, &cred_id).await?.is_some() {
-        return Err(AuthError::BadRequest);
-    }
-
-    let (credential_id, public_key, aaguid, sign_count) = passkey_to_model_fields(&passkey);
+    let (credential_id, public_key, aaguid, sign_count) =
+        passkey_to_model_fields(&passkey).map_err(AuthError::Internal)?;
     let now = Utc::now().fixed_offset();
 
-    passkey_entity::ActiveModel {
+    let insert_result = passkey_entity::ActiveModel {
         id: Set(Uuid::new_v4()),
         user_id: Set(user.id),
         credential_id: Set(credential_id),
@@ -185,9 +220,13 @@ pub async fn registration_finish(
         created_at: Set(now),
     }
     .insert(&state.db)
-    .await?;
+    .await;
 
-    Ok(StatusCode::CREATED)
+    match insert_result {
+        Ok(_) => Ok(StatusCode::CREATED),
+        Err(err) if is_postgres_unique_violation(&err) => Err(AuthError::BadRequest),
+        Err(err) => Err(err.into()),
+    }
 }
 
 #[axum::debug_handler]
@@ -198,7 +237,7 @@ pub async fn registration_finish(
     summary = "パスキー認証チャレンジ発行",
     request_body = PasskeyAuthenticationStartRequest,
     responses(
-        (status = 200, description = "PublicKeyCredentialRequestOptions (WebAuthn JSON)"),
+        (status = 200, description = "PublicKeyCredentialRequestOptions (WebAuthn JSON) + challenge_id"),
         SessionAuthErrors,
     )
 )]
@@ -206,50 +245,73 @@ pub async fn authentication_start(
     State(state): State<AppState>,
     Valid(Json(payload)): Valid<Json<PasskeyAuthenticationStartRequest>>,
 ) -> Result<Json<serde_json::Value>, AuthError> {
+    let challenge_id = Uuid::new_v4();
+
     if let Some(email) = payload.email.as_deref() {
         let email = normalize_email(email);
-        let user = users::Entity::find()
-            .filter(users::Column::Email.eq(email.clone()))
-            .one(&state.db)
-            .await?
-            .ok_or(AuthError::UserNotFound)?;
-
-        if !user.email_verified {
-            return Err(AuthError::EmailNotVerified);
-        }
-
-        let passkey_list = load_user_passkeys(&state.db, user.id)
-            .await
-            .map_err(AuthError::Internal)?;
-        if passkey_list.is_empty() {
-            return Err(AuthError::PasskeyNotFound);
-        }
+        let passkey_list = passkeys_for_email_auth(&state.db, &email).await?;
 
         let (rcr, auth_state) = state
             .webauthn
             .start_passkey_authentication(&passkey_list)?;
 
-        passkey_challenges::store_authentication(&state.redis_client, &email, &auth_state)
-            .await
-            .map_err(AuthError::Internal)?;
-
-        return Ok(Json(
-            serde_json::to_value(&rcr).map_err(|e| AuthError::Internal(anyhow::anyhow!(e)))?,
-        ));
-    }
-
-    let passkey_list: Vec<Passkey> = vec![];
-    let (rcr, auth_state) = state
-        .webauthn
-        .start_passkey_authentication(&passkey_list)?;
-
-    passkey_challenges::store_authentication(&state.redis_client, "conditional", &auth_state)
+        passkey_challenges::store_authentication(
+            &state.redis_client,
+            challenge_id,
+            &auth_state,
+        )
         .await
         .map_err(AuthError::Internal)?;
 
-    Ok(Json(
-        serde_json::to_value(&rcr).map_err(|e| AuthError::Internal(anyhow::anyhow!(e)))?,
-    ))
+        return challenge_response(rcr, challenge_id);
+    }
+
+    let (rcr, auth_state) = state.webauthn.start_discoverable_authentication()?;
+
+    passkey_challenges::store_discoverable_authentication(
+        &state.redis_client,
+        challenge_id,
+        &auth_state,
+    )
+    .await
+    .map_err(AuthError::Internal)?;
+
+    challenge_response(rcr, challenge_id)
+}
+
+async fn finish_passkey_authentication(
+    state: &AppState,
+    credential: &PublicKeyCredential,
+    auth_state: webauthn_rs::prelude::PasskeyAuthentication,
+    stored: passkey_entity::Model,
+) -> Result<(), AuthError> {
+    let mut passkey = model_to_passkey(&stored).map_err(AuthError::Internal)?;
+    let auth_result = state
+        .webauthn
+        .finish_passkey_authentication(credential, &auth_state)?;
+
+    if auth_result.counter() > 0 && auth_result.counter() <= stored.sign_count as u32 {
+        return Err(AuthError::InvalidCredentials);
+    }
+
+    if let Some(true) = passkey.update_credential(&auth_result) {
+        let (credential_id, public_key, aaguid, sign_count) =
+            passkey_to_model_fields(&passkey).map_err(AuthError::Internal)?;
+        let mut active: passkey_entity::ActiveModel = stored.clone().into();
+        active.credential_id = Set(credential_id);
+        active.public_key = Set(public_key);
+        active.aaguid = Set(aaguid);
+        active.sign_count = Set(sign_count);
+        active.last_used_at = Set(Some(Utc::now().fixed_offset()));
+        active.update(&state.db).await?;
+    } else {
+        let mut active: passkey_entity::ActiveModel = stored.into();
+        active.sign_count = Set(auth_result.counter() as i64);
+        active.last_used_at = Set(Some(Utc::now().fixed_offset()));
+        active.update(&state.db).await?;
+    }
+
+    Ok(())
 }
 
 #[axum::debug_handler]
@@ -271,6 +333,73 @@ pub async fn authentication_finish(
 ) -> Result<StatusCode, AuthError> {
     let credential: PublicKeyCredential =
         serde_json::from_value(payload.credential).map_err(|_| AuthError::BadRequest)?;
+
+    if let Some(auth_state) = passkey_challenges::take_discoverable_authentication(
+        &state.redis_client,
+        payload.challenge_id,
+    )
+    .await
+    .map_err(AuthError::Internal)?
+    {
+        let (user_id, cred_id) = state
+            .webauthn
+            .identify_discoverable_authentication(&credential)
+            .map_err(|_| AuthError::InvalidCredentials)?;
+
+        let stored = find_by_credential_id(&state.db, cred_id)
+            .await?
+            .filter(|row| row.user_id == user_id)
+            .ok_or(AuthError::InvalidCredentials)?;
+
+        let user = users::Entity::find_by_id(stored.user_id)
+            .one(&state.db)
+            .await?
+            .ok_or(AuthError::InvalidCredentials)?;
+
+        if !user.email_verified {
+            return Err(AuthError::InvalidCredentials);
+        }
+
+        let mut passkey = model_to_passkey(&stored).map_err(AuthError::Internal)?;
+        let auth_result = state.webauthn.finish_discoverable_authentication(
+            &credential,
+            auth_state,
+            &[DiscoverableKey::from(&passkey)],
+        )?;
+
+        if auth_result.counter() > 0 && auth_result.counter() <= stored.sign_count as u32 {
+            return Err(AuthError::InvalidCredentials);
+        }
+
+        if let Some(true) = passkey.update_credential(&auth_result) {
+            let (credential_id, public_key, aaguid, sign_count) =
+                passkey_to_model_fields(&passkey).map_err(AuthError::Internal)?;
+            let mut active: passkey_entity::ActiveModel = stored.clone().into();
+            active.credential_id = Set(credential_id);
+            active.public_key = Set(public_key);
+            active.aaguid = Set(aaguid);
+            active.sign_count = Set(sign_count);
+            active.last_used_at = Set(Some(Utc::now().fixed_offset()));
+            active.update(&state.db).await?;
+        } else {
+            let mut active: passkey_entity::ActiveModel = stored.into();
+            active.sign_count = Set(auth_result.counter() as i64);
+            active.last_used_at = Set(Some(Utc::now().fixed_offset()));
+            active.update(&state.db).await?;
+        }
+
+        session.set("user_id", user.id);
+        return Ok(StatusCode::NO_CONTENT);
+    }
+
+    let auth_state = passkey_challenges::take_authentication(
+        &state.redis_client,
+        payload.challenge_id,
+    )
+    .await
+    .map_err(AuthError::Internal)?
+    .ok_or(AuthError::BadRequest)?;
+
     let cred_id = credential.get_credential_id();
     let stored = find_by_credential_id(&state.db, cred_id)
         .await?
@@ -279,50 +408,14 @@ pub async fn authentication_finish(
     let user = users::Entity::find_by_id(stored.user_id)
         .one(&state.db)
         .await?
-        .ok_or(AuthError::UserNotFound)?;
+        .ok_or(AuthError::InvalidCredentials)?;
 
     if !user.email_verified {
-        return Err(AuthError::EmailNotVerified);
-    }
-
-    let session_key = normalize_email(&user.email);
-    let auth_state = match passkey_challenges::take_authentication(&state.redis_client, &session_key)
-        .await
-        .map_err(AuthError::Internal)?
-    {
-        Some(s) => s,
-        None => passkey_challenges::take_authentication(&state.redis_client, "conditional")
-            .await
-            .map_err(AuthError::Internal)?
-            .ok_or(AuthError::BadRequest)?,
-    };
-
-    let mut passkey = model_to_passkey(&stored).map_err(AuthError::Internal)?;
-    let auth_result = state
-        .webauthn
-        .finish_passkey_authentication(&credential, &auth_state)?;
-
-    if auth_result.counter() > 0 && auth_result.counter() <= stored.sign_count as u32 {
         return Err(AuthError::InvalidCredentials);
     }
 
-    if let Some(true) = passkey.update_credential(&auth_result) {
-        let (credential_id, public_key, aaguid, sign_count) = passkey_to_model_fields(&passkey);
-        let mut active: passkey_entity::ActiveModel = stored.clone().into();
-        active.credential_id = Set(credential_id);
-        active.public_key = Set(public_key);
-        active.aaguid = Set(aaguid);
-        active.sign_count = Set(sign_count);
-        active.last_used_at = Set(Some(Utc::now().fixed_offset()));
-        active.update(&state.db).await?;
-    } else {
-        let mut active: passkey_entity::ActiveModel = stored.into();
-        active.sign_count = Set(auth_result.counter() as i64);
-        active.last_used_at = Set(Some(Utc::now().fixed_offset()));
-        active.update(&state.db).await?;
-    }
+    finish_passkey_authentication(&state, &credential, auth_state, stored).await?;
 
-    // パスキーログインは 2FA（TOTP）を免除 — full session のみ発行
     session.set("user_id", user.id);
     Ok(StatusCode::NO_CONTENT)
 }

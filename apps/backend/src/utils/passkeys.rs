@@ -9,12 +9,14 @@ use crate::entities::passkeys::{self, Entity as PasskeyEntity};
 
 pub const MAX_PASSKEYS_PER_USER: u64 = 20;
 
-pub fn passkey_to_model_fields(passkey: &Passkey) -> (Vec<u8>, Vec<u8>, Option<Vec<u8>>, i64) {
+pub fn passkey_to_model_fields(
+    passkey: &Passkey,
+) -> Result<(Vec<u8>, Vec<u8>, Option<Vec<u8>>, i64), anyhow::Error> {
     let credential_id = passkey.cred_id().to_vec();
-    let public_key = serde_json::to_vec(passkey).unwrap_or_default();
+    let public_key = serde_json::to_vec(passkey)?;
     let credential: Credential = passkey.clone().into();
     let sign_count = credential.counter as i64;
-    (credential_id, public_key, None, sign_count)
+    Ok((credential_id, public_key, None, sign_count))
 }
 
 pub fn model_to_passkey(model: &passkeys::Model) -> Result<Passkey, anyhow::Error> {
