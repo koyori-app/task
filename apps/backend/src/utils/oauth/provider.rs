@@ -1,5 +1,7 @@
 //! OAuth プロバイダー定義と認可 URL 生成。
 
+use reqwest::Client;
+use serde::Deserialize;
 use url::Url;
 
 use super::config::{OAuthSettings, ProviderConfig};
@@ -22,10 +24,47 @@ pub struct ProviderUserInfo {
     pub avatar_url: Option<String>,
 }
 
-pub fn resolve_endpoints(
+#[derive(Debug, Deserialize)]
+struct OidcDiscoveryDocument {
+    authorization_endpoint: String,
+    token_endpoint: String,
+    #[serde(default)]
+    userinfo_endpoint: Option<String>,
+}
+
+/// OIDC Discovery（`.well-known/openid-configuration`）でエンドポイントを取得する。
+pub async fn fetch_oidc_discovery(
+    http: &Client,
+    issuer_url: &str,
+) -> Result<ProviderEndpoints, anyhow::Error> {
+    let issuer = issuer_url.trim_end_matches('/');
+    let discovery_url = format!("{issuer}/.well-known/openid-configuration");
+    let doc: OidcDiscoveryDocument = http
+        .get(&discovery_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    let userinfo_url = doc
+        .userinfo_endpoint
+        .ok_or_else(|| anyhow::anyhow!("OIDC discovery document missing userinfo_endpoint"))?;
+
+    Ok(ProviderEndpoints {
+        authorize_url: doc.authorization_endpoint,
+        token_url: doc.token_endpoint,
+        userinfo_url,
+        scopes: vec!["openid", "email", "profile"],
+        use_oidc_id_token: true,
+    })
+}
+
+pub async fn resolve_endpoints(
     provider_slug: &str,
     settings: &OAuthSettings,
     instance_url: Option<&str>,
+    http: &Client,
 ) -> Result<ProviderEndpoints, anyhow::Error> {
     match provider_slug {
         "github" => Ok(ProviderEndpoints {
@@ -68,14 +107,8 @@ pub fn resolve_endpoints(
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("oidc provider not configured"))?
                 .issuer_url
-                .trim_end_matches('/');
-            Ok(ProviderEndpoints {
-                authorize_url: format!("{issuer}/oauth2/authorize"),
-                token_url: format!("{issuer}/oauth2/token"),
-                userinfo_url: format!("{issuer}/oauth2/userinfo"),
-                scopes: vec!["openid", "email", "profile"],
-                use_oidc_id_token: true,
-            })
+                .clone();
+            fetch_oidc_discovery(http, &issuer).await
         }
         other => anyhow::bail!("unsupported oauth provider: {other}"),
     }
@@ -133,13 +166,21 @@ pub fn build_authorize_url(
     )
 }
 
+fn is_localhost_host(host: &str) -> bool {
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
 fn validate_instance_url(raw: &str) -> Result<(), anyhow::Error> {
     let parsed = Url::parse(raw)?;
-    if parsed.scheme() != "https" && parsed.scheme() != "http" {
+    let scheme = parsed.scheme();
+    if scheme != "https" && scheme != "http" {
         anyhow::bail!("instance_url must use http or https");
     }
-    if parsed.host_str().is_none() {
-        anyhow::bail!("instance_url must include a host");
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow::anyhow!("instance_url must include a host"))?;
+    if scheme == "http" && !is_localhost_host(host) {
+        anyhow::bail!("instance_url over http is only allowed for localhost");
     }
     Ok(())
 }

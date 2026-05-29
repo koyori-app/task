@@ -31,7 +31,7 @@ impl MigrationTrait for Migration {
                 token_expires_at TIMESTAMPTZ,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                UNIQUE (provider, provider_user_id, instance_url)
+                UNIQUE NULLS NOT DISTINCT (provider, provider_user_id, instance_url)
             )
         "#;
         manager
@@ -72,6 +72,20 @@ impl MigrationTrait for Migration {
             .execute(Statement::from_string(
                 manager.get_database_backend(),
                 drop_table.to_owned(),
+            ))
+            .await?;
+
+        // OAuth-only users may have NULL password_hash; set a placeholder before NOT NULL.
+        let fill_null_passwords = r#"
+            UPDATE users
+            SET password_hash = 'oauth-down-migration-placeholder'
+            WHERE password_hash IS NULL
+        "#;
+        manager
+            .get_connection()
+            .execute(Statement::from_string(
+                manager.get_database_backend(),
+                fill_null_passwords.to_owned(),
             ))
             .await?;
 

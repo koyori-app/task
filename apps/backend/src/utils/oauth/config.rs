@@ -139,7 +139,7 @@ fn pair_config(
 fn parse_encryption_key(raw: Option<&str>) -> Result<[u8; 32], anyhow::Error> {
     let key_str = raw
         .filter(|s| !s.is_empty())
-        .unwrap_or("0123456789abcdef0123456789abcdef");
+        .ok_or_else(|| anyhow::anyhow!("OAUTH_ENCRYPTION_KEY is required"))?;
 
     if key_str.len() < 32 {
         anyhow::bail!("OAUTH_ENCRYPTION_KEY must be at least 32 characters");

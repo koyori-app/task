@@ -13,6 +13,8 @@ const KEY_PREFIX: &str = "oauth:state:";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthStatePayload {
+    /// OAuth フロー開始時のプロバイダー slug（callback で照合して CSRF を防ぐ）
+    pub provider: String,
     pub code_verifier: String,
     pub redirect_after: String,
     /// アカウント連携時のログイン済みユーザー ID

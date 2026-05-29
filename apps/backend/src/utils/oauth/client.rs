@@ -47,6 +47,8 @@ struct GitLabUser {
     username: String,
     #[serde(default)]
     email: Option<String>,
+    #[serde(default)]
+    confirmed_at: Option<String>,
     avatar_url: Option<String>,
 }
 
@@ -203,7 +205,7 @@ async fn fetch_gitlab_user(
     Ok(ProviderUserInfo {
         provider_user_id: user.id.to_string(),
         email: user.email.clone(),
-        email_verified: user.email.as_ref().map(|_| true),
+        email_verified: user.confirmed_at.as_ref().map(|_| true),
         username: user.username,
         avatar_url: user.avatar_url,
     })

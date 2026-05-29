@@ -31,7 +31,11 @@ use crate::utils::oauth::provider::{
     ProviderUserInfo, build_authorize_url, get_credentials, normalize_instance_url,
     resolve_endpoints,
 };
+
 use crate::utils::oauth::state::{OAuthStatePayload, build_frontend_redirect, consume_state, store_state};
+
+const OAUTH_PENDING_STATE_KEY: &str = "oauth_pending_state";
+const OAUTH_PENDING_PROVIDER_KEY: &str = "oauth_pending_provider";
 use crate::AppState;
 
 #[derive(Error, Debug)]
@@ -209,6 +213,7 @@ pub async fn oauth_start(
     Path(provider): Path<String>,
     Query(query): Query<OAuthStartQuery>,
     optional_auth: OptionalAuthUser,
+    session: Session<SessionRedisPool>,
     State(state): State<AppState>,
 ) -> Result<Redirect, OAuthError> {
     let settings = &state.oauth_settings;
@@ -230,8 +235,14 @@ pub async fn oauth_start(
         _ => None,
     };
 
-    let endpoints = resolve_endpoints(&provider, settings, instance_url.as_deref())
-        .map_err(OAuthError::Internal)?;
+    let endpoints = resolve_endpoints(
+        &provider,
+        settings,
+        instance_url.as_deref(),
+        &state.http_client,
+    )
+    .await
+    .map_err(OAuthError::Internal)?;
     let credentials = get_credentials(&provider, settings).map_err(OAuthError::Internal)?;
 
     let pkce = generate_pkce_pair();
@@ -246,6 +257,7 @@ pub async fn oauth_start(
         &state.redis_client,
         &oauth_state,
         &OAuthStatePayload {
+            provider: provider.clone(),
             code_verifier: pkce.code_verifier,
             redirect_after,
             link_user_id,
@@ -254,6 +266,9 @@ pub async fn oauth_start(
     )
     .await
     .map_err(OAuthError::Internal)?;
+
+    session.set(OAUTH_PENDING_STATE_KEY, oauth_state.clone());
+    session.set(OAUTH_PENDING_PROVIDER_KEY, provider.clone());
 
     let redirect_uri = settings.callback_url(&provider);
     let authorize_url = build_authorize_url(
@@ -295,13 +310,28 @@ pub async fn oauth_callback(
         return Err(OAuthError::ProviderNotConfigured);
     }
 
+    let pending_state: Option<String> = session.get(OAUTH_PENDING_STATE_KEY);
+    let pending_provider: Option<String> = session.get(OAUTH_PENDING_PROVIDER_KEY);
+    if pending_state.as_deref() != Some(query.state.as_str())
+        || pending_provider.as_deref() != Some(provider.as_str())
+    {
+        return Err(OAuthError::InvalidState);
+    }
+    session.remove(OAUTH_PENDING_STATE_KEY);
+    session.remove(OAUTH_PENDING_PROVIDER_KEY);
+
     let payload = consume_state(&state.redis_client, &query.state)
         .await
         .map_err(OAuthError::Internal)?
         .ok_or(OAuthError::InvalidState)?;
 
+    if payload.provider != provider {
+        return Err(OAuthError::InvalidState);
+    }
+
     let instance_url = payload.instance_url.as_deref();
-    let endpoints = resolve_endpoints(&provider, settings, instance_url)
+    let endpoints = resolve_endpoints(&provider, settings, instance_url, &state.http_client)
+        .await
         .map_err(OAuthError::Internal)?;
     let credentials = get_credentials(&provider, settings).map_err(OAuthError::Internal)?;
     let redirect_uri = settings.callback_url(&provider);
@@ -343,6 +373,7 @@ pub async fn oauth_callback(
 
     session.set("user_id", user_id);
 
+    // フロント基底 URL は email 認証と同一（単一フロント前提）。OAuth 専用 URL は未分離。
     let frontend_redirect = build_frontend_redirect(
         &state.settings.email_verification_app_url,
         &payload.redirect_after,
@@ -539,18 +570,15 @@ async fn resolve_user_and_connection(
         }
     }
 
-    let user_id = create_oauth_user(state, provider_slug, provider_info).await?;
-    insert_connection(
+    create_oauth_user_and_connection(
         state,
-        user_id,
+        provider_slug,
         db_provider,
         normalized_instance.as_deref(),
         provider_info,
         token,
     )
-    .await?;
-
-    Ok(user_id)
+    .await
 }
 
 async fn find_connection(
@@ -666,10 +694,13 @@ async fn update_connection_tokens(
     Ok(())
 }
 
-async fn create_oauth_user(
+async fn create_oauth_user_and_connection(
     state: &AppState,
     _provider_slug: &str,
+    db_provider: &str,
+    instance_url: Option<&str>,
     provider_info: &ProviderUserInfo,
+    token: &TokenResponse,
 ) -> Result<Uuid, OAuthError> {
     let user_id = Uuid::new_v4();
     let username = derive_unique_username(&state.db, &provider_info.username).await?;
@@ -678,6 +709,17 @@ async fn create_oauth_user(
         .as_ref()
         .map(|e| normalize_email(e))
         .unwrap_or_else(|| format!("{user_id}@oauth.local"));
+
+    let access_token_enc = encrypt_token(&state.oauth_settings.encryption_key, &token.access_token)
+        .map_err(OAuthError::Internal)?;
+    let refresh_token_enc = match &token.refresh_token {
+        Some(rt) => Some(
+            encrypt_token(&state.oauth_settings.encryption_key, rt)
+                .map_err(OAuthError::Internal)?,
+        ),
+        None => None,
+    };
+    let now = Utc::now().fixed_offset();
 
     let user = users::ActiveModel {
         id: Set(user_id),
@@ -690,9 +732,35 @@ async fn create_oauth_user(
         ..Default::default()
     };
 
-    with_transaction::<(), OAuthError, _>(&state.db, |txn| {
+    let connection = oauth_connections::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        user_id: Set(user_id),
+        provider: Set(db_provider.to_string()),
+        provider_user_id: Set(provider_info.provider_user_id.clone()),
+        provider_email: Set(provider_info.email.clone()),
+        instance_url: Set(instance_url.map(str::to_string)),
+        access_token_enc: Set(Some(access_token_enc)),
+        refresh_token_enc: Set(refresh_token_enc),
+        token_expires_at: Set(token.expires_at.map(|dt| dt.fixed_offset())),
+        created_at: Set(now),
+        updated_at: Set(now),
+        ..Default::default()
+    };
+
+    with_transaction::<Uuid, OAuthError, _>(&state.db, |txn| {
         Box::pin(async move {
             users::Entity::insert(user)
+                .exec(txn)
+                .await
+                .map_err(|e| {
+                    if is_postgres_unique_violation(&e) {
+                        OAuthError::EmailConflict
+                    } else {
+                        OAuthError::Internal(e.into())
+                    }
+                })?;
+
+            oauth_connections::Entity::insert(connection)
                 .exec(txn)
                 .await
                 .map_err(|e| {
@@ -702,12 +770,11 @@ async fn create_oauth_user(
                         OAuthError::Internal(e.into())
                     }
                 })?;
-            Ok(())
+
+            Ok(user_id)
         })
     })
-    .await?;
-
-    Ok(user_id)
+    .await
 }
 
 async fn derive_unique_username(
