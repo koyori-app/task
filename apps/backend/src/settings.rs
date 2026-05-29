@@ -34,6 +34,16 @@ pub struct Settings {
     pub personal_token_secret: String,
     /// 起動時に管理者昇格するユーザーのメールアドレス（管理者ゼロ時のみ有効）。
     pub bootstrap_admin_email: Option<String>,
+    /// TOTP シークレット暗号化用（AES-256-GCM）。32 文字以上必須。
+    #[validate(length(min = 32, message = "TOTP_ENCRYPTION_KEY must be at least 32 characters"))]
+    pub totp_encryption_key: String,
+    /// otpauth URI の issuer（認証アプリ表示名）
+    #[serde(default = "default_totp_issuer")]
+    pub totp_issuer: String,
+}
+
+fn default_totp_issuer() -> String {
+    "TaskApp".to_string()
 }
 
 fn default_verification_email_worker_concurrency() -> usize {
@@ -118,6 +128,8 @@ mod tests {
             verification_email_worker_concurrency: 1,
             personal_token_secret: "a".repeat(32),
             bootstrap_admin_email: None,
+            totp_encryption_key: "b".repeat(32),
+            totp_issuer: "TaskApp".to_string(),
         }
         .validate()
         .is_ok()

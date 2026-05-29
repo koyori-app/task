@@ -52,6 +52,12 @@ pub enum AuthError {
     /// 認証メールジョブのキュー投入に失敗した（未認証ユーザーは残し再送 API で回復する）。
     #[error("verification email enqueue failed")]
     VerificationEmailEnqueueFailed(#[source] anyhow::Error),
+    #[error("invalid 2fa code")]
+    InvalidTwoFactorCode,
+    #[error("2fa already enabled")]
+    TwoFactorAlreadyEnabled,
+    #[error("2fa not enabled")]
+    TwoFactorNotEnabled,
 }
 
 impl From<sea_orm::DbErr> for AuthError {
@@ -147,6 +153,27 @@ impl IntoResponse for AuthError {
                 )
                     .into_response()
             }
+            AuthError::InvalidTwoFactorCode => (
+                StatusCode::UNAUTHORIZED,
+                Json(ServerError {
+                    message: "invalid-2fa-code".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::TwoFactorAlreadyEnabled => (
+                StatusCode::CONFLICT,
+                Json(ServerError {
+                    message: "2fa-already-enabled".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::TwoFactorNotEnabled => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError {
+                    message: "2fa-not-enabled".into(),
+                }),
+            )
+                .into_response(),
         }
     }
 }

@@ -14,4 +14,5 @@ pub mod password_reset_delivery;
 pub mod redis;
 pub mod smtp;
 pub mod system_settings;
+pub mod totp;
 pub mod verification_email_delivery;
