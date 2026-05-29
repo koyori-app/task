@@ -8,6 +8,7 @@ use axum_valid::Valid;
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 use validator::Validate;
 
 use crate::extractors::{AuthMethod, AuthUser, CurrentUser};
@@ -82,12 +83,16 @@ pub async fn password_reset_request(
         .await?
     {
         let token = generate_email_verification_token();
-        password_reset_email::enqueue(
+        if let Err(e) = password_reset::store_token(&state.redis_client, user.id, &token).await {
+            warn!(user_id = %user.id, error = ?e, "password reset token store failed");
+        } else if let Err(e) = password_reset_email::enqueue(
             state.password_reset_email_storage.as_ref(),
-            PasswordResetEmailJob::new(user.id, email, token),
+            PasswordResetEmailJob::new(user.id, email),
         )
         .await
-        .map_err(AuthError::PasswordResetEmailEnqueueFailed)?;
+        {
+            warn!(user_id = %user.id, error = ?e, "password reset email enqueue failed");
+        }
     }
     Ok(Json(MessageResponse {
         message: "入力されたメールアドレスにリセットリンクを送信しました（登録済みの場合）".into(),

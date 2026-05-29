@@ -8,22 +8,23 @@ use apalis_postgres::{Config, JsonCodec, PostgresStorage, PgPool};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::utils::auth::generate_email_verification_token;
 use crate::utils::{password_reset, password_reset_email_delivery};
 use crate::{AppState, settings::Settings};
 
 pub const QUEUE_NAME: &str = "password_reset_email";
 pub const MAX_RETRIES: usize = 8;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// パスワードリセットメール送信ジョブ（トークンは Redis のみに保持）。
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PasswordResetEmailJob {
     pub user_id: Uuid,
     pub email: String,
-    pub token: String,
 }
 
 impl PasswordResetEmailJob {
-    pub fn new(user_id: Uuid, email: String, token: String) -> Self {
-        Self { user_id, email, token }
+    pub fn new(user_id: Uuid, email: String) -> Self {
+        Self { user_id, email }
     }
 }
 
@@ -59,16 +60,20 @@ pub async fn enqueue(
     job: PasswordResetEmailJob,
 ) -> Result<(), anyhow::Error> {
     let mut storage = storage.clone();
-    storage.push(job).await.map_err(|e| anyhow::anyhow!("push password reset job: {e}"))
+    storage
+        .push(job)
+        .await
+        .map_err(|e| anyhow::anyhow!("push password reset job: {e}"))
 }
 
 pub async fn process(job: PasswordResetEmailJob, state: Data<AppState>) -> Result<(), BoxDynError> {
-    password_reset::store_token(&state.redis_client, job.user_id, &job.token).await?;
+    let token = generate_email_verification_token();
+    password_reset::store_token(&state.redis_client, job.user_id, &token).await?;
     password_reset_email_delivery::send_password_reset_email(
         &state.smtp_client,
         &job.email,
         &state.settings,
-        &job.token,
+        &token,
     )
     .await?;
     Ok(())
