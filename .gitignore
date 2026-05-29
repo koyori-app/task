@@ -1,4 +1,5 @@
 .env
 *.rdb
 docs/.retype
-retype.manifest
+docs/node_modules
+docs/retype.manifest
