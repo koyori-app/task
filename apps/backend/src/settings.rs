@@ -34,6 +34,31 @@ pub struct Settings {
     pub personal_token_secret: String,
     /// 起動時に管理者昇格するユーザーのメールアドレス（管理者ゼロ時のみ有効）。
     pub bootstrap_admin_email: Option<String>,
+    /// GitHub App ID（数字文字列）
+    #[validate(length(min = 1, message = "github_app_id is required"))]
+    pub github_app_id: String,
+    /// GitHub App 秘密鍵（PEM）。環境変数では `\n` をリテラル改行に変換して読み込む。
+    #[validate(length(min = 1, message = "github_app_private_key is required"))]
+    pub github_app_private_key: String,
+    /// GitHub Webhook 署名検証用シークレット
+    #[validate(length(min = 1, message = "github_app_webhook_secret is required"))]
+    pub github_app_webhook_secret: String,
+    /// GitHub App スラッグ（install URL 用）
+    #[validate(length(min = 1, message = "github_app_name is required"))]
+    pub github_app_name: String,
+    /// Installation Access Token 暗号化キー（32 バイト以上）
+    #[validate(length(
+        min = 32,
+        message = "github_token_encryption_key must be at least 32 characters"
+    ))]
+    pub github_token_encryption_key: String,
+    /// インストール完了後のフロントリダイレクト先ベース URL
+    #[serde(default = "default_github_app_frontend_base_url")]
+    pub github_app_frontend_base_url: String,
+}
+
+fn default_github_app_frontend_base_url() -> String {
+    "http://localhost:3000".to_string()
 }
 
 fn default_verification_email_worker_concurrency() -> usize {
@@ -50,9 +75,18 @@ pub fn load_settings() -> Result<Settings, anyhow::Error> {
         .add_source(Environment::default())
         .build()?;
 
-    let settings: Settings = settings
+    let mut settings: Settings = settings
         .try_deserialize()
         .map_err(|e| anyhow::anyhow!("failed to deserialize settings: {e}"))?;
+
+    settings.github_app_private_key = settings
+        .github_app_private_key
+        .replace("\\n", "\n");
+
+    if settings.github_app_frontend_base_url.is_empty() {
+        settings.github_app_frontend_base_url =
+            settings.email_verification_app_url.clone();
+    }
 
     settings
         .validate()
@@ -118,9 +152,19 @@ mod tests {
             verification_email_worker_concurrency: 1,
             personal_token_secret: "a".repeat(32),
             bootstrap_admin_email: None,
+            github_app_id: "1".into(),
+            github_app_private_key: test_github_private_key(),
+            github_app_webhook_secret: "webhook-secret".into(),
+            github_app_name: "task-app".into(),
+            github_token_encryption_key: "b".repeat(32),
+            github_app_frontend_base_url: "http://localhost:3000".into(),
         }
         .validate()
         .is_ok()
+    }
+
+    fn test_github_private_key() -> String {
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy0AHB7MbzgZryNTg3nX3W\nnQ4H+Yh6zpt+o0f+4v6mK8b0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n\n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n\n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n\n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n\nAgMBAAECggEABdummy\n-----END RSA PRIVATE KEY-----".into()
     }
 
     #[test]

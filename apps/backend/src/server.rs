@@ -27,7 +27,10 @@ use utoipa_scalar::{Scalar, Servable};
 
 use crate::{
     AppState,
-    jobs::verification_email::{self, MAX_RETRIES, QUEUE_NAME},
+    jobs::{
+        github_webhook::{self, QUEUE_NAME as GITHUB_WEBHOOK_QUEUE},
+        verification_email::{self, MAX_RETRIES, QUEUE_NAME},
+    },
     middlewares::logging::logging_middleware,
 };
 
@@ -84,8 +87,10 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .allow_credentials(true);
 
     let email_storage = state.verification_email_storage.as_ref().clone();
+    let github_webhook_storage = state.github_webhook_storage.as_ref().clone();
     let board_api = ApiBuilder::new(Router::new())
         .register(email_storage)
+        .register(github_webhook_storage)
         .build();
 
     let email_worker_storage = state.verification_email_storage.as_ref().clone();
@@ -101,6 +106,23 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let worker_shutdown = shutdown_rx.clone();
+    let github_worker_storage = state.github_webhook_storage.as_ref().clone();
+    let github_worker_state = state.clone();
+    let github_worker = WorkerBuilder::new(format!("{GITHUB_WEBHOOK_QUEUE}-worker"))
+        .backend(github_worker_storage)
+        .retry(RetryPolicy::retries(github_webhook::MAX_RETRIES))
+        .enable_tracing()
+        .concurrency(github_webhook::worker_concurrency())
+        .data(github_worker_state)
+        .build(github_webhook::process);
+
+    let github_shutdown = shutdown_rx.clone();
+    let github_worker_handle = tokio::spawn(async move {
+        github_worker
+            .run_until(wait_for_shutdown(github_shutdown))
+            .await
+    });
+
     let worker_handle = tokio::spawn(async move {
         email_worker
             .run_until(wait_for_shutdown(worker_shutdown))
@@ -142,6 +164,12 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         Ok(Ok(())) => info!("verification email worker stopped"),
         Ok(Err(e)) => warn!("verification email worker error: {e}"),
         Err(e) => warn!("verification email worker join error: {e}"),
+    }
+
+    match github_worker_handle.await {
+        Ok(Ok(())) => info!("github webhook worker stopped"),
+        Ok(Err(e)) => warn!("github webhook worker error: {e}"),
+        Err(e) => warn!("github webhook worker join error: {e}"),
     }
 
     Ok(())

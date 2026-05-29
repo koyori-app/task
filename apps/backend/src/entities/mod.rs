@@ -1,9 +1,6 @@
 pub mod audit_logs;
-<<<<<<< HEAD
-pub mod oauth_connections;
-=======
 pub mod github_integrations;
->>>>>>> 37e1ceac (feat(github): add github_integrations entity and token utilities)
+pub mod oauth_connections;
 pub mod system_settings;
 pub mod drive_files;
 pub mod drive_folder_shares;
