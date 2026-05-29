@@ -8,16 +8,23 @@ use image::Luma;
 use qrcode::QrCode;
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 use sea_orm::prelude::Uuid;
+use sha2::{Digest, Sha256};
 use totp_rs::{Algorithm, Secret, TOTP};
 
 use crate::utils::auth::{create_personal_token_hash, AuthError};
 
+const AES_KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
 const RECOVERY_CODE_COUNT: usize = 10;
 const RECOVERY_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
+fn derive_totp_aes_key(key: &str) -> [u8; AES_KEY_LEN] {
+    Sha256::digest(key.as_bytes()).into()
+}
+
 pub fn encrypt_totp_secret(plain_secret: &str, key: &str) -> Result<String, AuthError> {
-    let cipher = Aes256Gcm::new_from_slice(key.as_bytes())
+    let aes_key = derive_totp_aes_key(key);
+    let cipher = Aes256Gcm::new_from_slice(&aes_key)
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("aes key: {e}")))?;
     let mut nonce_bytes = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce_bytes);
@@ -39,7 +46,8 @@ pub fn decrypt_totp_secret(secret_enc: &str, key: &str) -> Result<String, AuthEr
         return Err(AuthError::Internal(anyhow::anyhow!("invalid secret_enc")));
     }
     let (nonce_bytes, ciphertext) = data.split_at(NONCE_LEN);
-    let cipher = Aes256Gcm::new_from_slice(key.as_bytes())
+    let aes_key = derive_totp_aes_key(key);
+    let cipher = Aes256Gcm::new_from_slice(&aes_key)
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("aes key: {e}")))?;
     let nonce = Nonce::from_slice(nonce_bytes);
     let plain = cipher
