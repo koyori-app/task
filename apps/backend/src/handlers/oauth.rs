@@ -329,6 +329,13 @@ pub async fn oauth_callback(
         return Err(OAuthError::InvalidState);
     }
 
+    if let Some(link_user_id) = payload.link_user_id {
+        let session_user_id: Option<Uuid> = session.get("user_id");
+        if session_user_id != Some(link_user_id) {
+            return Err(OAuthError::InvalidState);
+        }
+    }
+
     let instance_url = payload.instance_url.as_deref();
     let endpoints = resolve_endpoints(&provider, settings, instance_url, &state.http_client)
         .await
@@ -374,6 +381,7 @@ pub async fn oauth_callback(
     session.set("user_id", user_id);
 
     // フロント基底 URL は email 認証と同一（単一フロント前提）。OAuth 専用 URL は未分離。
+    // email_verification_app_url is the configured frontend base URL (shared with verification emails).
     let frontend_redirect = build_frontend_redirect(
         &state.settings.email_verification_app_url,
         &payload.redirect_after,
@@ -629,6 +637,27 @@ async fn insert_connection(
     provider_info: &ProviderUserInfo,
     token: &TokenResponse,
 ) -> Result<(), OAuthError> {
+    insert_connection_txn(
+        state,
+        &state.db,
+        user_id,
+        provider,
+        instance_url,
+        provider_info,
+        token,
+    )
+    .await
+}
+
+async fn insert_connection_txn(
+    state: &AppState,
+    db: &impl sea_orm::ConnectionTrait,
+    user_id: Uuid,
+    provider: &str,
+    instance_url: Option<&str>,
+    provider_info: &ProviderUserInfo,
+    token: &TokenResponse,
+) -> Result<(), OAuthError> {
     let access_token_enc = encrypt_token(&state.oauth_settings.encryption_key, &token.access_token)
         .map_err(OAuthError::Internal)?;
     let refresh_token_enc = match &token.refresh_token {
@@ -656,7 +685,7 @@ async fn insert_connection(
     };
 
     oauth_connections::Entity::insert(connection)
-        .exec(&state.db)
+        .exec(db)
         .await
         .map_err(|e| {
             if is_postgres_unique_violation(&e) {
