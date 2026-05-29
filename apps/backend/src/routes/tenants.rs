@@ -75,6 +75,10 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::labels::delete_label))
                         .routes(routes!(crate::handlers::labels::export_labels))
                         .routes(routes!(crate::handlers::labels::import_labels)),
+                )
+                .nest(
+                    "/{project_id}/github",
+                    crate::routes::github::tenant_github_routes(),
                 ),
         )
         .nest(

@@ -5,6 +5,7 @@ pub mod admin_tenants;
 pub mod admin_users;
 pub mod oauth;
 pub mod auth;
+pub mod github;
 pub mod drive_files;
 pub mod drive_folders;
 pub mod labels;
