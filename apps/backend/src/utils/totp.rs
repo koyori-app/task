@@ -213,3 +213,27 @@ pub fn recovery_code_matches(stored_hash: &str, candidate_hash: &str) -> bool {
         .ct_eq(candidate_hash.as_bytes())
         .into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_totp_valid_and_invalid_codes() {
+        let secret = generate_totp_secret_base32().expect("secret");
+        let totp = build_totp(&secret, "TaskApp", "user@example.com").expect("totp");
+        let valid = totp.generate_current().expect("current code");
+        assert!(verify_totp_code(&secret, "TaskApp", "user@example.com", &valid).unwrap());
+        assert!(!verify_totp_code(&secret, "TaskApp", "user@example.com", "000000").unwrap());
+    }
+
+    #[test]
+    fn recovery_code_hash_is_constant_time_match() {
+        let plain = generate_recovery_code_plain();
+        let normalized = normalize_recovery_code(&plain);
+        let hash = hash_recovery_code(&normalized, "test-secret-key-32-chars-min!!").unwrap();
+        let again = hash_recovery_code(&normalized, "test-secret-key-32-chars-min!!").unwrap();
+        assert!(recovery_code_matches(&hash, &again));
+        assert!(!recovery_code_matches(&hash, "wrong-hash-value"));
+    }
+}
