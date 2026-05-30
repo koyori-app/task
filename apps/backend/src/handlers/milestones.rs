@@ -9,41 +9,12 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::{milestones, project_members, tasks, tenants};
+use crate::auth_helpers::require_member_or_owner;
+use crate::entities::{milestones, tasks};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::AppState;
-
-async fn is_tenant_owner(
-    state: &AppState,
-    tenant_id: Uuid,
-    user_id: Uuid,
-) -> Result<bool, AppError> {
-    let tenant = tenants::Entity::find_by_id(tenant_id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(tenant.owner_id == user_id)
-}
-
-async fn require_member_or_owner(
-    state: &AppState,
-    tenant_id: Uuid,
-    project_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    if is_tenant_owner(state, tenant_id, user_id).await? {
-        return Ok(());
-    }
-    let is_member = project_members::Entity::find()
-        .filter(project_members::Column::ProjectId.eq(project_id))
-        .filter(project_members::Column::UserId.eq(user_id))
-        .one(&state.db)
-        .await?
-        .is_some();
-    if is_member { Ok(()) } else { Err(AppError::Forbidden) }
-}
 
 #[derive(Validate, Deserialize, ToSchema)]
 pub struct CreateMilestoneRequest {

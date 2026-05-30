@@ -2,7 +2,7 @@ use axum::{Json, extract::{Path, Query, State}, http::StatusCode};
 use axum_valid::Valid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait,
-    DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
+    EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
     TransactionTrait, prelude::Uuid,
 };
 use sea_orm::sea_query::LockType;
