@@ -108,9 +108,11 @@ async function onSubmit(event: SubmitEvent) {
                 v-model="password"
                 type="password"
                 autocomplete="new-password"
+                minlength="8"
+                aria-describedby="password-hint"
                 required
               />
-              <FieldDescription>
+              <FieldDescription id="password-hint">
                 8文字以上で設定してください。
               </FieldDescription>
             </Field>
