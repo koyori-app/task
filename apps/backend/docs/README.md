@@ -5,3 +5,4 @@
 | ドキュメント | 内容 | ステータス |
 |-------------|------|-----------|
 | [personal-access-tokens-authz.md](./personal-access-tokens-authz.md) | PAT 認証・認可（2 層モデル、テナント/プロジェクト束縛） | 未実装 |
+| [redis-trust-boundary.md](./redis-trust-boundary.md) | Redis 信頼境界（セッション・WebAuthn チャレンジ） | 運用ガイド |
