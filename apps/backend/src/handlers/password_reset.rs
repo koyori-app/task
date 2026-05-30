@@ -6,7 +6,10 @@ use axum::{
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
+};
+use sea_orm::sea_query::Expr;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 use validator::Validate;
@@ -20,7 +23,7 @@ use crate::openapi::{
 use crate::utils::auth::{AuthError, DUMMY_PASSWORD_HASH, create_password_hash, verify_password};
 use crate::utils::email::normalize_email;
 use crate::utils::password_reset;
-use crate::{AppState, entities::users};
+use crate::{AppState, entities::{personal_tokens, users}};
 
 type AuthSession = axum_session::Session<SessionRedisPool>;
 
@@ -104,10 +107,11 @@ pub async fn password_reset_verify(
     State(state): State<AppState>,
     Query(query): Query<PasswordResetVerifyQuery>,
 ) -> Result<StatusCode, AuthError> {
-    let exists = password_reset::token_exists(&state.redis_client, &query.token)
+    let valid = password_reset::lookup_token_user_id(&state.redis_client, &query.token)
         .await
-        .map_err(|e| AuthError::Internal(e.into()))?;
-    if exists {
+        .map_err(|e| AuthError::Internal(e.into()))?
+        .is_some();
+    if valid {
         Ok(StatusCode::OK)
     } else {
         Err(AuthError::PasswordResetTokenNotFound)
@@ -128,14 +132,8 @@ pub async fn password_reset_complete(
     if payload.new_password.len() < 8 {
         return Err(AuthError::InvalidNewPassword);
     }
-    if !password_reset::token_exists(&state.redis_client, &payload.token)
-        .await
-        .map_err(|e| AuthError::Internal(e.into()))?
-    {
-        return Err(AuthError::InvalidPasswordResetToken);
-    }
     let password_hash = create_password_hash(&payload.new_password)?;
-    let user_id = password_reset::lookup_token_user_id(&state.redis_client, &payload.token)
+    let user_id = password_reset::consume_token(&state.redis_client, &payload.token)
         .await
         .map_err(|e| AuthError::Internal(e.into()))?
         .ok_or(AuthError::InvalidPasswordResetToken)?;
@@ -147,10 +145,12 @@ pub async fn password_reset_complete(
     active.password_hash = Set(password_hash);
     active.sessions_revoked_at = Set(Some(Utc::now().fixed_offset()));
     active.update(&state.db).await?;
-    // Consume token only after DB update succeeds so a failed update leaves the token valid.
-    let _ = password_reset::consume_token(&state.redis_client, &payload.token)
-        .await
-        .map_err(|e| AuthError::Internal(e.into()))?;
+    personal_tokens::Entity::update_many()
+        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
+        .filter(personal_tokens::Column::UserId.eq(user_id))
+        .filter(personal_tokens::Column::Revoked.eq(false))
+        .exec(&state.db)
+        .await?;
     Ok(Json(MessageResponse {
         message: "パスワードをリセットしました。再度ログインしてください。".into(),
     }))
@@ -187,6 +187,12 @@ pub async fn password_change(
     active.password_hash = Set(password_hash);
     active.sessions_revoked_at = Set(Some(Utc::now().fixed_offset()));
     active.update(&state.db).await?;
+    personal_tokens::Entity::update_many()
+        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
+        .filter(personal_tokens::Column::UserId.eq(auth.user_id))
+        .filter(personal_tokens::Column::Revoked.eq(false))
+        .exec(&state.db)
+        .await?;
     session.remove("user_id");
     session.remove("issued_at_ms");
     Ok(Json(MessageResponse {
