@@ -8,6 +8,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::entities::{audit_logs, users};
+use crate::utils::email::normalize_email;
 
 /// `BOOTSTRAP_ADMIN_EMAIL` 設定時、管理者が 0 人なら対象ユーザーを昇格する。
 pub async fn bootstrap_admin_email(db: &DatabaseConnection, email: &str) -> Result<(), sea_orm::DbErr> {
@@ -21,8 +22,9 @@ pub async fn bootstrap_admin_email(db: &DatabaseConnection, email: &str) -> Resu
         return Ok(());
     }
 
+    let normalized = normalize_email(email);
     let Some(user) = users::Entity::find()
-        .filter(users::Column::Email.eq(email))
+        .filter(users::Column::Email.eq(normalized))
         .one(db)
         .await?
     else {
