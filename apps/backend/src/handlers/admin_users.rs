@@ -149,7 +149,11 @@ async fn reset_2fa_for_user(db: &DatabaseConnection, user_id: Uuid) -> Result<()
     Ok(())
 }
 
-async fn ensure_not_last_admin(db: &DatabaseConnection, target_id: Uuid) -> Result<(), AppError> {
+/// 最後の1人の管理者を削除/降格できないようにするガード。
+pub async fn ensure_not_last_admin(
+    db: &DatabaseConnection,
+    target_id: Uuid,
+) -> Result<(), AppError> {
     let target = users::Entity::find_by_id(target_id)
         .one(db)
         .await?
