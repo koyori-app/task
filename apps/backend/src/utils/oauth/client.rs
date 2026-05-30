@@ -150,11 +150,7 @@ async fn fetch_github_user(
         .json()
         .await?;
 
-    let (email, email_verified) = if user.email.is_some() {
-        (user.email.clone(), Some(true))
-    } else {
-        fetch_github_primary_email(http, access_token).await?
-    };
+    let (email, email_verified) = fetch_github_verified_email(http, access_token).await?;
 
     Ok(ProviderUserInfo {
         provider_user_id: user.id.to_string(),
@@ -165,7 +161,7 @@ async fn fetch_github_user(
     })
 }
 
-async fn fetch_github_primary_email(
+async fn fetch_github_verified_email(
     http: &reqwest::Client,
     access_token: &str,
 ) -> Result<(Option<String>, Option<bool>), anyhow::Error> {
@@ -178,14 +174,58 @@ async fn fetch_github_primary_email(
         .json()
         .await?;
 
-    let primary = emails
-        .iter()
-        .find(|e| e.primary)
-        .or_else(|| emails.first());
+    let verified: Vec<&GitHubEmail> = emails.iter().filter(|e| e.verified).collect();
+    let pick = verified.iter().find(|e| e.primary).copied().or(verified.first().copied());
 
-    Ok(primary
-        .map(|e| (Some(e.email.clone()), Some(e.verified)))
-        .unwrap_or((None, None)))
+    Ok(match pick {
+        Some(e) => (Some(e.email.clone()), Some(true)),
+        None => (None, None),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pick_github_email(emails: &[GitHubEmail]) -> (Option<String>, Option<bool>) {
+        let verified: Vec<&GitHubEmail> = emails.iter().filter(|e| e.verified).collect();
+        let pick = verified.iter().find(|e| e.primary).copied().or(verified.first().copied());
+        match pick {
+            Some(e) => (Some(e.email.clone()), Some(true)),
+            None => (None, None),
+        }
+    }
+
+    #[test]
+    fn github_email_uses_verified_primary_only() {
+        let emails = vec![
+            GitHubEmail {
+                email: "unverified@example.com".into(),
+                primary: true,
+                verified: false,
+            },
+            GitHubEmail {
+                email: "verified@example.com".into(),
+                primary: false,
+                verified: true,
+            },
+        ];
+        let (email, verified) = pick_github_email(&emails);
+        assert_eq!(email.as_deref(), Some("verified@example.com"));
+        assert_eq!(verified, Some(true));
+    }
+
+    #[test]
+    fn github_email_none_when_no_verified() {
+        let emails = vec![GitHubEmail {
+            email: "bad@example.com".into(),
+            primary: true,
+            verified: false,
+        }];
+        let (email, verified) = pick_github_email(&emails);
+        assert!(email.is_none());
+        assert!(verified.is_none());
+    }
 }
 
 async fn fetch_gitlab_user(
