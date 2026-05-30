@@ -9,10 +9,80 @@ use webauthn_rs::prelude::{
 use super::redis::RedisConnection;
 
 pub const CHALLENGE_TTL_SECS: u64 = 5 * 60;
+/// 登録 start〜finish を保護する排他ロック TTL（登録フローは通常 5 秒未満）
+pub const REGISTRATION_LOCK_TTL_SECS: u64 = 30;
 
 const KEY_REG: &str = "webauthn:reg:";
+const KEY_REG_LOCK: &str = "webauthn:reg:lock:";
 const KEY_AUTH: &str = "webauthn:auth:";
 const KEY_AUTH_DISC: &str = "webauthn:auth:disc:";
+
+/// 登録フロー排他ロックを取得する（`SET key 1 NX EX 30`）。成功時のみ `true`。
+pub async fn acquire_registration_lock(
+    redis: &RedisConnection,
+    user_id: Uuid,
+) -> Result<bool, anyhow::Error> {
+    let key = format!("{KEY_REG_LOCK}{user_id}");
+    let mut conn = redis
+        .conn
+        .acquire()
+        .await
+        .map_err(|e| anyhow::anyhow!("redis acquire: {e}"))?;
+
+    let acquired: Option<String> = redis::cmd("SET")
+        .arg(&key)
+        .arg("1")
+        .arg("NX")
+        .arg("EX")
+        .arg(REGISTRATION_LOCK_TTL_SECS)
+        .query_async(&mut conn)
+        .await
+        .map_err(|e| anyhow::anyhow!("redis SET NX: {e}"))?;
+
+    Ok(acquired.is_some())
+}
+
+/// 登録フロー排他ロックを解放する（`DEL`）。存在しなくても成功。
+pub async fn release_registration_lock(
+    redis: &RedisConnection,
+    user_id: Uuid,
+) -> Result<(), anyhow::Error> {
+    let key = format!("{KEY_REG_LOCK}{user_id}");
+    let mut conn = redis
+        .conn
+        .acquire()
+        .await
+        .map_err(|e| anyhow::anyhow!("redis acquire: {e}"))?;
+
+    let _: () = redis::cmd("DEL")
+        .arg(key)
+        .query_async(&mut conn)
+        .await
+        .map_err(|e| anyhow::anyhow!("redis DEL: {e}"))?;
+
+    Ok(())
+}
+
+/// 登録フロー排他ロックが保持されているか（finish 前の検証用）。
+pub async fn registration_lock_held(
+    redis: &RedisConnection,
+    user_id: Uuid,
+) -> Result<bool, anyhow::Error> {
+    let key = format!("{KEY_REG_LOCK}{user_id}");
+    let mut conn = redis
+        .conn
+        .acquire()
+        .await
+        .map_err(|e| anyhow::anyhow!("redis acquire: {e}"))?;
+
+    let exists: bool = redis::cmd("EXISTS")
+        .arg(key)
+        .query_async(&mut conn)
+        .await
+        .map_err(|e| anyhow::anyhow!("redis EXISTS: {e}"))?;
+
+    Ok(exists)
+}
 
 pub async fn store_registration(
     redis: &RedisConnection,
