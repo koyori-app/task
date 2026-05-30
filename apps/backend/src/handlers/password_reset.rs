@@ -161,7 +161,7 @@ pub async fn password_reset_complete(
         return Err(AuthError::InvalidNewPassword);
     }
     let password_hash = create_password_hash(&payload.new_password)?;
-    let user_id = password_reset::consume_token(&state.redis_client, &payload.token)
+    let user_id = password_reset::lookup_token_user_id(&state.redis_client, &payload.token)
         .await
         .map_err(|e| AuthError::Internal(e.into()))?
         .ok_or(AuthError::InvalidPasswordResetToken)?;
@@ -173,6 +173,9 @@ pub async fn password_reset_complete(
     active.password_hash = Set(password_hash);
     active.sessions_revoked_at = Set(Some(Utc::now().fixed_offset()));
     active.update(&state.db).await?;
+    password_reset::consume_token(&state.redis_client, &payload.token)
+        .await
+        .map_err(|e| AuthError::Internal(e.into()))?;
     personal_tokens::Entity::update_many()
         .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
         .filter(personal_tokens::Column::UserId.eq(user_id))
