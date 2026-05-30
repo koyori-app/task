@@ -349,6 +349,10 @@ pub async fn update_user(
     let before_admin = user.is_admin;
     let before_suspended = user.is_suspended;
 
+    if !before_suspended && payload.is_suspended == Some(true) {
+        revoke_user_sessions(&state.db, id).await?;
+    }
+
     let mut active: users::ActiveModel = user.into();
     if let Some(v) = payload.is_admin {
         active.is_admin = Set(v);
