@@ -11,56 +11,14 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
 use crate::entities::{
-    project_members, project_statuses, project_task_counters, task_assignees, task_labels,
-    task_relations, tasks, tenants,
+    project_statuses, project_task_counters, task_assignees, task_labels, task_relations, tasks,
 };
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::AppState;
-
-// ─── ACL helpers ─────────────────────────────────────────────────────────
-
-async fn is_tenant_owner(
-    state: &AppState,
-    tenant_id: Uuid,
-    user_id: Uuid,
-) -> Result<bool, AppError> {
-    let tenant = tenants::Entity::find_by_id(tenant_id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(tenant.owner_id == user_id)
-}
-
-async fn is_project_member(
-    db: &DatabaseConnection,
-    project_id: Uuid,
-    user_id: Uuid,
-) -> Result<bool, AppError> {
-    Ok(project_members::Entity::find()
-        .filter(project_members::Column::ProjectId.eq(project_id))
-        .filter(project_members::Column::UserId.eq(user_id))
-        .one(db)
-        .await?
-        .is_some())
-}
-
-async fn require_member_or_owner(
-    state: &AppState,
-    tenant_id: Uuid,
-    project_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    if is_tenant_owner(state, tenant_id, user_id).await? {
-        return Ok(());
-    }
-    if is_project_member(&state.db, project_id, user_id).await? {
-        return Ok(());
-    }
-    Err(AppError::Forbidden)
-}
 
 // ─── Task lookup (UUID or KEY-N) ─────────────────────────────────────────
 
@@ -195,6 +153,7 @@ pub struct CreateTaskRequest {
     #[schema(value_type = String, format = "uuid")]
     pub status_id: Uuid,
     pub priority: Option<tasks::TaskPriority>,
+    #[validate(range(min = 0, max = 100))]
     pub progress_pct: Option<i16>,
     #[schema(value_type = Option<String>, format = "uuid")]
     pub parent_task_id: Option<Uuid>,
@@ -219,6 +178,7 @@ pub struct UpdateTaskRequest {
     #[schema(value_type = Option<String>, format = "uuid")]
     pub status_id: Option<Uuid>,
     pub priority: Option<tasks::TaskPriority>,
+    #[validate(range(min = 0, max = 100))]
     pub progress_pct: Option<i16>,
     #[schema(value_type = Option<String>, format = "uuid")]
     pub parent_task_id: Option<Uuid>,
@@ -818,6 +778,7 @@ pub async fn list_relations(
     let mut blocks = Vec::new();
     for rel in blocks_rels {
         if let Some(t) = tasks::Entity::find_by_id(rel.blocked_task_id)
+            .filter(tasks::Column::ProjectId.eq(project_id))
             .filter(tasks::Column::DeletedAt.is_null())
             .one(&state.db)
             .await?
@@ -833,6 +794,7 @@ pub async fn list_relations(
     let mut blocked_by = Vec::new();
     for rel in blocked_rels {
         if let Some(t) = tasks::Entity::find_by_id(rel.blocker_task_id)
+            .filter(tasks::Column::ProjectId.eq(project_id))
             .filter(tasks::Column::DeletedAt.is_null())
             .one(&state.db)
             .await?
@@ -878,6 +840,13 @@ pub async fn add_relation(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+    resolve_task(
+        &state,
+        tenant_id,
+        project_id,
+        &payload.target_task_id.to_string(),
+    )
+    .await?;
 
     let (blocker, blocked) = match payload.relation_type.as_str() {
         "blocks" => (task.id, payload.target_task_id),
