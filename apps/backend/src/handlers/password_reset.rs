@@ -22,7 +22,7 @@ use crate::openapi::{
 };
 use crate::utils::auth::{AuthError, DUMMY_PASSWORD_HASH, create_password_hash, verify_password};
 use crate::utils::email::normalize_email;
-use crate::utils::password_reset;
+use crate::utils::{password_reset, password_reset_log};
 use crate::{AppState, entities::{personal_tokens, users}};
 
 type AuthSession = axum_session::Session<SessionRedisPool>;
@@ -38,12 +38,12 @@ pub struct PasswordResetRequestBody {
     pub email: String,
 }
 
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[derive(Deserialize, utoipa::IntoParams)]
 pub struct PasswordResetVerifyQuery {
     pub token: String,
 }
 
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
+#[derive(Validate, Deserialize, utoipa::ToSchema)]
 pub struct PasswordResetCompleteBody {
     #[validate(length(min = 1))]
     pub token: String,
@@ -51,11 +51,37 @@ pub struct PasswordResetCompleteBody {
     pub new_password: String,
 }
 
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
+#[derive(Validate, Deserialize, utoipa::ToSchema)]
 pub struct PasswordChangeBody {
     pub current_password: String,
     #[validate(length(min = 8))]
     pub new_password: String,
+}
+
+impl std::fmt::Debug for PasswordResetVerifyQuery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PasswordResetVerifyQuery")
+            .field("token", &"<redacted>")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for PasswordResetCompleteBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PasswordResetCompleteBody")
+            .field("token", &"<redacted>")
+            .field("new_password", &"<redacted>")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for PasswordChangeBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PasswordChangeBody")
+            .field("current_password", &"<redacted>")
+            .field("new_password", &"<redacted>")
+            .finish()
+    }
 }
 
 #[utoipa::path(
@@ -89,6 +115,8 @@ pub async fn password_reset_request(
         .await
         {
             warn!(user_id = %user.id, error = ?e, "password reset email enqueue failed");
+        } else {
+            password_reset_log::email_queued(user.id);
         }
     }
     Ok(Json(MessageResponse {
@@ -151,6 +179,7 @@ pub async fn password_reset_complete(
         .filter(personal_tokens::Column::Revoked.eq(false))
         .exec(&state.db)
         .await?;
+    password_reset_log::reset_completed(user_id);
     Ok(Json(MessageResponse {
         message: "パスワードをリセットしました。再度ログインしてください。".into(),
     }))
@@ -195,6 +224,7 @@ pub async fn password_change(
         .await?;
     session.remove("user_id");
     session.remove("issued_at_ms");
+    password_reset_log::password_changed(auth.user_id);
     Ok(Json(MessageResponse {
         message: "パスワードを変更しました。再度ログインしてください。".into(),
     }))

@@ -17,3 +17,9 @@ pub mod smtp;
 pub mod system_settings;
 pub mod totp;
 pub mod verification_email_delivery;
+<<<<<<< HEAD
+=======
+pub mod password_reset;
+pub mod password_reset_email_delivery;
+pub mod password_reset_log;
+>>>>>>> 6879ac29 (fix(auth): add password reset security logging and ops docs)

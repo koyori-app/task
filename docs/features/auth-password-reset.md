@@ -253,6 +253,18 @@ https://app.example.com/auth/reset-password?token={token}
 | 旧セッションの悪用 | `sessions_revoked_at` で完了後の全セッションを無効化 |
 | メール爆撃 | `pw_reset:rl:{email}` で 60 秒に 1 回に制限 |
 | OAuth ユーザーへの誤ったパスワード変更 | `password_hash IS NULL` の場合 change エンドポイントは `400` |
+| トークンのログ・キュー漏洩 | リセットトークンは Redis のみ。Apalis payload・構造化ログ・HTTP ログのクエリに載せない（運用: `apps/backend/docs/password-reset-flow.md`） |
+
+### 8.1 観測性（構造化ログ）
+
+成功時のみ `tracing` の `event` フィールドで記録する（値は `user_id` のみ）:
+
+- `auth.password_reset.email_queued`
+- `auth.password_reset.email_sent`
+- `auth.password_reset.completed`
+- `auth.password_change.completed`
+
+enqueue 失敗は `warn!(user_id, error)`。外部 HTTP 応答は列挙防止のため 200 のまま。
 
 ---
 

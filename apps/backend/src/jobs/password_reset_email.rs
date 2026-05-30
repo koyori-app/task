@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::utils::auth::generate_email_verification_token;
-use crate::utils::{password_reset, password_reset_email_delivery};
+use crate::utils::{password_reset, password_reset_email_delivery, password_reset_log};
 use crate::{AppState, settings::Settings};
 
 pub const QUEUE_NAME: &str = "password_reset_email";
@@ -76,6 +76,7 @@ pub async fn process(job: PasswordResetEmailJob, state: Data<AppState>) -> Resul
         &token,
     )
     .await?;
+    password_reset_log::email_sent(job.user_id);
     Ok(())
 }
 
