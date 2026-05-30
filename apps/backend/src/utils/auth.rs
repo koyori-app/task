@@ -60,6 +60,10 @@ pub enum AuthError {
     PasskeyLimitExceeded,
     #[error("cannot remove last authentication method")]
     LastAuthMethod,
+    #[error("possible credential clone detected")]
+    PossibleCredentialClone,
+    #[error("passkey registration already in progress")]
+    RegistrationInProgress,
     #[error("webauthn error")]
     WebAuthn(#[from] webauthn_rs::prelude::WebauthnError),
 }
@@ -182,6 +186,20 @@ impl IntoResponse for AuthError {
                 StatusCode::FORBIDDEN,
                 Json(ServerError {
                     message: "last-auth-method".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::PossibleCredentialClone => (
+                StatusCode::UNAUTHORIZED,
+                Json(ServerError {
+                    message: "possible-credential-clone".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::RegistrationInProgress => (
+                StatusCode::CONFLICT,
+                Json(ServerError {
+                    message: "passkey-registration-in-progress".into(),
                 }),
             )
                 .into_response(),
