@@ -14,7 +14,7 @@ use sea_orm::{
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, warn};
 use validator::Validate;
 
 use crate::entities::{oauth_connections, users};
@@ -32,7 +32,10 @@ use crate::utils::oauth::provider::{
     resolve_endpoints,
 };
 
-use crate::utils::oauth::state::{OAuthStatePayload, build_frontend_redirect, consume_state, store_state};
+use crate::utils::oauth::state::{
+    OAuthStatePayload, build_frontend_oauth_error_redirect, build_frontend_redirect,
+    consume_state, sanitize_redirect_path, store_state,
+};
 
 const OAUTH_PENDING_STATE_KEY: &str = "oauth_pending_state";
 const OAUTH_PENDING_PROVIDER_KEY: &str = "oauth_pending_provider";
@@ -60,6 +63,8 @@ pub enum OAuthError {
     BadRequest,
     #[error("unauthorized")]
     Unauthorized,
+    #[error("security violation")]
+    SecurityViolation,
 }
 
 impl From<sea_orm::DbErr> for OAuthError {
@@ -147,6 +152,16 @@ impl IntoResponse for OAuthError {
                 }),
             )
                 .into_response(),
+            OAuthError::SecurityViolation => {
+                warn!("oauth security validation failed");
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ServerError {
+                        message: "bad-request".into(),
+                    }),
+                )
+                    .into_response()
+            }
         }
     }
 }
@@ -161,8 +176,14 @@ pub struct OAuthStartQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct OAuthCallbackQuery {
-    pub code: String,
-    pub state: String,
+    #[serde(default)]
+    pub code: Option<String>,
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub error_description: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -247,9 +268,14 @@ pub async fn oauth_start(
 
     let pkce = generate_pkce_pair();
     let oauth_state = generate_state();
-    let redirect_after = query
+    let raw_redirect = query
         .redirect_after
-        .unwrap_or_else(|| settings.default_redirect_path.clone());
+        .as_deref()
+        .unwrap_or(settings.default_redirect_path.as_str());
+    let redirect_after = sanitize_redirect_path(raw_redirect).map_err(|e| {
+        warn!("oauth redirect_after rejected: {e}");
+        OAuthError::SecurityViolation
+    })?;
 
     let link_user_id = optional_auth.0.map(|auth| auth.user_id);
 
@@ -310,9 +336,34 @@ pub async fn oauth_callback(
         return Err(OAuthError::ProviderNotConfigured);
     }
 
+    if let Some(error) = &query.error {
+        warn!(
+            oauth_error = %error,
+            error_description = query.error_description.as_deref().unwrap_or(""),
+            provider = %provider,
+            "oauth provider returned authorization error"
+        );
+        session.remove(OAUTH_PENDING_STATE_KEY);
+        session.remove(OAUTH_PENDING_PROVIDER_KEY);
+
+        let frontend_redirect = build_frontend_oauth_error_redirect(
+            &state.settings.email_verification_app_url,
+            &settings.default_redirect_path,
+            settings,
+        )
+        .map_err(|e| {
+            warn!("oauth error redirect build failed: {e}");
+            OAuthError::SecurityViolation
+        })?;
+        return Ok(Redirect::temporary(&frontend_redirect));
+    }
+
+    let code = query.code.ok_or(OAuthError::BadRequest)?;
+    let oauth_state_param = query.state.ok_or(OAuthError::BadRequest)?;
+
     let pending_state: Option<String> = session.get(OAUTH_PENDING_STATE_KEY);
     let pending_provider: Option<String> = session.get(OAUTH_PENDING_PROVIDER_KEY);
-    if pending_state.as_deref() != Some(query.state.as_str())
+    if pending_state.as_deref() != Some(oauth_state_param.as_str())
         || pending_provider.as_deref() != Some(provider.as_str())
     {
         return Err(OAuthError::InvalidState);
@@ -320,7 +371,7 @@ pub async fn oauth_callback(
     session.remove(OAUTH_PENDING_STATE_KEY);
     session.remove(OAUTH_PENDING_PROVIDER_KEY);
 
-    let payload = consume_state(&state.redis_client, &query.state)
+    let payload = consume_state(&state.redis_client, &oauth_state_param)
         .await
         .map_err(OAuthError::Internal)?
         .ok_or(OAuthError::InvalidState)?;
@@ -347,7 +398,7 @@ pub async fn oauth_callback(
         &state.http_client,
         &endpoints,
         &credentials,
-        &query.code,
+        &code,
         &redirect_uri,
         &payload.code_verifier,
     )
@@ -386,7 +437,11 @@ pub async fn oauth_callback(
         &state.settings.email_verification_app_url,
         &payload.redirect_after,
         settings,
-    );
+    )
+    .map_err(|e| {
+        warn!("oauth success redirect build failed: {e}");
+        OAuthError::SecurityViolation
+    })?;
 
     Ok(Redirect::temporary(&frontend_redirect))
 }
