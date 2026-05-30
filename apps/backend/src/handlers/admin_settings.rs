@@ -1,15 +1,19 @@
-use axum::{Json, extract::State};
+use axum::{
+    Json,
+    extract::State,
+    http::HeaderMap,
+};
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
-use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::entities::{audit_logs, system_settings};
+use crate::entities::system_settings;
 use crate::error::AppError;
 use crate::extractors::AdminUser;
+use crate::handlers::admin_audit::record_audit;
 use crate::openapi::SessionAuthErrors;
 use crate::AppState;
 
@@ -87,6 +91,7 @@ pub async fn get_system_settings(
 pub async fn update_system_settings(
     admin: AdminUser,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<UpdateSystemSettingsRequest>,
 ) -> Result<Json<SystemSettingsResponse>, AppError> {
     let before = load_singleton(&state.db).await?;
@@ -140,20 +145,16 @@ pub async fn update_system_settings(
         },
     });
 
-    audit_logs::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        actor_id: Set(Some(admin.user_id)),
-        actor_type: Set("user".to_string()),
-        action: Set("system.settings.update".to_string()),
-        resource_type: Set("system".to_string()),
-        resource_id: Set("settings".to_string()),
-        tenant_id: Set(None),
-        metadata: Set(Some(metadata.into())),
-        ip_address: Set(None),
-        user_agent: Set(None),
-        created_at: Set(Utc::now()),
-    }
-    .insert(&state.db)
+    record_audit(
+        &state.db,
+        admin.user_id,
+        "system.settings.update",
+        "system",
+        "settings",
+        None,
+        Some(metadata),
+        &headers,
+    )
     .await?;
 
     Ok(Json(model_to_response(updated)))
