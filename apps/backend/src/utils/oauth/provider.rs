@@ -1,5 +1,7 @@
 //! OAuth プロバイダー定義と認可 URL 生成。
 
+use std::net::{IpAddr, ToSocketAddrs};
+
 use reqwest::Client;
 use serde::Deserialize;
 use url::Url;
@@ -170,6 +172,59 @@ fn is_localhost_host(host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
+fn is_restricted_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.octets()[0] == 0
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_unique_local()
+                || (v6.segments()[0] & 0xff00) == 0xfe00 // link-local fe80::/10
+        }
+    }
+}
+
+fn validate_resolved_host(host: &str) -> Result<(), anyhow::Error> {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_restricted_ip(ip) && !is_localhost_ip(ip) {
+            anyhow::bail!("instance_url must not target a private or restricted IP address");
+        }
+        return Ok(());
+    }
+
+    let addrs: Vec<IpAddr> = (host, 443)
+        .to_socket_addrs()
+        .map_err(|e| anyhow::anyhow!("instance_url DNS resolution failed: {e}"))?
+        .map(|addr| addr.ip())
+        .collect();
+
+    if addrs.is_empty() {
+        anyhow::bail!("instance_url host could not be resolved");
+    }
+
+    for ip in addrs {
+        if is_restricted_ip(ip) && !is_localhost_ip(ip) {
+            anyhow::bail!("instance_url must not resolve to a private or restricted IP address");
+        }
+    }
+
+    Ok(())
+}
+
+fn is_localhost_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_loopback(),
+        IpAddr::V6(v6) => v6.is_loopback(),
+    }
+}
+
 fn validate_instance_url(raw: &str) -> Result<(), anyhow::Error> {
     let parsed = Url::parse(raw)?;
     let scheme = parsed.scheme();
@@ -182,6 +237,7 @@ fn validate_instance_url(raw: &str) -> Result<(), anyhow::Error> {
     if scheme == "http" && !is_localhost_host(host) {
         anyhow::bail!("instance_url over http is only allowed for localhost");
     }
+    validate_resolved_host(host)?;
     Ok(())
 }
 
@@ -189,4 +245,21 @@ pub fn normalize_instance_url(raw: &str) -> Result<String, anyhow::Error> {
     let trimmed = raw.trim().trim_end_matches('/');
     validate_instance_url(trimmed)?;
     Ok(trimmed.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_private_ip_literal() {
+        assert!(validate_instance_url("https://192.168.1.1").is_err());
+        assert!(validate_instance_url("https://10.0.0.5").is_err());
+    }
+
+    #[test]
+    fn allows_localhost_instance() {
+        assert!(validate_instance_url("http://127.0.0.1:8080").is_ok());
+        assert!(validate_instance_url("http://localhost:8080").is_ok());
+    }
 }
