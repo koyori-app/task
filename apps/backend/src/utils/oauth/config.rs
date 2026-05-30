@@ -35,7 +35,43 @@ impl OAuthSettings {
         let app_base_url = env_var("APP_BASE_URL")
             .unwrap_or_else(|| "http://localhost:3400".to_string());
 
-        let encryption_key = parse_encryption_key(env_var("OAUTH_ENCRYPTION_KEY").as_deref())?;
+        let github = pair_config(
+            env_var("OAUTH_GITHUB_CLIENT_ID"),
+            env_var("OAUTH_GITHUB_CLIENT_SECRET"),
+        );
+        let gitlab = pair_config(
+            env_var("OAUTH_GITLAB_CLIENT_ID"),
+            env_var("OAUTH_GITLAB_CLIENT_SECRET"),
+        );
+        let gitlab_selfhosted = pair_config(
+            env_var("OAUTH_GITLAB_SELFHOSTED_CLIENT_ID"),
+            env_var("OAUTH_GITLAB_SELFHOSTED_CLIENT_SECRET"),
+        );
+        let google = pair_config(
+            env_var("OAUTH_GOOGLE_CLIENT_ID"),
+            env_var("OAUTH_GOOGLE_CLIENT_SECRET"),
+        );
+        let oidc = match (
+            env_var("OAUTH_OIDC_ISSUER_URL"),
+            env_var("OAUTH_OIDC_CLIENT_ID"),
+            env_var("OAUTH_OIDC_CLIENT_SECRET"),
+        ) {
+            (Some(issuer_url), Some(client_id), Some(client_secret)) => Some(OidcConfig {
+                issuer_url: issuer_url.trim_end_matches('/').to_string(),
+                client_id,
+                client_secret,
+            }),
+            _ => None,
+        };
+
+        let has_providers = github.is_some()
+            || gitlab.is_some()
+            || gitlab_selfhosted.is_some()
+            || google.is_some()
+            || oidc.is_some();
+
+        let encryption_key =
+            parse_encryption_key(env_var("OAUTH_ENCRYPTION_KEY").as_deref(), has_providers)?;
 
         let default_redirect_path =
             env_var("OAUTH_DEFAULT_REDIRECT_PATH").unwrap_or_else(|| "/dashboard".to_string());
@@ -44,34 +80,11 @@ impl OAuthSettings {
             app_base_url: app_base_url.trim_end_matches('/').to_string(),
             encryption_key,
             default_redirect_path,
-            github: pair_config(
-                env_var("OAUTH_GITHUB_CLIENT_ID"),
-                env_var("OAUTH_GITHUB_CLIENT_SECRET"),
-            ),
-            gitlab: pair_config(
-                env_var("OAUTH_GITLAB_CLIENT_ID"),
-                env_var("OAUTH_GITLAB_CLIENT_SECRET"),
-            ),
-            gitlab_selfhosted: pair_config(
-                env_var("OAUTH_GITLAB_SELFHOSTED_CLIENT_ID"),
-                env_var("OAUTH_GITLAB_SELFHOSTED_CLIENT_SECRET"),
-            ),
-            google: pair_config(
-                env_var("OAUTH_GOOGLE_CLIENT_ID"),
-                env_var("OAUTH_GOOGLE_CLIENT_SECRET"),
-            ),
-            oidc: match (
-                env_var("OAUTH_OIDC_ISSUER_URL"),
-                env_var("OAUTH_OIDC_CLIENT_ID"),
-                env_var("OAUTH_OIDC_CLIENT_SECRET"),
-            ) {
-                (Some(issuer_url), Some(client_id), Some(client_secret)) => Some(OidcConfig {
-                    issuer_url: issuer_url.trim_end_matches('/').to_string(),
-                    client_id,
-                    client_secret,
-                }),
-                _ => None,
-            },
+            github,
+            gitlab,
+            gitlab_selfhosted,
+            google,
+            oidc,
         })
     }
 
@@ -136,10 +149,15 @@ fn pair_config(
     }
 }
 
-fn parse_encryption_key(raw: Option<&str>) -> Result<[u8; 32], anyhow::Error> {
-    let key_str = raw
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("OAUTH_ENCRYPTION_KEY is required"))?;
+fn parse_encryption_key(raw: Option<&str>, require: bool) -> Result<[u8; 32], anyhow::Error> {
+    let Some(key_str) = raw.filter(|s| !s.is_empty()) else {
+        if require {
+            anyhow::bail!(
+                "OAUTH_ENCRYPTION_KEY is required when at least one OAuth provider is configured"
+            );
+        }
+        return Ok([0u8; 32]);
+    };
 
     if key_str.len() < 32 {
         anyhow::bail!("OAUTH_ENCRYPTION_KEY must be at least 32 characters");
@@ -148,4 +166,20 @@ fn parse_encryption_key(raw: Option<&str>) -> Result<[u8; 32], anyhow::Error> {
     let mut key = [0u8; 32];
     key.copy_from_slice(&key_str.as_bytes()[..32]);
     Ok(key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encryption_key_optional_without_providers() {
+        let key = parse_encryption_key(None, false).unwrap();
+        assert_eq!(key, [0u8; 32]);
+    }
+
+    #[test]
+    fn encryption_key_required_with_providers() {
+        assert!(parse_encryption_key(None, true).is_err());
+    }
 }
