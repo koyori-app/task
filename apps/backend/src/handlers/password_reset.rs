@@ -135,7 +135,7 @@ pub async fn password_reset_complete(
         return Err(AuthError::InvalidPasswordResetToken);
     }
     let password_hash = create_password_hash(&payload.new_password)?;
-    let user_id = password_reset::consume_token(&state.redis_client, &payload.token)
+    let user_id = password_reset::lookup_token_user_id(&state.redis_client, &payload.token)
         .await
         .map_err(|e| AuthError::Internal(e.into()))?
         .ok_or(AuthError::InvalidPasswordResetToken)?;
@@ -147,6 +147,10 @@ pub async fn password_reset_complete(
     active.password_hash = Set(password_hash);
     active.sessions_revoked_at = Set(Some(Utc::now().fixed_offset()));
     active.update(&state.db).await?;
+    // Consume token only after DB update succeeds so a failed update leaves the token valid.
+    let _ = password_reset::consume_token(&state.redis_client, &payload.token)
+        .await
+        .map_err(|e| AuthError::Internal(e.into()))?;
     Ok(Json(MessageResponse {
         message: "パスワードをリセットしました。再度ログインしてください。".into(),
     }))
