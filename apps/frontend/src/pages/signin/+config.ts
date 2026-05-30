@@ -1,1 +1,1 @@
-export default { Layout: false }
+export default {}
