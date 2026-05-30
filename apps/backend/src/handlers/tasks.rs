@@ -2,7 +2,7 @@ use axum::{Json, extract::{Path, Query, State}, http::StatusCode};
 use axum_valid::Valid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait,
-    EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
+    EntityTrait, IsolationLevel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
     TransactionTrait, prelude::Uuid,
 };
 use sea_orm::sea_query::LockType;
@@ -854,7 +854,12 @@ pub async fn add_relation(
         _ => return Err(AppError::BadRequest),
     };
 
-    let txn = state.db.begin().await?;
+    // SERIALIZABLE: prevent concurrent inverse relations from bypassing cycle detection
+    // (READ COMMITTED allows both T1/T2 to pass would_create_cycle before either commits).
+    let txn = state
+        .db
+        .begin_with_config(Some(IsolationLevel::Serializable), None)
+        .await?;
     if would_create_cycle(&txn, project_id, blocker, blocked).await? {
         return Err(AppError::Conflict);
     }
