@@ -7,6 +7,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, JoinType, QueryFilter,
     QuerySelect, RelationTrait, TransactionTrait,
 };
+use sea_orm::sea_query::Expr;
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -79,6 +80,26 @@ pub async fn login_2fa_flags(
     Ok((requires_2fa, requires_2fa_setup))
 }
 
+/// 第一認証（パスワード / OAuth コールバック）成功後のセッション確立。
+/// 2FA 必須時は `half_authed` セッションを返す（OAuth 経路からも呼ぶ）。
+pub async fn establish_login_session(
+    session: &Session<SessionRedisPool>,
+    db: &sea_orm::DatabaseConnection,
+    user: &users::Model,
+) -> Result<Option<Login2faResponse>, AuthError> {
+    session.set("user_id", user.id);
+    let (requires_2fa, requires_2fa_setup) = login_2fa_flags(db, user).await?;
+    if requires_2fa || requires_2fa_setup {
+        session.set("half_authed", true);
+        return Ok(Some(Login2faResponse {
+            requires_2fa,
+            requires_2fa_setup,
+        }));
+    }
+    session.set("half_authed", false);
+    Ok(None)
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct Login2faResponse {
     pub requires_2fa: bool,
@@ -136,20 +157,40 @@ async fn verify_user_totp_or_recovery(
         let normalized = normalize_recovery_code(recovery);
         let candidate_hash =
             hash_recovery_code(&normalized, &state.settings.recovery_code_secret)?;
+
+        let txn = state.db.begin().await?;
         let codes = recovery_codes::Entity::find()
             .filter(recovery_codes::Column::UserId.eq(user_id))
             .filter(recovery_codes::Column::UsedAt.is_null())
-            .all(&state.db)
+            .all(&txn)
             .await?;
+
+        let mut matched_id: Option<Uuid> = None;
         for stored in codes {
             if recovery_code_matches(&stored.code_hash, &candidate_hash) {
-                let mut active: recovery_codes::ActiveModel = stored.into();
-                active.used_at = Set(Some(Utc::now().into()));
-                active.update(&state.db).await?;
+                matched_id = Some(stored.id);
+                break;
+            }
+        }
+
+        if let Some(id) = matched_id {
+            let result = recovery_codes::Entity::update_many()
+                .col_expr(recovery_codes::Column::UsedAt, Expr::value(Some(Utc::now())))
+                .filter(recovery_codes::Column::Id.eq(id))
+                .filter(recovery_codes::Column::UsedAt.is_null())
+                .exec(&txn)
+                .await?;
+
+            if result.rows_affected == 1 {
+                txn.commit().await?;
                 clear_2fa_attempts(&state.redis_client, user_id).await?;
                 return Ok(());
             }
+            txn.rollback().await?;
+            return Err(AuthError::InvalidTwoFactorCode);
         }
+
+        txn.rollback().await?;
         totp::record_2fa_failure(&state.redis_client, user_id).await?;
         return Err(AuthError::InvalidTwoFactorCode);
     }
