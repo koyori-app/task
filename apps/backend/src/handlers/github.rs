@@ -20,6 +20,7 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::jobs::github_webhook::{self, GithubWebhookJob};
 use crate::openapi::CrudErrors;
+use crate::settings::GithubAppSettings;
 use crate::utils::{
     github_api, github_oauth_state::{self, GithubOAuthStatePayload},
     github_token_crypto,
@@ -78,20 +79,35 @@ async fn require_project_in_tenant(
     }
 }
 
-fn install_redirect_url(settings: &crate::settings::Settings, state: &str) -> String {
+fn install_redirect_url(github: &GithubAppSettings, state: &str) -> String {
     format!(
         "https://github.com/apps/{}/installations/new?state={}",
-        settings.github_app_name, state
+        github.github_app_name, state
     )
 }
 
 fn settings_redirect_url(
-    settings: &crate::settings::Settings,
+    github: &GithubAppSettings,
     tenant_id: Uuid,
     project_id: Uuid,
 ) -> String {
-    let base = settings.github_app_frontend_base_url.trim_end_matches('/');
+    let base = github.github_app_frontend_base_url.trim_end_matches('/');
     format!("{base}/tenants/{tenant_id}/projects/{project_id}/settings/github")
+}
+
+/// GitHub Webhook 署名検証（HMAC-SHA256, ConstantTimeEq）。
+pub fn verify_webhook_signature(secret: &str, signature_header: &str, body: &[u8]) -> bool {
+    let Some(hex_digest) = signature_header.strip_prefix("sha256=") else {
+        return false;
+    };
+    let Ok(expected) = hex::decode(hex_digest) else {
+        return false;
+    };
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
+    mac.update(body);
+    let computed = mac.finalize().into_bytes();
+    expected.ct_eq(computed.as_slice()).into()
 }
 
 #[axum::debug_handler]
@@ -114,9 +130,16 @@ pub async fn start_github_install(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Response, AppError> {
+    let github = state.settings.require_github_app()?;
     auth.require_session()?;
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
     require_project_in_tenant(&state, tenant_id, project_id).await?;
+
+    let existing_installation_id = github_integrations::Entity::find()
+        .filter(github_integrations::Column::ProjectId.eq(project_id))
+        .one(&state.db)
+        .await?
+        .map(|row| row.installation_id);
 
     let state_token = github_oauth_state::new_state_token();
     github_oauth_state::store_state(
@@ -126,12 +149,13 @@ pub async fn start_github_install(
             tenant_id,
             project_id,
             user_id: auth.user_id,
+            installation_id: existing_installation_id,
         },
     )
     .await
     .map_err(AppError::Internal)?;
 
-    let location = install_redirect_url(&state.settings, &state_token);
+    let location = install_redirect_url(github, &state_token);
     Ok((
         StatusCode::ACCEPTED,
         [(header::LOCATION, location)],
@@ -157,6 +181,7 @@ pub async fn github_callback(
     auth: AuthUser,
     Query(query): Query<GithubCallbackQuery>,
 ) -> Result<Response, AppError> {
+    let github = state.settings.require_github_app()?;
     auth.require_session()?;
 
     let payload = github_oauth_state::consume_state(&state.redis_client, &query.state)
@@ -168,19 +193,30 @@ pub async fn github_callback(
         return Err(AppError::Forbidden);
     }
 
+    if let Some(expected) = payload.installation_id {
+        if expected != query.installation_id {
+            return Err(AppError::Forbidden);
+        }
+    }
+
     require_tenant_owner(&state, payload.tenant_id, auth.user_id).await?;
     require_project_in_tenant(&state, payload.tenant_id, payload.project_id).await?;
 
-    let access = github_api::fetch_installation_access_token(&state.settings, query.installation_id)
-        .await
-        .map_err(AppError::Internal)?;
+    let access =
+        github_api::fetch_installation_access_token(github, query.installation_id)
+            .await
+            .map_err(AppError::Internal)?;
+    let account_login =
+        github_api::fetch_installation_account_login(github, query.installation_id)
+            .await
+            .map_err(AppError::Internal)?;
     let (repo_owner, repo_name) =
-        github_api::fetch_primary_repository(&state.settings, &access.token)
+        github_api::fetch_primary_repository(&access.token, &account_login)
             .await
             .map_err(AppError::Internal)?;
 
     let token_enc = github_token_crypto::encrypt_token(
-        &state.settings.github_token_encryption_key,
+        &github.github_token_encryption_key,
         &access.token,
     )
     .map_err(AppError::Internal)?;
@@ -216,23 +252,8 @@ pub async fn github_callback(
         .await?;
     }
 
-    let redirect_to =
-        settings_redirect_url(&state.settings, payload.tenant_id, payload.project_id);
+    let redirect_to = settings_redirect_url(github, payload.tenant_id, payload.project_id);
     Ok(Redirect::temporary(&redirect_to).into_response())
-}
-
-fn verify_webhook_signature(secret: &str, signature_header: &str, body: &[u8]) -> bool {
-    let Some(hex_digest) = signature_header.strip_prefix("sha256=") else {
-        return false;
-    };
-    let Ok(expected) = hex::decode(hex_digest) else {
-        return false;
-    };
-    let mut mac =
-        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
-    mac.update(body);
-    let computed = mac.finalize().into_bytes();
-    expected.ct_eq(computed.as_slice()).into()
 }
 
 #[axum::debug_handler]
@@ -251,12 +272,13 @@ pub async fn github_webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<StatusCode, AppError> {
+    let github = state.settings.require_github_app()?;
     let signature = headers
         .get("X-Hub-Signature-256")
         .and_then(|v| v.to_str().ok())
         .ok_or(AppError::Forbidden)?;
     if !verify_webhook_signature(
-        &state.settings.github_app_webhook_secret,
+        &github.github_app_webhook_secret,
         signature,
         &body,
     ) {
@@ -323,6 +345,7 @@ pub async fn get_github_integration(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<GithubIntegrationResponse>, AppError> {
+    state.settings.require_github_app()?;
     auth.require_session()?;
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
     require_project_in_tenant(&state, tenant_id, project_id).await?;
@@ -365,6 +388,7 @@ pub async fn delete_github_integration(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
+    let github = state.settings.require_github_app()?;
     auth.require_session()?;
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
     require_project_in_tenant(&state, tenant_id, project_id).await?;
@@ -375,6 +399,9 @@ pub async fn delete_github_integration(
         .await?;
 
     if let Some(row) = integration {
+        github_api::delete_app_installation(github, row.installation_id)
+            .await
+            .map_err(AppError::Internal)?;
         let active: github_integrations::ActiveModel = row.into();
         active.delete(&state.db).await?;
     }
