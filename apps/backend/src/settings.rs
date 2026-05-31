@@ -2,6 +2,26 @@ use config::{Config, Environment};
 use serde::Deserialize;
 use validator::Validate;
 
+/// GitHub App 連携に必要な設定（`GITHUB_APP_ID` 等が揃っているときのみ有効）。
+#[derive(Clone, Deserialize, Validate)]
+pub struct GithubAppSettings {
+    #[validate(length(min = 1, message = "github_app_id is required"))]
+    pub github_app_id: String,
+    #[validate(length(min = 1, message = "github_app_private_key is required"))]
+    pub github_app_private_key: String,
+    #[validate(length(min = 1, message = "github_app_webhook_secret is required"))]
+    pub github_app_webhook_secret: String,
+    #[validate(length(min = 1, message = "github_app_name is required"))]
+    pub github_app_name: String,
+    #[validate(length(
+        min = 32,
+        message = "github_token_encryption_key must be at least 32 characters"
+    ))]
+    pub github_token_encryption_key: String,
+    #[serde(default = "default_github_app_frontend_base_url")]
+    pub github_app_frontend_base_url: String,
+}
+
 #[derive(Clone, Deserialize, Validate)]
 pub struct Settings {
     pub database_url: String,
@@ -14,47 +34,37 @@ pub struct Settings {
     pub smtp_username: String,
     pub smtp_password: String,
     pub smtp_from: String,
-    /// 認証メールに載せるリンクのベース URL（必須。例: `https://app.example.com`）。
-    /// 末尾に `/verify-email?token=…` を付与する。未設定・不正な値では起動しない。
     #[validate(length(min = 1, message = "email_verification_app_url is required"))]
     #[validate(custom(
         function = "validate_email_verification_app_url",
         message = "email_verification_app_url must be a valid http or https base URL"
     ))]
     pub email_verification_app_url: String,
-    /// 認証メール Apalis ワーカーの並列度
     #[validate(range(
         min = 1,
         message = "verification_email_worker_concurrency must be >= 1"
     ))]
     #[serde(default = "default_verification_email_worker_concurrency")]
     pub verification_email_worker_concurrency: usize,
-    /// PAT の HMAC-SHA256 署名に使う秘密鍵。起動時に必須。32バイト以上（256ビット）が必要。
     #[validate(length(min = 32, message = "PERSONAL_TOKEN_SECRET must be at least 32 characters"))]
     pub personal_token_secret: String,
     /// 起動時に管理者昇格するユーザーのメールアドレス（管理者ゼロ時のみ有効）。
     pub bootstrap_admin_email: Option<String>,
-    /// GitHub App ID（数字文字列）
-    #[validate(length(min = 1, message = "github_app_id is required"))]
-    pub github_app_id: String,
-    /// GitHub App 秘密鍵（PEM）。環境変数では `\n` をリテラル改行に変換して読み込む。
-    #[validate(length(min = 1, message = "github_app_private_key is required"))]
-    pub github_app_private_key: String,
-    /// GitHub Webhook 署名検証用シークレット
-    #[validate(length(min = 1, message = "github_app_webhook_secret is required"))]
-    pub github_app_webhook_secret: String,
-    /// GitHub App スラッグ（install URL 用）
-    #[validate(length(min = 1, message = "github_app_name is required"))]
-    pub github_app_name: String,
-    /// Installation Access Token 暗号化キー（32 バイト以上）
-    #[validate(length(
-        min = 32,
-        message = "github_token_encryption_key must be at least 32 characters"
-    ))]
-    pub github_token_encryption_key: String,
-    /// インストール完了後のフロントリダイレクト先ベース URL
-    #[serde(default = "default_github_app_frontend_base_url")]
-    pub github_app_frontend_base_url: String,
+    /// GitHub App 連携。`GITHUB_APP_ID` 未設定時は `None`（他機能は起動可能）。
+    #[serde(default, skip_deserializing)]
+    pub github_app: Option<GithubAppSettings>,
+}
+
+impl Settings {
+    pub fn github_app_enabled(&self) -> bool {
+        self.github_app.is_some()
+    }
+
+    pub fn require_github_app(&self) -> Result<&GithubAppSettings, crate::error::AppError> {
+        self.github_app
+            .as_ref()
+            .ok_or(crate::error::AppError::BadRequest)
+    }
 }
 
 fn default_github_app_frontend_base_url() -> String {
@@ -69,24 +79,54 @@ fn default_allow_origin() -> String {
     "http://localhost:3000".to_string()
 }
 
+fn github_app_enabled_from_env() -> bool {
+    std::env::var("GITHUB_APP_ID")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+}
+
+/// 環境変数から GitHub App 設定を読み込む（未設定時は `None`）。
+fn load_github_app_settings(
+    config: &Config,
+) -> Result<Option<GithubAppSettings>, anyhow::Error> {
+    if !github_app_enabled_from_env() {
+        return Ok(None);
+    }
+
+    let mut gh: GithubAppSettings = config
+        .clone()
+        .try_deserialize()
+        .map_err(|e| anyhow::anyhow!("failed to deserialize github app settings: {e}"))?;
+
+    gh.github_app_private_key = gh.github_app_private_key.replace("\\n", "\n");
+
+    if gh.github_app_frontend_base_url.is_empty() {
+        let base: Settings = config
+            .clone()
+            .try_deserialize()
+            .map_err(|e| anyhow::anyhow!("failed to read base settings for github redirect: {e}"))?;
+        gh.github_app_frontend_base_url = base.email_verification_app_url.clone();
+    }
+
+    gh.validate()
+        .map_err(|e| anyhow::anyhow!("invalid github app settings: {e}"))?;
+
+    Ok(Some(gh))
+}
+
 pub fn load_settings() -> Result<Settings, anyhow::Error> {
     dotenvy::dotenv().ok();
-    let settings = Config::builder()
+    let config = Config::builder()
         .add_source(Environment::default())
         .build()?;
 
-    let mut settings: Settings = settings
+    let github_app = load_github_app_settings(&config)?;
+
+    let mut settings: Settings = config
         .try_deserialize()
         .map_err(|e| anyhow::anyhow!("failed to deserialize settings: {e}"))?;
 
-    settings.github_app_private_key = settings
-        .github_app_private_key
-        .replace("\\n", "\n");
-
-    if settings.github_app_frontend_base_url.is_empty() {
-        settings.github_app_frontend_base_url =
-            settings.email_verification_app_url.clone();
-    }
+    settings.github_app = github_app;
 
     settings
         .validate()
@@ -102,7 +142,6 @@ fn validate_email_verification_app_url(raw: &str) -> Result<(), validator::Valid
         return Err(validator::ValidationError::new("required"));
     }
 
-    // `http:/localhost` は url クレートではパースできるがベース URL として不正
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err(validator::ValidationError::new("http_or_https"));
     }
@@ -121,7 +160,6 @@ fn validate_email_verification_app_url(raw: &str) -> Result<(), validator::Valid
         return Err(validator::ValidationError::new("host"));
     }
 
-    // scheme 直後は `//` 必須（`http:/foo` を弾く）
     let after_scheme = url
         .strip_prefix(parsed.scheme())
         .and_then(|s| s.strip_prefix(':'))
@@ -137,7 +175,7 @@ fn validate_email_verification_app_url(raw: &str) -> Result<(), validator::Valid
 mod tests {
     use super::*;
 
-    fn check(url: &str) -> bool {
+    fn base_settings(email_url: &str) -> Settings {
         Settings {
             database_url: String::new(),
             redis_url: String::new(),
@@ -148,10 +186,16 @@ mod tests {
             smtp_username: String::new(),
             smtp_password: String::new(),
             smtp_from: String::new(),
-            email_verification_app_url: url.to_string(),
+            email_verification_app_url: email_url.to_string(),
             verification_email_worker_concurrency: 1,
             personal_token_secret: "a".repeat(32),
             bootstrap_admin_email: None,
+            github_app: Some(test_github_app_settings()),
+        }
+    }
+
+    fn test_github_app_settings() -> GithubAppSettings {
+        GithubAppSettings {
             github_app_id: "1".into(),
             github_app_private_key: test_github_private_key(),
             github_app_webhook_secret: "webhook-secret".into(),
@@ -159,8 +203,10 @@ mod tests {
             github_token_encryption_key: "b".repeat(32),
             github_app_frontend_base_url: "http://localhost:3000".into(),
         }
-        .validate()
-        .is_ok()
+    }
+
+    fn check(url: &str) -> bool {
+        base_settings(url).validate().is_ok()
     }
 
     fn test_github_private_key() -> String {
