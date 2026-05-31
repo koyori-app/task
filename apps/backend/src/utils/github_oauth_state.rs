@@ -17,6 +17,9 @@ pub struct GithubOAuthStatePayload {
     pub tenant_id: Uuid,
     pub project_id: Uuid,
     pub user_id: Uuid,
+    /// 再連携時は既存 installation を束縛。新規インストール時は `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installation_id: Option<i64>,
 }
 
 pub fn new_state_token() -> String {
