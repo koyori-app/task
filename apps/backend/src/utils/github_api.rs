@@ -5,7 +5,7 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 
-use crate::settings::Settings;
+use crate::settings::GithubAppSettings;
 
 #[derive(Debug, Serialize)]
 struct AppJwtClaims {
@@ -21,8 +21,14 @@ struct InstallationTokenResponse {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct RepositoryOwner {
+    pub login: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct InstallationRepository {
     pub full_name: String,
+    pub owner: RepositoryOwner,
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,12 +36,17 @@ struct InstallationRepositoriesResponse {
     repositories: Vec<InstallationRepository>,
 }
 
+#[derive(Debug, Deserialize)]
+struct InstallationAccountResponse {
+    account: RepositoryOwner,
+}
+
 pub struct InstallationAccessToken {
     pub token: String,
     pub expires_at: chrono::DateTime<chrono::FixedOffset>,
 }
 
-pub fn create_app_jwt(settings: &Settings) -> Result<String, anyhow::Error> {
+pub fn create_app_jwt(settings: &GithubAppSettings) -> Result<String, anyhow::Error> {
     let now = Utc::now();
     let claims = AppJwtClaims {
         iss: settings.github_app_id.clone(),
@@ -53,7 +64,7 @@ pub fn create_app_jwt(settings: &Settings) -> Result<String, anyhow::Error> {
 }
 
 pub async fn fetch_installation_access_token(
-    settings: &Settings,
+    settings: &GithubAppSettings,
     installation_id: i64,
 ) -> Result<InstallationAccessToken, anyhow::Error> {
     let jwt = create_app_jwt(settings)?;
@@ -88,9 +99,47 @@ pub async fn fetch_installation_access_token(
     })
 }
 
+pub async fn fetch_installation_account_login(
+    settings: &GithubAppSettings,
+    installation_id: i64,
+) -> Result<String, anyhow::Error> {
+    let jwt = create_app_jwt(settings)?;
+    let url = format!("https://api.github.com/app/installations/{installation_id}");
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {jwt}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "task-backend")
+        .send()
+        .await
+        .context("github get installation")?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(anyhow!("github get installation failed: {status} {body}"));
+    }
+    let body: InstallationAccountResponse = response
+        .json()
+        .await
+        .context("parse installation response")?;
+    Ok(body.account.login)
+}
+
+/// インストール先リポジトリを選定する（テスト可能な純関数）。
+pub fn select_primary_repository<'a>(
+    repositories: &'a [InstallationRepository],
+    preferred_owner: &str,
+) -> Option<&'a InstallationRepository> {
+    repositories
+        .iter()
+        .find(|r| r.owner.login == preferred_owner)
+        .or_else(|| repositories.first())
+}
+
 pub async fn fetch_primary_repository(
-    _settings: &Settings,
     installation_access_token: &str,
+    preferred_owner: &str,
 ) -> Result<(String, String), anyhow::Error> {
     let client = reqwest::Client::new();
     let response = client
@@ -115,10 +164,9 @@ pub async fn fetch_primary_repository(
         .json()
         .await
         .context("parse installation repositories")?;
-    let repo = body
-        .repositories
-        .first()
-        .ok_or_else(|| anyhow!("no repositories accessible for installation"))?;
+    let repo = select_primary_repository(&body.repositories, preferred_owner).ok_or_else(|| {
+        anyhow!("no repositories accessible for installation")
+    })?;
     let (owner, name) = repo
         .full_name
         .split_once('/')
@@ -126,8 +174,35 @@ pub async fn fetch_primary_repository(
     Ok((owner.to_string(), name.to_string()))
 }
 
+pub async fn delete_app_installation(
+    settings: &GithubAppSettings,
+    installation_id: i64,
+) -> Result<(), anyhow::Error> {
+    let jwt = create_app_jwt(settings)?;
+    let url = format!("https://api.github.com/app/installations/{installation_id}");
+    let client = reqwest::Client::new();
+    let response = client
+        .delete(&url)
+        .header("Authorization", format!("Bearer {jwt}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "task-backend")
+        .send()
+        .await
+        .context("github delete installation")?;
+    if !response.status().is_success() && response.status() != reqwest::StatusCode::NOT_FOUND {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(anyhow!(
+            "github delete installation failed: {status} {body}"
+        ));
+    }
+    Ok(())
+}
+
+/// Wave 1 で Installation Access Token の自動更新に使用予定。
+#[allow(dead_code)]
 pub async fn refresh_token_if_needed(
-    settings: &Settings,
+    settings: &GithubAppSettings,
     installation_id: i64,
     token_expires_at: chrono::DateTime<chrono::FixedOffset>,
     access_token_enc: &str,
@@ -145,4 +220,36 @@ pub async fn refresh_token_if_needed(
     }
     let fresh = fetch_installation_access_token(settings, installation_id).await?;
     Ok((fresh.token, fresh.expires_at))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn repo(full_name: &str, owner: &str) -> InstallationRepository {
+        InstallationRepository {
+            full_name: full_name.to_string(),
+            owner: RepositoryOwner {
+                login: owner.to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn select_primary_repository_prefers_installation_account_owner() {
+        let repos = vec![
+            repo("other-org/app", "other-org"),
+            repo("myorg/backend", "myorg"),
+            repo("myorg/frontend", "myorg"),
+        ];
+        let chosen = select_primary_repository(&repos, "myorg").unwrap();
+        assert_eq!(chosen.full_name, "myorg/backend");
+    }
+
+    #[test]
+    fn select_primary_repository_falls_back_to_first() {
+        let repos = vec![repo("other-org/app", "other-org")];
+        let chosen = select_primary_repository(&repos, "myorg").unwrap();
+        assert_eq!(chosen.full_name, "other-org/app");
+    }
 }
