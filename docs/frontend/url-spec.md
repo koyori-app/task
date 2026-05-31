@@ -2,6 +2,7 @@
 
 > ステータス: **Draft**
 > 作成日: 2026-05-31
+> Vike route parameter naming: **camelCase**（例: `@folderId`, `@projectKey`, `@taskId`）
 
 ---
 
@@ -69,7 +70,7 @@
 
 ## 3. Vike ページディレクトリ構造
 
-```
+```plaintext
 apps/frontend/src/pages/
 ├── +Layout.vue                          # ルートレイアウト（認証チェック）
 ├── index/+Page.vue                      # / → /{tenant} へリダイレクト or ランディング
@@ -121,7 +122,41 @@ apps/frontend/src/pages/
 
 ---
 
-## 5. 移行メモ
+## 5. URL ↔ Vike ページファイル 対応表
+
+> **レビュー時チェックリスト**: 新しい URL を追加・変更する際は、この表を同時に更新すること。
+> URL パターンとページファイルパスが常に 1:1 対応していることを PR レビューで確認する。
+
+| URL パターン | Vike ページファイル |
+|-------------|-------------------|
+| `/` | `index/+Page.vue` |
+| `/signin` | `signin/+Page.vue` |
+| `/signup` | `signup/+Page.vue` |
+| `/forgot-password` | `forgot-password/+Page.vue` |
+| `/reset-password` | `reset-password/+Page.vue` |
+| `/{tenant}` | `@tenant/+Page.vue` |
+| `/{tenant}/settings` | `@tenant/settings/+Page.vue` |
+| `/{tenant}/members` | `@tenant/members/+Page.vue` |
+| `/{tenant}/drive` | `@tenant/drive/+Page.vue` |
+| `/{tenant}/drive/{folder_id}` | `@tenant/drive/@folderId/+Page.vue` |
+| `/{tenant}/projects` | `@tenant/projects/+Page.vue` |
+| `/{tenant}/projects/{key}` | `@tenant/projects/@projectKey/+Page.vue` |
+| `/{tenant}/projects/{key}/tasks` | `@tenant/projects/@projectKey/tasks/+Page.vue` |
+| `/{tenant}/projects/{key}/tasks/{KEY-N}` | `@tenant/projects/@projectKey/tasks/@taskId/+Page.vue` |
+| `/{tenant}/projects/{key}/milestones` | `@tenant/projects/@projectKey/milestones/+Page.vue` |
+| `/{tenant}/projects/{key}/labels` | `@tenant/projects/@projectKey/labels/+Page.vue` |
+| `/{tenant}/projects/{key}/members` | `@tenant/projects/@projectKey/members/+Page.vue` |
+| `/{tenant}/projects/{key}/settings` | `@tenant/projects/@projectKey/settings/+Page.vue` |
+| `/admin` | `admin/+Page.vue` |
+| `/admin/users` | `admin/users/+Page.vue` |
+| `/admin/tenants` | `admin/tenants/+Page.vue` |
+| `/admin/audit-logs` | `admin/audit-logs/+Page.vue` |
+
+> すべてのパスは `apps/frontend/src/pages/` 配下の相対パス。
+
+---
+
+## 6. 移行メモ
 
 現在存在する仮ページ（`/labels`、`/tasks`）はこの仕様のプロジェクトスコープパスへ移行する。
 
