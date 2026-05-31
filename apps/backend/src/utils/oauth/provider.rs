@@ -110,6 +110,7 @@ pub async fn resolve_endpoints(
                 .ok_or_else(|| anyhow::anyhow!("oidc provider not configured"))?
                 .issuer_url
                 .clone();
+            validate_instance_url(&issuer)?;
             fetch_oidc_discovery(http, &issuer).await
         }
         other => anyhow::bail!("unsupported oauth provider: {other}"),

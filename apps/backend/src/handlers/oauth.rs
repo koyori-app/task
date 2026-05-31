@@ -346,9 +346,20 @@ pub async fn oauth_callback(
         session.remove(OAUTH_PENDING_STATE_KEY);
         session.remove(OAUTH_PENDING_PROVIDER_KEY);
 
+        let redirect_after = if let Some(state_param) = &query.state {
+            consume_state(&state.redis_client, state_param)
+                .await
+                .ok()
+                .flatten()
+                .map(|p| p.redirect_after)
+                .unwrap_or_else(|| settings.default_redirect_path.clone())
+        } else {
+            settings.default_redirect_path.clone()
+        };
+
         let frontend_redirect = build_frontend_oauth_error_redirect(
             &state.settings.email_verification_app_url,
-            &settings.default_redirect_path,
+            &redirect_after,
             settings,
         )
         .map_err(|e| {
@@ -504,6 +515,10 @@ pub async fn disconnect_connection(
 
     let db_provider = resolve_disconnect_provider(&state.oauth_settings, &provider)?;
 
+    if db_provider == "gitlab_selfhosted" && query.instance_url.is_none() {
+        return Err(OAuthError::BadRequest);
+    }
+
     let mut filter = oauth_connections::Entity::find()
         .filter(oauth_connections::Column::UserId.eq(auth.user_id))
         .filter(oauth_connections::Column::Provider.eq(&db_provider));
@@ -596,6 +611,11 @@ async fn resolve_user_and_connection(
     .await?;
 
     if let Some(conn) = existing {
+        if let Some(expected_user_id) = link_user_id {
+            if conn.user_id != expected_user_id {
+                return Err(OAuthError::ConnectionExists);
+            }
+        }
         let user_id = conn.user_id;
         update_connection_tokens(state, conn, token).await?;
         return Ok(user_id);
