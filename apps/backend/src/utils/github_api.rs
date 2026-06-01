@@ -7,6 +7,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::settings::GithubAppSettings;
 
+fn github_api_base() -> String {
+    std::env::var("GITHUB_API_BASE_URL")
+        .unwrap_or_else(|_| "https://api.github.com".to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
 #[derive(Debug, Serialize)]
 struct AppJwtClaims {
     iss: String,
@@ -69,7 +76,8 @@ pub async fn fetch_installation_access_token(
 ) -> Result<InstallationAccessToken, anyhow::Error> {
     let jwt = create_app_jwt(settings)?;
     let url = format!(
-        "https://api.github.com/app/installations/{installation_id}/access_tokens"
+        "{}/app/installations/{installation_id}/access_tokens",
+        github_api_base()
     );
     let client = reqwest::Client::new();
     let response = client
@@ -104,7 +112,7 @@ pub async fn fetch_installation_account_login(
     installation_id: i64,
 ) -> Result<String, anyhow::Error> {
     let jwt = create_app_jwt(settings)?;
-    let url = format!("https://api.github.com/app/installations/{installation_id}");
+    let url = format!("{}/app/installations/{installation_id}", github_api_base());
     let client = reqwest::Client::new();
     let response = client
         .get(&url)
@@ -143,7 +151,7 @@ pub async fn fetch_primary_repository(
 ) -> Result<(String, String), anyhow::Error> {
     let client = reqwest::Client::new();
     let response = client
-        .get("https://api.github.com/installation/repositories")
+        .get(format!("{}/installation/repositories", github_api_base()))
         .header(
             "Authorization",
             format!("Bearer {installation_access_token}"),
@@ -179,7 +187,7 @@ pub async fn delete_app_installation(
     installation_id: i64,
 ) -> Result<(), anyhow::Error> {
     let jwt = create_app_jwt(settings)?;
-    let url = format!("https://api.github.com/app/installations/{installation_id}");
+    let url = format!("{}/app/installations/{installation_id}", github_api_base());
     let client = reqwest::Client::new();
     let response = client
         .delete(&url)

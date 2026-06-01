@@ -195,7 +195,7 @@ pub async fn github_callback(
 
     if let Some(expected) = payload.installation_id {
         if expected != query.installation_id {
-            return Err(AppError::Forbidden);
+            return Err(AppError::BadRequest);
         }
     }
 
@@ -398,13 +398,15 @@ pub async fn delete_github_integration(
         .one(&state.db)
         .await?;
 
-    if let Some(row) = integration {
-        github_api::delete_app_installation(github, row.installation_id)
-            .await
-            .map_err(AppError::Internal)?;
-        let active: github_integrations::ActiveModel = row.into();
-        active.delete(&state.db).await?;
-    }
+    let Some(row) = integration else {
+        return Err(AppError::NotFound);
+    };
+
+    github_api::delete_app_installation(github, row.installation_id)
+        .await
+        .map_err(AppError::Internal)?;
+    let active: github_integrations::ActiveModel = row.into();
+    active.delete(&state.db).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }

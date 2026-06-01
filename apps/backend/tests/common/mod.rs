@@ -1,6 +1,7 @@
-//! HTTP 統合テスト用の Axum アプリ構築ヘルパー。
+//! HTTP 統合テスト用の Axum アプリ構築ヘルパー（admin / GitHub App 共通）。
 
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::{
@@ -14,11 +15,10 @@ use axum::{
 };
 use axum_session::{SameSite, SessionConfig, SessionLayer, SessionMode, SessionStore};
 use axum_session_redispool::SessionRedisPool;
-use cookie::Key;
 use backend::{
     AppState,
-    entities::{oauth_connections, users},
-    jobs::{setup_pool, setup_verification_email_storage},
+    entities::{oauth_connections, projects, tenants, users},
+    jobs::{setup_github_webhook_storage, setup_pool, setup_verification_email_storage},
     routes,
     settings,
     utils::{
@@ -31,6 +31,7 @@ use backend::{
         storage::setup_storage,
     },
 };
+use cookie::Key;
 use http_body_util::BodyExt;
 use reqwest::{redirect::Policy, Client, Response};
 use sea_orm::{
@@ -68,6 +69,30 @@ pub fn is_redirect(status: StatusCode) -> bool {
 pub const TEST_OAUTH_CLIENT_ID: &str = "test-gitlab-selfhosted-client";
 pub const TEST_OAUTH_CLIENT_SECRET: &str = "test-gitlab-selfhosted-secret";
 pub const TEST_OAUTH_ENCRYPTION_KEY: &str = "01234567890123456789012345678901";
+
+fn load_dotenv() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let _ = dotenvy::dotenv().ok();
+    let _ = dotenvy::from_path(manifest.join(".env")).ok();
+    let _ = dotenvy::from_path("/home/coder/task/apps/backend/.env").ok();
+}
+
+/// GitHub App HTTP 統合テスト用: 必須の GitHub 環境変数を設定する。
+pub fn load_github_test_env() {
+    load_dotenv();
+    // SAFETY: test process is single-threaded before Tokio workers spawn.
+    unsafe {
+        std::env::set_var("GITHUB_APP_ID", "1");
+        std::env::set_var("GITHUB_APP_WEBHOOK_SECRET", "webhook-secret");
+        std::env::set_var("GITHUB_APP_NAME", "task-app");
+        std::env::set_var(
+            "GITHUB_TOKEN_ENCRYPTION_KEY",
+            "01234567890123456789012345678901",
+        );
+        let pem = include_str!("../fixtures/github_test_rsa.pem").replace('\n', "\\n");
+        std::env::set_var("GITHUB_APP_PRIVATE_KEY", pem);
+    }
+}
 
 fn test_session_config() -> SessionConfig {
     SessionConfig::default()
@@ -217,12 +242,32 @@ pub struct TestUser {
     pub password: String,
 }
 
+pub struct TestTenantProject {
+    pub tenant_id: Uuid,
+    pub project_id: Uuid,
+}
+
 impl TestApp {
     pub async fn new() -> Self {
         init_tracing();
-        dotenvy::dotenv().ok();
+        load_dotenv();
         let mut settings = settings::load_settings().expect("load settings from .env");
         settings.email_verification_app_url = "http://localhost:3000".to_string();
+        Self::build(settings).await
+    }
+
+    pub async fn new_with_github() -> Self {
+        init_tracing();
+        load_github_test_env();
+        let settings = settings::load_settings().expect("load settings");
+        assert!(
+            settings.github_app.is_some(),
+            "GITHUB_APP_ID must enable github_app in tests"
+        );
+        Self::build(settings).await
+    }
+
+    async fn build(settings: settings::Settings) -> Self {
         let db = sea_orm::Database::connect(&settings.database_url)
             .await
             .expect("connect database");
@@ -246,6 +291,9 @@ impl TestApp {
             setup_verification_email_storage(&pg_pool, &settings)
                 .await
                 .expect("verification email storage");
+        let github_webhook_storage = setup_github_webhook_storage(&pg_pool, &settings)
+            .await
+            .expect("github webhook storage");
         let storage = setup_storage().await.expect("storage backend");
         let http_client = create_http_client().expect("http client");
 
@@ -286,6 +334,7 @@ impl TestApp {
             redis_client,
             smtp_client,
             verification_email_storage,
+            github_webhook_storage,
             storage,
             drive_config: DriveConfig::from_env(),
             oauth_settings,
@@ -388,6 +437,42 @@ impl TestApp {
             id,
             email,
             password,
+        }
+    }
+
+    pub async fn insert_tenant_project(&self, owner_id: Uuid) -> TestTenantProject {
+        let tenant_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let suffix = &tenant_id.to_string()[..8];
+
+        tenants::ActiveModel {
+            id: Set(tenant_id),
+            display_id: Set(format!("gh-{suffix}")),
+            name: Set(format!("GitHub Test {suffix}")),
+            description: Set(String::new()),
+            icon_url: Set(String::new()),
+            owner_id: Set(owner_id),
+            drive_quota_bytes: Set(None),
+        }
+        .insert(&self.state.db)
+        .await
+        .expect("insert tenant");
+
+        projects::ActiveModel {
+            id: Set(project_id),
+            name: Set("github-test".into()),
+            description: Set(String::new()),
+            tenant_id: Set(tenant_id),
+            icon_emoji: Set(None),
+            icon_url: Set(None),
+        }
+        .insert(&self.state.db)
+        .await
+        .expect("insert project");
+
+        TestTenantProject {
+            tenant_id,
+            project_id,
         }
     }
 
@@ -576,7 +661,7 @@ pub async fn insert_user(
     is_suspended: bool,
 ) -> TestUser {
     let id = Uuid::new_v4();
-    let email = format!("admin-test-{id}@example.com");
+    let email = format!("integration-test-{id}@example.com");
     let password = "TestPassword123!".to_string();
     let password_hash = create_password_hash(&password).expect("password hash");
 
@@ -635,8 +720,6 @@ pub async fn insert_personal_token_for_test(
 }
 
 pub async fn insert_tenant(db: &DatabaseConnection, owner_id: Uuid) -> Uuid {
-    use backend::entities::tenants;
-
     let id = Uuid::new_v4();
     tenants::ActiveModel {
         id: Set(id),
