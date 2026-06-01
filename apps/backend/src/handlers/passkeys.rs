@@ -22,12 +22,12 @@ use crate::entities::{passkeys as passkey_entity, users};
 use crate::extractors::{AuthUser, CurrentUser};
 use crate::openapi::SessionAuthErrors;
 use crate::utils::auth::AuthError;
-use crate::utils::db::is_postgres_unique_violation;
 use crate::utils::email::normalize_email;
 use crate::utils::passkey_challenges;
 use crate::utils::passkeys::{
-    MAX_PASSKEYS_PER_USER, count_user_passkeys, find_by_credential_id, is_last_auth_method,
-    load_user_passkeys, model_to_passkey, passkey_to_model_fields, verify_sign_counter,
+    count_user_passkeys, find_by_credential_id, insert_passkey_under_user_lock,
+    is_last_auth_method, load_user_passkeys, model_to_passkey, passkey_to_model_fields,
+    verify_sign_counter, MAX_PASSKEYS_PER_USER,
 };
 use crate::AppState;
 
@@ -220,12 +220,6 @@ pub async fn registration_finish(
         let _ = passkey_challenges::release_registration_lock(&state.redis_client, user.id).await;
     };
 
-    let count = count_user_passkeys(&state.db, user.id).await?;
-    if count >= MAX_PASSKEYS_PER_USER {
-        release_lock().await;
-        return Err(AuthError::PasskeyLimitExceeded);
-    }
-
     let reg_state = match passkey_challenges::take_registration(&state.redis_client, user.id).await
     {
         Ok(Some(s)) => s,
@@ -262,26 +256,28 @@ pub async fn registration_finish(
         };
     let now = Utc::now().fixed_offset();
 
-    let insert_result = passkey_entity::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        user_id: Set(user.id),
-        credential_id: Set(credential_id),
-        public_key: Set(public_key),
-        aaguid: Set(aaguid),
-        sign_count: Set(sign_count),
-        name: Set(payload.name),
-        last_used_at: Set(None),
-        created_at: Set(now),
-    }
-    .insert(&state.db)
+    let insert_result = insert_passkey_under_user_lock(
+        &state.db,
+        user.id,
+        passkey_entity::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(user.id),
+            credential_id: Set(credential_id),
+            public_key: Set(public_key),
+            aaguid: Set(aaguid),
+            sign_count: Set(sign_count),
+            name: Set(payload.name),
+            last_used_at: Set(None),
+            created_at: Set(now),
+        },
+    )
     .await;
 
     release_lock().await;
 
     match insert_result {
-        Ok(_) => Ok(StatusCode::CREATED),
-        Err(err) if is_postgres_unique_violation(&err) => Err(AuthError::BadRequest),
-        Err(err) => Err(err.into()),
+        Ok(()) => Ok(StatusCode::CREATED),
+        Err(e) => Err(e),
     }
 }
 

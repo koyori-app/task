@@ -14,7 +14,6 @@ use axum::{
 };
 use axum_session::{SameSite, SessionConfig, SessionLayer, SessionMode, SessionStore};
 use axum_session_redispool::SessionRedisPool;
-use cookie::Key;
 use backend::{
     AppState,
     entities::{oauth_connections, users},
@@ -29,8 +28,10 @@ use backend::{
         redis::RedisConnection,
         smtp::SmtpClient,
         storage::setup_storage,
+        webauthn::build_webauthn,
     },
 };
+use cookie::Key;
 use http_body_util::BodyExt;
 use reqwest::{redirect::Policy, Client, Response};
 use sea_orm::{
@@ -248,6 +249,7 @@ impl TestApp {
                 .expect("verification email storage");
         let storage = setup_storage().await.expect("storage backend");
         let http_client = create_http_client().expect("http client");
+        let webauthn = build_webauthn(&settings).expect("webauthn");
 
         let mock = MockOAuthHandle::start(MockGitLabUser {
             id: 42_001,
@@ -290,6 +292,7 @@ impl TestApp {
             drive_config: DriveConfig::from_env(),
             oauth_settings,
             http_client,
+            webauthn,
         };
 
         let session_store = SessionStore::<SessionRedisPool>::new(
@@ -389,6 +392,14 @@ impl TestApp {
             email,
             password,
         }
+    }
+
+    pub async fn insert_passkey_user(
+        &self,
+        email_verified: bool,
+        password: Option<&str>,
+    ) -> TestUser {
+        insert_passkey_user(&self.state.db, email_verified, password).await
     }
 
     pub fn reset_session_client(&mut self) {
@@ -527,6 +538,14 @@ impl TestApp {
             .expect("patch request")
     }
 
+    pub async fn delete_with_session(&self, path: &str) -> Response {
+        self.client
+            .delete(format!("{}{path}", self.base_url))
+            .send()
+            .await
+            .expect("delete request")
+    }
+
     pub async fn get_with_bearer(&self, path: &str, token: &str) -> Response {
         self.client
             .get(format!("{}{path}", self.base_url))
@@ -590,6 +609,43 @@ pub async fn insert_user(
         password_hash: Set(Some(password_hash)),
         is_admin: Set(is_admin),
         is_suspended: Set(is_suspended),
+        sessions_revoked_at: Set(None),
+    }
+    .insert(db)
+    .await
+    .expect("insert user");
+
+    TestUser {
+        id,
+        email,
+        password,
+    }
+}
+
+pub async fn insert_passkey_user(
+    db: &DatabaseConnection,
+    email_verified: bool,
+    password: Option<&str>,
+) -> TestUser {
+    let id = Uuid::new_v4();
+    let email = format!("webauthn-test-{id}@example.com");
+    let password = password.map(|p| p.to_string()).unwrap_or_default();
+    let password_hash = if password.is_empty() {
+        String::new()
+    } else {
+        create_password_hash(&password).expect("password hash")
+    };
+
+    users::ActiveModel {
+        id: Set(id),
+        username: Set(format!("test_{}", &id.to_string()[..8])),
+        bio: Set(Some(String::new())),
+        avatar_url: Set(None),
+        email: Set(email.clone()),
+        email_verified: Set(email_verified),
+        password_hash: Set(password_hash),
+        is_admin: Set(false),
+        is_suspended: Set(false),
         sessions_revoked_at: Set(None),
     }
     .insert(db)

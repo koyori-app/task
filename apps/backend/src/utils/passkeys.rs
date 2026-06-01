@@ -1,8 +1,10 @@
 //! パスキー DB ↔ webauthn-rs `Passkey` 変換
 
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
+    PaginatorTrait, QueryFilter, QuerySelect, TransactionTrait,
 };
+use uuid::Uuid;
 use webauthn_rs::prelude::{
     AttestationMetadata, AuthenticationResult, Credential, Passkey,
 };
@@ -120,8 +122,47 @@ pub async fn load_user_passkeys(
     rows.iter().map(model_to_passkey).collect()
 }
 
-pub async fn count_user_passkeys(
+/// ユーザ行を `FOR UPDATE` でロックしたうえで件数上限を確認し、パスキーを INSERT する。
+/// TTL 切れ直後の並行 finish による上限超過挿入を防ぐ。
+pub async fn insert_passkey_under_user_lock(
     db: &DatabaseConnection,
+    user_id: Uuid,
+    model: passkeys::ActiveModel,
+) -> Result<(), AuthError> {
+    use crate::entities::users;
+    use crate::utils::db::is_postgres_unique_violation;
+
+    let txn = db.begin().await?;
+    users::Entity::find_by_id(user_id)
+        .lock_exclusive()
+        .one(&txn)
+        .await?
+        .ok_or(AuthError::Unauthorized)?;
+
+    let count = count_user_passkeys(&txn, user_id).await?;
+    if count >= MAX_PASSKEYS_PER_USER {
+        txn.rollback().await?;
+        return Err(AuthError::PasskeyLimitExceeded);
+    }
+
+    match model.insert(&txn).await {
+        Ok(_) => {
+            txn.commit().await?;
+            Ok(())
+        }
+        Err(err) if is_postgres_unique_violation(&err) => {
+            txn.rollback().await?;
+            Err(AuthError::BadRequest)
+        }
+        Err(err) => {
+            txn.rollback().await?;
+            Err(err.into())
+        }
+    }
+}
+
+pub async fn count_user_passkeys<C: ConnectionTrait>(
+    db: &C,
     user_id: uuid::Uuid,
 ) -> Result<u64, sea_orm::DbErr> {
     PasskeyEntity::find()
