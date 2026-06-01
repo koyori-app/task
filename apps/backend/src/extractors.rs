@@ -21,9 +21,23 @@ async fn user_id_from_session(parts: &mut Parts, state: &AppState) -> Result<Uui
         .await
         .map_err(|_| AuthError::Internal(anyhow::anyhow!("session layer missing")))?;
 
-    session
+    let user_id = session
         .get::<Uuid>("user_id")
-        .ok_or(AuthError::Unauthorized)
+        .ok_or(AuthError::Unauthorized)?;
+    let issued_at_ms = session.get::<i64>("issued_at_ms").unwrap_or(0);
+
+    let user = users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AuthError::Unauthorized)?;
+
+    if let Some(revoked_at) = user.sessions_revoked_at {
+        if issued_at_ms < revoked_at.timestamp_millis() {
+            return Err(AuthError::Unauthorized);
+        }
+    }
+
+    Ok(user_id)
 }
 
 fn bearer_token_from_parts(parts: &Parts) -> Option<String> {

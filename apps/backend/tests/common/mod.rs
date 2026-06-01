@@ -50,7 +50,8 @@ async fn ensure_schema(db: &DatabaseConnection) {
         .get_or_init(|| async {
             db.execute_unprepared(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
-                 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_suspended BOOLEAN NOT NULL DEFAULT false;",
+                 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_suspended BOOLEAN NOT NULL DEFAULT false;
+                 ALTER TABLE users ADD COLUMN IF NOT EXISTS sessions_revoked_at TIMESTAMPTZ;",
             )
             .await
             .expect("prepare admin user columns");
@@ -185,6 +186,14 @@ impl TestApp {
             .expect("reqwest client");
     }
 
+    pub fn session_client(&self) -> Client {
+        self.client.clone()
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
     pub async fn login_session(&mut self, email: &str, password: &str) {
         let response = self
             .client
@@ -235,6 +244,15 @@ impl TestApp {
             .expect("post request")
     }
 
+    pub async fn patch_json_with_session(&self, path: &str, body: serde_json::Value) -> Response {
+        self.client
+            .patch(format!("{}{path}", self.base_url))
+            .json(&body)
+            .send()
+            .await
+            .expect("patch request")
+    }
+
     pub async fn get_with_bearer(&self, path: &str, token: &str) -> Response {
         self.client
             .get(format!("{}{path}", self.base_url))
@@ -277,6 +295,7 @@ pub async fn insert_user(
         password_hash: Set(password_hash),
         is_admin: Set(is_admin),
         is_suspended: Set(is_suspended),
+        sessions_revoked_at: Set(None),
     }
     .insert(db)
     .await

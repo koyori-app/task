@@ -6,11 +6,13 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use axum_valid::Valid;
+use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
     EntityTrait, ExecResult, ExprTrait, PaginatorTrait, QueryFilter, Statement, TransactionTrait,
     Value,
 };
+use sea_orm::sea_query::Expr;
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -109,14 +111,26 @@ async fn column_exists(db: &DatabaseConnection, table: &str, column: &str) -> Re
 }
 
 async fn revoke_user_sessions(db: &DatabaseConnection, user_id: Uuid) -> Result<(), AppError> {
-    if column_exists(db, "users", "sessions_revoked_at").await? {
-        execute_bound(
-            db,
-            "UPDATE users SET sessions_revoked_at = NOW() WHERE id = ?",
-            vec![user_id.into()],
-        )
+    let user = users::Entity::find_by_id(user_id)
+        .one(db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let mut active: users::ActiveModel = user.into();
+    active.sessions_revoked_at = Set(Some(Utc::now().into()));
+    active.update(db).await?;
+    Ok(())
+}
+
+async fn revoke_personal_tokens_for_user(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    personal_tokens::Entity::update_many()
+        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
+        .filter(personal_tokens::Column::UserId.eq(user_id))
+        .filter(personal_tokens::Column::Revoked.eq(false))
+        .exec(db)
         .await?;
-    }
     Ok(())
 }
 
@@ -290,6 +304,7 @@ pub async fn create_user(
         password_hash: Set(password_hash),
         is_admin: Set(payload.is_admin),
         is_suspended: Set(false),
+        sessions_revoked_at: Set(None),
     };
 
     let model = user.insert(&state.db).await.map_err(|e| {
@@ -355,6 +370,7 @@ pub async fn update_user(
 
     if !before_suspended && payload.is_suspended == Some(true) {
         revoke_user_sessions(&state.db, id).await?;
+        revoke_personal_tokens_for_user(&state.db, id).await?;
     }
 
     let mut active: users::ActiveModel = user.into();

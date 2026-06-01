@@ -27,6 +27,9 @@ pub struct Model {
     pub password_hash: String,
     pub is_admin: bool,
     pub is_suspended: bool,
+    #[sea_orm(nullable)]
+    #[schema(value_type = String, format = "date-time", nullable)]
+    pub sessions_revoked_at: Option<DateTimeUtc>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

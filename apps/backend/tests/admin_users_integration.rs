@@ -144,4 +144,60 @@ async fn admin_users_integration_suite() {
         }
         app.cleanup_user(admin.id).await;
     }
+
+    // Test 5: 管理者 suspend でセッション無効化 + PAT revoke
+    {
+        let target = app.insert_user(false, false).await;
+        let tenant_id = insert_tenant(&app.state.db, target.id).await;
+        app.reset_session_client();
+        app.login_session(&target.email, &target.password).await;
+        let target_session_client = app.session_client();
+        let pat = insert_personal_token_for_test(
+            &app.state.db,
+            target.id,
+            tenant_id,
+            &app.state.settings.personal_token_secret,
+        )
+        .await;
+
+        let admin = app.insert_user(true, false).await;
+        app.reset_session_client();
+        app.login_session(&admin.email, &admin.password).await;
+
+        let suspend_response = app
+            .patch_json_with_session(
+                &format!("/v1/admin/users/{}", target.id),
+                serde_json::json!({ "is_suspended": true }),
+            )
+            .await;
+        assert_eq!(suspend_response.status(), StatusCode::OK);
+
+        let session_response = target_session_client
+            .get(format!("{}/v1/tenants", app.base_url()))
+            .send()
+            .await
+            .expect("target session request");
+        assert_eq!(session_response.status(), StatusCode::UNAUTHORIZED);
+
+        let pat_response = app.get_with_bearer("/v1/tenants", &pat).await;
+        assert_eq!(pat_response.status(), StatusCode::UNAUTHORIZED);
+
+        let token_row = backend::entities::personal_tokens::Entity::find()
+            .filter(backend::entities::personal_tokens::Column::UserId.eq(target.id))
+            .one(&app.state.db)
+            .await
+            .expect("load pat")
+            .expect("pat exists");
+        assert!(token_row.revoked);
+
+        let user_row = users::Entity::find_by_id(target.id)
+            .one(&app.state.db)
+            .await
+            .expect("load user")
+            .expect("user exists");
+        assert!(user_row.sessions_revoked_at.is_some());
+
+        app.cleanup_user(target.id).await;
+        app.cleanup_user(admin.id).await;
+    }
 }

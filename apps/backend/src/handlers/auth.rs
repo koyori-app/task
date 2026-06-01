@@ -1,4 +1,5 @@
 use axum::{Json, extract::State, http::StatusCode};
+use chrono::Utc;
 use axum_session::Session;
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
@@ -76,6 +77,7 @@ pub async fn login(
     }
 
     session.set("user_id", user.id);
+    session.set("issued_at_ms", Utc::now().timestamp_millis());
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -119,15 +121,18 @@ pub async fn register(
     } = payload;
     let email = normalize_email(&email);
 
+    crate::utils::system_settings::ensure_system_settings_row(&state.db).await?;
+
     let settings = system_settings::Entity::find()
         .filter(system_settings::Column::Singleton.eq(true))
         .one(&state.db)
-        .await?;
+        .await?
+        .ok_or(AuthError::Internal(anyhow::anyhow!(
+            "system_settings singleton row missing after ensure"
+        )))?;
 
-    if let Some(s) = settings {
-        if !s.user_registration_enabled {
-            return Err(AuthError::Forbidden);
-        }
+    if !settings.user_registration_enabled {
+        return Err(AuthError::Forbidden);
     }
 
     let password_hash = create_password_hash(&password)?;
@@ -144,6 +149,7 @@ pub async fn register(
         password_hash: Set(password_hash),
         is_admin: Set(false),
         is_suspended: Set(false),
+        sessions_revoked_at: Set(None),
     };
 
     with_transaction::<(), AuthError, _>(&state.db, |txn| {
