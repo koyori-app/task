@@ -1,13 +1,13 @@
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::State,
     http::StatusCode,
 };
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
 use sea_orm::sea_query::Expr;
 use serde::{Deserialize, Serialize};
@@ -38,8 +38,9 @@ pub struct PasswordResetRequestBody {
     pub email: String,
 }
 
-#[derive(Deserialize, utoipa::IntoParams)]
-pub struct PasswordResetVerifyQuery {
+#[derive(Validate, Deserialize, utoipa::ToSchema)]
+pub struct PasswordResetVerifyBody {
+    #[validate(length(min = 1))]
     pub token: String,
 }
 
@@ -58,9 +59,9 @@ pub struct PasswordChangeBody {
     pub new_password: String,
 }
 
-impl std::fmt::Debug for PasswordResetVerifyQuery {
+impl std::fmt::Debug for PasswordResetVerifyBody {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PasswordResetVerifyQuery")
+        f.debug_struct("PasswordResetVerifyBody")
             .field("token", &"<redacted>")
             .finish()
     }
@@ -125,17 +126,17 @@ pub async fn password_reset_request(
 }
 
 #[utoipa::path(
-    get,
+    post,
     path = "/password-reset/verify",
     tag = "Auth",
-    params(PasswordResetVerifyQuery),
+    request_body = PasswordResetVerifyBody,
     responses((status = 200), PasswordResetVerifyErrors)
 )]
 pub async fn password_reset_verify(
     State(state): State<AppState>,
-    Query(query): Query<PasswordResetVerifyQuery>,
+    Valid(Json(payload)): Valid<Json<PasswordResetVerifyBody>>,
 ) -> Result<StatusCode, AuthError> {
-    let valid = password_reset::lookup_token_user_id(&state.redis_client, &query.token)
+    let valid = password_reset::lookup_token_user_id(&state.redis_client, &payload.token)
         .await
         .map_err(|e| AuthError::Internal(e.into()))?
         .is_some();
@@ -172,16 +173,47 @@ pub async fn password_reset_complete(
     let mut active: users::ActiveModel = user.into();
     active.password_hash = Set(password_hash);
     active.sessions_revoked_at = Set(Some(Utc::now().fixed_offset()));
-    active.update(&state.db).await?;
-    password_reset::consume_token(&state.redis_client, &payload.token)
+
+    let txn = state
+        .db
+        .begin()
         .await
         .map_err(|e| AuthError::Internal(e.into()))?;
+    active.update(&txn).await?;
     personal_tokens::Entity::update_many()
         .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
         .filter(personal_tokens::Column::UserId.eq(user_id))
         .filter(personal_tokens::Column::Revoked.eq(false))
-        .exec(&state.db)
+        .exec(&txn)
         .await?;
+    txn.commit()
+        .await
+        .map_err(|e| AuthError::Internal(e.into()))?;
+
+    match password_reset::consume_token(&state.redis_client, &payload.token).await {
+        Ok(Some(consumed_id)) if consumed_id == user_id => {}
+        Ok(Some(consumed_id)) => {
+            warn!(
+                user_id = %user_id,
+                consumed_id = %consumed_id,
+                "password reset consume_token returned unexpected user_id"
+            );
+        }
+        Ok(None) => {
+            warn!(
+                user_id = %user_id,
+                "password reset consume_token missed after DB commit (token already consumed or expired)"
+            );
+        }
+        Err(e) => {
+            warn!(
+                user_id = %user_id,
+                error = ?e,
+                "password reset consume_token failed after DB commit; PAT revoke already applied"
+            );
+        }
+    }
+
     password_reset_log::reset_completed(user_id);
     Ok(Json(MessageResponse {
         message: "パスワードをリセットしました。再度ログインしてください。".into(),
