@@ -1,10 +1,12 @@
 mod common;
 
 use axum::http::StatusCode;
-use backend::utils::password_reset;
+use backend::entities::{personal_tokens, scopes::Scope, tenants};
+use backend::utils::{auth, password_reset};
 use common::TestApp;
 use chrono::Utc;
-use sea_orm::EntityTrait;
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+use uuid::Uuid;
 
 const RESET_MESSAGE: &str = "入力されたメールアドレスにリセットリンクを送信しました（登録済みの場合）";
 
@@ -57,15 +59,18 @@ async fn password_reset_integration_suite() {
             .expect("store token");
 
         let valid = app
-            .get(&format!(
-                "/v1/auth/password-reset/verify?token={}",
-                urlencoding::encode(&token)
-            ))
+            .post_json(
+                "/v1/auth/password-reset/verify",
+                serde_json::json!({ "token": token }),
+            )
             .await;
         assert_eq!(valid.status(), StatusCode::OK);
 
         let invalid = app
-            .get("/v1/auth/password-reset/verify?token=not-a-real-token")
+            .post_json(
+                "/v1/auth/password-reset/verify",
+                serde_json::json!({ "token": "not-a-real-token" }),
+            )
             .await;
         assert_eq!(invalid.status(), StatusCode::NOT_FOUND);
         let body = invalid.text().await.expect("body");
@@ -88,6 +93,44 @@ async fn password_reset_integration_suite() {
             .await
             .expect("store token");
 
+        let tenant_id = Uuid::new_v4();
+        tenants::ActiveModel {
+            id: Set(tenant_id),
+            display_id: Set(format!("t{}", &tenant_id.to_string()[..8])),
+            name: Set("PW Reset Test Tenant".into()),
+            description: Set(String::new()),
+            icon_url: Set(String::new()),
+            owner_id: Set(user.id),
+            drive_quota_bytes: Set(None),
+        }
+        .insert(&app.state.db)
+        .await
+        .expect("insert tenant");
+
+        let (pat_plain, pat_hash) =
+            auth::generate_personal_token(&app.state.settings.personal_token_secret)
+                .expect("generate pat");
+        let pat_id = Uuid::new_v4();
+        let scopes_json = serde_json::to_string(&vec![Scope::ReadProject]).expect("scopes json");
+        sqlx::query(
+            r#"
+            INSERT INTO personal_tokens
+                (id, name, token, revoked, user_id, token_last_four, token_hash, scopes, tenant_id)
+            VALUES ($1, $2, $3, false, $4, $5, $6, $7::json, $8)
+            "#,
+        )
+        .bind(pat_id)
+        .bind("reset-test-pat")
+        .bind(&pat_plain)
+        .bind(user.id)
+        .bind("abcd")
+        .bind(&pat_hash)
+        .bind(&scopes_json)
+        .bind(tenant_id)
+        .execute(&app.state.pg_pool)
+        .await
+        .expect("insert personal token");
+
         let complete = app
             .post_json(
                 "/v1/auth/password-reset/complete",
@@ -108,6 +151,20 @@ async fn password_reset_integration_suite() {
             .expect("load user")
             .expect("user exists");
         assert!(row.sessions_revoked_at.is_some());
+
+        let pat_row = personal_tokens::Entity::find_by_id(pat_id)
+            .one(&app.state.db)
+            .await
+            .expect("load pat")
+            .expect("pat exists");
+        assert!(
+            pat_row.revoked,
+            "personal_tokens.revoked must be true after password reset complete"
+        );
+
+        let _ = tenants::Entity::delete_by_id(tenant_id)
+            .exec(&app.state.db)
+            .await;
 
         app.cleanup_user(user.id).await;
     }

@@ -35,7 +35,7 @@ sequenceDiagram
     B->>F: 200（固定メッセージ）
 
     U->>F: メールのリンク（token はクエリ）
-    F->>B: GET /v1/auth/password-reset/verify?token=...
+    F->>B: POST /v1/auth/password-reset/verify { token }
     B->>R: lookup（消費しない）
     B->>F: 200 / 404
 

@@ -85,7 +85,8 @@ if let Some(revoked_at) = user.sessions_revoked_at {
    → リセットメールをジョブキューに投入
    → 200 OK（本文: 固定メッセージ）
 
-2. GET /v1/auth/password-reset/verify?token={token}  （公開）
+2. POST /v1/auth/password-reset/verify  （公開）
+   Request: { "token": "..." }
    → Redis でトークンの存在を確認（消費しない）
    → 有効: 200 OK
    → 無効・期限切れ: 404
@@ -97,10 +98,9 @@ if let Some(revoked_at) = user.sessions_revoked_at {
    → Redis でトークンの存在確認（消費しない）
      → 無効・期限切れ: 400 Bad Request
    → Argon2id でハッシュを生成（消費前に計算を完了させる）
-   → Redis からトークンを消費（GETDEL）→ user_id を取得
-     → 消費失敗（並行リクエストで先に消費された）: 400 Bad Request
-   → users.password_hash を UPDATE
-   → users.sessions_revoked_at を now() に UPDATE
+   → users.password_hash / sessions_revoked_at を UPDATE
+   → personal_tokens の該当 user_id 行を revoked = true に UPDATE（同一 DB トランザクション）
+   → Redis からトークンを消費（GETDEL）。Redis 失敗時も PAT 無効化はロールバックしない（warn ログ）
    → 200 OK
 ```
 
@@ -162,7 +162,7 @@ pub async fn token_exists(redis: &RedisConnection, token: &str) -> Result<bool, 
 | メソッド | パス | 認証 | 説明 |
 |---------|------|------|------|
 | `POST` | `/v1/auth/password-reset/request` | 不要 | リセットメール送信 |
-| `GET` | `/v1/auth/password-reset/verify` | 不要 | トークン有効確認 |
+| `POST` | `/v1/auth/password-reset/verify` | 不要 | トークン有効確認（token は JSON ボディ） |
 | `POST` | `/v1/auth/password-reset/complete` | 不要 | 新パスワード設定 |
 | `POST` | `/v1/auth/password/change` | セッション必須 | ログイン中の変更 |
 
@@ -182,8 +182,12 @@ POST /v1/auth/password-reset/request
 
 **トークン確認**:
 
+```json
+POST /v1/auth/password-reset/verify
+{ "token": "URL-safe-base64-token" }
+```
+
 ```text
-GET /v1/auth/password-reset/verify?token=xxxxx
 200 OK  — 有効
 404     — 無効・期限切れ
 ```
