@@ -21,7 +21,7 @@ use crate::AppState;
 pub struct CreateStatusRequest {
     #[validate(length(min = 1, max = 100))]
     pub name: String,
-    #[validate(length(min = 7, max = 7))]
+    #[validate(regex(path = "crate::utils::validation::COLOR_REGEX"))]
     pub color: String,
     pub position: i16,
     #[serde(default)]
@@ -34,7 +34,7 @@ pub struct CreateStatusRequest {
 pub struct UpdateStatusRequest {
     #[validate(length(min = 1, max = 100))]
     pub name: Option<String>,
-    #[validate(length(min = 7, max = 7))]
+    #[validate(regex(path = "crate::utils::validation::COLOR_REGEX"))]
     pub color: Option<String>,
     pub position: Option<i16>,
     pub is_default: Option<bool>,
@@ -291,16 +291,12 @@ pub async fn delete_status(
             .ok_or(AppError::NotFound)?;
 
         let txn = state.db.begin().await?;
-        let affected = tasks::Entity::find()
+        tasks::Entity::update_many()
+            .col_expr(tasks::Column::StatusId, Expr::value(migrate_to))
             .filter(tasks::Column::StatusId.eq(id))
             .filter(tasks::Column::DeletedAt.is_null())
-            .all(&txn)
+            .exec(&txn)
             .await?;
-        for t in affected {
-            let mut active: tasks::ActiveModel = t.into();
-            active.status_id = Set(migrate_to);
-            active.update(&txn).await?;
-        }
         project_statuses::Entity::delete_by_id(id).exec(&txn).await?;
         txn.commit().await?;
     } else {
