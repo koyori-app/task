@@ -200,6 +200,7 @@ pub struct CreateTaskRequest {
     pub soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
     #[schema(value_type = Option<String>, format = "date-time")]
     pub hard_deadline: Option<chrono::DateTime<chrono::Utc>>,
+    #[validate(range(min = 1))]
     pub estimated_minutes: Option<i32>,
     #[serde(default)]
     pub assignees: Vec<AssigneeInput>,
@@ -235,6 +236,7 @@ pub struct UpdateTaskRequest {
     pub hard_deadline: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
     pub clear_hard_deadline: bool,
+    #[validate(range(min = 1))]
     pub estimated_minutes: Option<i32>,
     #[serde(default)]
     pub clear_estimated_minutes: bool,
@@ -376,6 +378,12 @@ pub async fn create_task(
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
+
+    if let (Some(s), Some(h)) = (payload.soft_deadline, payload.hard_deadline) {
+        if s >= h {
+            return Err(AppError::BadRequest);
+        }
+    }
 
     project_statuses::Entity::find_by_id(payload.status_id)
         .filter(project_statuses::Column::ProjectId.eq(project_id))
@@ -524,6 +532,8 @@ pub async fn update_task(
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let task_id = task.id;
+    let existing_soft = task.soft_deadline;
+    let existing_hard = task.hard_deadline;
     let parent_changes = payload.clear_parent_task_id || payload.parent_task_id.is_some();
 
     let mut active: tasks::ActiveModel = task.into();
@@ -557,6 +567,27 @@ pub async fn update_task(
     else if let Some(v) = payload.soft_deadline { active.soft_deadline = Set(Some(v)); }
     if payload.clear_hard_deadline { active.hard_deadline = Set(None); }
     else if let Some(v) = payload.hard_deadline { active.hard_deadline = Set(Some(v)); }
+
+    let effective_soft = if payload.clear_soft_deadline {
+        None
+    } else if let Some(v) = payload.soft_deadline {
+        Some(v)
+    } else {
+        existing_soft
+    };
+    let effective_hard = if payload.clear_hard_deadline {
+        None
+    } else if let Some(v) = payload.hard_deadline {
+        Some(v)
+    } else {
+        existing_hard
+    };
+    if let (Some(s), Some(h)) = (effective_soft, effective_hard) {
+        if s >= h {
+            return Err(AppError::BadRequest);
+        }
+    }
+
     if payload.clear_estimated_minutes { active.estimated_minutes = Set(None); }
     else if let Some(v) = payload.estimated_minutes { active.estimated_minutes = Set(Some(v)); }
     if let Some(v) = payload.is_archived { active.is_archived = Set(v); }
@@ -918,33 +949,57 @@ pub async fn list_relations(
         .filter(task_relations::Column::BlockerTaskId.eq(task.id))
         .all(&state.db)
         .await?;
-    let mut blocks = Vec::new();
-    for rel in blocks_rels {
-        if let Some(t) = tasks::Entity::find_by_id(rel.blocked_task_id)
+    let blocked_ids: Vec<Uuid> = blocks_rels.iter().map(|r| r.blocked_task_id).collect();
+    let blocked_tasks: HashMap<Uuid, tasks::Model> = if blocked_ids.is_empty() {
+        HashMap::new()
+    } else {
+        tasks::Entity::find()
+            .filter(tasks::Column::Id.is_in(blocked_ids))
             .filter(tasks::Column::ProjectId.eq(project_id))
             .filter(tasks::Column::DeletedAt.is_null())
-            .one(&state.db)
+            .all(&state.db)
             .await?
-        {
-            blocks.push(RelationEntry { relation_id: rel.id, task: t });
-        }
-    }
+            .into_iter()
+            .map(|t| (t.id, t))
+            .collect()
+    };
+    let blocks: Vec<RelationEntry> = blocks_rels
+        .into_iter()
+        .filter_map(|rel| {
+            blocked_tasks.get(&rel.blocked_task_id).map(|t| RelationEntry {
+                relation_id: rel.id,
+                task: t.clone(),
+            })
+        })
+        .collect();
 
     let blocked_rels = task_relations::Entity::find()
         .filter(task_relations::Column::BlockedTaskId.eq(task.id))
         .all(&state.db)
         .await?;
-    let mut blocked_by = Vec::new();
-    for rel in blocked_rels {
-        if let Some(t) = tasks::Entity::find_by_id(rel.blocker_task_id)
+    let blocker_ids: Vec<Uuid> = blocked_rels.iter().map(|r| r.blocker_task_id).collect();
+    let blocker_tasks: HashMap<Uuid, tasks::Model> = if blocker_ids.is_empty() {
+        HashMap::new()
+    } else {
+        tasks::Entity::find()
+            .filter(tasks::Column::Id.is_in(blocker_ids))
             .filter(tasks::Column::ProjectId.eq(project_id))
             .filter(tasks::Column::DeletedAt.is_null())
-            .one(&state.db)
+            .all(&state.db)
             .await?
-        {
-            blocked_by.push(RelationEntry { relation_id: rel.id, task: t });
-        }
-    }
+            .into_iter()
+            .map(|t| (t.id, t))
+            .collect()
+    };
+    let blocked_by: Vec<RelationEntry> = blocked_rels
+        .into_iter()
+        .filter_map(|rel| {
+            blocker_tasks.get(&rel.blocker_task_id).map(|t| RelationEntry {
+                relation_id: rel.id,
+                task: t.clone(),
+            })
+        })
+        .collect();
 
     Ok(Json(TaskRelationsResponse { subtasks, blocks, blocked_by }))
 }
