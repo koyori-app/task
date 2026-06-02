@@ -14,15 +14,19 @@ impl MigrationTrait for Migration {
                 ADD COLUMN IF NOT EXISTS key VARCHAR(10)
             "#,
             r#"
-            UPDATE projects
-            SET key = 'P' || upper(substring(replace(id::text, '-', '') from 1 for 3))
-            WHERE key IS NULL
+            WITH cte AS (
+              SELECT id,
+                     'P' || upper(to_hex(row_number() OVER (PARTITION BY tenant_id ORDER BY id)::int)) AS new_key
+              FROM projects WHERE key IS NULL
+            )
+            UPDATE projects SET key = cte.new_key FROM cte WHERE projects.id = cte.id
             "#,
             r#"
             DO $$
             BEGIN
                 IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'projects_key_format'
+                    SELECT 1 FROM pg_constraint
+                    WHERE conrelid = 'projects'::regclass AND conname = 'projects_key_format'
                 ) THEN
                     ALTER TABLE projects
                         ADD CONSTRAINT projects_key_format
