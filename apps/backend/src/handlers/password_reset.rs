@@ -162,7 +162,7 @@ pub async fn password_reset_complete(
         return Err(AuthError::InvalidNewPassword);
     }
     let password_hash = create_password_hash(&payload.new_password)?;
-    let user_id = password_reset::lookup_token_user_id(&state.redis_client, &payload.token)
+    let user_id = password_reset::consume_token(&state.redis_client, &payload.token)
         .await
         .map_err(|e| AuthError::Internal(e.into()))?
         .ok_or(AuthError::InvalidPasswordResetToken)?;
@@ -189,30 +189,6 @@ pub async fn password_reset_complete(
     txn.commit()
         .await
         .map_err(|e| AuthError::Internal(e.into()))?;
-
-    match password_reset::consume_token(&state.redis_client, &payload.token).await {
-        Ok(Some(consumed_id)) if consumed_id == user_id => {}
-        Ok(Some(consumed_id)) => {
-            warn!(
-                user_id = %user_id,
-                consumed_id = %consumed_id,
-                "password reset consume_token returned unexpected user_id"
-            );
-        }
-        Ok(None) => {
-            warn!(
-                user_id = %user_id,
-                "password reset consume_token missed after DB commit (token already consumed or expired)"
-            );
-        }
-        Err(e) => {
-            warn!(
-                user_id = %user_id,
-                error = ?e,
-                "password reset consume_token failed after DB commit; PAT revoke already applied"
-            );
-        }
-    }
 
     password_reset_log::reset_completed(user_id);
     Ok(Json(MessageResponse {
