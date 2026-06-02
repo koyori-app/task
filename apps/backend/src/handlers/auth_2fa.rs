@@ -47,6 +47,34 @@ pub async fn user_has_active_2fa(
     Ok(cred.map(|c| c.is_verified).unwrap_or(false))
 }
 
+/// ユーザーが所属する（テナントオーナー or プロジェクトメンバー）テナントのいずれかで
+/// `require_2fa=true` が設定されているかを判定する。
+/// 2FA セットアップ強制（`user_must_setup_2fa`）と 2FA 無効化禁止（`delete_totp`）の
+/// 双方で参照する共通ポリシー判定。
+async fn user_in_require_2fa_tenant(
+    db: &sea_orm::DatabaseConnection,
+    user_id: Uuid,
+) -> Result<bool, AuthError> {
+    let owns_required_tenant = tenants::Entity::find()
+        .filter(tenants::Column::OwnerId.eq(user_id))
+        .filter(tenants::Column::Require2fa.eq(true))
+        .one(db)
+        .await?
+        .is_some();
+    if owns_required_tenant {
+        return Ok(true);
+    }
+    let member_of_required_tenant = project_members::Entity::find()
+        .join(JoinType::InnerJoin, project_members::Relation::Projects.def())
+        .join(JoinType::InnerJoin, projects::Relation::Tenants.def())
+        .filter(project_members::Column::UserId.eq(user_id))
+        .filter(tenants::Column::Require2fa.eq(true))
+        .one(db)
+        .await?
+        .is_some();
+    Ok(member_of_required_tenant)
+}
+
 async fn user_must_setup_2fa(
     db: &sea_orm::DatabaseConnection,
     user_id: Uuid,
@@ -54,21 +82,7 @@ async fn user_must_setup_2fa(
     if user_has_active_2fa(db, user_id).await? {
         return Ok(false);
     }
-    let in_required_tenant = tenants::Entity::find()
-        .filter(tenants::Column::OwnerId.eq(user_id))
-        .filter(tenants::Column::Require2fa.eq(true))
-        .one(db)
-        .await?
-        .is_some()
-        || project_members::Entity::find()
-            .join(JoinType::InnerJoin, project_members::Relation::Projects.def())
-            .join(JoinType::InnerJoin, projects::Relation::Tenants.def())
-            .filter(project_members::Column::UserId.eq(user_id))
-            .filter(tenants::Column::Require2fa.eq(true))
-            .one(db)
-            .await?
-            .is_some();
-    Ok(in_required_tenant)
+    user_in_require_2fa_tenant(db, user_id).await
 }
 
 pub async fn login_2fa_flags(
@@ -408,6 +422,11 @@ pub async fn delete_totp(
     let user = load_user(&state, auth.user_id).await?;
     if !user.totp_enabled {
         return Err(AuthError::TwoFactorNotEnabled);
+    }
+    // テナントの 2FA 強制ポリシー（require_2fa=true）が有効なユーザーは
+    // 自分で 2FA を無効化できない。コード検証を消費する前に弾く。
+    if user_in_require_2fa_tenant(&state.db, auth.user_id).await? {
+        return Err(AuthError::Forbidden);
     }
     verify_user_totp_or_recovery(
         &state,
