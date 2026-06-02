@@ -57,7 +57,7 @@ const data = {
   navMain: [
     {
       title: 'Labels',
-      url: '/labels',
+      url: '#',
       icon: SquareTerminal,
       isActive: true,
     },
