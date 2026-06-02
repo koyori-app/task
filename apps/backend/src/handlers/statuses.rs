@@ -107,11 +107,12 @@ pub async fn create_status(
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
+    let txn = state.db.begin().await?;
     if payload.is_default {
         project_statuses::Entity::update_many()
             .col_expr(project_statuses::Column::IsDefault, Expr::value(false))
             .filter(project_statuses::Column::ProjectId.eq(project_id))
-            .exec(&state.db)
+            .exec(&txn)
             .await?;
     }
     let status = project_statuses::ActiveModel {
@@ -124,8 +125,9 @@ pub async fn create_status(
         is_done_state: Set(payload.is_done_state),
         created_at: Set(chrono::Utc::now()),
     }
-    .insert(&state.db)
+    .insert(&txn)
     .await?;
+    txn.commit().await?;
     Ok((StatusCode::CREATED, Json(status)))
 }
 
@@ -161,12 +163,13 @@ pub async fn update_status(
         .await?
         .ok_or(AppError::NotFound)?;
     let mut active: project_statuses::ActiveModel = status.into();
+    let txn = state.db.begin().await?;
     if payload.is_default == Some(true) {
         project_statuses::Entity::update_many()
             .col_expr(project_statuses::Column::IsDefault, Expr::value(false))
             .filter(project_statuses::Column::ProjectId.eq(project_id))
             .filter(project_statuses::Column::Id.ne(id))
-            .exec(&state.db)
+            .exec(&txn)
             .await?;
     }
     if let Some(v) = payload.name { active.name = Set(v); }
@@ -174,7 +177,9 @@ pub async fn update_status(
     if let Some(v) = payload.position { active.position = Set(v); }
     if let Some(v) = payload.is_default { active.is_default = Set(v); }
     if let Some(v) = payload.is_done_state { active.is_done_state = Set(v); }
-    Ok(Json(active.update(&state.db).await?))
+    let updated = active.update(&txn).await?;
+    txn.commit().await?;
+    Ok(Json(updated))
 }
 
 #[axum::debug_handler]
