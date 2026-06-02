@@ -5,7 +5,7 @@ use sea_orm::{
     EntityTrait, IsolationLevel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
     TransactionTrait, prelude::Uuid,
 };
-use sea_orm::sea_query::LockType;
+use sea_orm::sea_query::{Expr, LockType};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use utoipa::ToSchema;
@@ -13,7 +13,8 @@ use validator::Validate;
 
 use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
 use crate::entities::{
-    project_statuses, project_task_counters, task_assignees, task_labels, task_relations, tasks,
+    labels, project_statuses, project_task_counters, task_assignees, task_labels, task_relations,
+    tasks,
 };
 use crate::error::AppError;
 use crate::extractors::AuthUser;
@@ -222,6 +223,18 @@ fn default_limit() -> u64 {
     50
 }
 
+fn parse_task_priority(value: &str) -> Result<tasks::TaskPriority, AppError> {
+    match value {
+        "critical_fire" => Ok(tasks::TaskPriority::CriticalFire),
+        "critical" => Ok(tasks::TaskPriority::Critical),
+        "high" => Ok(tasks::TaskPriority::High),
+        "medium" => Ok(tasks::TaskPriority::Medium),
+        "low" => Ok(tasks::TaskPriority::Low),
+        "trivial" => Ok(tasks::TaskPriority::Trivial),
+        _ => Err(AppError::BadRequest),
+    }
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct TaskListResponse {
     pub tasks: Vec<tasks::Model>,
@@ -264,6 +277,10 @@ pub async fn list_tasks(
     if let Some(sid) = q.status_id {
         query = query.filter(tasks::Column::StatusId.eq(sid));
     }
+    if let Some(ref priority) = q.priority {
+        let priority = parse_task_priority(priority)?;
+        query = query.filter(tasks::Column::Priority.eq(priority));
+    }
     if let Some(mid) = q.milestone_id {
         query = query.filter(tasks::Column::MilestoneId.eq(mid));
     }
@@ -271,14 +288,10 @@ pub async fn list_tasks(
         query = query.filter(tasks::Column::ParentTaskId.eq(pid));
     }
     if let Some(uid) = q.assignee_id {
-        let ids: Vec<Uuid> = task_assignees::Entity::find()
-            .filter(task_assignees::Column::UserId.eq(uid))
-            .all(&state.db)
-            .await?
-            .into_iter()
-            .map(|a| a.task_id)
-            .collect();
-        query = query.filter(tasks::Column::Id.is_in(ids));
+        query = query.filter(Expr::cust_with_values(
+            "EXISTS (SELECT 1 FROM task_assignees WHERE task_assignees.task_id = tasks.id AND task_assignees.user_id = $1)",
+            vec![sea_orm::Value::from(uid)],
+        ));
     }
 
     query = match q.sort.as_deref().unwrap_or("created_at_desc") {
@@ -359,6 +372,7 @@ pub async fn create_task(
     .await?;
 
     for a in &payload.assignees {
+        require_member_or_owner(&state, tenant_id, project_id, a.user_id).await?;
         task_assignees::ActiveModel {
             id: Set(Uuid::new_v4()),
             task_id: Set(model.id),
@@ -368,6 +382,16 @@ pub async fn create_task(
         }
         .insert(&txn)
         .await?;
+    }
+    if !payload.label_ids.is_empty() {
+        let labels_in_project = labels::Entity::find()
+            .filter(labels::Column::Id.is_in(payload.label_ids.clone()))
+            .filter(labels::Column::ProjectId.eq(project_id))
+            .all(&txn)
+            .await?;
+        if labels_in_project.len() != payload.label_ids.len() {
+            return Err(AppError::BadRequest);
+        }
     }
     for lid in &payload.label_ids {
         task_labels::ActiveModel {
@@ -630,6 +654,7 @@ pub async fn add_assignee(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+    require_member_or_owner(&state, tenant_id, project_id, payload.user_id).await?;
     let assignee = task_assignees::ActiveModel {
         id: Set(Uuid::new_v4()),
         task_id: Set(task.id),
