@@ -13,8 +13,8 @@ use validator::Validate;
 
 use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
 use crate::entities::{
-    labels, project_statuses, project_task_counters, task_assignees, task_labels, task_relations,
-    tasks,
+    labels, milestones, project_statuses, project_task_counters, task_assignees, task_labels,
+    task_relations, tasks,
 };
 use crate::error::AppError;
 use crate::extractors::AuthUser;
@@ -346,6 +346,24 @@ pub async fn create_task(
         .ok_or(AppError::NotFound)?;
 
     let txn = state.db.begin().await?;
+
+    // parent_task_id / milestone_id が同一プロジェクトに属することを検証
+    if let Some(pid) = payload.parent_task_id {
+        tasks::Entity::find_by_id(pid)
+            .filter(tasks::Column::ProjectId.eq(project_id))
+            .filter(tasks::Column::DeletedAt.is_null())
+            .one(&txn)
+            .await?
+            .ok_or(AppError::NotFound)?;
+    }
+    if let Some(mid) = payload.milestone_id {
+        milestones::Entity::find_by_id(mid)
+            .filter(milestones::Column::ProjectId.eq(project_id))
+            .one(&txn)
+            .await?
+            .ok_or(AppError::NotFound)?;
+    }
+
     let seq_id = next_seq_id(&txn, project_id).await?;
 
     let model = tasks::ActiveModel {
@@ -475,10 +493,27 @@ pub async fn update_task(
     }
     if let Some(v) = payload.priority { active.priority = Set(v); }
     if let Some(v) = payload.progress_pct { active.progress_pct = Set(v); }
-    if payload.clear_parent_task_id { active.parent_task_id = Set(None); }
-    else if let Some(v) = payload.parent_task_id { active.parent_task_id = Set(Some(v)); }
-    if payload.clear_milestone_id { active.milestone_id = Set(None); }
-    else if let Some(v) = payload.milestone_id { active.milestone_id = Set(Some(v)); }
+    if payload.clear_parent_task_id {
+        active.parent_task_id = Set(None);
+    } else if let Some(v) = payload.parent_task_id {
+        tasks::Entity::find_by_id(v)
+            .filter(tasks::Column::ProjectId.eq(project_id))
+            .filter(tasks::Column::DeletedAt.is_null())
+            .one(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        active.parent_task_id = Set(Some(v));
+    }
+    if payload.clear_milestone_id {
+        active.milestone_id = Set(None);
+    } else if let Some(v) = payload.milestone_id {
+        milestones::Entity::find_by_id(v)
+            .filter(milestones::Column::ProjectId.eq(project_id))
+            .one(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        active.milestone_id = Set(Some(v));
+    }
     if payload.clear_soft_deadline { active.soft_deadline = Set(None); }
     else if let Some(v) = payload.soft_deadline { active.soft_deadline = Set(Some(v)); }
     if payload.clear_hard_deadline { active.hard_deadline = Set(None); }
