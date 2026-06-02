@@ -246,12 +246,14 @@ pub async fn delete_milestone(
     auth.require_scope(crate::entities::scopes::Scope::WriteMilestone)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
-    milestones::Entity::find_by_id(id)
-        .filter(milestones::Column::ProjectId.eq(project_id))
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
     // tasks.milestone_id cascades to NULL via FK ON DELETE SET NULL
-    milestones::Entity::delete_by_id(id).exec(&state.db).await?;
+    let result = milestones::Entity::delete_many()
+        .filter(milestones::Column::Id.eq(id))
+        .filter(milestones::Column::ProjectId.eq(project_id))
+        .exec(&state.db)
+        .await?;
+    if result.rows_affected == 0 {
+        return Err(AppError::NotFound);
+    }
     Ok(StatusCode::NO_CONTENT)
 }

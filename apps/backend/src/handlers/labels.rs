@@ -201,12 +201,14 @@ pub async fn delete_label(
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
-    labels::Entity::find_by_id(id)
+    let result = labels::Entity::delete_many()
+        .filter(labels::Column::Id.eq(id))
         .filter(labels::Column::ProjectId.eq(project_id))
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    labels::Entity::delete_by_id(id).exec(&state.db).await?;
+        .exec(&state.db)
+        .await?;
+    if result.rows_affected == 0 {
+        return Err(AppError::NotFound);
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
