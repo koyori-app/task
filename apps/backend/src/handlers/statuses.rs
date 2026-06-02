@@ -270,11 +270,15 @@ pub async fn delete_status(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
-    project_statuses::Entity::find_by_id(id)
+    let status = project_statuses::Entity::find_by_id(id)
         .filter(project_statuses::Column::ProjectId.eq(project_id))
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+
+    if status.is_default {
+        return Err(AppError::BadRequest);
+    }
 
     let task_count = tasks::Entity::find()
         .filter(tasks::Column::StatusId.eq(id))
