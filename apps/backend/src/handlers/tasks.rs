@@ -138,6 +138,42 @@ async fn would_create_cycle<C: ConnectionTrait>(
     Ok(false)
 }
 
+// ─── Parent hierarchy cycle detection ────────────────────────────────────
+
+/// `ancestor_id` が `descendant_id` の祖先か（parent_task_id リンクを上方向に
+/// 辿って到達するか）を判定する。`ancestor_id == descendant_id` の場合も true。
+/// parent_task_id に循環を作る更新を防ぐために使用する。
+async fn is_ancestor_of<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    ancestor_id: Uuid,
+    descendant_id: Uuid,
+) -> Result<bool, AppError> {
+    if ancestor_id == descendant_id {
+        return Ok(true);
+    }
+    let mut visited: HashSet<Uuid> = HashSet::new();
+    let mut current = descendant_id;
+    loop {
+        if !visited.insert(current) {
+            return Ok(false);
+        }
+        let node = tasks::Entity::find_by_id(current)
+            .filter(tasks::Column::ProjectId.eq(project_id))
+            .one(db)
+            .await?;
+        match node.and_then(|t| t.parent_task_id) {
+            None => return Ok(false),
+            Some(parent_id) => {
+                if parent_id == ancestor_id {
+                    return Ok(true);
+                }
+                current = parent_id;
+            }
+        }
+    }
+}
+
 // ─── DTOs ────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize, ToSchema)]
@@ -479,6 +515,21 @@ pub async fn update_task(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+
+    // 親タスク変更時の循環参照検出（修正3）
+    // clear_parent_task_id が優先されるため、クリア指定時はチェック不要。
+    if !payload.clear_parent_task_id {
+        if let Some(new_parent_id) = payload.parent_task_id {
+            // 自己参照（自分自身を親に設定）を拒否
+            if new_parent_id == task.id {
+                return Err(AppError::Conflict);
+            }
+            // task が new_parent_id の祖先なら、親に設定するとサイクルが生じる
+            if is_ancestor_of(&state.db, project_id, task.id, new_parent_id).await? {
+                return Err(AppError::Conflict);
+            }
+        }
+    }
 
     let mut active: tasks::ActiveModel = task.into();
     if let Some(v) = payload.title { active.title = Set(v); }
