@@ -53,9 +53,10 @@ pub struct LabelExportItem {
     pub description: String,
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Validate, Deserialize, ToSchema)]
 pub struct ImportLabelRequest {
     pub version: u32,
+    #[validate(length(max = 500))]
     pub labels: Vec<LabelExportItem>,
     #[serde(default)]
     pub on_conflict: ImportConflict,
@@ -266,7 +267,7 @@ pub async fn import_labels(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
-    Json(payload): Json<ImportLabelRequest>,
+    Valid(Json(payload)): Valid<Json<ImportLabelRequest>>,
 ) -> Result<Json<Vec<labels::Model>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
