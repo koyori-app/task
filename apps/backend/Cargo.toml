@@ -13,13 +13,15 @@ sea-orm = { version = "2.0.0-rc.38", features = [
     "debug-print",
     "entity-registry",
     "schema-sync",
+    "with-chrono",
+    "with-time",
 ] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tokio = { version = "1.52.1", features = ["fs", "io-util", "macros", "rt-multi-thread", "net", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-utoipa = { version = "5.4.0", features = ["uuid"] }
+utoipa = { version = "5.4.0", features = ["uuid", "chrono", "time"] }
 uuid = { version = "1", features = ["serde"] }
 utoipa-axum = "0.2.0"
 utoipa-scalar = { version = "0.3.0", features = ["axum"] }
@@ -44,6 +46,7 @@ urlencoding = "2.1"
 hmac = "0.13"
 sha2 = "0.11"
 rand = "0.10"
+regex = "1"
 subtle = "2.4"
 strum = { version = "0.28.0", features = ["derive"] }
 strum_macros = "0.28"
@@ -60,3 +63,4 @@ aws-config = "1"
 aws-credential-types = "1"
 aws-sdk-s3 = "1"
 mime_guess = "2"
+time = { version = "0.3", features = ["serde"] }

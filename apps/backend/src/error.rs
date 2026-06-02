@@ -30,6 +30,8 @@ pub enum AppError {
     Conflict,
     #[error("bad request")]
     BadRequest,
+    #[error("bad request: {0}")]
+    BadRequestDetail(String),
     #[error("gone")]
     Gone,
     #[error("unprocessable entity")]
@@ -81,6 +83,11 @@ impl IntoResponse for AppError {
                 Json(ServerError {
                     message: "bad-request".into(),
                 }),
+            )
+                .into_response(),
+            AppError::BadRequestDetail(msg) => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError { message: msg }),
             )
                 .into_response(),
             AppError::Gone => (

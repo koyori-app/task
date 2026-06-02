@@ -1,29 +1,315 @@
-use axum::{Json, extract::State};
-use sea_orm::EntityTrait;
+use axum::{Json, extract::{Path, State}, http::StatusCode};
+use axum_valid::Valid;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+    prelude::Uuid,
+};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use validator::Validate;
 
+use crate::auth_helpers::require_member_or_owner;
+use crate::entities::labels;
 use crate::error::AppError;
-use crate::openapi::InternalOnlyError;
-use crate::{AppState, entities};
+use crate::extractors::AuthUser;
+use crate::openapi::CrudErrors;
+use crate::AppState;
+
+#[derive(Validate, Deserialize, ToSchema)]
+pub struct CreateLabelRequest {
+    #[validate(length(min = 1, max = 100))]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[validate(regex(path = "crate::utils::validation::COLOR_REGEX"))]
+    pub color: String,
+    pub icon_url: Option<String>,
+}
+
+#[derive(Validate, Deserialize, ToSchema)]
+pub struct UpdateLabelRequest {
+    #[validate(length(min = 1, max = 100))]
+    pub name: Option<String>,
+    pub description: Option<String>,
+    #[validate(regex(path = "crate::utils::validation::COLOR_REGEX"))]
+    pub color: Option<String>,
+    pub icon_url: Option<String>,
+    #[serde(default)]
+    pub clear_icon_url: bool,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct LabelExport {
+    pub version: u32,
+    pub labels: Vec<LabelExportItem>,
+}
+
+#[derive(Validate, Serialize, Deserialize, ToSchema)]
+pub struct LabelExportItem {
+    #[validate(length(min = 1, max = 100))]
+    pub name: String,
+    #[validate(regex(path = "crate::utils::validation::COLOR_REGEX"))]
+    pub color: String,
+    pub description: String,
+}
+
+#[derive(Validate, Deserialize, ToSchema)]
+pub struct ImportLabelRequest {
+    pub version: u32,
+    #[validate(length(max = 500))]
+    pub labels: Vec<LabelExportItem>,
+    #[serde(default)]
+    pub on_conflict: ImportConflict,
+}
+
+#[derive(Deserialize, ToSchema, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ImportConflict {
+    #[default]
+    Skip,
+    Overwrite,
+}
 
 #[axum::debug_handler]
 #[utoipa::path(
     get,
     path = "/",
     tag = "Labels",
-    summary = "ラベル一覧",
+    summary = "プロジェクトのラベル一覧",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+    ),
     responses(
-        (
-            status = 200,
-            description = "すべてのラベル",
-            body = [entities::labels::Model]
-        ),
-        InternalOnlyError,
+        (status = 200, description = "ラベル一覧", body = [labels::Model]),
+        CrudErrors,
     )
 )]
-pub async fn get_labels(
+pub async fn list_labels(
     State(state): State<AppState>,
-) -> Result<Json<Vec<entities::labels::Model>>, AppError> {
-    // DB 障害時は 500 を返す
-    let labels = entities::labels::Entity::find().all(&state.db).await?;
-    Ok(Json(labels))
+    auth: AuthUser,
+    Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Vec<labels::Model>>, AppError> {
+    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
+    let list = labels::Entity::find()
+        .filter(labels::Column::ProjectId.eq(project_id))
+        .all(&state.db)
+        .await?;
+    Ok(Json(list))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    post,
+    path = "/",
+    tag = "Labels",
+    summary = "ラベル作成",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+    ),
+    request_body = CreateLabelRequest,
+    responses(
+        (status = 201, description = "作成されたラベル", body = labels::Model),
+        CrudErrors,
+    )
+)]
+pub async fn create_label(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+    Valid(Json(payload)): Valid<Json<CreateLabelRequest>>,
+) -> Result<(StatusCode, Json<labels::Model>), AppError> {
+    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
+    let label = labels::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        name: Set(payload.name),
+        description: Set(payload.description),
+        color: Set(payload.color),
+        icon_url: Set(payload.icon_url),
+        project_id: Set(Some(project_id)),
+    }
+    .insert(&state.db)
+    .await?;
+    Ok((StatusCode::CREATED, Json(label)))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    put,
+    path = "/{id}",
+    tag = "Labels",
+    summary = "ラベル更新",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        ("id" = Uuid, Path, description = "ラベルID"),
+    ),
+    request_body = UpdateLabelRequest,
+    responses(
+        (status = 200, description = "更新後のラベル", body = labels::Model),
+        CrudErrors,
+    )
+)]
+pub async fn update_label(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
+    Valid(Json(payload)): Valid<Json<UpdateLabelRequest>>,
+) -> Result<Json<labels::Model>, AppError> {
+    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
+    let label = labels::Entity::find_by_id(id)
+        .filter(labels::Column::ProjectId.eq(project_id))
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let mut active: labels::ActiveModel = label.into();
+    if let Some(v) = payload.name { active.name = Set(v); }
+    if let Some(v) = payload.description { active.description = Set(v); }
+    if let Some(v) = payload.color { active.color = Set(v); }
+    if payload.clear_icon_url { active.icon_url = Set(None); }
+    else if let Some(v) = payload.icon_url { active.icon_url = Set(Some(v)); }
+    Ok(Json(active.update(&state.db).await?))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    delete,
+    path = "/{id}",
+    tag = "Labels",
+    summary = "ラベル削除",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        ("id" = Uuid, Path, description = "ラベルID"),
+    ),
+    responses(
+        (status = 204, description = "削除しました"),
+        CrudErrors,
+    )
+)]
+pub async fn delete_label(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
+) -> Result<StatusCode, AppError> {
+    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
+    let result = labels::Entity::delete_many()
+        .filter(labels::Column::Id.eq(id))
+        .filter(labels::Column::ProjectId.eq(project_id))
+        .exec(&state.db)
+        .await?;
+    if result.rows_affected == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    get,
+    path = "/export",
+    tag = "Labels",
+    summary = "ラベルを JSON エクスポート",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+    ),
+    responses(
+        (status = 200, description = "エクスポートデータ", body = LabelExport),
+        CrudErrors,
+    )
+)]
+pub async fn export_labels(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<LabelExport>, AppError> {
+    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
+    let list = labels::Entity::find()
+        .filter(labels::Column::ProjectId.eq(project_id))
+        .all(&state.db)
+        .await?;
+    let items = list
+        .into_iter()
+        .map(|l| LabelExportItem { name: l.name, color: l.color, description: l.description })
+        .collect();
+    Ok(Json(LabelExport { version: 1, labels: items }))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    post,
+    path = "/import",
+    tag = "Labels",
+    summary = "ラベルを JSON インポート",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+    ),
+    request_body = ImportLabelRequest,
+    responses(
+        (status = 200, description = "インポート後のラベル一覧", body = [labels::Model]),
+        CrudErrors,
+    )
+)]
+pub async fn import_labels(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+    Valid(Json(payload)): Valid<Json<ImportLabelRequest>>,
+) -> Result<Json<Vec<labels::Model>>, AppError> {
+    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
+
+    let txn = state.db.begin().await?;
+    for item in &payload.labels {
+        item.validate().map_err(|_| AppError::BadRequest)?;
+        let existing = labels::Entity::find()
+            .filter(labels::Column::ProjectId.eq(project_id))
+            .filter(labels::Column::Name.eq(&item.name))
+            .one(&txn)
+            .await?;
+
+        match existing {
+            Some(l) => {
+                if matches!(payload.on_conflict, ImportConflict::Overwrite) {
+                    let mut active: labels::ActiveModel = l.into();
+                    active.color = Set(item.color.clone());
+                    active.description = Set(item.description.clone());
+                    active.update(&txn).await?;
+                }
+            }
+            None => {
+                labels::ActiveModel {
+                    id: Set(Uuid::new_v4()),
+                    name: Set(item.name.clone()),
+                    description: Set(item.description.clone()),
+                    color: Set(item.color.clone()),
+                    icon_url: Set(None),
+                    project_id: Set(Some(project_id)),
+                }
+                .insert(&txn)
+                .await?;
+            }
+        }
+    }
+    txn.commit().await?;
+
+    let list = labels::Entity::find()
+        .filter(labels::Column::ProjectId.eq(project_id))
+        .all(&state.db)
+        .await?;
+    Ok(Json(list))
 }

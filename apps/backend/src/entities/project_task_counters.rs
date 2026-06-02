@@ -1,22 +1,14 @@
 use sea_orm::entity::prelude::*;
-use utoipa::ToSchema; // Scalar/OpenAPI用
+use utoipa::ToSchema;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, ToSchema, serde::Serialize)]
-#[sea_orm(table_name = "labels")]
-#[schema(as=crate::entities::labels::Model)]
+#[sea_orm(table_name = "project_task_counters")]
+#[schema(as = crate::entities::project_task_counters::Model)]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)] // auto_incrementを無効にする
-    #[schema(value_type = String, format="uuid")] // OpenAPIでUUIDとして扱うための属性
-    pub id: Uuid,
-    pub name: String,
-    pub description: String,
-    pub color: String,
-    #[sea_orm(nullable)]
-    #[schema(nullable)]
-    pub icon_url: Option<String>,
-    #[sea_orm(nullable)]
-    #[schema(value_type = Option<String>, format = "uuid", nullable)]
-    pub project_id: Option<Uuid>,
+    #[sea_orm(primary_key, auto_increment = false)]
+    #[schema(value_type = String, format = "uuid")]
+    pub project_id: Uuid,
+    pub last_seq: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
