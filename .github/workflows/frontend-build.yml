@@ -47,6 +47,10 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: apps/frontend
 
+      - name: Generate API client
+        run: pnpm openapi:generate
+        working-directory: apps/frontend
+
       - name: Build
         run: pnpm build
         working-directory: apps/frontend
