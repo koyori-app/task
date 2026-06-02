@@ -212,6 +212,8 @@ pub struct UpdateTaskRequest {
     #[validate(length(min = 1, max = 255))]
     pub title: Option<String>,
     pub description: Option<String>,
+    #[serde(default)]
+    pub clear_description: bool,
     #[schema(value_type = Option<String>, format = "uuid")]
     pub status_id: Option<Uuid>,
     pub priority: Option<tasks::TaskPriority>,
@@ -533,7 +535,11 @@ pub async fn update_task(
 
     let mut active: tasks::ActiveModel = task.into();
     if let Some(v) = payload.title { active.title = Set(v); }
-    if let Some(v) = payload.description { active.description = Set(Some(v)); }
+    if payload.clear_description {
+        active.description = Set(None);
+    } else if let Some(v) = payload.description {
+        active.description = Set(Some(v));
+    }
     if let Some(v) = payload.status_id {
         project_statuses::Entity::find_by_id(v)
             .filter(project_statuses::Column::ProjectId.eq(project_id))
