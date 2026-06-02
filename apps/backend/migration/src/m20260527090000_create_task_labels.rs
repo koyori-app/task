@@ -12,7 +12,8 @@ impl MigrationTrait for Migration {
                 task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
                 label_id UUID NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
                 PRIMARY KEY (task_id, label_id)
-            )
+            );
+            CREATE INDEX IF NOT EXISTS idx_task_labels_label_id ON task_labels (label_id)
         "#;
         let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
         manager.get_connection().execute(stmt).await.map(|_| ())
