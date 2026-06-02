@@ -623,6 +623,7 @@ pub async fn delete_task(
 ) -> Result<StatusCode, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     if task.created_by != auth.user_id && !is_tenant_owner(&state, tenant_id, auth.user_id).await? {
         return Err(AppError::Forbidden);
@@ -764,6 +765,14 @@ pub async fn add_assignee(
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     require_member_or_owner(&state, tenant_id, project_id, payload.user_id).await?;
+    let duplicate = task_assignees::Entity::find()
+        .filter(task_assignees::Column::TaskId.eq(task.id))
+        .filter(task_assignees::Column::UserId.eq(payload.user_id))
+        .one(&state.db)
+        .await?;
+    if duplicate.is_some() {
+        return Err(AppError::Conflict);
+    }
     let assignee = task_assignees::ActiveModel {
         id: Set(Uuid::new_v4()),
         task_id: Set(task.id),

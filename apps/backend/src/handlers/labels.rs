@@ -48,7 +48,7 @@ pub struct LabelExport {
 pub struct LabelExportItem {
     #[validate(length(min = 1, max = 100))]
     pub name: String,
-    #[validate(length(min = 7, max = 7))]
+    #[validate(regex(path = "crate::utils::validation::COLOR_REGEX"))]
     pub color: String,
     pub description: String,
 }
