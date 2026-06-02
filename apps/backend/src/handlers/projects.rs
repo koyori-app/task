@@ -29,7 +29,7 @@ pub struct CreateProjectRequest {
 fn generate_project_key(name: &str) -> String {
     let upper: String = name
         .chars()
-        .filter(|c| c.is_alphanumeric())
+        .filter(|c| c.is_ascii_alphanumeric())
         .map(|c| c.to_ascii_uppercase())
         .take(10)
         .collect();
