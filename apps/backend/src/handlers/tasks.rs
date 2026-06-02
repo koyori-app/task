@@ -523,21 +523,8 @@ pub async fn update_task(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
-
-    // 親タスク変更時の循環参照検出（修正3）
-    // clear_parent_task_id が優先されるため、クリア指定時はチェック不要。
-    if !payload.clear_parent_task_id {
-        if let Some(new_parent_id) = payload.parent_task_id {
-            // 自己参照（自分自身を親に設定）を拒否
-            if new_parent_id == task.id {
-                return Err(AppError::Conflict);
-            }
-            // task が new_parent_id の祖先なら、親に設定するとサイクルが生じる
-            if is_ancestor_of(&state.db, project_id, task.id, new_parent_id).await? {
-                return Err(AppError::Conflict);
-            }
-        }
-    }
+    let task_id = task.id;
+    let parent_changes = payload.clear_parent_task_id || payload.parent_task_id.is_some();
 
     let mut active: tasks::ActiveModel = task.into();
     if let Some(v) = payload.title { active.title = Set(v); }
@@ -556,17 +543,6 @@ pub async fn update_task(
     }
     if let Some(v) = payload.priority { active.priority = Set(v); }
     if let Some(v) = payload.progress_pct { active.progress_pct = Set(v); }
-    if payload.clear_parent_task_id {
-        active.parent_task_id = Set(None);
-    } else if let Some(v) = payload.parent_task_id {
-        tasks::Entity::find_by_id(v)
-            .filter(tasks::Column::ProjectId.eq(project_id))
-            .filter(tasks::Column::DeletedAt.is_null())
-            .one(&state.db)
-            .await?
-            .ok_or(AppError::NotFound)?;
-        active.parent_task_id = Set(Some(v));
-    }
     if payload.clear_milestone_id {
         active.milestone_id = Set(None);
     } else if let Some(v) = payload.milestone_id {
@@ -586,7 +562,42 @@ pub async fn update_task(
     if let Some(v) = payload.is_archived { active.is_archived = Set(v); }
     active.updated_at = Set(chrono::Utc::now());
 
-    Ok(Json(active.update(&state.db).await?))
+    if parent_changes {
+        let txn = state
+            .db
+            .begin_with_config(Some(IsolationLevel::Serializable), None)
+            .await?;
+        let fresh = tasks::Entity::find_by_id(task_id)
+            .filter(tasks::Column::ProjectId.eq(project_id))
+            .filter(tasks::Column::DeletedAt.is_null())
+            .one(&txn)
+            .await?
+            .ok_or(AppError::NotFound)?;
+
+        if payload.clear_parent_task_id {
+            active.parent_task_id = Set(None);
+        } else if let Some(new_parent_id) = payload.parent_task_id {
+            if new_parent_id == fresh.id {
+                return Err(AppError::Conflict);
+            }
+            if is_ancestor_of(&txn, project_id, fresh.id, new_parent_id).await? {
+                return Err(AppError::Conflict);
+            }
+            tasks::Entity::find_by_id(new_parent_id)
+                .filter(tasks::Column::ProjectId.eq(project_id))
+                .filter(tasks::Column::DeletedAt.is_null())
+                .one(&txn)
+                .await?
+                .ok_or(AppError::NotFound)?;
+            active.parent_task_id = Set(Some(new_parent_id));
+        }
+
+        let updated = active.update(&txn).await?;
+        txn.commit().await?;
+        Ok(Json(updated))
+    } else {
+        Ok(Json(active.update(&state.db).await?))
+    }
 }
 
 #[axum::debug_handler]
