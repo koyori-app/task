@@ -1245,6 +1245,7 @@ dependencies = [
  "rand 0.10.1",
  "redis",
  "redis_pool",
+ "regex",
  "sea-orm",
  "sentry",
  "serde",

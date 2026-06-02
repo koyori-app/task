@@ -21,7 +21,7 @@ pub struct CreateLabelRequest {
     pub name: String,
     #[serde(default)]
     pub description: String,
-    #[validate(length(min = 7, max = 7))]
+    #[validate(regex(path = "crate::utils::validation::COLOR_REGEX"))]
     pub color: String,
     pub icon_url: Option<String>,
 }
@@ -31,7 +31,7 @@ pub struct UpdateLabelRequest {
     #[validate(length(min = 1, max = 100))]
     pub name: Option<String>,
     pub description: Option<String>,
-    #[validate(length(min = 7, max = 7))]
+    #[validate(regex(path = "crate::utils::validation::COLOR_REGEX"))]
     pub color: Option<String>,
     pub icon_url: Option<String>,
     #[serde(default)]
