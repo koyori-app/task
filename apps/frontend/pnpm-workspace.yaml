@@ -1,6 +1,9 @@
 allowBuilds:
+  '@nestjs/core': true
+  '@openapitools/openapi-generator-cli': true
   '@sentry/cli': true
   esbuild: true
+  vue-demi: true
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@0.1.21
   vite-plus: 0.1.21
