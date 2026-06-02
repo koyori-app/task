@@ -439,17 +439,23 @@ pub async fn create_task(
         .insert(&txn)
         .await?;
     }
-    if !payload.label_ids.is_empty() {
+    let unique_label_ids: Vec<Uuid> = {
+        let mut v = payload.label_ids.clone();
+        v.sort();
+        v.dedup();
+        v
+    };
+    if !unique_label_ids.is_empty() {
         let labels_in_project = labels::Entity::find()
-            .filter(labels::Column::Id.is_in(payload.label_ids.clone()))
+            .filter(labels::Column::Id.is_in(unique_label_ids.clone()))
             .filter(labels::Column::ProjectId.eq(project_id))
             .all(&txn)
             .await?;
-        if labels_in_project.len() != payload.label_ids.len() {
+        if labels_in_project.len() != unique_label_ids.len() {
             return Err(AppError::BadRequest);
         }
     }
-    for lid in &payload.label_ids {
+    for lid in &unique_label_ids {
         task_labels::ActiveModel {
             task_id: Set(model.id),
             label_id: Set(*lid),
