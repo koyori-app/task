@@ -17,16 +17,12 @@ mod m20260527060000_create_task_assignees;
 mod m20260527070000_create_task_relations;
 mod m20260527080000_add_project_id_to_labels;
 mod m20260527090000_create_task_labels;
-<<<<<<< HEAD
 mod m20260527100000_add_admin_fields_to_users;
 mod m20260527110000_create_audit_logs;
 mod m20260527120000_create_system_settings;
 mod m20260528190000_add_drive_system_max_quota_mb;
 mod m20260529100000_oauth_connections;
 mod m20260601160000_add_sessions_revoked_at_to_users;
-=======
-mod m20260529010000_add_sessions_revoked_at_to_users;
->>>>>>> 2e86e83c (chore(backend): add dev-dependencies for password reset integration tests)
 mod m20260603_add_unique_task_assignees;
 mod m20260529100000_auth_2fa;
 
@@ -53,16 +49,12 @@ impl MigratorTrait for Migrator {
             Box::new(m20260527070000_create_task_relations::Migration),
             Box::new(m20260527080000_add_project_id_to_labels::Migration),
             Box::new(m20260527090000_create_task_labels::Migration),
-<<<<<<< HEAD
             Box::new(m20260527100000_add_admin_fields_to_users::Migration),
             Box::new(m20260527110000_create_audit_logs::Migration),
             Box::new(m20260527120000_create_system_settings::Migration),
             Box::new(m20260528190000_add_drive_system_max_quota_mb::Migration),
             Box::new(m20260529100000_oauth_connections::Migration),
             Box::new(m20260601160000_add_sessions_revoked_at_to_users::Migration),
-=======
-            Box::new(m20260529010000_add_sessions_revoked_at_to_users::Migration),
->>>>>>> 2e86e83c (chore(backend): add dev-dependencies for password reset integration tests)
             Box::new(m20260603_add_unique_task_assignees::Migration),
             Box::new(m20260529100000_auth_2fa::Migration),
         ]

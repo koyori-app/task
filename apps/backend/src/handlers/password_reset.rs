@@ -20,7 +20,7 @@ use crate::openapi::{
     PasswordChangeErrors, PasswordResetCompleteErrors, PasswordResetRequestErrors,
     PasswordResetVerifyErrors,
 };
-use crate::utils::auth::{AuthError, DUMMY_PASSWORD_HASH, create_password_hash, verify_password};
+use crate::utils::auth::{AuthError, create_password_hash, verify_password};
 use crate::utils::email::normalize_email;
 use crate::utils::{password_reset, password_reset_log};
 use crate::{AppState, entities::{personal_tokens, users}};
@@ -103,7 +103,6 @@ pub async fn password_reset_request(
     {
         return Err(AuthError::TooManyRequests);
     }
-    let _ = verify_password("timing-normalize", DUMMY_PASSWORD_HASH)?;
     if let Some(user) = users::Entity::find()
         .filter(users::Column::Email.eq(&email))
         .one(&state.db)
@@ -158,9 +157,6 @@ pub async fn password_reset_complete(
     State(state): State<AppState>,
     Valid(Json(payload)): Valid<Json<PasswordResetCompleteBody>>,
 ) -> Result<Json<MessageResponse>, AuthError> {
-    if payload.new_password.len() < 8 {
-        return Err(AuthError::InvalidNewPassword);
-    }
     let password_hash = create_password_hash(&payload.new_password)?;
     let user_id = password_reset::consume_token(&state.redis_client, &payload.token)
         .await
@@ -219,20 +215,26 @@ pub async fn password_change(
     if !verify_password(&payload.current_password, &user.password_hash)? {
         return Err(AuthError::InvalidCurrentPassword);
     }
-    if payload.new_password.len() < 8 {
-        return Err(AuthError::InvalidNewPassword);
-    }
     let password_hash = create_password_hash(&payload.new_password)?;
     let mut active: users::ActiveModel = user.0.clone().into();
     active.password_hash = Set(password_hash);
     active.sessions_revoked_at = Set(Some(Utc::now().fixed_offset()));
-    active.update(&state.db).await?;
+
+    let txn = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| AuthError::Internal(e.into()))?;
+    active.update(&txn).await?;
     personal_tokens::Entity::update_many()
         .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
         .filter(personal_tokens::Column::UserId.eq(auth.user_id))
         .filter(personal_tokens::Column::Revoked.eq(false))
-        .exec(&state.db)
+        .exec(&txn)
         .await?;
+    txn.commit()
+        .await
+        .map_err(|e| AuthError::Internal(e.into()))?;
     session.remove("user_id");
     session.remove("issued_at_ms");
     password_reset_log::password_changed(auth.user_id);
