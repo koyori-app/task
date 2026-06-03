@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+use std::sync::LazyLock;
+
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
@@ -7,8 +10,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use image::Luma;
 use qrcode::QrCode;
 use argon2::password_hash::rand_core::{OsRng, RngCore};
+use redis::Script;
 use sea_orm::prelude::Uuid;
-use sha2::{Digest, Sha256};
 use totp_rs::{Algorithm, Secret, TOTP};
 
 use crate::utils::auth::{create_personal_token_hash, AuthError};
@@ -18,12 +21,39 @@ const NONCE_LEN: usize = 12;
 const RECOVERY_CODE_COUNT: usize = 10;
 const RECOVERY_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-fn derive_totp_aes_key(key: &str) -> [u8; AES_KEY_LEN] {
-    Sha256::digest(key.as_bytes()).into()
+/// INCR + EXPIRE + 上限判定を単一 Lua で実行（GET/INCR 分離によるレース回避）。
+static RECORD_2FA_FAILURE_SCRIPT: LazyLock<Script> = LazyLock::new(|| {
+    Script::new(
+        r#"
+        local key = KEYS[1]
+        local max = tonumber(ARGV[1])
+        local ttl = tonumber(ARGV[2])
+        local count = redis.call('INCR', key)
+        if count == 1 then
+            redis.call('EXPIRE', key, ttl)
+        end
+        if count >= max then
+            return 1
+        end
+        return 0
+        "#,
+    )
+});
+
+fn derive_totp_aes_key(key: &str) -> Result<[u8; AES_KEY_LEN], AuthError> {
+    let bytes = key.as_bytes();
+    if bytes.len() != AES_KEY_LEN {
+        return Err(AuthError::Internal(anyhow::anyhow!(
+            "totp encryption key must be exactly {AES_KEY_LEN} bytes"
+        )));
+    }
+    let mut out = [0u8; AES_KEY_LEN];
+    out.copy_from_slice(bytes);
+    Ok(out)
 }
 
 pub fn encrypt_totp_secret(plain_secret: &str, key: &str) -> Result<String, AuthError> {
-    let aes_key = derive_totp_aes_key(key);
+    let aes_key = derive_totp_aes_key(key)?;
     let cipher = Aes256Gcm::new_from_slice(&aes_key)
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("aes key: {e}")))?;
     let mut nonce_bytes = [0u8; NONCE_LEN];
@@ -46,7 +76,7 @@ pub fn decrypt_totp_secret(secret_enc: &str, key: &str) -> Result<String, AuthEr
         return Err(AuthError::Internal(anyhow::anyhow!("invalid secret_enc")));
     }
     let (nonce_bytes, ciphertext) = data.split_at(NONCE_LEN);
-    let aes_key = derive_totp_aes_key(key);
+    let aes_key = derive_totp_aes_key(key)?;
     let cipher = Aes256Gcm::new_from_slice(&aes_key)
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("aes key: {e}")))?;
     let nonce = Nonce::from_slice(nonce_bytes);
@@ -95,7 +125,10 @@ pub fn otpauth_uri(secret_base32: &str, issuer: &str, account: &str) -> Result<S
 pub fn qr_code_png_data_uri(otpauth_uri: &str) -> Result<String, AuthError> {
     let code = QrCode::new(otpauth_uri.as_bytes())
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("qr encode: {e}")))?;
-    let image = code.render::<Luma<u8>>().build();
+    let image = code
+        .render::<Luma<u8>>()
+        .min_dimensions(200, 200)
+        .build();
     let mut png_bytes = Vec::new();
     image::DynamicImage::ImageLuma8(image)
         .write_to(
@@ -124,9 +157,11 @@ pub fn generate_recovery_code_plain() -> String {
 }
 
 pub fn generate_recovery_codes() -> Vec<String> {
-    (0..RECOVERY_CODE_COUNT)
-        .map(|_| generate_recovery_code_plain())
-        .collect()
+    let mut codes = HashSet::with_capacity(RECOVERY_CODE_COUNT);
+    while codes.len() < RECOVERY_CODE_COUNT {
+        codes.insert(generate_recovery_code_plain());
+    }
+    codes.into_iter().collect()
 }
 
 pub fn hash_recovery_code(code: &str, secret: &str) -> Result<String, AuthError> {
@@ -134,7 +169,11 @@ pub fn hash_recovery_code(code: &str, secret: &str) -> Result<String, AuthError>
 }
 
 pub fn normalize_recovery_code(input: &str) -> String {
-    input.trim().to_uppercase()
+    input
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_uppercase()
 }
 
 const ATTEMPT_KEY_PREFIX: &str = "2fa_attempts:";
@@ -172,19 +211,13 @@ pub async fn record_2fa_failure(
         .acquire()
         .await
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis acquire: {e}")))?;
-    let count: i64 = redis::cmd("INCR")
-        .arg(&key)
-        .query_async(&mut conn)
+    let _: i32 = RECORD_2FA_FAILURE_SCRIPT
+        .key(&key)
+        .arg(MAX_ATTEMPTS)
+        .arg(LOCKOUT_SECS)
+        .invoke_async(&mut conn)
         .await
-        .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis incr: {e}")))?;
-    if count == 1 {
-        let _: () = redis::cmd("EXPIRE")
-            .arg(&key)
-            .arg(LOCKOUT_SECS)
-            .query_async(&mut conn)
-            .await
-            .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis expire: {e}")))?;
-    }
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis 2fa failure script: {e}")))?;
     Ok(())
 }
 
@@ -235,5 +268,20 @@ mod tests {
         let again = hash_recovery_code(&normalized, "test-secret-key-32-chars-min!!").unwrap();
         assert!(recovery_code_matches(&hash, &again));
         assert!(!recovery_code_matches(&hash, "wrong-hash-value"));
+    }
+
+    #[test]
+    fn normalize_recovery_code_strips_separators() {
+        assert_eq!(
+            normalize_recovery_code("  abcd-efgh-ijkl  "),
+            normalize_recovery_code("ABCDEFGHIJKL")
+        );
+    }
+
+    #[test]
+    fn generate_recovery_codes_are_unique() {
+        let codes = generate_recovery_codes();
+        assert_eq!(codes.len(), RECOVERY_CODE_COUNT);
+        assert_eq!(codes.iter().collect::<HashSet<_>>().len(), RECOVERY_CODE_COUNT);
     }
 }

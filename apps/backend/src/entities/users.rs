@@ -22,17 +22,17 @@ pub struct Model {
     pub email: String,
     /// メールアドレスの確認が済んでいるかどうか
     pub email_verified: bool,
-    #[sea_orm(nullable)]
     #[schema(ignore)]
     #[serde(skip_serializing)]
-    pub password_hash: Option<String>,
+    pub password_hash: String,
     pub is_admin: bool,
     pub is_suspended: bool,
     #[sea_orm(nullable)]
     #[schema(ignore)]
     #[serde(skip_serializing)]
     pub sessions_revoked_at: Option<DateTimeUtc>,
-    /// TOTP 2FA が有効か（`totp_credentials.is_verified` とセットで有効扱い）
+    /// TOTP 2FA が有効か（`totp_credentials.is_verified` とセットで有効扱い）。
+    /// 更新は `handlers::auth_2fa` 経由の ActiveModel のみとし、他モジュールから直接書き換えないこと。
     pub totp_enabled: bool,
 }
 

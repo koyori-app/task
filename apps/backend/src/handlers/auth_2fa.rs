@@ -101,6 +101,7 @@ pub async fn establish_login_session(
     db: &sea_orm::DatabaseConnection,
     user: &users::Model,
 ) -> Result<Option<Login2faResponse>, AuthError> {
+    session.renew();
     session.set("user_id", user.id);
     let (requires_2fa, requires_2fa_setup) = login_2fa_flags(db, user).await?;
     if requires_2fa || requires_2fa_setup {
@@ -159,6 +160,33 @@ async fn load_user(
         .ok_or(AuthError::Unauthorized)
 }
 
+async fn insert_recovery_code_hashes(
+    txn: &sea_orm::DatabaseTransaction,
+    user_id: Uuid,
+    codes: &[String],
+    recovery_secret: &str,
+) -> Result<(), AuthError> {
+    let created_at = Utc::now().into();
+    let models: Result<Vec<recovery_codes::ActiveModel>, AuthError> = codes
+        .iter()
+        .map(|code| {
+            let normalized = normalize_recovery_code(code);
+            let hash = hash_recovery_code(&normalized, recovery_secret)?;
+            Ok(recovery_codes::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                user_id: Set(user_id),
+                code_hash: Set(hash),
+                used_at: Set(None),
+                created_at: Set(created_at),
+            })
+        })
+        .collect();
+    recovery_codes::Entity::insert_many(models?)
+        .exec(txn)
+        .await?;
+    Ok(())
+}
+
 async fn verify_user_totp_or_recovery(
     state: &AppState,
     user_id: Uuid,
@@ -214,6 +242,9 @@ async fn verify_user_totp_or_recovery(
         .one(&state.db)
         .await?
         .ok_or(AuthError::TwoFactorNotEnabled)?;
+    if !cred.is_verified {
+        return Err(AuthError::TwoFactorNotEnabled);
+    }
     let secret =
         decrypt_totp_secret(&cred.secret_enc, &state.settings.totp_encryption_key)?;
     let user = users::Entity::find_by_id(user_id)
@@ -342,18 +373,13 @@ pub async fn totp_verify_setup(
         .exec(&txn)
         .await?;
 
-    for code in &codes {
-        let hash = hash_recovery_code(code, &state.settings.recovery_code_secret)?;
-        recovery_codes::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            user_id: Set(user.user_id),
-            code_hash: Set(hash),
-            used_at: Set(None),
-            created_at: Set(Utc::now().into()),
-        }
-        .insert(&txn)
-        .await?;
-    }
+    insert_recovery_code_hashes(
+        &txn,
+        user.user_id,
+        &codes,
+        &state.settings.recovery_code_secret,
+    )
+    .await?;
 
     let mut user_active: users::ActiveModel = user_model.into();
     user_active.totp_enabled = Set(true);
@@ -363,6 +389,7 @@ pub async fn totp_verify_setup(
 
     clear_2fa_attempts(&state.redis_client, user.user_id).await?;
     session.set("half_authed", false);
+    session.renew();
 
     Ok(Json(VerifySetupResponse {
         recovery_codes: codes,
@@ -398,6 +425,7 @@ pub async fn verify_2fa(
     )
     .await?;
     session.set("half_authed", false);
+    session.renew();
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -481,18 +509,13 @@ pub async fn regenerate_recovery_codes(
         .filter(recovery_codes::Column::UserId.eq(auth.user_id))
         .exec(&txn)
         .await?;
-    for code in &codes {
-        let hash = hash_recovery_code(code, &state.settings.recovery_code_secret)?;
-        recovery_codes::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            user_id: Set(auth.user_id),
-            code_hash: Set(hash),
-            used_at: Set(None),
-            created_at: Set(Utc::now().into()),
-        }
-        .insert(&txn)
-        .await?;
-    }
+    insert_recovery_code_hashes(
+        &txn,
+        auth.user_id,
+        &codes,
+        &state.settings.recovery_code_secret,
+    )
+    .await?;
     txn.commit().await?;
     Ok(Json(VerifySetupResponse {
         recovery_codes: codes,
