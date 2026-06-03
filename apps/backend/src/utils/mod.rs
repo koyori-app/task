@@ -1,8 +1,5 @@
 pub mod auth;
-<<<<<<< HEAD
 pub mod bootstrap_admin;
-=======
->>>>>>> cf1ee0da (fix(auth): address PR #43 OAuth security review findings)
 pub mod http;
 pub mod validation;
 pub mod drive;

@@ -1249,7 +1249,6 @@ dependencies = [
  "redis",
  "redis_pool",
  "regex",
- "reqwest 0.12.28",
  "reqwest",
  "sea-orm",
  "sentry",
@@ -2737,7 +2736,6 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tower-service",
- "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -4193,7 +4191,6 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.40",
- "socket2 0.6.3",
  "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
@@ -4232,7 +4229,6 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.3",
  "socket2 0.5.10",
  "tracing",
  "windows-sys 0.52.0",
@@ -4447,46 +4443,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71fe3824f5629716b1589be05dacd749f6aa084c87e00e016714a8cdfccc997c"
 dependencies = [
  "bytecheck",
-]
-
-[[package]]
-name = "reqwest"
-version = "0.12.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
-dependencies = [
- "base64",
- "bytes",
- "cookie",
- "cookie_store",
- "futures-core",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.9.0",
- "hyper-rustls 0.27.9",
- "hyper-util",
- "js-sys",
- "log",
- "percent-encoding",
- "pin-project-lite",
- "quinn",
- "rustls 0.23.40",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "sync_wrapper",
- "tokio",
- "tokio-rustls 0.26.4",
- "tower",
- "tower-http",
- "tower-service",
- "url",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -5026,7 +4982,7 @@ dependencies = [
  "cfg_aliases",
  "httpdate",
  "native-tls",
- "reqwest 0.13.3",
+ "reqwest",
  "sentry-actix",
  "sentry-backtrace",
  "sentry-contexts",
