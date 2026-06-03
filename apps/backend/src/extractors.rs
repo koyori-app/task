@@ -51,10 +51,6 @@ fn session_is_half_authed(session: &Session) -> bool {
     session.get::<bool>("half_authed").unwrap_or(false)
 }
 
-async fn user_id_from_session(parts: &mut Parts, state: &AppState) -> Result<Uuid, AuthError> {
-    Ok(user_from_session(parts, state).await?.id)
-}
-
 fn bearer_token_from_parts(parts: &Parts) -> Option<String> {
     parts
         .headers
