@@ -10,6 +10,7 @@ use axum_valid::Valid;
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
+    QuerySelect,
 };
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
@@ -528,25 +529,36 @@ pub async fn disconnect_connection(
         filter = filter.filter(oauth_connections::Column::InstanceUrl.eq(normalized));
     }
 
-    let connection = filter.one(&state.db).await?.ok_or(OAuthError::ConnectionNotFound)?;
+    with_transaction::<(), OAuthError, _>(&state.db, |txn| {
+        Box::pin(async move {
+            let user = users::Entity::find_by_id(auth.user_id)
+                .lock_exclusive()
+                .one(txn)
+                .await?
+                .ok_or(OAuthError::Unauthorized)?;
 
-    let user = users::Entity::find_by_id(auth.user_id)
-        .one(&state.db)
-        .await?
-        .ok_or(OAuthError::Unauthorized)?;
+            let connection = filter
+                .one(txn)
+                .await?
+                .ok_or(OAuthError::ConnectionNotFound)?;
 
-    let connection_count = oauth_connections::Entity::find()
-        .filter(oauth_connections::Column::UserId.eq(auth.user_id))
-        .count(&state.db)
-        .await?;
+            let connection_count = oauth_connections::Entity::find()
+                .filter(oauth_connections::Column::UserId.eq(auth.user_id))
+                .count(txn)
+                .await?;
 
-    if connection_count <= 1 && user.password_hash.is_none() {
-        return Err(OAuthError::LastAuthMethod);
-    }
+            if connection_count <= 1 && user.password_hash.is_none() {
+                return Err(OAuthError::LastAuthMethod);
+            }
 
-    oauth_connections::Entity::delete_by_id(connection.id)
-        .exec(&state.db)
-        .await?;
+            oauth_connections::Entity::delete_by_id(connection.id)
+                .exec(txn)
+                .await?;
+
+            Ok(())
+        })
+    })
+    .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -827,10 +839,10 @@ async fn create_oauth_user_and_connection(
 
     let user = users::ActiveModel {
         id: Set(user_id),
-        username: Set(username),
+        username: Set(username.clone()),
         bio: Set(Some(String::new())),
         avatar_url: Set(provider_info.avatar_url.clone()),
-        email: Set(email),
+        email: Set(email.clone()),
         email_verified: Set(provider_info.email_verified.unwrap_or(false)),
         password_hash: Set(None),
         ..Default::default()
@@ -853,16 +865,15 @@ async fn create_oauth_user_and_connection(
 
     with_transaction::<Uuid, OAuthError, _>(&state.db, |txn| {
         Box::pin(async move {
-            users::Entity::insert(user)
-                .exec(txn)
-                .await
-                .map_err(|e| {
-                    if is_postgres_unique_violation(&e) {
-                        OAuthError::EmailConflict
-                    } else {
-                        OAuthError::Internal(e.into())
-                    }
-                })?;
+            if let Err(e) = users::Entity::insert(user).exec(txn).await {
+                if is_postgres_unique_violation(&e) {
+                    return Err(
+                        classify_user_unique_violation(txn, &email, &username)
+                            .await?,
+                    );
+                }
+                return Err(OAuthError::Internal(e.into()));
+            }
 
             oauth_connections::Entity::insert(connection)
                 .exec(txn)
@@ -917,6 +928,36 @@ async fn derive_unique_username(
 
     Err(OAuthError::Internal(anyhow::anyhow!(
         "failed to derive unique username"
+    )))
+}
+
+async fn classify_user_unique_violation(
+    db: &impl sea_orm::ConnectionTrait,
+    email: &str,
+    username: &str,
+) -> Result<OAuthError, OAuthError> {
+    if users::Entity::find()
+        .filter(users::Column::Email.eq(email))
+        .one(db)
+        .await?
+        .is_some()
+    {
+        return Ok(OAuthError::EmailConflict);
+    }
+
+    if users::Entity::find()
+        .filter(users::Column::Username.eq(username))
+        .one(db)
+        .await?
+        .is_some()
+    {
+        return Ok(OAuthError::Internal(anyhow::anyhow!(
+            "username already taken during oauth signup"
+        )));
+    }
+
+    Ok(OAuthError::Internal(anyhow::anyhow!(
+        "unexpected unique constraint on user insert"
     )))
 }
 

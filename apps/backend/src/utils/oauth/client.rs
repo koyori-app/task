@@ -75,34 +75,17 @@ pub async fn exchange_code(
     redirect_uri: &str,
     code_verifier: &str,
 ) -> Result<TokenResponse, anyhow::Error> {
-    let params = vec![
-        ("grant_type", "authorization_code"),
-        ("code", code),
-        ("redirect_uri", redirect_uri),
-        ("client_id", credentials.client_id.as_str()),
-        ("client_secret", credentials.client_secret.as_str()),
-        ("code_verifier", code_verifier),
-    ];
-
-    let body: String = params
-        .iter()
-        .map(|(k, v)| {
-            format!(
-                "{}={}",
-                urlencoding::encode(k),
-                urlencoding::encode(v)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("&");
     let response = http
         .post(&endpoints.token_url)
         .header(ACCEPT, "application/json")
-        .header(
-            reqwest::header::CONTENT_TYPE,
-            "application/x-www-form-urlencoded",
-        )
-        .body(body)
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+            ("client_id", credentials.client_id.as_str()),
+            ("client_secret", credentials.client_secret.as_str()),
+            ("code_verifier", code_verifier),
+        ])
         .send()
         .await?
         .error_for_status()?;

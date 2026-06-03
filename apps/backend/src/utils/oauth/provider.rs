@@ -169,6 +169,20 @@ pub fn build_authorize_url(
     )
 }
 
+fn resolve_socket_addrs(host: &str) -> Result<Vec<std::net::SocketAddr>, anyhow::Error> {
+    let lookup = || -> Result<Vec<std::net::SocketAddr>, anyhow::Error> {
+        (host, 443)
+            .to_socket_addrs()
+            .map_err(|e| anyhow::anyhow!("instance_url DNS resolution failed: {e}"))
+            .map(|iter| iter.collect())
+    };
+    if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::task::block_in_place(lookup)
+    } else {
+        lookup()
+    }
+}
+
 fn is_localhost_host(host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
@@ -186,7 +200,7 @@ fn is_restricted_ip(ip: IpAddr) -> bool {
         IpAddr::V6(v6) => {
             v6.is_loopback()
                 || v6.is_unspecified()
-                || v6.is_unique_local()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00 // unique local fc00::/7
                 || (v6.segments()[0] & 0xff00) == 0xfe00 // link-local fe80::/10
         }
     }
@@ -200,9 +214,8 @@ fn validate_resolved_host(host: &str) -> Result<(), anyhow::Error> {
         return Ok(());
     }
 
-    let addrs: Vec<IpAddr> = (host, 443)
-        .to_socket_addrs()
-        .map_err(|e| anyhow::anyhow!("instance_url DNS resolution failed: {e}"))?
+    let addrs: Vec<IpAddr> = resolve_socket_addrs(host)?
+        .into_iter()
         .map(|addr| addr.ip())
         .collect();
 
@@ -230,7 +243,7 @@ fn validate_instance_url(raw: &str) -> Result<(), anyhow::Error> {
     let parsed = Url::parse(raw)?;
     let scheme = parsed.scheme();
     if scheme != "https" && scheme != "http" {
-        anyhow::bail!("instance_url must use http or https");
+        anyhow::bail!("instance_url must use https (http is only allowed for localhost)");
     }
     let host = parsed
         .host_str()

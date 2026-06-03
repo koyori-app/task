@@ -57,6 +57,8 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // Rollback order: drop oauth_connections first, then restore password_hash NOT NULL.
+        // OAuth-only users have NULL password_hash; fill placeholders before SET NOT NULL.
         let drop_index = "DROP INDEX IF EXISTS idx_oauth_connections_user";
         manager
             .get_connection()
