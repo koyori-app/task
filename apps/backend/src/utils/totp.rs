@@ -211,13 +211,16 @@ pub async fn record_2fa_failure(
         .acquire()
         .await
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis acquire: {e}")))?;
-    let _: i32 = RECORD_2FA_FAILURE_SCRIPT
+    let locked_out: i32 = RECORD_2FA_FAILURE_SCRIPT
         .key(&key)
         .arg(MAX_ATTEMPTS)
         .arg(LOCKOUT_SECS)
         .invoke_async(&mut conn)
         .await
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis 2fa failure script: {e}")))?;
+    if locked_out == 1 {
+        return Err(AuthError::TooManyRequests);
+    }
     Ok(())
 }
 

@@ -103,23 +103,31 @@ async fn auth_2fa_integration_suite() {
         let _enabled = app.enable_2fa(&user).await;
         app.login_half_authed(&user).await;
 
-        for _ in 0..5 {
+        for attempt in 1..=4 {
             let bad = app
                 .post_json_with_session(
                     "/v1/auth/2fa/verify",
                     serde_json::json!({ "code": "000000" }),
                 )
                 .await;
-            assert_eq!(bad.status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(
+                bad.status(),
+                StatusCode::UNAUTHORIZED,
+                "attempt {attempt} should be 401"
+            );
         }
 
-        let locked = app
+        let fifth = app
             .post_json_with_session(
                 "/v1/auth/2fa/verify",
                 serde_json::json!({ "code": "000000" }),
             )
             .await;
-        assert_eq!(locked.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            fifth.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "5th failure must return 429 immediately"
+        );
 
         app.cleanup_user(user.id).await;
     }
