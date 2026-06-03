@@ -230,7 +230,7 @@ async fn password_reset_integration_suite() {
             .expect("load user")
             .expect("user exists");
         assert!(row.sessions_revoked_at.is_some());
-        assert!(row.sessions_revoked_at.unwrap() <= Utc::now().fixed_offset());
+        assert!(row.sessions_revoked_at.unwrap() <= Utc::now());
 
         app.cleanup_user(user.id).await;
     }

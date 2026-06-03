@@ -168,7 +168,7 @@ pub async fn password_reset_complete(
         .ok_or_else(|| AuthError::Internal(anyhow::anyhow!("user missing for token")))?;
     let mut active: users::ActiveModel = user.into();
     active.password_hash = Set(password_hash);
-    active.sessions_revoked_at = Set(Some(Utc::now().fixed_offset()));
+    active.sessions_revoked_at = Set(Some(Utc::now()));
 
     let txn = state
         .db
@@ -218,7 +218,7 @@ pub async fn password_change(
     let password_hash = create_password_hash(&payload.new_password)?;
     let mut active: users::ActiveModel = user.0.clone().into();
     active.password_hash = Set(password_hash);
-    active.sessions_revoked_at = Set(Some(Utc::now().fixed_offset()));
+    active.sessions_revoked_at = Set(Some(Utc::now()));
 
     let txn = state
         .db
