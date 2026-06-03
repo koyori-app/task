@@ -161,3 +161,59 @@ async fn oauth_callback_returns_email_conflict() {
 
     app.cleanup_user(existing.id).await;
 }
+
+#[tokio::test]
+async fn oauth_disconnect_last_auth_method_returns_403() {
+    let app = TestApp::new().await;
+    let unique = uuid::Uuid::new_v4();
+    app.set_mock_user(MockGitLabUser {
+        id: 400_001,
+        username: format!("oauth_only_{unique}"),
+        email: Some(format!("oauth-only-{unique}@example.com")),
+    });
+
+    let start = app.oauth_start(false).await;
+    let callback = app.follow_oauth_start(start).await;
+    assert!(is_redirect(callback.status()), "oauth callback redirect");
+
+    let me = app.get_me().await;
+    assert_eq!(me.status(), StatusCode::OK);
+    let body: serde_json::Value = me.json().await.expect("me json");
+    let user_id: uuid::Uuid = body["id"]
+        .as_str()
+        .expect("user id")
+        .parse()
+        .expect("uuid parse");
+    assert_eq!(app.count_connections_for_user(user_id).await, 1);
+
+    let disconnect_path = format!(
+        "/v1/auth/oauth/connections/gitlab_selfhosted?instance_url={}",
+        urlencoding::encode(app.instance_url())
+    );
+    let response = app.delete_with_session(&disconnect_path).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = response.text().await.expect("body");
+    assert!(body.contains("oauth-last-auth-method"));
+
+    app.cleanup_user(user_id).await;
+}
+
+#[tokio::test]
+async fn oauth_callback_provider_error_redirects_with_oauth_error() {
+    let app = TestApp::new().await;
+
+    let response = app
+        .get("/v1/auth/oauth/gitlab_selfhosted/callback?error=access_denied")
+        .await;
+    assert!(is_redirect(response.status()), "provider error redirect");
+    let location = response
+        .headers()
+        .get("location")
+        .expect("redirect location")
+        .to_str()
+        .expect("redirect location utf8");
+    assert!(
+        location.contains("oauth_error=authorization_failed"),
+        "unexpected redirect location: {location}"
+    );
+}
