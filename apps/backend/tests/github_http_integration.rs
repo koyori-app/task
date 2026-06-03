@@ -23,9 +23,19 @@ async fn mount_github_api_mocks(server: &MockServer) {
 
     Mock::given(method("GET"))
         .and(path_regex(r"^/app/installations/\d+$"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "account": { "login": "acme" }
-        })))
+        .respond_with(|req: &wiremock::Request| {
+            let installation_id = req
+                .url
+                .path_segments()
+                .and_then(|segments| segments.last())
+                .and_then(|id| id.parse::<i64>().ok())
+                .unwrap_or(0);
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": installation_id,
+                "account": { "login": "acme" },
+                "created_at": chrono::Utc::now().to_rfc3339(),
+            }))
+        })
         .mount(server)
         .await;
 
@@ -59,10 +69,16 @@ fn install_path(tp: &TestTenantProject) -> String {
 }
 
 fn callback_path(state: &str, installation_id: i64) -> String {
-    format!(
-        "/v1/github/callback?state={}&installation_id={installation_id}",
-        urlencoding::encode(state)
-    )
+    format!("/v1/github/callback?state={state}&installation_id={installation_id}")
+}
+
+fn state_from_install_location(location: &str) -> String {
+    url::Url::parse(location)
+        .expect("install location url")
+        .query_pairs()
+        .find(|(key, _)| key == "state")
+        .map(|(_, value)| value.into_owned())
+        .expect("state query param in install location")
 }
 
 fn integration_path(tp: &TestTenantProject) -> String {
@@ -105,27 +121,23 @@ async fn github_http_integration_suite() {
         app.reset_session_client();
     }
 
-    // 2. GET /callback 正常系 — state 一致・DB に integration 作成
+    // 2. GET /callback 正常系 — /install の state を /callback に渡して DB に integration 作成
     {
         let user = app.insert_user(false, false).await;
         let tp = app.insert_tenant_project(user.id).await;
         app.login_session(&user.email, &user.password).await;
 
-        let installation_id = unique_installation_id();
-        let state_token = github_oauth_state::new_state_token();
-        github_oauth_state::store_state(
-            &app.state.redis_client,
-            &state_token,
-            &GithubOAuthStatePayload {
-                tenant_id: tp.tenant_id,
-                project_id: tp.project_id,
-                user_id: user.id,
-                installation_id: None,
-            },
-        )
-        .await
-        .expect("store oauth state");
+        let install = app.get_with_session(&install_path(&tp)).await;
+        assert_eq!(install.status(), StatusCode::ACCEPTED);
+        let location = install
+            .headers()
+            .get("location")
+            .expect("location header")
+            .to_str()
+            .expect("location utf8");
+        let state_token = state_from_install_location(location);
 
+        let installation_id = unique_installation_id();
         let response = app
             .get_with_session(&callback_path(&state_token, installation_id))
             .await;
@@ -200,21 +212,17 @@ async fn github_http_integration_suite() {
         let tp = app.insert_tenant_project(user.id).await;
         app.login_session(&user.email, &user.password).await;
 
-        let installation_id = unique_installation_id();
-        let state_token = github_oauth_state::new_state_token();
-        github_oauth_state::store_state(
-            &app.state.redis_client,
-            &state_token,
-            &GithubOAuthStatePayload {
-                tenant_id: tp.tenant_id,
-                project_id: tp.project_id,
-                user_id: user.id,
-                installation_id: None,
-            },
-        )
-        .await
-        .expect("store oauth state");
+        let install = app.get_with_session(&install_path(&tp)).await;
+        assert_eq!(install.status(), StatusCode::ACCEPTED);
+        let location = install
+            .headers()
+            .get("location")
+            .expect("location header")
+            .to_str()
+            .expect("location utf8");
+        let state_token = state_from_install_location(location);
 
+        let installation_id = unique_installation_id();
         let callback = app
             .get_with_session(&callback_path(&state_token, installation_id))
             .await;

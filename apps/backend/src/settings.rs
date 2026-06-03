@@ -101,11 +101,11 @@ fn load_github_app_settings(
     gh.github_app_private_key = gh.github_app_private_key.replace("\\n", "\n");
 
     if gh.github_app_frontend_base_url.is_empty() {
-        let base: Settings = config
-            .clone()
-            .try_deserialize()
-            .map_err(|e| anyhow::anyhow!("failed to read base settings for github redirect: {e}"))?;
-        gh.github_app_frontend_base_url = base.email_verification_app_url.clone();
+        gh.github_app_frontend_base_url = config
+            .get_string("email_verification_app_url")
+            .map_err(|e| {
+                anyhow::anyhow!("failed to read email_verification_app_url for github redirect: {e}")
+            })?;
     }
 
     gh.validate()

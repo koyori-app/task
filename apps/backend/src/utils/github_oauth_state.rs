@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use super::redis::RedisConnection;
 
 const KEY_PREFIX: &str = "github_oauth_state:";
-const TTL_SECS: u64 = 600;
+pub const TTL_SECS: u64 = 600;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GithubOAuthStatePayload {
@@ -25,7 +25,7 @@ pub struct GithubOAuthStatePayload {
 pub fn new_state_token() -> String {
     let mut bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut bytes);
-    urlencoding::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)).into_owned()
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
 pub async fn store_state(

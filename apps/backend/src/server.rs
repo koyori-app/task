@@ -87,10 +87,8 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .allow_credentials(true);
 
     let email_storage = state.verification_email_storage.as_ref().clone();
-    let github_webhook_storage = state.github_webhook_storage.as_ref().clone();
     let board_api = ApiBuilder::new(Router::new())
         .register(email_storage)
-        .register(github_webhook_storage)
         .build();
 
     let email_worker_storage = state.verification_email_storage.as_ref().clone();

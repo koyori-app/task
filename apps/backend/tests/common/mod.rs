@@ -17,7 +17,11 @@ use axum_session::{SameSite, SessionConfig, SessionLayer, SessionMode, SessionSt
 use axum_session_redispool::SessionRedisPool;
 use backend::{
     AppState,
+<<<<<<< HEAD
     entities::{oauth_connections, projects, tenants, users},
+=======
+    entities::{github_integrations, projects, tenants, users},
+>>>>>>> fc56b7e7 (fix(backend): address PR #44 GitHub App review findings)
     jobs::{setup_github_webhook_storage, setup_pool, setup_verification_email_storage},
     routes,
     settings,
@@ -465,6 +469,7 @@ impl TestApp {
             tenant_id: Set(tenant_id),
             icon_emoji: Set(None),
             icon_url: Set(None),
+            key: Set("GHUB".into()),
         }
         .insert(&self.state.db)
         .await
@@ -639,13 +644,44 @@ impl TestApp {
     }
 
     pub async fn cleanup_user(&self, user_id: Uuid) {
+<<<<<<< HEAD
         let _ = oauth_connections::Entity::delete_many()
             .filter(oauth_connections::Column::UserId.eq(user_id))
             .exec(&self.state.db)
             .await;
         let _ = users::Entity::delete_by_id(user_id)
+=======
+        let integrations = github_integrations::Entity::find()
+            .filter(github_integrations::Column::CreatedBy.eq(user_id))
+            .all(&self.state.db)
+            .await
+            .expect("list github integrations for cleanup");
+        for row in integrations {
+            let active: github_integrations::ActiveModel = row.into();
+            active
+                .delete(&self.state.db)
+                .await
+                .expect("cleanup github integration");
+        }
+
+        let owned_tenants = tenants::Entity::find()
+            .filter(tenants::Column::OwnerId.eq(user_id))
+            .all(&self.state.db)
+            .await
+            .expect("list tenants for cleanup");
+        for row in owned_tenants {
+            let active: tenants::ActiveModel = row.into();
+            active
+                .delete(&self.state.db)
+                .await
+                .expect("cleanup tenant");
+        }
+
+        users::Entity::delete_by_id(user_id)
+>>>>>>> fc56b7e7 (fix(backend): address PR #44 GitHub App review findings)
             .exec(&self.state.db)
-            .await;
+            .await
+            .expect("cleanup user");
     }
 }
 

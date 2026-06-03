@@ -75,4 +75,8 @@ http-body-util = "0.1"
 reqwest = { version = "0.13", default-features = false, features = ["cookies", "json", "rustls"] }
 tower = { version = "0.5.2", features = ["util"] }
 urlencoding = "2.1"
+<<<<<<< HEAD
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+=======
+wiremock = "0.6"
+>>>>>>> fc56b7e7 (fix(backend): address PR #44 GitHub App review findings)

@@ -1,11 +1,25 @@
 //! GitHub App JWT 発行と Installation Access Token 取得。
 
+use std::sync::OnceLock;
+
 use anyhow::{anyhow, Context};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::settings::GithubAppSettings;
+use crate::utils::github_oauth_state::TTL_SECS;
+
+static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
+
+fn http_client() -> &'static Client {
+    HTTP_CLIENT.get_or_init(|| {
+        Client::builder()
+            .build()
+            .expect("build shared reqwest client")
+    })
+}
 
 fn github_api_base() -> String {
     std::env::var("GITHUB_API_BASE_URL")
@@ -44,8 +58,17 @@ struct InstallationRepositoriesResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct InstallationAccountResponse {
+struct InstallationResponse {
+    id: i64,
     account: RepositoryOwner,
+    created_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct InstallationInfo {
+    pub id: i64,
+    pub account_login: String,
+    pub created_at: chrono::DateTime<chrono::FixedOffset>,
 }
 
 pub struct InstallationAccessToken {
@@ -79,7 +102,7 @@ pub async fn fetch_installation_access_token(
         "{}/app/installations/{installation_id}/access_tokens",
         github_api_base()
     );
-    let client = reqwest::Client::new();
+    let client = http_client();
     let response = client
         .post(&url)
         .header("Authorization", format!("Bearer {jwt}"))
@@ -107,13 +130,13 @@ pub async fn fetch_installation_access_token(
     })
 }
 
-pub async fn fetch_installation_account_login(
+pub async fn fetch_installation(
     settings: &GithubAppSettings,
     installation_id: i64,
-) -> Result<String, anyhow::Error> {
+) -> Result<InstallationInfo, anyhow::Error> {
     let jwt = create_app_jwt(settings)?;
     let url = format!("{}/app/installations/{installation_id}", github_api_base());
-    let client = reqwest::Client::new();
+    let client = http_client();
     let response = client
         .get(&url)
         .header("Authorization", format!("Bearer {jwt}"))
@@ -127,11 +150,52 @@ pub async fn fetch_installation_account_login(
         let body = response.text().await.unwrap_or_default();
         return Err(anyhow!("github get installation failed: {status} {body}"));
     }
-    let body: InstallationAccountResponse = response
+    let body: InstallationResponse = response
         .json()
         .await
         .context("parse installation response")?;
-    Ok(body.account.login)
+    let created_at = chrono::DateTime::parse_from_rfc3339(&body.created_at)
+        .context("parse installation created_at")?;
+    Ok(InstallationInfo {
+        id: body.id,
+        account_login: body.account.login,
+        created_at,
+    })
+}
+
+/// OAuth コールバックで installation_id を GitHub API 経由で検証する。
+pub async fn verify_installation_for_callback(
+    settings: &GithubAppSettings,
+    installation_id: i64,
+    expected_installation_id: Option<i64>,
+) -> Result<InstallationInfo, anyhow::Error> {
+    let info = fetch_installation(settings, installation_id).await?;
+
+    if info.id != installation_id {
+        return Err(anyhow!(
+            "installation id mismatch: api={} query={installation_id}",
+            info.id
+        ));
+    }
+
+    if let Some(expected) = expected_installation_id {
+        if expected != installation_id {
+            return Err(anyhow!(
+                "installation id does not match oauth state binding"
+            ));
+        }
+    } else {
+        let max_age = chrono::Duration::seconds(TTL_SECS as i64);
+        let cutoff = chrono::Utc::now().fixed_offset() - max_age;
+        if info.created_at < cutoff {
+            return Err(anyhow!(
+                "installation is too old to bind on first connect (created_at={})",
+                info.created_at
+            ));
+        }
+    }
+
+    Ok(info)
 }
 
 /// インストール先リポジトリを選定する（テスト可能な純関数）。
@@ -149,7 +213,7 @@ pub async fn fetch_primary_repository(
     installation_access_token: &str,
     preferred_owner: &str,
 ) -> Result<(String, String), anyhow::Error> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let response = client
         .get(format!("{}/installation/repositories", github_api_base()))
         .header(
@@ -188,7 +252,7 @@ pub async fn delete_app_installation(
 ) -> Result<(), anyhow::Error> {
     let jwt = create_app_jwt(settings)?;
     let url = format!("{}/app/installations/{installation_id}", github_api_base());
-    let client = reqwest::Client::new();
+    let client = http_client();
     let response = client
         .delete(&url)
         .header("Authorization", format!("Bearer {jwt}"))
@@ -197,7 +261,10 @@ pub async fn delete_app_installation(
         .send()
         .await
         .context("github delete installation")?;
-    if !response.status().is_success() && response.status() != reqwest::StatusCode::NOT_FOUND {
+    if !response.status().is_success()
+        && response.status() != reqwest::StatusCode::NOT_FOUND
+        && response.status() != reqwest::StatusCode::GONE
+    {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         return Err(anyhow!(

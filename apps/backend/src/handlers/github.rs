@@ -193,23 +193,22 @@ pub async fn github_callback(
         return Err(AppError::Forbidden);
     }
 
-    if let Some(expected) = payload.installation_id {
-        if expected != query.installation_id {
-            return Err(AppError::BadRequest);
-        }
-    }
-
     require_tenant_owner(&state, payload.tenant_id, auth.user_id).await?;
     require_project_in_tenant(&state, payload.tenant_id, payload.project_id).await?;
 
+    let installation = github_api::verify_installation_for_callback(
+        github,
+        query.installation_id,
+        payload.installation_id,
+    )
+    .await
+    .map_err(|_| AppError::BadRequest)?;
+
     let access =
-        github_api::fetch_installation_access_token(github, query.installation_id)
+        github_api::fetch_installation_access_token(github, installation.id)
             .await
             .map_err(AppError::Internal)?;
-    let account_login =
-        github_api::fetch_installation_account_login(github, query.installation_id)
-            .await
-            .map_err(AppError::Internal)?;
+    let account_login = installation.account_login;
     let (repo_owner, repo_name) =
         github_api::fetch_primary_repository(&access.token, &account_login)
             .await
