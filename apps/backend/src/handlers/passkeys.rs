@@ -404,6 +404,10 @@ pub async fn authentication_finish(
             return Err(AuthError::InvalidCredentials);
         }
 
+        if user.is_suspended {
+            return Err(AuthError::Suspended);
+        }
+
         let mut passkey = model_to_passkey(&stored).map_err(AuthError::Internal)?;
         let auth_result = state.webauthn.finish_discoverable_authentication(
             &credential,
@@ -437,6 +441,10 @@ pub async fn authentication_finish(
 
     if !user.email_verified {
         return Err(AuthError::InvalidCredentials);
+    }
+
+    if user.is_suspended {
+        return Err(AuthError::Suspended);
     }
 
     finish_passkey_authentication(&state, &credential, auth_state, stored).await?;
