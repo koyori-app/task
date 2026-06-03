@@ -472,28 +472,6 @@ impl TestApp {
             .expect("oauth callback request")
     }
 
-    pub async fn follow_callback(&self, callback: Response) -> Response {
-        assert!(is_redirect(callback.status()), "oauth callback redirect");
-        let location = callback
-            .headers()
-            .get("location")
-            .expect("callback location")
-            .to_str()
-            .expect("callback location utf8")
-            .to_string();
-        self.client
-            .get(location)
-            .send()
-            .await
-            .expect("follow frontend redirect")
-    }
-
-    pub async fn complete_oauth_signup(&self) -> Response {
-        let start = self.oauth_start(false).await;
-        let callback = self.follow_oauth_start(start).await;
-        self.follow_callback(callback).await
-    }
-
     pub async fn get_me(&self) -> Response {
         self.client
             .get(format!("{}/v1/auth/me", self.base_url))
