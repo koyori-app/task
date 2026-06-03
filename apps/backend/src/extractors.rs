@@ -16,7 +16,7 @@ use crate::{
 
 type Session = axum_session::Session<SessionRedisPool>;
 
-async fn user_id_from_session(parts: &mut Parts, state: &AppState) -> Result<Uuid, AuthError> {
+async fn user_from_session(parts: &mut Parts, state: &AppState) -> Result<users::Model, AuthError> {
     let session = Session::from_request_parts(parts, state)
         .await
         .map_err(|_| AuthError::Internal(anyhow::anyhow!("session layer missing")))?;
@@ -37,7 +37,7 @@ async fn user_id_from_session(parts: &mut Parts, state: &AppState) -> Result<Uui
         }
     }
 
-    Ok(user_id)
+    Ok(user)
 }
 
 fn bearer_token_from_parts(parts: &Parts) -> Option<String> {
@@ -272,16 +272,12 @@ impl FromRequestParts<AppState> for AuthUser {
                 },
             })
         } else {
-            let user_id = user_id_from_session(parts, state).await?;
-            let user = users::Entity::find_by_id(user_id)
-                .one(&state.db)
-                .await?
-                .ok_or(AuthError::Unauthorized)?;
+            let user = user_from_session(parts, state).await?;
             if user.is_suspended {
                 return Err(AuthError::Suspended);
             }
             Ok(AuthUser {
-                user_id,
+                user_id: user.id,
                 method: AuthMethod::Session,
             })
         }
@@ -300,18 +296,16 @@ impl FromRequestParts<AppState> for AdminUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let user_id = user_id_from_session(parts, state).await?;
-        let user = users::Entity::find_by_id(user_id)
-            .one(&state.db)
-            .await?
-            .ok_or(AuthError::Unauthorized)?;
+        let user = user_from_session(parts, state).await?;
         if user.is_suspended {
             return Err(AuthError::Suspended);
         }
         if !user.is_admin {
             return Err(AuthError::Forbidden);
         }
-        Ok(AdminUser { user_id })
+        Ok(AdminUser {
+            user_id: user.id,
+        })
     }
 }
 
@@ -333,11 +327,7 @@ impl FromRequestParts<AppState> for CurrentUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let user_id = user_id_from_session(parts, state).await?;
-        let user = users::Entity::find_by_id(user_id)
-            .one(&state.db)
-            .await?
-            .ok_or(AuthError::Unauthorized)?;
+        let user = user_from_session(parts, state).await?;
         Ok(CurrentUser(user))
     }
 }

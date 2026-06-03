@@ -28,7 +28,8 @@ pub struct Model {
     pub is_admin: bool,
     pub is_suspended: bool,
     #[sea_orm(nullable)]
-    #[schema(value_type = String, format = "date-time", nullable)]
+    #[schema(ignore)]
+    #[serde(skip_serializing)]
     pub sessions_revoked_at: Option<DateTimeUtc>,
 }
 

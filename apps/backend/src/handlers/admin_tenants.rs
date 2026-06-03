@@ -40,15 +40,17 @@ pub struct AdminTaskListResponse {
     pub tasks: Vec<AdminTaskRow>,
 }
 
-async fn table_exists(db: &sea_orm::DatabaseConnection, table: &str) -> Result<bool, AppError> {
-    let sql = format!(
-        "SELECT EXISTS (
+async fn table_exists<C: ConnectionTrait>(conn: &C, table: &str) -> Result<bool, AppError> {
+    let sql = "SELECT EXISTS (
             SELECT FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_name = '{table}'
-        )"
-    );
-    let row = db
-        .query_one_raw(Statement::from_string(db.get_database_backend(), sql))
+            WHERE table_schema = 'public' AND table_name = ?
+        )";
+    let row = conn
+        .query_one_raw(Statement::from_sql_and_values(
+            conn.get_database_backend(),
+            sql,
+            vec![table.into()],
+        ))
         .await?;
     Ok(row
         .and_then(|r| r.try_get_by_index::<bool>(0).ok())
@@ -205,14 +207,16 @@ pub async fn list_tenant_project_tasks(
         return Ok(Json(AdminTaskListResponse { tasks: vec![] }));
     }
 
-    let sql = format!(
-        "SELECT id, project_id, title FROM tasks
-         WHERE project_id = '{project_id}' AND deleted_at IS NULL
-         ORDER BY created_at DESC"
-    );
+    let sql = "SELECT id, project_id, title FROM tasks
+         WHERE project_id = ? AND deleted_at IS NULL
+         ORDER BY created_at DESC";
     let rows = state
         .db
-        .query_all_raw(Statement::from_string(state.db.get_database_backend(), sql))
+        .query_all_raw(Statement::from_sql_and_values(
+            state.db.get_database_backend(),
+            sql,
+            vec![project_id.into()],
+        ))
         .await?;
 
     let tasks = rows

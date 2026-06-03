@@ -21,11 +21,8 @@ mod m20260527100000_add_admin_fields_to_users;
 mod m20260527110000_create_audit_logs;
 mod m20260527120000_create_system_settings;
 mod m20260528190000_add_drive_system_max_quota_mb;
-<<<<<<< HEAD
-mod m20260603_add_unique_task_assignees;
-=======
 mod m20260601160000_add_sessions_revoked_at_to_users;
->>>>>>> 8c16859f (fix(admin): revoke PAT/sessions on suspend and ensure system_settings)
+mod m20260603_add_unique_task_assignees;
 
 pub struct Migrator;
 
@@ -54,11 +51,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260527110000_create_audit_logs::Migration),
             Box::new(m20260527120000_create_system_settings::Migration),
             Box::new(m20260528190000_add_drive_system_max_quota_mb::Migration),
-<<<<<<< HEAD
-            Box::new(m20260603_add_unique_task_assignees::Migration),
-=======
             Box::new(m20260601160000_add_sessions_revoked_at_to_users::Migration),
->>>>>>> 8c16859f (fix(admin): revoke PAT/sessions on suspend and ensure system_settings)
+            Box::new(m20260603_add_unique_task_assignees::Migration),
         ]
     }
 }

@@ -80,30 +80,38 @@ async fn execute_bound<C: ConnectionTrait>(
     Ok(conn.execute_raw(stmt).await?)
 }
 
-async fn table_exists(db: &DatabaseConnection, table: &str) -> Result<bool, AppError> {
-    let sql = format!(
-        "SELECT EXISTS (
+async fn table_exists<C: ConnectionTrait>(conn: &C, table: &str) -> Result<bool, AppError> {
+    let sql = "SELECT EXISTS (
             SELECT FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_name = '{table}'
-        )"
-    );
-    let row = db
-        .query_one_raw(Statement::from_string(db.get_database_backend(), sql))
+            WHERE table_schema = 'public' AND table_name = ?
+        )";
+    let row = conn
+        .query_one_raw(Statement::from_sql_and_values(
+            conn.get_database_backend(),
+            sql,
+            vec![table.into()],
+        ))
         .await?;
     Ok(row
         .and_then(|r| r.try_get_by_index::<bool>(0).ok())
         .unwrap_or(false))
 }
 
-async fn column_exists(db: &DatabaseConnection, table: &str, column: &str) -> Result<bool, AppError> {
-    let sql = format!(
-        "SELECT EXISTS (
+async fn column_exists<C: ConnectionTrait>(
+    conn: &C,
+    table: &str,
+    column: &str,
+) -> Result<bool, AppError> {
+    let sql = "SELECT EXISTS (
             SELECT FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = '{table}' AND column_name = '{column}'
-        )"
-    );
-    let row = db
-        .query_one_raw(Statement::from_string(db.get_database_backend(), sql))
+            WHERE table_schema = 'public' AND table_name = ? AND column_name = ?
+        )";
+    let row = conn
+        .query_one_raw(Statement::from_sql_and_values(
+            conn.get_database_backend(),
+            sql,
+            vec![table.into(), column.into()],
+        ))
         .await?;
     Ok(row
         .and_then(|r| r.try_get_by_index::<bool>(0).ok())
@@ -111,13 +119,14 @@ async fn column_exists(db: &DatabaseConnection, table: &str, column: &str) -> Re
 }
 
 async fn revoke_user_sessions(db: &DatabaseConnection, user_id: Uuid) -> Result<(), AppError> {
-    let user = users::Entity::find_by_id(user_id)
-        .one(db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    let mut active: users::ActiveModel = user.into();
-    active.sessions_revoked_at = Set(Some(Utc::now().into()));
-    active.update(db).await?;
+    users::Entity::update_many()
+        .col_expr(
+            users::Column::SessionsRevokedAt,
+            Expr::value(Some(Utc::now())),
+        )
+        .filter(users::Column::Id.eq(user_id))
+        .exec(db)
+        .await?;
     Ok(())
 }
 
@@ -188,7 +197,7 @@ pub async fn ensure_not_last_admin(
 async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(), AppError> {
     let txn = db.begin().await?;
 
-    if table_exists(db, "task_assignees").await? {
+    if table_exists(&txn, "task_assignees").await? {
         execute_bound(
             &txn,
             "DELETE FROM task_assignees WHERE user_id = ?",
@@ -196,7 +205,7 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
         )
         .await?;
     }
-    if table_exists(db, "tasks").await? {
+    if table_exists(&txn, "tasks").await? {
         execute_bound(
             &txn,
             "DELETE FROM tasks WHERE created_by = ?",
@@ -204,7 +213,7 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
         )
         .await?;
     }
-    if table_exists(db, "milestones").await? {
+    if table_exists(&txn, "milestones").await? {
         execute_bound(
             &txn,
             "DELETE FROM milestones WHERE created_by = ?",
@@ -362,6 +371,10 @@ pub async fn update_user(
         .ok_or(AppError::NotFound)?;
 
     if payload.is_admin == Some(false) && user.is_admin {
+        ensure_not_last_admin(&state.db, id).await?;
+    }
+
+    if payload.is_suspended == Some(true) && user.is_admin {
         ensure_not_last_admin(&state.db, id).await?;
     }
 
