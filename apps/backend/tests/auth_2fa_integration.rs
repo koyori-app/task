@@ -1,7 +1,9 @@
 mod common;
 
 use axum::http::StatusCode;
+use backend::entities::{totp_credentials, users};
 use common::TestApp;
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 
 #[tokio::test]
 async fn auth_2fa_integration_suite() {
@@ -179,7 +181,58 @@ async fn auth_2fa_integration_suite() {
             .await;
         assert_eq!(delete.status(), StatusCode::FORBIDDEN);
 
+        let user_row = users::Entity::find_by_id(user.id)
+            .one(&app.state.db)
+            .await
+            .expect("load user")
+            .expect("user exists");
+        assert!(user_row.totp_enabled, "totp_enabled must remain true after forbidden delete");
+
+        let cred_count = totp_credentials::Entity::find()
+            .filter(totp_credentials::Column::UserId.eq(user.id))
+            .count(&app.state.db)
+            .await
+            .expect("count totp credentials");
+        assert!(cred_count > 0, "totp_credentials must not be deleted on forbidden delete");
+
         app.cleanup_user(user.id).await;
+    }
+
+    // Test 7: Suspended user cannot POST /2fa/verify with existing half_authed session
+    {
+        let mut app = TestApp::new().await;
+        let user = app.insert_user_default().await;
+        let _enabled = app.enable_2fa(&user).await;
+        app.login_half_authed(&user).await;
+        let half_authed_client = app.session_client();
+
+        let admin = app.insert_user(true, false).await;
+        app.reset_session_client();
+        app.login_session_no_content(&admin.email, &admin.password).await;
+
+        let suspend = app
+            .patch_json_with_session(
+                &format!("/v1/admin/users/{}", user.id),
+                serde_json::json!({ "is_suspended": true }),
+            )
+            .await;
+        assert_eq!(suspend.status(), StatusCode::OK);
+
+        let verify = half_authed_client
+            .post(format!("{}/v1/auth/2fa/verify", app.base_url()))
+            .json(&serde_json::json!({ "code": "000000" }))
+            .send()
+            .await
+            .expect("verify request");
+        assert_eq!(verify.status(), StatusCode::FORBIDDEN);
+        let body = verify.text().await.expect("verify body");
+        assert!(
+            body.contains("account-suspended"),
+            "expected account-suspended in body, got: {body}"
+        );
+
+        app.cleanup_user(user.id).await;
+        app.cleanup_user(admin.id).await;
     }
 }
 
