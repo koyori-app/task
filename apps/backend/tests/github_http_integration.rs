@@ -53,6 +53,7 @@ async fn mount_github_api_mocks(server: &MockServer) {
     Mock::given(method("DELETE"))
         .and(path_regex(r"^/app/installations/\d+$"))
         .respond_with(ResponseTemplate::new(204))
+        .expect(1)
         .mount(server)
         .await;
 }
