@@ -223,6 +223,62 @@ async fn webauthn_integration_suite() {
         app.cleanup_user(user.id).await;
     }
 
+    // 存在しない challenge_id → 400
+    {
+        let mut app = TestApp::new().await;
+        let user = app
+            .insert_passkey_user(true, Some("TestPassword123!"))
+            .await;
+        app.login_session(&user.email, &user.password).await;
+
+        let (soft, _) = SoftToken::new(true).expect("softtoken");
+        let mut wa = WebauthnAuthenticator::new(soft);
+        soft_register_finish(&app, &mut wa, "invalid-challenge-key").await;
+
+        app.reset_session_client();
+
+        let auth_start = app
+            .post_json_with_session(
+                "/v1/auth/passkeys/authentication/start",
+                serde_json::json!({ "email": user.email }),
+            )
+            .await;
+        assert_eq!(auth_start.status(), StatusCode::OK);
+        let auth_json: serde_json::Value = auth_start.json().await.expect("auth json");
+        let mut options = auth_json.clone();
+        options
+            .as_object_mut()
+            .expect("object")
+            .remove("challenge_id");
+        let rcr: RequestChallengeResponse =
+            serde_json::from_value(options).expect("parse rcr");
+
+        let origin = webauthn_origin(&app.state.settings.email_verification_app_url);
+        let auth_cred = wa
+            .do_authentication(origin, rcr)
+            .expect("softtoken authentication");
+
+        let bogus_challenge_id = Uuid::new_v4();
+
+        let finish = app
+            .post_json_with_session(
+                "/v1/auth/passkeys/authentication/finish",
+                serde_json::json!({
+                    "challenge_id": bogus_challenge_id,
+                    "credential": auth_cred,
+                }),
+            )
+            .await;
+        assert_eq!(
+            finish.status(),
+            StatusCode::BAD_REQUEST,
+            "invalid challenge_id: {}",
+            finish.text().await.unwrap_or_default()
+        );
+
+        app.cleanup_user(user.id).await;
+    }
+
     // 登録上限: 並行 INSERT で 21 件目を防ぐ
     {
         let app = TestApp::new().await;
