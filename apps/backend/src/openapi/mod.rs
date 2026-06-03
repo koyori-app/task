@@ -37,6 +37,22 @@ fn register_tags(openapi: &mut OpenApi) {
         TagBuilder::new().name("Drive Files").description(Some("ドライブ — ファイル操作")).build(),
         TagBuilder::new().name("Drive Folders").description(Some("ドライブ — フォルダ管理")).build(),
         TagBuilder::new().name("Drive Shares").description(Some("ドライブ — フォルダ共有・公開リンク")).build(),
+        TagBuilder::new()
+            .name("Admin Users")
+            .description(Some("管理者 — ユーザー管理"))
+            .build(),
+        TagBuilder::new()
+            .name("Admin Tenants")
+            .description(Some("管理者 — テナント閲覧・削除"))
+            .build(),
+        TagBuilder::new()
+            .name("Admin Audit Logs")
+            .description(Some("管理者 — 監査ログ一覧"))
+            .build(),
+        TagBuilder::new()
+            .name("Admin System Settings")
+            .description(Some("管理者 — システム設定"))
+            .build(),
     ]);
 }
 

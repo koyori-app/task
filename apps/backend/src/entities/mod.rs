@@ -1,3 +1,5 @@
+pub mod audit_logs;
+pub mod system_settings;
 pub mod drive_files;
 pub mod drive_folder_shares;
 pub mod drive_folders;

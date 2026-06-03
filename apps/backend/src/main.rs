@@ -1,5 +1,4 @@
 use backend::{AppState, server::run, utils::smtp::SmtpClient};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -50,6 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 起動時: システム上限を超過しているテナントを警告ログに出力
     if let Some(system_max) = drive_config.system_max_bytes_opt() {
         use backend::entities::tenants;
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
         let violators = tenants::Entity::find()
             .filter(tenants::Column::DriveQuotaBytes.gt(system_max))
             .all(&db)
@@ -62,6 +62,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "tenant drive quota exceeds system_max — update tenant quota or raise DRIVE_SYSTEM_MAX_QUOTA_MB"
             );
         }
+    }
+
+    if let Some(ref email) = settings.bootstrap_admin_email {
+        backend::utils::bootstrap_admin::bootstrap_admin_email(&db, email).await?;
     }
 
     let state = AppState {

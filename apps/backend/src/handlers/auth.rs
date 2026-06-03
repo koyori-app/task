@@ -1,4 +1,5 @@
 use axum::{Json, extract::State, http::StatusCode};
+use chrono::Utc;
 use axum_session::Session;
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
@@ -23,7 +24,7 @@ use crate::jobs::verification_email;
 use crate::utils::db::{is_postgres_unique_violation, with_transaction};
 use crate::utils::email::normalize_email;
 use crate::utils::email_verification;
-use crate::{AppState, entities::users};
+use crate::{AppState, entities::system_settings, entities::users};
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
 pub struct LoginRequest {
@@ -76,6 +77,7 @@ pub async fn login(
     }
 
     session.set("user_id", user.id);
+    session.set("issued_at_ms", Utc::now().timestamp_millis());
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -119,6 +121,20 @@ pub async fn register(
     } = payload;
     let email = normalize_email(&email);
 
+    crate::utils::system_settings::ensure_system_settings_row(&state.db).await?;
+
+    let settings = system_settings::Entity::find()
+        .filter(system_settings::Column::Singleton.eq(true))
+        .one(&state.db)
+        .await?
+        .ok_or(AuthError::Internal(anyhow::anyhow!(
+            "system_settings singleton row missing after ensure"
+        )))?;
+
+    if !settings.user_registration_enabled {
+        return Err(AuthError::Forbidden);
+    }
+
     let password_hash = create_password_hash(&password)?;
     let verification_token = generate_email_verification_token();
     let user_id = Uuid::new_v4();
@@ -131,6 +147,9 @@ pub async fn register(
         email: Set(email.clone()),
         email_verified: Set(false),
         password_hash: Set(password_hash),
+        is_admin: Set(false),
+        is_suspended: Set(false),
+        sessions_revoked_at: Set(None),
     };
 
     with_transaction::<(), AuthError, _>(&state.db, |txn| {

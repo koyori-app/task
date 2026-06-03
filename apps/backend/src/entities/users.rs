@@ -25,6 +25,12 @@ pub struct Model {
     #[schema(ignore)]
     #[serde(skip_serializing)]
     pub password_hash: String,
+    pub is_admin: bool,
+    pub is_suspended: bool,
+    #[sea_orm(nullable)]
+    #[schema(ignore)]
+    #[serde(skip_serializing)]
+    pub sessions_revoked_at: Option<DateTimeUtc>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

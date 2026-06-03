@@ -32,6 +32,8 @@ pub struct Settings {
     /// PAT の HMAC-SHA256 署名に使う秘密鍵。起動時に必須。32バイト以上（256ビット）が必要。
     #[validate(length(min = 32, message = "PERSONAL_TOKEN_SECRET must be at least 32 characters"))]
     pub personal_token_secret: String,
+    /// 起動時に管理者昇格するユーザーのメールアドレス（管理者ゼロ時のみ有効）。
+    pub bootstrap_admin_email: Option<String>,
 }
 
 fn default_verification_email_worker_concurrency() -> usize {
@@ -115,6 +117,7 @@ mod tests {
             email_verification_app_url: url.to_string(),
             verification_email_worker_concurrency: 1,
             personal_token_secret: "a".repeat(32),
+            bootstrap_admin_email: None,
         }
         .validate()
         .is_ok()
