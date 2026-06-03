@@ -240,7 +240,7 @@ https://app.example.com/auth/reset-password?token={token}
 ```
 
 リンク先フロントエンドページ: `/auth/reset-password?token={token}`  
-→ トークン確認（`GET verify`）→ 有効なら新パスワード入力フォームを表示
+→ フロントは URL の `?token=` を読み取り、`POST /v1/auth/password-reset/verify` に `{"token":"..."}` を送ってトークン確認 → 有効なら新パスワード入力フォームを表示
 
 ---
 
