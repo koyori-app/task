@@ -102,6 +102,7 @@ pub async fn establish_login_session(
     user: &users::Model,
 ) -> Result<Option<Login2faResponse>, AuthError> {
     session.renew();
+    session.set("issued_at_ms", Utc::now().timestamp_millis());
     session.set("user_id", user.id);
     let (requires_2fa, requires_2fa_setup) = login_2fa_flags(db, user).await?;
     if requires_2fa || requires_2fa_setup {
