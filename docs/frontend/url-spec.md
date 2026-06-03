@@ -86,7 +86,7 @@ apps/frontend/src/pages/
 │   ├── members/+Page.vue                # /{tenant}/members
 │   ├── drive/
 │   │   ├── +Page.vue                    # /{tenant}/drive
-│   │   └── @folderId/+Page.vue          # /{tenant}/drive/{folder_id}
+│   │   └── @folderId/+Page.vue          # /{tenant}/drive/{folder_id}（Vike: camelCase）
 │   └── projects/
 │       ├── +Page.vue                    # /{tenant}/projects
 │       └── @projectKey/
@@ -94,7 +94,7 @@ apps/frontend/src/pages/
 │           ├── +Layout.vue              # プロジェクトレイアウト（プロジェクトナビ）
 │           ├── tasks/
 │           │   ├── +Page.vue            # /{tenant}/projects/{key}/tasks
-│           │   └── @taskId/+Page.vue    # /{tenant}/projects/{key}/tasks/{KEY-N}
+│           │   └── @taskId/+Page.vue    # /{tenant}/projects/{key}/tasks/{KEY-N}（Vike: camelCase）
 │           ├── milestones/+Page.vue     # /{tenant}/projects/{key}/milestones
 │           ├── labels/+Page.vue         # /{tenant}/projects/{key}/labels
 │           ├── members/+Page.vue        # /{tenant}/projects/{key}/members

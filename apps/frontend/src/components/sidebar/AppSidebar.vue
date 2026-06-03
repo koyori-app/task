@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { SidebarProps } from '@/components/ui/sidebar';
+import { usePageContext } from 'vike-vue/usePageContext';
+import { computed } from 'vue';
 
 import {
   AudioWaveform,
@@ -30,8 +32,18 @@ const props = withDefaults(defineProps<SidebarProps>(), {
   collapsible: 'icon',
 });
 
+const pageContext = usePageContext();
+
+const labelsUrl = computed(() => {
+  const { tenant, projectKey } = pageContext.routeParams;
+  if (typeof tenant === 'string' && typeof projectKey === 'string') {
+    return `/${tenant}/projects/${projectKey}/labels`;
+  }
+  return '#';
+});
+
 // This is sample data.
-const data = {
+const data = computed(() => ({
   user: {
     name: 'shadcn',
     email: 'm@example.com',
@@ -57,9 +69,9 @@ const data = {
   navMain: [
     {
       title: 'Labels',
-      url: '#',
+      url: labelsUrl.value,
       icon: SquareTerminal,
-      isActive: true,
+      isActive: pageContext.urlPathname.endsWith('/labels'),
     },
     {
       title: 'Playground',
@@ -163,7 +175,7 @@ const data = {
       icon: Map,
     },
   ],
-};
+}));
 </script>
 
 <template>
