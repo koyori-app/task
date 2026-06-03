@@ -502,7 +502,7 @@ pub async fn regenerate_recovery_codes(
 #[axum::debug_handler]
 #[utoipa::path(
     post,
-    path = "/tenants/{tenant_id}/require-2fa",
+    path = "/{tenant_id}/require-2fa",
     tag = "Tenants",
     summary = "テナント 2FA 強制ポリシー変更",
     request_body = Require2faPolicyRequest,

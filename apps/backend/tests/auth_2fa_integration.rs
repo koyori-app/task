@@ -123,5 +123,55 @@ async fn auth_2fa_integration_suite() {
 
         app.cleanup_user(user.id).await;
     }
+
+    // Test 6: Tenant require_2fa blocks DELETE /2fa/totp
+    {
+        let mut app = TestApp::new().await;
+        let user = app.insert_user().await;
+        let enabled = app.enable_2fa(&user).await;
+
+        app.login_half_authed(&user).await;
+        let verify = app
+            .post_json_with_session(
+                "/v1/auth/2fa/verify",
+                serde_json::json!({ "recovery_code": &enabled.recovery_codes[0] }),
+            )
+            .await;
+        assert_eq!(verify.status(), StatusCode::NO_CONTENT);
+
+        let display_id = format!("req2fa-{}", &user.id.to_string()[..8]);
+        let create = app
+            .post_json_with_session(
+                "/v1/tenants",
+                serde_json::json!({
+                    "display_id": display_id,
+                    "name": "Require 2FA Tenant",
+                    "description": "",
+                    "icon_url": ""
+                }),
+            )
+            .await;
+        assert_eq!(create.status(), StatusCode::CREATED);
+        let tenant: serde_json::Value = create.json().await.expect("tenant json");
+        let tenant_id = tenant["id"].as_str().expect("tenant id");
+
+        let policy = app
+            .post_json_with_session(
+                &format!("/v1/tenants/{tenant_id}/require-2fa"),
+                serde_json::json!({ "enabled": true }),
+            )
+            .await;
+        assert_eq!(policy.status(), StatusCode::OK);
+
+        let delete = app
+            .delete_json_with_session(
+                "/v1/auth/2fa/totp",
+                serde_json::json!({ "recovery_code": &enabled.recovery_codes[1] }),
+            )
+            .await;
+        assert_eq!(delete.status(), StatusCode::FORBIDDEN);
+
+        app.cleanup_user(user.id).await;
+    }
 }
 
