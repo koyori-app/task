@@ -157,11 +157,11 @@ pub async fn password_reset_complete(
     State(state): State<AppState>,
     Valid(Json(payload)): Valid<Json<PasswordResetCompleteBody>>,
 ) -> Result<Json<MessageResponse>, AuthError> {
-    let password_hash = create_password_hash(&payload.new_password)?;
     let user_id = password_reset::consume_token(&state.redis_client, &payload.token)
         .await
         .map_err(|e| AuthError::Internal(e.into()))?
         .ok_or(AuthError::InvalidPasswordResetToken)?;
+    let password_hash = create_password_hash(&payload.new_password)?;
     let user = users::Entity::find_by_id(user_id)
         .one(&state.db)
         .await?
