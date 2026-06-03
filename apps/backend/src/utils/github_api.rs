@@ -275,29 +275,6 @@ pub async fn delete_app_installation(
     Ok(())
 }
 
-/// Wave 1 で Installation Access Token の自動更新に使用予定。
-#[allow(dead_code)]
-pub async fn refresh_token_if_needed(
-    settings: &GithubAppSettings,
-    installation_id: i64,
-    token_expires_at: chrono::DateTime<chrono::FixedOffset>,
-    access_token_enc: &str,
-) -> Result<(String, chrono::DateTime<chrono::FixedOffset>), anyhow::Error> {
-    let refresh_threshold =
-        chrono::Utc::now().fixed_offset() + chrono::Duration::minutes(5);
-    if token_expires_at > refresh_threshold {
-        return Ok((
-            crate::utils::github_token_crypto::decrypt_token(
-                &settings.github_token_encryption_key,
-                access_token_enc,
-            )?,
-            token_expires_at,
-        ));
-    }
-    let fresh = fetch_installation_access_token(settings, installation_id).await?;
-    Ok((fresh.token, fresh.expires_at))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
