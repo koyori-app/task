@@ -9,15 +9,15 @@ use webauthn_rs::prelude::{
 use super::redis::RedisConnection;
 
 pub const CHALLENGE_TTL_SECS: u64 = 5 * 60;
-/// 登録 start〜finish を保護する排他ロック TTL（登録フローは通常 5 秒未満）
-pub const REGISTRATION_LOCK_TTL_SECS: u64 = 30;
+/// 登録 start〜finish を保護する排他ロック TTL（チャレンジ TTL と揃える）
+pub const REGISTRATION_LOCK_TTL_SECS: u64 = CHALLENGE_TTL_SECS;
 
 const KEY_REG: &str = "webauthn:reg:";
 const KEY_REG_LOCK: &str = "webauthn:reg:lock:";
 const KEY_AUTH: &str = "webauthn:auth:";
 const KEY_AUTH_DISC: &str = "webauthn:auth:disc:";
 
-/// 登録フロー排他ロックを取得する（`SET key 1 NX EX 30`）。成功時のみ `true`。
+/// 登録フロー排他ロックを取得する（`SET key 1 NX EX REGISTRATION_LOCK_TTL_SECS`）。成功時のみ `true`。
 pub async fn acquire_registration_lock(
     redis: &RedisConnection,
     user_id: Uuid,

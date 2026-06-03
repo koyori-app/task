@@ -1,8 +1,9 @@
 //! パスキー DB ↔ webauthn-rs `Passkey` 変換
 
+use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
-    PaginatorTrait, QueryFilter, QuerySelect, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
+    EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, TransactionTrait,
 };
 use uuid::Uuid;
 use webauthn_rs::prelude::{
@@ -46,6 +47,37 @@ pub fn verify_sign_counter(
     stored_sign_count: i64,
 ) -> Result<(), AuthError> {
     verify_sign_counter_values(auth_result.counter(), stored_sign_count)
+}
+
+/// 認証成功後に DB 上のパスキー行を更新する（通常認証・discoverable 認証共通）。
+pub async fn update_passkey_after_authentication(
+    db: &DatabaseConnection,
+    stored: passkeys::Model,
+    passkey: &mut Passkey,
+    auth_result: &AuthenticationResult,
+) -> Result<(), AuthError> {
+    verify_sign_counter(auth_result, stored.sign_count)?;
+
+    let now = Utc::now().fixed_offset();
+
+    if let Some(true) = passkey.update_credential(auth_result) {
+        let (credential_id, public_key, aaguid, sign_count) =
+            passkey_to_model_fields(passkey).map_err(AuthError::Internal)?;
+        let mut active: passkeys::ActiveModel = stored.into();
+        active.credential_id = Set(credential_id);
+        active.public_key = Set(public_key);
+        active.aaguid = Set(aaguid);
+        active.sign_count = Set(sign_count);
+        active.last_used_at = Set(Some(now));
+        active.update(db).await?;
+    } else {
+        let mut active: passkeys::ActiveModel = stored.into();
+        active.sign_count = Set(auth_result.counter() as i64);
+        active.last_used_at = Set(Some(now));
+        active.update(db).await?;
+    }
+
+    Ok(())
 }
 
 /// `verify_sign_counter` のコアロジック（テスト可能）。
@@ -204,9 +236,11 @@ pub async fn is_last_auth_method(
 }
 
 async fn oauth_connection_count(
-    _db: &DatabaseConnection,
-    _user_id: uuid::Uuid,
+    db: &DatabaseConnection,
+    user_id: uuid::Uuid,
 ) -> Result<u64, anyhow::Error> {
-    // oauth_connections テーブルは別ブランチで実装予定。未実装時は 0 件扱い。
+    // oauth_connections テーブルは別ブランチ（auth-oauth）で実装予定。
+    // 未実装の間は 0 件扱いとし、パスワードなし＋パスキー1件の削除を 403 で防ぐ（仕様 §7）。
+    let _ = (db, user_id);
     Ok(0)
 }

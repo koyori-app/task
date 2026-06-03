@@ -27,7 +27,7 @@ use crate::utils::passkey_challenges;
 use crate::utils::passkeys::{
     count_user_passkeys, find_by_credential_id, insert_passkey_under_user_lock,
     is_last_auth_method, load_user_passkeys, model_to_passkey, passkey_to_model_fields,
-    verify_sign_counter, MAX_PASSKEYS_PER_USER,
+    update_passkey_after_authentication, MAX_PASSKEYS_PER_USER,
 };
 use crate::AppState;
 
@@ -150,7 +150,14 @@ pub async fn registration_start(
         return Err(AuthError::RegistrationInProgress);
     }
 
-    let count = count_user_passkeys(&state.db, user.id).await?;
+    let count = match count_user_passkeys(&state.db, user.id).await {
+        Ok(count) => count,
+        Err(e) => {
+            let _ = passkey_challenges::release_registration_lock(&state.redis_client, user.id)
+                .await;
+            return Err(e.into());
+        }
+    };
     if count >= MAX_PASSKEYS_PER_USER {
         let _ = passkey_challenges::release_registration_lock(&state.redis_client, user.id)
             .await
@@ -158,9 +165,14 @@ pub async fn registration_start(
         return Err(AuthError::PasskeyLimitExceeded);
     }
 
-    let existing = load_user_passkeys(&state.db, user.id)
-        .await
-        .map_err(AuthError::Internal)?;
+    let existing = match load_user_passkeys(&state.db, user.id).await {
+        Ok(passkeys) => passkeys,
+        Err(e) => {
+            let _ = passkey_challenges::release_registration_lock(&state.redis_client, user.id)
+                .await;
+            return Err(AuthError::Internal(e));
+        }
+    };
     let exclude = exclude_credentials(&existing);
 
     let (ccr, reg_state) = match state.webauthn.start_passkey_registration(
@@ -303,6 +315,7 @@ pub async fn authentication_start(
         let email = normalize_email(email);
         let passkey_list = passkeys_for_email_auth(&state.db, &email).await?;
 
+        // 空リストでもダミーチャレンジを返す（ユーザー列挙防止）。webauthn-rs は空 slice を許容。
         let (rcr, auth_state) = state
             .webauthn
             .start_passkey_authentication(&passkey_list)?;
@@ -342,26 +355,7 @@ async fn finish_passkey_authentication(
         .webauthn
         .finish_passkey_authentication(credential, &auth_state)?;
 
-    verify_sign_counter(&auth_result, stored.sign_count)?;
-
-    if let Some(true) = passkey.update_credential(&auth_result) {
-        let (credential_id, public_key, aaguid, sign_count) =
-            passkey_to_model_fields(&passkey).map_err(AuthError::Internal)?;
-        let mut active: passkey_entity::ActiveModel = stored.clone().into();
-        active.credential_id = Set(credential_id);
-        active.public_key = Set(public_key);
-        active.aaguid = Set(aaguid);
-        active.sign_count = Set(sign_count);
-        active.last_used_at = Set(Some(Utc::now().fixed_offset()));
-        active.update(&state.db).await?;
-    } else {
-        let mut active: passkey_entity::ActiveModel = stored.into();
-        active.sign_count = Set(auth_result.counter() as i64);
-        active.last_used_at = Set(Some(Utc::now().fixed_offset()));
-        active.update(&state.db).await?;
-    }
-
-    Ok(())
+    update_passkey_after_authentication(&state.db, stored, &mut passkey, &auth_result).await
 }
 
 #[axum::debug_handler]
@@ -417,24 +411,7 @@ pub async fn authentication_finish(
             &[DiscoverableKey::from(&passkey)],
         )?;
 
-        verify_sign_counter(&auth_result, stored.sign_count)?;
-
-        if let Some(true) = passkey.update_credential(&auth_result) {
-            let (credential_id, public_key, aaguid, sign_count) =
-                passkey_to_model_fields(&passkey).map_err(AuthError::Internal)?;
-            let mut active: passkey_entity::ActiveModel = stored.clone().into();
-            active.credential_id = Set(credential_id);
-            active.public_key = Set(public_key);
-            active.aaguid = Set(aaguid);
-            active.sign_count = Set(sign_count);
-            active.last_used_at = Set(Some(Utc::now().fixed_offset()));
-            active.update(&state.db).await?;
-        } else {
-            let mut active: passkey_entity::ActiveModel = stored.into();
-            active.sign_count = Set(auth_result.counter() as i64);
-            active.last_used_at = Set(Some(Utc::now().fixed_offset()));
-            active.update(&state.db).await?;
-        }
+        update_passkey_after_authentication(&state.db, stored, &mut passkey, &auth_result).await?;
 
         session.set("user_id", user.id);
         return Ok(StatusCode::NO_CONTENT);

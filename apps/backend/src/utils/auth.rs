@@ -16,7 +16,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use chrono::Utc;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -204,7 +204,7 @@ impl IntoResponse for AuthError {
             )
                 .into_response(),
             AuthError::WebAuthn(e) => {
-                debug!("webauthn error: {e:?}");
+                warn!("webauthn error: {e:?}");
                 (
                     StatusCode::BAD_REQUEST,
                     Json(ServerError {
