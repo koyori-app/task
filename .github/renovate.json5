@@ -1,21 +1,60 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
-  ],
+  "extends": ["config:base"],
+  "ignorePresets": [":prHourlyLimit2"],
+  // "baseBranches": ["develop", "master"],
   "schedule": ["before 9am on monday"],
   "timezone": "Asia/Tokyo",
+  // "dependencyDashboard": false,
+  "automerge": false,
+  "prHourlyLimit": 100,
+  "prConcurrentLimit": 100,
+  "branchConcurrentLimit": 100,
+  // "labels": ["type/Dependencies📦"],
   "labels": ["dependencies"],
   "packageRules": [
     {
-      "matchManagers": ["pnpm"],
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchManagers": ["github-actions", "gitlabci", "gitlabci-include"],
       "automerge": true
     },
     {
       "matchManagers": ["cargo"],
-      "matchUpdateTypes": ["minor", "patch"],
       "automerge": true
+    },
+    {
+      "matchManagers": ["npm"],
+      // "addLabels": ["topic/JavaScript🧶"]
+      "automerge": true
+    },
+    {
+      "matchManagers": ["docker-compose", "dockerfile"],
+      // "addLabels": ["topic/Docker⚓"]
+      "automerge": true
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchPackagePatterns": ["scalar"],
+      "groupName": "scalar"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchPackagePatterns": ["regle"],
+      "groupName": "regle"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchPackagePatterns": ["vueuse"],
+      "groupName": "vueuse"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchPackagePatterns": ["vue-macros"],
+      "groupName": "vue-macros"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["vite", "vite-plus", "vitest"],
+      "groupName": "vite-plus"
     }
   ]
 }
