@@ -52,6 +52,8 @@ pub enum OAuthError {
     InvalidState,
     #[error("email conflict")]
     EmailConflict,
+    #[error("username conflict")]
+    UsernameConflict,
     #[error("connection already exists")]
     ConnectionExists,
     #[error("connection not found")]
@@ -108,6 +110,13 @@ impl IntoResponse for OAuthError {
                 StatusCode::CONFLICT,
                 Json(ServerError {
                     message: "oauth-email-conflict".into(),
+                }),
+            )
+                .into_response(),
+            OAuthError::UsernameConflict => (
+                StatusCode::CONFLICT,
+                Json(ServerError {
+                    message: "oauth-username-conflict".into(),
                 }),
             )
                 .into_response(),
@@ -951,9 +960,7 @@ async fn classify_user_unique_violation(
         .await?
         .is_some()
     {
-        return Ok(OAuthError::Internal(anyhow::anyhow!(
-            "username already taken during oauth signup"
-        )));
+        return Ok(OAuthError::UsernameConflict);
     }
 
     Ok(OAuthError::Internal(anyhow::anyhow!(
