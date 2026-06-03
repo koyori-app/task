@@ -202,7 +202,10 @@ pub async fn github_callback(
         payload.installation_id,
     )
     .await
-    .map_err(|_| AppError::BadRequest)?;
+    .map_err(|e| {
+        tracing::warn!(error = %e, "github callback installation verification failed");
+        AppError::BadRequest
+    })?;
 
     let access =
         github_api::fetch_installation_access_token(github, installation.id)
