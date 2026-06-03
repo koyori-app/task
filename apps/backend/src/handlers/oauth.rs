@@ -33,6 +33,7 @@ use crate::utils::oauth::provider::{
     resolve_endpoints,
 };
 
+use crate::utils::login_session::establish_login_session;
 use crate::utils::oauth::state::{
     OAuthStatePayload, build_frontend_oauth_error_redirect, build_frontend_redirect,
     consume_state, sanitize_redirect_path, store_state,
@@ -450,7 +451,23 @@ pub async fn oauth_callback(
     )
     .await?;
 
-    session.set("user_id", user_id);
+    let user_model = users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .ok_or(OAuthError::Unauthorized)?;
+
+    let twofa_required = establish_login_session(&session, &state.db, &user_model)
+        .await
+        .map_err(OAuthError::from)?;
+
+    if twofa_required.is_some() {
+        let twofa_redirect = format!(
+            "{}/auth/2fa?redirect_after={}",
+            state.settings.email_verification_app_url.trim_end_matches('/'),
+            urlencoding::encode(&payload.redirect_after)
+        );
+        return Ok(Redirect::temporary(&twofa_redirect));
+    }
 
     // フロント基底 URL は email 認証と同一（単一フロント前提）。OAuth 専用 URL は未分離。
     // email_verification_app_url is the configured frontend base URL (shared with verification emails).

@@ -8,6 +8,7 @@ pub mod storage;
 pub mod db;
 pub mod email;
 pub mod email_verification;
+pub mod login_session;
 pub mod password_reset;
 pub mod password_reset_delivery;
 pub mod redis;
