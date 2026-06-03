@@ -310,7 +310,7 @@ pub async fn create_user(
         avatar_url: Set(None),
         email: Set(email),
         email_verified: Set(payload.email_verified),
-        password_hash: Set(password_hash),
+        password_hash: Set(Some(password_hash)),
         is_admin: Set(payload.is_admin),
         is_suspended: Set(false),
         sessions_revoked_at: Set(None),
