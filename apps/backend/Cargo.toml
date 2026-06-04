@@ -75,8 +75,5 @@ cookie = "0.18"
 http-body-util = "0.1"
 reqwest = { version = "0.13", default-features = false, features = ["cookies", "json", "rustls"] }
 tower = { version = "0.5.2", features = ["util"] }
-<<<<<<< HEAD
 urlencoding = "2.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-=======
->>>>>>> f56ba034 (fix(auth): PR #42 レビュー残件（DoS除去・DB重複・changeトランザクション）)

@@ -167,7 +167,7 @@ pub async fn password_reset_complete(
         .await?
         .ok_or_else(|| AuthError::Internal(anyhow::anyhow!("user missing for token")))?;
     let mut active: users::ActiveModel = user.into();
-    active.password_hash = Set(password_hash);
+    active.password_hash = Set(Some(password_hash));
     active.sessions_revoked_at = Set(Some(Utc::now()));
 
     let txn = state
@@ -209,15 +209,16 @@ pub async fn password_change(
     if !matches!(auth.method, AuthMethod::Session) {
         return Err(AuthError::Unauthorized);
     }
-    if user.password_hash.is_empty() {
-        return Err(AuthError::PasswordNotSet);
-    }
-    if !verify_password(&payload.current_password, &user.password_hash)? {
+    let current_hash = user
+        .password_hash
+        .as_deref()
+        .ok_or(AuthError::PasswordNotSet)?;
+    if !verify_password(&payload.current_password, current_hash)? {
         return Err(AuthError::InvalidCurrentPassword);
     }
     let password_hash = create_password_hash(&payload.new_password)?;
     let mut active: users::ActiveModel = user.0.clone().into();
-    active.password_hash = Set(password_hash);
+    active.password_hash = Set(Some(password_hash));
     active.sessions_revoked_at = Set(Some(Utc::now()));
 
     let txn = state
