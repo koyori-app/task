@@ -17,11 +17,7 @@ use axum_session::{SameSite, SessionConfig, SessionLayer, SessionMode, SessionSt
 use axum_session_redispool::SessionRedisPool;
 use backend::{
     AppState,
-<<<<<<< HEAD
-    entities::{oauth_connections, projects, tenants, users},
-=======
-    entities::{github_integrations, projects, tenants, users},
->>>>>>> fc56b7e7 (fix(backend): address PR #44 GitHub App review findings)
+    entities::{github_integrations, oauth_connections, projects, tenants, users},
     jobs::{setup_github_webhook_storage, setup_pool, setup_verification_email_storage},
     routes,
     settings,
@@ -644,13 +640,11 @@ impl TestApp {
     }
 
     pub async fn cleanup_user(&self, user_id: Uuid) {
-<<<<<<< HEAD
         let _ = oauth_connections::Entity::delete_many()
             .filter(oauth_connections::Column::UserId.eq(user_id))
             .exec(&self.state.db)
             .await;
-        let _ = users::Entity::delete_by_id(user_id)
-=======
+
         let integrations = github_integrations::Entity::find()
             .filter(github_integrations::Column::CreatedBy.eq(user_id))
             .all(&self.state.db)
@@ -678,7 +672,6 @@ impl TestApp {
         }
 
         users::Entity::delete_by_id(user_id)
->>>>>>> fc56b7e7 (fix(backend): address PR #44 GitHub App review findings)
             .exec(&self.state.db)
             .await
             .expect("cleanup user");
