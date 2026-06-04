@@ -22,9 +22,10 @@ pub struct Model {
     pub email: String,
     /// メールアドレスの確認が済んでいるかどうか
     pub email_verified: bool,
+    #[sea_orm(nullable)]
     #[schema(ignore)]
     #[serde(skip_serializing)]
-    pub password_hash: String,
+    pub password_hash: Option<String>,
     pub is_admin: bool,
     pub is_suspended: bool,
     #[sea_orm(nullable)]

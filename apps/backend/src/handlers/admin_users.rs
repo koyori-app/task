@@ -314,6 +314,7 @@ pub async fn create_user(
         is_admin: Set(payload.is_admin),
         is_suspended: Set(false),
         sessions_revoked_at: Set(None),
+        totp_enabled: Set(false),
     };
 
     let model = user.insert(&state.db).await.map_err(|e| {
