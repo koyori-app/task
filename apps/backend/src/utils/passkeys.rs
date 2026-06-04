@@ -10,6 +10,7 @@ use webauthn_rs::prelude::{
     AttestationMetadata, AuthenticationResult, Credential, Passkey,
 };
 
+use crate::entities::oauth_connections;
 use crate::entities::passkeys::{self, Entity as PasskeyEntity};
 use crate::utils::auth::AuthError;
 
