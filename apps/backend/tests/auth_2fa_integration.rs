@@ -10,7 +10,7 @@ async fn auth_2fa_integration_suite() {
     // Test 1: AuthUser rejects half_authed session on /me
     {
         let mut app = TestApp::new().await;
-        let user = app.insert_user().await;
+        let user = app.insert_user_default().await;
         let _enabled = app.enable_2fa(&user).await;
         app.login_half_authed(&user).await;
 
@@ -23,7 +23,7 @@ async fn auth_2fa_integration_suite() {
     // Test 2: HalfAuthedUser accepts POST /2fa/verify
     {
         let mut app = TestApp::new().await;
-        let user = app.insert_user().await;
+        let user = app.insert_user_default().await;
         let enabled = app.enable_2fa(&user).await;
         app.login_half_authed(&user).await;
 
@@ -45,7 +45,7 @@ async fn auth_2fa_integration_suite() {
     // Test 3: Recovery code single-use
     {
         let mut app = TestApp::new().await;
-        let user = app.insert_user().await;
+        let user = app.insert_user_default().await;
         let enabled = app.enable_2fa(&user).await;
         let code = enabled.recovery_codes[1].clone();
 
@@ -74,7 +74,7 @@ async fn auth_2fa_integration_suite() {
     // Test 4: Concurrent recovery consume — exactly one succeeds
     {
         let mut app = TestApp::new().await;
-        let user = app.insert_user().await;
+        let user = app.insert_user_default().await;
         let enabled = app.enable_2fa(&user).await;
         let recovery = enabled.recovery_codes[2].clone();
         app.login_half_authed(&user).await;
@@ -101,7 +101,7 @@ async fn auth_2fa_integration_suite() {
     // Test 5: Lockout after repeated invalid codes
     {
         let mut app = TestApp::new().await;
-        let user = app.insert_user().await;
+        let user = app.insert_user_default().await;
         let _enabled = app.enable_2fa(&user).await;
         app.login_half_authed(&user).await;
 
@@ -137,7 +137,7 @@ async fn auth_2fa_integration_suite() {
     // Test 6: Tenant require_2fa blocks DELETE /2fa/totp
     {
         let mut app = TestApp::new().await;
-        let user = app.insert_user().await;
+        let user = app.insert_user_default().await;
         let enabled = app.enable_2fa(&user).await;
 
         app.login_half_authed(&user).await;

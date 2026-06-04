@@ -1,39 +1,75 @@
 //! HTTP 統合テスト用の Axum アプリ構築ヘルパー。
 
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::{
+    Json,
     Router,
     body::Body,
+    extract::{Query, State},
     http::{Request, StatusCode, header},
+    response::{IntoResponse, Redirect},
+    routing::{get, post},
 };
 use axum_session::{SameSite, SessionConfig, SessionLayer, SessionMode, SessionStore};
 use axum_session_redispool::SessionRedisPool;
+use cookie::Key;
 use backend::{
     AppState,
-    entities::users,
+    entities::{oauth_connections, users},
     jobs::{setup_pool, setup_verification_email_storage},
     routes,
     settings,
     utils::{
         auth::create_password_hash,
         drive::DriveConfig,
+        totp::build_totp,
+        http::create_http_client,
+        oauth::config::{OAuthSettings, ProviderConfig},
         redis::RedisConnection,
         smtp::SmtpClient,
         storage::setup_storage,
-        totp::build_totp,
     },
 };
-use cookie::Key;
 use http_body_util::BodyExt;
-use reqwest::{Client, Response};
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, DatabaseConnection, EntityTrait};
+use reqwest::{redirect::Policy, Client, Response};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
+    EntityTrait, QueryFilter,
+};
+use serde::{Deserialize, Serialize};
 use tokio::{net::TcpListener, sync::OnceCell};
 use tower::ServiceExt;
 use url::Url;
 use uuid::Uuid;
 
 static SCHEMA_READY: OnceCell<()> = OnceCell::const_new();
+
+fn init_tracing() {
+    static TRACING: OnceLock<()> = OnceLock::new();
+    TRACING.get_or_init(|| {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter("backend=debug")
+            .with_test_writer()
+            .try_init();
+    });
+}
+
+pub fn is_redirect(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::MOVED_PERMANENTLY
+            | StatusCode::FOUND
+            | StatusCode::SEE_OTHER
+            | StatusCode::TEMPORARY_REDIRECT
+            | StatusCode::PERMANENT_REDIRECT
+    )
+}
+
+pub const TEST_OAUTH_CLIENT_ID: &str = "test-gitlab-selfhosted-client";
+pub const TEST_OAUTH_CLIENT_SECRET: &str = "test-gitlab-selfhosted-secret";
+pub const TEST_OAUTH_ENCRYPTION_KEY: &str = "01234567890123456789012345678901";
 
 fn test_session_config() -> SessionConfig {
     SessionConfig::default()
@@ -52,10 +88,11 @@ async fn ensure_schema(db: &DatabaseConnection) {
             db.execute_unprepared(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
                  ALTER TABLE users ADD COLUMN IF NOT EXISTS is_suspended BOOLEAN NOT NULL DEFAULT false;
-                 ALTER TABLE users ADD COLUMN IF NOT EXISTS sessions_revoked_at TIMESTAMPTZ;",
+                 ALTER TABLE users ADD COLUMN IF NOT EXISTS sessions_revoked_at TIMESTAMPTZ;
+                 ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;",
             )
             .await
-            .expect("prepare admin user columns");
+            .expect("prepare user columns for integration tests");
 
             db.execute_unprepared(
                 r#"
@@ -94,9 +131,113 @@ CREATE INDEX IF NOT EXISTS idx_recovery_codes_user ON recovery_codes(user_id);
         .await;
 }
 
+#[derive(Clone, Debug)]
+pub struct MockGitLabUser {
+    pub id: i64,
+    pub username: String,
+    pub email: Option<String>,
+}
+
+#[derive(Clone)]
+struct MockOAuthState {
+    user: Arc<Mutex<MockGitLabUser>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthorizeQuery {
+    redirect_uri: String,
+    state: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TokenResponseBody {
+    access_token: String,
+    token_type: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct GitLabUserResponse {
+    id: i64,
+    username: String,
+    email: Option<String>,
+    confirmed_at: Option<String>,
+    avatar_url: Option<String>,
+}
+
+pub struct MockOAuthHandle {
+    pub base_url: String,
+    user: Arc<Mutex<MockGitLabUser>>,
+}
+
+impl MockOAuthHandle {
+    pub async fn start(initial_user: MockGitLabUser) -> Self {
+        let user = Arc::new(Mutex::new(initial_user));
+        let state = MockOAuthState {
+            user: user.clone(),
+        };
+
+        let router = Router::new()
+            .route("/oauth/authorize", get(authorize))
+            .route("/oauth/token", post(token))
+            .route("/api/v4/user", get(userinfo))
+            .with_state(state);
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock oauth listener");
+        let addr = listener.local_addr().expect("mock oauth addr");
+        tokio::spawn(async move {
+            axum::serve(listener, router)
+                .await
+                .expect("serve mock oauth");
+        });
+
+        Self {
+            base_url: format!("http://{addr}"),
+            user,
+        }
+    }
+
+    pub fn set_user(&self, user: MockGitLabUser) {
+        *self.user.lock().expect("mock oauth user lock") = user;
+    }
+}
+
+async fn authorize(Query(query): Query<AuthorizeQuery>) -> Redirect {
+    let mut url =
+        url::Url::parse(&query.redirect_uri).expect("mock oauth redirect_uri must be valid");
+    url.query_pairs_mut()
+        .append_pair("code", "mock-auth-code")
+        .append_pair("state", &query.state);
+    Redirect::temporary(url.as_str())
+}
+
+async fn token() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(TokenResponseBody {
+            access_token: "mock-access-token".to_string(),
+            token_type: "Bearer",
+        }),
+    )
+}
+
+async fn userinfo(State(state): State<MockOAuthState>) -> impl IntoResponse {
+    let user = state.user.lock().expect("mock oauth user lock").clone();
+    let confirmed_at = user.email.as_ref().map(|_| "2024-01-01T00:00:00Z".to_string());
+    Json(GitLabUserResponse {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        confirmed_at,
+        avatar_url: None,
+    })
+}
+
 pub struct TestApp {
     pub state: AppState,
     pub base_url: String,
+    pub mock: MockOAuthHandle,
     client: Client,
     router: Router,
 }
@@ -111,16 +252,12 @@ pub struct Enabled2fa {
     pub recovery_codes: Vec<String>,
 }
 
-pub struct TestResponse {
-    pub status: StatusCode,
-    pub body: String,
-    pub set_cookie: Option<String>,
-}
-
 impl TestApp {
     pub async fn new() -> Self {
+        init_tracing();
         dotenvy::dotenv().ok();
-        let settings = settings::load_settings().expect("load settings from .env");
+        let mut settings = settings::load_settings().expect("load settings from .env");
+        settings.email_verification_app_url = "http://localhost:3000".to_string();
         let db = sea_orm::Database::connect(&settings.database_url)
             .await
             .expect("connect database");
@@ -145,6 +282,37 @@ impl TestApp {
                 .await
                 .expect("verification email storage");
         let storage = setup_storage().await.expect("storage backend");
+        let http_client = create_http_client().expect("http client");
+
+        let mock = MockOAuthHandle::start(MockGitLabUser {
+            id: 42_001,
+            username: "oauth_test_user".to_string(),
+            email: Some(format!("oauth-test-{}@example.com", Uuid::new_v4())),
+        })
+        .await;
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test listener");
+        let addr: SocketAddr = listener.local_addr().expect("local addr");
+        let base_url = format!("http://{addr}");
+
+        let mut encryption_key = [0u8; 32];
+        encryption_key.copy_from_slice(&TEST_OAUTH_ENCRYPTION_KEY.as_bytes()[..32]);
+
+        let oauth_settings = OAuthSettings {
+            app_base_url: base_url.clone(),
+            encryption_key,
+            default_redirect_path: "/dashboard".to_string(),
+            github: None,
+            gitlab: None,
+            gitlab_selfhosted: Some(ProviderConfig {
+                client_id: TEST_OAUTH_CLIENT_ID.to_string(),
+                client_secret: TEST_OAUTH_CLIENT_SECRET.to_string(),
+            }),
+            google: None,
+            oidc: None,
+        };
 
         let state = AppState {
             settings,
@@ -155,6 +323,8 @@ impl TestApp {
             verification_email_storage,
             storage,
             drive_config: DriveConfig::from_env(),
+            oauth_settings,
+            http_client,
         };
 
         let session_store = SessionStore::<SessionRedisPool>::new(
@@ -169,10 +339,6 @@ impl TestApp {
             .with_state(state.clone())
             .layer(SessionLayer::new(session_store));
 
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind test listener");
-        let addr: SocketAddr = listener.local_addr().expect("local addr");
         let app_router = router.clone();
         tokio::spawn(async move {
             axum::serve(listener, app_router)
@@ -182,12 +348,14 @@ impl TestApp {
 
         let client = Client::builder()
             .cookie_store(true)
+            .redirect(Policy::none())
             .build()
             .expect("reqwest client");
 
         Self {
             state,
-            base_url: format!("http://{addr}"),
+            base_url,
+            mock,
             client,
             router,
         }
@@ -215,6 +383,14 @@ impl TestApp {
         }
     }
 
+    pub fn instance_url(&self) -> &str {
+        &self.mock.base_url
+    }
+
+    pub fn set_mock_user(&self, user: MockGitLabUser) {
+        self.mock.set_user(user);
+    }
+
     pub async fn insert_user_default(&self) -> TestUser {
         insert_user(&self.state.db, false, false).await
     }
@@ -223,9 +399,42 @@ impl TestApp {
         insert_user(&self.state.db, is_admin, is_suspended).await
     }
 
+    pub async fn insert_oauth_user(&self, email: Option<&str>) -> TestUser {
+        let id = Uuid::new_v4();
+        let email = email
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("pw-user-{id}@example.com"));
+        let password = "TestPassword123!".to_string();
+        let password_hash = create_password_hash(&password).expect("password hash");
+
+        users::ActiveModel {
+            id: Set(id),
+            username: Set(format!("test_{}", &id.to_string()[..8])),
+            bio: Set(Some(String::new())),
+            avatar_url: Set(None),
+            email: Set(email.clone()),
+            email_verified: Set(true),
+            password_hash: Set(Some(password_hash)),
+            is_admin: Set(false),
+            is_suspended: Set(false),
+            sessions_revoked_at: Set(None),
+            totp_enabled: Set(false),
+        }
+        .insert(&self.state.db)
+        .await
+        .expect("insert user");
+
+        TestUser {
+            id,
+            email,
+            password,
+        }
+    }
+
     pub fn reset_session_client(&mut self) {
         self.client = Client::builder()
             .cookie_store(true)
+            .redirect(Policy::none())
             .build()
             .expect("reqwest client");
     }
@@ -313,7 +522,64 @@ impl TestApp {
         assert_eq!(body["requires_2fa"].as_bool(), Some(true));
     }
 
-    pub async fn get_with_session(&self, path: &str) -> Response {
+    pub async fn oauth_start(&self, link: bool) -> Response {
+        let mut url = format!(
+            "{}/v1/auth/oauth/gitlab_selfhosted?instance_url={}",
+            self.base_url,
+            urlencoding::encode(self.instance_url())
+        );
+        if link {
+            url.push_str("&redirect_after=/settings");
+        }
+        self.client
+            .get(&url)
+            .send()
+            .await
+            .expect("oauth start request")
+    }
+
+    pub async fn follow_oauth_start(&self, start: Response) -> Response {
+        assert!(is_redirect(start.status()), "oauth start redirect");
+        let authorize_url = start
+            .headers()
+            .get("location")
+            .expect("oauth start location")
+            .to_str()
+            .expect("location utf8")
+            .to_string();
+
+        let to_callback = self
+            .client
+            .get(authorize_url)
+            .send()
+            .await
+            .expect("follow mock authorize redirect");
+
+        assert!(is_redirect(to_callback.status()), "mock authorize redirect");
+        let callback_url = to_callback
+            .headers()
+            .get("location")
+            .expect("callback location")
+            .to_str()
+            .expect("callback location utf8")
+            .to_string();
+
+        self.client
+            .get(callback_url)
+            .send()
+            .await
+            .expect("oauth callback request")
+    }
+
+    pub async fn get_me(&self) -> Response {
+        self.client
+            .get(format!("{}/v1/auth/me", self.base_url))
+            .send()
+            .await
+            .expect("me request")
+    }
+
+    pub async fn get(&self, path: &str) -> Response {
         self.client
             .get(format!("{}{path}", self.base_url))
             .send()
@@ -321,25 +587,11 @@ impl TestApp {
             .expect("get request")
     }
 
+    pub async fn get_with_session(&self, path: &str) -> Response {
+        self.get(path).await
+    }
+
     pub async fn post_json_with_session(&self, path: &str, body: serde_json::Value) -> Response {
-        self.client
-            .post(format!("{}{path}", self.base_url))
-            .json(&body)
-            .send()
-            .await
-            .expect("post request")
-    }
-
-    pub async fn delete_json_with_session(&self, path: &str, body: serde_json::Value) -> Response {
-        self.client
-            .delete(format!("{}{path}", self.base_url))
-            .json(&body)
-            .send()
-            .await
-            .expect("delete request")
-    }
-
-    pub async fn post_json(&self, path: &str, body: serde_json::Value) -> Response {
         self.client
             .post(format!("{}{path}", self.base_url))
             .json(&body)
@@ -387,10 +639,80 @@ impl TestApp {
         &self.client
     }
 
+    pub async fn delete_with_session(&self, path: &str) -> Response {
+        self.client
+            .delete(format!("{}{path}", self.base_url))
+            .send()
+            .await
+            .expect("delete request")
+    }
+
+    pub async fn delete_json_with_session(&self, path: &str, body: serde_json::Value) -> Response {
+        self.client
+            .delete(format!("{}{path}", self.base_url))
+            .json(&body)
+            .send()
+            .await
+            .expect("delete request")
+    }
+
+    pub async fn count_connections_for_user(&self, user_id: Uuid) -> u64 {
+        oauth_connections::Entity::find()
+            .filter(oauth_connections::Column::UserId.eq(user_id))
+            .all(&self.state.db)
+            .await
+            .expect("load connections")
+            .len() as u64
+    }
+
     pub async fn cleanup_user(&self, user_id: Uuid) {
+        let _ = oauth_connections::Entity::delete_many()
+            .filter(oauth_connections::Column::UserId.eq(user_id))
+            .exec(&self.state.db)
+            .await;
         let _ = users::Entity::delete_by_id(user_id)
             .exec(&self.state.db)
             .await;
+    }
+}
+
+pub struct TestResponse {
+    pub status: StatusCode,
+    pub body: String,
+    pub set_cookie: Option<String>,
+}
+
+pub async fn insert_user(
+    db: &DatabaseConnection,
+    is_admin: bool,
+    is_suspended: bool,
+) -> TestUser {
+    let id = Uuid::new_v4();
+    let email = format!("admin-test-{id}@example.com");
+    let password = "TestPassword123!".to_string();
+    let password_hash = create_password_hash(&password).expect("password hash");
+
+    users::ActiveModel {
+        id: Set(id),
+        username: Set(format!("test_{}", &id.to_string()[..8])),
+        bio: Set(Some(String::new())),
+        avatar_url: Set(None),
+        email: Set(email.clone()),
+        email_verified: Set(true),
+        password_hash: Set(Some(password_hash)),
+        is_admin: Set(is_admin),
+        is_suspended: Set(is_suspended),
+        sessions_revoked_at: Set(None),
+        totp_enabled: Set(false),
+    }
+    .insert(db)
+    .await
+    .expect("insert user");
+
+    TestUser {
+        id,
+        email,
+        password,
     }
 }
 
@@ -406,40 +728,6 @@ pub fn secret_from_otpauth_uri(uri: &str) -> String {
 pub fn current_totp_code(secret: &str, issuer: &str, email: &str) -> String {
     let totp = build_totp(secret, issuer, email).expect("totp");
     totp.generate_current().expect("code")
-}
-
-pub async fn insert_user(
-    db: &DatabaseConnection,
-    is_admin: bool,
-    is_suspended: bool,
-) -> TestUser {
-    let id = Uuid::new_v4();
-    let email = format!("test-{id}@example.com");
-    let password = "TestPassword123!".to_string();
-    let password_hash = create_password_hash(&password).expect("password hash");
-
-    users::ActiveModel {
-        id: Set(id),
-        username: Set(format!("test_{}", &id.to_string()[..8])),
-        bio: Set(Some(String::new())),
-        avatar_url: Set(None),
-        email: Set(email.clone()),
-        email_verified: Set(true),
-        password_hash: Set(password_hash),
-        is_admin: Set(is_admin),
-        is_suspended: Set(is_suspended),
-        sessions_revoked_at: Set(None),
-        totp_enabled: Set(false),
-    }
-    .insert(db)
-    .await
-    .expect("insert user");
-
-    TestUser {
-        id,
-        email,
-        password,
-    }
 }
 
 pub async fn insert_personal_token_for_test(
