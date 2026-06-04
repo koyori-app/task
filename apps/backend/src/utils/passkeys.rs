@@ -229,7 +229,7 @@ pub async fn is_last_auth_method(
         .await?
         .ok_or_else(|| anyhow::anyhow!("user not found"))?;
 
-    if !user.password_hash.is_empty() {
+    if user.password_hash.is_some() {
         return Ok(false);
     }
 
@@ -240,8 +240,8 @@ async fn oauth_connection_count(
     db: &DatabaseConnection,
     user_id: uuid::Uuid,
 ) -> Result<u64, anyhow::Error> {
-    // oauth_connections テーブルは別ブランチ（auth-oauth）で実装予定。
-    // 未実装の間は 0 件扱いとし、パスワードなし＋パスキー1件の削除を 403 で防ぐ（仕様 §7）。
-    let _ = (db, user_id);
-    Ok(0)
+    Ok(oauth_connections::Entity::find()
+        .filter(oauth_connections::Column::UserId.eq(user_id))
+        .count(db)
+        .await?)
 }
