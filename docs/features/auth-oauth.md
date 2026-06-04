@@ -170,6 +170,8 @@ GitLab.com と異なり、OAuth エンドポイントがインスタンスごと
 12. redirect_after へリダイレクト（デフォルト: /dashboard）
 ```
 
+`redirect_after` は `/` で始まる相対パスのみ許可する（`//`・`:`・`@`・`..` を拒否）。組み立て時はフロント基底 URL と `url::Url::join` で同一 origin を検証する。プロバイダーが `error` を返した場合は詳細をログに残し、フロントへ `oauth_error=authorization_failed` のみ付与してリダイレクトする。
+
 ---
 
 ## 6. ユーザー照合ロジック

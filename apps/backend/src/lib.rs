@@ -1,6 +1,7 @@
 use crate::{
     settings::Settings,
     utils::{
+        oauth::OAuthSettings,
         redis::RedisConnection,
         smtp::SmtpClient,
         drive::DriveConfig,
@@ -39,4 +40,6 @@ pub struct AppState {
     pub verification_email_storage: Arc<VerificationEmailStorage>,
     pub storage: Arc<dyn StorageBackend>,
     pub drive_config: DriveConfig,
+    pub oauth_settings: OAuthSettings,
+    pub http_client: reqwest::Client,
 }

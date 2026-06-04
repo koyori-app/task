@@ -63,7 +63,7 @@ pub async fn login(
 
     let password_hash = user
         .as_ref()
-        .map(|u| u.password_hash.as_str())
+        .and_then(|u| u.password_hash.as_deref())
         .unwrap_or(DUMMY_PASSWORD_HASH);
 
     if !verify_password(&password, password_hash)? {
@@ -146,7 +146,7 @@ pub async fn register(
         avatar_url: Set(None),
         email: Set(email.clone()),
         email_verified: Set(false),
-        password_hash: Set(password_hash),
+        password_hash: Set(Some(password_hash)),
         is_admin: Set(false),
         is_suspended: Set(false),
         sessions_revoked_at: Set(None),

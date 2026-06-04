@@ -1,11 +1,14 @@
 pub mod auth;
 pub mod bootstrap_admin;
+pub mod http;
 pub mod validation;
 pub mod drive;
+pub mod oauth;
 pub mod storage;
 pub mod db;
 pub mod email;
 pub mod email_verification;
+pub mod login_session;
 pub mod password_reset;
 pub mod password_reset_delivery;
 pub mod redis;

@@ -45,6 +45,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     let drive_config = backend::utils::drive::DriveConfig::from_env();
+    let oauth_settings = backend::utils::oauth::OAuthSettings::from_env()?;
+    let http_client = backend::utils::http::create_http_client().map_err(|err| {
+        std::io::Error::other(format!("HTTP client initialization failed: {err}"))
+    })?;
 
     // 起動時: システム上限を超過しているテナントを警告ログに出力
     if let Some(system_max) = drive_config.system_max_bytes_opt() {
@@ -77,6 +81,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         verification_email_storage,
         storage,
         drive_config,
+        oauth_settings,
+        http_client,
     };
     run(state).await?;
 

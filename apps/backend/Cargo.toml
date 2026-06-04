@@ -64,9 +64,13 @@ aws-credential-types = "1"
 aws-sdk-s3 = "1"
 mime_guess = "2"
 time = { version = "0.3", features = ["serde"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form"] }
+aes-gcm = "0.10"
 
 [dev-dependencies]
 cookie = "0.18"
 http-body-util = "0.1"
-reqwest = { version = "0.12", default-features = false, features = ["cookies", "json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["cookies", "json", "rustls"] }
 tower = { version = "0.5.2", features = ["util"] }
+urlencoding = "2.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
