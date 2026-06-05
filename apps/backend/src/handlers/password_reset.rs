@@ -162,7 +162,9 @@ pub async fn password_reset_complete(
     State(state): State<AppState>,
     Valid(Json(payload)): Valid<Json<PasswordResetCompleteBody>>,
 ) -> Result<Json<MessageResponse>, AuthError> {
-    let user_id = password_reset::consume_token(&state.redis_client, &payload.token)
+    // トークンを消費する前に user_id を確認し、ユーザ取得とハッシュ生成を済ませる。
+    // consume_token は GETDEL 相当なので先に呼ぶと後続の失敗でトークンが失われ再試行不能になる。
+    let user_id = password_reset::lookup_token_user_id(&state.redis_client, &payload.token)
         .await
         .map_err(|e| AuthError::Internal(e.into()))?
         .ok_or(AuthError::InvalidPasswordResetToken)?;
@@ -177,6 +179,16 @@ pub async fn password_reset_complete(
         .one(&txn)
         .await?
         .ok_or_else(|| AuthError::Internal(anyhow::anyhow!("user missing for token")))?;
+
+    // 準備完了後にトークンを消費する。ここで失敗した場合はトークンが残るため再試行可能。
+    let consumed_id = password_reset::consume_token(&state.redis_client, &payload.token)
+        .await
+        .map_err(|e| AuthError::Internal(e.into()))?
+        .ok_or(AuthError::InvalidPasswordResetToken)?;
+    if consumed_id != user_id {
+        return Err(AuthError::Internal(anyhow::anyhow!("token user_id mismatch")));
+    }
+
     let mut active: users::ActiveModel = user.into();
     active.password_hash = Set(Some(password_hash));
     active.sessions_revoked_at = Set(Some(Utc::now()));
