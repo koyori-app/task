@@ -217,7 +217,7 @@ pub async fn password_change(
         return Err(AuthError::InvalidCurrentPassword);
     }
     let password_hash = create_password_hash(&payload.new_password)?;
-    let mut active: users::ActiveModel = user.0.clone().into();
+    let mut active: users::ActiveModel = user.0.into();
     active.password_hash = Set(Some(password_hash));
     active.sessions_revoked_at = Set(Some(Utc::now()));
 

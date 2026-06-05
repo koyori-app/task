@@ -192,8 +192,6 @@ pub enum PasswordResetRequestErrors {
     BadRequest(#[to_schema] ServerError),
     #[response(status = 429, description = "しばらくしてから再度お試しください")]
     TooManyRequests(#[to_schema] ServerError),
-    #[response(status = 503, description = "リセットメールの送信準備に失敗しました")]
-    Unavailable(#[to_schema] ServerError),
     #[response(status = 500, description = "サーバー側で問題が発生しました")]
     Internal(#[to_schema] ServerError),
 }

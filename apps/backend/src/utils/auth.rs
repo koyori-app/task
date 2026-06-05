@@ -16,7 +16,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use thiserror::Error;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use chrono::Utc;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -58,8 +58,6 @@ pub enum AuthError {
     TwoFactorAlreadyEnabled,
     #[error("2fa not enabled")]
     TwoFactorNotEnabled,
-    #[error("password reset email enqueue failed")]
-    PasswordResetEmailEnqueueFailed(#[source] anyhow::Error),
     #[error("invalid password reset token")]
     InvalidPasswordResetToken,
     #[error("password reset token not found")]
@@ -68,8 +66,6 @@ pub enum AuthError {
     InvalidCurrentPassword,
     #[error("password not set")]
     PasswordNotSet,
-    #[error("invalid new password")]
-    InvalidNewPassword,
 }
 
 impl From<sea_orm::DbErr> for AuthError {
@@ -186,16 +182,6 @@ impl IntoResponse for AuthError {
                 }),
             )
                 .into_response(),
-            AuthError::PasswordResetEmailEnqueueFailed(e) => {
-                warn!("password reset email enqueue failed: {:#?}", e);
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(ServerError {
-                        message: "password-reset-email-enqueue-failed".into(),
-                    }),
-                )
-                    .into_response()
-            }
             AuthError::InvalidPasswordResetToken => (
                 StatusCode::BAD_REQUEST,
                 Json(ServerError { message: "invalid-password-reset-token".into() }),
@@ -214,11 +200,6 @@ impl IntoResponse for AuthError {
             AuthError::PasswordNotSet => (
                 StatusCode::BAD_REQUEST,
                 Json(ServerError { message: "password-not-set".into() }),
-            )
-                .into_response(),
-            AuthError::InvalidNewPassword => (
-                StatusCode::BAD_REQUEST,
-                Json(ServerError { message: "invalid-new-password".into() }),
             )
                 .into_response(),
         }

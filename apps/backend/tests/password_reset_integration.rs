@@ -1,12 +1,11 @@
 mod common;
 
 use axum::http::StatusCode;
-use backend::entities::{personal_tokens, scopes::Scope, tenants};
-use backend::utils::{auth, password_reset};
-use common::TestApp;
+use backend::entities::{personal_tokens, tenants, users};
+use backend::utils::password_reset;
+use common::{TestApp, insert_personal_token_for_test, insert_tenant};
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
-use uuid::Uuid;
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 
 const RESET_MESSAGE: &str = "入力されたメールアドレスにリセットリンクを送信しました（登録済みの場合）";
 
@@ -93,43 +92,21 @@ async fn password_reset_integration_suite() {
             .await
             .expect("store token");
 
-        let tenant_id = Uuid::new_v4();
-        tenants::ActiveModel {
-            id: Set(tenant_id),
-            display_id: Set(format!("t{}", &tenant_id.to_string()[..8])),
-            name: Set("PW Reset Test Tenant".into()),
-            description: Set(String::new()),
-            icon_url: Set(String::new()),
-            owner_id: Set(user.id),
-            drive_quota_bytes: Set(None),
-        }
-        .insert(&app.state.db)
-        .await
-        .expect("insert tenant");
-
-        let (pat_plain, pat_hash) =
-            auth::generate_personal_token(&app.state.settings.personal_token_secret)
-                .expect("generate pat");
-        let pat_id = Uuid::new_v4();
-        let scopes_json = serde_json::to_string(&vec![Scope::ReadProject]).expect("scopes json");
-        sqlx::query(
-            r#"
-            INSERT INTO personal_tokens
-                (id, name, token, revoked, user_id, token_last_four, token_hash, scopes, tenant_id)
-            VALUES ($1, $2, $3, false, $4, $5, $6, $7::json, $8)
-            "#,
+        let tenant_id = insert_tenant(&app.state.db, user.id).await;
+        let _pat = insert_personal_token_for_test(
+            &app.state.db,
+            user.id,
+            tenant_id,
+            &app.state.settings.personal_token_secret,
         )
-        .bind(pat_id)
-        .bind("reset-test-pat")
-        .bind(&pat_plain)
-        .bind(user.id)
-        .bind("abcd")
-        .bind(&pat_hash)
-        .bind(&scopes_json)
-        .bind(tenant_id)
-        .execute(&app.state.pg_pool)
-        .await
-        .expect("insert personal token");
+        .await;
+        let pat_id = personal_tokens::Entity::find()
+            .filter(personal_tokens::Column::UserId.eq(user.id))
+            .one(&app.state.db)
+            .await
+            .expect("load pat")
+            .expect("pat exists")
+            .id;
 
         let complete = app
             .post_json(
@@ -231,6 +208,116 @@ async fn password_reset_integration_suite() {
             .expect("user exists");
         assert!(row.sessions_revoked_at.is_some());
         assert!(row.sessions_revoked_at.unwrap() <= Utc::now());
+
+        app.cleanup_user(user.id).await;
+    }
+
+    // Test 6: レート制限 — 60 秒以内に同一メールで 2 回 request すると 429
+    {
+        let user = app.insert_user(false, false).await;
+
+        let first = app
+            .post_json(
+                "/v1/auth/password-reset/request",
+                serde_json::json!({ "email": user.email }),
+            )
+            .await;
+        assert_eq!(first.status(), StatusCode::OK);
+
+        let second = app
+            .post_json(
+                "/v1/auth/password-reset/request",
+                serde_json::json!({ "email": user.email }),
+            )
+            .await;
+        assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        app.cleanup_user(user.id).await;
+    }
+
+    // Test 7: password/change — 現在パスワード不一致は 400
+    {
+        let mut app = TestApp::new().await;
+        let user = app.insert_user(false, false).await;
+        app.login_session(&user.email, &user.password).await;
+
+        let resp = app
+            .post_json_with_session(
+                "/v1/auth/password/change",
+                serde_json::json!({
+                    "current_password": "WrongPassword999!",
+                    "new_password": "NewPassword123!"
+                }),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = resp.text().await.expect("body");
+        assert!(body.contains("invalid-current-password"));
+
+        app.cleanup_user(user.id).await;
+    }
+
+    // Test 8: password/change — PAT 認証は 401
+    {
+        let app = TestApp::new().await;
+        let user = app.insert_user(false, false).await;
+        let tenant_id = insert_tenant(&app.state.db, user.id).await;
+        let pat = insert_personal_token_for_test(
+            &app.state.db,
+            user.id,
+            tenant_id,
+            &app.state.settings.personal_token_secret,
+        )
+        .await;
+
+        let resp = app
+            .post_json_with_bearer(
+                "/v1/auth/password/change",
+                serde_json::json!({
+                    "current_password": user.password,
+                    "new_password": "NewPassword123!"
+                }),
+                &pat,
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        let _ = backend::entities::tenants::Entity::delete_by_id(tenant_id)
+            .exec(&app.state.db)
+            .await;
+        app.cleanup_user(user.id).await;
+    }
+
+    // Test 9: password/change — password_hash が NULL（OAuth ユーザー）は 400
+    // 通常ユーザーとしてログインしてからDB上で password_hash を NULL に更新し、
+    // その後に password/change を呼ぶことで PasswordNotSet パスを検証する。
+    {
+        let mut app = TestApp::new().await;
+        let user = app.insert_user(false, false).await;
+        app.login_session(&user.email, &user.password).await;
+
+        // セッション確立後に password_hash を NULL へ更新（OAuth ユーザー相当）
+        users::ActiveModel {
+            id: Set(user.id),
+            password_hash: Set(None),
+            ..Default::default()
+        }
+        .update(&app.state.db)
+        .await
+        .expect("clear password hash");
+
+        let resp = app
+            .post_json_with_session(
+                "/v1/auth/password/change",
+                serde_json::json!({
+                    "current_password": user.password,
+                    "new_password": "NewPassword123!"
+                }),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = resp.text().await.expect("body");
+        assert!(body.contains("password-not-set"));
 
         app.cleanup_user(user.id).await;
     }

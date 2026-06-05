@@ -81,5 +81,5 @@ pub async fn process(job: PasswordResetEmailJob, state: Data<AppState>) -> Resul
 }
 
 pub fn worker_concurrency(settings: &Settings) -> usize {
-    settings.verification_email_worker_concurrency.max(1)
+    settings.password_reset_worker_concurrency.max(1)
 }

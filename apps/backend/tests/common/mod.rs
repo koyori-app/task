@@ -616,6 +616,21 @@ impl TestApp {
             .expect("post request")
     }
 
+    pub async fn post_json_with_bearer(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+        token: &str,
+    ) -> Response {
+        self.client
+            .post(format!("{}{path}", self.base_url))
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .json(&body)
+            .send()
+            .await
+            .expect("post request")
+    }
+
     pub async fn post_json_with_session_and_headers(
         &self,
         path: &str,
