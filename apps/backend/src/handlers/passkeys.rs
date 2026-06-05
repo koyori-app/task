@@ -19,7 +19,7 @@ use webauthn_rs::prelude::{
 };
 
 use crate::entities::{passkeys as passkey_entity, users};
-use crate::extractors::{AuthUser, CurrentUser};
+use crate::extractors::CurrentUser;
 use crate::openapi::SessionAuthErrors;
 use crate::utils::auth::AuthError;
 use crate::utils::email::normalize_email;
@@ -528,7 +528,6 @@ pub async fn delete_passkey(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
-    _auth: AuthUser,
 ) -> Result<StatusCode, AuthError> {
     let row = passkey_entity::Entity::find_by_id(id)
         .filter(passkey_entity::Column::UserId.eq(user.id))
