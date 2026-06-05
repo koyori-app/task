@@ -1,4 +1,4 @@
-use sea_orm::Statement;
+
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
@@ -13,13 +13,11 @@ impl MigrationTrait for Migration {
                 last_seq INT NOT NULL DEFAULT 0
             )
         "#;
-        let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
-        manager.get_connection().execute(stmt).await.map(|_| ())
+                manager.get_connection().execute_unprepared(sql).await.map(|_| ())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let sql = "DROP TABLE IF EXISTS project_task_counters";
-        let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
-        manager.get_connection().execute(stmt).await.map(|_| ())
+                manager.get_connection().execute_unprepared(sql).await.map(|_| ())
     }
 }

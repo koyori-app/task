@@ -1,4 +1,4 @@
-use sea_orm::Statement;
+
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
@@ -28,8 +28,7 @@ CREATE TABLE IF NOT EXISTS recovery_codes (
 
 CREATE INDEX IF NOT EXISTS idx_recovery_codes_user ON recovery_codes(user_id);
 "#;
-        let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
-        manager.get_connection().execute(stmt).await.map(|_| ())
+                manager.get_connection().execute_unprepared(sql).await.map(|_| ())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -40,7 +39,6 @@ DROP TABLE IF EXISTS totp_credentials;
 ALTER TABLE tenants DROP COLUMN IF EXISTS require_2fa;
 ALTER TABLE users DROP COLUMN IF EXISTS totp_enabled;
 "#;
-        let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
-        manager.get_connection().execute(stmt).await.map(|_| ())
+                manager.get_connection().execute_unprepared(sql).await.map(|_| ())
     }
 }

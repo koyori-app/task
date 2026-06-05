@@ -1,4 +1,4 @@
-use sea_orm::Statement;
+
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
@@ -12,8 +12,7 @@ impl MigrationTrait for Migration {
                 ADD CONSTRAINT project_members_role_check
                 CHECK (role IN ('Admin', 'Member', 'Viewer'))
         "#;
-        let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
-        manager.get_connection().execute(stmt).await.map(|_| ())
+                manager.get_connection().execute_unprepared(sql).await.map(|_| ())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -21,7 +20,6 @@ impl MigrationTrait for Migration {
             ALTER TABLE project_members
                 DROP CONSTRAINT IF EXISTS project_members_role_check
         "#;
-        let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
-        manager.get_connection().execute(stmt).await.map(|_| ())
+                manager.get_connection().execute_unprepared(sql).await.map(|_| ())
     }
 }

@@ -1,4 +1,4 @@
-use sea_orm::Statement;
+
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
@@ -12,10 +12,7 @@ impl MigrationTrait for Migration {
         "#;
         manager
             .get_connection()
-            .execute(Statement::from_string(
-                manager.get_database_backend(),
-                alter_users.to_owned(),
-            ))
+            .execute_unprepared(alter_users)
             .await?;
 
         let create_oauth_connections = r#"
@@ -36,10 +33,7 @@ impl MigrationTrait for Migration {
         "#;
         manager
             .get_connection()
-            .execute(Statement::from_string(
-                manager.get_database_backend(),
-                create_oauth_connections.to_owned(),
-            ))
+            .execute_unprepared(create_oauth_connections)
             .await?;
 
         let create_index = r#"
@@ -47,10 +41,7 @@ impl MigrationTrait for Migration {
         "#;
         manager
             .get_connection()
-            .execute(Statement::from_string(
-                manager.get_database_backend(),
-                create_index.to_owned(),
-            ))
+            .execute_unprepared(create_index)
             .await?;
 
         Ok(())
@@ -62,19 +53,13 @@ impl MigrationTrait for Migration {
         let drop_index = "DROP INDEX IF EXISTS idx_oauth_connections_user";
         manager
             .get_connection()
-            .execute(Statement::from_string(
-                manager.get_database_backend(),
-                drop_index.to_owned(),
-            ))
+            .execute_unprepared(drop_index)
             .await?;
 
         let drop_table = "DROP TABLE IF EXISTS oauth_connections";
         manager
             .get_connection()
-            .execute(Statement::from_string(
-                manager.get_database_backend(),
-                drop_table.to_owned(),
-            ))
+            .execute_unprepared(drop_table)
             .await?;
 
         // OAuth-only users may have NULL password_hash; set a placeholder before NOT NULL.
@@ -85,10 +70,7 @@ impl MigrationTrait for Migration {
         "#;
         manager
             .get_connection()
-            .execute(Statement::from_string(
-                manager.get_database_backend(),
-                fill_null_passwords.to_owned(),
-            ))
+            .execute_unprepared(fill_null_passwords)
             .await?;
 
         let alter_users = r#"
@@ -96,10 +78,7 @@ impl MigrationTrait for Migration {
         "#;
         manager
             .get_connection()
-            .execute(Statement::from_string(
-                manager.get_database_backend(),
-                alter_users.to_owned(),
-            ))
+            .execute_unprepared(alter_users)
             .await?;
 
         Ok(())

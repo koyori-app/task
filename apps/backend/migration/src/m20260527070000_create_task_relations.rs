@@ -1,4 +1,4 @@
-use sea_orm::Statement;
+
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
@@ -17,20 +17,17 @@ impl MigrationTrait for Migration {
                 CHECK (blocker_task_id <> blocked_task_id)
             )
         "#;
-        let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
-        manager.get_connection().execute(stmt).await?;
+                manager.get_connection().execute_unprepared(sql).await?;
 
         let index_sql = r#"
             CREATE INDEX IF NOT EXISTS idx_task_relations_blocked_task_id
                 ON task_relations (blocked_task_id);
         "#;
-        let index_stmt = Statement::from_string(manager.get_database_backend(), index_sql.to_owned());
-        manager.get_connection().execute(index_stmt).await.map(|_| ())
+                manager.get_connection().execute_unprepared(index_sql).await.map(|_| ())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let sql = "DROP TABLE IF EXISTS task_relations";
-        let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
-        manager.get_connection().execute(stmt).await.map(|_| ())
+                manager.get_connection().execute_unprepared(sql).await.map(|_| ())
     }
 }

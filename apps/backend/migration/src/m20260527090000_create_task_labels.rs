@@ -1,4 +1,4 @@
-use sea_orm::Statement;
+
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
@@ -15,13 +15,11 @@ impl MigrationTrait for Migration {
             );
             CREATE INDEX IF NOT EXISTS idx_task_labels_label_id ON task_labels (label_id)
         "#;
-        let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
-        manager.get_connection().execute(stmt).await.map(|_| ())
+                manager.get_connection().execute_unprepared(sql).await.map(|_| ())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let sql = "DROP TABLE IF EXISTS task_labels";
-        let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
-        manager.get_connection().execute(stmt).await.map(|_| ())
+                manager.get_connection().execute_unprepared(sql).await.map(|_| ())
     }
 }
