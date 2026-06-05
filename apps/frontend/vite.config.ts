@@ -18,6 +18,10 @@ const dirname =
 
 dotenv.config({ path: path.resolve(dirname, '.env') });
 
+const coderAllowedHost = process.env.CODER_AGENT_URL
+  ? `.${new URL(process.env.CODER_AGENT_URL).hostname}`
+  : undefined;
+
 const analyze = process.env.ANALYZE === 'true';
 
 const sentryEnabled =
@@ -56,12 +60,23 @@ export default defineConfig({
     include: ['vue', 'reka-ui', '@lucide/vue', '@phosphor-icons/vue'],
   },
   server: {
+    proxy: {
+      '/api': {
+        target: process.env.API_BASE ?? 'http://localhost:3400',
+        changeOrigin: true,
+      },
+    },
     warmup: {
       clientFiles: [
         './src/pages/+Layout.vue',
         // './src/pages/index/+Page.vue'
         ],
     },
+    allowedHosts: [
+      'localhost',
+      '127.0.0.1',
+      ...(coderAllowedHost ? [coderAllowedHost] : []),
+    ],
   },
   build: {
     sourcemap: analyze || process.env.NODE_ENV !== 'production',
