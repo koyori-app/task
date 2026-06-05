@@ -56,12 +56,19 @@ export default defineConfig({
     include: ['vue', 'reka-ui', '@lucide/vue', '@phosphor-icons/vue'],
   },
   server: {
+    proxy: {
+      '/api': {
+        target: process.env.API_BASE ?? 'http://localhost:3400',
+        changeOrigin: true,
+      },
+    },
     warmup: {
       clientFiles: [
         './src/pages/+Layout.vue',
         // './src/pages/index/+Page.vue'
         ],
     },
+    allowedHosts: true,
   },
   build: {
     sourcemap: analyze || process.env.NODE_ENV !== 'production',
