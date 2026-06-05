@@ -87,6 +87,11 @@ fn test_session_config() -> SessionConfig {
 async fn ensure_schema(db: &DatabaseConnection) {
     SCHEMA_READY
         .get_or_init(|| async {
+            db.get_schema_registry("backend::entities::*")
+                .sync(db)
+                .await
+                .expect("sync schema");
+
             db.execute_unprepared(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
                  ALTER TABLE users ADD COLUMN IF NOT EXISTS is_suspended BOOLEAN NOT NULL DEFAULT false;
@@ -125,10 +130,6 @@ CREATE INDEX IF NOT EXISTS idx_recovery_codes_user ON recovery_codes(user_id);
             .await
             .expect("prepare 2fa schema");
 
-            db.get_schema_registry("backend::entities::*")
-                .sync(db)
-                .await
-                .expect("sync schema");
         })
         .await;
 }
