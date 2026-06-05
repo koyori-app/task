@@ -14,8 +14,9 @@ pub struct Settings {
     pub smtp_username: String,
     pub smtp_password: String,
     pub smtp_from: String,
-    /// 認証メールに載せるリンクのベース URL（必須。例: `https://app.example.com`）。
-    /// 末尾に `/verify-email?token=…` を付与する。未設定・不正な値では起動しない。
+    /// アプリのベース URL（必須。例: `https://app.example.com`）。
+    /// メール認証リンク・パスワードリセットリンク等すべてのメール送信で使用する。
+    /// 未設定・不正な値では起動しない。
     #[validate(length(min = 1, message = "email_verification_app_url is required"))]
     #[validate(custom(
         function = "validate_email_verification_app_url",
@@ -29,6 +30,13 @@ pub struct Settings {
     ))]
     #[serde(default = "default_verification_email_worker_concurrency")]
     pub verification_email_worker_concurrency: usize,
+    /// パスワードリセットメール Apalis ワーカーの並列度
+    #[validate(range(
+        min = 1,
+        message = "password_reset_worker_concurrency must be >= 1"
+    ))]
+    #[serde(default = "default_password_reset_worker_concurrency")]
+    pub password_reset_worker_concurrency: usize,
     /// PAT の HMAC-SHA256 署名に使う秘密鍵。起動時に必須。32バイト以上（256ビット）が必要。
     #[validate(length(min = 32, message = "PERSONAL_TOKEN_SECRET must be at least 32 characters"))]
     pub personal_token_secret: String,
@@ -53,6 +61,10 @@ fn default_totp_issuer() -> String {
 }
 
 fn default_verification_email_worker_concurrency() -> usize {
+    1
+}
+
+fn default_password_reset_worker_concurrency() -> usize {
     1
 }
 
@@ -141,6 +153,7 @@ mod tests {
             smtp_from: String::new(),
             email_verification_app_url: url.to_string(),
             verification_email_worker_concurrency: 1,
+            password_reset_worker_concurrency: 1,
             personal_token_secret: "a".repeat(32),
             recovery_code_secret: "c".repeat(32),
             totp_encryption_key: "b".repeat(32),

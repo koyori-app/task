@@ -18,7 +18,9 @@ use cookie::Key;
 use backend::{
     AppState,
     entities::{oauth_connections, users},
-    jobs::{setup_pool, setup_verification_email_storage},
+    jobs::{
+        setup_password_reset_email_storage, setup_pool, setup_verification_email_storage,
+    },
     routes,
     settings,
     utils::{
@@ -281,6 +283,10 @@ impl TestApp {
             setup_verification_email_storage(&pg_pool, &settings)
                 .await
                 .expect("verification email storage");
+        let password_reset_email_storage =
+            setup_password_reset_email_storage(&pg_pool, &settings)
+                .await
+                .expect("password reset email storage");
         let storage = setup_storage().await.expect("storage backend");
         let http_client = create_http_client().expect("http client");
 
@@ -321,6 +327,7 @@ impl TestApp {
             redis_client,
             smtp_client,
             verification_email_storage,
+            password_reset_email_storage,
             storage,
             drive_config: DriveConfig::from_env(),
             oauth_settings,
@@ -591,9 +598,33 @@ impl TestApp {
         self.get(path).await
     }
 
+    pub async fn post_json(&self, path: &str, body: serde_json::Value) -> Response {
+        self.client
+            .post(format!("{}{path}", self.base_url))
+            .json(&body)
+            .send()
+            .await
+            .expect("post request")
+    }
+
     pub async fn post_json_with_session(&self, path: &str, body: serde_json::Value) -> Response {
         self.client
             .post(format!("{}{path}", self.base_url))
+            .json(&body)
+            .send()
+            .await
+            .expect("post request")
+    }
+
+    pub async fn post_json_with_bearer(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+        token: &str,
+    ) -> Response {
+        self.client
+            .post(format!("{}{path}", self.base_url))
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
             .json(&body)
             .send()
             .await
@@ -688,7 +719,7 @@ pub async fn insert_user(
     is_suspended: bool,
 ) -> TestUser {
     let id = Uuid::new_v4();
-    let email = format!("admin-test-{id}@example.com");
+    let email = format!("test-{id}@example.com");
     let password = "TestPassword123!".to_string();
     let password_hash = create_password_hash(&password).expect("password hash");
 

@@ -185,3 +185,39 @@ pub enum ResendVerificationErrors {
     )]
     Internal(#[to_schema] ServerError),
 }
+
+#[derive(IntoResponses)]
+pub enum PasswordResetRequestErrors {
+    #[response(status = 400, description = "リクエストが不正です")]
+    BadRequest(#[to_schema] ServerError),
+    #[response(status = 429, description = "しばらくしてから再度お試しください")]
+    TooManyRequests(#[to_schema] ServerError),
+    #[response(status = 500, description = "サーバー側で問題が発生しました")]
+    Internal(#[to_schema] ServerError),
+}
+
+#[derive(IntoResponses)]
+pub enum PasswordResetVerifyErrors {
+    #[response(status = 404, description = "トークンが無効または期限切れです")]
+    NotFound(#[to_schema] ServerError),
+    #[response(status = 500, description = "サーバー側で問題が発生しました")]
+    Internal(#[to_schema] ServerError),
+}
+
+#[derive(IntoResponses)]
+pub enum PasswordResetCompleteErrors {
+    #[response(status = 400, description = "リクエストが不正です")]
+    BadRequest(#[to_schema] ServerError),
+    #[response(status = 500, description = "サーバー側で問題が発生しました")]
+    Internal(#[to_schema] ServerError),
+}
+
+#[derive(IntoResponses)]
+pub enum PasswordChangeErrors {
+    #[response(status = 401, description = "ログインが必要です")]
+    Unauthorized(#[to_schema] ServerError),
+    #[response(status = 400, description = "リクエストが不正です")]
+    BadRequest(#[to_schema] ServerError),
+    #[response(status = 500, description = "サーバー側で問題が発生しました")]
+    Internal(#[to_schema] ServerError),
+}

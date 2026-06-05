@@ -1,5 +1,6 @@
 //! Apalis バックグラウンドジョブ
 
+pub mod password_reset_email;
 pub mod verification_email;
 
 use std::sync::Arc;
@@ -8,6 +9,7 @@ use apalis_postgres::PgPool;
 
 use crate::settings::Settings;
 
+pub use password_reset_email::{PasswordResetEmailJob, PasswordResetEmailStorage};
 pub use verification_email::{
     VerificationEmailJob, VerificationEmailStorage, QUEUE_NAME, MAX_RETRIES,
 };
@@ -21,4 +23,11 @@ pub async fn setup_verification_email_storage(
     settings: &Settings,
 ) -> Result<Arc<VerificationEmailStorage>, sqlx::Error> {
     verification_email::setup(pool, settings).await
+}
+
+pub async fn setup_password_reset_email_storage(
+    pool: &PgPool,
+    settings: &Settings,
+) -> Result<Arc<PasswordResetEmailStorage>, sqlx::Error> {
+    password_reset_email::setup(pool, settings).await
 }

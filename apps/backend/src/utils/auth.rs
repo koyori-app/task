@@ -58,6 +58,14 @@ pub enum AuthError {
     TwoFactorAlreadyEnabled,
     #[error("2fa not enabled")]
     TwoFactorNotEnabled,
+    #[error("invalid password reset token")]
+    InvalidPasswordResetToken,
+    #[error("password reset token not found")]
+    PasswordResetTokenNotFound,
+    #[error("invalid current password")]
+    InvalidCurrentPassword,
+    #[error("password not set")]
+    PasswordNotSet,
 }
 
 impl From<sea_orm::DbErr> for AuthError {
@@ -172,6 +180,26 @@ impl IntoResponse for AuthError {
                 Json(ServerError {
                     message: "2fa-not-enabled".into(),
                 }),
+            )
+                .into_response(),
+            AuthError::InvalidPasswordResetToken => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError { message: "invalid-password-reset-token".into() }),
+            )
+                .into_response(),
+            AuthError::PasswordResetTokenNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(ServerError { message: "password-reset-token-not-found".into() }),
+            )
+                .into_response(),
+            AuthError::InvalidCurrentPassword => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError { message: "invalid-current-password".into() }),
+            )
+                .into_response(),
+            AuthError::PasswordNotSet => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError { message: "password-not-set".into() }),
             )
                 .into_response(),
         }

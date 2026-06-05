@@ -26,10 +26,11 @@ static STORE_TOKEN_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
 static CONSUME_TOKEN_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
     redis::Script::new(
         r#"
-        local user_id = redis.call('GETDEL', KEYS[1])
+        local user_id = redis.call('GET', KEYS[1])
         if not user_id then
             return nil
         end
+        redis.call('DEL', KEYS[1])
         local user_key = ARGV[1] .. user_id
         if redis.call('GET', user_key) == ARGV[2] then
             redis.call('DEL', user_key)
@@ -75,6 +76,30 @@ pub async fn store_token(
         .map_err(|e| anyhow::anyhow!("redis store_token script: {e}"))?;
 
     Ok(())
+}
+
+/// Returns the user id bound to a reset token without consuming it.
+pub async fn lookup_token_user_id(
+    redis: &RedisConnection,
+    token: &str,
+) -> Result<Option<Uuid>, anyhow::Error> {
+    let mut conn = redis
+        .conn
+        .acquire()
+        .await
+        .map_err(|e| anyhow::anyhow!("redis acquire: {e}"))?;
+    let token_key = format!("{KEY_TOKEN}{token}");
+    let raw: Option<String> = redis::cmd("GET")
+        .arg(&token_key)
+        .query_async(&mut conn)
+        .await
+        .map_err(|e| anyhow::anyhow!("redis GET token: {e}"))?;
+    let Some(s) = raw else {
+        return Ok(None);
+    };
+    Ok(Some(
+        Uuid::parse_str(s.trim()).map_err(|e| anyhow::anyhow!("invalid user id: {e}"))?,
+    ))
 }
 
 pub async fn consume_token(
@@ -147,3 +172,4 @@ pub async fn try_acquire_rate_limit(
 
     Ok(set_ok.is_some())
 }
+

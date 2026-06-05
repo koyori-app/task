@@ -11,6 +11,8 @@ pub mod email_verification;
 pub mod login_session;
 pub mod password_reset;
 pub mod password_reset_delivery;
+pub mod password_reset_email_delivery;
+pub mod password_reset_log;
 pub mod redis;
 pub mod smtp;
 pub mod system_settings;

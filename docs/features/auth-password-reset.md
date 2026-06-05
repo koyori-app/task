@@ -80,27 +80,24 @@ if let Some(revoked_at) = user.sessions_revoked_at {
    → メールアドレスからユーザーを検索
    → 存在しない場合も 200 を返す（メール存在の有無を漏らさない）
    → レートリミット確認（RATE_LIMIT_SECS 以内に同一メールへ送信済みなら 429）
-   → 32 バイトのランダムトークンを生成（URL-safe base64）
-   → Redis に保存（TTL: TOKEN_TTL_SECS = 30 分）
-   → リセットメールをジョブキューに投入
+   → 登録済みユーザーの場合のみ `PasswordResetEmailJob { user_id, email }` をキュー投入
+     （トークンはワーカー内で生成し Redis にのみ保存。Apalis payload に秘密値は載せない）
+   → キュー投入失敗時も外部には 200（列挙防止）
    → 200 OK（本文: 固定メッセージ）
 
-2. GET /v1/auth/password-reset/verify?token={token}  （公開）
+2. POST /v1/auth/password-reset/verify  （公開）
+   Request: { "token": "..." }
    → Redis でトークンの存在を確認（消費しない）
    → 有効: 200 OK
    → 無効・期限切れ: 404
 
 3. POST /v1/auth/password-reset/complete  （公開）
    Request: { "token": "...", "new_password": "..." }
-   → new_password をバリデーション（8 文字以上）← 先に検証してトークン消費を防ぐ
-     → 不正: 400 Bad Request（トークンはまだ有効のまま）
-   → Redis でトークンの存在確認（消費しない）
-     → 無効・期限切れ: 400 Bad Request
-   → Argon2id でハッシュを生成（消費前に計算を完了させる）
-   → Redis からトークンを消費（GETDEL）→ user_id を取得
-     → 消費失敗（並行リクエストで先に消費された）: 400 Bad Request
-   → users.password_hash を UPDATE
-   → users.sessions_revoked_at を now() に UPDATE
+   → `validator` による new_password 検証（8 文字以上。手動 len チェックは行わない）
+   → Redis でトークンを消費（GET+DEL）→ user_id を取得（二重消費防止のため DB 更新前に実行）。無効・期限切れ: 400 Bad Request
+   → Argon2id でハッシュを生成
+   → DB トランザクション開始 → users.password_hash / sessions_revoked_at を UPDATE
+   → personal_tokens の該当 user_id 行を revoked = true に UPDATE → コミット
    → 200 OK
 ```
 
@@ -116,9 +113,9 @@ Request: { "current_password": "...", "new_password": "..." }
   → 不一致: 400 Bad Request（"current_password が正しくありません"）
 → new_password をバリデーション（8 文字以上）
 → Argon2id でハッシュ化
-→ users.password_hash を UPDATE
-→ users.sessions_revoked_at を now() に UPDATE（他のセッションは次回リクエスト時に遅延無効化）
-→ 現在のセッションは即時削除（session.destroy()）
+→ users.password_hash / sessions_revoked_at を UPDATE
+→ personal_tokens の該当 user_id 行を revoked = true に UPDATE（同一 DB トランザクション）
+→ 現在のセッションの `user_id` / `issued_at_ms` を削除（他セッションは sessions_revoked_at で遅延無効化）
 → 200 OK（次のリクエストで再ログインを促す）
 ```
 
@@ -151,8 +148,8 @@ pub async fn consume_token(redis: &RedisConnection, token: &str) -> Result<Optio
 /// レートリミット枠を取得（SET NX）。Ok(false) = 429 相当。
 pub async fn try_acquire_rate_limit(redis: &RedisConnection, email: &str) -> Result<bool, anyhow::Error>;
 
-/// トークンの存在確認のみ（消費しない）。
-pub async fn token_exists(redis: &RedisConnection, token: &str) -> Result<bool, anyhow::Error>;
+/// トークンの存在確認のみ（消費しない）。user_id を返す。
+pub async fn lookup_token_user_id(redis: &RedisConnection, token: &str) -> Result<Option<Uuid>, anyhow::Error>;
 ```
 
 ---
@@ -162,7 +159,7 @@ pub async fn token_exists(redis: &RedisConnection, token: &str) -> Result<bool, 
 | メソッド | パス | 認証 | 説明 |
 |---------|------|------|------|
 | `POST` | `/v1/auth/password-reset/request` | 不要 | リセットメール送信 |
-| `GET` | `/v1/auth/password-reset/verify` | 不要 | トークン有効確認 |
+| `POST` | `/v1/auth/password-reset/verify` | 不要 | トークン有効確認（token は JSON ボディ） |
 | `POST` | `/v1/auth/password-reset/complete` | 不要 | 新パスワード設定 |
 | `POST` | `/v1/auth/password/change` | セッション必須 | ログイン中の変更 |
 
@@ -182,8 +179,12 @@ POST /v1/auth/password-reset/request
 
 **トークン確認**:
 
+```json
+POST /v1/auth/password-reset/verify
+{ "token": "URL-safe-base64-token" }
+```
+
 ```text
-GET /v1/auth/password-reset/verify?token=xxxxx
 200 OK  — 有効
 404     — 無効・期限切れ
 ```
@@ -239,7 +240,7 @@ https://app.example.com/auth/reset-password?token={token}
 ```
 
 リンク先フロントエンドページ: `/auth/reset-password?token={token}`  
-→ トークン確認（`GET verify`）→ 有効なら新パスワード入力フォームを表示
+→ フロントは URL の `?token=` を読み取り、`POST /v1/auth/password-reset/verify` に `{"token":"..."}` を送ってトークン確認 → 有効なら新パスワード入力フォームを表示
 
 ---
 
@@ -247,12 +248,25 @@ https://app.example.com/auth/reset-password?token={token}
 
 | 脅威 | 対策 |
 |------|------|
-| メールアドレス列挙 | リクエスト結果は常に同一レスポンス（200）。タイミング攻撃対策に処理時間も均一化する |
+| メールアドレス列挙 | リクエスト結果は常に同一レスポンス（200）。キュー障害時も 200 |
+| Apalis board 漏洩 | パスワードリセットキューは board API に登録しない（verification のみ） |
 | トークン総当たり | 32 バイト = 256 ビットのエントロピー。現実的に総当たり不可 |
 | トークン再利用 | GETDEL で消費済みは即時削除。TTL 30 分で自動失効 |
 | 旧セッションの悪用 | `sessions_revoked_at` で完了後の全セッションを無効化 |
 | メール爆撃 | `pw_reset:rl:{email}` で 60 秒に 1 回に制限 |
 | OAuth ユーザーへの誤ったパスワード変更 | `password_hash IS NULL` の場合 change エンドポイントは `400` |
+| トークンのログ・キュー漏洩 | リセットトークンは Redis のみ。Apalis payload・構造化ログ・HTTP ログのクエリに載せない（運用: `apps/backend/docs/password-reset-flow.md`） |
+
+### 8.1 観測性（構造化ログ）
+
+成功時のみ `tracing` の `event` フィールドで記録する（値は `user_id` のみ）:
+
+- `auth.password_reset.email_queued`
+- `auth.password_reset.email_sent`
+- `auth.password_reset.completed`
+- `auth.password_change.completed`
+
+enqueue 失敗は `warn!(user_id, error)`。外部 HTTP 応答は列挙防止のため 200 のまま。
 
 ---
 
