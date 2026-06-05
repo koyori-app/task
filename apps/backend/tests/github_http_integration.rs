@@ -73,13 +73,24 @@ fn callback_path(state: &str, installation_id: i64) -> String {
     format!("/v1/github/callback?state={state}&installation_id={installation_id}")
 }
 
-fn state_from_install_location(location: &str) -> String {
-    url::Url::parse(location)
-        .expect("install location url")
+fn state_from_install_url(url: &str) -> String {
+    url::Url::parse(url)
+        .expect("install url")
         .query_pairs()
         .find(|(key, _)| key == "state")
         .map(|(_, value)| value.into_owned())
-        .expect("state query param in install location")
+        .expect("state query param in install url")
+}
+
+/// GET /install を呼び、200 OK + JSON body から state トークンを取り出す。
+async fn get_install_state(app: &TestApp, tp: &TestTenantProject) -> String {
+    let response = app.get_with_session(&install_path(tp)).await;
+    assert_eq!(response.status(), StatusCode::OK, "install should return 200");
+    let body: serde_json::Value = response.json().await.expect("install json body");
+    let url = body["url"].as_str().expect("install url field");
+    assert!(url.contains("github.com/apps/task-app/installations/new"));
+    assert!(url.contains("state="));
+    state_from_install_url(url)
 }
 
 fn integration_path(tp: &TestTenantProject) -> String {
@@ -101,22 +112,13 @@ async fn github_http_integration_suite() {
     let mut app = TestApp::new_with_github().await;
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-    // 1. GET /install — GitHub インストール URL へリダイレクト
+    // 1. GET /install — GitHub インストール URL を JSON で返す
     {
         let user = app.insert_user(false, false).await;
         let tp = app.insert_tenant_project(user.id).await;
         app.login_session(&user.email, &user.password).await;
 
-        let response = app.get_with_session(&install_path(&tp)).await;
-        assert_eq!(response.status(), StatusCode::ACCEPTED);
-        let location = response
-            .headers()
-            .get("location")
-            .expect("location header")
-            .to_str()
-            .expect("location utf8");
-        assert!(location.contains("github.com/apps/task-app/installations/new"));
-        assert!(location.contains("state="));
+        let _ = get_install_state(&app, &tp).await;
 
         app.cleanup_user(user.id).await;
         app.reset_session_client();
@@ -128,15 +130,7 @@ async fn github_http_integration_suite() {
         let tp = app.insert_tenant_project(user.id).await;
         app.login_session(&user.email, &user.password).await;
 
-        let install = app.get_with_session(&install_path(&tp)).await;
-        assert_eq!(install.status(), StatusCode::ACCEPTED);
-        let location = install
-            .headers()
-            .get("location")
-            .expect("location header")
-            .to_str()
-            .expect("location utf8");
-        let state_token = state_from_install_location(location);
+        let state_token = get_install_state(&app, &tp).await;
 
         let installation_id = unique_installation_id();
         let response = app
@@ -213,15 +207,7 @@ async fn github_http_integration_suite() {
         let tp = app.insert_tenant_project(user.id).await;
         app.login_session(&user.email, &user.password).await;
 
-        let install = app.get_with_session(&install_path(&tp)).await;
-        assert_eq!(install.status(), StatusCode::ACCEPTED);
-        let location = install
-            .headers()
-            .get("location")
-            .expect("location header")
-            .to_str()
-            .expect("location utf8");
-        let state_token = state_from_install_location(location);
+        let state_token = get_install_state(&app, &tp).await;
 
         let installation_id = unique_installation_id();
         let callback = app

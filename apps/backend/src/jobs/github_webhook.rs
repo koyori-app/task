@@ -75,6 +75,6 @@ pub async fn process(job: GithubWebhookJob, _state: Data<crate::AppState>) -> Re
     Ok(())
 }
 
-pub fn worker_concurrency() -> usize {
-    1
+pub fn worker_concurrency(settings: &Settings) -> usize {
+    settings.github_webhook_worker_concurrency
 }

@@ -501,6 +501,7 @@ impl TestApp {
             icon_url: Set(String::new()),
             owner_id: Set(owner_id),
             drive_quota_bytes: Set(None),
+            require_2fa: Set(false),
         }
         .insert(&self.state.db)
         .await

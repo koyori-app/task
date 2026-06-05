@@ -121,7 +121,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .backend(github_worker_storage)
         .retry(RetryPolicy::retries(github_webhook::MAX_RETRIES))
         .enable_tracing()
-        .concurrency(github_webhook::worker_concurrency())
+        .concurrency(github_webhook::worker_concurrency(settings))
         .data(github_worker_state)
         .build(github_webhook::process);
 

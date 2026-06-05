@@ -1,7 +1,5 @@
 //! GitHub App JWT 発行と Installation Access Token 取得。
 
-use std::sync::OnceLock;
-
 use anyhow::{anyhow, Context};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
@@ -11,22 +9,16 @@ use serde::{Deserialize, Serialize};
 use crate::settings::GithubAppSettings;
 use crate::utils::github_oauth_state::TTL_SECS;
 
-static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
-
-fn http_client() -> &'static Client {
-    HTTP_CLIENT.get_or_init(|| {
-        Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .expect("build shared reqwest client")
+fn github_api_base() -> &'static str {
+    // テスト用オーバーライド以外は定数。OnceLock でキャッシュして毎回 env lookup しない。
+    use std::sync::OnceLock;
+    static BASE: OnceLock<String> = OnceLock::new();
+    BASE.get_or_init(|| {
+        std::env::var("GITHUB_API_BASE_URL")
+            .unwrap_or_else(|_| "https://api.github.com".to_string())
+            .trim_end_matches('/')
+            .to_string()
     })
-}
-
-fn github_api_base() -> String {
-    std::env::var("GITHUB_API_BASE_URL")
-        .unwrap_or_else(|_| "https://api.github.com".to_string())
-        .trim_end_matches('/')
-        .to_string()
 }
 
 #[derive(Debug, Serialize)]
@@ -86,15 +78,11 @@ pub fn create_app_jwt(settings: &GithubAppSettings) -> Result<String, anyhow::Er
     };
     let key = EncodingKey::from_rsa_pem(settings.github_app_private_key.as_bytes())
         .context("parse github app private key PEM")?;
-    encode(
-        &Header::new(Algorithm::RS256),
-        &claims,
-        &key,
-    )
-    .context("encode github app jwt")
+    encode(&Header::new(Algorithm::RS256), &claims, &key).context("encode github app jwt")
 }
 
 pub async fn fetch_installation_access_token(
+    client: &Client,
     settings: &GithubAppSettings,
     installation_id: i64,
 ) -> Result<InstallationAccessToken, anyhow::Error> {
@@ -103,7 +91,6 @@ pub async fn fetch_installation_access_token(
         "{}/app/installations/{installation_id}/access_tokens",
         github_api_base()
     );
-    let client = http_client();
     let response = client
         .post(&url)
         .header("Authorization", format!("Bearer {jwt}"))
@@ -115,9 +102,7 @@ pub async fn fetch_installation_access_token(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(anyhow!(
-            "github installation token failed: {status} {body}"
-        ));
+        return Err(anyhow!("github installation token failed: {status} {body}"));
     }
     let body: InstallationTokenResponse = response
         .json()
@@ -132,12 +117,12 @@ pub async fn fetch_installation_access_token(
 }
 
 pub async fn fetch_installation(
+    client: &Client,
     settings: &GithubAppSettings,
     installation_id: i64,
 ) -> Result<InstallationInfo, anyhow::Error> {
     let jwt = create_app_jwt(settings)?;
     let url = format!("{}/app/installations/{installation_id}", github_api_base());
-    let client = http_client();
     let response = client
         .get(&url)
         .header("Authorization", format!("Bearer {jwt}"))
@@ -166,11 +151,12 @@ pub async fn fetch_installation(
 
 /// OAuth コールバックで installation_id を GitHub API 経由で検証する。
 pub async fn verify_installation_for_callback(
+    client: &Client,
     settings: &GithubAppSettings,
     installation_id: i64,
     expected_installation_id: Option<i64>,
 ) -> Result<InstallationInfo, anyhow::Error> {
-    let info = fetch_installation(settings, installation_id).await?;
+    let info = fetch_installation(client, settings, installation_id).await?;
 
     if info.id != installation_id {
         return Err(anyhow!(
@@ -186,6 +172,7 @@ pub async fn verify_installation_for_callback(
             ));
         }
     } else {
+        // 新規インストール: state の TTL 内に作成されたものだけ受け付ける
         let max_age = chrono::Duration::seconds(TTL_SECS as i64);
         let cutoff = chrono::Utc::now().fixed_offset() - max_age;
         if info.created_at < cutoff {
@@ -211,10 +198,10 @@ pub fn select_primary_repository<'a>(
 }
 
 pub async fn fetch_primary_repository(
+    client: &Client,
     installation_access_token: &str,
     preferred_owner: &str,
 ) -> Result<(String, String), anyhow::Error> {
-    let client = http_client();
     let response = client
         .get(format!("{}/installation/repositories", github_api_base()))
         .header(
@@ -229,17 +216,16 @@ pub async fn fetch_primary_repository(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(anyhow!(
-            "github list repositories failed: {status} {body}"
-        ));
+        return Err(anyhow!("github list repositories failed: {status} {body}"));
     }
     let body: InstallationRepositoriesResponse = response
         .json()
         .await
         .context("parse installation repositories")?;
-    let repo = select_primary_repository(&body.repositories, preferred_owner).ok_or_else(|| {
-        anyhow!("no repositories accessible for installation")
-    })?;
+    let repo =
+        select_primary_repository(&body.repositories, preferred_owner).ok_or_else(|| {
+            anyhow!("no repositories accessible for installation")
+        })?;
     let (owner, name) = repo
         .full_name
         .split_once('/')
@@ -248,12 +234,12 @@ pub async fn fetch_primary_repository(
 }
 
 pub async fn delete_app_installation(
+    client: &Client,
     settings: &GithubAppSettings,
     installation_id: i64,
 ) -> Result<(), anyhow::Error> {
     let jwt = create_app_jwt(settings)?;
     let url = format!("{}/app/installations/{installation_id}", github_api_base());
-    let client = http_client();
     let response = client
         .delete(&url)
         .header("Authorization", format!("Bearer {jwt}"))

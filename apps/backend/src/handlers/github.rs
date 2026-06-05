@@ -1,7 +1,7 @@
 use axum::{
     body::Bytes,
     extract::{Path, Query, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Redirect, Response},
     Json,
 };
@@ -33,6 +33,9 @@ type HmacSha256 = Hmac<Sha256>;
 pub struct GithubCallbackQuery {
     pub installation_id: i64,
     pub state: String,
+    /// GitHub が送る操作種別。"request" はオーナー承認待ちであり連携未完了。
+    #[serde(default)]
+    pub setup_action: Option<String>,
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -45,6 +48,11 @@ pub struct GithubIntegrationResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = String, format = "date-time", nullable)]
     pub connected_at: Option<DateTimeWithTimeZone>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct GithubInstallUrlResponse {
+    pub url: String,
 }
 
 async fn require_tenant_owner(
@@ -115,13 +123,13 @@ pub fn verify_webhook_signature(secret: &str, signature_header: &str, body: &[u8
     get,
     path = "/install",
     tag = "GitHub",
-    summary = "GitHub App インストール開始",
+    summary = "GitHub App インストール URL 取得",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
         ("project_id" = Uuid, Path, description = "プロジェクトID"),
     ),
     responses(
-        (status = 202, description = "GitHub インストール URL へリダイレクト"),
+        (status = 200, body = GithubInstallUrlResponse, description = "GitHub インストール URL"),
         CrudErrors,
     )
 )]
@@ -129,7 +137,7 @@ pub async fn start_github_install(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
-) -> Result<Response, AppError> {
+) -> Result<Json<GithubInstallUrlResponse>, AppError> {
     let github = state.settings.require_github_app()?;
     auth.require_session()?;
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
@@ -155,12 +163,8 @@ pub async fn start_github_install(
     .await
     .map_err(AppError::Internal)?;
 
-    let location = install_redirect_url(github, &state_token);
-    Ok((
-        StatusCode::ACCEPTED,
-        [(header::LOCATION, location)],
-    )
-        .into_response())
+    let url = install_redirect_url(github, &state_token);
+    Ok(Json(GithubInstallUrlResponse { url }))
 }
 
 #[axum::debug_handler]
@@ -172,7 +176,7 @@ pub async fn start_github_install(
     params(GithubCallbackQuery),
     responses(
         (status = 302, description = "設定画面へリダイレクト"),
-        (status = 400, description = "無効な state"),
+        (status = 400, description = "無効な state / setup_action=request"),
         (status = 403, description = "ユーザー不一致"),
     )
 )]
@@ -183,6 +187,15 @@ pub async fn github_callback(
 ) -> Result<Response, AppError> {
     let github = state.settings.require_github_app()?;
     auth.require_session()?;
+
+    // setup_action=request はオーナーへの承認リクエスト段階。インストール未完了なので拒否。
+    if query.setup_action.as_deref() == Some("request") {
+        tracing::info!(
+            installation_id = query.installation_id,
+            "github callback: setup_action=request, installation pending owner approval"
+        );
+        return Err(AppError::BadRequest);
+    }
 
     let payload = github_oauth_state::consume_state(&state.redis_client, &query.state)
         .await
@@ -197,6 +210,7 @@ pub async fn github_callback(
     require_project_in_tenant(&state, payload.tenant_id, payload.project_id).await?;
 
     let installation = github_api::verify_installation_for_callback(
+        &state.http_client,
         github,
         query.installation_id,
         payload.installation_id,
@@ -208,12 +222,12 @@ pub async fn github_callback(
     })?;
 
     let access =
-        github_api::fetch_installation_access_token(github, installation.id)
+        github_api::fetch_installation_access_token(&state.http_client, github, installation.id)
             .await
             .map_err(AppError::Internal)?;
     let account_login = installation.account_login;
     let (repo_owner, repo_name) =
-        github_api::fetch_primary_repository(&access.token, &account_login)
+        github_api::fetch_primary_repository(&state.http_client, &access.token, &account_login)
             .await
             .map_err(AppError::Internal)?;
 
@@ -230,13 +244,13 @@ pub async fn github_callback(
         .await?;
 
     if let Some(model) = existing {
+        // 再連携: created_by / created_at は変更しない
         let mut active: github_integrations::ActiveModel = model.into();
         active.installation_id = Set(query.installation_id);
         active.repo_owner = Set(repo_owner);
         active.repo_name = Set(repo_name);
         active.access_token_enc = Set(token_enc);
         active.token_expires_at = Set(access.expires_at.into());
-        active.created_by = Set(auth.user_id);
         active.update(&state.db).await?;
     } else {
         github_integrations::ActiveModel {
@@ -279,11 +293,7 @@ pub async fn github_webhook(
         .get("X-Hub-Signature-256")
         .and_then(|v| v.to_str().ok())
         .ok_or(AppError::Forbidden)?;
-    if !verify_webhook_signature(
-        &github.github_app_webhook_secret,
-        signature,
-        &body,
-    ) {
+    if !verify_webhook_signature(&github.github_app_webhook_secret, signature, &body) {
         return Err(AppError::Forbidden);
     }
 
@@ -307,23 +317,33 @@ pub async fn github_webhook(
         .or_else(|| payload.get("installation_id").and_then(|id| id.as_i64()));
 
     if let Some(installation_id) = installation_id {
-        if let Some(integration) = github_integrations::Entity::find()
+        match github_integrations::Entity::find()
             .filter(github_integrations::Column::InstallationId.eq(installation_id))
             .one(&state.db)
             .await?
         {
-            github_webhook::enqueue(
-                &state.github_webhook_storage,
-                GithubWebhookJob {
-                    integration_id: integration.id,
-                    project_id: integration.project_id,
-                    event: event.clone(),
-                    delivery_id: delivery_id.clone(),
-                    payload: payload.clone(),
-                },
-            )
-            .await
-            .map_err(AppError::Internal)?;
+            Some(integration) => {
+                github_webhook::enqueue(
+                    &state.github_webhook_storage,
+                    GithubWebhookJob {
+                        integration_id: integration.id,
+                        project_id: integration.project_id,
+                        event: event.clone(),
+                        delivery_id: delivery_id.clone(),
+                        payload: payload.clone(),
+                    },
+                )
+                .await
+                .map_err(AppError::Internal)?;
+            }
+            None => {
+                tracing::warn!(
+                    installation_id,
+                    event = %event,
+                    delivery_id = ?delivery_id,
+                    "github webhook: no integration found for installation_id"
+                );
+            }
         }
     }
 
@@ -404,11 +424,22 @@ pub async fn delete_github_integration(
         return Err(AppError::NotFound);
     };
 
-    github_api::delete_app_installation(github, row.installation_id)
-        .await
-        .map_err(AppError::Internal)?;
+    // DB を先に削除し、その後 GitHub API で連携解除する。
+    // 順序を逆にすると GitHub 側が消えた後に DB 削除が失敗した場合に「connected」が残る。
+    let installation_id = row.installation_id;
     let active: github_integrations::ActiveModel = row.into();
     active.delete(&state.db).await?;
+
+    if let Err(e) =
+        github_api::delete_app_installation(&state.http_client, github, installation_id).await
+    {
+        // GitHub 側の削除失敗はログのみ。DB は既に削除済みなので UI には「未連携」と表示される。
+        tracing::warn!(
+            error = %e,
+            installation_id,
+            "github delete_app_installation failed; db record already removed"
+        );
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
