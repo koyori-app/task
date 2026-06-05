@@ -417,6 +417,8 @@ pub async fn authentication_finish(
 
         update_passkey_after_authentication(&state.db, stored, &mut passkey, &auth_result).await?;
 
+        session.renew();
+        session.set("issued_at_ms", Utc::now().timestamp_millis());
         session.set("user_id", user.id);
         return Ok(StatusCode::NO_CONTENT);
     }
@@ -449,6 +451,8 @@ pub async fn authentication_finish(
 
     finish_passkey_authentication(&state, &credential, auth_state, stored).await?;
 
+    session.renew();
+    session.set("issued_at_ms", Utc::now().timestamp_millis());
     session.set("user_id", user.id);
     Ok(StatusCode::NO_CONTENT)
 }
