@@ -18,12 +18,16 @@ use axum_session_redispool::SessionRedisPool;
 use backend::{
     AppState,
     entities::{github_integrations, oauth_connections, projects, tenants, users},
-    jobs::{setup_github_webhook_storage, setup_pool, setup_verification_email_storage},
+    jobs::{
+        setup_github_webhook_storage, setup_password_reset_email_storage, setup_pool,
+        setup_verification_email_storage,
+    },
     routes,
     settings,
     utils::{
         auth::create_password_hash,
         drive::DriveConfig,
+        totp::build_totp,
         http::create_http_client,
         oauth::config::{OAuthSettings, ProviderConfig},
         redis::RedisConnection,
@@ -41,6 +45,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use tokio::{net::TcpListener, sync::OnceCell};
 use tower::ServiceExt;
+use url::Url;
 use uuid::Uuid;
 
 static SCHEMA_READY: OnceCell<()> = OnceCell::const_new();
@@ -116,6 +121,35 @@ async fn ensure_schema(db: &DatabaseConnection) {
             )
             .await
             .expect("prepare user columns for integration tests");
+
+            db.execute_unprepared(
+                r#"
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS require_2fa BOOLEAN NOT NULL DEFAULT false;
+UPDATE users SET totp_enabled = false WHERE totp_enabled IS NULL;
+ALTER TABLE users ALTER COLUMN totp_enabled SET NOT NULL;
+ALTER TABLE users ALTER COLUMN totp_enabled SET DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS totp_credentials (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    secret_enc TEXT NOT NULL,
+    is_verified BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recovery_codes (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash VARCHAR NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_recovery_codes_user ON recovery_codes(user_id);
+"#,
+            )
+            .await
+            .expect("prepare 2fa schema");
 
             db.get_schema_registry("backend::entities::*")
                 .sync(db)
@@ -247,6 +281,10 @@ pub struct TestTenantProject {
     pub project_id: Uuid,
 }
 
+pub struct Enabled2fa {
+    pub recovery_codes: Vec<String>,
+}
+
 impl TestApp {
     pub async fn new() -> Self {
         init_tracing();
@@ -294,6 +332,10 @@ impl TestApp {
         let github_webhook_storage = setup_github_webhook_storage(&pg_pool, &settings)
             .await
             .expect("github webhook storage");
+        let password_reset_email_storage =
+            setup_password_reset_email_storage(&pg_pool, &settings)
+                .await
+                .expect("password reset email storage");
         let storage = setup_storage().await.expect("storage backend");
         let http_client = create_http_client().expect("http client");
 
@@ -335,6 +377,7 @@ impl TestApp {
             smtp_client,
             verification_email_storage,
             github_webhook_storage,
+            password_reset_email_storage,
             storage,
             drive_config: DriveConfig::from_env(),
             oauth_settings,
@@ -405,6 +448,10 @@ impl TestApp {
         self.mock.set_user(user);
     }
 
+    pub async fn insert_user_default(&self) -> TestUser {
+        insert_user(&self.state.db, false, false).await
+    }
+
     pub async fn insert_user(&self, is_admin: bool, is_suspended: bool) -> TestUser {
         insert_user(&self.state.db, is_admin, is_suspended).await
     }
@@ -428,6 +475,7 @@ impl TestApp {
             is_admin: Set(false),
             is_suspended: Set(false),
             sessions_revoked_at: Set(None),
+            totp_enabled: Set(false),
         }
         .insert(&self.state.db)
         .await
@@ -493,7 +541,7 @@ impl TestApp {
         &self.base_url
     }
 
-    pub async fn login_session(&mut self, email: &str, password: &str) {
+    pub async fn login_session(&mut self, email: &str, password: &str) -> StatusCode {
         let response = self
             .client
             .post(format!("{}/v1/auth/login", self.base_url))
@@ -501,12 +549,71 @@ impl TestApp {
             .send()
             .await
             .expect("login request");
+        response.status()
+    }
+
+    pub async fn login_session_no_content(&mut self, email: &str, password: &str) {
+        let status = self.login_session(email, password).await;
         assert_eq!(
-            response.status(),
+            status,
             StatusCode::NO_CONTENT,
-            "login failed: {}",
-            response.text().await.unwrap_or_default()
+            "login expected 204 NO_CONTENT"
         );
+    }
+
+    pub async fn enable_2fa(&mut self, user: &TestUser) -> Enabled2fa {
+        let status = self.login_session(&user.email, &user.password).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "full login before 2fa setup");
+
+        let setup = self
+            .post_json_with_session("/v1/auth/2fa/totp/setup", serde_json::json!({}))
+            .await;
+        assert_eq!(setup.status(), StatusCode::OK);
+        let setup_body: serde_json::Value = setup.json().await.expect("setup json");
+        let uri = setup_body["otpauth_uri"]
+            .as_str()
+            .expect("otpauth_uri");
+        let secret = secret_from_otpauth_uri(uri);
+        let totp = build_totp(
+            &secret,
+            &self.state.settings.totp_issuer,
+            &user.email,
+        )
+        .expect("build totp");
+        let code = totp.generate_current().expect("totp code");
+
+        let verify = self
+            .post_json_with_session(
+                "/v1/auth/2fa/totp/verify-setup",
+                serde_json::json!({ "code": code }),
+            )
+            .await;
+        assert_eq!(verify.status(), StatusCode::OK);
+        let body: serde_json::Value = verify.json().await.expect("verify-setup json");
+        let codes: Vec<String> = body["recovery_codes"]
+            .as_array()
+            .expect("recovery_codes array")
+            .iter()
+            .map(|v| v.as_str().expect("code str").to_string())
+            .collect();
+
+        self.reset_session_client();
+        Enabled2fa {
+            recovery_codes: codes,
+        }
+    }
+
+    pub async fn login_half_authed(&mut self, user: &TestUser) {
+        let response = self
+            .client
+            .post(format!("{}/v1/auth/login", self.base_url))
+            .json(&serde_json::json!({ "email": user.email, "password": user.password }))
+            .send()
+            .await
+            .expect("login");
+        assert_eq!(response.status(), StatusCode::OK, "2fa login returns JSON body");
+        let body: serde_json::Value = response.json().await.expect("login json");
+        assert_eq!(body["requires_2fa"].as_bool(), Some(true));
     }
 
     pub async fn oauth_start(&self, link: bool) -> Response {
@@ -578,9 +685,33 @@ impl TestApp {
         self.get(path).await
     }
 
+    pub async fn post_json(&self, path: &str, body: serde_json::Value) -> Response {
+        self.client
+            .post(format!("{}{path}", self.base_url))
+            .json(&body)
+            .send()
+            .await
+            .expect("post request")
+    }
+
     pub async fn post_json_with_session(&self, path: &str, body: serde_json::Value) -> Response {
         self.client
             .post(format!("{}{path}", self.base_url))
+            .json(&body)
+            .send()
+            .await
+            .expect("post request")
+    }
+
+    pub async fn post_json_with_bearer(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+        token: &str,
+    ) -> Response {
+        self.client
+            .post(format!("{}{path}", self.base_url))
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
             .json(&body)
             .send()
             .await
@@ -622,9 +753,22 @@ impl TestApp {
             .expect("bearer request")
     }
 
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
     pub async fn delete_with_session(&self, path: &str) -> Response {
         self.client
             .delete(format!("{}{path}", self.base_url))
+            .send()
+            .await
+            .expect("delete request")
+    }
+
+    pub async fn delete_json_with_session(&self, path: &str, body: serde_json::Value) -> Response {
+        self.client
+            .delete(format!("{}{path}", self.base_url))
+            .json(&body)
             .send()
             .await
             .expect("delete request")
@@ -705,6 +849,7 @@ pub async fn insert_user(
         is_admin: Set(is_admin),
         is_suspended: Set(is_suspended),
         sessions_revoked_at: Set(None),
+        totp_enabled: Set(false),
     }
     .insert(db)
     .await
@@ -715,6 +860,20 @@ pub async fn insert_user(
         email,
         password,
     }
+}
+
+pub fn secret_from_otpauth_uri(uri: &str) -> String {
+    let parsed = Url::parse(uri).expect("otpauth uri");
+    parsed
+        .query_pairs()
+        .find(|(k, _)| k == "secret")
+        .map(|(_, v)| v.into_owned())
+        .expect("secret query param")
+}
+
+pub fn current_totp_code(secret: &str, issuer: &str, email: &str) -> String {
+    let totp = build_totp(secret, issuer, email).expect("totp");
+    totp.generate_current().expect("code")
 }
 
 pub async fn insert_personal_token_for_test(
@@ -758,6 +917,7 @@ pub async fn insert_tenant(db: &DatabaseConnection, owner_id: Uuid) -> Uuid {
         icon_url: Set(String::new()),
         owner_id: Set(owner_id),
         drive_quota_bytes: Set(None),
+        require_2fa: Set(false),
     }
     .insert(db)
     .await

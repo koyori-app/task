@@ -52,6 +52,20 @@ pub enum AuthError {
     /// 認証メールジョブのキュー投入に失敗した（未認証ユーザーは残し再送 API で回復する）。
     #[error("verification email enqueue failed")]
     VerificationEmailEnqueueFailed(#[source] anyhow::Error),
+    #[error("invalid 2fa code")]
+    InvalidTwoFactorCode,
+    #[error("2fa already enabled")]
+    TwoFactorAlreadyEnabled,
+    #[error("2fa not enabled")]
+    TwoFactorNotEnabled,
+    #[error("invalid password reset token")]
+    InvalidPasswordResetToken,
+    #[error("password reset token not found")]
+    PasswordResetTokenNotFound,
+    #[error("invalid current password")]
+    InvalidCurrentPassword,
+    #[error("password not set")]
+    PasswordNotSet,
 }
 
 impl From<sea_orm::DbErr> for AuthError {
@@ -147,6 +161,47 @@ impl IntoResponse for AuthError {
                 )
                     .into_response()
             }
+            AuthError::InvalidTwoFactorCode => (
+                StatusCode::UNAUTHORIZED,
+                Json(ServerError {
+                    message: "invalid-2fa-code".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::TwoFactorAlreadyEnabled => (
+                StatusCode::CONFLICT,
+                Json(ServerError {
+                    message: "2fa-already-enabled".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::TwoFactorNotEnabled => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError {
+                    message: "2fa-not-enabled".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::InvalidPasswordResetToken => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError { message: "invalid-password-reset-token".into() }),
+            )
+                .into_response(),
+            AuthError::PasswordResetTokenNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(ServerError { message: "password-reset-token-not-found".into() }),
+            )
+                .into_response(),
+            AuthError::InvalidCurrentPassword => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError { message: "invalid-current-password".into() }),
+            )
+                .into_response(),
+            AuthError::PasswordNotSet => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError { message: "password-not-set".into() }),
+            )
+                .into_response(),
         }
     }
 }

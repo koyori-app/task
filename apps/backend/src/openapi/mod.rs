@@ -11,7 +11,8 @@ pub use crate::error::ServerError;
 pub use responses::{
     CredentialErrors, CrudErrors, DriveFolderErrors, InternalOnlyError, OAuthErrors,
     PublicShareErrors, RegisterErrors, ResendVerificationErrors, SessionAuthErrors,
-    UnauthorizedErrors, VerifyEmailErrors,
+    UnauthorizedErrors, VerifyEmailErrors, PasswordChangeErrors, PasswordResetCompleteErrors,
+    PasswordResetRequestErrors, PasswordResetVerifyErrors,
 };
 
 /// スキーマのうち、ハンドラだけでは OpenAPI に載らないものを登録する。
@@ -21,6 +22,9 @@ pub fn register_schemas(openapi: &mut OpenApi) {
         .get_or_insert_with(utoipa::openapi::Components::new);
 
     register_schema::<ServerError>(components);
+    register_schema::<crate::handlers::auth_2fa::Login2faResponse>(components);
+    register_schema::<crate::handlers::auth_2fa::TotpSetupResponse>(components);
+    register_schema::<crate::handlers::auth_2fa::VerifySetupResponse>(components);
     register_security_schemes(components);
     register_tags(openapi);
 }

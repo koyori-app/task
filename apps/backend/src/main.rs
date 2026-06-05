@@ -39,6 +39,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         backend::jobs::setup_verification_email_storage(&pg_pool, &settings).await?;
     let github_webhook_storage =
         backend::jobs::setup_github_webhook_storage(&pg_pool, &settings).await?;
+    let password_reset_email_storage =
+        backend::jobs::setup_password_reset_email_storage(&pg_pool, &settings).await?;
 
     let storage = backend::utils::storage::setup_storage().await.map_err(|e| {
         std::io::Error::other(format!(
@@ -82,6 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         smtp_client,
         verification_email_storage,
         github_webhook_storage,
+        password_reset_email_storage,
         storage,
         drive_config,
         oauth_settings,
