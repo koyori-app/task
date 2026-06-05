@@ -73,8 +73,8 @@ jobs:
             cargo-${{ runner.os }}-
 
       - name: Run migrations
-        run: cargo run -p migration -- up
-        working-directory: apps/backend
+        run: cargo run -- up
+        working-directory: apps/backend/migration
 
       - name: Run tests
         run: cargo test
