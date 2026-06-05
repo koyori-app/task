@@ -26,10 +26,11 @@ static STORE_TOKEN_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
 static CONSUME_TOKEN_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
     redis::Script::new(
         r#"
-        local user_id = redis.call('GETDEL', KEYS[1])
+        local user_id = redis.call('GET', KEYS[1])
         if not user_id then
             return nil
         end
+        redis.call('DEL', KEYS[1])
         local user_key = ARGV[1] .. user_id
         if redis.call('GET', user_key) == ARGV[2] then
             redis.call('DEL', user_key)

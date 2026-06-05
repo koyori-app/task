@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use validator::Validate;
 
-use crate::extractors::{AuthMethod, AuthUser, CurrentUser};
+use crate::extractors::CurrentUser;
 use crate::jobs::{PasswordResetEmailJob, password_reset_email};
 use crate::openapi::{
     PasswordChangeErrors, PasswordResetCompleteErrors, PasswordResetRequestErrors,
@@ -108,6 +108,11 @@ pub async fn password_reset_request(
         .one(&state.db)
         .await?
     {
+        if user.is_suspended {
+            return Ok(Json(MessageResponse {
+                message: "入力されたメールアドレスにリセットリンクを送信しました（登録済みの場合）".into(),
+            }));
+        }
         if let Err(e) = password_reset_email::enqueue(
             state.password_reset_email_storage.as_ref(),
             PasswordResetEmailJob::new(user.id, email),
@@ -162,19 +167,19 @@ pub async fn password_reset_complete(
         .map_err(|e| AuthError::Internal(e.into()))?
         .ok_or(AuthError::InvalidPasswordResetToken)?;
     let password_hash = create_password_hash(&payload.new_password)?;
-    let user = users::Entity::find_by_id(user_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| AuthError::Internal(anyhow::anyhow!("user missing for token")))?;
-    let mut active: users::ActiveModel = user.into();
-    active.password_hash = Set(Some(password_hash));
-    active.sessions_revoked_at = Set(Some(Utc::now()));
 
     let txn = state
         .db
         .begin()
         .await
         .map_err(|e| AuthError::Internal(e.into()))?;
+    let user = users::Entity::find_by_id(user_id)
+        .one(&txn)
+        .await?
+        .ok_or_else(|| AuthError::Internal(anyhow::anyhow!("user missing for token")))?;
+    let mut active: users::ActiveModel = user.into();
+    active.password_hash = Set(Some(password_hash));
+    active.sessions_revoked_at = Set(Some(Utc::now()));
     active.update(&txn).await?;
     personal_tokens::Entity::update_many()
         .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
@@ -202,13 +207,9 @@ pub async fn password_reset_complete(
 pub async fn password_change(
     session: AuthSession,
     State(state): State<AppState>,
-    auth: AuthUser,
     user: CurrentUser,
     Valid(Json(payload)): Valid<Json<PasswordChangeBody>>,
 ) -> Result<Json<MessageResponse>, AuthError> {
-    if !matches!(auth.method, AuthMethod::Session) {
-        return Err(AuthError::Unauthorized);
-    }
     let current_hash = user
         .password_hash
         .as_deref()
@@ -216,6 +217,7 @@ pub async fn password_change(
     if !verify_password(&payload.current_password, current_hash)? {
         return Err(AuthError::InvalidCurrentPassword);
     }
+    let user_id = user.id;
     let password_hash = create_password_hash(&payload.new_password)?;
     let mut active: users::ActiveModel = user.0.into();
     active.password_hash = Set(Some(password_hash));
@@ -229,7 +231,7 @@ pub async fn password_change(
     active.update(&txn).await?;
     personal_tokens::Entity::update_many()
         .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
-        .filter(personal_tokens::Column::UserId.eq(auth.user_id))
+        .filter(personal_tokens::Column::UserId.eq(user_id))
         .filter(personal_tokens::Column::Revoked.eq(false))
         .exec(&txn)
         .await?;
@@ -238,7 +240,7 @@ pub async fn password_change(
         .map_err(|e| AuthError::Internal(e.into()))?;
     session.remove("user_id");
     session.remove("issued_at_ms");
-    password_reset_log::password_changed(auth.user_id);
+    password_reset_log::password_changed(user_id);
     Ok(Json(MessageResponse {
         message: "パスワードを変更しました。再度ログインしてください。".into(),
     }))
