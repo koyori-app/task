@@ -16,10 +16,17 @@ use crate::{
 
 type Session = axum_session::Session<SessionRedisPool>;
 
-async fn user_from_session(parts: &mut Parts, state: &AppState) -> Result<users::Model, AuthError> {
-    let session = Session::from_request_parts(parts, state)
+async fn session_from_parts(
+    parts: &mut Parts,
+    state: &AppState,
+) -> Result<Session, AuthError> {
+    Session::from_request_parts(parts, state)
         .await
-        .map_err(|_| AuthError::Internal(anyhow::anyhow!("session layer missing")))?;
+        .map_err(|_| AuthError::Internal(anyhow::anyhow!("session layer missing")))
+}
+
+async fn user_from_session(parts: &mut Parts, state: &AppState) -> Result<users::Model, AuthError> {
+    let session = session_from_parts(parts, state).await?;
 
     let user_id = session
         .get::<Uuid>("user_id")
@@ -38,6 +45,10 @@ async fn user_from_session(parts: &mut Parts, state: &AppState) -> Result<users:
     }
 
     Ok(user)
+}
+
+fn session_is_half_authed(session: &Session) -> bool {
+    session.get::<bool>("half_authed").unwrap_or(false)
 }
 
 fn bearer_token_from_parts(parts: &Parts) -> Option<String> {
@@ -236,7 +247,10 @@ impl FromRequestParts<AppState> for OptionalAuthUser {
     ) -> Result<Self, Self::Rejection> {
         match AuthUser::from_request_parts(parts, state).await {
             Ok(auth) => Ok(OptionalAuthUser(Some(auth))),
-            Err(AuthError::Unauthorized) => Ok(OptionalAuthUser(None)),
+            // 半認証セッションは未認証扱い（Drive 等の Optional エンドポイントで 403 にしない）
+            Err(AuthError::Unauthorized) | Err(AuthError::Forbidden) => {
+                Ok(OptionalAuthUser(None))
+            }
             Err(e) => Err(e),
         }
     }
@@ -272,6 +286,10 @@ impl FromRequestParts<AppState> for AuthUser {
                 },
             })
         } else {
+            let session = session_from_parts(parts, state).await?;
+            if session_is_half_authed(&session) {
+                return Err(AuthError::Forbidden);
+            }
             let user = user_from_session(parts, state).await?;
             if user.is_suspended {
                 return Err(AuthError::Suspended);
@@ -281,6 +299,69 @@ impl FromRequestParts<AppState> for AuthUser {
                 method: AuthMethod::Session,
             })
         }
+    }
+}
+
+/// 半認証セッション専用（`POST /v1/auth/2fa/verify`）
+pub struct HalfAuthedUser {
+    pub user_id: Uuid,
+}
+
+impl FromRequestParts<AppState> for HalfAuthedUser {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        if bearer_token_from_parts(parts).is_some() {
+            return Err(AuthError::Forbidden);
+        }
+        let session = session_from_parts(parts, state).await?;
+        if !session_is_half_authed(&session) {
+            return Err(AuthError::Forbidden);
+        }
+        let user_id = session
+            .get::<Uuid>("user_id")
+            .ok_or(AuthError::Unauthorized)?;
+        let issued_at_ms = session.get::<i64>("issued_at_ms").unwrap_or(0);
+        let user = users::Entity::find_by_id(user_id)
+            .one(&state.db)
+            .await?
+            .ok_or(AuthError::Unauthorized)?;
+        // Suspend before session-revocation so admin suspend still returns 403 on 2FA verify.
+        if user.is_suspended {
+            return Err(AuthError::Suspended);
+        }
+        if let Some(revoked_at) = user.sessions_revoked_at {
+            if issued_at_ms < revoked_at.timestamp_millis() {
+                return Err(AuthError::Unauthorized);
+            }
+        }
+        Ok(HalfAuthedUser { user_id: user.id })
+    }
+}
+
+/// ログイン済みセッション（半認証・完全認証どちらも可）。2FA セットアップ用。
+pub struct LoggedInUser {
+    pub user_id: Uuid,
+}
+
+impl FromRequestParts<AppState> for LoggedInUser {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        if bearer_token_from_parts(parts).is_some() {
+            return Err(AuthError::Forbidden);
+        }
+        let user = user_from_session(parts, state).await?;
+        if user.is_suspended {
+            return Err(AuthError::Suspended);
+        }
+        Ok(LoggedInUser { user_id: user.id })
     }
 }
 
@@ -327,6 +408,10 @@ impl FromRequestParts<AppState> for CurrentUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
+        let session = session_from_parts(parts, state).await?;
+        if session_is_half_authed(&session) {
+            return Err(AuthError::Forbidden);
+        }
         let user = user_from_session(parts, state).await?;
         Ok(CurrentUser(user))
     }

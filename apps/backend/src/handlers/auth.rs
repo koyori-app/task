@@ -1,5 +1,4 @@
-use axum::{Json, extract::State, http::StatusCode};
-use chrono::Utc;
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use axum_session::Session;
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
@@ -11,6 +10,7 @@ use validator::Validate;
 
 use crate::entities;
 use crate::extractors::{AuthUser, CurrentUser};
+use crate::handlers::auth_2fa::{establish_login_session, Login2faResponse};
 use crate::openapi::{
     CredentialErrors, RegisterErrors, ResendVerificationErrors, SessionAuthErrors,
     UnauthorizedErrors, VerifyEmailErrors,
@@ -45,6 +45,7 @@ pub struct LoginRequest {
     request_body = LoginRequest,
     responses(
         (status = 204, description = "ログインに成功しました（本文なし）"),
+        (status = 200, description = "2FA が必要", body = Login2faResponse),
         CredentialErrors,
     )
 )]
@@ -52,7 +53,7 @@ pub async fn login(
     session: Session<SessionRedisPool>,
     State(state): State<AppState>,
     Valid(Json(payload)): Valid<Json<LoginRequest>>,
-) -> Result<StatusCode, AuthError> {
+) -> Result<impl IntoResponse, AuthError> {
     let LoginRequest { email, password } = payload;
     let email = normalize_email(&email);
 
@@ -76,9 +77,11 @@ pub async fn login(
         return Err(AuthError::EmailNotVerified);
     }
 
-    session.set("user_id", user.id);
-    session.set("issued_at_ms", Utc::now().timestamp_millis());
-    Ok(StatusCode::NO_CONTENT)
+    if let Some(response) = establish_login_session(&session, &state.db, &user).await? {
+        return Ok((StatusCode::OK, Json(response)).into_response());
+    }
+
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
@@ -150,6 +153,7 @@ pub async fn register(
         is_admin: Set(false),
         is_suspended: Set(false),
         sessions_revoked_at: Set(None),
+        totp_enabled: Set(false),
     };
 
     with_transaction::<(), AuthError, _>(&state.db, |txn| {
@@ -328,6 +332,7 @@ pub async fn logout(
     _auth: AuthUser,
 ) -> Result<StatusCode, AuthError> {
     session.remove("user_id");
+    session.remove("half_authed");
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -17,4 +17,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(crate::handlers::oauth::list_connections))
         .routes(routes!(crate::handlers::oauth::disconnect_connection))
         .routes(routes!(crate::handlers::oauth::set_initial_password))
+        .routes(routes!(crate::handlers::auth_2fa::totp_setup))
+        .routes(routes!(crate::handlers::auth_2fa::totp_verify_setup))
+        .routes(routes!(crate::handlers::auth_2fa::verify_2fa))
+        .routes(routes!(crate::handlers::auth_2fa::delete_totp))
+        .routes(routes!(crate::handlers::auth_2fa::regenerate_recovery_codes))
 }

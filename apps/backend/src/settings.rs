@@ -32,8 +32,24 @@ pub struct Settings {
     /// PAT の HMAC-SHA256 署名に使う秘密鍵。起動時に必須。32バイト以上（256ビット）が必要。
     #[validate(length(min = 32, message = "PERSONAL_TOKEN_SECRET must be at least 32 characters"))]
     pub personal_token_secret: String,
+    /// リカバリーコード HMAC 用秘密鍵。PAT 秘密鍵とは分離。32 文字以上必須。
+    #[validate(length(min = 32, message = "RECOVERY_CODE_SECRET must be at least 32 characters"))]
+    pub recovery_code_secret: String,
+    /// TOTP シークレット暗号化用（AES-256-GCM）。UTF-8 で正確に 32 バイト必須。
+    #[validate(custom(
+        function = "validate_totp_encryption_key_bytes",
+        message = "TOTP_ENCRYPTION_KEY must be exactly 32 bytes"
+    ))]
+    pub totp_encryption_key: String,
+    /// otpauth URI の issuer（認証アプリ表示名）
+    #[serde(default = "default_totp_issuer")]
+    pub totp_issuer: String,
     /// 起動時に管理者昇格するユーザーのメールアドレス（管理者ゼロ時のみ有効）。
     pub bootstrap_admin_email: Option<String>,
+}
+
+fn default_totp_issuer() -> String {
+    "TaskApp".to_string()
 }
 
 fn default_verification_email_worker_concurrency() -> usize {
@@ -42,6 +58,15 @@ fn default_verification_email_worker_concurrency() -> usize {
 
 fn default_allow_origin() -> String {
     "http://localhost:3000".to_string()
+}
+
+/// AES-256 鍵素材は 32 バイト固定（マルチバイト文字の文字数ではなくバイト長で検証）。
+fn validate_totp_encryption_key_bytes(raw: &str) -> Result<(), validator::ValidationError> {
+    if raw.as_bytes().len() == 32 {
+        Ok(())
+    } else {
+        Err(validator::ValidationError::new("totp_key_bytes"))
+    }
 }
 
 pub fn load_settings() -> Result<Settings, anyhow::Error> {
@@ -117,6 +142,9 @@ mod tests {
             email_verification_app_url: url.to_string(),
             verification_email_worker_concurrency: 1,
             personal_token_secret: "a".repeat(32),
+            recovery_code_secret: "c".repeat(32),
+            totp_encryption_key: "b".repeat(32),
+            totp_issuer: "TaskApp".to_string(),
             bootstrap_admin_email: None,
         }
         .validate()
