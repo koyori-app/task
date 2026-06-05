@@ -72,10 +72,6 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
-      - name: Run migrations
-        run: cargo run -- up
-        working-directory: apps/backend/migration
-
       - name: Run tests
         run: cargo test
         working-directory: apps/backend
