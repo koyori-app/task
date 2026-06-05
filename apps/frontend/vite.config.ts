@@ -18,6 +18,10 @@ const dirname =
 
 dotenv.config({ path: path.resolve(dirname, '.env') });
 
+const coderAllowedHost = process.env.CODER_AGENT_URL
+  ? `.${new URL(process.env.CODER_AGENT_URL).hostname}`
+  : undefined;
+
 const analyze = process.env.ANALYZE === 'true';
 
 const sentryEnabled =
@@ -68,7 +72,11 @@ export default defineConfig({
         // './src/pages/index/+Page.vue'
         ],
     },
-    allowedHosts: true,
+    allowedHosts: [
+      'localhost',
+      '127.0.0.1',
+      ...(coderAllowedHost ? [coderAllowedHost] : []),
+    ],
   },
   build: {
     sourcemap: analyze || process.env.NODE_ENV !== 'production',
