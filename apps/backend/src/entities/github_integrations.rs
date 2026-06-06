@@ -11,7 +11,6 @@ pub struct Model {
     #[sea_orm(unique)]
     #[schema(value_type = String, format = "uuid")]
     pub project_id: Uuid,
-    #[sea_orm(unique)]
     pub installation_id: i64,
     pub repo_owner: String,
     pub repo_name: String,

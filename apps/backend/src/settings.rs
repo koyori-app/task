@@ -98,7 +98,7 @@ impl Settings {
 }
 
 fn default_github_app_frontend_base_url() -> String {
-    "http://localhost:3000".to_string()
+    String::new()
 }
 
 fn default_totp_issuer() -> String {

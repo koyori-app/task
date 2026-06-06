@@ -187,14 +187,17 @@ pub async fn verify_installation_for_callback(
 }
 
 /// インストール先リポジトリを選定する（テスト可能な純関数）。
+/// アクセス可能なリポジトリが 1 件のときのみ自動選択する。
+/// 複数ある場合はユーザーの明示的選択が必要なため `None` を返す。
 pub fn select_primary_repository<'a>(
     repositories: &'a [InstallationRepository],
-    preferred_owner: &str,
+    _preferred_owner: &str,
 ) -> Option<&'a InstallationRepository> {
-    repositories
-        .iter()
-        .find(|r| r.owner.login == preferred_owner)
-        .or_else(|| repositories.first())
+    if repositories.len() == 1 {
+        repositories.first()
+    } else {
+        None
+    }
 }
 
 pub async fn fetch_primary_repository(
@@ -224,7 +227,10 @@ pub async fn fetch_primary_repository(
         .context("parse installation repositories")?;
     let repo =
         select_primary_repository(&body.repositories, preferred_owner).ok_or_else(|| {
-            anyhow!("no repositories accessible for installation")
+            anyhow!(
+                "installation has access to {} repositories; select one explicitly",
+                body.repositories.len()
+            )
         })?;
     let (owner, name) = repo
         .full_name
@@ -275,18 +281,17 @@ mod tests {
     }
 
     #[test]
-    fn select_primary_repository_prefers_installation_account_owner() {
+    fn select_primary_repository_returns_none_for_multiple_repos() {
         let repos = vec![
             repo("other-org/app", "other-org"),
             repo("myorg/backend", "myorg"),
             repo("myorg/frontend", "myorg"),
         ];
-        let chosen = select_primary_repository(&repos, "myorg").unwrap();
-        assert_eq!(chosen.full_name, "myorg/backend");
+        assert!(select_primary_repository(&repos, "myorg").is_none());
     }
 
     #[test]
-    fn select_primary_repository_falls_back_to_first() {
+    fn select_primary_repository_auto_selects_single_repo() {
         let repos = vec![repo("other-org/app", "other-org")];
         let chosen = select_primary_repository(&repos, "myorg").unwrap();
         assert_eq!(chosen.full_name, "other-org/app");
