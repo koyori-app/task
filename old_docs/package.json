@@ -17,7 +17,7 @@
     "vue-router": "5.0.6"
   },
   "devDependencies": {
-    "rolldown": "1.0.0-rc.18",
+    "rolldown": "1.1.0",
     "vite-plus": "catalog:"
   }
 }
