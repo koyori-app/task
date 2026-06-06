@@ -15,21 +15,25 @@
   "packageRules": [
     {
       "matchManagers": ["github-actions", "gitlabci", "gitlabci-include"],
-      "automerge": true
+      "automerge": true,
+      "matchUpdateTypes": ["minor", "patch", "digest"]
     },
     {
       "matchManagers": ["cargo"],
-      "automerge": true
+      "automerge": true,
+      "matchUpdateTypes": ["minor", "patch", "digest"]
     },
     {
       "matchManagers": ["npm"],
       // "addLabels": ["topic/JavaScript🧶"]
-      "automerge": true
+      "automerge": true,
+      "matchUpdateTypes": ["minor", "patch", "digest"]
     },
     {
       "matchManagers": ["docker-compose", "dockerfile"],
       // "addLabels": ["topic/Docker⚓"]
-      "automerge": true
+      "automerge": true,
+      "matchUpdateTypes": ["minor", "patch", "digest"]
     },
     {
       "matchManagers": ["npm"],
