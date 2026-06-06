@@ -93,7 +93,7 @@ impl Settings {
     pub fn require_github_app(&self) -> Result<&GithubAppSettings, crate::error::AppError> {
         self.github_app
             .as_ref()
-            .ok_or(crate::error::AppError::BadRequest)
+            .ok_or(crate::error::AppError::NotFound)
     }
 }
 

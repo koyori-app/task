@@ -80,3 +80,4 @@ tower = { version = "0.5.2", features = ["util"] }
 urlencoding = "2.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 wiremock = "0.6"
+serial_test = "3"

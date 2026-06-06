@@ -424,22 +424,19 @@ pub async fn delete_github_integration(
         return Err(AppError::NotFound);
     };
 
-    // DB を先に削除し、その後 GitHub API で連携解除する。
-    // 順序を逆にすると GitHub 側が消えた後に DB 削除が失敗した場合に「connected」が残る。
     let installation_id = row.installation_id;
+
+    // GitHub 側を先に解除する（404/410 は冪等成功として delete_app_installation 内で処理済み）。
+    // DB を先に削除すると GitHub 側の失敗時に installation_id が失われ再試行不能になる。
+    github_api::delete_app_installation(&state.http_client, github, installation_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, installation_id, "github delete_app_installation failed");
+            AppError::Internal(e)
+        })?;
+
     let active: github_integrations::ActiveModel = row.into();
     active.delete(&state.db).await?;
-
-    if let Err(e) =
-        github_api::delete_app_installation(&state.http_client, github, installation_id).await
-    {
-        // GitHub 側の削除失敗はログのみ。DB は既に削除済みなので UI には「未連携」と表示される。
-        tracing::warn!(
-            error = %e,
-            installation_id,
-            "github delete_app_installation failed; db record already removed"
-        );
-    }
 
     Ok(StatusCode::NO_CONTENT)
 }

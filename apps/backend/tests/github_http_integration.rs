@@ -100,10 +100,14 @@ fn integration_path(tp: &TestTenantProject) -> String {
     )
 }
 
+// serial: GITHUB_API_BASE_URL を OnceLock でキャッシュするため、
+// 並列実行すると別テストが先にキャッシュした URL が使われる競合が起きる。
+#[serial_test::serial]
 #[tokio::test]
 async fn github_http_integration_suite() {
     let mock_server = MockServer::start().await;
-    // SAFETY: set before TestApp::new spawns the server task.
+    // SAFETY: シングルスレッドの初期化前に set_var するため safe。
+    // serial アトリビュートにより他テストとの並列実行を防いでいる。
     unsafe {
         std::env::set_var("GITHUB_API_BASE_URL", mock_server.uri());
     }

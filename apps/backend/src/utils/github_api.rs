@@ -73,7 +73,8 @@ pub fn create_app_jwt(settings: &GithubAppSettings) -> Result<String, anyhow::Er
     let now = Utc::now();
     let claims = AppJwtClaims {
         iss: settings.github_app_id.clone(),
-        iat: now.timestamp(),
+        // iat を 60 秒前に設定してサーバ時刻のわずかなズレによる「issued in future」拒否を防ぐ
+        iat: (now - Duration::seconds(60)).timestamp(),
         exp: (now + Duration::minutes(9)).timestamp(),
     };
     let key = EncodingKey::from_rsa_pem(settings.github_app_private_key.as_bytes())
