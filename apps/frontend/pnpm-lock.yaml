@@ -113,8 +113,8 @@ importers:
         specifier: 20.19.41
         version: 20.19.41
       '@vitejs/plugin-vue':
-        specifier: 6.0.6
-        version: 6.0.6(@voidzero-dev/vite-plus-core@0.1.21)(vue@3.5.34(typescript@6.0.3))
+        specifier: 6.0.7
+        version: 6.0.7(@voidzero-dev/vite-plus-core@0.1.21)(vue@3.5.34(typescript@6.0.3))
       '@vitest/browser-playwright':
         specifier: 4.1.6
         version: 4.1.6(@voidzero-dev/vite-plus-core@0.1.21)(@voidzero-dev/vite-plus-test@0.1.21)(playwright@1.59.1)
@@ -1533,8 +1533,8 @@ packages:
   '@rolldown/pluginutils@1.0.0':
     resolution: {integrity: sha512-aKs/3GSWyV0mrhNmt/96/Z3yczC3yvrzYATCiCXQebBsGyYzjNdUphRVLeJQ67ySKVXRfMxt2lm12pmXvbPFQQ==}
 
-  '@rolldown/pluginutils@1.0.0-rc.13':
-    resolution: {integrity: sha512-3ngTAv6F/Py35BsYbeeLeecvhMKdsKm4AoOETVhAA+Qc8nrA2I0kF7oa93mE9qnIurngOSpMnQ0x2nQY2FPviA==}
+  '@rolldown/pluginutils@1.0.1':
+    resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
 
   '@sentry-internal/browser-utils@10.52.0':
     resolution: {integrity: sha512-x/yEPZdpH6NGQeoeQnV9tj8reAH8twNttiltGZl2o8Rk7sQeUfe7E8yuYP2XbJ2RqyZK5qRS3COrNyMPzf6KFA==}
@@ -2049,8 +2049,8 @@ packages:
     peerDependencies:
       vite: '*'
 
-  '@vitejs/plugin-vue@6.0.6':
-    resolution: {integrity: sha512-u9HHgfrq3AjXlysn0eINFnWQOJQLO9WN6VprZ8FXl7A2bYisv3Hui9Ij+7QZ41F/WYWarHjwBbXtD7dKg3uxbg==}
+  '@vitejs/plugin-vue@6.0.7':
+    resolution: {integrity: sha512-km+p+XdSz9Sxm5rqUbqcSfZYaAniKxWBj1KURl+Jr7UaPvvX7BmaWMdP69I5rrFDeQGyxAG7NXdc57vz+snhWg==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       vite: ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0
@@ -5108,7 +5108,7 @@ snapshots:
 
   '@rolldown/pluginutils@1.0.0': {}
 
-  '@rolldown/pluginutils@1.0.0-rc.13': {}
+  '@rolldown/pluginutils@1.0.1': {}
 
   '@sentry-internal/browser-utils@10.52.0':
     dependencies:
@@ -5790,9 +5790,9 @@ snapshots:
       - utf-8-validate
     optional: true
 
-  '@vitejs/plugin-vue@6.0.6(@voidzero-dev/vite-plus-core@0.1.21)(vue@3.5.34(typescript@6.0.3))':
+  '@vitejs/plugin-vue@6.0.7(@voidzero-dev/vite-plus-core@0.1.21)(vue@3.5.34(typescript@6.0.3))':
     dependencies:
-      '@rolldown/pluginutils': 1.0.0-rc.13
+      '@rolldown/pluginutils': 1.0.1
       vite: '@voidzero-dev/vite-plus-core@0.1.21(@types/node@20.19.41)(@vitejs/devtools@0.1.24)(esbuild@0.28.0)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)'
       vue: 3.5.34(typescript@6.0.3)
 
