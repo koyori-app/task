@@ -1,4 +1,4 @@
-
+use sea_orm::Statement;
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
@@ -44,7 +44,8 @@ impl MigrationTrait for Migration {
             "#,
         ];
         for sql in steps {
-                        conn.execute_unprepared(sql).await?;
+            let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
+            conn.execute(stmt).await?;
         }
         Ok(())
     }
@@ -69,7 +70,8 @@ impl MigrationTrait for Migration {
             "#,
         ];
         for sql in steps {
-                        conn.execute_unprepared(sql).await?;
+            let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
+            conn.execute(stmt).await?;
         }
         Ok(())
     }

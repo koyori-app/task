@@ -1,4 +1,4 @@
-
+use sea_orm::Statement;
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
@@ -36,7 +36,8 @@ impl MigrationTrait for Migration {
             CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status_id);
             CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id) WHERE parent_task_id IS NOT NULL
         "#;
-                manager.get_connection().execute_unprepared(sql).await.map(|_| ())
+        let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
+        manager.get_connection().execute(stmt).await.map(|_| ())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -46,6 +47,7 @@ impl MigrationTrait for Migration {
             DROP INDEX IF EXISTS idx_tasks_project;
             DROP TABLE IF EXISTS tasks
         "#;
-                manager.get_connection().execute_unprepared(sql).await.map(|_| ())
+        let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
+        manager.get_connection().execute(stmt).await.map(|_| ())
     }
 }

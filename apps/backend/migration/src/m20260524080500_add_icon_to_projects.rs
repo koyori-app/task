@@ -1,4 +1,4 @@
-
+use sea_orm::Statement;
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
@@ -12,7 +12,8 @@ impl MigrationTrait for Migration {
               ADD COLUMN icon_emoji VARCHAR,
               ADD COLUMN icon_url VARCHAR
         "#;
-                manager.get_connection().execute_unprepared(sql).await.map(|_| ())
+        let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
+        manager.get_connection().execute(stmt).await.map(|_| ())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -21,6 +22,7 @@ impl MigrationTrait for Migration {
               DROP COLUMN IF EXISTS icon_emoji,
               DROP COLUMN IF EXISTS icon_url
         "#;
-                manager.get_connection().execute_unprepared(sql).await.map(|_| ())
+        let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
+        manager.get_connection().execute(stmt).await.map(|_| ())
     }
 }
