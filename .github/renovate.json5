@@ -16,7 +16,9 @@
     {
       "matchManagers": ["github-actions", "gitlabci", "gitlabci-include"],
       "automerge": true,
-      "matchUpdateTypes": ["minor", "patch", "digest"]
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      // Apply the same cooldown to CI action updates before automerge.
+      "minimumReleaseAge": "1 day"
     },
     {
       "matchManagers": ["cargo"],
@@ -37,7 +39,9 @@
       "matchManagers": ["docker-compose", "dockerfile"],
       // "addLabels": ["topic/Docker⚓"]
       "automerge": true,
-      "matchUpdateTypes": ["minor", "patch", "digest"]
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      // Apply the same cooldown to container image updates before automerge.
+      "minimumReleaseAge": "1 day"
     },
     {
       "matchManagers": ["npm"],
