@@ -11,6 +11,9 @@ on:
       - 'apps/backend/**'
       - '.github/workflows/backend-test.yml'
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
