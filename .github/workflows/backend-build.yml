@@ -37,9 +37,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             apps/backend/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('apps/backend/Cargo.lock') }}
+          key: cargo-release-${{ runner.os }}-${{ hashFiles('apps/backend/Cargo.lock') }}
           restore-keys: |
-            cargo-${{ runner.os }}-
+            cargo-release-${{ runner.os }}-
 
       - name: Build
         run: cargo build --release
