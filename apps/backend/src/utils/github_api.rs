@@ -188,17 +188,24 @@ pub async fn verify_installation_for_callback(
 }
 
 /// インストール先リポジトリを選定する（テスト可能な純関数）。
-/// アクセス可能なリポジトリが 1 件のときのみ自動選択する。
-/// 複数ある場合はユーザーの明示的選択が必要なため `None` を返す。
+/// 1. リポジトリが 1 件 → そのまま返す
+/// 2. preferred_owner と一致するリポジトリが 1 件のみ → それを返す
+/// 3. それ以外（複数一致・ゼロ件）→ ユーザーの明示的選択が必要なため `None`
 pub fn select_primary_repository<'a>(
     repositories: &'a [InstallationRepository],
-    _preferred_owner: &str,
+    preferred_owner: &str,
 ) -> Option<&'a InstallationRepository> {
     if repositories.len() == 1 {
-        repositories.first()
-    } else {
-        None
+        return repositories.first();
     }
+    let mut matches = repositories
+        .iter()
+        .filter(|r| r.owner.login == preferred_owner);
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        return None; // 複数一致
+    }
+    Some(first)
 }
 
 pub async fn fetch_primary_repository(
