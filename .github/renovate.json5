@@ -21,13 +21,17 @@
     {
       "matchManagers": ["cargo"],
       "automerge": true,
-      "matchUpdateTypes": ["minor", "patch", "digest"]
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      // Keep Rust crate automerge on the same cooldown as npm/pnpm.
+      "minimumReleaseAge": "1 day"
     },
     {
       "matchManagers": ["npm"],
       // "addLabels": ["topic/JavaScript🧶"]
       "automerge": true,
-      "matchUpdateTypes": ["minor", "patch", "digest"]
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      // Align Renovate automerge with pnpm v11's default supply-chain delay.
+      "minimumReleaseAge": "1 day"
     },
     {
       "matchManagers": ["docker-compose", "dockerfile"],
