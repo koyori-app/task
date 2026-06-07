@@ -160,8 +160,7 @@ pub async fn registration_start(
     };
     if count >= MAX_PASSKEYS_PER_USER {
         let _ = passkey_challenges::release_registration_lock(&state.redis_client, user.id)
-            .await
-            .map_err(AuthError::Internal)?;
+            .await;
         return Err(AuthError::PasskeyLimitExceeded);
     }
 

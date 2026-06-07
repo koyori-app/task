@@ -233,10 +233,6 @@ pub async fn is_last_auth_method<C: ConnectionTrait>(
         return Ok(false);
     }
 
-    if count_user_passkeys(db, user_id).await? > 1 {
-        return Ok(false);
-    }
-
     Ok(oauth_connection_count(db, user_id).await? == 0)
 }
 
@@ -244,8 +240,12 @@ async fn oauth_connection_count<C: ConnectionTrait>(
     db: &C,
     user_id: uuid::Uuid,
 ) -> Result<u64, anyhow::Error> {
-    Ok(oauth_connections::Entity::find()
+    // FOR UPDATE で行をロックし、並行する OAuth 切断との競合を防ぐ。
+    // COUNT(*) は FOR UPDATE と組み合わせられないため all() でロック取得後にカウントする。
+    let rows = oauth_connections::Entity::find()
         .filter(oauth_connections::Column::UserId.eq(user_id))
-        .count(db)
-        .await?)
+        .lock_exclusive()
+        .all(db)
+        .await?;
+    Ok(rows.len() as u64)
 }
