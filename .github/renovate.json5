@@ -66,6 +66,7 @@
     {
       "matchManagers": ["npm"],
       "matchPackageNames": ["vite", "vite-plus", "vitest"],
+      "matchPackagePatterns": ["^@voidzero-dev/"],
       "groupName": "vite-plus"
     }
   ]
