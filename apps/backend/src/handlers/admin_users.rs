@@ -221,6 +221,14 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
         )
         .await?;
     }
+    if table_exists(&txn, "sprints").await? {
+        execute_bound(
+            &txn,
+            "DELETE FROM sprints WHERE created_by = ?",
+            vec![user_id.into()],
+        )
+        .await?;
+    }
 
     drive_files::Entity::delete_many()
         .filter(drive_files::Column::UploaderId.eq(user_id))

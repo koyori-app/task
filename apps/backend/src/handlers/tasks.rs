@@ -13,7 +13,8 @@ use validator::Validate;
 
 use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
 use crate::entities::{
-    labels, milestones, project_statuses, project_task_counters, task_assignees, task_labels,
+    labels, milestones, project_statuses, project_task_counters, sprints, task_assignees,
+    task_labels,
     task_relations, tasks,
 };
 use crate::error::AppError;
@@ -196,6 +197,8 @@ pub struct CreateTaskRequest {
     pub parent_task_id: Option<Uuid>,
     #[schema(value_type = Option<String>, format = "uuid")]
     pub milestone_id: Option<Uuid>,
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub sprint_id: Option<Uuid>,
     #[schema(value_type = Option<String>, format = "date-time")]
     pub soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
     #[schema(value_type = Option<String>, format = "date-time")]
@@ -228,6 +231,10 @@ pub struct UpdateTaskRequest {
     pub milestone_id: Option<Uuid>,
     #[serde(default)]
     pub clear_milestone_id: bool,
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub sprint_id: Option<Uuid>,
+    #[serde(default)]
+    pub clear_sprint_id: bool,
     #[schema(value_type = Option<String>, format = "date-time")]
     pub soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
@@ -249,6 +256,7 @@ pub struct ListTasksQuery {
     pub priority: Option<String>,
     pub assignee_id: Option<Uuid>,
     pub milestone_id: Option<Uuid>,
+    pub sprint_id: Option<Uuid>,
     pub parent_task_id: Option<Uuid>,
     #[serde(default)]
     pub is_archived: bool,
@@ -323,6 +331,9 @@ pub async fn list_tasks(
     }
     if let Some(mid) = q.milestone_id {
         query = query.filter(tasks::Column::MilestoneId.eq(mid));
+    }
+    if let Some(sid) = q.sprint_id {
+        query = query.filter(tasks::Column::SprintId.eq(sid));
     }
     if let Some(pid) = q.parent_task_id {
         query = query.filter(tasks::Column::ParentTaskId.eq(pid));
@@ -409,6 +420,16 @@ pub async fn create_task(
             .await?
             .ok_or(AppError::NotFound)?;
     }
+    if let Some(sid) = payload.sprint_id {
+        let sprint = sprints::Entity::find_by_id(sid)
+            .filter(sprints::Column::ProjectId.eq(project_id))
+            .one(&txn)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if sprint.status == sprints::SprintStatus::Completed {
+            return Err(AppError::Conflict);
+        }
+    }
 
     let seq_id = next_seq_id(&txn, project_id).await?;
 
@@ -423,6 +444,7 @@ pub async fn create_task(
         progress_pct: Set(payload.progress_pct.unwrap_or(0)),
         parent_task_id: Set(payload.parent_task_id),
         milestone_id: Set(payload.milestone_id),
+        sprint_id: Set(payload.sprint_id),
         soft_deadline: Set(payload.soft_deadline),
         hard_deadline: Set(payload.hard_deadline),
         estimated_minutes: Set(payload.estimated_minutes),
@@ -562,6 +584,19 @@ pub async fn update_task(
             .await?
             .ok_or(AppError::NotFound)?;
         active.milestone_id = Set(Some(v));
+    }
+    if payload.clear_sprint_id {
+        active.sprint_id = Set(None);
+    } else if let Some(v) = payload.sprint_id {
+        let sprint = sprints::Entity::find_by_id(v)
+            .filter(sprints::Column::ProjectId.eq(project_id))
+            .one(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if sprint.status == sprints::SprintStatus::Completed {
+            return Err(AppError::Conflict);
+        }
+        active.sprint_id = Set(Some(v));
     }
     if payload.clear_soft_deadline { active.soft_deadline = Set(None); }
     else if let Some(v) = payload.soft_deadline { active.soft_deadline = Set(Some(v)); }

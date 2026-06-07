@@ -123,7 +123,8 @@ async fn ensure_schema(db: &DatabaseConnection) {
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
                  ALTER TABLE users ADD COLUMN IF NOT EXISTS is_suspended BOOLEAN NOT NULL DEFAULT false;
                  ALTER TABLE users ADD COLUMN IF NOT EXISTS sessions_revoked_at TIMESTAMPTZ;
-                 ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;",
+                 ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+                 ALTER TABLE personal_tokens DROP COLUMN IF EXISTS token;",
             )
             .await
             .expect("prepare user columns for integration tests");

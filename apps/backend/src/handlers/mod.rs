@@ -13,6 +13,7 @@ pub mod drive_files;
 pub mod drive_folders;
 pub mod labels;
 pub mod milestones;
+pub mod sprints;
 pub mod personal_tokens;
 pub mod project_members;
 pub mod projects;

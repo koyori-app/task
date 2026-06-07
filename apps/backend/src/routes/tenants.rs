@@ -68,6 +68,18 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::milestones::delete_milestone)),
                 )
                 .nest(
+                    "/{project_id}/sprints",
+                    OpenApiRouter::<AppState>::new()
+                        .routes(routes!(crate::handlers::sprints::list_sprints))
+                        .routes(routes!(crate::handlers::sprints::create_sprint))
+                        .routes(routes!(crate::handlers::sprints::get_sprint))
+                        .routes(routes!(crate::handlers::sprints::update_sprint))
+                        .routes(routes!(crate::handlers::sprints::delete_sprint))
+                        .routes(routes!(crate::handlers::sprints::start_sprint))
+                        .routes(routes!(crate::handlers::sprints::complete_sprint))
+                        .routes(routes!(crate::handlers::sprints::assign_tasks_to_sprint)),
+                )
+                .nest(
                     "/{project_id}/labels",
                     OpenApiRouter::<AppState>::new()
                         .routes(routes!(crate::handlers::labels::list_labels))

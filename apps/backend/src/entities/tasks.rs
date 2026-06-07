@@ -46,6 +46,9 @@ pub struct Model {
     #[schema(value_type = Option<String>, format = "uuid", nullable)]
     pub milestone_id: Option<Uuid>,
     #[sea_orm(nullable)]
+    #[schema(value_type = Option<String>, format = "uuid", nullable)]
+    pub sprint_id: Option<Uuid>,
+    #[sea_orm(nullable)]
     #[schema(value_type = Option<String>, format = "date-time", nullable)]
     pub soft_deadline: Option<DateTimeUtc>,
     #[sea_orm(nullable)]
@@ -93,6 +96,14 @@ pub enum Relation {
     )]
     Milestones,
     #[sea_orm(
+        belongs_to = "super::sprints::Entity",
+        from = "Column::SprintId",
+        to = "super::sprints::Column::Id",
+        on_update = "NoAction",
+        on_delete = "SetNull"
+    )]
+    Sprints,
+    #[sea_orm(
         belongs_to = "super::users::Entity",
         from = "Column::CreatedBy",
         to = "super::users::Column::Id",
@@ -117,6 +128,12 @@ impl Related<super::project_statuses::Entity> for Entity {
 impl Related<super::milestones::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Milestones.def()
+    }
+}
+
+impl Related<super::sprints::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Sprints.def()
     }
 }
 
