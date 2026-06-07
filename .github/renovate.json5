@@ -65,7 +65,8 @@
     },
     {
       "matchManagers": ["npm"],
-      "matchPackageNames": ["vite", "vite-plus", "vitest"],
+      "matchPackagePatterns": ["vite", "vitest"],
+      "excludePackagePatterns": ["^@vitejs/"],
       "groupName": "vite-plus"
     }
   ]
