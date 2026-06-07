@@ -1,15 +1,15 @@
-name: Frontend Build Check
+name: Frontend Unit Test
 
 on:
   push:
     branches: [main]
     paths:
       - 'apps/frontend/**'
-      - '.github/workflows/frontend-build.yml'
+      - '.github/workflows/frontend-test.yml'
   pull_request:
     paths:
       - 'apps/frontend/**'
-      - '.github/workflows/frontend-build.yml'
+      - '.github/workflows/frontend-test.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -19,8 +19,9 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -37,7 +38,7 @@ jobs:
         run: corepack enable
 
       - name: Install pnpm
-        run: corepack prepare pnpm@latest --activate
+        run: corepack prepare pnpm@11.5.2 --activate
 
       - name: Get pnpm store path
         id: pnpm-cache
@@ -56,10 +57,6 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: apps/frontend
 
-      - name: Generate API client
-        run: pnpm openapi:generate
-        working-directory: apps/frontend
-
-      - name: Build
-        run: pnpm build
+      - name: Run unit tests
+        run: pnpm test:unit
         working-directory: apps/frontend
