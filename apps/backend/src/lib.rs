@@ -29,7 +29,7 @@ use std::sync::Arc;
 use apalis_postgres::PgPool;
 use webauthn_rs::prelude::Webauthn;
 
-use crate::jobs::VerificationEmailStorage;
+use crate::jobs::{GithubWebhookStorage, PasswordResetEmailStorage, VerificationEmailStorage};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -39,6 +39,8 @@ pub struct AppState {
     pub redis_client: RedisConnection,
     pub smtp_client: SmtpClient,
     pub verification_email_storage: Arc<VerificationEmailStorage>,
+    pub github_webhook_storage: Arc<GithubWebhookStorage>,
+    pub password_reset_email_storage: Arc<PasswordResetEmailStorage>,
     pub storage: Arc<dyn StorageBackend>,
     pub drive_config: DriveConfig,
     pub oauth_settings: OAuthSettings,

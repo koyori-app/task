@@ -163,11 +163,10 @@ pub async fn establish_login_session(
     db: &DatabaseConnection,
     user: &users::Model,
 ) -> Result<Option<Login2faFlags>, sea_orm::DbErr> {
+    let flags = login_2fa_flags(db, user.id).await?;
     session.renew();
     session.set("issued_at_ms", Utc::now().timestamp_millis());
     session.set("user_id", user.id);
-
-    let flags = login_2fa_flags(db, user.id).await?;
     if flags.needs_second_factor() {
         session.set("half_authed", true);
         return Ok(Some(flags));

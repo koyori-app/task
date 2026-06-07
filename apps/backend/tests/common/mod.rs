@@ -1,6 +1,7 @@
-//! HTTP 統合テスト用の Axum アプリ構築ヘルパー。
+//! HTTP 統合テスト用の Axum アプリ構築ヘルパー（admin / GitHub App 共通）。
 
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::{
@@ -16,13 +17,17 @@ use axum_session::{SameSite, SessionConfig, SessionLayer, SessionMode, SessionSt
 use axum_session_redispool::SessionRedisPool;
 use backend::{
     AppState,
-    entities::{oauth_connections, users},
-    jobs::{setup_pool, setup_verification_email_storage},
+    entities::{github_integrations, oauth_connections, projects, tenants, users},
+    jobs::{
+        setup_github_webhook_storage, setup_password_reset_email_storage, setup_pool,
+        setup_verification_email_storage,
+    },
     routes,
     settings,
     utils::{
         auth::create_password_hash,
         drive::DriveConfig,
+        totp::build_totp,
         http::create_http_client,
         oauth::config::{OAuthSettings, ProviderConfig},
         redis::RedisConnection,
@@ -41,6 +46,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use tokio::{net::TcpListener, sync::OnceCell};
 use tower::ServiceExt;
+use url::Url;
 use uuid::Uuid;
 
 static SCHEMA_READY: OnceCell<()> = OnceCell::const_new();
@@ -70,6 +76,30 @@ pub const TEST_OAUTH_CLIENT_ID: &str = "test-gitlab-selfhosted-client";
 pub const TEST_OAUTH_CLIENT_SECRET: &str = "test-gitlab-selfhosted-secret";
 pub const TEST_OAUTH_ENCRYPTION_KEY: &str = "01234567890123456789012345678901";
 
+fn load_dotenv() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let _ = dotenvy::dotenv().ok();
+    let _ = dotenvy::from_path(manifest.join(".env")).ok();
+    let _ = dotenvy::from_path("/home/coder/task/apps/backend/.env").ok();
+}
+
+/// GitHub App HTTP 統合テスト用: 必須の GitHub 環境変数を設定する。
+pub fn load_github_test_env() {
+    load_dotenv();
+    // SAFETY: test process is single-threaded before Tokio workers spawn.
+    unsafe {
+        std::env::set_var("GITHUB_APP_ID", "1");
+        std::env::set_var("GITHUB_APP_WEBHOOK_SECRET", "webhook-secret");
+        std::env::set_var("GITHUB_APP_NAME", "task-app");
+        std::env::set_var(
+            "GITHUB_TOKEN_ENCRYPTION_KEY",
+            "01234567890123456789012345678901",
+        );
+        let pem = include_str!("../fixtures/github_test_rsa.pem").replace('\n', "\\n");
+        std::env::set_var("GITHUB_APP_PRIVATE_KEY", pem);
+    }
+}
+
 fn test_session_config() -> SessionConfig {
     SessionConfig::default()
         .with_secure(false)
@@ -84,6 +114,11 @@ fn test_session_config() -> SessionConfig {
 async fn ensure_schema(db: &DatabaseConnection) {
     SCHEMA_READY
         .get_or_init(|| async {
+            db.get_schema_registry("backend::entities::*")
+                .sync(db)
+                .await
+                .expect("sync schema");
+
             db.execute_unprepared(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
                  ALTER TABLE users ADD COLUMN IF NOT EXISTS is_suspended BOOLEAN NOT NULL DEFAULT false;
@@ -93,10 +128,35 @@ async fn ensure_schema(db: &DatabaseConnection) {
             .await
             .expect("prepare user columns for integration tests");
 
-            db.get_schema_registry("backend::entities::*")
-                .sync(db)
-                .await
-                .expect("sync schema");
+            db.execute_unprepared(
+                r#"
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS require_2fa BOOLEAN NOT NULL DEFAULT false;
+UPDATE users SET totp_enabled = false WHERE totp_enabled IS NULL;
+ALTER TABLE users ALTER COLUMN totp_enabled SET NOT NULL;
+ALTER TABLE users ALTER COLUMN totp_enabled SET DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS totp_credentials (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    secret_enc TEXT NOT NULL,
+    is_verified BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recovery_codes (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash VARCHAR NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_recovery_codes_user ON recovery_codes(user_id);
+"#,
+            )
+            .await
+            .expect("prepare 2fa schema");
+
         })
         .await;
 }
@@ -218,12 +278,36 @@ pub struct TestUser {
     pub password: String,
 }
 
+pub struct TestTenantProject {
+    pub tenant_id: Uuid,
+    pub project_id: Uuid,
+}
+
+pub struct Enabled2fa {
+    pub recovery_codes: Vec<String>,
+}
+
 impl TestApp {
     pub async fn new() -> Self {
         init_tracing();
-        dotenvy::dotenv().ok();
+        load_dotenv();
         let mut settings = settings::load_settings().expect("load settings from .env");
         settings.email_verification_app_url = "http://localhost:3000".to_string();
+        Self::build(settings).await
+    }
+
+    pub async fn new_with_github() -> Self {
+        init_tracing();
+        load_github_test_env();
+        let settings = settings::load_settings().expect("load settings");
+        assert!(
+            settings.github_app.is_some(),
+            "GITHUB_APP_ID must enable github_app in tests"
+        );
+        Self::build(settings).await
+    }
+
+    async fn build(settings: settings::Settings) -> Self {
         let db = sea_orm::Database::connect(&settings.database_url)
             .await
             .expect("connect database");
@@ -247,6 +331,13 @@ impl TestApp {
             setup_verification_email_storage(&pg_pool, &settings)
                 .await
                 .expect("verification email storage");
+        let github_webhook_storage = setup_github_webhook_storage(&pg_pool, &settings)
+            .await
+            .expect("github webhook storage");
+        let password_reset_email_storage =
+            setup_password_reset_email_storage(&pg_pool, &settings)
+                .await
+                .expect("password reset email storage");
         let storage = setup_storage().await.expect("storage backend");
         let http_client = create_http_client().expect("http client");
         let webauthn = build_webauthn(&settings).expect("webauthn");
@@ -288,6 +379,8 @@ impl TestApp {
             redis_client,
             smtp_client,
             verification_email_storage,
+            github_webhook_storage,
+            password_reset_email_storage,
             storage,
             drive_config: DriveConfig::from_env(),
             oauth_settings,
@@ -359,6 +452,10 @@ impl TestApp {
         self.mock.set_user(user);
     }
 
+    pub async fn insert_user_default(&self) -> TestUser {
+        insert_user(&self.state.db, false, false).await
+    }
+
     pub async fn insert_user(&self, is_admin: bool, is_suspended: bool) -> TestUser {
         insert_user(&self.state.db, is_admin, is_suspended).await
     }
@@ -382,6 +479,7 @@ impl TestApp {
             is_admin: Set(false),
             is_suspended: Set(false),
             sessions_revoked_at: Set(None),
+            totp_enabled: Set(false),
         }
         .insert(&self.state.db)
         .await
@@ -402,6 +500,44 @@ impl TestApp {
         insert_passkey_user(&self.state.db, email_verified, password).await
     }
 
+    pub async fn insert_tenant_project(&self, owner_id: Uuid) -> TestTenantProject {
+        let tenant_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let suffix = &tenant_id.to_string()[..8];
+
+        tenants::ActiveModel {
+            id: Set(tenant_id),
+            display_id: Set(format!("gh-{suffix}")),
+            name: Set(format!("GitHub Test {suffix}")),
+            description: Set(String::new()),
+            icon_url: Set(String::new()),
+            owner_id: Set(owner_id),
+            drive_quota_bytes: Set(None),
+            require_2fa: Set(false),
+        }
+        .insert(&self.state.db)
+        .await
+        .expect("insert tenant");
+
+        projects::ActiveModel {
+            id: Set(project_id),
+            name: Set("github-test".into()),
+            description: Set(String::new()),
+            tenant_id: Set(tenant_id),
+            icon_emoji: Set(None),
+            icon_url: Set(None),
+            key: Set("GHUB".into()),
+        }
+        .insert(&self.state.db)
+        .await
+        .expect("insert project");
+
+        TestTenantProject {
+            tenant_id,
+            project_id,
+        }
+    }
+
     pub fn reset_session_client(&mut self) {
         self.client = Client::builder()
             .cookie_store(true)
@@ -418,7 +554,7 @@ impl TestApp {
         &self.base_url
     }
 
-    pub async fn login_session(&mut self, email: &str, password: &str) {
+    pub async fn login_session(&mut self, email: &str, password: &str) -> StatusCode {
         let response = self
             .client
             .post(format!("{}/v1/auth/login", self.base_url))
@@ -426,12 +562,71 @@ impl TestApp {
             .send()
             .await
             .expect("login request");
+        response.status()
+    }
+
+    pub async fn login_session_no_content(&mut self, email: &str, password: &str) {
+        let status = self.login_session(email, password).await;
         assert_eq!(
-            response.status(),
+            status,
             StatusCode::NO_CONTENT,
-            "login failed: {}",
-            response.text().await.unwrap_or_default()
+            "login expected 204 NO_CONTENT"
         );
+    }
+
+    pub async fn enable_2fa(&mut self, user: &TestUser) -> Enabled2fa {
+        let status = self.login_session(&user.email, &user.password).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "full login before 2fa setup");
+
+        let setup = self
+            .post_json_with_session("/v1/auth/2fa/totp/setup", serde_json::json!({}))
+            .await;
+        assert_eq!(setup.status(), StatusCode::OK);
+        let setup_body: serde_json::Value = setup.json().await.expect("setup json");
+        let uri = setup_body["otpauth_uri"]
+            .as_str()
+            .expect("otpauth_uri");
+        let secret = secret_from_otpauth_uri(uri);
+        let totp = build_totp(
+            &secret,
+            &self.state.settings.totp_issuer,
+            &user.email,
+        )
+        .expect("build totp");
+        let code = totp.generate_current().expect("totp code");
+
+        let verify = self
+            .post_json_with_session(
+                "/v1/auth/2fa/totp/verify-setup",
+                serde_json::json!({ "code": code }),
+            )
+            .await;
+        assert_eq!(verify.status(), StatusCode::OK);
+        let body: serde_json::Value = verify.json().await.expect("verify-setup json");
+        let codes: Vec<String> = body["recovery_codes"]
+            .as_array()
+            .expect("recovery_codes array")
+            .iter()
+            .map(|v| v.as_str().expect("code str").to_string())
+            .collect();
+
+        self.reset_session_client();
+        Enabled2fa {
+            recovery_codes: codes,
+        }
+    }
+
+    pub async fn login_half_authed(&mut self, user: &TestUser) {
+        let response = self
+            .client
+            .post(format!("{}/v1/auth/login", self.base_url))
+            .json(&serde_json::json!({ "email": user.email, "password": user.password }))
+            .send()
+            .await
+            .expect("login");
+        assert_eq!(response.status(), StatusCode::OK, "2fa login returns JSON body");
+        let body: serde_json::Value = response.json().await.expect("login json");
+        assert_eq!(body["requires_2fa"].as_bool(), Some(true));
     }
 
     pub async fn oauth_start(&self, link: bool) -> Response {
@@ -503,9 +698,33 @@ impl TestApp {
         self.get(path).await
     }
 
+    pub async fn post_json(&self, path: &str, body: serde_json::Value) -> Response {
+        self.client
+            .post(format!("{}{path}", self.base_url))
+            .json(&body)
+            .send()
+            .await
+            .expect("post request")
+    }
+
     pub async fn post_json_with_session(&self, path: &str, body: serde_json::Value) -> Response {
         self.client
             .post(format!("{}{path}", self.base_url))
+            .json(&body)
+            .send()
+            .await
+            .expect("post request")
+    }
+
+    pub async fn post_json_with_bearer(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+        token: &str,
+    ) -> Response {
+        self.client
+            .post(format!("{}{path}", self.base_url))
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
             .json(&body)
             .send()
             .await
@@ -555,9 +774,22 @@ impl TestApp {
             .expect("bearer request")
     }
 
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
     pub async fn delete_with_session(&self, path: &str) -> Response {
         self.client
             .delete(format!("{}{path}", self.base_url))
+            .send()
+            .await
+            .expect("delete request")
+    }
+
+    pub async fn delete_json_with_session(&self, path: &str, body: serde_json::Value) -> Response {
+        self.client
+            .delete(format!("{}{path}", self.base_url))
+            .json(&body)
             .send()
             .await
             .expect("delete request")
@@ -577,9 +809,37 @@ impl TestApp {
             .filter(oauth_connections::Column::UserId.eq(user_id))
             .exec(&self.state.db)
             .await;
-        let _ = users::Entity::delete_by_id(user_id)
+
+        let integrations = github_integrations::Entity::find()
+            .filter(github_integrations::Column::CreatedBy.eq(user_id))
+            .all(&self.state.db)
+            .await
+            .expect("list github integrations for cleanup");
+        for row in integrations {
+            let active: github_integrations::ActiveModel = row.into();
+            active
+                .delete(&self.state.db)
+                .await
+                .expect("cleanup github integration");
+        }
+
+        let owned_tenants = tenants::Entity::find()
+            .filter(tenants::Column::OwnerId.eq(user_id))
+            .all(&self.state.db)
+            .await
+            .expect("list tenants for cleanup");
+        for row in owned_tenants {
+            let active: tenants::ActiveModel = row.into();
+            active
+                .delete(&self.state.db)
+                .await
+                .expect("cleanup tenant");
+        }
+
+        users::Entity::delete_by_id(user_id)
             .exec(&self.state.db)
-            .await;
+            .await
+            .expect("cleanup user");
     }
 }
 
@@ -595,7 +855,7 @@ pub async fn insert_user(
     is_suspended: bool,
 ) -> TestUser {
     let id = Uuid::new_v4();
-    let email = format!("admin-test-{id}@example.com");
+    let email = format!("integration-test-{id}@example.com");
     let password = "TestPassword123!".to_string();
     let password_hash = create_password_hash(&password).expect("password hash");
 
@@ -610,6 +870,7 @@ pub async fn insert_user(
         is_admin: Set(is_admin),
         is_suspended: Set(is_suspended),
         sessions_revoked_at: Set(None),
+        totp_enabled: Set(false),
     }
     .insert(db)
     .await
@@ -659,6 +920,20 @@ pub async fn insert_passkey_user(
     }
 }
 
+pub fn secret_from_otpauth_uri(uri: &str) -> String {
+    let parsed = Url::parse(uri).expect("otpauth uri");
+    parsed
+        .query_pairs()
+        .find(|(k, _)| k == "secret")
+        .map(|(_, v)| v.into_owned())
+        .expect("secret query param")
+}
+
+pub fn current_totp_code(secret: &str, issuer: &str, email: &str) -> String {
+    let totp = build_totp(secret, issuer, email).expect("totp");
+    totp.generate_current().expect("code")
+}
+
 pub async fn insert_personal_token_for_test(
     db: &DatabaseConnection,
     user_id: Uuid,
@@ -674,12 +949,11 @@ pub async fn insert_personal_token_for_test(
     let stmt = Statement::from_sql_and_values(
         db.get_database_backend(),
         r#"INSERT INTO personal_tokens
-            (id, name, token, token_hash, token_last_four, user_id, tenant_id, revoked, scopes)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, false, '["admin:tenant"]'::json)"#,
+            (id, name, token_hash, token_last_four, user_id, tenant_id, revoked, scopes)
+            VALUES ($1, $2, $3, $4, $5, $6, false, '["admin:tenant"]'::json)"#,
         vec![
             id.into(),
             "integration-test".into(),
-            token.clone().into(),
             token_hash.into(),
             last_four.into(),
             user_id.into(),
@@ -691,8 +965,6 @@ pub async fn insert_personal_token_for_test(
 }
 
 pub async fn insert_tenant(db: &DatabaseConnection, owner_id: Uuid) -> Uuid {
-    use backend::entities::tenants;
-
     let id = Uuid::new_v4();
     tenants::ActiveModel {
         id: Set(id),
@@ -702,6 +974,7 @@ pub async fn insert_tenant(db: &DatabaseConnection, owner_id: Uuid) -> Uuid {
         icon_url: Set(String::new()),
         owner_id: Set(owner_id),
         drive_quota_bytes: Set(None),
+        require_2fa: Set(false),
     }
     .insert(db)
     .await

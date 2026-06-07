@@ -871,6 +871,8 @@ async fn create_oauth_user_and_connection(
         email: Set(email.clone()),
         email_verified: Set(provider_info.email_verified.unwrap_or(false)),
         password_hash: Set(None),
+        is_admin: Set(false),
+        is_suspended: Set(false),
         ..Default::default()
     };
 

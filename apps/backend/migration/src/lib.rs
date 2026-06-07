@@ -25,6 +25,7 @@ mod m20260529100000_oauth_connections;
 mod m20260601160000_add_sessions_revoked_at_to_users;
 mod m20260603_add_unique_task_assignees;
 mod m20260529010000_create_passkeys;
+mod m20260529100000_auth_2fa;
 
 pub struct Migrator;
 
@@ -57,6 +58,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260601160000_add_sessions_revoked_at_to_users::Migration),
             Box::new(m20260603_add_unique_task_assignees::Migration),
             Box::new(m20260529010000_create_passkeys::Migration),
+            Box::new(m20260529100000_auth_2fa::Migration),
         ]
     }
 }

@@ -65,7 +65,12 @@ aws-sdk-s3 = "1"
 mime_guess = "2"
 time = { version = "0.3", features = ["serde"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form"] }
+jsonwebtoken = { version = "9", features = ["use_pem"] }
 aes-gcm = "0.10"
+hex = "0.4"
+totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
+qrcode = "0.14"
+image = { version = "0.25", default-features = false, features = ["png"] }
 webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation", "danger-credential-internals", "conditional-ui"] }
 
 [dev-dependencies]
@@ -75,4 +80,6 @@ reqwest = { version = "0.13", default-features = false, features = ["cookies", "
 tower = { version = "0.5.2", features = ["util"] }
 urlencoding = "2.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+wiremock = "0.6"
+serial_test = "3"
 webauthn-authenticator-rs = { version = "0.5.5", default-features = false, features = ["softtoken"] }

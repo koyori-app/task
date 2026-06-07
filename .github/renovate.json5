@@ -1,0 +1,72 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:base"],
+  "ignorePresets": [":prHourlyLimit2"],
+  // "baseBranches": ["develop", "master"],
+  "schedule": ["before 9am on monday"],
+  "timezone": "Asia/Tokyo",
+  // "dependencyDashboard": false,
+  "automerge": false,
+  "prHourlyLimit": 100,
+  "prConcurrentLimit": 100,
+  "branchConcurrentLimit": 100,
+  // "labels": ["type/Dependencies📦"],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions", "gitlabci", "gitlabci-include"],
+      "automerge": true,
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      // Apply the same cooldown to CI action updates before automerge.
+      "minimumReleaseAge": "1 day"
+    },
+    {
+      "matchManagers": ["cargo"],
+      "automerge": true,
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      // Keep Rust crate automerge on the same cooldown as npm/pnpm.
+      "minimumReleaseAge": "1 day"
+    },
+    {
+      "matchManagers": ["npm"],
+      // "addLabels": ["topic/JavaScript🧶"]
+      "automerge": true,
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      // Align Renovate automerge with pnpm v11's default supply-chain delay.
+      "minimumReleaseAge": "1 day"
+    },
+    {
+      "matchManagers": ["docker-compose", "dockerfile"],
+      // "addLabels": ["topic/Docker⚓"]
+      "automerge": true,
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      // Apply the same cooldown to container image updates before automerge.
+      "minimumReleaseAge": "1 day"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchPackagePatterns": ["scalar"],
+      "groupName": "scalar"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchPackagePatterns": ["regle"],
+      "groupName": "regle"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchPackagePatterns": ["vueuse"],
+      "groupName": "vueuse"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchPackagePatterns": ["vue-macros"],
+      "groupName": "vue-macros"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["vite", "vite-plus", "vitest"],
+      "groupName": "vite-plus"
+    }
+  ]
+}

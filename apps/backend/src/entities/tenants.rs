@@ -17,6 +17,8 @@ pub struct Model {
     #[sea_orm(nullable)]
     #[schema(nullable)]
     pub drive_quota_bytes: Option<i64>,
+    /// テナントメンバー全員に 2FA 設定を強制する
+    pub require_2fa: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

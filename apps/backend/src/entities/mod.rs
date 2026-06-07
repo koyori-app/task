@@ -1,4 +1,5 @@
 pub mod audit_logs;
+pub mod github_integrations;
 pub mod oauth_connections;
 pub mod system_settings;
 pub mod drive_files;
@@ -7,6 +8,8 @@ pub mod drive_folders;
 pub mod labels;
 pub mod milestones;
 pub mod passkeys;
+pub mod recovery_codes;
+pub mod totp_credentials;
 pub mod personal_tokens;
 pub mod project_members;
 pub mod project_statuses;
