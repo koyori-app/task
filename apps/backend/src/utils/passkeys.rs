@@ -240,8 +240,15 @@ async fn oauth_connection_count<C: ConnectionTrait>(
     db: &C,
     user_id: uuid::Uuid,
 ) -> Result<u64, anyhow::Error> {
-    // FOR UPDATE で行をロックし、並行する OAuth 切断との競合を防ぐ。
+    // FOR UPDATE で oauth_connections 行をロックし、このトランザクション中に
+    // 別リクエストが同じ行を削除するのを防ぐ。
     // COUNT(*) は FOR UPDATE と組み合わせられないため all() でロック取得後にカウントする。
+    //
+    // ⚠ TOCTOU 注意: このロックはパスキー削除トランザクションのコミット後に解放される。
+    // コミット後に OAuth disconnect が再開すると「パスキーのみ」状態のユーザーの
+    // OAuth 接続が削除され、認証手段がゼロになる可能性がある。
+    // 完全な保護には OAuth disconnect 側でも is_last_auth_method 相当のガードが必要。
+    // → oauth.rs の disconnect_connection に同等の判定を実装する際に合わせて対処すること。
     let rows = oauth_connections::Entity::find()
         .filter(oauth_connections::Column::UserId.eq(user_id))
         .lock_exclusive()
