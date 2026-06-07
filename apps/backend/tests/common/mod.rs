@@ -51,87 +51,6 @@ use uuid::Uuid;
 
 static SCHEMA_READY: OnceCell<()> = OnceCell::const_new();
 
-/// DB接続・Redis・PgPool等の高コストなリソースを保持する。テストバイナリ内で1回だけ初期化される。
-struct SharedInfra {
-    /// すべての高コストフィールドを含むAppStateのテンプレート。
-    /// `oauth_settings.app_base_url` はプレースホルダーであり、TestApp生成時に上書きする。
-    state_template: AppState,
-}
-
-static SHARED_INFRA: OnceCell<Arc<SharedInfra>> = OnceCell::const_new();
-static SHARED_INFRA_GITHUB: OnceCell<Arc<SharedInfra>> = OnceCell::const_new();
-
-async fn build_shared_infra(settings: settings::Settings) -> Arc<SharedInfra> {
-    let db = sea_orm::Database::connect(&settings.database_url)
-        .await
-        .expect("connect database");
-    ensure_schema(&db).await;
-
-    let smtp_client = SmtpClient::new(
-        &settings.smtp_host,
-        settings.smtp_port,
-        &settings.smtp_username,
-        &settings.smtp_password,
-        &settings.smtp_from,
-    )
-    .expect("smtp client");
-    let redis_client = RedisConnection::new(&settings.redis_url);
-    redis_client.ping().await.expect("redis ping");
-
-    let pg_pool = setup_pool(&settings.database_url)
-        .await
-        .expect("pg pool");
-    let verification_email_storage =
-        setup_verification_email_storage(&pg_pool, &settings)
-            .await
-            .expect("verification email storage");
-    let github_webhook_storage = setup_github_webhook_storage(&pg_pool, &settings)
-        .await
-        .expect("github webhook storage");
-    let password_reset_email_storage =
-        setup_password_reset_email_storage(&pg_pool, &settings)
-            .await
-            .expect("password reset email storage");
-    let storage = setup_storage().await.expect("storage backend");
-    let http_client = create_http_client().expect("http client");
-    let webauthn = build_webauthn(&settings).expect("webauthn");
-
-    let mut encryption_key = [0u8; 32];
-    encryption_key.copy_from_slice(&TEST_OAUTH_ENCRYPTION_KEY.as_bytes()[..32]);
-
-    let oauth_settings = OAuthSettings {
-        app_base_url: String::new(),
-        encryption_key,
-        default_redirect_path: "/dashboard".to_string(),
-        github: None,
-        gitlab: None,
-        gitlab_selfhosted: Some(ProviderConfig {
-            client_id: TEST_OAUTH_CLIENT_ID.to_string(),
-            client_secret: TEST_OAUTH_CLIENT_SECRET.to_string(),
-        }),
-        google: None,
-        oidc: None,
-    };
-
-    let state_template = AppState {
-        settings,
-        db,
-        pg_pool,
-        redis_client,
-        smtp_client,
-        verification_email_storage,
-        github_webhook_storage,
-        password_reset_email_storage,
-        storage,
-        drive_config: DriveConfig::from_env(),
-        oauth_settings,
-        http_client,
-        webauthn,
-    };
-
-    Arc::new(SharedInfra { state_template })
-}
-
 fn init_tracing() {
     static TRACING: OnceLock<()> = OnceLock::new();
     TRACING.get_or_init(|| {
@@ -372,40 +291,58 @@ impl TestApp {
     pub async fn new() -> Self {
         init_tracing();
         load_dotenv();
-        let infra = SHARED_INFRA
-            .get_or_init(|| async {
-                let mut settings =
-                    settings::load_settings().expect("load settings from .env");
-                settings.email_verification_app_url = "http://localhost:3000".to_string();
-                build_shared_infra(settings).await
-            })
-            .await;
-        Self::from_shared(infra.clone()).await
+        let mut settings = settings::load_settings().expect("load settings from .env");
+        settings.email_verification_app_url = "http://localhost:3000".to_string();
+        Self::build(settings).await
     }
 
     pub async fn new_with_github() -> Self {
         init_tracing();
         load_github_test_env();
-        let infra = SHARED_INFRA_GITHUB
-            .get_or_init(|| async {
-                let settings = settings::load_settings().expect("load settings");
-                assert!(
-                    settings.github_app.is_some(),
-                    "GITHUB_APP_ID must enable github_app in tests"
-                );
-                build_shared_infra(settings).await
-            })
-            .await;
-        Self::from_shared(infra.clone()).await
+        let settings = settings::load_settings().expect("load settings");
+        assert!(
+            settings.github_app.is_some(),
+            "GITHUB_APP_ID must enable github_app in tests"
+        );
+        Self::build(settings).await
     }
 
-    /// 高コストなリソースは `infra` から clone（安価）し、安価な per-test リソースのみ生成する。
-    async fn from_shared(infra: Arc<SharedInfra>) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0")
+    async fn build(settings: settings::Settings) -> Self {
+        // Each #[tokio::test] owns a separate runtime. Keep runtime-bound
+        // connection pools scoped to the TestApp created on that runtime.
+        let db = sea_orm::Database::connect(&settings.database_url)
             .await
-            .expect("bind test listener");
-        let addr: SocketAddr = listener.local_addr().expect("local addr");
-        let base_url = format!("http://{addr}");
+            .expect("connect database");
+        ensure_schema(&db).await;
+
+        let smtp_client = SmtpClient::new(
+            &settings.smtp_host,
+            settings.smtp_port,
+            &settings.smtp_username,
+            &settings.smtp_password,
+            &settings.smtp_from,
+        )
+        .expect("smtp client");
+        let redis_client = RedisConnection::new(&settings.redis_url);
+        redis_client.ping().await.expect("redis ping");
+
+        let pg_pool = setup_pool(&settings.database_url)
+            .await
+            .expect("pg pool");
+        let verification_email_storage =
+            setup_verification_email_storage(&pg_pool, &settings)
+                .await
+                .expect("verification email storage");
+        let github_webhook_storage = setup_github_webhook_storage(&pg_pool, &settings)
+            .await
+            .expect("github webhook storage");
+        let password_reset_email_storage =
+            setup_password_reset_email_storage(&pg_pool, &settings)
+                .await
+                .expect("password reset email storage");
+        let storage = setup_storage().await.expect("storage backend");
+        let http_client = create_http_client().expect("http client");
+        let webauthn = build_webauthn(&settings).expect("webauthn");
 
         let mock = MockOAuthHandle::start(MockGitLabUser {
             id: 42_001,
@@ -414,9 +351,44 @@ impl TestApp {
         })
         .await;
 
-        // AppState の clone は安価（全フィールドが Arc または小さい値型）
-        let mut state = infra.state_template.clone();
-        state.oauth_settings.app_base_url = base_url.clone();
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test listener");
+        let addr: SocketAddr = listener.local_addr().expect("local addr");
+        let base_url = format!("http://{addr}");
+
+        let mut encryption_key = [0u8; 32];
+        encryption_key.copy_from_slice(&TEST_OAUTH_ENCRYPTION_KEY.as_bytes()[..32]);
+
+        let oauth_settings = OAuthSettings {
+            app_base_url: base_url.clone(),
+            encryption_key,
+            default_redirect_path: "/dashboard".to_string(),
+            github: None,
+            gitlab: None,
+            gitlab_selfhosted: Some(ProviderConfig {
+                client_id: TEST_OAUTH_CLIENT_ID.to_string(),
+                client_secret: TEST_OAUTH_CLIENT_SECRET.to_string(),
+            }),
+            google: None,
+            oidc: None,
+        };
+
+        let state = AppState {
+            settings,
+            db,
+            pg_pool,
+            redis_client,
+            smtp_client,
+            verification_email_storage,
+            github_webhook_storage,
+            password_reset_email_storage,
+            storage,
+            drive_config: DriveConfig::from_env(),
+            oauth_settings,
+            http_client,
+            webauthn,
+        };
 
         let session_store = SessionStore::<SessionRedisPool>::new(
             Some(state.redis_client.conn.clone().into()),
