@@ -16,6 +16,18 @@ pub async fn is_tenant_owner(
     Ok(tenant.owner_id == user_id)
 }
 
+pub async fn require_tenant_owner(
+    state: &AppState,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    if is_tenant_owner(state, tenant_id, user_id).await? {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
+}
+
 pub async fn require_member_or_owner(
     state: &AppState,
     tenant_id: Uuid,
