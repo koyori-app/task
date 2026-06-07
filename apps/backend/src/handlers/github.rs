@@ -349,19 +349,22 @@ pub async fn github_webhook(
             );
         }
 
-        for integration in integrations {
-            github_webhook::enqueue(
-                &state.github_webhook_storage,
-                GithubWebhookJob {
-                    integration_id: integration.id,
-                    project_id: integration.project_id,
-                    event: event.clone(),
-                    delivery_id: delivery_id.clone(),
-                    payload: payload.clone(),
-                },
-            )
-            .await
-            .map_err(AppError::Internal)?;
+        let jobs: Vec<GithubWebhookJob> = integrations
+            .into_iter()
+            .map(|integration| GithubWebhookJob {
+                integration_id: integration.id,
+                project_id: integration.project_id,
+                event: event.clone(),
+                delivery_id: delivery_id.clone(),
+                payload: payload.clone(),
+            })
+            .collect();
+
+        // TODO(#9b): Wave 1+ で delivery_id + integration_id ベースの重複排除を追加
+        for job in jobs {
+            github_webhook::enqueue(&state.github_webhook_storage, job)
+                .await
+                .map_err(AppError::Internal)?;
         }
     }
 
