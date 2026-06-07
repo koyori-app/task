@@ -14,20 +14,20 @@ icon: lucide:layout-list
 
 ## 機能一覧と仕様書リンク
 
-| # | 機能グループ | 仕様書 | 依存 |
-|---|------------|--------|------|
-| 1 | **コア**（CRUD・ステータス・担当者・ラベル・マイルストーン・依存関係） | [tasks/core](/features/tasks/core) | なし |
-| 2 | **作業時間追跡**（タイマー・手動ログ） | [tasks/time-tracking](/features/tasks/time-tracking) | 1 |
-| 3 | **スプリント**（イテレーション・バーンダウン） | [tasks/sprints](/features/tasks/sprints) | 1 |
-| 4 | **コメント・アクティビティ**（スレッド・変更履歴・@メンション） | [tasks/collaboration](/features/tasks/collaboration) | 1 |
-| 5 | **通知・ウォッチャー**（in-app・メール・購読） | [tasks/notifications](/features/tasks/notifications) | 1, 4 |
-| 6 | **カスタムフィールド**（プロジェクト固有属性） | [tasks/custom-fields](/features/tasks/custom-fields) | 1 |
-| 7 | **検索・バルク・ビュー・添付**（全文検索・一括更新・保存フィルター・Drive連携） | [tasks/extensions](/features/tasks/extensions) | 1, (Drive) |
-| 8 | **自動化**（トリガー→アクションエンジン） | [tasks/automation](/features/tasks/automation) | 1, 4, 5 |
-| 9a | **GitHub App 基盤**（インストール・認証情報管理・Webhook 受信インフラ） | [tasks/github-app](/features/tasks/github-app) | なし（PR 1 と並行可） |
-| 9b | **GitHub↔タスク連携**（PR・コミット・自動クローズ） | [tasks/github-tasks](/features/tasks/github-tasks) | 1, 8, 9a |
-| 10 | **Webhook**（外部向けイベント送信） | [tasks/webhooks](/features/tasks/webhooks) | 1 |
-| — | **フロントエンド** | 各仕様書末尾の「Phase B」節 | 1〜10 すべて完了後 |
+| # | 機能グループ | 仕様書 | 依存 | 状態 |
+|---|------------|--------|------|------|
+| 1 | **コア**（CRUD・ステータス・担当者・ラベル・マイルストーン・依存関係） | [tasks/core](/features/tasks/core) | なし | ✅ 完了 ([#40](https://github.com/TeamBlackCrystal/task/pull/40)) |
+| 2 | **作業時間追跡**（タイマー・手動ログ） | [tasks/time-tracking](/features/tasks/time-tracking) | 1 | 未着手 |
+| 3 | **スプリント**（イテレーション・バーンダウン） | [tasks/sprints](/features/tasks/sprints) | 1 | 未着手 |
+| 4 | **コメント・アクティビティ**（スレッド・変更履歴・@メンション） | [tasks/collaboration](/features/tasks/collaboration) | 1 | 未着手 |
+| 5 | **通知・ウォッチャー**（in-app・メール・購読） | [tasks/notifications](/features/tasks/notifications) | 1, 4 | 未着手 |
+| 6 | **カスタムフィールド**（プロジェクト固有属性） | [tasks/custom-fields](/features/tasks/custom-fields) | 1 | 未着手 |
+| 7 | **検索・バルク・ビュー・添付**（全文検索・一括更新・保存フィルター・Drive連携） | [tasks/extensions](/features/tasks/extensions) | 1, (Drive) | 未着手 |
+| 8 | **自動化**（トリガー→アクションエンジン） | [tasks/automation](/features/tasks/automation) | 1, 4, 5 | 未着手 |
+| 9a | **GitHub App 基盤**（インストール・認証情報管理・Webhook 受信インフラ） | [tasks/github-app](/features/tasks/github-app) | なし（PR 1 と並行可） | ✅ 完了 ([#44](https://github.com/TeamBlackCrystal/task/pull/44)) |
+| 9b | **GitHub↔タスク連携**（PR・コミット・自動クローズ） | [tasks/github-tasks](/features/tasks/github-tasks) | 1, 8, 9a | 未着手 |
+| 10 | **Webhook**（外部向けイベント送信） | [tasks/webhooks](/features/tasks/webhooks) | 1 | 未着手 |
+| — | **フロントエンド** | 各仕様書末尾の「Phase B」節 | 1〜10 すべて完了後 | 未着手 |
 
 ---
 
