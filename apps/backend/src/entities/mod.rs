@@ -22,6 +22,8 @@ pub mod task_assignees;
 pub mod task_comments;
 pub mod task_labels;
 pub mod task_relations;
+pub mod task_timers;
 pub mod tasks;
+pub mod time_logs;
 pub mod tenants;
 pub mod users;
