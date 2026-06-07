@@ -6,8 +6,8 @@ use axum::{
 use axum_valid::Valid;
 use chrono::{NaiveDate, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
-    QueryOrder, prelude::Uuid,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult,
+    QueryFilter, QueryOrder, Statement, prelude::Uuid,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -19,7 +19,13 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
+use crate::utils::db::with_transaction;
 use crate::AppState;
+
+#[derive(Debug, FromQueryResult)]
+struct DeletedTimerRow {
+    started_at: chrono::DateTime<Utc>,
+}
 
 #[derive(Validate, Deserialize, ToSchema)]
 pub struct CreateTimeLogRequest {
@@ -400,28 +406,43 @@ pub async fn stop_timer(
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
-    let timer = task_timers::Entity::find()
-        .filter(task_timers::Column::TaskId.eq(task.id))
-        .filter(task_timers::Column::UserId.eq(auth.user_id))
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    let logged_minutes = elapsed_minutes_from_start(timer.started_at);
-    let logged_at = Utc::now().date_naive();
-    let log = time_logs::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        task_id: Set(task.id),
-        user_id: Set(auth.user_id),
-        logged_minutes: Set(logged_minutes),
-        logged_at: Set(logged_at),
-        note: Set(None),
-        created_at: Set(Utc::now()),
-    }
-    .insert(&state.db)
+    let task_id = task.id;
+    let user_id = auth.user_id;
+
+    let log = with_transaction::<time_logs::Model, AppError, _>(&state.db, |txn| {
+        Box::pin(async move {
+            let deleted = DeletedTimerRow::find_by_statement(Statement::from_sql_and_values(
+                txn.get_database_backend(),
+                "DELETE FROM task_timers \
+                 WHERE task_id = $1 AND user_id = $2 \
+                 RETURNING started_at",
+                vec![task_id.into(), user_id.into()],
+            ))
+            .one(txn)
+            .await?;
+
+            let timer = match deleted {
+                Some(row) => row,
+                None => return Err(AppError::Conflict),
+            };
+            let logged_minutes = elapsed_minutes_from_start(timer.started_at);
+            let logged_at = Utc::now().date_naive();
+            let log = time_logs::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                task_id: Set(task_id),
+                user_id: Set(user_id),
+                logged_minutes: Set(logged_minutes),
+                logged_at: Set(logged_at),
+                note: Set(None),
+                created_at: Set(Utc::now()),
+            }
+            .insert(txn)
+            .await?;
+            Ok(log)
+        })
+    })
     .await?;
-    task_timers::Entity::delete_by_id((task.id, auth.user_id))
-        .exec(&state.db)
-        .await?;
+
     Ok(Json(log))
 }
 
