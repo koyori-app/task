@@ -248,4 +248,25 @@ async fn github_http_integration_suite() {
 
         app.cleanup_user(user.id).await;
     }
+
+    // 7. ACL — テナント非オーナーは install / integration 操作不可 → 403
+    {
+        let owner = app.insert_user(false, false).await;
+        let tp = app.insert_tenant_project(owner.id).await;
+        let member = app.insert_user(false, false).await;
+        app.login_session(&member.email, &member.password).await;
+
+        let install = app.get_with_session(&install_path(&tp)).await;
+        assert_eq!(install.status(), StatusCode::FORBIDDEN);
+
+        let get = app.get_with_session(&integration_path(&tp)).await;
+        assert_eq!(get.status(), StatusCode::FORBIDDEN);
+
+        let delete = app.delete_with_session(&integration_path(&tp)).await;
+        assert_eq!(delete.status(), StatusCode::FORBIDDEN);
+
+        app.cleanup_user(member.id).await;
+        app.reset_session_client();
+        app.cleanup_user(owner.id).await;
+    }
 }
