@@ -33,7 +33,7 @@ defineProps<{
     <SidebarMenu>
       <template v-for="item in items" :key="item.title">
         <SidebarMenuItem v-if="!item.items?.length">
-          <SidebarMenuButton as-child :tooltip="item.title">
+          <SidebarMenuButton as-child :tooltip="item.title" :is-active="item.isActive">
             <a :href="item.url">
               <component :is="item.icon" v-if="item.icon" />
               <span>{{ item.title }}</span>
