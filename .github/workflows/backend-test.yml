@@ -78,11 +78,11 @@ jobs:
         with:
           workspaces: apps/backend -> target
 
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@56545b37b57562edd73171cb6c62cc509db4c34e # v2.81.7
-        with:
-          tool: cargo-nextest
+      # - name: Install cargo-nextest
+      #   uses: taiki-e/install-action@56545b37b57562edd73171cb6c62cc509db4c34e # v2.81.7
+      #   with:
+      #     tool: cargo-nextest
 
       - name: Run tests
-        run: cargo nextest run
+        run: cargo test
         working-directory: apps/backend
