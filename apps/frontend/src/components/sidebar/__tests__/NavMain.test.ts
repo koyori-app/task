@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { describe, it, expect, afterEach } from 'vitest';
+import { mount, enableAutoUnmount } from '@vue/test-utils';
+
+enableAutoUnmount(afterEach);
 import NavMain from '../NavMain.vue';
 import SidebarProvider from '../../ui/sidebar/SidebarProvider.vue';
 
