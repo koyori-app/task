@@ -308,6 +308,8 @@ impl TestApp {
     }
 
     async fn build(settings: settings::Settings) -> Self {
+        // Each #[tokio::test] owns a separate runtime. Keep runtime-bound
+        // connection pools scoped to the TestApp created on that runtime.
         let db = sea_orm::Database::connect(&settings.database_url)
             .await
             .expect("connect database");
