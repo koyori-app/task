@@ -33,7 +33,7 @@
     "dotenv": "17.4.2",
     "elysia": "1.4.28",
     "hono": "4.12.23",
-    "reka-ui": "2.9.7",
+    "reka-ui": "2.9.9",
     "tailwind-merge": "3.6.0",
     "vike": "0.4.259",
     "vike-vue": "0.9.11",
