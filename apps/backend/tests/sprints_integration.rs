@@ -2,7 +2,7 @@ mod common;
 
 use axum::http::StatusCode;
 use common::{TestApp, TestTenantProject, TestUser};
-use sea_orm::EntityTrait;
+use sea_orm::{ConnectionTrait, EntityTrait, Statement};
 use uuid::Uuid;
 
 fn sprints_base(tp: &TestTenantProject) -> String {
@@ -146,6 +146,20 @@ async fn sprints_integration_suite() {
     let assigned: Vec<serde_json::Value> = assign.json().await.expect("assigned json");
     assert_eq!(assigned.len(), 2);
 
+    app.state
+        .db
+        .execute_raw(Statement::from_sql_and_values(
+            app.state.db.get_database_backend(),
+            "UPDATE tasks SET created_at = $1::timestamptz, updated_at = $1::timestamptz WHERE id IN ($2, $3)",
+            [
+                "2026-06-01T09:00:00Z".into(),
+                task1.into(),
+                task2.into(),
+            ],
+        ))
+        .await
+        .expect("set deterministic task timestamps");
+
     let detail = app
         .get_with_session(&format!("{}/{}", sprints_base(&tp), sprint_a))
         .await;
@@ -175,15 +189,40 @@ async fn sprints_integration_suite() {
         .expect("put task");
     assert_eq!(update.status(), StatusCode::OK);
 
+    app.state
+        .db
+        .execute_raw(Statement::from_sql_and_values(
+            app.state.db.get_database_backend(),
+            "UPDATE tasks SET updated_at = $1::timestamptz WHERE id = $2",
+            ["2026-06-02T12:00:00Z".into(), task1.into()],
+        ))
+        .await
+        .expect("set deterministic completion timestamp");
+
     let detail2 = app
         .get_with_session(&format!("{}/{}", sprints_base(&tp), sprint_a))
         .await;
     let detail2_body: serde_json::Value = detail2.json().await.expect("detail2 json");
     assert_eq!(detail2_body["task_counts"]["done"].as_u64(), Some(1));
     assert_eq!(detail2_body["task_counts"]["in_progress"].as_u64(), Some(1));
+    let burndown2 = detail2_body["burndown"]
+        .as_array()
+        .expect("burndown array");
+    let june_1 = &burndown2[0];
+    let june_2 = &burndown2[1];
+    assert_eq!(june_1["actual_remaining"].as_u64(), Some(2));
+    assert_eq!(june_2["actual_remaining"].as_u64(), Some(1));
 
     // complete sprint moves incomplete to backlog by default
     let complete_path = format!("{}/{}/complete", sprints_base(&tp), sprint_a);
+    let self_target = app
+        .post_json_with_session(
+            &complete_path,
+            serde_json::json!({ "move_incomplete_to_sprint_id": sprint_a }),
+        )
+        .await;
+    assert_eq!(self_target.status(), StatusCode::BAD_REQUEST);
+
     let complete = app
         .post_json_with_session(&complete_path, serde_json::json!({}))
         .await;

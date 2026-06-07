@@ -30,6 +30,16 @@ impl MigrationTrait for Migration {
             ))
             .await?;
 
+        let project_idx =
+            "CREATE INDEX IF NOT EXISTS idx_sprints_project ON sprints(project_id)";
+        manager
+            .get_connection()
+            .execute(Statement::from_string(
+                manager.get_database_backend(),
+                project_idx.to_owned(),
+            ))
+            .await?;
+
         let add_sprint_id = r#"
             ALTER TABLE tasks ADD COLUMN IF NOT EXISTS sprint_id UUID REFERENCES sprints(id) ON DELETE SET NULL
         "#;
@@ -61,6 +71,15 @@ impl MigrationTrait for Migration {
             .execute(Statement::from_string(
                 manager.get_database_backend(),
                 drop_idx.to_owned(),
+            ))
+            .await?;
+
+        let drop_project_idx = "DROP INDEX IF EXISTS idx_sprints_project";
+        manager
+            .get_connection()
+            .execute(Statement::from_string(
+                manager.get_database_backend(),
+                drop_project_idx.to_owned(),
             ))
             .await?;
 

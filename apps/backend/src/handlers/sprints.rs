@@ -192,7 +192,7 @@ fn build_burndown(
                     return false;
                 }
                 if done_statuses.contains(&t.status_id) {
-                    t.updated_at <= eod
+                    t.updated_at > eod
                 } else {
                     true
                 }
@@ -560,6 +560,10 @@ pub async fn complete_sprint(
     }
 
     if let Some(target_id) = payload.move_incomplete_to_sprint_id {
+        if target_id == id {
+            return Err(AppError::BadRequest);
+        }
+
         let target = load_sprint(&state, project_id, target_id).await?;
         if target.status == SprintStatus::Completed {
             return Err(AppError::BadRequest);
