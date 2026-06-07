@@ -12,7 +12,6 @@ use utoipa::ToSchema;
 use validator::Validate;
 
 use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
-use crate::utils::db::is_postgres_unique_violation;
 use crate::entities::{
     labels, milestones, project_statuses, project_task_counters, task_assignees, task_labels,
     task_relations, tasks,
@@ -61,33 +60,27 @@ async fn resolve_task(
 // ─── Seq ID counter ──────────────────────────────────────────────────────
 
 async fn next_seq_id(db: &sea_orm::DatabaseTransaction, project_id: Uuid) -> Result<i32, AppError> {
-    loop {
-        let existing = project_task_counters::Entity::find_by_id(project_id)
-            .lock(LockType::Update)
-            .one(db)
-            .await?;
-        match existing {
-            Some(c) => {
-                let new_seq = c.last_seq + 1;
-                let mut active: project_task_counters::ActiveModel = c.into();
-                active.last_seq = Set(new_seq);
-                return Ok(active.update(db).await?.last_seq);
-            }
-            None => {
-                let insert_result = project_task_counters::ActiveModel {
-                    project_id: Set(project_id),
-                    last_seq: Set(1),
-                }
-                .insert(db)
-                .await;
-                match insert_result {
-                    Ok(c) => return Ok(c.last_seq),
-                    Err(e) if is_postgres_unique_violation(&e) => continue,
-                    Err(e) => return Err(e.into()),
-                }
-            }
+    let existing = project_task_counters::Entity::find_by_id(project_id)
+        .lock(LockType::Update)
+        .one(db)
+        .await?;
+    Ok(match existing {
+        Some(c) => {
+            let new_seq = c.last_seq + 1;
+            let mut active: project_task_counters::ActiveModel = c.into();
+            active.last_seq = Set(new_seq);
+            active.update(db).await?.last_seq
         }
-    }
+        None => {
+            project_task_counters::ActiveModel {
+                project_id: Set(project_id),
+                last_seq: Set(1),
+            }
+            .insert(db)
+            .await?
+            .last_seq
+        }
+    })
 }
 
 // ─── BFS cycle detection ─────────────────────────────────────────────────

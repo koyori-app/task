@@ -5,8 +5,7 @@ use sea_orm::prelude::Uuid;
 use serde::Deserialize;
 use validator::Validate;
 
-use crate::auth_helpers::{is_tenant_owner, require_member_or_owner, require_tenant_owner};
-use crate::entities::{drive_folders, project_members, project_task_counters, projects, scopes::Scope};
+use crate::entities::{drive_folders, project_members, projects, scopes::Scope, tenants};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -66,6 +65,52 @@ pub struct UpdateProjectRequest {
     pub clear_icon_emoji: bool,
     #[serde(default)]
     pub clear_icon_url: bool,
+}
+
+async fn is_tenant_owner(
+    state: &AppState,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, AppError> {
+    let tenant = tenants::Entity::find_by_id(tenant_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(tenant.owner_id == user_id)
+}
+
+async fn require_tenant_owner(
+    state: &AppState,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    if is_tenant_owner(state, tenant_id, user_id).await? {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
+}
+
+async fn require_project_readable(
+    state: &AppState,
+    tenant_id: Uuid,
+    project_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    if is_tenant_owner(state, tenant_id, user_id).await? {
+        return Ok(());
+    }
+    let is_member = project_members::Entity::find()
+        .filter(project_members::Column::ProjectId.eq(project_id))
+        .filter(project_members::Column::UserId.eq(user_id))
+        .one(&state.db)
+        .await?
+        .is_some();
+    if is_member {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
 }
 
 #[axum::debug_handler]
@@ -139,14 +184,6 @@ pub async fn create_project(
         created_at: Set(chrono::Utc::now().into()),
     };
     drive_folder.insert(&txn).await?;
-
-    project_task_counters::ActiveModel {
-        project_id: Set(model.id),
-        last_seq: Set(0),
-    }
-    .insert(&txn)
-    .await?;
-
     txn.commit().await?;
 
     Ok((StatusCode::CREATED, Json(model)))
@@ -221,7 +258,7 @@ pub async fn get_project(
 ) -> Result<Json<projects::Model>, AppError> {
     auth.require_scope(Scope::ReadProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(id)).await?;
-    require_member_or_owner(&state, tenant_id, id, auth.user_id).await?;
+    require_project_readable(&state, tenant_id, id, auth.user_id).await?;
     let project = projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))
         .one(&state.db)
