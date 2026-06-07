@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue"
 import { navigate } from "vike/client/router"
-import { createApi } from "@/lib/api"
-import { ResponseError } from "@/generated/api/runtime"
+import { apiClient } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -19,15 +18,13 @@ const password = ref("")
 const errorMessage = ref("")
 const isSubmitting = ref(false)
 
-function mapRegisterError(err: unknown): string {
-  if (err instanceof ResponseError) {
-    const status = err.response.status
-    if (status === 422 || status === 400) {
-      return "入力内容に誤りがあります"
-    }
-    if (status === 409) {
-      return "このメールアドレスは既に使用されています"
-    }
+function mapRegisterError(response: Response): string {
+  const status = response.status
+  if (status === 422 || status === 400) {
+    return "入力内容に誤りがあります"
+  }
+  if (status === 409) {
+    return "このメールアドレスは既に使用されています"
   }
   return "エラーが発生しました。しばらくしてからお試しください"
 }
@@ -37,16 +34,20 @@ async function onSubmit(event: SubmitEvent) {
   errorMessage.value = ""
   isSubmitting.value = true
   try {
-    await createApi().register({
-      registerRequest: {
+    const { error, response } = await apiClient.POST("/v1/auth/register", {
+      body: {
         username: username.value,
         email: email.value,
         password: password.value,
       },
     })
+    if (error) {
+      errorMessage.value = mapRegisterError(response)
+      return
+    }
     await navigate("/signin")
-  } catch (err) {
-    errorMessage.value = mapRegisterError(err)
+  } catch {
+    errorMessage.value = "エラーが発生しました。しばらくしてからお試しください"
   } finally {
     isSubmitting.value = false
   }

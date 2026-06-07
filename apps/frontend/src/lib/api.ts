@@ -1,9 +1,6 @@
-import { Configuration, DefaultApi } from '@/generated/api';
+import createClient from 'openapi-fetch';
+import type { paths } from '@/generated/api';
 
-export function createApi(): DefaultApi {
-  return new DefaultApi(
-    new Configuration({
-      basePath: import.meta.env.VITE_API_BASE ?? '/api',
-    }),
-  );
-}
+export const apiClient = createClient<paths>({
+  baseUrl: import.meta.env.VITE_API_BASE ?? '/api',
+});

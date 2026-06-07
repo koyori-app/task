@@ -1,6 +1,5 @@
-import { createApi } from '@/lib/api';
-import type { DefaultApi } from '@/generated/api';
+import { apiClient } from '@/lib/api';
 
-export function useDefaultApi(): DefaultApi {
-  return createApi();
+export function useDefaultApi() {
+  return apiClient;
 }
