@@ -1,4 +1,5 @@
 pub mod audit_logs;
+pub mod github_integrations;
 pub mod oauth_connections;
 pub mod system_settings;
 pub mod drive_files;
