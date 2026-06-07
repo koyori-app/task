@@ -94,6 +94,20 @@ export default defineConfig({
     maxWorkers: 4,
     projects: [
       {
+        plugins: [vue()],
+        resolve: {
+          alias: {
+            '@': path.resolve(dirname, 'src'),
+          },
+        },
+        test: {
+          name: 'unit',
+          environment: 'happy-dom',
+          include: ['src/**/*.{test,spec}.{ts,tsx}'],
+          globals: true,
+        },
+      },
+      {
         extends: true,
         plugins: [
           // The plugin will run tests for the stories defined in your Storybook config
