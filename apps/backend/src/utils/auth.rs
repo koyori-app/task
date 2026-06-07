@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use argon2::{
     Argon2,
     password_hash::{
@@ -272,13 +274,32 @@ impl IntoResponse for AuthError {
     }
 }
 
+const ARGON2_PRODUCTION_COSTS: (u32, u32, u32) = (131072, 3, 2);
+const ARGON2_TEST_COSTS: (u32, u32, u32) = (8192, 1, 1);
+
+fn argon2_test_mode() -> bool {
+    // Never permit reduced password hashing costs in release builds.
+    cfg!(debug_assertions)
+        && std::env::var("ARGON2_TEST_MODE")
+            .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false)
+}
+
+fn argon2_costs() -> (u32, u32, u32) {
+    if argon2_test_mode() {
+        ARGON2_TEST_COSTS
+    } else {
+        ARGON2_PRODUCTION_COSTS
+    }
+}
+
 pub fn argon2_params() -> Result<Argon2<'static>, AuthError> {
-    // Argon2idパラメータ
+    let (memory_cost, time_cost, parallelism) = argon2_costs();
     let params = argon2::Params::new(
-        131072, // memory cost
-        3,      // time cost
-        2,      // parallelism
-        None,   // output length
+        memory_cost,
+        time_cost,
+        parallelism,
+        None, // output length
     )
     .map_err(|e| AuthError::Internal(anyhow::anyhow!("argon2 params: {e}")))?;
 
@@ -314,8 +335,24 @@ pub fn create_password_hash(password: &str) -> Result<String, AuthError> {
 
 /// 存在しないユーザー向けのダミーハッシュ。ログイン時に常に Argon2 検証を走らせ、
 /// メールアドレスの有無による応答時間差（タイミング攻撃）を抑える。
-pub const DUMMY_PASSWORD_HASH: &str =
+const PRODUCTION_DUMMY_PASSWORD_HASH: &str =
     "$argon2id$v=19$m=131072,t=3,p=2$0UUArODQDWduujvFlpWtKg$GDp6SlCwV4PIue/EfTr+nJVjlFnycyxtCfnJMnjlIjU";
+
+pub fn dummy_password_hash() -> Result<&'static str, AuthError> {
+    if !argon2_test_mode() {
+        return Ok(PRODUCTION_DUMMY_PASSWORD_HASH);
+    }
+
+    static TEST_DUMMY_PASSWORD_HASH: OnceLock<Result<String, String>> = OnceLock::new();
+    match TEST_DUMMY_PASSWORD_HASH.get_or_init(|| {
+        create_password_hash("test-dummy-password").map_err(|error| error.to_string())
+    }) {
+        Ok(hash) => Ok(hash.as_str()),
+        Err(error) => Err(AuthError::Internal(anyhow::anyhow!(
+            "test dummy password hash: {error}"
+        ))),
+    }
+}
 
 pub fn verify_password(password: &str, password_hash: &str) -> Result<bool, AuthError> {
     let parsed_hash = PasswordHash::new(password_hash)
@@ -393,7 +430,11 @@ mod tests {
 
     #[test]
     fn dummy_password_hash_is_valid_argon2() {
-        assert!(PasswordHash::new(DUMMY_PASSWORD_HASH).is_ok());
-        assert!(!verify_password("wrong-password", DUMMY_PASSWORD_HASH).unwrap());
+        let hash = dummy_password_hash().unwrap();
+        assert!(PasswordHash::new(hash).is_ok());
+        assert!(!verify_password("wrong-password", hash).unwrap());
+        if argon2_test_mode() {
+            assert!(hash.contains("m=8192,t=1,p=1"));
+        }
     }
 }

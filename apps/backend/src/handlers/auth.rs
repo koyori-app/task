@@ -16,7 +16,7 @@ use crate::openapi::{
     UnauthorizedErrors, VerifyEmailErrors,
 };
 use crate::utils::auth::{
-    AuthError, DUMMY_PASSWORD_HASH, create_password_hash, generate_email_verification_token,
+    AuthError, create_password_hash, dummy_password_hash, generate_email_verification_token,
     verify_password,
 };
 use crate::jobs::VerificationEmailJob;
@@ -62,10 +62,10 @@ pub async fn login(
         .one(&state.db)
         .await?;
 
-    let password_hash = user
-        .as_ref()
-        .and_then(|u| u.password_hash.as_deref())
-        .unwrap_or(DUMMY_PASSWORD_HASH);
+    let password_hash = match user.as_ref().and_then(|u| u.password_hash.as_deref()) {
+        Some(hash) => hash,
+        None => dummy_password_hash()?,
+    };
 
     if !verify_password(&password, password_hash)? {
         return Err(AuthError::InvalidCredentials);
@@ -335,4 +335,3 @@ pub async fn logout(
     session.remove("half_authed");
     Ok(StatusCode::NO_CONTENT)
 }
-
