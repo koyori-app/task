@@ -22,5 +22,6 @@ pub mod password_reset_log;
 pub mod redis;
 pub mod smtp;
 pub mod system_settings;
+pub mod task_activities;
 pub mod totp;
 pub mod verification_email_delivery;
