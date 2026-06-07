@@ -1,6 +1,9 @@
 pub mod auth;
 pub mod bootstrap_admin;
 pub mod http;
+pub mod passkey_challenges;
+pub mod passkeys;
+pub mod webauthn;
 pub mod validation;
 pub mod github_api;
 pub mod github_oauth_state;

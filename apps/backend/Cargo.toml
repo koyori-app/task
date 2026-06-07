@@ -71,6 +71,7 @@ hex = "0.4"
 totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
 qrcode = "0.14"
 image = { version = "0.25", default-features = false, features = ["png"] }
+webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation", "danger-credential-internals", "conditional-ui"] }
 
 [dev-dependencies]
 cookie = "0.18"
@@ -81,3 +82,4 @@ urlencoding = "2.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 wiremock = "0.6"
 serial_test = "3"
+webauthn-authenticator-rs = { version = "0.5.5", default-features = false, features = ["softtoken"] }

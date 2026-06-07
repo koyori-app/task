@@ -19,6 +19,7 @@ use tracing::{debug, warn};
 use validator::Validate;
 
 use crate::entities::{oauth_connections, users};
+use crate::utils::passkeys::count_user_passkeys;
 use crate::error::{ServerError, internal_server_error};
 use crate::extractors::{AuthUser, CurrentUser, OptionalAuthUser};
 use crate::openapi::OAuthErrors;
@@ -573,7 +574,10 @@ pub async fn disconnect_connection(
                 .count(txn)
                 .await?;
 
-            if connection_count <= 1 && user.password_hash.is_none() {
+            let passkey_count = count_user_passkeys(txn, auth.user_id)
+                .await
+                .map_err(|e| OAuthError::Internal(e.into()))?;
+            if connection_count <= 1 && user.password_hash.is_none() && passkey_count == 0 {
                 return Err(OAuthError::LastAuthMethod);
             }
 

@@ -16,7 +16,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use chrono::Utc;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -52,6 +52,20 @@ pub enum AuthError {
     /// 認証メールジョブのキュー投入に失敗した（未認証ユーザーは残し再送 API で回復する）。
     #[error("verification email enqueue failed")]
     VerificationEmailEnqueueFailed(#[source] anyhow::Error),
+    #[error("bad request")]
+    BadRequest,
+    #[error("passkey not found")]
+    PasskeyNotFound,
+    #[error("passkey limit exceeded")]
+    PasskeyLimitExceeded,
+    #[error("cannot remove last authentication method")]
+    LastAuthMethod,
+    #[error("possible credential clone detected")]
+    PossibleCredentialClone,
+    #[error("passkey registration already in progress")]
+    RegistrationInProgress,
+    #[error("webauthn error")]
+    WebAuthn(#[from] webauthn_rs::prelude::WebauthnError),
     #[error("invalid 2fa code")]
     InvalidTwoFactorCode,
     #[error("2fa already enabled")]
@@ -157,6 +171,58 @@ impl IntoResponse for AuthError {
                     StatusCode::SERVICE_UNAVAILABLE,
                     Json(ServerError {
                         message: "verification-email-enqueue-failed".into(),
+                    }),
+                )
+                    .into_response()
+            }
+            AuthError::BadRequest => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError {
+                    message: "bad-request".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::PasskeyNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(ServerError {
+                    message: "passkey-not-found".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::PasskeyLimitExceeded => (
+                StatusCode::CONFLICT,
+                Json(ServerError {
+                    message: "passkey-limit-exceeded".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::LastAuthMethod => (
+                StatusCode::FORBIDDEN,
+                Json(ServerError {
+                    message: "last-auth-method".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::PossibleCredentialClone => (
+                StatusCode::UNAUTHORIZED,
+                Json(ServerError {
+                    message: "possible-credential-clone".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::RegistrationInProgress => (
+                StatusCode::CONFLICT,
+                Json(ServerError {
+                    message: "passkey-registration-in-progress".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::WebAuthn(e) => {
+                warn!("webauthn error: {e:?}");
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ServerError {
+                        message: "webauthn-error".into(),
                     }),
                 )
                     .into_response()

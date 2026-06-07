@@ -80,6 +80,8 @@ pub struct Settings {
     pub totp_issuer: String,
     /// 起動時に管理者昇格するユーザーのメールアドレス（管理者ゼロ時のみ有効）。
     pub bootstrap_admin_email: Option<String>,
+    /// WebAuthn RP ID（省略時は `email_verification_app_url` のホスト名）
+    pub webauthn_rp_id: Option<String>,
     /// GitHub App 連携。`GITHUB_APP_ID` 未設定時は `None`（他機能は起動可能）。
     #[serde(default, skip_deserializing)]
     pub github_app: Option<GithubAppSettings>,
@@ -246,6 +248,7 @@ mod tests {
             totp_encryption_key: "b".repeat(32),
             totp_issuer: "TaskApp".to_string(),
             bootstrap_admin_email: None,
+            webauthn_rp_id: None,
             github_app: Some(test_github_app_settings()),
         }
     }

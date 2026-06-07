@@ -5,6 +5,7 @@ pub mod admin_tenants;
 pub mod admin_users;
 pub mod oauth;
 pub mod auth;
+pub mod passkeys;
 pub mod auth_2fa;
 pub mod github;
 pub mod password_reset;
