@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue"
 import { navigate } from "vike/client/router"
-import { createApi } from "@/lib/api"
-import { ResponseError } from "@/generated/api/runtime"
+import { apiClient } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -18,15 +17,13 @@ const password = ref("")
 const errorMessage = ref("")
 const isSubmitting = ref(false)
 
-function loginErrorMessage(error: unknown): string {
-  if (error instanceof ResponseError) {
-    const status = error.response.status
-    if (status === 401) {
-      return "メールアドレスまたはパスワードが正しくありません"
-    }
-    if (status === 403) {
-      return "メールアドレスの確認が完了していません"
-    }
+function loginErrorMessage(response: Response): string {
+  const status = response.status
+  if (status === 401) {
+    return "メールアドレスまたはパスワードが正しくありません"
+  }
+  if (status === 403) {
+    return "メールアドレスの確認が完了していません"
   }
   return "エラーが発生しました。しばらくしてからお試しください"
 }
@@ -37,15 +34,19 @@ async function onSubmit(event: Event) {
   isSubmitting.value = true
 
   try {
-    await createApi().login({
-      loginRequest: {
+    const { error, response } = await apiClient.POST("/v1/auth/login", {
+      body: {
         email: email.value,
         password: password.value,
       },
     })
+    if (error) {
+      errorMessage.value = loginErrorMessage(response)
+      return
+    }
     await navigate("/")
-  } catch (error) {
-    errorMessage.value = loginErrorMessage(error)
+  } catch {
+    errorMessage.value = "エラーが発生しました。しばらくしてからお試しください"
   } finally {
     isSubmitting.value = false
   }

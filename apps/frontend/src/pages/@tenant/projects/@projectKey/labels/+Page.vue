@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useDefaultApi } from '@/composables/useDefaultApi';
-import { type CrateEntitiesLabelsModel, FetchError } from '@/generated/api';
+import type { components } from '@/generated/api';
 
-const labels = ref<CrateEntitiesLabelsModel[]>([]);
+type Label = components['schemas']['crate.entities.labels.Model'];
+
+const labels = ref<Label[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
 
@@ -13,14 +15,15 @@ onMounted(async () => {
     error.value = null;
 
     const api = useDefaultApi();
-    labels.value = await api.getLabels();
+    const { data, error: fetchError } = await api.GET('/v1/labels');
+    if (fetchError) {
+      error.value = 'Failed to fetch labels';
+    } else {
+      labels.value = data ?? [];
+    }
   } catch (err) {
     console.error('Failed to fetch labels:', err);
-    if (err instanceof FetchError && err.cause?.message) {
-      error.value = `${err.message} (${err.cause.message})`;
-    } else {
-      error.value = err instanceof Error ? err.message : 'Failed to fetch labels';
-    }
+    error.value = err instanceof Error ? err.message : 'Failed to fetch labels';
   } finally {
     loading.value = false;
   }
@@ -77,8 +80,8 @@ onMounted(async () => {
               <td class="py-3 px-4 text-gray-600">{{ label.description }}</td>
               <td class="py-3 px-4">
                 <a
-                  v-if="label.iconUrl"
-                  :href="label.iconUrl"
+                  v-if="label.icon_url"
+                  :href="label.icon_url"
                   target="_blank"
                   rel="noopener noreferrer"
                   class="text-blue-600 hover:underline text-xs"
