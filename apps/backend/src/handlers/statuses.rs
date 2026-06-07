@@ -293,15 +293,27 @@ pub async fn delete_status(
             return Err(AppError::BadRequest);
         }
         // Verify target status belongs to same project
-        project_statuses::Entity::find_by_id(migrate_to)
+        let target_status = project_statuses::Entity::find_by_id(migrate_to)
             .filter(project_statuses::Column::ProjectId.eq(project_id))
             .one(&state.db)
             .await?
             .ok_or(AppError::NotFound)?;
 
         let txn = state.db.begin().await?;
-        tasks::Entity::update_many()
-            .col_expr(tasks::Column::StatusId, Expr::value(migrate_to))
+        let mut update = tasks::Entity::update_many()
+            .col_expr(tasks::Column::StatusId, Expr::value(migrate_to));
+        update = if target_status.is_done_state {
+            update.col_expr(
+                tasks::Column::CompletedAt,
+                Expr::cust("COALESCE(completed_at, now())"),
+            )
+        } else {
+            update.col_expr(
+                tasks::Column::CompletedAt,
+                Expr::value(Option::<chrono::DateTime<chrono::Utc>>::None),
+            )
+        };
+        update
             .filter(tasks::Column::StatusId.eq(id))
             .filter(tasks::Column::DeletedAt.is_null())
             .exec(&txn)

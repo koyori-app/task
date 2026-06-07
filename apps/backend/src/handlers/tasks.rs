@@ -396,13 +396,12 @@ pub async fn create_task(
         }
     }
 
-    project_statuses::Entity::find_by_id(payload.status_id)
+    let txn = state.db.begin().await?;
+    let status = project_statuses::Entity::find_by_id(payload.status_id)
         .filter(project_statuses::Column::ProjectId.eq(project_id))
-        .one(&state.db)
+        .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
-
-    let txn = state.db.begin().await?;
 
     // parent_task_id / milestone_id が同一プロジェクトに属することを検証
     if let Some(pid) = payload.parent_task_id {
@@ -423,6 +422,7 @@ pub async fn create_task(
     if let Some(sid) = payload.sprint_id {
         let sprint = sprints::Entity::find_by_id(sid)
             .filter(sprints::Column::ProjectId.eq(project_id))
+            .lock(LockType::Update)
             .one(&txn)
             .await?
             .ok_or(AppError::NotFound)?;
@@ -452,6 +452,7 @@ pub async fn create_task(
         created_by: Set(auth.user_id),
         created_at: Set(chrono::Utc::now()),
         updated_at: Set(chrono::Utc::now()),
+        completed_at: Set(status.is_done_state.then(chrono::Utc::now)),
         deleted_at: Set(None),
     }
     .insert(&txn)
@@ -557,6 +558,14 @@ pub async fn update_task(
     let existing_soft = task.soft_deadline;
     let existing_hard = task.hard_deadline;
     let parent_changes = payload.clear_parent_task_id || payload.parent_task_id.is_some();
+    let txn = if parent_changes {
+        state
+            .db
+            .begin_with_config(Some(IsolationLevel::Serializable), None)
+            .await?
+    } else {
+        state.db.begin().await?
+    };
 
     let mut active: tasks::ActiveModel = task.into();
     if let Some(v) = payload.title { active.title = Set(v); }
@@ -566,11 +575,20 @@ pub async fn update_task(
         active.description = Set(Some(v));
     }
     if let Some(v) = payload.status_id {
-        project_statuses::Entity::find_by_id(v)
+        let status = project_statuses::Entity::find_by_id(v)
             .filter(project_statuses::Column::ProjectId.eq(project_id))
-            .one(&state.db)
+            .one(&txn)
             .await?
             .ok_or(AppError::NotFound)?;
+        active.completed_at = if status.is_done_state {
+            match active.completed_at.clone() {
+                sea_orm::ActiveValue::Set(Some(completed_at))
+                | sea_orm::ActiveValue::Unchanged(Some(completed_at)) => Set(Some(completed_at)),
+                _ => Set(Some(chrono::Utc::now())),
+            }
+        } else {
+            Set(None)
+        };
         active.status_id = Set(v);
     }
     if let Some(v) = payload.priority { active.priority = Set(v); }
@@ -580,7 +598,7 @@ pub async fn update_task(
     } else if let Some(v) = payload.milestone_id {
         milestones::Entity::find_by_id(v)
             .filter(milestones::Column::ProjectId.eq(project_id))
-            .one(&state.db)
+            .one(&txn)
             .await?
             .ok_or(AppError::NotFound)?;
         active.milestone_id = Set(Some(v));
@@ -590,7 +608,8 @@ pub async fn update_task(
     } else if let Some(v) = payload.sprint_id {
         let sprint = sprints::Entity::find_by_id(v)
             .filter(sprints::Column::ProjectId.eq(project_id))
-            .one(&state.db)
+            .lock(LockType::Update)
+            .one(&txn)
             .await?
             .ok_or(AppError::NotFound)?;
         if sprint.status == sprints::SprintStatus::Completed {
@@ -629,10 +648,6 @@ pub async fn update_task(
     active.updated_at = Set(chrono::Utc::now());
 
     if parent_changes {
-        let txn = state
-            .db
-            .begin_with_config(Some(IsolationLevel::Serializable), None)
-            .await?;
         let fresh = tasks::Entity::find_by_id(task_id)
             .filter(tasks::Column::ProjectId.eq(project_id))
             .filter(tasks::Column::DeletedAt.is_null())
@@ -662,7 +677,9 @@ pub async fn update_task(
         txn.commit().await?;
         Ok(Json(updated))
     } else {
-        Ok(Json(active.update(&state.db).await?))
+        let updated = active.update(&txn).await?;
+        txn.commit().await?;
+        Ok(Json(updated))
     }
 }
 

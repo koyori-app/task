@@ -193,11 +193,20 @@ async fn sprints_integration_suite() {
         .db
         .execute_raw(Statement::from_sql_and_values(
             app.state.db.get_database_backend(),
-            "UPDATE tasks SET updated_at = $1::timestamptz WHERE id = $2",
+            "UPDATE tasks SET completed_at = $1::timestamptz, updated_at = $1::timestamptz WHERE id = $2",
             ["2026-06-02T12:00:00Z".into(), task1.into()],
         ))
         .await
         .expect("set deterministic completion timestamp");
+
+    let edit_completed = app
+        .client()
+        .put(format!("{}{}", app.base_url(), task_path))
+        .json(&serde_json::json!({ "title": "Task 1 edited after completion" }))
+        .send()
+        .await
+        .expect("edit completed task");
+    assert_eq!(edit_completed.status(), StatusCode::OK);
 
     let detail2 = app
         .get_with_session(&format!("{}/{}", sprints_base(&tp), sprint_a))

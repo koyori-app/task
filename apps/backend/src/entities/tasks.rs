@@ -66,6 +66,9 @@ pub struct Model {
     pub updated_at: DateTimeUtc,
     #[sea_orm(nullable)]
     #[schema(value_type = Option<String>, format = "date-time", nullable)]
+    pub completed_at: Option<DateTimeUtc>,
+    #[sea_orm(nullable)]
+    #[schema(value_type = Option<String>, format = "date-time", nullable)]
     pub deleted_at: Option<DateTimeUtc>,
 }
 

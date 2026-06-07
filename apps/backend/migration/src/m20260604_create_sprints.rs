@@ -19,7 +19,9 @@ impl MigrationTrait for Migration {
                 created_by UUID NOT NULL REFERENCES users(id) ON DELETE NO ACTION,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                CHECK (start_date <= end_date)
+                CHECK (start_date <= end_date),
+                CONSTRAINT sprints_status_check
+                    CHECK (status IN ('planning', 'active', 'completed'))
             )
         "#;
         manager
@@ -40,14 +42,32 @@ impl MigrationTrait for Migration {
             ))
             .await?;
 
-        let add_sprint_id = r#"
-            ALTER TABLE tasks ADD COLUMN IF NOT EXISTS sprint_id UUID REFERENCES sprints(id) ON DELETE SET NULL
+        let add_task_columns = r#"
+            ALTER TABLE tasks
+                ADD COLUMN IF NOT EXISTS sprint_id UUID REFERENCES sprints(id) ON DELETE SET NULL,
+                ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ
         "#;
         manager
             .get_connection()
             .execute(Statement::from_string(
                 manager.get_database_backend(),
-                add_sprint_id.to_owned(),
+                add_task_columns.to_owned(),
+            ))
+            .await?;
+
+        let backfill_completed_at = r#"
+            UPDATE tasks
+            SET completed_at = tasks.updated_at
+            FROM project_statuses
+            WHERE tasks.status_id = project_statuses.id
+              AND project_statuses.is_done_state = TRUE
+              AND tasks.completed_at IS NULL
+        "#;
+        manager
+            .get_connection()
+            .execute(Statement::from_string(
+                manager.get_database_backend(),
+                backfill_completed_at.to_owned(),
             ))
             .await?;
 
@@ -83,12 +103,16 @@ impl MigrationTrait for Migration {
             ))
             .await?;
 
-        let drop_col = "ALTER TABLE tasks DROP COLUMN IF EXISTS sprint_id";
+        let drop_columns = r#"
+            ALTER TABLE tasks
+                DROP COLUMN IF EXISTS completed_at,
+                DROP COLUMN IF EXISTS sprint_id
+        "#;
         manager
             .get_connection()
             .execute(Statement::from_string(
                 manager.get_database_backend(),
-                drop_col.to_owned(),
+                drop_columns.to_owned(),
             ))
             .await?;
 

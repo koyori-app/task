@@ -8,9 +8,10 @@ use axum::{
 use axum_valid::Valid;
 use chrono::{Datelike, NaiveDate, NaiveTime};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
-    prelude::Uuid,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, TransactionTrait, prelude::Uuid,
 };
+use sea_orm::sea_query::LockType;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
@@ -192,7 +193,7 @@ fn build_burndown(
                     return false;
                 }
                 if done_statuses.contains(&t.status_id) {
-                    t.updated_at > eod
+                    t.completed_at.is_none_or(|completed_at| completed_at > eod)
                 } else {
                     true
                 }
@@ -554,24 +555,44 @@ pub async fn complete_sprint(
         return Err(AppError::BadRequest);
     }
 
-    let sprint = load_sprint(&state, project_id, id).await?;
-    if sprint.status != SprintStatus::Active {
-        return Err(AppError::Conflict);
-    }
-
     if let Some(target_id) = payload.move_incomplete_to_sprint_id {
         if target_id == id {
-            return Err(AppError::BadRequest);
-        }
-
-        let target = load_sprint(&state, project_id, target_id).await?;
-        if target.status == SprintStatus::Completed {
             return Err(AppError::BadRequest);
         }
     }
 
     let done_statuses = done_status_ids(&state, project_id).await?;
     let txn = state.db.begin().await?;
+
+    let mut sprint_ids = vec![id];
+    if let Some(target_id) = payload.move_incomplete_to_sprint_id {
+        sprint_ids.push(target_id);
+        sprint_ids.sort();
+    }
+    let locked_sprints = sprints::Entity::find()
+        .filter(sprints::Column::ProjectId.eq(project_id))
+        .filter(sprints::Column::Id.is_in(sprint_ids))
+        .order_by_asc(sprints::Column::Id)
+        .lock(LockType::Update)
+        .all(&txn)
+        .await?;
+    let sprint = locked_sprints
+        .iter()
+        .find(|sprint| sprint.id == id)
+        .cloned()
+        .ok_or(AppError::NotFound)?;
+    if sprint.status != SprintStatus::Active {
+        return Err(AppError::Conflict);
+    }
+    if let Some(target_id) = payload.move_incomplete_to_sprint_id {
+        let target = locked_sprints
+            .iter()
+            .find(|sprint| sprint.id == target_id)
+            .ok_or(AppError::NotFound)?;
+        if target.status == SprintStatus::Completed {
+            return Err(AppError::BadRequest);
+        }
+    }
 
     let incomplete = tasks::Entity::find()
         .filter(tasks::Column::SprintId.eq(id))
@@ -634,11 +655,6 @@ pub async fn assign_tasks_to_sprint(
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
-    let sprint = load_sprint(&state, project_id, id).await?;
-    if sprint.status == SprintStatus::Completed {
-        return Err(AppError::Conflict);
-    }
-
     let unique_ids: Vec<Uuid> = {
         let mut ids = payload.task_ids.clone();
         ids.sort();
@@ -647,6 +663,16 @@ pub async fn assign_tasks_to_sprint(
     };
 
     let txn = state.db.begin().await?;
+    let sprint = sprints::Entity::find_by_id(id)
+        .filter(sprints::Column::ProjectId.eq(project_id))
+        .lock(LockType::Update)
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if sprint.status == SprintStatus::Completed {
+        return Err(AppError::Conflict);
+    }
+
     let found = tasks::Entity::find()
         .filter(tasks::Column::Id.is_in(unique_ids.clone()))
         .filter(tasks::Column::ProjectId.eq(project_id))
