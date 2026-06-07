@@ -11,6 +11,7 @@ import { computed, useAttrs } from "vue";
 const pageContext = usePageContext();
 const { href } = useAttrs();
 const isActive = computed(() => {
+  if (typeof href !== "string") return false;
   const { urlPathname } = pageContext;
   return href === "/" ? urlPathname === href : urlPathname.startsWith(href);
 });

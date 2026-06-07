@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useDefaultApi } from '@/composables/useDefaultApi';
-import { type Model, FetchError } from '@/generated/api';
+import { type CrateEntitiesLabelsModel, FetchError } from '@/generated/api';
 
-const labels = ref<Model[]>([]);
+const labels = ref<CrateEntitiesLabelsModel[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
 
