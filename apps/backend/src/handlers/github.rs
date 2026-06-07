@@ -317,33 +317,33 @@ pub async fn github_webhook(
         .or_else(|| payload.get("installation_id").and_then(|id| id.as_i64()));
 
     if let Some(installation_id) = installation_id {
-        match github_integrations::Entity::find()
+        let integrations = github_integrations::Entity::find()
             .filter(github_integrations::Column::InstallationId.eq(installation_id))
-            .one(&state.db)
-            .await?
-        {
-            Some(integration) => {
-                github_webhook::enqueue(
-                    &state.github_webhook_storage,
-                    GithubWebhookJob {
-                        integration_id: integration.id,
-                        project_id: integration.project_id,
-                        event: event.clone(),
-                        delivery_id: delivery_id.clone(),
-                        payload: payload.clone(),
-                    },
-                )
-                .await
-                .map_err(AppError::Internal)?;
-            }
-            None => {
-                tracing::warn!(
-                    installation_id,
-                    event = %event,
-                    delivery_id = ?delivery_id,
-                    "github webhook: no integration found for installation_id"
-                );
-            }
+            .all(&state.db)
+            .await?;
+
+        if integrations.is_empty() {
+            tracing::warn!(
+                installation_id,
+                event = %event,
+                delivery_id = ?delivery_id,
+                "github webhook: no integration found for installation_id"
+            );
+        }
+
+        for integration in integrations {
+            github_webhook::enqueue(
+                &state.github_webhook_storage,
+                GithubWebhookJob {
+                    integration_id: integration.id,
+                    project_id: integration.project_id,
+                    event: event.clone(),
+                    delivery_id: delivery_id.clone(),
+                    payload: payload.clone(),
+                },
+            )
+            .await
+            .map_err(AppError::Internal)?;
         }
     }
 
