@@ -130,7 +130,7 @@ async fn webauthn_integration_suite() {
             .expect("load")
             .expect("user");
         let mut active: users::ActiveModel = model.into();
-        active.password_hash = Set(String::new());
+        active.password_hash = Set(None);
         active.update(&app.state.db).await.expect("clear password");
 
         let passkey = passkeys::Entity::find()

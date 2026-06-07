@@ -215,8 +215,8 @@ pub async fn find_by_credential_id(
 }
 
 /// 最後の認証手段削除ガード（仕様書 §7）
-pub async fn is_last_auth_method(
-    db: &DatabaseConnection,
+pub async fn is_last_auth_method<C: ConnectionTrait>(
+    db: &C,
     user_id: uuid::Uuid,
     passkey_count: u64,
 ) -> Result<bool, anyhow::Error> {
@@ -233,11 +233,15 @@ pub async fn is_last_auth_method(
         return Ok(false);
     }
 
+    if count_user_passkeys(db, user_id).await? > 1 {
+        return Ok(false);
+    }
+
     Ok(oauth_connection_count(db, user_id).await? == 0)
 }
 
-async fn oauth_connection_count(
-    db: &DatabaseConnection,
+async fn oauth_connection_count<C: ConnectionTrait>(
+    db: &C,
     user_id: uuid::Uuid,
 ) -> Result<u64, anyhow::Error> {
     Ok(oauth_connections::Entity::find()

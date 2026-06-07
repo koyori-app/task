@@ -8,7 +8,7 @@ use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
@@ -246,7 +246,13 @@ pub async fn registration_finish(
     };
 
     let credential: RegisterPublicKeyCredential =
-        serde_json::from_value(payload.credential).map_err(|_| AuthError::BadRequest)?;
+        match serde_json::from_value(payload.credential) {
+            Ok(c) => c,
+            Err(_) => {
+                release_lock().await;
+                return Err(AuthError::BadRequest);
+            }
+        };
     let passkey = match state
         .webauthn
         .finish_passkey_registration(&credential, &reg_state)
@@ -315,20 +321,24 @@ pub async fn authentication_start(
         let email = normalize_email(email);
         let passkey_list = passkeys_for_email_auth(&state.db, &email).await?;
 
-        // 空リストでもダミーチャレンジを返す（ユーザー列挙防止）。webauthn-rs は空 slice を許容。
-        let (rcr, auth_state) = state
-            .webauthn
-            .start_passkey_authentication(&passkey_list)?;
+        // パスキーが存在する場合のみ allowCredentials 付きチャレンジを返す。
+        // 空リストで start_passkey_authentication すると空の allowCredentials が返り、
+        // 攻撃者がパスキー未登録アカウントを識別できるため、その場合は discoverable に fallback する。
+        if !passkey_list.is_empty() {
+            let (rcr, auth_state) = state
+                .webauthn
+                .start_passkey_authentication(&passkey_list)?;
 
-        passkey_challenges::store_authentication(
-            &state.redis_client,
-            challenge_id,
-            &auth_state,
-        )
-        .await
-        .map_err(AuthError::Internal)?;
+            passkey_challenges::store_authentication(
+                &state.redis_client,
+                challenge_id,
+                &auth_state,
+            )
+            .await
+            .map_err(AuthError::Internal)?;
 
-        return challenge_response(rcr, challenge_id);
+            return challenge_response(rcr, challenge_id);
+        }
     }
 
     let (rcr, auth_state) = state.webauthn.start_discoverable_authentication()?;
@@ -529,23 +539,38 @@ pub async fn delete_passkey(
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AuthError> {
-    let row = passkey_entity::Entity::find_by_id(id)
-        .filter(passkey_entity::Column::UserId.eq(user.id))
-        .one(&state.db)
-        .await?
-        .ok_or(AuthError::PasskeyNotFound)?;
+    state
+        .db
+        .transaction::<_, (), AuthError>(|txn| {
+            Box::pin(async move {
+                let row = passkey_entity::Entity::find_by_id(id)
+                    .filter(passkey_entity::Column::UserId.eq(user.id))
+                    .one(txn)
+                    .await?
+                    .ok_or(AuthError::PasskeyNotFound)?;
 
-    let count = count_user_passkeys(&state.db, user.id).await?;
-    if is_last_auth_method(&state.db, user.id, count)
+                // count と削除を同一トランザクション内に収め、並行削除による
+                // 「全パスキー削除」競合を防止する。
+                let count = count_user_passkeys(txn, user.id).await?;
+                if is_last_auth_method(txn, user.id, count)
+                    .await
+                    .map_err(AuthError::Internal)?
+                {
+                    return Err(AuthError::LastAuthMethod);
+                }
+
+                passkey_entity::Entity::delete_by_id(row.id)
+                    .exec(txn)
+                    .await?;
+
+                Ok(())
+            })
+        })
         .await
-        .map_err(AuthError::Internal)?
-    {
-        return Err(AuthError::LastAuthMethod);
-    }
-
-    passkey_entity::Entity::delete_by_id(row.id)
-        .exec(&state.db)
-        .await?;
+        .map_err(|e| match e {
+            sea_orm::TransactionError::Connection(db_err) => AuthError::from(db_err),
+            sea_orm::TransactionError::Transaction(auth_err) => auth_err,
+        })?;
 
     Ok(StatusCode::NO_CONTENT)
 }

@@ -778,14 +778,6 @@ impl TestApp {
         &self.client
     }
 
-    pub async fn delete_with_session(&self, path: &str) -> Response {
-        self.client
-            .delete(format!("{}{path}", self.base_url))
-            .send()
-            .await
-            .expect("delete request")
-    }
-
     pub async fn delete_json_with_session(&self, path: &str, body: serde_json::Value) -> Response {
         self.client
             .delete(format!("{}{path}", self.base_url))
@@ -904,7 +896,8 @@ pub async fn insert_passkey_user(
         avatar_url: Set(None),
         email: Set(email.clone()),
         email_verified: Set(email_verified),
-        password_hash: Set(password_hash),
+        password_hash: Set(if password_hash.is_empty() { None } else { Some(password_hash) }),
+        totp_enabled: Set(false),
         is_admin: Set(false),
         is_suspended: Set(false),
         sessions_revoked_at: Set(None),
