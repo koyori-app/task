@@ -16,6 +16,7 @@ use utoipa::ToSchema;
 use validator::Validate;
 
 use crate::auth_helpers::require_member_or_owner;
+use crate::utils::db::is_postgres_unique_violation;
 use crate::entities::{project_statuses, sprints, tasks};
 use crate::entities::sprints::SprintStatus;
 use crate::error::AppError;
@@ -489,7 +490,13 @@ pub async fn start_sprint(
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
-    let sprint = load_sprint(&state, project_id, id).await?;
+    let txn = state.db.begin().await?;
+
+    let sprint = sprints::Entity::find_by_id(id)
+        .filter(sprints::Column::ProjectId.eq(project_id))
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
     if sprint.status != SprintStatus::Planning {
         return Err(AppError::Conflict);
     }
@@ -497,7 +504,7 @@ pub async fn start_sprint(
     let active_exists = sprints::Entity::find()
         .filter(sprints::Column::ProjectId.eq(project_id))
         .filter(sprints::Column::Status.eq(SprintStatus::Active))
-        .one(&state.db)
+        .one(&txn)
         .await?;
     if active_exists.is_some() {
         return Err(AppError::Conflict);
@@ -506,7 +513,13 @@ pub async fn start_sprint(
     let mut active: sprints::ActiveModel = sprint.into();
     active.status = Set(SprintStatus::Active);
     active.updated_at = Set(chrono::Utc::now());
-    Ok(Json(active.update(&state.db).await?))
+    let updated = match active.update(&txn).await {
+        Ok(model) => model,
+        Err(e) if is_postgres_unique_violation(&e) => return Err(AppError::Conflict),
+        Err(e) => return Err(e.into()),
+    };
+    txn.commit().await?;
+    Ok(Json(updated))
 }
 
 #[axum::debug_handler]

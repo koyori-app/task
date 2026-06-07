@@ -216,6 +216,31 @@ async fn sprints_integration_suite() {
     app.login_session_no_content(&user.email, &user.password)
         .await;
 
+    // concurrent start_sprint: exactly one succeeds, the other returns 409
+    let sprint_c = create_sprint(&app, &tp, "Sprint C").await;
+    let sprint_d = create_sprint(&app, &tp, "Sprint D").await;
+    let base = app.base_url();
+    let client = app.client().clone();
+    let body = serde_json::json!({});
+    let path_c = format!("{base}{}/{}/start", sprints_base(&tp), sprint_c);
+    let path_d = format!("{base}{}/{}/start", sprints_base(&tp), sprint_d);
+    let (r1, r2) = tokio::join!(
+        client.post(&path_c).json(&body).send(),
+        client.post(&path_d).json(&body).send(),
+    );
+    let s1 = r1.expect("start sprint c").status();
+    let s2 = r2.expect("start sprint d").status();
+    let ok_count = [s1, s2]
+        .iter()
+        .filter(|s| **s == StatusCode::OK)
+        .count();
+    let conflict_count = [s1, s2]
+        .iter()
+        .filter(|s| **s == StatusCode::CONFLICT)
+        .count();
+    assert_eq!(ok_count, 1, "only one concurrent start may succeed");
+    assert_eq!(conflict_count, 1, "other concurrent start must return 409");
+
     // list filter by status
     let list = app
         .get_with_session(&format!("{}?status=completed", sprints_base(&tp)))
