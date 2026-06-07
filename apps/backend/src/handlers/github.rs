@@ -316,18 +316,36 @@ pub async fn github_webhook(
         .and_then(|id| id.as_i64())
         .or_else(|| payload.get("installation_id").and_then(|id| id.as_i64()));
 
+    // payload に repository が含まれる場合はリポジトリ単位で絞り込む。
+    // installation 全体イベント (installation, installation_repositories 等) は
+    // repository フィールドを持たないため、その場合は installation 配下の全件を対象とする。
+    let repo_filter: Option<(String, String)> = payload
+        .get("repository")
+        .and_then(|r| {
+            let owner = r.get("owner")?.get("login")?.as_str()?.to_owned();
+            let name = r.get("name")?.as_str()?.to_owned();
+            Some((owner, name))
+        });
+
     if let Some(installation_id) = installation_id {
-        let integrations = github_integrations::Entity::find()
-            .filter(github_integrations::Column::InstallationId.eq(installation_id))
-            .all(&state.db)
-            .await?;
+        let mut query = github_integrations::Entity::find()
+            .filter(github_integrations::Column::InstallationId.eq(installation_id));
+
+        if let Some((ref owner, ref name)) = repo_filter {
+            query = query
+                .filter(github_integrations::Column::RepoOwner.eq(owner.as_str()))
+                .filter(github_integrations::Column::RepoName.eq(name.as_str()));
+        }
+
+        let integrations = query.all(&state.db).await?;
 
         if integrations.is_empty() {
             tracing::warn!(
                 installation_id,
                 event = %event,
                 delivery_id = ?delivery_id,
-                "github webhook: no integration found for installation_id"
+                repo = ?repo_filter,
+                "github webhook: no integration found"
             );
         }
 
