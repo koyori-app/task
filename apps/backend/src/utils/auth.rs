@@ -278,11 +278,14 @@ const ARGON2_PRODUCTION_COSTS: (u32, u32, u32) = (131072, 3, 2);
 const ARGON2_TEST_COSTS: (u32, u32, u32) = (8192, 1, 1);
 
 fn argon2_test_mode() -> bool {
-    // Never permit reduced password hashing costs in release builds.
-    cfg!(debug_assertions)
-        && std::env::var("ARGON2_TEST_MODE")
-            .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
-            .unwrap_or(false)
+    static TEST_MODE: OnceLock<bool> = OnceLock::new();
+    *TEST_MODE.get_or_init(|| {
+        // Never permit reduced password hashing costs in release builds.
+        cfg!(debug_assertions)
+            && std::env::var("ARGON2_TEST_MODE")
+                .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+                .unwrap_or(false)
+    })
 }
 
 fn argon2_costs() -> (u32, u32, u32) {
