@@ -385,7 +385,14 @@ pub async fn update_sprint(
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
-    let sprint = load_sprint(&state, project_id, id).await?;
+    let txn = state.db.begin().await?;
+
+    let sprint = sprints::Entity::find_by_id(id)
+        .filter(sprints::Column::ProjectId.eq(project_id))
+        .lock(LockType::Update)
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
     if sprint.status != SprintStatus::Planning {
         return Err(AppError::Conflict);
     }
@@ -420,7 +427,9 @@ pub async fn update_sprint(
     }
     active.updated_at = Set(chrono::Utc::now());
 
-    Ok(Json(active.update(&state.db).await?))
+    let updated = active.update(&txn).await?;
+    txn.commit().await?;
+    Ok(Json(updated))
 }
 
 #[axum::debug_handler]
@@ -449,19 +458,20 @@ pub async fn delete_sprint(
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
-    let sprint = load_sprint(&state, project_id, id).await?;
+    let txn = state.db.begin().await?;
+
+    let sprint = sprints::Entity::find_by_id(id)
+        .filter(sprints::Column::ProjectId.eq(project_id))
+        .lock(LockType::Update)
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
     if sprint.status != SprintStatus::Planning {
         return Err(AppError::Conflict);
     }
 
-    let result = sprints::Entity::delete_many()
-        .filter(sprints::Column::Id.eq(id))
-        .filter(sprints::Column::ProjectId.eq(project_id))
-        .exec(&state.db)
-        .await?;
-    if result.rows_affected == 0 {
-        return Err(AppError::NotFound);
-    }
+    sprints::Entity::delete_by_id(id).exec(&txn).await?;
+    txn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
