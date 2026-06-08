@@ -21,6 +21,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     services:
       postgres:
@@ -71,16 +72,16 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-      - name: Cache cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/backend/target
-          key: cargo-debug-${{ runner.os }}-${{ hashFiles('apps/backend/Cargo.lock') }}
-          restore-keys: |
-            cargo-debug-${{ runner.os }}-
+          workspaces: apps/backend -> target
+
+      # - name: Install cargo-nextest
+      #   uses: taiki-e/install-action@56545b37b57562edd73171cb6c62cc509db4c34e # v2.81.7
+      #   with:
+      #     tool: cargo-nextest
 
       - name: Run tests
         run: cargo test
