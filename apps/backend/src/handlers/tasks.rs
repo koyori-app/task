@@ -13,7 +13,8 @@ use validator::Validate;
 
 use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
 use crate::entities::{
-    labels, milestones, project_statuses, project_task_counters, task_assignees, task_labels,
+    labels, milestones, project_statuses, project_task_counters, sprints, task_assignees,
+    task_labels,
     task_relations, tasks,
 };
 use crate::error::AppError;
@@ -196,6 +197,8 @@ pub struct CreateTaskRequest {
     pub parent_task_id: Option<Uuid>,
     #[schema(value_type = Option<String>, format = "uuid")]
     pub milestone_id: Option<Uuid>,
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub sprint_id: Option<Uuid>,
     #[schema(value_type = Option<String>, format = "date-time")]
     pub soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
     #[schema(value_type = Option<String>, format = "date-time")]
@@ -228,6 +231,10 @@ pub struct UpdateTaskRequest {
     pub milestone_id: Option<Uuid>,
     #[serde(default)]
     pub clear_milestone_id: bool,
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub sprint_id: Option<Uuid>,
+    #[serde(default)]
+    pub clear_sprint_id: bool,
     #[schema(value_type = Option<String>, format = "date-time")]
     pub soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
@@ -249,6 +256,7 @@ pub struct ListTasksQuery {
     pub priority: Option<String>,
     pub assignee_id: Option<Uuid>,
     pub milestone_id: Option<Uuid>,
+    pub sprint_id: Option<Uuid>,
     pub parent_task_id: Option<Uuid>,
     #[serde(default)]
     pub is_archived: bool,
@@ -324,6 +332,9 @@ pub async fn list_tasks(
     if let Some(mid) = q.milestone_id {
         query = query.filter(tasks::Column::MilestoneId.eq(mid));
     }
+    if let Some(sid) = q.sprint_id {
+        query = query.filter(tasks::Column::SprintId.eq(sid));
+    }
     if let Some(pid) = q.parent_task_id {
         query = query.filter(tasks::Column::ParentTaskId.eq(pid));
     }
@@ -385,13 +396,12 @@ pub async fn create_task(
         }
     }
 
-    project_statuses::Entity::find_by_id(payload.status_id)
+    let txn = state.db.begin().await?;
+    let status = project_statuses::Entity::find_by_id(payload.status_id)
         .filter(project_statuses::Column::ProjectId.eq(project_id))
-        .one(&state.db)
+        .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
-
-    let txn = state.db.begin().await?;
 
     // parent_task_id / milestone_id が同一プロジェクトに属することを検証
     if let Some(pid) = payload.parent_task_id {
@@ -409,6 +419,17 @@ pub async fn create_task(
             .await?
             .ok_or(AppError::NotFound)?;
     }
+    if let Some(sid) = payload.sprint_id {
+        let sprint = sprints::Entity::find_by_id(sid)
+            .filter(sprints::Column::ProjectId.eq(project_id))
+            .lock(LockType::Update)
+            .one(&txn)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if sprint.status == sprints::SprintStatus::Completed {
+            return Err(AppError::Conflict);
+        }
+    }
 
     let seq_id = next_seq_id(&txn, project_id).await?;
 
@@ -423,6 +444,7 @@ pub async fn create_task(
         progress_pct: Set(payload.progress_pct.unwrap_or(0)),
         parent_task_id: Set(payload.parent_task_id),
         milestone_id: Set(payload.milestone_id),
+        sprint_id: Set(payload.sprint_id),
         soft_deadline: Set(payload.soft_deadline),
         hard_deadline: Set(payload.hard_deadline),
         estimated_minutes: Set(payload.estimated_minutes),
@@ -430,6 +452,7 @@ pub async fn create_task(
         created_by: Set(auth.user_id),
         created_at: Set(chrono::Utc::now()),
         updated_at: Set(chrono::Utc::now()),
+        completed_at: Set(status.is_done_state.then(chrono::Utc::now)),
         deleted_at: Set(None),
     }
     .insert(&txn)
@@ -535,6 +558,14 @@ pub async fn update_task(
     let existing_soft = task.soft_deadline;
     let existing_hard = task.hard_deadline;
     let parent_changes = payload.clear_parent_task_id || payload.parent_task_id.is_some();
+    let txn = if parent_changes {
+        state
+            .db
+            .begin_with_config(Some(IsolationLevel::Serializable), None)
+            .await?
+    } else {
+        state.db.begin().await?
+    };
 
     let mut active: tasks::ActiveModel = task.into();
     if let Some(v) = payload.title { active.title = Set(v); }
@@ -544,11 +575,20 @@ pub async fn update_task(
         active.description = Set(Some(v));
     }
     if let Some(v) = payload.status_id {
-        project_statuses::Entity::find_by_id(v)
+        let status = project_statuses::Entity::find_by_id(v)
             .filter(project_statuses::Column::ProjectId.eq(project_id))
-            .one(&state.db)
+            .one(&txn)
             .await?
             .ok_or(AppError::NotFound)?;
+        active.completed_at = if status.is_done_state {
+            match active.completed_at.clone() {
+                sea_orm::ActiveValue::Set(Some(completed_at))
+                | sea_orm::ActiveValue::Unchanged(Some(completed_at)) => Set(Some(completed_at)),
+                _ => Set(Some(chrono::Utc::now())),
+            }
+        } else {
+            Set(None)
+        };
         active.status_id = Set(v);
     }
     if let Some(v) = payload.priority { active.priority = Set(v); }
@@ -558,10 +598,24 @@ pub async fn update_task(
     } else if let Some(v) = payload.milestone_id {
         milestones::Entity::find_by_id(v)
             .filter(milestones::Column::ProjectId.eq(project_id))
-            .one(&state.db)
+            .one(&txn)
             .await?
             .ok_or(AppError::NotFound)?;
         active.milestone_id = Set(Some(v));
+    }
+    if payload.clear_sprint_id {
+        active.sprint_id = Set(None);
+    } else if let Some(v) = payload.sprint_id {
+        let sprint = sprints::Entity::find_by_id(v)
+            .filter(sprints::Column::ProjectId.eq(project_id))
+            .lock(LockType::Update)
+            .one(&txn)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if sprint.status == sprints::SprintStatus::Completed {
+            return Err(AppError::Conflict);
+        }
+        active.sprint_id = Set(Some(v));
     }
     if payload.clear_soft_deadline { active.soft_deadline = Set(None); }
     else if let Some(v) = payload.soft_deadline { active.soft_deadline = Set(Some(v)); }
@@ -594,10 +648,6 @@ pub async fn update_task(
     active.updated_at = Set(chrono::Utc::now());
 
     if parent_changes {
-        let txn = state
-            .db
-            .begin_with_config(Some(IsolationLevel::Serializable), None)
-            .await?;
         let fresh = tasks::Entity::find_by_id(task_id)
             .filter(tasks::Column::ProjectId.eq(project_id))
             .filter(tasks::Column::DeletedAt.is_null())
@@ -627,7 +677,9 @@ pub async fn update_task(
         txn.commit().await?;
         Ok(Json(updated))
     } else {
-        Ok(Json(active.update(&state.db).await?))
+        let updated = active.update(&txn).await?;
+        txn.commit().await?;
+        Ok(Json(updated))
     }
 }
 

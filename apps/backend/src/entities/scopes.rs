@@ -22,6 +22,10 @@ pub enum Scope {
     ReadMilestone,
     #[serde(rename = "write:milestone")]
     WriteMilestone,
+    #[serde(rename = "read:sprint")]
+    ReadSprint,
+    #[serde(rename = "write:sprint")]
+    WriteSprint,
 }
 
 impl Scope {
@@ -36,6 +40,8 @@ impl Scope {
             Scope::WriteTask => "write:task",
             Scope::ReadMilestone => "read:milestone",
             Scope::WriteMilestone => "write:milestone",
+            Scope::ReadSprint => "read:sprint",
+            Scope::WriteSprint => "write:sprint",
         }
     }
 
@@ -50,6 +56,8 @@ impl Scope {
             "write:task" => Some(Scope::WriteTask),
             "read:milestone" => Some(Scope::ReadMilestone),
             "write:milestone" => Some(Scope::WriteMilestone),
+            "read:sprint" => Some(Scope::ReadSprint),
+            "write:sprint" => Some(Scope::WriteSprint),
             _ => None,
         }
     }
@@ -73,6 +81,7 @@ impl ScopeList {
             || (scope == Scope::ReadDrive && self.0.contains(&Scope::WriteDrive))
             || (scope == Scope::ReadTask && self.0.contains(&Scope::WriteTask))
             || (scope == Scope::ReadMilestone && self.0.contains(&Scope::WriteMilestone))
+            || (scope == Scope::ReadSprint && self.0.contains(&Scope::WriteSprint))
     }
 }
 

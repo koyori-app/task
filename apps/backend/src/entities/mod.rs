@@ -7,6 +7,7 @@ pub mod drive_folder_shares;
 pub mod drive_folders;
 pub mod labels;
 pub mod milestones;
+pub mod sprints;
 pub mod passkeys;
 pub mod recovery_codes;
 pub mod totp_credentials;

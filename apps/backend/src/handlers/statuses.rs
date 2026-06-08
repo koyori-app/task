@@ -4,7 +4,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder, TransactionTrait, prelude::Uuid,
 };
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, Func};
 use serde::Deserialize;
 use std::collections::HashSet;
 use utoipa::ToSchema;
@@ -162,6 +162,7 @@ pub async fn update_status(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    let old_is_done_state = status.is_done_state;
     let mut active: project_statuses::ActiveModel = status.into();
     let txn = state.db.begin().await?;
     if payload.is_default == Some(true) {
@@ -178,6 +179,30 @@ pub async fn update_status(
     if let Some(v) = payload.is_default { active.is_default = Set(v); }
     if let Some(v) = payload.is_done_state { active.is_done_state = Set(v); }
     let updated = active.update(&txn).await?;
+
+    if let Some(new_is_done) = payload.is_done_state {
+        if new_is_done != old_is_done_state {
+            let mut task_update = tasks::Entity::update_many()
+                .filter(tasks::Column::StatusId.eq(id))
+                .filter(tasks::Column::DeletedAt.is_null());
+            task_update = if new_is_done {
+                task_update.col_expr(
+                    tasks::Column::CompletedAt,
+                    Expr::expr(Func::coalesce([
+                        Expr::col(tasks::Column::CompletedAt),
+                        Expr::current_timestamp(),
+                    ])),
+                )
+            } else {
+                task_update.col_expr(
+                    tasks::Column::CompletedAt,
+                    Expr::value(Option::<chrono::DateTime<chrono::Utc>>::None),
+                )
+            };
+            task_update.exec(&txn).await?;
+        }
+    }
+
     txn.commit().await?;
     Ok(Json(updated))
 }
@@ -293,15 +318,30 @@ pub async fn delete_status(
             return Err(AppError::BadRequest);
         }
         // Verify target status belongs to same project
-        project_statuses::Entity::find_by_id(migrate_to)
+        let target_status = project_statuses::Entity::find_by_id(migrate_to)
             .filter(project_statuses::Column::ProjectId.eq(project_id))
             .one(&state.db)
             .await?
             .ok_or(AppError::NotFound)?;
 
         let txn = state.db.begin().await?;
-        tasks::Entity::update_many()
-            .col_expr(tasks::Column::StatusId, Expr::value(migrate_to))
+        let mut update = tasks::Entity::update_many()
+            .col_expr(tasks::Column::StatusId, Expr::value(migrate_to));
+        update = if target_status.is_done_state {
+            update.col_expr(
+                tasks::Column::CompletedAt,
+                Expr::expr(Func::coalesce([
+                    Expr::col(tasks::Column::CompletedAt),
+                    Expr::current_timestamp(),
+                ])),
+            )
+        } else {
+            update.col_expr(
+                tasks::Column::CompletedAt,
+                Expr::value(Option::<chrono::DateTime<chrono::Utc>>::None),
+            )
+        };
+        update
             .filter(tasks::Column::StatusId.eq(id))
             .filter(tasks::Column::DeletedAt.is_null())
             .exec(&txn)
