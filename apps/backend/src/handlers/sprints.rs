@@ -166,7 +166,11 @@ fn build_burndown(
         return Vec::new();
     }
 
-    let total_at_start = sprint_tasks.len();
+    let start_naive = time_date_to_naive(sprint.start_date);
+    let total_at_start = sprint_tasks
+        .iter()
+        .filter(|t| t.created_at.date_naive() <= start_naive)
+        .count();
     let span_days = (sprint.end_date - sprint.start_date).whole_days();
     let mut points = Vec::new();
     let mut cursor = sprint.start_date;
@@ -505,6 +509,7 @@ pub async fn start_sprint(
 
     let sprint = sprints::Entity::find_by_id(id)
         .filter(sprints::Column::ProjectId.eq(project_id))
+        .lock(LockType::Update)
         .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
