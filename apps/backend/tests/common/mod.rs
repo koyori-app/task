@@ -114,6 +114,13 @@ fn test_session_config() -> SessionConfig {
 async fn ensure_schema(db: &DatabaseConnection) {
     SCHEMA_READY
         .get_or_init(|| async {
+            // Sea-ORM の sync() は CREATE UNIQUE INDEX 由来のインデックスを
+            // ALTER TABLE DROP CONSTRAINT で削除しようとして失敗するため、
+            // 事前に DROP して sync() が素通りできるようにする
+            let _ = db
+                .execute_unprepared("DROP INDEX IF EXISTS idx_sprints_active_per_project")
+                .await;
+
             db.get_schema_registry("backend::entities::*")
                 .sync(db)
                 .await
@@ -157,6 +164,19 @@ CREATE INDEX IF NOT EXISTS idx_recovery_codes_user ON recovery_codes(user_id);
             )
             .await
             .expect("prepare 2fa schema");
+
+            db.execute_unprepared(
+                r#"
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS sprint_id UUID REFERENCES sprints(id) ON DELETE SET NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sprints_active_per_project
+    ON sprints(project_id)
+    WHERE status = 'active';
+"#,
+            )
+            .await
+            .expect("prepare sprints schema");
 
         })
         .await;
