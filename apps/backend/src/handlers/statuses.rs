@@ -4,7 +4,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder, TransactionTrait, prelude::Uuid,
 };
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, Func};
 use serde::Deserialize;
 use std::collections::HashSet;
 use utoipa::ToSchema;
@@ -305,7 +305,10 @@ pub async fn delete_status(
         update = if target_status.is_done_state {
             update.col_expr(
                 tasks::Column::CompletedAt,
-                Expr::cust("COALESCE(completed_at, now())"),
+                Expr::expr(Func::coalesce([
+                    Expr::col(tasks::Column::CompletedAt),
+                    Expr::current_timestamp(),
+                ])),
             )
         } else {
             update.col_expr(
