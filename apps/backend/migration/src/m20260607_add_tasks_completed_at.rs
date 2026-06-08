@@ -43,7 +43,12 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .get_connection()
-            .execute_unprepared("ALTER TABLE tasks DROP COLUMN IF EXISTS completed_at")
+            .execute_unprepared(
+                r#"
+                ALTER TABLE tasks DROP COLUMN IF EXISTS completed_at;
+                ALTER TABLE sprints DROP CONSTRAINT IF EXISTS sprints_status_check;
+                "#,
+            )
             .await
             .map(|_| ())
     }

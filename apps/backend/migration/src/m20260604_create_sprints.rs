@@ -44,30 +44,13 @@ impl MigrationTrait for Migration {
 
         let add_task_columns = r#"
             ALTER TABLE tasks
-                ADD COLUMN IF NOT EXISTS sprint_id UUID REFERENCES sprints(id) ON DELETE SET NULL,
-                ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ
+                ADD COLUMN IF NOT EXISTS sprint_id UUID REFERENCES sprints(id) ON DELETE SET NULL
         "#;
         manager
             .get_connection()
             .execute(Statement::from_string(
                 manager.get_database_backend(),
                 add_task_columns.to_owned(),
-            ))
-            .await?;
-
-        let backfill_completed_at = r#"
-            UPDATE tasks
-            SET completed_at = tasks.updated_at
-            FROM project_statuses
-            WHERE tasks.status_id = project_statuses.id
-              AND project_statuses.is_done_state = TRUE
-              AND tasks.completed_at IS NULL
-        "#;
-        manager
-            .get_connection()
-            .execute(Statement::from_string(
-                manager.get_database_backend(),
-                backfill_completed_at.to_owned(),
             ))
             .await?;
 
@@ -105,7 +88,6 @@ impl MigrationTrait for Migration {
 
         let drop_columns = r#"
             ALTER TABLE tasks
-                DROP COLUMN IF EXISTS completed_at,
                 DROP COLUMN IF EXISTS sprint_id
         "#;
         manager
