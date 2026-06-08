@@ -562,6 +562,7 @@ pub async fn complete_sprint(
     Json(payload): Json<CompleteSprintRequest>,
 ) -> Result<Json<sprints::Model>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
+    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -666,6 +667,7 @@ pub async fn assign_tasks_to_sprint(
     Valid(Json(payload)): Valid<Json<AssignTasksRequest>>,
 ) -> Result<Json<Vec<tasks::Model>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
+    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
