@@ -162,6 +162,7 @@ pub async fn update_status(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    let old_is_done_state = status.is_done_state;
     let mut active: project_statuses::ActiveModel = status.into();
     let txn = state.db.begin().await?;
     if payload.is_default == Some(true) {
@@ -178,6 +179,30 @@ pub async fn update_status(
     if let Some(v) = payload.is_default { active.is_default = Set(v); }
     if let Some(v) = payload.is_done_state { active.is_done_state = Set(v); }
     let updated = active.update(&txn).await?;
+
+    if let Some(new_is_done) = payload.is_done_state {
+        if new_is_done != old_is_done_state {
+            let mut task_update = tasks::Entity::update_many()
+                .filter(tasks::Column::StatusId.eq(id))
+                .filter(tasks::Column::DeletedAt.is_null());
+            task_update = if new_is_done {
+                task_update.col_expr(
+                    tasks::Column::CompletedAt,
+                    Expr::expr(Func::coalesce([
+                        Expr::col(tasks::Column::CompletedAt),
+                        Expr::current_timestamp(),
+                    ])),
+                )
+            } else {
+                task_update.col_expr(
+                    tasks::Column::CompletedAt,
+                    Expr::value(Option::<chrono::DateTime<chrono::Utc>>::None),
+                )
+            };
+            task_update.exec(&txn).await?;
+        }
+    }
+
     txn.commit().await?;
     Ok(Json(updated))
 }
