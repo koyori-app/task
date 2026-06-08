@@ -207,6 +207,12 @@ async fn sprints_integration_suite() {
         .await
         .expect("edit completed task");
     assert_eq!(edit_completed.status(), StatusCode::OK);
+    let edit_body: serde_json::Value = edit_completed.json().await.expect("edit body");
+    assert_eq!(
+        edit_body["completed_at"].as_str(),
+        Some("2026-06-02T12:00:00Z"),
+        "editing a completed task must not clear completed_at"
+    );
 
     let detail2 = app
         .get_with_session(&format!("{}/{}", sprints_base(&tp), sprint_a))
