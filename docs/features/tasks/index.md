@@ -17,9 +17,9 @@ icon: lucide:layout-list
 | # | 機能グループ | 仕様書 | 依存 | 状態 |
 |---|------------|--------|------|------|
 | 1 | **コア**（CRUD・ステータス・担当者・ラベル・マイルストーン・依存関係） | [tasks/core](/features/tasks/core) | なし | ✅ 完了 ([#40](https://github.com/TeamBlackCrystal/task/pull/40)) |
-| 2 | **作業時間追跡**（タイマー・手動ログ） | [tasks/time-tracking](/features/tasks/time-tracking) | 1 | 未着手 |
-| 3 | **スプリント**（イテレーション・バーンダウン） | [tasks/sprints](/features/tasks/sprints) | 1 | 未着手 |
-| 4 | **コメント・アクティビティ**（スレッド・変更履歴・@メンション） | [tasks/collaboration](/features/tasks/collaboration) | 1 | 未着手 |
+| 2 | **作業時間追跡**（タイマー・手動ログ） | [tasks/time-tracking](/features/tasks/time-tracking) | 1 | 🔄 実装中 ([#76](https://github.com/TeamBlackCrystal/task/pull/76)) |
+| 3 | **スプリント**（イテレーション・バーンダウン） | [tasks/sprints](/features/tasks/sprints) | 1 | ✅ 完了 ([#78](https://github.com/TeamBlackCrystal/task/pull/78)) |
+| 4 | **コメント・アクティビティ**（スレッド・変更履歴・@メンション） | [tasks/collaboration](/features/tasks/collaboration) | 1 | ✅ 完了 ([#77](https://github.com/TeamBlackCrystal/task/pull/77)) |
 | 5 | **通知・ウォッチャー**（in-app・メール・購読） | [tasks/notifications](/features/tasks/notifications) | 1, 4 | 未着手 |
 | 6 | **カスタムフィールド**（プロジェクト固有属性） | [tasks/custom-fields](/features/tasks/custom-fields) | 1 | 未着手 |
 | 7 | **検索・バルク・ビュー・添付**（全文検索・一括更新・保存フィルター・Drive連携） | [tasks/extensions](/features/tasks/extensions) | 1, (Drive) | 未着手 |
@@ -36,11 +36,11 @@ icon: lucide:layout-list
 ```text
 [1 コア] ──────────────────────────────────────────┐
     │                                               │
-    ├──[2 作業時間追跡]                              │
+    ├──[2 作業時間追跡 🔄]                           │
     │                                               │
-    ├──[3 スプリント]                                │
+    ├──[3 スプリント ✅]                             │
     │                                               │
-    ├──[4 コメント・アクティビティ]──[5 通知・ウォッチャー]
+    ├──[4 コメント・アクティビティ ✅]──[5 通知・ウォッチャー]
     │                                          │
     ├──[6 カスタムフィールド]                   │
     │                                          │
