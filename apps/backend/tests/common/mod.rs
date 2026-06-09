@@ -771,6 +771,15 @@ impl TestApp {
             .expect("post request")
     }
 
+    pub async fn put_json_with_session(&self, path: &str, body: serde_json::Value) -> Response {
+        self.client
+            .put(format!("{}{path}", self.base_url))
+            .json(&body)
+            .send()
+            .await
+            .expect("put request")
+    }
+
     pub async fn patch_json_with_session(&self, path: &str, body: serde_json::Value) -> Response {
         self.client
             .patch(format!("{}{path}", self.base_url))

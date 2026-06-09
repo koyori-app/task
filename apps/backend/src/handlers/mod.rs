@@ -18,5 +18,6 @@ pub mod personal_tokens;
 pub mod project_members;
 pub mod projects;
 pub mod statuses;
+pub mod task_comments;
 pub mod tasks;
 pub mod tenants;

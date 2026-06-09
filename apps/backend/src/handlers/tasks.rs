@@ -20,11 +20,12 @@ use crate::entities::{
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
+use crate::utils::task_activities::{priority_label, record_activity, status_name};
 use crate::AppState;
 
 // ─── Task lookup (UUID or KEY-N) ─────────────────────────────────────────
 
-async fn resolve_task(
+pub(crate) async fn resolve_task(
     state: &AppState,
     tenant_id: Uuid,
     project_id: Uuid,
@@ -56,6 +57,105 @@ async fn resolve_task(
         }
     }
     Err(AppError::NotFound)
+}
+
+async fn record_task_field_activities<C: ConnectionTrait>(
+    db: &C,
+    task_id: Uuid,
+    user_id: Uuid,
+    project_id: Uuid,
+    before: &tasks::Model,
+    payload: &UpdateTaskRequest,
+) -> Result<(), AppError> {
+    if let Some(new_status_id) = payload.status_id {
+        if new_status_id != before.status_id {
+            let from = status_name(db, before.status_id).await?;
+            let to = status_name(db, new_status_id).await?;
+            record_activity(
+                db,
+                task_id,
+                Some(user_id),
+                "status_changed",
+                serde_json::json!({ "from": from, "to": to }).into(),
+            )
+            .await?;
+        }
+    }
+    if let Some(new_priority) = payload.priority {
+        if new_priority != before.priority {
+            record_activity(
+                db,
+                task_id,
+                Some(user_id),
+                "priority_changed",
+                serde_json::json!({
+                    "from": priority_label(before.priority),
+                    "to": priority_label(new_priority),
+                })
+                .into(),
+            )
+            .await?;
+        }
+    }
+    if payload.clear_soft_deadline || payload.soft_deadline.is_some() {
+        let new_soft = if payload.clear_soft_deadline {
+            None
+        } else {
+            payload.soft_deadline.or(before.soft_deadline)
+        };
+        if new_soft != before.soft_deadline {
+            record_activity(
+                db,
+                task_id,
+                Some(user_id),
+                "deadline_changed",
+                serde_json::json!({
+                    "field": "soft_deadline",
+                    "from": before.soft_deadline,
+                    "to": new_soft,
+                })
+                .into(),
+            )
+            .await?;
+        }
+    }
+    if payload.clear_hard_deadline || payload.hard_deadline.is_some() {
+        let new_hard = if payload.clear_hard_deadline {
+            None
+        } else {
+            payload.hard_deadline.or(before.hard_deadline)
+        };
+        if new_hard != before.hard_deadline {
+            record_activity(
+                db,
+                task_id,
+                Some(user_id),
+                "deadline_changed",
+                serde_json::json!({
+                    "field": "hard_deadline",
+                    "from": before.hard_deadline,
+                    "to": new_hard,
+                })
+                .into(),
+            )
+            .await?;
+        }
+    }
+    if let Some(archived) = payload.is_archived {
+        if archived != before.is_archived {
+            let event_type = if archived { "archived" } else { "unarchived" };
+            record_activity(
+                db,
+                task_id,
+                Some(user_id),
+                event_type,
+                serde_json::json!({}).into(),
+            )
+            .await?;
+        }
+    }
+    let _ = project_id;
+    Ok(())
 }
 
 // ─── Seq ID counter ──────────────────────────────────────────────────────
@@ -495,6 +595,14 @@ pub async fn create_task(
         .await?;
     }
 
+    record_activity(
+        &txn,
+        model.id,
+        Some(auth.user_id),
+        "task_created",
+        serde_json::json!({}).into(),
+    )
+    .await?;
     txn.commit().await?;
     Ok((StatusCode::CREATED, Json(model)))
 }
@@ -554,6 +662,7 @@ pub async fn update_task(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+    let task_snapshot = task.clone();
     let task_id = task.id;
     let existing_soft = task.soft_deadline;
     let existing_hard = task.hard_deadline;
@@ -568,11 +677,13 @@ pub async fn update_task(
     };
 
     let mut active: tasks::ActiveModel = task.into();
-    if let Some(v) = payload.title { active.title = Set(v); }
+    if let Some(ref v) = payload.title {
+        active.title = Set(v.clone());
+    }
     if payload.clear_description {
         active.description = Set(None);
-    } else if let Some(v) = payload.description {
-        active.description = Set(Some(v));
+    } else if let Some(ref v) = payload.description {
+        active.description = Set(Some(v.clone()));
     }
     if let Some(v) = payload.status_id {
         let status = project_statuses::Entity::find_by_id(v)
@@ -674,10 +785,28 @@ pub async fn update_task(
         }
 
         let updated = active.update(&txn).await?;
+        record_task_field_activities(
+            &txn,
+            task_id,
+            auth.user_id,
+            project_id,
+            &task_snapshot,
+            &payload,
+        )
+        .await?;
         txn.commit().await?;
         Ok(Json(updated))
     } else {
         let updated = active.update(&txn).await?;
+        record_task_field_activities(
+            &txn,
+            task_id,
+            auth.user_id,
+            project_id,
+            &task_snapshot,
+            &payload,
+        )
+        .await?;
         txn.commit().await?;
         Ok(Json(updated))
     }
@@ -742,10 +871,22 @@ pub async fn archive_task(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+    let task_id = task.id;
+    let txn = state.db.begin().await?;
     let mut active: tasks::ActiveModel = task.into();
     active.is_archived = Set(true);
     active.updated_at = Set(chrono::Utc::now());
-    Ok(Json(active.update(&state.db).await?))
+    let updated = active.update(&txn).await?;
+    record_activity(
+        &txn,
+        task_id,
+        Some(auth.user_id),
+        "archived",
+        serde_json::json!({}).into(),
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(Json(updated))
 }
 
 #[axum::debug_handler]
@@ -773,10 +914,22 @@ pub async fn unarchive_task(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+    let task_id = task.id;
+    let txn = state.db.begin().await?;
     let mut active: tasks::ActiveModel = task.into();
     active.is_archived = Set(false);
     active.updated_at = Set(chrono::Utc::now());
-    Ok(Json(active.update(&state.db).await?))
+    let updated = active.update(&txn).await?;
+    record_activity(
+        &txn,
+        task_id,
+        Some(auth.user_id),
+        "unarchived",
+        serde_json::json!({}).into(),
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(Json(updated))
 }
 
 // ─── Assignees ───────────────────────────────────────────────────────────
@@ -856,15 +1009,30 @@ pub async fn add_assignee(
     if duplicate.is_some() {
         return Err(AppError::Conflict);
     }
+    let role = payload.role.clone();
+    let txn = state.db.begin().await?;
     let assignee = task_assignees::ActiveModel {
         id: Set(Uuid::new_v4()),
         task_id: Set(task.id),
         user_id: Set(payload.user_id),
-        role: Set(payload.role),
+        role: Set(role.clone()),
         assigned_at: Set(chrono::Utc::now()),
     }
-    .insert(&state.db)
+    .insert(&txn)
     .await?;
+    record_activity(
+        &txn,
+        task.id,
+        Some(auth.user_id),
+        "assignee_added",
+        serde_json::json!({
+            "user_id": payload.user_id,
+            "role": role,
+        })
+        .into(),
+    )
+    .await?;
+    txn.commit().await?;
     Ok((StatusCode::CREATED, Json(assignee)))
 }
 
@@ -945,7 +1113,17 @@ pub async fn remove_assignee(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
-    task_assignees::Entity::delete_by_id(assignee.id).exec(&state.db).await?;
+    let txn = state.db.begin().await?;
+    task_assignees::Entity::delete_by_id(assignee.id).exec(&txn).await?;
+    record_activity(
+        &txn,
+        task.id,
+        Some(auth.user_id),
+        "assignee_removed",
+        serde_json::json!({ "user_id": user_id }).into(),
+    )
+    .await?;
+    txn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1122,6 +1300,28 @@ pub async fn add_relation(
     }
     .insert(&txn)
     .await?;
+    let target_task = tasks::Entity::find_by_id(payload.target_task_id)
+        .filter(tasks::Column::ProjectId.eq(project_id))
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let relation_type = if payload.relation_type == "blocked_by" {
+        "blocks"
+    } else {
+        payload.relation_type.as_str()
+    };
+    record_activity(
+        &txn,
+        task.id,
+        Some(auth.user_id),
+        "relation_added",
+        serde_json::json!({
+            "type": relation_type,
+            "target_seq_id": target_task.seq_id,
+        })
+        .into(),
+    )
+    .await?;
     txn.commit().await?;
 
     Ok((StatusCode::CREATED, Json(rel)))
@@ -1160,6 +1360,35 @@ pub async fn remove_relation(
     if rel.blocker_task_id != task.id && rel.blocked_task_id != task.id {
         return Err(AppError::NotFound);
     }
-    task_relations::Entity::delete_by_id(relation_id).exec(&state.db).await?;
+    let other_task_id = if rel.blocker_task_id == task.id {
+        rel.blocked_task_id
+    } else {
+        rel.blocker_task_id
+    };
+    let other_task = tasks::Entity::find_by_id(other_task_id)
+        .filter(tasks::Column::ProjectId.eq(project_id))
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let relation_type = if rel.blocker_task_id == task.id {
+        "blocks"
+    } else {
+        "blocked_by"
+    };
+    let txn = state.db.begin().await?;
+    task_relations::Entity::delete_by_id(relation_id).exec(&txn).await?;
+    record_activity(
+        &txn,
+        task.id,
+        Some(auth.user_id),
+        "relation_removed",
+        serde_json::json!({
+            "type": relation_type,
+            "target_seq_id": other_task.seq_id,
+        })
+        .into(),
+    )
+    .await?;
+    txn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }

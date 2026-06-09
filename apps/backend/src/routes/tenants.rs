@@ -47,7 +47,12 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::tasks::remove_assignee))
                         .routes(routes!(crate::handlers::tasks::list_relations))
                         .routes(routes!(crate::handlers::tasks::add_relation))
-                        .routes(routes!(crate::handlers::tasks::remove_relation)),
+                        .routes(routes!(crate::handlers::tasks::remove_relation))
+                        .routes(routes!(crate::handlers::task_comments::list_comments))
+                        .routes(routes!(crate::handlers::task_comments::create_comment))
+                        .routes(routes!(crate::handlers::task_comments::update_comment))
+                        .routes(routes!(crate::handlers::task_comments::delete_comment))
+                        .routes(routes!(crate::handlers::task_comments::list_activities)),
                 )
                 .nest(
                     "/{project_id}/statuses",
