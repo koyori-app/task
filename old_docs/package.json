@@ -10,7 +10,7 @@
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
-    "nuxt": "4.4.4",
+    "nuxt": "4.4.8",
     "nuxt-component-meta": "0.17.2",
     "shadcn-docs-nuxt": "1.2.2",
     "vue": "3.5.35",
