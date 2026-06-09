@@ -595,15 +595,15 @@ pub async fn create_task(
         .await?;
     }
 
-    txn.commit().await?;
     record_activity(
-        &state.db,
+        &txn,
         model.id,
         Some(auth.user_id),
         "task_created",
         serde_json::json!({}).into(),
     )
     .await?;
+    txn.commit().await?;
     Ok((StatusCode::CREATED, Json(model)))
 }
 

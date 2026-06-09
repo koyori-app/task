@@ -2,7 +2,7 @@ use axum::{Json, extract::{Path, State}, http::StatusCode};
 use axum_valid::Valid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    prelude::Uuid,
+    TransactionTrait, prelude::Uuid,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -247,8 +247,9 @@ pub async fn create_comment(
         }
     }
 
-    let _mentions = extract_mentions(&state.db, &payload.body).await?;
+    let _mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
 
+    let txn = state.db.begin().await?;
     let comment = task_comments::ActiveModel {
         id: Set(Uuid::new_v4()),
         task_id: Set(task.id),
@@ -259,17 +260,18 @@ pub async fn create_comment(
         updated_at: Set(chrono::Utc::now()),
         deleted_at: Set(None),
     }
-    .insert(&state.db)
+    .insert(&txn)
     .await?;
 
     record_activity(
-        &state.db,
+        &txn,
         task.id,
         Some(auth.user_id),
         "comment_added",
         serde_json::json!({ "comment_id": comment.id }).into(),
     )
     .await?;
+    txn.commit().await?;
 
     Ok((StatusCode::CREATED, Json(comment)))
 }
@@ -320,7 +322,7 @@ pub async fn update_comment(
         return Err(AppError::Forbidden);
     }
 
-    let _mentions = extract_mentions(&state.db, &payload.body).await?;
+    let _mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
 
     let mut active: task_comments::ActiveModel = comment.into();
     active.body = Set(payload.body);

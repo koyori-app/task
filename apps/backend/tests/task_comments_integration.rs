@@ -132,7 +132,7 @@ async fn task_comments_integration_suite() {
         1
     );
 
-    let other = app.insert_user(true, false).await;
+    let other = app.insert_user(false, false).await;
     app.reset_session_client();
     app.login_session_no_content(&other.email, &other.password).await;
     let forbidden_update = app
