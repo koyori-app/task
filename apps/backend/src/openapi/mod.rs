@@ -37,6 +37,10 @@ fn register_tags(openapi: &mut OpenApi) {
         TagBuilder::new().name("Projects").description(Some("プロジェクト管理")).build(),
         TagBuilder::new().name("Project Members").description(Some("プロジェクトメンバー管理")).build(),
         TagBuilder::new().name("Labels").description(Some("ラベル一覧")).build(),
+        TagBuilder::new()
+            .name("Custom Fields")
+            .description(Some("プロジェクトカスタムフィールド定義"))
+            .build(),
         TagBuilder::new().name("Personal Tokens").description(Some("パーソナルアクセストークン（PAT）管理")).build(),
         TagBuilder::new().name("Drive Files").description(Some("ドライブ — ファイル操作")).build(),
         TagBuilder::new().name("Drive Folders").description(Some("ドライブ — フォルダ管理")).build(),
