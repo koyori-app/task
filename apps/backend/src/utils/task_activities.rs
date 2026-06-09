@@ -86,9 +86,10 @@ pub async fn extract_mentions<C: ConnectionTrait>(
         .all(db)
         .await?;
 
-    let mut user_ids = Vec::new();
+    let mut user_ids: Vec<Uuid> = Vec::new();
+    let mut seen_ids: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
     for u in matched {
-        if member_ids.contains(&u.id) && !user_ids.contains(&u.id) {
+        if member_ids.contains(&u.id) && seen_ids.insert(u.id) {
             user_ids.push(u.id);
         }
     }

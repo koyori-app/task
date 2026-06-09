@@ -872,18 +872,20 @@ pub async fn archive_task(
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let task_id = task.id;
+    let txn = state.db.begin().await?;
     let mut active: tasks::ActiveModel = task.into();
     active.is_archived = Set(true);
     active.updated_at = Set(chrono::Utc::now());
-    let updated = active.update(&state.db).await?;
+    let updated = active.update(&txn).await?;
     record_activity(
-        &state.db,
+        &txn,
         task_id,
         Some(auth.user_id),
         "archived",
         serde_json::json!({}).into(),
     )
     .await?;
+    txn.commit().await?;
     Ok(Json(updated))
 }
 
@@ -913,18 +915,20 @@ pub async fn unarchive_task(
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let task_id = task.id;
+    let txn = state.db.begin().await?;
     let mut active: tasks::ActiveModel = task.into();
     active.is_archived = Set(false);
     active.updated_at = Set(chrono::Utc::now());
-    let updated = active.update(&state.db).await?;
+    let updated = active.update(&txn).await?;
     record_activity(
-        &state.db,
+        &txn,
         task_id,
         Some(auth.user_id),
         "unarchived",
         serde_json::json!({}).into(),
     )
     .await?;
+    txn.commit().await?;
     Ok(Json(updated))
 }
 
@@ -1006,6 +1010,7 @@ pub async fn add_assignee(
         return Err(AppError::Conflict);
     }
     let role = payload.role.clone();
+    let txn = state.db.begin().await?;
     let assignee = task_assignees::ActiveModel {
         id: Set(Uuid::new_v4()),
         task_id: Set(task.id),
@@ -1013,10 +1018,10 @@ pub async fn add_assignee(
         role: Set(role.clone()),
         assigned_at: Set(chrono::Utc::now()),
     }
-    .insert(&state.db)
+    .insert(&txn)
     .await?;
     record_activity(
-        &state.db,
+        &txn,
         task.id,
         Some(auth.user_id),
         "assignee_added",
@@ -1027,6 +1032,7 @@ pub async fn add_assignee(
         .into(),
     )
     .await?;
+    txn.commit().await?;
     Ok((StatusCode::CREATED, Json(assignee)))
 }
 
@@ -1107,15 +1113,17 @@ pub async fn remove_assignee(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    let txn = state.db.begin().await?;
+    task_assignees::Entity::delete_by_id(assignee.id).exec(&txn).await?;
     record_activity(
-        &state.db,
+        &txn,
         task.id,
         Some(auth.user_id),
         "assignee_removed",
         serde_json::json!({ "user_id": user_id }).into(),
     )
     .await?;
-    task_assignees::Entity::delete_by_id(assignee.id).exec(&state.db).await?;
+    txn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1367,8 +1375,10 @@ pub async fn remove_relation(
     } else {
         "blocked_by"
     };
+    let txn = state.db.begin().await?;
+    task_relations::Entity::delete_by_id(relation_id).exec(&txn).await?;
     record_activity(
-        &state.db,
+        &txn,
         task.id,
         Some(auth.user_id),
         "relation_removed",
@@ -1379,6 +1389,6 @@ pub async fn remove_relation(
         .into(),
     )
     .await?;
-    task_relations::Entity::delete_by_id(relation_id).exec(&state.db).await?;
+    txn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }

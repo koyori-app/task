@@ -15,7 +15,7 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
-use crate::utils::task_activities::{extract_mentions, record_activity};
+use crate::utils::task_activities::record_activity;
 use crate::AppState;
 
 #[derive(Serialize, ToSchema)]
@@ -247,8 +247,6 @@ pub async fn create_comment(
         }
     }
 
-    let _mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
-
     let txn = state.db.begin().await?;
     let comment = task_comments::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -321,8 +319,6 @@ pub async fn update_comment(
     if comment.user_id != auth.user_id {
         return Err(AppError::Forbidden);
     }
-
-    let _mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
 
     let mut active: task_comments::ActiveModel = comment.into();
     active.body = Set(payload.body);
