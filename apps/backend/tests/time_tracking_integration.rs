@@ -45,6 +45,8 @@ async fn setup_task_fixture(app: &TestApp, owner_id: Uuid) -> TaskFixture {
         hard_deadline: Set(None),
         estimated_minutes: Set(Some(180)),
         is_archived: Set(false),
+        completed_at: Set(None),
+        sprint_id: Set(None),
         created_by: Set(owner_id),
         created_at: Set(chrono::Utc::now()),
         updated_at: Set(chrono::Utc::now()),
