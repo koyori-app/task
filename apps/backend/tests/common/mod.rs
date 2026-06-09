@@ -121,6 +121,18 @@ async fn ensure_schema(db: &DatabaseConnection) {
                 .execute_unprepared("DROP INDEX IF EXISTS idx_sprints_active_per_project")
                 .await;
 
+            db.execute_unprepared(
+                r#"
+ALTER TABLE projects DROP CONSTRAINT IF EXISTS idx_projects_personal_owner;
+DROP INDEX IF EXISTS idx_projects_personal_owner;
+ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS is_personal BOOLEAN NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS personal_owner_id UUID REFERENCES users(id) ON DELETE CASCADE;
+"#,
+            )
+            .await
+            .expect("prepare personal project columns");
+
             db.get_schema_registry("backend::entities::*")
                 .sync(db)
                 .await
@@ -173,6 +185,10 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS sprint_id UUID REFERENCES sprints(id)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sprints_active_per_project
     ON sprints(project_id)
     WHERE status = 'active';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal_owner
+    ON projects(tenant_id, personal_owner_id)
+    WHERE is_personal = true;
 "#,
             )
             .await
@@ -550,6 +566,8 @@ impl TestApp {
             icon_emoji: Set(None),
             icon_url: Set(None),
             key: Set("GHUB".into()),
+            is_personal: Set(false),
+            personal_owner_id: Set(None),
         }
         .insert(&self.state.db)
         .await
