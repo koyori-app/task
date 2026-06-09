@@ -15,7 +15,7 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
-use crate::utils::task_activities::record_activity;
+use crate::utils::task_activities::{extract_mentions, record_activity};
 use crate::AppState;
 
 #[derive(Serialize, ToSchema)]
@@ -148,6 +148,7 @@ pub async fn list_comments(
         }
     }
 
+    // トップレベル: 新しい順、リプライ: 古い順（スレッド内時系列）
     top_level.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
     let comments = top_level
@@ -157,9 +158,9 @@ pub async fn list_comments(
                 .get(&parent.user_id)
                 .cloned()
                 .unwrap_or_else(|| "unknown".into());
-            let replies = replies_by_parent
-                .remove(&parent.id)
-                .unwrap_or_default()
+            let mut thread_replies = replies_by_parent.remove(&parent.id).unwrap_or_default();
+            thread_replies.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            let replies = thread_replies
                 .into_iter()
                 .map(|reply| {
                     let reply_user = users_map
@@ -247,6 +248,9 @@ pub async fn create_comment(
         }
     }
 
+    // TODO: mention notification — メンション対象ユーザーへの通知をここで実装する
+    let _mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
+
     let txn = state.db.begin().await?;
     let comment = task_comments::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -320,10 +324,25 @@ pub async fn update_comment(
         return Err(AppError::Forbidden);
     }
 
+    // TODO: mention notification — メンション対象ユーザーへの通知をここで実装する
+    let _mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
+
+    let comment_id = comment.id;
+    let txn = state.db.begin().await?;
     let mut active: task_comments::ActiveModel = comment.into();
     active.body = Set(payload.body);
     active.updated_at = Set(chrono::Utc::now());
-    Ok(Json(active.update(&state.db).await?))
+    let updated = active.update(&txn).await?;
+    record_activity(
+        &txn,
+        task.id,
+        Some(auth.user_id),
+        "comment_edited",
+        serde_json::json!({ "comment_id": comment_id }).into(),
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(Json(updated))
 }
 
 #[axum::debug_handler]
@@ -358,16 +377,28 @@ pub async fn delete_comment(
         .await?
         .ok_or(AppError::NotFound)?;
     if comment.deleted_at.is_some() {
-        return Ok(StatusCode::NO_CONTENT);
+        return Err(AppError::NotFound);
     }
     let is_owner = is_tenant_owner(&state, tenant_id, auth.user_id).await?;
     if comment.user_id != auth.user_id && !is_owner {
         return Err(AppError::Forbidden);
     }
+    let comment_id = comment.id;
+    let task_id = task.id;
+    let txn = state.db.begin().await?;
     let mut active: task_comments::ActiveModel = comment.into();
     active.deleted_at = Set(Some(chrono::Utc::now()));
     active.updated_at = Set(chrono::Utc::now());
-    active.update(&state.db).await?;
+    active.update(&txn).await?;
+    record_activity(
+        &txn,
+        task_id,
+        Some(auth.user_id),
+        "comment_deleted",
+        serde_json::json!({ "comment_id": comment_id }).into(),
+    )
+    .await?;
+    txn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
