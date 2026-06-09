@@ -20,6 +20,7 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
+use crate::utils::notifications::{notify_comment_added, notify_mentioned};
 use crate::utils::task_activities::{extract_mentions, record_activity};
 
 #[derive(Serialize, ToSchema)]
@@ -257,8 +258,7 @@ pub async fn create_comment(
         }
     }
 
-    // TODO: mention notification — メンション対象ユーザーへの通知をここで実装する
-    let _mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
+    let mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
 
     let txn = state.db.begin().await?;
     let comment = task_comments::ActiveModel {
@@ -282,6 +282,8 @@ pub async fn create_comment(
         serde_json::json!({ "comment_id": comment.id }).into(),
     )
     .await?;
+    notify_mentioned(&txn, project_id, task.id, &mentions, comment.id, auth.user_id).await?;
+    notify_comment_added(&txn, project_id, task.id, comment.id, auth.user_id, &mentions).await?;
     txn.commit().await?;
 
     Ok((StatusCode::CREATED, Json(comment)))
@@ -334,7 +336,6 @@ pub async fn update_comment(
         return Err(AppError::Forbidden);
     }
 
-    // TODO: mention notification — メンション対象ユーザーへの通知をここで実装する
     let _mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
 
     let comment_id = comment.id;
