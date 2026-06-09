@@ -21,6 +21,7 @@ pub mod projects;
 pub mod sprints;
 pub mod statuses;
 pub mod task_comments;
+pub mod task_extensions;
 pub mod task_notifications;
 pub mod tasks;
 pub mod tenants;

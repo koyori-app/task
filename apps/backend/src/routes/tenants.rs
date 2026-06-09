@@ -36,6 +36,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
                     OpenApiRouter::<AppState>::new()
                         .routes(routes!(crate::handlers::tasks::list_tasks))
                         .routes(routes!(crate::handlers::tasks::create_task))
+                        .routes(routes!(crate::handlers::task_extensions::search_tasks))
+                        .routes(routes!(crate::handlers::task_extensions::bulk_update_tasks))
                         .routes(routes!(crate::handlers::tasks::get_task))
                         .routes(routes!(crate::handlers::tasks::update_task))
                         .routes(routes!(crate::handlers::tasks::delete_task))
@@ -63,7 +65,18 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::time_tracking::get_timer_status))
                         .routes(routes!(crate::handlers::task_notifications::list_watchers))
                         .routes(routes!(crate::handlers::task_notifications::start_watch))
-                        .routes(routes!(crate::handlers::task_notifications::stop_watch)),
+                        .routes(routes!(crate::handlers::task_notifications::stop_watch))
+                        .routes(routes!(crate::handlers::task_extensions::list_task_attachments))
+                        .routes(routes!(crate::handlers::task_extensions::attach_task_file))
+                        .routes(routes!(crate::handlers::task_extensions::detach_task_file)),
+                )
+                .nest(
+                    "/{project_id}/task-views",
+                    OpenApiRouter::<AppState>::new()
+                        .routes(routes!(crate::handlers::task_extensions::list_task_views))
+                        .routes(routes!(crate::handlers::task_extensions::create_task_view))
+                        .routes(routes!(crate::handlers::task_extensions::update_task_view))
+                        .routes(routes!(crate::handlers::task_extensions::delete_task_view)),
                 )
                 .nest(
                     "/{project_id}/statuses",

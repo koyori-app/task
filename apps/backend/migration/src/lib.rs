@@ -31,6 +31,7 @@ mod m20260607_add_tasks_completed_at;
 mod m20260607_create_task_comments_and_activities;
 mod m20260609_create_custom_fields;
 mod m20260609_create_task_notifications;
+mod m20260610_create_task_extensions;
 mod m20260529010000_create_passkeys;
 mod m20260529100000_auth_2fa;
 mod m20260609_add_personal_projects;
@@ -72,6 +73,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260607_create_task_comments_and_activities::Migration),
             Box::new(m20260609_create_custom_fields::Migration),
             Box::new(m20260609_create_task_notifications::Migration),
+            Box::new(m20260610_create_task_extensions::Migration),
             Box::new(m20260529010000_create_passkeys::Migration),
             Box::new(m20260529100000_auth_2fa::Migration),
             Box::new(m20260609_add_personal_projects::Migration),
