@@ -19,5 +19,6 @@ pub mod project_members;
 pub mod projects;
 pub mod statuses;
 pub mod task_comments;
+pub mod task_extensions;
 pub mod tasks;
 pub mod tenants;
