@@ -176,6 +176,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sprints_active_per_project
             .await
             .expect("prepare sprints schema");
 
+            db.execute_unprepared(
+                r#"
+ALTER TABLE projects DROP CONSTRAINT IF EXISTS idx_projects_personal_owner;
+DROP INDEX IF EXISTS idx_projects_personal_owner;
+ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS is_personal BOOLEAN NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS personal_owner_id UUID REFERENCES users(id) ON DELETE CASCADE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal_owner
+    ON projects(tenant_id, personal_owner_id)
+    WHERE is_personal = true;
+"#,
+            )
+            .await
+            .expect("prepare personal project columns");
+
         })
         .await;
 }
@@ -550,6 +565,8 @@ impl TestApp {
             icon_emoji: Set(None),
             icon_url: Set(None),
             key: Set("GHUB".into()),
+            is_personal: Set(false),
+            personal_owner_id: Set(None),
         }
         .insert(&self.state.db)
         .await

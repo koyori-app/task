@@ -33,6 +33,7 @@ mod m20260609_create_custom_fields;
 mod m20260609_create_task_notifications;
 mod m20260529010000_create_passkeys;
 mod m20260529100000_auth_2fa;
+mod m20260609_add_personal_projects;
 
 pub struct Migrator;
 
@@ -73,6 +74,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260609_create_task_notifications::Migration),
             Box::new(m20260529010000_create_passkeys::Migration),
             Box::new(m20260529100000_auth_2fa::Migration),
+            Box::new(m20260609_add_personal_projects::Migration),
         ]
     }
 }
