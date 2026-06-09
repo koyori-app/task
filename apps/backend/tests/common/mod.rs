@@ -974,12 +974,11 @@ pub async fn insert_personal_token_for_test(
     let stmt = Statement::from_sql_and_values(
         db.get_database_backend(),
         r#"INSERT INTO personal_tokens
-            (id, name, token, token_hash, token_last_four, user_id, tenant_id, revoked, scopes)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, false, '["admin:tenant"]'::json)"#,
+            (id, name, token_hash, token_last_four, user_id, tenant_id, revoked, scopes)
+            VALUES ($1, $2, $3, $4, $5, $6, false, '["admin:tenant"]'::json)"#,
         vec![
             id.into(),
             "integration-test".into(),
-            token.clone().into(),
             token_hash.into(),
             last_four.into(),
             user_id.into(),
