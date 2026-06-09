@@ -93,6 +93,10 @@ fn register_tags(openapi: &mut OpenApi) {
             .description(Some("GitHub App 連携・Webhook"))
             .build(),
         TagBuilder::new()
+            .name("My Tasks")
+            .description(Some("個人todo管理 — My Tasks ビュー・クイックキャプチャ"))
+            .build(),
+        TagBuilder::new()
             .name("Notifications")
             .description(Some("in-app 通知・ウォッチャー・通知設定"))
             .build(),

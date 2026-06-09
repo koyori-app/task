@@ -19,6 +19,11 @@ pub struct Model {
     #[schema(nullable)]
     pub icon_url: Option<String>,
     pub key: String,
+    #[serde(default)]
+    pub is_personal: bool,
+    #[sea_orm(nullable)]
+    #[schema(value_type = Option<String>, format = "uuid", nullable)]
+    pub personal_owner_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
