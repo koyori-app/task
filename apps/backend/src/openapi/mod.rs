@@ -58,6 +58,7 @@ fn register_tags(openapi: &mut OpenApi) {
             .description(Some("管理者 — システム設定"))
             .build(),
         TagBuilder::new().name("GitHub").description(Some("GitHub App 連携・Webhook")).build(),
+        TagBuilder::new().name("Notifications").description(Some("in-app 通知・ウォッチャー・通知設定")).build(),
     ]);
 }
 
