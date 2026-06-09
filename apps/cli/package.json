@@ -1,0 +1,23 @@
+{
+  "name": "@koyori/task-cli",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "task": "./bin/task.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "js-yaml": "^4.1.1",
+    "openapi-fetch": "^0.17.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.0",
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.0.0",
+    "typescript": "^5.0.0"
+  }
+}
