@@ -21,6 +21,7 @@ pub mod redis;
 pub mod smtp;
 pub mod storage;
 pub mod system_settings;
+pub mod notifications;
 pub mod task_activities;
 pub mod totp;
 pub mod validation;
