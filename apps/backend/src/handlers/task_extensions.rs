@@ -25,6 +25,7 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
+use crate::utils::db::is_postgres_unique_violation;
 use crate::utils::drive::content_url;
 use crate::utils::task_activities::{record_activity, status_name};
 use crate::AppState;
@@ -490,11 +491,19 @@ pub struct CreateTaskViewRequest {
     #[serde(default)]
     pub sort: serde_json::Value,
     #[serde(default = "default_view_type")]
+    #[validate(custom(function = "validate_view_type"))]
     pub view_type: String,
 }
 
 fn default_view_type() -> String {
     "list".into()
+}
+
+fn validate_view_type(view_type: &str) -> Result<(), validator::ValidationError> {
+    match view_type {
+        "board" | "list" | "table" => Ok(()),
+        _ => Err(validator::ValidationError::new("view_type")),
+    }
 }
 
 #[derive(Validate, Deserialize, ToSchema)]
@@ -504,6 +513,7 @@ pub struct UpdateTaskViewRequest {
     pub is_shared: Option<bool>,
     pub filters: Option<serde_json::Value>,
     pub sort: Option<serde_json::Value>,
+    #[validate(custom(function = "validate_view_type"))]
     pub view_type: Option<String>,
 }
 
@@ -678,25 +688,25 @@ pub async fn list_task_attachments(
     let rows = task_attachments::Entity::find()
         .filter(task_attachments::Column::TaskId.eq(task.id))
         .order_by_desc(task_attachments::Column::CreatedAt)
+        .find_also_related(drive_files::Entity)
         .all(&state.db)
         .await?;
 
-    let mut attachments = Vec::with_capacity(rows.len());
-    for row in rows {
-        let file = drive_files::Entity::find_by_id(row.drive_file_id)
-            .one(&state.db)
-            .await?
-            .ok_or(AppError::NotFound)?;
-        attachments.push(TaskAttachmentResponse {
-            id: row.id,
-            drive_file_id: row.drive_file_id,
-            name: file.name,
-            mime_type: file.mime_type,
-            size: file.size,
-            url: content_url(file.id),
-            created_at: row.created_at,
-        });
-    }
+    let attachments = rows
+        .into_iter()
+        .map(|(row, file)| {
+            let file = file.ok_or(AppError::NotFound)?;
+            Ok(TaskAttachmentResponse {
+                id: row.id,
+                drive_file_id: row.drive_file_id,
+                name: file.name,
+                mime_type: file.mime_type,
+                size: file.size,
+                url: content_url(file.id),
+                created_at: row.created_at,
+            })
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
 
     Ok(Json(TaskAttachmentListResponse { attachments }))
 }
@@ -729,15 +739,30 @@ pub async fn attach_task_file(
         }
     }
 
-    let model = task_attachments::ActiveModel {
+    let already_attached = task_attachments::Entity::find()
+        .filter(task_attachments::Column::TaskId.eq(task.id))
+        .filter(task_attachments::Column::DriveFileId.eq(payload.drive_file_id))
+        .one(&state.db)
+        .await?
+        .is_some();
+    if already_attached {
+        return Err(AppError::Conflict);
+    }
+
+    let model = match (task_attachments::ActiveModel {
         id: Set(Uuid::new_v4()),
         task_id: Set(task.id),
         drive_file_id: Set(payload.drive_file_id),
         created_by: Set(auth.user_id),
         created_at: Set(chrono::Utc::now()),
-    }
+    })
     .insert(&state.db)
-    .await?;
+    .await
+    {
+        Ok(model) => model,
+        Err(e) if is_postgres_unique_violation(&e) => return Err(AppError::Conflict),
+        Err(e) => return Err(e.into()),
+    };
 
     Ok((
         StatusCode::CREATED,
