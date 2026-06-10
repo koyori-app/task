@@ -496,3 +496,46 @@ pub async fn get_timer_status(
         },
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration;
+
+    #[test]
+    fn elapsed_minutes_from_start_zero_seconds() {
+        assert_eq!(elapsed_minutes_from_start(Utc::now()), 1);
+    }
+
+    #[test]
+    fn elapsed_minutes_from_start_fifty_nine_seconds() {
+        assert_eq!(
+            elapsed_minutes_from_start(Utc::now() - Duration::seconds(59)),
+            1
+        );
+    }
+
+    #[test]
+    fn elapsed_minutes_from_start_sixty_seconds() {
+        assert_eq!(
+            elapsed_minutes_from_start(Utc::now() - Duration::seconds(60)),
+            1
+        );
+    }
+
+    #[test]
+    fn elapsed_minutes_from_start_sixty_one_seconds() {
+        assert_eq!(
+            elapsed_minutes_from_start(Utc::now() - Duration::seconds(61)),
+            2
+        );
+    }
+
+    #[test]
+    fn elapsed_minutes_from_start_future_timestamp() {
+        assert_eq!(
+            elapsed_minutes_from_start(Utc::now() + Duration::seconds(30)),
+            1
+        );
+    }
+}
