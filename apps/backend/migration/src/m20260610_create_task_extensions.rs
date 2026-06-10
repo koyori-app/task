@@ -3,17 +3,23 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
+fn search_ts_config() -> &'static str {
+    match std::env::var("USE_PG_BIGM") {
+        Ok(v) if v == "1" || v.eq_ignore_ascii_case("true") => "public.pg_bigm",
+        _ => "pg_catalog.simple",
+    }
+}
+
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .get_connection()
-            .execute_unprepared(
-                r#"
+        let ts_config = search_ts_config();
+        let sql = format!(
+            r#"
 ALTER TABLE tasks
     ADD COLUMN IF NOT EXISTS search_vector tsvector
     GENERATED ALWAYS AS (
-        to_tsvector('pg_catalog.simple',
+        to_tsvector('{ts_config}',
             coalesce(title, '') || ' ' || coalesce(description, ''))
     ) STORED;
 
@@ -44,9 +50,9 @@ CREATE TABLE IF NOT EXISTS task_attachments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_task_attachments_task ON task_attachments(task_id);
-"#,
-            )
-            .await?;
+"#
+        );
+        manager.get_connection().execute_unprepared(&sql).await?;
         Ok(())
     }
 

@@ -37,6 +37,14 @@ fn use_pg_bigm_search() -> bool {
         .unwrap_or(false)
 }
 
+fn search_ts_config() -> &'static str {
+    if use_pg_bigm_search() {
+        "public.pg_bigm"
+    } else {
+        "pg_catalog.simple"
+    }
+}
+
 #[derive(Deserialize, ToSchema, utoipa::IntoParams)]
 pub struct SearchTasksQuery {
     pub q: String,
@@ -169,18 +177,21 @@ async fn search_tasks_tsvector(
     limit: u64,
     offset: u64,
 ) -> Result<Json<SearchTasksResponse>, AppError> {
-    let count_sql = r#"
+    let ts_config = search_ts_config();
+    let count_sql = format!(
+        r#"
         SELECT COUNT(*)::bigint AS cnt
         FROM tasks
         WHERE project_id = $1
           AND deleted_at IS NULL
-          AND search_vector @@ plainto_tsquery('pg_catalog.simple', $2)
-    "#;
+          AND search_vector @@ plainto_tsquery('{ts_config}', $2)
+    "#
+    );
     let count_result = state
         .db
         .query_one_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
-            count_sql,
+            &count_sql,
             [project_id.into(), query.into()],
         ))
         .await?;
@@ -188,26 +199,28 @@ async fn search_tasks_tsvector(
         .and_then(|r| r.try_get_by_index(0).ok())
         .unwrap_or(0);
 
-    let search_sql = r#"
+    let search_sql = format!(
+        r#"
         SELECT id, seq_id, title,
-               ts_rank(search_vector, plainto_tsquery('pg_catalog.simple', $2))::real AS score,
+               ts_rank(search_vector, plainto_tsquery('{ts_config}', $2))::real AS score,
                ts_headline(
-                   'pg_catalog.simple',
+                   '{ts_config}',
                    coalesce(title, '') || ' ' || coalesce(description, ''),
-                   plainto_tsquery('pg_catalog.simple', $2)
+                   plainto_tsquery('{ts_config}', $2)
                ) AS highlight
         FROM tasks
         WHERE project_id = $1
           AND deleted_at IS NULL
-          AND search_vector @@ plainto_tsquery('pg_catalog.simple', $2)
+          AND search_vector @@ plainto_tsquery('{ts_config}', $2)
         ORDER BY score DESC
         LIMIT $3 OFFSET $4
-    "#;
+    "#
+    );
     let rows = state
         .db
         .query_all_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
-            search_sql,
+            &search_sql,
             [
                 project_id.into(),
                 query.into(),
