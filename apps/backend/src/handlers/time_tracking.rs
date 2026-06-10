@@ -6,8 +6,8 @@ use axum::{
 use axum_valid::Valid;
 use chrono::{NaiveDate, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult,
-    QueryFilter, QueryOrder, Statement, prelude::Uuid,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DbErr, EntityTrait,
+    FromQueryResult, QueryFilter, QueryOrder, Statement, prelude::Uuid,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -19,7 +19,7 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
-use crate::utils::db::with_transaction;
+use crate::utils::db::{is_postgres_unique_violation, with_transaction};
 use crate::AppState;
 
 #[derive(Debug, FromQueryResult)]
@@ -370,13 +370,19 @@ pub async fn start_timer(
     if existing.is_some() {
         return Err(AppError::Conflict);
     }
-    let timer = task_timers::ActiveModel {
+    let timer = match (task_timers::ActiveModel {
         task_id: Set(task.id),
         user_id: Set(auth.user_id),
         started_at: Set(Utc::now()),
-    }
+    })
     .insert(&state.db)
-    .await?;
+    .await
+    {
+        Ok(timer) => timer,
+        Err(DbErr::RecordNotInserted) => return Err(AppError::Conflict),
+        Err(e) if is_postgres_unique_violation(&e) => return Err(AppError::Conflict),
+        Err(e) => return Err(e.into()),
+    };
     Ok((StatusCode::CREATED, Json(timer)))
 }
 
