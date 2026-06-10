@@ -21,3 +21,4 @@ pub mod statuses;
 pub mod task_comments;
 pub mod tasks;
 pub mod tenants;
+pub mod time_tracking;

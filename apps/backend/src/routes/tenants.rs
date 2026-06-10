@@ -52,7 +52,15 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::task_comments::create_comment))
                         .routes(routes!(crate::handlers::task_comments::update_comment))
                         .routes(routes!(crate::handlers::task_comments::delete_comment))
-                        .routes(routes!(crate::handlers::task_comments::list_activities)),
+                        .routes(routes!(crate::handlers::task_comments::list_activities))
+                        .routes(routes!(crate::handlers::time_tracking::get_time_summary))
+                        .routes(routes!(crate::handlers::time_tracking::list_time_logs))
+                        .routes(routes!(crate::handlers::time_tracking::create_time_log))
+                        .routes(routes!(crate::handlers::time_tracking::update_time_log))
+                        .routes(routes!(crate::handlers::time_tracking::delete_time_log))
+                        .routes(routes!(crate::handlers::time_tracking::start_timer))
+                        .routes(routes!(crate::handlers::time_tracking::stop_timer))
+                        .routes(routes!(crate::handlers::time_tracking::get_timer_status)),
                 )
                 .nest(
                     "/{project_id}/statuses",
