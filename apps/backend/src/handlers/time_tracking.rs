@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
-use chrono::{NaiveDate, Utc};
+use chrono::{Duration, NaiveDate, Utc};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DbErr, EntityTrait,
     FromQueryResult, QueryFilter, QueryOrder, Statement, prelude::Uuid,
@@ -432,7 +432,7 @@ pub async fn stop_timer(
                 None => return Err(AppError::Conflict),
             };
             let logged_minutes = elapsed_minutes_from_start(timer.started_at);
-            let logged_at = Utc::now().date_naive();
+            let logged_at = (Utc::now() + Duration::hours(9)).date_naive();
             let log = time_logs::ActiveModel {
                 id: Set(Uuid::new_v4()),
                 task_id: Set(task_id),
