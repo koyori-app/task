@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import { usePageContext } from 'vike-vue/usePageContext';
 import { useDefaultApi } from '@/composables/useDefaultApi';
 import type { components } from '@/generated/api';
 
@@ -8,14 +9,24 @@ type Label = components['schemas']['crate.entities.labels.Model'];
 const labels = ref<Label[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
+const pageContext = usePageContext();
 
 onMounted(async () => {
   try {
     loading.value = true;
     error.value = null;
 
+    const { tenant, projectKey } = pageContext.routeParams;
+    if (typeof tenant !== 'string' || typeof projectKey !== 'string') {
+      error.value = 'Missing route parameters';
+      return;
+    }
+
     const api = useDefaultApi();
-    const { data, error: fetchError } = await api.GET('/v1/labels');
+    const { data, error: fetchError } = await api.GET(
+      '/v1/tenants/{tenant_id}/projects/{project_id}/labels',
+      { params: { path: { tenant_id: tenant, project_id: projectKey } } },
+    );
     if (fetchError) {
       error.value = 'Failed to fetch labels';
     } else {
@@ -38,7 +49,9 @@ onMounted(async () => {
       <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center h-32">
         <div class="text-center">
-          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-2"></div>
+          <div
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-2"
+          ></div>
           <p class="text-gray-600">Loading labels...</p>
         </div>
       </div>
@@ -69,10 +82,7 @@ onMounted(async () => {
             <tr v-for="label in labels" :key="label.id" class="border-b hover:bg-gray-50">
               <td class="py-3 px-4">
                 <div class="flex items-center gap-2">
-                  <div
-                    class="w-6 h-6 rounded border"
-                    :style="{ backgroundColor: label.color }"
-                  />
+                  <div class="w-6 h-6 rounded border" :style="{ backgroundColor: label.color }" />
                   <span class="text-xs text-gray-500">{{ label.color }}</span>
                 </div>
               </td>

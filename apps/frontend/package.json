@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@elysiajs/static": "1.4.10",
+    "@koyori-app/openapi-vue-query": "0.1.1",
     "@lucide/vue": "1.17.0",
     "@phosphor-icons/vue": "2.2.1",
     "@sentry/vue": "10.56.0",
