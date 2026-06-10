@@ -5,6 +5,7 @@ import type { ApiPaths } from "./paths";
 export type TaskApiClient = Client<ApiPaths, `${string}/${string}`>;
 
 let cachedClient: TaskApiClient | null = null;
+let cachedTenantId: string | null = null;
 
 export function getClient(): TaskApiClient {
   if (cachedClient) {
@@ -22,5 +23,9 @@ export function getClient(): TaskApiClient {
 }
 
 export function getTenantId(): string {
-  return resolveRuntimeConfig().tenant_id;
+  if (cachedTenantId) {
+    return cachedTenantId;
+  }
+  cachedTenantId = resolveRuntimeConfig().tenant_id;
+  return cachedTenantId;
 }

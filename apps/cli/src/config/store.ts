@@ -22,7 +22,7 @@ export function loadConfigFile(): TaskConfig {
     return {};
   }
   const raw = fs.readFileSync(CONFIG_PATH, "utf8");
-  return (yaml.load(raw) as TaskConfig) ?? {};
+  return (yaml.load(raw, { schema: yaml.DEFAULT_SAFE_SCHEMA }) as TaskConfig) ?? {};
 }
 
 export function saveConfigFile(config: TaskConfig): void {
