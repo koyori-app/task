@@ -22,7 +22,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_search_vector ON tasks USING GIN(search_vec
 CREATE TABLE IF NOT EXISTS project_task_views (
     id UUID PRIMARY KEY,
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    created_by UUID NOT NULL REFERENCES users(id),
+    created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name VARCHAR(100) NOT NULL,
     is_shared BOOLEAN NOT NULL DEFAULT false,
     filters JSONB NOT NULL DEFAULT '{}',
@@ -32,12 +32,13 @@ CREATE TABLE IF NOT EXISTS project_task_views (
 );
 
 CREATE INDEX IF NOT EXISTS idx_project_task_views_project ON project_task_views(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_task_views_project_created_by ON project_task_views(project_id, created_by);
 
 CREATE TABLE IF NOT EXISTS task_attachments (
     id UUID PRIMARY KEY,
     task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     drive_file_id UUID NOT NULL REFERENCES drive_files(id) ON DELETE CASCADE,
-    created_by UUID NOT NULL REFERENCES users(id),
+    created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (task_id, drive_file_id)
 );

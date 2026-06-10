@@ -28,9 +28,9 @@ mod m20260604_create_sprints;
 mod m20260607_add_sprints_active_unique_index;
 mod m20260607_add_tasks_completed_at;
 mod m20260607_create_task_comments_and_activities;
-mod m20260610_create_task_extensions;
 mod m20260529010000_create_passkeys;
 mod m20260529100000_auth_2fa;
+mod m20260610_create_task_extensions;
 
 pub struct Migrator;
 
@@ -66,9 +66,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260607_add_sprints_active_unique_index::Migration),
             Box::new(m20260607_add_tasks_completed_at::Migration),
             Box::new(m20260607_create_task_comments_and_activities::Migration),
-            Box::new(m20260610_create_task_extensions::Migration),
             Box::new(m20260529010000_create_passkeys::Migration),
             Box::new(m20260529100000_auth_2fa::Migration),
+            Box::new(m20260610_create_task_extensions::Migration),
         ]
     }
 }
