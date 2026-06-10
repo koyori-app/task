@@ -11,6 +11,7 @@ pub mod github;
 pub mod password_reset;
 pub mod drive_files;
 pub mod drive_folders;
+pub mod custom_fields;
 pub mod labels;
 pub mod milestones;
 pub mod sprints;
