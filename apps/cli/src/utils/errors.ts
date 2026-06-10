@@ -15,9 +15,18 @@ export function exitWithConfigError(message: string): never {
 
 export function handleApiError(err: unknown): never {
   const e = err as { status?: number; message?: string };
-  if (e.status === 401) process.exit(3);
-  if (e.status === 403) process.exit(4);
-  if (e.status === 404) process.exit(5);
+  if (e.status === 401) {
+    console.error("Authentication failed: invalid or expired token");
+    process.exit(3);
+  }
+  if (e.status === 403) {
+    console.error("Permission denied: insufficient access for this resource");
+    process.exit(4);
+  }
+  if (e.status === 404) {
+    console.error("Resource not found");
+    process.exit(5);
+  }
   console.error(
     JSON.stringify({
       error: "api_error",

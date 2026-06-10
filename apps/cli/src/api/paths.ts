@@ -35,6 +35,7 @@ export type Task = {
   description?: string | null;
   status_id: string;
   priority: TaskPriority;
+  sprint_id?: string | null;
   soft_deadline?: string | null;
   hard_deadline?: string | null;
   completed_at?: string | null;
@@ -93,6 +94,72 @@ export type Comment = {
   body: string;
   user_id: string;
   created_at: string;
+};
+
+export type SearchTaskHit = {
+  id: string;
+  seq_id: number;
+  title: string;
+  highlight: string;
+  score: number;
+};
+
+export type SearchTasksResponse = {
+  tasks: SearchTaskHit[];
+  total: number;
+};
+
+export type BulkUpdateFields = {
+  status_id?: string;
+  assignee_id?: string;
+  label_ids?: string[];
+  sprint_id?: string;
+  clear_sprint_id?: boolean;
+};
+
+export type BulkUpdateRequest = {
+  task_ids: string[];
+  update: BulkUpdateFields;
+};
+
+export type BulkFailure = {
+  task_id: string;
+  reason: string;
+};
+
+export type BulkUpdateResponse = {
+  updated: number;
+  failed: BulkFailure[];
+};
+
+export type TaskView = {
+  id: string;
+  project_id: string;
+  created_by: string;
+  name: string;
+  is_shared: boolean;
+  filters: Record<string, unknown>;
+  sort: Record<string, unknown>;
+  view_type: string;
+  created_at: string;
+};
+
+export type TaskViewListResponse = {
+  views: TaskView[];
+};
+
+export type TaskAttachment = {
+  id: string;
+  drive_file_id: string;
+  name: string;
+  mime_type: string;
+  size: number;
+  url: string;
+  created_at: string;
+};
+
+export type TaskAttachmentListResponse = {
+  attachments: TaskAttachment[];
 };
 
 export interface ApiPaths {
@@ -203,6 +270,118 @@ export interface ApiPaths {
     delete: {
       parameters: {
         path: { tenant_id: string; project_id: string; id: string };
+      };
+      responses: {
+        204: { content: never };
+      };
+    };
+  };
+  "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/search": {
+    get: {
+      parameters: {
+        path: { tenant_id: string; project_id: string };
+        query: { q: string; limit?: number; offset?: number };
+      };
+      responses: {
+        200: { content: { "application/json": SearchTasksResponse } };
+      };
+    };
+  };
+  "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/bulk": {
+    post: {
+      parameters: { path: { tenant_id: string; project_id: string } };
+      requestBody: {
+        content: { "application/json": BulkUpdateRequest };
+      };
+      responses: {
+        200: { content: { "application/json": BulkUpdateResponse } };
+      };
+    };
+  };
+  "/v1/tenants/{tenant_id}/projects/{project_id}/task-views": {
+    get: {
+      parameters: { path: { tenant_id: string; project_id: string } };
+      responses: {
+        200: { content: { "application/json": TaskViewListResponse } };
+      };
+    };
+    post: {
+      parameters: { path: { tenant_id: string; project_id: string } };
+      requestBody: {
+        content: {
+          "application/json": {
+            name: string;
+            is_shared?: boolean;
+            filters?: Record<string, unknown>;
+            sort?: Record<string, unknown>;
+            view_type?: string;
+          };
+        };
+      };
+      responses: {
+        201: { content: { "application/json": TaskView } };
+      };
+    };
+  };
+  "/v1/tenants/{tenant_id}/projects/{project_id}/task-views/{view_id}": {
+    patch: {
+      parameters: {
+        path: { tenant_id: string; project_id: string; view_id: string };
+      };
+      requestBody: {
+        content: {
+          "application/json": {
+            name?: string;
+            is_shared?: boolean;
+            filters?: Record<string, unknown>;
+            sort?: Record<string, unknown>;
+            view_type?: string;
+          };
+        };
+      };
+      responses: {
+        200: { content: { "application/json": TaskView } };
+      };
+    };
+    delete: {
+      parameters: {
+        path: { tenant_id: string; project_id: string; view_id: string };
+      };
+      responses: {
+        204: { content: never };
+      };
+    };
+  };
+  "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/attachments": {
+    get: {
+      parameters: {
+        path: { tenant_id: string; project_id: string; id: string };
+      };
+      responses: {
+        200: { content: { "application/json": TaskAttachmentListResponse } };
+      };
+    };
+    post: {
+      parameters: {
+        path: { tenant_id: string; project_id: string; id: string };
+      };
+      requestBody: {
+        content: { "application/json": { drive_file_id: string } };
+      };
+      responses: {
+        201: { content: { "application/json": TaskAttachment } };
+      };
+    };
+  };
+  "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/attachments/{attachment_id}": {
+    delete: {
+      parameters: {
+        path: {
+          tenant_id: string;
+          project_id: string;
+          id: string;
+          attachment_id: string;
+        };
       };
       responses: {
         204: { content: never };
