@@ -211,3 +211,77 @@ async fn task_extensions_integration_suite() {
         .await;
     assert_eq!(delete_view.status(), StatusCode::NO_CONTENT);
 }
+
+#[tokio::test]
+async fn task_extensions_negative_cases() {
+    let mut app = TestApp::new().await;
+    let fx = setup_task(&mut app).await;
+
+    let fake_task_id = Uuid::new_v4();
+    let attachments_fake_task = format!(
+        "/v1/tenants/{}/projects/{}/tasks/{}/attachments",
+        fx.tenant_id, fx.project_id, fake_task_id
+    );
+    let list_missing_task = app.get_with_session(&attachments_fake_task).await;
+    assert_eq!(list_missing_task.status(), StatusCode::NOT_FOUND);
+
+    let fake_file_id = Uuid::new_v4();
+    let attachments_path = format!(
+        "/v1/tenants/{}/projects/{}/tasks/{}/attachments",
+        fx.tenant_id, fx.project_id, fx.task_id
+    );
+    let attach_missing_file = app
+        .post_json_with_session(
+            &attachments_path,
+            serde_json::json!({ "drive_file_id": fake_file_id }),
+        )
+        .await;
+    assert_eq!(attach_missing_file.status(), StatusCode::NOT_FOUND);
+
+    let user = app.insert_user(false, false).await;
+    let file_id = insert_drive_file(&app, fx.tenant_id, user.id).await;
+    let attach_ok = app
+        .post_json_with_session(
+            &attachments_path,
+            serde_json::json!({ "drive_file_id": file_id }),
+        )
+        .await;
+    assert_eq!(attach_ok.status(), StatusCode::CREATED);
+
+    let attach_duplicate = app
+        .post_json_with_session(
+            &attachments_path,
+            serde_json::json!({ "drive_file_id": file_id }),
+        )
+        .await;
+    assert_eq!(attach_duplicate.status(), StatusCode::CONFLICT);
+
+    let other_user = app.insert_user(false, false).await;
+    let other_tp = app.insert_tenant_project(other_user.id).await;
+    let cross_tenant_attach = format!(
+        "/v1/tenants/{}/projects/{}/tasks/{}/attachments",
+        other_tp.tenant_id, other_tp.project_id, fx.task_id
+    );
+    let cross_tenant = app
+        .post_json_with_session(
+            &cross_tenant_attach,
+            serde_json::json!({ "drive_file_id": file_id }),
+        )
+        .await;
+    assert_eq!(cross_tenant.status(), StatusCode::FORBIDDEN);
+
+    let views_base = format!(
+        "/v1/tenants/{}/projects/{}/task-views",
+        fx.tenant_id, fx.project_id
+    );
+    let invalid_view = app
+        .post_json_with_session(
+            &views_base,
+            serde_json::json!({
+                "name": "Invalid view",
+                "view_type": "kanban"
+            }),
+        )
+        .await;
+    assert_eq!(invalid_view.status(), StatusCode::BAD_REQUEST);
+}
