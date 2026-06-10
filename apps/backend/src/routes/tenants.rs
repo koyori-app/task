@@ -52,7 +52,10 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::task_comments::create_comment))
                         .routes(routes!(crate::handlers::task_comments::update_comment))
                         .routes(routes!(crate::handlers::task_comments::delete_comment))
-                        .routes(routes!(crate::handlers::task_comments::list_activities)),
+                        .routes(routes!(crate::handlers::task_comments::list_activities))
+                        .routes(routes!(crate::handlers::task_notifications::list_watchers))
+                        .routes(routes!(crate::handlers::task_notifications::start_watch))
+                        .routes(routes!(crate::handlers::task_notifications::stop_watch)),
                 )
                 .nest(
                     "/{project_id}/statuses",

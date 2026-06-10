@@ -20,6 +20,7 @@ use crate::entities::{
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
+use crate::utils::notifications::{notify_assigned, notify_status_changed};
 use crate::utils::task_activities::{priority_label, record_activity, status_name};
 use crate::AppState;
 
@@ -79,6 +80,7 @@ async fn record_task_field_activities<C: ConnectionTrait>(
                 serde_json::json!({ "from": from, "to": to }).into(),
             )
             .await?;
+            notify_status_changed(db, project_id, task_id, user_id, &from, &to).await?;
         }
     }
     if let Some(new_priority) = payload.priority {
@@ -569,6 +571,7 @@ pub async fn create_task(
         }
         .insert(&txn)
         .await?;
+        notify_assigned(&txn, project_id, model.id, a.user_id, auth.user_id, &a.role).await?;
     }
     let unique_label_ids: Vec<Uuid> = {
         let mut v = payload.label_ids.clone();
@@ -1032,6 +1035,7 @@ pub async fn add_assignee(
         .into(),
     )
     .await?;
+    notify_assigned(&txn, project_id, task.id, payload.user_id, auth.user_id, &role).await?;
     txn.commit().await?;
     Ok((StatusCode::CREATED, Json(assignee)))
 }
