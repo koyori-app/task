@@ -120,6 +120,9 @@ async fn ensure_schema(db: &DatabaseConnection) {
             let _ = db
                 .execute_unprepared("DROP INDEX IF EXISTS idx_sprints_active_per_project")
                 .await;
+            let _ = db
+                .execute_unprepared("DROP INDEX IF EXISTS idx_projects_personal_owner")
+                .await;
 
             db.get_schema_registry("backend::entities::*")
                 .sync(db)
