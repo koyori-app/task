@@ -842,14 +842,20 @@ pub async fn detach_task_file(
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
-    let result = task_attachments::Entity::delete_many()
+    let attachment = task_attachments::Entity::find()
         .filter(task_attachments::Column::Id.eq(attachment_id))
         .filter(task_attachments::Column::TaskId.eq(task.id))
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let owner = is_tenant_owner(&state, tenant_id, auth.user_id).await?;
+    if attachment.created_by != auth.user_id && !owner {
+        return Err(AppError::Forbidden);
+    }
+
+    task_attachments::Entity::delete_by_id(attachment.id)
         .exec(&state.db)
         .await?;
-
-    if result.rows_affected == 0 {
-        return Err(AppError::NotFound);
-    }
     Ok(StatusCode::NO_CONTENT)
 }
