@@ -164,7 +164,7 @@ async fn task_extensions_integration_suite() {
                 "task_ids": [task_uuid],
                 "update": {
                     "status_id": fx.status_done_id,
-                    "label_ids": [fx.label_id]
+                    "add_label_ids": [fx.label_id]
                 }
             }),
         )

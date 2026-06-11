@@ -112,7 +112,7 @@ export type SearchTasksResponse = {
 export type BulkUpdateFields = {
   status_id?: string;
   assignee_id?: string;
-  label_ids?: string[];
+  add_label_ids?: string[];
   sprint_id?: string;
   clear_sprint_id?: boolean;
 };
