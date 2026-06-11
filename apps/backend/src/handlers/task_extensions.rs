@@ -155,16 +155,61 @@ async fn search_tasks_ilike(
     Ok(Json(SearchTasksResponse { tasks: hits, total }))
 }
 
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+fn chars_eq_ignore_case(a: char, b: char) -> bool {
+    a.to_lowercase().eq(b.to_lowercase())
+}
+
+fn find_match_char_range(text: &str, query: &str) -> Option<(usize, usize)> {
+    let query_chars: Vec<char> = query.chars().collect();
+    if query_chars.is_empty() {
+        return None;
+    }
+    let text_chars: Vec<char> = text.chars().collect();
+    let q_len = query_chars.len();
+    for start in 0..=text_chars.len().saturating_sub(q_len) {
+        if text_chars[start..start + q_len]
+            .iter()
+            .zip(query_chars.iter())
+            .all(|(a, b)| chars_eq_ignore_case(*a, *b))
+        {
+            return Some((start, start + q_len));
+        }
+    }
+    None
+}
+
+fn chars_slice(s: &str, start: usize, end: usize) -> String {
+    s.chars().skip(start).take(end.saturating_sub(start)).collect()
+}
+
 fn highlight_ilike(title: &str, description: Option<&str>, query: &str) -> String {
-    let q_lower = query.to_lowercase();
     let text = format!("{} {}", title, description.unwrap_or_default());
-    if let Some(pos) = text.to_lowercase().find(&q_lower) {
-        let end = (pos + query.len()).min(text.len());
+    if let Some((start_char, end_char)) = find_match_char_range(&text, query) {
+        let total_chars = text.chars().count();
+        let display_start = start_char.saturating_sub(60);
+        let display_end = (end_char + 60).min(total_chars);
+        let prefix_marker = if display_start > 0 { "…" } else { "" };
+        let suffix_marker = if display_end < total_chars { "…" } else { "" };
         format!(
-            "…{}<em>{}</em>{}…",
-            &text[..pos],
-            &text[pos..end],
-            &text[end..]
+            "{prefix_marker}{}<em>{}</em>{}{suffix_marker}",
+            html_escape(&chars_slice(&text, display_start, start_char)),
+            html_escape(&chars_slice(&text, start_char, end_char)),
+            html_escape(&chars_slice(&text, end_char, display_end)),
         )
     } else {
         text.chars().take(120).collect()
