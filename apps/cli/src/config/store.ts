@@ -30,7 +30,10 @@ export function loadConfigFile(): TaskConfig {
 
 export function saveConfigFile(config: TaskConfig): void {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, yaml.dump(config), "utf8");
+  fs.writeFileSync(CONFIG_PATH, yaml.dump(config), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
 }
 
 export function resolveRuntimeConfig(): Required<
