@@ -300,7 +300,8 @@ pub struct BulkUpdateFields {
     pub status_id: Option<Uuid>,
     #[schema(value_type = Option<String>, format = "uuid")]
     pub assignee_id: Option<Uuid>,
-    pub label_ids: Option<Vec<Uuid>>,
+    /// 既存ラベルに追加する ID 一覧（上書きではない）。
+    pub add_label_ids: Option<Vec<Uuid>>,
     #[schema(value_type = Option<String>, format = "uuid")]
     pub sprint_id: Option<Uuid>,
     #[serde(default)]
@@ -484,7 +485,7 @@ async fn apply_bulk_update(
         }
     }
 
-    if let Some(ref label_ids) = update.label_ids {
+    if let Some(ref label_ids) = update.add_label_ids {
         let mut unique = label_ids.clone();
         unique.sort();
         unique.dedup();
