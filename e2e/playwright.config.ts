@@ -13,7 +13,7 @@ export default defineConfig({
     {
       // CI: pass BACKEND_BIN=./apps/backend/target/release/backend to skip rebuild
       command: process.env.BACKEND_BIN ?? 'cargo run --bin backend',
-      cwd: process.env.BACKEND_BIN ? '.' : '../backend',
+      cwd: process.env.BACKEND_BIN ? '.' : '../apps/backend',
       url: 'http://localhost:3400/v1/auth/me',
       reuseExistingServer: !isCI,
       timeout: 120_000,
@@ -34,7 +34,7 @@ export default defineConfig({
     },
     {
       command: 'pnpm dev',
-      cwd: '../frontend',
+      cwd: '../apps/frontend',
       url: 'http://localhost:3000',
       reuseExistingServer: !isCI,
     },
