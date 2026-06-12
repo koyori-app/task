@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { defineComponent } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
-import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
+import { VueQueryPlugin, QueryClient, useQuery } from '@tanstack/vue-query';
 import {
-  createTestApiVueQueryClient,
+  createTestApiClient,
   meQueryOptions,
   projectLabelsQueryOptions,
 } from '../api-vue-query';
@@ -44,11 +44,11 @@ function createFetchMock() {
 describe('api-vue-query PoC', () => {
   let queryClient: QueryClient;
   let fetchMock: ReturnType<typeof createFetchMock>;
-  let testApi: ReturnType<typeof createTestApiVueQueryClient>;
+  let testApi: ReturnType<typeof createTestApiClient>;
 
   beforeEach(() => {
     fetchMock = createFetchMock();
-    testApi = createTestApiVueQueryClient(fetchMock);
+    testApi = createTestApiClient(fetchMock);
     queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -61,10 +61,14 @@ describe('api-vue-query PoC', () => {
     queryClient.clear();
   });
 
-  function mountWithQuery(setup: () => void) {
-    return mount(
+  function withQuery<T>(setup: () => T): T {
+    let result!: T;
+    mount(
       defineComponent({
-        setup,
+        setup() {
+          result = setup();
+          return {};
+        },
         template: '<div />',
       }),
       {
@@ -73,19 +77,16 @@ describe('api-vue-query PoC', () => {
         },
       },
     );
+    return result;
   }
 
   it('useQuery fetches /v1/auth/me via mocked fetch', async () => {
-    const state = { queryResult: undefined as ReturnType<typeof testApi.useMeQuery> | undefined };
-
-    mountWithQuery(() => {
-      state.queryResult = testApi.useMeQuery();
-    });
+    const query = withQuery(() => testApi.useQuery('get', '/v1/auth/me'));
 
     await flushPromises();
 
-    expect(state.queryResult!.isSuccess.value).toBe(true);
-    expect(state.queryResult!.data.value).toEqual(mockUser);
+    expect(query.isSuccess.value).toBe(true);
+    expect(query.data.value).toEqual(mockUser);
     expect(fetchMock).toHaveBeenCalled();
   });
 
@@ -102,18 +103,49 @@ describe('api-vue-query PoC', () => {
   });
 
   it('useMutation posts to /v1/auth/logout via mocked fetch', async () => {
-    const state = {
-      mutationResult: undefined as ReturnType<typeof testApi.useLogoutMutation> | undefined,
-    };
+    const mutation = withQuery(() => testApi.useMutation('post', '/v1/auth/logout'));
 
-    mountWithQuery(() => {
-      state.mutationResult = testApi.useLogoutMutation();
-    });
-
-    await state.mutationResult!.mutateAsync({});
+    await mutation.mutateAsync({} as never);
     await flushPromises();
 
     const logoutCall = fetchMock.mock.calls.find((call) => call[0].url.includes('/v1/auth/logout'));
     expect(logoutCall?.[0].method).toBe('POST');
+  });
+
+  it('useQuery sets isError on non-2xx response', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: 'unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const query = withQuery(() => testApi.useQuery('get', '/v1/auth/me'));
+
+    await flushPromises();
+
+    expect(query.isError.value).toBe(true);
+  });
+
+  it('useMutation sets error on non-2xx response', async () => {
+    const mutation = withQuery(() => testApi.useMutation('post', '/v1/auth/logout'));
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: 'forbidden' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(mutation.mutateAsync({} as never)).rejects.toBeTruthy();
+  });
+
+  it('queryOptions integrates with useQuery from @tanstack/vue-query', async () => {
+    const query = withQuery(() => useQuery(testApi.queryOptions('get', '/v1/auth/me')));
+
+    await flushPromises();
+
+    expect(query.isSuccess.value).toBe(true);
+    expect(query.data.value).toEqual(mockUser);
   });
 });
