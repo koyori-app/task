@@ -9,8 +9,6 @@ catalog:
   vite-plus: 0.1.24
   vitest: npm:@voidzero-dev/vite-plus-test@0.1.24
 minimumReleaseAgeExclude:
-  - '@koyori-app/openapi-vue-query@0.1.1'
-  - '@koyori-app/openapi-vue-query@0.1.2'
   - '@koyori-app/openapi-vue-query@0.1.3'
 overrides:
   vite: 'catalog:'
