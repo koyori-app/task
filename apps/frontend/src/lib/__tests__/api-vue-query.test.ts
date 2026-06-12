@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { defineComponent } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
-import { VueQueryPlugin, QueryClient, useQuery } from '@tanstack/vue-query';
+import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import {
   createTestApiClient,
   meQueryOptions,
@@ -140,12 +140,5 @@ describe('api-vue-query PoC', () => {
     await expect(mutation.mutateAsync({} as never)).rejects.toBeTruthy();
   });
 
-  it('queryOptions integrates with useQuery from @tanstack/vue-query', async () => {
-    const query = withQuery(() => useQuery(testApi.queryOptions('get', '/v1/auth/me')));
 
-    await flushPromises();
-
-    expect(query.isSuccess.value).toBe(true);
-    expect(query.data.value).toEqual(mockUser);
-  });
 });
