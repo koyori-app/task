@@ -11,7 +11,7 @@ export default defineConfig({
   reporter: isCI ? 'github' : 'list',
   webServer: [
     {
-      // CI: pass BACKEND_BIN=./apps/backend/target/release/backend to skip rebuild
+      // CI: pass BACKEND_BIN=<absolute path> to skip rebuild
       command: process.env.BACKEND_BIN ?? 'cargo run --bin backend',
       cwd: process.env.BACKEND_BIN ? '.' : '../apps/backend',
       url: 'http://localhost:3400/v1/auth/me',
@@ -37,6 +37,9 @@ export default defineConfig({
       cwd: '../apps/frontend',
       url: 'http://localhost:3000',
       reuseExistingServer: !isCI,
+      env: {
+        APP_URL: 'http://localhost:3000',
+      },
     },
   ],
 });
