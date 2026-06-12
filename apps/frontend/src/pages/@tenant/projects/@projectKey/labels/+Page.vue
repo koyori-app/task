@@ -16,8 +16,11 @@ onMounted(async () => {
     loading.value = true;
     error.value = null;
 
-    const { tenant, projectKey } = pageContext.routeParams;
-    if (typeof tenant !== 'string' || typeof projectKey !== 'string') {
+    // projectKey is the route-level identifier for a project; assumed to equal
+    // the project_id the API expects. If this system introduces separate slug
+    // vs. UUID fields, resolve projectKey → project_id before this call.
+    const { tenant, projectKey: projectId } = pageContext.routeParams;
+    if (typeof tenant !== 'string' || typeof projectId !== 'string') {
       error.value = 'Missing route parameters';
       return;
     }
@@ -25,7 +28,7 @@ onMounted(async () => {
     const api = useDefaultApi();
     const { data, error: fetchError } = await api.GET(
       '/v1/tenants/{tenant_id}/projects/{project_id}/labels',
-      { params: { path: { tenant_id: tenant, project_id: projectKey } } },
+      { params: { path: { tenant_id: tenant, project_id: projectId } } },
     );
     if (fetchError) {
       error.value = 'Failed to fetch labels';
