@@ -5,6 +5,7 @@ import { useDefaultApi } from '@/composables/useDefaultApi';
 import type { components } from '@/generated/api';
 
 type Label = components['schemas']['crate.entities.labels.Model'];
+type Project = components['schemas']['crate.entities.projects.Model'];
 
 const labels = ref<Label[]>([]);
 const loading = ref(true);
@@ -16,19 +17,31 @@ onMounted(async () => {
     loading.value = true;
     error.value = null;
 
-    // projectKey is the route-level identifier for a project; assumed to equal
-    // the project_id the API expects. If this system introduces separate slug
-    // vs. UUID fields, resolve projectKey → project_id before this call.
-    const { tenant, projectKey: projectId } = pageContext.routeParams;
-    if (typeof tenant !== 'string' || typeof projectId !== 'string') {
+    const { tenant, projectKey } = pageContext.routeParams;
+    if (typeof tenant !== 'string' || typeof projectKey !== 'string') {
       error.value = 'Missing route parameters';
       return;
     }
 
     const api = useDefaultApi();
+    const { data: projects, error: projectsError } = await api.GET(
+      '/v1/tenants/{tenant_id}/projects',
+      { params: { path: { tenant_id: tenant } } },
+    );
+    if (projectsError) {
+      error.value = 'Failed to fetch project';
+      return;
+    }
+
+    const project = projects?.find((item: Project) => item.key === projectKey);
+    if (!project) {
+      error.value = 'Project not found';
+      return;
+    }
+
     const { data, error: fetchError } = await api.GET(
       '/v1/tenants/{tenant_id}/projects/{project_id}/labels',
-      { params: { path: { tenant_id: tenant, project_id: projectId } } },
+      { params: { path: { tenant_id: tenant, project_id: project.id } } },
     );
     if (fetchError) {
       error.value = 'Failed to fetch labels';
