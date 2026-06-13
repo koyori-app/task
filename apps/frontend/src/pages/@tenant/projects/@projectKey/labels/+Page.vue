@@ -29,7 +29,7 @@ onMounted(async () => {
       { params: { path: { tenant_id: tenant } } },
     );
     if (projectsError) {
-      error.value = 'Failed to fetch project';
+      error.value = 'Failed to fetch projects';
       return;
     }
 
