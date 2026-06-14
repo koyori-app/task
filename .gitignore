@@ -3,3 +3,5 @@
 docs/.retype
 docs/node_modules
 docs/retype.manifest
+
+.worktrees/
