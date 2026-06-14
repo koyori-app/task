@@ -26,5 +26,5 @@ export const useAuthStore = defineStore(
 
     return { user, setUser, clearUser };
   },
-  { persist: { pick: ['user.id', 'user.username'] } },
+  { persist: { pick: ['user.id', 'user.username', 'user.email'] } },
 );
