@@ -6,6 +6,6 @@ import type { PageContext } from 'vike/types';
 function onCreatePinia(pageContext: PageContext) {
   if (import.meta.env.SSR) return;
   (pageContext as any).pinia?.use(
-    createPersistedState({ storage: sessionStorage }),
+    createPersistedState({ storage: localStorage }),
   );
 }
