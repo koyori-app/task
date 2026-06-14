@@ -37,6 +37,7 @@
     "hono": "4.12.23",
     "openapi-fetch": "0.17.0",
     "pinia": "3.0.4",
+    "pinia-plugin-persistedstate": "4.7.1",
     "reka-ui": "2.9.9",
     "tailwind-merge": "3.6.0",
     "vike": "0.4.259",
