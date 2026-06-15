@@ -65,6 +65,7 @@ const form = useForm({
                   <FieldLabel :for="field.name">パスワード</FieldLabel>
                   <PasswordInput
                     :id="field.name"
+                    :name="field.name"
                     autocomplete="current-password"
                     :model-value="field.state.value"
                     @update:model-value="field.handleChange"
