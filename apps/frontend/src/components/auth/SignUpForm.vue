@@ -64,13 +64,14 @@ const form = useForm({
                     @blur="field.handleBlur"
                     @input="(e: Event) => field.handleChange((e.target as HTMLInputElement).value)"
                   />
-                  <FieldError class="min-h-[1.25rem]">
-                    {{
-                      field.state.meta.errors.length
-                        ? arkMessage(String(field.state.meta.errors[0]))
-                        : ''
-                    }}
-                  </FieldError>
+                  <div class="min-h-[1.25rem]">
+                    <FieldError v-if="field.state.meta.errors.length > 0 && field.state.meta.isTouched">
+                      {{ arkMessage(String(field.state.meta.errors[0])) }}
+                    </FieldError>
+                    <p v-else class="text-muted-foreground text-xs">
+                      3文字以上で設定してください。
+                    </p>
+                  </div>
                 </Field>
               </template>
             </form.Field>
@@ -123,7 +124,8 @@ const form = useForm({
                   <div class="min-h-[1.5rem]">
                     <PasswordStrengthBar
                       v-if="
-                        passwordFocused && !(hasSubmitted && field.state.meta.errors.length > 0)
+                        passwordValue.length > 0 &&
+                        (passwordFocused || !field.state.meta.errors.length)
                       "
                       :strength="strength"
                     />
@@ -132,10 +134,10 @@ const form = useForm({
                     >
                       {{ arkMessage(String(field.state.meta.errors[0])) }}
                     </FieldError>
+                    <p v-else class="text-muted-foreground text-xs">
+                      8文字以上で設定してください。
+                    </p>
                   </div>
-                  <FieldDescription id="password-hint">
-                    8文字以上で設定してください。
-                  </FieldDescription>
                 </Field>
               </template>
             </form.Field>
