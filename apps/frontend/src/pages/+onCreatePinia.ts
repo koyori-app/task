@@ -1,11 +1,16 @@
 export { onCreatePinia };
 
 import { createPersistedState } from 'pinia-plugin-persistedstate';
+import type { Pinia } from 'pinia';
 import type { PageContext } from 'vike/types';
 
-function onCreatePinia(pageContext: PageContext) {
+type PageContextWithPinia = PageContext & {
+  pinia?: Pinia;
+};
+
+function onCreatePinia(pageContext: PageContextWithPinia) {
   if (import.meta.env.SSR) return;
-  (pageContext as any).pinia?.use(
+  pageContext.pinia?.use(
     createPersistedState({ storage: localStorage }),
   );
 }
