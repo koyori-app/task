@@ -44,13 +44,13 @@ importers:
         version: 3.1.3(@voidzero-dev/vite-plus-core@0.1.24)(esbuild@0.28.0)(lightningcss@1.32.0)(rolldown@1.1.1)(typescript@6.0.3)(vue@3.5.35(typescript@6.0.3))
       '@universal-middleware/core':
         specifier: 0.4.18
-        version: 0.4.18(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)
+        version: 0.4.18(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)
       '@vikejs/elysia':
         specifier: 0.2.0
-        version: 0.2.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2))
+        version: 0.2.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2))
       '@vikejs/hono':
         specifier: 0.2.0
-        version: 0.2.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2))
+        version: 0.2.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2))
       '@vueuse/core':
         specifier: 14.3.0
         version: 14.3.0(vue@3.5.35(typescript@6.0.3))
@@ -73,8 +73,8 @@ importers:
         specifier: 1.4.28
         version: 1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3)
       hono:
-        specifier: 4.12.23
-        version: 4.12.23
+        specifier: 4.12.25
+        version: 4.12.25
       openapi-fetch:
         specifier: 0.17.0
         version: 0.17.0
@@ -92,16 +92,16 @@ importers:
         version: 3.6.0
       vike:
         specifier: 0.4.259
-        version: 0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2)
+        version: 0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2)
       vike-vue:
         specifier: 0.9.11
-        version: 0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3))
+        version: 0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3))
       vike-vue-pinia:
         specifier: 0.2.6
-        version: 0.2.6(pinia@3.0.4(typescript@6.0.3)(vue@3.5.35(typescript@6.0.3)))(vike-vue@0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3)))(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3))
+        version: 0.2.6(pinia@3.0.4(typescript@6.0.3)(vue@3.5.35(typescript@6.0.3)))(vike-vue@0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3)))(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3))
       vike-vue-query:
         specifier: 0.2.3
-        version: 0.2.3(@tanstack/vue-query@5.101.0(vue@3.5.35(typescript@6.0.3)))(vike-vue@0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3)))(vue@3.5.35(typescript@6.0.3))
+        version: 0.2.3(@tanstack/vue-query@5.101.0(vue@3.5.35(typescript@6.0.3)))(vike-vue@0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3)))(vue@3.5.35(typescript@6.0.3))
       vue:
         specifier: 3.5.35
         version: 3.5.35(typescript@6.0.3)
@@ -3353,8 +3353,8 @@ packages:
     resolution: {integrity: sha512-F/1DnUGPopORZi0ni+CvrCgHQ5FyEAHRLSApuYWMmrbSwoN2Mn/7k+Gl38gJnR7yyDZk6WLXwiGod1JOWNDKGw==}
     hasBin: true
 
-  hono@4.12.23:
-    resolution: {integrity: sha512-eIaZ9qDgu7XV0pxOCrg7/WhnQ6Ivm22UcxhXx/A3dcbqbbYgBEkc6e/J/s7j2tS96zoB0S9VBdLwQNCWwUo4LA==}
+  hono@4.12.25:
+    resolution: {integrity: sha512-2NFaIyNVgJmBs/ecmtGzlmluTFs5cHEWGTdu0t1HBwYzoGXOL5nUQBRMXsXWla5i4KkG//QMzVP88m1+I3fdAQ==}
     engines: {node: '>=16.9.0'}
 
   hookable@5.5.3:
@@ -6208,12 +6208,12 @@ snapshots:
     optionalDependencies:
       srvx: 0.11.15
 
-  '@universal-deploy/vite@0.1.9(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)':
+  '@universal-deploy/vite@0.1.9(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)':
     dependencies:
       '@universal-deploy/netlify': 0.2.2(@voidzero-dev/vite-plus-core@0.1.24)(srvx@0.11.15)
       '@universal-deploy/node': 0.1.6(@voidzero-dev/vite-plus-core@0.1.24)
       '@universal-deploy/store': 0.2.1(srvx@0.11.15)
-      '@universal-middleware/express': 0.4.26(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)
+      '@universal-middleware/express': 0.4.26(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)
       magic-string: 0.30.21
       rou3: 0.8.1
     optionalDependencies:
@@ -6229,29 +6229,29 @@ snapshots:
       - hono
       - srvx
 
-  '@universal-middleware/core@0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)':
+  '@universal-middleware/core@0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)':
     dependencies:
       regexparam: 3.0.0
       tough-cookie: 6.0.1
     optionalDependencies:
       elysia: 1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3)
       h3: 1.15.11
-      hono: 4.12.23
+      hono: 4.12.25
       srvx: 0.11.15
 
-  '@universal-middleware/core@0.4.18(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)':
+  '@universal-middleware/core@0.4.18(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)':
     dependencies:
       regexparam: 3.0.0
       tough-cookie: 6.0.1
     optionalDependencies:
       elysia: 1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3)
       h3: 1.15.11
-      hono: 4.12.23
+      hono: 4.12.25
       srvx: 0.11.15
 
-  '@universal-middleware/elysia@0.6.4(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)':
+  '@universal-middleware/elysia@0.6.4(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)':
     dependencies:
-      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)
+      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -6263,10 +6263,10 @@ snapshots:
       - hono
       - srvx
 
-  '@universal-middleware/express@0.4.26(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)':
+  '@universal-middleware/express@0.4.26(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)':
     dependencies:
-      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)
-      '@universal-middleware/node': 0.1.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)
+      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)
+      '@universal-middleware/node': 0.1.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -6278,9 +6278,9 @@ snapshots:
       - hono
       - srvx
 
-  '@universal-middleware/hono@0.4.21(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)':
+  '@universal-middleware/hono@0.4.21(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)':
     dependencies:
-      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)
+      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -6292,9 +6292,9 @@ snapshots:
       - hono
       - srvx
 
-  '@universal-middleware/node@0.1.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)':
+  '@universal-middleware/node@0.1.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)':
     dependencies:
-      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)
+      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -6310,11 +6310,11 @@ snapshots:
     dependencies:
       valibot: 1.4.1(typescript@6.0.3)
 
-  '@vikejs/elysia@0.2.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2))':
+  '@vikejs/elysia@0.2.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2))':
     dependencies:
-      '@universal-middleware/elysia': 0.6.4(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)
+      '@universal-middleware/elysia': 0.6.4(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)
       elysia: 1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3)
-      vike: 0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2)
+      vike: 0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2)
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -6325,11 +6325,11 @@ snapshots:
       - hono
       - srvx
 
-  '@vikejs/hono@0.2.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2))':
+  '@vikejs/hono@0.2.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2))':
     dependencies:
-      '@universal-middleware/hono': 0.4.21(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)
-      hono: 4.12.23
-      vike: 0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2)
+      '@universal-middleware/hono': 0.4.21(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)
+      hono: 4.12.25
+      vike: 0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2)
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -7382,7 +7382,7 @@ snapshots:
 
   he@1.2.0: {}
 
-  hono@4.12.23: {}
+  hono@4.12.25: {}
 
   hookable@5.5.3: {}
 
@@ -8510,31 +8510,31 @@ snapshots:
     optionalDependencies:
       typescript: 6.0.3
 
-  vike-vue-pinia@0.2.6(pinia@3.0.4(typescript@6.0.3)(vue@3.5.35(typescript@6.0.3)))(vike-vue@0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3)))(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3)):
+  vike-vue-pinia@0.2.6(pinia@3.0.4(typescript@6.0.3)(vue@3.5.35(typescript@6.0.3)))(vike-vue@0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3)))(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3)):
     dependencies:
       pinia: 3.0.4(typescript@6.0.3)(vue@3.5.35(typescript@6.0.3))
-      vike: 0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2)
-      vike-vue: 0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3))
+      vike: 0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2)
+      vike-vue: 0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3))
       vue: 3.5.35(typescript@6.0.3)
 
-  vike-vue-query@0.2.3(@tanstack/vue-query@5.101.0(vue@3.5.35(typescript@6.0.3)))(vike-vue@0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3)))(vue@3.5.35(typescript@6.0.3)):
+  vike-vue-query@0.2.3(@tanstack/vue-query@5.101.0(vue@3.5.35(typescript@6.0.3)))(vike-vue@0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3)))(vue@3.5.35(typescript@6.0.3)):
     dependencies:
       '@tanstack/vue-query': 5.101.0(vue@3.5.35(typescript@6.0.3))
-      vike-vue: 0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3))
+      vike-vue: 0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3))
       vue: 3.5.35(typescript@6.0.3)
 
-  vike-vue@0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3)):
+  vike-vue@0.9.11(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2))(vue@3.5.35(typescript@6.0.3)):
     dependencies:
       magic-string: 0.30.21
       oxc-parser: 0.104.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)
       oxc-walker: 0.6.0(oxc-parser@0.104.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0))
-      vike: 0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2)
+      vike: 0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2)
       vue: 3.5.35(typescript@6.0.3)
     transitivePeerDependencies:
       - '@emnapi/core'
       - '@emnapi/runtime'
 
-  vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)(supports-color@10.2.2):
+  vike@0.4.259(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)(supports-color@10.2.2):
     dependencies:
       '@babel/core': 7.29.0(supports-color@10.2.2)
       '@babel/types': 7.29.0
@@ -8543,9 +8543,9 @@ snapshots:
       '@brillout/picocolors': 1.0.30
       '@brillout/vite-plugin-server-entry': 0.7.18
       '@universal-deploy/store': 0.2.1(srvx@0.11.15)
-      '@universal-deploy/vite': 0.1.9(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)
-      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)
-      '@universal-middleware/node': 0.1.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.23)(srvx@0.11.15)
+      '@universal-deploy/vite': 0.1.9(@voidzero-dev/vite-plus-core@0.1.24)(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)
+      '@universal-middleware/core': 0.4.17(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)
+      '@universal-middleware/node': 0.1.0(elysia@1.4.28(@sinclair/typebox@0.34.49)(exact-mirror@1.0.0)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(hono@4.12.25)(srvx@0.11.15)
       cac: 6.7.14
       convert-route: 1.1.1
       es-module-lexer: 1.7.0
