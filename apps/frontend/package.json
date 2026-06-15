@@ -12,6 +12,7 @@
     "openapi:export": "cargo run --manifest-path ../backend/Cargo.toml --bin export_openapi -- ./openapi.json",
     "openapi": "pnpm run openapi:export && pnpm run openapi:generate",
     "test:unit": "vp test --project unit --run",
+    "test:unit:coverage": "vp test --project unit --run --coverage",
     "test:unit:watch": "vp test --project unit",
     "verify": "vue-tsc --noEmit && vp lint && vp fmt --check"
   },

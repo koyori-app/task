@@ -92,6 +92,20 @@ export default defineConfig({
   },
   test: {
     maxWorkers: 4,
+    coverage: {
+      provider: 'v8',
+      reporter: ['lcov', 'text', 'json-summary', 'json'],
+      reportsDirectory: './coverage',
+      reportOnFailure: true,
+      exclude: [
+        '**/*.stories.{ts,tsx,js,jsx}',
+        '**/*.story.{ts,tsx,js,jsx}',
+        '**/.storybook/**',
+        'storybook-static/**',
+        'src/components/ui/**',
+        'src/generated/**',
+      ],
+    },
     projects: [
       {
         plugins: [vue()],
