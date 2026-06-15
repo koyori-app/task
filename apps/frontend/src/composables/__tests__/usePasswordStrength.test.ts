@@ -128,6 +128,26 @@ describe('usePasswordStrength', () => {
     expect(strength.value).toBe('');
   });
 
+  it('レスポンスが JSON でないとき（nginx 等）strength を更新しない', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('<html>Welcome to nginx!</html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        }),
+      ),
+    );
+
+    const password = ref('hello123');
+    const { strength } = usePasswordStrength(password);
+
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    expect(strength.value).toBe('');
+  });
+
   it('高速入力時に古いレスポンスを破棄する', async () => {
     let resolveFirst!: (v: Response) => void;
     const firstResponse = new Promise<Response>(
