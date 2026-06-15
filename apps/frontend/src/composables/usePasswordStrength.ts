@@ -30,16 +30,20 @@ export function usePasswordStrength(password: Ref<string>): {
       if (!value) return;
 
       const id = ++seq;
-      const response = await fetch('/internal/password-strength', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: value }),
-      });
+      try {
+        const response = await fetch('/internal/password-strength', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: value }),
+        });
 
-      if (!response.ok || id !== seq) return;
+        if (!response.ok || id !== seq) return;
 
-      const data = (await response.json()) as { strength: PasswordStrength };
-      strength.value = data.strength;
+        const data = (await response.json()) as { strength: PasswordStrength };
+        strength.value = data.strength;
+      } catch {
+        // network/parse error: keep previous strength
+      }
     },
     { debounce: 300 },
   );
