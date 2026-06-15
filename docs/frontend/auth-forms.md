@@ -39,7 +39,7 @@
 zxcvbn-ts は非圧縮約 4.7MB のためクライアントバンドルに乗せない。
 スコアリングは Elysia SSR サーバーで行い、クライアントは API 経由で結果を取得する。
 
-```
+```text
 クライアント
   └─ usePasswordStrength（watchDebounced 300ms）
        └─ POST /internal/password-strength
@@ -48,7 +48,7 @@ zxcvbn-ts は非圧縮約 4.7MB のためクライアントバンドルに乗せ
 ```
 
 `/internal/` プレフィックスにより Vite dev proxy（`/api/*` → Rust backend）と衝突しない。
-dev / prod 両環境で Elysia が直接処理する（`+server.ts` 経由）。
+dev / prod 両環境で Elysia が直接処理する（`elysia.ts` 経由）。
 
 ### エンドポイント
 
