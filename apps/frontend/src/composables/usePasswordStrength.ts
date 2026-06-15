@@ -28,6 +28,7 @@ export function usePasswordStrength(password: Ref<string>): {
     password,
     async (value) => {
       if (!value) return;
+      // TODO: add client-side maxLength guard once backend enforces a limit (e.g. 256)
 
       const id = ++seq;
       try {
