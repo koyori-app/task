@@ -38,7 +38,7 @@ function getApp() {
     },
     {
       body: t.Object({
-        password: t.String(),
+        password: t.String({ maxLength: 256 }),
       }),
     },
   );

@@ -116,6 +116,18 @@ describe('usePasswordStrength', () => {
     expect(strength.value).toBe('');
   });
 
+  it('fetch がネットワークエラーで reject したとき strength を更新しない', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network error')));
+
+    const password = ref('hello123');
+    const { strength } = usePasswordStrength(password);
+
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    expect(strength.value).toBe('');
+  });
+
   it('高速入力時に古いレスポンスを破棄する', async () => {
     let resolveFirst!: (v: Response) => void;
     const firstResponse = new Promise<Response>(
