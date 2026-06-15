@@ -17,12 +17,23 @@ zxcvbnOptions.setOptions({
   graphs: commonPackage.adjacencyGraphs,
 });
 
+/**
+ * Converts a numeric password strength score to a categorical strength level.
+ *
+ * @param score - The password strength score, typically from zxcvbn
+ * @returns 'low' for scores up to 1, 'medium' for scores up to 3, 'high' otherwise
+ */
 function scoreToStrength(score: number): PasswordStrength {
   if (score <= 1) return 'low';
   if (score <= 3) return 'medium';
   return 'high';
 }
 
+/**
+ * Creates and configures the Elysia application server.
+ *
+ * @returns The configured Elysia application instance
+ */
 function getApp() {
   const app = new Elysia();
 

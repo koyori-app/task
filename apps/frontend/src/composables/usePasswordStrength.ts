@@ -4,12 +4,13 @@ import { ref, watch, type Ref } from 'vue';
 export type PasswordStrength = '' | 'low' | 'medium' | 'high';
 
 /**
- * Expected behavior (zxcvbn-ts via server API):
- * - `12345678` → low
- * - `Password1` → low
- * - `P@ssw0rd` → low
- * - `sakura123` → low〜medium（jaPasswords により low 寄り）
- * - `Tr0ub4dor&3` → high
+ * Maintains a reactive password strength value based on server-side validation.
+ *
+ * Clears the strength immediately when the password is empty. For non-empty
+ * passwords, performs a debounced server-side strength check.
+ *
+ * @param password - A reactive reference to the password string
+ * @returns An object containing the reactive `strength` value
  */
 export function usePasswordStrength(password: Ref<string>): {
   strength: Ref<PasswordStrength>;
