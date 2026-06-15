@@ -33,6 +33,9 @@ importers:
       '@sentry/vue':
         specifier: 10.56.0
         version: 10.56.0(pinia@3.0.4(typescript@6.0.3)(vue@3.5.35(typescript@6.0.3)))(vue@3.5.35(typescript@6.0.3))
+      '@tanstack/vue-form':
+        specifier: 1.33.0
+        version: 1.33.0(vue@3.5.35(typescript@6.0.3))
       '@tanstack/vue-query':
         specifier: 5.101.0
         version: 5.101.0(vue@3.5.35(typescript@6.0.3))
@@ -54,6 +57,15 @@ importers:
       '@vueuse/core':
         specifier: 14.3.0
         version: 14.3.0(vue@3.5.35(typescript@6.0.3))
+      '@zxcvbn-ts/core':
+        specifier: 3.0.4
+        version: 3.0.4
+      '@zxcvbn-ts/language-common':
+        specifier: 3.0.4
+        version: 3.0.4
+      '@zxcvbn-ts/language-ja':
+        specifier: 3.0.2
+        version: 3.0.2
       arkenv:
         specifier: 0.12.1
         version: 0.12.1(arktype@2.2.0)
@@ -2211,12 +2223,27 @@ packages:
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
 
+  '@tanstack/devtools-event-client@0.4.3':
+    resolution: {integrity: sha512-OZI6QyULw0FI0wjgmeYzCIfbgPsOEzwJtCpa69XrfLMtNXLGnz3d/dIabk7frg0TmHo+Ah49w5I4KC7Tufwsvw==}
+    engines: {node: '>=18'}
+    hasBin: true
+
+  '@tanstack/form-core@1.33.0':
+    resolution: {integrity: sha512-AV4Pw9Dk4orFsuPBcDssfWMJFs+yMYBae7zZ4oTqrCf4ftNGQKxvrQRZeqKHG6A4TkiLeSvf2kzIjcVkrW7E6w==}
+
   '@tanstack/match-sorter-utils@8.19.4':
     resolution: {integrity: sha512-Wo1iKt2b9OT7d+YGhvEPD3DXvPv2etTusIMhMUoG7fbhmxcXCtIjJDEygy91Y2JFlwGyjqiBPRozme7UD8hoqg==}
     engines: {node: '>=12'}
 
+  '@tanstack/pacer-lite@0.1.1':
+    resolution: {integrity: sha512-y/xtNPNt/YeyoVxE/JCx+T7yjEzpezmbb+toK8DDD1P4m7Kzs5YR956+7OKexG3f8aXgC3rLZl7b1V+yNUSy5w==}
+    engines: {node: '>=18'}
+
   '@tanstack/query-core@5.101.0':
     resolution: {integrity: sha512-cQetA74EB+seWySv1TTKr828TnP0u39m6LykwDXIo84SNortpDkp30TMEjkqtYCNP9c40uT/iwl6MLiufEt0Ow==}
+
+  '@tanstack/store@0.11.0':
+    resolution: {integrity: sha512-WlzzCt3xi0G6pCAJu1U+2jiECwabETDpQDi3hfkFZvJii9AuZqEKbOiVarX1/bWhTNjU486yQtJCCasi/0q+Cw==}
 
   '@tanstack/table-core@8.21.3':
     resolution: {integrity: sha512-ldZXEhOBb8Is7xLs01fR3YEc3DERiz5silj8tnGkFZytt1abEvl/GhUmCE0PMLaMPTa3Jk4HbKmRlHmu+gCftg==}
@@ -2225,11 +2252,25 @@ packages:
   '@tanstack/virtual-core@3.14.0':
     resolution: {integrity: sha512-JLANqGy/D6k4Ujmh8Tr25lGimuOXNiaVyXaCAZS0W+1390sADdGnyUdSWNIfd49gebtIxGMij4IktRVzrdr12Q==}
 
+  '@tanstack/vue-form@1.33.0':
+    resolution: {integrity: sha512-ZdVDo4W2ohL27bCjsuNy/eQ8PHm9mOzCFNfI7d6GfhS5KHqehZ8TiR/y1eRJR/c1y3nucgSi6RfY6iLHBMVhAQ==}
+    peerDependencies:
+      vue: ^3.4.0
+
   '@tanstack/vue-query@5.101.0':
     resolution: {integrity: sha512-sZeW0RvfEZ9QRiaXirE/HQZsFT5saMlPZVfeYvjPX6lqSBS9lkD7wfnCfzOBns6HD2f34Gx9cazkuU3Xj6hl/A==}
     peerDependencies:
       '@vue/composition-api': ^1.1.2
       vue: ^2.6.0 || ^3.3.0
+    peerDependenciesMeta:
+      '@vue/composition-api':
+        optional: true
+
+  '@tanstack/vue-store@0.11.0':
+    resolution: {integrity: sha512-w1lE4D7oo6nIUhTQvL/RoTgcvoYJw+KvttWPNJd/Xu+MvNxMnjxFF/LgFp9vwmbNbiGhGCg3ZoPJptwjrfwNYw==}
+    peerDependencies:
+      '@vue/composition-api': ^1.2.1
+      vue: ^2.5.0 || ^3.0.0
     peerDependenciesMeta:
       '@vue/composition-api':
         optional: true
@@ -2789,6 +2830,15 @@ packages:
   '@webcontainer/env@1.1.1':
     resolution: {integrity: sha512-6aN99yL695Hi9SuIk1oC88l9o0gmxL1nGWWQ/kNy81HigJ0FoaoTXpytCj6ItzgyCEwA9kF1wixsTuv5cjsgng==}
 
+  '@zxcvbn-ts/core@3.0.4':
+    resolution: {integrity: sha512-aQeiT0F09FuJaAqNrxynlAwZ2mW/1MdXakKWNmGM1Qp/VaY6CnB/GfnMS2T8gB2231Esp1/maCWd8vTG4OuShw==}
+
+  '@zxcvbn-ts/language-common@3.0.4':
+    resolution: {integrity: sha512-viSNNnRYtc7ULXzxrQIVUNwHAPSXRtoIwy/Tq4XQQdIknBzw4vz36lQLF6mvhMlTIlpjoN/Z1GFu/fwiAlUSsw==}
+
+  '@zxcvbn-ts/language-ja@3.0.2':
+    resolution: {integrity: sha512-YjQyt+eMe3EdpeJiSt81AMF8HfEXXCary/VRoG+0erZBzRjfJ1U3JdSiu9wFFxiEF8Cb5FEmTQ6nQPyraezH6Q==}
+
   abbrev@2.0.0:
     resolution: {integrity: sha512-6/mh1E2u2YgEsCHdY0Yx5oW+61gZU+1vXaoiHHrpKeuRNNgFvS+/jrwHiQhB5apAf5oB7UB7E19ol2R2LKH8hQ==}
     engines: {node: ^14.17.0 || ^16.13.0 || >=18.0.0}
@@ -3247,6 +3297,10 @@ packages:
 
   fast-safe-stringify@2.1.1:
     resolution: {integrity: sha512-W+KJc2dmILlPplD/H4K9l9LcAHAfPtP6BY84uVLXQ6Evcz9Lcg33Y2z1IVblT6xdY54PXYVHEv+0Wpq8Io6zkA==}
+
+  fastest-levenshtein@1.0.16:
+    resolution: {integrity: sha512-eRnCtTTtGZFpQCwhJiUOuxPQWRXVKYDn0b2PeHfXL6/Zi53SLAzAHfVhVWK2AryC/WH05kGfxhFIPvTF0SXQzg==}
+    engines: {node: '>= 4.9.1'}
 
   fdir@6.5.0:
     resolution: {integrity: sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==}
@@ -6051,21 +6105,47 @@ snapshots:
       tailwindcss: 4.3.1
       vite: '@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.13.2)(@vitejs/devtools@0.1.24)(esbuild@0.28.0)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)'
 
+  '@tanstack/devtools-event-client@0.4.3': {}
+
+  '@tanstack/form-core@1.33.0':
+    dependencies:
+      '@tanstack/devtools-event-client': 0.4.3
+      '@tanstack/pacer-lite': 0.1.1
+      '@tanstack/store': 0.11.0
+
   '@tanstack/match-sorter-utils@8.19.4':
     dependencies:
       remove-accents: 0.5.0
 
+  '@tanstack/pacer-lite@0.1.1': {}
+
   '@tanstack/query-core@5.101.0': {}
+
+  '@tanstack/store@0.11.0': {}
 
   '@tanstack/table-core@8.21.3': {}
 
   '@tanstack/virtual-core@3.14.0': {}
+
+  '@tanstack/vue-form@1.33.0(vue@3.5.35(typescript@6.0.3))':
+    dependencies:
+      '@tanstack/form-core': 1.33.0
+      '@tanstack/vue-store': 0.11.0(vue@3.5.35(typescript@6.0.3))
+      vue: 3.5.35(typescript@6.0.3)
+    transitivePeerDependencies:
+      - '@vue/composition-api'
 
   '@tanstack/vue-query@5.101.0(vue@3.5.35(typescript@6.0.3))':
     dependencies:
       '@tanstack/match-sorter-utils': 8.19.4
       '@tanstack/query-core': 5.101.0
       '@vue/devtools-api': 6.6.4
+      vue: 3.5.35(typescript@6.0.3)
+      vue-demi: 0.14.10(vue@3.5.35(typescript@6.0.3))
+
+  '@tanstack/vue-store@0.11.0(vue@3.5.35(typescript@6.0.3))':
+    dependencies:
+      '@tanstack/store': 0.11.0
       vue: 3.5.35(typescript@6.0.3)
       vue-demi: 0.14.10(vue@3.5.35(typescript@6.0.3))
 
@@ -6819,6 +6899,14 @@ snapshots:
 
   '@webcontainer/env@1.1.1': {}
 
+  '@zxcvbn-ts/core@3.0.4':
+    dependencies:
+      fastest-levenshtein: 1.0.16
+
+  '@zxcvbn-ts/language-common@3.0.4': {}
+
+  '@zxcvbn-ts/language-ja@3.0.2': {}
+
   abbrev@2.0.0: {}
 
   acorn@7.4.1: {}
@@ -7261,6 +7349,8 @@ snapshots:
 
   fast-safe-stringify@2.1.1:
     optional: true
+
+  fastest-levenshtein@1.0.16: {}
 
   fdir@6.5.0(picomatch@4.0.4):
     optionalDependencies:

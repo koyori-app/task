@@ -78,6 +78,9 @@ export default defineConfig({
       ...(coderAllowedHost ? [coderAllowedHost] : []),
     ],
   },
+  ssr: {
+    noExternal: ['@zxcvbn-ts/core', '@zxcvbn-ts/language-common', '@zxcvbn-ts/language-ja'],
+  },
   build: {
     sourcemap: analyze || process.env.NODE_ENV !== 'production',
     rollupOptions: {
