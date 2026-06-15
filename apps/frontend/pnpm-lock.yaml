@@ -55,8 +55,8 @@ importers:
         specifier: 14.3.0
         version: 14.3.0(vue@3.5.35(typescript@6.0.3))
       arkenv:
-        specifier: 0.12.0
-        version: 0.12.0(arktype@2.2.0)
+        specifier: 0.12.1
+        version: 0.12.1(arktype@2.2.0)
       arktype:
         specifier: 2.2.0
         version: 2.2.0
@@ -2859,8 +2859,8 @@ packages:
     resolution: {integrity: sha512-COROpnaoap1E2F000S62r6A60uHZnmlvomhfyT2DlTcrY1OrBKn2UhH7qn5wTC9zMvD0AY7csdPSNwKP+7WiQw==}
     engines: {node: '>= 0.4'}
 
-  arkenv@0.12.0:
-    resolution: {integrity: sha512-HeLLZzFt7K4S9J2aIXBVfDoAiLT9P27sj3KOLM/GtZpej20yBcdNoiAOZjh4TnE9e+a1faxr+2RuxryRMkMxLQ==}
+  arkenv@0.12.1:
+    resolution: {integrity: sha512-333Lq0PkklFDRtsXtCk9OVWHfyDY3Q32goCBmsbJqy9+3iARj0EkXIo5BjuUeIadEs5jRFzmX/4QPiw+AyU/Fg==}
     peerDependencies:
       arktype: ^2.1.22
     peerDependenciesMeta:
@@ -6869,7 +6869,7 @@ snapshots:
 
   aria-query@5.3.2: {}
 
-  arkenv@0.12.0(arktype@2.2.0):
+  arkenv@0.12.1(arktype@2.2.0):
     optionalDependencies:
       arktype: 2.2.0
 
