@@ -1,109 +1,99 @@
 <script setup lang="ts">
-import { ref } from "vue"
-import { navigate } from "vike/client/router"
-import { apiClient } from "@/lib/api"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+import { useForm } from '@tanstack/vue-form';
+import { type } from 'arktype';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
+import PasswordInput from '@/components/auth/PasswordInput.vue';
+import { Input } from '@/components/ui/input';
 
-const email = ref("")
-const password = ref("")
-const errorMessage = ref("")
-const isSubmitting = ref(false)
+const schema = type({
+  email: 'string.email',
+  password: 'string >= 8',
+});
 
-function loginErrorMessage(response: Response): string {
-  const status = response.status
-  if (status === 401) {
-    return "メールアドレスまたはパスワードが正しくありません"
-  }
-  if (status === 403) {
-    return "メールアドレスの確認が完了していません"
-  }
-  return "エラーが発生しました。しばらくしてからお試しください"
+function arkMessage(msg: string): string {
+  if (msg.includes('email address')) return 'メールアドレスの形式が正しくありません';
+  if (msg.includes('at least length 8')) return '8文字以上で入力してください';
+  return msg;
 }
 
-async function onSubmit(event: Event) {
-  event.preventDefault()
-  errorMessage.value = ""
-  isSubmitting.value = true
-
-  try {
-    const { error, response } = await apiClient.POST("/v1/auth/login", {
-      body: {
-        email: email.value,
-        password: password.value,
-      },
-    })
-    if (error) {
-      errorMessage.value = loginErrorMessage(response)
-      return
-    }
-    await navigate("/")
-  } catch {
-    errorMessage.value = "エラーが発生しました。しばらくしてからお試しください"
-  } finally {
-    isSubmitting.value = false
-  }
-}
+const form = useForm({
+  defaultValues: { email: '', password: '' },
+  validators: { onSubmit: schema },
+  onSubmit: async ({ value }) => {
+    // TODO: POST /v1/auth/login
+    console.log('signin stub', value);
+  },
+});
 </script>
 
 <template>
   <div class="flex flex-col gap-6">
     <Card class="overflow-hidden p-0">
       <CardContent class="grid p-0 md:grid-cols-2">
-        <form class="p-6 md:p-8" @submit="onSubmit">
+        <form class="p-6 md:p-8" @submit.prevent="form.handleSubmit">
           <FieldGroup>
             <div class="flex flex-col items-center gap-2 text-center">
-              <h1 class="text-2xl font-bold">
-                おかえりなさい
-              </h1>
+              <h1 class="text-2xl font-bold">おかえりなさい</h1>
               <p class="text-muted-foreground text-sm text-balance">
                 メールアドレスを入力してサインインしてください
               </p>
             </div>
-            <div
-              v-if="errorMessage"
-              role="alert"
-              class="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-            >
-              {{ errorMessage }}
-            </div>
-            <Field>
-              <FieldLabel for="email">
-                メールアドレス
-              </FieldLabel>
-              <Input
-                id="email"
-                v-model="email"
-                type="email"
-                placeholder="m@example.com"
-                autocomplete="email"
-                required
-              />
-            </Field>
-            <Field>
-              <FieldLabel for="password">
-                パスワード
-              </FieldLabel>
-              <Input
-                id="password"
-                v-model="password"
-                type="password"
-                autocomplete="current-password"
-                required
-              />
-            </Field>
-            <Field>
-              <Button type="submit" class="w-full" :disabled="isSubmitting">
-                {{ isSubmitting ? "サインイン中…" : "サインイン" }}
-              </Button>
-            </Field>
+            <form.Field name="email" :validators="{ onBlur: type('string.email') }">
+              <template #default="{ field }">
+                <Field>
+                  <FieldLabel :for="field.name">メールアドレス</FieldLabel>
+                  <Input
+                    :id="field.name"
+                    :name="field.name"
+                    type="email"
+                    placeholder="m@example.com"
+                    autocomplete="email"
+                    :value="field.state.value"
+                    @blur="field.handleBlur"
+                    @input="(e: Event) => field.handleChange((e.target as HTMLInputElement).value)"
+                  />
+                  <FieldError class="min-h-[1.25rem]">
+                    {{
+                      field.state.meta.errors.length
+                        ? arkMessage(String(field.state.meta.errors[0]))
+                        : ''
+                    }}
+                  </FieldError>
+                </Field>
+              </template>
+            </form.Field>
+            <form.Field name="password" :validators="{ onBlur: type('string >= 8') }">
+              <template #default="{ field }">
+                <Field>
+                  <FieldLabel :for="field.name">パスワード</FieldLabel>
+                  <PasswordInput
+                    :id="field.name"
+                    autocomplete="current-password"
+                    :model-value="field.state.value"
+                    @update:model-value="field.handleChange"
+                    @blur="field.handleBlur"
+                  />
+                  <FieldError class="min-h-[1.25rem]">
+                    {{
+                      field.state.meta.errors.length
+                        ? arkMessage(String(field.state.meta.errors[0]))
+                        : ''
+                    }}
+                  </FieldError>
+                </Field>
+              </template>
+            </form.Field>
+            <form.Subscribe>
+              <template #default="{ canSubmit, isSubmitting }">
+                <Field>
+                  <Button type="submit" class="w-full" :disabled="!canSubmit || isSubmitting">
+                    {{ isSubmitting ? 'サインイン中…' : 'サインイン' }}
+                  </Button>
+                </Field>
+              </template>
+            </form.Subscribe>
             <FieldDescription class="text-center">
               アカウントをお持ちでない方は
               <a href="/signup" class="underline underline-offset-4">新規登録</a>
@@ -115,7 +105,7 @@ async function onSubmit(event: Event) {
             src="/placeholder.svg"
             alt=""
             class="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
-          >
+          />
         </div>
       </CardContent>
     </Card>
