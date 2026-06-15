@@ -23,7 +23,7 @@ function arkMessage(msg: string): string {
   return msg;
 }
 
-const hasSubmitted = ref(false);
+const hasSubmitted = ref(false); // TODO: use to display success message after registration
 const passwordFocused = ref(false);
 const passwordValue = ref('');
 const { strength } = usePasswordStrength(passwordValue);
