@@ -12,6 +12,7 @@ const model = defineModel<string>({ default: '' });
 
 defineProps<{
   id?: string;
+  name?: string;
   placeholder?: string;
   autocomplete?: string;
 }>();
@@ -32,6 +33,7 @@ function toggleVisibility() {
   <InputGroup>
     <InputGroupInput
       :id="id"
+      :name="name"
       v-model="model"
       :type="isVisible ? 'text' : 'password'"
       :placeholder="placeholder"

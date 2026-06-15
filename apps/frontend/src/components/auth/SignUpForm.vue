@@ -9,19 +9,13 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { usePasswordStrength } from '@/composables/usePasswordStrength';
+import { arkMessage } from '@/lib/auth-validation';
 
 const schema = type({
   username: 'string >= 3',
   email: 'string.email',
   password: 'string >= 8',
 });
-
-function arkMessage(msg: string): string {
-  if (msg.includes('at least length 3')) return '3文字以上で入力してください。';
-  if (msg.includes('email address')) return 'メールアドレスの形式が正しくありません。';
-  if (msg.includes('at least length 8')) return '8文字以上で入力してください。';
-  return msg;
-}
 
 const hasSubmitted = ref(false); // TODO: use to display success message after registration
 const passwordFocused = ref(false);
