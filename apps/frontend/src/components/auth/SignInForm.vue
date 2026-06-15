@@ -6,17 +6,12 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import PasswordInput from '@/components/auth/PasswordInput.vue';
 import { Input } from '@/components/ui/input';
+import { arkMessage } from '@/lib/auth-validation';
 
 const schema = type({
   email: 'string.email',
   password: 'string >= 8',
 });
-
-function arkMessage(msg: string): string {
-  if (msg.includes('email address')) return 'メールアドレスの形式が正しくありません';
-  if (msg.includes('at least length 8')) return '8文字以上で入力してください';
-  return msg;
-}
 
 const form = useForm({
   defaultValues: { email: '', password: '' },
