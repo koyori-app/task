@@ -1,14 +1,11 @@
 use std::collections::{HashMap, HashSet};
-use regex::Regex;
+use chrono::NaiveDate;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, prelude::Uuid};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::LazyLock;
 use utoipa::ToSchema;
 use crate::entities::{project_custom_fields, task_custom_field_values};
 use crate::error::AppError;
-
-static DATE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap());
 
 #[derive(Serialize, ToSchema)]
 pub struct CustomFieldDefinitionSummary {
@@ -47,9 +44,17 @@ pub fn validate_select_options(options: &Option<Value>) -> Result<(), AppError> 
     let Some(options) = options else { return Err(AppError::BadRequest); };
     let arr = options.as_array().ok_or(AppError::BadRequest)?;
     if arr.is_empty() { return Err(AppError::BadRequest); }
+    let mut seen_values = HashSet::new();
     for item in arr {
         let obj = item.as_object().ok_or(AppError::BadRequest)?;
-        if !obj.contains_key("label") || !obj.contains_key("value") { return Err(AppError::BadRequest); }
+        let label = obj.get("label").and_then(|v| v.as_str()).map(str::trim);
+        let value = obj.get("value").and_then(|v| v.as_str()).map(str::trim);
+        if label.map(|s| s.is_empty()).unwrap_or(true) || value.map(|s| s.is_empty()).unwrap_or(true) {
+            return Err(AppError::BadRequest);
+        }
+        if !seen_values.insert(value.unwrap()) {
+            return Err(AppError::BadRequest);
+        }
     }
     Ok(())
 }
@@ -65,7 +70,11 @@ pub fn validate_custom_field_value(field: &project_custom_fields::Model, value: 
             let allowed: Vec<&str> = arr.iter().filter_map(|o| o.get("value").and_then(|v| v.as_str())).collect();
             if allowed.contains(&value) { Ok(()) } else { Err(AppError::BadRequest) }
         }
-        project_custom_fields::CustomFieldType::Date => if DATE_REGEX.is_match(value) { Ok(()) } else { Err(AppError::BadRequest) },
+        project_custom_fields::CustomFieldType::Date => {
+            NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                .map(|_| ())
+                .map_err(|_| AppError::BadRequest)
+        }
         project_custom_fields::CustomFieldType::Url => url::Url::parse(value).map(|_| ()).map_err(|_| AppError::BadRequest),
         project_custom_fields::CustomFieldType::Checkbox => if value == "true" || value == "false" { Ok(()) } else { Err(AppError::BadRequest) },
     }

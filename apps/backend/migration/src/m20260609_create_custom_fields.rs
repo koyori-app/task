@@ -12,13 +12,15 @@ impl MigrationTrait for Migration {
                 id UUID PRIMARY KEY,
                 project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                 name VARCHAR(100) NOT NULL,
-                field_type VARCHAR NOT NULL,
+                field_type VARCHAR NOT NULL CHECK (field_type IN ('Text', 'Number', 'Select', 'Date', 'Url', 'Checkbox')),
                 options JSONB,
                 is_required BOOLEAN NOT NULL DEFAULT false,
                 position SMALLINT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 UNIQUE (project_id, name)
             );
+            CREATE INDEX IF NOT EXISTS idx_project_custom_fields_project_position 
+                ON project_custom_fields(project_id, position);
 
             CREATE TABLE IF NOT EXISTS task_custom_field_values (
                 task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,

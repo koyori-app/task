@@ -123,7 +123,7 @@ pub async fn create_custom_field(
 
 #[axum::debug_handler]
 #[utoipa::path(
-    put,
+    patch,
     path = "/{field_id}",
     tag = "Custom Fields",
     summary = "カスタムフィールド更新",

@@ -56,5 +56,11 @@ async fn custom_fields_integration_suite() {
 
     let get = app.get_with_session(&format!("{tasks_base}/{task_id}")).await;
     assert_eq!(get.status(), StatusCode::OK);
-    assert!(get.json::<Value>().await.expect("json")["custom_field_values"].is_array());
+    let body = get.json::<Value>().await.expect("json");
+    let values = body["custom_field_values"]
+        .as_array()
+        .expect("custom_field_values should be array");
+    assert_eq!(values.len(), 2);
+    assert!(values.iter().any(|v| v["field_id"] == number_id && v["value"] == "5"));
+    assert!(values.iter().any(|v| v["field_id"] == select_id && v["value"] == "m"));
 }
