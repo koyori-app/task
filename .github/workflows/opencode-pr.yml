@@ -51,7 +51,6 @@ jobs:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          model: opencode-go/mimo-v2.5-pro
           use_github_token: true
           model: opencode-go/mimo-v2.5-pro
           prompt: |
