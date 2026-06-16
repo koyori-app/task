@@ -29,8 +29,8 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      pull-requests: read
-      issues: read
+      pull-requests: write
+      issues: write
 
     steps:
       - name: Checkout repository
@@ -42,19 +42,36 @@ jobs:
         uses: anomalyco/opencode/github@latest
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          use_github_token: true
           model: opencode-go/mimo-v2.5-pro
           prompt: |
             日本語で回答してください。
-            バックエンド以下のスタックです。
+
+            以下の行為は禁止です。
+            - コード修正
+            - ファイル作成
+            - ファイル削除
+            - コミット
+            - push
+            - ブランチ作成
+            - Pull Request作成
+
+            バックエンドは以下のスタックです。
             - Rust
             - Axum
-            - SeaORM - PostgreSQL
-            - Apalis - Redis
+            - SeaORM
+            - PostgreSQL
+            - Apalis
+            - Redis
+
             フロントエンドは以下のスタックです。
             - Vue.js
             - Vike
             - Tailwind CSS
             - Pinia
-            - Tanstack Query, Table, Form
+            - TanStack Query
+            - TanStack Table
+            - TanStack Form
             - Shadcn Vue
