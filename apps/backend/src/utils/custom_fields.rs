@@ -47,9 +47,13 @@ pub fn validate_select_options(options: &Option<Value>) -> Result<(), AppError> 
     let mut seen_values = HashSet::new();
     for item in arr {
         let obj = item.as_object().ok_or(AppError::BadRequest)?;
-        let label = obj.get("label").and_then(|v| v.as_str()).map(str::trim);
-        let value = obj.get("value").and_then(|v| v.as_str()).map(str::trim);
-        if label.map(|s| s.is_empty()).unwrap_or(true) || value.map(|s| s.is_empty()).unwrap_or(true) {
+        let label = obj.get("label").and_then(|v| v.as_str());
+        let value = obj.get("value").and_then(|v| v.as_str());
+        if label.map(|s| s.trim().is_empty()).unwrap_or(true) || value.map(|s| s.trim().is_empty()).unwrap_or(true) {
+            return Err(AppError::BadRequest);
+        }
+        // value に前後の空白があると lookup 時に不一致が起きるため拒否
+        if value.map(|s| s != s.trim()).unwrap_or(false) {
             return Err(AppError::BadRequest);
         }
         if !seen_values.insert(value.unwrap()) {
