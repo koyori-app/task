@@ -73,6 +73,7 @@ pub async fn list_custom_fields(
     let fields = project_custom_fields::Entity::find()
         .filter(project_custom_fields::Column::ProjectId.eq(project_id))
         .order_by_asc(project_custom_fields::Column::Position)
+        .order_by_asc(project_custom_fields::Column::CreatedAt)
         .all(&state.db).await?;
     Ok(Json(CustomFieldListResponse { fields }))
 }

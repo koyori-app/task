@@ -97,7 +97,7 @@ pub fn display_value_for(field: &project_custom_fields::Model, value: &str) -> S
 }
 
 pub async fn load_task_custom_field_values<C: ConnectionTrait>(db: &C, project_id: Uuid, task_id: Uuid) -> Result<Vec<TaskCustomFieldValueResponse>, AppError> {
-    let fields = project_custom_fields::Entity::find().filter(project_custom_fields::Column::ProjectId.eq(project_id)).order_by_asc(project_custom_fields::Column::Position).all(db).await?;
+    let fields = project_custom_fields::Entity::find().filter(project_custom_fields::Column::ProjectId.eq(project_id)).order_by_asc(project_custom_fields::Column::Position).order_by_asc(project_custom_fields::Column::CreatedAt).all(db).await?;
     let values = task_custom_field_values::Entity::find().filter(task_custom_field_values::Column::TaskId.eq(task_id)).all(db).await?;
     let value_map: HashMap<Uuid, String> = values.into_iter().filter_map(|v| v.value.map(|val| (v.field_id, val))).collect();
     Ok(fields.into_iter().map(|field| {
@@ -107,6 +107,9 @@ pub async fn load_task_custom_field_values<C: ConnectionTrait>(db: &C, project_i
     }).collect())
 }
 
+/// カスタムフィールド値を upsert する。
+/// **必ずトランザクション内で呼ぶこと。** 複数行を個別に INSERT/UPDATE/DELETE するため、
+/// トランザクション外で呼ぶと並行リクエストで中途半端な状態が残るリスクがある。
 pub async fn upsert_task_custom_field_values<C: ConnectionTrait>(db: &C, project_id: Uuid, task_id: Uuid, inputs: &[CustomFieldValueInput]) -> Result<(), AppError> {
     if inputs.is_empty() { return Ok(()); }
     let field_ids: Vec<Uuid> = inputs.iter().map(|i| i.field_id).collect();
@@ -138,6 +141,9 @@ pub async fn upsert_task_custom_field_values<C: ConnectionTrait>(db: &C, project
     Ok(())
 }
 
+/// 必須カスタムフィールドが全て埋まっているか検証する。
+/// `pending` に upsert 予定の値を渡すことで、DB への保存前でも正しく検証できる。
+/// 新規作成時は DB 上に値がないため、`pending` で全値を渡す必要がある。
 pub async fn ensure_required_custom_fields<C: ConnectionTrait>(db: &C, project_id: Uuid, task_id: Uuid, pending: Option<&[CustomFieldValueInput]>) -> Result<(), AppError> {
     let required_fields = project_custom_fields::Entity::find().filter(project_custom_fields::Column::ProjectId.eq(project_id)).filter(project_custom_fields::Column::IsRequired.eq(true)).all(db).await?;
     if required_fields.is_empty() { return Ok(()); }
