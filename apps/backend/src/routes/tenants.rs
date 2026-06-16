@@ -93,6 +93,14 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::sprints::assign_tasks_to_sprint)),
                 )
                 .nest(
+                    "/{project_id}/custom-fields",
+                    OpenApiRouter::<AppState>::new()
+                        .routes(routes!(crate::handlers::custom_fields::list_custom_fields))
+                        .routes(routes!(crate::handlers::custom_fields::create_custom_field))
+                        .routes(routes!(crate::handlers::custom_fields::update_custom_field))
+                        .routes(routes!(crate::handlers::custom_fields::delete_custom_field)),
+                )
+                .nest(
                     "/{project_id}/labels",
                     OpenApiRouter::<AppState>::new()
                         .routes(routes!(crate::handlers::labels::list_labels))

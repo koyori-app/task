@@ -20,6 +20,10 @@ use crate::entities::{
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
+use crate::utils::custom_fields::{
+    ensure_required_custom_fields, load_task_custom_field_values, upsert_task_custom_field_values,
+    CustomFieldValueInput, TaskCustomFieldValueResponse,
+};
 use crate::utils::task_activities::{priority_label, record_activity, status_name};
 use crate::AppState;
 
@@ -309,6 +313,8 @@ pub struct CreateTaskRequest {
     pub assignees: Vec<AssigneeInput>,
     #[serde(default)]
     pub label_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub custom_field_values: Vec<CustomFieldValueInput>,
 }
 
 #[derive(Validate, Deserialize, ToSchema)]
@@ -348,6 +354,7 @@ pub struct UpdateTaskRequest {
     #[serde(default)]
     pub clear_estimated_minutes: bool,
     pub is_archived: Option<bool>,
+    pub custom_field_values: Option<Vec<CustomFieldValueInput>>,
 }
 
 #[derive(Deserialize, ToSchema, utoipa::IntoParams)]
@@ -387,6 +394,23 @@ fn parse_task_priority(value: &str) -> Result<tasks::TaskPriority, AppError> {
 pub struct TaskListResponse {
     pub tasks: Vec<tasks::Model>,
     pub total: u64,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct TaskDetailResponse {
+    #[serde(flatten)]
+    pub task: tasks::Model,
+    pub custom_field_values: Vec<TaskCustomFieldValueResponse>,
+}
+
+async fn build_task_detail_response(
+    state: &AppState,
+    project_id: Uuid,
+    task: tasks::Model,
+) -> Result<TaskDetailResponse, AppError> {
+    let custom_field_values =
+        load_task_custom_field_values(&state.db, project_id, task.id).await?;
+    Ok(TaskDetailResponse { task, custom_field_values })
 }
 
 // ─── Tasks ───────────────────────────────────────────────────────────────
@@ -476,7 +500,7 @@ pub async fn list_tasks(
     ),
     request_body = CreateTaskRequest,
     responses(
-        (status = 201, description = "作成されたタスク", body = tasks::Model),
+        (status = 201, description = "作成されたタスク", body = TaskDetailResponse),
         CrudErrors,
     )
 )]
@@ -485,7 +509,7 @@ pub async fn create_task(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateTaskRequest>>,
-) -> Result<(StatusCode, Json<tasks::Model>), AppError> {
+) -> Result<(StatusCode, Json<TaskDetailResponse>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -595,6 +619,11 @@ pub async fn create_task(
         .await?;
     }
 
+    if status.is_done_state {
+        ensure_required_custom_fields(&txn, project_id, model.id, Some(&payload.custom_field_values)).await?;
+    }
+    upsert_task_custom_field_values(&txn, project_id, model.id, &payload.custom_field_values).await?;
+
     record_activity(
         &txn,
         model.id,
@@ -604,7 +633,7 @@ pub async fn create_task(
     )
     .await?;
     txn.commit().await?;
-    Ok((StatusCode::CREATED, Json(model)))
+    Ok((StatusCode::CREATED, Json(build_task_detail_response(&state, project_id, model).await?)))
 }
 
 #[axum::debug_handler]
@@ -619,7 +648,7 @@ pub async fn create_task(
         ("id" = String, Path, description = "タスクID（UUID または ENG-42 形式）"),
     ),
     responses(
-        (status = 200, description = "タスク", body = tasks::Model),
+        (status = 200, description = "タスク", body = TaskDetailResponse),
         CrudErrors,
     )
 )]
@@ -627,12 +656,12 @@ pub async fn get_task(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
-) -> Result<Json<tasks::Model>, AppError> {
+) -> Result<Json<TaskDetailResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
-    Ok(Json(task))
+    Ok(Json(build_task_detail_response(&state, project_id, task).await?))
 }
 
 #[axum::debug_handler]
@@ -648,7 +677,7 @@ pub async fn get_task(
     ),
     request_body = UpdateTaskRequest,
     responses(
-        (status = 200, description = "更新後のタスク", body = tasks::Model),
+        (status = 200, description = "更新後のタスク", body = TaskDetailResponse),
         CrudErrors,
     )
 )]
@@ -657,7 +686,7 @@ pub async fn update_task(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
     Valid(Json(payload)): Valid<Json<UpdateTaskRequest>>,
-) -> Result<Json<tasks::Model>, AppError> {
+) -> Result<Json<TaskDetailResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -691,6 +720,9 @@ pub async fn update_task(
             .one(&txn)
             .await?
             .ok_or(AppError::NotFound)?;
+        if status.is_done_state {
+            ensure_required_custom_fields(&txn, project_id, task_id, payload.custom_field_values.as_deref()).await?;
+        }
         active.completed_at = if status.is_done_state {
             match active.completed_at.clone() {
                 sea_orm::ActiveValue::Set(Some(completed_at))
@@ -794,8 +826,11 @@ pub async fn update_task(
             &payload,
         )
         .await?;
+        if let Some(ref values) = payload.custom_field_values {
+            upsert_task_custom_field_values(&txn, project_id, task_id, values).await?;
+        }
         txn.commit().await?;
-        Ok(Json(updated))
+        Ok(Json(build_task_detail_response(&state, project_id, updated).await?))
     } else {
         let updated = active.update(&txn).await?;
         record_task_field_activities(
@@ -807,8 +842,11 @@ pub async fn update_task(
             &payload,
         )
         .await?;
+        if let Some(ref values) = payload.custom_field_values {
+            upsert_task_custom_field_values(&txn, project_id, task_id, values).await?;
+        }
         txn.commit().await?;
-        Ok(Json(updated))
+        Ok(Json(build_task_detail_response(&state, project_id, updated).await?))
     }
 }
 

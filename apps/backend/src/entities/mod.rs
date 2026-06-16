@@ -6,6 +6,8 @@ pub mod drive_files;
 pub mod drive_folder_shares;
 pub mod drive_folders;
 pub mod labels;
+pub mod project_custom_fields;
+pub mod task_custom_field_values;
 pub mod milestones;
 pub mod sprints;
 pub mod passkeys;

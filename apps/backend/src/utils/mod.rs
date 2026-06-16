@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod custom_fields;
 pub mod bootstrap_admin;
 pub mod http;
 pub mod passkey_challenges;
