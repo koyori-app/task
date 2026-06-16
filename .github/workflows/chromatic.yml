@@ -28,8 +28,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Build Storybook
+        run: pnpm build-storybook --stats-json
+
       - uses: chromaui/action@latest
         with:
           workingDir: apps/frontend
           projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
-          buildScriptName: build-storybook
+          storybookBuildDir: storybook-static
+          onlyChanged: true
