@@ -61,6 +61,6 @@ async fn custom_fields_integration_suite() {
         .as_array()
         .expect("custom_field_values should be array");
     assert_eq!(values.len(), 2);
-    assert!(values.iter().any(|v| v["field_id"] == number_id && v["value"] == "5"));
-    assert!(values.iter().any(|v| v["field_id"] == select_id && v["value"] == "m"));
+    assert!(values.iter().any(|v| v["field"]["id"] == number_id && v["value"] == "5"));
+    assert!(values.iter().any(|v| v["field"]["id"] == select_id && v["value"] == "m"));
 }
