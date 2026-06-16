@@ -118,14 +118,21 @@ pub async fn list_notifications(State(state): State<AppState>, auth: AuthUser, Q
     }).collect() }))
 }
 
-#[utoipa::path(patch, path = "/me/notifications/{id}/read", tag = "Notifications", responses((status = 200, body = notifications::Model), CrudErrors))]
+#[utoipa::path(patch, path = "/me/notifications/{id}/read", tag = "Notifications", responses((status = 200, body = NotificationItem), CrudErrors))]
 #[axum::debug_handler]
-pub async fn mark_notification_read(State(state): State<AppState>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Json<notifications::Model>, AppError> {
+pub async fn mark_notification_read(State(state): State<AppState>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Json<NotificationItem>, AppError> {
     let notification = notifications::Entity::find_by_id(id).filter(notifications::Column::UserId.eq(auth.user_id)).one(&state.db).await?.ok_or(AppError::NotFound)?;
-    if notification.read_at.is_some() { return Ok(Json(notification)); }
-    let mut active: notifications::ActiveModel = notification.into();
-    active.read_at = Set(Some(chrono::Utc::now()));
-    Ok(Json(active.update(&state.db).await?))
+    let row = if notification.read_at.is_some() {
+        notification
+    } else {
+        let mut active: notifications::ActiveModel = notification.into();
+        active.read_at = Set(Some(chrono::Utc::now()));
+        active.update(&state.db).await?
+    };
+    let task = if let Some(tid) = row.task_id {
+        tasks::Entity::find_by_id(tid).one(&state.db).await?.map(|t| NotificationTaskSummary { id: t.id, seq_id: t.seq_id, title: t.title })
+    } else { None };
+    Ok(Json(NotificationItem { id: row.id, notification_type: row.notification_type, task, payload: row.payload.clone().into(), read_at: row.read_at, created_at: row.created_at }))
 }
 
 #[utoipa::path(patch, path = "/me/notifications/read-all", tag = "Notifications", responses((status = 204), CrudErrors))]

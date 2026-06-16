@@ -2,6 +2,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
     prelude::Uuid,
 };
+use sea_orm::sea_query::OnConflict;
 use sea_orm::entity::prelude::Json;
 use std::collections::HashSet;
 
@@ -28,20 +29,17 @@ pub async fn ensure_watcher<C: ConnectionTrait>(
     task_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), AppError> {
-    let existing = task_watchers::Entity::find()
-        .filter(task_watchers::Column::TaskId.eq(task_id))
-        .filter(task_watchers::Column::UserId.eq(user_id))
-        .one(db)
-        .await?;
-    if existing.is_some() {
-        return Ok(());
-    }
-    task_watchers::ActiveModel {
+    task_watchers::Entity::insert(task_watchers::ActiveModel {
         task_id: Set(task_id),
         user_id: Set(user_id),
         created_at: Set(chrono::Utc::now()),
-    }
-    .insert(db)
+    })
+    .on_conflict(
+        OnConflict::columns([task_watchers::Column::TaskId, task_watchers::Column::UserId])
+            .do_nothing()
+            .to_owned(),
+    )
+    .exec_without_returning(db)
     .await?;
     Ok(())
 }

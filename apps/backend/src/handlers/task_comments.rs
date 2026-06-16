@@ -336,7 +336,7 @@ pub async fn update_comment(
         return Err(AppError::Forbidden);
     }
 
-    let _mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
+    let mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
 
     let comment_id = comment.id;
     let txn = state.db.begin().await?;
@@ -352,6 +352,7 @@ pub async fn update_comment(
         serde_json::json!({ "comment_id": comment_id }).into(),
     )
     .await?;
+    notify_mentioned(&txn, project_id, task.id, &mentions, comment_id, auth.user_id).await?;
     txn.commit().await?;
     Ok(Json(updated))
 }
