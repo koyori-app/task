@@ -67,7 +67,10 @@ pub fn validate_custom_field_value(field: &project_custom_fields::Model, value: 
     if value.is_empty() { return Err(AppError::BadRequest); }
     match field.field_type {
         project_custom_fields::CustomFieldType::Text => Ok(()),
-        project_custom_fields::CustomFieldType::Number => value.parse::<f64>().map(|_| ()).map_err(|_| AppError::BadRequest),
+        project_custom_fields::CustomFieldType::Number => {
+            let n = value.parse::<f64>().map_err(|_| AppError::BadRequest)?;
+            if n.is_finite() { Ok(()) } else { Err(AppError::BadRequest) }
+        }
         project_custom_fields::CustomFieldType::Select => {
             let options = field.options.as_ref().ok_or(AppError::BadRequest)?;
             let arr = options.as_array().ok_or(AppError::BadRequest)?;
@@ -79,7 +82,10 @@ pub fn validate_custom_field_value(field: &project_custom_fields::Model, value: 
                 .map(|_| ())
                 .map_err(|_| AppError::BadRequest)
         }
-        project_custom_fields::CustomFieldType::Url => url::Url::parse(value).map(|_| ()).map_err(|_| AppError::BadRequest),
+        project_custom_fields::CustomFieldType::Url => {
+            let parsed = url::Url::parse(value).map_err(|_| AppError::BadRequest)?;
+            if matches!(parsed.scheme(), "http" | "https") { Ok(()) } else { Err(AppError::BadRequest) }
+        }
         project_custom_fields::CustomFieldType::Checkbox => if value == "true" || value == "false" { Ok(()) } else { Err(AppError::BadRequest) },
     }
 }
