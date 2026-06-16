@@ -12,7 +12,7 @@ impl MigrationTrait for Migration {
                 id UUID PRIMARY KEY,
                 project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                 name VARCHAR(100) NOT NULL,
-                field_type VARCHAR NOT NULL CHECK (field_type IN ('Text', 'Number', 'Select', 'Date', 'Url', 'Checkbox')),
+                field_type VARCHAR NOT NULL CHECK (field_type IN ('text', 'number', 'select', 'date', 'url', 'checkbox')),
                 options JSONB,
                 is_required BOOLEAN NOT NULL DEFAULT false,
                 position SMALLINT NOT NULL,
