@@ -103,6 +103,7 @@ export default defineConfig({
         '**/.storybook/**',
         'storybook-static/**',
         'src/components/ui/**',
+        'src/components/originui/**',
         'src/generated/**',
       ],
     },
@@ -149,7 +150,7 @@ export default defineConfig({
   fmt: {
     singleQuote: true,
     trailingComma: 'all',
-    ignorePatterns: ['content/**/*.md', 'src/components/ui/**'],
+    ignorePatterns: ['content/**/*.md', 'src/components/ui/**', 'src/components/originui/**'],
   },
   lint: { options: { typeAware: true, typeCheck: true } },
 });
