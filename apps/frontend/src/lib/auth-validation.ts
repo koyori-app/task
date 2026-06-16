@@ -1,0 +1,12 @@
+/**
+ * Converts English validation error messages to their Japanese equivalents.
+ *
+ * @param msg - A validation error message
+ * @returns The Japanese translation if the message matches a known validation error, otherwise the original message
+ */
+export function arkMessage(msg: string): string {
+  if (msg.includes('at least length 3')) return '3文字以上で入力してください。';
+  if (msg.includes('email address')) return 'メールアドレスの形式が正しくありません。';
+  if (msg.includes('at least length 8')) return '8文字以上で入力してください。';
+  return msg;
+}
