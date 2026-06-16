@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+    paths:
+      - apps/frontend/**
 
 jobs:
   chromatic:
@@ -31,7 +33,7 @@ jobs:
       - name: Build Storybook
         run: pnpm build-storybook --stats-json
 
-      - uses: chromaui/action@latest
+      - uses: chromaui/action@v17
         with:
           workingDir: apps/frontend
           projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
