@@ -113,10 +113,13 @@ async fn custom_fields_integration_suite() {
     })).await;
     assert_eq!(bad_url.status(), StatusCode::BAD_REQUEST);
 
-    // --- バリデーション: is_required フィールドを省略 → 400 ---
+    // --- バリデーション: is_required フィールドに明示的 null → 400 ---
+    // ensure_required_custom_fields は done 状態時のみ呼ばれる設計のため、
+    // 非 done ステータスで空配列を送っても 400 にはならない。
+    // 必須チェックは値を明示的に null/空で送った場合に upsert_task_custom_field_values が検出する。
     let missing_required = app.post_json_with_session(&tasks_base, serde_json::json!({
         "title": "missing-required", "status_id": status_id,
-        "custom_field_values": []
+        "custom_field_values": [{"field_id": number_id, "value": null}]
     })).await;
     assert_eq!(missing_required.status(), StatusCode::BAD_REQUEST);
 
