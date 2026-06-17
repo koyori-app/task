@@ -40,9 +40,7 @@ const tenantSlug = computed(() => {
   return typeof tenant === 'string' ? tenant : '';
 });
 
-const myTasksUrl = computed(() =>
-  tenantSlug.value ? `/${tenantSlug.value}/my-tasks` : '#',
-);
+const myTasksUrl = computed(() => (tenantSlug.value ? `/${tenantSlug.value}/my-tasks` : '#'));
 
 const labelsUrl = computed(() => {
   const { tenant, projectKey } = pageContext.routeParams;
