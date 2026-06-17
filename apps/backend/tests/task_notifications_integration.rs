@@ -338,7 +338,7 @@ async fn status_changed_notification_to_watcher() {
     let status_a_id = app
         .post_json_with_session(
             &status_path,
-            serde_json::json!({"name":"Todo","color":"#aaa","position":0,"is_default":true}),
+            serde_json::json!({"name":"Todo","color":"#aaaaaa","position":0,"is_default":true}),
         )
         .await
         .json::<Value>()
@@ -350,7 +350,7 @@ async fn status_changed_notification_to_watcher() {
     let status_b_id = app
         .post_json_with_session(
             &status_path,
-            serde_json::json!({"name":"Done","color":"#bbb","position":1,"is_default":false}),
+            serde_json::json!({"name":"Done","color":"#bbbbbb","position":1,"is_default":false}),
         )
         .await
         .json::<Value>()
@@ -486,5 +486,5 @@ async fn notification_settings_get_update_and_validation() {
             }),
         )
         .await;
-    assert_eq!(invalid_resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(invalid_resp.status(), StatusCode::BAD_REQUEST);
 }
