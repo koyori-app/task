@@ -1,9 +1,5 @@
-import {
-  enhance,
-  MiddlewareOrder,
-  type UniversalMiddleware,
-} from "@universal-middleware/core";
-import { appEnvSettings } from "#/settings/env";
+import { enhance, MiddlewareOrder, type UniversalMiddleware } from '@universal-middleware/core';
+import { appEnvSettings } from '#/settings/env';
 
 type AppSettings = {
   env: typeof appEnvSettings;
@@ -26,7 +22,7 @@ const injectSettings: UniversalMiddleware<Universal.Context, SettingsContext> = 
 });
 
 export const settingInjector = enhance(injectSettings, {
-  name: "app:setting-injector",
+  name: 'app:setting-injector',
   order: MiddlewareOrder.CUSTOM_PRE_PROCESSING,
   immutable: true,
 });

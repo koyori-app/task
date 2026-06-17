@@ -4,14 +4,8 @@
     "target": "ES2022",
     "module": "ES2022",
     "moduleResolution": "Bundler",
-    "lib": [
-      "DOM",
-      "DOM.Iterable",
-      "ESNext"
-    ],
-    "types": [
-      "vite/client"
-    ],
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "types": ["vite/client"],
     "noEmit": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -21,7 +15,5 @@
       "@/sentry.browser.config": ["./sentry.browser.config.ts"]
     }
   },
-  "exclude": [
-    "dist"
-  ]
+  "exclude": ["dist"]
 }

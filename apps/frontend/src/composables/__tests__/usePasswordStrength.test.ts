@@ -150,9 +150,7 @@ describe('usePasswordStrength', () => {
 
   it('高速入力時に古いレスポンスを破棄する', async () => {
     let resolveFirst!: (v: Response) => void;
-    const firstResponse = new Promise<Response>(
-      (res) => (resolveFirst = res),
-    );
+    const firstResponse = new Promise<Response>((res) => (resolveFirst = res));
 
     const fetchMock = vi
       .fn()

@@ -57,4 +57,3 @@ This app is integrated with [Sentry](https://sentry.io) for error tracking.
 1. Build & Start the app `pnpm build && pnpm preview`.
 2. open Testpage in browser: http://localhost:3000/sentry.
 3. check your [Sentry Dashboard](https://sentry.io) for new Errors.
-

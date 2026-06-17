@@ -5,15 +5,15 @@
 </template>
 
 <script lang="ts" setup>
-import { usePageContext } from "vike-vue/usePageContext";
-import { computed, useAttrs } from "vue";
+import { usePageContext } from 'vike-vue/usePageContext';
+import { computed, useAttrs } from 'vue';
 
 const pageContext = usePageContext();
 const { href } = useAttrs();
 const isActive = computed(() => {
-  if (typeof href !== "string") return false;
+  if (typeof href !== 'string') return false;
   const { urlPathname } = pageContext;
-  return href === "/" ? urlPathname === href : urlPathname.startsWith(href);
+  return href === '/' ? urlPathname === href : urlPathname.startsWith(href);
 });
 </script>
 

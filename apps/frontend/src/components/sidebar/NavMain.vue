@@ -40,12 +40,7 @@ defineProps<{
             </a>
           </SidebarMenuButton>
         </SidebarMenuItem>
-        <Collapsible
-          v-else
-          as-child
-          :default-open="item.isActive"
-          class="group/collapsible"
-        >
+        <Collapsible v-else as-child :default-open="item.isActive" class="group/collapsible">
           <SidebarMenuItem>
             <CollapsibleTrigger as-child>
               <SidebarMenuButton :tooltip="item.title">

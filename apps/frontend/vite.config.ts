@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import vue from '@vitejs/plugin-vue';
 import tailwindcss from '@tailwindcss/vite';
 import { sentryVitePlugin } from '@sentry/vite-plugin';
-import { analyzer, unstableRolldownAdapter } from 'vite-bundle-analyzer'
+import { analyzer, unstableRolldownAdapter } from 'vite-bundle-analyzer';
 
 /// <reference types="@batijs/core/types" />
 
@@ -25,8 +25,7 @@ const coderAllowedHost = process.env.CODER_AGENT_URL
 const analyze = process.env.ANALYZE === 'true';
 
 const sentryEnabled =
-  process.env.NODE_ENV?.includes('prod') ||
-  process.env.FORCE_ENABLE_IN_DEV === 'true';
+  process.env.NODE_ENV?.includes('prod') || process.env.FORCE_ENABLE_IN_DEV === 'true';
 
 // console.log('FORCE_ENABLE_IN_DEV: ', process.env.FORCE_ENABLE_IN_DEV === 'true');
 // console.log('sentryEnabled: ', sentryEnabled);
@@ -70,13 +69,9 @@ export default defineConfig({
       clientFiles: [
         './src/pages/+Layout.vue',
         // './src/pages/index/+Page.vue'
-        ],
+      ],
     },
-    allowedHosts: [
-      'localhost',
-      '127.0.0.1',
-      ...(coderAllowedHost ? [coderAllowedHost] : []),
-    ],
+    allowedHosts: ['localhost', '127.0.0.1', ...(coderAllowedHost ? [coderAllowedHost] : [])],
   },
   ssr: {
     noExternal: ['@zxcvbn-ts/core', '@zxcvbn-ts/language-common', '@zxcvbn-ts/language-ja'],

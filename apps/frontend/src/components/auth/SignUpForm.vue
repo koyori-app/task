@@ -59,7 +59,9 @@ const form = useForm({
                     @input="(e: Event) => field.handleChange((e.target as HTMLInputElement).value)"
                   />
                   <div class="min-h-[1.25rem]">
-                    <FieldError v-if="field.state.meta.errors.length > 0 && field.state.meta.isTouched">
+                    <FieldError
+                      v-if="field.state.meta.errors.length > 0 && field.state.meta.isTouched"
+                    >
                       {{ arkMessage(String(field.state.meta.errors[0])) }}
                     </FieldError>
                     <p v-else class="text-muted-foreground text-xs">

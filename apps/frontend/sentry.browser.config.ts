@@ -1,12 +1,12 @@
-import * as Sentry from "@sentry/vue";
-import { getCurrentInstance } from "vue";
+import * as Sentry from '@sentry/vue';
+import { getCurrentInstance } from 'vue';
 
 export const sentryBrowserConfig = () => {
   import.meta.env.PROD === true &&
     Sentry.init({
       app: getCurrentInstance()?.appContext.app,
       dsn: import.meta.env.PUBLIC_ENV__SENTRY_DSN,
-      environment: "production-frontend",
+      environment: 'production-frontend',
       // enabled: import.meta.env.DEV ? false : true,
       integrations: [Sentry.replayIntegration()],
       // Set tracesSampleRate to 1.0 to capture 100%
