@@ -17,7 +17,8 @@ use validator::Validate;
 use crate::AppState;
 use crate::auth_helpers::require_member_or_owner;
 use crate::entities::{
-    notification_settings, notifications, project_members, projects, task_watchers, tasks, users,
+    notification_settings, notifications, project_members, projects, task_watchers, tasks, tenants,
+    users,
 };
 use crate::error::AppError;
 use crate::extractors::AuthUser;
@@ -185,6 +186,8 @@ pub async fn list_notifications(
     auth: AuthUser,
     Query(q): Query<ListNotificationsQuery>,
 ) -> Result<Json<NotificationListResponse>, AppError> {
+    auth.require_session()?;
+
     let unread_count = notifications::Entity::find()
         .filter(notifications::Column::UserId.eq(auth.user_id))
         .filter(notifications::Column::ReadAt.is_null())
@@ -222,7 +225,7 @@ pub async fn list_notifications(
             .collect()
     };
 
-    // 現在もプロジェクトメンバーであるものだけ返す
+    // プロジェクトメンバーまたはテナントオーナーであるものだけ返す
     let project_ids: Vec<Uuid> = tasks_map
         .values()
         .map(|t| t.project_id)
@@ -232,14 +235,50 @@ pub async fn list_notifications(
     let accessible_project_ids: HashSet<Uuid> = if project_ids.is_empty() {
         HashSet::new()
     } else {
-        project_members::Entity::find()
+        let member_project_ids: HashSet<Uuid> = project_members::Entity::find()
             .filter(project_members::Column::UserId.eq(auth.user_id))
-            .filter(project_members::Column::ProjectId.is_in(project_ids))
+            .filter(project_members::Column::ProjectId.is_in(project_ids.clone()))
             .all(&state.db)
             .await?
             .into_iter()
             .map(|m| m.project_id)
-            .collect()
+            .collect();
+
+        // メンバーでないプロジェクトについてテナントオーナーか確認
+        let projects_map: HashMap<Uuid, projects::Model> = projects::Entity::find()
+            .filter(projects::Column::Id.is_in(project_ids))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|p| (p.id, p))
+            .collect();
+        let non_member_tenant_ids: Vec<Uuid> = projects_map
+            .values()
+            .filter(|p| !member_project_ids.contains(&p.id))
+            .map(|p| p.tenant_id)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let owned_tenant_ids: HashSet<Uuid> = if non_member_tenant_ids.is_empty() {
+            HashSet::new()
+        } else {
+            tenants::Entity::find()
+                .filter(tenants::Column::Id.is_in(non_member_tenant_ids))
+                .filter(tenants::Column::OwnerId.eq(auth.user_id))
+                .all(&state.db)
+                .await?
+                .into_iter()
+                .map(|t| t.id)
+                .collect()
+        };
+
+        let mut accessible = member_project_ids;
+        for project in projects_map.values() {
+            if owned_tenant_ids.contains(&project.tenant_id) {
+                accessible.insert(project.id);
+            }
+        }
+        accessible
     };
 
     Ok(Json(NotificationListResponse {
@@ -280,13 +319,15 @@ pub async fn mark_notification_read(
     auth: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<NotificationItem>, AppError> {
+    auth.require_session()?;
+
     let notification = notifications::Entity::find_by_id(id)
         .filter(notifications::Column::UserId.eq(auth.user_id))
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // task に紐づく通知はプロジェクトメンバーであることを確認
+    // task に紐づく通知はプロジェクトアクセス可能（メンバーまたはテナントオーナー）か確認
     if let Some(tid) = notification.task_id {
         if let Some(task) = tasks::Entity::find_by_id(tid).one(&state.db).await? {
             let is_member = project_members::Entity::find()
@@ -296,7 +337,21 @@ pub async fn mark_notification_read(
                 .await?
                 > 0;
             if !is_member {
-                return Err(AppError::NotFound);
+                let project = projects::Entity::find_by_id(task.project_id)
+                    .one(&state.db)
+                    .await?;
+                let is_owner = if let Some(proj) = project {
+                    tenants::Entity::find_by_id(proj.tenant_id)
+                        .one(&state.db)
+                        .await?
+                        .map(|t| t.owner_id == auth.user_id)
+                        .unwrap_or(false)
+                } else {
+                    false
+                };
+                if !is_owner {
+                    return Err(AppError::NotFound);
+                }
             }
         }
     }
@@ -336,6 +391,7 @@ pub async fn mark_all_notifications_read(
     State(state): State<AppState>,
     auth: AuthUser,
 ) -> Result<StatusCode, AppError> {
+    auth.require_session()?;
     notifications::Entity::update_many()
         .col_expr(
             notifications::Column::ReadAt,
@@ -355,6 +411,7 @@ pub async fn get_notification_settings(
     auth: AuthUser,
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<NotificationSettingsResponse>, AppError> {
+    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
     let project = projects::Entity::find_by_id(project_id)
         .one(&state.db)
         .await?
@@ -390,6 +447,7 @@ pub async fn update_notification_settings(
     Path(project_id): Path<Uuid>,
     Valid(Json(payload)): Valid<Json<UpdateNotificationSettingsRequest>>,
 ) -> Result<Json<NotificationSettingsResponse>, AppError> {
+    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     let project = projects::Entity::find_by_id(project_id)
         .one(&state.db)
         .await?

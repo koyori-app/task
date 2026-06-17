@@ -7,7 +7,7 @@ use sea_orm::{
 use std::collections::HashSet;
 
 use crate::entities::{
-    notification_settings, notifications, project_members, task_watchers, users,
+    notification_settings, notifications, project_members, projects, task_watchers, tenants, users,
 };
 use crate::error::AppError;
 
@@ -152,7 +152,7 @@ pub async fn notify_watchers<C: ConnectionTrait>(
 ) -> Result<(), AppError> {
     let exclude_set: HashSet<Uuid> = exclude.iter().copied().collect();
 
-    // プロジェクトから外れたユーザーには通知しない
+    // プロジェクトから外れたユーザーには通知しない（テナントオーナーは除外しない）
     let member_ids: HashSet<Uuid> = project_members::Entity::find()
         .filter(project_members::Column::ProjectId.eq(project_id))
         .all(db)
@@ -161,12 +161,28 @@ pub async fn notify_watchers<C: ConnectionTrait>(
         .map(|m| m.user_id)
         .collect();
 
+    // テナントオーナーは project_members に入っていなくてもウォッチャー通知を受け取る
+    let tenant_id = projects::Entity::find_by_id(project_id)
+        .one(db)
+        .await?
+        .map(|p| p.tenant_id);
+    let tenant_owner_id: Option<Uuid> = if let Some(tid) = tenant_id {
+        tenants::Entity::find_by_id(tid)
+            .one(db)
+            .await?
+            .map(|t| t.owner_id)
+    } else {
+        None
+    };
+
     let watchers = task_watchers::Entity::find()
         .filter(task_watchers::Column::TaskId.eq(task_id))
         .all(db)
         .await?;
     for watcher in watchers {
-        if exclude_set.contains(&watcher.user_id) || !member_ids.contains(&watcher.user_id) {
+        let is_accessible =
+            member_ids.contains(&watcher.user_id) || tenant_owner_id == Some(watcher.user_id);
+        if exclude_set.contains(&watcher.user_id) || !is_accessible {
             continue;
         }
         notify_user_if_enabled(
