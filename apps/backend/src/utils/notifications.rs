@@ -160,6 +160,8 @@ pub async fn notify_watchers<C: ConnectionTrait>(
     Ok(())
 }
 
+/// メンション通知を送信し、実際に通知が届いたユーザーのIDリストを返す。
+/// 返値は notify_comment_added の除外リストに使うこと。
 pub async fn notify_mentioned<C: ConnectionTrait>(
     db: &C,
     project_id: Uuid,
@@ -167,7 +169,7 @@ pub async fn notify_mentioned<C: ConnectionTrait>(
     mentioned_user_ids: &[Uuid],
     comment_id: Uuid,
     author_id: Uuid,
-) -> Result<(), AppError> {
+) -> Result<Vec<Uuid>, AppError> {
     let author_name = users::Entity::find_by_id(author_id)
         .one(db)
         .await?
@@ -178,21 +180,17 @@ pub async fn notify_mentioned<C: ConnectionTrait>(
         "author": author_name,
     })
     .into();
+    let mut notified = Vec::new();
     for user_id in mentioned_user_ids {
         if *user_id == author_id {
             continue;
         }
-        notify_user_if_enabled(
-            db,
-            *user_id,
-            project_id,
-            task_id,
-            TYPE_MENTIONED,
-            payload.clone(),
-        )
-        .await?;
+        if in_app_enabled(db, *user_id, project_id, TYPE_MENTIONED).await? {
+            create_notification(db, *user_id, Some(task_id), TYPE_MENTIONED, payload.clone()).await?;
+            notified.push(*user_id);
+        }
     }
-    Ok(())
+    Ok(notified)
 }
 
 pub async fn notify_comment_added<C: ConnectionTrait>(

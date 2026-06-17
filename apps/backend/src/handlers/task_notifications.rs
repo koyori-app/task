@@ -1,6 +1,6 @@
 use axum::{Json, extract::{Path, Query, State}, http::StatusCode};
 use axum_valid::Valid;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, prelude::Uuid};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, prelude::Uuid};
 use sea_orm::sea_query::{Expr, Order};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -105,8 +105,8 @@ pub async fn stop_watch(State(state): State<AppState>, auth: AuthUser, Path((ten
 pub async fn list_notifications(State(state): State<AppState>, auth: AuthUser, Query(q): Query<ListNotificationsQuery>) -> Result<Json<NotificationListResponse>, AppError> {
     let mut query = notifications::Entity::find().filter(notifications::Column::UserId.eq(auth.user_id));
     if q.unread == Some(true) { query = query.filter(notifications::Column::ReadAt.is_null()); }
-    let unread_count = notifications::Entity::find().filter(notifications::Column::UserId.eq(auth.user_id)).filter(notifications::Column::ReadAt.is_null()).count(&state.db).await?;
     let rows = query.order_by(Expr::cust("CASE WHEN read_at IS NULL THEN 0 ELSE 1 END"), Order::Asc).order_by_desc(notifications::Column::CreatedAt).all(&state.db).await?;
+    let unread_count = rows.iter().filter(|n| n.read_at.is_none()).count() as u64;
     let task_ids: Vec<Uuid> = rows.iter().filter_map(|n| n.task_id).collect();
     let tasks_map: HashMap<Uuid, tasks::Model> = if task_ids.is_empty() { HashMap::new() } else {
         tasks::Entity::find().filter(tasks::Column::Id.is_in(task_ids)).all(&state.db).await?.into_iter().map(|t| (t.id, t)).collect()
