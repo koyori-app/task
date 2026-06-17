@@ -368,6 +368,8 @@ pub async fn update_comment(
         serde_json::json!({ "comment_id": comment_id }).into(),
     )
     .await?;
+    // 編集時は新規メンションのみ通知する。notify_comment_added は呼ばない
+    // （ウォッチャー全員への再通知は過剰なため、編集コメントは意図的に対象外）
     let _ = notify_mentioned(
         &txn,
         project_id,

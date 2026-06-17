@@ -223,6 +223,8 @@ pub async fn notify_mentioned<C: ConnectionTrait>(
         if *user_id == author_id {
             continue;
         }
+        // メンション = 関心あり → notify_assigned と同様にウォッチャーへ自動追加
+        ensure_watcher(db, task_id, *user_id).await?;
         if in_app_enabled(db, *user_id, project_id, TYPE_MENTIONED).await? {
             create_notification(db, *user_id, Some(task_id), TYPE_MENTIONED, payload.clone())
                 .await?;

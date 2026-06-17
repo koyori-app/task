@@ -6,8 +6,8 @@ use axum::{
 use axum_valid::Valid;
 use sea_orm::sea_query::{Expr, Order};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, prelude::Uuid,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, prelude::Uuid,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -240,7 +240,11 @@ pub async fn list_notifications(
             notifications::Entity::find()
                 .filter(notifications::Column::UserId.eq(auth.user_id))
                 .filter(notifications::Column::ReadAt.is_null())
-                .filter(notifications::Column::TaskId.is_in(accessible_task_ids))
+                .filter(
+                    Condition::any()
+                        .add(notifications::Column::TaskId.is_null())
+                        .add(notifications::Column::TaskId.is_in(accessible_task_ids)),
+                )
                 .count(&state.db)
                 .await?
         }
@@ -388,15 +392,66 @@ pub async fn mark_all_notifications_read(
     auth: AuthUser,
 ) -> Result<StatusCode, AppError> {
     auth.require_session()?;
-    notifications::Entity::update_many()
+
+    // list_notifications と同じアクセス制御: メンバーまたはテナントオーナーのプロジェクトのみ既読にする
+    let member_project_ids: HashSet<Uuid> = project_members::Entity::find()
+        .filter(project_members::Column::UserId.eq(auth.user_id))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|m| m.project_id)
+        .collect();
+    let owned_tenant_ids: Vec<Uuid> = tenants::Entity::find()
+        .filter(tenants::Column::OwnerId.eq(auth.user_id))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    let owner_project_ids: HashSet<Uuid> = if owned_tenant_ids.is_empty() {
+        HashSet::new()
+    } else {
+        projects::Entity::find()
+            .filter(projects::Column::TenantId.is_in(owned_tenant_ids))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|p| p.id)
+            .collect()
+    };
+    let accessible_project_ids: HashSet<Uuid> = member_project_ids
+        .into_iter()
+        .chain(owner_project_ids)
+        .collect();
+
+    let accessible_task_ids: Vec<Uuid> = if accessible_project_ids.is_empty() {
+        vec![]
+    } else {
+        tasks::Entity::find()
+            .filter(
+                tasks::Column::ProjectId
+                    .is_in(accessible_project_ids.into_iter().collect::<Vec<_>>()),
+            )
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|t| t.id)
+            .collect()
+    };
+
+    let mut update = notifications::Entity::update_many()
         .col_expr(
             notifications::Column::ReadAt,
             Expr::value(chrono::Utc::now()),
         )
         .filter(notifications::Column::UserId.eq(auth.user_id))
-        .filter(notifications::Column::ReadAt.is_null())
-        .exec(&state.db)
-        .await?;
+        .filter(notifications::Column::ReadAt.is_null());
+    update = update.filter(
+        Condition::any()
+            .add(notifications::Column::TaskId.is_null())
+            .add(notifications::Column::TaskId.is_in(accessible_task_ids)),
+    );
+    update.exec(&state.db).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
