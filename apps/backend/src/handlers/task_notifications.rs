@@ -188,11 +188,60 @@ pub async fn list_notifications(
 ) -> Result<Json<NotificationListResponse>, AppError> {
     auth.require_session()?;
 
-    let unread_count = notifications::Entity::find()
-        .filter(notifications::Column::UserId.eq(auth.user_id))
-        .filter(notifications::Column::ReadAt.is_null())
-        .count(&state.db)
-        .await?;
+    // ユーザーがメンバーのプロジェクトID
+    let member_project_ids: HashSet<Uuid> = project_members::Entity::find()
+        .filter(project_members::Column::UserId.eq(auth.user_id))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|m| m.project_id)
+        .collect();
+
+    // ユーザーがオーナーのテナントに属するプロジェクトID
+    let owned_tenant_ids: Vec<Uuid> = tenants::Entity::find()
+        .filter(tenants::Column::OwnerId.eq(auth.user_id))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    let owner_project_ids: HashSet<Uuid> = if owned_tenant_ids.is_empty() {
+        HashSet::new()
+    } else {
+        projects::Entity::find()
+            .filter(projects::Column::TenantId.is_in(owned_tenant_ids))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|p| p.id)
+            .collect()
+    };
+    let accessible_project_ids: HashSet<Uuid> =
+        member_project_ids.into_iter().chain(owner_project_ids).collect();
+
+    let unread_count: u64 = if accessible_project_ids.is_empty() {
+        0
+    } else {
+        let accessible_task_ids: Vec<Uuid> = tasks::Entity::find()
+            .filter(tasks::Column::ProjectId.is_in(
+                accessible_project_ids.iter().cloned().collect::<Vec<_>>(),
+            ))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        if accessible_task_ids.is_empty() {
+            0
+        } else {
+            notifications::Entity::find()
+                .filter(notifications::Column::UserId.eq(auth.user_id))
+                .filter(notifications::Column::ReadAt.is_null())
+                .filter(notifications::Column::TaskId.is_in(accessible_task_ids))
+                .count(&state.db)
+                .await?
+        }
+    };
 
     let limit = q.limit.unwrap_or(50).min(100);
     let offset = q.offset.unwrap_or(0);
@@ -223,62 +272,6 @@ pub async fn list_notifications(
             .into_iter()
             .map(|t| (t.id, t))
             .collect()
-    };
-
-    // プロジェクトメンバーまたはテナントオーナーであるものだけ返す
-    let project_ids: Vec<Uuid> = tasks_map
-        .values()
-        .map(|t| t.project_id)
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    let accessible_project_ids: HashSet<Uuid> = if project_ids.is_empty() {
-        HashSet::new()
-    } else {
-        let member_project_ids: HashSet<Uuid> = project_members::Entity::find()
-            .filter(project_members::Column::UserId.eq(auth.user_id))
-            .filter(project_members::Column::ProjectId.is_in(project_ids.clone()))
-            .all(&state.db)
-            .await?
-            .into_iter()
-            .map(|m| m.project_id)
-            .collect();
-
-        // メンバーでないプロジェクトについてテナントオーナーか確認
-        let projects_map: HashMap<Uuid, projects::Model> = projects::Entity::find()
-            .filter(projects::Column::Id.is_in(project_ids))
-            .all(&state.db)
-            .await?
-            .into_iter()
-            .map(|p| (p.id, p))
-            .collect();
-        let non_member_tenant_ids: Vec<Uuid> = projects_map
-            .values()
-            .filter(|p| !member_project_ids.contains(&p.id))
-            .map(|p| p.tenant_id)
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
-        let owned_tenant_ids: HashSet<Uuid> = if non_member_tenant_ids.is_empty() {
-            HashSet::new()
-        } else {
-            tenants::Entity::find()
-                .filter(tenants::Column::Id.is_in(non_member_tenant_ids))
-                .filter(tenants::Column::OwnerId.eq(auth.user_id))
-                .all(&state.db)
-                .await?
-                .into_iter()
-                .map(|t| t.id)
-                .collect()
-        };
-
-        let mut accessible = member_project_ids;
-        for project in projects_map.values() {
-            if owned_tenant_ids.contains(&project.tenant_id) {
-                accessible.insert(project.id);
-            }
-        }
-        accessible
     };
 
     Ok(Json(NotificationListResponse {
