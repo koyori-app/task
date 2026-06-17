@@ -1120,7 +1120,15 @@ pub async fn add_assignee(
         .into(),
     )
     .await?;
-    notify_assigned(&txn, project_id, task.id, payload.user_id, auth.user_id, &role).await?;
+    notify_assigned(
+        &txn,
+        project_id,
+        task.id,
+        payload.user_id,
+        auth.user_id,
+        &role,
+    )
+    .await?;
     txn.commit().await?;
     Ok((StatusCode::CREATED, Json(assignee)))
 }

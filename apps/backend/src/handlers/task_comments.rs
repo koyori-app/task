@@ -282,8 +282,24 @@ pub async fn create_comment(
         serde_json::json!({ "comment_id": comment.id }).into(),
     )
     .await?;
-    let actually_mentioned = notify_mentioned(&txn, project_id, task.id, &mentions, comment.id, auth.user_id).await?;
-    notify_comment_added(&txn, project_id, task.id, comment.id, auth.user_id, &actually_mentioned).await?;
+    let actually_mentioned = notify_mentioned(
+        &txn,
+        project_id,
+        task.id,
+        &mentions,
+        comment.id,
+        auth.user_id,
+    )
+    .await?;
+    notify_comment_added(
+        &txn,
+        project_id,
+        task.id,
+        comment.id,
+        auth.user_id,
+        &actually_mentioned,
+    )
+    .await?;
     txn.commit().await?;
 
     Ok((StatusCode::CREATED, Json(comment)))
@@ -352,7 +368,15 @@ pub async fn update_comment(
         serde_json::json!({ "comment_id": comment_id }).into(),
     )
     .await?;
-    let _ = notify_mentioned(&txn, project_id, task.id, &mentions, comment_id, auth.user_id).await?;
+    let _ = notify_mentioned(
+        &txn,
+        project_id,
+        task.id,
+        &mentions,
+        comment_id,
+        auth.user_id,
+    )
+    .await?;
     txn.commit().await?;
     Ok(Json(updated))
 }

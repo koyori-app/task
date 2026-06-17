@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS notification_settings (
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     email_events VARCHAR[] NOT NULL DEFAULT '{}',
     in_app_events VARCHAR[] NOT NULL DEFAULT
-        '{assigned,mentioned,deadline_soon,comment_added,pr_merged}',
+        '{assigned,mentioned,status_changed,deadline_soon,comment_added,pr_merged}',
     PRIMARY KEY (user_id, project_id)
 );
 

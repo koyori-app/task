@@ -1,13 +1,13 @@
+use sea_orm::entity::prelude::Json;
+use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
     prelude::Uuid,
 };
-use sea_orm::sea_query::OnConflict;
-use sea_orm::entity::prelude::Json;
 use std::collections::HashSet;
 
 use crate::entities::{
-    notification_settings, notifications, task_watchers, users,
+    notification_settings, notifications, project_members, task_watchers, users,
 };
 use crate::error::AppError;
 
@@ -19,6 +19,7 @@ pub const TYPE_COMMENT_ADDED: &str = "comment_added";
 pub const DEFAULT_IN_APP_EVENTS: &[&str] = &[
     TYPE_ASSIGNED,
     TYPE_MENTIONED,
+    TYPE_STATUS_CHANGED,
     "deadline_soon",
     TYPE_COMMENT_ADDED,
     "pr_merged",
@@ -139,12 +140,22 @@ pub async fn notify_watchers<C: ConnectionTrait>(
     exclude: &[Uuid],
 ) -> Result<(), AppError> {
     let exclude_set: HashSet<Uuid> = exclude.iter().copied().collect();
+
+    // プロジェクトから外れたユーザーには通知しない
+    let member_ids: HashSet<Uuid> = project_members::Entity::find()
+        .filter(project_members::Column::ProjectId.eq(project_id))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|m| m.user_id)
+        .collect();
+
     let watchers = task_watchers::Entity::find()
         .filter(task_watchers::Column::TaskId.eq(task_id))
         .all(db)
         .await?;
     for watcher in watchers {
-        if exclude_set.contains(&watcher.user_id) {
+        if exclude_set.contains(&watcher.user_id) || !member_ids.contains(&watcher.user_id) {
             continue;
         }
         notify_user_if_enabled(
@@ -186,7 +197,8 @@ pub async fn notify_mentioned<C: ConnectionTrait>(
             continue;
         }
         if in_app_enabled(db, *user_id, project_id, TYPE_MENTIONED).await? {
-            create_notification(db, *user_id, Some(task_id), TYPE_MENTIONED, payload.clone()).await?;
+            create_notification(db, *user_id, Some(task_id), TYPE_MENTIONED, payload.clone())
+                .await?;
             notified.push(*user_id);
         }
     }
