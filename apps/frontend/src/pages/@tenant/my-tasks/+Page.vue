@@ -41,9 +41,9 @@ const capturePriority = ref('medium');
 const submitting = ref(false);
 
 const groupedTasks = computed(() => {
-  const personal = tasks.value.filter(t => t.project.is_personal);
+  const personal = tasks.value.filter((t) => t.project.is_personal);
   const byProject = new Map<string, MyTaskItem[]>();
-  for (const task of tasks.value.filter(t => !t.project.is_personal)) {
+  for (const task of tasks.value.filter((t) => !t.project.is_personal)) {
     const key = task.project.id;
     if (!byProject.has(key)) byProject.set(key, []);
     byProject.get(key)!.push(task);
@@ -97,7 +97,12 @@ function formatDeadline(task: MyTaskItem) {
 
 function priorityLabel(p: string) {
   const map: Record<string, string> = {
-    critical_fire: '🔥', critical: '‼️', high: '⬆️', medium: '➡️', low: '⬇️', trivial: '💤',
+    critical_fire: '🔥',
+    critical: '‼️',
+    high: '⬆️',
+    medium: '➡️',
+    low: '⬇️',
+    trivial: '💤',
   };
   return map[p] ?? p;
 }
@@ -118,7 +123,10 @@ onMounted(loadTasks);
         :key="tab.key"
         size="sm"
         :variant="activeFilter === tab.key ? 'default' : 'outline'"
-        @click="activeFilter = tab.key; loadTasks()"
+        @click="
+          activeFilter = tab.key;
+          loadTasks();
+        "
       >
         {{ tab.label }}
       </Button>
