@@ -1,0 +1,42 @@
+name: Chromatic
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - apps/frontend/**
+      - .github/workflows/chromatic.yml
+
+jobs:
+  chromatic:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/frontend/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build Storybook
+        run: pnpm build-storybook --stats-json
+
+      - uses: chromaui/action@v17
+        with:
+          workingDir: apps/frontend
+          projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
+          storybookBuildDir: storybook-static
+          onlyChanged: true
