@@ -85,11 +85,9 @@ impl IntoResponse for AppError {
                 }),
             )
                 .into_response(),
-            AppError::BadRequestDetail(msg) => (
-                StatusCode::BAD_REQUEST,
-                Json(ServerError { message: msg }),
-            )
-                .into_response(),
+            AppError::BadRequestDetail(msg) => {
+                (StatusCode::BAD_REQUEST, Json(ServerError { message: msg })).into_response()
+            }
             AppError::Gone => (
                 StatusCode::GONE,
                 Json(ServerError {

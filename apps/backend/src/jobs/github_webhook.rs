@@ -6,7 +6,7 @@ use std::time::Duration;
 use apalis::prelude::{
     BackoffConfig, BoxDynError, Data, IntervalStrategy, StrategyBuilder, TaskSink,
 };
-use apalis_postgres::{Config, JsonCodec, PostgresStorage, PgPool};
+use apalis_postgres::{Config, JsonCodec, PgPool, PostgresStorage};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -64,7 +64,10 @@ pub async fn enqueue(
 }
 
 /// Wave 0: 受信をログに残すのみ（タスクリンクは PR #9b）。
-pub async fn process(job: GithubWebhookJob, _state: Data<crate::AppState>) -> Result<(), BoxDynError> {
+pub async fn process(
+    job: GithubWebhookJob,
+    _state: Data<crate::AppState>,
+) -> Result<(), BoxDynError> {
     tracing::info!(
         integration_id = %job.integration_id,
         project_id = %job.project_id,

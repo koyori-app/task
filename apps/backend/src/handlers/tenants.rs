@@ -1,16 +1,20 @@
-use axum::{Json, extract::{Path, State}, http::StatusCode};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+};
 use axum_valid::Valid;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use sea_orm::prelude::Uuid;
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use serde::Deserialize;
 use validator::Validate;
 
+use crate::AppState;
 use crate::entities::{scopes::Scope, tenants};
-use crate::extractors::AuthMethod;
 use crate::error::AppError;
+use crate::extractors::AuthMethod;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use crate::AppState;
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
 pub struct CreateTenantRequest {

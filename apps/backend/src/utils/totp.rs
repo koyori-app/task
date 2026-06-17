@@ -2,19 +2,19 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use aes_gcm::{
-    aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
 };
+use argon2::password_hash::rand_core::{OsRng, RngCore};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use image::Luma;
 use qrcode::QrCode;
-use argon2::password_hash::rand_core::{OsRng, RngCore};
 use redis::Script;
 use sea_orm::prelude::Uuid;
 use totp_rs::{Algorithm, Secret, TOTP};
 
-use crate::utils::auth::{create_personal_token_hash, AuthError};
+use crate::utils::auth::{AuthError, create_personal_token_hash};
 
 const AES_KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
@@ -83,8 +83,7 @@ pub fn decrypt_totp_secret(secret_enc: &str, key: &str) -> Result<String, AuthEr
     let plain = cipher
         .decrypt(nonce, ciphertext)
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("aes decrypt: {e}")))?;
-    String::from_utf8(plain)
-        .map_err(|e| AuthError::Internal(anyhow::anyhow!("utf8 secret: {e}")))
+    String::from_utf8(plain).map_err(|e| AuthError::Internal(anyhow::anyhow!("utf8 secret: {e}")))
 }
 
 pub fn generate_totp_secret_base32() -> Result<String, AuthError> {
@@ -125,10 +124,7 @@ pub fn otpauth_uri(secret_base32: &str, issuer: &str, account: &str) -> Result<S
 pub fn qr_code_png_data_uri(otpauth_uri: &str) -> Result<String, AuthError> {
     let code = QrCode::new(otpauth_uri.as_bytes())
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("qr encode: {e}")))?;
-    let image = code
-        .render::<Luma<u8>>()
-        .min_dimensions(200, 200)
-        .build();
+    let image = code.render::<Luma<u8>>().min_dimensions(200, 200).build();
     let mut png_bytes = Vec::new();
     image::DynamicImage::ImageLuma8(image)
         .write_to(
@@ -136,7 +132,10 @@ pub fn qr_code_png_data_uri(otpauth_uri: &str) -> Result<String, AuthError> {
             image::ImageFormat::Png,
         )
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("png write: {e}")))?;
-    Ok(format!("data:image/png;base64,{}", BASE64.encode(png_bytes)))
+    Ok(format!(
+        "data:image/png;base64,{}",
+        BASE64.encode(png_bytes)
+    ))
 }
 
 fn random_recovery_segment() -> String {
@@ -285,6 +284,9 @@ mod tests {
     fn generate_recovery_codes_are_unique() {
         let codes = generate_recovery_codes();
         assert_eq!(codes.len(), RECOVERY_CODE_COUNT);
-        assert_eq!(codes.iter().collect::<HashSet<_>>().len(), RECOVERY_CODE_COUNT);
+        assert_eq!(
+            codes.iter().collect::<HashSet<_>>().len(),
+            RECOVERY_CODE_COUNT
+        );
     }
 }

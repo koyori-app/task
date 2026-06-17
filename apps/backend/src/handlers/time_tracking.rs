@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::AppState;
 use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
 use crate::entities::{task_timers, time_logs, users};
 use crate::error::AppError;
@@ -20,7 +21,6 @@ use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
 use crate::utils::db::{is_postgres_unique_violation, with_transaction};
-use crate::AppState;
 
 #[derive(Debug, FromQueryResult)]
 struct DeletedTimerRow {
@@ -306,10 +306,8 @@ pub async fn get_time_summary(
             .all(&state.db)
             .await?
     };
-    let user_names: std::collections::HashMap<Uuid, String> = user_rows
-        .into_iter()
-        .map(|u| (u.id, u.username))
-        .collect();
+    let user_names: std::collections::HashMap<Uuid, String> =
+        user_rows.into_iter().map(|u| (u.id, u.username)).collect();
 
     let by_user = by_user_map
         .into_iter()

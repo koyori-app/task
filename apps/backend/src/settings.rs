@@ -50,24 +50,24 @@ pub struct Settings {
     #[serde(default = "default_verification_email_worker_concurrency")]
     pub verification_email_worker_concurrency: usize,
     /// パスワードリセットメール Apalis ワーカーの並列度
-    #[validate(range(
-        min = 1,
-        message = "password_reset_worker_concurrency must be >= 1"
-    ))]
+    #[validate(range(min = 1, message = "password_reset_worker_concurrency must be >= 1"))]
     #[serde(default = "default_password_reset_worker_concurrency")]
     pub password_reset_worker_concurrency: usize,
     /// GitHub Webhook Apalis ワーカーの並列度
-    #[validate(range(
-        min = 1,
-        message = "github_webhook_worker_concurrency must be >= 1"
-    ))]
+    #[validate(range(min = 1, message = "github_webhook_worker_concurrency must be >= 1"))]
     #[serde(default = "default_github_webhook_worker_concurrency")]
     pub github_webhook_worker_concurrency: usize,
     /// PAT の HMAC-SHA256 署名に使う秘密鍵。起動時に必須。32バイト以上（256ビット）が必要。
-    #[validate(length(min = 32, message = "PERSONAL_TOKEN_SECRET must be at least 32 characters"))]
+    #[validate(length(
+        min = 32,
+        message = "PERSONAL_TOKEN_SECRET must be at least 32 characters"
+    ))]
     pub personal_token_secret: String,
     /// リカバリーコード HMAC 用秘密鍵。PAT 秘密鍵とは分離。32 文字以上必須。
-    #[validate(length(min = 32, message = "RECOVERY_CODE_SECRET must be at least 32 characters"))]
+    #[validate(length(
+        min = 32,
+        message = "RECOVERY_CODE_SECRET must be at least 32 characters"
+    ))]
     pub recovery_code_secret: String,
     /// TOTP シークレット暗号化用（AES-256-GCM）。UTF-8 で正確に 32 バイト必須。
     #[validate(custom(
@@ -139,9 +139,7 @@ fn github_app_enabled_from_env() -> bool {
 }
 
 /// 環境変数から GitHub App 設定を読み込む（未設定時は `None`）。
-fn load_github_app_settings(
-    config: &Config,
-) -> Result<Option<GithubAppSettings>, anyhow::Error> {
+fn load_github_app_settings(config: &Config) -> Result<Option<GithubAppSettings>, anyhow::Error> {
     if !github_app_enabled_from_env() {
         return Ok(None);
     }
@@ -154,11 +152,14 @@ fn load_github_app_settings(
     gh.github_app_private_key = gh.github_app_private_key.replace("\\n", "\n");
 
     if gh.github_app_frontend_base_url.is_empty() {
-        gh.github_app_frontend_base_url = config
-            .get_string("email_verification_app_url")
-            .map_err(|e| {
-                anyhow::anyhow!("failed to read email_verification_app_url for github redirect: {e}")
-            })?;
+        gh.github_app_frontend_base_url =
+            config
+                .get_string("email_verification_app_url")
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "failed to read email_verification_app_url for github redirect: {e}"
+                    )
+                })?;
     }
 
     gh.validate()

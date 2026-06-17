@@ -11,11 +11,10 @@ fn webauthn_origin(settings: &Settings) -> Result<Url, anyhow::Error> {
     let origin = format!(
         "{}://{}{}",
         parsed.scheme(),
-        parsed.host_str()
+        parsed
+            .host_str()
             .ok_or_else(|| anyhow::anyhow!("webauthn: origin has no host"))?,
-        parsed.port()
-            .map(|p| format!(":{p}"))
-            .unwrap_or_default()
+        parsed.port().map(|p| format!(":{p}")).unwrap_or_default()
     );
     Url::parse(&origin).map_err(|e| anyhow::anyhow!("webauthn origin: {e}"))
 }

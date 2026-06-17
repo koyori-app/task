@@ -1,6 +1,6 @@
 //! WebAuthn 登録・認証セッション状態を Redis に保持（TTL 5 分）。
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 use webauthn_rs::prelude::{
     DiscoverableAuthentication, PasskeyAuthentication, PasskeyRegistration,

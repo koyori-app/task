@@ -1,9 +1,4 @@
-use axum::{
-    middleware::{Next},
-    response::IntoResponse,
-    http::Request,
-    body::Body,
-};
+use axum::{body::Body, http::Request, middleware::Next, response::IntoResponse};
 
 pub async fn logging_middleware(req: Request<Body>, next: Next) -> impl IntoResponse {
     // Log path only — never the query string (password-reset verify carries ?token=).

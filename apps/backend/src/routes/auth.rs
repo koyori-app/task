@@ -28,9 +28,17 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(crate::handlers::auth_2fa::totp_verify_setup))
         .routes(routes!(crate::handlers::auth_2fa::verify_2fa))
         .routes(routes!(crate::handlers::auth_2fa::delete_totp))
-        .routes(routes!(crate::handlers::auth_2fa::regenerate_recovery_codes))
-        .routes(routes!(crate::handlers::password_reset::password_reset_request))
-        .routes(routes!(crate::handlers::password_reset::password_reset_verify))
-        .routes(routes!(crate::handlers::password_reset::password_reset_complete))
+        .routes(routes!(
+            crate::handlers::auth_2fa::regenerate_recovery_codes
+        ))
+        .routes(routes!(
+            crate::handlers::password_reset::password_reset_request
+        ))
+        .routes(routes!(
+            crate::handlers::password_reset::password_reset_verify
+        ))
+        .routes(routes!(
+            crate::handlers::password_reset::password_reset_complete
+        ))
         .routes(routes!(crate::handlers::password_reset::password_change))
 }

@@ -84,8 +84,14 @@ async fn auth_2fa_integration_suite() {
         let body = serde_json::json!({ "recovery_code": recovery });
 
         let (r1, r2) = tokio::join!(
-            client.post(format!("{base}/v1/auth/2fa/verify")).json(&body).send(),
-            client.post(format!("{base}/v1/auth/2fa/verify")).json(&body).send(),
+            client
+                .post(format!("{base}/v1/auth/2fa/verify"))
+                .json(&body)
+                .send(),
+            client
+                .post(format!("{base}/v1/auth/2fa/verify"))
+                .json(&body)
+                .send(),
         );
         let s1 = r1.expect("req1").status();
         let s2 = r2.expect("req2").status();
@@ -186,14 +192,20 @@ async fn auth_2fa_integration_suite() {
             .await
             .expect("load user")
             .expect("user exists");
-        assert!(user_row.totp_enabled, "totp_enabled must remain true after forbidden delete");
+        assert!(
+            user_row.totp_enabled,
+            "totp_enabled must remain true after forbidden delete"
+        );
 
         let cred_count = totp_credentials::Entity::find()
             .filter(totp_credentials::Column::UserId.eq(user.id))
             .count(&app.state.db)
             .await
             .expect("count totp credentials");
-        assert!(cred_count > 0, "totp_credentials must not be deleted on forbidden delete");
+        assert!(
+            cred_count > 0,
+            "totp_credentials must not be deleted on forbidden delete"
+        );
 
         app.cleanup_user(user.id).await;
     }
@@ -208,7 +220,8 @@ async fn auth_2fa_integration_suite() {
 
         let admin = app.insert_user(true, false).await;
         app.reset_session_client();
-        app.login_session_no_content(&admin.email, &admin.password).await;
+        app.login_session_no_content(&admin.email, &admin.password)
+            .await;
 
         let suspend = app
             .patch_json_with_session(
@@ -235,4 +248,3 @@ async fn auth_2fa_integration_suite() {
         app.cleanup_user(admin.id).await;
     }
 }
-

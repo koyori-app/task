@@ -4,12 +4,12 @@ use std::env;
 use std::sync::Arc;
 
 pub mod local;
-pub mod r#trait;
 pub mod s3;
+pub mod r#trait;
 
 pub use local::LocalStorageBackend;
-pub use r#trait::{ByteStream, StorageBackend, StorageError};
 pub use s3::S3StorageBackend;
+pub use r#trait::{ByteStream, StorageBackend, StorageError};
 
 /// `STORAGE_BACKEND` 環境変数に応じてストレージバックエンドを初期化する。
 ///
@@ -23,8 +23,7 @@ pub async fn setup_storage() -> Result<Arc<dyn StorageBackend>, StorageError> {
             Ok(Arc::new(s3))
         }
         "local" => {
-            let upload_dir =
-                env::var("LOCAL_UPLOAD_DIR").unwrap_or_else(|_| "./uploads".into());
+            let upload_dir = env::var("LOCAL_UPLOAD_DIR").unwrap_or_else(|_| "./uploads".into());
             Ok(Arc::new(LocalStorageBackend::new(upload_dir)))
         }
         other => Err(StorageError::Other(format!(

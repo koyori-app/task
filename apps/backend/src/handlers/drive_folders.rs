@@ -8,16 +8,18 @@ use axum::{
 use axum_valid::Valid;
 use chrono::Utc;
 use rand::RngExt;
+use sea_orm::prelude::Uuid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
 };
-use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
+use crate::AppState;
 use crate::entities::{
-    drive_files, drive_folder_shares, drive_folders,
+    drive_files, drive_folder_shares,
     drive_folder_shares::{SharePermission, validate_share_target_xor},
+    drive_folders,
     scopes::Scope,
     users,
 };
@@ -25,10 +27,10 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::{DriveFolderErrors, PublicShareErrors};
 use crate::utils::drive::is_tenant_owner;
-use crate::AppState;
 
 const SHARE_TOKEN_LEN: usize = 32;
-const SHARE_TOKEN_CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const SHARE_TOKEN_CHARSET: &[u8] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 // --- Request / response DTOs ---
 

@@ -193,35 +193,27 @@ mod tests {
     #[test]
     fn build_redirect_stays_on_frontend_origin() {
         let settings = test_settings();
-        let url = build_frontend_redirect(
-            "https://app.example.com",
-            "/settings/profile",
-            &settings,
-        )
-        .unwrap();
+        let url =
+            build_frontend_redirect("https://app.example.com", "/settings/profile", &settings)
+                .unwrap();
         assert_eq!(url, "https://app.example.com/settings/profile");
     }
 
     #[test]
     fn build_redirect_rejects_open_redirect_via_path() {
         let settings = test_settings();
-        assert!(build_frontend_redirect(
-            "https://app.example.com",
-            "//evil.com/phish",
-            &settings,
-        )
-        .is_err());
+        assert!(
+            build_frontend_redirect("https://app.example.com", "//evil.com/phish", &settings,)
+                .is_err()
+        );
     }
 
     #[test]
     fn oauth_error_redirect_includes_query_param() {
         let settings = test_settings();
-        let url = build_frontend_oauth_error_redirect(
-            "https://app.example.com",
-            "/login",
-            &settings,
-        )
-        .unwrap();
+        let url =
+            build_frontend_oauth_error_redirect("https://app.example.com", "/login", &settings)
+                .unwrap();
         assert!(url.contains("oauth_error=authorization_failed"));
         assert!(url.starts_with("https://app.example.com/login"));
     }

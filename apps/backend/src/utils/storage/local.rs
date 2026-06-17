@@ -31,11 +31,7 @@ impl LocalStorageBackend {
 }
 
 fn validate_key(key: &str) -> Result<(), StorageError> {
-    if key.is_empty()
-        || key.contains('/')
-        || key.contains('\\')
-        || key.contains("..")
-    {
+    if key.is_empty() || key.contains('/') || key.contains('\\') || key.contains("..") {
         return Err(StorageError::InvalidKey);
     }
     Ok(())
@@ -89,9 +85,8 @@ impl StorageBackend for LocalStorageBackend {
     async fn get_stream(&self, key: &str) -> Result<ByteStream, StorageError> {
         let path = self.resolve_path(key)?;
         let file = File::open(&path).await?;
-        let stream = ReaderStream::new(file)
-            .map(|res| res.map(Bytes::from).map_err(StorageError::from));
+        let stream =
+            ReaderStream::new(file).map(|res| res.map(Bytes::from).map_err(StorageError::from));
         Ok(Box::pin(stream))
     }
-
 }

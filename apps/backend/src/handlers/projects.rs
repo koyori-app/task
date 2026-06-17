@@ -1,16 +1,22 @@
-use axum::{Json, extract::{Path, State}, http::StatusCode};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+};
 use axum_valid::Valid;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, QueryFilter, ColumnTrait, TransactionTrait};
 use sea_orm::prelude::Uuid;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+};
 use serde::Deserialize;
 use validator::Validate;
 
+use crate::AppState;
 use crate::entities::{drive_folders, project_members, projects, scopes::Scope, tenants};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::utils::db::is_postgres_unique_violation;
-use crate::AppState;
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
 pub struct CreateProjectRequest {
@@ -44,13 +50,12 @@ fn validate_project_key(key: &str) -> bool {
     let chars: Vec<char> = key.chars().collect();
     (chars.len() >= 2 && chars.len() <= 10)
         && chars[0].is_ascii_uppercase()
-        && chars[1..].iter().all(|c| {
-            c.is_ascii_alphanumeric() && (c.is_ascii_uppercase() || c.is_ascii_digit())
-        })
+        && chars[1..]
+            .iter()
+            .all(|c| c.is_ascii_alphanumeric() && (c.is_ascii_uppercase() || c.is_ascii_digit()))
 }
 
-const INVALID_PROJECT_KEY_MESSAGE: &str =
-    "key は 2〜10 文字で、先頭は大文字英字、残りは大文字英字または数字で入力してください（例: ENG, BACK）";
+const INVALID_PROJECT_KEY_MESSAGE: &str = "key は 2〜10 文字で、先頭は大文字英字、残りは大文字英字または数字で入力してください（例: ENG, BACK）";
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateProjectRequest {
@@ -138,7 +143,11 @@ pub async fn create_project(
     let explicit_key = payload.key;
     let mut key = match explicit_key.as_ref() {
         Some(k) if validate_project_key(k) => k.clone(),
-        Some(_) => return Err(AppError::BadRequestDetail(INVALID_PROJECT_KEY_MESSAGE.into())),
+        Some(_) => {
+            return Err(AppError::BadRequestDetail(
+                INVALID_PROJECT_KEY_MESSAGE.into(),
+            ));
+        }
         None => {
             let generated = generate_project_key(&payload.name);
             if validate_project_key(&generated) {
@@ -257,7 +266,8 @@ pub async fn get_project(
     Path((tenant_id, id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<projects::Model>, AppError> {
     auth.require_scope(Scope::ReadProject)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(id))
+        .await?;
     require_project_readable(&state, tenant_id, id, auth.user_id).await?;
     let project = projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))
@@ -290,7 +300,8 @@ pub async fn update_project(
     Valid(Json(payload)): Valid<Json<UpdateProjectRequest>>,
 ) -> Result<Json<projects::Model>, AppError> {
     auth.require_scope(Scope::WriteProject)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(id))
+        .await?;
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
     let project = projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))
@@ -340,7 +351,8 @@ pub async fn delete_project(
     Path((tenant_id, id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
     auth.require_scope(Scope::WriteProject)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(id))
+        .await?;
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
     projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))

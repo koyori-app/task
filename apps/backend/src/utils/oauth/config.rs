@@ -32,8 +32,8 @@ impl OAuthSettings {
     pub fn from_env() -> Result<Self, anyhow::Error> {
         dotenvy::dotenv().ok();
 
-        let app_base_url = env_var("APP_BASE_URL")
-            .unwrap_or_else(|| "http://localhost:3400".to_string());
+        let app_base_url =
+            env_var("APP_BASE_URL").unwrap_or_else(|| "http://localhost:3400".to_string());
 
         let github = pair_config(
             env_var("OAUTH_GITHUB_CLIENT_ID"),
@@ -117,13 +117,8 @@ impl OAuthSettings {
     /// DB に保存する provider キー（汎用 OIDC は `oidc:{issuer}`）。
     pub fn db_provider_key(&self, provider_slug: &str) -> Option<String> {
         match provider_slug {
-            "github" | "gitlab" | "gitlab_selfhosted" | "google" => {
-                Some(provider_slug.to_string())
-            }
-            "oidc" => self
-                .oidc
-                .as_ref()
-                .map(|c| format!("oidc:{}", c.issuer_url)),
+            "github" | "gitlab" | "gitlab_selfhosted" | "google" => Some(provider_slug.to_string()),
+            "oidc" => self.oidc.as_ref().map(|c| format!("oidc:{}", c.issuer_url)),
             _ => None,
         }
     }
@@ -136,10 +131,7 @@ fn env_var(name: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-fn pair_config(
-    client_id: Option<String>,
-    client_secret: Option<String>,
-) -> Option<ProviderConfig> {
+fn pair_config(client_id: Option<String>, client_secret: Option<String>) -> Option<ProviderConfig> {
     match (client_id, client_secret) {
         (Some(id), Some(secret)) => Some(ProviderConfig {
             client_id: id,

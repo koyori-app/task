@@ -1,10 +1,7 @@
 use crate::{
     settings::Settings,
     utils::{
-        oauth::OAuthSettings,
-        redis::RedisConnection,
-        smtp::SmtpClient,
-        drive::DriveConfig,
+        drive::DriveConfig, oauth::OAuthSettings, redis::RedisConnection, smtp::SmtpClient,
         storage::StorageBackend,
     },
 };
@@ -12,17 +9,17 @@ use sea_orm::DatabaseConnection;
 
 pub mod auth_helpers;
 pub mod dto;
-pub mod error;
 pub mod entities;
-pub mod jobs;
+pub mod error;
 pub mod extractors;
 pub mod handlers;
+pub mod jobs;
+pub mod middlewares;
 pub mod openapi;
 pub mod routes;
 pub mod server;
 pub mod settings;
 pub mod utils;
-pub mod middlewares;
 
 use std::sync::Arc;
 

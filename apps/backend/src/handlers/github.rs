@@ -1,20 +1,21 @@
 use axum::{
+    Json,
     body::Bytes,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Redirect, Response},
-    Json,
 };
 use hmac::{Hmac, KeyInit, Mac};
-use sea_orm::{
-    prelude::DateTimeWithTimeZone, ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait,
-    QueryFilter,
-};
 use sea_orm::prelude::Uuid;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
+    prelude::DateTimeWithTimeZone,
+};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
+use crate::AppState;
 use crate::entities::{github_integrations, projects, tenants};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
@@ -22,10 +23,10 @@ use crate::jobs::github_webhook::{self, GithubWebhookJob};
 use crate::openapi::CrudErrors;
 use crate::settings::GithubAppSettings;
 use crate::utils::{
-    github_api, github_oauth_state::{self, GithubOAuthStatePayload},
+    github_api,
+    github_oauth_state::{self, GithubOAuthStatePayload},
     github_token_crypto,
 };
-use crate::AppState;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -94,11 +95,7 @@ fn install_redirect_url(github: &GithubAppSettings, state: &str) -> String {
     )
 }
 
-fn settings_redirect_url(
-    github: &GithubAppSettings,
-    tenant_id: Uuid,
-    project_id: Uuid,
-) -> String {
+fn settings_redirect_url(github: &GithubAppSettings, tenant_id: Uuid, project_id: Uuid) -> String {
     let base = github.github_app_frontend_base_url.trim_end_matches('/');
     format!("{base}/tenants/{tenant_id}/projects/{project_id}/settings/github")
 }
@@ -231,11 +228,9 @@ pub async fn github_callback(
             .await
             .map_err(AppError::Internal)?;
 
-    let token_enc = github_token_crypto::encrypt_token(
-        &github.github_token_encryption_key,
-        &access.token,
-    )
-    .map_err(AppError::Internal)?;
+    let token_enc =
+        github_token_crypto::encrypt_token(&github.github_token_encryption_key, &access.token)
+            .map_err(AppError::Internal)?;
 
     let now: DateTimeWithTimeZone = chrono::Utc::now().fixed_offset().into();
     let existing = github_integrations::Entity::find()
@@ -319,13 +314,11 @@ pub async fn github_webhook(
     // payload に repository が含まれる場合はリポジトリ単位で絞り込む。
     // installation 全体イベント (installation, installation_repositories 等) は
     // repository フィールドを持たないため、その場合は installation 配下の全件を対象とする。
-    let repo_filter: Option<(String, String)> = payload
-        .get("repository")
-        .and_then(|r| {
-            let owner = r.get("owner")?.get("login")?.as_str()?.to_owned();
-            let name = r.get("name")?.as_str()?.to_owned();
-            Some((owner, name))
-        });
+    let repo_filter: Option<(String, String)> = payload.get("repository").and_then(|r| {
+        let owner = r.get("owner")?.get("login")?.as_str()?.to_owned();
+        let name = r.get("name")?.as_str()?.to_owned();
+        Some((owner, name))
+    });
 
     if let Some(installation_id) = installation_id {
         let mut query = github_integrations::Entity::find()

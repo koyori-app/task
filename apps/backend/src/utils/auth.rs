@@ -252,22 +252,30 @@ impl IntoResponse for AuthError {
                 .into_response(),
             AuthError::InvalidPasswordResetToken => (
                 StatusCode::BAD_REQUEST,
-                Json(ServerError { message: "invalid-password-reset-token".into() }),
+                Json(ServerError {
+                    message: "invalid-password-reset-token".into(),
+                }),
             )
                 .into_response(),
             AuthError::PasswordResetTokenNotFound => (
                 StatusCode::NOT_FOUND,
-                Json(ServerError { message: "password-reset-token-not-found".into() }),
+                Json(ServerError {
+                    message: "password-reset-token-not-found".into(),
+                }),
             )
                 .into_response(),
             AuthError::InvalidCurrentPassword => (
                 StatusCode::BAD_REQUEST,
-                Json(ServerError { message: "invalid-current-password".into() }),
+                Json(ServerError {
+                    message: "invalid-current-password".into(),
+                }),
             )
                 .into_response(),
             AuthError::PasswordNotSet => (
                 StatusCode::BAD_REQUEST,
-                Json(ServerError { message: "password-not-set".into() }),
+                Json(ServerError {
+                    message: "password-not-set".into(),
+                }),
             )
                 .into_response(),
         }
@@ -338,8 +346,7 @@ pub fn create_password_hash(password: &str) -> Result<String, AuthError> {
 
 /// 存在しないユーザー向けのダミーハッシュ。ログイン時に常に Argon2 検証を走らせ、
 /// メールアドレスの有無による応答時間差（タイミング攻撃）を抑える。
-const PRODUCTION_DUMMY_PASSWORD_HASH: &str =
-    "$argon2id$v=19$m=131072,t=3,p=2$0UUArODQDWduujvFlpWtKg$GDp6SlCwV4PIue/EfTr+nJVjlFnycyxtCfnJMnjlIjU";
+const PRODUCTION_DUMMY_PASSWORD_HASH: &str = "$argon2id$v=19$m=131072,t=3,p=2$0UUArODQDWduujvFlpWtKg$GDp6SlCwV4PIue/EfTr+nJVjlFnycyxtCfnJMnjlIjU";
 
 pub fn dummy_password_hash() -> Result<&'static str, AuthError> {
     if !argon2_test_mode() {
@@ -425,7 +432,6 @@ pub async fn authenticate_personal_token(
 
     Ok(token)
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -113,9 +113,7 @@ pub async fn fetch_user_info(
         "gitlab" | "gitlab_selfhosted" => {
             fetch_gitlab_user(http, &endpoints.userinfo_url, access_token).await
         }
-        "google" | "oidc" => {
-            fetch_oidc_user(http, &endpoints.userinfo_url, access_token).await
-        }
+        "google" | "oidc" => fetch_oidc_user(http, &endpoints.userinfo_url, access_token).await,
         other => anyhow::bail!("unsupported provider for userinfo: {other}"),
     }
 }
@@ -158,7 +156,11 @@ async fn fetch_github_verified_email(
         .await?;
 
     let verified: Vec<&GitHubEmail> = emails.iter().filter(|e| e.verified).collect();
-    let pick = verified.iter().find(|e| e.primary).copied().or(verified.first().copied());
+    let pick = verified
+        .iter()
+        .find(|e| e.primary)
+        .copied()
+        .or(verified.first().copied());
 
     Ok(match pick {
         Some(e) => (Some(e.email.clone()), Some(true)),
@@ -172,7 +174,11 @@ mod tests {
 
     fn pick_github_email(emails: &[GitHubEmail]) -> (Option<String>, Option<bool>) {
         let verified: Vec<&GitHubEmail> = emails.iter().filter(|e| e.verified).collect();
-        let pick = verified.iter().find(|e| e.primary).copied().or(verified.first().copied());
+        let pick = verified
+            .iter()
+            .find(|e| e.primary)
+            .copied()
+            .or(verified.first().copied());
         match pick {
             Some(e) => (Some(e.email.clone()), Some(true)),
             None => (None, None),

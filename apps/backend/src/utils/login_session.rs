@@ -84,7 +84,10 @@ async fn column_exists<C: ConnectionTrait>(
     .await
 }
 
-async fn user_has_active_2fa(db: &DatabaseConnection, user_id: uuid::Uuid) -> Result<bool, sea_orm::DbErr> {
+async fn user_has_active_2fa(
+    db: &DatabaseConnection,
+    user_id: uuid::Uuid,
+) -> Result<bool, sea_orm::DbErr> {
     if !column_exists(db, "users", "totp_enabled").await? {
         return Ok(false);
     }
@@ -110,7 +113,10 @@ async fn user_has_active_2fa(db: &DatabaseConnection, user_id: uuid::Uuid) -> Re
     .await
 }
 
-async fn user_in_require_2fa_tenant(db: &DatabaseConnection, user_id: uuid::Uuid) -> Result<bool, sea_orm::DbErr> {
+async fn user_in_require_2fa_tenant(
+    db: &DatabaseConnection,
+    user_id: uuid::Uuid,
+) -> Result<bool, sea_orm::DbErr> {
     if !column_exists(db, "tenants", "require_2fa").await? {
         return Ok(false);
     }

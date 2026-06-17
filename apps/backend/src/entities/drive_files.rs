@@ -1,5 +1,5 @@
-use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue;
+use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 

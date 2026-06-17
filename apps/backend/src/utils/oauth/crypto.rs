@@ -9,8 +9,8 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
 pub fn encrypt_token(key: &[u8; 32], plaintext: &str) -> Result<String, anyhow::Error> {
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| anyhow::anyhow!("aes key init: {e}"))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| anyhow::anyhow!("aes key init: {e}"))?;
 
     let mut nonce_bytes = [0u8; 12];
     OsRng.fill_bytes(&mut nonce_bytes);
@@ -35,8 +35,8 @@ pub fn decrypt_token(key: &[u8; 32], encoded: &str) -> Result<String, anyhow::Er
     }
 
     let (nonce_bytes, ciphertext) = data.split_at(12);
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| anyhow::anyhow!("aes key init: {e}"))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| anyhow::anyhow!("aes key init: {e}"))?;
     let nonce = Nonce::from_slice(nonce_bytes);
 
     let plaintext = cipher

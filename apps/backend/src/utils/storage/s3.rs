@@ -5,10 +5,10 @@ use std::env;
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_credential_types::Credentials;
+use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Builder as S3ConfigBuilder, Region};
 use aws_sdk_s3::primitives::ByteStream as AwsByteStream;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
-use aws_sdk_s3::Client;
 use bytes::Bytes;
 use futures::StreamExt;
 
@@ -55,13 +55,7 @@ impl S3StorageBackend {
             )
         });
 
-        let credentials = Credentials::new(
-            access_key_id,
-            secret_access_key,
-            None,
-            None,
-            "env",
-        );
+        let credentials = Credentials::new(access_key_id, secret_access_key, None, None, "env");
 
         let shared_config = aws_config::defaults(BehaviorVersion::latest())
             .credentials_provider(credentials)
@@ -83,11 +77,7 @@ impl S3StorageBackend {
 }
 
 fn validate_key(key: &str) -> Result<(), StorageError> {
-    if key.is_empty()
-        || key.starts_with('/')
-        || key.contains("..")
-        || key.contains('\\')
-    {
+    if key.is_empty() || key.starts_with('/') || key.contains("..") || key.contains('\\') {
         return Err(StorageError::InvalidKey);
     }
     Ok(())
@@ -157,15 +147,8 @@ async fn multipart_upload(
         .ok_or_else(|| StorageError::Other("S3 upload_id missing".into()))?
         .to_string();
 
-    let result = multipart_upload_inner(
-        client,
-        bucket,
-        key,
-        &upload_id,
-        &mut stream,
-        content_length,
-    )
-    .await;
+    let result =
+        multipart_upload_inner(client, bucket, key, &upload_id, &mut stream, content_length).await;
 
     if result.is_err() {
         let _ = client
@@ -200,15 +183,7 @@ async fn multipart_upload_inner(
 
         while pending.len() >= MULTIPART_PART_SIZE {
             let part_bytes = Bytes::from(pending.drain(..MULTIPART_PART_SIZE).collect::<Vec<_>>());
-            let etag = upload_part(
-                client,
-                bucket,
-                key,
-                upload_id,
-                part_number,
-                part_bytes,
-            )
-            .await?;
+            let etag = upload_part(client, bucket, key, upload_id, part_number, part_bytes).await?;
             completed_parts.push(
                 CompletedPart::builder()
                     .part_number(part_number)
@@ -355,5 +330,4 @@ impl StorageBackend for S3StorageBackend {
 
         Ok(Box::pin(stream))
     }
-
 }

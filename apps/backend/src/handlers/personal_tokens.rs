@@ -4,27 +4,27 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
+use sea_orm::prelude::{DateTimeWithTimeZone, Uuid};
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
 };
-use sea_orm::sea_query::Expr;
-use sea_orm::prelude::{DateTimeWithTimeZone, Uuid};
 use serde::Deserialize;
 use validator::Validate;
 
+use crate::AppState;
 use crate::dto::personal_tokens::{CreatePersonalTokenResponse, PersonalTokenResponse};
+use crate::entities::scopes::ScopeList;
 use crate::entities::{
     personal_tokens::{self},
     projects,
     scopes::Scope,
     tenants,
 };
-use crate::entities::scopes::ScopeList;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::{CrudErrors, SessionAuthErrors};
 use crate::utils::auth;
-use crate::AppState;
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
 pub struct CreatePersonalTokenRequest {
@@ -128,8 +128,8 @@ pub async fn create_personal_token(
     }
 
     let secret = &state.settings.personal_token_secret;
-    let (token_value, token_hash) = auth::generate_personal_token(secret)
-        .map_err(|e| AppError::Internal(e.into()))?;
+    let (token_value, token_hash) =
+        auth::generate_personal_token(secret).map_err(|e| AppError::Internal(e.into()))?;
 
     let allowed_project_ids = payload.project_ids.map(|ids| serde_json::json!(ids));
 
@@ -177,8 +177,7 @@ pub async fn get_personal_token(
 ) -> Result<Json<PersonalTokenResponse>, AppError> {
     auth.require_session()?;
     let token = get_owned_token(&state, id, auth.user_id).await?;
-    let resp = PersonalTokenResponse::try_from(token)
-        .map_err(|e| AppError::Internal(e.into()))?;
+    let resp = PersonalTokenResponse::try_from(token).map_err(|e| AppError::Internal(e.into()))?;
     Ok(Json(resp))
 }
 

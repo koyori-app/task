@@ -6,7 +6,8 @@ use serde_json::Value;
 
 async fn setup_task(app: &mut TestApp) -> (common::TestTenantProject, String, String) {
     let user = app.insert_user(true, false).await;
-    app.login_session_no_content(&user.email, &user.password).await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
     let tp = app.insert_tenant_project(user.id).await;
 
     let status_path = format!(
@@ -111,7 +112,10 @@ async fn task_comments_integration_suite() {
 
     let update_path = format!("{comments_base}/{reply_id}");
     let update = app
-        .put_json_with_session(&update_path, serde_json::json!({ "body": "更新した返信です。" }))
+        .put_json_with_session(
+            &update_path,
+            serde_json::json!({ "body": "更新した返信です。" }),
+        )
         .await;
     assert_eq!(update.status(), StatusCode::OK);
 
@@ -134,7 +138,8 @@ async fn task_comments_integration_suite() {
 
     let other = app.insert_user(false, false).await;
     app.reset_session_client();
-    app.login_session_no_content(&other.email, &other.password).await;
+    app.login_session_no_content(&other.email, &other.password)
+        .await;
     let forbidden_update = app
         .put_json_with_session(&update_path, serde_json::json!({ "body": "他人の編集" }))
         .await;

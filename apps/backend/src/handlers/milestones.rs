@@ -1,6 +1,10 @@
 use std::collections::HashSet;
 
-use axum::{Json, extract::{Path, State}, http::StatusCode};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+};
 use axum_valid::Valid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, prelude::Uuid,
@@ -9,12 +13,12 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::AppState;
 use crate::auth_helpers::require_member_or_owner;
 use crate::entities::{milestones, tasks};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use crate::AppState;
 
 #[derive(Validate, Deserialize, ToSchema)]
 pub struct CreateMilestoneRequest {
@@ -69,7 +73,8 @@ pub async fn list_milestones(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Vec<milestones::Model>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadMilestone)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let list = milestones::Entity::find()
         .filter(milestones::Column::ProjectId.eq(project_id))
@@ -101,7 +106,8 @@ pub async fn create_milestone(
     Valid(Json(payload)): Valid<Json<CreateMilestoneRequest>>,
 ) -> Result<(StatusCode, Json<milestones::Model>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteMilestone)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let model = milestones::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -140,7 +146,8 @@ pub async fn get_milestone(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<MilestoneDetail>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadMilestone)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let milestone = milestones::Entity::find_by_id(id)
         .filter(milestones::Column::ProjectId.eq(project_id))
@@ -173,7 +180,11 @@ pub async fn get_milestone(
         0
     };
 
-    let progress_pct = if total > 0 { (done * 100 / total) as u32 } else { 0 };
+    let progress_pct = if total > 0 {
+        (done * 100 / total) as u32
+    } else {
+        0
+    };
 
     Ok(Json(MilestoneDetail {
         milestone,
@@ -206,7 +217,8 @@ pub async fn update_milestone(
     Valid(Json(payload)): Valid<Json<UpdateMilestoneRequest>>,
 ) -> Result<Json<milestones::Model>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteMilestone)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let milestone = milestones::Entity::find_by_id(id)
         .filter(milestones::Column::ProjectId.eq(project_id))
@@ -214,10 +226,17 @@ pub async fn update_milestone(
         .await?
         .ok_or(AppError::NotFound)?;
     let mut active: milestones::ActiveModel = milestone.into();
-    if let Some(v) = payload.name { active.name = Set(v); }
-    if payload.clear_description { active.description = Set(None); }
-    else if let Some(v) = payload.description { active.description = Set(Some(v)); }
-    if let Some(v) = payload.due_date { active.due_date = Set(v); }
+    if let Some(v) = payload.name {
+        active.name = Set(v);
+    }
+    if payload.clear_description {
+        active.description = Set(None);
+    } else if let Some(v) = payload.description {
+        active.description = Set(Some(v));
+    }
+    if let Some(v) = payload.due_date {
+        active.due_date = Set(v);
+    }
     active.updated_at = Set(chrono::Utc::now());
     Ok(Json(active.update(&state.db).await?))
 }
@@ -244,7 +263,8 @@ pub async fn delete_milestone(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteMilestone)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     // tasks.milestone_id cascades to NULL via FK ON DELETE SET NULL
     let result = milestones::Entity::delete_many()

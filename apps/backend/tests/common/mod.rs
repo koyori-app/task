@@ -5,8 +5,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::{
-    Json,
-    Router,
+    Json, Router,
     body::Body,
     extract::{Query, State},
     http::{Request, StatusCode, header},
@@ -22,23 +21,22 @@ use backend::{
         setup_github_webhook_storage, setup_password_reset_email_storage, setup_pool,
         setup_verification_email_storage,
     },
-    routes,
-    settings,
+    routes, settings,
     utils::{
         auth::create_password_hash,
         drive::DriveConfig,
-        totp::build_totp,
         http::create_http_client,
         oauth::config::{OAuthSettings, ProviderConfig},
         redis::RedisConnection,
         smtp::SmtpClient,
         storage::setup_storage,
+        totp::build_totp,
         webauthn::build_webauthn,
     },
 };
 use cookie::Key;
 use http_body_util::BodyExt;
-use reqwest::{redirect::Policy, Client, Response};
+use reqwest::{Client, Response, redirect::Policy};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
     EntityTrait, QueryFilter,
@@ -223,9 +221,7 @@ pub struct MockOAuthHandle {
 impl MockOAuthHandle {
     pub async fn start(initial_user: MockGitLabUser) -> Self {
         let user = Arc::new(Mutex::new(initial_user));
-        let state = MockOAuthState {
-            user: user.clone(),
-        };
+        let state = MockOAuthState { user: user.clone() };
 
         let router = Router::new()
             .route("/oauth/authorize", get(authorize))
@@ -275,7 +271,10 @@ async fn token() -> impl IntoResponse {
 
 async fn userinfo(State(state): State<MockOAuthState>) -> impl IntoResponse {
     let user = state.user.lock().expect("mock oauth user lock").clone();
-    let confirmed_at = user.email.as_ref().map(|_| "2024-01-01T00:00:00Z".to_string());
+    let confirmed_at = user
+        .email
+        .as_ref()
+        .map(|_| "2024-01-01T00:00:00Z".to_string());
     Json(GitLabUserResponse {
         id: user.id,
         username: user.username,
@@ -347,20 +346,16 @@ impl TestApp {
         let redis_client = RedisConnection::new(&settings.redis_url);
         redis_client.ping().await.expect("redis ping");
 
-        let pg_pool = setup_pool(&settings.database_url)
+        let pg_pool = setup_pool(&settings.database_url).await.expect("pg pool");
+        let verification_email_storage = setup_verification_email_storage(&pg_pool, &settings)
             .await
-            .expect("pg pool");
-        let verification_email_storage =
-            setup_verification_email_storage(&pg_pool, &settings)
-                .await
-                .expect("verification email storage");
+            .expect("verification email storage");
         let github_webhook_storage = setup_github_webhook_storage(&pg_pool, &settings)
             .await
             .expect("github webhook storage");
-        let password_reset_email_storage =
-            setup_password_reset_email_storage(&pg_pool, &settings)
-                .await
-                .expect("password reset email storage");
+        let password_reset_email_storage = setup_password_reset_email_storage(&pg_pool, &settings)
+            .await
+            .expect("password reset email storage");
         let storage = setup_storage().await.expect("storage backend");
         let http_client = create_http_client().expect("http client");
         let webauthn = build_webauthn(&settings).expect("webauthn");
@@ -446,7 +441,12 @@ impl TestApp {
     }
 
     pub async fn request(&self, req: Request<Body>) -> TestResponse {
-        let response = self.router.clone().oneshot(req).await.expect("router response");
+        let response = self
+            .router
+            .clone()
+            .oneshot(req)
+            .await
+            .expect("router response");
         let status = response.status();
         let set_cookie = response
             .headers()
@@ -599,23 +599,21 @@ impl TestApp {
 
     pub async fn enable_2fa(&mut self, user: &TestUser) -> Enabled2fa {
         let status = self.login_session(&user.email, &user.password).await;
-        assert_eq!(status, StatusCode::NO_CONTENT, "full login before 2fa setup");
+        assert_eq!(
+            status,
+            StatusCode::NO_CONTENT,
+            "full login before 2fa setup"
+        );
 
         let setup = self
             .post_json_with_session("/v1/auth/2fa/totp/setup", serde_json::json!({}))
             .await;
         assert_eq!(setup.status(), StatusCode::OK);
         let setup_body: serde_json::Value = setup.json().await.expect("setup json");
-        let uri = setup_body["otpauth_uri"]
-            .as_str()
-            .expect("otpauth_uri");
+        let uri = setup_body["otpauth_uri"].as_str().expect("otpauth_uri");
         let secret = secret_from_otpauth_uri(uri);
-        let totp = build_totp(
-            &secret,
-            &self.state.settings.totp_issuer,
-            &user.email,
-        )
-        .expect("build totp");
+        let totp =
+            build_totp(&secret, &self.state.settings.totp_issuer, &user.email).expect("build totp");
         let code = totp.generate_current().expect("totp code");
 
         let verify = self
@@ -647,7 +645,11 @@ impl TestApp {
             .send()
             .await
             .expect("login");
-        assert_eq!(response.status(), StatusCode::OK, "2fa login returns JSON body");
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "2fa login returns JSON body"
+        );
         let body: serde_json::Value = response.json().await.expect("login json");
         assert_eq!(body["requires_2fa"].as_bool(), Some(true));
     }
@@ -854,10 +856,7 @@ impl TestApp {
             .expect("list tenants for cleanup");
         for row in owned_tenants {
             let active: tenants::ActiveModel = row.into();
-            active
-                .delete(&self.state.db)
-                .await
-                .expect("cleanup tenant");
+            active.delete(&self.state.db).await.expect("cleanup tenant");
         }
 
         users::Entity::delete_by_id(user_id)
@@ -873,11 +872,7 @@ pub struct TestResponse {
     pub set_cookie: Option<String>,
 }
 
-pub async fn insert_user(
-    db: &DatabaseConnection,
-    is_admin: bool,
-    is_suspended: bool,
-) -> TestUser {
+pub async fn insert_user(db: &DatabaseConnection, is_admin: bool, is_suspended: bool) -> TestUser {
     let id = Uuid::new_v4();
     let email = format!("integration-test-{id}@example.com");
     let password = "TestPassword123!".to_string();
@@ -928,7 +923,11 @@ pub async fn insert_passkey_user(
         avatar_url: Set(None),
         email: Set(email.clone()),
         email_verified: Set(email_verified),
-        password_hash: Set(if password_hash.is_empty() { None } else { Some(password_hash) }),
+        password_hash: Set(if password_hash.is_empty() {
+            None
+        } else {
+            Some(password_hash)
+        }),
         totp_enabled: Set(false),
         is_admin: Set(false),
         is_suspended: Set(false),

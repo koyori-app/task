@@ -1,6 +1,5 @@
-
-use apalis::layers::retry::RetryPolicy;
 use apalis::layers::WorkerBuilderExt;
+use apalis::layers::retry::RetryPolicy;
 use apalis::prelude::WorkerBuilder;
 use apalis_board::axum::{
     framework::{ApiBuilder, RegisterRoute},
@@ -29,7 +28,9 @@ use crate::{
     AppState,
     jobs::{
         github_webhook::{self, QUEUE_NAME as GITHUB_WEBHOOK_QUEUE},
-        password_reset_email::{self, MAX_RETRIES as PW_RESET_MAX_RETRIES, QUEUE_NAME as PW_RESET_QUEUE},
+        password_reset_email::{
+            self, MAX_RETRIES as PW_RESET_MAX_RETRIES, QUEUE_NAME as PW_RESET_QUEUE,
+        },
         verification_email::{self, MAX_RETRIES, QUEUE_NAME},
     },
     middlewares::logging::logging_middleware,

@@ -2,12 +2,12 @@
 
 use std::env;
 
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, QueryFilter, QuerySelect};
 use sea_orm::prelude::Uuid;
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, QueryFilter, QuerySelect};
 
+use crate::AppState;
 use crate::entities::{drive_files, tenants};
 use crate::error::AppError;
-use crate::AppState;
 
 /// Drive 関連の環境変数設定。
 #[derive(Clone, Debug)]
@@ -66,8 +66,14 @@ fn mb_to_bytes(mb: i64) -> i64 {
 /// テナントの有効クォータ（バイト）。`None` = 無制限。
 /// システム上限（`system_max_quota_bytes`）が設定されている場合は常にその値でキャップする。
 pub fn effective_quota(tenant: &tenants::Model, config: &DriveConfig) -> Option<i64> {
-    let requested = tenant.drive_quota_bytes.unwrap_or(config.default_quota_bytes);
-    let requested_opt = if requested == 0 { None } else { Some(requested) };
+    let requested = tenant
+        .drive_quota_bytes
+        .unwrap_or(config.default_quota_bytes);
+    let requested_opt = if requested == 0 {
+        None
+    } else {
+        Some(requested)
+    };
     let system_max_opt = config.system_max_bytes_opt();
     match (requested_opt, system_max_opt) {
         (Some(q), Some(max)) => Some(std::cmp::Ord::min(q, max)),

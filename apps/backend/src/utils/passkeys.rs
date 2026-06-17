@@ -6,9 +6,7 @@ use sea_orm::{
     EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, TransactionTrait,
 };
 use uuid::Uuid;
-use webauthn_rs::prelude::{
-    AttestationMetadata, AuthenticationResult, Credential, Passkey,
-};
+use webauthn_rs::prelude::{AttestationMetadata, AuthenticationResult, Credential, Passkey};
 
 use crate::entities::oauth_connections;
 use crate::entities::passkeys::{self, Entity as PasskeyEntity};
@@ -140,7 +138,8 @@ mod tests {
 }
 
 pub fn model_to_passkey(model: &passkeys::Model) -> Result<Passkey, anyhow::Error> {
-    serde_json::from_slice(&model.public_key).map_err(|e| anyhow::anyhow!("passkey deserialize: {e}"))
+    serde_json::from_slice(&model.public_key)
+        .map_err(|e| anyhow::anyhow!("passkey deserialize: {e}"))
 }
 
 pub async fn load_user_passkeys(

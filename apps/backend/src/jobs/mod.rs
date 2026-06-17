@@ -13,7 +13,7 @@ use crate::settings::Settings;
 pub use github_webhook::{GithubWebhookJob, GithubWebhookStorage};
 pub use password_reset_email::{PasswordResetEmailJob, PasswordResetEmailStorage};
 pub use verification_email::{
-    VerificationEmailJob, VerificationEmailStorage, QUEUE_NAME, MAX_RETRIES,
+    MAX_RETRIES, QUEUE_NAME, VerificationEmailJob, VerificationEmailStorage,
 };
 
 pub async fn setup_pool(database_url: &str) -> Result<PgPool, sqlx::Error> {

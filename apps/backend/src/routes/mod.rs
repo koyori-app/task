@@ -4,8 +4,8 @@ use crate::AppState;
 
 pub mod admin;
 pub mod auth;
-pub mod github;
 pub mod drive;
+pub mod github;
 pub mod personal_tokens;
 pub mod tenants;
 

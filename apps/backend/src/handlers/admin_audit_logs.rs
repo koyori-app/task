@@ -1,4 +1,8 @@
-use axum::{Json, extract::{Query, State}, http::HeaderMap};
+use axum::{
+    Json,
+    extract::{Query, State},
+    http::HeaderMap,
+};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Utc};
@@ -9,11 +13,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::{
-    AppState,
-    entities::audit_logs,
-    error::AppError,
-    extractors::AdminUser,
-    openapi::CrudErrors,
+    AppState, entities::audit_logs, error::AppError, extractors::AdminUser, openapi::CrudErrors,
 };
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -51,8 +51,7 @@ struct AuditLogCursor {
 }
 
 fn encode_cursor(created_at: DateTime<Utc>, id: Uuid) -> String {
-    let payload = serde_json::to_string(&AuditLogCursor { created_at, id })
-        .expect("cursor json");
+    let payload = serde_json::to_string(&AuditLogCursor { created_at, id }).expect("cursor json");
     URL_SAFE_NO_PAD.encode(payload.as_bytes())
 }
 
@@ -142,8 +141,7 @@ pub async fn list_audit_logs(
     let has_more = rows.len() > limit as usize;
     let logs: Vec<_> = rows.into_iter().take(limit as usize).collect();
     let next_cursor = if has_more {
-        logs.last()
-            .map(|log| encode_cursor(log.created_at, log.id))
+        logs.last().map(|log| encode_cursor(log.created_at, log.id))
     } else {
         None
     };

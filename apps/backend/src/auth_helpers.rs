@@ -1,8 +1,8 @@
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, prelude::Uuid};
 
+use crate::AppState;
 use crate::entities::{project_members, tenants};
 use crate::error::AppError;
-use crate::AppState;
 
 pub async fn is_tenant_owner(
     state: &AppState,

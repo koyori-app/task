@@ -4,7 +4,7 @@ use std::time::Duration;
 use apalis::prelude::{
     BackoffConfig, BoxDynError, Data, IntervalStrategy, StrategyBuilder, TaskSink,
 };
-use apalis_postgres::{Config, JsonCodec, PostgresStorage, PgPool};
+use apalis_postgres::{Config, JsonCodec, PgPool, PostgresStorage};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

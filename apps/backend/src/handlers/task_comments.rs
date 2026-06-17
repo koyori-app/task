@@ -1,4 +1,8 @@
-use axum::{Json, extract::{Path, State}, http::StatusCode};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+};
 use axum_valid::Valid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
@@ -9,6 +13,7 @@ use std::collections::HashMap;
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::AppState;
 use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
 use crate::entities::{task_activities, task_comments, users};
 use crate::error::AppError;
@@ -16,7 +21,6 @@ use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
 use crate::utils::task_activities::{extract_mentions, record_activity};
-use crate::AppState;
 
 #[derive(Serialize, ToSchema)]
 pub struct CommentUser {
@@ -114,7 +118,8 @@ pub async fn list_comments(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<CommentListResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
@@ -142,7 +147,10 @@ pub async fn list_comments(
 
     for comment in all {
         if let Some(parent_id) = comment.parent_comment_id {
-            replies_by_parent.entry(parent_id).or_default().push(comment);
+            replies_by_parent
+                .entry(parent_id)
+                .or_default()
+                .push(comment);
         } else {
             top_level.push(comment);
         }
@@ -230,7 +238,8 @@ pub async fn create_comment(
     Valid(Json(payload)): Valid<Json<CreateCommentRequest>>,
 ) -> Result<(StatusCode, Json<task_comments::Model>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
@@ -309,7 +318,8 @@ pub async fn update_comment(
     Valid(Json(payload)): Valid<Json<UpdateCommentRequest>>,
 ) -> Result<Json<task_comments::Model>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let comment = task_comments::Entity::find_by_id(cid)
@@ -368,7 +378,8 @@ pub async fn delete_comment(
     Path((tenant_id, project_id, id, cid)): Path<(Uuid, Uuid, String, Uuid)>,
 ) -> Result<StatusCode, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let comment = task_comments::Entity::find_by_id(cid)
@@ -424,7 +435,8 @@ pub async fn list_activities(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<ActivityListResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
@@ -452,7 +464,10 @@ pub async fn list_activities(
         .map(|row| {
             let user = row.user_id.map(|uid| ActivityUser {
                 id: uid,
-                name: users_map.get(&uid).cloned().unwrap_or_else(|| "unknown".into()),
+                name: users_map
+                    .get(&uid)
+                    .cloned()
+                    .unwrap_or_else(|| "unknown".into()),
             });
             ActivityItem {
                 id: row.id,

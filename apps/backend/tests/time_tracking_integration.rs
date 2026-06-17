@@ -94,13 +94,15 @@ async fn time_tracking_integration_suite() {
         .await;
     assert_eq!(create.status(), StatusCode::CREATED);
     let created: serde_json::Value = create.json().await.expect("create json");
-    let log_id = created["id"].as_str().expect("log id").parse::<Uuid>().unwrap();
+    let log_id = created["id"]
+        .as_str()
+        .expect("log id")
+        .parse::<Uuid>()
+        .unwrap();
     assert_eq!(created["logged_minutes"], 90);
 
     // 2. ログ一覧
-    let list = app
-        .get_with_session(&format!("{base}/time-logs"))
-        .await;
+    let list = app.get_with_session(&format!("{base}/time-logs")).await;
     assert_eq!(list.status(), StatusCode::OK);
     let logs: Vec<serde_json::Value> = list.json().await.expect("list json");
     assert_eq!(logs.len(), 1);
@@ -137,9 +139,7 @@ async fn time_tracking_integration_suite() {
         .await;
     assert_eq!(start.status(), StatusCode::CREATED);
 
-    let status = app
-        .get_with_session(&format!("{base}/timer/status"))
-        .await;
+    let status = app.get_with_session(&format!("{base}/timer/status")).await;
     assert_eq!(status.status(), StatusCode::OK);
     let status_body: serde_json::Value = status.json().await.expect("status json");
     assert_eq!(status_body["is_running"], true);
@@ -229,8 +229,7 @@ async fn time_tracking_integration_suite() {
         )
         .await;
     assert!(
-        bad.status() == StatusCode::UNPROCESSABLE_ENTITY
-            || bad.status() == StatusCode::BAD_REQUEST,
+        bad.status() == StatusCode::UNPROCESSABLE_ENTITY || bad.status() == StatusCode::BAD_REQUEST,
         "invalid logged_minutes should be rejected, got {}",
         bad.status()
     );

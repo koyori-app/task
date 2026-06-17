@@ -2,8 +2,8 @@ use tower_http::limit::RequestBodyLimitLayer;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::utils::drive::DriveConfig;
 use crate::AppState;
+use crate::utils::drive::DriveConfig;
 
 pub fn tenant_folder_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::<AppState>::new()
@@ -34,7 +34,11 @@ pub fn tenant_drive_routes() -> OpenApiRouter<AppState> {
 
 pub fn public_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::<AppState>::new()
-        .routes(routes!(crate::handlers::drive_folders::get_public_share_folder))
-        .routes(routes!(crate::handlers::drive_folders::list_public_share_files))
+        .routes(routes!(
+            crate::handlers::drive_folders::get_public_share_folder
+        ))
+        .routes(routes!(
+            crate::handlers::drive_folders::list_public_share_files
+        ))
         .routes(routes!(crate::handlers::drive_files::get_file_content))
 }
