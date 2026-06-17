@@ -216,16 +216,19 @@ pub async fn list_notifications(
             .map(|p| p.id)
             .collect()
     };
-    let accessible_project_ids: HashSet<Uuid> =
-        member_project_ids.into_iter().chain(owner_project_ids).collect();
+    let accessible_project_ids: HashSet<Uuid> = member_project_ids
+        .into_iter()
+        .chain(owner_project_ids)
+        .collect();
 
     let unread_count: u64 = if accessible_project_ids.is_empty() {
         0
     } else {
         let accessible_task_ids: Vec<Uuid> = tasks::Entity::find()
-            .filter(tasks::Column::ProjectId.is_in(
-                accessible_project_ids.iter().cloned().collect::<Vec<_>>(),
-            ))
+            .filter(
+                tasks::Column::ProjectId
+                    .is_in(accessible_project_ids.iter().cloned().collect::<Vec<_>>()),
+            )
             .all(&state.db)
             .await?
             .into_iter()

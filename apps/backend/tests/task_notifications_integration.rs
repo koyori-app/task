@@ -502,10 +502,14 @@ async fn mention_notifies_tenant_owner_non_member() {
     let member = app.insert_user(false, false).await;
 
     // owner でログインして member を project に追加
-    app.login_session_no_content(&owner.email, &owner.password).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
     let member_resp = app
         .post_json_with_session(
-            &format!("/v1/tenants/{}/projects/{}/members", tp.tenant_id, tp.project_id),
+            &format!(
+                "/v1/tenants/{}/projects/{}/members",
+                tp.tenant_id, tp.project_id
+            ),
             serde_json::json!({"user_id": member.id, "role": "Member"}),
         )
         .await;
@@ -514,7 +518,10 @@ async fn mention_notifies_tenant_owner_non_member() {
     // ステータスとタスクを作成
     let status_resp = app
         .post_json_with_session(
-            &format!("/v1/tenants/{}/projects/{}/statuses", tp.tenant_id, tp.project_id),
+            &format!(
+                "/v1/tenants/{}/projects/{}/statuses",
+                tp.tenant_id, tp.project_id
+            ),
             serde_json::json!({"name":"Backlog","color":"#336699","position":0,"is_default":true}),
         )
         .await;
@@ -526,7 +533,10 @@ async fn mention_notifies_tenant_owner_non_member() {
 
     let task_resp = app
         .post_json_with_session(
-            &format!("/v1/tenants/{}/projects/{}/tasks", tp.tenant_id, tp.project_id),
+            &format!(
+                "/v1/tenants/{}/projects/{}/tasks",
+                tp.tenant_id, tp.project_id
+            ),
             serde_json::json!({"title":"Mention owner test","status_id":status_id}),
         )
         .await;
@@ -538,7 +548,8 @@ async fn mention_notifies_tenant_owner_non_member() {
 
     // member でログインして @owner_username を含むコメントを投稿
     app.reset_session_client();
-    app.login_session_no_content(&member.email, &member.password).await;
+    app.login_session_no_content(&member.email, &member.password)
+        .await;
     let comment_resp = app
         .post_json_with_session(
             &format!(
@@ -552,7 +563,8 @@ async fn mention_notifies_tenant_owner_non_member() {
 
     // owner でログインして通知を確認
     app.reset_session_client();
-    app.login_session_no_content(&owner.email, &owner.password).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
     let notifs: Value = app
         .get_with_session("/v1/users/me/notifications")
         .await
