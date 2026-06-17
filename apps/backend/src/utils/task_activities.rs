@@ -6,7 +6,7 @@ use sea_orm::{
 };
 use std::sync::LazyLock;
 
-use crate::entities::{project_members, project_statuses, task_activities, tasks, users};
+use crate::entities::{project_members, project_statuses, projects, task_activities, tasks, tenants, users};
 use crate::error::AppError;
 
 static MENTION_RE: LazyLock<Regex> =
@@ -77,6 +77,18 @@ pub async fn extract_mentions<C: ConnectionTrait>(
         .map(|m| m.user_id)
         .collect();
 
+    let tenant_owner_id: Option<Uuid> = if let Some(proj) = projects::Entity::find_by_id(project_id)
+        .one(db)
+        .await?
+    {
+        tenants::Entity::find_by_id(proj.tenant_id)
+            .one(db)
+            .await?
+            .map(|t| t.owner_id)
+    } else {
+        None
+    };
+
     // Single batch query for all mentioned users
     let matched = users::Entity::find()
         .filter(users::Column::Username.is_in(usernames))
@@ -86,7 +98,9 @@ pub async fn extract_mentions<C: ConnectionTrait>(
     let mut user_ids: Vec<Uuid> = Vec::new();
     let mut seen_ids: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
     for u in matched {
-        if member_ids.contains(&u.id) && seen_ids.insert(u.id) {
+        let is_allowed = member_ids.contains(&u.id)
+            || tenant_owner_id.is_some_and(|oid| oid == u.id);
+        if is_allowed && seen_ids.insert(u.id) {
             user_ids.push(u.id);
         }
     }
