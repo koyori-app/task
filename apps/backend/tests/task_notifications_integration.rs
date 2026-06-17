@@ -488,3 +488,87 @@ async fn notification_settings_get_update_and_validation() {
         .await;
     assert_eq!(invalid_resp.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn mention_notifies_tenant_owner_non_member() {
+    let mut app = TestApp::new().await;
+
+    // owner（tenant owner、project member にはしない）
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let owner_username = format!("test_{}", &owner.id.to_string()[..8]);
+
+    // project member を作成
+    let member = app.insert_user(false, false).await;
+
+    // owner でログインして member を project に追加
+    app.login_session_no_content(&owner.email, &owner.password).await;
+    let member_resp = app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/projects/{}/members", tp.tenant_id, tp.project_id),
+            serde_json::json!({"user_id": member.id, "role": "Member"}),
+        )
+        .await;
+    assert_eq!(member_resp.status(), StatusCode::CREATED);
+
+    // ステータスとタスクを作成
+    let status_resp = app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/projects/{}/statuses", tp.tenant_id, tp.project_id),
+            serde_json::json!({"name":"Backlog","color":"#336699","position":0,"is_default":true}),
+        )
+        .await;
+    assert_eq!(status_resp.status(), StatusCode::CREATED);
+    let status_id = status_resp.json::<Value>().await.expect("json")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let task_resp = app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/projects/{}/tasks", tp.tenant_id, tp.project_id),
+            serde_json::json!({"title":"Mention owner test","status_id":status_id}),
+        )
+        .await;
+    assert_eq!(task_resp.status(), StatusCode::CREATED);
+    let task_id = task_resp.json::<Value>().await.expect("json")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // member でログインして @owner_username を含むコメントを投稿
+    app.reset_session_client();
+    app.login_session_no_content(&member.email, &member.password).await;
+    let comment_resp = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/tasks/{}/comments",
+                tp.tenant_id, tp.project_id, task_id
+            ),
+            serde_json::json!({"body": format!("@{} please review", owner_username)}),
+        )
+        .await;
+    assert_eq!(comment_resp.status(), StatusCode::CREATED);
+
+    // owner でログインして通知を確認
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password).await;
+    let notifs: Value = app
+        .get_with_session("/v1/users/me/notifications")
+        .await
+        .json()
+        .await
+        .expect("json");
+
+    let types: Vec<&str> = notifs["notifications"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|n| n["notification_type"].as_str())
+        .collect();
+    assert!(
+        types.contains(&"mentioned"),
+        "tenant owner should receive mention notification even if not a project member, got: {:?}",
+        types
+    );
+}
