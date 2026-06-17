@@ -118,6 +118,9 @@ async fn ensure_schema(db: &DatabaseConnection) {
             let _ = db
                 .execute_unprepared("DROP INDEX IF EXISTS idx_sprints_active_per_project")
                 .await;
+            let _ = db
+                .execute_unprepared("DROP INDEX IF EXISTS idx_projects_personal_owner")
+                .await;
 
             db.get_schema_registry("backend::entities::*")
                 .sync(db)
@@ -178,7 +181,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sprints_active_per_project
 
             db.execute_unprepared(
                 r#"
-ALTER TABLE projects DROP CONSTRAINT IF EXISTS idx_projects_personal_owner;
 DROP INDEX IF EXISTS idx_projects_personal_owner;
 ALTER TABLE projects
     ADD COLUMN IF NOT EXISTS is_personal BOOLEAN NOT NULL DEFAULT false,

@@ -14,16 +14,16 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::AppState;
 use crate::entities::{
-    drive_folders, project_members, project_statuses, project_task_counters, projects, scopes::Scope,
-    task_assignees, tasks, users,
+    drive_folders, project_members, project_statuses, project_task_counters, projects,
+    scopes::Scope, task_assignees, tasks, users,
 };
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::utils::db::is_postgres_unique_violation;
 use crate::utils::task_activities::record_activity;
-use crate::AppState;
 
 #[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
 pub struct ListMyTasksQuery {
@@ -128,10 +128,7 @@ async fn next_seq_id(db: &sea_orm::DatabaseTransaction, project_id: Uuid) -> Res
     })
 }
 
-async fn default_status_id<C: ConnectionTrait>(
-    db: &C,
-    project_id: Uuid,
-) -> Result<Uuid, AppError> {
+async fn default_status_id<C: ConnectionTrait>(db: &C, project_id: Uuid) -> Result<Uuid, AppError> {
     project_statuses::Entity::find()
         .filter(project_statuses::Column::ProjectId.eq(project_id))
         .filter(project_statuses::Column::IsDefault.eq(true))
@@ -468,7 +465,9 @@ pub async fn list_my_tasks(
         let project = projects_map
             .get(&task.project_id)
             .ok_or(AppError::NotFound)?;
-        let status = statuses_map.get(&task.status_id).ok_or(AppError::NotFound)?;
+        let status = statuses_map
+            .get(&task.status_id)
+            .ok_or(AppError::NotFound)?;
         items.push(build_my_task_item(task, project, status));
     }
 
