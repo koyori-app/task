@@ -74,7 +74,7 @@ async function submitCapture() {
       priority: capturePriority.value,
     };
     if (captureDeadline.value) {
-      body.soft_deadline = `${captureDeadline.value}T00:00:00Z`;
+      body.soft_deadline = new Date(`${captureDeadline.value}T00:00:00`).toISOString();
     }
     const { error } = await apiClient.POST('/v1/tenants/{tenant_id}/users/me/tasks', {
       params: { path: { tenant_id: tenantId.value } },
