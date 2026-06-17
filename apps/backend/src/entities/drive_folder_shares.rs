@@ -1,5 +1,5 @@
-use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue;
+use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -95,9 +95,7 @@ impl ActiveModelBehavior for ActiveModel {
     {
         let shared_with_user_id = active_option_uuid(&self.shared_with_user_id);
         let share_token = active_option_string(&self.share_token);
-        if let (Some(shared_with_user_id), Some(share_token)) =
-            (shared_with_user_id, share_token)
-        {
+        if let (Some(shared_with_user_id), Some(share_token)) = (shared_with_user_id, share_token) {
             let token_ref = share_token.as_deref();
             validate_share_target_xor(shared_with_user_id, token_ref)?;
         }

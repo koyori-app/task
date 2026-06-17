@@ -3,11 +3,12 @@ mod common;
 use axum::http::StatusCode;
 use backend::entities::{personal_tokens, tenants, users};
 use backend::utils::password_reset;
-use common::{TestApp, insert_personal_token_for_test, insert_tenant};
 use chrono::Utc;
+use common::{TestApp, insert_personal_token_for_test, insert_tenant};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 
-const RESET_MESSAGE: &str = "入力されたメールアドレスにリセットリンクを送信しました（登録済みの場合）";
+const RESET_MESSAGE: &str =
+    "入力されたメールアドレスにリセットリンクを送信しました（登録済みの場合）";
 
 #[tokio::test]
 async fn password_reset_integration_suite() {

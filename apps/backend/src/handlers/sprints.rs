@@ -7,23 +7,23 @@ use axum::{
 };
 use axum_valid::Valid;
 use chrono::{Datelike, NaiveDate, NaiveTime};
+use sea_orm::sea_query::LockType;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, TransactionTrait, prelude::Uuid,
 };
-use sea_orm::sea_query::LockType;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::AppState;
 use crate::auth_helpers::require_member_or_owner;
-use crate::utils::db::is_postgres_unique_violation;
-use crate::entities::{project_statuses, sprints, tasks};
 use crate::entities::sprints::SprintStatus;
+use crate::entities::{project_statuses, sprints, tasks};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use crate::AppState;
+use crate::utils::db::is_postgres_unique_violation;
 
 #[derive(Validate, Deserialize, ToSchema)]
 pub struct CreateSprintRequest {
@@ -191,8 +191,7 @@ fn build_burndown(
             .iter()
             .filter(|t| {
                 let created_date = t.created_at.date_naive();
-                let created_on_or_before =
-                    created_date <= time_date_to_naive(cursor);
+                let created_on_or_before = created_date <= time_date_to_naive(cursor);
                 if !created_on_or_before {
                     return false;
                 }
@@ -409,10 +408,7 @@ pub async fn update_sprint(
         .end_date
         .map(naive_to_time_date)
         .unwrap_or(sprint.end_date);
-    validate_date_range(
-        time_date_to_naive(start),
-        time_date_to_naive(end),
-    )?;
+    validate_date_range(time_date_to_naive(start), time_date_to_naive(end))?;
 
     let mut active: sprints::ActiveModel = sprint.into();
     if let Some(v) = payload.name {

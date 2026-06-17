@@ -125,8 +125,8 @@ pub async fn consume_token(
         return Ok(None);
     };
 
-    let uid = Uuid::parse_str(s.trim())
-        .map_err(|e| anyhow::anyhow!("invalid user id in redis: {e}"))?;
+    let uid =
+        Uuid::parse_str(s.trim()).map_err(|e| anyhow::anyhow!("invalid user id in redis: {e}"))?;
 
     Ok(Some(uid))
 }
@@ -172,4 +172,3 @@ pub async fn try_acquire_rate_limit(
 
     Ok(set_ok.is_some())
 }
-

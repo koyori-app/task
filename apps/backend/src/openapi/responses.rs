@@ -112,7 +112,10 @@ pub enum DriveFolderErrors {
     Forbidden(#[to_schema] ServerError),
     #[response(status = 404, description = "リソースが見つかりません")]
     NotFound(#[to_schema] ServerError),
-    #[response(status = 409, description = "フォルダ内にファイルまたはサブフォルダが存在します")]
+    #[response(
+        status = 409,
+        description = "フォルダ内にファイルまたはサブフォルダが存在します"
+    )]
     Conflict(#[to_schema] ServerError),
     #[response(
         status = 422,

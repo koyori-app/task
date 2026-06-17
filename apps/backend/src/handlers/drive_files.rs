@@ -12,17 +12,17 @@ use axum_valid::Valid;
 use bytes::Bytes;
 use chrono::Utc;
 use futures::{SinkExt, channel::mpsc as fmpsc};
+use sea_orm::prelude::Uuid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder, QuerySelect, TransactionTrait,
 };
-use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
+use crate::AppState;
 use crate::entities::{
-    drive_files, drive_folder_shares, drive_folders, project_members, scopes::Scope,
-    tenants,
+    drive_files, drive_folder_shares, drive_folders, project_members, scopes::Scope, tenants,
 };
 use crate::error::AppError;
 use crate::extractors::{AuthUser, OptionalAuthUser};
@@ -32,7 +32,6 @@ use crate::utils::drive::{
     tenant_used_bytes,
 };
 use crate::utils::storage::{ByteStream, StorageError};
-use crate::AppState;
 
 const MAX_LIST_LIMIT: u32 = 200;
 const DEFAULT_LIST_LIMIT: u32 = 50;
@@ -400,9 +399,8 @@ pub async fn upload_file(
                 let name = display_name
                     .or_else(|| original_filename.clone())
                     .ok_or(AppError::BadRequest)?;
-                let mime_type = content_type.unwrap_or_else(|| {
-                    guess_mime(original_filename.as_deref().unwrap_or(&name))
-                });
+                let mime_type = content_type
+                    .unwrap_or_else(|| guess_mime(original_filename.as_deref().unwrap_or(&name)));
 
                 // クォータ事前チェック（既に上限に達していれば即拒否）
                 let used = tenant_used_bytes(&state.db, tenant_id).await?;
@@ -434,7 +432,8 @@ pub async fn upload_file(
                     loop {
                         match field.chunk().await {
                             Ok(Some(bytes)) => {
-                                let new_count = counter.fetch_add(bytes.len() as u64, Ordering::Relaxed)
+                                let new_count = counter
+                                    .fetch_add(bytes.len() as u64, Ordering::Relaxed)
                                     + bytes.len() as u64;
                                 if new_count > max_bytes {
                                     // 上限超過: エラーを送ってストリームを早期終了
@@ -462,7 +461,9 @@ pub async fn upload_file(
                 let storage_key = file_id.to_string();
 
                 let (upload_result, _) = tokio::join!(
-                    state.storage.upload(&storage_key, byte_stream, 0, &mime_type),
+                    state
+                        .storage
+                        .upload(&storage_key, byte_stream, 0, &mime_type),
                     pump
                 );
 
@@ -515,7 +516,9 @@ pub async fn upload_file(
                 }
                 .await;
                 match result {
-                    Ok(saved) => return Ok((StatusCode::CREATED, Json(drive_file_response(&saved)))),
+                    Ok(saved) => {
+                        return Ok((StatusCode::CREATED, Json(drive_file_response(&saved))));
+                    }
                     Err(e) => {
                         let _ = state.storage.delete(&storage_key).await;
                         return Err(e);
@@ -537,9 +540,8 @@ pub async fn upload_file(
                     .await
                     .map_err(|e| AppError::Internal(e.into()))?;
                 if !text.is_empty() {
-                    folder_id = Some(
-                        Uuid::parse_str(text.trim()).map_err(|_| AppError::BadRequest)?,
-                    );
+                    folder_id =
+                        Some(Uuid::parse_str(text.trim()).map_err(|_| AppError::BadRequest)?);
                 }
             }
             _ => {}
@@ -683,13 +685,7 @@ pub async fn get_file_content(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    can_access_file_content(
-        &state,
-        &file,
-        &auth,
-        query.token.as_deref(),
-    )
-    .await?;
+    can_access_file_content(&state, &file, &auth, query.token.as_deref()).await?;
 
     let stream = state
         .storage
@@ -793,7 +789,13 @@ pub async fn update_drive_quota(
 
 fn sanitize_filename(name: &str) -> String {
     name.chars()
-        .map(|c| if c == '"' || c == '\r' || c == '\n' { '_' } else { c })
+        .map(|c| {
+            if c == '"' || c == '\r' || c == '\n' {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect()
 }
 

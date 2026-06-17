@@ -20,10 +20,7 @@ mod tests {
 
     #[test]
     fn trims_and_lowercases() {
-        assert_eq!(
-            normalize_email("  User@Example.COM  "),
-            "user@example.com"
-        );
+        assert_eq!(normalize_email("  User@Example.COM  "), "user@example.com");
     }
 
     #[test]

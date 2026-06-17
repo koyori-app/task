@@ -153,8 +153,8 @@ pub async fn consume_token(
         return Ok(None);
     };
 
-    let uid = Uuid::parse_str(s.trim())
-        .map_err(|e| anyhow::anyhow!("invalid user id in redis: {e}"))?;
+    let uid =
+        Uuid::parse_str(s.trim()).map_err(|e| anyhow::anyhow!("invalid user id in redis: {e}"))?;
 
     Ok(Some(uid))
 }
@@ -171,7 +171,10 @@ pub async fn consume_token(
 ///
 /// # Errors
 /// * Redis 接続・コマンド実行に失敗した場合
-pub async fn try_acquire_resend_slot(redis: &RedisConnection, email: &str) -> Result<bool, anyhow::Error> {
+pub async fn try_acquire_resend_slot(
+    redis: &RedisConnection,
+    email: &str,
+) -> Result<bool, anyhow::Error> {
     let mut conn = redis
         .conn
         .acquire()

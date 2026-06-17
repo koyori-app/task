@@ -1,21 +1,25 @@
-use axum::{Json, extract::{Path, State}, http::StatusCode};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+};
 use axum_valid::Valid;
+use sea_orm::sea_query::{Expr, Func};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder, TransactionTrait, prelude::Uuid,
 };
-use sea_orm::sea_query::{Expr, Func};
 use serde::Deserialize;
 use std::collections::HashSet;
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::AppState;
 use crate::auth_helpers::require_member_or_owner;
 use crate::entities::{project_statuses, tasks};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use crate::AppState;
 
 #[derive(Validate, Deserialize, ToSchema)]
 pub struct CreateStatusRequest {
@@ -72,7 +76,8 @@ pub async fn list_statuses(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Vec<project_statuses::Model>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let statuses = project_statuses::Entity::find()
         .filter(project_statuses::Column::ProjectId.eq(project_id))
@@ -105,7 +110,8 @@ pub async fn create_status(
     Valid(Json(payload)): Valid<Json<CreateStatusRequest>>,
 ) -> Result<(StatusCode, Json<project_statuses::Model>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let txn = state.db.begin().await?;
     if payload.is_default {
@@ -155,7 +161,8 @@ pub async fn update_status(
     Valid(Json(payload)): Valid<Json<UpdateStatusRequest>>,
 ) -> Result<Json<project_statuses::Model>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let status = project_statuses::Entity::find_by_id(id)
         .filter(project_statuses::Column::ProjectId.eq(project_id))
@@ -173,11 +180,21 @@ pub async fn update_status(
             .exec(&txn)
             .await?;
     }
-    if let Some(v) = payload.name { active.name = Set(v); }
-    if let Some(v) = payload.color { active.color = Set(v); }
-    if let Some(v) = payload.position { active.position = Set(v); }
-    if let Some(v) = payload.is_default { active.is_default = Set(v); }
-    if let Some(v) = payload.is_done_state { active.is_done_state = Set(v); }
+    if let Some(v) = payload.name {
+        active.name = Set(v);
+    }
+    if let Some(v) = payload.color {
+        active.color = Set(v);
+    }
+    if let Some(v) = payload.position {
+        active.position = Set(v);
+    }
+    if let Some(v) = payload.is_default {
+        active.is_default = Set(v);
+    }
+    if let Some(v) = payload.is_done_state {
+        active.is_done_state = Set(v);
+    }
     let updated = active.update(&txn).await?;
 
     if let Some(new_is_done) = payload.is_done_state {
@@ -230,7 +247,8 @@ pub async fn reorder_statuses(
     Json(payload): Json<ReorderRequest>,
 ) -> Result<Json<Vec<project_statuses::Model>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
     let existing = project_statuses::Entity::find()
@@ -292,7 +310,8 @@ pub async fn delete_status(
     axum::extract::Query(q): axum::extract::Query<DeleteStatusQuery>,
 ) -> Result<StatusCode, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
     let status = project_statuses::Entity::find_by_id(id)
@@ -312,8 +331,7 @@ pub async fn delete_status(
         .await?;
 
     if task_count > 0 {
-        let migrate_to = q.migrate_to_status_id
-            .ok_or(AppError::BadRequest)?;
+        let migrate_to = q.migrate_to_status_id.ok_or(AppError::BadRequest)?;
         if migrate_to == id {
             return Err(AppError::BadRequest);
         }
@@ -325,8 +343,8 @@ pub async fn delete_status(
             .ok_or(AppError::NotFound)?;
 
         let txn = state.db.begin().await?;
-        let mut update = tasks::Entity::update_many()
-            .col_expr(tasks::Column::StatusId, Expr::value(migrate_to));
+        let mut update =
+            tasks::Entity::update_many().col_expr(tasks::Column::StatusId, Expr::value(migrate_to));
         update = if target_status.is_done_state {
             update.col_expr(
                 tasks::Column::CompletedAt,
@@ -346,10 +364,14 @@ pub async fn delete_status(
             .filter(tasks::Column::DeletedAt.is_null())
             .exec(&txn)
             .await?;
-        project_statuses::Entity::delete_by_id(id).exec(&txn).await?;
+        project_statuses::Entity::delete_by_id(id)
+            .exec(&txn)
+            .await?;
         txn.commit().await?;
     } else {
-        project_statuses::Entity::delete_by_id(id).exec(&state.db).await?;
+        project_statuses::Entity::delete_by_id(id)
+            .exec(&state.db)
+            .await?;
     }
 
     Ok(StatusCode::NO_CONTENT)

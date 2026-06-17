@@ -31,7 +31,9 @@ fn admin_tenants_routes() -> OpenApiRouter<AppState> {
         .nest(
             "/{tenant_id}/projects",
             OpenApiRouter::<AppState>::new()
-                .routes(routes!(crate::handlers::admin_tenants::list_tenant_projects))
+                .routes(routes!(
+                    crate::handlers::admin_tenants::list_tenant_projects
+                ))
                 .nest(
                     "/{project_id}/tasks",
                     OpenApiRouter::<AppState>::new().routes(routes!(
@@ -48,6 +50,10 @@ fn admin_audit_logs_routes() -> OpenApiRouter<AppState> {
 
 fn admin_settings_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::<AppState>::new()
-        .routes(routes!(crate::handlers::admin_settings::get_system_settings))
-        .routes(routes!(crate::handlers::admin_settings::update_system_settings))
+        .routes(routes!(
+            crate::handlers::admin_settings::get_system_settings
+        ))
+        .routes(routes!(
+            crate::handlers::admin_settings::update_system_settings
+        ))
 }

@@ -1,8 +1,8 @@
 //! 管理者操作の監査ログ記録ヘルパー。
 
 use axum::http::HeaderMap;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
 use sea_orm::prelude::{Json, Uuid};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
 
 use crate::entities::audit_logs;
 

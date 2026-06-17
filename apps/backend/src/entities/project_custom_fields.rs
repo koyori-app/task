@@ -2,7 +2,9 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize, ToSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize, ToSchema,
+)]
 #[serde(rename_all = "lowercase")]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
 pub enum CustomFieldType {
@@ -53,7 +55,9 @@ pub enum Relation {
 }
 
 impl Related<super::projects::Entity> for Entity {
-    fn to() -> RelationDef { Relation::Projects.def() }
+    fn to() -> RelationDef {
+        Relation::Projects.def()
+    }
 }
 
 impl ActiveModelBehavior for ActiveModel {}

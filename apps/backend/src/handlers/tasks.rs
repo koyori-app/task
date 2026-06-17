@@ -1,31 +1,34 @@
-use axum::{Json, extract::{Path, Query, State}, http::StatusCode};
-use axum_valid::Valid;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait,
-    EntityTrait, IsolationLevel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
-    TransactionTrait, prelude::Uuid,
+use axum::{
+    Json,
+    extract::{Path, Query, State},
+    http::StatusCode,
 };
+use axum_valid::Valid;
 use sea_orm::sea_query::{Expr, LockType};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait, EntityTrait,
+    IsolationLevel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
+    prelude::Uuid,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::AppState;
 use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
 use crate::entities::{
     labels, milestones, project_statuses, project_task_counters, sprints, task_assignees,
-    task_labels,
-    task_relations, tasks,
+    task_labels, task_relations, tasks,
 };
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::utils::custom_fields::{
-    ensure_required_custom_fields, load_task_custom_field_values, upsert_task_custom_field_values,
-    CustomFieldValueInput, TaskCustomFieldValueResponse,
+    CustomFieldValueInput, TaskCustomFieldValueResponse, ensure_required_custom_fields,
+    load_task_custom_field_values, upsert_task_custom_field_values,
 };
 use crate::utils::task_activities::{priority_label, record_activity, status_name};
-use crate::AppState;
 
 // ─── Task lookup (UUID or KEY-N) ─────────────────────────────────────────
 
@@ -408,9 +411,11 @@ async fn build_task_detail_response(
     project_id: Uuid,
     task: tasks::Model,
 ) -> Result<TaskDetailResponse, AppError> {
-    let custom_field_values =
-        load_task_custom_field_values(&state.db, project_id, task.id).await?;
-    Ok(TaskDetailResponse { task, custom_field_values })
+    let custom_field_values = load_task_custom_field_values(&state.db, project_id, task.id).await?;
+    Ok(TaskDetailResponse {
+        task,
+        custom_field_values,
+    })
 }
 
 // ─── Tasks ───────────────────────────────────────────────────────────────
@@ -438,7 +443,8 @@ pub async fn list_tasks(
     Query(q): Query<ListTasksQuery>,
 ) -> Result<Json<TaskListResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
     let mut query = tasks::Entity::find()
@@ -477,11 +483,7 @@ pub async fn list_tasks(
 
     let limit = std::cmp::min(q.limit, 200);
     let total = query.clone().count(&state.db).await?;
-    let tasks_page = query
-        .offset(q.offset)
-        .limit(limit)
-        .all(&state.db)
-        .await?;
+    let tasks_page = query.offset(q.offset).limit(limit).all(&state.db).await?;
     Ok(Json(TaskListResponse {
         tasks: tasks_page,
         total,
@@ -511,7 +513,8 @@ pub async fn create_task(
     Valid(Json(payload)): Valid<Json<CreateTaskRequest>>,
 ) -> Result<(StatusCode, Json<TaskDetailResponse>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
     if let (Some(s), Some(h)) = (payload.soft_deadline, payload.hard_deadline) {
@@ -620,9 +623,16 @@ pub async fn create_task(
     }
 
     if status.is_done_state {
-        ensure_required_custom_fields(&txn, project_id, model.id, Some(&payload.custom_field_values)).await?;
+        ensure_required_custom_fields(
+            &txn,
+            project_id,
+            model.id,
+            Some(&payload.custom_field_values),
+        )
+        .await?;
     }
-    upsert_task_custom_field_values(&txn, project_id, model.id, &payload.custom_field_values).await?;
+    upsert_task_custom_field_values(&txn, project_id, model.id, &payload.custom_field_values)
+        .await?;
 
     record_activity(
         &txn,
@@ -633,7 +643,10 @@ pub async fn create_task(
     )
     .await?;
     txn.commit().await?;
-    Ok((StatusCode::CREATED, Json(build_task_detail_response(&state, project_id, model).await?)))
+    Ok((
+        StatusCode::CREATED,
+        Json(build_task_detail_response(&state, project_id, model).await?),
+    ))
 }
 
 #[axum::debug_handler]
@@ -658,10 +671,13 @@ pub async fn get_task(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<TaskDetailResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
-    Ok(Json(build_task_detail_response(&state, project_id, task).await?))
+    Ok(Json(
+        build_task_detail_response(&state, project_id, task).await?,
+    ))
 }
 
 #[axum::debug_handler]
@@ -688,7 +704,8 @@ pub async fn update_task(
     Valid(Json(payload)): Valid<Json<UpdateTaskRequest>>,
 ) -> Result<Json<TaskDetailResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let task_snapshot = task.clone();
@@ -721,7 +738,13 @@ pub async fn update_task(
             .await?
             .ok_or(AppError::NotFound)?;
         if status.is_done_state {
-            ensure_required_custom_fields(&txn, project_id, task_id, payload.custom_field_values.as_deref()).await?;
+            ensure_required_custom_fields(
+                &txn,
+                project_id,
+                task_id,
+                payload.custom_field_values.as_deref(),
+            )
+            .await?;
         }
         active.completed_at = if status.is_done_state {
             match active.completed_at.clone() {
@@ -734,8 +757,12 @@ pub async fn update_task(
         };
         active.status_id = Set(v);
     }
-    if let Some(v) = payload.priority { active.priority = Set(v); }
-    if let Some(v) = payload.progress_pct { active.progress_pct = Set(v); }
+    if let Some(v) = payload.priority {
+        active.priority = Set(v);
+    }
+    if let Some(v) = payload.progress_pct {
+        active.progress_pct = Set(v);
+    }
     if payload.clear_milestone_id {
         active.milestone_id = Set(None);
     } else if let Some(v) = payload.milestone_id {
@@ -760,10 +787,16 @@ pub async fn update_task(
         }
         active.sprint_id = Set(Some(v));
     }
-    if payload.clear_soft_deadline { active.soft_deadline = Set(None); }
-    else if let Some(v) = payload.soft_deadline { active.soft_deadline = Set(Some(v)); }
-    if payload.clear_hard_deadline { active.hard_deadline = Set(None); }
-    else if let Some(v) = payload.hard_deadline { active.hard_deadline = Set(Some(v)); }
+    if payload.clear_soft_deadline {
+        active.soft_deadline = Set(None);
+    } else if let Some(v) = payload.soft_deadline {
+        active.soft_deadline = Set(Some(v));
+    }
+    if payload.clear_hard_deadline {
+        active.hard_deadline = Set(None);
+    } else if let Some(v) = payload.hard_deadline {
+        active.hard_deadline = Set(Some(v));
+    }
 
     let effective_soft = if payload.clear_soft_deadline {
         None
@@ -785,9 +818,14 @@ pub async fn update_task(
         }
     }
 
-    if payload.clear_estimated_minutes { active.estimated_minutes = Set(None); }
-    else if let Some(v) = payload.estimated_minutes { active.estimated_minutes = Set(Some(v)); }
-    if let Some(v) = payload.is_archived { active.is_archived = Set(v); }
+    if payload.clear_estimated_minutes {
+        active.estimated_minutes = Set(None);
+    } else if let Some(v) = payload.estimated_minutes {
+        active.estimated_minutes = Set(Some(v));
+    }
+    if let Some(v) = payload.is_archived {
+        active.is_archived = Set(v);
+    }
     active.updated_at = Set(chrono::Utc::now());
 
     if parent_changes {
@@ -830,7 +868,9 @@ pub async fn update_task(
             upsert_task_custom_field_values(&txn, project_id, task_id, values).await?;
         }
         txn.commit().await?;
-        Ok(Json(build_task_detail_response(&state, project_id, updated).await?))
+        Ok(Json(
+            build_task_detail_response(&state, project_id, updated).await?,
+        ))
     } else {
         let updated = active.update(&txn).await?;
         record_task_field_activities(
@@ -846,7 +886,9 @@ pub async fn update_task(
             upsert_task_custom_field_values(&txn, project_id, task_id, values).await?;
         }
         txn.commit().await?;
-        Ok(Json(build_task_detail_response(&state, project_id, updated).await?))
+        Ok(Json(
+            build_task_detail_response(&state, project_id, updated).await?,
+        ))
     }
 }
 
@@ -872,7 +914,8 @@ pub async fn delete_task(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<StatusCode, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     if task.created_by != auth.user_id && !is_tenant_owner(&state, tenant_id, auth.user_id).await? {
@@ -906,7 +949,8 @@ pub async fn archive_task(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<tasks::Model>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let task_id = task.id;
@@ -949,7 +993,8 @@ pub async fn unarchive_task(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<tasks::Model>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let task_id = task.id;
@@ -994,7 +1039,8 @@ pub async fn list_assignees(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<Vec<task_assignees::Model>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let assignees = task_assignees::Entity::find()
@@ -1035,7 +1081,8 @@ pub async fn add_assignee(
     Valid(Json(payload)): Valid<Json<AddAssigneeRequest>>,
 ) -> Result<(StatusCode, Json<task_assignees::Model>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     require_member_or_owner(&state, tenant_id, project_id, payload.user_id).await?;
@@ -1105,7 +1152,8 @@ pub async fn update_assignee(
     Valid(Json(payload)): Valid<Json<UpdateAssigneeRequest>>,
 ) -> Result<Json<task_assignees::Model>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let assignee = task_assignees::Entity::find()
@@ -1142,7 +1190,8 @@ pub async fn remove_assignee(
     Path((tenant_id, project_id, id, user_id)): Path<(Uuid, Uuid, String, Uuid)>,
 ) -> Result<StatusCode, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let assignee = task_assignees::Entity::find()
@@ -1152,7 +1201,9 @@ pub async fn remove_assignee(
         .await?
         .ok_or(AppError::NotFound)?;
     let txn = state.db.begin().await?;
-    task_assignees::Entity::delete_by_id(assignee.id).exec(&txn).await?;
+    task_assignees::Entity::delete_by_id(assignee.id)
+        .exec(&txn)
+        .await?;
     record_activity(
         &txn,
         task.id,
@@ -1203,7 +1254,8 @@ pub async fn list_relations(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<TaskRelationsResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
@@ -1234,10 +1286,12 @@ pub async fn list_relations(
     let blocks: Vec<RelationEntry> = blocks_rels
         .into_iter()
         .filter_map(|rel| {
-            blocked_tasks.get(&rel.blocked_task_id).map(|t| RelationEntry {
-                relation_id: rel.id,
-                task: t.clone(),
-            })
+            blocked_tasks
+                .get(&rel.blocked_task_id)
+                .map(|t| RelationEntry {
+                    relation_id: rel.id,
+                    task: t.clone(),
+                })
         })
         .collect();
 
@@ -1262,14 +1316,20 @@ pub async fn list_relations(
     let blocked_by: Vec<RelationEntry> = blocked_rels
         .into_iter()
         .filter_map(|rel| {
-            blocker_tasks.get(&rel.blocker_task_id).map(|t| RelationEntry {
-                relation_id: rel.id,
-                task: t.clone(),
-            })
+            blocker_tasks
+                .get(&rel.blocker_task_id)
+                .map(|t| RelationEntry {
+                    relation_id: rel.id,
+                    task: t.clone(),
+                })
         })
         .collect();
 
-    Ok(Json(TaskRelationsResponse { subtasks, blocks, blocked_by }))
+    Ok(Json(TaskRelationsResponse {
+        subtasks,
+        blocks,
+        blocked_by,
+    }))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1303,7 +1363,8 @@ pub async fn add_relation(
     Json(payload): Json<AddRelationRequest>,
 ) -> Result<(StatusCode, Json<task_relations::Model>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     resolve_task(
@@ -1388,7 +1449,8 @@ pub async fn remove_relation(
     Path((tenant_id, project_id, id, relation_id)): Path<(Uuid, Uuid, String, Uuid)>,
 ) -> Result<StatusCode, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let rel = task_relations::Entity::find_by_id(relation_id)
@@ -1414,7 +1476,9 @@ pub async fn remove_relation(
         "blocked_by"
     };
     let txn = state.db.begin().await?;
-    task_relations::Entity::delete_by_id(relation_id).exec(&txn).await?;
+    task_relations::Entity::delete_by_id(relation_id)
+        .exec(&txn)
+        .await?;
     record_activity(
         &txn,
         task.id,

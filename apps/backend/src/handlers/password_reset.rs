@@ -1,15 +1,11 @@
-use axum::{
-    Json,
-    extract::State,
-    http::StatusCode,
-};
+use axum::{Json, extract::State, http::StatusCode};
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
 use chrono::Utc;
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
-use sea_orm::sea_query::Expr;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 use validator::Validate;
@@ -23,7 +19,10 @@ use crate::openapi::{
 use crate::utils::auth::{AuthError, create_password_hash, verify_password};
 use crate::utils::email::normalize_email;
 use crate::utils::{password_reset, password_reset_log};
-use crate::{AppState, entities::{personal_tokens, users}};
+use crate::{
+    AppState,
+    entities::{personal_tokens, users},
+};
 
 type AuthSession = axum_session::Session<SessionRedisPool>;
 
@@ -110,7 +109,8 @@ pub async fn password_reset_request(
     {
         if user.is_suspended {
             return Ok(Json(MessageResponse {
-                message: "入力されたメールアドレスにリセットリンクを送信しました（登録済みの場合）".into(),
+                message: "入力されたメールアドレスにリセットリンクを送信しました（登録済みの場合）"
+                    .into(),
             }));
         }
         if let Err(e) = password_reset_email::enqueue(
@@ -186,7 +186,9 @@ pub async fn password_reset_complete(
         .map_err(|e| AuthError::Internal(e.into()))?
         .ok_or(AuthError::InvalidPasswordResetToken)?;
     if consumed_id != user_id {
-        return Err(AuthError::Internal(anyhow::anyhow!("token user_id mismatch")));
+        return Err(AuthError::Internal(anyhow::anyhow!(
+            "token user_id mismatch"
+        )));
     }
 
     let mut active: users::ActiveModel = user.into();

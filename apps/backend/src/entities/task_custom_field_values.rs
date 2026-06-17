@@ -37,11 +37,15 @@ pub enum Relation {
 }
 
 impl Related<super::tasks::Entity> for Entity {
-    fn to() -> RelationDef { Relation::Tasks.def() }
+    fn to() -> RelationDef {
+        Relation::Tasks.def()
+    }
 }
 
 impl Related<super::project_custom_fields::Entity> for Entity {
-    fn to() -> RelationDef { Relation::ProjectCustomFields.def() }
+    fn to() -> RelationDef {
+        Relation::ProjectCustomFields.def()
+    }
 }
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -2,7 +2,7 @@ mod common;
 
 use axum::http::StatusCode;
 use backend::entities::{oauth_connections, users};
-use common::{is_redirect, MockGitLabUser, TestApp};
+use common::{MockGitLabUser, TestApp, is_redirect};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use url::Url;
 
@@ -70,7 +70,9 @@ async fn oauth_callback_rejects_state_mismatch() {
     assert!(is_redirect(start.status()), "oauth start redirect");
 
     let response = app
-        .get("/v1/auth/oauth/gitlab_selfhosted/callback?code=mock-auth-code&state=wrong-state-value")
+        .get(
+            "/v1/auth/oauth/gitlab_selfhosted/callback?code=mock-auth-code&state=wrong-state-value",
+        )
         .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = response.text().await.expect("body");

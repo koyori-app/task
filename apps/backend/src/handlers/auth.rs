@@ -10,7 +10,9 @@ use validator::Validate;
 
 use crate::entities;
 use crate::extractors::{AuthUser, CurrentUser};
-use crate::handlers::auth_2fa::{establish_login_session, Login2faResponse};
+use crate::handlers::auth_2fa::{Login2faResponse, establish_login_session};
+use crate::jobs::VerificationEmailJob;
+use crate::jobs::verification_email;
 use crate::openapi::{
     CredentialErrors, RegisterErrors, ResendVerificationErrors, SessionAuthErrors,
     UnauthorizedErrors, VerifyEmailErrors,
@@ -19,8 +21,6 @@ use crate::utils::auth::{
     AuthError, create_password_hash, dummy_password_hash, generate_email_verification_token,
     verify_password,
 };
-use crate::jobs::VerificationEmailJob;
-use crate::jobs::verification_email;
 use crate::utils::db::{is_postgres_unique_violation, with_transaction};
 use crate::utils::email::normalize_email;
 use crate::utils::email_verification;
@@ -181,10 +181,7 @@ pub async fn register(
     .await
     .map_err(AuthError::VerificationEmailEnqueueFailed)?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json("Register successful".to_string()),
-    ))
+    Ok((StatusCode::CREATED, Json("Register successful".to_string())))
 }
 
 /// メールでの本人確認時に送信する情報。
@@ -215,11 +212,10 @@ pub async fn verify_email(
     State(state): State<AppState>,
     Valid(Json(payload)): Valid<Json<VerifyEmailRequest>>,
 ) -> Result<Json<String>, AuthError> {
-    let user_id =
-        email_verification::consume_token(&state.redis_client, &payload.token)
-            .await
-            .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis consume verification token: {e}")))?
-            .ok_or(AuthError::InvalidVerificationToken)?;
+    let user_id = email_verification::consume_token(&state.redis_client, &payload.token)
+        .await
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis consume verification token: {e}")))?
+        .ok_or(AuthError::InvalidVerificationToken)?;
 
     let user = users::Entity::find_by_id(user_id)
         .one(&state.db)

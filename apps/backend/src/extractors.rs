@@ -5,7 +5,9 @@ use axum::{
     http::{header::AUTHORIZATION, request::Parts},
 };
 use axum_session_redispool::SessionRedisPool;
-use sea_orm::{ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait, prelude::Uuid};
+use sea_orm::{
+    ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait, prelude::Uuid,
+};
 
 use crate::{
     AppState,
@@ -16,10 +18,7 @@ use crate::{
 
 type Session = axum_session::Session<SessionRedisPool>;
 
-async fn session_from_parts(
-    parts: &mut Parts,
-    state: &AppState,
-) -> Result<Session, AuthError> {
+async fn session_from_parts(parts: &mut Parts, state: &AppState) -> Result<Session, AuthError> {
     Session::from_request_parts(parts, state)
         .await
         .map_err(|_| AuthError::Internal(anyhow::anyhow!("session layer missing")))
@@ -221,7 +220,10 @@ async fn session_has_tenant_access(
         }
     } else {
         let is_member = project_members::Entity::find()
-            .join(JoinType::InnerJoin, project_members::Relation::Projects.def())
+            .join(
+                JoinType::InnerJoin,
+                project_members::Relation::Projects.def(),
+            )
             .filter(project_members::Column::UserId.eq(user_id))
             .filter(projects::Column::TenantId.eq(tenant_id))
             .one(&state.db)
@@ -248,9 +250,7 @@ impl FromRequestParts<AppState> for OptionalAuthUser {
         match AuthUser::from_request_parts(parts, state).await {
             Ok(auth) => Ok(OptionalAuthUser(Some(auth))),
             // 半認証セッションは未認証扱い（Drive 等の Optional エンドポイントで 403 にしない）
-            Err(AuthError::Unauthorized) | Err(AuthError::Forbidden) => {
-                Ok(OptionalAuthUser(None))
-            }
+            Err(AuthError::Unauthorized) | Err(AuthError::Forbidden) => Ok(OptionalAuthUser(None)),
             Err(e) => Err(e),
         }
     }
@@ -264,7 +264,12 @@ impl FromRequestParts<AppState> for AuthUser {
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         if let Some(token) = bearer_token_from_parts(parts) {
-            let record = authenticate_personal_token(&state.db, &state.settings.personal_token_secret, &token).await?;
+            let record = authenticate_personal_token(
+                &state.db,
+                &state.settings.personal_token_secret,
+                &token,
+            )
+            .await?;
             let user = users::Entity::find_by_id(record.user_id)
                 .one(&state.db)
                 .await?
@@ -280,7 +285,11 @@ impl FromRequestParts<AppState> for AuthUser {
                     allowed_project_ids: match record.allowed_project_ids.as_ref() {
                         None => None,
                         Some(v) => crate::entities::personal_tokens::parse_allowed_project_ids(v)
-                            .map_err(|e| AuthError::Internal(anyhow::anyhow!("allowed_project_ids parse error: {e}")))?,
+                            .map_err(|e| {
+                            AuthError::Internal(anyhow::anyhow!(
+                                "allowed_project_ids parse error: {e}"
+                            ))
+                        })?,
                     },
                     scopes: record.scopes.clone(),
                 },
@@ -384,9 +393,7 @@ impl FromRequestParts<AppState> for AdminUser {
         if !user.is_admin {
             return Err(AuthError::Forbidden);
         }
-        Ok(AdminUser {
-            user_id: user.id,
-        })
+        Ok(AdminUser { user_id: user.id })
     }
 }
 

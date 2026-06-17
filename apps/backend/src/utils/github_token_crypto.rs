@@ -1,11 +1,11 @@
 //! Installation Access Token の AES-256-GCM 暗号化。
 
 use aes_gcm::{
-    aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
 };
-use anyhow::{anyhow, Context};
-use base64::{engine::general_purpose::STANDARD, Engine};
+use anyhow::{Context, anyhow};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use rand::Rng;
 
 const NONCE_LEN: usize = 12;
@@ -28,9 +28,7 @@ pub fn encrypt_token(key_material: &str, plaintext: &str) -> Result<String, anyh
 pub fn decrypt_token(key_material: &str, encoded: &str) -> Result<String, anyhow::Error> {
     let key = derive_key(key_material)?;
     let cipher = Aes256Gcm::new(&key.into());
-    let bytes = STANDARD
-        .decode(encoded)
-        .context("decode encrypted token")?;
+    let bytes = STANDARD.decode(encoded).context("decode encrypted token")?;
     if bytes.len() <= NONCE_LEN {
         return Err(anyhow!("encrypted token too short"));
     }

@@ -1,7 +1,9 @@
 //! GitHub App Wave 0 統合テスト（署名・OAuth state・リポジトリ選定）。
 
 use backend::handlers::github::verify_webhook_signature;
-use backend::utils::github_api::{select_primary_repository, InstallationRepository, RepositoryOwner};
+use backend::utils::github_api::{
+    InstallationRepository, RepositoryOwner, select_primary_repository,
+};
 use backend::utils::github_oauth_state::GithubOAuthStatePayload;
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::prelude::Uuid;

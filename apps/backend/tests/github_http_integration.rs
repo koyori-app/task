@@ -85,7 +85,11 @@ fn state_from_install_url(url: &str) -> String {
 /// GET /install を呼び、200 OK + JSON body から state トークンを取り出す。
 async fn get_install_state(app: &TestApp, tp: &TestTenantProject) -> String {
     let response = app.get_with_session(&install_path(tp)).await;
-    assert_eq!(response.status(), StatusCode::OK, "install should return 200");
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "install should return 200"
+    );
     let body: serde_json::Value = response.json().await.expect("install json body");
     let url = body["url"].as_str().expect("install url field");
     assert!(url.contains("github.com/apps/task-app/installations/new"));
@@ -167,7 +171,10 @@ async fn github_http_integration_suite() {
         app.login_session(&user.email, &user.password).await;
 
         let response = app
-            .get_with_session(&callback_path("nonexistent-state-token", unique_installation_id()))
+            .get_with_session(&callback_path(
+                "nonexistent-state-token",
+                unique_installation_id(),
+            ))
             .await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 

@@ -1,8 +1,8 @@
 //! GitHub App JWT 発行と Installation Access Token 取得。
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use chrono::{Duration, Utc};
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -109,8 +109,8 @@ pub async fn fetch_installation_access_token(
         .json()
         .await
         .context("parse installation token response")?;
-    let expires_at = chrono::DateTime::parse_from_rfc3339(&body.expires_at)
-        .context("parse token expires_at")?;
+    let expires_at =
+        chrono::DateTime::parse_from_rfc3339(&body.expires_at).context("parse token expires_at")?;
     Ok(InstallationAccessToken {
         token: body.token,
         expires_at,
@@ -233,13 +233,12 @@ pub async fn fetch_primary_repository(
         .json()
         .await
         .context("parse installation repositories")?;
-    let repo =
-        select_primary_repository(&body.repositories, preferred_owner).ok_or_else(|| {
-            anyhow!(
-                "installation has access to {} repositories; select one explicitly",
-                body.repositories.len()
-            )
-        })?;
+    let repo = select_primary_repository(&body.repositories, preferred_owner).ok_or_else(|| {
+        anyhow!(
+            "installation has access to {} repositories; select one explicitly",
+            body.repositories.len()
+        )
+    })?;
     let (owner, name) = repo
         .full_name
         .split_once('/')

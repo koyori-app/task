@@ -1,9 +1,9 @@
 use regex::Regex;
+use sea_orm::entity::prelude::Json;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
     prelude::Uuid,
 };
-use sea_orm::entity::prelude::Json;
 use std::sync::LazyLock;
 
 use crate::entities::{project_members, project_statuses, task_activities, tasks, users};
@@ -32,10 +32,7 @@ pub async fn record_activity<C: ConnectionTrait>(
     Ok(())
 }
 
-pub async fn status_name<C: ConnectionTrait>(
-    db: &C,
-    status_id: Uuid,
-) -> Result<String, AppError> {
+pub async fn status_name<C: ConnectionTrait>(db: &C, status_id: Uuid) -> Result<String, AppError> {
     project_statuses::Entity::find_by_id(status_id)
         .one(db)
         .await?

@@ -1,14 +1,18 @@
-use axum::{Json, extract::{Path, State}, http::StatusCode};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+};
 use axum_session::Session;
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
 use chrono::Utc;
+use sea_orm::prelude::Uuid;
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, JoinType, QueryFilter,
     QuerySelect, RelationTrait, TransactionTrait,
 };
-use sea_orm::sea_query::Expr;
-use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
@@ -16,16 +20,16 @@ use crate::{
     AppState,
     entities::{project_members, projects, recovery_codes, tenants, totp_credentials, users},
     error::AppError,
-    extractors::{AuthUser, HalfAuthedUser, LoggedInUser},
     error::ServerError,
+    extractors::{AuthUser, HalfAuthedUser, LoggedInUser},
     openapi::{CrudErrors, SessionAuthErrors},
     utils::{
         auth::AuthError,
         totp::{
             self, clear_2fa_attempts, decrypt_totp_secret, encrypt_totp_secret,
-            generate_recovery_codes, generate_totp_secret_base32,
-            hash_recovery_code, normalize_recovery_code, otpauth_uri, qr_code_png_data_uri,
-            recovery_code_matches, verify_totp_code,
+            generate_recovery_codes, generate_totp_secret_base32, hash_recovery_code,
+            normalize_recovery_code, otpauth_uri, qr_code_png_data_uri, recovery_code_matches,
+            verify_totp_code,
         },
     },
 };
@@ -65,7 +69,10 @@ async fn user_in_require_2fa_tenant(
         return Ok(true);
     }
     let member_of_required_tenant = project_members::Entity::find()
-        .join(JoinType::InnerJoin, project_members::Relation::Projects.def())
+        .join(
+            JoinType::InnerJoin,
+            project_members::Relation::Projects.def(),
+        )
         .join(JoinType::InnerJoin, projects::Relation::Tenants.def())
         .filter(project_members::Column::UserId.eq(user_id))
         .filter(tenants::Column::Require2fa.eq(true))
@@ -151,10 +158,7 @@ pub struct Require2faPolicyRequest {
     pub enabled: bool,
 }
 
-async fn load_user(
-    state: &AppState,
-    user_id: Uuid,
-) -> Result<users::Model, AuthError> {
+async fn load_user(state: &AppState, user_id: Uuid) -> Result<users::Model, AuthError> {
     users::Entity::find_by_id(user_id)
         .one(&state.db)
         .await?
@@ -198,8 +202,7 @@ async fn verify_user_totp_or_recovery(
 
     if let Some(recovery) = recovery_code {
         let normalized = normalize_recovery_code(recovery);
-        let candidate_hash =
-            hash_recovery_code(&normalized, &state.settings.recovery_code_secret)?;
+        let candidate_hash = hash_recovery_code(&normalized, &state.settings.recovery_code_secret)?;
 
         let txn = state.db.begin().await?;
         let codes = recovery_codes::Entity::find()
@@ -218,7 +221,10 @@ async fn verify_user_totp_or_recovery(
 
         if let Some(id) = matched_id {
             let result = recovery_codes::Entity::update_many()
-                .col_expr(recovery_codes::Column::UsedAt, Expr::value(Some(Utc::now())))
+                .col_expr(
+                    recovery_codes::Column::UsedAt,
+                    Expr::value(Some(Utc::now())),
+                )
                 .filter(recovery_codes::Column::Id.eq(id))
                 .filter(recovery_codes::Column::UsedAt.is_null())
                 .exec(&txn)
@@ -246,8 +252,7 @@ async fn verify_user_totp_or_recovery(
     if !cred.is_verified {
         return Err(AuthError::TwoFactorNotEnabled);
     }
-    let secret =
-        decrypt_totp_secret(&cred.secret_enc, &state.settings.totp_encryption_key)?;
+    let secret = decrypt_totp_secret(&cred.secret_enc, &state.settings.totp_encryption_key)?;
     let user = users::Entity::find_by_id(user_id)
         .one(&state.db)
         .await?
@@ -350,8 +355,7 @@ pub async fn totp_verify_setup(
 
     totp::check_2fa_lockout(&state.redis_client, user.user_id).await?;
 
-    let secret =
-        decrypt_totp_secret(&cred.secret_enc, &state.settings.totp_encryption_key)?;
+    let secret = decrypt_totp_secret(&cred.secret_enc, &state.settings.totp_encryption_key)?;
     if !verify_totp_code(
         &secret,
         &state.settings.totp_issuer,

@@ -4,10 +4,10 @@ use axum::http::StatusCode;
 use backend::entities::{passkeys, users};
 use backend::utils::auth::AuthError;
 use backend::utils::passkeys::{
-    count_user_passkeys, insert_passkey_under_user_lock, MAX_PASSKEYS_PER_USER,
+    MAX_PASSKEYS_PER_USER, count_user_passkeys, insert_passkey_under_user_lock,
 };
 use chrono::Utc;
-use common::{insert_passkey_user, TestApp};
+use common::{TestApp, insert_passkey_user};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use url::Url;
 use uuid::Uuid;
@@ -21,10 +21,7 @@ fn webauthn_origin(app_url: &str) -> Url {
         "{}://{}{}",
         parsed.scheme(),
         parsed.host_str().expect("host"),
-        parsed
-            .port()
-            .map(|p| format!(":{p}"))
-            .unwrap_or_default()
+        parsed.port().map(|p| format!(":{p}")).unwrap_or_default()
     );
     Url::parse(&origin).expect("origin url")
 }
@@ -35,7 +32,10 @@ async fn soft_register_finish(
     name: &str,
 ) {
     let start = app
-        .post_json_with_session("/v1/auth/passkeys/registration/start", serde_json::json!({}))
+        .post_json_with_session(
+            "/v1/auth/passkeys/registration/start",
+            serde_json::json!({}),
+        )
         .await;
     assert_eq!(start.status(), StatusCode::OK, "registration start");
     let start_body = start.text().await.expect("start body");
@@ -95,12 +95,18 @@ async fn webauthn_integration_suite() {
         app.login_session(&user.email, &user.password).await;
 
         let first = app
-            .post_json_with_session("/v1/auth/passkeys/registration/start", serde_json::json!({}))
+            .post_json_with_session(
+                "/v1/auth/passkeys/registration/start",
+                serde_json::json!({}),
+            )
             .await;
         assert_eq!(first.status(), StatusCode::OK);
 
         let second = app
-            .post_json_with_session("/v1/auth/passkeys/registration/start", serde_json::json!({}))
+            .post_json_with_session(
+                "/v1/auth/passkeys/registration/start",
+                serde_json::json!({}),
+            )
             .await;
         assert_eq!(second.status(), StatusCode::CONFLICT);
         let body = second.text().await.expect("body");
@@ -116,13 +122,9 @@ async fn webauthn_integration_suite() {
             .insert_passkey_user(true, Some("TestPassword123!"))
             .await;
         app.login_session(&user.email, &user.password).await;
-        insert_passkey_under_user_lock(
-            &app.state.db,
-            user.id,
-            dummy_passkey_model(user.id, 1),
-        )
-        .await
-        .expect("seed passkey");
+        insert_passkey_under_user_lock(&app.state.db, user.id, dummy_passkey_model(user.id, 1))
+            .await
+            .expect("seed passkey");
 
         let model = users::Entity::find_by_id(user.id)
             .one(&app.state.db)
@@ -196,8 +198,7 @@ async fn webauthn_integration_suite() {
             .as_object_mut()
             .expect("object")
             .remove("challenge_id");
-        let rcr: RequestChallengeResponse =
-            serde_json::from_value(options).expect("parse rcr");
+        let rcr: RequestChallengeResponse = serde_json::from_value(options).expect("parse rcr");
 
         let origin = webauthn_origin(&app.state.settings.email_verification_app_url);
         let auth_cred = wa
@@ -250,8 +251,7 @@ async fn webauthn_integration_suite() {
             .as_object_mut()
             .expect("object")
             .remove("challenge_id");
-        let rcr: RequestChallengeResponse =
-            serde_json::from_value(options).expect("parse rcr");
+        let rcr: RequestChallengeResponse = serde_json::from_value(options).expect("parse rcr");
 
         let origin = webauthn_origin(&app.state.settings.email_verification_app_url);
         let auth_cred = wa

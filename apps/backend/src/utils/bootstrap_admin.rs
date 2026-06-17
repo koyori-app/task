@@ -11,7 +11,10 @@ use crate::entities::{audit_logs, users};
 use crate::utils::email::normalize_email;
 
 /// `BOOTSTRAP_ADMIN_EMAIL` 設定時、管理者が 0 人なら対象ユーザーを昇格する。
-pub async fn bootstrap_admin_email(db: &DatabaseConnection, email: &str) -> Result<(), sea_orm::DbErr> {
+pub async fn bootstrap_admin_email(
+    db: &DatabaseConnection,
+    email: &str,
+) -> Result<(), sea_orm::DbErr> {
     let admin_count = users::Entity::find()
         .filter(users::Column::IsAdmin.eq(true))
         .count(db)

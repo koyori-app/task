@@ -20,12 +20,7 @@ async fn setup_project(app: &mut TestApp) -> (TestUser, TestTenantProject) {
     (user, tp)
 }
 
-async fn create_status(
-    app: &TestApp,
-    tp: &TestTenantProject,
-    name: &str,
-    is_done: bool,
-) -> Uuid {
+async fn create_status(app: &TestApp, tp: &TestTenantProject, name: &str, is_done: bool) -> Uuid {
     let path = format!(
         "/v1/tenants/{}/projects/{}/statuses",
         tp.tenant_id, tp.project_id
@@ -42,7 +37,11 @@ async fn create_status(
             }),
         )
         .await;
-    assert_eq!(response.status(), StatusCode::CREATED, "create status {name}");
+    assert_eq!(
+        response.status(),
+        StatusCode::CREATED,
+        "create status {name}"
+    );
     let body: serde_json::Value = response.json().await.expect("status json");
     body["id"]
         .as_str()
@@ -65,11 +64,7 @@ async fn create_sprint(app: &TestApp, tp: &TestTenantProject, name: &str) -> Uui
         .await;
     let status = response.status();
     let text = response.text().await.expect("sprint body");
-    assert_eq!(
-        status,
-        StatusCode::CREATED,
-        "create sprint failed: {text}"
-    );
+    assert_eq!(status, StatusCode::CREATED, "create sprint failed: {text}");
     let body: serde_json::Value = serde_json::from_str(&text).expect("sprint json");
     assert_eq!(body["status"].as_str(), Some("planning"));
     body["id"]
@@ -79,12 +74,7 @@ async fn create_sprint(app: &TestApp, tp: &TestTenantProject, name: &str) -> Uui
         .expect("uuid")
 }
 
-async fn create_task(
-    app: &TestApp,
-    tp: &TestTenantProject,
-    status_id: Uuid,
-    title: &str,
-) -> Uuid {
+async fn create_task(app: &TestApp, tp: &TestTenantProject, status_id: Uuid, title: &str) -> Uuid {
     let path = format!(
         "/v1/tenants/{}/projects/{}/tasks",
         tp.tenant_id, tp.project_id
@@ -100,11 +90,7 @@ async fn create_task(
         .await;
     assert_eq!(response.status(), StatusCode::CREATED);
     let body: serde_json::Value = response.json().await.expect("task json");
-    body["id"]
-        .as_str()
-        .expect("task id")
-        .parse()
-        .expect("uuid")
+    body["id"].as_str().expect("task id").parse().expect("uuid")
 }
 
 #[tokio::test]
@@ -166,9 +152,7 @@ async fn sprints_integration_suite() {
     assert_eq!(detail.status(), StatusCode::OK);
     let detail_body: serde_json::Value = detail.json().await.expect("detail json");
     assert_eq!(detail_body["task_counts"]["total"].as_u64(), Some(2));
-    let burndown = detail_body["burndown"]
-        .as_array()
-        .expect("burndown array");
+    let burndown = detail_body["burndown"].as_array().expect("burndown array");
     assert!(!burndown.is_empty());
     let first = &burndown[0];
     assert_eq!(first["ideal_remaining"].as_i64(), Some(2));
@@ -220,9 +204,7 @@ async fn sprints_integration_suite() {
     let detail2_body: serde_json::Value = detail2.json().await.expect("detail2 json");
     assert_eq!(detail2_body["task_counts"]["done"].as_u64(), Some(1));
     assert_eq!(detail2_body["task_counts"]["in_progress"].as_u64(), Some(1));
-    let burndown2 = detail2_body["burndown"]
-        .as_array()
-        .expect("burndown array");
+    let burndown2 = detail2_body["burndown"].as_array().expect("burndown array");
     let june_1 = &burndown2[0];
     let june_2 = &burndown2[1];
     assert_eq!(june_1["actual_remaining"].as_u64(), Some(2));
@@ -284,10 +266,7 @@ async fn sprints_integration_suite() {
     );
     let s1 = r1.expect("start sprint c").status();
     let s2 = r2.expect("start sprint d").status();
-    let ok_count = [s1, s2]
-        .iter()
-        .filter(|s| **s == StatusCode::OK)
-        .count();
+    let ok_count = [s1, s2].iter().filter(|s| **s == StatusCode::OK).count();
     let conflict_count = [s1, s2]
         .iter()
         .filter(|s| **s == StatusCode::CONFLICT)
@@ -301,5 +280,9 @@ async fn sprints_integration_suite() {
         .await;
     assert_eq!(list.status(), StatusCode::OK);
     let list_body: Vec<serde_json::Value> = list.json().await.expect("list json");
-    assert!(list_body.iter().any(|s| s["id"].as_str() == Some(sprint_a.to_string().as_str())));
+    assert!(
+        list_body
+            .iter()
+            .any(|s| s["id"].as_str() == Some(sprint_a.to_string().as_str()))
+    );
 }

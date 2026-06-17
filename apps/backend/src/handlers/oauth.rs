@@ -8,18 +8,17 @@ use axum_session::Session;
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
 use chrono::Utc;
+use sea_orm::prelude::Uuid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
     QuerySelect,
 };
-use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, warn};
 use validator::Validate;
 
 use crate::entities::{oauth_connections, users};
-use crate::utils::passkeys::count_user_passkeys;
 use crate::error::{ServerError, internal_server_error};
 use crate::extractors::{AuthUser, CurrentUser, OptionalAuthUser};
 use crate::openapi::OAuthErrors;
@@ -33,11 +32,12 @@ use crate::utils::oauth::provider::{
     ProviderUserInfo, build_authorize_url, get_credentials, normalize_instance_url,
     resolve_endpoints,
 };
+use crate::utils::passkeys::count_user_passkeys;
 
 use crate::utils::login_session::establish_login_session;
 use crate::utils::oauth::state::{
-    OAuthStatePayload, build_frontend_oauth_error_redirect, build_frontend_redirect,
-    consume_state, sanitize_redirect_path, store_state,
+    OAuthStatePayload, build_frontend_oauth_error_redirect, build_frontend_redirect, consume_state,
+    sanitize_redirect_path, store_state,
 };
 
 const OAUTH_PENDING_STATE_KEY: &str = "oauth_pending_state";
@@ -434,8 +434,8 @@ pub async fn oauth_callback(
         &endpoints,
         &token.access_token,
     )
-        .await
-        .map_err(OAuthError::Internal)?;
+    .await
+    .map_err(OAuthError::Internal)?;
 
     let db_provider = settings
         .db_provider_key(&provider)
@@ -464,7 +464,10 @@ pub async fn oauth_callback(
     if twofa_required.is_some() {
         let twofa_redirect = format!(
             "{}/auth/2fa?redirect_after={}",
-            state.settings.email_verification_app_url.trim_end_matches('/'),
+            state
+                .settings
+                .email_verification_app_url
+                .trim_end_matches('/'),
             urlencoding::encode(&payload.redirect_after)
         );
         return Ok(Redirect::temporary(&twofa_redirect));
@@ -539,7 +542,8 @@ pub async fn disconnect_connection(
     State(state): State<AppState>,
     auth: AuthUser,
 ) -> Result<StatusCode, OAuthError> {
-    auth.require_session().map_err(|_| OAuthError::Unauthorized)?;
+    auth.require_session()
+        .map_err(|_| OAuthError::Unauthorized)?;
 
     let db_provider = resolve_disconnect_provider(&state.oauth_settings, &provider)?;
 
@@ -610,7 +614,8 @@ pub async fn set_initial_password(
     auth: AuthUser,
     Valid(Json(payload)): Valid<Json<SetPasswordRequest>>,
 ) -> Result<StatusCode, OAuthError> {
-    auth.require_session().map_err(|_| OAuthError::Unauthorized)?;
+    auth.require_session()
+        .map_err(|_| OAuthError::Unauthorized)?;
 
     let user = users::Entity::find_by_id(auth.user_id)
         .one(&state.db)
@@ -899,10 +904,7 @@ async fn create_oauth_user_and_connection(
         Box::pin(async move {
             if let Err(e) = users::Entity::insert(user).exec(txn).await {
                 if is_postgres_unique_violation(&e) {
-                    return Err(
-                        classify_user_unique_violation(txn, &email, &username)
-                            .await?,
-                    );
+                    return Err(classify_user_unique_violation(txn, &email, &username).await?);
                 }
                 return Err(OAuthError::Internal(e.into()));
             }

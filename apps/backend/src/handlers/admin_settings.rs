@@ -1,8 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    http::HeaderMap,
-};
+use axum::{Json, extract::State, http::HeaderMap};
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -10,12 +6,12 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::AppState;
 use crate::entities::system_settings;
 use crate::error::AppError;
 use crate::extractors::AdminUser;
 use crate::handlers::admin_audit::record_audit;
 use crate::openapi::SessionAuthErrors;
-use crate::AppState;
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SystemSettingsResponse {
@@ -39,7 +35,9 @@ fn model_to_response(model: system_settings::Model) -> SystemSettingsResponse {
     }
 }
 
-async fn load_singleton(db: &sea_orm::DatabaseConnection) -> Result<system_settings::Model, AppError> {
+async fn load_singleton(
+    db: &sea_orm::DatabaseConnection,
+) -> Result<system_settings::Model, AppError> {
     system_settings::Entity::find()
         .filter(system_settings::Column::Singleton.eq(true))
         .one(db)

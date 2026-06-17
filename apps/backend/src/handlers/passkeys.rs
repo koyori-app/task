@@ -7,10 +7,10 @@ use axum_session::Session;
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
 use chrono::Utc;
+use sea_orm::prelude::Uuid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
-use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
@@ -18,6 +18,7 @@ use webauthn_rs::prelude::{
     CredentialID, DiscoverableKey, Passkey, PublicKeyCredential, RegisterPublicKeyCredential,
 };
 
+use crate::AppState;
 use crate::entities::{passkeys as passkey_entity, users};
 use crate::extractors::CurrentUser;
 use crate::openapi::SessionAuthErrors;
@@ -25,11 +26,10 @@ use crate::utils::auth::AuthError;
 use crate::utils::email::normalize_email;
 use crate::utils::passkey_challenges;
 use crate::utils::passkeys::{
-    count_user_passkeys, find_by_credential_id, insert_passkey_under_user_lock,
-    is_last_auth_method, load_user_passkeys, model_to_passkey, passkey_to_model_fields,
-    update_passkey_after_authentication, MAX_PASSKEYS_PER_USER,
+    MAX_PASSKEYS_PER_USER, count_user_passkeys, find_by_credential_id,
+    insert_passkey_under_user_lock, is_last_auth_method, load_user_passkeys, model_to_passkey,
+    passkey_to_model_fields, update_passkey_after_authentication,
 };
-use crate::AppState;
 
 type AppSession = Session<SessionRedisPool>;
 
@@ -141,7 +141,10 @@ pub async fn registration_start(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> Result<Json<serde_json::Value>, AuthError> {
-    user.0.email_verified.then_some(()).ok_or(AuthError::Forbidden)?;
+    user.0
+        .email_verified
+        .then_some(())
+        .ok_or(AuthError::Forbidden)?;
 
     let lock_acquired = passkey_challenges::acquire_registration_lock(&state.redis_client, user.id)
         .await
@@ -153,22 +156,21 @@ pub async fn registration_start(
     let count = match count_user_passkeys(&state.db, user.id).await {
         Ok(count) => count,
         Err(e) => {
-            let _ = passkey_challenges::release_registration_lock(&state.redis_client, user.id)
-                .await;
+            let _ =
+                passkey_challenges::release_registration_lock(&state.redis_client, user.id).await;
             return Err(e.into());
         }
     };
     if count >= MAX_PASSKEYS_PER_USER {
-        let _ = passkey_challenges::release_registration_lock(&state.redis_client, user.id)
-            .await;
+        let _ = passkey_challenges::release_registration_lock(&state.redis_client, user.id).await;
         return Err(AuthError::PasskeyLimitExceeded);
     }
 
     let existing = match load_user_passkeys(&state.db, user.id).await {
         Ok(passkeys) => passkeys,
         Err(e) => {
-            let _ = passkey_challenges::release_registration_lock(&state.redis_client, user.id)
-                .await;
+            let _ =
+                passkey_challenges::release_registration_lock(&state.redis_client, user.id).await;
             return Err(AuthError::Internal(e));
         }
     };
@@ -182,17 +184,16 @@ pub async fn registration_start(
     ) {
         Ok(v) => v,
         Err(e) => {
-            let _ = passkey_challenges::release_registration_lock(&state.redis_client, user.id)
-                .await;
+            let _ =
+                passkey_challenges::release_registration_lock(&state.redis_client, user.id).await;
             return Err(e.into());
         }
     };
 
-    if let Err(e) = passkey_challenges::store_registration(&state.redis_client, user.id, &reg_state)
-        .await
+    if let Err(e) =
+        passkey_challenges::store_registration(&state.redis_client, user.id, &reg_state).await
     {
-        let _ = passkey_challenges::release_registration_lock(&state.redis_client, user.id)
-            .await;
+        let _ = passkey_challenges::release_registration_lock(&state.redis_client, user.id).await;
         return Err(AuthError::Internal(e));
     }
 
@@ -218,7 +219,10 @@ pub async fn registration_finish(
     user: CurrentUser,
     Valid(Json(payload)): Valid<Json<PasskeyRegistrationFinishRequest>>,
 ) -> Result<StatusCode, AuthError> {
-    user.0.email_verified.then_some(()).ok_or(AuthError::Forbidden)?;
+    user.0
+        .email_verified
+        .then_some(())
+        .ok_or(AuthError::Forbidden)?;
 
     if !passkey_challenges::registration_lock_held(&state.redis_client, user.id)
         .await
@@ -244,14 +248,13 @@ pub async fn registration_finish(
         }
     };
 
-    let credential: RegisterPublicKeyCredential =
-        match serde_json::from_value(payload.credential) {
-            Ok(c) => c,
-            Err(_) => {
-                release_lock().await;
-                return Err(AuthError::BadRequest);
-            }
-        };
+    let credential: RegisterPublicKeyCredential = match serde_json::from_value(payload.credential) {
+        Ok(c) => c,
+        Err(_) => {
+            release_lock().await;
+            return Err(AuthError::BadRequest);
+        }
+    };
     let passkey = match state
         .webauthn
         .finish_passkey_registration(&credential, &reg_state)
@@ -263,14 +266,13 @@ pub async fn registration_finish(
         }
     };
 
-    let (credential_id, public_key, aaguid, sign_count) =
-        match passkey_to_model_fields(&passkey) {
-            Ok(f) => f,
-            Err(e) => {
-                release_lock().await;
-                return Err(AuthError::Internal(e));
-            }
-        };
+    let (credential_id, public_key, aaguid, sign_count) = match passkey_to_model_fields(&passkey) {
+        Ok(f) => f,
+        Err(e) => {
+            release_lock().await;
+            return Err(AuthError::Internal(e));
+        }
+    };
     let now = Utc::now().fixed_offset();
 
     let insert_result = insert_passkey_under_user_lock(
@@ -324,9 +326,7 @@ pub async fn authentication_start(
         // 空リストで start_passkey_authentication すると空の allowCredentials が返り、
         // 攻撃者がパスキー未登録アカウントを識別できるため、その場合は discoverable に fallback する。
         if !passkey_list.is_empty() {
-            let (rcr, auth_state) = state
-                .webauthn
-                .start_passkey_authentication(&passkey_list)?;
+            let (rcr, auth_state) = state.webauthn.start_passkey_authentication(&passkey_list)?;
 
             passkey_challenges::store_authentication(
                 &state.redis_client,
@@ -432,13 +432,11 @@ pub async fn authentication_finish(
         return Ok(StatusCode::NO_CONTENT);
     }
 
-    let auth_state = passkey_challenges::take_authentication(
-        &state.redis_client,
-        payload.challenge_id,
-    )
-    .await
-    .map_err(AuthError::Internal)?
-    .ok_or(AuthError::BadRequest)?;
+    let auth_state =
+        passkey_challenges::take_authentication(&state.redis_client, payload.challenge_id)
+            .await
+            .map_err(AuthError::Internal)?
+            .ok_or(AuthError::BadRequest)?;
 
     let cred_id = credential.get_credential_id();
     let stored = find_by_credential_id(&state.db, cred_id)
