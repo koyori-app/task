@@ -23,7 +23,16 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
-use crate::utils::notifications::{DEFAULT_IN_APP_EVENTS, ensure_watcher};
+use crate::utils::notifications::{DEFAULT_IN_APP_EVENTS, KNOWN_EVENT_TYPES, ensure_watcher};
+
+fn validate_known_event_types(events: &Vec<String>) -> Result<(), validator::ValidationError> {
+    for e in events {
+        if !KNOWN_EVENT_TYPES.contains(&e.as_str()) {
+            return Err(validator::ValidationError::new("unknown_event_type"));
+        }
+    }
+    Ok(())
+}
 
 #[derive(Serialize, ToSchema)]
 pub struct WatcherUser {
@@ -83,7 +92,9 @@ pub struct NotificationSettingsResponse {
 
 #[derive(Validate, Deserialize, ToSchema)]
 pub struct UpdateNotificationSettingsRequest {
+    #[validate(custom(function = "validate_known_event_types"))]
     pub email_events: Vec<String>,
+    #[validate(custom(function = "validate_known_event_types"))]
     pub in_app_events: Vec<String>,
 }
 
