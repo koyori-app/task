@@ -352,7 +352,16 @@ pub async fn update_comment(
         return Err(AppError::Forbidden);
     }
 
-    let mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
+    let old_body = comment.body.clone();
+    let old_mentions = extract_mentions(&state.db, &old_body, project_id).await?;
+    let new_mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
+
+    // 編集前から存在するメンションを除き、新規に追加されたメンションのみ通知
+    let old_set: std::collections::HashSet<Uuid> = old_mentions.into_iter().collect();
+    let added_mentions: Vec<Uuid> = new_mentions
+        .into_iter()
+        .filter(|id| !old_set.contains(id))
+        .collect();
 
     let comment_id = comment.id;
     let txn = state.db.begin().await?;
@@ -374,7 +383,7 @@ pub async fn update_comment(
         &txn,
         project_id,
         task.id,
-        &mentions,
+        &added_mentions,
         comment_id,
         auth.user_id,
     )

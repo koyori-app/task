@@ -254,16 +254,12 @@ pub async fn list_notifications(
     let accessible_proj_ids = accessible_project_ids(&state.db, auth.user_id).await?;
     let task_ids = accessible_task_ids(&state.db, &accessible_proj_ids).await?;
 
-    let unread_count: u64 = if task_ids.is_empty() {
-        0
-    } else {
-        notifications::Entity::find()
-            .filter(notifications::Column::UserId.eq(auth.user_id))
-            .filter(notifications::Column::ReadAt.is_null())
-            .filter(accessible_notification_condition(task_ids.clone()))
-            .count(&state.db)
-            .await?
-    };
+    let unread_count: u64 = notifications::Entity::find()
+        .filter(notifications::Column::UserId.eq(auth.user_id))
+        .filter(notifications::Column::ReadAt.is_null())
+        .filter(accessible_notification_condition(task_ids.clone()))
+        .count(&state.db)
+        .await?;
 
     let limit = q.limit.unwrap_or(50).min(100);
     let offset = q.offset.unwrap_or(0);
