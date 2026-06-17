@@ -79,7 +79,7 @@ const data = computed(() => ({
       title: 'My Tasks',
       url: myTasksUrl.value,
       icon: ListTodo,
-      isActive: pageContext.urlPathname.endsWith('/my-tasks'),
+      isActive: pageContext.urlPathname === `/${pageContext.routeParams.tenant}/my-tasks`,
     },
     {
       title: 'Labels',
