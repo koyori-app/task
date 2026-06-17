@@ -10,6 +10,7 @@ pub mod github_oauth_state;
 pub mod github_token_crypto;
 pub mod http;
 pub mod login_session;
+pub mod notifications;
 pub mod oauth;
 pub mod passkey_challenges;
 pub mod passkeys;

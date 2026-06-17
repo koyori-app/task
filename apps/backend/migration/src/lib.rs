@@ -30,6 +30,7 @@ mod m20260607_add_sprints_active_unique_index;
 mod m20260607_add_tasks_completed_at;
 mod m20260607_create_task_comments_and_activities;
 mod m20260609_create_custom_fields;
+mod m20260609_create_task_notifications;
 mod m20260529010000_create_passkeys;
 mod m20260529100000_auth_2fa;
 
@@ -69,6 +70,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260607_add_tasks_completed_at::Migration),
             Box::new(m20260607_create_task_comments_and_activities::Migration),
             Box::new(m20260609_create_custom_fields::Migration),
+            Box::new(m20260609_create_task_notifications::Migration),
             Box::new(m20260529010000_create_passkeys::Migration),
             Box::new(m20260529100000_auth_2fa::Migration),
         ]

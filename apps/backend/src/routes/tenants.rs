@@ -60,7 +60,10 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::time_tracking::delete_time_log))
                         .routes(routes!(crate::handlers::time_tracking::start_timer))
                         .routes(routes!(crate::handlers::time_tracking::stop_timer))
-                        .routes(routes!(crate::handlers::time_tracking::get_timer_status)),
+                        .routes(routes!(crate::handlers::time_tracking::get_timer_status))
+                        .routes(routes!(crate::handlers::task_notifications::list_watchers))
+                        .routes(routes!(crate::handlers::task_notifications::start_watch))
+                        .routes(routes!(crate::handlers::task_notifications::stop_watch)),
                 )
                 .nest(
                     "/{project_id}/statuses",

@@ -20,6 +20,7 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
+use crate::utils::notifications::{notify_comment_added, notify_mentioned};
 use crate::utils::task_activities::{extract_mentions, record_activity};
 
 #[derive(Serialize, ToSchema)]
@@ -257,8 +258,7 @@ pub async fn create_comment(
         }
     }
 
-    // TODO: mention notification — メンション対象ユーザーへの通知をここで実装する
-    let _mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
+    let mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
 
     let txn = state.db.begin().await?;
     let comment = task_comments::ActiveModel {
@@ -280,6 +280,24 @@ pub async fn create_comment(
         Some(auth.user_id),
         "comment_added",
         serde_json::json!({ "comment_id": comment.id }).into(),
+    )
+    .await?;
+    let actually_mentioned = notify_mentioned(
+        &txn,
+        project_id,
+        task.id,
+        &mentions,
+        comment.id,
+        auth.user_id,
+    )
+    .await?;
+    notify_comment_added(
+        &txn,
+        project_id,
+        task.id,
+        comment.id,
+        auth.user_id,
+        &actually_mentioned,
     )
     .await?;
     txn.commit().await?;
@@ -334,8 +352,16 @@ pub async fn update_comment(
         return Err(AppError::Forbidden);
     }
 
-    // TODO: mention notification — メンション対象ユーザーへの通知をここで実装する
-    let _mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
+    let old_body = comment.body.clone();
+    let old_mentions = extract_mentions(&state.db, &old_body, project_id).await?;
+    let new_mentions = extract_mentions(&state.db, &payload.body, project_id).await?;
+
+    // 編集前から存在するメンションを除き、新規に追加されたメンションのみ通知
+    let old_set: std::collections::HashSet<Uuid> = old_mentions.into_iter().collect();
+    let added_mentions: Vec<Uuid> = new_mentions
+        .into_iter()
+        .filter(|id| !old_set.contains(id))
+        .collect();
 
     let comment_id = comment.id;
     let txn = state.db.begin().await?;
@@ -349,6 +375,17 @@ pub async fn update_comment(
         Some(auth.user_id),
         "comment_edited",
         serde_json::json!({ "comment_id": comment_id }).into(),
+    )
+    .await?;
+    // 編集時は新規メンションのみ通知する。notify_comment_added は呼ばない
+    // （ウォッチャー全員への再通知は過剰なため、編集コメントは意図的に対象外）
+    let _ = notify_mentioned(
+        &txn,
+        project_id,
+        task.id,
+        &added_mentions,
+        comment_id,
+        auth.user_id,
     )
     .await?;
     txn.commit().await?;

@@ -5,13 +5,17 @@ use axum::{
 };
 use axum_valid::Valid;
 use sea_orm::prelude::Uuid;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QuerySelect,
+};
 use serde::Deserialize;
 use validator::Validate;
 
 use crate::AppState;
 use crate::entities::project_members::ProjectRole;
-use crate::entities::{project_members, projects, scopes::Scope, tenants, users};
+use crate::entities::{
+    project_members, projects, scopes::Scope, task_watchers, tasks, tenants, users,
+};
 use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -248,6 +252,21 @@ pub async fn remove_member(
     let member = find_member(&state, project_id, member_user_id).await?;
     if member.role == ProjectRole::Admin && count_admins(&state, project_id).await? <= 1 {
         return Err(AppError::Conflict);
+    }
+    // プロジェクト配下タスクの watcher を削除してから member を削除
+    let task_ids: Vec<Uuid> = tasks::Entity::find()
+        .select_only()
+        .column(tasks::Column::Id)
+        .filter(tasks::Column::ProjectId.eq(project_id))
+        .into_tuple::<Uuid>()
+        .all(&state.db)
+        .await?;
+    if !task_ids.is_empty() {
+        task_watchers::Entity::delete_many()
+            .filter(task_watchers::Column::UserId.eq(member_user_id))
+            .filter(task_watchers::Column::TaskId.is_in(task_ids))
+            .exec(&state.db)
+            .await?;
     }
     project_members::Entity::delete_by_id(member.id)
         .exec(&state.db)
