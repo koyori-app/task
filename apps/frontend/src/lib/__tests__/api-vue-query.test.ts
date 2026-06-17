@@ -2,11 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { defineComponent } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
-import {
-  createTestApiClient,
-  meQueryOptions,
-  projectLabelsQueryOptions,
-} from '../api-vue-query';
+import { createTestApiClient, meQueryOptions, projectLabelsQueryOptions } from '../api-vue-query';
 
 const mockUser = {
   id: '00000000-0000-0000-0000-000000000001',
@@ -139,6 +135,4 @@ describe('api-vue-query PoC', () => {
 
     await expect(mutation.mutateAsync({} as never)).rejects.toBeTruthy();
   });
-
-
 });

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import SignInForm from "./SignInForm.vue"
+import SignInForm from './SignInForm.vue';
 
-defineOptions({ name: "SignIn" })
+defineOptions({ name: 'SignIn' });
 </script>
 
 <template>

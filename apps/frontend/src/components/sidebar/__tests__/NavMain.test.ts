@@ -12,10 +12,15 @@ const leafItems = [
 
 // isActive: true を設定すると Collapsible が default-open になりコンテンツが DOM に現れる
 const treeItems = [
-  { title: 'Settings', url: '/settings', isActive: true, items: [
-    { title: 'General', url: '/settings/general' },
-    { title: 'Team', url: '/settings/team' },
-  ]},
+  {
+    title: 'Settings',
+    url: '/settings',
+    isActive: true,
+    items: [
+      { title: 'General', url: '/settings/general' },
+      { title: 'Team', url: '/settings/team' },
+    ],
+  },
 ];
 
 function mountNavMain(items: typeof leafItems | typeof treeItems) {
@@ -33,7 +38,7 @@ describe('NavMain – leaf items (no sub-items)', () => {
   it('renders each leaf item as a direct <a> link', () => {
     const wrapper = mountNavMain(leafItems);
     const links = wrapper.findAll('a');
-    const hrefs = links.map(l => l.attributes('href'));
+    const hrefs = links.map((l) => l.attributes('href'));
     expect(hrefs).toContain('/tenant/projects/proj/labels');
     expect(hrefs).toContain('/tenant/projects/proj/tasks');
   });
@@ -69,7 +74,7 @@ describe('NavMain – collapsible items (with sub-items)', () => {
   it('renders sub-item links when collapsible is open (isActive: true)', () => {
     const wrapper = mountNavMain(treeItems);
     const links = wrapper.findAll('a');
-    const hrefs = links.map(l => l.attributes('href'));
+    const hrefs = links.map((l) => l.attributes('href'));
     expect(hrefs).toContain('/settings/general');
     expect(hrefs).toContain('/settings/team');
   });

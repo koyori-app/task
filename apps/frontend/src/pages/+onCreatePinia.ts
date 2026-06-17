@@ -10,7 +10,5 @@ type PageContextWithPinia = PageContext & {
 
 function onCreatePinia(pageContext: PageContextWithPinia) {
   if (import.meta.env.SSR) return;
-  pageContext.pinia?.use(
-    createPersistedState({ storage: localStorage }),
-  );
+  pageContext.pinia?.use(createPersistedState({ storage: localStorage }));
 }

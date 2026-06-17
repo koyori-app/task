@@ -5,7 +5,7 @@ import type {
   ExpandedState,
   SortingState,
   VisibilityState,
-} from '@tanstack/vue-table'
+} from '@tanstack/vue-table';
 import {
   FlexRender,
   getCoreRowModel,
@@ -14,14 +14,14 @@ import {
   getPaginationRowModel,
   getSortedRowModel,
   useVueTable,
-} from '@tanstack/vue-table'
-import { createReusableTemplate } from '@vueuse/core'
-import { ArrowUpDown, ChevronDown, MoreHorizontal } from '@lucide/vue'
-import { h, ref } from 'vue'
+} from '@tanstack/vue-table';
+import { createReusableTemplate } from '@vueuse/core';
+import { ArrowUpDown, ChevronDown, MoreHorizontal } from '@lucide/vue';
+import { h, ref } from 'vue';
 
-import { valueUpdater } from '@/components/ui/table/utils'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
+import { valueUpdater } from '@/components/ui/table/utils';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -30,8 +30,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { Input } from '@/components/ui/input'
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
 import {
   Table,
   TableBody,
@@ -39,13 +39,13 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@/components/ui/table';
 
 export interface Payment {
-  id: string
-  taskId: string
-  title: string
-  amount: number
+  id: string;
+  taskId: string;
+  title: string;
+  amount: number;
 }
 
 const data: Payment[] = [
@@ -79,28 +79,32 @@ const data: Payment[] = [
     taskId: 'IB-5',
     title: 'タスク5',
   },
-]
+];
 
 const [DefineTemplate, ReuseTemplate] = createReusableTemplate<{
   payment: {
-    id: string
-  }
-  onExpand: () => void
-}>()
+    id: string;
+  };
+  onExpand: () => void;
+}>();
 
 const columns: ColumnDef<Payment>[] = [
   {
     id: 'select',
-    header: ({ table }) => h(Checkbox, {
-      'modelValue': table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && 'indeterminate'),
-      'onUpdate:modelValue': value => table.toggleAllPageRowsSelected(!!value),
-      'ariaLabel': 'Select all',
-    }),
-    cell: ({ row }) => h(Checkbox, {
-      'modelValue': row.getIsSelected(),
-      'onUpdate:modelValue': value => row.toggleSelected(!!value),
-      'ariaLabel': 'Select row',
-    }),
+    header: ({ table }) =>
+      h(Checkbox, {
+        modelValue:
+          table.getIsAllPageRowsSelected() ||
+          (table.getIsSomePageRowsSelected() && 'indeterminate'),
+        'onUpdate:modelValue': (value) => table.toggleAllPageRowsSelected(!!value),
+        ariaLabel: 'Select all',
+      }),
+    cell: ({ row }) =>
+      h(Checkbox, {
+        modelValue: row.getIsSelected(),
+        'onUpdate:modelValue': (value) => row.toggleSelected(!!value),
+        ariaLabel: 'Select row',
+      }),
     enableSorting: false,
     enableHiding: false,
   },
@@ -112,10 +116,14 @@ const columns: ColumnDef<Payment>[] = [
   {
     accessorKey: 'title',
     header: ({ column }) => {
-      return h(Button, {
-        variant: 'ghost',
-        onClick: () => column.toggleSorting(column.getIsSorted() === 'asc'),
-      }, () => ['Title', h(ArrowUpDown, { class: 'ml-2 h-4 w-4' })])
+      return h(
+        Button,
+        {
+          variant: 'ghost',
+          onClick: () => column.toggleSorting(column.getIsSorted() === 'asc'),
+        },
+        () => ['Title', h(ArrowUpDown, { class: 'ml-2 h-4 w-4' })],
+      );
     },
     cell: ({ row }) => h('div', { class: 'lowercase' }, row.getValue('title')),
   },
@@ -123,35 +131,35 @@ const columns: ColumnDef<Payment>[] = [
     accessorKey: 'amount',
     header: () => h('div', { class: 'text-right' }, 'Amount'),
     cell: ({ row }) => {
-      const amount = Number.parseFloat(row.getValue('amount'))
+      const amount = Number.parseFloat(row.getValue('amount'));
 
       const formatted = new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: 'USD',
-      }).format(amount)
+      }).format(amount);
 
-      return h('div', { class: 'text-right font-medium' }, formatted)
+      return h('div', { class: 'text-right font-medium' }, formatted);
     },
   },
   {
     id: 'actions',
     enableHiding: false,
     cell: ({ row }) => {
-      const payment = row.original
+      const payment = row.original;
 
       return h(ReuseTemplate, {
         payment,
         onExpand: row.toggleExpanded,
-      })
+      });
     },
   },
-]
+];
 
-const sorting = ref<SortingState>([])
-const columnFilters = ref<ColumnFiltersState>([])
-const columnVisibility = ref<VisibilityState>({})
-const rowSelection = ref({})
-const expanded = ref<ExpandedState>({})
+const sorting = ref<SortingState>([]);
+const columnFilters = ref<ColumnFiltersState>([]);
+const columnVisibility = ref<VisibilityState>({});
+const rowSelection = ref({});
+const expanded = ref<ExpandedState>({});
 
 const table = useVueTable({
   data,
@@ -161,22 +169,32 @@ const table = useVueTable({
   getSortedRowModel: getSortedRowModel(),
   getFilteredRowModel: getFilteredRowModel(),
   getExpandedRowModel: getExpandedRowModel(),
-  onSortingChange: updaterOrValue => valueUpdater(updaterOrValue, sorting),
-  onColumnFiltersChange: updaterOrValue => valueUpdater(updaterOrValue, columnFilters),
-  onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
-  onRowSelectionChange: updaterOrValue => valueUpdater(updaterOrValue, rowSelection),
-  onExpandedChange: updaterOrValue => valueUpdater(updaterOrValue, expanded),
+  onSortingChange: (updaterOrValue) => valueUpdater(updaterOrValue, sorting),
+  onColumnFiltersChange: (updaterOrValue) => valueUpdater(updaterOrValue, columnFilters),
+  onColumnVisibilityChange: (updaterOrValue) => valueUpdater(updaterOrValue, columnVisibility),
+  onRowSelectionChange: (updaterOrValue) => valueUpdater(updaterOrValue, rowSelection),
+  onExpandedChange: (updaterOrValue) => valueUpdater(updaterOrValue, expanded),
   state: {
-    get sorting() { return sorting.value },
-    get columnFilters() { return columnFilters.value },
-    get columnVisibility() { return columnVisibility.value },
-    get rowSelection() { return rowSelection.value },
-    get expanded() { return expanded.value },
+    get sorting() {
+      return sorting.value;
+    },
+    get columnFilters() {
+      return columnFilters.value;
+    },
+    get columnVisibility() {
+      return columnVisibility.value;
+    },
+    get rowSelection() {
+      return rowSelection.value;
+    },
+    get expanded() {
+      return expanded.value;
+    },
   },
-})
+});
 
 function copy(id: string) {
-  navigator.clipboard.writeText(id)
+  navigator.clipboard.writeText(id);
 }
 </script>
 
@@ -191,9 +209,7 @@ function copy(id: string) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuLabel>Actions</DropdownMenuLabel>
-        <DropdownMenuItem @click="copy(payment.id)">
-          Copy payment ID
-        </DropdownMenuItem>
+        <DropdownMenuItem @click="copy(payment.id)"> Copy payment ID </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem>View customer</DropdownMenuItem>
         <DropdownMenuItem>View payment details</DropdownMenuItem>
@@ -206,7 +222,7 @@ function copy(id: string) {
         class="max-w-sm"
         placeholder="Filter titles..."
         :model-value="table.getColumn('title')?.getFilterValue() as string"
-        @update:model-value=" table.getColumn('title')?.setFilterValue($event)"
+        @update:model-value="table.getColumn('title')?.setFilterValue($event)"
       />
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
@@ -220,9 +236,11 @@ function copy(id: string) {
             :key="column.id"
             class="capitalize"
             :model-value="column.getIsVisible()"
-            @update:model-value="(value) => {
-              column.toggleVisibility(!!value)
-            }"
+            @update:model-value="
+              (value) => {
+                column.toggleVisibility(!!value);
+              }
+            "
           >
             {{ column.id }}
           </DropdownMenuCheckboxItem>
@@ -234,7 +252,11 @@ function copy(id: string) {
         <TableHeader>
           <TableRow v-for="headerGroup in table.getHeaderGroups()" :key="headerGroup.id">
             <TableHead v-for="header in headerGroup.headers" :key="header.id">
-              <FlexRender v-if="!header.isPlaceholder" :render="header.column.columnDef.header" :props="header.getContext()" />
+              <FlexRender
+                v-if="!header.isPlaceholder"
+                :render="header.column.columnDef.header"
+                :props="header.getContext()"
+              />
             </TableHead>
           </TableRow>
         </TableHeader>
@@ -255,12 +277,7 @@ function copy(id: string) {
           </template>
 
           <TableRow v-else>
-            <TableCell
-              :colspan="columns.length"
-              class="h-24 text-center"
-            >
-              No results.
-            </TableCell>
+            <TableCell :colspan="columns.length" class="h-24 text-center"> No results. </TableCell>
           </TableRow>
         </TableBody>
       </Table>
