@@ -1,0 +1,131 @@
+import type { Meta, StoryObj } from '@storybook/vue3-vite';
+import { expect, within } from 'storybook/test';
+import { vi } from 'vitest';
+import { provide } from 'vue';
+import MyTasksPage from '@/pages/@tenant/my-tasks/+Page.vue';
+
+const PAGE_CONTEXT_KEY = 'vike-vue:usePageContext';
+
+const mockContext = {
+  urlPathname: '/tenant-123/my-tasks',
+  routeParams: { tenant: 'tenant-123' },
+};
+
+const jsonResponse = (data: unknown) =>
+  new Response(JSON.stringify(data), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+const sampleTasks = [
+  {
+    id: 'task-1',
+    seq_key: 'FE-1',
+    title: '仕様書のレビュー',
+    priority: 'high',
+    soft_deadline: '2026-06-20T00:00:00Z',
+    hard_deadline: null,
+    is_personal: false,
+    project: { id: 'proj-1', name: 'フロントエンド', key: 'FE', is_personal: false },
+    status: { id: 's1', name: 'In Progress', color: '#3b82f6', is_done_state: false },
+  },
+  {
+    id: 'task-2',
+    seq_key: 'BE-5',
+    title: 'APIのドキュメント作成',
+    priority: 'medium',
+    soft_deadline: null,
+    hard_deadline: null,
+    is_personal: false,
+    project: { id: 'proj-2', name: 'バックエンド', key: 'BE', is_personal: false },
+    status: { id: 's2', name: 'Todo', color: '#6b7280', is_done_state: false },
+  },
+  {
+    id: 'task-3',
+    seq_key: 'P-1',
+    title: '個人メモ',
+    priority: 'low',
+    soft_deadline: null,
+    hard_deadline: null,
+    is_personal: true,
+    project: { id: 'proj-personal', name: '個人 Inbox', key: 'P', is_personal: true },
+    status: { id: 's3', name: 'Todo', color: '#6b7280', is_done_state: false },
+  },
+];
+
+const meta = {
+  title: 'Pages/MyTasks',
+  component: MyTasksPage,
+  tags: ['autodocs'],
+  parameters: {
+    layout: 'padded',
+    docs: {
+      description: {
+        component: 'テナント横断のタスク一覧ページ。apiClient は fetch モックで差し替え済み。',
+      },
+    },
+  },
+  decorators: [
+    () => ({
+      setup() {
+        provide(PAGE_CONTEXT_KEY, mockContext);
+      },
+      template: '<story />',
+    }),
+  ],
+} satisfies Meta<typeof MyTasksPage>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const WithTasks: Story = {
+  name: 'タスクあり（個人 + プロジェクト）',
+  beforeEach() {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ tasks: sampleTasks })));
+    return () => vi.unstubAllGlobals();
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('仕様書のレビュー')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('APIのドキュメント作成')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('個人メモ')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('個人 Inbox')).resolves.toBeInTheDocument();
+  },
+};
+
+export const Empty: Story = {
+  name: 'タスクなし',
+  beforeEach() {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ tasks: [] })));
+    return () => vi.unstubAllGlobals();
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('タスクがありません')).resolves.toBeInTheDocument();
+  },
+};
+
+export const ApiError: Story = {
+  name: 'API エラー',
+  beforeEach() {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    return () => vi.unstubAllGlobals();
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.findByText('タスクの読み込みに失敗しました'),
+    ).resolves.toBeInTheDocument();
+  },
+};
+
+export const Loading: Story = {
+  name: 'ロード中',
+  beforeEach() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => new Promise(() => {})),
+    );
+    return () => vi.unstubAllGlobals();
+  },
+};
