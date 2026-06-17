@@ -5,6 +5,13 @@ import { usePageContext } from 'vike-vue/usePageContext';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { apiClient } from '@/lib/api';
 
 type FilterTab = 'today' | 'week' | 'no_due_date' | 'overdue' | 'all';
@@ -144,11 +151,16 @@ onMounted(loadTasks);
       <div class="flex flex-col gap-2 sm:flex-row">
         <Input v-model="captureTitle" placeholder="タスクを追加..." class="flex-1" />
         <Input v-model="captureDeadline" type="date" class="w-full sm:w-40" />
-        <select v-model="capturePriority" class="h-9 rounded-md border bg-background px-3 text-sm">
-          <option value="high">高</option>
-          <option value="medium">中</option>
-          <option value="low">低</option>
-        </select>
+        <Select v-model="capturePriority">
+          <SelectTrigger class="w-full sm:w-24">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="high">高</SelectItem>
+            <SelectItem value="medium">中</SelectItem>
+            <SelectItem value="low">低</SelectItem>
+          </SelectContent>
+        </Select>
         <Button type="submit" :disabled="submitting || !captureTitle.trim()">
           <Loader2 v-if="submitting" class="mr-2 h-4 w-4 animate-spin" />
           追加
