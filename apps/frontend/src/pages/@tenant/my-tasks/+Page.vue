@@ -39,6 +39,7 @@ const captureTitle = ref('');
 const captureDeadline = ref('');
 const capturePriority = ref('medium');
 const submitting = ref(false);
+const errorMessage = ref<string | null>(null);
 
 const groupedTasks = computed(() => {
   const personal = tasks.value.filter((t) => t.project.is_personal);
@@ -60,6 +61,9 @@ async function loadTasks() {
     });
     if (error) throw error;
     tasks.value = (data?.tasks ?? []) as MyTaskItem[];
+    errorMessage.value = null;
+  } catch {
+    errorMessage.value = 'タスクの読み込みに失敗しました';
   } finally {
     loading.value = false;
   }
@@ -83,7 +87,10 @@ async function submitCapture() {
     if (error) throw error;
     captureTitle.value = '';
     captureDeadline.value = '';
+    errorMessage.value = null;
     await loadTasks();
+  } catch {
+    errorMessage.value = 'タスクの追加に失敗しました';
   } finally {
     submitting.value = false;
   }
@@ -147,6 +154,7 @@ onMounted(loadTasks);
           追加
         </Button>
       </div>
+      <p v-if="errorMessage" class="text-sm text-destructive mt-2">{{ errorMessage }}</p>
     </form>
 
     <div v-if="loading" class="flex justify-center py-8">
