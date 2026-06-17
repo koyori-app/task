@@ -26,6 +26,7 @@ use crate::utils::db::is_postgres_unique_violation;
 use crate::utils::task_activities::record_activity;
 
 #[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListMyTasksQuery {
     #[serde(default = "default_filter")]
     pub filter: String,
