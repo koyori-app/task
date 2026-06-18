@@ -1,4 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
+import { provide } from 'vue';
+import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import SignInForm from '@/components/auth/SignInForm.vue';
 
 const meta = {
@@ -12,6 +14,20 @@ const meta = {
       },
     },
   },
+  decorators: [
+    () => ({
+      setup() {
+        const queryClient = new QueryClient({
+          defaultOptions: {
+            queries: { retry: false, gcTime: 0, staleTime: 0 },
+            mutations: { retry: false },
+          },
+        });
+        provide(VUE_QUERY_CLIENT, queryClient);
+      },
+      template: '<story />',
+    }),
+  ],
 } satisfies Meta<typeof SignInForm>;
 
 export default meta;
