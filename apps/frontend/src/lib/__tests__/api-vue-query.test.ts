@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { defineComponent } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
-import { createTestApiClient, meQueryOptions, projectLabelsQueryOptions } from '../api-vue-query';
+import {
+  AUTH_ME_STALE_TIME_MS,
+  createTestApiClient,
+  meQueryOptions,
+  projectLabelsQueryOptions,
+} from '../api-vue-query';
 
 const mockUser = {
   id: '00000000-0000-0000-0000-000000000001',
@@ -22,6 +27,17 @@ function createFetchMock() {
     if (method === 'GET' && url.includes('/v1/auth/me')) {
       return new Response(JSON.stringify(mockUser), {
         status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (method === 'POST' && url.includes('/v1/auth/login')) {
+      return new Response(null, { status: 204 });
+    }
+
+    if (method === 'POST' && url.includes('/v1/auth/register')) {
+      return new Response(JSON.stringify('Register successful'), {
+        status: 201,
         headers: { 'Content-Type': 'application/json' },
       });
     }
@@ -86,6 +102,12 @@ describe('api-vue-query PoC', () => {
     expect(fetchMock).toHaveBeenCalled();
   });
 
+  it('meQueryOptions sets staleTime for session cache', () => {
+    const options = meQueryOptions();
+    expect(options.staleTime).toBe(AUTH_ME_STALE_TIME_MS);
+    expect(options.retry).toBe(false);
+  });
+
   it('query key follows [method, path, init] shape', () => {
     const key = meQueryOptions().queryKey;
     expect(key).toEqual(['get', '/v1/auth/me']);
@@ -96,6 +118,37 @@ describe('api-vue-query PoC', () => {
       '/v1/tenants/{tenant_id}/projects/{project_id}/labels',
       { params: { path: { tenant_id: 'tenant-1', project_id: 'project-1' } } },
     ]);
+  });
+
+  it('useMutation posts to /v1/auth/login via mocked fetch', async () => {
+    const mutation = withQuery(() => testApi.useMutation('post', '/v1/auth/login'));
+
+    await mutation.mutateAsync({
+      body: { email: 'test@example.com', password: 'password123' },
+    } as never);
+    await flushPromises();
+
+    const loginCall = fetchMock.mock.calls.find((call) => call[0].url.includes('/v1/auth/login'));
+    expect(loginCall?.[0].method).toBe('POST');
+  });
+
+  it('useMutation posts to /v1/auth/register via mocked fetch', async () => {
+    const mutation = withQuery(() => testApi.useMutation('post', '/v1/auth/register'));
+
+    await mutation.mutateAsync({
+      body: {
+        username: 'testuser',
+        email: 'test@example.com',
+        password: 'password123',
+      },
+      parseAs: 'text',
+    } as never);
+    await flushPromises();
+
+    const registerCall = fetchMock.mock.calls.find((call) =>
+      call[0].url.includes('/v1/auth/register'),
+    );
+    expect(registerCall?.[0].method).toBe('POST');
   });
 
   it('useMutation posts to /v1/auth/logout via mocked fetch', async () => {
