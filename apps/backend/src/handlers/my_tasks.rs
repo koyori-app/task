@@ -209,24 +209,25 @@ pub(crate) async fn get_or_create_personal_project(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let txn = state.db.begin().await?;
-
-    if let Some(existing) = projects::Entity::find()
-        .filter(projects::Column::TenantId.eq(tenant_id))
-        .filter(projects::Column::IsPersonal.eq(true))
-        .filter(projects::Column::PersonalOwnerId.eq(user_id))
-        .one(&txn)
-        .await?
-    {
-        txn.commit().await?;
-        return Ok(existing);
-    }
-
     let mut key = personal_project_key(user_id);
     let name = format!("{}'s Inbox", user.username);
-    let project_id = Uuid::new_v4();
 
-    let model = loop {
+    loop {
+        let txn = state.db.begin().await?;
+
+        // txn 内で再確認（並行リクエストが先に作成した場合に対応）
+        if let Some(existing) = projects::Entity::find()
+            .filter(projects::Column::TenantId.eq(tenant_id))
+            .filter(projects::Column::IsPersonal.eq(true))
+            .filter(projects::Column::PersonalOwnerId.eq(user_id))
+            .one(&txn)
+            .await?
+        {
+            txn.commit().await?;
+            return Ok(existing);
+        }
+
+        let project_id = Uuid::new_v4();
         let project = projects::ActiveModel {
             id: Set(project_id),
             name: Set(name.clone()),
@@ -238,31 +239,48 @@ pub(crate) async fn get_or_create_personal_project(
             is_personal: Set(true),
             personal_owner_id: Set(Some(user_id)),
         };
-        match project.insert(&txn).await {
-            Ok(model) => break model,
+
+        let model = match project.insert(&txn).await {
+            Ok(model) => model,
             Err(e) if is_postgres_unique_violation(&e) => {
+                txn.rollback().await?;
+                // 並行リクエストが同時に personal project を作成した可能性を確認
+                if let Some(existing) = projects::Entity::find()
+                    .filter(projects::Column::TenantId.eq(tenant_id))
+                    .filter(projects::Column::IsPersonal.eq(true))
+                    .filter(projects::Column::PersonalOwnerId.eq(user_id))
+                    .one(&state.db)
+                    .await?
+                {
+                    return Ok(existing);
+                }
+                // key 衝突: 新しい key と新しい txn で再試行
                 let suffix = Uuid::new_v4().simple().to_string().to_ascii_uppercase();
                 key = format!("ME{}", &suffix[..4]);
+                continue;
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => {
+                txn.rollback().await?;
+                return Err(e.into());
+            }
+        };
+
+        drive_folders::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            name: Set(model.name.clone()),
+            parent_id: Set(None),
+            tenant_id: Set(tenant_id),
+            project_id: Set(Some(model.id)),
+            created_by: Set(user_id),
+            created_at: Set(Utc::now().into()),
         }
-    };
+        .insert(&txn)
+        .await?;
 
-    drive_folders::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        name: Set(model.name.clone()),
-        parent_id: Set(None),
-        tenant_id: Set(tenant_id),
-        project_id: Set(Some(model.id)),
-        created_by: Set(user_id),
-        created_at: Set(Utc::now().into()),
+        seed_personal_project_defaults(&txn, model.id, user_id).await?;
+        txn.commit().await?;
+        return Ok(model);
     }
-    .insert(&txn)
-    .await?;
-
-    seed_personal_project_defaults(&txn, model.id, user_id).await?;
-    txn.commit().await?;
-    Ok(model)
 }
 
 fn apply_my_tasks_filter(
