@@ -297,3 +297,46 @@ mod tests {
             })
         ));
     }
+
+    /// 全 trait メソッド（upload / delete / get_stream）が
+    /// validate_key を経由して不正な key を拒否することを確認する。
+    /// ダミーの S3 クライアントでも key 妥当性確認は HTTP 呼び出し前に
+    /// 実行されるため、ネットワークアクセスなしでテストできる。
+    fn dummy_backend() -> S3StorageBackend {
+        use aws_sdk_s3::config::{Credentials, Region};
+        let config = aws_sdk_s3::Config::builder()
+            .endpoint_url("http://localhost:1")
+            .region(Region::new("us-east-1"))
+            .credentials_provider(Credentials::new("x", "x", None, None, "test"))
+            .behavior_version(aws_config::BehaviorVersion::latest())
+            .build();
+        S3StorageBackend {
+            client: aws_sdk_s3::Client::from_conf(config),
+            bucket: "test".into(),
+            public_base_url: "http://localhost:1/test".into(),
+        }
+    }
+
+    #[test]
+    fn upload_rejects_invalid_key() {
+        let backend = dummy_backend();
+        let stream: ByteStream = Box::pin(futures::stream::empty());
+        let result =
+            futures::executor::block_on(backend.upload("", stream, 0, "text/plain"));
+        assert!(matches!(result, Err(StorageError::InvalidKey)));
+    }
+
+    #[test]
+    fn delete_rejects_invalid_key() {
+        let backend = dummy_backend();
+        let result = futures::executor::block_on(backend.delete("/root"));
+        assert!(matches!(result, Err(StorageError::InvalidKey)));
+    }
+
+    #[test]
+    fn get_stream_rejects_invalid_key() {
+        let backend = dummy_backend();
+        let result = futures::executor::block_on(backend.get_stream("../escape"));
+        assert!(matches!(result, Err(StorageError::InvalidKey)));
+    }
+}
