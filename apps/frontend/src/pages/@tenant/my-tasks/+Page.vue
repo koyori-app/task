@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Check, Loader2 } from '@lucide/vue';
-import { computed, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
+import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
 
 import { Button } from '@/components/ui/button';
@@ -12,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { apiClient } from '@/lib/api';
+import { fetchClient, apiClient } from '@/lib/api-vue-query';
 
 type FilterTab = 'today' | 'week' | 'no_due_date' | 'overdue' | 'all';
 
@@ -28,8 +29,11 @@ interface MyTaskItem {
   status: { id: string; name: string; color: string; is_done_state?: boolean };
 }
 
+const TASKS_PATH = '/v1/tenants/{tenant_id}/users/me/tasks' as const;
+
 const pageContext = usePageContext();
 const tenantId = computed(() => String(pageContext.routeParams.tenant ?? ''));
+const queryClient = useQueryClient();
 
 const tabs: { key: FilterTab; label: string }[] = [
   { key: 'today', label: '今日' },
@@ -40,20 +44,35 @@ const tabs: { key: FilterTab; label: string }[] = [
 ];
 
 const activeFilter = ref<FilterTab>('today');
-const tasks = ref<MyTaskItem[]>([]);
-const loading = ref(false);
 const captureTitle = ref('');
 const captureDeadline = ref('');
 const capturePriority = ref('medium');
-const submitting = ref(false);
 const errorMessage = ref<string | null>(null);
 
-let loadAbortController: AbortController | null = null;
+const tasksQuery = useQuery({
+  queryKey: computed(() => [
+    'get',
+    TASKS_PATH,
+    { params: { path: { tenant_id: tenantId.value }, query: { filter: activeFilter.value } } },
+  ]),
+  queryFn: async ({ signal }) => {
+    const { data, error } = await fetchClient.GET(TASKS_PATH, {
+      // generated type incorrectly puts filter in path; pass as query at runtime
+      params: { path: { tenant_id: tenantId.value }, query: { filter: activeFilter.value } } as any,
+      signal,
+    });
+    if (error) throw error;
+    return data;
+  },
+  enabled: computed(() => !!tenantId.value),
+});
+
+const allTasks = computed(() => (tasksQuery.data.value?.tasks ?? []) as MyTaskItem[]);
 
 const groupedTasks = computed(() => {
-  const personal = tasks.value.filter((t) => t.project.is_personal);
+  const personal = allTasks.value.filter((t) => t.project.is_personal);
   const byProject = new Map<string, MyTaskItem[]>();
-  for (const task of tasks.value.filter((t) => !t.project.is_personal)) {
+  for (const task of allTasks.value.filter((t) => !t.project.is_personal)) {
     const key = task.project.id;
     if (!byProject.has(key)) byProject.set(key, []);
     byProject.get(key)!.push(task);
@@ -61,53 +80,31 @@ const groupedTasks = computed(() => {
   return { personal, byProject };
 });
 
-async function loadTasks() {
-  if (!tenantId.value) return;
-  loadAbortController?.abort();
-  loadAbortController = new AbortController();
-  const { signal } = loadAbortController;
-  loading.value = true;
-  try {
-    const { data, error } = await apiClient.GET('/v1/tenants/{tenant_id}/users/me/tasks', {
-      params: { path: { tenant_id: tenantId.value }, query: { filter: activeFilter.value } },
-      signal,
-    });
-    if (signal.aborted) return;
-    if (error) throw error;
-    tasks.value = (data?.tasks ?? []) as MyTaskItem[];
-    errorMessage.value = null;
-  } catch (e) {
-    if (signal.aborted) return;
-    errorMessage.value = 'タスクの読み込みに失敗しました';
-  } finally {
-    if (!signal.aborted) loading.value = false;
-  }
-}
+const captureMutation = apiClient.useMutation('post', TASKS_PATH, {
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['get', TASKS_PATH] });
+  },
+});
 
 async function submitCapture() {
   if (!captureTitle.value.trim() || !tenantId.value) return;
-  submitting.value = true;
+  const body: Record<string, unknown> = {
+    title: captureTitle.value.trim(),
+    priority: capturePriority.value,
+  };
+  if (captureDeadline.value) {
+    body.soft_deadline = new Date(`${captureDeadline.value}T00:00:00`).toISOString();
+  }
+  errorMessage.value = null;
   try {
-    const body: Record<string, unknown> = {
-      title: captureTitle.value.trim(),
-      priority: capturePriority.value,
-    };
-    if (captureDeadline.value) {
-      body.soft_deadline = new Date(`${captureDeadline.value}T00:00:00`).toISOString();
-    }
-    const { error } = await apiClient.POST('/v1/tenants/{tenant_id}/users/me/tasks', {
+    await captureMutation.mutateAsync({
       params: { path: { tenant_id: tenantId.value } },
       body: body as never,
     });
-    if (error) throw error;
     captureTitle.value = '';
     captureDeadline.value = '';
-    errorMessage.value = null;
-    await loadTasks();
   } catch {
     errorMessage.value = 'タスクの追加に失敗しました';
-  } finally {
-    submitting.value = false;
   }
 }
 
@@ -128,8 +125,6 @@ function priorityLabel(p: string) {
   };
   return map[p] ?? p;
 }
-
-onMounted(loadTasks);
 </script>
 
 <template>
@@ -145,10 +140,7 @@ onMounted(loadTasks);
         :key="tab.key"
         size="sm"
         :variant="activeFilter === tab.key ? 'default' : 'outline'"
-        @click="
-          activeFilter = tab.key;
-          loadTasks();
-        "
+        @click="activeFilter = tab.key"
       >
         {{ tab.label }}
       </Button>
@@ -169,17 +161,21 @@ onMounted(loadTasks);
             <SelectItem value="low">低</SelectItem>
           </SelectContent>
         </Select>
-        <Button type="submit" :disabled="submitting || !captureTitle.trim()">
-          <Loader2 v-if="submitting" class="mr-2 h-4 w-4 animate-spin" />
+        <Button type="submit" :disabled="captureMutation.isPending.value || !captureTitle.trim()">
+          <Loader2 v-if="captureMutation.isPending.value" class="mr-2 h-4 w-4 animate-spin" />
           追加
         </Button>
       </div>
       <p v-if="errorMessage" class="text-sm text-destructive mt-2">{{ errorMessage }}</p>
     </form>
 
-    <div v-if="loading" class="flex justify-center py-8">
+    <div v-if="tasksQuery.isFetching.value" class="flex justify-center py-8">
       <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
     </div>
+
+    <p v-else-if="tasksQuery.isError.value" class="py-8 text-center text-sm text-destructive">
+      タスクの読み込みに失敗しました
+    </p>
 
     <template v-else>
       <section v-if="groupedTasks.personal.length" class="space-y-2">
@@ -217,7 +213,7 @@ onMounted(loadTasks);
         </div>
       </section>
 
-      <p v-if="!tasks.length" class="py-8 text-center text-sm text-muted-foreground">
+      <p v-if="!allTasks.length" class="py-8 text-center text-sm text-muted-foreground">
         タスクがありません
       </p>
     </template>
