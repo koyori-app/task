@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::AppState;
 use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
 use crate::entities::{
     drive_files, labels, project_statuses, project_task_views, sprints, task_assignees,
@@ -28,7 +29,6 @@ use crate::openapi::CrudErrors;
 use crate::utils::db::is_postgres_unique_violation;
 use crate::utils::drive::content_url;
 use crate::utils::task_activities::{record_activity, status_name};
-use crate::AppState;
 
 const BULK_MAX_TASKS: usize = 100;
 
@@ -194,7 +194,10 @@ fn find_match_char_range(text: &str, query: &str) -> Option<(usize, usize)> {
 }
 
 fn chars_slice(s: &str, start: usize, end: usize) -> String {
-    s.chars().skip(start).take(end.saturating_sub(start)).collect()
+    s.chars()
+        .skip(start)
+        .take(end.saturating_sub(start))
+        .collect()
 }
 
 fn highlight_ilike(title: &str, description: Option<&str>, query: &str) -> String {
@@ -620,7 +623,12 @@ pub async fn create_task_view(
 }
 
 #[axum::debug_handler]
-#[utoipa::path(patch, path = "/{view_id}", tag = "TaskViews", summary = "保存済みビュー更新")]
+#[utoipa::path(
+    patch,
+    path = "/{view_id}",
+    tag = "TaskViews",
+    summary = "保存済みビュー更新"
+)]
 pub async fn update_task_view(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -665,7 +673,12 @@ pub async fn update_task_view(
 }
 
 #[axum::debug_handler]
-#[utoipa::path(delete, path = "/{view_id}", tag = "TaskViews", summary = "保存済みビュー削除")]
+#[utoipa::path(
+    delete,
+    path = "/{view_id}",
+    tag = "TaskViews",
+    summary = "保存済みビュー削除"
+)]
 pub async fn delete_task_view(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -719,7 +732,12 @@ pub struct AttachFileRequest {
 }
 
 #[axum::debug_handler]
-#[utoipa::path(get, path = "/{id}/attachments", tag = "Tasks", summary = "タスク添付ファイル一覧")]
+#[utoipa::path(
+    get,
+    path = "/{id}/attachments",
+    tag = "Tasks",
+    summary = "タスク添付ファイル一覧"
+)]
 pub async fn list_task_attachments(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -758,7 +776,12 @@ pub async fn list_task_attachments(
 }
 
 #[axum::debug_handler]
-#[utoipa::path(post, path = "/{id}/attachments", tag = "Tasks", summary = "タスクにファイルを添付")]
+#[utoipa::path(
+    post,
+    path = "/{id}/attachments",
+    tag = "Tasks",
+    summary = "タスクにファイルを添付"
+)]
 pub async fn attach_task_file(
     State(state): State<AppState>,
     auth: AuthUser,

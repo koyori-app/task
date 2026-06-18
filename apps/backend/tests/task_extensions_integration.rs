@@ -18,7 +18,8 @@ struct TaskFixture {
 
 async fn setup_task(app: &mut TestApp) -> TaskFixture {
     let user = app.insert_user(true, false).await;
-    app.login_session_no_content(&user.email, &user.password).await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
     let tp = app.insert_tenant_project(user.id).await;
 
     let status_path = format!(

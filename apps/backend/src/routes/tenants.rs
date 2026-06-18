@@ -66,7 +66,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::task_notifications::list_watchers))
                         .routes(routes!(crate::handlers::task_notifications::start_watch))
                         .routes(routes!(crate::handlers::task_notifications::stop_watch))
-                        .routes(routes!(crate::handlers::task_extensions::list_task_attachments))
+                        .routes(routes!(
+                            crate::handlers::task_extensions::list_task_attachments
+                        ))
                         .routes(routes!(crate::handlers::task_extensions::attach_task_file))
                         .routes(routes!(crate::handlers::task_extensions::detach_task_file)),
                 )
