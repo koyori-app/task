@@ -214,3 +214,86 @@ impl StorageBackend for S3StorageBackend {
         Ok(Box::pin(stream))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_key_rejects_empty() {
+        assert!(matches!(validate_key(""), Err(StorageError::InvalidKey)));
+    }
+
+    #[test]
+    fn validate_key_rejects_leading_slash() {
+        assert!(matches!(
+            validate_key("/etc/passwd"),
+            Err(StorageError::InvalidKey)
+        ));
+    }
+
+    #[test]
+    fn validate_key_rejects_double_dot() {
+        assert!(matches!(
+            validate_key("../escape"),
+            Err(StorageError::InvalidKey)
+        ));
+        assert!(matches!(
+            validate_key("foo/../bar"),
+            Err(StorageError::InvalidKey)
+        ));
+        assert!(matches!(
+            validate_key(".."),
+            Err(StorageError::InvalidKey)
+        ));
+    }
+
+    #[test]
+    fn validate_key_rejects_backslash() {
+        assert!(matches!(
+            validate_key("foo\\bar"),
+            Err(StorageError::InvalidKey)
+        ));
+    }
+
+    #[test]
+    fn validate_key_accepts_valid_keys() {
+        assert!(validate_key("uuid-v4-key").is_ok());
+        assert!(validate_key("prefix/uuid-key").is_ok());
+        assert!(validate_key("a").is_ok());
+        assert!(validate_key("abc123-_.").is_ok());
+    }
+
+    #[test]
+    fn read_stream_to_bytes_empty_stream() {
+        let chunks: Vec<Result<Bytes, StorageError>> = vec![];
+        let stream: ByteStream = Box::pin(futures::stream::iter(chunks));
+        let result = futures::executor::block_on(read_stream_to_bytes(stream, 0));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Bytes::new());
+    }
+
+    #[test]
+    fn read_stream_to_bytes_single_chunk() {
+        let chunks: Vec<Result<Bytes, StorageError>> =
+            vec![Ok(Bytes::from_static(b"hello"))];
+        let stream: ByteStream = Box::pin(futures::stream::iter(chunks));
+        let result = futures::executor::block_on(read_stream_to_bytes(stream, 5));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Bytes::from_static(b"hello"));
+    }
+
+    #[test]
+    fn read_stream_to_bytes_size_mismatch() {
+        let chunks: Vec<Result<Bytes, StorageError>> =
+            vec![Ok(Bytes::from_static(b"short"))];
+        let stream: ByteStream = Box::pin(futures::stream::iter(chunks));
+        let result = futures::executor::block_on(read_stream_to_bytes(stream, 100));
+        assert!(matches!(
+            result,
+            Err(StorageError::SizeMismatch {
+                expected: 100,
+                actual: 5
+            })
+        ));
+    }

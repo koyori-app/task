@@ -90,3 +90,60 @@ impl StorageBackend for LocalStorageBackend {
         Ok(Box::pin(stream))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_key_rejects_empty() {
+        assert!(matches!(validate_key(""), Err(StorageError::InvalidKey)));
+    }
+
+    #[test]
+    fn validate_key_rejects_slash() {
+        assert!(matches!(
+            validate_key("/etc/passwd"),
+            Err(StorageError::InvalidKey)
+        ));
+        assert!(matches!(
+            validate_key("foo/bar"),
+            Err(StorageError::InvalidKey)
+        ));
+    }
+
+    #[test]
+    fn validate_key_rejects_double_dot() {
+        assert!(matches!(
+            validate_key("../escape"),
+            Err(StorageError::InvalidKey)
+        ));
+        assert!(matches!(
+            validate_key(".."),
+            Err(StorageError::InvalidKey)
+        ));
+    }
+
+    #[test]
+    fn validate_key_rejects_backslash() {
+        assert!(matches!(
+            validate_key("foo\\bar"),
+            Err(StorageError::InvalidKey)
+        ));
+    }
+
+    #[test]
+    fn validate_key_accepts_valid_keys() {
+        assert!(validate_key("uuid-v4-key").is_ok());
+        assert!(validate_key("a").is_ok());
+        assert!(validate_key("abc123-_.").is_ok());
+    }
+
+    #[test]
+    fn validate_key_rejects_slash_but_s3_allows_internal() {
+        // local backend rejects any forward slash (path traversal protection),
+        // while S3 backend only rejects leading slash.
+        // This test documents the intentional difference.
+        assert!(validate_key("prefix/uuid-key").is_err());
+    }
+}
