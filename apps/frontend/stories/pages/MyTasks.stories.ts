@@ -1,12 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { expect, fn, within } from 'storybook/test';
 import { provide } from 'vue';
-import { QueryClient } from '@tanstack/vue-query';
+import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import MyTasksPage from '@/pages/@tenant/my-tasks/+Page.vue';
 
 const PAGE_CONTEXT_KEY = 'vike-vue:usePageContext';
-// Symbol.for matches @tanstack/vue-query's internal injection key
-const VUE_QUERY_CLIENT_KEY = Symbol.for('VUE_QUERY_CLIENT');
 
 const mockContext = {
   urlPathname: '/tenant-123/my-tasks',
@@ -76,7 +74,7 @@ const meta = {
             mutations: { retry: false },
           },
         });
-        provide(VUE_QUERY_CLIENT_KEY, queryClient);
+        provide(VUE_QUERY_CLIENT, queryClient);
         provide(PAGE_CONTEXT_KEY, mockContext);
       },
       template: '<story />',
