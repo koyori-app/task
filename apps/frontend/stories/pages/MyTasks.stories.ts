@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { expect, within } from 'storybook/test';
-import { vi } from 'vitest';
+import { expect, fn, within } from 'storybook/test';
 import { provide } from 'vue';
 import MyTasksPage from '@/pages/@tenant/my-tasks/+Page.vue';
 
@@ -81,8 +80,11 @@ type Story = StoryObj<typeof meta>;
 export const WithTasks: Story = {
   name: 'タスクあり（個人 + プロジェクト）',
   beforeEach() {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ tasks: sampleTasks })));
-    return () => vi.unstubAllGlobals();
+    const original = globalThis.fetch;
+    globalThis.fetch = fn().mockResolvedValue(jsonResponse({ tasks: sampleTasks }));
+    return () => {
+      globalThis.fetch = original;
+    };
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -96,8 +98,11 @@ export const WithTasks: Story = {
 export const Empty: Story = {
   name: 'タスクなし',
   beforeEach() {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ tasks: [] })));
-    return () => vi.unstubAllGlobals();
+    const original = globalThis.fetch;
+    globalThis.fetch = fn().mockResolvedValue(jsonResponse({ tasks: [] }));
+    return () => {
+      globalThis.fetch = original;
+    };
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -108,8 +113,11 @@ export const Empty: Story = {
 export const ApiError: Story = {
   name: 'API エラー',
   beforeEach() {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
-    return () => vi.unstubAllGlobals();
+    const original = globalThis.fetch;
+    globalThis.fetch = fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    return () => {
+      globalThis.fetch = original;
+    };
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -122,10 +130,10 @@ export const ApiError: Story = {
 export const Loading: Story = {
   name: 'ロード中',
   beforeEach() {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() => new Promise(() => {})),
-    );
-    return () => vi.unstubAllGlobals();
+    const original = globalThis.fetch;
+    globalThis.fetch = fn().mockImplementation(() => new Promise(() => {}));
+    return () => {
+      globalThis.fetch = original;
+    };
   },
 };
