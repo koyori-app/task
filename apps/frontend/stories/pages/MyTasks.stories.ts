@@ -121,9 +121,7 @@ export const ApiError: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(
-      canvas.findByText('タスクの読み込みに失敗しました'),
-    ).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('タスクの読み込みに失敗しました')).resolves.toBeInTheDocument();
   },
 };
 
