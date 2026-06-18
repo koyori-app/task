@@ -1,9 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { expect, fn, within } from 'storybook/test';
 import { provide } from 'vue';
+import { QueryClient } from '@tanstack/vue-query';
 import MyTasksPage from '@/pages/@tenant/my-tasks/+Page.vue';
 
 const PAGE_CONTEXT_KEY = 'vike-vue:usePageContext';
+// Symbol.for matches @tanstack/vue-query's internal injection key
+const VUE_QUERY_CLIENT_KEY = Symbol.for('VUE_QUERY_CLIENT');
 
 const mockContext = {
   urlPathname: '/tenant-123/my-tasks',
@@ -60,13 +63,20 @@ const meta = {
     layout: 'padded',
     docs: {
       description: {
-        component: 'テナント横断のタスク一覧ページ。apiClient は fetch モックで差し替え済み。',
+        component: 'テナント横断のタスク一覧ページ。fetch モックで apiClient を差し替え済み。',
       },
     },
   },
   decorators: [
     () => ({
       setup() {
+        const queryClient = new QueryClient({
+          defaultOptions: {
+            queries: { retry: false, gcTime: 0, staleTime: 0 },
+            mutations: { retry: false },
+          },
+        });
+        provide(VUE_QUERY_CLIENT_KEY, queryClient);
         provide(PAGE_CONTEXT_KEY, mockContext);
       },
       template: '<story />',
