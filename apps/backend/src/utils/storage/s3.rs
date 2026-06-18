@@ -66,7 +66,7 @@ impl S3StorageBackend {
             .with_region(&region)
             .with_access_key_id(&access_key_id)
             .with_secret_access_key(&secret_access_key)
-            .with_allow_http(true);
+            .with_allow_http(endpoint.starts_with("http://"));
 
         if force_path_style {
             builder = builder.with_virtual_hosted_style_request(false);
@@ -85,7 +85,7 @@ impl S3StorageBackend {
 }
 
 fn to_path(key: &str) -> Result<Path, StorageError> {
-    if key.is_empty() || key.starts_with('/') || key.contains("..") || key.contains('\\') {
+    if key.is_empty() {
         return Err(StorageError::InvalidKey);
     }
     Path::parse(key).map_err(|_| StorageError::InvalidKey)
@@ -162,7 +162,7 @@ impl StorageBackend for S3StorageBackend {
                 }
                 if !pending.is_empty() {
                     upload
-                        .put_part(PutPayload::from(Bytes::from(pending.split_off(0))))
+                        .put_part(PutPayload::from(Bytes::from(std::mem::take(&mut pending))))
                         .await
                         .map_err(|e| StorageError::Other(format!("S3 UploadPart failed: {e}")))?;
                 }
