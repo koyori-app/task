@@ -8,7 +8,7 @@ const meta = {
   parameters: {
     docs: {
       description: {
-        component: 'onSubmit は console.log スタブ（API 未接続）。',
+        component: 'POST /v1/auth/login でサインインし、成功時に / へ遷移します。',
       },
     },
   },
