@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import type { components } from '@/generated/api';
 import { fetchClient, apiClient } from '@/lib/api-vue-query';
 
 type FilterTab = 'today' | 'week' | 'no_due_date' | 'overdue' | 'all';
@@ -46,7 +47,7 @@ const tabs: { key: FilterTab; label: string }[] = [
 const activeFilter = ref<FilterTab>('today');
 const captureTitle = ref('');
 const captureDeadline = ref('');
-const capturePriority = ref('medium');
+const capturePriority = ref<components['schemas']['TaskPriority']>('Medium');
 const errorMessage = ref<string | null>(null);
 
 const tasksQuery = useQuery({
@@ -88,7 +89,7 @@ const captureMutation = apiClient.useMutation('post', TASKS_PATH, {
 
 async function submitCapture() {
   if (!captureTitle.value.trim() || !tenantId.value) return;
-  const body: Record<string, unknown> = {
+  const body: components['schemas']['QuickCaptureRequest'] = {
     title: captureTitle.value.trim(),
     priority: capturePriority.value,
   };
@@ -99,7 +100,7 @@ async function submitCapture() {
   try {
     await captureMutation.mutateAsync({
       params: { path: { tenant_id: tenantId.value } },
-      body: body as never,
+      body,
     });
     captureTitle.value = '';
     captureDeadline.value = '';
@@ -116,12 +117,12 @@ function formatDeadline(task: MyTaskItem) {
 
 function priorityLabel(p: string) {
   const map: Record<string, string> = {
-    critical_fire: '🔥',
-    critical: '‼️',
-    high: '⬆️',
-    medium: '➡️',
-    low: '⬇️',
-    trivial: '💤',
+    CriticalFire: '🔥',
+    Critical: '‼️',
+    High: '⬆️',
+    Medium: '➡️',
+    Low: '⬇️',
+    Trivial: '💤',
   };
   return map[p] ?? p;
 }
@@ -156,9 +157,9 @@ function priorityLabel(p: string) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="high">高</SelectItem>
-            <SelectItem value="medium">中</SelectItem>
-            <SelectItem value="low">低</SelectItem>
+            <SelectItem value="High">高</SelectItem>
+            <SelectItem value="Medium">中</SelectItem>
+            <SelectItem value="Low">低</SelectItem>
           </SelectContent>
         </Select>
         <Button type="submit" :disabled="captureMutation.isPending.value || !captureTitle.trim()">
