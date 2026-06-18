@@ -48,6 +48,8 @@ const capturePriority = ref('medium');
 const submitting = ref(false);
 const errorMessage = ref<string | null>(null);
 
+let loadAbortController: AbortController | null = null;
+
 const groupedTasks = computed(() => {
   const personal = tasks.value.filter((t) => t.project.is_personal);
   const byProject = new Map<string, MyTaskItem[]>();
@@ -61,18 +63,24 @@ const groupedTasks = computed(() => {
 
 async function loadTasks() {
   if (!tenantId.value) return;
+  loadAbortController?.abort();
+  loadAbortController = new AbortController();
+  const { signal } = loadAbortController;
   loading.value = true;
   try {
     const { data, error } = await apiClient.GET('/v1/tenants/{tenant_id}/users/me/tasks', {
       params: { path: { tenant_id: tenantId.value }, query: { filter: activeFilter.value } },
+      signal,
     });
+    if (signal.aborted) return;
     if (error) throw error;
     tasks.value = (data?.tasks ?? []) as MyTaskItem[];
     errorMessage.value = null;
-  } catch {
+  } catch (e) {
+    if (signal.aborted) return;
     errorMessage.value = 'タスクの読み込みに失敗しました';
   } finally {
-    loading.value = false;
+    if (!signal.aborted) loading.value = false;
   }
 }
 
