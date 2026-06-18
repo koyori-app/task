@@ -167,6 +167,8 @@ pub async fn create_project(
             icon_emoji: Set(payload.icon_emoji.clone()),
             icon_url: Set(payload.icon_url.clone()),
             key: Set(key.clone()),
+            is_personal: Set(false),
+            personal_owner_id: Set(None),
         };
         match project.insert(&txn).await {
             Ok(model) => break model,
@@ -220,6 +222,7 @@ pub async fn list_projects(
     if is_tenant_owner(&state, tenant_id, auth.user_id).await? {
         let list = projects::Entity::find()
             .filter(projects::Column::TenantId.eq(tenant_id))
+            .filter(projects::Column::IsPersonal.eq(false))
             .all(&state.db)
             .await?;
         return Ok(Json(list));
@@ -239,6 +242,7 @@ pub async fn list_projects(
 
     let list = projects::Entity::find()
         .filter(projects::Column::TenantId.eq(tenant_id))
+        .filter(projects::Column::IsPersonal.eq(false))
         .filter(projects::Column::Id.is_in(member_project_ids))
         .all(&state.db)
         .await?;

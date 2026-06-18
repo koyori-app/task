@@ -10,6 +10,7 @@ import {
   Command,
   Frame,
   GalleryVerticalEnd,
+  ListTodo,
   Map,
   PieChart,
   Settings2,
@@ -33,6 +34,13 @@ const props = withDefaults(defineProps<SidebarProps>(), {
 });
 
 const pageContext = usePageContext();
+
+const tenantSlug = computed(() => {
+  const { tenant } = pageContext.routeParams;
+  return typeof tenant === 'string' ? tenant : '';
+});
+
+const myTasksUrl = computed(() => (tenantSlug.value ? `/${tenantSlug.value}/my-tasks` : '#'));
 
 const labelsUrl = computed(() => {
   const { tenant, projectKey } = pageContext.routeParams;
@@ -67,6 +75,12 @@ const data = computed(() => ({
     },
   ],
   navMain: [
+    {
+      title: 'My Tasks',
+      url: myTasksUrl.value,
+      icon: ListTodo,
+      isActive: pageContext.urlPathname === `/${pageContext.routeParams.tenant}/my-tasks`,
+    },
     {
       title: 'Labels',
       url: labelsUrl.value,

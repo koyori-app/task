@@ -2,8 +2,9 @@ import createFetchClient from 'openapi-fetch';
 import { createClient } from '@koyori-app/openapi-vue-query';
 import type { paths } from '@/generated/api';
 
-const fetchClient = createFetchClient<paths>({
+export const fetchClient = createFetchClient<paths>({
   baseUrl: import.meta.env.VITE_API_BASE ?? '/api',
+  fetch: (req: Request) => globalThis.fetch(req),
 });
 
 /** Typed TanStack Vue Query helpers for task OpenAPI paths. */
