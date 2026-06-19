@@ -41,7 +41,16 @@ pid_cwd_under_backend() {
 
 kill_backend_dev() {
   # Port listeners (:3400). Never touch frontend dev ports.
-  kill_pids "$(pids_on_port "${DEV_PORT}")"
+  local pid cwd
+  for pid in $(pids_on_port "${DEV_PORT}"); do
+    if pid_cwd_under_backend "${pid}"; then
+      kill_pids "${pid}"
+    else
+      cwd="$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || echo "?")"
+      echo "Error: port ${DEV_PORT} is occupied by non-project process (pid ${pid}, cwd ${cwd}). Aborting." >&2
+      exit 1
+    fi
+  done
 
   # Orphan cargo/backend processes whose cwd is under BACKEND_DIR
   local pid

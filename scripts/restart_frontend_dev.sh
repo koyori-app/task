@@ -40,7 +40,16 @@ pid_cwd_under_frontend() {
 
 kill_frontend_dev() {
   # Port listeners (vike dev). Never touch backend :3400.
-  kill_pids "$(pids_on_port "${DEV_PORT}")"
+  local pid cwd
+  for pid in $(pids_on_port "${DEV_PORT}"); do
+    if pid_cwd_under_frontend "${pid}"; then
+      kill_pids "${pid}"
+    else
+      cwd="$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || echo "?")"
+      echo "Error: port ${DEV_PORT} is occupied by non-project process (pid ${pid}, cwd ${cwd}). Aborting." >&2
+      exit 1
+    fi
+  done
 
   # Orphan pnpm/vike dev processes whose cwd is under FRONTEND_DIR
   local pid
