@@ -1,4 +1,5 @@
 import { createTodoHandler } from '#/middlewares/create-todo-handler';
+import { apiProxyPlugin } from '#/middlewares/api-proxy';
 import { settingInjector } from '#/middlewares/setting-injector';
 import { staticPlugin } from '@elysiajs/static';
 import vike from '@vikejs/elysia';
@@ -23,7 +24,7 @@ function scoreToStrength(score: number): PasswordStrength {
   return 'high';
 }
 
-function getApp() {
+export function getApp() {
   const app = new Elysia();
 
   app.use(staticPlugin({ assets: 'server/public', prefix: '/static-assets' }));
@@ -42,6 +43,8 @@ function getApp() {
       }),
     },
   );
+
+  app.use(apiProxyPlugin);
 
   vike(app, [settingInjector, createTodoHandler]);
 

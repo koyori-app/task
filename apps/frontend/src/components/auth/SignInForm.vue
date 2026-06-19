@@ -1,11 +1,14 @@
 <script setup lang="ts">
+import { useQueryClient } from '@tanstack/vue-query';
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
+import { ref } from 'vue';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import PasswordInput from '@/components/auth/PasswordInput.vue';
 import { Input } from '@/components/ui/input';
+import { meQueryOptions, useLoginMutation, useLogoutMutation } from '@/lib/api-vue-query';
 import { arkMessage } from '@/lib/auth-validation';
 
 const schema = type({
@@ -13,12 +16,39 @@ const schema = type({
   password: 'string >= 8',
 });
 
+const queryClient = useQueryClient();
+const loginMutation = useLoginMutation();
+const logoutMutation = useLogoutMutation();
+const submitError = ref<string | null>(null);
+
 const form = useForm({
   defaultValues: { email: '', password: '' },
   validators: { onSubmit: schema },
   onSubmit: async ({ value }) => {
-    // TODO: POST /v1/auth/login
-    console.log('signin stub', value);
+    submitError.value = null;
+    try {
+      const result = await loginMutation.mutateAsync({
+        body: {
+          email: value.email,
+          password: value.password,
+        },
+      });
+
+      if (result && typeof result === 'object' && 'requires_2fa' in result) {
+        try {
+          await logoutMutation.mutateAsync({} as never);
+        } catch {
+          // logout failure: still show the same unsupported-2FA message
+        }
+        submitError.value = '二要素認証は現在サポートされていません。';
+        return;
+      }
+
+      await queryClient.invalidateQueries({ queryKey: meQueryOptions().queryKey });
+      window.location.assign('/');
+    } catch {
+      submitError.value = 'メールアドレスまたはパスワードが正しくありません。';
+    }
   },
 });
 </script>
@@ -81,6 +111,9 @@ const form = useForm({
                 </Field>
               </template>
             </form.Field>
+            <p v-if="submitError" class="text-destructive text-center text-sm">
+              {{ submitError }}
+            </p>
             <form.Subscribe>
               <template #default="{ canSubmit, isSubmitting }">
                 <Field>

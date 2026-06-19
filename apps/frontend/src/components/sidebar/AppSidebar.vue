@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { SidebarProps } from '@/components/ui/sidebar';
+import { useAuthSession } from '@/composables/useAuthSession';
+import { useAuthStore } from '@/stores/auth';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { computed } from 'vue';
 
@@ -34,6 +36,8 @@ const props = withDefaults(defineProps<SidebarProps>(), {
 });
 
 const pageContext = usePageContext();
+const authStore = useAuthStore();
+const { logout } = useAuthSession();
 
 const tenantSlug = computed(() => {
   const { tenant } = pageContext.routeParams;
@@ -53,8 +57,8 @@ const labelsUrl = computed(() => {
 // This is sample data.
 const data = computed(() => ({
   user: {
-    name: 'shadcn',
-    email: 'm@example.com',
+    name: authStore.user?.username ?? 'User',
+    email: authStore.user?.email ?? '',
     avatar: '/avatars/shadcn.jpg',
   },
   teams: [
@@ -202,7 +206,7 @@ const data = computed(() => ({
       <NavProjects :projects="data.projects" />
     </SidebarContent>
     <SidebarFooter>
-      <NavUser :user="data.user" />
+      <NavUser :user="data.user" :on-logout="logout" />
     </SidebarFooter>
     <SidebarRail />
   </Sidebar>

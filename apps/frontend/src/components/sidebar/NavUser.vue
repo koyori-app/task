@@ -31,6 +31,7 @@ const props = defineProps<{
     email: string;
     avatar: string;
   };
+  onLogout?: () => void | Promise<void>;
 }>();
 
 const { isMobile } = useSidebar();
@@ -97,7 +98,7 @@ const { isMobile } = useSidebar();
             </DropdownMenuItem>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
-          <DropdownMenuItem>
+          <DropdownMenuItem @click="onLogout?.()">
             <PhSignOut />
             Log out
           </DropdownMenuItem>

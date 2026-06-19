@@ -63,6 +63,7 @@ export default defineConfig({
       '/api': {
         target: process.env.API_BASE ?? 'http://localhost:3400',
         changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },
     warmup: {

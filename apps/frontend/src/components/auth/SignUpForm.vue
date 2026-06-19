@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { usePasswordStrength } from '@/composables/usePasswordStrength';
+import { useRegisterMutation } from '@/lib/api-vue-query';
 import { arkMessage } from '@/lib/auth-validation';
 
 const schema = type({
@@ -17,7 +18,8 @@ const schema = type({
   password: 'string >= 8',
 });
 
-const hasSubmitted = ref(false); // TODO: use to display success message after registration
+const registerMutation = useRegisterMutation();
+const submitError = ref<string | null>(null);
 const passwordFocused = ref(false);
 const passwordValue = ref('');
 const { strength } = usePasswordStrength(passwordValue);
@@ -26,9 +28,20 @@ const form = useForm({
   defaultValues: { username: '', email: '', password: '' },
   validators: { onSubmit: schema },
   onSubmit: async ({ value }) => {
-    hasSubmitted.value = true;
-    // TODO: POST /v1/auth/register
-    console.log('signup stub', value);
+    submitError.value = null;
+    try {
+      await registerMutation.mutateAsync({
+        body: {
+          username: value.username,
+          email: value.email,
+          password: value.password,
+        },
+        parseAs: 'text',
+      });
+      window.location.assign('/signin');
+    } catch {
+      submitError.value = '登録に失敗しました。メールアドレスが既に使われている可能性があります。';
+    }
   },
 });
 </script>
@@ -138,6 +151,9 @@ const form = useForm({
                 </Field>
               </template>
             </form.Field>
+            <p v-if="submitError" class="text-destructive text-center text-sm">
+              {{ submitError }}
+            </p>
             <form.Subscribe>
               <template #default="{ canSubmit, isSubmitting }">
                 <Field>

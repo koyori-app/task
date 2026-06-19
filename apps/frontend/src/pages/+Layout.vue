@@ -12,18 +12,29 @@ import {
 } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
+import { useAuthSession } from '@/composables/useAuthSession';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { computed, defineAsyncComponent } from 'vue';
 
 const pageContext = usePageContext();
 const isAuthPage = computed(() => ['/signin', '/signup'].includes(pageContext.urlPathname));
 
+const { meQuery } = useAuthSession({
+  guard: computed(() => !isAuthPage.value),
+});
+
 const AppSidebar = defineAsyncComponent(() => import('@/components/sidebar/AppSidebar.vue'));
 </script>
 
 <template>
   <slot v-if="isAuthPage" />
-  <SidebarProvider v-else>
+  <div
+    v-else-if="meQuery.isPending.value"
+    class="flex min-h-svh items-center justify-center text-muted-foreground text-sm"
+  >
+    読み込み中…
+  </div>
+  <SidebarProvider v-else-if="meQuery.isSuccess.value">
     <Suspense>
       <AppSidebar />
       <template #fallback>
