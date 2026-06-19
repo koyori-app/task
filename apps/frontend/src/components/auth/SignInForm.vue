@@ -3,7 +3,10 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { ref } from 'vue';
+<<<<<<< HEAD
 import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
+=======
+>>>>>>> dd661ec8 (test(e2e): retry sign-in flow)
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
@@ -22,7 +25,10 @@ const queryClient = useQueryClient();
 const loginMutation = useLoginMutation();
 const logoutMutation = useLogoutMutation();
 const submitError = ref<string | null>(null);
+<<<<<<< HEAD
 const unverifiedEmail = ref<string | null>(null);
+=======
+>>>>>>> dd661ec8 (test(e2e): retry sign-in flow)
 
 const form = useForm({
   defaultValues: { email: '', password: '' },
@@ -66,11 +72,15 @@ const form = useForm({
   <div v-else class="flex flex-col gap-6">
     <Card class="overflow-hidden p-0">
       <CardContent class="grid p-0 md:grid-cols-2">
+<<<<<<< HEAD
         <HydrationSafeForm
           v-slot="{ isHydrated }"
           class="p-6 md:p-8"
           data-testid="signin-form"
           @submit="form.handleSubmit">
+=======
+        <form class="p-6 md:p-8" @submit.prevent="form.handleSubmit">
+>>>>>>> dd661ec8 (test(e2e): retry sign-in flow)
           <FieldGroup>
             <div class="flex flex-col items-center gap-2 text-center">
               <h1 class="text-2xl font-bold">おかえりなさい</h1>
@@ -138,11 +148,15 @@ const form = useForm({
             <form.Subscribe>
               <template #default="{ canSubmit, isSubmitting }">
                 <Field>
+<<<<<<< HEAD
                   <Button
                     type="submit"
                     class="w-full"
                     :disabled="!canSubmit || isSubmitting || !isHydrated"
                   >
+=======
+                  <Button type="submit" class="w-full" :disabled="!canSubmit || isSubmitting">
+>>>>>>> dd661ec8 (test(e2e): retry sign-in flow)
                     {{ isSubmitting ? 'サインイン中…' : 'サインイン' }}
                   </Button>
                 </Field>
