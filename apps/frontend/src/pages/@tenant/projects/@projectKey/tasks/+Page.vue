@@ -13,15 +13,9 @@ import {
   getSortedRowModel,
   useVueTable,
 } from '@tanstack/vue-table';
-import {
-  PhCellSignalFull,
-  PhCellSignalHigh,
-  PhCellSignalMedium,
-  PhCellSignalLow,
-  PhCaretDown,
-  PhCaretUp,
-  PhCaretUpDown,
-} from '@phosphor-icons/vue';
+import type { LucideIcon } from '@lucide/vue';
+import { Signal, SignalHigh, SignalLow, SignalMedium } from '@lucide/vue';
+import { PhCaretDown, PhCaretUp, PhCaretUpDown } from '@phosphor-icons/vue';
 import { h, ref } from 'vue';
 import type { Column } from '@tanstack/vue-table';
 
@@ -93,11 +87,11 @@ function sortableHeader(column: Column<Task>, label: string) {
   );
 }
 
-const PRIORITY_CONFIG: Record<Priority, { label: string; color: string; icon: unknown }> = {
-  urgent: { label: '緊急', color: '#ef4444', icon: PhCellSignalFull },
-  high: { label: '高', color: '#f97316', icon: PhCellSignalHigh },
-  medium: { label: '中', color: '#eab308', icon: PhCellSignalMedium },
-  low: { label: '低', color: '#6b7280', icon: PhCellSignalLow },
+const PRIORITY_CONFIG: Record<Priority, { label: string; color: string; icon: LucideIcon }> = {
+  urgent: { label: '緊急', color: '#ef4444', icon: Signal },
+  high: { label: '高', color: '#f97316', icon: SignalHigh },
+  medium: { label: '中', color: '#eab308', icon: SignalMedium },
+  low: { label: '低', color: '#6b7280', icon: SignalLow },
 };
 
 function taskKey(task: Task) {
@@ -209,7 +203,7 @@ const columns: ColumnDef<Task>[] = [
       const task = row.original;
       const pc = PRIORITY_CONFIG[task.priority];
       return h('div', { class: 'flex items-center gap-2 min-w-0' }, [
-        h(pc.icon as any, { class: 'size-4 shrink-0', weight: 'thin', style: { color: pc.color } }),
+        h(pc.icon, { class: 'size-4 shrink-0', style: { color: pc.color } }),
         h('span', { class: 'truncate text-sm' }, task.title),
       ]);
     },
@@ -248,7 +242,7 @@ const columns: ColumnDef<Task>[] = [
           class: 'inline-flex items-center gap-1 text-xs whitespace-nowrap',
           style: { color: pc.color },
         },
-        [h(pc.icon as any, { class: 'size-4', weight: 'thin' }), pc.label],
+        [h(pc.icon, { class: 'size-4' }), pc.label],
       );
     },
   },
