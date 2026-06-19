@@ -29,20 +29,26 @@ kill_pids() {
   kill -9 ${pids} 2>/dev/null || true
 }
 
+pid_cwd_under_frontend() {
+  local pid="$1"
+  [[ -z "${pid}" || ! "${pid}" =~ ^[0-9]+$ ]] && return 1
+  [[ "${pid}" -eq "$$" || "${pid}" -eq "${BASHPID}" ]] && return 1
+  local cwd
+  cwd="$(readlink -f "/proc/${pid}/cwd" 2>/dev/null)" || return 1
+  [[ "${cwd}" == "${FRONTEND_DIR}"* ]]
+}
+
 kill_frontend_dev() {
   # Port listeners (vike dev). Never touch backend :3400.
   kill_pids "$(pids_on_port "${DEV_PORT}")"
 
-  # Orphan pnpm/vike dev processes for this repo frontend
-  while IFS= read -r line; do
-    [[ -z "${line}" ]] && continue
-    local pid="${line%% *}"
-    local cmd="${line#* }"
-    if [[ "${cmd}" == *"${FRONTEND_DIR}"* ]] \
-      || [[ "${cmd}" == *"vike dev"* && "${cmd}" != *"backend"* ]]; then
+  # Orphan pnpm/vike dev processes whose cwd is under FRONTEND_DIR
+  local pid
+  for pid in $(pgrep -f "pnpm run dev|vike dev" 2>/dev/null || true); do
+    if pid_cwd_under_frontend "${pid}"; then
       kill_pids "${pid}"
     fi
-  done < <(pgrep -af "pnpm run dev|vike dev" 2>/dev/null || true)
+  done
 
   sleep 1
 }
