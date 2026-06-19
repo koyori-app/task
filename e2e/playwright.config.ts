@@ -54,7 +54,7 @@ export default defineConfig({
       },
     },
     {
-      command: 'pnpm dev',
+      command: 'pnpm exec vike build && bun ./dist/server/index.mjs',
       cwd: '../apps/frontend',
       url: 'http://localhost:3000',
       reuseExistingServer: !isCI,

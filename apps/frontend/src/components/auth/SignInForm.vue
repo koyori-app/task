@@ -2,7 +2,7 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
-import { ref } from 'vue';
+import { onMounted, ref } from 'vue';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
@@ -20,6 +20,11 @@ const queryClient = useQueryClient();
 const loginMutation = useLoginMutation();
 const logoutMutation = useLogoutMutation();
 const submitError = ref<string | null>(null);
+const isHydrated = ref(false);
+
+onMounted(() => {
+  isHydrated.value = true;
+});
 
 const form = useForm({
   defaultValues: { email: '', password: '' },
@@ -57,7 +62,12 @@ const form = useForm({
   <div class="flex flex-col gap-6">
     <Card class="overflow-hidden p-0">
       <CardContent class="grid p-0 md:grid-cols-2">
-        <form class="p-6 md:p-8" @submit.prevent="form.handleSubmit">
+        <form
+          class="p-6 md:p-8"
+          data-testid="signin-form"
+          :data-hydrated="isHydrated ? 'true' : 'false'"
+          @submit.prevent="form.handleSubmit"
+        >
           <FieldGroup>
             <div class="flex flex-col items-center gap-2 text-center">
               <h1 class="text-2xl font-bold">おかえりなさい</h1>
@@ -115,9 +125,9 @@ const form = useForm({
               {{ submitError }}
             </p>
             <form.Subscribe>
-              <template #default="{ canSubmit, isSubmitting }">
+              <template #default="{ isSubmitting }">
                 <Field>
-                  <Button type="submit" class="w-full" :disabled="!canSubmit || isSubmitting">
+                  <Button type="submit" class="w-full" :disabled="isSubmitting">
                     {{ isSubmitting ? 'サインイン中…' : 'サインイン' }}
                   </Button>
                 </Field>
