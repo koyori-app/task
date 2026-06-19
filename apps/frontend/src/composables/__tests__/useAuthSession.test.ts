@@ -193,6 +193,41 @@ describe('useAuthSession', () => {
     assignSpy.mockRestore();
   });
 
+  it('rejects invalid /me payload and clears user without setUser', async () => {
+    fetchMock.mockImplementation(async (input: Request) => {
+      if (input.method.toUpperCase() === 'GET' && input.url.includes('/v1/auth/me')) {
+        return new Response(JSON.stringify({ id: 123, email: 'not-an-email' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return new Response(null, { status: 204 });
+    });
+
+    let authStore!: ReturnType<typeof useAuthStore>;
+
+    mount(
+      defineComponent({
+        setup() {
+          useAuthSession();
+          authStore = useAuthStore();
+          return {};
+        },
+        template: '<div />',
+      }),
+      {
+        global: {
+          plugins: [[VueQueryPlugin, { queryClient }], createPinia()],
+        },
+      },
+    );
+
+    await flushPromises();
+
+    expect(authStore.user).toBeNull();
+  });
+
   it('does not redirect on auth error when already on /signin', async () => {
     mockPagePathname.value = '/signin';
 

@@ -1,8 +1,21 @@
+import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { computed, watch, type MaybeRefOrGetter, toValue } from 'vue';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { meQueryOptions, useLogoutMutation, useMeQuery } from '@/lib/api-vue-query';
-import { useAuthStore, type AuthUser } from '@/stores/auth';
+import { useAuthStore } from '@/stores/auth';
+
+export const authUserSchema = type({
+  id: 'string',
+  email: 'string',
+  username: 'string',
+  email_verified: 'boolean',
+  is_admin: 'boolean',
+  is_suspended: 'boolean',
+  totp_enabled: 'boolean',
+  'avatar_url?': 'string | null',
+  'bio?': 'string | null',
+});
 
 export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) {
   const authStore = useAuthStore();
@@ -17,9 +30,13 @@ export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) 
   watch(
     () => meQuery.data.value,
     (user) => {
-      if (user) {
-        authStore.setUser(user as AuthUser);
+      if (!user) return;
+      const result = authUserSchema(user);
+      if (result instanceof type.errors) {
+        authStore.clearUser();
+        return;
       }
+      authStore.setUser(result);
     },
     { immediate: true },
   );

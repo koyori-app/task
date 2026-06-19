@@ -23,9 +23,14 @@ function buildBackendUrl(request: Request): string {
 function copyHeaders(source: Headers, skipHopByHop = true): Headers {
   const headers = new Headers();
   source.forEach((value, key) => {
-    if (skipHopByHop && HOP_BY_HOP.has(key.toLowerCase())) return;
+    const lowerKey = key.toLowerCase();
+    if (skipHopByHop && HOP_BY_HOP.has(lowerKey)) return;
+    if (lowerKey === 'set-cookie') return;
     headers.set(key, value);
   });
+  for (const cookie of source.getSetCookie()) {
+    headers.append('Set-Cookie', cookie);
+  }
   return headers;
 }
 
