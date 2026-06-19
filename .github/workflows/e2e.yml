@@ -51,6 +51,9 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+    env:
+      RUSTC_WRAPPER: sccache
+
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -62,6 +65,11 @@ jobs:
 
       - name: Install mold
         run: sudo apt-get install -y mold
+
+      - name: Install sccache
+        uses: taiki-e/install-action@56545b37b57562edd73171cb6c62cc509db4c34e # v2.81.7
+        with:
+          tool: sccache
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
