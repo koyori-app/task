@@ -3,19 +3,7 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { computed, watch, type MaybeRefOrGetter, toValue } from 'vue';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { meQueryOptions, useLogoutMutation, useMeQuery } from '@/lib/api-vue-query';
-import { useAuthStore } from '@/stores/auth';
-
-export const authUserSchema = type({
-  id: 'string',
-  email: 'string',
-  username: 'string',
-  email_verified: 'boolean',
-  is_admin: 'boolean',
-  is_suspended: 'boolean',
-  totp_enabled: 'boolean',
-  'avatar_url?': 'string | null',
-  'bio?': 'string | null',
-});
+import { authUserSchema, useAuthStore } from '@/stores/auth';
 
 export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) {
   const authStore = useAuthStore();
