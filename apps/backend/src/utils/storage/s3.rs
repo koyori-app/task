@@ -221,94 +221,37 @@ impl StorageBackend for S3StorageBackend {
 mod tests {
     use super::*;
 
+    // to_path: Path::parse は先頭スラッシュを正規化、バックスラッシュをパーセントエンコードするため
+    // 拒否するのは空文字と ".." を含むパスのみ。
+
     #[test]
-    fn validate_key_rejects_empty() {
-        assert!(matches!(validate_key(""), Err(StorageError::InvalidKey)));
+    fn to_path_rejects_empty() {
+        assert!(matches!(to_path(""), Err(StorageError::InvalidKey)));
     }
 
     #[test]
-    fn validate_key_rejects_leading_slash() {
+    fn to_path_rejects_double_dot() {
+        assert!(matches!(to_path("../escape"), Err(StorageError::InvalidKey)));
         assert!(matches!(
-            validate_key("/etc/passwd"),
+            to_path("foo/../bar"),
             Err(StorageError::InvalidKey)
         ));
+        assert!(matches!(to_path(".."), Err(StorageError::InvalidKey)));
     }
 
     #[test]
-    fn validate_key_rejects_double_dot() {
-        assert!(matches!(
-            validate_key("../escape"),
-            Err(StorageError::InvalidKey)
-        ));
-        assert!(matches!(
-            validate_key("foo/../bar"),
-            Err(StorageError::InvalidKey)
-        ));
-        assert!(matches!(validate_key(".."), Err(StorageError::InvalidKey)));
+    fn to_path_accepts_valid_keys() {
+        assert!(to_path("uuid-v4-key").is_ok());
+        assert!(to_path("prefix/uuid-key").is_ok());
+        assert!(to_path("a").is_ok());
+        assert!(to_path("abc123-_.").is_ok());
     }
 
-    #[test]
-    fn validate_key_rejects_backslash() {
-        assert!(matches!(
-            validate_key("foo\\bar"),
-            Err(StorageError::InvalidKey)
-        ));
-    }
-
-    #[test]
-    fn validate_key_accepts_valid_keys() {
-        assert!(validate_key("uuid-v4-key").is_ok());
-        assert!(validate_key("prefix/uuid-key").is_ok());
-        assert!(validate_key("a").is_ok());
-        assert!(validate_key("abc123-_.").is_ok());
-    }
-
-    #[test]
-    fn read_stream_to_bytes_empty_stream() {
-        let chunks: Vec<Result<Bytes, StorageError>> = vec![];
-        let stream: ByteStream = Box::pin(futures::stream::iter(chunks));
-        let result = futures::executor::block_on(read_stream_to_bytes(stream, 0));
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Bytes::new());
-    }
-
-    #[test]
-    fn read_stream_to_bytes_single_chunk() {
-        let chunks: Vec<Result<Bytes, StorageError>> = vec![Ok(Bytes::from_static(b"hello"))];
-        let stream: ByteStream = Box::pin(futures::stream::iter(chunks));
-        let result = futures::executor::block_on(read_stream_to_bytes(stream, 5));
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Bytes::from_static(b"hello"));
-    }
-
-    #[test]
-    fn read_stream_to_bytes_size_mismatch() {
-        let chunks: Vec<Result<Bytes, StorageError>> = vec![Ok(Bytes::from_static(b"short"))];
-        let stream: ByteStream = Box::pin(futures::stream::iter(chunks));
-        let result = futures::executor::block_on(read_stream_to_bytes(stream, 100));
-        assert!(matches!(
-            result,
-            Err(StorageError::SizeMismatch {
-                expected: 100,
-                actual: 5
-            })
-        ));
-    }
-
-    /// 全 trait メソッド（upload / delete / get_stream）が
-    /// validate_key を経由して不正な key を拒否することを確認する。
-    /// ダミーの S3 クライアントでも key 妥当性確認は HTTP 呼び出し前に
-    /// 実行されるため、ネットワークアクセスなしでテストできる。
+    /// upload / delete / get_stream が to_path 経由で不正な key を拒否することを確認する。
+    /// InMemory ストアを使うことでネットワークアクセスなしにテストできる。
     fn dummy_backend() -> S3StorageBackend {
-        use aws_sdk_s3::config::{Credentials, Region};
-        let config = aws_sdk_s3::Config::builder()
-            .endpoint_url("http://localhost:1")
-            .region(Region::new("us-east-1"))
-            .credentials_provider(Credentials::new("x", "x", None, None, "test"))
-            .behavior_version(aws_config::BehaviorVersion::latest())
-            .build();
         S3StorageBackend {
-            client: aws_sdk_s3::Client::from_conf(config),
+            store: Arc::new(object_store::memory::InMemory::new()),
             bucket: "test".into(),
             public_base_url: "http://localhost:1/test".into(),
         }
@@ -325,14 +268,14 @@ mod tests {
     #[test]
     fn delete_rejects_invalid_key() {
         let backend = dummy_backend();
-        let result = futures::executor::block_on(backend.delete("/root"));
+        let result = futures::executor::block_on(backend.delete("../escape"));
         assert!(matches!(result, Err(StorageError::InvalidKey)));
     }
 
     #[test]
     fn get_stream_rejects_invalid_key() {
         let backend = dummy_backend();
-        let result = futures::executor::block_on(backend.get_stream("../escape"));
+        let result = futures::executor::block_on(backend.get_stream(""));
         assert!(matches!(result, Err(StorageError::InvalidKey)));
     }
 }
