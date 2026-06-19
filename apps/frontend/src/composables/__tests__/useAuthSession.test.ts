@@ -17,8 +17,14 @@ const mockUser = {
   totp_enabled: false,
 };
 
-const { mockPagePathname } = vi.hoisted(() => ({
+const { mockPagePathname, meQueryMockState } = vi.hoisted(() => ({
   mockPagePathname: { value: '/' as string },
+  meQueryMockState: {
+    controlled: false,
+    data: { value: null as Record<string, unknown> | null },
+    isError: { value: false },
+    isFetching: { value: false },
+  },
 }));
 
 vi.mock('vike-vue/usePageContext', () => ({
@@ -52,11 +58,19 @@ vi.mock('@/lib/api-vue-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api-vue-query')>();
   return {
     ...actual,
-    useMeQuery: (options?: { enabled?: import('vue').MaybeRefOrGetter<boolean> }) =>
-      testApi.useQuery('get', '/v1/auth/me', undefined, {
+    useMeQuery: (options?: { enabled?: import('vue').MaybeRefOrGetter<boolean> }) => {
+      if (meQueryMockState.controlled) {
+        return {
+          data: meQueryMockState.data,
+          isError: meQueryMockState.isError,
+          isFetching: meQueryMockState.isFetching,
+        };
+      }
+      return testApi.useQuery('get', '/v1/auth/me', undefined, {
         retry: false,
         ...(options?.enabled !== undefined ? { enabled: options.enabled } : {}),
-      }),
+      });
+    },
     useLogoutMutation: () => testApi.useMutation('post', '/v1/auth/logout'),
     meQueryOptions: () => testApi.queryOptions('get', '/v1/auth/me', undefined, { retry: false }),
   };
@@ -79,6 +93,10 @@ describe('useAuthSession', () => {
 
   afterEach(() => {
     queryClient.clear();
+    meQueryMockState.controlled = false;
+    meQueryMockState.data.value = null;
+    meQueryMockState.isError.value = false;
+    meQueryMockState.isFetching.value = false;
   });
 
   it('hydrates auth store from /v1/auth/me', async () => {
@@ -263,5 +281,71 @@ describe('useAuthSession', () => {
     expect(assignSpy).not.toHaveBeenCalled();
     assignSpy.mockRestore();
     mockPagePathname.value = '/';
+  });
+
+  it('does not clear user or redirect while me query error is in-flight', async () => {
+    meQueryMockState.controlled = true;
+    meQueryMockState.isError.value = true;
+    meQueryMockState.isFetching.value = true;
+
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const authStore = useAuthStore();
+    authStore.setUser(mockUser);
+
+    mount(
+      defineComponent({
+        setup() {
+          useAuthSession({ guard: true });
+          return {};
+        },
+        template: '<div />',
+      }),
+      {
+        global: {
+          plugins: [[VueQueryPlugin, { queryClient }], pinia],
+        },
+      },
+    );
+
+    await flushPromises();
+
+    expect(authStore.user).toEqual(mockUser);
+    expect(assignSpy).not.toHaveBeenCalled();
+    assignSpy.mockRestore();
+  });
+
+  it('clears user and redirects when me query error is settled', async () => {
+    meQueryMockState.controlled = true;
+    meQueryMockState.isError.value = true;
+    meQueryMockState.isFetching.value = false;
+
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const authStore = useAuthStore();
+    authStore.setUser(mockUser);
+
+    mount(
+      defineComponent({
+        setup() {
+          useAuthSession({ guard: true });
+          return {};
+        },
+        template: '<div />',
+      }),
+      {
+        global: {
+          plugins: [[VueQueryPlugin, { queryClient }], pinia],
+        },
+      },
+    );
+
+    await flushPromises();
+
+    expect(authStore.user).toBeNull();
+    expect(assignSpy).toHaveBeenCalledWith('/signin');
+    assignSpy.mockRestore();
   });
 });

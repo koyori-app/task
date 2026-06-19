@@ -37,10 +37,12 @@ export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) 
     }
   }
 
+  const isSettledError = computed(() => meQuery.isError.value && !meQuery.isFetching.value);
+
   watch(
-    () => meQuery.isError.value,
-    (isError) => {
-      if (!isError) return;
+    isSettledError,
+    (settled) => {
+      if (!settled) return;
       authStore.clearUser();
       redirectToSignInIfNeeded();
     },
