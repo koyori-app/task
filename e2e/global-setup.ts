@@ -45,6 +45,7 @@ export async function seedUser() {
 /** Drive the sign-in form and wait for the redirect away from /signin. */
 export async function signIn(page: Page) {
   await page.goto('/signin');
+  await page.getByTestId('signin-form').and(page.locator('[data-hydrated="true"]')).waitFor();
   await page.fill('#email', TEST_USER.email);
   await page.fill('#password', TEST_USER.password);
   await page.getByRole('button', { name: 'サインイン' }).click();

@@ -87,6 +87,9 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
       - name: Enable corepack
         run: corepack enable
 
