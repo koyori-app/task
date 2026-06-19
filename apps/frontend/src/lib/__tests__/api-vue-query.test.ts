@@ -8,7 +8,10 @@ import {
   fetchClient,
   meQueryOptions,
   projectLabelsQueryOptions,
+  useLoginMutation,
+  useLogoutMutation,
   useMeQuery,
+  useRegisterMutation,
 } from '../api-vue-query';
 
 const mockUser = {
@@ -304,5 +307,98 @@ describe('api-vue-query production client', () => {
   it('meQueryOptions disables retry for session cache', () => {
     expect(meQueryOptions().retry).toBe(false);
     expect(meQueryOptions().staleTime).toBe(AUTH_ME_STALE_TIME_MS);
+  });
+
+  it('useLoginMutation posts to /v1/auth/login via production wrapper', async () => {
+    const fetchSpy = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const req = input instanceof Request ? input : new Request(input);
+      if (req.method.toUpperCase() === 'POST' && req.url.includes('/v1/auth/login')) {
+        return new Response(null, { status: 204 });
+      }
+      return new Response(JSON.stringify({ message: 'not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    globalThis.fetch = fetchSpy;
+
+    const mutation = withQuery(() => useLoginMutation());
+
+    await mutation.mutateAsync({
+      body: { email: 'test@example.com', password: 'password123' },
+    } as never);
+    await flushPromises();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const loginReq =
+      fetchSpy.mock.calls[0][0] instanceof Request
+        ? fetchSpy.mock.calls[0][0]
+        : new Request(fetchSpy.mock.calls[0][0]);
+    expect(loginReq.method).toBe('POST');
+    expect(loginReq.url).toContain('/v1/auth/login');
+  });
+
+  it('useRegisterMutation posts to /v1/auth/register via production wrapper', async () => {
+    const fetchSpy = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const req = input instanceof Request ? input : new Request(input);
+      if (req.method.toUpperCase() === 'POST' && req.url.includes('/v1/auth/register')) {
+        return new Response(JSON.stringify('Register successful'), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ message: 'not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    globalThis.fetch = fetchSpy;
+
+    const mutation = withQuery(() => useRegisterMutation());
+
+    await mutation.mutateAsync({
+      body: {
+        username: 'testuser',
+        email: 'test@example.com',
+        password: 'password123',
+      },
+      parseAs: 'text',
+    } as never);
+    await flushPromises();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const registerReq =
+      fetchSpy.mock.calls[0][0] instanceof Request
+        ? fetchSpy.mock.calls[0][0]
+        : new Request(fetchSpy.mock.calls[0][0]);
+    expect(registerReq.method).toBe('POST');
+    expect(registerReq.url).toContain('/v1/auth/register');
+  });
+
+  it('useLogoutMutation posts to /v1/auth/logout via production wrapper', async () => {
+    const fetchSpy = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const req = input instanceof Request ? input : new Request(input);
+      if (req.method.toUpperCase() === 'POST' && req.url.includes('/v1/auth/logout')) {
+        return new Response(null, { status: 204 });
+      }
+      return new Response(JSON.stringify({ message: 'not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    globalThis.fetch = fetchSpy;
+
+    const mutation = withQuery(() => useLogoutMutation());
+
+    await mutation.mutateAsync({} as never);
+    await flushPromises();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const logoutReq =
+      fetchSpy.mock.calls[0][0] instanceof Request
+        ? fetchSpy.mock.calls[0][0]
+        : new Request(fetchSpy.mock.calls[0][0]);
+    expect(logoutReq.method).toBe('POST');
+    expect(logoutReq.url).toContain('/v1/auth/logout');
   });
 });

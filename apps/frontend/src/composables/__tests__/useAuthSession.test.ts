@@ -17,8 +17,12 @@ const mockUser = {
   totp_enabled: false,
 };
 
+const { mockPagePathname } = vi.hoisted(() => ({
+  mockPagePathname: { value: '/' as string },
+}));
+
 vi.mock('vike-vue/usePageContext', () => ({
-  usePageContext: () => ({ urlPathname: '/' }),
+  usePageContext: () => ({ urlPathname: mockPagePathname.value }),
 }));
 
 const fetchMock = vi.fn(async (input: Request) => {
@@ -48,7 +52,11 @@ vi.mock('@/lib/api-vue-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api-vue-query')>();
   return {
     ...actual,
-    useMeQuery: () => testApi.useQuery('get', '/v1/auth/me', undefined, { retry: false }),
+    useMeQuery: (options?: { enabled?: import('vue').MaybeRefOrGetter<boolean> }) =>
+      testApi.useQuery('get', '/v1/auth/me', undefined, {
+        retry: false,
+        ...(options?.enabled !== undefined ? { enabled: options.enabled } : {}),
+      }),
     useLogoutMutation: () => testApi.useMutation('post', '/v1/auth/logout'),
     meQueryOptions: () => testApi.queryOptions('get', '/v1/auth/me', undefined, { retry: false }),
   };
@@ -59,6 +67,7 @@ describe('useAuthSession', () => {
 
   beforeEach(() => {
     setActivePinia(createPinia());
+    mockPagePathname.value = '/';
     queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -123,6 +132,34 @@ describe('useAuthSession', () => {
     assignSpy.mockRestore();
   });
 
+  it('does not fetch /me when guard is false', async () => {
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+
+    mount(
+      defineComponent({
+        setup() {
+          useAuthSession({ guard: false });
+          return {};
+        },
+        template: '<div />',
+      }),
+      {
+        global: {
+          plugins: [[VueQueryPlugin, { queryClient }], createPinia()],
+        },
+      },
+    );
+
+    await flushPromises();
+
+    const meCalls = fetchMock.mock.calls.filter((call) =>
+      call[0].url.includes('/v1/auth/me'),
+    );
+    expect(meCalls).toHaveLength(0);
+    expect(assignSpy).not.toHaveBeenCalled();
+    assignSpy.mockRestore();
+  });
+
   it('redirects unauthenticated users when guard is enabled', async () => {
     fetchMock.mockImplementation(async (input: Request) => {
       if (input.method.toUpperCase() === 'GET' && input.url.includes('/v1/auth/me')) {
@@ -156,5 +193,42 @@ describe('useAuthSession', () => {
 
     expect(assignSpy).toHaveBeenCalledWith('/signin');
     assignSpy.mockRestore();
+  });
+
+  it('does not redirect on auth error when already on /signin', async () => {
+    mockPagePathname.value = '/signin';
+
+    fetchMock.mockImplementation(async (input: Request) => {
+      if (input.method.toUpperCase() === 'GET' && input.url.includes('/v1/auth/me')) {
+        return new Response(JSON.stringify({ message: 'unauthorized' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+
+    mount(
+      defineComponent({
+        setup() {
+          useAuthSession({ guard: true });
+          return {};
+        },
+        template: '<div />',
+      }),
+      {
+        global: {
+          plugins: [[VueQueryPlugin, { queryClient }], createPinia()],
+        },
+      },
+    );
+
+    await flushPromises();
+
+    expect(assignSpy).not.toHaveBeenCalled();
+    assignSpy.mockRestore();
+    mockPagePathname.value = '/';
   });
 });
