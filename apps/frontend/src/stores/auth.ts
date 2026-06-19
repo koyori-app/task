@@ -5,10 +5,12 @@ export interface AuthUser {
   id: string;
   email: string;
   username: string;
-  email_verified?: boolean;
-  is_admin?: boolean;
-  is_suspended?: boolean;
-  totp_enabled?: boolean;
+  email_verified: boolean;
+  is_admin: boolean;
+  is_suspended: boolean;
+  totp_enabled: boolean;
+  avatar_url?: string | null;
+  bio?: string | null;
 }
 
 export const useAuthStore = defineStore(
