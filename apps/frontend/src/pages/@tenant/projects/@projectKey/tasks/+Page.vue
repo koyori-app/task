@@ -4,7 +4,7 @@ import type {
   ColumnFiltersState,
   SortingState,
   VisibilityState,
-} from '@tanstack/vue-table'
+} from '@tanstack/vue-table';
 import {
   FlexRender,
   getCoreRowModel,
@@ -12,21 +12,29 @@ import {
   getPaginationRowModel,
   getSortedRowModel,
   useVueTable,
-} from '@tanstack/vue-table'
-import { PhCellSignalFull, PhCellSignalHigh, PhCellSignalMedium, PhCellSignalLow, PhCaretDown, PhCaretUp, PhCaretUpDown } from '@phosphor-icons/vue'
-import { h, ref } from 'vue'
-import type { Column } from '@tanstack/vue-table'
+} from '@tanstack/vue-table';
+import {
+  PhCellSignalFull,
+  PhCellSignalHigh,
+  PhCellSignalMedium,
+  PhCellSignalLow,
+  PhCaretDown,
+  PhCaretUp,
+  PhCaretUpDown,
+} from '@phosphor-icons/vue';
+import { h, ref } from 'vue';
+import type { Column } from '@tanstack/vue-table';
 
-import { valueUpdater } from '@/components/ui/table/utils'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
+import { valueUpdater } from '@/components/ui/table/utils';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+} from '@/components/ui/dropdown-menu';
 import {
   Table,
   TableBody,
@@ -34,82 +42,89 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+} from '@/components/ui/table';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
 // ---- 型定義 ----
-type Priority = 'urgent' | 'high' | 'medium' | 'low'
+type Priority = 'urgent' | 'high' | 'medium' | 'low';
 
 interface TaskStatus {
-  id: string
-  name: string
-  color: string
+  id: string;
+  name: string;
+  color: string;
 }
 
 interface TaskAssignee {
-  name: string
-  initials: string
+  name: string;
+  initials: string;
 }
 
 interface Task {
-  id: string
-  seq_id: number
-  project_key: string
-  title: string
-  status: TaskStatus
-  priority: Priority
-  assignee?: TaskAssignee
-  due_date?: string
+  id: string;
+  seq_id: number;
+  project_key: string;
+  title: string;
+  status: TaskStatus;
+  priority: Priority;
+  assignee?: TaskAssignee;
+  due_date?: string;
 }
 
 // ---- ヘルパー ----
-const PRIORITY_ORDER: Record<Priority, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
+const PRIORITY_ORDER: Record<Priority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
 /** ソート可能な列ヘッダー: 矢印アイコン付きボタンを返す */
 function sortableHeader(column: Column<Task>, label: string) {
-  const sorted = column.getIsSorted()
-  const icon = sorted === 'asc'
-    ? h(PhCaretUp,       { class: 'ml-1 size-4' })
-    : sorted === 'desc'
-    ? h(PhCaretDown,     { class: 'ml-1 size-4' })
-    : h(PhCaretUpDown,   { class: 'ml-1 size-4 opacity-40' })
-  return h(Button, {
-    variant: 'ghost',
-    class: '-ml-3 h-8 text-xs font-medium',
-    onClick: () => column.toggleSorting(sorted === 'asc'),
-  }, () => [label, icon])
+  const sorted = column.getIsSorted();
+  const icon =
+    sorted === 'asc'
+      ? h(PhCaretUp, { class: 'ml-1 size-4' })
+      : sorted === 'desc'
+        ? h(PhCaretDown, { class: 'ml-1 size-4' })
+        : h(PhCaretUpDown, { class: 'ml-1 size-4 opacity-40' });
+  return h(
+    Button,
+    {
+      variant: 'ghost',
+      class: '-ml-3 h-8 text-xs font-medium',
+      onClick: () => column.toggleSorting(sorted === 'asc'),
+    },
+    () => [label, icon],
+  );
 }
 
 const PRIORITY_CONFIG: Record<Priority, { label: string; color: string; icon: unknown }> = {
   urgent: { label: '緊急', color: '#ef4444', icon: PhCellSignalFull },
-  high:   { label: '高',   color: '#f97316', icon: PhCellSignalHigh },
-  medium: { label: '中',   color: '#eab308', icon: PhCellSignalMedium },
-  low:    { label: '低',   color: '#6b7280', icon: PhCellSignalLow },
-}
+  high: { label: '高', color: '#f97316', icon: PhCellSignalHigh },
+  medium: { label: '中', color: '#eab308', icon: PhCellSignalMedium },
+  low: { label: '低', color: '#6b7280', icon: PhCellSignalLow },
+};
 
 function taskKey(task: Task) {
-  return `${task.project_key}-${task.seq_id}`
+  return `${task.project_key}-${task.seq_id}`;
 }
 
 function formatDate(iso?: string) {
-  if (!iso) return null
-  const d = new Date(iso)
-  const now = new Date()
-  const diff = d.getTime() - now.getTime()
-  const days = Math.ceil(diff / 86400000)
-  if (days < 0)   return { label: `${Math.abs(days)}日超過`, overdue: true }
-  if (days === 0) return { label: '今日', overdue: false }
-  if (days <= 7)  return { label: `${days}日後`, overdue: false }
+  if (!iso) return null;
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = d.getTime() - now.getTime();
+  const days = Math.ceil(diff / 86400000);
+  if (days < 0) return { label: `${Math.abs(days)}日超過`, overdue: true };
+  if (days === 0) return { label: '今日', overdue: false };
+  if (days <= 7) return { label: `${days}日後`, overdue: false };
   return {
     label: d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' }),
     overdue: false,
-  }
+  };
 }
 
 // ---- モックデータ ----
 const data: Task[] = [
   {
-    id: '1', seq_id: 1, project_key: 'ENG',
+    id: '1',
+    seq_id: 1,
+    project_key: 'ENG',
     title: 'OAuth 対応を実装する',
     status: { id: 's1', name: 'In Progress', color: '#3b82f6' },
     priority: 'high',
@@ -117,7 +132,9 @@ const data: Task[] = [
     due_date: new Date(Date.now() + 2 * 86400000).toISOString(),
   },
   {
-    id: '2', seq_id: 2, project_key: 'ENG',
+    id: '2',
+    seq_id: 2,
+    project_key: 'ENG',
     title: 'ログイン画面の UI 実装',
     status: { id: 's2', name: 'In Review', color: '#8b5cf6' },
     priority: 'medium',
@@ -125,27 +142,33 @@ const data: Task[] = [
     due_date: new Date(Date.now() - 1 * 86400000).toISOString(),
   },
   {
-    id: '3', seq_id: 3, project_key: 'ENG',
+    id: '3',
+    seq_id: 3,
+    project_key: 'ENG',
     title: 'DB スキーマ設計',
     status: { id: 's3', name: 'Done', color: '#22c55e' },
     priority: 'urgent',
     assignee: { name: '山田 次郎', initials: '山' },
   },
   {
-    id: '4', seq_id: 4, project_key: 'ENG',
+    id: '4',
+    seq_id: 4,
+    project_key: 'ENG',
     title: '通知メール送信機能',
     status: { id: 's1', name: 'In Progress', color: '#3b82f6' },
     priority: 'low',
     due_date: new Date(Date.now() + 14 * 86400000).toISOString(),
   },
   {
-    id: '5', seq_id: 5, project_key: 'ENG',
+    id: '5',
+    seq_id: 5,
+    project_key: 'ENG',
     title: 'タスク一覧 API の実装',
     status: { id: 's0', name: 'Backlog', color: '#94a3b8' },
     priority: 'medium',
     assignee: { name: '田中 太郎', initials: '田' },
   },
-]
+];
 
 // ---- テーブル列定義 ----
 const columns: ColumnDef<Task>[] = [
@@ -153,15 +176,17 @@ const columns: ColumnDef<Task>[] = [
     id: 'select',
     header: ({ table }) =>
       h(Checkbox, {
-        'modelValue': table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && 'indeterminate'),
+        modelValue:
+          table.getIsAllPageRowsSelected() ||
+          (table.getIsSomePageRowsSelected() && 'indeterminate'),
         'onUpdate:modelValue': (value) => table.toggleAllPageRowsSelected(!!value),
-        'ariaLabel': 'Select all',
+        ariaLabel: 'Select all',
       }),
     cell: ({ row }) =>
       h(Checkbox, {
-        'modelValue': row.getIsSelected(),
+        modelValue: row.getIsSelected(),
         'onUpdate:modelValue': (value) => row.toggleSelected(!!value),
-        'ariaLabel': 'Select row',
+        ariaLabel: 'Select row',
       }),
     enableSorting: false,
     enableHiding: false,
@@ -171,18 +196,22 @@ const columns: ColumnDef<Task>[] = [
     accessorFn: (row) => taskKey(row),
     header: ({ column }) => sortableHeader(column, 'ID'),
     cell: ({ row }) =>
-      h('span', { class: 'font-mono text-xs text-muted-foreground whitespace-nowrap' }, taskKey(row.original)),
+      h(
+        'span',
+        { class: 'font-mono text-xs text-muted-foreground whitespace-nowrap' },
+        taskKey(row.original),
+      ),
   },
   {
     accessorKey: 'title',
     header: ({ column }) => sortableHeader(column, 'タイトル'),
     cell: ({ row }) => {
-      const task = row.original
-      const pc = PRIORITY_CONFIG[task.priority]
+      const task = row.original;
+      const pc = PRIORITY_CONFIG[task.priority];
       return h('div', { class: 'flex items-center gap-2 min-w-0' }, [
         h(pc.icon as any, { class: 'size-4 shrink-0', weight: 'thin', style: { color: pc.color } }),
         h('span', { class: 'truncate text-sm' }, task.title),
-      ])
+      ]);
     },
   },
   {
@@ -190,15 +219,20 @@ const columns: ColumnDef<Task>[] = [
     accessorFn: (row) => row.status.name,
     header: ({ column }) => sortableHeader(column, 'ステータス'),
     cell: ({ row }) => {
-      const s = row.original.status
-      return h('span', {
-        class: 'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap',
-        style: {
-          backgroundColor: s.color + '1a',
-          borderColor: s.color + '66',
-          color: s.color,
+      const s = row.original.status;
+      return h(
+        'span',
+        {
+          class:
+            'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap',
+          style: {
+            backgroundColor: s.color + '1a',
+            borderColor: s.color + '66',
+            color: s.color,
+          },
         },
-      }, s.name)
+        s.name,
+      );
     },
   },
   {
@@ -207,14 +241,15 @@ const columns: ColumnDef<Task>[] = [
     sortingFn: (a, b) => PRIORITY_ORDER[a.original.priority] - PRIORITY_ORDER[b.original.priority],
     header: ({ column }) => sortableHeader(column, '優先度'),
     cell: ({ row }) => {
-      const pc = PRIORITY_CONFIG[row.original.priority]
-      return h('span', {
-        class: 'inline-flex items-center gap-1 text-xs whitespace-nowrap',
-        style: { color: pc.color },
-      }, [
-        h(pc.icon as any, { class: 'size-4', weight: 'thin' }),
-        pc.label,
-      ])
+      const pc = PRIORITY_CONFIG[row.original.priority];
+      return h(
+        'span',
+        {
+          class: 'inline-flex items-center gap-1 text-xs whitespace-nowrap',
+          style: { color: pc.color },
+        },
+        [h(pc.icon as any, { class: 'size-4', weight: 'thin' }), pc.label],
+      );
     },
   },
   {
@@ -222,14 +257,14 @@ const columns: ColumnDef<Task>[] = [
     accessorFn: (row) => row.assignee?.name ?? '',
     header: ({ column }) => sortableHeader(column, '担当者'),
     cell: ({ row }) => {
-      const a = row.original.assignee
-      if (!a) return h('span', { class: 'text-muted-foreground text-xs' }, '−')
+      const a = row.original.assignee;
+      if (!a) return h('span', { class: 'text-muted-foreground text-xs' }, '−');
       return h('div', { class: 'flex items-center gap-1.5' }, [
         h(Avatar, { class: 'size-5' }, () => [
           h(AvatarFallback, { class: 'text-[10px]' }, () => a.initials),
         ]),
         h('span', { class: 'text-xs truncate max-w-24' }, a.name),
-      ])
+      ]);
     },
   },
   {
@@ -237,20 +272,27 @@ const columns: ColumnDef<Task>[] = [
     accessorFn: (row) => row.due_date ?? '',
     header: ({ column }) => sortableHeader(column, '期限'),
     cell: ({ row }) => {
-      const formatted = formatDate(row.original.due_date)
-      if (!formatted) return h('span', { class: 'text-muted-foreground text-xs' }, '−')
-      return h('span', {
-        class: ['text-xs whitespace-nowrap', formatted.overdue ? 'text-red-500 font-medium' : 'text-muted-foreground'],
-      }, formatted.label)
+      const formatted = formatDate(row.original.due_date);
+      if (!formatted) return h('span', { class: 'text-muted-foreground text-xs' }, '−');
+      return h(
+        'span',
+        {
+          class: [
+            'text-xs whitespace-nowrap',
+            formatted.overdue ? 'text-red-500 font-medium' : 'text-muted-foreground',
+          ],
+        },
+        formatted.label,
+      );
     },
   },
-]
+];
 
 // ---- テーブル状態 ----
-const sorting          = ref<SortingState>([])
-const columnFilters    = ref<ColumnFiltersState>([])
-const columnVisibility = ref<VisibilityState>({})
-const rowSelection     = ref({})
+const sorting = ref<SortingState>([]);
+const columnFilters = ref<ColumnFiltersState>([]);
+const columnVisibility = ref<VisibilityState>({});
+const rowSelection = ref({});
 
 const table = useVueTable({
   data,
@@ -259,17 +301,25 @@ const table = useVueTable({
   getPaginationRowModel: getPaginationRowModel(),
   getSortedRowModel: getSortedRowModel(),
   getFilteredRowModel: getFilteredRowModel(),
-  onSortingChange:          (u) => valueUpdater(u, sorting),
-  onColumnFiltersChange:    (u) => valueUpdater(u, columnFilters),
+  onSortingChange: (u) => valueUpdater(u, sorting),
+  onColumnFiltersChange: (u) => valueUpdater(u, columnFilters),
   onColumnVisibilityChange: (u) => valueUpdater(u, columnVisibility),
-  onRowSelectionChange:     (u) => valueUpdater(u, rowSelection),
+  onRowSelectionChange: (u) => valueUpdater(u, rowSelection),
   state: {
-    get sorting()          { return sorting.value },
-    get columnFilters()    { return columnFilters.value },
-    get columnVisibility() { return columnVisibility.value },
-    get rowSelection()     { return rowSelection.value },
+    get sorting() {
+      return sorting.value;
+    },
+    get columnFilters() {
+      return columnFilters.value;
+    },
+    get columnVisibility() {
+      return columnVisibility.value;
+    },
+    get rowSelection() {
+      return rowSelection.value;
+    },
   },
-})
+});
 </script>
 
 <template>
@@ -290,7 +340,7 @@ const table = useVueTable({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuCheckboxItem
-            v-for="col in table.getAllColumns().filter(c => c.getCanHide())"
+            v-for="col in table.getAllColumns().filter((c) => c.getCanHide())"
             :key="col.id"
             class="text-sm"
             :model-value="col.getIsVisible()"
@@ -307,11 +357,7 @@ const table = useVueTable({
       <Table>
         <TableHeader>
           <TableRow v-for="hg in table.getHeaderGroups()" :key="hg.id">
-            <TableHead
-              v-for="header in hg.headers"
-              :key="header.id"
-              class="h-9 text-xs px-3"
-            >
+            <TableHead v-for="header in hg.headers" :key="header.id" class="h-9 text-xs px-3">
               <FlexRender
                 v-if="!header.isPlaceholder"
                 :render="header.column.columnDef.header"
@@ -328,15 +374,8 @@ const table = useVueTable({
               :data-state="row.getIsSelected() && 'selected'"
               class="h-10"
             >
-              <TableCell
-                v-for="cell in row.getVisibleCells()"
-                :key="cell.id"
-                class="py-1.5 px-3"
-              >
-                <FlexRender
-                  :render="cell.column.columnDef.cell"
-                  :props="cell.getContext()"
-                />
+              <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id" class="py-1.5 px-3">
+                <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
               </TableCell>
             </TableRow>
           </template>
@@ -360,15 +399,21 @@ const table = useVueTable({
       </span>
       <div class="flex gap-1.5">
         <Button
-          variant="outline" size="sm" class="h-7 text-xs"
+          variant="outline"
+          size="sm"
+          class="h-7 text-xs"
           :disabled="!table.getCanPreviousPage()"
           @click="table.previousPage()"
-        >前へ</Button>
+          >前へ</Button
+        >
         <Button
-          variant="outline" size="sm" class="h-7 text-xs"
+          variant="outline"
+          size="sm"
+          class="h-7 text-xs"
           :disabled="!table.getCanNextPage()"
           @click="table.nextPage()"
-        >次へ</Button>
+          >次へ</Button
+        >
       </div>
     </div>
   </div>
