@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import PasswordInput from '@/components/auth/PasswordInput.vue';
 import { Input } from '@/components/ui/input';
-import { meQueryOptions, useLoginMutation } from '@/lib/api-vue-query';
+import { meQueryOptions, useLoginMutation, useLogoutMutation } from '@/lib/api-vue-query';
 import { arkMessage } from '@/lib/auth-validation';
 
 const schema = type({
@@ -18,6 +18,7 @@ const schema = type({
 
 const queryClient = useQueryClient();
 const loginMutation = useLoginMutation();
+const logoutMutation = useLogoutMutation();
 const submitError = ref<string | null>(null);
 
 const form = useForm({
@@ -34,6 +35,11 @@ const form = useForm({
       });
 
       if (result && typeof result === 'object' && 'requires_2fa' in result) {
+        try {
+          await logoutMutation.mutateAsync({} as never);
+        } catch {
+          // logout failure: still show the same unsupported-2FA message
+        }
         submitError.value = '二要素認証は現在サポートされていません。';
         return;
       }
