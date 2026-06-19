@@ -1,4 +1,5 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
+import { STORAGE_STATE } from './global-setup';
 
 const isCI = !!process.env.CI;
 
@@ -9,6 +10,26 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   reporter: isCI ? 'github' : 'list',
+  projects: [
+    // Logs in once and saves the session for authenticated specs.
+    {
+      name: 'setup',
+      testMatch: /auth\.setup\.ts/,
+    },
+    // Unauthenticated specs (e.g. the sign-in page render check).
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+      testIgnore: [/auth\.setup\.ts/, /.*\.authenticated\.spec\.ts/],
+    },
+    // Authenticated specs reuse the saved session from the setup project.
+    {
+      name: 'authenticated',
+      use: { ...devices['Desktop Chrome'], storageState: STORAGE_STATE },
+      testMatch: /.*\.authenticated\.spec\.ts/,
+      dependencies: ['setup'],
+    },
+  ],
   webServer: [
     {
       // CI: pass BACKEND_BIN=<absolute path> to skip rebuild
