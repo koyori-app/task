@@ -93,5 +93,5 @@ jobs:
           tool: cargo-nextest
 
       - name: Run tests
-        run: cargo nextest run
+        run: cargo nextest run --test-threads=1
         working-directory: apps/backend
