@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { defineComponent } from 'vue';
+import { defineComponent, ref } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import {
   AUTH_ME_STALE_TIME_MS,
   createTestApiClient,
+  fetchClient,
   meQueryOptions,
   projectLabelsQueryOptions,
+  useMeQuery,
 } from '../api-vue-query';
 
 const mockUser = {
@@ -187,5 +189,120 @@ describe('api-vue-query PoC', () => {
     );
 
     await expect(mutation.mutateAsync({} as never)).rejects.toBeTruthy();
+  });
+});
+
+describe('api-vue-query production client', () => {
+  let queryClient: QueryClient;
+  const originalFetch = globalThis.fetch;
+
+  function meResponse() {
+    return new Response(JSON.stringify(mockUser), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  function withQuery<T>(setup: () => T): T {
+    let result!: T;
+    mount(
+      defineComponent({
+        setup() {
+          result = setup();
+          return {};
+        },
+        template: '<div />',
+      }),
+      {
+        global: {
+          plugins: [[VueQueryPlugin, { queryClient }]],
+        },
+      },
+    );
+    return result;
+  }
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+  });
+
+  afterEach(() => {
+    queryClient.clear();
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('fetchClient delegates HTTP to globalThis.fetch', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(meResponse());
+    globalThis.fetch = fetchSpy;
+
+    const { data, error } = await fetchClient.GET('/v1/auth/me');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(error).toBeUndefined();
+    expect(data).toEqual(mockUser);
+  });
+
+  it('useMeQuery fetches /v1/auth/me via production client', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(meResponse());
+    globalThis.fetch = fetchSpy;
+
+    const query = withQuery(() => useMeQuery());
+
+    await flushPromises();
+
+    expect(query.isSuccess.value).toBe(true);
+    expect(query.data.value).toEqual(mockUser);
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  it('useMeQuery does not fetch when enabled is false', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(meResponse());
+    globalThis.fetch = fetchSpy;
+
+    const query = withQuery(() => useMeQuery({ enabled: false }));
+
+    await flushPromises();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(query.isFetched.value).toBe(false);
+    expect(query.data.value).toBeUndefined();
+  });
+
+  it('useMeQuery respects reactive enabled ref', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(meResponse());
+    globalThis.fetch = fetchSpy;
+    const enabled = ref(false);
+
+    const query = withQuery(() => useMeQuery({ enabled }));
+
+    await flushPromises();
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    enabled.value = true;
+    await flushPromises();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(query.isSuccess.value).toBe(true);
+    expect(query.data.value).toEqual(mockUser);
+  });
+
+  it('projectLabelsQueryOptions builds tenant/project query key', () => {
+    const options = projectLabelsQueryOptions('tenant-a', 'project-b');
+    expect(options.queryKey).toEqual([
+      'get',
+      '/v1/tenants/{tenant_id}/projects/{project_id}/labels',
+      { params: { path: { tenant_id: 'tenant-a', project_id: 'project-b' } } },
+    ]);
+  });
+
+  it('meQueryOptions disables retry for session cache', () => {
+    expect(meQueryOptions().retry).toBe(false);
+    expect(meQueryOptions().staleTime).toBe(AUTH_ME_STALE_TIME_MS);
   });
 });
