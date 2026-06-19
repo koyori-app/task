@@ -231,7 +231,10 @@ mod tests {
 
     #[test]
     fn to_path_rejects_double_dot() {
-        assert!(matches!(to_path("../escape"), Err(StorageError::InvalidKey)));
+        assert!(matches!(
+            to_path("../escape"),
+            Err(StorageError::InvalidKey)
+        ));
         assert!(matches!(
             to_path("foo/../bar"),
             Err(StorageError::InvalidKey)
