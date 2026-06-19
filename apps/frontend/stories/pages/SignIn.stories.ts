@@ -15,15 +15,8 @@ let locationAssignSpy: ReturnType<typeof fn>;
 let originalLocationAssign: Location['assign'];
 
 const getRequestInfo = (input: RequestInfo | URL, init?: RequestInit) => {
-  const url =
-    typeof input === 'string'
-      ? input
-      : input instanceof URL
-        ? input.href
-        : input.url;
-  const method = (
-    init?.method ?? (input instanceof Request ? input.method : 'GET')
-  ).toUpperCase();
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
   return { url, method };
 };
 

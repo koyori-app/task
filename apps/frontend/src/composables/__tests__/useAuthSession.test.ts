@@ -152,9 +152,7 @@ describe('useAuthSession', () => {
 
     await flushPromises();
 
-    const meCalls = fetchMock.mock.calls.filter((call) =>
-      call[0].url.includes('/v1/auth/me'),
-    );
+    const meCalls = fetchMock.mock.calls.filter((call) => call[0].url.includes('/v1/auth/me'));
     expect(meCalls).toHaveLength(0);
     expect(assignSpy).not.toHaveBeenCalled();
     assignSpy.mockRestore();

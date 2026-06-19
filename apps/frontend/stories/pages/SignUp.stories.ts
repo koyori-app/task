@@ -15,15 +15,8 @@ let locationAssignSpy: ReturnType<typeof fn>;
 let originalLocationAssign: Location['assign'];
 
 const getRequestInfo = (input: RequestInfo | URL, init?: RequestInit) => {
-  const url =
-    typeof input === 'string'
-      ? input
-      : input instanceof URL
-        ? input.href
-        : input.url;
-  const method = (
-    init?.method ?? (input instanceof Request ? input.method : 'GET')
-  ).toUpperCase();
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
   return { url, method };
 };
 
@@ -131,9 +124,7 @@ export const RegisterError: Story = {
     await fillSignUpForm(canvas);
     await userEvent.click(canvas.getByRole('button', { name: 'アカウント作成' }));
     await expect(
-      canvas.findByText(
-        '登録に失敗しました。メールアドレスが既に使われている可能性があります。',
-      ),
+      canvas.findByText('登録に失敗しました。メールアドレスが既に使われている可能性があります。'),
     ).resolves.toBeInTheDocument();
   },
 };
