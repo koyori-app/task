@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::StreamExt;
 use object_store::aws::AmazonS3Builder;
-use object_store::{Attribute, Attributes, ObjectStore, PutMultipartOpts, PutOptions, PutPayload, path::Path};
+use object_store::{
+    Attribute, Attributes, ObjectStore, PutMultipartOpts, PutOptions, PutPayload, path::Path,
+};
 
 use super::r#trait::{ByteStream, StorageBackend, StorageError};
 
@@ -140,7 +142,9 @@ impl StorageBackend for S3StorageBackend {
                 .store
                 .put_multipart_opts(&path, opts)
                 .await
-                .map_err(|e| StorageError::Other(format!("S3 CreateMultipartUpload failed: {e}")))?;
+                .map_err(|e| {
+                    StorageError::Other(format!("S3 CreateMultipartUpload failed: {e}"))
+                })?;
 
             let mut pending: Vec<u8> = Vec::with_capacity(MULTIPART_PART_SIZE);
             let mut uploaded: u64 = 0;
@@ -154,10 +158,9 @@ impl StorageBackend for S3StorageBackend {
                     while pending.len() >= MULTIPART_PART_SIZE {
                         let part =
                             Bytes::from(pending.drain(..MULTIPART_PART_SIZE).collect::<Vec<_>>());
-                        upload
-                            .put_part(PutPayload::from(part))
-                            .await
-                            .map_err(|e| StorageError::Other(format!("S3 UploadPart failed: {e}")))?;
+                        upload.put_part(PutPayload::from(part)).await.map_err(|e| {
+                            StorageError::Other(format!("S3 UploadPart failed: {e}"))
+                        })?;
                     }
                 }
                 if !pending.is_empty() {
@@ -181,10 +184,9 @@ impl StorageBackend for S3StorageBackend {
                 return result;
             }
 
-            upload
-                .complete()
-                .await
-                .map_err(|e| StorageError::Other(format!("S3 CompleteMultipartUpload failed: {e}")))?;
+            upload.complete().await.map_err(|e| {
+                StorageError::Other(format!("S3 CompleteMultipartUpload failed: {e}"))
+            })?;
         }
 
         Ok(())
@@ -242,10 +244,7 @@ mod tests {
             validate_key("foo/../bar"),
             Err(StorageError::InvalidKey)
         ));
-        assert!(matches!(
-            validate_key(".."),
-            Err(StorageError::InvalidKey)
-        ));
+        assert!(matches!(validate_key(".."), Err(StorageError::InvalidKey)));
     }
 
     #[test]
@@ -275,8 +274,7 @@ mod tests {
 
     #[test]
     fn read_stream_to_bytes_single_chunk() {
-        let chunks: Vec<Result<Bytes, StorageError>> =
-            vec![Ok(Bytes::from_static(b"hello"))];
+        let chunks: Vec<Result<Bytes, StorageError>> = vec![Ok(Bytes::from_static(b"hello"))];
         let stream: ByteStream = Box::pin(futures::stream::iter(chunks));
         let result = futures::executor::block_on(read_stream_to_bytes(stream, 5));
         assert!(result.is_ok());
@@ -285,8 +283,7 @@ mod tests {
 
     #[test]
     fn read_stream_to_bytes_size_mismatch() {
-        let chunks: Vec<Result<Bytes, StorageError>> =
-            vec![Ok(Bytes::from_static(b"short"))];
+        let chunks: Vec<Result<Bytes, StorageError>> = vec![Ok(Bytes::from_static(b"short"))];
         let stream: ByteStream = Box::pin(futures::stream::iter(chunks));
         let result = futures::executor::block_on(read_stream_to_bytes(stream, 100));
         assert!(matches!(
@@ -321,8 +318,7 @@ mod tests {
     fn upload_rejects_invalid_key() {
         let backend = dummy_backend();
         let stream: ByteStream = Box::pin(futures::stream::empty());
-        let result =
-            futures::executor::block_on(backend.upload("", stream, 0, "text/plain"));
+        let result = futures::executor::block_on(backend.upload("", stream, 0, "text/plain"));
         assert!(matches!(result, Err(StorageError::InvalidKey)));
     }
 

@@ -118,10 +118,7 @@ mod tests {
             validate_key("../escape"),
             Err(StorageError::InvalidKey)
         ));
-        assert!(matches!(
-            validate_key(".."),
-            Err(StorageError::InvalidKey)
-        ));
+        assert!(matches!(validate_key(".."), Err(StorageError::InvalidKey)));
     }
 
     #[test]
