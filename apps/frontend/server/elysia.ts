@@ -1,4 +1,3 @@
-import { createTodoHandler } from '#/middlewares/create-todo-handler';
 import { apiProxyPlugin } from '#/middlewares/api-proxy';
 import { settingInjector } from '#/middlewares/setting-injector';
 import { staticPlugin } from '@elysiajs/static';
@@ -46,7 +45,7 @@ export function getApp() {
 
   app.use(apiProxyPlugin);
 
-  vike(app, [settingInjector, createTodoHandler]);
+  vike(app, [settingInjector]);
 
   return app;
 }

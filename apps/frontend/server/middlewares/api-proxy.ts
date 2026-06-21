@@ -55,7 +55,7 @@ async function proxyToBackend(request: Request): Promise<Response> {
 
 /**
  * Dev/prod SSR: forward /api/v1/* to the Rust backend with /api stripped.
- * Local SSR routes (/api/todo/create, /internal/*) stay on Elysia.
+ * Local SSR routes (/internal/*) stay on Elysia.
  */
 export const apiProxyPlugin = new Elysia({ name: 'api-proxy' }).all('/api/v1/*', ({ request }) =>
   proxyToBackend(request),

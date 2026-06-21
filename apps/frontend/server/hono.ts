@@ -1,4 +1,3 @@
-import { createTodoHandler } from './middlewares/create-todo-handler';
 import vike from '@vikejs/hono';
 import { Hono } from 'hono';
 
@@ -8,7 +7,7 @@ import { Hono } from 'hono';
 function getApp() {
   const app = new Hono();
 
-  vike(app, [createTodoHandler]);
+  vike(app);
 
   return app;
 }
