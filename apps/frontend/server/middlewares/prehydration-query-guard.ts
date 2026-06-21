@@ -10,7 +10,7 @@ export const prehydrationQueryGuard: UniversalMiddleware = enhance(
     }
 
     const url = new URL(request.url);
-    if (!GUARDED_PATHS.has(url.pathname)) {
+    if (!GUARDED_PATHS.has(url.pathname.toLowerCase())) {
       return context;
     }
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue';
 import { useHydrated } from '@/composables/useHydrated';
 
 const emit = defineEmits<{
@@ -6,6 +7,11 @@ const emit = defineEmits<{
 }>();
 
 const isHydrated = useHydrated();
+const formEl = ref<HTMLFormElement | null>(null);
+
+onMounted(() => {
+  formEl.value?.removeAttribute('onsubmit');
+});
 
 function handleSubmit(event: SubmitEvent) {
   if (!isHydrated.value) {
@@ -24,7 +30,12 @@ function preventPrehydrationEnter(event: KeyboardEvent) {
 </script>
 
 <template>
-  <form @submit.prevent="handleSubmit" @keydown.enter="preventPrehydrationEnter">
+  <form
+    ref="formEl"
+    onsubmit="return false;"
+    @submit.prevent="handleSubmit"
+    @keydown.enter="preventPrehydrationEnter"
+  >
     <slot :is-hydrated="isHydrated" />
   </form>
 </template>

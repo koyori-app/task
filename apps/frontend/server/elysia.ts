@@ -1,4 +1,5 @@
 import { apiProxyPlugin } from '#/middlewares/api-proxy';
+import { prehydrationQueryGuard } from '#/middlewares/prehydration-query-guard';
 import { settingInjector } from '#/middlewares/setting-injector';
 import { staticPlugin } from '@elysiajs/static';
 import vike from '@vikejs/elysia';
