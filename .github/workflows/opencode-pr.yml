@@ -12,7 +12,8 @@ jobs:
   opencode:
     if: |
       (
-        github.event_name == 'pull_request'
+        github.event_name == 'pull_request' &&
+        contains(fromJson('["yupix", "sousuke0422"]'), github.event.pull_request.user.login)
       ) ||
       (
         (
