@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
 
 import { Button } from '@/components/ui/button';
+import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -147,7 +148,11 @@ function priorityLabel(p: string) {
       </Button>
     </div>
 
-    <form class="flex flex-col gap-3 rounded-lg border p-4" @submit.prevent="submitCapture">
+    <HydrationSafeForm
+      v-slot="{ isHydrated }"
+      class="flex flex-col gap-3 rounded-lg border p-4"
+      @submit="submitCapture"
+    >
       <p class="text-sm font-medium">クイックキャプチャ</p>
       <div class="flex flex-col gap-2 sm:flex-row">
         <Input v-model="captureTitle" placeholder="タスクを追加..." class="flex-1" />
@@ -162,13 +167,16 @@ function priorityLabel(p: string) {
             <SelectItem value="Low">低</SelectItem>
           </SelectContent>
         </Select>
-        <Button type="submit" :disabled="captureMutation.isPending.value || !captureTitle.trim()">
+        <Button
+          type="submit"
+          :disabled="captureMutation.isPending.value || !captureTitle.trim() || !isHydrated"
+        >
           <Loader2 v-if="captureMutation.isPending.value" class="mr-2 h-4 w-4 animate-spin" />
           追加
         </Button>
       </div>
       <p v-if="errorMessage" class="text-sm text-destructive mt-2">{{ errorMessage }}</p>
-    </form>
+    </HydrationSafeForm>
 
     <div v-if="tasksQuery.isFetching.value" class="flex justify-center py-8">
       <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />

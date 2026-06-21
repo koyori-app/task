@@ -45,7 +45,7 @@ export function getApp() {
 
   app.use(apiProxyPlugin);
 
-  vike(app, [settingInjector]);
+  vike(app, [prehydrationQueryGuard, settingInjector]);
 
   return app;
 }
