@@ -13,8 +13,15 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { useAuthSession } from '@/composables/useAuthSession';
+import { clientOnly } from 'vike-vue/clientOnly';
 import { usePageContext } from 'vike-vue/usePageContext';
-import { computed, defineAsyncComponent } from 'vue';
+import { computed, defineAsyncComponent, defineComponent } from 'vue';
+
+const TanStackDevtools = import.meta.env.DEV
+  ? clientOnly(() => import('@/components/devtools/TanStackDevtoolsClient.vue'))
+  : defineComponent({ name: 'TanStackDevtoolsStub', render: () => null });
+
+const showTanStackDevtools = import.meta.env.DEV;
 
 const pageContext = usePageContext();
 const isAuthPage = computed(() => ['/signin', '/signup'].includes(pageContext.urlPathname));
@@ -27,6 +34,7 @@ const AppSidebar = defineAsyncComponent(() => import('@/components/sidebar/AppSi
 </script>
 
 <template>
+  <TanStackDevtools v-if="showTanStackDevtools" />
   <slot v-if="isAuthPage" />
   <div
     v-else-if="meQuery.isPending.value"

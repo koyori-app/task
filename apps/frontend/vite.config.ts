@@ -7,6 +7,7 @@ import { analyzer, unstableRolldownAdapter } from 'vite-bundle-analyzer';
 
 /// <reference types="@batijs/core/types" />
 
+import { devtools } from '@tanstack/devtools-vite';
 import vike from 'vike/plugin';
 import { defineConfig } from 'vite-plus';
 import path from 'node:path';
@@ -43,6 +44,7 @@ export default defineConfig({
   // Standalone build UI (vite build). Embedded client uses +onCreateApp inject.
   plugins: [
     ...(analyze ? [unstableRolldownAdapter(analyzer())] : []),
+    devtools(),
     vike(),
     ...(sentryPlugin ? [sentryPlugin] : []),
     tailwindcss(),
