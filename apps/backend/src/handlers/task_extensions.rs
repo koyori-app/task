@@ -33,17 +33,10 @@ use crate::utils::task_activities::{record_activity, status_name};
 const BULK_MAX_TASKS: usize = 100;
 
 fn use_pg_bigm_search() -> bool {
-    std::env::var("USE_PG_BIGM")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-}
-
-fn search_ts_config() -> &'static str {
-    if use_pg_bigm_search() {
-        "public.pg_bigm"
-    } else {
-        "pg_catalog.simple"
-    }
+    matches!(
+        std::env::var("USE_PG_BIGM").as_deref(),
+        Ok("1") | Ok("true") | Ok("True") | Ok("TRUE")
+    )
 }
 
 #[derive(Deserialize, ToSchema, utoipa::IntoParams)]
@@ -110,11 +103,24 @@ pub async fn search_tasks(
     let limit = q.limit.min(100);
     let offset = q.offset;
 
+    // pg_bigm は LIKE + gin_bigm_ops で使う拡張であり tsvector 設定名ではない。
+    // USE_PG_BIGM=true の場合は ILIKE + gin_bigm_ops index 経路を使う。
     if use_pg_bigm_search() {
-        search_tasks_tsvector(&state, project_id, query, limit, offset).await
-    } else {
         search_tasks_ilike(&state, project_id, query, limit, offset).await
+    } else {
+        search_tasks_tsvector(&state, project_id, query, limit, offset).await
     }
+}
+
+fn escape_like(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for c in s.chars() {
+        if matches!(c, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 async fn search_tasks_ilike(
@@ -124,12 +130,12 @@ async fn search_tasks_ilike(
     limit: u64,
     offset: u64,
 ) -> Result<Json<SearchTasksResponse>, AppError> {
-    let pattern = format!("%{query}%");
+    let pattern = format!("%{}%", escape_like(query));
     let base = tasks::Entity::find()
         .filter(tasks::Column::ProjectId.eq(project_id))
         .filter(tasks::Column::DeletedAt.is_null())
         .filter(Expr::cust_with_values(
-            "(COALESCE(title, '') ILIKE $1 OR COALESCE(description, '') ILIKE $1)",
+            "(COALESCE(title, '') ILIKE $1 ESCAPE '\\' OR COALESCE(description, '') ILIKE $1 ESCAPE '\\')",
             [pattern.clone()],
         ));
 
@@ -226,21 +232,18 @@ async fn search_tasks_tsvector(
     limit: u64,
     offset: u64,
 ) -> Result<Json<SearchTasksResponse>, AppError> {
-    let ts_config = search_ts_config();
-    let count_sql = format!(
-        r#"
+    let count_sql = r#"
         SELECT COUNT(*)::bigint AS cnt
         FROM tasks
         WHERE project_id = $1
           AND deleted_at IS NULL
-          AND search_vector @@ plainto_tsquery('{ts_config}', $2)
-    "#
-    );
+          AND search_vector @@ plainto_tsquery('pg_catalog.simple', $2)
+    "#;
     let count_result = state
         .db
         .query_one_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
-            &count_sql,
+            count_sql,
             [project_id.into(), query.into()],
         ))
         .await?;
@@ -248,28 +251,26 @@ async fn search_tasks_tsvector(
         .and_then(|r| r.try_get_by_index(0).ok())
         .unwrap_or(0);
 
-    let search_sql = format!(
-        r#"
+    let search_sql = r#"
         SELECT id, seq_id, title,
-               ts_rank(search_vector, plainto_tsquery('{ts_config}', $2))::real AS score,
+               ts_rank(search_vector, plainto_tsquery('pg_catalog.simple', $2))::real AS score,
                ts_headline(
-                   '{ts_config}',
+                   'pg_catalog.simple',
                    coalesce(title, '') || ' ' || coalesce(description, ''),
-                   plainto_tsquery('{ts_config}', $2)
+                   plainto_tsquery('pg_catalog.simple', $2)
                ) AS highlight
         FROM tasks
         WHERE project_id = $1
           AND deleted_at IS NULL
-          AND search_vector @@ plainto_tsquery('{ts_config}', $2)
+          AND search_vector @@ plainto_tsquery('pg_catalog.simple', $2)
         ORDER BY score DESC
         LIMIT $3 OFFSET $4
-    "#
-    );
+    "#;
     let rows = state
         .db
         .query_all_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
-            &search_sql,
+            search_sql,
             [
                 project_id.into(),
                 query.into(),
@@ -422,27 +423,31 @@ async fn apply_bulk_update(
     let mut active: tasks::ActiveModel = task.into();
 
     if let Some(status_id) = update.status_id {
-        let status = project_statuses::Entity::find_by_id(status_id)
-            .filter(project_statuses::Column::ProjectId.eq(project_id))
-            .one(&txn)
-            .await?
-            .ok_or(AppError::NotFound)?;
-        active.status_id = Set(status_id);
-        active.completed_at = if status.is_done_state {
-            Set(Some(chrono::Utc::now()))
-        } else {
-            Set(None)
-        };
-        let from = status_name(&txn, snapshot.status_id).await?;
-        let to = status_name(&txn, status_id).await?;
-        record_activity(
-            &txn,
-            task_id,
-            Some(user_id),
-            "status_changed",
-            serde_json::json!({ "from": from, "to": to }).into(),
-        )
-        .await?;
+        // ステータスが変わらない場合は completed_at もアクティビティも更新しない
+        if status_id != snapshot.status_id {
+            let status = project_statuses::Entity::find_by_id(status_id)
+                .filter(project_statuses::Column::ProjectId.eq(project_id))
+                .one(&txn)
+                .await?
+                .ok_or(AppError::NotFound)?;
+            active.status_id = Set(status_id);
+            // 単体更新 API と同じルール: done 状態なら既存 completed_at を保持、なければ now()
+            active.completed_at = if status.is_done_state {
+                Set(Some(snapshot.completed_at.unwrap_or_else(chrono::Utc::now)))
+            } else {
+                Set(None)
+            };
+            let from = status_name(&txn, snapshot.status_id).await?;
+            let to = status_name(&txn, status_id).await?;
+            record_activity(
+                &txn,
+                task_id,
+                Some(user_id),
+                "status_changed",
+                serde_json::json!({ "from": from, "to": to }).into(),
+            )
+            .await?;
+        }
     }
 
     if update.clear_sprint_id {
