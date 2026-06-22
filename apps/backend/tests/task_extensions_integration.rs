@@ -6,7 +6,7 @@ use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 use serde_json::Value;
 use uuid::Uuid;
 
-use backend::entities::drive_files;
+use backend::entities::{drive_files, project_members};
 
 struct TaskFixture {
     tenant_id: Uuid,
@@ -285,4 +285,114 @@ async fn task_extensions_negative_cases() {
         )
         .await;
     assert_eq!(invalid_view.status(), StatusCode::BAD_REQUEST);
+}
+
+async fn add_project_member(app: &TestApp, project_id: Uuid, user_id: Uuid) {
+    project_members::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        project_id: Set(project_id),
+        user_id: Set(user_id),
+        role: Set(project_members::ProjectRole::Member),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("add project member");
+}
+
+#[tokio::test]
+async fn task_extensions_acl_cases() {
+    let mut app = TestApp::new().await;
+    let fx = setup_task(&mut app).await; // owner としてログイン済み
+
+    let views_base = format!(
+        "/v1/tenants/{}/projects/{}/task-views",
+        fx.tenant_id, fx.project_id
+    );
+
+    // owner が非共有ビューと共有ビューを作成
+    let private = app
+        .post_json_with_session(
+            &views_base,
+            serde_json::json!({ "name": "Owner private", "is_shared": false }),
+        )
+        .await;
+    assert_eq!(private.status(), StatusCode::CREATED);
+    let private_body: Value = private.json().await.expect("private view json");
+    let private_view_id = private_body["id"]
+        .as_str()
+        .expect("private view id")
+        .to_string();
+
+    let shared = app
+        .post_json_with_session(
+            &views_base,
+            serde_json::json!({ "name": "Owner shared", "is_shared": true }),
+        )
+        .await;
+    assert_eq!(shared.status(), StatusCode::CREATED);
+    let shared_body: Value = shared.json().await.expect("shared view json");
+    let shared_view_id = shared_body["id"]
+        .as_str()
+        .expect("shared view id")
+        .to_string();
+
+    // プロジェクトメンバー B と、メンバーでない outsider を用意
+    let member_b = app.insert_user(false, false).await;
+    add_project_member(&app, fx.project_id, member_b.id).await;
+    let outsider = app.insert_user(false, false).await;
+
+    // ケース1: 非メンバーは search / bulk で 403
+    app.login_session_no_content(&outsider.email, &outsider.password)
+        .await;
+    let search_path = format!(
+        "/v1/tenants/{}/projects/{}/tasks/search?q=OAuth",
+        fx.tenant_id, fx.project_id
+    );
+    let outsider_search = app.get_with_session(&search_path).await;
+    assert_eq!(outsider_search.status(), StatusCode::FORBIDDEN);
+
+    let bulk_path = format!(
+        "/v1/tenants/{}/projects/{}/tasks/bulk",
+        fx.tenant_id, fx.project_id
+    );
+    let outsider_bulk = app
+        .post_json_with_session(
+            &bulk_path,
+            serde_json::json!({
+                "task_ids": [Uuid::new_v4()],
+                "update": { "status_id": fx.status_done_id }
+            }),
+        )
+        .await;
+    assert_eq!(outsider_bulk.status(), StatusCode::FORBIDDEN);
+
+    // ケース2: メンバー B のビュー一覧には共有ビューのみ表示され、owner の非共有ビューは見えない
+    app.login_session_no_content(&member_b.email, &member_b.password)
+        .await;
+    let list = app.get_with_session(&views_base).await;
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_body: Value = list.json().await.expect("list views json");
+    let ids: Vec<&str> = list_body["views"]
+        .as_array()
+        .expect("views array")
+        .iter()
+        .filter_map(|v| v["id"].as_str())
+        .collect();
+    assert!(
+        ids.contains(&shared_view_id.as_str()),
+        "共有ビューはメンバーに見える"
+    );
+    assert!(
+        !ids.contains(&private_view_id.as_str()),
+        "owner の非共有ビューはメンバーに見えない"
+    );
+
+    // ケース3: メンバー B は owner のビューを更新できない（403）
+    let patch = app
+        .patch_json_with_session(
+            &format!("{views_base}/{private_view_id}"),
+            serde_json::json!({ "name": "hijack" }),
+        )
+        .await;
+    assert_eq!(patch.status(), StatusCode::FORBIDDEN);
 }

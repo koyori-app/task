@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS project_task_views (
     filters JSONB NOT NULL DEFAULT '{{}}',
     sort JSONB NOT NULL DEFAULT '{{}}',
     view_type VARCHAR NOT NULL DEFAULT 'list',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_project_task_views_project ON project_task_views(project_id);
