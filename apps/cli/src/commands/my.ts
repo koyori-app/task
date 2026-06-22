@@ -71,28 +71,34 @@ export function registerMyCommands(program: Command): void {
       const tenantId = getTenantId();
 
       if ("uuid" in parsed) {
-        const list = await client.GET("/v1/tenants/{tenant_id}/users/me/tasks", {
-          params: {
-            path: { tenant_id: tenantId },
-            query: { filter: "all", limit: 200 },
-          },
-        });
-        const tasks = unwrapApiResult(list).tasks;
-        const task = tasks.find((item) => item.id === parsed.uuid);
-        if (!task) {
+        let matchedTask: import("../api/paths").MyTaskItem | undefined;
+        const PAGE = 200;
+        let offset = 0;
+        while (!matchedTask) {
+          const list = await client.GET("/v1/tenants/{tenant_id}/users/me/tasks", {
+            params: {
+              path: { tenant_id: tenantId },
+              query: { filter: "all", limit: PAGE, offset },
+            },
+          });
+          const tasks = unwrapApiResult(list).tasks;
+          matchedTask = tasks.find((t) => t.id === parsed.uuid);
+          if (matchedTask || tasks.length < PAGE) break;
+          offset += PAGE;
+        }
+        if (!matchedTask) {
           const { handleApiError } = await import("../utils/errors");
           handleApiError({ status: 404, message: `Task not found: ${ref}` });
         }
-        const matchedTask = task!;
-        const statusId = await findDoneStatusId(matchedTask.project.id);
+        const statusId = await findDoneStatusId(matchedTask!.project.id);
         const result = await client.PUT(
           "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}",
           {
             params: {
               path: {
                 tenant_id: tenantId,
-                project_id: matchedTask.project.id,
-                id: matchedTask.id,
+                project_id: matchedTask!.project.id,
+                id: matchedTask!.id,
               },
             },
             body: { status_id: statusId },

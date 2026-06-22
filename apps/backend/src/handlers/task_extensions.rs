@@ -221,7 +221,7 @@ fn highlight_ilike(title: &str, description: Option<&str>, query: &str) -> Strin
             html_escape(&chars_slice(&text, end_char, display_end)),
         )
     } else {
-        text.chars().take(120).collect()
+        html_escape(&text.chars().take(120).collect::<String>())
     }
 }
 
@@ -252,13 +252,8 @@ async fn search_tasks_tsvector(
         .unwrap_or(0);
 
     let search_sql = r#"
-        SELECT id, seq_id, title,
-               ts_rank(search_vector, plainto_tsquery('pg_catalog.simple', $2))::real AS score,
-               ts_headline(
-                   'pg_catalog.simple',
-                   coalesce(title, '') || ' ' || coalesce(description, ''),
-                   plainto_tsquery('pg_catalog.simple', $2)
-               ) AS highlight
+        SELECT id, seq_id, title, description,
+               ts_rank(search_vector, plainto_tsquery('pg_catalog.simple', $2))::real AS score
         FROM tasks
         WHERE project_id = $1
           AND deleted_at IS NULL
@@ -282,12 +277,19 @@ async fn search_tasks_tsvector(
     let hits = rows
         .into_iter()
         .filter_map(|row| {
+            let title: Option<String> = row.try_get_by_index(2).ok()?;
+            let description: Option<String> = row.try_get_by_index(3).ok().flatten();
+            let highlight = highlight_ilike(
+                title.as_deref().unwrap_or(""),
+                description.as_deref(),
+                query,
+            );
             Some(SearchTaskHit {
                 id: row.try_get_by_index(0).ok()?,
                 seq_id: row.try_get_by_index(1).ok()?,
-                title: row.try_get_by_index(2).ok()?,
-                score: row.try_get_by_index(3).ok()?,
-                highlight: row.try_get_by_index(4).ok()?,
+                title,
+                score: row.try_get_by_index(4).ok()?,
+                highlight,
             })
         })
         .collect();
