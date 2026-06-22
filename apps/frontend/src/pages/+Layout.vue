@@ -13,15 +13,14 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { useAuthSession } from '@/composables/useAuthSession';
-import { clientOnly } from 'vike-vue/clientOnly';
+import { ClientOnly } from 'vike-vue/ClientOnly';
 import { usePageContext } from 'vike-vue/usePageContext';
-import { computed, defineAsyncComponent, defineComponent } from 'vue';
+import { computed, defineAsyncComponent } from 'vue';
 
 const TanStackDevtools = import.meta.env.DEV
-  ? clientOnly(() => import('@/components/devtools/TanStackDevtoolsClient.vue'))
-  : defineComponent({ name: 'TanStackDevtoolsStub', render: () => null });
-
-const showTanStackDevtools = import.meta.env.DEV;
+  ? defineAsyncComponent(() => import('@/components/devtools/TanStackDevtoolsClient.vue'))
+  : null;
+const isDev = import.meta.env.DEV;
 
 const pageContext = usePageContext();
 const isAuthPage = computed(() => ['/signin', '/signup'].includes(pageContext.urlPathname));
@@ -34,7 +33,9 @@ const AppSidebar = defineAsyncComponent(() => import('@/components/sidebar/AppSi
 </script>
 
 <template>
-  <TanStackDevtools v-if="showTanStackDevtools" />
+  <ClientOnly v-if="isDev && TanStackDevtools">
+    <component :is="TanStackDevtools" />
+  </ClientOnly>
   <slot v-if="isAuthPage" />
   <div
     v-else-if="meQuery.isPending.value"
