@@ -42,7 +42,7 @@
     "openapi-fetch": "0.17.0",
     "pinia": "3.0.4",
     "pinia-plugin-persistedstate": "4.7.1",
-    "reka-ui": "2.9.10",
+    "reka-ui": "2.10.0",
     "tailwind-merge": "3.6.0",
     "vike": "0.4.259",
     "vike-vue": "0.9.11",
