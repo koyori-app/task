@@ -33,7 +33,7 @@
     "@zxcvbn-ts/core": "3.0.4",
     "@zxcvbn-ts/language-common": "3.0.4",
     "@zxcvbn-ts/language-ja": "3.0.2",
-    "arkenv": "0.12.1",
+    "arkenv": "0.12.2",
     "arktype": "2.2.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
