@@ -38,7 +38,7 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "dotenv": "17.4.2",
-    "elysia": "1.4.28",
+    "elysia": "1.4.29",
     "openapi-fetch": "0.17.0",
     "pinia": "3.0.4",
     "pinia-plugin-persistedstate": "4.7.1",
