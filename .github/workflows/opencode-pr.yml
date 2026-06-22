@@ -3,34 +3,12 @@ name: opencode-pr
 on:
   pull_request:
     types: [opened, reopened, ready_for_review]
-  issue_comment:
-    types: [created]
-  pull_request_review_comment:
-    types: [created]
 
 jobs:
   opencode:
     if: |
-      (
-        github.event_name == 'pull_request' &&
-        contains(fromJson('["yupix", "sousuke0422"]'), github.event.pull_request.user.login)
-      ) ||
-      (
-        (
-          github.event_name == 'pull_request_review_comment' ||
-          (
-            github.event_name == 'issue_comment' &&
-            github.event.issue.pull_request
-          )
-        ) &&
-        (
-          startsWith(github.event.comment.body, '/oc') ||
-          contains(github.event.comment.body, ' /oc') ||
-          startsWith(github.event.comment.body, '/opencode') ||
-          contains(github.event.comment.body, ' /opencode')
-        ) &&
-        contains(fromJson('["yupix", "sousuke0422"]'), github.event.comment.user.login)
-      )
+      github.event_name == 'pull_request' &&
+      contains(fromJson('["yupix", "sousuke0422"]'), github.event.pull_request.user.login)
 
     runs-on: ubuntu-latest
 
