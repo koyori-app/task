@@ -75,9 +75,9 @@ const form = useForm({
                     type="email"
                     placeholder="m@example.com"
                     autocomplete="email"
-                    :value="field.state.value"
+                    :model-value="field.state.value"
                     @blur="field.handleBlur"
-                    @input="(e: Event) => field.handleChange((e.target as HTMLInputElement).value)"
+                    @update:model-value="(v) => field.handleChange(String(v))"
                   />
                   <FieldError class="min-h-[1.25rem]">
                     {{
