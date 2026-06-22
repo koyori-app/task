@@ -46,6 +46,10 @@ export function useLogoutMutation() {
   return apiClient.useMutation('post', '/v1/auth/logout');
 }
 
+export function useResendVerificationEmailMutation() {
+  return apiClient.useMutation('post', '/v1/auth/resend-verification-email');
+}
+
 export function createTestApiClient(fetchImpl: (input: Request) => Promise<Response>) {
   return createClient<paths>(
     createFetchClient<paths>({
