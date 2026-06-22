@@ -618,6 +618,7 @@ pub async fn create_task_view(
         sort: Set(payload.sort.into()),
         view_type: Set(payload.view_type),
         created_at: Set(chrono::Utc::now()),
+        updated_at: Set(chrono::Utc::now()),
     }
     .insert(&state.db)
     .await?;
@@ -670,6 +671,7 @@ pub async fn update_task_view(
     if let Some(view_type) = payload.view_type {
         active.view_type = Set(view_type);
     }
+    active.updated_at = Set(chrono::Utc::now());
 
     let updated = active.update(&state.db).await?;
     Ok(Json(updated))

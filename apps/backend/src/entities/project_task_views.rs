@@ -20,6 +20,8 @@ pub struct Model {
     pub view_type: String,
     #[schema(value_type = String, format = "date-time")]
     pub created_at: DateTimeUtc,
+    #[schema(value_type = String, format = "date-time")]
+    pub updated_at: DateTimeUtc,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -37,7 +39,7 @@ pub enum Relation {
         from = "Column::CreatedBy",
         to = "super::users::Column::Id",
         on_update = "NoAction",
-        on_delete = "NoAction"
+        on_delete = "Cascade"
     )]
     Users,
 }
