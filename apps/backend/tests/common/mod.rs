@@ -193,6 +193,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal_owner
             .await
             .expect("prepare personal project columns");
 
+            // search_vector は GENERATED ALWAYS AS の tsvector カラムで entity 定義に無いため
+            // sync() が作らない。手動で追加する。
+            db.execute_unprepared(
+                r#"
+ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS search_vector tsvector
+    GENERATED ALWAYS AS (
+        to_tsvector('pg_catalog.simple',
+            coalesce(title, '') || ' ' || coalesce(description, ''))
+    ) STORED;
+CREATE INDEX IF NOT EXISTS idx_tasks_search_vector ON tasks USING GIN(search_vector);
+"#,
+            )
+            .await
+            .expect("prepare search_vector column");
+
         })
         .await;
 }
