@@ -3,14 +3,14 @@ import { ref } from 'vue';
 import { Button } from '@/components/ui/button';
 import { useResendVerificationEmailMutation } from '@/lib/api-vue-query';
 
-const props = defineProps<{ email: string }>();
+const props = defineProps<{ email: string; backHref?: string }>();
 const emit = defineEmits<{ logout: [] }>();
 
 const resendMutation = useResendVerificationEmailMutation();
 const sent = ref(false);
 
 async function resend() {
-  await resendMutation.mutateAsync({} as never);
+  await resendMutation.mutateAsync({ body: { email: props.email } });
   sent.value = true;
 }
 </script>
@@ -36,7 +36,10 @@ async function resend() {
         >
           {{ resendMutation.isPending.value ? '送信中…' : '確認メールを再送する' }}
         </Button>
-        <Button variant="ghost" size="sm" @click="emit('logout')">サインアウト</Button>
+        <a v-if="props.backHref" :href="props.backHref">
+          <Button variant="ghost" size="sm">サインインページへ戻る</Button>
+        </a>
+        <Button v-else variant="ghost" size="sm" @click="emit('logout')">サインアウト</Button>
       </div>
     </div>
   </div>
