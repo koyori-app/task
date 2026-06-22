@@ -2,6 +2,7 @@
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { ref } from 'vue';
+import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
 import PasswordInput from '@/components/auth/PasswordInput.vue';
 import PasswordStrengthBar from '@/components/auth/PasswordStrengthBar.vue';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,7 @@ const schema = type({
 
 const registerMutation = useRegisterMutation();
 const submitError = ref<string | null>(null);
+const registeredEmail = ref<string | null>(null);
 const passwordFocused = ref(false);
 const passwordValue = ref('');
 const { strength } = usePasswordStrength(passwordValue);
@@ -38,7 +40,7 @@ const form = useForm({
         },
         parseAs: 'text',
       });
-      window.location.assign('/signin');
+      registeredEmail.value = value.email;
     } catch {
       submitError.value = '登録に失敗しました。メールアドレスが既に使われている可能性があります。';
     }
@@ -47,7 +49,8 @@ const form = useForm({
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
+  <EmailNotVerified v-if="registeredEmail" :email="registeredEmail" back-href="/signin" />
+  <div v-else class="flex flex-col gap-6">
     <Card class="overflow-hidden p-0">
       <CardContent class="grid p-0 md:grid-cols-2">
         <form class="p-6 md:p-8" @submit.prevent="form.handleSubmit">

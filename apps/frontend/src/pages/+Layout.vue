@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
+import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
 import { useAuthSession } from '@/composables/useAuthSession';
 import { ClientOnly } from 'vike-vue/ClientOnly';
 import { usePageContext } from 'vike-vue/usePageContext';
@@ -25,9 +26,11 @@ const isDev = import.meta.env.DEV;
 const pageContext = usePageContext();
 const isAuthPage = computed(() => ['/signin', '/signup'].includes(pageContext.urlPathname));
 
-const { meQuery } = useAuthSession({
+const { meQuery, logout } = useAuthSession({
   guard: computed(() => !isAuthPage.value),
 });
+
+const isEmailVerified = computed(() => meQuery.data.value?.email_verified ?? true);
 
 const AppSidebar = defineAsyncComponent(() => import('@/components/sidebar/AppSidebar.vue'));
 </script>
@@ -43,6 +46,11 @@ const AppSidebar = defineAsyncComponent(() => import('@/components/sidebar/AppSi
   >
     読み込み中…
   </div>
+  <EmailNotVerified
+    v-else-if="meQuery.isSuccess.value && !isEmailVerified"
+    :email="meQuery.data.value!.email"
+    @logout="logout"
+  />
   <SidebarProvider v-else-if="meQuery.isSuccess.value">
     <Suspense>
       <AppSidebar />

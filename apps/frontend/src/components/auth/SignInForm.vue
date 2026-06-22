@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { ref } from 'vue';
+import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
@@ -20,12 +21,14 @@ const queryClient = useQueryClient();
 const loginMutation = useLoginMutation();
 const logoutMutation = useLogoutMutation();
 const submitError = ref<string | null>(null);
+const unverifiedEmail = ref<string | null>(null);
 
 const form = useForm({
   defaultValues: { email: '', password: '' },
   validators: { onSubmit: schema },
   onSubmit: async ({ value }) => {
     submitError.value = null;
+    unverifiedEmail.value = null;
     try {
       const result = await loginMutation.mutateAsync({
         body: {
@@ -46,15 +49,20 @@ const form = useForm({
 
       await queryClient.invalidateQueries({ queryKey: meQueryOptions().queryKey });
       window.location.assign('/');
-    } catch {
-      submitError.value = 'メールアドレスまたはパスワードが正しくありません。';
+    } catch (e) {
+      if ((e as { response?: { status?: number } }).response?.status === 403) {
+        unverifiedEmail.value = value.email;
+      } else {
+        submitError.value = 'メールアドレスまたはパスワードが正しくありません。';
+      }
     }
   },
 });
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
+  <EmailNotVerified v-if="unverifiedEmail" :email="unverifiedEmail" back-href="/signin" />
+  <div v-else class="flex flex-col gap-6">
     <Card class="overflow-hidden p-0">
       <CardContent class="grid p-0 md:grid-cols-2">
         <form class="p-6 md:p-8" @submit.prevent="form.handleSubmit">
