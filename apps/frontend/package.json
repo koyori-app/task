@@ -34,7 +34,7 @@
     "@zxcvbn-ts/language-common": "3.0.4",
     "@zxcvbn-ts/language-ja": "3.0.2",
     "arkenv": "0.12.2",
-    "arktype": "2.2.0",
+    "arktype": "2.2.1",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "dotenv": "17.4.2",
