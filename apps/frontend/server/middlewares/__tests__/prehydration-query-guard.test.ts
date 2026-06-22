@@ -20,6 +20,14 @@ describe('prehydrationQueryGuard', () => {
     expect((response as Response).headers.get('Location')).toBe('/SignIn?next=%2Fhome#section');
   });
 
+  it('strips username from signup URLs to prevent credential leakage', async () => {
+    const response = await runGuard('https://example.test/signup?username=leaked&invite=abc123');
+
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(302);
+    expect((response as Response).headers.get('Location')).toBe('/signup?invite=abc123');
+  });
+
   it('does not redirect unguarded paths with sensitive query keys', async () => {
     const response = await runGuard('https://example.test/profile?email=a%40b.test');
 

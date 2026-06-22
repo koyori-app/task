@@ -1,7 +1,7 @@
 import { enhance, MiddlewareOrder, type UniversalMiddleware } from '@universal-middleware/core';
 
 const GUARDED_PATHS = new Set(['/signin', '/signup']);
-const SENSITIVE_QUERY_KEYS = ['password', 'email'];
+const SENSITIVE_QUERY_KEYS = ['password', 'email', 'username'];
 
 export const prehydrationQueryGuard: UniversalMiddleware = enhance(
   async (request, context) => {
