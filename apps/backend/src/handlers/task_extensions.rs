@@ -277,13 +277,9 @@ async fn search_tasks_tsvector(
     let hits = rows
         .into_iter()
         .filter_map(|row| {
-            let title: Option<String> = row.try_get_by_index(2).ok()?;
+            let title: String = row.try_get_by_index(2).ok()?;
             let description: Option<String> = row.try_get_by_index(3).ok().flatten();
-            let highlight = highlight_ilike(
-                title.as_deref().unwrap_or(""),
-                description.as_deref(),
-                query,
-            );
+            let highlight = highlight_ilike(&title, description.as_deref(), query);
             Some(SearchTaskHit {
                 id: row.try_get_by_index(0).ok()?,
                 seq_id: row.try_get_by_index(1).ok()?,
