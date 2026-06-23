@@ -30,11 +30,10 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Enable corepack
-        run: corepack enable
-
-      - name: Install pnpm
-        run: corepack prepare pnpm@11.5.2 --activate
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: apps/frontend/package.json
 
       - name: Get pnpm store path
         id: pnpm-cache
