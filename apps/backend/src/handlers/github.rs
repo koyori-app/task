@@ -15,12 +15,12 @@ use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
 use crate::AppState;
-use crate::payload::github::*;
 use crate::entities::{github_integrations, projects, tenants};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::jobs::github_webhook::{self, GithubWebhookJob};
 use crate::openapi::CrudErrors;
+use crate::payload::github::*;
 use crate::settings::GithubAppSettings;
 use crate::utils::{
     github_api,

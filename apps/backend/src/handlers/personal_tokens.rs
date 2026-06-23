@@ -13,7 +13,6 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::AppState;
-use crate::payload::personal_tokens::{CreatePersonalTokenResponse, PersonalTokenResponse};
 use crate::entities::scopes::ScopeList;
 use crate::entities::{
     personal_tokens::{self},
@@ -24,6 +23,7 @@ use crate::entities::{
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::{CrudErrors, SessionAuthErrors};
+use crate::payload::personal_tokens::{CreatePersonalTokenResponse, PersonalTokenResponse};
 use crate::utils::auth;
 
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]

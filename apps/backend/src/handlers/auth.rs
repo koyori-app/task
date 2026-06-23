@@ -9,14 +9,14 @@ use sea_orm::{ColumnTrait, QueryFilter};
 use crate::entities;
 use crate::extractors::{AuthUser, CurrentUser};
 use crate::handlers::auth_2fa::establish_login_session;
-use crate::payload::auth::*;
-use crate::payload::auth_2fa::Login2faResponse;
 use crate::jobs::VerificationEmailJob;
 use crate::jobs::verification_email;
 use crate::openapi::{
     CredentialErrors, RegisterErrors, ResendVerificationErrors, SessionAuthErrors,
     UnauthorizedErrors, VerifyEmailErrors,
 };
+use crate::payload::auth::*;
+use crate::payload::auth_2fa::Login2faResponse;
 use crate::utils::auth::{
     AuthError, create_password_hash, dummy_password_hash, generate_email_verification_token,
     verify_password,
