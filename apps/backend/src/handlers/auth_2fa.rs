@@ -13,8 +13,6 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, JoinType, QueryFilter,
     QuerySelect, RelationTrait, TransactionTrait,
 };
-use serde::{Deserialize, Serialize};
-use validator::Validate;
 
 use crate::{
     AppState,
@@ -23,6 +21,7 @@ use crate::{
     error::ServerError,
     extractors::{AuthUser, HalfAuthedUser, LoggedInUser},
     openapi::{CrudErrors, SessionAuthErrors},
+    payload::auth_2fa::*,
     utils::{
         auth::AuthError,
         totp::{
@@ -121,41 +120,6 @@ pub async fn establish_login_session(
     }
     session.set("half_authed", false);
     Ok(None)
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct Login2faResponse {
-    pub requires_2fa: bool,
-    pub requires_2fa_setup: bool,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct TotpSetupResponse {
-    pub otpauth_uri: String,
-    pub qr_code_png: String,
-}
-
-#[derive(Validate, Deserialize, utoipa::ToSchema)]
-pub struct TotpCodeRequest {
-    #[validate(length(min = 6, max = 8))]
-    pub code: String,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct VerifySetupResponse {
-    pub recovery_codes: Vec<String>,
-}
-
-#[derive(Validate, Deserialize, utoipa::ToSchema)]
-pub struct Verify2faRequest {
-    #[validate(length(min = 6, max = 20))]
-    pub code: Option<String>,
-    pub recovery_code: Option<String>,
-}
-
-#[derive(Validate, Deserialize, utoipa::ToSchema)]
-pub struct Require2faPolicyRequest {
-    pub enabled: bool,
 }
 
 async fn load_user(state: &AppState, user_id: Uuid) -> Result<users::Model, AuthError> {

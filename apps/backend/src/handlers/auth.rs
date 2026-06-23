@@ -10,7 +10,8 @@ use validator::Validate;
 
 use crate::entities;
 use crate::extractors::{AuthUser, CurrentUser};
-use crate::handlers::auth_2fa::{Login2faResponse, establish_login_session};
+use crate::handlers::auth_2fa::establish_login_session;
+use crate::payload::auth_2fa::Login2faResponse;
 use crate::jobs::VerificationEmailJob;
 use crate::jobs::verification_email;
 use crate::openapi::{
