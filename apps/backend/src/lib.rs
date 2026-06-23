@@ -8,7 +8,6 @@ use crate::{
 use sea_orm::DatabaseConnection;
 
 pub mod auth_helpers;
-pub mod dto;
 pub mod entities;
 pub mod error;
 pub mod extractors;

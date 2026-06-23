@@ -13,7 +13,7 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::AppState;
-use crate::dto::personal_tokens::{CreatePersonalTokenResponse, PersonalTokenResponse};
+use crate::payload::personal_tokens::{CreatePersonalTokenResponse, PersonalTokenResponse};
 use crate::entities::scopes::ScopeList;
 use crate::entities::{
     personal_tokens::{self},
