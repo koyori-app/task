@@ -119,7 +119,7 @@ export default defineConfig({
         test: {
           name: 'unit',
           environment: 'happy-dom',
-          include: ['src/**/*.{test,spec}.{ts,tsx}'],
+          include: ['src/**/*.{test,spec}.{ts,tsx}', 'server/**/*.{test,spec}.{ts,tsx}'],
           globals: true,
         },
       },

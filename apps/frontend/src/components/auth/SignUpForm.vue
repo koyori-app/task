@@ -5,6 +5,7 @@ import { ref } from 'vue';
 import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
 import PasswordInput from '@/components/auth/PasswordInput.vue';
 import PasswordStrengthBar from '@/components/auth/PasswordStrengthBar.vue';
+import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
@@ -53,7 +54,7 @@ const form = useForm({
   <div v-else class="flex flex-col gap-6">
     <Card class="overflow-hidden p-0">
       <CardContent class="grid p-0 md:grid-cols-2">
-        <form class="p-6 md:p-8" @submit.prevent="form.handleSubmit">
+        <HydrationSafeForm v-slot="{ isHydrated }" class="p-6 md:p-8" @submit="form.handleSubmit">
           <FieldGroup>
             <div class="flex flex-col items-center gap-2 text-center">
               <h1 class="text-2xl font-bold">アカウント作成</h1>
@@ -160,7 +161,11 @@ const form = useForm({
             <form.Subscribe>
               <template #default="{ canSubmit, isSubmitting }">
                 <Field>
-                  <Button type="submit" class="w-full" :disabled="!canSubmit || isSubmitting">
+                  <Button
+                    type="submit"
+                    class="w-full"
+                    :disabled="!canSubmit || isSubmitting || !isHydrated"
+                  >
                     {{ isSubmitting ? '登録中…' : 'アカウント作成' }}
                   </Button>
                 </Field>
@@ -171,7 +176,7 @@ const form = useForm({
               <a href="/signin" class="underline underline-offset-4">サインイン</a>
             </FieldDescription>
           </FieldGroup>
-        </form>
+        </HydrationSafeForm>
         <div class="bg-muted relative hidden md:block">
           <img
             src="/placeholder.svg"
