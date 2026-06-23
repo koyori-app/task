@@ -17,8 +17,6 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder, QuerySelect, TransactionTrait,
 };
-use serde::{Deserialize, Serialize};
-use validator::Validate;
 
 use crate::AppState;
 use crate::entities::{
@@ -27,6 +25,7 @@ use crate::entities::{
 use crate::error::AppError;
 use crate::extractors::{AuthUser, OptionalAuthUser};
 use crate::openapi::CrudErrors;
+use crate::payload::drive_files::*;
 use crate::utils::drive::{
     content_url, current_storage_type, effective_quota, guess_mime, is_tenant_owner,
     tenant_used_bytes,
@@ -34,68 +33,6 @@ use crate::utils::drive::{
 use crate::utils::storage::{ByteStream, StorageError};
 
 const MAX_LIST_LIMIT: u32 = 200;
-const DEFAULT_LIST_LIMIT: u32 = 50;
-
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
-pub struct ListFilesQuery {
-    pub folder_id: Option<Uuid>,
-    #[param(minimum = 1, maximum = 200)]
-    #[serde(default = "default_list_limit")]
-    pub limit: u32,
-    #[serde(default)]
-    pub offset: u32,
-}
-
-fn default_list_limit() -> u32 {
-    DEFAULT_LIST_LIMIT
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct DriveFileResponse {
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    pub name: String,
-    pub size: i64,
-    pub mime_type: String,
-    pub url: String,
-    #[schema(value_type = String, format = "uuid", nullable)]
-    pub folder_id: Option<Uuid>,
-    #[schema(value_type = String, format = "date-time")]
-    pub created_at: chrono::DateTime<chrono::FixedOffset>,
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct ListFilesResponse {
-    pub files: Vec<DriveFileResponse>,
-    pub total: u64,
-}
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct UpdateFileRequest {
-    #[validate(length(min = 1))]
-    pub name: Option<String>,
-    pub folder_id: Option<Option<Uuid>>,
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct DriveUsageResponse {
-    pub used_bytes: i64,
-    #[schema(nullable)]
-    pub quota_bytes: Option<i64>,
-    #[schema(nullable)]
-    pub system_max_bytes: Option<i64>,
-    pub unlimited: bool,
-}
-
-#[derive(Debug, Deserialize, utoipa::ToSchema)]
-pub struct UpdateQuotaRequest {
-    pub quota_bytes: Option<i64>,
-}
-
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
-pub struct ContentQuery {
-    pub token: Option<String>,
-}
 
 fn drive_file_response(model: &drive_files::Model) -> DriveFileResponse {
     DriveFileResponse {

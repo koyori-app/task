@@ -6,9 +6,7 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
-use serde::{Deserialize, Serialize};
 use tracing::warn;
-use validator::Validate;
 
 use crate::extractors::CurrentUser;
 use crate::jobs::{PasswordResetEmailJob, password_reset_email};
@@ -16,6 +14,7 @@ use crate::openapi::{
     PasswordChangeErrors, PasswordResetCompleteErrors, PasswordResetRequestErrors,
     PasswordResetVerifyErrors,
 };
+use crate::payload::password_reset::*;
 use crate::utils::auth::{AuthError, create_password_hash, verify_password};
 use crate::utils::email::normalize_email;
 use crate::utils::{password_reset, password_reset_log};
@@ -25,64 +24,6 @@ use crate::{
 };
 
 type AuthSession = axum_session::Session<SessionRedisPool>;
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct MessageResponse {
-    pub message: String,
-}
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct PasswordResetRequestBody {
-    #[validate(email)]
-    pub email: String,
-}
-
-#[derive(Validate, Deserialize, utoipa::ToSchema)]
-pub struct PasswordResetVerifyBody {
-    #[validate(length(min = 1))]
-    pub token: String,
-}
-
-#[derive(Validate, Deserialize, utoipa::ToSchema)]
-pub struct PasswordResetCompleteBody {
-    #[validate(length(min = 1))]
-    pub token: String,
-    #[validate(length(min = 8))]
-    pub new_password: String,
-}
-
-#[derive(Validate, Deserialize, utoipa::ToSchema)]
-pub struct PasswordChangeBody {
-    pub current_password: String,
-    #[validate(length(min = 8))]
-    pub new_password: String,
-}
-
-impl std::fmt::Debug for PasswordResetVerifyBody {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PasswordResetVerifyBody")
-            .field("token", &"<redacted>")
-            .finish()
-    }
-}
-
-impl std::fmt::Debug for PasswordResetCompleteBody {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PasswordResetCompleteBody")
-            .field("token", &"<redacted>")
-            .field("new_password", &"<redacted>")
-            .finish()
-    }
-}
-
-impl std::fmt::Debug for PasswordChangeBody {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PasswordChangeBody")
-            .field("current_password", &"<redacted>")
-            .field("new_password", &"<redacted>")
-            .finish()
-    }
-}
 
 #[utoipa::path(
     post,

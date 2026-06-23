@@ -6,8 +6,6 @@ use axum::{
 use axum_valid::Valid;
 use sea_orm::prelude::Uuid;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
-use serde::Deserialize;
-use validator::Validate;
 
 use crate::AppState;
 use crate::entities::{scopes::Scope, tenants};
@@ -15,26 +13,7 @@ use crate::error::AppError;
 use crate::extractors::AuthMethod;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct CreateTenantRequest {
-    #[validate(length(min = 1))]
-    pub display_id: String,
-    #[validate(length(min = 1))]
-    pub name: String,
-    #[serde(default)]
-    pub description: String,
-    #[serde(default)]
-    pub icon_url: String,
-}
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct UpdateTenantRequest {
-    #[validate(length(min = 1))]
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub icon_url: Option<String>,
-}
+use crate::payload::tenants::*;
 
 #[axum::debug_handler]
 #[utoipa::path(

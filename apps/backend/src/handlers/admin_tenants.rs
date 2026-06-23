@@ -4,8 +4,6 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, prelude::Uuid};
-use serde::Serialize;
-use utoipa::ToSchema;
 
 use sea_orm::{ConnectionTrait, Statement};
 
@@ -16,29 +14,8 @@ use crate::{
     extractors::AdminUser,
     handlers::admin_audit::record_audit,
     openapi::CrudErrors,
+    payload::admin_tenants::*,
 };
-
-#[derive(Serialize, ToSchema)]
-pub struct AdminTenantListResponse {
-    pub tenants: Vec<tenants::Model>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct AdminProjectListResponse {
-    pub projects: Vec<projects::Model>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct AdminTaskRow {
-    pub id: Uuid,
-    pub project_id: Uuid,
-    pub title: String,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct AdminTaskListResponse {
-    pub tasks: Vec<AdminTaskRow>,
-}
 
 async fn table_exists<C: ConnectionTrait>(conn: &C, table: &str) -> Result<bool, AppError> {
     let sql = "SELECT EXISTS (

@@ -11,9 +11,7 @@ use sea_orm::prelude::Uuid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
-use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
-use validator::Validate;
+use serde::Serialize;
 use webauthn_rs::prelude::{
     CredentialID, DiscoverableKey, Passkey, PublicKeyCredential, RegisterPublicKeyCredential,
 };
@@ -22,6 +20,7 @@ use crate::AppState;
 use crate::entities::{passkeys as passkey_entity, users};
 use crate::extractors::CurrentUser;
 use crate::openapi::SessionAuthErrors;
+use crate::payload::passkeys::*;
 use crate::utils::auth::AuthError;
 use crate::utils::email::normalize_email;
 use crate::utils::passkey_challenges;
@@ -33,20 +32,6 @@ use crate::utils::passkeys::{
 
 type AppSession = Session<SessionRedisPool>;
 
-#[derive(Serialize, ToSchema)]
-pub struct PasskeyListItem {
-    pub id: Uuid,
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_used_at: Option<String>,
-    pub created_at: String,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct PasskeyListResponse {
-    pub passkeys: Vec<PasskeyListItem>,
-}
-
 fn to_list_item(model: passkey_entity::Model) -> PasskeyListItem {
     PasskeyListItem {
         id: model.id,
@@ -54,33 +39,6 @@ fn to_list_item(model: passkey_entity::Model) -> PasskeyListItem {
         last_used_at: model.last_used_at.map(|t| t.to_rfc3339()),
         created_at: model.created_at.to_rfc3339(),
     }
-}
-
-#[derive(Validate, Deserialize, utoipa::ToSchema)]
-pub struct PasskeyRegistrationFinishRequest {
-    #[validate(length(min = 1, max = 255))]
-    pub name: String,
-    #[schema(value_type = Object)]
-    pub credential: serde_json::Value,
-}
-
-#[derive(Validate, Deserialize, utoipa::ToSchema)]
-pub struct PasskeyAuthenticationStartRequest {
-    #[validate(email)]
-    pub email: Option<String>,
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct PasskeyAuthenticationFinishRequest {
-    pub challenge_id: Uuid,
-    #[schema(value_type = Object)]
-    pub credential: serde_json::Value,
-}
-
-#[derive(Validate, Deserialize, utoipa::ToSchema)]
-pub struct PasskeyRenameRequest {
-    #[validate(length(min = 1, max = 255))]
-    pub name: String,
 }
 
 fn exclude_credentials(passkeys: &[Passkey]) -> Option<Vec<CredentialID>> {
