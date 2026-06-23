@@ -22,7 +22,7 @@
     "@koyori-app/openapi-vue-query": "0.1.4",
     "@lucide/vue": "1.21.0",
     "@phosphor-icons/vue": "2.2.1",
-    "@sentry/vue": "10.58.0",
+    "@sentry/vue": "10.59.0",
     "@tanstack/vue-form": "1.33.0",
     "@tanstack/vue-query": "5.101.0",
     "@tanstack/vue-table": "8.21.3",
