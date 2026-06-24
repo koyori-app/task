@@ -68,6 +68,8 @@ pub enum OAuthError {
     BadRequest,
     #[error("unauthorized")]
     Unauthorized,
+    #[error("account suspended")]
+    AccountSuspended,
     #[error("security violation")]
     SecurityViolation,
 }
@@ -161,6 +163,13 @@ impl IntoResponse for OAuthError {
                 StatusCode::UNAUTHORIZED,
                 Json(ServerError {
                     message: "unauthorized".into(),
+                }),
+            )
+                .into_response(),
+            OAuthError::AccountSuspended => (
+                StatusCode::FORBIDDEN,
+                Json(ServerError {
+                    message: "account-suspended".into(),
                 }),
             )
                 .into_response(),
@@ -456,6 +465,10 @@ pub async fn oauth_callback(
         .one(&state.db)
         .await?
         .ok_or(OAuthError::Unauthorized)?;
+
+    if user_model.is_suspended {
+        return Err(OAuthError::AccountSuspended);
+    }
 
     let twofa_required = establish_login_session(&session, &state.db, &user_model)
         .await

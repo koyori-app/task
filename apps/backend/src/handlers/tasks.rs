@@ -28,6 +28,7 @@ use crate::utils::custom_fields::{
     CustomFieldValueInput, TaskCustomFieldValueResponse, ensure_required_custom_fields,
     load_task_custom_field_values, upsert_task_custom_field_values,
 };
+use crate::utils::db::is_postgres_unique_violation;
 use crate::utils::notifications::{notify_assigned, notify_status_changed};
 use crate::utils::task_activities::{priority_label, record_activity, status_name};
 
@@ -1403,14 +1404,19 @@ pub async fn add_relation(
         return Err(AppError::Conflict);
     }
 
-    let rel = task_relations::ActiveModel {
+    let rel = match (task_relations::ActiveModel {
         id: Set(Uuid::new_v4()),
         blocker_task_id: Set(blocker),
         blocked_task_id: Set(blocked),
         created_at: Set(chrono::Utc::now()),
     }
     .insert(&txn)
-    .await?;
+    .await)
+    {
+        Ok(rel) => rel,
+        Err(e) if is_postgres_unique_violation(&e) => return Err(AppError::Conflict),
+        Err(e) => return Err(e.into()),
+    };
     let target_task = tasks::Entity::find_by_id(payload.target_task_id)
         .filter(tasks::Column::ProjectId.eq(project_id))
         .one(&txn)

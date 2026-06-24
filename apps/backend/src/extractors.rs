@@ -386,6 +386,10 @@ impl FromRequestParts<AppState> for AdminUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
+        let session = session_from_parts(parts, state).await?;
+        if session_is_half_authed(&session) {
+            return Err(AuthError::Forbidden);
+        }
         let user = user_from_session(parts, state).await?;
         if user.is_suspended {
             return Err(AuthError::Suspended);
@@ -420,6 +424,9 @@ impl FromRequestParts<AppState> for CurrentUser {
             return Err(AuthError::Forbidden);
         }
         let user = user_from_session(parts, state).await?;
+        if user.is_suspended {
+            return Err(AuthError::Suspended);
+        }
         Ok(CurrentUser(user))
     }
 }
