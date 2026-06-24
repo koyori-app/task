@@ -22,69 +22,69 @@
         "parameters": [
           {
             "name": "action",
-            "in": "path",
+            "in": "query",
             "description": "アクション名の前方一致フィルタ",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": "string"
             }
           },
           {
             "name": "resource_type",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": "string"
             }
           },
           {
             "name": "resource_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": "string"
             }
           },
           {
             "name": "actor_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "tenant_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "from",
-            "in": "path",
+            "in": "query",
             "description": "期間開始（ISO 8601）",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": "string"
             }
           },
           {
             "name": "to",
-            "in": "path",
+            "in": "query",
             "description": "期間終了（ISO 8601）",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": "string"
             }
           },
           {
             "name": "limit",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "integer",
               "format": "int64",
@@ -93,10 +93,10 @@
           },
           {
             "name": "cursor",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": "string"
             }
           }
         ],
@@ -3952,10 +3952,10 @@
           },
           {
             "name": "token",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": "string"
             }
           }
         ],
@@ -4217,7 +4217,7 @@
         "parameters": [
           {
             "name": "installation_id",
-            "in": "path",
+            "in": "query",
             "required": true,
             "schema": {
               "type": "integer",
@@ -4226,7 +4226,7 @@
           },
           {
             "name": "state",
-            "in": "path",
+            "in": "query",
             "required": true,
             "schema": {
               "type": "string"
@@ -4234,11 +4234,11 @@
           },
           {
             "name": "setup_action",
-            "in": "path",
+            "in": "query",
             "description": "GitHub が送る操作種別。\"request\" はオーナー承認待ちであり連携未完了。",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": "string"
             }
           }
         ],
@@ -5163,17 +5163,17 @@
           },
           {
             "name": "folder_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "limit",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
@@ -5183,8 +5183,8 @@
           },
           {
             "name": "offset",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "integer",
               "format": "int32",
@@ -10254,10 +10254,10 @@
           },
           {
             "name": "status",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": "string"
             }
           }
         ],
@@ -12360,77 +12360,77 @@
           },
           {
             "name": "status_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "priority",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": "string"
             }
           },
           {
             "name": "assignee_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "milestone_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "sprint_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "parent_task_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "is_archived",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "boolean"
             }
           },
           {
             "name": "sort",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": "string"
             }
           },
           {
             "name": "limit",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "integer",
               "format": "int64",
@@ -12439,8 +12439,8 @@
           },
           {
             "name": "offset",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "integer",
               "format": "int64",

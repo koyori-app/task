@@ -6,6 +6,7 @@ use validator::Validate;
 pub const DEFAULT_LIST_LIMIT: u32 = 50;
 
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListFilesQuery {
     pub folder_id: Option<Uuid>,
     #[param(minimum = 1, maximum = 200)]
@@ -62,6 +63,7 @@ pub struct UpdateQuotaRequest {
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ContentQuery {
     pub token: Option<String>,
 }

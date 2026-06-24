@@ -31,6 +31,7 @@ pub struct UpdateSprintRequest {
 }
 
 #[derive(Deserialize, ToSchema, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListSprintsQuery {
     pub status: Option<String>,
 }

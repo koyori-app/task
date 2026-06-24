@@ -5,6 +5,7 @@ use utoipa::{IntoParams, ToSchema};
 use crate::entities::audit_logs;
 
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct AuditLogQuery {
     /// アクション名の前方一致フィルタ
     pub action: Option<String>,

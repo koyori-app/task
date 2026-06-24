@@ -83,6 +83,7 @@ pub struct UpdateTaskRequest {
 }
 
 #[derive(Deserialize, ToSchema, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListTasksQuery {
     pub status_id: Option<Uuid>,
     pub priority: Option<String>,
