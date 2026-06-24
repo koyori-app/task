@@ -462,7 +462,20 @@ async fn apply_bulk_update(
 }
 
 #[axum::debug_handler]
-#[utoipa::path(get, path = "/", tag = "TaskViews", summary = "保存済みビュー一覧")]
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "TaskViews",
+    summary = "保存済みビュー一覧",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+    ),
+    responses(
+        (status = 200, description = "ビュー一覧", body = TaskViewListResponse),
+        CrudErrors,
+    )
+)]
 pub async fn list_task_views(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -488,7 +501,21 @@ pub async fn list_task_views(
 }
 
 #[axum::debug_handler]
-#[utoipa::path(post, path = "/", tag = "TaskViews", summary = "保存済みビュー作成")]
+#[utoipa::path(
+    post,
+    path = "/",
+    tag = "TaskViews",
+    summary = "保存済みビュー作成",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+    ),
+    request_body = CreateTaskViewRequest,
+    responses(
+        (status = 201, description = "作成されたビュー", body = project_task_views::Model),
+        CrudErrors,
+    )
+)]
 pub async fn create_task_view(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -523,7 +550,17 @@ pub async fn create_task_view(
     patch,
     path = "/{view_id}",
     tag = "TaskViews",
-    summary = "保存済みビュー更新"
+    summary = "保存済みビュー更新",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        ("view_id" = Uuid, Path, description = "ビューID"),
+    ),
+    request_body = UpdateTaskViewRequest,
+    responses(
+        (status = 200, description = "更新されたビュー", body = project_task_views::Model),
+        CrudErrors,
+    )
 )]
 pub async fn update_task_view(
     State(state): State<AppState>,
@@ -574,7 +611,16 @@ pub async fn update_task_view(
     delete,
     path = "/{view_id}",
     tag = "TaskViews",
-    summary = "保存済みビュー削除"
+    summary = "保存済みビュー削除",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        ("view_id" = Uuid, Path, description = "ビューID"),
+    ),
+    responses(
+        (status = 204, description = "削除成功"),
+        CrudErrors,
+    )
 )]
 pub async fn delete_task_view(
     State(state): State<AppState>,
@@ -608,7 +654,16 @@ pub async fn delete_task_view(
     get,
     path = "/{id}/attachments",
     tag = "Tasks",
-    summary = "タスク添付ファイル一覧"
+    summary = "タスク添付ファイル一覧",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        ("id" = String, Path, description = "タスクID（UUID または連番ID）"),
+    ),
+    responses(
+        (status = 200, description = "添付ファイル一覧", body = TaskAttachmentListResponse),
+        CrudErrors,
+    )
 )]
 pub async fn list_task_attachments(
     State(state): State<AppState>,
@@ -652,7 +707,17 @@ pub async fn list_task_attachments(
     post,
     path = "/{id}/attachments",
     tag = "Tasks",
-    summary = "タスクにファイルを添付"
+    summary = "タスクにファイルを添付",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        ("id" = String, Path, description = "タスクID（UUID または連番ID）"),
+    ),
+    request_body = AttachFileRequest,
+    responses(
+        (status = 201, description = "添付完了", body = TaskAttachmentResponse),
+        CrudErrors,
+    )
 )]
 pub async fn attach_task_file(
     State(state): State<AppState>,
@@ -724,7 +789,17 @@ pub async fn attach_task_file(
     delete,
     path = "/{id}/attachments/{attachment_id}",
     tag = "Tasks",
-    summary = "タスク添付を解除"
+    summary = "タスク添付を解除",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        ("id" = String, Path, description = "タスクID（UUID または連番ID）"),
+        ("attachment_id" = Uuid, Path, description = "添付ID"),
+    ),
+    responses(
+        (status = 204, description = "解除成功"),
+        CrudErrors,
+    )
 )]
 pub async fn detach_task_file(
     State(state): State<AppState>,

@@ -6,6 +6,7 @@ use validator::Validate;
 use crate::entities::project_task_views;
 
 #[derive(Deserialize, ToSchema, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct SearchTasksQuery {
     pub q: String,
     #[serde(default = "default_search_limit")]
