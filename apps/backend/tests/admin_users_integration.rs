@@ -1,11 +1,12 @@
 mod common;
 
 use axum::http::StatusCode;
-use backend::entities::{audit_logs, users};
+use backend::entities::{audit_logs, project_statuses, tasks, users};
 use backend::error::AppError;
 use backend::handlers::admin_users::ensure_not_last_admin;
 use common::{TestApp, insert_personal_token_for_test, insert_tenant, insert_user};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+use uuid::Uuid;
 
 #[tokio::test]
 async fn admin_users_integration_suite() {
@@ -196,6 +197,81 @@ async fn admin_users_integration_suite() {
             .expect("load user")
             .expect("user exists");
         assert!(user_row.sessions_revoked_at.is_some());
+
+        app.cleanup_user(target.id).await;
+        app.cleanup_user(admin.id).await;
+    }
+
+    // Test 6: 管理者削除は tasks を soft-delete しユーザーを匿名化（物理削除しない）
+    {
+        let target = app.insert_user(false, false).await;
+        let tp = app.insert_tenant_project(target.id).await;
+        let status_id = Uuid::new_v4();
+        project_statuses::ActiveModel {
+            id: Set(status_id),
+            project_id: Set(tp.project_id),
+            name: Set("Todo".into()),
+            color: Set("#808080".into()),
+            position: Set(0),
+            is_default: Set(true),
+            is_done_state: Set(false),
+            created_at: Set(chrono::Utc::now()),
+        }
+        .insert(&app.state.db)
+        .await
+        .expect("insert status");
+
+        let task_id = Uuid::new_v4();
+        tasks::ActiveModel {
+            id: Set(task_id),
+            project_id: Set(tp.project_id),
+            seq_id: Set(1),
+            title: Set("admin delete test".into()),
+            description: Set(None),
+            status_id: Set(status_id),
+            priority: Set(tasks::TaskPriority::Medium),
+            progress_pct: Set(0),
+            parent_task_id: Set(None),
+            milestone_id: Set(None),
+            sprint_id: Set(None),
+            soft_deadline: Set(None),
+            hard_deadline: Set(None),
+            estimated_minutes: Set(None),
+            is_archived: Set(false),
+            created_by: Set(target.id),
+            created_at: Set(chrono::Utc::now()),
+            updated_at: Set(chrono::Utc::now()),
+            completed_at: Set(None),
+            deleted_at: Set(None),
+        }
+        .insert(&app.state.db)
+        .await
+        .expect("insert task");
+
+        let admin = app.insert_user(true, false).await;
+        app.reset_session_client();
+        app.login_session(&admin.email, &admin.password).await;
+
+        let delete_response = app
+            .delete_with_session(&format!("/v1/admin/users/{}", target.id))
+            .await;
+        assert_eq!(delete_response.status(), StatusCode::NO_CONTENT);
+
+        let task_row = tasks::Entity::find_by_id(task_id)
+            .one(&app.state.db)
+            .await
+            .expect("load task")
+            .expect("task still exists (not physically deleted)");
+        assert_eq!(task_row.created_by, target.id);
+
+        let user_row = users::Entity::find_by_id(target.id)
+            .one(&app.state.db)
+            .await
+            .expect("load user")
+            .expect("user still exists");
+        assert!(user_row.email.starts_with("deleted+"));
+        assert!(user_row.is_suspended);
+        assert!(user_row.password_hash.is_none());
 
         app.cleanup_user(target.id).await;
         app.cleanup_user(admin.id).await;

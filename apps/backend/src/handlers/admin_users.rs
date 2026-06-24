@@ -18,10 +18,7 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 use crate::AppState;
-use crate::entities::{
-    drive_files, drive_folder_shares, drive_folders, personal_tokens, project_members, tenants,
-    users,
-};
+use crate::entities::{personal_tokens, project_members, tasks, users};
 use crate::error::AppError;
 use crate::extractors::AdminUser;
 use crate::handlers::admin_audit::record_audit;
@@ -195,77 +192,93 @@ pub async fn ensure_not_last_admin(
 }
 
 async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(), AppError> {
-    let txn = db.begin().await?;
+    if table_exists(db, "tasks").await.unwrap_or(false)
+        && column_exists(db, "tasks", "deleted_at").await.unwrap_or(false)
+    {
+        let owned = tasks::Entity::find()
+            .filter(tasks::Column::CreatedBy.eq(user_id))
+            .filter(tasks::Column::DeletedAt.is_null())
+            .all(db)
+            .await
+            .unwrap_or_default();
+        let now = Utc::now();
+        for task in owned {
+            let mut active: tasks::ActiveModel = task.into();
+            active.deleted_at = Set(Some(now));
+            active.updated_at = Set(now);
+            let _ = active.update(db).await;
+        }
+    }
 
-    if table_exists(&txn, "task_assignees").await? {
-        execute_bound(
-            &txn,
+    if table_exists(db, "task_assignees").await.unwrap_or(false) {
+        let _ = execute_bound(
+            db,
             "DELETE FROM task_assignees WHERE user_id = ?",
             vec![user_id.into()],
         )
-        .await?;
+        .await;
     }
-    if table_exists(&txn, "tasks").await? {
-        execute_bound(
-            &txn,
-            "DELETE FROM tasks WHERE created_by = ?",
+
+    if table_exists(db, "project_members").await.unwrap_or(false) {
+        let _ = project_members::Entity::delete_many()
+            .filter(project_members::Column::UserId.eq(user_id))
+            .exec(db)
+            .await;
+    }
+
+    if table_exists(db, "personal_tokens").await.unwrap_or(false)
+        && column_exists(db, "personal_tokens", "revoked").await.unwrap_or(false)
+    {
+        let _ = personal_tokens::Entity::update_many()
+            .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
+            .filter(personal_tokens::Column::UserId.eq(user_id))
+            .exec(db)
+            .await;
+    }
+
+    if column_exists(db, "users", "sessions_revoked_at").await.unwrap_or(false) {
+        let _ = revoke_user_sessions(db, user_id).await;
+    }
+
+    if table_exists(db, "totp_credentials").await.unwrap_or(false)
+        || table_exists(db, "recovery_codes").await.unwrap_or(false)
+    {
+        let _ = reset_2fa_for_user(db, user_id).await;
+    }
+
+    if table_exists(db, "passkeys").await.unwrap_or(false) {
+        let _ = execute_bound(
+            db,
+            "DELETE FROM passkeys WHERE user_id = ?",
             vec![user_id.into()],
         )
-        .await?;
+        .await;
     }
-    if table_exists(&txn, "milestones").await? {
-        execute_bound(
-            &txn,
-            "DELETE FROM milestones WHERE created_by = ?",
+    if table_exists(db, "oauth_connections").await.unwrap_or(false) {
+        let _ = execute_bound(
+            db,
+            "DELETE FROM oauth_connections WHERE user_id = ?",
             vec![user_id.into()],
         )
-        .await?;
-    }
-    if table_exists(&txn, "sprints").await? {
-        execute_bound(
-            &txn,
-            "DELETE FROM sprints WHERE created_by = ?",
-            vec![user_id.into()],
-        )
-        .await?;
+        .await;
     }
 
-    drive_files::Entity::delete_many()
-        .filter(drive_files::Column::UploaderId.eq(user_id))
-        .exec(&txn)
-        .await?;
+    let txn = db.begin().await?;
 
-    drive_folders::Entity::delete_many()
-        .filter(drive_folders::Column::CreatedBy.eq(user_id))
-        .exec(&txn)
-        .await?;
-
-    drive_folder_shares::Entity::delete_many()
-        .filter(
-            drive_folder_shares::Column::SharedWithUserId
-                .eq(user_id)
-                .or(drive_folder_shares::Column::CreatedBy.eq(user_id)),
-        )
-        .exec(&txn)
-        .await?;
-
-    project_members::Entity::delete_many()
-        .filter(project_members::Column::UserId.eq(user_id))
-        .exec(&txn)
-        .await?;
-
-    personal_tokens::Entity::delete_many()
-        .filter(personal_tokens::Column::UserId.eq(user_id))
-        .exec(&txn)
-        .await?;
-
-    tenants::Entity::delete_many()
-        .filter(tenants::Column::OwnerId.eq(user_id))
-        .exec(&txn)
-        .await?;
-
-    users::Entity::delete_by_id(user_id).exec(&txn).await?;
-
+    let tombstone_email = format!("deleted+{user_id}@invalid.local");
+    let tombstone_username = format!("deleted-{user_id}");
+    let user = users::Entity::find_by_id(user_id)
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let mut active: users::ActiveModel = user.into();
+    active.email = Set(tombstone_email);
+    active.username = Set(tombstone_username);
+    active.password_hash = Set(None);
+    active.is_suspended = Set(true);
+    active.is_admin = Set(false);
+    active.email_verified = Set(false);
+    active.update(&txn).await?;
     txn.commit().await?;
     Ok(())
 }
