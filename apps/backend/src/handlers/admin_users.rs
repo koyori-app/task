@@ -163,7 +163,9 @@ pub async fn ensure_not_last_admin(
 
 async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(), AppError> {
     if table_exists(db, "tasks").await.unwrap_or(false)
-        && column_exists(db, "tasks", "deleted_at").await.unwrap_or(false)
+        && column_exists(db, "tasks", "deleted_at")
+            .await
+            .unwrap_or(false)
     {
         let owned = tasks::Entity::find()
             .filter(tasks::Column::CreatedBy.eq(user_id))
@@ -197,7 +199,9 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
     }
 
     if table_exists(db, "personal_tokens").await.unwrap_or(false)
-        && column_exists(db, "personal_tokens", "revoked").await.unwrap_or(false)
+        && column_exists(db, "personal_tokens", "revoked")
+            .await
+            .unwrap_or(false)
     {
         let _ = personal_tokens::Entity::update_many()
             .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
@@ -206,7 +210,10 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
             .await;
     }
 
-    if column_exists(db, "users", "sessions_revoked_at").await.unwrap_or(false) {
+    if column_exists(db, "users", "sessions_revoked_at")
+        .await
+        .unwrap_or(false)
+    {
         let _ = revoke_user_sessions(db, user_id).await;
     }
 
