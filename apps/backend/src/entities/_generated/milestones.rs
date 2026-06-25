@@ -19,7 +19,7 @@ pub struct Model {
     #[schema(nullable)]
     pub description: Option<String>,
     #[schema(value_type = String, example = "2026-07-01")]
-    pub due_date: Date,
+    pub due_date: TimeDate,
     #[schema(value_type = String, format = "uuid")]
     pub created_by: Uuid,
     #[schema(value_type = String, format = "date-time")]
