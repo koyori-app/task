@@ -1,3 +1,4 @@
+//! Project members entity — schema-first with hand-written DeriveActiveEnum.
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -15,19 +16,7 @@ pub enum ProjectRole {
     Viewer,
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, ToSchema, serde::Serialize)]
-#[sea_orm(table_name = "project_members")]
-#[schema(as = crate::entities::project_members::Model)]
-pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    #[schema(value_type = String, format = "uuid")]
-    pub project_id: Uuid,
-    #[schema(value_type = String, format = "uuid")]
-    pub user_id: Uuid,
-    pub role: ProjectRole,
-}
+pub use super::_generated::project_members::*;
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
@@ -60,5 +49,3 @@ impl Related<super::users::Entity> for Entity {
         Relation::Users.def()
     }
 }
-
-impl ActiveModelBehavior for ActiveModel {}
