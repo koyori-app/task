@@ -21,11 +21,11 @@ struct_attrs = ['#[schema(as = crate::entities::users::Model)]']
 
 [[entities.users.fields]]
 name = "id"
-attrs = ['#[schema(value_type = String, format="uuid")]']
+attrs = ['#[schema(value_type = String, format = "uuid")]']
 
 [[entities.users.fields]]
 name = "username"
-attrs = ['#[schema(value_type = String, format="username")]']
+attrs = ['#[schema(value_type = String, format = "username")]']
 
 [[entities.users.fields]]
 name = "bio"
@@ -37,7 +37,7 @@ attrs = ['#[sea_orm(nullable)]', '#[schema(nullable)]']
 
 [[entities.users.fields]]
 name = "email"
-attrs = ['#[schema(value_type = String, format="email")]']
+attrs = ['#[schema(value_type = String, format = "email")]']
 
 [[entities.users.fields]]
 name = "email_verified"
@@ -153,11 +153,11 @@ struct_attrs = ['#[schema(as = crate::entities::tenants::Model)]']
 
 [[entities.tenants.fields]]
 name = "id"
-attrs = ['#[schema(value_type = String, format="uuid")]']
+attrs = ['#[schema(value_type = String, format = "uuid")]']
 
 [[entities.tenants.fields]]
 name = "owner_id"
-attrs = ['#[schema(value_type = String, format="uuid")]']
+attrs = ['#[schema(value_type = String, format = "uuid")]']
 
 [[entities.tenants.fields]]
 name = "drive_quota_bytes"
@@ -198,11 +198,11 @@ struct_attrs = ['#[schema(as = crate::entities::projects::Model)]']
 
 [[entities.projects.fields]]
 name = "id"
-attrs = ['#[schema(value_type = String, format="uuid")]']
+attrs = ['#[schema(value_type = String, format = "uuid")]']
 
 [[entities.projects.fields]]
 name = "tenant_id"
-attrs = ['#[schema(value_type = String, format="uuid")]']
+attrs = ['#[schema(value_type = String, format = "uuid")]']
 
 [[entities.projects.fields]]
 name = "icon_emoji"

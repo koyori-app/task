@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
-use sea_orm::prelude::{DateTimeWithTimeZone, Uuid};
+use sea_orm::prelude::Uuid;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
