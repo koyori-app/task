@@ -2,7 +2,6 @@
 
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
-use utoipa::ToSchema;
 
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, utoipa::ToSchema)]

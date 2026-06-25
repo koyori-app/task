@@ -1,10 +1,7 @@
 //! 管理者専用 — ユーザー管理 API（`/v1/admin/users`）
 
 use crate::AppState;
-use crate::entities::{
-    drive_files, drive_folder_shares, drive_folders, personal_tokens, project_members, tasks,
-    tenants, users,
-};
+use crate::entities::{personal_tokens, project_members, tasks, users};
 use crate::error::AppError;
 use crate::extractors::AdminUser;
 use crate::handlers::admin_audit::record_audit;

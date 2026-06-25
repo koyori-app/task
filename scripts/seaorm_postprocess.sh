@@ -41,15 +41,10 @@ def inject_entity(entity_name: str, cfg: dict) -> None:
     text = text.replace("utoipa :: ToSchema", "utoipa::ToSchema")
     text = text.replace("DateTimeWithTimeZone", "DateTimeUtc")
 
-    if "use utoipa::ToSchema" not in text and "utoipa::ToSchema" in text:
-        text = text.replace(
-            "use sea_orm::entity::prelude::*;",
-            "use sea_orm::entity::prelude::*;\nuse utoipa::ToSchema;",
-            1,
-        )
+    text = re.sub(r"^use utoipa::ToSchema;\n", "", text, flags=re.MULTILINE)
 
     struct_attrs = cfg.get("struct_attrs", [])
-    if struct_attrs:
+    if struct_attrs and not any(a in text for a in struct_attrs):
         block = "\n".join(struct_attrs)
         text, n = re.subn(
             r"(#\[sea_orm\(table_name = \"[^\"]+\"\)\])",
@@ -91,7 +86,9 @@ def inject_entity(entity_name: str, cfg: dict) -> None:
         existing_attrs = match.group(2)
         insert_lines: list[str] = []
         for line in doc_lines:
-            insert_lines.append(f"{indent}/// {line}")
+            doc_marker = f"{indent}/// {line}"
+            if doc_marker not in text:
+                insert_lines.append(doc_marker)
         for attr in attrs:
             if attr in existing_attrs:
                 continue

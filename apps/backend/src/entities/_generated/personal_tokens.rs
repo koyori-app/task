@@ -2,7 +2,6 @@
 
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
-use utoipa::ToSchema;
 
 use crate::entities::scopes::ScopeList;
 

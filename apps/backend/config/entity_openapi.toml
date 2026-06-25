@@ -82,6 +82,10 @@ name = "used_at"
 attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = Option<String>, format = "date-time", nullable)]']
 
 [[entities.recovery_codes.fields]]
+name = "code_hash"
+attrs = ['#[schema(ignore)]', '#[serde(skip_serializing)]']
+
+[[entities.recovery_codes.fields]]
 name = "created_at"
 attrs = ['#[schema(value_type = String, format = "date-time")]']
 

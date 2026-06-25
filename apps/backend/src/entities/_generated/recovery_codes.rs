@@ -2,22 +2,27 @@
 
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
-use utoipa::ToSchema;
 
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, utoipa::ToSchema)]
 #[sea_orm(table_name = "recovery_codes")]
 #[schema(as = crate::entities::recovery_codes::Model)]
 pub struct Model {
+
     #[schema(value_type = String, format = "uuid")]
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+
     #[schema(value_type = String, format = "uuid")]
     pub user_id: Uuid,
+    #[schema(ignore)]
+    #[serde(skip_serializing)]
     pub code_hash: String,
+
     #[sea_orm(nullable)]
     #[schema(value_type = Option<String>, format = "date-time", nullable)]
     pub used_at: Option<DateTimeUtc>,
+
     #[schema(value_type = String, format = "date-time")]
     pub created_at: DateTimeUtc,
 }
