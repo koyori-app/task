@@ -1,28 +1,7 @@
-use sea_orm::entity::prelude::*;
-use utoipa::ToSchema;
+//! Drive folders entity — schema-first generated output re-exported for stable module path.
+pub use super::_generated::drive_folders::*;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, ToSchema, serde::Serialize)]
-#[sea_orm(table_name = "drive_folders")]
-#[schema(as = crate::entities::drive_folders::Model)]
-pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    pub name: String,
-    #[sea_orm(nullable)]
-    #[schema(value_type = String, format = "uuid", nullable)]
-    pub parent_id: Option<Uuid>,
-    #[schema(value_type = String, format = "uuid")]
-    pub tenant_id: Uuid,
-    #[sea_orm(nullable)]
-    #[schema(value_type = String, format = "uuid", nullable)]
-    pub project_id: Option<Uuid>,
-    #[schema(value_type = String, format = "uuid")]
-    pub created_by: Uuid,
-    #[schema(value_type = String, format = "date-time")]
-    #[sea_orm(default_expr = "Expr::current_timestamp()")]
-    pub created_at: DateTimeWithTimeZone,
-}
+use sea_orm::entity::prelude::*;
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
@@ -79,5 +58,3 @@ impl Related<super::users::Entity> for Entity {
         Relation::Users.def()
     }
 }
-
-impl ActiveModelBehavior for ActiveModel {}
