@@ -70,7 +70,7 @@ async fn soft_register_finish(
 }
 
 fn dummy_passkey_model(user_id: Uuid, index: u8) -> passkeys::ActiveModel {
-    let now = Utc::now().fixed_offset();
+    let now = Utc::now();
     passkeys::ActiveModel {
         id: Set(Uuid::new_v4()),
         user_id: Set(user_id),
