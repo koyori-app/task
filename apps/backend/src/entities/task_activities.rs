@@ -1,25 +1,7 @@
-use sea_orm::entity::prelude::*;
-use utoipa::ToSchema;
+//! Task activities entity — schema-first generated output re-exported for stable module path.
+pub use super::_generated::task_activities::*;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, ToSchema, serde::Serialize)]
-#[sea_orm(table_name = "task_activities")]
-#[schema(as = crate::entities::task_activities::Model)]
-pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    #[schema(value_type = String, format = "uuid")]
-    pub task_id: Uuid,
-    #[sea_orm(nullable)]
-    #[schema(nullable, value_type = Option<String>, format = "uuid")]
-    pub user_id: Option<Uuid>,
-    pub event_type: String,
-    #[sea_orm(column_type = "JsonBinary")]
-    #[schema(value_type = serde_json::Value)]
-    pub payload: Json,
-    #[schema(value_type = String, format = "date-time")]
-    pub created_at: DateTimeUtc,
-}
+use sea_orm::entity::prelude::*;
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
@@ -52,5 +34,3 @@ impl Related<super::users::Entity> for Entity {
         Relation::Users.def()
     }
 }
-
-impl ActiveModelBehavior for ActiveModel {}
