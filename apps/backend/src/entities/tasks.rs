@@ -1,3 +1,4 @@
+//! Tasks entity — schema-first with hand-written DeriveActiveEnum (OpenAPI core).
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -21,56 +22,7 @@ pub enum TaskPriority {
     Trivial,
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, ToSchema, serde::Serialize)]
-#[sea_orm(table_name = "tasks")]
-#[schema(as = crate::entities::tasks::Model)]
-pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    #[schema(value_type = String, format = "uuid")]
-    pub project_id: Uuid,
-    pub seq_id: i32,
-    pub title: String,
-    #[sea_orm(nullable)]
-    #[schema(nullable)]
-    pub description: Option<String>,
-    #[schema(value_type = String, format = "uuid")]
-    pub status_id: Uuid,
-    pub priority: TaskPriority,
-    pub progress_pct: i16,
-    #[sea_orm(nullable)]
-    #[schema(value_type = Option<String>, format = "uuid", nullable)]
-    pub parent_task_id: Option<Uuid>,
-    #[sea_orm(nullable)]
-    #[schema(value_type = Option<String>, format = "uuid", nullable)]
-    pub milestone_id: Option<Uuid>,
-    #[sea_orm(nullable)]
-    #[schema(value_type = Option<String>, format = "uuid", nullable)]
-    pub sprint_id: Option<Uuid>,
-    #[sea_orm(nullable)]
-    #[schema(value_type = Option<String>, format = "date-time", nullable)]
-    pub soft_deadline: Option<DateTimeUtc>,
-    #[sea_orm(nullable)]
-    #[schema(value_type = Option<String>, format = "date-time", nullable)]
-    pub hard_deadline: Option<DateTimeUtc>,
-    #[sea_orm(nullable)]
-    #[schema(nullable)]
-    pub estimated_minutes: Option<i32>,
-    pub is_archived: bool,
-    #[schema(value_type = String, format = "uuid")]
-    pub created_by: Uuid,
-    #[schema(value_type = String, format = "date-time")]
-    pub created_at: DateTimeUtc,
-    #[schema(value_type = String, format = "date-time")]
-    pub updated_at: DateTimeUtc,
-    #[sea_orm(nullable)]
-    #[schema(value_type = Option<String>, format = "date-time", nullable)]
-    pub completed_at: Option<DateTimeUtc>,
-    #[sea_orm(nullable)]
-    #[schema(value_type = Option<String>, format = "date-time", nullable)]
-    pub deleted_at: Option<DateTimeUtc>,
-}
+pub use super::_generated::tasks::*;
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
@@ -145,5 +97,3 @@ impl Related<super::users::Entity> for Entity {
         Relation::Users.def()
     }
 }
-
-impl ActiveModelBehavior for ActiveModel {}
