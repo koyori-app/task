@@ -154,7 +154,7 @@ export default defineConfig({
     ignorePatterns: ['content/**/*.md', 'src/components/ui/**', 'src/components/originui/**'],
   },
   lint: {
-    plugins: ["oxc", "typescript", "unicorn", "vue"],
+    plugins: ['oxc', 'typescript', 'unicorn', 'vue'],
     options: { typeAware: true, typeCheck: true },
   },
 });
