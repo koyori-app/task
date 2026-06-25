@@ -1,29 +1,7 @@
-use sea_orm::entity::prelude::*;
-use utoipa::ToSchema;
+//! GitHub integrations entity — schema-first generated output re-exported for stable module path.
+pub use super::_generated::github_integrations::*;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, ToSchema, serde::Serialize)]
-#[sea_orm(table_name = "github_integrations")]
-#[schema(as = crate::entities::github_integrations::Model)]
-pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    #[sea_orm(unique)]
-    #[schema(value_type = String, format = "uuid")]
-    pub project_id: Uuid,
-    pub installation_id: i64,
-    pub repo_owner: String,
-    pub repo_name: String,
-    #[schema(ignore)]
-    #[serde(skip_serializing)]
-    pub access_token_enc: String,
-    #[schema(value_type = String, format = "date-time")]
-    pub token_expires_at: DateTimeWithTimeZone,
-    #[schema(value_type = String, format = "uuid")]
-    pub created_by: Uuid,
-    #[schema(value_type = String, format = "date-time")]
-    pub created_at: DateTimeWithTimeZone,
-}
+use sea_orm::entity::prelude::*;
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
@@ -50,5 +28,3 @@ impl Related<super::projects::Entity> for Entity {
         Relation::Projects.def()
     }
 }
-
-impl ActiveModelBehavior for ActiveModel {}
