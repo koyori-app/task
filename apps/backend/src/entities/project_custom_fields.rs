@@ -1,3 +1,4 @@
+//! Project custom fields entity — schema-first with hand-written DeriveActiveEnum.
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -22,25 +23,7 @@ pub enum CustomFieldType {
     Checkbox,
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, ToSchema, serde::Serialize)]
-#[sea_orm(table_name = "project_custom_fields")]
-#[schema(as = crate::entities::project_custom_fields::Model)]
-pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    #[schema(value_type = String, format = "uuid")]
-    pub project_id: Uuid,
-    pub name: String,
-    pub field_type: CustomFieldType,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    #[schema(nullable)]
-    pub options: Option<Json>,
-    pub is_required: bool,
-    pub position: i16,
-    #[schema(value_type = String, format = "date-time")]
-    pub created_at: DateTimeUtc,
-}
+pub use super::_generated::project_custom_fields::*;
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
@@ -59,5 +42,3 @@ impl Related<super::projects::Entity> for Entity {
         Relation::Projects.def()
     }
 }
-
-impl ActiveModelBehavior for ActiveModel {}
