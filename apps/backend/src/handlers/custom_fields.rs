@@ -1,3 +1,11 @@
+use crate::AppState;
+use crate::auth_helpers::require_member_or_owner;
+use crate::entities::project_custom_fields;
+use crate::error::AppError;
+use crate::extractors::AuthUser;
+use crate::openapi::CrudErrors;
+use crate::payload::custom_fields::*;
+use crate::utils::custom_fields::validate_select_options;
 use axum::{
     Json,
     extract::{Path, State},
@@ -8,43 +16,6 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
     prelude::Uuid,
 };
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use utoipa::ToSchema;
-use validator::Validate;
-
-use crate::AppState;
-use crate::auth_helpers::require_member_or_owner;
-use crate::entities::project_custom_fields;
-use crate::error::AppError;
-use crate::extractors::AuthUser;
-use crate::openapi::CrudErrors;
-use crate::utils::custom_fields::validate_select_options;
-
-#[derive(Validate, Deserialize, ToSchema)]
-pub struct CreateCustomFieldRequest {
-    #[validate(length(min = 1, max = 100))]
-    pub name: String,
-    pub field_type: project_custom_fields::CustomFieldType,
-    pub options: Option<Value>,
-    #[serde(default)]
-    pub is_required: bool,
-    pub position: Option<i16>,
-}
-
-#[derive(Validate, Deserialize, ToSchema)]
-pub struct UpdateCustomFieldRequest {
-    #[validate(length(min = 1, max = 100))]
-    pub name: Option<String>,
-    pub options: Option<Value>,
-    pub is_required: Option<bool>,
-    pub position: Option<i16>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct CustomFieldListResponse {
-    pub fields: Vec<project_custom_fields::Model>,
-}
 
 async fn next_position(state: &AppState, project_id: Uuid) -> Result<i16, AppError> {
     let max = project_custom_fields::Entity::find()

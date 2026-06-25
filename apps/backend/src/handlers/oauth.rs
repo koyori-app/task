@@ -13,10 +13,8 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
     QuerySelect,
 };
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, warn};
-use validator::Validate;
 
 use crate::entities::{oauth_connections, users};
 use crate::error::{ServerError, internal_server_error};
@@ -34,15 +32,17 @@ use crate::utils::oauth::provider::{
 };
 use crate::utils::passkeys::count_user_passkeys;
 
+use crate::payload::oauth::*;
 use crate::utils::login_session::establish_login_session;
 use crate::utils::oauth::state::{
     OAuthStatePayload, build_frontend_oauth_error_redirect, build_frontend_redirect, consume_state,
     sanitize_redirect_path, store_state,
 };
 
+use crate::AppState;
+
 const OAUTH_PENDING_STATE_KEY: &str = "oauth_pending_state";
 const OAUTH_PENDING_PROVIDER_KEY: &str = "oauth_pending_provider";
-use crate::AppState;
 
 #[derive(Error, Debug)]
 pub enum OAuthError {
@@ -185,54 +185,6 @@ impl IntoResponse for OAuthError {
             }
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct OAuthStartQuery {
-    #[serde(default)]
-    pub redirect_after: Option<String>,
-    #[serde(default)]
-    pub instance_url: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct OAuthCallbackQuery {
-    #[serde(default)]
-    pub code: Option<String>,
-    #[serde(default)]
-    pub state: Option<String>,
-    #[serde(default)]
-    pub error: Option<String>,
-    #[serde(default)]
-    pub error_description: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct DisconnectQuery {
-    #[serde(default)]
-    pub instance_url: Option<String>,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct OAuthConnectionItem {
-    pub provider: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider_email: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub instance_url: Option<String>,
-    pub connected_at: String,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct OAuthConnectionsResponse {
-    pub connections: Vec<OAuthConnectionItem>,
-}
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct SetPasswordRequest {
-    #[schema(value_type = String, format = "password")]
-    #[validate(length(min = 8))]
-    pub password: String,
 }
 
 #[axum::debug_handler]

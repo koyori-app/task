@@ -9,10 +9,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder, TransactionTrait, prelude::Uuid,
 };
-use serde::Deserialize;
 use std::collections::HashSet;
-use utoipa::ToSchema;
-use validator::Validate;
 
 use crate::AppState;
 use crate::auth_helpers::require_member_or_owner;
@@ -20,41 +17,7 @@ use crate::entities::{project_statuses, tasks};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-
-#[derive(Validate, Deserialize, ToSchema)]
-pub struct CreateStatusRequest {
-    #[validate(length(min = 1, max = 100))]
-    pub name: String,
-    #[validate(regex(path = "crate::utils::validation::COLOR_REGEX"))]
-    pub color: String,
-    pub position: i16,
-    #[serde(default)]
-    pub is_default: bool,
-    #[serde(default)]
-    pub is_done_state: bool,
-}
-
-#[derive(Validate, Deserialize, ToSchema)]
-pub struct UpdateStatusRequest {
-    #[validate(length(min = 1, max = 100))]
-    pub name: Option<String>,
-    #[validate(regex(path = "crate::utils::validation::COLOR_REGEX"))]
-    pub color: Option<String>,
-    pub position: Option<i16>,
-    pub is_default: Option<bool>,
-    pub is_done_state: Option<bool>,
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct ReorderRequest {
-    pub ids: Vec<Uuid>,
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct DeleteStatusQuery {
-    pub migrate_to_status_id: Option<Uuid>,
-}
-
+use crate::payload::statuses::*;
 #[axum::debug_handler]
 #[utoipa::path(
     get,

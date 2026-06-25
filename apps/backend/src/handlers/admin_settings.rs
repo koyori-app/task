@@ -1,31 +1,15 @@
-use axum::{Json, extract::State, http::HeaderMap};
-use chrono::Utc;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-};
-use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
-
 use crate::AppState;
 use crate::entities::system_settings;
 use crate::error::AppError;
 use crate::extractors::AdminUser;
 use crate::handlers::admin_audit::record_audit;
 use crate::openapi::SessionAuthErrors;
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct SystemSettingsResponse {
-    pub user_registration_enabled: bool,
-    pub drive_default_quota_mb: i64,
-    pub drive_system_max_quota_mb: i64,
-}
-
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct UpdateSystemSettingsRequest {
-    pub user_registration_enabled: Option<bool>,
-    pub drive_default_quota_mb: Option<i64>,
-    pub drive_system_max_quota_mb: Option<i64>,
-}
+use crate::payload::admin_settings::*;
+use axum::{Json, extract::State, http::HeaderMap};
+use chrono::Utc;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+};
 
 fn model_to_response(model: system_settings::Model) -> SystemSettingsResponse {
     SystemSettingsResponse {

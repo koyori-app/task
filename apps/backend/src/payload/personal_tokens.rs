@@ -1,8 +1,28 @@
 use sea_orm::prelude::{DateTimeWithTimeZone, Uuid};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+use validator::Validate;
 
-use crate::entities::{personal_tokens, scopes::ScopeList};
+use crate::entities::{personal_tokens, scopes::Scope, scopes::ScopeList};
+
+#[derive(Validate, Debug, Deserialize, ToSchema)]
+pub struct CreatePersonalTokenRequest {
+    #[validate(length(min = 1, max = 100))]
+    pub name: String,
+    #[schema(value_type = String, format = "uuid")]
+    pub tenant_id: Uuid,
+    #[schema(value_type = Vec<String>, format = "uuid", nullable)]
+    pub project_ids: Option<Vec<Uuid>>,
+    pub scopes: Vec<Scope>,
+    #[schema(value_type = String, format = "date-time", nullable)]
+    pub expires_at: Option<DateTimeWithTimeZone>,
+}
+
+#[derive(Validate, Debug, Deserialize, ToSchema)]
+pub struct RevokeAllPersonalTokensRequest {
+    #[schema(value_type = String, format = "uuid")]
+    pub confirm_tenant_id: Uuid,
+}
 
 /// PAT のメタデータ（平文トークン・ハッシュは含まない）
 #[derive(Debug, Clone, Serialize, ToSchema)]

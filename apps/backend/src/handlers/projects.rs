@@ -8,29 +8,14 @@ use sea_orm::prelude::Uuid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
-use serde::Deserialize;
-use validator::Validate;
 
 use crate::AppState;
 use crate::entities::{drive_folders, project_members, projects, scopes::Scope, tenants};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
+use crate::payload::projects::*;
 use crate::utils::db::is_postgres_unique_violation;
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct CreateProjectRequest {
-    #[validate(length(min = 1))]
-    pub name: String,
-    #[serde(default)]
-    pub description: String,
-    #[validate(length(max = 8))]
-    pub icon_emoji: Option<String>,
-    #[validate(url)]
-    pub icon_url: Option<String>,
-    /// プロジェクトキー（例: ENG, BACK）。省略時はプロジェクト名から自動生成。
-    pub key: Option<String>,
-}
 
 fn generate_project_key(name: &str) -> String {
     let upper: String = name
@@ -56,21 +41,6 @@ fn validate_project_key(key: &str) -> bool {
 }
 
 const INVALID_PROJECT_KEY_MESSAGE: &str = "key は 2〜10 文字で、先頭は大文字英字、残りは大文字英字または数字で入力してください（例: ENG, BACK）";
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct UpdateProjectRequest {
-    #[validate(length(min = 1))]
-    pub name: Option<String>,
-    pub description: Option<String>,
-    #[validate(length(max = 8))]
-    pub icon_emoji: Option<String>,
-    #[validate(url)]
-    pub icon_url: Option<String>,
-    #[serde(default)]
-    pub clear_icon_emoji: bool,
-    #[serde(default)]
-    pub clear_icon_url: bool,
-}
 
 async fn is_tenant_owner(
     state: &AppState,

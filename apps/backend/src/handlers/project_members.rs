@@ -8,8 +8,6 @@ use sea_orm::prelude::Uuid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QuerySelect,
 };
-use serde::Deserialize;
-use validator::Validate;
 
 use crate::AppState;
 use crate::entities::project_members::ProjectRole;
@@ -19,18 +17,7 @@ use crate::entities::{
 use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct AddMemberRequest {
-    #[schema(value_type = String, format = "uuid")]
-    pub user_id: Uuid,
-    pub role: ProjectRole,
-}
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct UpdateMemberRequest {
-    pub role: ProjectRole,
-}
+use crate::payload::project_members::*;
 
 async fn get_project_in_tenant(
     state: &AppState,

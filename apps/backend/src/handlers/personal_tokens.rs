@@ -9,41 +9,18 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
 };
-use serde::Deserialize;
-use validator::Validate;
 
 use crate::AppState;
-use crate::dto::personal_tokens::{CreatePersonalTokenResponse, PersonalTokenResponse};
 use crate::entities::scopes::ScopeList;
 use crate::entities::{
     personal_tokens::{self},
-    projects,
-    scopes::Scope,
-    tenants,
+    projects, tenants,
 };
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::{CrudErrors, SessionAuthErrors};
+use crate::payload::personal_tokens::*;
 use crate::utils::auth;
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct CreatePersonalTokenRequest {
-    #[validate(length(min = 1, max = 100))]
-    pub name: String,
-    #[schema(value_type = String, format = "uuid")]
-    pub tenant_id: Uuid,
-    #[schema(value_type = Vec<String>, format = "uuid", nullable)]
-    pub project_ids: Option<Vec<Uuid>>,
-    pub scopes: Vec<Scope>,
-    #[schema(value_type = String, format = "date-time", nullable)]
-    pub expires_at: Option<DateTimeWithTimeZone>,
-}
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct RevokeAllPersonalTokensRequest {
-    #[schema(value_type = String, format = "uuid")]
-    pub confirm_tenant_id: Uuid,
-}
 
 fn token_last_four(token: &str) -> String {
     token[token.len().saturating_sub(4)..].to_string()

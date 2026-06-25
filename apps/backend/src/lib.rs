@@ -8,7 +8,6 @@ use crate::{
 use sea_orm::DatabaseConnection;
 
 pub mod auth_helpers;
-pub mod dto;
 pub mod entities;
 pub mod error;
 pub mod extractors;
@@ -16,6 +15,7 @@ pub mod handlers;
 pub mod jobs;
 pub mod middlewares;
 pub mod openapi;
+pub mod payload;
 pub mod routes;
 pub mod server;
 pub mod settings;

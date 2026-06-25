@@ -1,5 +1,18 @@
 //! Drive folder CRUD, sharing, and public link handlers.
 
+use crate::AppState;
+use crate::entities::{
+    drive_files, drive_folder_shares,
+    drive_folder_shares::{SharePermission, validate_share_target_xor},
+    drive_folders,
+    scopes::Scope,
+    users,
+};
+use crate::error::AppError;
+use crate::extractors::AuthUser;
+use crate::openapi::{DriveFolderErrors, PublicShareErrors};
+use crate::payload::drive_folders::*;
+use crate::utils::drive::is_tenant_owner;
 use axum::{
     Json,
     extract::{Path, State},
@@ -12,62 +25,10 @@ use sea_orm::prelude::Uuid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
 };
-use serde::{Deserialize, Serialize};
-use validator::Validate;
-
-use crate::AppState;
-use crate::entities::{
-    drive_files, drive_folder_shares,
-    drive_folder_shares::{SharePermission, validate_share_target_xor},
-    drive_folders,
-    scopes::Scope,
-    users,
-};
-use crate::error::AppError;
-use crate::extractors::AuthUser;
-use crate::openapi::{DriveFolderErrors, PublicShareErrors};
-use crate::utils::drive::is_tenant_owner;
 
 const SHARE_TOKEN_LEN: usize = 32;
 const SHARE_TOKEN_CHARSET: &[u8] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-
-// --- Request / response DTOs ---
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct CreateFolderRequest {
-    #[validate(length(min = 1))]
-    pub name: String,
-    #[schema(value_type = String, format = "uuid", nullable)]
-    pub parent_id: Option<Uuid>,
-}
-
-#[derive(Debug, Deserialize, utoipa::ToSchema)]
-pub struct UpdateFolderRequest {
-    pub name: Option<String>,
-    /// `null` でルートへ移動。フィールド省略時は変更なし。
-    #[schema(value_type = String, format = "uuid", nullable)]
-    pub parent_id: Option<Option<Uuid>>,
-}
-
-#[derive(Debug, Deserialize, utoipa::ToSchema)]
-pub struct CreateShareRequest {
-    /// `user` or `public_link`
-    #[serde(rename = "type")]
-    pub share_type: String,
-    #[schema(value_type = String, format = "uuid", nullable)]
-    pub user_id: Option<Uuid>,
-    pub permission: String,
-    #[schema(value_type = String, format = "date-time", nullable)]
-    pub expires_at: Option<sea_orm::prelude::DateTimeWithTimeZone>,
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct PublicFolderResponse {
-    pub name: String,
-    pub created_by_name: String,
-    pub file_count: u64,
-}
 
 // --- Token generation ---
 

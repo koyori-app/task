@@ -1,5 +1,21 @@
 //! 管理者専用 — ユーザー管理 API（`/v1/admin/users`）
 
+use crate::AppState;
+use crate::entities::{
+    drive_files, drive_folder_shares, drive_folders, personal_tokens, project_members, tasks,
+    tenants, users,
+};
+use crate::error::AppError;
+use crate::extractors::AdminUser;
+use crate::handlers::admin_audit::record_audit;
+use crate::openapi::CrudErrors;
+use crate::payload::admin_users::*;
+use crate::utils::auth::AuthError;
+use crate::utils::auth::{create_password_hash, generate_email_verification_token};
+use crate::utils::db::is_postgres_unique_violation;
+use crate::utils::email::normalize_email;
+use crate::utils::password_reset;
+use crate::utils::password_reset_delivery;
 use axum::{
     Json,
     extract::{Path, State},
@@ -14,58 +30,12 @@ use sea_orm::{
     EntityTrait, ExecResult, ExprTrait, PaginatorTrait, QueryFilter, Statement, TransactionTrait,
     Value,
 };
-use serde::{Deserialize, Serialize};
-use validator::Validate;
-
-use crate::AppState;
-use crate::entities::{personal_tokens, project_members, tasks, users};
-use crate::error::AppError;
-use crate::extractors::AdminUser;
-use crate::handlers::admin_audit::record_audit;
-use crate::openapi::CrudErrors;
-use crate::utils::auth::AuthError;
-use crate::utils::auth::{create_password_hash, generate_email_verification_token};
-use crate::utils::db::is_postgres_unique_violation;
-use crate::utils::email::normalize_email;
-use crate::utils::password_reset;
-use crate::utils::password_reset_delivery;
 
 fn auth_error_to_app(e: AuthError) -> AppError {
     match e {
         AuthError::Internal(err) => AppError::Internal(err),
         _ => AppError::Internal(anyhow::anyhow!("{e}")),
     }
-}
-
-#[derive(Debug, Deserialize, utoipa::ToSchema, Validate)]
-pub struct AdminCreateUserRequest {
-    #[validate(length(min = 3))]
-    pub username: String,
-    #[validate(email)]
-    pub email: String,
-    #[validate(length(min = 8))]
-    pub password: String,
-    #[serde(default)]
-    pub is_admin: bool,
-    #[serde(default)]
-    pub email_verified: bool,
-}
-
-#[derive(Debug, Deserialize, utoipa::ToSchema, Validate)]
-pub struct AdminUpdateUserRequest {
-    pub is_admin: Option<bool>,
-    pub is_suspended: Option<bool>,
-}
-
-#[derive(Debug, Deserialize, utoipa::ToSchema, Validate)]
-pub struct AdminPasswordResetRequest {
-    #[validate(email)]
-    pub send_to: Option<String>,
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct AdminPasswordResetResponse {
-    pub message: String,
 }
 
 async fn execute_bound<C: ConnectionTrait>(
@@ -193,7 +163,9 @@ pub async fn ensure_not_last_admin(
 
 async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(), AppError> {
     if table_exists(db, "tasks").await.unwrap_or(false)
-        && column_exists(db, "tasks", "deleted_at").await.unwrap_or(false)
+        && column_exists(db, "tasks", "deleted_at")
+            .await
+            .unwrap_or(false)
     {
         let owned = tasks::Entity::find()
             .filter(tasks::Column::CreatedBy.eq(user_id))
@@ -227,7 +199,9 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
     }
 
     if table_exists(db, "personal_tokens").await.unwrap_or(false)
-        && column_exists(db, "personal_tokens", "revoked").await.unwrap_or(false)
+        && column_exists(db, "personal_tokens", "revoked")
+            .await
+            .unwrap_or(false)
     {
         let _ = personal_tokens::Entity::update_many()
             .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
@@ -236,7 +210,10 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
             .await;
     }
 
-    if column_exists(db, "users", "sessions_revoked_at").await.unwrap_or(false) {
+    if column_exists(db, "users", "sessions_revoked_at")
+        .await
+        .unwrap_or(false)
+    {
         let _ = revoke_user_sessions(db, user_id).await;
     }
 

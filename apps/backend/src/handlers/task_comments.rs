@@ -8,10 +8,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
     TransactionTrait, prelude::Uuid,
 };
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use utoipa::ToSchema;
-use validator::Validate;
 
 use crate::AppState;
 use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
@@ -20,74 +17,9 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
+use crate::payload::task_comments::*;
 use crate::utils::notifications::{notify_comment_added, notify_mentioned};
 use crate::utils::task_activities::{extract_mentions, record_activity};
-
-#[derive(Serialize, ToSchema)]
-pub struct CommentUser {
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    pub name: String,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct CommentReply {
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    pub user: CommentUser,
-    #[schema(nullable)]
-    pub body: Option<String>,
-    #[schema(value_type = String, format = "date-time")]
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    #[schema(value_type = String, format = "date-time")]
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-    pub is_deleted: bool,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct CommentThread {
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    pub user: CommentUser,
-    #[schema(nullable)]
-    pub body: Option<String>,
-    pub replies: Vec<CommentReply>,
-    #[schema(value_type = String, format = "date-time")]
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    #[schema(value_type = String, format = "date-time")]
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-    pub is_deleted: bool,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct CommentListResponse {
-    pub comments: Vec<CommentThread>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct ActivityUser {
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    pub name: String,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct ActivityItem {
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    pub event_type: String,
-    #[schema(nullable)]
-    pub user: Option<ActivityUser>,
-    #[schema(value_type = serde_json::Value)]
-    pub payload: serde_json::Value,
-    #[schema(value_type = String, format = "date-time")]
-    pub created_at: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct ActivityListResponse {
-    pub activities: Vec<ActivityItem>,
-}
 
 fn comment_body(model: &task_comments::Model) -> Option<String> {
     if model.deleted_at.is_some() {
@@ -207,14 +139,6 @@ pub async fn list_comments(
     Ok(Json(CommentListResponse { comments }))
 }
 
-#[derive(Validate, Deserialize, ToSchema)]
-pub struct CreateCommentRequest {
-    #[validate(length(min = 1))]
-    pub body: String,
-    #[schema(value_type = Option<String>, format = "uuid")]
-    pub parent_comment_id: Option<Uuid>,
-}
-
 #[axum::debug_handler]
 #[utoipa::path(
     post,
@@ -303,12 +227,6 @@ pub async fn create_comment(
     txn.commit().await?;
 
     Ok((StatusCode::CREATED, Json(comment)))
-}
-
-#[derive(Validate, Deserialize, ToSchema)]
-pub struct UpdateCommentRequest {
-    #[validate(length(min = 1))]
-    pub body: String,
 }
 
 #[axum::debug_handler]

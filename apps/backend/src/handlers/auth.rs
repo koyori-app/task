@@ -5,18 +5,18 @@ use axum_valid::Valid;
 use sea_orm::prelude::Uuid;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use sea_orm::{ColumnTrait, QueryFilter};
-use serde::Deserialize;
-use validator::Validate;
 
 use crate::entities;
 use crate::extractors::{AuthUser, CurrentUser};
-use crate::handlers::auth_2fa::{Login2faResponse, establish_login_session};
+use crate::handlers::auth_2fa::establish_login_session;
 use crate::jobs::VerificationEmailJob;
 use crate::jobs::verification_email;
 use crate::openapi::{
     CredentialErrors, RegisterErrors, ResendVerificationErrors, SessionAuthErrors,
     UnauthorizedErrors, VerifyEmailErrors,
 };
+use crate::payload::auth::*;
+use crate::payload::auth_2fa::Login2faResponse;
 use crate::utils::auth::{
     AuthError, create_password_hash, dummy_password_hash, generate_email_verification_token,
     verify_password,
@@ -25,16 +25,6 @@ use crate::utils::db::{is_postgres_unique_violation, with_transaction};
 use crate::utils::email::normalize_email;
 use crate::utils::email_verification;
 use crate::{AppState, entities::system_settings, entities::users};
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct LoginRequest {
-    #[schema(value_type = String, format="email")]
-    #[validate(email)]
-    pub email: String,
-    #[schema(value_type = String, format="password")]
-    #[validate(length(min = 8))]
-    pub password: String,
-}
 
 #[axum::debug_handler]
 #[utoipa::path(
@@ -82,19 +72,6 @@ pub async fn login(
     }
 
     Ok(StatusCode::NO_CONTENT.into_response())
-}
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct RegisterRequest {
-    #[schema(value_type = String, format="username")]
-    #[validate(length(min = 3))]
-    pub username: String,
-    #[schema(value_type = String, format="email")]
-    #[validate(email)]
-    pub email: String,
-    #[schema(value_type = String, format="password")]
-    #[validate(length(min = 8))]
-    pub password: String,
 }
 
 #[axum::debug_handler]
@@ -184,14 +161,6 @@ pub async fn register(
     Ok((StatusCode::CREATED, Json("Register successful".to_string())))
 }
 
-/// メールでの本人確認時に送信する情報。
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct VerifyEmailRequest {
-    /// メールまたはアプリにお知らせした認証用文字列です。
-    #[validate(length(min = 1))]
-    pub token: String,
-}
-
 #[axum::debug_handler]
 #[utoipa::path(
     post,
@@ -235,13 +204,6 @@ pub async fn verify_email(
     active.update(&state.db).await?;
 
     Ok(Json("Email verified".to_string()))
-}
-
-#[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
-pub struct ResendVerificationRequest {
-    #[schema(value_type = String, format="email")]
-    #[validate(email)]
-    pub email: String,
 }
 
 #[axum::debug_handler]

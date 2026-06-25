@@ -10,10 +10,7 @@ use sea_orm::{
     IsolationLevel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
     prelude::Uuid,
 };
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
-use utoipa::ToSchema;
-use validator::Validate;
 
 use crate::AppState;
 use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
@@ -24,9 +21,9 @@ use crate::entities::{
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
+use crate::payload::tasks::*;
 use crate::utils::custom_fields::{
-    CustomFieldValueInput, TaskCustomFieldValueResponse, ensure_required_custom_fields,
-    load_task_custom_field_values, upsert_task_custom_field_values,
+    ensure_required_custom_fields, load_task_custom_field_values, upsert_task_custom_field_values,
 };
 use crate::utils::db::is_postgres_unique_violation;
 use crate::utils::notifications::{notify_assigned, notify_status_changed};
@@ -285,105 +282,6 @@ async fn is_ancestor_of<C: ConnectionTrait>(
     }
 }
 
-// ─── DTOs ────────────────────────────────────────────────────────────────
-
-#[derive(Deserialize, ToSchema)]
-pub struct AssigneeInput {
-    pub user_id: Uuid,
-    pub role: String,
-}
-
-#[derive(Validate, Deserialize, ToSchema)]
-pub struct CreateTaskRequest {
-    #[validate(length(min = 1, max = 255))]
-    pub title: String,
-    pub description: Option<String>,
-    #[schema(value_type = String, format = "uuid")]
-    pub status_id: Uuid,
-    pub priority: Option<tasks::TaskPriority>,
-    #[validate(range(min = 0, max = 100))]
-    pub progress_pct: Option<i16>,
-    #[schema(value_type = Option<String>, format = "uuid")]
-    pub parent_task_id: Option<Uuid>,
-    #[schema(value_type = Option<String>, format = "uuid")]
-    pub milestone_id: Option<Uuid>,
-    #[schema(value_type = Option<String>, format = "uuid")]
-    pub sprint_id: Option<Uuid>,
-    #[schema(value_type = Option<String>, format = "date-time")]
-    pub soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
-    #[schema(value_type = Option<String>, format = "date-time")]
-    pub hard_deadline: Option<chrono::DateTime<chrono::Utc>>,
-    #[validate(range(min = 1))]
-    pub estimated_minutes: Option<i32>,
-    #[serde(default)]
-    pub assignees: Vec<AssigneeInput>,
-    #[serde(default)]
-    pub label_ids: Vec<Uuid>,
-    #[serde(default)]
-    pub custom_field_values: Vec<CustomFieldValueInput>,
-}
-
-#[derive(Validate, Deserialize, ToSchema)]
-pub struct UpdateTaskRequest {
-    #[validate(length(min = 1, max = 255))]
-    pub title: Option<String>,
-    pub description: Option<String>,
-    #[serde(default)]
-    pub clear_description: bool,
-    #[schema(value_type = Option<String>, format = "uuid")]
-    pub status_id: Option<Uuid>,
-    pub priority: Option<tasks::TaskPriority>,
-    #[validate(range(min = 0, max = 100))]
-    pub progress_pct: Option<i16>,
-    #[schema(value_type = Option<String>, format = "uuid")]
-    pub parent_task_id: Option<Uuid>,
-    #[serde(default)]
-    pub clear_parent_task_id: bool,
-    #[schema(value_type = Option<String>, format = "uuid")]
-    pub milestone_id: Option<Uuid>,
-    #[serde(default)]
-    pub clear_milestone_id: bool,
-    #[schema(value_type = Option<String>, format = "uuid")]
-    pub sprint_id: Option<Uuid>,
-    #[serde(default)]
-    pub clear_sprint_id: bool,
-    #[schema(value_type = Option<String>, format = "date-time")]
-    pub soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(default)]
-    pub clear_soft_deadline: bool,
-    #[schema(value_type = Option<String>, format = "date-time")]
-    pub hard_deadline: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(default)]
-    pub clear_hard_deadline: bool,
-    #[validate(range(min = 1))]
-    pub estimated_minutes: Option<i32>,
-    #[serde(default)]
-    pub clear_estimated_minutes: bool,
-    pub is_archived: Option<bool>,
-    pub custom_field_values: Option<Vec<CustomFieldValueInput>>,
-}
-
-#[derive(Deserialize, ToSchema, utoipa::IntoParams)]
-pub struct ListTasksQuery {
-    pub status_id: Option<Uuid>,
-    pub priority: Option<String>,
-    pub assignee_id: Option<Uuid>,
-    pub milestone_id: Option<Uuid>,
-    pub sprint_id: Option<Uuid>,
-    pub parent_task_id: Option<Uuid>,
-    #[serde(default)]
-    pub is_archived: bool,
-    pub sort: Option<String>,
-    #[serde(default = "default_limit")]
-    pub limit: u64,
-    #[serde(default)]
-    pub offset: u64,
-}
-
-fn default_limit() -> u64 {
-    50
-}
-
 fn parse_task_priority(value: &str) -> Result<tasks::TaskPriority, AppError> {
     match value {
         "critical_fire" => Ok(tasks::TaskPriority::CriticalFire),
@@ -394,19 +292,6 @@ fn parse_task_priority(value: &str) -> Result<tasks::TaskPriority, AppError> {
         "trivial" => Ok(tasks::TaskPriority::Trivial),
         _ => Err(AppError::BadRequest),
     }
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct TaskListResponse {
-    pub tasks: Vec<tasks::Model>,
-    pub total: u64,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct TaskDetailResponse {
-    #[serde(flatten)]
-    pub task: tasks::Model,
-    pub custom_field_values: Vec<TaskCustomFieldValueResponse>,
 }
 
 async fn build_task_detail_response(
@@ -1054,13 +939,6 @@ pub async fn list_assignees(
     Ok(Json(assignees))
 }
 
-#[derive(Validate, Deserialize, ToSchema)]
-pub struct AddAssigneeRequest {
-    pub user_id: Uuid,
-    #[validate(length(min = 1))]
-    pub role: String,
-}
-
 #[axum::debug_handler]
 #[utoipa::path(
     post,
@@ -1132,12 +1010,6 @@ pub async fn add_assignee(
     .await?;
     txn.commit().await?;
     Ok((StatusCode::CREATED, Json(assignee)))
-}
-
-#[derive(Validate, Deserialize, ToSchema)]
-pub struct UpdateAssigneeRequest {
-    #[validate(length(min = 1))]
-    pub role: String,
 }
 
 #[axum::debug_handler]
@@ -1230,20 +1102,6 @@ pub async fn remove_assignee(
 }
 
 // ─── Relations ───────────────────────────────────────────────────────────
-
-#[derive(Serialize, ToSchema)]
-pub struct RelationEntry {
-    pub relation_id: Uuid,
-    #[serde(flatten)]
-    pub task: tasks::Model,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct TaskRelationsResponse {
-    pub subtasks: Vec<tasks::Model>,
-    pub blocks: Vec<RelationEntry>,
-    pub blocked_by: Vec<RelationEntry>,
-}
 
 #[axum::debug_handler]
 #[utoipa::path(
@@ -1343,13 +1201,6 @@ pub async fn list_relations(
         blocks,
         blocked_by,
     }))
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct AddRelationRequest {
-    #[serde(rename = "type")]
-    pub relation_type: String,
-    pub target_task_id: Uuid,
 }
 
 #[axum::debug_handler]
