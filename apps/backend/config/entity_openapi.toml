@@ -661,3 +661,190 @@ attrs = ['#[schema(value_type = String, format = "date-time")]']
 [[entities.oauth_connections.fields]]
 name = "updated_at"
 attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.drive_folder_shares]
+struct_attrs = ['#[schema(as = crate::entities::drive_folder_shares::Model)]']
+
+[[entities.drive_folder_shares.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.drive_folder_shares.fields]]
+name = "folder_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.drive_folder_shares.fields]]
+name = "shared_with_user_id"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = String, format = "uuid", nullable)]']
+
+[[entities.drive_folder_shares.fields]]
+name = "share_token"
+attrs = ['#[sea_orm(nullable, unique)]', '#[schema(nullable)]']
+
+[[entities.drive_folder_shares.fields]]
+name = "created_by"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.drive_folder_shares.fields]]
+name = "expires_at"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = String, format = "date-time", nullable)]']
+
+[[entities.drive_folder_shares.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]', '#[sea_orm(default_expr = "Expr::current_timestamp()")]']
+
+[entities.sprints]
+struct_attrs = ['#[schema(as = crate::entities::sprints::Model)]']
+
+[[entities.sprints.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.sprints.fields]]
+name = "project_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.sprints.fields]]
+name = "goal"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable)]']
+
+[[entities.sprints.fields]]
+name = "start_date"
+attrs = ['#[schema(value_type = String, example = "2026-06-01")]']
+
+[[entities.sprints.fields]]
+name = "end_date"
+attrs = ['#[schema(value_type = String, example = "2026-06-14")]']
+
+[[entities.sprints.fields]]
+name = "created_by"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.sprints.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[[entities.sprints.fields]]
+name = "updated_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.drive_files]
+struct_attrs = ['#[schema(as = crate::entities::drive_files::Model)]']
+
+[[entities.drive_files.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.drive_files.fields]]
+name = "tenant_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.drive_files.fields]]
+name = "project_id"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = String, format = "uuid", nullable)]']
+
+[[entities.drive_files.fields]]
+name = "uploader_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.drive_files.fields]]
+name = "folder_id"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = String, format = "uuid", nullable)]']
+
+[[entities.drive_files.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]', '#[sea_orm(default_expr = "Expr::current_timestamp()")]']
+
+[entities.personal_tokens]
+struct_attrs = ['#[schema(as = crate::entities::personal_tokens::Model)]']
+
+[[entities.personal_tokens.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.personal_tokens.fields]]
+name = "token_hash"
+attrs = ['#[sea_orm(indexed)]', '#[schema(ignore)]', '#[serde(skip_serializing)]']
+
+[[entities.personal_tokens.fields]]
+name = "expires_at"
+attrs = ['#[schema(value_type = String, format = "date-time", nullable)]']
+
+[[entities.personal_tokens.fields]]
+name = "last_used_at"
+attrs = ['#[schema(value_type = String, format = "date-time", nullable)]']
+
+[[entities.personal_tokens.fields]]
+name = "user_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.personal_tokens.fields]]
+name = "tenant_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.personal_tokens.doc_comments]]
+field = "allowed_project_ids"
+comment = "JSONB として保存（`NULL` = テナント内全プロジェクト）。復元は `parse_allowed_project_ids`。"
+
+[entities.tasks]
+struct_attrs = ['#[schema(as = crate::entities::tasks::Model)]']
+
+[[entities.tasks.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.tasks.fields]]
+name = "project_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.tasks.fields]]
+name = "description"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable)]']
+
+[[entities.tasks.fields]]
+name = "status_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.tasks.fields]]
+name = "parent_task_id"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = Option<String>, format = "uuid", nullable)]']
+
+[[entities.tasks.fields]]
+name = "milestone_id"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = Option<String>, format = "uuid", nullable)]']
+
+[[entities.tasks.fields]]
+name = "sprint_id"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = Option<String>, format = "uuid", nullable)]']
+
+[[entities.tasks.fields]]
+name = "soft_deadline"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = Option<String>, format = "date-time", nullable)]']
+
+[[entities.tasks.fields]]
+name = "hard_deadline"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = Option<String>, format = "date-time", nullable)]']
+
+[[entities.tasks.fields]]
+name = "estimated_minutes"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable)]']
+
+[[entities.tasks.fields]]
+name = "created_by"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.tasks.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[[entities.tasks.fields]]
+name = "updated_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[[entities.tasks.fields]]
+name = "completed_at"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = Option<String>, format = "date-time", nullable)]']
+
+[[entities.tasks.fields]]
+name = "deleted_at"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = Option<String>, format = "date-time", nullable)]']
