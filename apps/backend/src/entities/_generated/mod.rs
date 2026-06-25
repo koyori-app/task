@@ -4,6 +4,7 @@ pub mod labels;
 pub mod notification_settings;
 pub mod project_statuses;
 pub mod project_task_counters;
+pub mod project_task_views;
 pub mod projects;
 pub mod recovery_codes;
 pub mod system_settings;

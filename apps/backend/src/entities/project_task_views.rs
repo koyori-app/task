@@ -1,28 +1,7 @@
-use sea_orm::entity::prelude::*;
-use serde::Serialize;
-use utoipa::ToSchema;
+//! Project task views entity — schema-first generated output re-exported for stable module path.
+pub use super::_generated::project_task_views::*;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, ToSchema, Serialize)]
-#[sea_orm(table_name = "project_task_views")]
-#[schema(as = crate::entities::project_task_views::Model)]
-pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    #[schema(value_type = String, format = "uuid")]
-    pub project_id: Uuid,
-    #[schema(value_type = String, format = "uuid")]
-    pub created_by: Uuid,
-    pub name: String,
-    pub is_shared: bool,
-    pub filters: Json,
-    pub sort: Json,
-    pub view_type: String,
-    #[schema(value_type = String, format = "date-time")]
-    pub created_at: DateTimeUtc,
-    #[schema(value_type = String, format = "date-time")]
-    pub updated_at: DateTimeUtc,
-}
+use sea_orm::entity::prelude::*;
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
@@ -55,5 +34,3 @@ impl Related<super::users::Entity> for Entity {
         Relation::Users.def()
     }
 }
-
-impl ActiveModelBehavior for ActiveModel {}

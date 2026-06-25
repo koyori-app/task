@@ -287,3 +287,188 @@ attrs = ['#[schema(value_type = String, format = "uuid")]']
 [[entities.task_assignees.fields]]
 name = "assigned_at"
 attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.project_task_views]
+struct_attrs = ['#[schema(as = crate::entities::project_task_views::Model)]']
+
+[[entities.project_task_views.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.project_task_views.fields]]
+name = "project_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.project_task_views.fields]]
+name = "created_by"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.project_task_views.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[[entities.project_task_views.fields]]
+name = "updated_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.task_activities]
+struct_attrs = ['#[schema(as = crate::entities::task_activities::Model)]']
+
+[[entities.task_activities.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_activities.fields]]
+name = "task_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_activities.fields]]
+name = "user_id"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable, value_type = Option<String>, format = "uuid")]']
+
+[[entities.task_activities.fields]]
+name = "payload"
+attrs = ['#[schema(value_type = serde_json::Value)]']
+
+[[entities.task_activities.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.task_attachments]
+struct_attrs = ['#[schema(as = crate::entities::task_attachments::Model)]']
+
+[[entities.task_attachments.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_attachments.fields]]
+name = "task_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_attachments.fields]]
+name = "drive_file_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_attachments.fields]]
+name = "created_by"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_attachments.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.notifications]
+struct_attrs = ['#[schema(as = crate::entities::notifications::Model)]']
+
+[[entities.notifications.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.notifications.fields]]
+name = "user_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.notifications.fields]]
+name = "task_id"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable, value_type = Option<String>, format = "uuid")]']
+
+[[entities.notifications.fields]]
+name = "payload"
+attrs = ['#[schema(value_type = serde_json::Value)]']
+
+[[entities.notifications.fields]]
+name = "read_at"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable, value_type = Option<String>, format = "date-time")]']
+
+[[entities.notifications.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.time_logs]
+struct_attrs = ['#[schema(as = crate::entities::time_logs::Model)]']
+
+[[entities.time_logs.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.time_logs.fields]]
+name = "task_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.time_logs.fields]]
+name = "user_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.time_logs.fields]]
+name = "logged_at"
+attrs = ['#[schema(value_type = String, format = "date")]']
+
+[[entities.time_logs.fields]]
+name = "note"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable)]']
+
+[[entities.time_logs.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.audit_logs]
+struct_attrs = ['#[schema(as = crate::entities::audit_logs::Model)]']
+
+[[entities.audit_logs.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.audit_logs.fields]]
+name = "actor_id"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable, value_type = Option<String>, format = "uuid")]']
+
+[[entities.audit_logs.fields]]
+name = "tenant_id"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable, value_type = Option<String>, format = "uuid")]']
+
+[[entities.audit_logs.fields]]
+name = "metadata"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable, value_type = Option<serde_json::Value>)]']
+
+[[entities.audit_logs.fields]]
+name = "ip_address"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable)]']
+
+[[entities.audit_logs.fields]]
+name = "user_agent"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable)]']
+
+[[entities.audit_logs.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.milestones]
+struct_attrs = ['#[schema(as = crate::entities::milestones::Model)]']
+
+[[entities.milestones.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.milestones.fields]]
+name = "project_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.milestones.fields]]
+name = "description"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable)]']
+
+[[entities.milestones.fields]]
+name = "due_date"
+attrs = ['#[schema(value_type = String, example = "2026-07-01")]']
+
+[[entities.milestones.fields]]
+name = "created_by"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.milestones.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[[entities.milestones.fields]]
+name = "updated_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
