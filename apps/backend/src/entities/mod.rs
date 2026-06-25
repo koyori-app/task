@@ -1,3 +1,4 @@
+pub mod _generated;
 pub mod audit_logs;
 pub mod drive_files;
 pub mod drive_folder_shares;
