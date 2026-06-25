@@ -472,3 +472,192 @@ attrs = ['#[schema(value_type = String, format = "date-time")]']
 [[entities.milestones.fields]]
 name = "updated_at"
 attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.github_integrations]
+struct_attrs = ['#[schema(as = crate::entities::github_integrations::Model)]']
+
+[[entities.github_integrations.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.github_integrations.fields]]
+name = "project_id"
+attrs = ['#[sea_orm(unique)]', '#[schema(value_type = String, format = "uuid")]']
+
+[[entities.github_integrations.fields]]
+name = "access_token_enc"
+attrs = ['#[schema(ignore)]', '#[serde(skip_serializing)]']
+
+[[entities.github_integrations.fields]]
+name = "token_expires_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[[entities.github_integrations.fields]]
+name = "created_by"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.github_integrations.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.task_comments]
+struct_attrs = ['#[schema(as = crate::entities::task_comments::Model)]']
+
+[[entities.task_comments.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_comments.fields]]
+name = "task_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_comments.fields]]
+name = "user_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_comments.fields]]
+name = "parent_comment_id"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = Option<String>, format = "uuid", nullable)]']
+
+[[entities.task_comments.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[[entities.task_comments.fields]]
+name = "updated_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[[entities.task_comments.fields]]
+name = "deleted_at"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = Option<String>, format = "date-time", nullable)]']
+
+[entities.drive_folders]
+struct_attrs = ['#[schema(as = crate::entities::drive_folders::Model)]']
+
+[[entities.drive_folders.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.drive_folders.fields]]
+name = "parent_id"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = String, format = "uuid", nullable)]']
+
+[[entities.drive_folders.fields]]
+name = "tenant_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.drive_folders.fields]]
+name = "project_id"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = String, format = "uuid", nullable)]']
+
+[[entities.drive_folders.fields]]
+name = "created_by"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.drive_folders.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.passkeys]
+struct_attrs = ['#[schema(as = crate::entities::passkeys::Model)]']
+
+[[entities.passkeys.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.passkeys.fields]]
+name = "user_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.passkeys.fields]]
+name = "credential_id"
+attrs = ['#[sea_orm(column_type = "VarBinary(StringLen::None)")]', '#[schema(ignore)]', '#[serde(skip_serializing)]']
+
+[[entities.passkeys.fields]]
+name = "public_key"
+attrs = ['#[sea_orm(column_type = "VarBinary(StringLen::None)")]', '#[schema(ignore)]', '#[serde(skip_serializing)]']
+
+[[entities.passkeys.fields]]
+name = "aaguid"
+attrs = ['#[sea_orm(column_type = "VarBinary(StringLen::None)", nullable)]', '#[schema(ignore)]', '#[serde(skip_serializing)]']
+
+[[entities.passkeys.fields]]
+name = "last_used_at"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = String, format = "date-time", nullable)]']
+
+[[entities.passkeys.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.project_custom_fields]
+struct_attrs = ['#[schema(as = crate::entities::project_custom_fields::Model)]']
+
+[[entities.project_custom_fields.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.project_custom_fields.fields]]
+name = "project_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.project_custom_fields.fields]]
+name = "options"
+attrs = ['#[sea_orm(column_type = "JsonBinary", nullable)]', '#[schema(nullable)]']
+
+[[entities.project_custom_fields.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.project_members]
+struct_attrs = ['#[schema(as = crate::entities::project_members::Model)]']
+
+[[entities.project_members.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.project_members.fields]]
+name = "project_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.project_members.fields]]
+name = "user_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[entities.oauth_connections]
+struct_attrs = ['#[schema(as = crate::entities::oauth_connections::Model)]']
+
+[[entities.oauth_connections.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.oauth_connections.fields]]
+name = "user_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.oauth_connections.fields]]
+name = "provider_email"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable)]']
+
+[[entities.oauth_connections.fields]]
+name = "instance_url"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable)]']
+
+[[entities.oauth_connections.fields]]
+name = "access_token_enc"
+attrs = ['#[sea_orm(nullable)]', '#[schema(ignore)]', '#[serde(skip_serializing)]']
+
+[[entities.oauth_connections.fields]]
+name = "refresh_token_enc"
+attrs = ['#[sea_orm(nullable)]', '#[schema(ignore)]', '#[serde(skip_serializing)]']
+
+[[entities.oauth_connections.fields]]
+name = "token_expires_at"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = String, format = "date-time", nullable)]']
+
+[[entities.oauth_connections.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[[entities.oauth_connections.fields]]
+name = "updated_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
