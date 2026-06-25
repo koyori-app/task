@@ -25,7 +25,7 @@ pub struct Model {
     pub created_by: Uuid,
     #[schema(value_type = String, format = "date-time")]
     #[sea_orm(default_expr = "Expr::current_timestamp()")]
-    pub created_at: DateTimeWithTimeZone,
+    pub created_at: DateTimeUtc,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

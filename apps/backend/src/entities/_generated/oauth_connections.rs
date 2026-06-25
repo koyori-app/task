@@ -32,11 +32,11 @@ pub struct Model {
     pub refresh_token_enc: Option<String>,
     #[sea_orm(nullable)]
     #[schema(value_type = String, format = "date-time", nullable)]
-    pub token_expires_at: Option<DateTimeWithTimeZone>,
+    pub token_expires_at: Option<DateTimeUtc>,
     #[schema(value_type = String, format = "date-time")]
-    pub created_at: DateTimeWithTimeZone,
+    pub created_at: DateTimeUtc,
     #[schema(value_type = String, format = "date-time")]
-    pub updated_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeUtc,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

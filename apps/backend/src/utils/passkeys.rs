@@ -57,7 +57,7 @@ pub async fn update_passkey_after_authentication(
 ) -> Result<(), AuthError> {
     verify_sign_counter(auth_result, stored.sign_count)?;
 
-    let now = Utc::now().fixed_offset();
+    let now = Utc::now();
 
     if let Some(true) = passkey.update_credential(auth_result) {
         let (credential_id, public_key, aaguid, sign_count) =

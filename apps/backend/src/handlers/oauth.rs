@@ -755,7 +755,7 @@ async fn insert_connection_txn(
         None => None,
     };
 
-    let now = Utc::now().fixed_offset();
+    let now = Utc::now();
     let connection = oauth_connections::ActiveModel {
         id: Set(Uuid::new_v4()),
         user_id: Set(user_id),
@@ -765,7 +765,7 @@ async fn insert_connection_txn(
         instance_url: Set(instance_url.map(str::to_string)),
         access_token_enc: Set(Some(access_token_enc)),
         refresh_token_enc: Set(refresh_token_enc),
-        token_expires_at: Set(token.expires_at.map(|dt| dt.fixed_offset())),
+        token_expires_at: Set(token.expires_at),
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()
@@ -803,8 +803,8 @@ async fn update_connection_tokens(
     let mut active: oauth_connections::ActiveModel = conn.into();
     active.access_token_enc = Set(Some(access_token_enc));
     active.refresh_token_enc = Set(refresh_token_enc);
-    active.token_expires_at = Set(token.expires_at.map(|dt| dt.fixed_offset()));
-    active.updated_at = Set(Utc::now().fixed_offset());
+    active.token_expires_at = Set(token.expires_at);
+    active.updated_at = Set(Utc::now());
     active.update(&state.db).await?;
 
     Ok(())
@@ -835,7 +835,7 @@ async fn create_oauth_user_and_connection(
         ),
         None => None,
     };
-    let now = Utc::now().fixed_offset();
+    let now = Utc::now();
 
     let user = users::ActiveModel {
         id: Set(user_id),
@@ -859,7 +859,7 @@ async fn create_oauth_user_and_connection(
         instance_url: Set(instance_url.map(str::to_string)),
         access_token_enc: Set(Some(access_token_enc)),
         refresh_token_enc: Set(refresh_token_enc),
-        token_expires_at: Set(token.expires_at.map(|dt| dt.fixed_offset())),
+        token_expires_at: Set(token.expires_at),
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()

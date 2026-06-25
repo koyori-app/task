@@ -28,8 +28,8 @@ pub struct Model {
     pub created_by: Uuid,
     #[sea_orm(nullable)]
     #[schema(value_type = String, format = "date-time", nullable)]
-    pub expires_at: Option<DateTimeWithTimeZone>,
+    pub expires_at: Option<DateTimeUtc>,
     #[schema(value_type = String, format = "date-time")]
     #[sea_orm(default_expr = "Expr::current_timestamp()")]
-    pub created_at: DateTimeWithTimeZone,
+    pub created_at: DateTimeUtc,
 }

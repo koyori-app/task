@@ -17,7 +17,7 @@ name = "project_id"
 attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = Option<String>, format = "uuid", nullable)]']
 
 [entities.users]
-struct_attrs = ['#[schema(as=crate::entities::users::Model)]']
+struct_attrs = ['#[schema(as = crate::entities::users::Model)]']
 
 [[entities.users.fields]]
 name = "id"
@@ -149,7 +149,7 @@ name = "created_at"
 attrs = ['#[schema(value_type = String, format = "date-time")]']
 
 [entities.tenants]
-struct_attrs = ['#[schema(as=crate::entities::tenants::Model)]']
+struct_attrs = ['#[schema(as = crate::entities::tenants::Model)]']
 
 [[entities.tenants.fields]]
 name = "id"
@@ -194,7 +194,7 @@ name = "label_id"
 attrs = ['#[schema(value_type = String, format = "uuid")]']
 
 [entities.projects]
-struct_attrs = ['#[schema(as=crate::entities::projects::Model)]']
+struct_attrs = ['#[schema(as = crate::entities::projects::Model)]']
 
 [[entities.projects.fields]]
 name = "id"

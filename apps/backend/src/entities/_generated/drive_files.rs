@@ -31,5 +31,5 @@ pub struct Model {
     pub folder_id: Option<Uuid>,
     #[schema(value_type = String, format = "date-time")]
     #[sea_orm(default_expr = "Expr::current_timestamp()")]
-    pub created_at: DateTimeWithTimeZone,
+    pub created_at: DateTimeUtc,
 }

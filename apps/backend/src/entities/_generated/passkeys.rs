@@ -30,9 +30,9 @@ pub struct Model {
     pub name: String,
     #[sea_orm(nullable)]
     #[schema(value_type = String, format = "date-time", nullable)]
-    pub last_used_at: Option<DateTimeWithTimeZone>,
+    pub last_used_at: Option<DateTimeUtc>,
     #[schema(value_type = String, format = "date-time")]
-    pub created_at: DateTimeWithTimeZone,
+    pub created_at: DateTimeUtc,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

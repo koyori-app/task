@@ -231,7 +231,7 @@ pub async fn registration_finish(
             return Err(AuthError::Internal(e));
         }
     };
-    let now = Utc::now().fixed_offset();
+    let now = Utc::now();
 
     let insert_result = insert_passkey_under_user_lock(
         &state.db,

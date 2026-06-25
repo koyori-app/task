@@ -7,10 +7,7 @@ use axum::{
 };
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::prelude::Uuid;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
-    prelude::DateTimeWithTimeZone,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
@@ -206,7 +203,7 @@ pub async fn github_callback(
         github_token_crypto::encrypt_token(&github.github_token_encryption_key, &access.token)
             .map_err(AppError::Internal)?;
 
-    let now: DateTimeWithTimeZone = chrono::Utc::now().fixed_offset().into();
+    let now = chrono::Utc::now();
     let existing = github_integrations::Entity::find()
         .filter(github_integrations::Column::ProjectId.eq(payload.project_id))
         .one(&state.db)
@@ -219,7 +216,7 @@ pub async fn github_callback(
         active.repo_owner = Set(repo_owner);
         active.repo_name = Set(repo_name);
         active.access_token_enc = Set(token_enc);
-        active.token_expires_at = Set(access.expires_at.into());
+        active.token_expires_at = Set(access.expires_at.with_timezone(&chrono::Utc));
         active.update(&state.db).await?;
     } else {
         github_integrations::ActiveModel {
@@ -229,7 +226,7 @@ pub async fn github_callback(
             repo_owner: Set(repo_owner),
             repo_name: Set(repo_name),
             access_token_enc: Set(token_enc),
-            token_expires_at: Set(access.expires_at.into()),
+            token_expires_at: Set(access.expires_at.with_timezone(&chrono::Utc)),
             created_by: Set(auth.user_id),
             created_at: Set(now),
         }

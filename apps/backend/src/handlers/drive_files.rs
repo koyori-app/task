@@ -96,11 +96,7 @@ async fn folder_has_user_share(
             .one(&state.db)
             .await?;
         if let Some(share) = share {
-            if share
-                .expires_at
-                .map(|e| e > Utc::now().fixed_offset())
-                .unwrap_or(true)
-            {
+            if share.expires_at.map(|e| e > Utc::now()).unwrap_or(true) {
                 return Ok(true);
             }
         }
@@ -125,11 +121,7 @@ async fn folder_has_token_share(
             .one(&state.db)
             .await?;
         if let Some(share) = share {
-            if share
-                .expires_at
-                .map(|e| e > Utc::now().fixed_offset())
-                .unwrap_or(true)
-            {
+            if share.expires_at.map(|e| e > Utc::now()).unwrap_or(true) {
                 return Ok(true);
             }
             return Ok(false);
@@ -445,7 +437,7 @@ pub async fn upload_file(
                         project_id: Set(folder_project_id),
                         uploader_id: Set(auth.user_id),
                         folder_id: Set(folder_id),
-                        created_at: Set(Utc::now().fixed_offset()),
+                        created_at: Set(Utc::now()),
                     };
                     let saved = model.insert(&txn).await?;
                     txn.commit().await?;

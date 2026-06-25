@@ -1,4 +1,5 @@
-use sea_orm::prelude::{DateTimeWithTimeZone, Uuid};
+use chrono::{DateTime, Utc};
+use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
@@ -15,7 +16,7 @@ pub struct CreatePersonalTokenRequest {
     pub project_ids: Option<Vec<Uuid>>,
     pub scopes: Vec<Scope>,
     #[schema(value_type = String, format = "date-time", nullable)]
-    pub expires_at: Option<DateTimeWithTimeZone>,
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Validate, Debug, Deserialize, ToSchema)]
@@ -37,9 +38,9 @@ pub struct PersonalTokenResponse {
     pub project_ids: Option<Vec<Uuid>>,
     pub scopes: ScopeList,
     #[schema(value_type = String, format = "date-time", nullable)]
-    pub expires_at: Option<DateTimeWithTimeZone>,
+    pub expires_at: Option<DateTime<Utc>>,
     #[schema(value_type = String, format = "date-time", nullable)]
-    pub last_used_at: Option<DateTimeWithTimeZone>,
+    pub last_used_at: Option<DateTime<Utc>>,
     pub revoked: bool,
     #[schema(value_type = String, format = "uuid")]
     pub user_id: Uuid,
@@ -83,9 +84,9 @@ pub struct CreatePersonalTokenResponse {
     pub project_ids: Option<Vec<Uuid>>,
     pub scopes: ScopeList,
     #[schema(value_type = String, format = "date-time", nullable)]
-    pub expires_at: Option<DateTimeWithTimeZone>,
+    pub expires_at: Option<DateTime<Utc>>,
     #[schema(value_type = String, format = "date-time", nullable)]
-    pub last_used_at: Option<DateTimeWithTimeZone>,
+    pub last_used_at: Option<DateTime<Utc>>,
     pub revoked: bool,
     #[schema(value_type = String, format = "uuid")]
     pub user_id: Uuid,

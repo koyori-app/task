@@ -22,11 +22,11 @@ pub struct Model {
     #[serde(skip_serializing)]
     pub access_token_enc: String,
     #[schema(value_type = String, format = "date-time")]
-    pub token_expires_at: DateTimeWithTimeZone,
+    pub token_expires_at: DateTimeUtc,
     #[schema(value_type = String, format = "uuid")]
     pub created_by: Uuid,
     #[schema(value_type = String, format = "date-time")]
-    pub created_at: DateTimeWithTimeZone,
+    pub created_at: DateTimeUtc,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
