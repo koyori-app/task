@@ -1,22 +1,7 @@
-use sea_orm::entity::prelude::*;
-use utoipa::ToSchema;
+//! Task attachments entity — schema-first generated output re-exported for stable module path.
+pub use super::_generated::task_attachments::*;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, ToSchema, serde::Serialize)]
-#[sea_orm(table_name = "task_attachments")]
-#[schema(as = crate::entities::task_attachments::Model)]
-pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    #[schema(value_type = String, format = "uuid")]
-    pub task_id: Uuid,
-    #[schema(value_type = String, format = "uuid")]
-    pub drive_file_id: Uuid,
-    #[schema(value_type = String, format = "uuid")]
-    pub created_by: Uuid,
-    #[schema(value_type = String, format = "date-time")]
-    pub created_at: DateTimeUtc,
-}
+use sea_orm::entity::prelude::*;
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
@@ -57,5 +42,3 @@ impl Related<super::drive_files::Entity> for Entity {
         Relation::DriveFiles.def()
     }
 }
-
-impl ActiveModelBehavior for ActiveModel {}
