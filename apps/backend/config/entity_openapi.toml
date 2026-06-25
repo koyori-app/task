@@ -65,3 +65,108 @@ lines = [
   "TOTP 2FA が有効か（`totp_credentials.is_verified` とセットで有効扱い）。",
   "更新は `handlers::auth_2fa` 経由の ActiveModel のみとし、他モジュールから直接書き換えないこと。",
 ]
+
+[entities.recovery_codes]
+struct_attrs = ['#[schema(as = crate::entities::recovery_codes::Model)]']
+
+[[entities.recovery_codes.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.recovery_codes.fields]]
+name = "user_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.recovery_codes.fields]]
+name = "used_at"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = Option<String>, format = "date-time", nullable)]']
+
+[[entities.recovery_codes.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.system_settings]
+struct_attrs = ['#[schema(as = crate::entities::system_settings::Model)]']
+
+[[entities.system_settings.fields]]
+name = "updated_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.totp_credentials]
+struct_attrs = ['#[schema(as = crate::entities::totp_credentials::Model)]']
+
+[[entities.totp_credentials.fields]]
+name = "user_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.totp_credentials.fields]]
+name = "secret_enc"
+attrs = ['#[schema(ignore)]', '#[serde(skip_serializing)]']
+
+[[entities.totp_credentials.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.project_task_counters]
+struct_attrs = ['#[schema(as = crate::entities::project_task_counters::Model)]']
+
+[[entities.project_task_counters.fields]]
+name = "project_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[entities.task_relations]
+struct_attrs = ['#[schema(as = crate::entities::task_relations::Model)]']
+
+[[entities.task_relations.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_relations.fields]]
+name = "blocker_task_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_relations.fields]]
+name = "blocked_task_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_relations.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.project_statuses]
+struct_attrs = ['#[schema(as = crate::entities::project_statuses::Model)]']
+
+[[entities.project_statuses.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.project_statuses.fields]]
+name = "project_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.project_statuses.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.tenants]
+struct_attrs = ['#[schema(as=crate::entities::tenants::Model)]']
+
+[[entities.tenants.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format="uuid")]']
+
+[[entities.tenants.fields]]
+name = "owner_id"
+attrs = ['#[schema(value_type = String, format="uuid")]']
+
+[[entities.tenants.fields]]
+name = "drive_quota_bytes"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable)]']
+
+[[entities.tenants.fields]]
+name = "require_2fa"
+attrs = []
+
+[[entities.tenants.doc_comments]]
+field = "require_2fa"
+comment = "テナントメンバー全員に 2FA 設定を強制する"
