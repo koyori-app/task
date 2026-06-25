@@ -1,30 +1,7 @@
-use sea_orm::entity::prelude::*;
-use utoipa::ToSchema;
+//! Projects entity — schema-first generated output re-exported for stable module path.
+pub use super::_generated::projects::*;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, ToSchema, serde::Serialize)]
-#[sea_orm(table_name = "projects")]
-#[schema(as=crate::entities::projects::Model)]
-pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    #[schema(value_type = String, format="uuid")]
-    pub id: Uuid,
-    pub name: String,
-    pub description: String,
-    #[schema(value_type = String, format="uuid")]
-    pub tenant_id: Uuid,
-    #[sea_orm(nullable)]
-    #[schema(nullable)]
-    pub icon_emoji: Option<String>,
-    #[sea_orm(nullable)]
-    #[schema(nullable)]
-    pub icon_url: Option<String>,
-    pub key: String,
-    #[serde(default)]
-    pub is_personal: bool,
-    #[sea_orm(nullable)]
-    #[schema(value_type = Option<String>, format = "uuid", nullable)]
-    pub personal_owner_id: Option<Uuid>,
-}
+use sea_orm::entity::prelude::*;
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
@@ -43,5 +20,3 @@ impl Related<super::tenants::Entity> for Entity {
         Relation::Tenants.def()
     }
 }
-
-impl ActiveModelBehavior for ActiveModel {}
