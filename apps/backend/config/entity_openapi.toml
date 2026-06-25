@@ -170,3 +170,120 @@ attrs = []
 [[entities.tenants.doc_comments]]
 field = "require_2fa"
 comment = "テナントメンバー全員に 2FA 設定を強制する"
+
+[entities.notification_settings]
+struct_attrs = ['#[schema(as = crate::entities::notification_settings::Model)]']
+
+[[entities.notification_settings.fields]]
+name = "user_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.notification_settings.fields]]
+name = "project_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[entities.task_labels]
+struct_attrs = ['#[schema(as = crate::entities::task_labels::Model)]']
+
+[[entities.task_labels.fields]]
+name = "task_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_labels.fields]]
+name = "label_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[entities.projects]
+struct_attrs = ['#[schema(as=crate::entities::projects::Model)]']
+
+[[entities.projects.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format="uuid")]']
+
+[[entities.projects.fields]]
+name = "tenant_id"
+attrs = ['#[schema(value_type = String, format="uuid")]']
+
+[[entities.projects.fields]]
+name = "icon_emoji"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable)]']
+
+[[entities.projects.fields]]
+name = "icon_url"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable)]']
+
+[[entities.projects.fields]]
+name = "key"
+attrs = []
+
+[[entities.projects.fields]]
+name = "is_personal"
+attrs = ['#[serde(default)]']
+
+[[entities.projects.fields]]
+name = "personal_owner_id"
+attrs = ['#[sea_orm(nullable)]', '#[schema(value_type = Option<String>, format = "uuid", nullable)]']
+
+[entities.task_custom_field_values]
+struct_attrs = ['#[schema(as = crate::entities::task_custom_field_values::Model)]']
+
+[[entities.task_custom_field_values.fields]]
+name = "task_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_custom_field_values.fields]]
+name = "field_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_custom_field_values.fields]]
+name = "value"
+attrs = ['#[sea_orm(nullable)]', '#[schema(nullable)]']
+
+[entities.task_timers]
+struct_attrs = ['#[schema(as = crate::entities::task_timers::Model)]']
+
+[[entities.task_timers.fields]]
+name = "task_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_timers.fields]]
+name = "user_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_timers.fields]]
+name = "started_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.task_watchers]
+struct_attrs = ['#[schema(as = crate::entities::task_watchers::Model)]']
+
+[[entities.task_watchers.fields]]
+name = "task_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_watchers.fields]]
+name = "user_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_watchers.fields]]
+name = "created_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
+
+[entities.task_assignees]
+struct_attrs = ['#[schema(as = crate::entities::task_assignees::Model)]']
+
+[[entities.task_assignees.fields]]
+name = "id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_assignees.fields]]
+name = "task_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_assignees.fields]]
+name = "user_id"
+attrs = ['#[schema(value_type = String, format = "uuid")]']
+
+[[entities.task_assignees.fields]]
+name = "assigned_at"
+attrs = ['#[schema(value_type = String, format = "date-time")]']
