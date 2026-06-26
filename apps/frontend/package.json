@@ -15,6 +15,7 @@
     "test:unit:coverage": "vp test --project unit --run --coverage",
     "test:unit:watch": "vp test --project unit",
     "fmt:check": "vp fmt --check",
+    "lint": "vp lint",
     "verify": "vue-tsc --noEmit && vp lint && vp fmt --check"
   },
   "dependencies": {

@@ -153,5 +153,8 @@ export default defineConfig({
     trailingComma: 'all',
     ignorePatterns: ['content/**/*.md', 'src/components/ui/**', 'src/components/originui/**'],
   },
-  lint: { options: { typeAware: true, typeCheck: true } },
+  lint: {
+    plugins: ['oxc', 'typescript', 'unicorn', 'vue'],
+    options: { typeAware: true, typeCheck: true },
+  },
 });
