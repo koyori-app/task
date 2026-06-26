@@ -94,8 +94,9 @@ def inject_entity(entity_name: str, cfg: dict) -> None:
                 continue
             insert_lines.append(f"{indent}{attr}")
 
-        replacement = "\n".join(insert_lines) + "\n" + match.group(0)
-        text = text[: match.start()] + replacement + text[match.end() :]
+        if insert_lines:
+            replacement = "\n".join(insert_lines) + "\n" + match.group(0)
+            text = text[: match.start()] + replacement + text[match.end() :]
 
     target.write_text(text)
     print(f"postprocessed: {target}")

@@ -6,14 +6,14 @@ use serde::Serialize;
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, utoipa::ToSchema)]
 #[sea_orm(table_name = "projects")]
-#[schema(as=crate::entities::projects::Model)]
+#[schema(as = crate::entities::projects::Model)]
 pub struct Model {
-    #[schema(value_type = String, format="uuid")]
+    #[schema(value_type = String, format = "uuid")]
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub name: String,
     pub description: String,
-    #[schema(value_type = String, format="uuid")]
+    #[schema(value_type = String, format = "uuid")]
     pub tenant_id: Uuid,
     #[sea_orm(nullable)]
     #[schema(nullable)]

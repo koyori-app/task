@@ -6,12 +6,12 @@ use serde::Serialize;
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, utoipa::ToSchema)]
 #[sea_orm(table_name = "users")]
-#[schema(as=crate::entities::users::Model)]
+#[schema(as = crate::entities::users::Model)]
 pub struct Model {
-    #[schema(value_type = String, format="uuid")]
+    #[schema(value_type = String, format = "uuid")]
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    #[schema(value_type = String, format="username")]
+    #[schema(value_type = String, format = "username")]
     pub username: String,
     #[sea_orm(nullable)]
     #[schema(nullable)]
@@ -19,7 +19,7 @@ pub struct Model {
     #[sea_orm(nullable)]
     #[schema(nullable)]
     pub avatar_url: Option<String>,
-    #[schema(value_type = String, format="email")]
+    #[schema(value_type = String, format = "email")]
     #[sea_orm(unique)]
     pub email: String,
     /// メールアドレスの確認が済んでいるかどうか
