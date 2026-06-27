@@ -301,7 +301,7 @@ async fn build_task_detail_response(
 ) -> Result<TaskDetailResponse, AppError> {
     let custom_field_values = load_task_custom_field_values(&state.db, project_id, task.id).await?;
     Ok(TaskDetailResponse {
-        task,
+        task: task.into(),
         custom_field_values,
     })
 }
@@ -373,7 +373,7 @@ pub async fn list_tasks(
     let total = query.clone().count(&state.db).await?;
     let tasks_page = query.offset(q.offset).limit(limit).all(&state.db).await?;
     Ok(Json(TaskListResponse {
-        tasks: tasks_page,
+        tasks: tasks_page.into_iter().map(Into::into).collect(),
         total,
     }))
 }
@@ -828,7 +828,7 @@ pub async fn delete_task(
         ("id" = String, Path, description = "タスクID"),
     ),
     responses(
-        (status = 200, description = "アーカイブ後のタスク", body = tasks::Model),
+        (status = 200, description = "アーカイブ後のタスク", body = TaskResponse),
         CrudErrors,
     )
 )]
@@ -836,7 +836,7 @@ pub async fn archive_task(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
-) -> Result<Json<tasks::Model>, AppError> {
+) -> Result<Json<TaskResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -857,7 +857,7 @@ pub async fn archive_task(
     )
     .await?;
     txn.commit().await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
@@ -872,7 +872,7 @@ pub async fn archive_task(
         ("id" = String, Path, description = "タスクID"),
     ),
     responses(
-        (status = 200, description = "アーカイブ解除後のタスク", body = tasks::Model),
+        (status = 200, description = "アーカイブ解除後のタスク", body = TaskResponse),
         CrudErrors,
     )
 )]
@@ -880,7 +880,7 @@ pub async fn unarchive_task(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
-) -> Result<Json<tasks::Model>, AppError> {
+) -> Result<Json<TaskResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -901,7 +901,7 @@ pub async fn unarchive_task(
     )
     .await?;
     txn.commit().await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 // ─── Assignees ───────────────────────────────────────────────────────────
@@ -1161,7 +1161,7 @@ pub async fn list_relations(
                 .get(&rel.blocked_task_id)
                 .map(|t| RelationEntry {
                     relation_id: rel.id,
-                    task: t.clone(),
+                    task: t.clone().into(),
                 })
         })
         .collect();
@@ -1191,13 +1191,13 @@ pub async fn list_relations(
                 .get(&rel.blocker_task_id)
                 .map(|t| RelationEntry {
                     relation_id: rel.id,
-                    task: t.clone(),
+                    task: t.clone().into(),
                 })
         })
         .collect();
 
     Ok(Json(TaskRelationsResponse {
-        subtasks,
+        subtasks: subtasks.into_iter().map(Into::into).collect(),
         blocks,
         blocked_by,
     }))
