@@ -152,7 +152,7 @@ pub async fn list_comments(
     ),
     request_body = CreateCommentRequest,
     responses(
-        (status = 201, description = "作成されたコメント", body = task_comments::Model),
+        (status = 201, description = "作成されたコメント", body = TaskCommentResponse),
         CrudErrors,
     )
 )]
@@ -161,7 +161,7 @@ pub async fn create_comment(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
     Valid(Json(payload)): Valid<Json<CreateCommentRequest>>,
-) -> Result<(StatusCode, Json<task_comments::Model>), AppError> {
+) -> Result<(StatusCode, Json<TaskCommentResponse>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -226,7 +226,7 @@ pub async fn create_comment(
     .await?;
     txn.commit().await?;
 
-    Ok((StatusCode::CREATED, Json(comment)))
+    Ok((StatusCode::CREATED, Json(comment.into())))
 }
 
 #[axum::debug_handler]
@@ -243,7 +243,7 @@ pub async fn create_comment(
     ),
     request_body = UpdateCommentRequest,
     responses(
-        (status = 200, description = "更新後のコメント", body = task_comments::Model),
+        (status = 200, description = "更新後のコメント", body = TaskCommentResponse),
         CrudErrors,
     )
 )]
@@ -252,7 +252,7 @@ pub async fn update_comment(
     auth: AuthUser,
     Path((tenant_id, project_id, id, cid)): Path<(Uuid, Uuid, String, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateCommentRequest>>,
-) -> Result<Json<task_comments::Model>, AppError> {
+) -> Result<Json<TaskCommentResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -307,7 +307,7 @@ pub async fn update_comment(
     )
     .await?;
     txn.commit().await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
