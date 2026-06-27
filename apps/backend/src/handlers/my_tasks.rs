@@ -20,6 +20,7 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::payload::my_tasks::*;
+use crate::payload::tasks::TaskResponse;
 use crate::utils::db::is_postgres_unique_violation;
 use crate::utils::task_activities::record_activity;
 fn personal_project_key(user_id: Uuid) -> String {
@@ -427,7 +428,7 @@ pub async fn list_my_tasks(
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     request_body = QuickCaptureRequest,
     responses(
-        (status = 201, description = "作成されたタスク", body = tasks::Model),
+        (status = 201, description = "作成されたタスク", body = TaskResponse),
         CrudErrors,
     )
 )]
@@ -436,7 +437,7 @@ pub async fn create_my_task(
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
     Valid(Json(payload)): Valid<Json<QuickCaptureRequest>>,
-) -> Result<(StatusCode, Json<tasks::Model>), AppError> {
+) -> Result<(StatusCode, Json<TaskResponse>), AppError> {
     auth.require_scope(Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
 
@@ -492,5 +493,5 @@ pub async fn create_my_task(
     .await?;
 
     txn.commit().await?;
-    Ok((StatusCode::CREATED, Json(model)))
+    Ok((StatusCode::CREATED, Json(model.into())))
 }
