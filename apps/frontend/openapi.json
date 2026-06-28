@@ -492,7 +492,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.tenants.Model"
+                  "$ref": "#/components/schemas/TenantResponse"
                 }
               }
             }
@@ -5125,7 +5125,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.tenants.Model"
+                    "$ref": "#/components/schemas/TenantResponse"
                   }
                 }
               }
@@ -5235,7 +5235,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.tenants.Model"
+                  "$ref": "#/components/schemas/TenantResponse"
                 }
               }
             }
@@ -5348,7 +5348,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.tenants.Model"
+                  "$ref": "#/components/schemas/TenantResponse"
                 }
               }
             }
@@ -5469,7 +5469,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.tenants.Model"
+                  "$ref": "#/components/schemas/TenantResponse"
                 }
               }
             }
@@ -7733,7 +7733,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.projects.Model"
+                    "$ref": "#/components/schemas/ProjectResponse"
                   }
                 }
               }
@@ -7855,7 +7855,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.projects.Model"
+                  "$ref": "#/components/schemas/ProjectResponse"
                 }
               }
             }
@@ -7978,7 +7978,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.projects.Model"
+                  "$ref": "#/components/schemas/ProjectResponse"
                 }
               }
             }
@@ -8109,7 +8109,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.projects.Model"
+                  "$ref": "#/components/schemas/ProjectResponse"
                 }
               }
             }
@@ -8477,7 +8477,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_custom_fields.Model"
+                  "$ref": "#/components/schemas/ProjectCustomFieldResponse"
                 }
               }
             }
@@ -8744,7 +8744,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_custom_fields.Model"
+                  "$ref": "#/components/schemas/ProjectCustomFieldResponse"
                 }
               }
             }
@@ -9225,7 +9225,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.labels.Model"
+                    "$ref": "#/components/schemas/LabelResponse"
                   }
                 }
               }
@@ -9357,7 +9357,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.labels.Model"
+                  "$ref": "#/components/schemas/LabelResponse"
                 }
               }
             }
@@ -9615,7 +9615,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.labels.Model"
+                    "$ref": "#/components/schemas/LabelResponse"
                   }
                 }
               }
@@ -9759,7 +9759,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.labels.Model"
+                  "$ref": "#/components/schemas/LabelResponse"
                 }
               }
             }
@@ -10008,7 +10008,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.project_members.Model"
+                    "$ref": "#/components/schemas/ProjectMemberResponse"
                   }
                 }
               }
@@ -10140,7 +10140,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_members.Model"
+                  "$ref": "#/components/schemas/ProjectMemberResponse"
                 }
               }
             }
@@ -10293,7 +10293,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_members.Model"
+                  "$ref": "#/components/schemas/ProjectMemberResponse"
                 }
               }
             }
@@ -12302,7 +12302,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.project_statuses.Model"
+                    "$ref": "#/components/schemas/ProjectStatusResponse"
                   }
                 }
               }
@@ -12434,7 +12434,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_statuses.Model"
+                  "$ref": "#/components/schemas/ProjectStatusResponse"
                 }
               }
             }
@@ -12569,7 +12569,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.project_statuses.Model"
+                    "$ref": "#/components/schemas/ProjectStatusResponse"
                   }
                 }
               }
@@ -12713,7 +12713,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_statuses.Model"
+                  "$ref": "#/components/schemas/ProjectStatusResponse"
                 }
               }
             }
@@ -13101,7 +13101,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_task_views.Model"
+                  "$ref": "#/components/schemas/ProjectTaskViewResponse"
                 }
               }
             }
@@ -13368,7 +13368,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_task_views.Model"
+                  "$ref": "#/components/schemas/ProjectTaskViewResponse"
                 }
               }
             }
@@ -19341,7 +19341,7 @@
           "projects": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/crate.entities.projects.Model"
+              "$ref": "#/components/schemas/ProjectResponse"
             }
           }
         }
@@ -19390,7 +19390,7 @@
           "tenants": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/crate.entities.tenants.Model"
+              "$ref": "#/components/schemas/TenantResponse"
             }
           }
         }
@@ -19962,8 +19962,7 @@
             "type": [
               "string",
               "null"
-            ],
-            "description": "プロジェクトキー（例: ENG, BACK）。省略時はプロジェクト名から自動生成。"
+            ]
           },
           "name": {
             "type": "string"
@@ -20256,7 +20255,7 @@
           "fields": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/crate.entities.project_custom_fields.Model"
+              "$ref": "#/components/schemas/ProjectCustomFieldResponse"
             }
           }
         }
@@ -20565,6 +20564,43 @@
           },
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "LabelResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "color"
+        ],
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "icon_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         }
       },
@@ -21175,6 +21211,124 @@
           }
         }
       },
+      "ProjectCustomFieldResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "field_type",
+          "is_required",
+          "position",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "field_type": {
+            "$ref": "#/components/schemas/CustomFieldType"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_required": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "options": {},
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ProjectMemberResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "user_id",
+          "role"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ProjectRole"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ProjectResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "tenant_id",
+          "key",
+          "is_personal"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "icon_emoji": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "icon_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_personal": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "personal_owner_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "ProjectRole": {
         "type": "string",
         "enum": [
@@ -21182,6 +21336,97 @@
           "Member",
           "Viewer"
         ]
+      },
+      "ProjectStatusResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "color",
+          "position",
+          "is_default",
+          "is_done_state",
+          "created_at"
+        ],
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "is_done_state": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ProjectTaskViewResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "created_by",
+          "name",
+          "is_shared",
+          "filters",
+          "sort",
+          "view_type",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filters": {},
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_shared": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sort": {},
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "view_type": {
+            "type": "string"
+          }
+        }
       },
       "PublicFolderResponse": {
         "type": "object",
@@ -21940,8 +22185,52 @@
           "views": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/crate.entities.project_task_views.Model"
+              "$ref": "#/components/schemas/ProjectTaskViewResponse"
             }
+          }
+        }
+      },
+      "TenantResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "display_id",
+          "name",
+          "description",
+          "icon_url",
+          "owner_id",
+          "require_2fa"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "display_id": {
+            "type": "string"
+          },
+          "drive_quota_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "icon_url": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "require_2fa": {
+            "type": "boolean"
           }
         }
       },
@@ -22642,7 +22931,6 @@
           }
         }
       },
-      "Value": {},
       "Verify2faRequest": {
         "type": "object",
         "properties": {
@@ -22779,213 +23067,6 @@
               "string",
               "null"
             ]
-          }
-        }
-      },
-      "crate.entities.labels.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "description",
-          "color"
-        ],
-        "properties": {
-          "color": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "icon_url": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "project_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.project_custom_fields.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "project_id",
-          "name",
-          "field_type",
-          "is_required",
-          "position",
-          "created_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "field_type": {
-            "$ref": "#/components/schemas/CustomFieldType"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_required": {
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          },
-          "options": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/Value"
-              }
-            ]
-          },
-          "position": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.project_members.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "project_id",
-          "user_id",
-          "role"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "role": {
-            "$ref": "#/components/schemas/ProjectRole"
-          },
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.project_statuses.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "project_id",
-          "name",
-          "color",
-          "position",
-          "is_default",
-          "is_done_state",
-          "created_at"
-        ],
-        "properties": {
-          "color": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_default": {
-            "type": "boolean"
-          },
-          "is_done_state": {
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          },
-          "position": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.project_task_views.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "project_id",
-          "created_by",
-          "name",
-          "is_shared",
-          "filters",
-          "sort",
-          "view_type",
-          "created_at",
-          "updated_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created_by": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "filters": {
-            "$ref": "#/components/schemas/Value"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_shared": {
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "sort": {
-            "$ref": "#/components/schemas/Value"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "view_type": {
-            "type": "string"
           }
         }
       },

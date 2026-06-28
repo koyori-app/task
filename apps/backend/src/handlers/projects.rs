@@ -97,7 +97,7 @@ async fn require_project_readable(
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     request_body = CreateProjectRequest,
     responses(
-        (status = 201, description = "作成されたプロジェクト", body = projects::Model),
+        (status = 201, description = "作成されたプロジェクト", body = ProjectResponse),
         CrudErrors,
     )
 )]
@@ -106,7 +106,7 @@ pub async fn create_project(
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
     Valid(Json(payload)): Valid<Json<CreateProjectRequest>>,
-) -> Result<(StatusCode, Json<projects::Model>), AppError> {
+) -> Result<(StatusCode, Json<ProjectResponse>), AppError> {
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     require_tenant_owner(&state, tenant_id, auth.user_id).await?;
@@ -167,7 +167,7 @@ pub async fn create_project(
     drive_folder.insert(&txn).await?;
     txn.commit().await?;
 
-    Ok((StatusCode::CREATED, Json(model)))
+    Ok((StatusCode::CREATED, Json(model.into())))
 }
 
 #[axum::debug_handler]
@@ -178,7 +178,7 @@ pub async fn create_project(
     summary = "プロジェクト一覧",
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     responses(
-        (status = 200, description = "プロジェクト一覧", body = [projects::Model]),
+        (status = 200, description = "プロジェクト一覧", body = [ProjectResponse]),
         CrudErrors,
     )
 )]
@@ -186,7 +186,7 @@ pub async fn list_projects(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
-) -> Result<Json<Vec<projects::Model>>, AppError> {
+) -> Result<Json<Vec<ProjectResponse>>, AppError> {
     auth.require_scope(Scope::ReadProject)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     if is_tenant_owner(&state, tenant_id, auth.user_id).await? {
@@ -195,7 +195,7 @@ pub async fn list_projects(
             .filter(projects::Column::IsPersonal.eq(false))
             .all(&state.db)
             .await?;
-        return Ok(Json(list));
+        return Ok(Json(list.into_iter().map(Into::into).collect()));
     }
 
     let member_project_ids: Vec<Uuid> = project_members::Entity::find()
@@ -216,7 +216,7 @@ pub async fn list_projects(
         .filter(projects::Column::Id.is_in(member_project_ids))
         .all(&state.db)
         .await?;
-    Ok(Json(list))
+    Ok(Json(list.into_iter().map(Into::into).collect()))
 }
 
 #[axum::debug_handler]
@@ -230,7 +230,7 @@ pub async fn list_projects(
         ("id" = Uuid, Path, description = "プロジェクトID"),
     ),
     responses(
-        (status = 200, description = "プロジェクト情報", body = projects::Model),
+        (status = 200, description = "プロジェクト情報", body = ProjectResponse),
         CrudErrors,
     )
 )]
@@ -238,7 +238,7 @@ pub async fn get_project(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, id)): Path<(Uuid, Uuid)>,
-) -> Result<Json<projects::Model>, AppError> {
+) -> Result<Json<ProjectResponse>, AppError> {
     auth.require_scope(Scope::ReadProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(id))
         .await?;
@@ -248,7 +248,7 @@ pub async fn get_project(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
-    Ok(Json(project))
+    Ok(Json(project.into()))
 }
 
 #[axum::debug_handler]
@@ -263,7 +263,7 @@ pub async fn get_project(
     ),
     request_body = UpdateProjectRequest,
     responses(
-        (status = 200, description = "更新後のプロジェクト", body = projects::Model),
+        (status = 200, description = "更新後のプロジェクト", body = ProjectResponse),
         CrudErrors,
     )
 )]
@@ -272,7 +272,7 @@ pub async fn update_project(
     auth: AuthUser,
     Path((tenant_id, id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateProjectRequest>>,
-) -> Result<Json<projects::Model>, AppError> {
+) -> Result<Json<ProjectResponse>, AppError> {
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(id))
         .await?;
@@ -301,7 +301,7 @@ pub async fn update_project(
         active.icon_url = Set(Some(icon_url));
     }
     let updated = active.update(&state.db).await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]

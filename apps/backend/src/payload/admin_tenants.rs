@@ -2,16 +2,16 @@ use sea_orm::prelude::Uuid;
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use crate::entities::{projects, tenants};
+use crate::payload::{projects::ProjectResponse, tenants::TenantResponse};
 
 #[derive(Serialize, ToSchema)]
 pub struct AdminTenantListResponse {
-    pub tenants: Vec<tenants::Model>,
+    pub tenants: Vec<TenantResponse>,
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct AdminProjectListResponse {
-    pub projects: Vec<projects::Model>,
+    pub projects: Vec<ProjectResponse>,
 }
 
 #[derive(Serialize, ToSchema)]

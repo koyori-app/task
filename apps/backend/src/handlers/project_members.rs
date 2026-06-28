@@ -97,7 +97,7 @@ async fn count_admins(state: &AppState, project_id: Uuid) -> Result<u64, AppErro
         ("project_id" = Uuid, Path, description = "プロジェクトID"),
     ),
     responses(
-        (status = 200, description = "メンバー一覧", body = [project_members::Model]),
+        (status = 200, description = "メンバー一覧", body = [ProjectMemberResponse]),
         CrudErrors,
     )
 )]
@@ -105,7 +105,7 @@ pub async fn list_members(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
-) -> Result<Json<Vec<project_members::Model>>, AppError> {
+) -> Result<Json<Vec<ProjectMemberResponse>>, AppError> {
     auth.require_scope(Scope::ReadProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -114,7 +114,7 @@ pub async fn list_members(
         .filter(project_members::Column::ProjectId.eq(project_id))
         .all(&state.db)
         .await?;
-    Ok(Json(members))
+    Ok(Json(members.into_iter().map(Into::into).collect()))
 }
 
 #[axum::debug_handler]
@@ -129,7 +129,7 @@ pub async fn list_members(
     ),
     request_body = AddMemberRequest,
     responses(
-        (status = 201, description = "追加されたメンバー", body = project_members::Model),
+        (status = 201, description = "追加されたメンバー", body = ProjectMemberResponse),
         (status = 409, description = "既にメンバーとして登録済み", body = ServerError),
         CrudErrors,
     )
@@ -139,7 +139,7 @@ pub async fn add_member(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<AddMemberRequest>>,
-) -> Result<(StatusCode, Json<project_members::Model>), AppError> {
+) -> Result<(StatusCode, Json<ProjectMemberResponse>), AppError> {
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -166,7 +166,7 @@ pub async fn add_member(
         role: Set(payload.role),
     };
     let model = member.insert(&state.db).await?;
-    Ok((StatusCode::CREATED, Json(model)))
+    Ok((StatusCode::CREATED, Json(model.into())))
 }
 
 #[axum::debug_handler]
@@ -182,7 +182,7 @@ pub async fn add_member(
     ),
     request_body = UpdateMemberRequest,
     responses(
-        (status = 200, description = "更新後のメンバー", body = project_members::Model),
+        (status = 200, description = "更新後のメンバー", body = ProjectMemberResponse),
         (status = 409, description = "最後のAdminは降格できません", body = ServerError),
         CrudErrors,
     )
@@ -192,7 +192,7 @@ pub async fn update_member(
     auth: AuthUser,
     Path((tenant_id, project_id, member_user_id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateMemberRequest>>,
-) -> Result<Json<project_members::Model>, AppError> {
+) -> Result<Json<ProjectMemberResponse>, AppError> {
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -207,7 +207,7 @@ pub async fn update_member(
     let mut active: project_members::ActiveModel = current.into();
     active.role = Set(payload.role);
     let updated = active.update(&state.db).await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
