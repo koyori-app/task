@@ -1,3 +1,5 @@
+use chrono::{DateTime, Utc};
+use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
@@ -22,10 +24,44 @@ pub struct UpdateMilestoneRequest {
     pub due_date: Option<time::Date>,
 }
 
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct MilestoneResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub project_id: Uuid,
+    pub name: String,
+    #[schema(nullable)]
+    pub description: Option<String>,
+    #[schema(value_type = String, example = "2026-07-01")]
+    pub due_date: time::Date,
+    #[schema(value_type = String, format = "uuid")]
+    pub created_by: Uuid,
+    #[schema(value_type = String, format = "date-time")]
+    pub created_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "date-time")]
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<milestones::Model> for MilestoneResponse {
+    fn from(model: milestones::Model) -> Self {
+        Self {
+            id: model.id,
+            project_id: model.project_id,
+            name: model.name,
+            description: model.description,
+            due_date: model.due_date,
+            created_by: model.created_by,
+            created_at: model.created_at.with_timezone(&Utc),
+            updated_at: model.updated_at.with_timezone(&Utc),
+        }
+    }
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct MilestoneDetail {
     #[serde(flatten)]
-    pub milestone: milestones::Model,
+    pub milestone: MilestoneResponse,
     pub progress_pct: u32,
     pub task_counts: TaskCounts,
 }

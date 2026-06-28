@@ -21,6 +21,7 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::payload::sprints::*;
+use crate::payload::tasks::TaskResponse;
 use crate::utils::db::is_postgres_unique_violation;
 
 fn naive_to_time_date(date: NaiveDate) -> time::Date {
@@ -168,7 +169,7 @@ async fn build_sprint_detail(
     let burndown = build_burndown(&sprint, &sprint_tasks, &done_statuses);
 
     Ok(SprintDetail {
-        sprint,
+        sprint: sprint.into(),
         task_counts: SprintTaskCounts {
             total,
             done,
@@ -190,7 +191,7 @@ async fn build_sprint_detail(
         ListSprintsQuery,
     ),
     responses(
-        (status = 200, description = "スプリント一覧", body = [sprints::Model]),
+        (status = 200, description = "スプリント一覧", body = [SprintResponse]),
         CrudErrors,
     )
 )]
@@ -199,7 +200,7 @@ pub async fn list_sprints(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Query(q): Query<ListSprintsQuery>,
-) -> Result<Json<Vec<sprints::Model>>, AppError> {
+) -> Result<Json<Vec<SprintResponse>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadSprint)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -211,7 +212,14 @@ pub async fn list_sprints(
         query = query.filter(sprints::Column::Status.eq(status));
     }
 
-    Ok(Json(query.all(&state.db).await?))
+    Ok(Json(
+        query
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+    ))
 }
 
 #[axum::debug_handler]
@@ -226,7 +234,7 @@ pub async fn list_sprints(
     ),
     request_body = CreateSprintRequest,
     responses(
-        (status = 201, description = "作成されたスプリント", body = sprints::Model),
+        (status = 201, description = "作成されたスプリント", body = SprintResponse),
         CrudErrors,
     )
 )]
@@ -235,7 +243,7 @@ pub async fn create_sprint(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateSprintRequest>>,
-) -> Result<(StatusCode, Json<sprints::Model>), AppError> {
+) -> Result<(StatusCode, Json<SprintResponse>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -259,7 +267,7 @@ pub async fn create_sprint(
     .insert(&state.db)
     .await?;
 
-    Ok((StatusCode::CREATED, Json(model)))
+    Ok((StatusCode::CREATED, Json(model.into())))
 }
 
 #[axum::debug_handler]
@@ -305,7 +313,7 @@ pub async fn get_sprint(
     ),
     request_body = UpdateSprintRequest,
     responses(
-        (status = 200, description = "更新後のスプリント", body = sprints::Model),
+        (status = 200, description = "更新後のスプリント", body = SprintResponse),
         CrudErrors,
     )
 )]
@@ -314,7 +322,7 @@ pub async fn update_sprint(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateSprintRequest>>,
-) -> Result<Json<sprints::Model>, AppError> {
+) -> Result<Json<SprintResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -361,7 +369,7 @@ pub async fn update_sprint(
 
     let updated = active.update(&txn).await?;
     txn.commit().await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
@@ -419,7 +427,7 @@ pub async fn delete_sprint(
         ("id" = Uuid, Path, description = "スプリントID"),
     ),
     responses(
-        (status = 200, description = "開始後のスプリント", body = sprints::Model),
+        (status = 200, description = "開始後のスプリント", body = SprintResponse),
         CrudErrors,
     )
 )]
@@ -427,7 +435,7 @@ pub async fn start_sprint(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
-) -> Result<Json<sprints::Model>, AppError> {
+) -> Result<Json<SprintResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -463,7 +471,7 @@ pub async fn start_sprint(
         Err(e) => return Err(e.into()),
     };
     txn.commit().await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
@@ -479,7 +487,7 @@ pub async fn start_sprint(
     ),
     request_body = CompleteSprintRequest,
     responses(
-        (status = 200, description = "完了後のスプリント", body = sprints::Model),
+        (status = 200, description = "完了後のスプリント", body = SprintResponse),
         CrudErrors,
     )
 )]
@@ -488,7 +496,7 @@ pub async fn complete_sprint(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Json(payload): Json<CompleteSprintRequest>,
-) -> Result<Json<sprints::Model>, AppError> {
+) -> Result<Json<SprintResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
@@ -568,7 +576,7 @@ pub async fn complete_sprint(
     let updated = active.update(&txn).await?;
 
     txn.commit().await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
@@ -584,7 +592,7 @@ pub async fn complete_sprint(
     ),
     request_body = AssignTasksRequest,
     responses(
-        (status = 200, description = "割り当て後のタスク一覧", body = [tasks::Model]),
+        (status = 200, description = "割り当て後のタスク一覧", body = [TaskResponse]),
         CrudErrors,
     )
 )]
@@ -593,7 +601,7 @@ pub async fn assign_tasks_to_sprint(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<AssignTasksRequest>>,
-) -> Result<Json<Vec<tasks::Model>>, AppError> {
+) -> Result<Json<Vec<TaskResponse>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
@@ -638,5 +646,5 @@ pub async fn assign_tasks_to_sprint(
     }
 
     txn.commit().await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into_iter().map(Into::into).collect()))
 }

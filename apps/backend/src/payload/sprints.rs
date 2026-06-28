@@ -1,10 +1,10 @@
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
-use crate::entities::sprints;
+use crate::entities::sprints::{self, SprintStatus};
 
 #[derive(Validate, Deserialize, ToSchema)]
 pub struct CreateSprintRequest {
@@ -65,10 +65,49 @@ pub struct BurndownPoint {
     pub actual_remaining: usize,
 }
 
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SprintResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub project_id: Uuid,
+    pub name: String,
+    #[schema(nullable)]
+    pub goal: Option<String>,
+    #[schema(value_type = String, example = "2026-06-01")]
+    pub start_date: time::Date,
+    #[schema(value_type = String, example = "2026-06-14")]
+    pub end_date: time::Date,
+    pub status: SprintStatus,
+    #[schema(value_type = String, format = "uuid")]
+    pub created_by: Uuid,
+    #[schema(value_type = String, format = "date-time")]
+    pub created_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "date-time")]
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<sprints::Model> for SprintResponse {
+    fn from(model: sprints::Model) -> Self {
+        Self {
+            id: model.id,
+            project_id: model.project_id,
+            name: model.name,
+            goal: model.goal,
+            start_date: model.start_date,
+            end_date: model.end_date,
+            status: model.status,
+            created_by: model.created_by,
+            created_at: model.created_at.with_timezone(&Utc),
+            updated_at: model.updated_at.with_timezone(&Utc),
+        }
+    }
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct SprintDetail {
     #[serde(flatten)]
-    pub sprint: sprints::Model,
+    pub sprint: SprintResponse,
     pub task_counts: SprintTaskCounts,
     pub burndown: Vec<BurndownPoint>,
 }

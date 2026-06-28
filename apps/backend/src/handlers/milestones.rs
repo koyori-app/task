@@ -28,7 +28,7 @@ use crate::payload::milestones::*;
         ("project_id" = Uuid, Path, description = "プロジェクトID"),
     ),
     responses(
-        (status = 200, description = "マイルストーン一覧", body = [milestones::Model]),
+        (status = 200, description = "マイルストーン一覧", body = [MilestoneResponse]),
         CrudErrors,
     )
 )]
@@ -36,7 +36,7 @@ pub async fn list_milestones(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
-) -> Result<Json<Vec<milestones::Model>>, AppError> {
+) -> Result<Json<Vec<MilestoneResponse>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadMilestone)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -45,7 +45,7 @@ pub async fn list_milestones(
         .filter(milestones::Column::ProjectId.eq(project_id))
         .all(&state.db)
         .await?;
-    Ok(Json(list))
+    Ok(Json(list.into_iter().map(Into::into).collect()))
 }
 
 #[axum::debug_handler]
@@ -60,7 +60,7 @@ pub async fn list_milestones(
     ),
     request_body = CreateMilestoneRequest,
     responses(
-        (status = 201, description = "作成されたマイルストーン", body = milestones::Model),
+        (status = 201, description = "作成されたマイルストーン", body = MilestoneResponse),
         CrudErrors,
     )
 )]
@@ -69,7 +69,7 @@ pub async fn create_milestone(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateMilestoneRequest>>,
-) -> Result<(StatusCode, Json<milestones::Model>), AppError> {
+) -> Result<(StatusCode, Json<MilestoneResponse>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteMilestone)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -86,7 +86,7 @@ pub async fn create_milestone(
     }
     .insert(&state.db)
     .await?;
-    Ok((StatusCode::CREATED, Json(model)))
+    Ok((StatusCode::CREATED, Json(model.into())))
 }
 
 #[axum::debug_handler]
@@ -152,7 +152,7 @@ pub async fn get_milestone(
     };
 
     Ok(Json(MilestoneDetail {
-        milestone,
+        milestone: milestone.into(),
         progress_pct,
         task_counts: TaskCounts { total, done },
     }))
@@ -171,7 +171,7 @@ pub async fn get_milestone(
     ),
     request_body = UpdateMilestoneRequest,
     responses(
-        (status = 200, description = "更新後のマイルストーン", body = milestones::Model),
+        (status = 200, description = "更新後のマイルストーン", body = MilestoneResponse),
         CrudErrors,
     )
 )]
@@ -180,7 +180,7 @@ pub async fn update_milestone(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateMilestoneRequest>>,
-) -> Result<Json<milestones::Model>, AppError> {
+) -> Result<Json<MilestoneResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteMilestone)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -203,7 +203,7 @@ pub async fn update_milestone(
         active.due_date = Set(v);
     }
     active.updated_at = Set(chrono::Utc::now());
-    Ok(Json(active.update(&state.db).await?))
+    Ok(Json(active.update(&state.db).await?.into()))
 }
 
 #[axum::debug_handler]
