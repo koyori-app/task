@@ -11,6 +11,8 @@ use crate::entities::{
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::{DriveFolderErrors, PublicShareErrors};
+use crate::payload::drive_files::DriveFileResponse;
+use crate::payload::drive_folder_shares::DriveFolderShareResponse;
 use crate::payload::drive_folders::*;
 use crate::utils::drive::is_tenant_owner;
 use axum::{
@@ -174,7 +176,7 @@ fn parse_share_permission(permission: &str) -> Result<SharePermission, AppError>
     summary = "ドライブフォルダ一覧",
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     responses(
-        (status = 200, description = "フォルダ一覧", body = [drive_folders::Model]),
+        (status = 200, description = "フォルダ一覧", body = [DriveFolderResponse]),
         DriveFolderErrors,
     ),
     security(("bearerAuth" = []))
@@ -183,14 +185,14 @@ pub async fn list_folders(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
-) -> Result<Json<Vec<drive_folders::Model>>, AppError> {
+) -> Result<Json<Vec<DriveFolderResponse>>, AppError> {
     auth.require_scope(Scope::ReadDrive)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     let folders = drive_folders::Entity::find()
         .filter(drive_folders::Column::TenantId.eq(tenant_id))
         .all(&state.db)
         .await?;
-    Ok(Json(folders))
+    Ok(Json(folders.into_iter().map(Into::into).collect()))
 }
 
 #[utoipa::path(
@@ -201,7 +203,7 @@ pub async fn list_folders(
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     request_body = CreateFolderRequest,
     responses(
-        (status = 201, description = "作成されたフォルダ", body = drive_folders::Model),
+        (status = 201, description = "作成されたフォルダ", body = DriveFolderResponse),
         DriveFolderErrors,
     ),
     security(("bearerAuth" = []))
@@ -211,7 +213,7 @@ pub async fn create_folder(
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
     Valid(Json(payload)): Valid<Json<CreateFolderRequest>>,
-) -> Result<(StatusCode, Json<drive_folders::Model>), AppError> {
+) -> Result<(StatusCode, Json<DriveFolderResponse>), AppError> {
     auth.require_scope(Scope::WriteDrive)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     if let Some(parent_id) = payload.parent_id {
@@ -228,7 +230,7 @@ pub async fn create_folder(
         created_at: Set(Default::default()),
     };
     let model = folder.insert(&state.db).await?;
-    Ok((StatusCode::CREATED, Json(model)))
+    Ok((StatusCode::CREATED, Json(model.into())))
 }
 
 #[utoipa::path(
@@ -242,7 +244,7 @@ pub async fn create_folder(
     ),
     request_body = UpdateFolderRequest,
     responses(
-        (status = 200, description = "更新されたフォルダ", body = drive_folders::Model),
+        (status = 200, description = "更新されたフォルダ", body = DriveFolderResponse),
         DriveFolderErrors,
     ),
     security(("bearerAuth" = []))
@@ -252,12 +254,12 @@ pub async fn update_folder(
     auth: AuthUser,
     Path((tenant_id, folder_id)): Path<(Uuid, Uuid)>,
     Json(payload): Json<UpdateFolderRequest>,
-) -> Result<Json<drive_folders::Model>, AppError> {
+) -> Result<Json<DriveFolderResponse>, AppError> {
     auth.require_scope(Scope::WriteDrive)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     let folder = get_folder_in_tenant(&state, tenant_id, folder_id).await?;
     if payload.name.is_none() && payload.parent_id.is_none() {
-        return Ok(Json(folder));
+        return Ok(Json(folder.into()));
     }
     if let Some(name) = &payload.name {
         if name.is_empty() {
@@ -277,7 +279,7 @@ pub async fn update_folder(
         active.parent_id = Set(parent_id);
     }
     let model = active.update(&state.db).await?;
-    Ok(Json(model))
+    Ok(Json(model.into()))
 }
 
 #[utoipa::path(
@@ -324,7 +326,7 @@ pub async fn delete_folder(
         ("folder_id" = Uuid, Path, description = "フォルダID"),
     ),
     responses(
-        (status = 200, description = "共有一覧", body = [drive_folder_shares::Model]),
+        (status = 200, description = "共有一覧", body = [DriveFolderShareResponse]),
         DriveFolderErrors,
     ),
     security(("bearerAuth" = []))
@@ -333,7 +335,7 @@ pub async fn list_shares(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, folder_id)): Path<(Uuid, Uuid)>,
-) -> Result<Json<Vec<drive_folder_shares::Model>>, AppError> {
+) -> Result<Json<Vec<DriveFolderShareResponse>>, AppError> {
     auth.require_scope(Scope::ReadDrive)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     let folder = get_folder_in_tenant(&state, tenant_id, folder_id).await?;
@@ -342,7 +344,7 @@ pub async fn list_shares(
         .filter(drive_folder_shares::Column::FolderId.eq(folder_id))
         .all(&state.db)
         .await?;
-    Ok(Json(shares))
+    Ok(Json(shares.into_iter().map(Into::into).collect()))
 }
 
 #[utoipa::path(
@@ -356,7 +358,7 @@ pub async fn list_shares(
     ),
     request_body = CreateShareRequest,
     responses(
-        (status = 201, description = "作成された共有", body = drive_folder_shares::Model),
+        (status = 201, description = "作成された共有", body = DriveFolderShareResponse),
         DriveFolderErrors,
     ),
     security(("bearerAuth" = []))
@@ -366,7 +368,7 @@ pub async fn create_share(
     auth: AuthUser,
     Path((tenant_id, folder_id)): Path<(Uuid, Uuid)>,
     Json(payload): Json<CreateShareRequest>,
-) -> Result<(StatusCode, Json<drive_folder_shares::Model>), AppError> {
+) -> Result<(StatusCode, Json<DriveFolderShareResponse>), AppError> {
     auth.require_scope(Scope::WriteDrive)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     let folder = get_folder_in_tenant(&state, tenant_id, folder_id).await?;
@@ -399,7 +401,7 @@ pub async fn create_share(
         created_at: Set(Default::default()),
     };
     let model = share.insert(&state.db).await?;
-    Ok((StatusCode::CREATED, Json(model)))
+    Ok((StatusCode::CREATED, Json(model.into())))
 }
 
 #[utoipa::path(
@@ -472,18 +474,18 @@ pub async fn get_public_share_folder(
     summary = "公開リンク経由でファイル一覧取得（認証不要）",
     params(("token" = String, Path, description = "共有トークン")),
     responses(
-        (status = 200, description = "ファイル一覧", body = [drive_files::Model]),
+        (status = 200, description = "ファイル一覧", body = [DriveFileResponse]),
         PublicShareErrors,
     )
 )]
 pub async fn list_public_share_files(
     State(state): State<AppState>,
     Path(token): Path<String>,
-) -> Result<Json<Vec<drive_files::Model>>, AppError> {
+) -> Result<Json<Vec<DriveFileResponse>>, AppError> {
     let share = load_active_share_by_token(&state, &token).await?;
     let files = drive_files::Entity::find()
         .filter(drive_files::Column::FolderId.eq(share.folder_id))
         .all(&state.db)
         .await?;
-    Ok(Json(files))
+    Ok(Json(files.into_iter().map(Into::into).collect()))
 }

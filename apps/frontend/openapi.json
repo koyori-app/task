@@ -4564,7 +4564,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.drive_files.Model"
+                    "$ref": "#/components/schemas/DriveFileResponse"
                   }
                 }
               }
@@ -6315,7 +6315,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.drive_folders.Model"
+                    "$ref": "#/components/schemas/DriveFolderResponse"
                   }
                 }
               }
@@ -6482,7 +6482,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.drive_folders.Model"
+                  "$ref": "#/components/schemas/DriveFolderResponse"
                 }
               }
             }
@@ -6819,7 +6819,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.drive_folders.Model"
+                  "$ref": "#/components/schemas/DriveFolderResponse"
                 }
               }
             }
@@ -6989,7 +6989,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.drive_folder_shares.Model"
+                    "$ref": "#/components/schemas/DriveFolderShareResponse"
                   }
                 }
               }
@@ -7166,7 +7166,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.drive_folder_shares.Model"
+                  "$ref": "#/components/schemas/DriveFolderShareResponse"
                 }
               }
             }
@@ -10562,7 +10562,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.milestones.Model"
+                    "$ref": "#/components/schemas/MilestoneResponse"
                   }
                 }
               }
@@ -10694,7 +10694,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.milestones.Model"
+                  "$ref": "#/components/schemas/MilestoneResponse"
                 }
               }
             }
@@ -10968,7 +10968,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.milestones.Model"
+                  "$ref": "#/components/schemas/MilestoneResponse"
                 }
               }
             }
@@ -11225,7 +11225,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.sprints.Model"
+                    "$ref": "#/components/schemas/SprintResponse"
                   }
                 }
               }
@@ -11357,7 +11357,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.sprints.Model"
+                  "$ref": "#/components/schemas/SprintResponse"
                 }
               }
             }
@@ -11631,7 +11631,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.sprints.Model"
+                  "$ref": "#/components/schemas/SprintResponse"
                 }
               }
             }
@@ -11898,7 +11898,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.sprints.Model"
+                  "$ref": "#/components/schemas/SprintResponse"
                 }
               }
             }
@@ -12031,7 +12031,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.sprints.Model"
+                  "$ref": "#/components/schemas/SprintResponse"
                 }
               }
             }
@@ -12176,7 +12176,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.tasks.Model"
+                    "$ref": "#/components/schemas/TaskResponse"
                   }
                 }
               }
@@ -20332,6 +20332,102 @@
           }
         }
       },
+      "DriveFolderResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "tenant_id",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "DriveFolderShareResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "folder_id",
+          "permission",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "folder_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/SharePermission"
+          },
+          "share_token": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shared_with_user_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
       "DriveUsageResponse": {
         "type": "object",
         "required": [
@@ -20538,7 +20634,7 @@
       "MilestoneDetail": {
         "allOf": [
           {
-            "$ref": "#/components/schemas/crate.entities.milestones.Model"
+            "$ref": "#/components/schemas/MilestoneResponse"
           },
           {
             "type": "object",
@@ -20558,6 +20654,53 @@
             }
           }
         ]
+      },
+      "MilestoneResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "due_date",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "due_date": {
+            "type": "string",
+            "example": "2026-07-01"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       },
       "MyTaskItem": {
         "type": "object",
@@ -21293,7 +21436,7 @@
       "SprintDetail": {
         "allOf": [
           {
-            "$ref": "#/components/schemas/crate.entities.sprints.Model"
+            "$ref": "#/components/schemas/SprintResponse"
           },
           {
             "type": "object",
@@ -21314,6 +21457,62 @@
             }
           }
         ]
+      },
+      "SprintResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "start_date",
+          "end_date",
+          "status",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "end_date": {
+            "type": "string",
+            "example": "2026-06-14"
+          },
+          "goal": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "start_date": {
+            "type": "string",
+            "example": "2026-06-01"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SprintStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       },
       "SprintStatus": {
         "type": "string",
@@ -21344,13 +21543,6 @@
             "minimum": 0
           }
         }
-      },
-      "StorageType": {
-        "type": "string",
-        "enum": [
-          "S3",
-          "Local"
-        ]
       },
       "SystemSettingsResponse": {
         "type": "object",
@@ -22474,170 +22666,6 @@
           }
         }
       },
-      "crate.entities.drive_files.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "size",
-          "mime_type",
-          "storage_type",
-          "storage_key",
-          "tenant_id",
-          "project_id",
-          "uploader_id",
-          "folder_id",
-          "created_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "folder_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "mime_type": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "project_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "size": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "storage_key": {
-            "type": "string"
-          },
-          "storage_type": {
-            "$ref": "#/components/schemas/StorageType"
-          },
-          "tenant_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "uploader_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.drive_folder_shares.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "folder_id",
-          "shared_with_user_id",
-          "permission",
-          "created_by",
-          "expires_at",
-          "created_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created_by": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "expires_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          },
-          "folder_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "permission": {
-            "$ref": "#/components/schemas/SharePermission"
-          },
-          "share_token": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "shared_with_user_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.drive_folders.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "parent_id",
-          "tenant_id",
-          "project_id",
-          "created_by",
-          "created_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created_by": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "parent_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "project_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "tenant_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
       "crate.entities.labels.Model": {
         "type": "object",
         "required": [
@@ -22672,53 +22700,6 @@
               "null"
             ],
             "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.milestones.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "project_id",
-          "name",
-          "due_date",
-          "created_by",
-          "created_at",
-          "updated_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created_by": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "description": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "due_date": {
-            "type": "string",
-            "example": "2026-07-01"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },
@@ -22943,62 +22924,6 @@
           }
         }
       },
-      "crate.entities.sprints.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "project_id",
-          "name",
-          "start_date",
-          "end_date",
-          "status",
-          "created_by",
-          "created_at",
-          "updated_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created_by": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "end_date": {
-            "type": "string",
-            "example": "2026-06-14"
-          },
-          "goal": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "start_date": {
-            "type": "string",
-            "example": "2026-06-01"
-          },
-          "status": {
-            "$ref": "#/components/schemas/SprintStatus"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
       "crate.entities.task_assignees.Model": {
         "type": "object",
         "required": [
@@ -23076,127 +23001,6 @@
           "user_id": {
             "type": "string",
             "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.tasks.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "project_id",
-          "seq_id",
-          "title",
-          "status_id",
-          "priority",
-          "progress_pct",
-          "is_archived",
-          "created_by",
-          "created_at",
-          "updated_at"
-        ],
-        "properties": {
-          "completed_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created_by": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "deleted_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          },
-          "description": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "estimated_minutes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32"
-          },
-          "hard_deadline": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_archived": {
-            "type": "boolean"
-          },
-          "milestone_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "parent_task_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "priority": {
-            "$ref": "#/components/schemas/TaskPriority"
-          },
-          "progress_pct": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "seq_id": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "soft_deadline": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          },
-          "sprint_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "status_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "title": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },

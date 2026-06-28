@@ -6,6 +6,7 @@ pub mod auth;
 pub mod auth_2fa;
 pub mod custom_fields;
 pub mod drive_files;
+pub mod drive_folder_shares;
 pub mod drive_folders;
 pub mod github;
 pub mod labels;

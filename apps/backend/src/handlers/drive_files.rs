@@ -27,24 +27,11 @@ use crate::extractors::{AuthUser, OptionalAuthUser};
 use crate::openapi::CrudErrors;
 use crate::payload::drive_files::*;
 use crate::utils::drive::{
-    content_url, current_storage_type, effective_quota, guess_mime, is_tenant_owner,
-    tenant_used_bytes,
+    current_storage_type, effective_quota, guess_mime, is_tenant_owner, tenant_used_bytes,
 };
 use crate::utils::storage::{ByteStream, StorageError};
 
 const MAX_LIST_LIMIT: u32 = 200;
-
-fn drive_file_response(model: &drive_files::Model) -> DriveFileResponse {
-    DriveFileResponse {
-        id: model.id,
-        name: model.name.clone(),
-        size: model.size,
-        mime_type: model.mime_type.clone(),
-        url: content_url(model.id),
-        folder_id: model.folder_id,
-        created_at: model.created_at.into(),
-    }
-}
 
 async fn load_tenant_file(
     state: &AppState,
@@ -279,7 +266,7 @@ pub async fn list_files(
         .await?;
 
     Ok(Json(ListFilesResponse {
-        files: files.iter().map(drive_file_response).collect(),
+        files: files.into_iter().map(Into::into).collect(),
         total,
     }))
 }
@@ -446,7 +433,7 @@ pub async fn upload_file(
                 .await;
                 match result {
                     Ok(saved) => {
-                        return Ok((StatusCode::CREATED, Json(drive_file_response(&saved))));
+                        return Ok((StatusCode::CREATED, Json(saved.into())));
                     }
                     Err(e) => {
                         let _ = state.storage.delete(&storage_key).await;
@@ -504,7 +491,7 @@ pub async fn get_file(
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     let file = load_tenant_file(&state, tenant_id, id).await?;
     authorize_file_access(&state, &file, &auth).await?;
-    Ok(Json(drive_file_response(&file)))
+    Ok(Json(file.into()))
 }
 
 #[axum::debug_handler]
@@ -552,7 +539,7 @@ pub async fn update_file(
     }
 
     let updated = active.update(&state.db).await?;
-    Ok(Json(drive_file_response(&updated)))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
