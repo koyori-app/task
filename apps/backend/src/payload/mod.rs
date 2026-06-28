@@ -26,3 +26,4 @@ pub mod task_notifications;
 pub mod tasks;
 pub mod tenants;
 pub mod time_tracking;
+pub mod users;

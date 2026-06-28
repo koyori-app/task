@@ -935,7 +935,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.users.Model"
+                    "$ref": "#/components/schemas/UserResponse"
                   }
                 }
               }
@@ -1045,7 +1045,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.users.Model"
+                  "$ref": "#/components/schemas/UserResponse"
                 }
               }
             }
@@ -1248,7 +1248,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.users.Model"
+                  "$ref": "#/components/schemas/UserResponse"
                 }
               }
             }
@@ -2321,7 +2321,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.users.Model"
+                  "$ref": "#/components/schemas/UserResponse"
                 }
               }
             }
@@ -16719,7 +16719,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.time_logs.Model"
+                    "$ref": "#/components/schemas/TimeLogResponse"
                   }
                 }
               }
@@ -16860,7 +16860,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.time_logs.Model"
+                  "$ref": "#/components/schemas/TimeLogResponse"
                 }
               }
             }
@@ -17144,7 +17144,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.time_logs.Model"
+                  "$ref": "#/components/schemas/TimeLogResponse"
                 }
               }
             }
@@ -17409,7 +17409,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.task_timers.Model"
+                  "$ref": "#/components/schemas/TaskTimerResponse"
                 }
               }
             }
@@ -17673,7 +17673,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.time_logs.Model"
+                  "$ref": "#/components/schemas/TimeLogResponse"
                 }
               }
             }
@@ -21909,6 +21909,28 @@
           }
         }
       },
+      "TaskTimerResponse": {
+        "type": "object",
+        "required": [
+          "task_id",
+          "user_id",
+          "started_at"
+        ],
+        "properties": {
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "TaskViewListResponse": {
         "type": "object",
         "required": [
@@ -21920,6 +21942,49 @@
             "items": {
               "$ref": "#/components/schemas/crate.entities.project_task_views.Model"
             }
+          }
+        }
+      },
+      "TimeLogResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "task_id",
+          "user_id",
+          "logged_minutes",
+          "logged_at",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "logged_at": {
+            "type": "string",
+            "format": "date"
+          },
+          "logged_minutes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -22505,6 +22570,57 @@
           }
         }
       },
+      "UserResponse": {
+        "type": "object",
+        "description": "Public user profile — excludes password_hash, sessions_revoked_at, and other secrets.",
+        "required": [
+          "id",
+          "username",
+          "email",
+          "email_verified",
+          "is_admin",
+          "is_suspended",
+          "totp_enabled"
+        ],
+        "properties": {
+          "avatar_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bio": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "email_verified": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_admin": {
+            "type": "boolean"
+          },
+          "is_suspended": {
+            "type": "boolean"
+          },
+          "totp_enabled": {
+            "type": "boolean"
+          },
+          "username": {
+            "type": "string",
+            "format": "username"
+          }
+        }
+      },
       "UserTimeSummary": {
         "type": "object",
         "required": [
@@ -22982,28 +23098,6 @@
           }
         }
       },
-      "crate.entities.task_timers.Model": {
-        "type": "object",
-        "required": [
-          "task_id",
-          "user_id",
-          "started_at"
-        ],
-        "properties": {
-          "started_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "task_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
       "crate.entities.tenants.Model": {
         "type": "object",
         "required": [
@@ -23046,101 +23140,6 @@
           "require_2fa": {
             "type": "boolean",
             "description": "テナントメンバー全員に 2FA 設定を強制する"
-          }
-        }
-      },
-      "crate.entities.time_logs.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "task_id",
-          "user_id",
-          "logged_minutes",
-          "logged_at",
-          "created_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "logged_at": {
-            "type": "string",
-            "format": "date"
-          },
-          "logged_minutes": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "note": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "task_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.users.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "username",
-          "email",
-          "email_verified",
-          "is_admin",
-          "is_suspended",
-          "totp_enabled"
-        ],
-        "properties": {
-          "avatar_url": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "bio": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "email": {
-            "type": "string",
-            "format": "email"
-          },
-          "email_verified": {
-            "type": "boolean",
-            "description": "メールアドレスの確認が済んでいるかどうか"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_admin": {
-            "type": "boolean"
-          },
-          "is_suspended": {
-            "type": "boolean"
-          },
-          "totp_enabled": {
-            "type": "boolean",
-            "description": "TOTP 2FA が有効か（`totp_credentials.is_verified` とセットで有効扱い）。\n更新は `handlers::auth_2fa` 経由の ActiveModel のみとし、他モジュールから直接書き換えないこと。"
-          },
-          "username": {
-            "type": "string",
-            "format": "username"
           }
         }
       }
