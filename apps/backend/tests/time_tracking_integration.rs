@@ -23,7 +23,7 @@ async fn setup_task_fixture(app: &TestApp, owner_id: Uuid) -> TaskFixture {
         position: Set(0),
         is_default: Set(true),
         is_done_state: Set(false),
-        created_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
     }
     .insert(&app.state.db)
     .await
@@ -48,8 +48,8 @@ async fn setup_task_fixture(app: &TestApp, owner_id: Uuid) -> TaskFixture {
         completed_at: Set(None),
         sprint_id: Set(None),
         created_by: Set(owner_id),
-        created_at: Set(chrono::Utc::now()),
-        updated_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
+        updated_at: Set(chrono::Utc::now().into()),
         deleted_at: Set(None),
     }
     .insert(&app.state.db)

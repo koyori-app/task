@@ -215,7 +215,7 @@ async fn admin_users_integration_suite() {
             position: Set(0),
             is_default: Set(true),
             is_done_state: Set(false),
-            created_at: Set(chrono::Utc::now()),
+            created_at: Set(chrono::Utc::now().into()),
         }
         .insert(&app.state.db)
         .await
@@ -239,8 +239,8 @@ async fn admin_users_integration_suite() {
             estimated_minutes: Set(None),
             is_archived: Set(false),
             created_by: Set(target.id),
-            created_at: Set(chrono::Utc::now()),
-            updated_at: Set(chrono::Utc::now()),
+            created_at: Set(chrono::Utc::now().into()),
+            updated_at: Set(chrono::Utc::now().into()),
             completed_at: Set(None),
             deleted_at: Set(None),
         }

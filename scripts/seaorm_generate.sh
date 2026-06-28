@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerate SeaORM entities from DB schema and apply OpenAPI postprocess.
+# Generate entity models (pure sea-orm-cli output, no postprocess)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
