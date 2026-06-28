@@ -58,7 +58,9 @@ pub async fn list_custom_fields(
         .order_by_asc(project_custom_fields::Column::CreatedAt)
         .all(&state.db)
         .await?;
-    Ok(Json(CustomFieldListResponse { fields }))
+    Ok(Json(CustomFieldListResponse {
+        fields: fields.into_iter().map(Into::into).collect(),
+    }))
 }
 
 #[axum::debug_handler]
@@ -73,7 +75,7 @@ pub async fn list_custom_fields(
     ),
     request_body = CreateCustomFieldRequest,
     responses(
-        (status = 201, description = "作成されたカスタムフィールド", body = project_custom_fields::Model),
+        (status = 201, description = "作成されたカスタムフィールド", body = ProjectCustomFieldResponse),
         CrudErrors,
     )
 )]
@@ -82,7 +84,7 @@ pub async fn create_custom_field(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateCustomFieldRequest>>,
-) -> Result<(StatusCode, Json<project_custom_fields::Model>), AppError> {
+) -> Result<(StatusCode, Json<ProjectCustomFieldResponse>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -107,7 +109,7 @@ pub async fn create_custom_field(
     }
     .insert(&state.db)
     .await?;
-    Ok((StatusCode::CREATED, Json(field)))
+    Ok((StatusCode::CREATED, Json(field.into())))
 }
 
 #[axum::debug_handler]
@@ -123,7 +125,7 @@ pub async fn create_custom_field(
     ),
     request_body = UpdateCustomFieldRequest,
     responses(
-        (status = 200, description = "更新後のカスタムフィールド", body = project_custom_fields::Model),
+        (status = 200, description = "更新後のカスタムフィールド", body = ProjectCustomFieldResponse),
         CrudErrors,
     )
 )]
@@ -132,7 +134,7 @@ pub async fn update_custom_field(
     auth: AuthUser,
     Path((tenant_id, project_id, field_id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateCustomFieldRequest>>,
-) -> Result<Json<project_custom_fields::Model>, AppError> {
+) -> Result<Json<ProjectCustomFieldResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -162,7 +164,7 @@ pub async fn update_custom_field(
     if let Some(position) = payload.position {
         active.position = Set(position);
     }
-    Ok(Json(active.update(&state.db).await?))
+    Ok(Json(active.update(&state.db).await?.into()))
 }
 
 #[axum::debug_handler]

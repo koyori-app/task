@@ -497,7 +497,9 @@ pub async fn list_task_views(
         .all(&state.db)
         .await?;
 
-    Ok(Json(TaskViewListResponse { views }))
+    Ok(Json(TaskViewListResponse {
+        views: views.into_iter().map(Into::into).collect(),
+    }))
 }
 
 #[axum::debug_handler]
@@ -512,7 +514,7 @@ pub async fn list_task_views(
     ),
     request_body = CreateTaskViewRequest,
     responses(
-        (status = 201, description = "作成されたビュー", body = project_task_views::Model),
+        (status = 201, description = "作成されたビュー", body = ProjectTaskViewResponse),
         CrudErrors,
     )
 )]
@@ -521,7 +523,7 @@ pub async fn create_task_view(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateTaskViewRequest>>,
-) -> Result<(StatusCode, Json<project_task_views::Model>), AppError> {
+) -> Result<(StatusCode, Json<ProjectTaskViewResponse>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -542,7 +544,7 @@ pub async fn create_task_view(
     .insert(&state.db)
     .await?;
 
-    Ok((StatusCode::CREATED, Json(model)))
+    Ok((StatusCode::CREATED, Json(model.into())))
 }
 
 #[axum::debug_handler]
@@ -558,7 +560,7 @@ pub async fn create_task_view(
     ),
     request_body = UpdateTaskViewRequest,
     responses(
-        (status = 200, description = "更新されたビュー", body = project_task_views::Model),
+        (status = 200, description = "更新されたビュー", body = ProjectTaskViewResponse),
         CrudErrors,
     )
 )]
@@ -567,7 +569,7 @@ pub async fn update_task_view(
     auth: AuthUser,
     Path((tenant_id, project_id, view_id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateTaskViewRequest>>,
-) -> Result<Json<project_task_views::Model>, AppError> {
+) -> Result<Json<ProjectTaskViewResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -603,7 +605,7 @@ pub async fn update_task_view(
     active.updated_at = Set(chrono::Utc::now());
 
     let updated = active.update(&state.db).await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]

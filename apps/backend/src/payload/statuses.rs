@@ -1,7 +1,40 @@
+use chrono::{DateTime, Utc};
 use sea_orm::prelude::Uuid;
 use serde::Deserialize;
 use utoipa::ToSchema;
 use validator::Validate;
+
+use crate::entities::project_statuses;
+
+#[derive(Debug, Clone, serde::Serialize, ToSchema)]
+pub struct ProjectStatusResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub project_id: Uuid,
+    pub name: String,
+    pub color: String,
+    pub position: i16,
+    pub is_default: bool,
+    pub is_done_state: bool,
+    #[schema(value_type = String, format = "date-time")]
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<project_statuses::Model> for ProjectStatusResponse {
+    fn from(model: project_statuses::Model) -> Self {
+        Self {
+            id: model.id,
+            project_id: model.project_id,
+            name: model.name,
+            color: model.color,
+            position: model.position,
+            is_default: model.is_default,
+            is_done_state: model.is_done_state,
+            created_at: model.created_at.with_timezone(&Utc),
+        }
+    }
+}
 
 #[derive(Validate, Deserialize, ToSchema)]
 pub struct CreateStatusRequest {

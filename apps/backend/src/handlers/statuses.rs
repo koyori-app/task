@@ -29,7 +29,7 @@ use crate::payload::statuses::*;
         ("project_id" = Uuid, Path, description = "プロジェクトID"),
     ),
     responses(
-        (status = 200, description = "ステータス一覧（position 順）", body = [project_statuses::Model]),
+        (status = 200, description = "ステータス一覧（position 順）", body = [ProjectStatusResponse]),
         CrudErrors,
     )
 )]
@@ -37,7 +37,7 @@ pub async fn list_statuses(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
-) -> Result<Json<Vec<project_statuses::Model>>, AppError> {
+) -> Result<Json<Vec<ProjectStatusResponse>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -47,7 +47,7 @@ pub async fn list_statuses(
         .order_by_asc(project_statuses::Column::Position)
         .all(&state.db)
         .await?;
-    Ok(Json(statuses))
+    Ok(Json(statuses.into_iter().map(Into::into).collect()))
 }
 
 #[axum::debug_handler]
@@ -62,7 +62,7 @@ pub async fn list_statuses(
     ),
     request_body = CreateStatusRequest,
     responses(
-        (status = 201, description = "作成されたステータス", body = project_statuses::Model),
+        (status = 201, description = "作成されたステータス", body = ProjectStatusResponse),
         CrudErrors,
     )
 )]
@@ -71,7 +71,7 @@ pub async fn create_status(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateStatusRequest>>,
-) -> Result<(StatusCode, Json<project_statuses::Model>), AppError> {
+) -> Result<(StatusCode, Json<ProjectStatusResponse>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -97,7 +97,7 @@ pub async fn create_status(
     .insert(&txn)
     .await?;
     txn.commit().await?;
-    Ok((StatusCode::CREATED, Json(status)))
+    Ok((StatusCode::CREATED, Json(status.into())))
 }
 
 #[axum::debug_handler]
@@ -113,7 +113,7 @@ pub async fn create_status(
     ),
     request_body = UpdateStatusRequest,
     responses(
-        (status = 200, description = "更新後のステータス", body = project_statuses::Model),
+        (status = 200, description = "更新後のステータス", body = ProjectStatusResponse),
         CrudErrors,
     )
 )]
@@ -122,7 +122,7 @@ pub async fn update_status(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateStatusRequest>>,
-) -> Result<Json<project_statuses::Model>, AppError> {
+) -> Result<Json<ProjectStatusResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -184,7 +184,7 @@ pub async fn update_status(
     }
 
     txn.commit().await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
@@ -199,7 +199,7 @@ pub async fn update_status(
     ),
     request_body = ReorderRequest,
     responses(
-        (status = 200, description = "並び替え後のステータス一覧", body = [project_statuses::Model]),
+        (status = 200, description = "並び替え後のステータス一覧", body = [ProjectStatusResponse]),
         CrudErrors,
     )
 )]
@@ -208,7 +208,7 @@ pub async fn reorder_statuses(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Json(payload): Json<ReorderRequest>,
-) -> Result<Json<Vec<project_statuses::Model>>, AppError> {
+) -> Result<Json<Vec<ProjectStatusResponse>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -246,7 +246,7 @@ pub async fn reorder_statuses(
         .order_by_asc(project_statuses::Column::Position)
         .all(&state.db)
         .await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into_iter().map(Into::into).collect()))
 }
 
 #[axum::debug_handler]

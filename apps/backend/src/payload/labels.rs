@@ -1,6 +1,36 @@
+use chrono::{DateTime, Utc};
+use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
+
+use crate::entities::labels;
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct LabelResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    pub name: String,
+    pub description: String,
+    pub color: String,
+    #[schema(nullable)]
+    pub icon_url: Option<String>,
+    #[schema(value_type = Option<String>, format = "uuid", nullable)]
+    pub project_id: Option<Uuid>,
+}
+
+impl From<labels::Model> for LabelResponse {
+    fn from(model: labels::Model) -> Self {
+        Self {
+            id: model.id,
+            name: model.name,
+            description: model.description,
+            color: model.color,
+            icon_url: model.icon_url,
+            project_id: model.project_id,
+        }
+    }
+}
 
 #[derive(Validate, Deserialize, ToSchema)]
 pub struct CreateLabelRequest {
