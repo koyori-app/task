@@ -4,6 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
+use chrono::Utc;
 use sea_orm::sea_query::{Expr, Order};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, PaginatorTrait,
@@ -125,7 +126,7 @@ pub async fn list_watchers(
                     .get(&w.user_id)
                     .cloned()
                     .unwrap_or_else(|| "unknown".into()),
-                created_at: w.created_at,
+                created_at: w.created_at.with_timezone(&Utc),
             })
             .collect(),
     }))
@@ -236,8 +237,8 @@ pub async fn list_notifications(
                     notification_type: row.notification_type,
                     task,
                     payload: row.payload.clone().into(),
-                    read_at: row.read_at,
-                    created_at: row.created_at,
+                    read_at: row.read_at.map(|dt| dt.with_timezone(&Utc)),
+                    created_at: row.created_at.with_timezone(&Utc),
                 }
             })
             .collect(),
@@ -274,7 +275,7 @@ pub async fn mark_notification_read(
         notification
     } else {
         let mut active: notifications::ActiveModel = notification.into();
-        active.read_at = Set(Some(chrono::Utc::now()));
+        active.read_at = Set(Some(chrono::Utc::now().into()));
         active.update(&state.db).await?
     };
     let task = if let Some(tid) = row.task_id {
@@ -294,8 +295,8 @@ pub async fn mark_notification_read(
         notification_type: row.notification_type,
         task,
         payload: row.payload.clone().into(),
-        read_at: row.read_at,
-        created_at: row.created_at,
+        read_at: row.read_at.map(|dt| dt.with_timezone(&Utc)),
+        created_at: row.created_at.with_timezone(&Utc),
     }))
 }
 

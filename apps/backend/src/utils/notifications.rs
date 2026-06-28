@@ -44,7 +44,7 @@ pub async fn ensure_watcher<C: ConnectionTrait>(
     task_watchers::Entity::insert(task_watchers::ActiveModel {
         task_id: Set(task_id),
         user_id: Set(user_id),
-        created_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
     })
     .on_conflict(
         OnConflict::columns([task_watchers::Column::TaskId, task_watchers::Column::UserId])
@@ -92,7 +92,7 @@ pub async fn create_notification<C: ConnectionTrait>(
         notification_type: Set(notification_type.to_string()),
         payload: Set(payload),
         read_at: Set(None),
-        created_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
     }
     .insert(db)
     .await?;

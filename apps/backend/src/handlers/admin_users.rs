@@ -174,8 +174,8 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
         let now = Utc::now();
         for task in owned {
             let mut active: tasks::ActiveModel = task.into();
-            active.deleted_at = Set(Some(now));
-            active.updated_at = Set(now);
+            active.deleted_at = Set(Some(now.into()));
+            active.updated_at = Set(now.into());
             let _ = active.update(db).await;
         }
     }

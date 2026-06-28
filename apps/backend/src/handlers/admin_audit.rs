@@ -37,7 +37,7 @@ pub async fn record_audit(
         metadata: Set(metadata.map(Json::from)),
         ip_address: Set(ip_address),
         user_agent: Set(user_agent),
-        created_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
     }
     .insert(db)
     .await?;

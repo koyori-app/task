@@ -4,6 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
+use chrono::Utc;
 use sea_orm::sea_query::{Expr, LockType};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait, EntityTrait,
@@ -105,12 +106,13 @@ async fn record_task_field_activities<C: ConnectionTrait>(
         }
     }
     if payload.clear_soft_deadline || payload.soft_deadline.is_some() {
+        let before_soft = before.soft_deadline.map(|dt| dt.with_timezone(&Utc));
         let new_soft = if payload.clear_soft_deadline {
             None
         } else {
-            payload.soft_deadline.or(before.soft_deadline)
+            payload.soft_deadline.or(before_soft)
         };
-        if new_soft != before.soft_deadline {
+        if new_soft != before_soft {
             record_activity(
                 db,
                 task_id,
@@ -118,7 +120,7 @@ async fn record_task_field_activities<C: ConnectionTrait>(
                 "deadline_changed",
                 serde_json::json!({
                     "field": "soft_deadline",
-                    "from": before.soft_deadline,
+                    "from": before_soft,
                     "to": new_soft,
                 })
                 .into(),
@@ -127,12 +129,13 @@ async fn record_task_field_activities<C: ConnectionTrait>(
         }
     }
     if payload.clear_hard_deadline || payload.hard_deadline.is_some() {
+        let before_hard = before.hard_deadline.map(|dt| dt.with_timezone(&Utc));
         let new_hard = if payload.clear_hard_deadline {
             None
         } else {
-            payload.hard_deadline.or(before.hard_deadline)
+            payload.hard_deadline.or(before_hard)
         };
-        if new_hard != before.hard_deadline {
+        if new_hard != before_hard {
             record_activity(
                 db,
                 task_id,
@@ -140,7 +143,7 @@ async fn record_task_field_activities<C: ConnectionTrait>(
                 "deadline_changed",
                 serde_json::json!({
                     "field": "hard_deadline",
-                    "from": before.hard_deadline,
+                    "from": before_hard,
                     "to": new_hard,
                 })
                 .into(),
@@ -460,14 +463,14 @@ pub async fn create_task(
         parent_task_id: Set(payload.parent_task_id),
         milestone_id: Set(payload.milestone_id),
         sprint_id: Set(payload.sprint_id),
-        soft_deadline: Set(payload.soft_deadline),
-        hard_deadline: Set(payload.hard_deadline),
+        soft_deadline: Set(payload.soft_deadline.map(Into::into)),
+        hard_deadline: Set(payload.hard_deadline.map(Into::into)),
         estimated_minutes: Set(payload.estimated_minutes),
         is_archived: Set(false),
         created_by: Set(auth.user_id),
-        created_at: Set(chrono::Utc::now()),
-        updated_at: Set(chrono::Utc::now()),
-        completed_at: Set(status.is_done_state.then(chrono::Utc::now)),
+        created_at: Set(chrono::Utc::now().into()),
+        updated_at: Set(chrono::Utc::now().into()),
+        completed_at: Set(status.is_done_state.then(|| chrono::Utc::now().into())),
         deleted_at: Set(None),
     }
     .insert(&txn)
@@ -480,7 +483,7 @@ pub async fn create_task(
             task_id: Set(model.id),
             user_id: Set(a.user_id),
             role: Set(a.role.clone()),
-            assigned_at: Set(chrono::Utc::now()),
+            assigned_at: Set(chrono::Utc::now().into()),
         }
         .insert(&txn)
         .await?;
@@ -599,8 +602,8 @@ pub async fn update_task(
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let task_snapshot = task.clone();
     let task_id = task.id;
-    let existing_soft = task.soft_deadline;
-    let existing_hard = task.hard_deadline;
+    let existing_soft = task.soft_deadline.map(|dt| dt.with_timezone(&Utc));
+    let existing_hard = task.hard_deadline.map(|dt| dt.with_timezone(&Utc));
     let parent_changes = payload.clear_parent_task_id || payload.parent_task_id.is_some();
     let txn = if parent_changes {
         state
@@ -639,7 +642,7 @@ pub async fn update_task(
             match active.completed_at.clone() {
                 sea_orm::ActiveValue::Set(Some(completed_at))
                 | sea_orm::ActiveValue::Unchanged(Some(completed_at)) => Set(Some(completed_at)),
-                _ => Set(Some(chrono::Utc::now())),
+                _ => Set(Some(chrono::Utc::now().into())),
             }
         } else {
             Set(None)
@@ -679,12 +682,12 @@ pub async fn update_task(
     if payload.clear_soft_deadline {
         active.soft_deadline = Set(None);
     } else if let Some(v) = payload.soft_deadline {
-        active.soft_deadline = Set(Some(v));
+        active.soft_deadline = Set(Some(v.into()));
     }
     if payload.clear_hard_deadline {
         active.hard_deadline = Set(None);
     } else if let Some(v) = payload.hard_deadline {
-        active.hard_deadline = Set(Some(v));
+        active.hard_deadline = Set(Some(v.into()));
     }
 
     let effective_soft = if payload.clear_soft_deadline {
@@ -715,7 +718,7 @@ pub async fn update_task(
     if let Some(v) = payload.is_archived {
         active.is_archived = Set(v);
     }
-    active.updated_at = Set(chrono::Utc::now());
+    active.updated_at = Set(chrono::Utc::now().into());
 
     if parent_changes {
         let fresh = tasks::Entity::find_by_id(task_id)
@@ -811,7 +814,7 @@ pub async fn delete_task(
         return Err(AppError::Forbidden);
     }
     let mut active: tasks::ActiveModel = task.into();
-    active.deleted_at = Set(Some(chrono::Utc::now()));
+    active.deleted_at = Set(Some(chrono::Utc::now().into()));
     active.update(&state.db).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -846,7 +849,7 @@ pub async fn archive_task(
     let txn = state.db.begin().await?;
     let mut active: tasks::ActiveModel = task.into();
     active.is_archived = Set(true);
-    active.updated_at = Set(chrono::Utc::now());
+    active.updated_at = Set(chrono::Utc::now().into());
     let updated = active.update(&txn).await?;
     record_activity(
         &txn,
@@ -890,7 +893,7 @@ pub async fn unarchive_task(
     let txn = state.db.begin().await?;
     let mut active: tasks::ActiveModel = task.into();
     active.is_archived = Set(false);
-    active.updated_at = Set(chrono::Utc::now());
+    active.updated_at = Set(chrono::Utc::now().into());
     let updated = active.update(&txn).await?;
     record_activity(
         &txn,
@@ -918,7 +921,7 @@ pub async fn unarchive_task(
         ("id" = String, Path, description = "タスクID"),
     ),
     responses(
-        (status = 200, description = "担当者一覧", body = [task_assignees::Model]),
+        (status = 200, description = "担当者一覧", body = [TaskAssigneeResponse]),
         CrudErrors,
     )
 )]
@@ -926,7 +929,7 @@ pub async fn list_assignees(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
-) -> Result<Json<Vec<task_assignees::Model>>, AppError> {
+) -> Result<Json<Vec<TaskAssigneeResponse>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -936,7 +939,7 @@ pub async fn list_assignees(
         .filter(task_assignees::Column::TaskId.eq(task.id))
         .all(&state.db)
         .await?;
-    Ok(Json(assignees))
+    Ok(Json(assignees.into_iter().map(Into::into).collect()))
 }
 
 #[axum::debug_handler]
@@ -952,7 +955,7 @@ pub async fn list_assignees(
     ),
     request_body = AddAssigneeRequest,
     responses(
-        (status = 201, description = "追加された担当者", body = task_assignees::Model),
+        (status = 201, description = "追加された担当者", body = TaskAssigneeResponse),
         CrudErrors,
     )
 )]
@@ -961,7 +964,7 @@ pub async fn add_assignee(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
     Valid(Json(payload)): Valid<Json<AddAssigneeRequest>>,
-) -> Result<(StatusCode, Json<task_assignees::Model>), AppError> {
+) -> Result<(StatusCode, Json<TaskAssigneeResponse>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -983,7 +986,7 @@ pub async fn add_assignee(
         task_id: Set(task.id),
         user_id: Set(payload.user_id),
         role: Set(role.clone()),
-        assigned_at: Set(chrono::Utc::now()),
+        assigned_at: Set(chrono::Utc::now().into()),
     }
     .insert(&txn)
     .await?;
@@ -1009,7 +1012,7 @@ pub async fn add_assignee(
     )
     .await?;
     txn.commit().await?;
-    Ok((StatusCode::CREATED, Json(assignee)))
+    Ok((StatusCode::CREATED, Json(assignee.into())))
 }
 
 #[axum::debug_handler]
@@ -1026,7 +1029,7 @@ pub async fn add_assignee(
     ),
     request_body = UpdateAssigneeRequest,
     responses(
-        (status = 200, description = "更新後の担当者", body = task_assignees::Model),
+        (status = 200, description = "更新後の担当者", body = TaskAssigneeResponse),
         CrudErrors,
     )
 )]
@@ -1035,7 +1038,7 @@ pub async fn update_assignee(
     auth: AuthUser,
     Path((tenant_id, project_id, id, user_id)): Path<(Uuid, Uuid, String, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateAssigneeRequest>>,
-) -> Result<Json<task_assignees::Model>, AppError> {
+) -> Result<Json<TaskAssigneeResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -1049,7 +1052,7 @@ pub async fn update_assignee(
         .ok_or(AppError::NotFound)?;
     let mut active: task_assignees::ActiveModel = assignee.into();
     active.role = Set(payload.role);
-    Ok(Json(active.update(&state.db).await?))
+    Ok(Json(active.update(&state.db).await?.into()))
 }
 
 #[axum::debug_handler]
@@ -1216,7 +1219,7 @@ pub async fn list_relations(
     ),
     request_body = AddRelationRequest,
     responses(
-        (status = 201, description = "追加された依存関係", body = task_relations::Model),
+        (status = 201, description = "追加された依存関係", body = TaskRelationResponse),
         CrudErrors,
     )
 )]
@@ -1225,7 +1228,7 @@ pub async fn add_relation(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
     Json(payload): Json<AddRelationRequest>,
-) -> Result<(StatusCode, Json<task_relations::Model>), AppError> {
+) -> Result<(StatusCode, Json<TaskRelationResponse>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -1259,7 +1262,7 @@ pub async fn add_relation(
         id: Set(Uuid::new_v4()),
         blocker_task_id: Set(blocker),
         blocked_task_id: Set(blocked),
-        created_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
     }
     .insert(&txn)
     .await)
@@ -1292,7 +1295,7 @@ pub async fn add_relation(
     .await?;
     txn.commit().await?;
 
-    Ok((StatusCode::CREATED, Json(rel)))
+    Ok((StatusCode::CREATED, Json(rel.into())))
 }
 
 #[axum::debug_handler]

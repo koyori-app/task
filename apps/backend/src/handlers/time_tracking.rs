@@ -115,7 +115,7 @@ pub async fn create_time_log(
         logged_minutes: Set(payload.logged_minutes),
         logged_at: Set(payload.logged_at),
         note: Set(payload.note),
-        created_at: Set(Utc::now()),
+        created_at: Set(Utc::now().into()),
     }
     .insert(&state.db)
     .await?;
@@ -323,7 +323,7 @@ pub async fn start_timer(
     let timer = match (task_timers::ActiveModel {
         task_id: Set(task.id),
         user_id: Set(auth.user_id),
-        started_at: Set(Utc::now()),
+        started_at: Set(Utc::now().into()),
     })
     .insert(&state.db)
     .await
@@ -390,7 +390,7 @@ pub async fn stop_timer(
                 logged_minutes: Set(logged_minutes),
                 logged_at: Set(logged_at),
                 note: Set(None),
-                created_at: Set(Utc::now()),
+                created_at: Set(Utc::now().into()),
             }
             .insert(txn)
             .await?;
@@ -436,8 +436,8 @@ pub async fn get_timer_status(
     Ok(Json(match timer {
         Some(t) => TimerStatusResponse {
             is_running: true,
-            started_at: Some(t.started_at),
-            elapsed_minutes: Some(elapsed_minutes_from_start(t.started_at)),
+            started_at: Some(t.started_at.with_timezone(&Utc)),
+            elapsed_minutes: Some(elapsed_minutes_from_start(t.started_at.with_timezone(&Utc))),
         },
         None => TimerStatusResponse {
             is_running: false,

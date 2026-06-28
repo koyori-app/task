@@ -245,7 +245,7 @@ pub async fn registration_finish(
             sign_count: Set(sign_count),
             name: Set(payload.name),
             last_used_at: Set(None),
-            created_at: Set(now),
+            created_at: Set(now.into()),
         },
     )
     .await;

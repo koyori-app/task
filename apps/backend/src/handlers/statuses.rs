@@ -92,7 +92,7 @@ pub async fn create_status(
         position: Set(payload.position),
         is_default: Set(payload.is_default),
         is_done_state: Set(payload.is_done_state),
-        created_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
     }
     .insert(&txn)
     .await?;

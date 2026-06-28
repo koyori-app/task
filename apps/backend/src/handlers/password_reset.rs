@@ -123,7 +123,7 @@ pub async fn password_reset_complete(
 
     let mut active: users::ActiveModel = user.into();
     active.password_hash = Set(Some(password_hash));
-    active.sessions_revoked_at = Set(Some(Utc::now()));
+    active.sessions_revoked_at = Set(Some(Utc::now().into()));
     active.update(&txn).await?;
     personal_tokens::Entity::update_many()
         .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
@@ -176,7 +176,7 @@ pub async fn password_change(
     let password_hash = create_password_hash(&payload.new_password)?;
     let mut active: users::ActiveModel = user.0.into();
     active.password_hash = Set(Some(password_hash));
-    active.sessions_revoked_at = Set(Some(Utc::now()));
+    active.sessions_revoked_at = Set(Some(Utc::now().into()));
 
     let txn = state
         .db

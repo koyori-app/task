@@ -67,12 +67,12 @@ pub async fn update_passkey_after_authentication(
         active.public_key = Set(public_key);
         active.aaguid = Set(aaguid);
         active.sign_count = Set(sign_count);
-        active.last_used_at = Set(Some(now));
+        active.last_used_at = Set(Some(now.into()));
         active.update(db).await?;
     } else {
         let mut active: passkeys::ActiveModel = stored.into();
         active.sign_count = Set(auth_result.counter() as i64);
-        active.last_used_at = Set(Some(now));
+        active.last_used_at = Set(Some(now.into()));
         active.update(db).await?;
     }
 

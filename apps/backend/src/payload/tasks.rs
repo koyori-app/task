@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::tasks;
+use crate::entities::{task_assignees, task_relations, tasks};
 use crate::utils::custom_fields::{CustomFieldValueInput, TaskCustomFieldValueResponse};
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -195,6 +195,54 @@ pub struct AddAssigneeRequest {
 pub struct UpdateAssigneeRequest {
     #[validate(length(min = 1))]
     pub role: String,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TaskAssigneeResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub task_id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub user_id: Uuid,
+    pub role: String,
+    #[schema(value_type = String, format = "date-time")]
+    pub assigned_at: DateTime<Utc>,
+}
+
+impl From<task_assignees::Model> for TaskAssigneeResponse {
+    fn from(model: task_assignees::Model) -> Self {
+        Self {
+            id: model.id,
+            task_id: model.task_id,
+            user_id: model.user_id,
+            role: model.role,
+            assigned_at: model.assigned_at.with_timezone(&Utc),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TaskRelationResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub blocker_task_id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub blocked_task_id: Uuid,
+    #[schema(value_type = String, format = "date-time")]
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<task_relations::Model> for TaskRelationResponse {
+    fn from(model: task_relations::Model) -> Self {
+        Self {
+            id: model.id,
+            blocker_task_id: model.blocker_task_id,
+            blocked_task_id: model.blocked_task_id,
+            created_at: model.created_at.with_timezone(&Utc),
+        }
+    }
 }
 
 #[derive(Serialize, ToSchema)]

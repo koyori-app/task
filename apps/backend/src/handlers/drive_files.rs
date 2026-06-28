@@ -424,7 +424,7 @@ pub async fn upload_file(
                         project_id: Set(folder_project_id),
                         uploader_id: Set(auth.user_id),
                         folder_id: Set(folder_id),
-                        created_at: Set(Utc::now()),
+                        created_at: Set(Utc::now().into()),
                     };
                     let saved = model.insert(&txn).await?;
                     txn.commit().await?;

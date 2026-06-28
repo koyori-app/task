@@ -261,8 +261,8 @@ pub async fn create_sprint(
         end_date: Set(end_date),
         status: Set(SprintStatus::Planning),
         created_by: Set(auth.user_id),
-        created_at: Set(chrono::Utc::now()),
-        updated_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
+        updated_at: Set(chrono::Utc::now().into()),
     }
     .insert(&state.db)
     .await?;
@@ -365,7 +365,7 @@ pub async fn update_sprint(
     if let Some(v) = payload.end_date {
         active.end_date = Set(naive_to_time_date(v));
     }
-    active.updated_at = Set(chrono::Utc::now());
+    active.updated_at = Set(chrono::Utc::now().into());
 
     let updated = active.update(&txn).await?;
     txn.commit().await?;
@@ -464,7 +464,7 @@ pub async fn start_sprint(
 
     let mut active: sprints::ActiveModel = sprint.into();
     active.status = Set(SprintStatus::Active);
-    active.updated_at = Set(chrono::Utc::now());
+    active.updated_at = Set(chrono::Utc::now().into());
     let updated = match active.update(&txn).await {
         Ok(model) => model,
         Err(e) if is_postgres_unique_violation(&e) => return Err(AppError::Conflict),
@@ -566,13 +566,13 @@ pub async fn complete_sprint(
     for task in incomplete {
         let mut active: tasks::ActiveModel = task.into();
         active.sprint_id = Set(new_sprint_id);
-        active.updated_at = Set(chrono::Utc::now());
+        active.updated_at = Set(chrono::Utc::now().into());
         active.update(&txn).await?;
     }
 
     let mut active: sprints::ActiveModel = sprint.into();
     active.status = Set(SprintStatus::Completed);
-    active.updated_at = Set(chrono::Utc::now());
+    active.updated_at = Set(chrono::Utc::now().into());
     let updated = active.update(&txn).await?;
 
     txn.commit().await?;
@@ -641,7 +641,7 @@ pub async fn assign_tasks_to_sprint(
     for task in found {
         let mut active: tasks::ActiveModel = task.into();
         active.sprint_id = Set(Some(id));
-        active.updated_at = Set(chrono::Utc::now());
+        active.updated_at = Set(chrono::Utc::now().into());
         updated.push(active.update(&txn).await?);
     }
 

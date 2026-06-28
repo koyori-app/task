@@ -81,8 +81,8 @@ pub async fn create_milestone(
         description: Set(payload.description),
         due_date: Set(payload.due_date),
         created_by: Set(auth.user_id),
-        created_at: Set(chrono::Utc::now()),
-        updated_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
+        updated_at: Set(chrono::Utc::now().into()),
     }
     .insert(&state.db)
     .await?;
@@ -202,7 +202,7 @@ pub async fn update_milestone(
     if let Some(v) = payload.due_date {
         active.due_date = Set(v);
     }
-    active.updated_at = Set(chrono::Utc::now());
+    active.updated_at = Set(chrono::Utc::now().into());
     Ok(Json(active.update(&state.db).await?.into()))
 }
 

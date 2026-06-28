@@ -27,7 +27,7 @@ pub async fn record_activity<C: ConnectionTrait>(
         user_id: Set(user_id),
         event_type: Set(event_type.to_string()),
         payload: Set(payload),
-        created_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
     }
     .insert(db)
     .await?;

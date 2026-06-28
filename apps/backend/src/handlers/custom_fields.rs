@@ -105,7 +105,7 @@ pub async fn create_custom_field(
         options: Set(payload.options),
         is_required: Set(payload.is_required),
         position: Set(position),
-        created_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
     }
     .insert(&state.db)
     .await?;

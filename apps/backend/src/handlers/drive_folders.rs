@@ -44,8 +44,10 @@ fn generate_share_token() -> String {
         .collect()
 }
 
-fn is_share_expired(expires_at: Option<&chrono::DateTime<Utc>>) -> bool {
-    expires_at.map(|t| *t < Utc::now()).unwrap_or(false)
+fn is_share_expired(expires_at: Option<&sea_orm::prelude::DateTimeWithTimeZone>) -> bool {
+    expires_at
+        .map(|t| t.with_timezone(&Utc) < Utc::now())
+        .unwrap_or(false)
 }
 
 // --- DB helpers ---
@@ -397,7 +399,7 @@ pub async fn create_share(
         share_token: Set(share_token),
         permission: Set(permission),
         created_by: Set(auth.user_id),
-        expires_at: Set(payload.expires_at.map(|dt| dt.with_timezone(&Utc))),
+        expires_at: Set(payload.expires_at.map(Into::into)),
         created_at: Set(Default::default()),
     };
     let model = share.insert(&state.db).await?;

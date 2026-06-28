@@ -216,7 +216,7 @@ pub async fn github_callback(
         active.repo_owner = Set(repo_owner);
         active.repo_name = Set(repo_name);
         active.access_token_enc = Set(token_enc);
-        active.token_expires_at = Set(access.expires_at.with_timezone(&chrono::Utc));
+        active.token_expires_at = Set(access.expires_at.into());
         active.update(&state.db).await?;
     } else {
         github_integrations::ActiveModel {
@@ -226,9 +226,9 @@ pub async fn github_callback(
             repo_owner: Set(repo_owner),
             repo_name: Set(repo_name),
             access_token_enc: Set(token_enc),
-            token_expires_at: Set(access.expires_at.with_timezone(&chrono::Utc)),
+            token_expires_at: Set(access.expires_at.into()),
             created_by: Set(auth.user_id),
-            created_at: Set(now),
+            created_at: Set(now.into()),
         }
         .insert(&state.db)
         .await?;
@@ -367,7 +367,7 @@ pub async fn get_github_integration(
             connected: true,
             repo_owner: Some(row.repo_owner),
             repo_name: Some(row.repo_name),
-            connected_at: Some(row.created_at),
+            connected_at: Some(row.created_at.with_timezone(&chrono::Utc)),
         },
         None => GithubIntegrationResponse {
             connected: false,

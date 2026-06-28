@@ -27,10 +27,6 @@ sea-orm-cli generate entity \
   --output-dir "$BACKEND/src/entities/_generated" \
   --tables "$TABLES" \
   --entity-format dense \
-  --with-serde serialize \
   --date-time-crate chrono \
   --with-prelude none \
-  --impl-active-model-behavior \
-  --model-extra-derives 'utoipa::ToSchema'
-
-bash "$ROOT/scripts/seaorm_postprocess.sh"
+  --impl-active-model-behavior

@@ -14788,7 +14788,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.task_assignees.Model"
+                    "$ref": "#/components/schemas/TaskAssigneeResponse"
                   }
                 }
               }
@@ -14929,7 +14929,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.task_assignees.Model"
+                  "$ref": "#/components/schemas/TaskAssigneeResponse"
                 }
               }
             }
@@ -15081,7 +15081,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.task_assignees.Model"
+                  "$ref": "#/components/schemas/TaskAssigneeResponse"
                 }
               }
             }
@@ -16450,7 +16450,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.task_relations.Model"
+                  "$ref": "#/components/schemas/TaskRelationResponse"
                 }
               }
             }
@@ -18200,7 +18200,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.tenants.Model"
+                  "$ref": "#/components/schemas/TenantResponse"
                 }
               }
             }
@@ -18313,7 +18313,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.projects.Model"
+                  "$ref": "#/components/schemas/ProjectResponse"
                 }
               }
             }
@@ -19464,10 +19464,70 @@
           "logs": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/crate.entities.audit_logs.Model"
+              "$ref": "#/components/schemas/AuditLogResponse"
             }
           },
           "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AuditLogResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "actor_type",
+          "action",
+          "resource_type",
+          "resource_id",
+          "created_at"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "actor_type": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip_address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "metadata": {},
+          "resource_id": {
+            "type": "string"
+          },
+          "resource_type": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "user_agent": {
             "type": [
               "string",
               "null"
@@ -21810,6 +21870,37 @@
           }
         }
       },
+      "TaskAssigneeResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "task_id",
+          "user_id",
+          "role",
+          "assigned_at"
+        ],
+        "properties": {
+          "assigned_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "TaskAttachmentListResponse": {
         "type": "object",
         "required": [
@@ -22004,6 +22095,33 @@
           "Low",
           "Trivial"
         ]
+      },
+      "TaskRelationResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "blocker_task_id",
+          "blocked_task_id",
+          "created_at"
+        ],
+        "properties": {
+          "blocked_task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "blocker_task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
       },
       "TaskRelationsResponse": {
         "type": "object",
@@ -23007,220 +23125,6 @@
           },
           "name": {
             "type": "string"
-          }
-        }
-      },
-      "crate.entities.audit_logs.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "actor_type",
-          "action",
-          "resource_type",
-          "resource_id",
-          "created_at"
-        ],
-        "properties": {
-          "action": {
-            "type": "string"
-          },
-          "actor_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "actor_type": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "ip_address": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "metadata": {},
-          "resource_id": {
-            "type": "string"
-          },
-          "resource_type": {
-            "type": "string"
-          },
-          "tenant_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "user_agent": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        }
-      },
-      "crate.entities.projects.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "description",
-          "tenant_id",
-          "key"
-        ],
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "icon_emoji": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "icon_url": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_personal": {
-            "type": "boolean"
-          },
-          "key": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "personal_owner_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "tenant_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.task_assignees.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "task_id",
-          "user_id",
-          "role",
-          "assigned_at"
-        ],
-        "properties": {
-          "assigned_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "role": {
-            "type": "string"
-          },
-          "task_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.task_relations.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "blocker_task_id",
-          "blocked_task_id",
-          "created_at"
-        ],
-        "properties": {
-          "blocked_task_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "blocker_task_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.tenants.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "display_id",
-          "name",
-          "description",
-          "icon_url",
-          "owner_id",
-          "require_2fa"
-        ],
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "display_id": {
-            "type": "string"
-          },
-          "drive_quota_bytes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64"
-          },
-          "icon_url": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "owner_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "require_2fa": {
-            "type": "boolean",
-            "description": "テナントメンバー全員に 2FA 設定を強制する"
           }
         }
       }

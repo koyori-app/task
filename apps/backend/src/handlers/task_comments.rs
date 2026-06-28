@@ -4,6 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
+use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
     TransactionTrait, prelude::Uuid,
@@ -115,8 +116,8 @@ pub async fn list_comments(
                             name: reply_user,
                         },
                         body: comment_body(&reply),
-                        created_at: reply.created_at,
-                        updated_at: reply.updated_at,
+                        created_at: reply.created_at.with_timezone(&Utc),
+                        updated_at: reply.updated_at.with_timezone(&Utc),
                         is_deleted: reply.deleted_at.is_some(),
                     }
                 })
@@ -129,8 +130,8 @@ pub async fn list_comments(
                 },
                 body: comment_body(&parent),
                 replies,
-                created_at: parent.created_at,
-                updated_at: parent.updated_at,
+                created_at: parent.created_at.with_timezone(&Utc),
+                updated_at: parent.updated_at.with_timezone(&Utc),
                 is_deleted: parent.deleted_at.is_some(),
             }
         })
@@ -191,8 +192,8 @@ pub async fn create_comment(
         user_id: Set(auth.user_id),
         body: Set(payload.body),
         parent_comment_id: Set(payload.parent_comment_id),
-        created_at: Set(chrono::Utc::now()),
-        updated_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
+        updated_at: Set(chrono::Utc::now().into()),
         deleted_at: Set(None),
     }
     .insert(&txn)
@@ -285,7 +286,7 @@ pub async fn update_comment(
     let txn = state.db.begin().await?;
     let mut active: task_comments::ActiveModel = comment.into();
     active.body = Set(payload.body);
-    active.updated_at = Set(chrono::Utc::now());
+    active.updated_at = Set(chrono::Utc::now().into());
     let updated = active.update(&txn).await?;
     record_activity(
         &txn,
@@ -353,8 +354,8 @@ pub async fn delete_comment(
     let task_id = task.id;
     let txn = state.db.begin().await?;
     let mut active: task_comments::ActiveModel = comment.into();
-    active.deleted_at = Set(Some(chrono::Utc::now()));
-    active.updated_at = Set(chrono::Utc::now());
+    active.deleted_at = Set(Some(chrono::Utc::now().into()));
+    active.updated_at = Set(chrono::Utc::now().into());
     active.update(&txn).await?;
     record_activity(
         &txn,
@@ -429,7 +430,7 @@ pub async fn list_activities(
                 event_type: row.event_type,
                 user,
                 payload: row.payload.clone().into(),
-                created_at: row.created_at,
+                created_at: row.created_at.with_timezone(&Utc),
             }
         })
         .collect();
