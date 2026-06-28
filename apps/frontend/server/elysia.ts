@@ -3,17 +3,17 @@ import { prehydrationQueryGuard } from '#/middlewares/prehydration-query-guard';
 import { settingInjector } from '#/middlewares/setting-injector';
 import { staticPlugin } from '@elysiajs/static';
 import vike from '@vikejs/elysia';
-import { zxcvbn, zxcvbnOptions } from '@zxcvbn-ts/core';
+import { ZxcvbnFactory } from '@zxcvbn-ts/core';
 import * as commonPackage from '@zxcvbn-ts/language-common';
 import * as jaPackage from '@zxcvbn-ts/language-ja';
 import { Elysia, t } from 'elysia';
 
 type PasswordStrength = '' | 'low' | 'medium' | 'high';
 
-zxcvbnOptions.setOptions({
+const zxcvbn = new ZxcvbnFactory({
   dictionary: {
     ...commonPackage.dictionary,
-    jaPasswords: jaPackage.dictionary.commonWords,
+    ...jaPackage.dictionary,
   },
   graphs: commonPackage.adjacencyGraphs,
 });
@@ -35,7 +35,7 @@ export function getApp() {
       const { password } = body;
       if (!password) return { strength: '' as const };
 
-      return { strength: scoreToStrength(zxcvbn(password).score) };
+      return { strength: scoreToStrength(zxcvbn.check(password).score) };
     },
     {
       body: t.Object({
