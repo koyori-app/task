@@ -231,7 +231,7 @@ pub async fn registration_finish(
             return Err(AuthError::Internal(e));
         }
     };
-    let now = Utc::now().fixed_offset();
+    let now = Utc::now();
 
     let insert_result = insert_passkey_under_user_lock(
         &state.db,
@@ -245,7 +245,7 @@ pub async fn registration_finish(
             sign_count: Set(sign_count),
             name: Set(payload.name),
             last_used_at: Set(None),
-            created_at: Set(now),
+            created_at: Set(now.into()),
         },
     )
     .await;

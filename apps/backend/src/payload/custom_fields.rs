@@ -1,9 +1,42 @@
+use chrono::{DateTime, Utc};
+use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 use validator::Validate;
 
 use crate::entities::project_custom_fields;
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProjectCustomFieldResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub project_id: Uuid,
+    pub name: String,
+    pub field_type: project_custom_fields::CustomFieldType,
+    #[schema(nullable)]
+    pub options: Option<Value>,
+    pub is_required: bool,
+    pub position: i16,
+    #[schema(value_type = String, format = "date-time")]
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<project_custom_fields::Model> for ProjectCustomFieldResponse {
+    fn from(model: project_custom_fields::Model) -> Self {
+        Self {
+            id: model.id,
+            project_id: model.project_id,
+            name: model.name,
+            field_type: model.field_type,
+            options: model.options.map(|json| json.into()),
+            is_required: model.is_required,
+            position: model.position,
+            created_at: model.created_at.with_timezone(&Utc),
+        }
+    }
+}
 
 #[derive(Validate, Deserialize, ToSchema)]
 pub struct CreateCustomFieldRequest {
@@ -27,5 +60,5 @@ pub struct UpdateCustomFieldRequest {
 
 #[derive(Serialize, ToSchema)]
 pub struct CustomFieldListResponse {
-    pub fields: Vec<project_custom_fields::Model>,
+    pub fields: Vec<ProjectCustomFieldResponse>,
 }

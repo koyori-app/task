@@ -5,7 +5,7 @@ use axum::{
 };
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, Utc};
 use sea_orm::{
     ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder, QuerySelect, prelude::Uuid,
 };
@@ -83,21 +83,22 @@ pub async fn list_audit_logs(
     }
     if let Some(from) = &params.from {
         let dt = parse_rfc3339(from)?;
-        query = query.filter(audit_logs::Column::CreatedAt.gte(dt));
+        query = query.filter(audit_logs::Column::CreatedAt.gte(DateTime::<FixedOffset>::from(dt)));
     }
     if let Some(to) = &params.to {
         let dt = parse_rfc3339(to)?;
-        query = query.filter(audit_logs::Column::CreatedAt.lte(dt));
+        query = query.filter(audit_logs::Column::CreatedAt.lte(DateTime::<FixedOffset>::from(dt)));
     }
 
     if let Some(cursor_str) = &params.cursor {
         let c = decode_cursor(cursor_str)?;
+        let cursor_at: DateTime<FixedOffset> = c.created_at.into();
         query = query.filter(
             Condition::any()
-                .add(audit_logs::Column::CreatedAt.lt(c.created_at))
+                .add(audit_logs::Column::CreatedAt.lt(cursor_at))
                 .add(
                     Condition::all()
-                        .add(audit_logs::Column::CreatedAt.eq(c.created_at))
+                        .add(audit_logs::Column::CreatedAt.eq(cursor_at))
                         .add(audit_logs::Column::Id.lt(c.id)),
                 ),
         );
@@ -111,7 +112,11 @@ pub async fn list_audit_logs(
         .await?;
 
     let has_more = rows.len() > limit as usize;
-    let logs: Vec<_> = rows.into_iter().take(limit as usize).collect();
+    let logs: Vec<AuditLogResponse> = rows
+        .into_iter()
+        .take(limit as usize)
+        .map(Into::into)
+        .collect();
     let next_cursor = if has_more {
         logs.last().map(|log| encode_cursor(log.created_at, log.id))
     } else {

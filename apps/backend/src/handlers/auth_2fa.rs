@@ -22,6 +22,7 @@ use crate::{
     extractors::{AuthUser, HalfAuthedUser, LoggedInUser},
     openapi::{CrudErrors, SessionAuthErrors},
     payload::auth_2fa::*,
+    payload::tenants::TenantResponse,
     utils::{
         auth::AuthError,
         totp::{
@@ -257,7 +258,7 @@ pub async fn totp_setup(
 
     let secret_plain = generate_totp_secret_base32()?;
     let secret_enc = encrypt_totp_secret(&secret_plain, &state.settings.totp_encryption_key)?;
-    let now = Utc::now().into();
+    let now = Utc::now();
 
     totp_credentials::Entity::delete_many()
         .filter(totp_credentials::Column::UserId.eq(user.user_id))
@@ -268,7 +269,7 @@ pub async fn totp_setup(
         user_id: Set(user.user_id),
         secret_enc: Set(secret_enc),
         is_verified: Set(false),
-        created_at: Set(now),
+        created_at: Set(now.into()),
     }
     .insert(&state.db)
     .await?;
@@ -499,7 +500,7 @@ pub async fn regenerate_recovery_codes(
     summary = "テナント 2FA 強制ポリシー変更",
     request_body = Require2faPolicyRequest,
     responses(
-        (status = 200, description = "更新後のテナント", body = tenants::Model),
+        (status = 200, description = "更新後のテナント", body = TenantResponse),
         (status = 404, description = "テナントが見つかりません", body = ServerError),
         CrudErrors,
     )
@@ -509,12 +510,12 @@ pub async fn set_tenant_require_2fa(
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
     Valid(Json(payload)): Valid<Json<Require2faPolicyRequest>>,
-) -> Result<Json<tenants::Model>, AppError> {
+) -> Result<Json<TenantResponse>, AppError> {
     auth.require_session()?;
     let tenant = auth.ensure_tenant_owner(&state, tenant_id).await?;
 
     let mut active: tenants::ActiveModel = tenant.into();
     active.require_2fa = Set(payload.enabled);
     let updated = active.update(&state.db).await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }

@@ -6,7 +6,6 @@ use sea_orm::prelude::Uuid;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use sea_orm::{ColumnTrait, QueryFilter};
 
-use crate::entities;
 use crate::extractors::{AuthUser, CurrentUser};
 use crate::handlers::auth_2fa::establish_login_session;
 use crate::jobs::VerificationEmailJob;
@@ -17,6 +16,7 @@ use crate::openapi::{
 };
 use crate::payload::auth::*;
 use crate::payload::auth_2fa::Login2faResponse;
+use crate::payload::users::UserResponse;
 use crate::utils::auth::{
     AuthError, create_password_hash, dummy_password_hash, generate_email_verification_token,
     verify_password,
@@ -262,15 +262,15 @@ pub async fn resend_verification_email(
     tag = "Auth",
     summary = "ログイン中ユーザー情報",
     responses(
-        (status = 200, description = "現在のアカウント情報", body = entities::users::Model),
+        (status = 200, description = "現在のアカウント情報", body = UserResponse),
         SessionAuthErrors,
     )
 )]
 pub async fn me(
     State(_): State<AppState>,
     user: CurrentUser,
-) -> Result<Json<entities::users::Model>, AuthError> {
-    Ok(Json(user.0))
+) -> Result<Json<UserResponse>, AuthError> {
+    Ok(Json(user.0.into()))
 }
 
 #[axum::debug_handler]

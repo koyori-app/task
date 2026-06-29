@@ -23,7 +23,7 @@ use crate::payload::tenants::*;
     summary = "テナントを作成",
     request_body = CreateTenantRequest,
     responses(
-        (status = 201, description = "作成されたテナント", body = tenants::Model),
+        (status = 201, description = "作成されたテナント", body = TenantResponse),
         CrudErrors,
     )
 )]
@@ -31,7 +31,7 @@ pub async fn create_tenant(
     State(state): State<AppState>,
     auth: AuthUser,
     Valid(Json(payload)): Valid<Json<CreateTenantRequest>>,
-) -> Result<(StatusCode, Json<tenants::Model>), AppError> {
+) -> Result<(StatusCode, Json<TenantResponse>), AppError> {
     // PAT はテナントにバインドされているため、新規テナント作成はセッション専用とする
     auth.require_session()?;
     let id = Uuid::new_v4();
@@ -46,7 +46,7 @@ pub async fn create_tenant(
         require_2fa: Set(false),
     };
     let model = tenant.insert(&state.db).await?;
-    Ok((StatusCode::CREATED, Json(model)))
+    Ok((StatusCode::CREATED, Json(model.into())))
 }
 
 #[axum::debug_handler]
@@ -56,14 +56,14 @@ pub async fn create_tenant(
     tag = "Tenants",
     summary = "自分のテナント一覧",
     responses(
-        (status = 200, description = "テナント一覧", body = [tenants::Model]),
+        (status = 200, description = "テナント一覧", body = [TenantResponse]),
         CrudErrors,
     )
 )]
 pub async fn list_tenants(
     State(state): State<AppState>,
     auth: AuthUser,
-) -> Result<Json<Vec<tenants::Model>>, AppError> {
+) -> Result<Json<Vec<TenantResponse>>, AppError> {
     // テナント一覧は ensure_tenant_owner/access 不要。
     // Session: OwnerId フィルタで自分のテナントのみ取得。
     // PAT: バインドされた tenant_id の単一テナントのみ返す。
@@ -85,7 +85,7 @@ pub async fn list_tenants(
                 .collect()
         }
     };
-    Ok(Json(tenants))
+    Ok(Json(tenants.into_iter().map(Into::into).collect()))
 }
 
 #[axum::debug_handler]
@@ -96,7 +96,7 @@ pub async fn list_tenants(
     summary = "テナントを取得",
     params(("id" = Uuid, Path, description = "テナントID")),
     responses(
-        (status = 200, description = "テナント情報", body = tenants::Model),
+        (status = 200, description = "テナント情報", body = TenantResponse),
         CrudErrors,
     )
 )]
@@ -104,13 +104,13 @@ pub async fn get_tenant(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(id): Path<Uuid>,
-) -> Result<Json<tenants::Model>, AppError> {
+) -> Result<Json<TenantResponse>, AppError> {
     // テナント情報の取得はオーナー専用操作。
     // ensure_tenant_access（オーナーとメンバー双方を通過させる）ではなく
     // ensure_tenant_owner を使い、プロジェクトメンバーを排除する。
     auth.require_scope(Scope::AdminTenant)?;
     let tenant = auth.ensure_tenant_owner(&state, id).await?;
-    Ok(Json(tenant))
+    Ok(Json(tenant.into()))
 }
 
 #[axum::debug_handler]
@@ -122,7 +122,7 @@ pub async fn get_tenant(
     params(("id" = Uuid, Path, description = "テナントID")),
     request_body = UpdateTenantRequest,
     responses(
-        (status = 200, description = "更新後のテナント", body = tenants::Model),
+        (status = 200, description = "更新後のテナント", body = TenantResponse),
         CrudErrors,
     )
 )]
@@ -131,7 +131,7 @@ pub async fn update_tenant(
     auth: AuthUser,
     Path(id): Path<Uuid>,
     Valid(Json(payload)): Valid<Json<UpdateTenantRequest>>,
-) -> Result<Json<tenants::Model>, AppError> {
+) -> Result<Json<TenantResponse>, AppError> {
     // テナント設定の変更はオーナー専用操作。
     // ensure_tenant_access ではなく ensure_tenant_owner を使い、
     // プロジェクトメンバーによる誤操作を防ぐ。
@@ -149,7 +149,7 @@ pub async fn update_tenant(
         active.icon_url = Set(icon_url);
     }
     let updated = active.update(&state.db).await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]

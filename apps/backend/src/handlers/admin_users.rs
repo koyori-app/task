@@ -1,15 +1,13 @@
 //! 管理者専用 — ユーザー管理 API（`/v1/admin/users`）
 
 use crate::AppState;
-use crate::entities::{
-    drive_files, drive_folder_shares, drive_folders, personal_tokens, project_members, tasks,
-    tenants, users,
-};
+use crate::entities::{personal_tokens, project_members, tasks, users};
 use crate::error::AppError;
 use crate::extractors::AdminUser;
 use crate::handlers::admin_audit::record_audit;
 use crate::openapi::CrudErrors;
 use crate::payload::admin_users::*;
+use crate::payload::users::UserResponse;
 use crate::utils::auth::AuthError;
 use crate::utils::auth::{create_password_hash, generate_email_verification_token};
 use crate::utils::db::is_postgres_unique_violation;
@@ -176,8 +174,8 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
         let now = Utc::now();
         for task in owned {
             let mut active: tasks::ActiveModel = task.into();
-            active.deleted_at = Set(Some(now));
-            active.updated_at = Set(now);
+            active.deleted_at = Set(Some(now.into()));
+            active.updated_at = Set(now.into());
             let _ = active.update(db).await;
         }
     }
@@ -267,16 +265,16 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
     tag = "Admin Users",
     summary = "全ユーザー一覧",
     responses(
-        (status = 200, description = "ユーザー一覧", body = [users::Model]),
+        (status = 200, description = "ユーザー一覧", body = [UserResponse]),
         CrudErrors,
     )
 )]
 pub async fn list_users(
     State(state): State<AppState>,
     _admin: AdminUser,
-) -> Result<Json<Vec<users::Model>>, AppError> {
+) -> Result<Json<Vec<UserResponse>>, AppError> {
     let list = users::Entity::find().all(&state.db).await?;
-    Ok(Json(list))
+    Ok(Json(list.into_iter().map(Into::into).collect()))
 }
 
 #[axum::debug_handler]
@@ -287,7 +285,7 @@ pub async fn list_users(
     summary = "ユーザー作成（管理者）",
     request_body = AdminCreateUserRequest,
     responses(
-        (status = 201, description = "作成されたユーザー", body = users::Model),
+        (status = 201, description = "作成されたユーザー", body = UserResponse),
         CrudErrors,
     )
 )]
@@ -296,7 +294,7 @@ pub async fn create_user(
     admin: AdminUser,
     headers: HeaderMap,
     Valid(Json(payload)): Valid<Json<AdminCreateUserRequest>>,
-) -> Result<(StatusCode, Json<users::Model>), AppError> {
+) -> Result<(StatusCode, Json<UserResponse>), AppError> {
     let email = normalize_email(&payload.email);
     let password_hash = create_password_hash(&payload.password).map_err(auth_error_to_app)?;
     let user_id = Uuid::new_v4();
@@ -338,7 +336,7 @@ pub async fn create_user(
     )
     .await?;
 
-    Ok((StatusCode::CREATED, Json(model)))
+    Ok((StatusCode::CREATED, Json(model.into())))
 }
 
 #[axum::debug_handler]
@@ -349,7 +347,7 @@ pub async fn create_user(
     summary = "ユーザー更新（is_admin / is_suspended）",
     request_body = AdminUpdateUserRequest,
     responses(
-        (status = 200, description = "更新後のユーザー", body = users::Model),
+        (status = 200, description = "更新後のユーザー", body = UserResponse),
         CrudErrors,
     )
 )]
@@ -359,7 +357,7 @@ pub async fn update_user(
     Path(id): Path<Uuid>,
     headers: HeaderMap,
     Valid(Json(payload)): Valid<Json<AdminUpdateUserRequest>>,
-) -> Result<Json<users::Model>, AppError> {
+) -> Result<Json<UserResponse>, AppError> {
     if payload.is_admin == Some(false) && admin.user_id == id {
         return Err(AppError::Forbidden);
     }
@@ -436,7 +434,7 @@ pub async fn update_user(
         }
     }
 
-    Ok(Json(model))
+    Ok(Json(model.into()))
 }
 
 #[axum::debug_handler]

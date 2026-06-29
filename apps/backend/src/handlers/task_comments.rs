@@ -4,6 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
+use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
     TransactionTrait, prelude::Uuid,
@@ -115,8 +116,8 @@ pub async fn list_comments(
                             name: reply_user,
                         },
                         body: comment_body(&reply),
-                        created_at: reply.created_at,
-                        updated_at: reply.updated_at,
+                        created_at: reply.created_at.with_timezone(&Utc),
+                        updated_at: reply.updated_at.with_timezone(&Utc),
                         is_deleted: reply.deleted_at.is_some(),
                     }
                 })
@@ -129,8 +130,8 @@ pub async fn list_comments(
                 },
                 body: comment_body(&parent),
                 replies,
-                created_at: parent.created_at,
-                updated_at: parent.updated_at,
+                created_at: parent.created_at.with_timezone(&Utc),
+                updated_at: parent.updated_at.with_timezone(&Utc),
                 is_deleted: parent.deleted_at.is_some(),
             }
         })
@@ -152,7 +153,7 @@ pub async fn list_comments(
     ),
     request_body = CreateCommentRequest,
     responses(
-        (status = 201, description = "作成されたコメント", body = task_comments::Model),
+        (status = 201, description = "作成されたコメント", body = TaskCommentResponse),
         CrudErrors,
     )
 )]
@@ -161,7 +162,7 @@ pub async fn create_comment(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
     Valid(Json(payload)): Valid<Json<CreateCommentRequest>>,
-) -> Result<(StatusCode, Json<task_comments::Model>), AppError> {
+) -> Result<(StatusCode, Json<TaskCommentResponse>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -191,8 +192,8 @@ pub async fn create_comment(
         user_id: Set(auth.user_id),
         body: Set(payload.body),
         parent_comment_id: Set(payload.parent_comment_id),
-        created_at: Set(chrono::Utc::now()),
-        updated_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
+        updated_at: Set(chrono::Utc::now().into()),
         deleted_at: Set(None),
     }
     .insert(&txn)
@@ -226,7 +227,7 @@ pub async fn create_comment(
     .await?;
     txn.commit().await?;
 
-    Ok((StatusCode::CREATED, Json(comment)))
+    Ok((StatusCode::CREATED, Json(comment.into())))
 }
 
 #[axum::debug_handler]
@@ -243,7 +244,7 @@ pub async fn create_comment(
     ),
     request_body = UpdateCommentRequest,
     responses(
-        (status = 200, description = "更新後のコメント", body = task_comments::Model),
+        (status = 200, description = "更新後のコメント", body = TaskCommentResponse),
         CrudErrors,
     )
 )]
@@ -252,7 +253,7 @@ pub async fn update_comment(
     auth: AuthUser,
     Path((tenant_id, project_id, id, cid)): Path<(Uuid, Uuid, String, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateCommentRequest>>,
-) -> Result<Json<task_comments::Model>, AppError> {
+) -> Result<Json<TaskCommentResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -285,7 +286,7 @@ pub async fn update_comment(
     let txn = state.db.begin().await?;
     let mut active: task_comments::ActiveModel = comment.into();
     active.body = Set(payload.body);
-    active.updated_at = Set(chrono::Utc::now());
+    active.updated_at = Set(chrono::Utc::now().into());
     let updated = active.update(&txn).await?;
     record_activity(
         &txn,
@@ -307,7 +308,7 @@ pub async fn update_comment(
     )
     .await?;
     txn.commit().await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
@@ -353,8 +354,8 @@ pub async fn delete_comment(
     let task_id = task.id;
     let txn = state.db.begin().await?;
     let mut active: task_comments::ActiveModel = comment.into();
-    active.deleted_at = Set(Some(chrono::Utc::now()));
-    active.updated_at = Set(chrono::Utc::now());
+    active.deleted_at = Set(Some(chrono::Utc::now().into()));
+    active.updated_at = Set(chrono::Utc::now().into());
     active.update(&txn).await?;
     record_activity(
         &txn,
@@ -429,7 +430,7 @@ pub async fn list_activities(
                 event_type: row.event_type,
                 user,
                 payload: row.payload.clone().into(),
-                created_at: row.created_at,
+                created_at: row.created_at.with_timezone(&Utc),
             }
         })
         .collect();

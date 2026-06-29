@@ -1,3 +1,4 @@
+//! Drive folder shares entity — schema-first with hand-written DeriveActiveEnum and validation.
 use sea_orm::ActiveValue;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -12,31 +13,7 @@ pub enum SharePermission {
     Viewer,
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, ToSchema, serde::Serialize)]
-#[sea_orm(table_name = "drive_folder_shares")]
-#[schema(as = crate::entities::drive_folder_shares::Model)]
-pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    #[schema(value_type = String, format = "uuid")]
-    pub folder_id: Uuid,
-    #[sea_orm(nullable)]
-    #[schema(value_type = String, format = "uuid", nullable)]
-    pub shared_with_user_id: Option<Uuid>,
-    #[sea_orm(nullable, unique)]
-    #[schema(nullable)]
-    pub share_token: Option<String>,
-    pub permission: SharePermission,
-    #[schema(value_type = String, format = "uuid")]
-    pub created_by: Uuid,
-    #[sea_orm(nullable)]
-    #[schema(value_type = String, format = "date-time", nullable)]
-    pub expires_at: Option<DateTimeWithTimeZone>,
-    #[schema(value_type = String, format = "date-time")]
-    #[sea_orm(default_expr = "Expr::current_timestamp()")]
-    pub created_at: DateTimeWithTimeZone,
-}
+pub use super::_generated::drive_folder_shares::*;
 
 /// CHECK: `(shared_with_user_id IS NOT NULL) XOR (share_token IS NOT NULL)`
 pub fn validate_share_target_xor(
@@ -51,40 +28,6 @@ pub fn validate_share_target_xor(
         ));
     }
     Ok(())
-}
-
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::drive_folders::Entity",
-        from = "Column::FolderId",
-        to = "super::drive_folders::Column::Id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    DriveFolders,
-    #[sea_orm(
-        belongs_to = "super::users::Entity",
-        from = "Column::SharedWithUserId",
-        to = "super::users::Column::Id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    SharedWithUser,
-    #[sea_orm(
-        belongs_to = "super::users::Entity",
-        from = "Column::CreatedBy",
-        to = "super::users::Column::Id",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    CreatedByUser,
-}
-
-impl Related<super::drive_folders::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::DriveFolders.def()
-    }
 }
 
 #[async_trait::async_trait]

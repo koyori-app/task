@@ -582,7 +582,9 @@ impl TestApp {
             tenant_id: Set(tenant_id),
             icon_emoji: Set(None),
             icon_url: Set(None),
-            key: Set("GHUB".into()),
+            // テナントごとに一意なキー。project key 制約 ^[A-Z][A-Z0-9]{1,9}$ を満たす。
+            // 全テスト共通の "GHUB" 固定だと、同一 DB を共有する複数テストバイナリ間で衝突する。
+            key: Set(format!("P{}", suffix.to_uppercase())),
             is_personal: Set(false),
             personal_owner_id: Set(None),
         }

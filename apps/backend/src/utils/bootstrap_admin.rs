@@ -50,7 +50,7 @@ pub async fn bootstrap_admin_email(
         metadata: Set(Some(json!({ "user_id": user.id.to_string() }))),
         ip_address: Set(None),
         user_agent: Set(None),
-        created_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
     };
     log.insert(db).await?;
 

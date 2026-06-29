@@ -7,10 +7,7 @@ use axum::{
 };
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::prelude::Uuid;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
-    prelude::DateTimeWithTimeZone,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
@@ -206,7 +203,7 @@ pub async fn github_callback(
         github_token_crypto::encrypt_token(&github.github_token_encryption_key, &access.token)
             .map_err(AppError::Internal)?;
 
-    let now: DateTimeWithTimeZone = chrono::Utc::now().fixed_offset().into();
+    let now = chrono::Utc::now();
     let existing = github_integrations::Entity::find()
         .filter(github_integrations::Column::ProjectId.eq(payload.project_id))
         .one(&state.db)
@@ -231,7 +228,7 @@ pub async fn github_callback(
             access_token_enc: Set(token_enc),
             token_expires_at: Set(access.expires_at.into()),
             created_by: Set(auth.user_id),
-            created_at: Set(now),
+            created_at: Set(now.into()),
         }
         .insert(&state.db)
         .await?;
@@ -370,7 +367,7 @@ pub async fn get_github_integration(
             connected: true,
             repo_owner: Some(row.repo_owner),
             repo_name: Some(row.repo_name),
-            connected_at: Some(row.created_at),
+            connected_at: Some(row.created_at.with_timezone(&chrono::Utc)),
         },
         None => GithubIntegrationResponse {
             connected: false,

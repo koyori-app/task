@@ -454,7 +454,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.tenants.Model"
+                  "$ref": "#/components/schemas/TenantResponse"
                 }
               }
             }
@@ -857,7 +857,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.users.Model"
+                    "$ref": "#/components/schemas/UserResponse"
                   }
                 }
               }
@@ -957,7 +957,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.users.Model"
+                  "$ref": "#/components/schemas/UserResponse"
                 }
               }
             }
@@ -1140,7 +1140,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.users.Model"
+                  "$ref": "#/components/schemas/UserResponse"
                 }
               }
             }
@@ -2109,7 +2109,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.users.Model"
+                  "$ref": "#/components/schemas/UserResponse"
                 }
               }
             }
@@ -4146,7 +4146,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.drive_files.Model"
+                    "$ref": "#/components/schemas/DriveFileResponse"
                   }
                 }
               }
@@ -4657,7 +4657,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.tenants.Model"
+                    "$ref": "#/components/schemas/TenantResponse"
                   }
                 }
               }
@@ -4757,7 +4757,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.tenants.Model"
+                  "$ref": "#/components/schemas/TenantResponse"
                 }
               }
             }
@@ -4860,7 +4860,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.tenants.Model"
+                  "$ref": "#/components/schemas/TenantResponse"
                 }
               }
             }
@@ -4971,7 +4971,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.tenants.Model"
+                  "$ref": "#/components/schemas/TenantResponse"
                 }
               }
             }
@@ -5747,7 +5747,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.drive_folders.Model"
+                    "$ref": "#/components/schemas/DriveFolderResponse"
                   }
                 }
               }
@@ -5900,7 +5900,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.drive_folders.Model"
+                  "$ref": "#/components/schemas/DriveFolderResponse"
                 }
               }
             }
@@ -6209,7 +6209,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.drive_folders.Model"
+                  "$ref": "#/components/schemas/DriveFolderResponse"
                 }
               }
             }
@@ -6365,7 +6365,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.drive_folder_shares.Model"
+                    "$ref": "#/components/schemas/DriveFolderShareResponse"
                   }
                 }
               }
@@ -6528,7 +6528,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.drive_folder_shares.Model"
+                  "$ref": "#/components/schemas/DriveFolderShareResponse"
                 }
               }
             }
@@ -7047,7 +7047,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.projects.Model"
+                    "$ref": "#/components/schemas/ProjectResponse"
                   }
                 }
               }
@@ -7159,7 +7159,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.projects.Model"
+                  "$ref": "#/components/schemas/ProjectResponse"
                 }
               }
             }
@@ -7272,7 +7272,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.projects.Model"
+                  "$ref": "#/components/schemas/ProjectResponse"
                 }
               }
             }
@@ -7393,7 +7393,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.projects.Model"
+                  "$ref": "#/components/schemas/ProjectResponse"
                 }
               }
             }
@@ -7731,7 +7731,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_custom_fields.Model"
+                  "$ref": "#/components/schemas/ProjectCustomFieldResponse"
                 }
               }
             }
@@ -7978,7 +7978,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_custom_fields.Model"
+                  "$ref": "#/components/schemas/ProjectCustomFieldResponse"
                 }
               }
             }
@@ -8419,7 +8419,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.labels.Model"
+                    "$ref": "#/components/schemas/LabelResponse"
                   }
                 }
               }
@@ -8541,7 +8541,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.labels.Model"
+                  "$ref": "#/components/schemas/LabelResponse"
                 }
               }
             }
@@ -8779,7 +8779,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.labels.Model"
+                    "$ref": "#/components/schemas/LabelResponse"
                   }
                 }
               }
@@ -8913,7 +8913,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.labels.Model"
+                  "$ref": "#/components/schemas/LabelResponse"
                 }
               }
             }
@@ -9142,7 +9142,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.project_members.Model"
+                    "$ref": "#/components/schemas/ProjectMemberResponse"
                   }
                 }
               }
@@ -9264,7 +9264,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_members.Model"
+                  "$ref": "#/components/schemas/ProjectMemberResponse"
                 }
               }
             }
@@ -9407,7 +9407,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_members.Model"
+                  "$ref": "#/components/schemas/ProjectMemberResponse"
                 }
               }
             }
@@ -9656,7 +9656,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.milestones.Model"
+                    "$ref": "#/components/schemas/MilestoneResponse"
                   }
                 }
               }
@@ -9778,7 +9778,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.milestones.Model"
+                  "$ref": "#/components/schemas/MilestoneResponse"
                 }
               }
             }
@@ -10032,7 +10032,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.milestones.Model"
+                  "$ref": "#/components/schemas/MilestoneResponse"
                 }
               }
             }
@@ -10269,7 +10269,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.sprints.Model"
+                    "$ref": "#/components/schemas/SprintResponse"
                   }
                 }
               }
@@ -10391,7 +10391,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.sprints.Model"
+                  "$ref": "#/components/schemas/SprintResponse"
                 }
               }
             }
@@ -10645,7 +10645,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.sprints.Model"
+                  "$ref": "#/components/schemas/SprintResponse"
                 }
               }
             }
@@ -10892,7 +10892,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.sprints.Model"
+                  "$ref": "#/components/schemas/SprintResponse"
                 }
               }
             }
@@ -11015,7 +11015,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.sprints.Model"
+                  "$ref": "#/components/schemas/SprintResponse"
                 }
               }
             }
@@ -11150,7 +11150,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.tasks.Model"
+                    "$ref": "#/components/schemas/TaskResponse"
                   }
                 }
               }
@@ -11266,7 +11266,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.project_statuses.Model"
+                    "$ref": "#/components/schemas/ProjectStatusResponse"
                   }
                 }
               }
@@ -11388,7 +11388,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_statuses.Model"
+                  "$ref": "#/components/schemas/ProjectStatusResponse"
                 }
               }
             }
@@ -11513,7 +11513,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.project_statuses.Model"
+                    "$ref": "#/components/schemas/ProjectStatusResponse"
                   }
                 }
               }
@@ -11647,7 +11647,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_statuses.Model"
+                  "$ref": "#/components/schemas/ProjectStatusResponse"
                 }
               }
             }
@@ -12005,7 +12005,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_task_views.Model"
+                  "$ref": "#/components/schemas/ProjectTaskViewResponse"
                 }
               }
             }
@@ -12252,7 +12252,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.project_task_views.Model"
+                  "$ref": "#/components/schemas/ProjectTaskViewResponse"
                 }
               }
             }
@@ -13448,7 +13448,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.tasks.Model"
+                  "$ref": "#/components/schemas/TaskResponse"
                 }
               }
             }
@@ -13572,7 +13572,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.task_assignees.Model"
+                    "$ref": "#/components/schemas/TaskAssigneeResponse"
                   }
                 }
               }
@@ -13703,7 +13703,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.task_assignees.Model"
+                  "$ref": "#/components/schemas/TaskAssigneeResponse"
                 }
               }
             }
@@ -13845,7 +13845,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.task_assignees.Model"
+                  "$ref": "#/components/schemas/TaskAssigneeResponse"
                 }
               }
             }
@@ -14597,7 +14597,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.task_comments.Model"
+                  "$ref": "#/components/schemas/TaskCommentResponse"
                 }
               }
             }
@@ -14739,7 +14739,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.task_comments.Model"
+                  "$ref": "#/components/schemas/TaskCommentResponse"
                 }
               }
             }
@@ -15114,7 +15114,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.task_relations.Model"
+                  "$ref": "#/components/schemas/TaskRelationResponse"
                 }
               }
             }
@@ -15363,7 +15363,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/crate.entities.time_logs.Model"
+                    "$ref": "#/components/schemas/TimeLogResponse"
                   }
                 }
               }
@@ -15494,7 +15494,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.time_logs.Model"
+                  "$ref": "#/components/schemas/TimeLogResponse"
                 }
               }
             }
@@ -15758,7 +15758,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.time_logs.Model"
+                  "$ref": "#/components/schemas/TimeLogResponse"
                 }
               }
             }
@@ -16003,7 +16003,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.task_timers.Model"
+                  "$ref": "#/components/schemas/TaskTimerResponse"
                 }
               }
             }
@@ -16247,7 +16247,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.time_logs.Model"
+                  "$ref": "#/components/schemas/TimeLogResponse"
                 }
               }
             }
@@ -16369,7 +16369,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.tasks.Model"
+                  "$ref": "#/components/schemas/TaskResponse"
                 }
               }
             }
@@ -16724,7 +16724,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.tenants.Model"
+                  "$ref": "#/components/schemas/TenantResponse"
                 }
               }
             }
@@ -16827,7 +16827,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.projects.Model"
+                  "$ref": "#/components/schemas/ProjectResponse"
                 }
               }
             }
@@ -17086,7 +17086,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/crate.entities.tasks.Model"
+                  "$ref": "#/components/schemas/TaskResponse"
                 }
               }
             }
@@ -17747,7 +17747,7 @@
           "projects": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/crate.entities.projects.Model"
+              "$ref": "#/components/schemas/ProjectResponse"
             }
           }
         }
@@ -17788,7 +17788,7 @@
           "tenants": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/crate.entities.tenants.Model"
+              "$ref": "#/components/schemas/TenantResponse"
             }
           }
         }
@@ -17847,10 +17847,51 @@
           "logs": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/crate.entities.audit_logs.Model"
+              "$ref": "#/components/schemas/AuditLogResponse"
             }
           },
           "next_cursor": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "AuditLogResponse": {
+        "type": "object",
+        "required": ["id", "actor_type", "action", "resource_type", "resource_id", "created_at"],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "actor_type": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip_address": {
+            "type": ["string", "null"]
+          },
+          "metadata": {},
+          "resource_id": {
+            "type": "string"
+          },
+          "resource_type": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "user_agent": {
             "type": ["string", "null"]
           }
         }
@@ -18229,8 +18270,7 @@
             "type": ["string", "null"]
           },
           "key": {
-            "type": ["string", "null"],
-            "description": "プロジェクトキー（例: ENG, BACK）。省略時はプロジェクト名から自動生成。"
+            "type": ["string", "null"]
           },
           "name": {
             "type": "string"
@@ -18455,7 +18495,7 @@
           "fields": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/crate.entities.project_custom_fields.Model"
+              "$ref": "#/components/schemas/ProjectCustomFieldResponse"
             }
           }
         }
@@ -18505,6 +18545,75 @@
           },
           "url": {
             "type": "string"
+          }
+        }
+      },
+      "DriveFolderResponse": {
+        "type": "object",
+        "required": ["id", "name", "tenant_id", "created_by", "created_at"],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "DriveFolderShareResponse": {
+        "type": "object",
+        "required": ["id", "folder_id", "permission", "created_by", "created_at"],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expires_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "folder_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/SharePermission"
+          },
+          "share_token": {
+            "type": ["string", "null"]
+          },
+          "shared_with_user_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
           }
         }
       },
@@ -18613,6 +18722,32 @@
           }
         }
       },
+      "LabelResponse": {
+        "type": "object",
+        "required": ["id", "name", "description", "color"],
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "icon_url": {
+            "type": ["string", "null"]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          }
+        }
+      },
       "ListFilesResponse": {
         "type": "object",
         "required": ["files", "total"],
@@ -18668,7 +18803,7 @@
       "MilestoneDetail": {
         "allOf": [
           {
-            "$ref": "#/components/schemas/crate.entities.milestones.Model"
+            "$ref": "#/components/schemas/MilestoneResponse"
           },
           {
             "type": "object",
@@ -18685,6 +18820,50 @@
             }
           }
         ]
+      },
+      "MilestoneResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "due_date",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": {
+            "type": ["string", "null"]
+          },
+          "due_date": {
+            "type": "string",
+            "example": "2026-07-01"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       },
       "MyTaskItem": {
         "type": "object",
@@ -19073,9 +19252,197 @@
           }
         }
       },
+      "ProjectCustomFieldResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "field_type",
+          "is_required",
+          "position",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "field_type": {
+            "$ref": "#/components/schemas/CustomFieldType"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_required": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "options": {},
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ProjectMemberResponse": {
+        "type": "object",
+        "required": ["id", "project_id", "user_id", "role"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ProjectRole"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ProjectResponse": {
+        "type": "object",
+        "required": ["id", "name", "description", "tenant_id", "key", "is_personal"],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "icon_emoji": {
+            "type": ["string", "null"]
+          },
+          "icon_url": {
+            "type": ["string", "null"]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_personal": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "personal_owner_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "ProjectRole": {
         "type": "string",
         "enum": ["Admin", "Member", "Viewer"]
+      },
+      "ProjectStatusResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "color",
+          "position",
+          "is_default",
+          "is_done_state",
+          "created_at"
+        ],
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "is_done_state": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ProjectTaskViewResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "created_by",
+          "name",
+          "is_shared",
+          "filters",
+          "sort",
+          "view_type",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filters": {},
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_shared": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sort": {},
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "view_type": {
+            "type": "string"
+          }
+        }
       },
       "PublicFolderResponse": {
         "type": "object",
@@ -19141,7 +19508,7 @@
       "RelationEntry": {
         "allOf": [
           {
-            "$ref": "#/components/schemas/crate.entities.tasks.Model"
+            "$ref": "#/components/schemas/TaskResponse"
           },
           {
             "type": "object",
@@ -19289,7 +19656,7 @@
       "SprintDetail": {
         "allOf": [
           {
-            "$ref": "#/components/schemas/crate.entities.sprints.Model"
+            "$ref": "#/components/schemas/SprintResponse"
           },
           {
             "type": "object",
@@ -19307,6 +19674,59 @@
             }
           }
         ]
+      },
+      "SprintResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "start_date",
+          "end_date",
+          "status",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "end_date": {
+            "type": "string",
+            "example": "2026-06-14"
+          },
+          "goal": {
+            "type": ["string", "null"]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "start_date": {
+            "type": "string",
+            "example": "2026-06-01"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SprintStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       },
       "SprintStatus": {
         "type": "string",
@@ -19330,10 +19750,6 @@
           }
         }
       },
-      "StorageType": {
-        "type": "string",
-        "enum": ["S3", "Local"]
-      },
       "SystemSettingsResponse": {
         "type": "object",
         "required": [
@@ -19352,6 +19768,31 @@
           },
           "user_registration_enabled": {
             "type": "boolean"
+          }
+        }
+      },
+      "TaskAssigneeResponse": {
+        "type": "object",
+        "required": ["id", "task_id", "user_id", "role", "assigned_at"],
+        "properties": {
+          "assigned_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -19398,6 +19839,43 @@
           }
         }
       },
+      "TaskCommentResponse": {
+        "type": "object",
+        "required": ["id", "task_id", "user_id", "body", "created_at", "updated_at"],
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "parent_comment_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "TaskCounts": {
         "type": "object",
         "required": ["total", "done"],
@@ -19430,7 +19908,7 @@
       "TaskDetailResponse": {
         "allOf": [
           {
-            "$ref": "#/components/schemas/crate.entities.tasks.Model"
+            "$ref": "#/components/schemas/TaskResponse"
           },
           {
             "type": "object",
@@ -19453,7 +19931,7 @@
           "tasks": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/crate.entities.tasks.Model"
+              "$ref": "#/components/schemas/TaskResponse"
             }
           },
           "total": {
@@ -19466,6 +19944,28 @@
       "TaskPriority": {
         "type": "string",
         "enum": ["CriticalFire", "Critical", "High", "Medium", "Low", "Trivial"]
+      },
+      "TaskRelationResponse": {
+        "type": "object",
+        "required": ["id", "blocker_task_id", "blocked_task_id", "created_at"],
+        "properties": {
+          "blocked_task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "blocker_task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
       },
       "TaskRelationsResponse": {
         "type": "object",
@@ -19486,8 +19986,120 @@
           "subtasks": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/crate.entities.tasks.Model"
+              "$ref": "#/components/schemas/TaskResponse"
             }
+          }
+        }
+      },
+      "TaskResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "seq_id",
+          "title",
+          "status_id",
+          "priority",
+          "progress_pct",
+          "is_archived",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "completed_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deleted_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "description": {
+            "type": ["string", "null"]
+          },
+          "estimated_minutes": {
+            "type": ["integer", "null"],
+            "format": "int32"
+          },
+          "hard_deadline": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_archived": {
+            "type": "boolean"
+          },
+          "milestone_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "parent_task_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/TaskPriority"
+          },
+          "progress_pct": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "seq_id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "soft_deadline": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "sprint_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "status_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TaskTimerResponse": {
+        "type": "object",
+        "required": ["task_id", "user_id", "started_at"],
+        "properties": {
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -19498,8 +20110,82 @@
           "views": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/crate.entities.project_task_views.Model"
+              "$ref": "#/components/schemas/ProjectTaskViewResponse"
             }
+          }
+        }
+      },
+      "TenantResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "display_id",
+          "name",
+          "description",
+          "icon_url",
+          "owner_id",
+          "require_2fa"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "display_id": {
+            "type": "string"
+          },
+          "drive_quota_bytes": {
+            "type": ["integer", "null"],
+            "format": "int64"
+          },
+          "icon_url": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "require_2fa": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TimeLogResponse": {
+        "type": "object",
+        "required": ["id", "task_id", "user_id", "logged_minutes", "logged_at", "created_at"],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "logged_at": {
+            "type": "string",
+            "format": "date"
+          },
+          "logged_minutes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "note": {
+            "type": ["string", "null"]
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -19898,6 +20584,51 @@
           }
         }
       },
+      "UserResponse": {
+        "type": "object",
+        "description": "Public user profile — excludes password_hash, sessions_revoked_at, and other secrets.",
+        "required": [
+          "id",
+          "username",
+          "email",
+          "email_verified",
+          "is_admin",
+          "is_suspended",
+          "totp_enabled"
+        ],
+        "properties": {
+          "avatar_url": {
+            "type": ["string", "null"]
+          },
+          "bio": {
+            "type": ["string", "null"]
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "email_verified": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_admin": {
+            "type": "boolean"
+          },
+          "is_suspended": {
+            "type": "boolean"
+          },
+          "totp_enabled": {
+            "type": "boolean"
+          },
+          "username": {
+            "type": "string",
+            "format": "username"
+          }
+        }
+      },
       "UserTimeSummary": {
         "type": "object",
         "required": ["user_id", "name", "minutes"],
@@ -19915,7 +20646,6 @@
           }
         }
       },
-      "Value": {},
       "Verify2faRequest": {
         "type": "object",
         "properties": {
@@ -19976,831 +20706,6 @@
           },
           "name": {
             "type": "string"
-          }
-        }
-      },
-      "crate.entities.audit_logs.Model": {
-        "type": "object",
-        "required": ["id", "actor_type", "action", "resource_type", "resource_id", "created_at"],
-        "properties": {
-          "action": {
-            "type": "string"
-          },
-          "actor_id": {
-            "type": ["string", "null"],
-            "format": "uuid"
-          },
-          "actor_type": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "ip_address": {
-            "type": ["string", "null"]
-          },
-          "metadata": {},
-          "resource_id": {
-            "type": "string"
-          },
-          "resource_type": {
-            "type": "string"
-          },
-          "tenant_id": {
-            "type": ["string", "null"],
-            "format": "uuid"
-          },
-          "user_agent": {
-            "type": ["string", "null"]
-          }
-        }
-      },
-      "crate.entities.drive_files.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "size",
-          "mime_type",
-          "storage_type",
-          "storage_key",
-          "tenant_id",
-          "project_id",
-          "uploader_id",
-          "folder_id",
-          "created_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "folder_id": {
-            "type": ["string", "null"],
-            "format": "uuid"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "mime_type": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "project_id": {
-            "type": ["string", "null"],
-            "format": "uuid"
-          },
-          "size": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "storage_key": {
-            "type": "string"
-          },
-          "storage_type": {
-            "$ref": "#/components/schemas/StorageType"
-          },
-          "tenant_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "uploader_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.drive_folder_shares.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "folder_id",
-          "shared_with_user_id",
-          "permission",
-          "created_by",
-          "expires_at",
-          "created_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created_by": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "expires_at": {
-            "type": ["string", "null"],
-            "format": "date-time"
-          },
-          "folder_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "permission": {
-            "$ref": "#/components/schemas/SharePermission"
-          },
-          "share_token": {
-            "type": ["string", "null"]
-          },
-          "shared_with_user_id": {
-            "type": ["string", "null"],
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.drive_folders.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "parent_id",
-          "tenant_id",
-          "project_id",
-          "created_by",
-          "created_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created_by": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "parent_id": {
-            "type": ["string", "null"],
-            "format": "uuid"
-          },
-          "project_id": {
-            "type": ["string", "null"],
-            "format": "uuid"
-          },
-          "tenant_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.labels.Model": {
-        "type": "object",
-        "required": ["id", "name", "description", "color"],
-        "properties": {
-          "color": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "icon_url": {
-            "type": ["string", "null"]
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "project_id": {
-            "type": ["string", "null"],
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.milestones.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "project_id",
-          "name",
-          "due_date",
-          "created_by",
-          "created_at",
-          "updated_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created_by": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "description": {
-            "type": ["string", "null"]
-          },
-          "due_date": {
-            "type": "string",
-            "example": "2026-07-01"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "crate.entities.project_custom_fields.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "project_id",
-          "name",
-          "field_type",
-          "is_required",
-          "position",
-          "created_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "field_type": {
-            "$ref": "#/components/schemas/CustomFieldType"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_required": {
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          },
-          "options": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/Value"
-              }
-            ]
-          },
-          "position": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.project_members.Model": {
-        "type": "object",
-        "required": ["id", "project_id", "user_id", "role"],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "role": {
-            "$ref": "#/components/schemas/ProjectRole"
-          },
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.project_statuses.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "project_id",
-          "name",
-          "color",
-          "position",
-          "is_default",
-          "is_done_state",
-          "created_at"
-        ],
-        "properties": {
-          "color": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_default": {
-            "type": "boolean"
-          },
-          "is_done_state": {
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          },
-          "position": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.project_task_views.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "project_id",
-          "created_by",
-          "name",
-          "is_shared",
-          "filters",
-          "sort",
-          "view_type",
-          "created_at",
-          "updated_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created_by": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "filters": {
-            "$ref": "#/components/schemas/Value"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_shared": {
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "sort": {
-            "$ref": "#/components/schemas/Value"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "view_type": {
-            "type": "string"
-          }
-        }
-      },
-      "crate.entities.projects.Model": {
-        "type": "object",
-        "required": ["id", "name", "description", "tenant_id", "key"],
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "icon_emoji": {
-            "type": ["string", "null"]
-          },
-          "icon_url": {
-            "type": ["string", "null"]
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_personal": {
-            "type": "boolean"
-          },
-          "key": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "personal_owner_id": {
-            "type": ["string", "null"],
-            "format": "uuid"
-          },
-          "tenant_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.sprints.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "project_id",
-          "name",
-          "start_date",
-          "end_date",
-          "status",
-          "created_by",
-          "created_at",
-          "updated_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created_by": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "end_date": {
-            "type": "string",
-            "example": "2026-06-14"
-          },
-          "goal": {
-            "type": ["string", "null"]
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "start_date": {
-            "type": "string",
-            "example": "2026-06-01"
-          },
-          "status": {
-            "$ref": "#/components/schemas/SprintStatus"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "crate.entities.task_assignees.Model": {
-        "type": "object",
-        "required": ["id", "task_id", "user_id", "role", "assigned_at"],
-        "properties": {
-          "assigned_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "role": {
-            "type": "string"
-          },
-          "task_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.task_comments.Model": {
-        "type": "object",
-        "required": ["id", "task_id", "user_id", "body", "created_at", "updated_at"],
-        "properties": {
-          "body": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "deleted_at": {
-            "type": ["string", "null"],
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "parent_comment_id": {
-            "type": ["string", "null"],
-            "format": "uuid"
-          },
-          "task_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.task_relations.Model": {
-        "type": "object",
-        "required": ["id", "blocker_task_id", "blocked_task_id", "created_at"],
-        "properties": {
-          "blocked_task_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "blocker_task_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.task_timers.Model": {
-        "type": "object",
-        "required": ["task_id", "user_id", "started_at"],
-        "properties": {
-          "started_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "task_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.tasks.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "project_id",
-          "seq_id",
-          "title",
-          "status_id",
-          "priority",
-          "progress_pct",
-          "is_archived",
-          "created_by",
-          "created_at",
-          "updated_at"
-        ],
-        "properties": {
-          "completed_at": {
-            "type": ["string", "null"],
-            "format": "date-time"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created_by": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "deleted_at": {
-            "type": ["string", "null"],
-            "format": "date-time"
-          },
-          "description": {
-            "type": ["string", "null"]
-          },
-          "estimated_minutes": {
-            "type": ["integer", "null"],
-            "format": "int32"
-          },
-          "hard_deadline": {
-            "type": ["string", "null"],
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_archived": {
-            "type": "boolean"
-          },
-          "milestone_id": {
-            "type": ["string", "null"],
-            "format": "uuid"
-          },
-          "parent_task_id": {
-            "type": ["string", "null"],
-            "format": "uuid"
-          },
-          "priority": {
-            "$ref": "#/components/schemas/TaskPriority"
-          },
-          "progress_pct": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "seq_id": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "soft_deadline": {
-            "type": ["string", "null"],
-            "format": "date-time"
-          },
-          "sprint_id": {
-            "type": ["string", "null"],
-            "format": "uuid"
-          },
-          "status_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "title": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "crate.entities.tenants.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "display_id",
-          "name",
-          "description",
-          "icon_url",
-          "owner_id",
-          "require_2fa"
-        ],
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "display_id": {
-            "type": "string"
-          },
-          "drive_quota_bytes": {
-            "type": ["integer", "null"],
-            "format": "int64"
-          },
-          "icon_url": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "owner_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "require_2fa": {
-            "type": "boolean",
-            "description": "テナントメンバー全員に 2FA 設定を強制する"
-          }
-        }
-      },
-      "crate.entities.time_logs.Model": {
-        "type": "object",
-        "required": ["id", "task_id", "user_id", "logged_minutes", "logged_at", "created_at"],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "logged_at": {
-            "type": "string",
-            "format": "date"
-          },
-          "logged_minutes": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "note": {
-            "type": ["string", "null"]
-          },
-          "task_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "crate.entities.users.Model": {
-        "type": "object",
-        "required": [
-          "id",
-          "username",
-          "email",
-          "email_verified",
-          "is_admin",
-          "is_suspended",
-          "totp_enabled"
-        ],
-        "properties": {
-          "avatar_url": {
-            "type": ["string", "null"]
-          },
-          "bio": {
-            "type": ["string", "null"]
-          },
-          "email": {
-            "type": "string",
-            "format": "email"
-          },
-          "email_verified": {
-            "type": "boolean",
-            "description": "メールアドレスの確認が済んでいるかどうか"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_admin": {
-            "type": "boolean"
-          },
-          "is_suspended": {
-            "type": "boolean"
-          },
-          "totp_enabled": {
-            "type": "boolean",
-            "description": "TOTP 2FA が有効か（`totp_credentials.is_verified` とセットで有効扱い）。\n更新は `handlers::auth_2fa` 経由の ActiveModel のみとし、他モジュールから直接書き換えないこと。"
-          },
-          "username": {
-            "type": "string",
-            "format": "username"
           }
         }
       }

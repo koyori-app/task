@@ -6,7 +6,7 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
-use chrono::{Datelike, NaiveDate, NaiveTime};
+use chrono::{NaiveDate, NaiveTime};
 use sea_orm::sea_query::LockType;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
@@ -21,16 +21,8 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::payload::sprints::*;
+use crate::payload::tasks::TaskResponse;
 use crate::utils::db::is_postgres_unique_violation;
-
-fn naive_to_time_date(date: NaiveDate) -> time::Date {
-    time::Date::from_calendar_date(
-        date.year(),
-        time::Month::try_from(date.month() as u8).expect("month"),
-        date.day() as u8,
-    )
-    .expect("valid date")
-}
 
 fn validate_date_range(start: NaiveDate, end: NaiveDate) -> Result<(), AppError> {
     if start > end {
@@ -48,14 +40,8 @@ fn parse_sprint_status(value: &str) -> Result<SprintStatus, AppError> {
     }
 }
 
-fn time_date_to_naive(date: time::Date) -> NaiveDate {
-    NaiveDate::from_ymd_opt(date.year(), date.month() as u32, date.day() as u32)
-        .expect("valid sprint date")
-}
-
-fn end_of_day_utc(date: time::Date) -> chrono::DateTime<chrono::Utc> {
-    time_date_to_naive(date)
-        .and_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap())
+fn end_of_day_utc(date: NaiveDate) -> chrono::DateTime<chrono::Utc> {
+    date.and_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap())
         .and_utc()
 }
 
@@ -87,7 +73,7 @@ fn build_burndown(
     sprint_tasks: &[tasks::Model],
     done_statuses: &HashSet<Uuid>,
 ) -> Vec<BurndownPoint> {
-    let today = time::OffsetDateTime::now_utc().date();
+    let today = chrono::Utc::now().date_naive();
     let end_cap = if sprint.end_date < today {
         sprint.end_date
     } else {
@@ -98,17 +84,17 @@ fn build_burndown(
         return Vec::new();
     }
 
-    let start_naive = time_date_to_naive(sprint.start_date);
+    let start_naive = sprint.start_date;
     let total_at_start = sprint_tasks
         .iter()
         .filter(|t| t.created_at.date_naive() <= start_naive)
         .count();
-    let span_days = (sprint.end_date - sprint.start_date).whole_days();
+    let span_days = (sprint.end_date - sprint.start_date).num_days();
     let mut points = Vec::new();
     let mut cursor = sprint.start_date;
 
     while cursor <= end_cap {
-        let day_offset = (cursor - sprint.start_date).whole_days();
+        let day_offset = (cursor - sprint.start_date).num_days();
         let ideal_remaining = if span_days <= 0 {
             0
         } else if total_at_start == 0 {
@@ -123,7 +109,7 @@ fn build_burndown(
             .iter()
             .filter(|t| {
                 let created_date = t.created_at.date_naive();
-                let created_on_or_before = created_date <= time_date_to_naive(cursor);
+                let created_on_or_before = created_date <= cursor;
                 if !created_on_or_before {
                     return false;
                 }
@@ -141,7 +127,7 @@ fn build_burndown(
             actual_remaining,
         });
 
-        cursor += time::Duration::days(1);
+        cursor += chrono::Duration::days(1);
     }
 
     points
@@ -168,7 +154,7 @@ async fn build_sprint_detail(
     let burndown = build_burndown(&sprint, &sprint_tasks, &done_statuses);
 
     Ok(SprintDetail {
-        sprint,
+        sprint: sprint.into(),
         task_counts: SprintTaskCounts {
             total,
             done,
@@ -190,7 +176,7 @@ async fn build_sprint_detail(
         ListSprintsQuery,
     ),
     responses(
-        (status = 200, description = "スプリント一覧", body = [sprints::Model]),
+        (status = 200, description = "スプリント一覧", body = [SprintResponse]),
         CrudErrors,
     )
 )]
@@ -199,7 +185,7 @@ pub async fn list_sprints(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Query(q): Query<ListSprintsQuery>,
-) -> Result<Json<Vec<sprints::Model>>, AppError> {
+) -> Result<Json<Vec<SprintResponse>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadSprint)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -211,7 +197,14 @@ pub async fn list_sprints(
         query = query.filter(sprints::Column::Status.eq(status));
     }
 
-    Ok(Json(query.all(&state.db).await?))
+    Ok(Json(
+        query
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+    ))
 }
 
 #[axum::debug_handler]
@@ -226,7 +219,7 @@ pub async fn list_sprints(
     ),
     request_body = CreateSprintRequest,
     responses(
-        (status = 201, description = "作成されたスプリント", body = sprints::Model),
+        (status = 201, description = "作成されたスプリント", body = SprintResponse),
         CrudErrors,
     )
 )]
@@ -235,31 +228,29 @@ pub async fn create_sprint(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateSprintRequest>>,
-) -> Result<(StatusCode, Json<sprints::Model>), AppError> {
+) -> Result<(StatusCode, Json<SprintResponse>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     validate_date_range(payload.start_date, payload.end_date)?;
-    let start_date = naive_to_time_date(payload.start_date);
-    let end_date = naive_to_time_date(payload.end_date);
 
     let model = sprints::ActiveModel {
         id: Set(Uuid::new_v4()),
         project_id: Set(project_id),
         name: Set(payload.name),
         goal: Set(payload.goal),
-        start_date: Set(start_date),
-        end_date: Set(end_date),
+        start_date: Set(payload.start_date),
+        end_date: Set(payload.end_date),
         status: Set(SprintStatus::Planning),
         created_by: Set(auth.user_id),
-        created_at: Set(chrono::Utc::now()),
-        updated_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
+        updated_at: Set(chrono::Utc::now().into()),
     }
     .insert(&state.db)
     .await?;
 
-    Ok((StatusCode::CREATED, Json(model)))
+    Ok((StatusCode::CREATED, Json(model.into())))
 }
 
 #[axum::debug_handler]
@@ -305,7 +296,7 @@ pub async fn get_sprint(
     ),
     request_body = UpdateSprintRequest,
     responses(
-        (status = 200, description = "更新後のスプリント", body = sprints::Model),
+        (status = 200, description = "更新後のスプリント", body = SprintResponse),
         CrudErrors,
     )
 )]
@@ -314,7 +305,7 @@ pub async fn update_sprint(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateSprintRequest>>,
-) -> Result<Json<sprints::Model>, AppError> {
+) -> Result<Json<SprintResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -332,15 +323,9 @@ pub async fn update_sprint(
         return Err(AppError::Conflict);
     }
 
-    let start = payload
-        .start_date
-        .map(naive_to_time_date)
-        .unwrap_or(sprint.start_date);
-    let end = payload
-        .end_date
-        .map(naive_to_time_date)
-        .unwrap_or(sprint.end_date);
-    validate_date_range(time_date_to_naive(start), time_date_to_naive(end))?;
+    let start = payload.start_date.unwrap_or(sprint.start_date);
+    let end = payload.end_date.unwrap_or(sprint.end_date);
+    validate_date_range(start, end)?;
 
     let mut active: sprints::ActiveModel = sprint.into();
     if let Some(v) = payload.name {
@@ -352,16 +337,16 @@ pub async fn update_sprint(
         active.goal = Set(Some(v));
     }
     if let Some(v) = payload.start_date {
-        active.start_date = Set(naive_to_time_date(v));
+        active.start_date = Set(v);
     }
     if let Some(v) = payload.end_date {
-        active.end_date = Set(naive_to_time_date(v));
+        active.end_date = Set(v);
     }
-    active.updated_at = Set(chrono::Utc::now());
+    active.updated_at = Set(chrono::Utc::now().into());
 
     let updated = active.update(&txn).await?;
     txn.commit().await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
@@ -419,7 +404,7 @@ pub async fn delete_sprint(
         ("id" = Uuid, Path, description = "スプリントID"),
     ),
     responses(
-        (status = 200, description = "開始後のスプリント", body = sprints::Model),
+        (status = 200, description = "開始後のスプリント", body = SprintResponse),
         CrudErrors,
     )
 )]
@@ -427,7 +412,7 @@ pub async fn start_sprint(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
-) -> Result<Json<sprints::Model>, AppError> {
+) -> Result<Json<SprintResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -456,14 +441,14 @@ pub async fn start_sprint(
 
     let mut active: sprints::ActiveModel = sprint.into();
     active.status = Set(SprintStatus::Active);
-    active.updated_at = Set(chrono::Utc::now());
+    active.updated_at = Set(chrono::Utc::now().into());
     let updated = match active.update(&txn).await {
         Ok(model) => model,
         Err(e) if is_postgres_unique_violation(&e) => return Err(AppError::Conflict),
         Err(e) => return Err(e.into()),
     };
     txn.commit().await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
@@ -479,7 +464,7 @@ pub async fn start_sprint(
     ),
     request_body = CompleteSprintRequest,
     responses(
-        (status = 200, description = "完了後のスプリント", body = sprints::Model),
+        (status = 200, description = "完了後のスプリント", body = SprintResponse),
         CrudErrors,
     )
 )]
@@ -488,7 +473,7 @@ pub async fn complete_sprint(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Json(payload): Json<CompleteSprintRequest>,
-) -> Result<Json<sprints::Model>, AppError> {
+) -> Result<Json<SprintResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
@@ -558,17 +543,17 @@ pub async fn complete_sprint(
     for task in incomplete {
         let mut active: tasks::ActiveModel = task.into();
         active.sprint_id = Set(new_sprint_id);
-        active.updated_at = Set(chrono::Utc::now());
+        active.updated_at = Set(chrono::Utc::now().into());
         active.update(&txn).await?;
     }
 
     let mut active: sprints::ActiveModel = sprint.into();
     active.status = Set(SprintStatus::Completed);
-    active.updated_at = Set(chrono::Utc::now());
+    active.updated_at = Set(chrono::Utc::now().into());
     let updated = active.update(&txn).await?;
 
     txn.commit().await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
@@ -584,7 +569,7 @@ pub async fn complete_sprint(
     ),
     request_body = AssignTasksRequest,
     responses(
-        (status = 200, description = "割り当て後のタスク一覧", body = [tasks::Model]),
+        (status = 200, description = "割り当て後のタスク一覧", body = [TaskResponse]),
         CrudErrors,
     )
 )]
@@ -593,7 +578,7 @@ pub async fn assign_tasks_to_sprint(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<AssignTasksRequest>>,
-) -> Result<Json<Vec<tasks::Model>>, AppError> {
+) -> Result<Json<Vec<TaskResponse>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
@@ -633,10 +618,10 @@ pub async fn assign_tasks_to_sprint(
     for task in found {
         let mut active: tasks::ActiveModel = task.into();
         active.sprint_id = Set(Some(id));
-        active.updated_at = Set(chrono::Utc::now());
+        active.updated_at = Set(chrono::Utc::now().into());
         updated.push(active.update(&txn).await?);
     }
 
     txn.commit().await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into_iter().map(Into::into).collect()))
 }

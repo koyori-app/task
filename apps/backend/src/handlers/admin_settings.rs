@@ -109,7 +109,7 @@ pub async fn update_system_settings(
     }
 
     validate_quota_pair(next_default, next_system_max)?;
-    active.updated_at = Set(Utc::now());
+    active.updated_at = Set(Utc::now().into());
 
     let updated = active.update(&state.db).await?;
 

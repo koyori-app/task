@@ -1,10 +1,77 @@
+use chrono::{DateTime, Utc};
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::tasks;
+use crate::entities::{task_assignees, task_relations, tasks};
 use crate::utils::custom_fields::{CustomFieldValueInput, TaskCustomFieldValueResponse};
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TaskResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub project_id: Uuid,
+    pub seq_id: i32,
+    pub title: String,
+    #[schema(nullable)]
+    pub description: Option<String>,
+    #[schema(value_type = String, format = "uuid")]
+    pub status_id: Uuid,
+    pub priority: tasks::TaskPriority,
+    pub progress_pct: i16,
+    #[schema(value_type = Option<String>, format = "uuid", nullable)]
+    pub parent_task_id: Option<Uuid>,
+    #[schema(value_type = Option<String>, format = "uuid", nullable)]
+    pub milestone_id: Option<Uuid>,
+    #[schema(value_type = Option<String>, format = "uuid", nullable)]
+    pub sprint_id: Option<Uuid>,
+    #[schema(value_type = Option<String>, format = "date-time", nullable)]
+    pub soft_deadline: Option<DateTime<Utc>>,
+    #[schema(value_type = Option<String>, format = "date-time", nullable)]
+    pub hard_deadline: Option<DateTime<Utc>>,
+    #[schema(nullable)]
+    pub estimated_minutes: Option<i32>,
+    pub is_archived: bool,
+    #[schema(value_type = String, format = "uuid")]
+    pub created_by: Uuid,
+    #[schema(value_type = String, format = "date-time")]
+    pub created_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "date-time")]
+    pub updated_at: DateTime<Utc>,
+    #[schema(value_type = Option<String>, format = "date-time", nullable)]
+    pub completed_at: Option<DateTime<Utc>>,
+    #[schema(value_type = Option<String>, format = "date-time", nullable)]
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+impl From<tasks::Model> for TaskResponse {
+    fn from(model: tasks::Model) -> Self {
+        Self {
+            id: model.id,
+            project_id: model.project_id,
+            seq_id: model.seq_id,
+            title: model.title,
+            description: model.description,
+            status_id: model.status_id,
+            priority: model.priority,
+            progress_pct: model.progress_pct,
+            parent_task_id: model.parent_task_id,
+            milestone_id: model.milestone_id,
+            sprint_id: model.sprint_id,
+            soft_deadline: model.soft_deadline.map(|dt| dt.with_timezone(&Utc)),
+            hard_deadline: model.hard_deadline.map(|dt| dt.with_timezone(&Utc)),
+            estimated_minutes: model.estimated_minutes,
+            is_archived: model.is_archived,
+            created_by: model.created_by,
+            created_at: model.created_at.with_timezone(&Utc),
+            updated_at: model.updated_at.with_timezone(&Utc),
+            completed_at: model.completed_at.map(|dt| dt.with_timezone(&Utc)),
+            deleted_at: model.deleted_at.map(|dt| dt.with_timezone(&Utc)),
+        }
+    }
+}
 
 #[derive(Deserialize, ToSchema)]
 pub struct AssigneeInput {
@@ -106,14 +173,14 @@ fn default_limit() -> u64 {
 
 #[derive(Serialize, ToSchema)]
 pub struct TaskListResponse {
-    pub tasks: Vec<tasks::Model>,
+    pub tasks: Vec<TaskResponse>,
     pub total: u64,
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct TaskDetailResponse {
     #[serde(flatten)]
-    pub task: tasks::Model,
+    pub task: TaskResponse,
     pub custom_field_values: Vec<TaskCustomFieldValueResponse>,
 }
 
@@ -130,16 +197,64 @@ pub struct UpdateAssigneeRequest {
     pub role: String,
 }
 
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TaskAssigneeResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub task_id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub user_id: Uuid,
+    pub role: String,
+    #[schema(value_type = String, format = "date-time")]
+    pub assigned_at: DateTime<Utc>,
+}
+
+impl From<task_assignees::Model> for TaskAssigneeResponse {
+    fn from(model: task_assignees::Model) -> Self {
+        Self {
+            id: model.id,
+            task_id: model.task_id,
+            user_id: model.user_id,
+            role: model.role,
+            assigned_at: model.assigned_at.with_timezone(&Utc),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TaskRelationResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub blocker_task_id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub blocked_task_id: Uuid,
+    #[schema(value_type = String, format = "date-time")]
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<task_relations::Model> for TaskRelationResponse {
+    fn from(model: task_relations::Model) -> Self {
+        Self {
+            id: model.id,
+            blocker_task_id: model.blocker_task_id,
+            blocked_task_id: model.blocked_task_id,
+            created_at: model.created_at.with_timezone(&Utc),
+        }
+    }
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct RelationEntry {
     pub relation_id: Uuid,
     #[serde(flatten)]
-    pub task: tasks::Model,
+    pub task: TaskResponse,
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct TaskRelationsResponse {
-    pub subtasks: Vec<tasks::Model>,
+    pub subtasks: Vec<TaskResponse>,
     pub blocks: Vec<RelationEntry>,
     pub blocked_by: Vec<RelationEntry>,
 }

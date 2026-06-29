@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
-use sea_orm::prelude::{DateTimeWithTimeZone, Uuid};
+use sea_orm::prelude::Uuid;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
@@ -115,7 +115,7 @@ pub async fn create_personal_token(
         name: Set(payload.name),
         token_last_four: Set(token_last_four(&token_value)),
         token_hash: Set(token_hash),
-        expires_at: Set(payload.expires_at),
+        expires_at: Set(payload.expires_at.map(Into::into)),
         last_used_at: Set(None),
         revoked: Set(false),
         user_id: Set(auth.user_id),

@@ -15,6 +15,7 @@ use crate::{
     handlers::admin_audit::record_audit,
     openapi::CrudErrors,
     payload::admin_tenants::*,
+    payload::tenants::TenantResponse,
 };
 
 async fn table_exists<C: ConnectionTrait>(conn: &C, table: &str) -> Result<bool, AppError> {
@@ -53,7 +54,9 @@ pub async fn list_tenants(
         .order_by_asc(tenants::Column::Name)
         .all(&state.db)
         .await?;
-    Ok(Json(AdminTenantListResponse { tenants }))
+    Ok(Json(AdminTenantListResponse {
+        tenants: tenants.into_iter().map(Into::into).collect(),
+    }))
 }
 
 #[axum::debug_handler]
@@ -64,7 +67,7 @@ pub async fn list_tenants(
     summary = "テナント詳細（管理者）",
     params(("id" = Uuid, Path, description = "テナントID")),
     responses(
-        (status = 200, description = "テナント", body = tenants::Model),
+        (status = 200, description = "テナント", body = TenantResponse),
         CrudErrors,
     )
 )]
@@ -72,12 +75,12 @@ pub async fn get_tenant(
     State(state): State<AppState>,
     _admin: AdminUser,
     Path(id): Path<Uuid>,
-) -> Result<Json<tenants::Model>, AppError> {
+) -> Result<Json<TenantResponse>, AppError> {
     let tenant = tenants::Entity::find_by_id(id)
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
-    Ok(Json(tenant))
+    Ok(Json(tenant.into()))
 }
 
 #[axum::debug_handler]
@@ -149,7 +152,9 @@ pub async fn list_tenant_projects(
         .order_by_asc(projects::Column::Name)
         .all(&state.db)
         .await?;
-    Ok(Json(AdminProjectListResponse { projects }))
+    Ok(Json(AdminProjectListResponse {
+        projects: projects.into_iter().map(Into::into).collect(),
+    }))
 }
 
 #[axum::debug_handler]

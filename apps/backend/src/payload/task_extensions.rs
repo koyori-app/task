@@ -1,9 +1,47 @@
+use chrono::{DateTime, Utc};
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use utoipa::ToSchema;
 use validator::Validate;
 
 use crate::entities::project_task_views;
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProjectTaskViewResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub project_id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub created_by: Uuid,
+    pub name: String,
+    pub is_shared: bool,
+    pub filters: Value,
+    pub sort: Value,
+    pub view_type: String,
+    #[schema(value_type = String, format = "date-time")]
+    pub created_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "date-time")]
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<project_task_views::Model> for ProjectTaskViewResponse {
+    fn from(model: project_task_views::Model) -> Self {
+        Self {
+            id: model.id,
+            project_id: model.project_id,
+            created_by: model.created_by,
+            name: model.name,
+            is_shared: model.is_shared,
+            filters: model.filters.into(),
+            sort: model.sort.into(),
+            view_type: model.view_type,
+            created_at: model.created_at.with_timezone(&Utc),
+            updated_at: model.updated_at.with_timezone(&Utc),
+        }
+    }
+}
 
 #[derive(Deserialize, ToSchema, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -71,7 +109,7 @@ pub struct BulkFailure {
 
 #[derive(Serialize, ToSchema)]
 pub struct TaskViewListResponse {
-    pub views: Vec<project_task_views::Model>,
+    pub views: Vec<ProjectTaskViewResponse>,
 }
 
 #[derive(Validate, Deserialize, ToSchema)]

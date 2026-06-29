@@ -20,6 +20,7 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
+use chrono::Utc;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait, EntityTrait,
@@ -365,7 +366,11 @@ async fn apply_bulk_update(
             active.status_id = Set(status_id);
             // 単体更新 API と同じルール: done 状態なら既存 completed_at を保持、なければ now()
             active.completed_at = if status.is_done_state {
-                Set(Some(snapshot.completed_at.unwrap_or_else(chrono::Utc::now)))
+                Set(Some(
+                    snapshot
+                        .completed_at
+                        .unwrap_or_else(|| chrono::Utc::now().into()),
+                ))
             } else {
                 Set(None)
             };
@@ -393,7 +398,7 @@ async fn apply_bulk_update(
         active.sprint_id = Set(Some(sprint_id));
     }
 
-    active.updated_at = Set(chrono::Utc::now());
+    active.updated_at = Set(chrono::Utc::now().into());
     active.update(&txn).await?;
 
     if let Some(assignee_id) = update.assignee_id {
@@ -410,7 +415,7 @@ async fn apply_bulk_update(
                 task_id: Set(task_id),
                 user_id: Set(assignee_id),
                 role: Set("assignee".into()),
-                assigned_at: Set(chrono::Utc::now()),
+                assigned_at: Set(chrono::Utc::now().into()),
             }
             .insert(&txn)
             .await?;
@@ -497,7 +502,9 @@ pub async fn list_task_views(
         .all(&state.db)
         .await?;
 
-    Ok(Json(TaskViewListResponse { views }))
+    Ok(Json(TaskViewListResponse {
+        views: views.into_iter().map(Into::into).collect(),
+    }))
 }
 
 #[axum::debug_handler]
@@ -512,7 +519,7 @@ pub async fn list_task_views(
     ),
     request_body = CreateTaskViewRequest,
     responses(
-        (status = 201, description = "作成されたビュー", body = project_task_views::Model),
+        (status = 201, description = "作成されたビュー", body = ProjectTaskViewResponse),
         CrudErrors,
     )
 )]
@@ -521,7 +528,7 @@ pub async fn create_task_view(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateTaskViewRequest>>,
-) -> Result<(StatusCode, Json<project_task_views::Model>), AppError> {
+) -> Result<(StatusCode, Json<ProjectTaskViewResponse>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -536,13 +543,13 @@ pub async fn create_task_view(
         filters: Set(payload.filters.into()),
         sort: Set(payload.sort.into()),
         view_type: Set(payload.view_type),
-        created_at: Set(chrono::Utc::now()),
-        updated_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
+        updated_at: Set(chrono::Utc::now().into()),
     }
     .insert(&state.db)
     .await?;
 
-    Ok((StatusCode::CREATED, Json(model)))
+    Ok((StatusCode::CREATED, Json(model.into())))
 }
 
 #[axum::debug_handler]
@@ -558,7 +565,7 @@ pub async fn create_task_view(
     ),
     request_body = UpdateTaskViewRequest,
     responses(
-        (status = 200, description = "更新されたビュー", body = project_task_views::Model),
+        (status = 200, description = "更新されたビュー", body = ProjectTaskViewResponse),
         CrudErrors,
     )
 )]
@@ -567,7 +574,7 @@ pub async fn update_task_view(
     auth: AuthUser,
     Path((tenant_id, project_id, view_id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateTaskViewRequest>>,
-) -> Result<Json<project_task_views::Model>, AppError> {
+) -> Result<Json<ProjectTaskViewResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -600,10 +607,10 @@ pub async fn update_task_view(
     if let Some(view_type) = payload.view_type {
         active.view_type = Set(view_type);
     }
-    active.updated_at = Set(chrono::Utc::now());
+    active.updated_at = Set(chrono::Utc::now().into());
 
     let updated = active.update(&state.db).await?;
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
@@ -694,7 +701,7 @@ pub async fn list_task_attachments(
                 mime_type: file.mime_type,
                 size: file.size,
                 url: content_url(file.id),
-                created_at: row.created_at,
+                created_at: row.created_at.with_timezone(&Utc),
             })
         })
         .collect::<Result<Vec<_>, AppError>>()?;
@@ -760,7 +767,7 @@ pub async fn attach_task_file(
         task_id: Set(task.id),
         drive_file_id: Set(payload.drive_file_id),
         created_by: Set(auth.user_id),
-        created_at: Set(chrono::Utc::now()),
+        created_at: Set(chrono::Utc::now().into()),
     })
     .insert(&state.db)
     .await
@@ -779,7 +786,7 @@ pub async fn attach_task_file(
             mime_type: file.mime_type,
             size: file.size,
             url: content_url(file.id),
-            created_at: model.created_at,
+            created_at: model.created_at.with_timezone(&Utc),
         }),
     ))
 }

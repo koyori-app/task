@@ -57,7 +57,7 @@ pub async fn update_passkey_after_authentication(
 ) -> Result<(), AuthError> {
     verify_sign_counter(auth_result, stored.sign_count)?;
 
-    let now = Utc::now().fixed_offset();
+    let now = Utc::now();
 
     if let Some(true) = passkey.update_credential(auth_result) {
         let (credential_id, public_key, aaguid, sign_count) =
@@ -67,12 +67,12 @@ pub async fn update_passkey_after_authentication(
         active.public_key = Set(public_key);
         active.aaguid = Set(aaguid);
         active.sign_count = Set(sign_count);
-        active.last_used_at = Set(Some(now));
+        active.last_used_at = Set(Some(now.into()));
         active.update(db).await?;
     } else {
         let mut active: passkeys::ActiveModel = stored.into();
         active.sign_count = Set(auth_result.counter() as i64);
-        active.last_used_at = Set(Some(now));
+        active.last_used_at = Set(Some(now.into()));
         active.update(db).await?;
     }
 

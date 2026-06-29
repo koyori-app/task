@@ -1,4 +1,8 @@
+use chrono::{DateTime, Utc};
 use sea_orm::prelude::Uuid;
+
+use crate::entities::drive_files;
+use crate::utils::drive::content_url;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
@@ -31,7 +35,21 @@ pub struct DriveFileResponse {
     #[schema(value_type = String, format = "uuid", nullable)]
     pub folder_id: Option<Uuid>,
     #[schema(value_type = String, format = "date-time")]
-    pub created_at: chrono::DateTime<chrono::FixedOffset>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<drive_files::Model> for DriveFileResponse {
+    fn from(model: drive_files::Model) -> Self {
+        Self {
+            id: model.id,
+            name: model.name,
+            size: model.size,
+            mime_type: model.mime_type,
+            url: content_url(model.id),
+            folder_id: model.folder_id,
+            created_at: model.created_at.with_timezone(&Utc),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]

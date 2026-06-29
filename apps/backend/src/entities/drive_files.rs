@@ -1,3 +1,4 @@
+//! Drive files entity — schema-first with hand-written DeriveActiveEnum and validation.
 use sea_orm::ActiveValue;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -14,32 +15,7 @@ pub enum StorageType {
     Local,
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, ToSchema, serde::Serialize)]
-#[sea_orm(table_name = "drive_files")]
-#[schema(as = crate::entities::drive_files::Model)]
-pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    pub name: String,
-    pub size: i64,
-    pub mime_type: String,
-    pub storage_type: StorageType,
-    pub storage_key: String,
-    #[schema(value_type = String, format = "uuid")]
-    pub tenant_id: Uuid,
-    #[sea_orm(nullable)]
-    #[schema(value_type = String, format = "uuid", nullable)]
-    pub project_id: Option<Uuid>,
-    #[schema(value_type = String, format = "uuid")]
-    pub uploader_id: Uuid,
-    #[sea_orm(nullable)]
-    #[schema(value_type = String, format = "uuid", nullable)]
-    pub folder_id: Option<Uuid>,
-    #[schema(value_type = String, format = "date-time")]
-    #[sea_orm(default_expr = "Expr::current_timestamp()")]
-    pub created_at: DateTimeWithTimeZone,
-}
+pub use super::_generated::drive_files::*;
 
 /// CHECK: `project_id IS NULL OR folder_id IS NOT NULL`
 pub fn validate_project_folder_constraint(
@@ -52,66 +28,6 @@ pub fn validate_project_folder_constraint(
         ));
     }
     Ok(())
-}
-
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::tenants::Entity",
-        from = "Column::TenantId",
-        to = "super::tenants::Column::Id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    Tenants,
-    #[sea_orm(
-        belongs_to = "super::projects::Entity",
-        from = "Column::ProjectId",
-        to = "super::projects::Column::Id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    Projects,
-    #[sea_orm(
-        belongs_to = "super::users::Entity",
-        from = "Column::UploaderId",
-        to = "super::users::Column::Id",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Users,
-    #[sea_orm(
-        belongs_to = "super::drive_folders::Entity",
-        from = "Column::FolderId",
-        to = "super::drive_folders::Column::Id",
-        on_update = "NoAction",
-        on_delete = "SetNull"
-    )]
-    DriveFolders,
-}
-
-impl Related<super::tenants::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Tenants.def()
-    }
-}
-
-impl Related<super::projects::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Projects.def()
-    }
-}
-
-impl Related<super::users::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Users.def()
-    }
-}
-
-impl Related<super::drive_folders::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::DriveFolders.def()
-    }
 }
 
 #[async_trait::async_trait]

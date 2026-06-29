@@ -28,7 +28,7 @@ use validator::Validate;
         ("project_id" = Uuid, Path, description = "プロジェクトID"),
     ),
     responses(
-        (status = 200, description = "ラベル一覧", body = [labels::Model]),
+        (status = 200, description = "ラベル一覧", body = [LabelResponse]),
         CrudErrors,
     )
 )]
@@ -36,7 +36,7 @@ pub async fn list_labels(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
-) -> Result<Json<Vec<labels::Model>>, AppError> {
+) -> Result<Json<Vec<LabelResponse>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -45,7 +45,7 @@ pub async fn list_labels(
         .filter(labels::Column::ProjectId.eq(project_id))
         .all(&state.db)
         .await?;
-    Ok(Json(list))
+    Ok(Json(list.into_iter().map(Into::into).collect()))
 }
 
 #[axum::debug_handler]
@@ -60,7 +60,7 @@ pub async fn list_labels(
     ),
     request_body = CreateLabelRequest,
     responses(
-        (status = 201, description = "作成されたラベル", body = labels::Model),
+        (status = 201, description = "作成されたラベル", body = LabelResponse),
         CrudErrors,
     )
 )]
@@ -69,7 +69,7 @@ pub async fn create_label(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateLabelRequest>>,
-) -> Result<(StatusCode, Json<labels::Model>), AppError> {
+) -> Result<(StatusCode, Json<LabelResponse>), AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -84,7 +84,7 @@ pub async fn create_label(
     }
     .insert(&state.db)
     .await?;
-    Ok((StatusCode::CREATED, Json(label)))
+    Ok((StatusCode::CREATED, Json(label.into())))
 }
 
 #[axum::debug_handler]
@@ -100,7 +100,7 @@ pub async fn create_label(
     ),
     request_body = UpdateLabelRequest,
     responses(
-        (status = 200, description = "更新後のラベル", body = labels::Model),
+        (status = 200, description = "更新後のラベル", body = LabelResponse),
         CrudErrors,
     )
 )]
@@ -109,7 +109,7 @@ pub async fn update_label(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateLabelRequest>>,
-) -> Result<Json<labels::Model>, AppError> {
+) -> Result<Json<LabelResponse>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -134,7 +134,7 @@ pub async fn update_label(
     } else if let Some(v) = payload.icon_url {
         active.icon_url = Set(Some(v));
     }
-    Ok(Json(active.update(&state.db).await?))
+    Ok(Json(active.update(&state.db).await?.into()))
 }
 
 #[axum::debug_handler]
@@ -227,7 +227,7 @@ pub async fn export_labels(
     ),
     request_body = ImportLabelRequest,
     responses(
-        (status = 200, description = "インポート後のラベル一覧", body = [labels::Model]),
+        (status = 200, description = "インポート後のラベル一覧", body = [LabelResponse]),
         CrudErrors,
     )
 )]
@@ -236,7 +236,7 @@ pub async fn import_labels(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<ImportLabelRequest>>,
-) -> Result<Json<Vec<labels::Model>>, AppError> {
+) -> Result<Json<Vec<LabelResponse>>, AppError> {
     auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -280,5 +280,5 @@ pub async fn import_labels(
         .filter(labels::Column::ProjectId.eq(project_id))
         .all(&state.db)
         .await?;
-    Ok(Json(list))
+    Ok(Json(list.into_iter().map(Into::into).collect()))
 }

@@ -20,6 +20,8 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::payload::my_tasks::*;
+use crate::payload::projects::ProjectResponse;
+use crate::payload::tasks::TaskResponse;
 use crate::utils::db::is_postgres_unique_violation;
 use crate::utils::task_activities::record_activity;
 fn personal_project_key(user_id: Uuid) -> String {
@@ -269,8 +271,8 @@ fn build_my_task_item(
             color: status.color.clone(),
         },
         priority: task.priority,
-        soft_deadline: task.soft_deadline,
-        hard_deadline: task.hard_deadline,
+        soft_deadline: task.soft_deadline.map(|dt| dt.with_timezone(&Utc)),
+        hard_deadline: task.hard_deadline.map(|dt| dt.with_timezone(&Utc)),
         project: MyTaskProjectInfo {
             id: project.id,
             name: project.name.clone(),
@@ -289,7 +291,7 @@ fn build_my_task_item(
     summary = "個人プロジェクトを取得（未存在なら自動生成）",
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     responses(
-        (status = 200, description = "個人プロジェクト", body = projects::Model),
+        (status = 200, description = "個人プロジェクト", body = ProjectResponse),
         CrudErrors,
     )
 )]
@@ -297,11 +299,11 @@ pub async fn get_personal_project(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
-) -> Result<Json<projects::Model>, AppError> {
+) -> Result<Json<ProjectResponse>, AppError> {
     auth.require_scope(Scope::ReadProject)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     let project = get_or_create_personal_project(&state, tenant_id, auth.user_id).await?;
-    Ok(Json(project))
+    Ok(Json(project.into()))
 }
 
 #[axum::debug_handler]
@@ -427,7 +429,7 @@ pub async fn list_my_tasks(
     params(("tenant_id" = Uuid, Path, description = "テナントID")),
     request_body = QuickCaptureRequest,
     responses(
-        (status = 201, description = "作成されたタスク", body = tasks::Model),
+        (status = 201, description = "作成されたタスク", body = TaskResponse),
         CrudErrors,
     )
 )]
@@ -436,7 +438,7 @@ pub async fn create_my_task(
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
     Valid(Json(payload)): Valid<Json<QuickCaptureRequest>>,
-) -> Result<(StatusCode, Json<tasks::Model>), AppError> {
+) -> Result<(StatusCode, Json<TaskResponse>), AppError> {
     auth.require_scope(Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
 
@@ -459,13 +461,13 @@ pub async fn create_my_task(
         parent_task_id: Set(None),
         milestone_id: Set(None),
         sprint_id: Set(None),
-        soft_deadline: Set(payload.soft_deadline),
+        soft_deadline: Set(payload.soft_deadline.map(Into::into)),
         hard_deadline: Set(None),
         estimated_minutes: Set(None),
         is_archived: Set(false),
         created_by: Set(auth.user_id),
-        created_at: Set(Utc::now()),
-        updated_at: Set(Utc::now()),
+        created_at: Set(Utc::now().into()),
+        updated_at: Set(Utc::now().into()),
         completed_at: Set(None),
         deleted_at: Set(None),
     }
@@ -477,7 +479,7 @@ pub async fn create_my_task(
         task_id: Set(model.id),
         user_id: Set(auth.user_id),
         role: Set("assignee".into()),
-        assigned_at: Set(Utc::now()),
+        assigned_at: Set(Utc::now().into()),
     }
     .insert(&txn)
     .await?;
@@ -492,5 +494,5 @@ pub async fn create_my_task(
     .await?;
 
     txn.commit().await?;
-    Ok((StatusCode::CREATED, Json(model)))
+    Ok((StatusCode::CREATED, Json(model.into())))
 }

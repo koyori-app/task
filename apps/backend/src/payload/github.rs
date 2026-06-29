@@ -1,4 +1,4 @@
-use sea_orm::prelude::DateTimeWithTimeZone;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -21,7 +21,7 @@ pub struct GithubIntegrationResponse {
     pub repo_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = String, format = "date-time", nullable)]
-    pub connected_at: Option<DateTimeWithTimeZone>,
+    pub connected_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
