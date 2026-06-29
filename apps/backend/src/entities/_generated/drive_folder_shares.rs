@@ -14,7 +14,6 @@ pub struct Model {
     #[sea_orm(nullable)]
     pub shared_with_user_id: Option<Uuid>,
     #[sea_orm(nullable, unique)]
-    #[sea_orm(unique)]
     pub share_token: Option<String>,
     pub permission: SharePermission,
     pub created_by: Uuid,
