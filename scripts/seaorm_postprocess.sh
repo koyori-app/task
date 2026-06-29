@@ -44,4 +44,9 @@ drop_default_active_model_behavior() {
 drop_default_active_model_behavior drive_files.rs
 drop_default_active_model_behavior drive_folder_shares.rs
 
+# sprints.project_id の単一列 unique は誤検出。実際の制約は partial unique
+# "idx_sprints_active_per_project ON sprints(project_id) WHERE status = 'active'" で、
+# project_id を単純 unique 化すると 1 プロジェクト 1 スプリントしか作れなくなる。除去する。
+perl -0pi -e 's/[ \t]*#\[sea_orm\(unique\)\]\r?\n([ \t]*pub project_id: Uuid,)/$1/' "$GEN/sprints.rs"
+
 echo "seaorm_postprocess: enum/json column types applied"
