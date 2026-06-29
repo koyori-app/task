@@ -450,7 +450,7 @@ impl MigrationTrait for Migration {
                 id             UUID PRIMARY KEY,
                 task_id        UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
                 user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                logged_minutes INTEGER NOT NULL,
+                logged_minutes INTEGER NOT NULL CHECK (logged_minutes > 0),
                 logged_at      DATE NOT NULL,
                 note           TEXT,
                 created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
