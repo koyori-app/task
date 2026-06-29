@@ -3,6 +3,13 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
+fn use_pg_bigm() -> bool {
+    matches!(
+        std::env::var("USE_PG_BIGM").as_deref(),
+        Ok("1") | Ok("true") | Ok("True") | Ok("TRUE")
+    )
+}
+
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -111,7 +118,9 @@ impl MigrationTrait for Migration {
                 project_id   UUID REFERENCES projects(id) ON DELETE CASCADE,
                 uploader_id  UUID NOT NULL REFERENCES users(id) ON DELETE NO ACTION,
                 folder_id    UUID REFERENCES drive_folders(id) ON DELETE SET NULL,
-                created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+                created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                CONSTRAINT drive_files_project_folder_check
+                    CHECK (project_id IS NULL OR folder_id IS NOT NULL)
             )
         "#).await?;
 
@@ -124,7 +133,10 @@ impl MigrationTrait for Migration {
                 permission          VARCHAR(16) NOT NULL,
                 created_by          UUID NOT NULL REFERENCES users(id) ON DELETE NO ACTION,
                 expires_at          TIMESTAMPTZ,
-                created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+                created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+                CONSTRAINT drive_folder_shares_xor_check CHECK (
+                    (shared_with_user_id IS NOT NULL)::int + (share_token IS NOT NULL)::int = 1
+                )
             )
         "#).await?;
 
@@ -254,7 +266,7 @@ impl MigrationTrait for Migration {
                 id          UUID PRIMARY KEY,
                 project_id  UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                 name        VARCHAR(100) NOT NULL,
-                field_type  VARCHAR NOT NULL,
+                field_type  VARCHAR NOT NULL CHECK (field_type IN ('text', 'number', 'select', 'date', 'url', 'checkbox')),
                 options     JSONB,
                 is_required BOOLEAN NOT NULL DEFAULT false,
                 position    SMALLINT NOT NULL,
@@ -292,12 +304,12 @@ impl MigrationTrait for Migration {
                 description       TEXT,
                 status_id         UUID NOT NULL REFERENCES project_statuses(id) ON DELETE NO ACTION,
                 priority          VARCHAR NOT NULL DEFAULT 'medium',
-                progress_pct      SMALLINT NOT NULL DEFAULT 0,
+                progress_pct      SMALLINT NOT NULL DEFAULT 0 CHECK (progress_pct BETWEEN 0 AND 100),
                 parent_task_id    UUID REFERENCES tasks(id) ON DELETE SET NULL,
                 milestone_id      UUID REFERENCES milestones(id) ON DELETE SET NULL,
                 soft_deadline     TIMESTAMPTZ,
                 hard_deadline     TIMESTAMPTZ,
-                estimated_minutes INTEGER,
+                estimated_minutes INTEGER CHECK (estimated_minutes > 0),
                 is_archived       BOOLEAN NOT NULL DEFAULT false,
                 created_by        UUID NOT NULL REFERENCES users(id) ON DELETE NO ACTION,
                 created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -305,18 +317,34 @@ impl MigrationTrait for Migration {
                 deleted_at        TIMESTAMPTZ,
                 sprint_id         UUID REFERENCES sprints(id) ON DELETE SET NULL,
                 completed_at      TIMESTAMPTZ,
-                search_vector     TSVECTOR GENERATED ALWAYS AS (
-                    to_tsvector('pg_catalog.simple',
-                        coalesce(title, '') || ' ' || coalesce(description, ''))
-                ) STORED,
-                UNIQUE (project_id, seq_id)
+                UNIQUE (project_id, seq_id),
+                CONSTRAINT soft_before_hard CHECK (
+                    soft_deadline IS NULL OR hard_deadline IS NULL OR soft_deadline <= hard_deadline
+                )
             )
         "#).await?;
         conn.execute_unprepared("CREATE INDEX idx_tasks_project ON tasks(project_id) WHERE deleted_at IS NULL").await?;
         conn.execute_unprepared("CREATE INDEX idx_tasks_status ON tasks(status_id)").await?;
         conn.execute_unprepared("CREATE INDEX idx_tasks_parent ON tasks(parent_task_id) WHERE parent_task_id IS NOT NULL").await?;
         conn.execute_unprepared("CREATE INDEX idx_tasks_sprint ON tasks(sprint_id) WHERE sprint_id IS NOT NULL").await?;
-        conn.execute_unprepared("CREATE INDEX idx_tasks_search_vector ON tasks USING GIN(search_vector)").await?;
+        // 全文検索: USE_PG_BIGM=true なら pg_bigm の trigram GIN を、そうでなければ
+        // 生成列 search_vector + GIN を作成する（旧 m20260610_create_task_extensions と同じ分岐）。
+        if use_pg_bigm() {
+            conn.execute_unprepared(r#"
+                CREATE INDEX idx_tasks_title_bigm ON tasks USING GIN(title gin_bigm_ops);
+                CREATE INDEX idx_tasks_description_bigm ON tasks USING GIN(description gin_bigm_ops)
+            "#).await?;
+        } else {
+            conn.execute_unprepared(r#"
+                ALTER TABLE tasks
+                    ADD COLUMN search_vector TSVECTOR
+                    GENERATED ALWAYS AS (
+                        to_tsvector('pg_catalog.simple',
+                            coalesce(title, '') || ' ' || coalesce(description, ''))
+                    ) STORED;
+                CREATE INDEX idx_tasks_search_vector ON tasks USING GIN(search_vector)
+            "#).await?;
+        }
 
         conn.execute_unprepared(r#"
             CREATE TABLE task_assignees (
@@ -478,16 +506,26 @@ impl MigrationTrait for Migration {
         conn.execute_unprepared("CREATE INDEX idx_audit_logs_resource ON audit_logs(resource_type, resource_id)").await?;
         conn.execute_unprepared("CREATE INDEX idx_audit_logs_tenant_id ON audit_logs(tenant_id)").await?;
         conn.execute_unprepared("CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at DESC)").await?;
+        // 監査ログはアプリロールに対して追記専用（改竄耐性）。app_role は外部プロビジョニング前提で
+        // 存在しない環境もあるため、ロールが存在する場合のみ REVOKE する。
+        conn.execute_unprepared(r#"
+            DO $$ BEGIN
+                IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_role') THEN
+                    REVOKE UPDATE, DELETE ON audit_logs FROM app_role;
+                END IF;
+            END $$;
+        "#).await?;
 
         conn.execute_unprepared(r#"
             CREATE TABLE system_settings (
-                singleton                  BOOLEAN PRIMARY KEY DEFAULT true,
+                singleton                  BOOLEAN PRIMARY KEY DEFAULT true CHECK (singleton = true),
                 user_registration_enabled  BOOLEAN NOT NULL DEFAULT true,
                 drive_default_quota_mb     BIGINT NOT NULL DEFAULT 10240,
                 updated_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
                 drive_system_max_quota_mb  BIGINT NOT NULL DEFAULT 102400
             )
         "#).await?;
+        conn.execute_unprepared("INSERT INTO system_settings DEFAULT VALUES ON CONFLICT DO NOTHING").await?;
 
         // ── integrations ──────────────────────────────────────────────────────
 
