@@ -16,7 +16,7 @@ pub struct Model {
     pub revoked: bool,
     pub user_id: Uuid,
     #[sea_orm(column_type = "JsonBinary")]
-    pub scopes: Json,
+    pub scopes: super::super::scopes::ScopeList,
     pub tenant_id: Uuid,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub allowed_project_ids: Option<Json>,

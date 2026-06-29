@@ -15,7 +15,7 @@ pub struct Model {
     pub goal: Option<String>,
     pub start_date: Date,
     pub end_date: Date,
-    pub status: String,
+    pub status: super::super::sprints::SprintStatus,
     pub created_by: Uuid,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,

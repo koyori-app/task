@@ -6,7 +6,7 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
-use chrono::{Datelike, NaiveDate, NaiveTime};
+use chrono::{NaiveDate, NaiveTime};
 use sea_orm::sea_query::LockType;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
@@ -24,15 +24,6 @@ use crate::payload::sprints::*;
 use crate::payload::tasks::TaskResponse;
 use crate::utils::db::is_postgres_unique_violation;
 
-fn naive_to_time_date(date: NaiveDate) -> time::Date {
-    time::Date::from_calendar_date(
-        date.year(),
-        time::Month::try_from(date.month() as u8).expect("month"),
-        date.day() as u8,
-    )
-    .expect("valid date")
-}
-
 fn validate_date_range(start: NaiveDate, end: NaiveDate) -> Result<(), AppError> {
     if start > end {
         return Err(AppError::BadRequest);
@@ -49,14 +40,8 @@ fn parse_sprint_status(value: &str) -> Result<SprintStatus, AppError> {
     }
 }
 
-fn time_date_to_naive(date: time::Date) -> NaiveDate {
-    NaiveDate::from_ymd_opt(date.year(), date.month() as u32, date.day() as u32)
-        .expect("valid sprint date")
-}
-
-fn end_of_day_utc(date: time::Date) -> chrono::DateTime<chrono::Utc> {
-    time_date_to_naive(date)
-        .and_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap())
+fn end_of_day_utc(date: NaiveDate) -> chrono::DateTime<chrono::Utc> {
+    date.and_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap())
         .and_utc()
 }
 
@@ -88,7 +73,7 @@ fn build_burndown(
     sprint_tasks: &[tasks::Model],
     done_statuses: &HashSet<Uuid>,
 ) -> Vec<BurndownPoint> {
-    let today = time::OffsetDateTime::now_utc().date();
+    let today = chrono::Utc::now().date_naive();
     let end_cap = if sprint.end_date < today {
         sprint.end_date
     } else {
@@ -99,17 +84,17 @@ fn build_burndown(
         return Vec::new();
     }
 
-    let start_naive = time_date_to_naive(sprint.start_date);
+    let start_naive = sprint.start_date;
     let total_at_start = sprint_tasks
         .iter()
         .filter(|t| t.created_at.date_naive() <= start_naive)
         .count();
-    let span_days = (sprint.end_date - sprint.start_date).whole_days();
+    let span_days = (sprint.end_date - sprint.start_date).num_days();
     let mut points = Vec::new();
     let mut cursor = sprint.start_date;
 
     while cursor <= end_cap {
-        let day_offset = (cursor - sprint.start_date).whole_days();
+        let day_offset = (cursor - sprint.start_date).num_days();
         let ideal_remaining = if span_days <= 0 {
             0
         } else if total_at_start == 0 {
@@ -124,7 +109,7 @@ fn build_burndown(
             .iter()
             .filter(|t| {
                 let created_date = t.created_at.date_naive();
-                let created_on_or_before = created_date <= time_date_to_naive(cursor);
+                let created_on_or_before = created_date <= cursor;
                 if !created_on_or_before {
                     return false;
                 }
@@ -142,7 +127,7 @@ fn build_burndown(
             actual_remaining,
         });
 
-        cursor += time::Duration::days(1);
+        cursor += chrono::Duration::days(1);
     }
 
     points
@@ -249,16 +234,14 @@ pub async fn create_sprint(
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     validate_date_range(payload.start_date, payload.end_date)?;
-    let start_date = naive_to_time_date(payload.start_date);
-    let end_date = naive_to_time_date(payload.end_date);
 
     let model = sprints::ActiveModel {
         id: Set(Uuid::new_v4()),
         project_id: Set(project_id),
         name: Set(payload.name),
         goal: Set(payload.goal),
-        start_date: Set(start_date),
-        end_date: Set(end_date),
+        start_date: Set(payload.start_date),
+        end_date: Set(payload.end_date),
         status: Set(SprintStatus::Planning),
         created_by: Set(auth.user_id),
         created_at: Set(chrono::Utc::now().into()),
@@ -340,15 +323,9 @@ pub async fn update_sprint(
         return Err(AppError::Conflict);
     }
 
-    let start = payload
-        .start_date
-        .map(naive_to_time_date)
-        .unwrap_or(sprint.start_date);
-    let end = payload
-        .end_date
-        .map(naive_to_time_date)
-        .unwrap_or(sprint.end_date);
-    validate_date_range(time_date_to_naive(start), time_date_to_naive(end))?;
+    let start = payload.start_date.unwrap_or(sprint.start_date);
+    let end = payload.end_date.unwrap_or(sprint.end_date);
+    validate_date_range(start, end)?;
 
     let mut active: sprints::ActiveModel = sprint.into();
     if let Some(v) = payload.name {
@@ -360,10 +337,10 @@ pub async fn update_sprint(
         active.goal = Set(Some(v));
     }
     if let Some(v) = payload.start_date {
-        active.start_date = Set(naive_to_time_date(v));
+        active.start_date = Set(v);
     }
     if let Some(v) = payload.end_date {
-        active.end_date = Set(naive_to_time_date(v));
+        active.end_date = Set(v);
     }
     active.updated_at = Set(chrono::Utc::now().into());
 

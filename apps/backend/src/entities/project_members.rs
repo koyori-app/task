@@ -17,35 +17,3 @@ pub enum ProjectRole {
 }
 
 pub use super::_generated::project_members::*;
-
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::projects::Entity",
-        from = "Column::ProjectId",
-        to = "super::projects::Column::Id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    Projects,
-    #[sea_orm(
-        belongs_to = "super::users::Entity",
-        from = "Column::UserId",
-        to = "super::users::Column::Id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    Users,
-}
-
-impl Related<super::projects::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Projects.def()
-    }
-}
-
-impl Related<super::users::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Users.def()
-    }
-}

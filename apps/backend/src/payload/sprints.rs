@@ -60,7 +60,7 @@ pub struct SprintTaskCounts {
 #[derive(Serialize, ToSchema)]
 pub struct BurndownPoint {
     #[schema(value_type = String, example = "2026-06-01")]
-    pub date: time::Date,
+    pub date: NaiveDate,
     pub ideal_remaining: i32,
     pub actual_remaining: usize,
 }
@@ -75,9 +75,9 @@ pub struct SprintResponse {
     #[schema(nullable)]
     pub goal: Option<String>,
     #[schema(value_type = String, example = "2026-06-01")]
-    pub start_date: time::Date,
+    pub start_date: NaiveDate,
     #[schema(value_type = String, example = "2026-06-14")]
-    pub end_date: time::Date,
+    pub end_date: NaiveDate,
     pub status: SprintStatus,
     #[schema(value_type = String, format = "uuid")]
     pub created_by: Uuid,

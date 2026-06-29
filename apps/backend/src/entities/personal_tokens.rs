@@ -13,35 +13,3 @@ pub fn parse_allowed_project_ids(
 }
 
 pub use super::_generated::personal_tokens::*;
-
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::users::Entity",
-        from = "Column::UserId",
-        to = "super::users::Column::Id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    Users,
-    #[sea_orm(
-        belongs_to = "super::tenants::Entity",
-        from = "Column::TenantId",
-        to = "super::tenants::Column::Id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    Tenants,
-}
-
-impl Related<super::users::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Users.def()
-    }
-}
-
-impl Related<super::tenants::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Tenants.def()
-    }
-}

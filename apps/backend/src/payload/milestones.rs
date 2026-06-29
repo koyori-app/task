@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -11,7 +11,7 @@ pub struct CreateMilestoneRequest {
     #[validate(length(min = 1, max = 255))]
     pub name: String,
     pub description: Option<String>,
-    pub due_date: time::Date,
+    pub due_date: NaiveDate,
 }
 
 #[derive(Validate, Deserialize, ToSchema)]
@@ -21,7 +21,7 @@ pub struct UpdateMilestoneRequest {
     pub description: Option<String>,
     #[serde(default)]
     pub clear_description: bool,
-    pub due_date: Option<time::Date>,
+    pub due_date: Option<NaiveDate>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -34,7 +34,7 @@ pub struct MilestoneResponse {
     #[schema(nullable)]
     pub description: Option<String>,
     #[schema(value_type = String, example = "2026-07-01")]
-    pub due_date: time::Date,
+    pub due_date: NaiveDate,
     #[schema(value_type = String, format = "uuid")]
     pub created_by: Uuid,
     #[schema(value_type = String, format = "date-time")]

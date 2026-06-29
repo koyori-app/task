@@ -30,66 +30,6 @@ pub fn validate_project_folder_constraint(
     Ok(())
 }
 
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::tenants::Entity",
-        from = "Column::TenantId",
-        to = "super::tenants::Column::Id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    Tenants,
-    #[sea_orm(
-        belongs_to = "super::projects::Entity",
-        from = "Column::ProjectId",
-        to = "super::projects::Column::Id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    Projects,
-    #[sea_orm(
-        belongs_to = "super::users::Entity",
-        from = "Column::UploaderId",
-        to = "super::users::Column::Id",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Users,
-    #[sea_orm(
-        belongs_to = "super::drive_folders::Entity",
-        from = "Column::FolderId",
-        to = "super::drive_folders::Column::Id",
-        on_update = "NoAction",
-        on_delete = "SetNull"
-    )]
-    DriveFolders,
-}
-
-impl Related<super::tenants::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Tenants.def()
-    }
-}
-
-impl Related<super::projects::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Projects.def()
-    }
-}
-
-impl Related<super::users::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Users.def()
-    }
-}
-
-impl Related<super::drive_folders::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::DriveFolders.def()
-    }
-}
-
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     async fn before_save<C>(self, _db: &C, _insert: bool) -> Result<Self, DbErr>

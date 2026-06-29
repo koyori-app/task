@@ -12,7 +12,7 @@ pub struct Model {
     pub project_id: Uuid,
     #[sea_orm(unique_key = "project_custom_fields_project_id_name_key")]
     pub name: String,
-    pub field_type: String,
+    pub field_type: super::super::project_custom_fields::CustomFieldType,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub options: Option<Json>,
     pub is_required: bool,

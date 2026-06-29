@@ -16,7 +16,7 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub description: Option<String>,
     pub status_id: Uuid,
-    pub priority: String,
+    pub priority: super::super::tasks::TaskPriority,
     pub progress_pct: i16,
     pub parent_task_id: Option<Uuid>,
     pub milestone_id: Option<Uuid>,

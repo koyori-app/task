@@ -12,7 +12,7 @@ pub struct Model {
     pub shared_with_user_id: Option<Uuid>,
     #[sea_orm(unique)]
     pub share_token: Option<String>,
-    pub permission: String,
+    pub permission: super::super::drive_folder_shares::SharePermission,
     pub created_by: Uuid,
     pub expires_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
@@ -43,5 +43,3 @@ pub struct Model {
     )]
     pub users_1: HasOne<super::users::Entity>,
 }
-
-impl ActiveModelBehavior for ActiveModel {}

@@ -11,7 +11,7 @@ pub struct Model {
     pub name: String,
     pub size: i64,
     pub mime_type: String,
-    pub storage_type: String,
+    pub storage_type: super::super::drive_files::StorageType,
     pub storage_key: String,
     pub tenant_id: Uuid,
     pub project_id: Option<Uuid>,
@@ -53,5 +53,3 @@ pub struct Model {
     )]
     pub users: HasOne<super::users::Entity>,
 }
-
-impl ActiveModelBehavior for ActiveModel {}

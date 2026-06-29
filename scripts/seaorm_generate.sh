@@ -30,3 +30,6 @@ sea-orm-cli generate entity \
   --date-time-crate chrono \
   --with-prelude none \
   --impl-active-model-behavior
+
+# Re-apply hand-written enum / JSON column types onto the pure cli output.
+"$ROOT/scripts/seaorm_postprocess.sh"

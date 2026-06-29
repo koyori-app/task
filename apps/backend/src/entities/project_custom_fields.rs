@@ -24,21 +24,3 @@ pub enum CustomFieldType {
 }
 
 pub use super::_generated::project_custom_fields::*;
-
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::projects::Entity",
-        from = "Column::ProjectId",
-        to = "super::projects::Column::Id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    Projects,
-}
-
-impl Related<super::projects::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Projects.def()
-    }
-}

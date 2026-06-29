@@ -30,40 +30,6 @@ pub fn validate_share_target_xor(
     Ok(())
 }
 
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::drive_folders::Entity",
-        from = "Column::FolderId",
-        to = "super::drive_folders::Column::Id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    DriveFolders,
-    #[sea_orm(
-        belongs_to = "super::users::Entity",
-        from = "Column::SharedWithUserId",
-        to = "super::users::Column::Id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    SharedWithUser,
-    #[sea_orm(
-        belongs_to = "super::users::Entity",
-        from = "Column::CreatedBy",
-        to = "super::users::Column::Id",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    CreatedByUser,
-}
-
-impl Related<super::drive_folders::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::DriveFolders.def()
-    }
-}
-
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     async fn before_save<C>(self, _db: &C, _insert: bool) -> Result<Self, DbErr>

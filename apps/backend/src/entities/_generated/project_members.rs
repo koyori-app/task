@@ -12,7 +12,7 @@ pub struct Model {
     pub project_id: Uuid,
     #[sea_orm(unique_key = "project_members_project_id_user_id_key")]
     pub user_id: Uuid,
-    pub role: String,
+    pub role: super::super::project_members::ProjectRole,
     #[sea_orm(
         belongs_to,
         from = "project_id",
