@@ -2,17 +2,33 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::entities::project_members::ProjectRole;
-
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "project_members")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(unique_key = "project_members_project_id_user_id_key")]
     pub project_id: Uuid,
+    #[sea_orm(unique_key = "project_members_project_id_user_id_key")]
     pub user_id: Uuid,
-    pub role: ProjectRole,
+    pub role: String,
+    #[sea_orm(
+        belongs_to,
+        from = "project_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub projects: HasOne<super::projects::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "user_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

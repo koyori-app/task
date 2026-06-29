@@ -9,7 +9,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub user_id: Uuid,
-    #[sea_orm(column_type = "VarBinary(StringLen::None)")]
+    #[sea_orm(column_type = "VarBinary(StringLen::None)", unique)]
     pub credential_id: Vec<u8>,
     #[sea_orm(column_type = "VarBinary(StringLen::None)")]
     pub public_key: Vec<u8>,
@@ -17,9 +17,16 @@ pub struct Model {
     pub aaguid: Option<Vec<u8>>,
     pub sign_count: i64,
     pub name: String,
-    #[sea_orm(nullable)]
     pub last_used_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        from = "user_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

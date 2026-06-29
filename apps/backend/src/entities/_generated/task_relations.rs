@@ -8,9 +8,29 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(unique_key = "task_relations_blocker_task_id_blocked_task_id_key")]
     pub blocker_task_id: Uuid,
+    #[sea_orm(unique_key = "task_relations_blocker_task_id_blocked_task_id_key")]
     pub blocked_task_id: Uuid,
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        relation_enum = "Tasks2",
+        from = "blocked_task_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub tasks_2: HasOne<super::tasks::Entity>,
+    #[sea_orm(
+        belongs_to,
+        relation_enum = "Tasks1",
+        from = "blocker_task_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub tasks_1: HasOne<super::tasks::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

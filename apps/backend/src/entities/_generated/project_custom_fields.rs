@@ -2,22 +2,32 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::entities::project_custom_fields::CustomFieldType;
-
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "project_custom_fields")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(unique_key = "project_custom_fields_project_id_name_key")]
     pub project_id: Uuid,
+    #[sea_orm(unique_key = "project_custom_fields_project_id_name_key")]
     pub name: String,
-    pub field_type: CustomFieldType,
+    pub field_type: String,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub options: Option<Json>,
     pub is_required: bool,
     pub position: i16,
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        from = "project_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub projects: HasOne<super::projects::Entity>,
+    #[sea_orm(has_many, via = "task_custom_field_values")]
+    pub tasks: HasMany<super::tasks::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

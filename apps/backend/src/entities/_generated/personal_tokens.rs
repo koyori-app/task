@@ -2,8 +2,6 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::entities::scopes::ScopeList;
-
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "personal_tokens")]
@@ -12,15 +10,32 @@ pub struct Model {
     pub id: Uuid,
     pub name: String,
     pub token_last_four: String,
-    #[sea_orm(indexed)]
     pub token_hash: String,
     pub expires_at: Option<DateTimeWithTimeZone>,
     pub last_used_at: Option<DateTimeWithTimeZone>,
     pub revoked: bool,
     pub user_id: Uuid,
-    pub scopes: ScopeList,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub scopes: Json,
     pub tenant_id: Uuid,
-    pub allowed_project_ids: Option<serde_json::Value>,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub allowed_project_ids: Option<Json>,
+    #[sea_orm(
+        belongs_to,
+        from = "tenant_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub tenants: HasOne<super::tenants::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "user_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

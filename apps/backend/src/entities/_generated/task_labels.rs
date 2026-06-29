@@ -10,6 +10,22 @@ pub struct Model {
     pub task_id: Uuid,
     #[sea_orm(primary_key, auto_increment = false)]
     pub label_id: Uuid,
+    #[sea_orm(
+        belongs_to,
+        from = "label_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub labels: HasOne<super::labels::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "task_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub tasks: HasOne<super::tasks::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

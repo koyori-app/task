@@ -2,24 +2,41 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::entities::sprints::SprintStatus;
-
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "sprints")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(unique)]
     pub project_id: Uuid,
     pub name: String,
-    #[sea_orm(nullable)]
+    #[sea_orm(column_type = "Text", nullable)]
     pub goal: Option<String>,
-    pub start_date: TimeDate,
-    pub end_date: TimeDate,
-    pub status: SprintStatus,
+    pub start_date: Date,
+    pub end_date: Date,
+    pub status: String,
     pub created_by: Uuid,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        from = "project_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub projects: HasOne<super::projects::Entity>,
+    #[sea_orm(has_many)]
+    pub tasks: HasMany<super::tasks::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "created_by",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

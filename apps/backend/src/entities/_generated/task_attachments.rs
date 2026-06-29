@@ -8,10 +8,36 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(unique_key = "task_attachments_task_id_drive_file_id_key")]
     pub task_id: Uuid,
+    #[sea_orm(unique_key = "task_attachments_task_id_drive_file_id_key")]
     pub drive_file_id: Uuid,
     pub created_by: Uuid,
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        from = "drive_file_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub drive_files: HasOne<super::drive_files::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "task_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub tasks: HasOne<super::tasks::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "created_by",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

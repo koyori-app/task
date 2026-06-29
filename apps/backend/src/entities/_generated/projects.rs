@@ -9,17 +9,51 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub name: String,
+    #[sea_orm(column_type = "Text")]
     pub description: String,
+    #[sea_orm(unique_key = "idx_projects_personal_owner")]
     pub tenant_id: Uuid,
-    #[sea_orm(nullable)]
     pub icon_emoji: Option<String>,
-    #[sea_orm(nullable)]
     pub icon_url: Option<String>,
-
+    #[sea_orm(unique_key = "projects_key_tenant_unique")]
     pub key: String,
     pub is_personal: bool,
-    #[sea_orm(nullable)]
+    #[sea_orm(unique_key = "idx_projects_personal_owner")]
     pub personal_owner_id: Option<Uuid>,
+    #[sea_orm(has_many)]
+    pub drive_files: HasMany<super::drive_files::Entity>,
+    #[sea_orm(has_many)]
+    pub drive_folders: HasMany<super::drive_folders::Entity>,
+    #[sea_orm(has_one)]
+    pub github_integrations: HasOne<super::github_integrations::Entity>,
+    #[sea_orm(has_many)]
+    pub labels: HasMany<super::labels::Entity>,
+    #[sea_orm(has_many)]
+    pub milestones: HasMany<super::milestones::Entity>,
+    #[sea_orm(has_many)]
+    pub project_custom_fields: HasMany<super::project_custom_fields::Entity>,
+    #[sea_orm(has_many)]
+    pub project_members: HasMany<super::project_members::Entity>,
+    #[sea_orm(has_many)]
+    pub project_statuses: HasMany<super::project_statuses::Entity>,
+    #[sea_orm(has_one)]
+    pub project_task_counters: HasOne<super::project_task_counters::Entity>,
+    #[sea_orm(has_many)]
+    pub project_task_views: HasMany<super::project_task_views::Entity>,
+    #[sea_orm(has_one)]
+    pub sprints: HasOne<super::sprints::Entity>,
+    #[sea_orm(has_many)]
+    pub tasks: HasMany<super::tasks::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "tenant_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub tenants: HasOne<super::tenants::Entity>,
+    #[sea_orm(has_many, via = "notification_settings")]
+    pub users: HasMany<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

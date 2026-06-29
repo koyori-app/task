@@ -10,8 +10,8 @@ pub struct Model {
     pub singleton: bool,
     pub user_registration_enabled: bool,
     pub drive_default_quota_mb: i64,
-    pub drive_system_max_quota_mb: i64,
     pub updated_at: DateTimeWithTimeZone,
+    pub drive_system_max_quota_mb: i64,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -13,7 +13,6 @@ sea-orm = { version = "2.0.0-rc.38", features = [
     "entity-registry",
     "schema-sync",
     "with-chrono",
-    "with-time",
     "postgres-array",
 ] }
 serde = { version = "1.0.228", features = ["derive"] }

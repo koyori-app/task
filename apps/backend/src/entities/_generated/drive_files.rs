@@ -2,8 +2,6 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::entities::drive_files::StorageType;
-
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "drive_files")]
@@ -13,14 +11,47 @@ pub struct Model {
     pub name: String,
     pub size: i64,
     pub mime_type: String,
-    pub storage_type: StorageType,
+    pub storage_type: String,
     pub storage_key: String,
     pub tenant_id: Uuid,
-    #[sea_orm(nullable)]
     pub project_id: Option<Uuid>,
     pub uploader_id: Uuid,
-    #[sea_orm(nullable)]
     pub folder_id: Option<Uuid>,
-    #[sea_orm(default_expr = "Expr::current_timestamp()")]
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        from = "folder_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "SetNull"
+    )]
+    pub drive_folders: HasOne<super::drive_folders::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "project_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub projects: HasOne<super::projects::Entity>,
+    #[sea_orm(has_many)]
+    pub task_attachments: HasMany<super::task_attachments::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "tenant_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub tenants: HasOne<super::tenants::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "uploader_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
+
+impl ActiveModelBehavior for ActiveModel {}

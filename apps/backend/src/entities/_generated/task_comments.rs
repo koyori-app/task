@@ -10,13 +10,37 @@ pub struct Model {
     pub id: Uuid,
     pub task_id: Uuid,
     pub user_id: Uuid,
+    #[sea_orm(column_type = "Text")]
     pub body: String,
-    #[sea_orm(nullable)]
     pub parent_comment_id: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
-    #[sea_orm(nullable)]
     pub deleted_at: Option<DateTimeWithTimeZone>,
+    #[sea_orm(
+        self_ref,
+        relation_enum = "SelfRef",
+        from = "parent_comment_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "SetNull"
+    )]
+    pub task_comments: HasOne<Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "task_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub tasks: HasOne<super::tasks::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "user_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

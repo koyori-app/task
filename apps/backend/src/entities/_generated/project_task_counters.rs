@@ -9,6 +9,14 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub project_id: Uuid,
     pub last_seq: i32,
+    #[sea_orm(
+        belongs_to,
+        from = "project_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub projects: HasOne<super::projects::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

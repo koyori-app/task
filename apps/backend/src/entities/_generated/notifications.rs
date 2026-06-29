@@ -9,14 +9,28 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub user_id: Uuid,
-    #[sea_orm(nullable)]
     pub task_id: Option<Uuid>,
     pub notification_type: String,
     #[sea_orm(column_type = "JsonBinary")]
     pub payload: Json,
-    #[sea_orm(nullable)]
     pub read_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        from = "task_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub tasks: HasOne<super::tasks::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "user_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

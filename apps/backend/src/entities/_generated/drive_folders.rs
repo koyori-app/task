@@ -9,14 +9,48 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub name: String,
-    #[sea_orm(nullable)]
     pub parent_id: Option<Uuid>,
     pub tenant_id: Uuid,
-    #[sea_orm(nullable)]
     pub project_id: Option<Uuid>,
     pub created_by: Uuid,
-    #[sea_orm(default_expr = "Expr::current_timestamp()")]
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(has_many)]
+    pub drive_files: HasMany<super::drive_files::Entity>,
+    #[sea_orm(has_many)]
+    pub drive_folder_shares: HasMany<super::drive_folder_shares::Entity>,
+    #[sea_orm(
+        self_ref,
+        relation_enum = "SelfRef",
+        from = "parent_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "SetNull"
+    )]
+    pub drive_folders: HasOne<Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "project_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub projects: HasOne<super::projects::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "tenant_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub tenants: HasOne<super::tenants::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "created_by",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

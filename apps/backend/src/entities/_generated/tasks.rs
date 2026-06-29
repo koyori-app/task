@@ -2,42 +2,110 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::entities::tasks::TaskPriority;
-
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "tasks")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(unique_key = "tasks_project_id_seq_id_key")]
     pub project_id: Uuid,
+    #[sea_orm(unique_key = "tasks_project_id_seq_id_key")]
     pub seq_id: i32,
     pub title: String,
-    #[sea_orm(nullable)]
+    #[sea_orm(column_type = "Text", nullable)]
     pub description: Option<String>,
     pub status_id: Uuid,
-    pub priority: TaskPriority,
+    pub priority: String,
     pub progress_pct: i16,
-    #[sea_orm(nullable)]
     pub parent_task_id: Option<Uuid>,
-    #[sea_orm(nullable)]
     pub milestone_id: Option<Uuid>,
-    #[sea_orm(nullable)]
-    pub sprint_id: Option<Uuid>,
-    #[sea_orm(nullable)]
     pub soft_deadline: Option<DateTimeWithTimeZone>,
-    #[sea_orm(nullable)]
     pub hard_deadline: Option<DateTimeWithTimeZone>,
-    #[sea_orm(nullable)]
     pub estimated_minutes: Option<i32>,
     pub is_archived: bool,
     pub created_by: Uuid,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
-    #[sea_orm(nullable)]
-    pub completed_at: Option<DateTimeWithTimeZone>,
-    #[sea_orm(nullable)]
     pub deleted_at: Option<DateTimeWithTimeZone>,
+    pub sprint_id: Option<Uuid>,
+    pub completed_at: Option<DateTimeWithTimeZone>,
+    #[sea_orm(
+        ignore,
+        column_type = "custom(\"tsvector\")",
+        select_as = "text",
+        nullable
+    )]
+    pub search_vector: Option<String>,
+    #[sea_orm(
+        belongs_to,
+        from = "milestone_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "SetNull"
+    )]
+    pub milestones: HasOne<super::milestones::Entity>,
+    #[sea_orm(has_many)]
+    pub notifications: HasMany<super::notifications::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "status_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    pub project_statuses: HasOne<super::project_statuses::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "project_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub projects: HasOne<super::projects::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "sprint_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "SetNull"
+    )]
+    pub sprints: HasOne<super::sprints::Entity>,
+    #[sea_orm(has_many)]
+    pub task_activities: HasMany<super::task_activities::Entity>,
+    #[sea_orm(has_many)]
+    pub task_assignees: HasMany<super::task_assignees::Entity>,
+    #[sea_orm(has_many)]
+    pub task_attachments: HasMany<super::task_attachments::Entity>,
+    #[sea_orm(has_many)]
+    pub task_comments: HasMany<super::task_comments::Entity>,
+    #[sea_orm(has_many)]
+    pub task_timers: HasMany<super::task_timers::Entity>,
+    #[sea_orm(has_many)]
+    pub task_watchers: HasMany<super::task_watchers::Entity>,
+    #[sea_orm(
+        self_ref,
+        relation_enum = "SelfRef",
+        from = "parent_task_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "SetNull"
+    )]
+    pub tasks: HasOne<Entity>,
+    #[sea_orm(has_many)]
+    pub time_logs: HasMany<super::time_logs::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "created_by",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    pub users: HasOne<super::users::Entity>,
+    #[sea_orm(has_many, via = "task_labels")]
+    pub labels: HasMany<super::labels::Entity>,
+    #[sea_orm(has_many, via = "task_custom_field_values")]
+    pub project_custom_fields: HasMany<super::project_custom_fields::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

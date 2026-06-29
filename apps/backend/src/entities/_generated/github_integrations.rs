@@ -13,10 +13,27 @@ pub struct Model {
     pub installation_id: i64,
     pub repo_owner: String,
     pub repo_name: String,
+    #[sea_orm(column_type = "Text")]
     pub access_token_enc: String,
     pub token_expires_at: DateTimeWithTimeZone,
     pub created_by: Uuid,
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        from = "project_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub projects: HasOne<super::projects::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "created_by",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

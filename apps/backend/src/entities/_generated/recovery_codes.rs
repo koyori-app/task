@@ -10,10 +10,16 @@ pub struct Model {
     pub id: Uuid,
     pub user_id: Uuid,
     pub code_hash: String,
-
-    #[sea_orm(nullable)]
     pub used_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        from = "user_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

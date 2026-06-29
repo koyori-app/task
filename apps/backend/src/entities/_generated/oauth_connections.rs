@@ -9,20 +9,28 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub user_id: Uuid,
+    #[sea_orm(unique_key = "oauth_connections_provider_provider_user_id_instance_url_key")]
     pub provider: String,
+    #[sea_orm(unique_key = "oauth_connections_provider_provider_user_id_instance_url_key")]
     pub provider_user_id: String,
-    #[sea_orm(nullable)]
     pub provider_email: Option<String>,
-    #[sea_orm(nullable)]
+    #[sea_orm(unique_key = "oauth_connections_provider_provider_user_id_instance_url_key")]
     pub instance_url: Option<String>,
-    #[sea_orm(nullable)]
+    #[sea_orm(column_type = "Text", nullable)]
     pub access_token_enc: Option<String>,
-    #[sea_orm(nullable)]
+    #[sea_orm(column_type = "Text", nullable)]
     pub refresh_token_enc: Option<String>,
-    #[sea_orm(nullable)]
     pub token_expires_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        from = "user_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

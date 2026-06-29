@@ -12,11 +12,29 @@ pub struct Model {
     pub created_by: Uuid,
     pub name: String,
     pub is_shared: bool,
+    #[sea_orm(column_type = "JsonBinary")]
     pub filters: Json,
+    #[sea_orm(column_type = "JsonBinary")]
     pub sort: Json,
     pub view_type: String,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        from = "project_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub projects: HasOne<super::projects::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "created_by",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

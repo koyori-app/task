@@ -2,8 +2,6 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::entities::drive_folder_shares::SharePermission;
-
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "drive_folder_shares")]
@@ -11,14 +9,39 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub folder_id: Uuid,
-    #[sea_orm(nullable)]
     pub shared_with_user_id: Option<Uuid>,
-    #[sea_orm(nullable, unique)]
+    #[sea_orm(unique)]
     pub share_token: Option<String>,
-    pub permission: SharePermission,
+    pub permission: String,
     pub created_by: Uuid,
-    #[sea_orm(nullable)]
     pub expires_at: Option<DateTimeWithTimeZone>,
-    #[sea_orm(default_expr = "Expr::current_timestamp()")]
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        from = "folder_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub drive_folders: HasOne<super::drive_folders::Entity>,
+    #[sea_orm(
+        belongs_to,
+        relation_enum = "Users2",
+        from = "created_by",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    pub users_2: HasOne<super::users::Entity>,
+    #[sea_orm(
+        belongs_to,
+        relation_enum = "Users1",
+        from = "shared_with_user_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub users_1: HasOne<super::users::Entity>,
 }
+
+impl ActiveModelBehavior for ActiveModel {}

@@ -8,22 +8,33 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    #[sea_orm(nullable)]
     pub actor_id: Option<Uuid>,
     pub actor_type: String,
     pub action: String,
     pub resource_type: String,
     pub resource_id: String,
-    #[sea_orm(nullable)]
     pub tenant_id: Option<Uuid>,
-    #[sea_orm(nullable)]
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub metadata: Option<Json>,
-    #[sea_orm(nullable)]
     pub ip_address: Option<String>,
-    #[sea_orm(nullable)]
     pub user_agent: Option<String>,
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        from = "tenant_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "SetNull"
+    )]
+    pub tenants: HasOne<super::tenants::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "actor_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "SetNull"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

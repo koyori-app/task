@@ -10,12 +10,30 @@ pub struct Model {
     pub id: Uuid,
     pub project_id: Uuid,
     pub name: String,
-    #[sea_orm(nullable)]
+    #[sea_orm(column_type = "Text", nullable)]
     pub description: Option<String>,
-    pub due_date: TimeDate,
+    pub due_date: Date,
     pub created_by: Uuid,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        from = "project_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub projects: HasOne<super::projects::Entity>,
+    #[sea_orm(has_many)]
+    pub tasks: HasMany<super::tasks::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "created_by",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -12,9 +12,25 @@ pub struct Model {
     pub user_id: Uuid,
     pub logged_minutes: i32,
     pub logged_at: Date,
-    #[sea_orm(nullable)]
+    #[sea_orm(column_type = "Text", nullable)]
     pub note: Option<String>,
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(
+        belongs_to,
+        from = "task_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub tasks: HasOne<super::tasks::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "user_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

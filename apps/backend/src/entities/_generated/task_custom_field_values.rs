@@ -10,8 +10,24 @@ pub struct Model {
     pub task_id: Uuid,
     #[sea_orm(primary_key, auto_increment = false)]
     pub field_id: Uuid,
-    #[sea_orm(nullable)]
+    #[sea_orm(column_type = "Text", nullable)]
     pub value: Option<String>,
+    #[sea_orm(
+        belongs_to,
+        from = "field_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub project_custom_fields: HasOne<super::project_custom_fields::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "task_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub tasks: HasOne<super::tasks::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

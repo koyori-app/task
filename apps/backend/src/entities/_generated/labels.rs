@@ -8,13 +8,25 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(unique_key = "labels_project_name_unique")]
     pub name: String,
+    #[sea_orm(column_type = "Text")]
     pub description: String,
     pub color: String,
-    #[sea_orm(nullable)]
+    #[sea_orm(column_type = "Text", nullable)]
     pub icon_url: Option<String>,
-    #[sea_orm(nullable)]
+    #[sea_orm(unique_key = "labels_project_name_unique")]
     pub project_id: Option<Uuid>,
+    #[sea_orm(
+        belongs_to,
+        from = "project_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub projects: HasOne<super::projects::Entity>,
+    #[sea_orm(has_many, via = "task_labels")]
+    pub tasks: HasMany<super::tasks::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
