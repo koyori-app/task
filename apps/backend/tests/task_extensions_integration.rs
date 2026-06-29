@@ -113,6 +113,7 @@ async fn insert_drive_file(app: &TestApp, tenant_id: Uuid, uploader_id: Uuid) ->
         project_id: Set(None),
         uploader_id: Set(uploader_id),
         folder_id: Set(None),
+        created_at: Set(chrono::Utc::now().into()),
         ..Default::default()
     }
     .insert(&app.state.db)
