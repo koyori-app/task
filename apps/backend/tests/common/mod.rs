@@ -121,16 +121,6 @@ async fn ensure_schema(db: &DatabaseConnection) {
             let _ = db
                 .execute_unprepared("DROP INDEX IF EXISTS idx_projects_personal_owner")
                 .await;
-            let _ = db
-                .execute_unprepared(
-                    "ALTER TABLE projects DROP CONSTRAINT IF EXISTS \"idx-projects-projects_key_tenant_unique\"",
-                )
-                .await;
-            let _ = db
-                .execute_unprepared(
-                    "DROP INDEX IF EXISTS \"idx-projects-projects_key_tenant_unique\"",
-                )
-                .await;
 
             db.get_schema_registry("backend::entities::*")
                 .sync(db)
@@ -198,12 +188,6 @@ ALTER TABLE projects
 CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal_owner
     ON projects(tenant_id, personal_owner_id)
     WHERE is_personal = true;
--- sync は entity の unique_key=key 単独で "idx-projects-projects_key_tenant_unique" を作るが、
--- 本来の制約は (tenant_id, key) の複合。migration と揃えるため同名で貼り直す。
--- sync が制約・インデックスどちらで作っても消せるよう両形式を DROP してから作る。
-ALTER TABLE projects DROP CONSTRAINT IF EXISTS "idx-projects-projects_key_tenant_unique";
-DROP INDEX IF EXISTS "idx-projects-projects_key_tenant_unique";
-CREATE UNIQUE INDEX "idx-projects-projects_key_tenant_unique" ON projects(tenant_id, key);
 "#,
             )
             .await
@@ -598,7 +582,9 @@ impl TestApp {
             tenant_id: Set(tenant_id),
             icon_emoji: Set(None),
             icon_url: Set(None),
-            key: Set("GHUB".into()),
+            // テナントごとに一意なキー。project key 制約 ^[A-Z][A-Z0-9]{1,9}$ を満たす。
+            // 全テスト共通の "GHUB" 固定だと、同一 DB を共有する複数テストバイナリ間で衝突する。
+            key: Set(format!("P{}", suffix.to_uppercase())),
             is_personal: Set(false),
             personal_owner_id: Set(None),
         }
