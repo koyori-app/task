@@ -58,5 +58,3 @@ jobs:
       - name: Run lint
         run: pnpm lint -- --format=github
         working-directory: apps/frontend
-        # TEMP waiver: keep frontend lint visible while existing violations are cleaned up separately.
-        continue-on-error: true
