@@ -122,7 +122,14 @@ async fn ensure_schema(db: &DatabaseConnection) {
                 .execute_unprepared("DROP INDEX IF EXISTS idx_projects_personal_owner")
                 .await;
             let _ = db
-                .execute_unprepared("DROP INDEX IF EXISTS projects_key_tenant_unique")
+                .execute_unprepared(
+                    "ALTER TABLE projects DROP CONSTRAINT IF EXISTS \"idx-projects-projects_key_tenant_unique\"",
+                )
+                .await;
+            let _ = db
+                .execute_unprepared(
+                    "DROP INDEX IF EXISTS \"idx-projects-projects_key_tenant_unique\"",
+                )
                 .await;
 
             db.get_schema_registry("backend::entities::*")
@@ -191,10 +198,12 @@ ALTER TABLE projects
 CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal_owner
     ON projects(tenant_id, personal_owner_id)
     WHERE is_personal = true;
--- entity の unique_key は key 単独で sync されるが、本来の制約は (tenant_id, key) の複合。
--- migration と揃えるため貼り直す。
-DROP INDEX IF EXISTS projects_key_tenant_unique;
-CREATE UNIQUE INDEX IF NOT EXISTS projects_key_tenant_unique ON projects(tenant_id, key);
+-- sync は entity の unique_key=key 単独で "idx-projects-projects_key_tenant_unique" を作るが、
+-- 本来の制約は (tenant_id, key) の複合。migration と揃えるため同名で貼り直す。
+-- sync が制約・インデックスどちらで作っても消せるよう両形式を DROP してから作る。
+ALTER TABLE projects DROP CONSTRAINT IF EXISTS "idx-projects-projects_key_tenant_unique";
+DROP INDEX IF EXISTS "idx-projects-projects_key_tenant_unique";
+CREATE UNIQUE INDEX "idx-projects-projects_key_tenant_unique" ON projects(tenant_id, key);
 "#,
             )
             .await
