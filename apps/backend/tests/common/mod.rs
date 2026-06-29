@@ -188,6 +188,10 @@ ALTER TABLE projects
 CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal_owner
     ON projects(tenant_id, personal_owner_id)
     WHERE is_personal = true;
+-- entity の unique_key は key 単独で sync されるが、本来の制約は (tenant_id, key) の複合。
+-- migration と揃えるため貼り直す。
+DROP INDEX IF EXISTS projects_key_tenant_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS projects_key_tenant_unique ON projects(tenant_id, key);
 "#,
             )
             .await
