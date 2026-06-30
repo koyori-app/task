@@ -1,8 +1,8 @@
 mod common;
 
 use axum::http::StatusCode;
-use backend::entities::{project_statuses, task_timers, tasks, time_logs};
 use common::{TestApp, TestTenantProject, insert_user};
+use entity::{project_statuses, task_timers, tasks, time_logs};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
@@ -37,7 +37,7 @@ async fn setup_task_fixture(app: &TestApp, owner_id: Uuid) -> TaskFixture {
         title: Set("Time tracking test".into()),
         description: Set(None),
         status_id: Set(status_id),
-        priority: Set(backend::entities::tasks::TaskPriority::Medium),
+        priority: Set(entity::tasks::TaskPriority::Medium),
         progress_pct: Set(0),
         parent_task_id: Set(None),
         milestone_id: Set(None),
@@ -175,11 +175,11 @@ async fn time_tracking_integration_suite() {
 
     // 7. 他人のログ編集は 403（メンバーとして追加）
     let member = insert_user(&app.state.db, false, false).await;
-    backend::entities::project_members::ActiveModel {
+    entity::project_members::ActiveModel {
         id: Set(Uuid::new_v4()),
         project_id: Set(fixture.tp.project_id),
         user_id: Set(member.id),
-        role: Set(backend::entities::project_members::ProjectRole::Member),
+        role: Set(entity::project_members::ProjectRole::Member),
     }
     .insert(&app.state.db)
     .await

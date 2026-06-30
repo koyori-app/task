@@ -20,11 +20,11 @@ if [[ -z "$TABLES" ]]; then
   exit 1
 fi
 
-mkdir -p "$BACKEND/src/entities/_generated"
+mkdir -p "$BACKEND/crates/entity/src/_generated"
 
 sea-orm-cli generate entity \
   --database-url "$database_url" \
-  --output-dir "$BACKEND/src/entities/_generated" \
+  --output-dir "$BACKEND/crates/entity/src/_generated" \
   --tables "$TABLES" \
   --entity-format dense \
   --date-time-crate chrono \

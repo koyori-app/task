@@ -5,7 +5,7 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::project_custom_fields;
+use entity::project_custom_fields;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ProjectCustomFieldResponse {

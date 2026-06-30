@@ -225,7 +225,7 @@ async fn sprints_integration_suite() {
         .await;
     assert_eq!(complete.status(), StatusCode::OK);
 
-    use backend::entities::tasks;
+    use entity::tasks;
     let task2_row = tasks::Entity::find_by_id(task2)
         .one(&app.state.db)
         .await

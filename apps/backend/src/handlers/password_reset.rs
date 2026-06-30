@@ -8,6 +8,7 @@ use sea_orm::{
 };
 use tracing::warn;
 
+use crate::AppState;
 use crate::extractors::CurrentUser;
 use crate::jobs::{PasswordResetEmailJob, password_reset_email};
 use crate::openapi::{
@@ -18,10 +19,7 @@ use crate::payload::password_reset::*;
 use crate::utils::auth::{AuthError, create_password_hash, verify_password};
 use crate::utils::email::normalize_email;
 use crate::utils::{password_reset, password_reset_log};
-use crate::{
-    AppState,
-    entities::{personal_tokens, users},
-};
+use entity::{personal_tokens, users};
 
 type AuthSession = axum_session::Session<SessionRedisPool>;
 

@@ -15,14 +15,14 @@ use sea_orm::{
 
 use crate::AppState;
 use crate::auth_helpers::require_member_or_owner;
-use crate::entities::sprints::SprintStatus;
-use crate::entities::{project_statuses, sprints, tasks};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::payload::sprints::*;
 use crate::payload::tasks::TaskResponse;
 use crate::utils::db::is_postgres_unique_violation;
+use entity::sprints::SprintStatus;
+use entity::{project_statuses, sprints, tasks};
 
 fn validate_date_range(start: NaiveDate, end: NaiveDate) -> Result<(), AppError> {
     if start > end {
@@ -186,7 +186,7 @@ pub async fn list_sprints(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Query(q): Query<ListSprintsQuery>,
 ) -> Result<Json<Vec<SprintResponse>>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadSprint)?;
+    auth.require_scope(entity::scopes::Scope::ReadSprint)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -229,7 +229,7 @@ pub async fn create_sprint(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateSprintRequest>>,
 ) -> Result<(StatusCode, Json<SprintResponse>), AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
+    auth.require_scope(entity::scopes::Scope::WriteSprint)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -274,7 +274,7 @@ pub async fn get_sprint(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<SprintDetail>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadSprint)?;
+    auth.require_scope(entity::scopes::Scope::ReadSprint)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -306,7 +306,7 @@ pub async fn update_sprint(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateSprintRequest>>,
 ) -> Result<Json<SprintResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
+    auth.require_scope(entity::scopes::Scope::WriteSprint)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -370,7 +370,7 @@ pub async fn delete_sprint(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
+    auth.require_scope(entity::scopes::Scope::WriteSprint)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -413,7 +413,7 @@ pub async fn start_sprint(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<SprintResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
+    auth.require_scope(entity::scopes::Scope::WriteSprint)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -474,8 +474,8 @@ pub async fn complete_sprint(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Json(payload): Json<CompleteSprintRequest>,
 ) -> Result<Json<SprintResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteSprint)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -579,8 +579,8 @@ pub async fn assign_tasks_to_sprint(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<AssignTasksRequest>>,
 ) -> Result<Json<Vec<TaskResponse>>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteSprint)?;
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteSprint)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;

@@ -1,6 +1,5 @@
 use crate::AppState;
 use crate::auth_helpers::require_member_or_owner;
-use crate::entities::labels;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -11,6 +10,7 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
+use entity::labels;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
     prelude::Uuid,
@@ -37,7 +37,7 @@ pub async fn list_labels(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Vec<LabelResponse>>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -70,7 +70,7 @@ pub async fn create_label(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateLabelRequest>>,
 ) -> Result<(StatusCode, Json<LabelResponse>), AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -110,7 +110,7 @@ pub async fn update_label(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateLabelRequest>>,
 ) -> Result<Json<LabelResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -158,7 +158,7 @@ pub async fn delete_label(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -193,7 +193,7 @@ pub async fn export_labels(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<LabelExport>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -237,7 +237,7 @@ pub async fn import_labels(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<ImportLabelRequest>>,
 ) -> Result<Json<Vec<LabelResponse>>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;

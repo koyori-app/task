@@ -12,7 +12,6 @@ use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
 use crate::AppState;
-use crate::entities::{github_integrations, projects, tenants};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::jobs::github_webhook::{self, GithubWebhookJob};
@@ -24,6 +23,7 @@ use crate::utils::{
     github_oauth_state::{self, GithubOAuthStatePayload},
     github_token_crypto,
 };
+use entity::{github_integrations, projects, tenants};
 
 type HmacSha256 = Hmac<Sha256>;
 

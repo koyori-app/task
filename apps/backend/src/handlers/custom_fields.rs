@@ -1,6 +1,5 @@
 use crate::AppState;
 use crate::auth_helpers::require_member_or_owner;
-use crate::entities::project_custom_fields;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -12,6 +11,7 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
+use entity::project_custom_fields;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
     prelude::Uuid,
@@ -48,7 +48,7 @@ pub async fn list_custom_fields(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<CustomFieldListResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -85,7 +85,7 @@ pub async fn create_custom_field(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateCustomFieldRequest>>,
 ) -> Result<(StatusCode, Json<ProjectCustomFieldResponse>), AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -135,7 +135,7 @@ pub async fn update_custom_field(
     Path((tenant_id, project_id, field_id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateCustomFieldRequest>>,
 ) -> Result<Json<ProjectCustomFieldResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -188,7 +188,7 @@ pub async fn delete_custom_field(
     auth: AuthUser,
     Path((tenant_id, project_id, field_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;

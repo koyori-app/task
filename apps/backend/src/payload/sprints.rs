@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
-use crate::entities::sprints::{self, SprintStatus};
+use entity::sprints::{self, SprintStatus};
 
 #[derive(Validate, Deserialize, ToSchema)]
 pub struct CreateSprintRequest {

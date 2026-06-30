@@ -23,8 +23,8 @@ use tracing::{debug, warn};
 use chrono::Utc;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-use crate::entities::personal_tokens::{self, Entity as PersonalTokenEntity};
 use crate::error::{ServerError, internal_server_error};
+use entity::personal_tokens::{self, Entity as PersonalTokenEntity};
 use sea_orm::DatabaseConnection;
 
 #[derive(Debug, Error)]

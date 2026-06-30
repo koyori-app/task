@@ -6,10 +6,8 @@ use sea_orm::{
 };
 use std::sync::LazyLock;
 
-use crate::entities::{
-    project_members, project_statuses, projects, task_activities, tasks, tenants, users,
-};
 use crate::error::AppError;
+use entity::{project_members, project_statuses, projects, task_activities, tasks, tenants, users};
 
 static MENTION_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"@([a-zA-Z0-9_-]+)").expect("mention regex"));

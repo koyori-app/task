@@ -1,6 +1,5 @@
 use crate::AppState;
 use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
-use crate::entities::{task_timers, time_logs, users};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
@@ -14,6 +13,7 @@ use axum::{
 };
 use axum_valid::Valid;
 use chrono::{Duration, Utc};
+use entity::{task_timers, time_logs, users};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DbErr, EntityTrait,
     FromQueryResult, QueryFilter, QueryOrder, Statement, prelude::Uuid,
@@ -66,7 +66,7 @@ pub async fn list_time_logs(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<Vec<TimeLogResponse>>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -103,7 +103,7 @@ pub async fn create_time_log(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
     Valid(Json(payload)): Valid<Json<CreateTimeLogRequest>>,
 ) -> Result<(StatusCode, Json<TimeLogResponse>), AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -146,7 +146,7 @@ pub async fn update_time_log(
     Path((tenant_id, project_id, id, log_id)): Path<(Uuid, Uuid, String, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateTimeLogRequest>>,
 ) -> Result<Json<TimeLogResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -194,7 +194,7 @@ pub async fn delete_time_log(
     auth: AuthUser,
     Path((tenant_id, project_id, id, log_id)): Path<(Uuid, Uuid, String, Uuid)>,
 ) -> Result<StatusCode, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -232,7 +232,7 @@ pub async fn get_time_summary(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<TimeLogSummaryResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -307,7 +307,7 @@ pub async fn start_timer(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<(StatusCode, Json<TaskTimerResponse>), AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -357,7 +357,7 @@ pub async fn stop_timer(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<TimeLogResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -423,7 +423,7 @@ pub async fn get_timer_status(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<TimerStatusResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;

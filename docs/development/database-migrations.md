@@ -16,7 +16,7 @@ icon: lucide:database
 バックエンドの DB スキーマとエンティティは **スキーマファースト** で運用する。
 
 - **スキーマの正本** は `apps/backend/migration` crate（SQL マイグレーション）にある。
-- **エンティティ** (`apps/backend/src/entities/`) は手書きせず、稼働中の DB から `sea-orm-cli` で自動生成する。
+- **エンティティ** (`apps/backend/crates/entity/`) は手書きせず、稼働中の DB から `sea-orm-cli` で自動生成する。
 - マイグレーション crate は `backend` に依存しない独立 crate なので、**backend がコンパイルエラーでも `sea-orm-cli migrate` が動く**（鶏卵問題の回避）。
 
 初期スキーマは単一ファイル `migration/src/m20260520000000_initial_schema.rs` に全テーブル・インデックス・制約を集約している。以降の変更は同ファイルを編集するか、新しい増分マイグレーションを追加する。
@@ -57,7 +57,7 @@ scripts/seaorm_generate.sh tasks,sprints
 
 このスクリプトは内部で次を行う:
 
-1. `sea-orm-cli generate entity` で `apps/backend/src/entities/_generated/` に純粋な生成物を出力
+1. `sea-orm-cli generate entity` で `apps/backend/crates/entity/src/_generated/` に純粋な生成物を出力
 2. `scripts/seaorm_postprocess.sh` を実行して、生成物に**型付けを再適用**
 
 `database_url` は `apps/backend/.env` から読み込む。

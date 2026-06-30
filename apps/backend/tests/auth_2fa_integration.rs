@@ -1,8 +1,8 @@
 mod common;
 
 use axum::http::StatusCode;
-use backend::entities::{totp_credentials, users};
 use common::TestApp;
+use entity::{totp_credentials, users};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 
 #[tokio::test]

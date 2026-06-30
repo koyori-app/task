@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::task_comments;
+use entity::task_comments;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct TaskCommentResponse {

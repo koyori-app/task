@@ -19,9 +19,6 @@ use sea_orm::{
 };
 
 use crate::AppState;
-use crate::entities::{
-    drive_files, drive_folder_shares, drive_folders, project_members, scopes::Scope, tenants,
-};
 use crate::error::AppError;
 use crate::extractors::{AuthUser, OptionalAuthUser};
 use crate::openapi::CrudErrors;
@@ -30,6 +27,9 @@ use crate::utils::drive::{
     current_storage_type, effective_quota, guess_mime, is_tenant_owner, tenant_used_bytes,
 };
 use crate::utils::storage::{ByteStream, StorageError};
+use entity::{
+    drive_files, drive_folder_shares, drive_folders, project_members, scopes::Scope, tenants,
+};
 
 const MAX_LIST_LIMIT: u32 = 200;
 

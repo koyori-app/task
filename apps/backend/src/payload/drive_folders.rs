@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use sea_orm::prelude::Uuid;
 
-use crate::entities::drive_folders;
+use entity::drive_folders;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;

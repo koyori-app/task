@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::labels;
+use entity::labels;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct LabelResponse {

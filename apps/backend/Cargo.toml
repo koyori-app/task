@@ -1,3 +1,7 @@
+[workspace]
+members = ["crates/entity"]
+exclude = ["migration"]
+
 [package]
 name = "backend"
 version = "0.1.0"
@@ -5,6 +9,7 @@ edition = "2024"
 default-run = "backend"
 
 [dependencies]
+entity = { path = "crates/entity" }
 axum = { version = "0.8.8", features = ["macros", "multipart"] }
 sea-orm = { version = "2.0.0-rc.38", features = [
     "sqlx-postgres",

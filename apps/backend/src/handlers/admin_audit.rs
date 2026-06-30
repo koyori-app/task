@@ -4,7 +4,7 @@ use axum::http::HeaderMap;
 use sea_orm::prelude::{Json, Uuid};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
 
-use crate::entities::audit_logs;
+use entity::audit_logs;
 
 pub async fn record_audit(
     db: &DatabaseConnection,

@@ -6,10 +6,10 @@ use sea_orm::{
 };
 use std::collections::HashSet;
 
-use crate::entities::{
+use crate::error::AppError;
+use entity::{
     notification_settings, notifications, project_members, projects, task_watchers, tenants, users,
 };
-use crate::error::AppError;
 
 pub const TYPE_ASSIGNED: &str = "assigned";
 pub const TYPE_MENTIONED: &str = "mentioned";

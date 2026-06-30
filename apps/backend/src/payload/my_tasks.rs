@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::tasks;
+use entity::tasks;
 
 #[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]

@@ -1,7 +1,6 @@
 //! 管理者専用 — ユーザー管理 API（`/v1/admin/users`）
 
 use crate::AppState;
-use crate::entities::{personal_tokens, project_members, tasks, users};
 use crate::error::AppError;
 use crate::extractors::AdminUser;
 use crate::handlers::admin_audit::record_audit;
@@ -21,6 +20,7 @@ use axum::{
 };
 use axum_valid::Valid;
 use chrono::Utc;
+use entity::{personal_tokens, project_members, tasks, users};
 use sea_orm::prelude::Uuid;
 use sea_orm::sea_query::Expr;
 use sea_orm::{

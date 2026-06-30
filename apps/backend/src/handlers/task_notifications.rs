@@ -14,16 +14,16 @@ use std::collections::{HashMap, HashSet};
 
 use crate::AppState;
 use crate::auth_helpers::require_member_or_owner;
-use crate::entities::{
-    notification_settings, notifications, project_members, projects, task_watchers, tasks, tenants,
-    users,
-};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
 use crate::payload::task_notifications::*;
 use crate::utils::notifications::{DEFAULT_IN_APP_EVENTS, ensure_watcher};
+use entity::{
+    notification_settings, notifications, project_members, projects, task_watchers, tasks, tenants,
+    users,
+};
 
 /// ユーザーがアクセス可能なプロジェクトID一覧を返す（メンバー or テナントオーナー）。
 /// list / count / read-all / read-one で共用するアクセス制御ロジック。
@@ -95,7 +95,7 @@ pub async fn list_watchers(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<WatcherListResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -139,7 +139,7 @@ pub async fn start_watch(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<StatusCode, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -155,7 +155,7 @@ pub async fn stop_watch(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<StatusCode, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -330,7 +330,7 @@ pub async fn get_notification_settings(
     auth: AuthUser,
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<NotificationSettingsResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     let project = projects::Entity::find_by_id(project_id)
         .one(&state.db)
         .await?
@@ -366,7 +366,7 @@ pub async fn update_notification_settings(
     Path(project_id): Path<Uuid>,
     Valid(Json(payload)): Valid<Json<UpdateNotificationSettingsRequest>>,
 ) -> Result<Json<NotificationSettingsResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     let project = projects::Entity::find_by_id(project_id)
         .one(&state.db)
         .await?

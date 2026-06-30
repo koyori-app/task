@@ -13,11 +13,11 @@ use std::collections::HashSet;
 
 use crate::AppState;
 use crate::auth_helpers::require_member_or_owner;
-use crate::entities::{project_statuses, tasks};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::payload::statuses::*;
+use entity::{project_statuses, tasks};
 #[axum::debug_handler]
 #[utoipa::path(
     get,
@@ -38,7 +38,7 @@ pub async fn list_statuses(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Vec<ProjectStatusResponse>>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -72,7 +72,7 @@ pub async fn create_status(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateStatusRequest>>,
 ) -> Result<(StatusCode, Json<ProjectStatusResponse>), AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -123,7 +123,7 @@ pub async fn update_status(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateStatusRequest>>,
 ) -> Result<Json<ProjectStatusResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -209,7 +209,7 @@ pub async fn reorder_statuses(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Json(payload): Json<ReorderRequest>,
 ) -> Result<Json<Vec<ProjectStatusResponse>>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -272,7 +272,7 @@ pub async fn delete_status(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     axum::extract::Query(q): axum::extract::Query<DeleteStatusQuery>,
 ) -> Result<StatusCode, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;

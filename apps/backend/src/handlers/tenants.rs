@@ -8,12 +8,12 @@ use sea_orm::prelude::Uuid;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 
 use crate::AppState;
-use crate::entities::{scopes::Scope, tenants};
 use crate::error::AppError;
 use crate::extractors::AuthMethod;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::payload::tenants::*;
+use entity::{scopes::Scope, tenants};
 
 #[axum::debug_handler]
 #[utoipa::path(

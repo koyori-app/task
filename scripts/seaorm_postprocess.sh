@@ -10,7 +10,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GEN="$ROOT/apps/backend/src/entities/_generated"
+GEN="$ROOT/apps/backend/crates/entity/src/_generated"
 
 # replace <file> <original-field-line> <typed-field-line>
 replace() {

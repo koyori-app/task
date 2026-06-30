@@ -4,7 +4,7 @@ use serde::Deserialize;
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::project_statuses;
+use entity::project_statuses;
 
 #[derive(Debug, Clone, serde::Serialize, ToSchema)]
 pub struct ProjectStatusResponse {

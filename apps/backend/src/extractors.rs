@@ -9,9 +9,10 @@ use sea_orm::{
     ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait, prelude::Uuid,
 };
 
+use entity::{project_members, projects, scopes::Scope, tenants, users};
+
 use crate::{
     AppState,
-    entities::{project_members, projects, scopes::Scope, tenants, users},
     error::AppError,
     utils::auth::{AuthError, authenticate_personal_token},
 };
@@ -68,7 +69,7 @@ pub enum AuthMethod {
         token_id: Uuid,
         tenant_id: Uuid,
         allowed_project_ids: Option<Vec<Uuid>>,
-        scopes: crate::entities::scopes::ScopeList,
+        scopes: entity::scopes::ScopeList,
     },
 }
 
@@ -284,12 +285,13 @@ impl FromRequestParts<AppState> for AuthUser {
                     tenant_id: record.tenant_id,
                     allowed_project_ids: match record.allowed_project_ids.as_ref() {
                         None => None,
-                        Some(v) => crate::entities::personal_tokens::parse_allowed_project_ids(v)
-                            .map_err(|e| {
-                            AuthError::Internal(anyhow::anyhow!(
-                                "allowed_project_ids parse error: {e}"
-                            ))
-                        })?,
+                        Some(v) => {
+                            entity::personal_tokens::parse_allowed_project_ids(v).map_err(|e| {
+                                AuthError::Internal(anyhow::anyhow!(
+                                    "allowed_project_ids parse error: {e}"
+                                ))
+                            })?
+                        }
                     },
                     scopes: record.scopes.clone(),
                 },
