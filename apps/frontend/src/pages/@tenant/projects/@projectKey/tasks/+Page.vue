@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Loader2 } from '@lucide/vue';
 import type {
   ColumnDef,
   ColumnFiltersState,
@@ -16,8 +17,10 @@ import {
 import type { LucideIcon } from '@lucide/vue';
 import { Signal, SignalHigh, SignalLow, SignalMedium } from '@lucide/vue';
 import { PhCaretDown, PhCaretUp, PhCaretUpDown } from '@phosphor-icons/vue';
-import { h, ref } from 'vue';
+import { computed, h, ref } from 'vue';
 import type { Column } from '@tanstack/vue-table';
+import { useQuery } from '@tanstack/vue-query';
+import { usePageContext } from 'vike-vue/usePageContext';
 
 import { valueUpdater } from '@/components/ui/table/utils';
 import { Button } from '@/components/ui/button';
@@ -38,37 +41,210 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { fetchClient } from '@/lib/api-vue-query';
+import type { components } from '@/generated/api';
+
+// ---- 定数 ----
+const LIST_PROJECTS_PATH = '/v1/tenants/{tenant_id}/projects' as const;
+const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
+const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
+const LIST_ASSIGNEES_PATH =
+  '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/assignees' as const;
 
 // ---- 型定義 ----
-type Priority = 'urgent' | 'high' | 'medium' | 'low';
+type ApiPriority = components['schemas']['TaskPriority'];
 
-interface TaskStatus {
-  id: string;
-  name: string;
-  color: string;
-}
-
-interface TaskAssignee {
-  name: string;
-  initials: string;
-}
-
-interface Task {
+interface TaskRow {
   id: string;
   seq_id: number;
   project_key: string;
   title: string;
-  status: TaskStatus;
-  priority: Priority;
-  assignee?: TaskAssignee;
+  status: { id: string; name: string; color: string };
+  priority: ApiPriority;
+  /** UUID スタブ（バックエンド拡充時の差し替えポイント） */
+  assignee?: { user_id: string };
   due_date?: string;
 }
 
+/** list_assignees の response 型をインライン定義 */
+interface AssigneeModel {
+  id: string;
+  task_id: string;
+  user_id: string;
+  role: string;
+  assigned_at: string;
+}
+
+// ---- ページコンテキスト ----
+const pageContext = usePageContext();
+const tenantId = computed(() => String(pageContext.routeParams.tenant ?? ''));
+const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
+
+// ---- クエリ①: プロジェクト一覧 ----
+const projectsQuery = useQuery({
+  queryKey: computed(() => [
+    'get',
+    LIST_PROJECTS_PATH,
+    { params: { path: { tenant_id: tenantId.value } } },
+  ]),
+  queryFn: async ({ signal }) => {
+    const { data, error } = await fetchClient.GET(LIST_PROJECTS_PATH, {
+      params: { path: { tenant_id: tenantId.value } },
+      signal,
+    });
+    if (error) throw error;
+    return data;
+  },
+  enabled: computed(() => !!tenantId.value),
+});
+
+/** projectKey から project_id を解決 */
+const projectId = computed(() => {
+  const projects = projectsQuery.data.value;
+  if (!projects || !projectKey.value) return null;
+  return projects.find((p) => p.key === projectKey.value)?.id ?? null;
+});
+
+// ---- クエリ②: タスク一覧 ----
+const tasksQuery = useQuery({
+  queryKey: computed(() => [
+    'get',
+    LIST_TASKS_PATH,
+    {
+      params: {
+        path: { tenant_id: tenantId.value, project_id: projectId.value },
+        query: { limit: 20, offset: 0 },
+      },
+    },
+  ]),
+  queryFn: async ({ signal }) => {
+    const { data, error } = await fetchClient.GET(LIST_TASKS_PATH, {
+      // generated type が query パラメータを path に誤分類しているため as any で回避
+      params: {
+        path: { tenant_id: tenantId.value, project_id: projectId.value },
+        query: { limit: 20, offset: 0 },
+      } as any,
+      signal,
+    });
+    if (error) throw error;
+    return data;
+  },
+  enabled: computed(() => !!tenantId.value && !!projectId.value),
+});
+
+// ---- クエリ③: ステータス一覧 ----
+const statusesQuery = useQuery({
+  queryKey: computed(() => [
+    'get',
+    LIST_STATUSES_PATH,
+    { params: { path: { tenant_id: tenantId.value, project_id: projectId.value } } },
+  ]),
+  queryFn: async ({ signal }) => {
+    const { data, error } = await fetchClient.GET(LIST_STATUSES_PATH, {
+      params: { path: { tenant_id: tenantId.value, project_id: projectId.value } },
+      signal,
+    });
+    if (error) throw error;
+    return data;
+  },
+  enabled: computed(() => !!tenantId.value && !!projectId.value),
+});
+
+/** status_id → { name, color } 解決用 Map */
+const statusMap = computed(() => {
+  const statuses = statusesQuery.data.value ?? [];
+  return new Map(statuses.map((s) => [s.id, { name: s.name, color: s.color }]));
+});
+
+// ---- クエリ④: 担当者一覧（タスク確定後、全タスクを並列取得） ----
+const assigneesQuery = useQuery({
+  queryKey: computed(() => [
+    'assignees',
+    tenantId.value,
+    projectId.value,
+    ...(tasksQuery.data.value?.tasks ?? []).map((t) => t.id),
+  ]),
+  queryFn: async ({ signal }) => {
+    const tasks = tasksQuery.data.value?.tasks ?? [];
+    const results = await Promise.all(
+      tasks.map((t) =>
+        fetchClient
+          .GET(LIST_ASSIGNEES_PATH, {
+            params: {
+              path: { tenant_id: tenantId.value, project_id: projectId.value, id: t.id },
+            },
+            signal,
+          })
+          .then((r) => ({ taskId: t.id, assignees: r.data as AssigneeModel[] | undefined })),
+      ),
+    );
+    const map = new Map<string, string[]>();
+    for (const r of results) {
+      if (r.assignees) {
+        map.set(
+          r.taskId,
+          r.assignees.map((a) => a.user_id),
+        );
+        // assignee 情報をログ出力（バックエンド拡充時の参照用）
+        console.log({ task_id: r.taskId, assignee_user_ids: r.assignees.map((a) => a.user_id) });
+      }
+    }
+    return map;
+  },
+  enabled: computed(() => (tasksQuery.data.value?.tasks?.length ?? 0) > 0),
+});
+
+// ---- テーブルデータ構築 ----
+const taskRows = computed<TaskRow[]>(() => {
+  const tasks = tasksQuery.data.value?.tasks;
+  const sMap = statusMap.value;
+  const aMap = assigneesQuery.data.value;
+  if (!tasks) return [];
+
+  return tasks.map((t) => {
+    const status = sMap.get(t.status_id) ?? { name: t.status_id, color: '#94a3b8' };
+    const assigneeUserIds = aMap?.get(t.id);
+    return {
+      id: t.id,
+      seq_id: t.seq_id,
+      project_key: projectKey.value,
+      title: t.title,
+      status: { id: t.status_id, ...status },
+      priority: t.priority,
+      assignee: assigneeUserIds?.length ? { user_id: assigneeUserIds[0] } : undefined,
+      due_date: t.soft_deadline ?? undefined,
+    };
+  });
+});
+
+const isInitialLoading = computed(
+  () =>
+    projectsQuery.isFetching.value ||
+    tasksQuery.isFetching.value ||
+    statusesQuery.isFetching.value ||
+    assigneesQuery.isFetching.value,
+);
+
+const isError = computed(
+  () =>
+    projectsQuery.isError.value ||
+    tasksQuery.isError.value ||
+    statusesQuery.isError.value ||
+    assigneesQuery.isError.value,
+);
+
 // ---- ヘルパー ----
-const PRIORITY_ORDER: Record<Priority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+const PRIORITY_ORDER: Record<string, number> = {
+  CriticalFire: 0,
+  Critical: 1,
+  High: 2,
+  Medium: 3,
+  Low: 4,
+  Trivial: 5,
+};
 
 /** ソート可能な列ヘッダー: 矢印アイコン付きボタンを返す */
-function sortableHeader(column: Column<Task>, label: string) {
+function sortableHeader(column: Column<TaskRow>, label: string) {
   const sorted = column.getIsSorted();
   const icon =
     sorted === 'asc'
@@ -87,14 +263,16 @@ function sortableHeader(column: Column<Task>, label: string) {
   );
 }
 
-const PRIORITY_CONFIG: Record<Priority, { label: string; color: string; icon: LucideIcon }> = {
-  urgent: { label: '緊急', color: '#ef4444', icon: Signal },
-  high: { label: '高', color: '#f97316', icon: SignalHigh },
-  medium: { label: '中', color: '#eab308', icon: SignalMedium },
-  low: { label: '低', color: '#6b7280', icon: SignalLow },
+const PRIORITY_CONFIG: Record<ApiPriority, { label: string; color: string; icon: LucideIcon }> = {
+  CriticalFire: { label: '🔥', color: '#dc2626', icon: Signal },
+  Critical: { label: '‼️', color: '#ef4444', icon: Signal },
+  High: { label: '⬆️', color: '#f97316', icon: SignalHigh },
+  Medium: { label: '➡️', color: '#eab308', icon: SignalMedium },
+  Low: { label: '⬇️', color: '#6b7280', icon: SignalLow },
+  Trivial: { label: '💤', color: '#9ca3af', icon: SignalLow },
 };
 
-function taskKey(task: Task) {
+function taskKey(task: TaskRow) {
   return `${task.project_key}-${task.seq_id}`;
 }
 
@@ -113,59 +291,8 @@ function formatDate(iso?: string) {
   };
 }
 
-// ---- モックデータ ----
-const data: Task[] = [
-  {
-    id: '1',
-    seq_id: 1,
-    project_key: 'ENG',
-    title: 'OAuth 対応を実装する',
-    status: { id: 's1', name: 'In Progress', color: '#3b82f6' },
-    priority: 'high',
-    assignee: { name: '田中 太郎', initials: '田' },
-    due_date: new Date(Date.now() + 2 * 86400000).toISOString(),
-  },
-  {
-    id: '2',
-    seq_id: 2,
-    project_key: 'ENG',
-    title: 'ログイン画面の UI 実装',
-    status: { id: 's2', name: 'In Review', color: '#8b5cf6' },
-    priority: 'medium',
-    assignee: { name: '鈴木 花子', initials: '鈴' },
-    due_date: new Date(Date.now() - 1 * 86400000).toISOString(),
-  },
-  {
-    id: '3',
-    seq_id: 3,
-    project_key: 'ENG',
-    title: 'DB スキーマ設計',
-    status: { id: 's3', name: 'Done', color: '#22c55e' },
-    priority: 'urgent',
-    assignee: { name: '山田 次郎', initials: '山' },
-  },
-  {
-    id: '4',
-    seq_id: 4,
-    project_key: 'ENG',
-    title: '通知メール送信機能',
-    status: { id: 's1', name: 'In Progress', color: '#3b82f6' },
-    priority: 'low',
-    due_date: new Date(Date.now() + 14 * 86400000).toISOString(),
-  },
-  {
-    id: '5',
-    seq_id: 5,
-    project_key: 'ENG',
-    title: 'タスク一覧 API の実装',
-    status: { id: 's0', name: 'Backlog', color: '#94a3b8' },
-    priority: 'medium',
-    assignee: { name: '田中 太郎', initials: '田' },
-  },
-];
-
 // ---- テーブル列定義 ----
-const columns: ColumnDef<Task>[] = [
+const columns: ColumnDef<TaskRow>[] = [
   {
     id: 'select',
     header: ({ table }) =>
@@ -232,7 +359,8 @@ const columns: ColumnDef<Task>[] = [
   {
     id: 'priority',
     accessorFn: (row) => row.priority,
-    sortingFn: (a, b) => PRIORITY_ORDER[a.original.priority] - PRIORITY_ORDER[b.original.priority],
+    sortingFn: (a, b) =>
+      (PRIORITY_ORDER[a.original.priority] ?? 99) - (PRIORITY_ORDER[b.original.priority] ?? 99),
     header: ({ column }) => sortableHeader(column, '優先度'),
     cell: ({ row }) => {
       const pc = PRIORITY_CONFIG[row.original.priority];
@@ -248,16 +376,22 @@ const columns: ColumnDef<Task>[] = [
   },
   {
     id: 'assignee',
-    accessorFn: (row) => row.assignee?.name ?? '',
+    accessorFn: (row) => row.assignee?.user_id ?? '',
     header: ({ column }) => sortableHeader(column, '担当者'),
     cell: ({ row }) => {
       const a = row.original.assignee;
       if (!a) return h('span', { class: 'text-muted-foreground text-xs' }, '−');
+      // UUID スタブ表示 — バックエンドがユーザー名解決に対応したら置き換える
+      // TODO: ユーザー名解決 API ができたら user_id → {name, avatar} に差し替え
       return h('div', { class: 'flex items-center gap-1.5' }, [
         h(Avatar, { class: 'size-5' }, () => [
-          h(AvatarFallback, { class: 'text-[10px]' }, () => a.initials),
+          h(AvatarFallback, { class: 'text-[10px] bg-muted text-muted-foreground' }, () => '?'),
         ]),
-        h('span', { class: 'text-xs truncate max-w-24' }, a.name),
+        h(
+          'span',
+          { class: 'text-xs truncate max-w-24 text-muted-foreground' },
+          a.user_id.slice(0, 8) + '…',
+        ),
       ]);
     },
   },
@@ -289,7 +423,9 @@ const columnVisibility = ref<VisibilityState>({});
 const rowSelection = ref({});
 
 const table = useVueTable({
-  data,
+  get data() {
+    return taskRows.value;
+  },
   columns,
   getCoreRowModel: getCoreRowModel(),
   getPaginationRowModel: getPaginationRowModel(),
@@ -318,97 +454,108 @@ const table = useVueTable({
 
 <template>
   <div class="flex flex-col gap-3">
-    <!-- ツールバー -->
-    <div class="flex items-center gap-2">
-      <Input
-        class="h-8 max-w-xs text-sm"
-        placeholder="タイトルで絞り込み..."
-        :model-value="(table.getColumn('title')?.getFilterValue() as string) ?? ''"
-        @update:model-value="table.getColumn('title')?.setFilterValue($event)"
-      />
-      <DropdownMenu>
-        <DropdownMenuTrigger as-child>
-          <Button variant="outline" size="sm" class="ml-auto h-8 text-xs">
-            列 <PhCaretDown class="ml-1 size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuCheckboxItem
-            v-for="col in table.getAllColumns().filter((c) => c.getCanHide())"
-            :key="col.id"
-            class="text-sm"
-            :model-value="col.getIsVisible()"
-            @update:model-value="(v) => col.toggleVisibility(!!v)"
-          >
-            {{ col.id }}
-          </DropdownMenuCheckboxItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+    <!-- ローディング / エラー表示 -->
+    <div v-if="isInitialLoading" class="flex justify-center py-8">
+      <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
     </div>
 
-    <!-- テーブル -->
-    <div class="rounded-md border overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow v-for="hg in table.getHeaderGroups()" :key="hg.id">
-            <TableHead v-for="header in hg.headers" :key="header.id" class="h-9 text-xs px-3">
-              <FlexRender
-                v-if="!header.isPlaceholder"
-                :render="header.column.columnDef.header"
-                :props="header.getContext()"
-              />
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <template v-if="table.getRowModel().rows?.length">
-            <TableRow
-              v-for="row in table.getRowModel().rows"
-              :key="row.id"
-              :data-state="row.getIsSelected() && 'selected'"
-              class="h-10"
+    <div v-else-if="isError" class="flex justify-center py-8 text-sm text-destructive">
+      タスクの読み込みに失敗しました
+    </div>
+
+    <template v-else>
+      <!-- ツールバー -->
+      <div class="flex items-center gap-2">
+        <Input
+          class="h-8 max-w-xs text-sm"
+          placeholder="タイトルで絞り込み..."
+          :model-value="(table.getColumn('title')?.getFilterValue() as string) ?? ''"
+          @update:model-value="table.getColumn('title')?.setFilterValue($event)"
+        />
+        <DropdownMenu>
+          <DropdownMenuTrigger as-child>
+            <Button variant="outline" size="sm" class="ml-auto h-8 text-xs">
+              列 <PhCaretDown class="ml-1 size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuCheckboxItem
+              v-for="col in table.getAllColumns().filter((c) => c.getCanHide())"
+              :key="col.id"
+              class="text-sm"
+              :model-value="col.getIsVisible()"
+              @update:model-value="(v) => col.toggleVisibility(!!v)"
             >
-              <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id" class="py-1.5 px-3">
-                <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
+              {{ col.id }}
+            </DropdownMenuCheckboxItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <!-- テーブル -->
+      <div class="rounded-md border overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow v-for="hg in table.getHeaderGroups()" :key="hg.id">
+              <TableHead v-for="header in hg.headers" :key="header.id" class="h-9 text-xs px-3">
+                <FlexRender
+                  v-if="!header.isPlaceholder"
+                  :render="header.column.columnDef.header"
+                  :props="header.getContext()"
+                />
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <template v-if="table.getRowModel().rows?.length">
+              <TableRow
+                v-for="row in table.getRowModel().rows"
+                :key="row.id"
+                :data-state="row.getIsSelected() && 'selected'"
+                class="h-10"
+              >
+                <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id" class="py-1.5 px-3">
+                  <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
+                </TableCell>
+              </TableRow>
+            </template>
+            <TableRow v-else>
+              <TableCell
+                :colspan="columns.length"
+                class="h-24 text-center text-sm text-muted-foreground"
+              >
+                タスクが見つかりません
               </TableCell>
             </TableRow>
-          </template>
-          <TableRow v-else>
-            <TableCell
-              :colspan="columns.length"
-              class="h-24 text-center text-sm text-muted-foreground"
-            >
-              タスクが見つかりません
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
-    </div>
-
-    <!-- ページネーション -->
-    <div class="flex items-center justify-between text-xs text-muted-foreground">
-      <span>
-        {{ table.getFilteredSelectedRowModel().rows.length }} /
-        {{ table.getFilteredRowModel().rows.length }} 件選択
-      </span>
-      <div class="flex gap-1.5">
-        <Button
-          variant="outline"
-          size="sm"
-          class="h-7 text-xs"
-          :disabled="!table.getCanPreviousPage()"
-          @click="table.previousPage()"
-          >前へ</Button
-        >
-        <Button
-          variant="outline"
-          size="sm"
-          class="h-7 text-xs"
-          :disabled="!table.getCanNextPage()"
-          @click="table.nextPage()"
-          >次へ</Button
-        >
+          </TableBody>
+        </Table>
       </div>
-    </div>
+
+      <!-- ページネーション -->
+      <div class="flex items-center justify-between text-xs text-muted-foreground">
+        <span>
+          {{ table.getFilteredSelectedRowModel().rows.length }} /
+          {{ table.getFilteredRowModel().rows.length }} 件選択
+        </span>
+        <div class="flex gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-7 text-xs"
+            :disabled="!table.getCanPreviousPage()"
+            @click="table.previousPage()"
+            >前へ</Button
+          >
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-7 text-xs"
+            :disabled="!table.getCanNextPage()"
+            @click="table.nextPage()"
+            >次へ</Button
+          >
+        </div>
+      </div>
+    </template>
   </div>
 </template>
