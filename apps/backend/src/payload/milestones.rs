@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::milestones;
+use entity::milestones;
 
 #[derive(Validate, Deserialize, ToSchema)]
 pub struct CreateMilestoneRequest {

@@ -11,8 +11,10 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 
+use entity::audit_logs;
+
 use crate::{
-    AppState, entities::audit_logs, error::AppError, extractors::AdminUser, openapi::CrudErrors,
+    AppState, error::AppError, extractors::AdminUser, openapi::CrudErrors,
     payload::admin_audit_logs::*,
 };
 

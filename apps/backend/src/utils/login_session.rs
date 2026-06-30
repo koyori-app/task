@@ -6,7 +6,7 @@ use axum_session_redispool::SessionRedisPool;
 use chrono::Utc;
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement, Value};
 
-use crate::entities::users;
+use entity::users;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Login2faFlags {

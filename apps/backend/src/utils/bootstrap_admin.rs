@@ -7,8 +7,8 @@ use sea_orm::{
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::entities::{audit_logs, users};
 use crate::utils::email::normalize_email;
+use entity::{audit_logs, users};
 
 /// `BOOTSTRAP_ADMIN_EMAIL` 設定時、管理者が 0 人なら対象ユーザーを昇格する。
 pub async fn bootstrap_admin_email(

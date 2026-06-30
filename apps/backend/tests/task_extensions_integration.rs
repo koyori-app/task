@@ -6,7 +6,7 @@ use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 use serde_json::Value;
 use uuid::Uuid;
 
-use backend::entities::{drive_files, project_members};
+use entity::{drive_files, project_members};
 
 struct TaskFixture {
     tenant_id: Uuid,

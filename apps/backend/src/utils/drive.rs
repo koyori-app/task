@@ -6,8 +6,8 @@ use sea_orm::prelude::Uuid;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, QueryFilter, QuerySelect};
 
 use crate::AppState;
-use crate::entities::{drive_files, tenants};
 use crate::error::AppError;
+use entity::{drive_files, tenants};
 
 /// Drive 関連の環境変数設定。
 #[derive(Clone, Debug)]
@@ -105,13 +105,13 @@ pub async fn tenant_used_bytes<C: ConnectionTrait>(
     Ok(sum.flatten().unwrap_or(0))
 }
 
-pub fn current_storage_type() -> crate::entities::drive_files::StorageType {
+pub fn current_storage_type() -> entity::drive_files::StorageType {
     match env::var("STORAGE_BACKEND")
         .unwrap_or_else(|_| "local".into())
         .as_str()
     {
-        "s3" => crate::entities::drive_files::StorageType::S3,
-        _ => crate::entities::drive_files::StorageType::Local,
+        "s3" => entity::drive_files::StorageType::S3,
+        _ => entity::drive_files::StorageType::Local,
     }
 }
 

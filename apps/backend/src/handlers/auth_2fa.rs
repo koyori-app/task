@@ -14,9 +14,10 @@ use sea_orm::{
     QuerySelect, RelationTrait, TransactionTrait,
 };
 
+use entity::{project_members, projects, recovery_codes, tenants, totp_credentials, users};
+
 use crate::{
     AppState,
-    entities::{project_members, projects, recovery_codes, tenants, totp_credentials, users},
     error::AppError,
     error::ServerError,
     extractors::{AuthUser, HalfAuthedUser, LoggedInUser},

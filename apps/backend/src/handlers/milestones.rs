@@ -12,11 +12,11 @@ use sea_orm::{
 
 use crate::AppState;
 use crate::auth_helpers::require_member_or_owner;
-use crate::entities::{milestones, tasks};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::payload::milestones::*;
+use entity::{milestones, tasks};
 #[axum::debug_handler]
 #[utoipa::path(
     get,
@@ -37,7 +37,7 @@ pub async fn list_milestones(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Vec<MilestoneResponse>>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadMilestone)?;
+    auth.require_scope(entity::scopes::Scope::ReadMilestone)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -70,7 +70,7 @@ pub async fn create_milestone(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateMilestoneRequest>>,
 ) -> Result<(StatusCode, Json<MilestoneResponse>), AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteMilestone)?;
+    auth.require_scope(entity::scopes::Scope::WriteMilestone)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -110,7 +110,7 @@ pub async fn get_milestone(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<MilestoneDetail>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadMilestone)?;
+    auth.require_scope(entity::scopes::Scope::ReadMilestone)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -129,9 +129,9 @@ pub async fn get_milestone(
     let total = all_tasks.len();
     let done = if total > 0 {
         // Fetch done statuses for this project
-        let done_statuses: HashSet<Uuid> = crate::entities::project_statuses::Entity::find()
-            .filter(crate::entities::project_statuses::Column::ProjectId.eq(project_id))
-            .filter(crate::entities::project_statuses::Column::IsDoneState.eq(true))
+        let done_statuses: HashSet<Uuid> = entity::project_statuses::Entity::find()
+            .filter(entity::project_statuses::Column::ProjectId.eq(project_id))
+            .filter(entity::project_statuses::Column::IsDoneState.eq(true))
             .all(&state.db)
             .await?
             .into_iter()
@@ -181,7 +181,7 @@ pub async fn update_milestone(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateMilestoneRequest>>,
 ) -> Result<Json<MilestoneResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteMilestone)?;
+    auth.require_scope(entity::scopes::Scope::WriteMilestone)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -227,7 +227,7 @@ pub async fn delete_milestone(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteMilestone)?;
+    auth.require_scope(entity::scopes::Scope::WriteMilestone)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;

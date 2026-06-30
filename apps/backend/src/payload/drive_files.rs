@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use sea_orm::prelude::Uuid;
 
-use crate::entities::drive_files;
 use crate::utils::drive::content_url;
+use entity::drive_files;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;

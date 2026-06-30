@@ -1,6 +1,6 @@
-use crate::entities::{project_custom_fields, task_custom_field_values};
 use crate::error::AppError;
 use chrono::NaiveDate;
+use entity::{project_custom_fields, task_custom_field_values};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
     QueryOrder, prelude::Uuid,

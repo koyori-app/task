@@ -6,6 +6,7 @@ use sea_orm::prelude::Uuid;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use sea_orm::{ColumnTrait, QueryFilter};
 
+use crate::AppState;
 use crate::extractors::{AuthUser, CurrentUser};
 use crate::handlers::auth_2fa::establish_login_session;
 use crate::jobs::VerificationEmailJob;
@@ -24,7 +25,7 @@ use crate::utils::auth::{
 use crate::utils::db::{is_postgres_unique_violation, with_transaction};
 use crate::utils::email::normalize_email;
 use crate::utils::email_verification;
-use crate::{AppState, entities::system_settings, entities::users};
+use entity::{system_settings, users};
 
 #[axum::debug_handler]
 #[utoipa::path(

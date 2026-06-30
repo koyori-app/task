@@ -16,7 +16,6 @@ use sea_orm::{
 use thiserror::Error;
 use tracing::{debug, warn};
 
-use crate::entities::{oauth_connections, users};
 use crate::error::{ServerError, internal_server_error};
 use crate::extractors::{AuthUser, CurrentUser, OptionalAuthUser};
 use crate::openapi::OAuthErrors;
@@ -31,6 +30,7 @@ use crate::utils::oauth::provider::{
     resolve_endpoints,
 };
 use crate::utils::passkeys::count_user_passkeys;
+use entity::{oauth_connections, users};
 
 use crate::payload::oauth::*;
 use crate::utils::login_session::establish_login_session;

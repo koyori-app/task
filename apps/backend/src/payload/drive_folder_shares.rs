@@ -3,7 +3,7 @@ use sea_orm::prelude::Uuid;
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use crate::entities::drive_folder_shares::{self, SharePermission};
+use entity::drive_folder_shares::{self, SharePermission};
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct DriveFolderShareResponse {

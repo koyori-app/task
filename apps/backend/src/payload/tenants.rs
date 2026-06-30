@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::tenants;
+use entity::tenants;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct TenantResponse {

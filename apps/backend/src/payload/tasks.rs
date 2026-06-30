@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::{task_assignees, task_relations, tasks};
 use crate::utils::custom_fields::{CustomFieldValueInput, TaskCustomFieldValueResponse};
+use entity::{task_assignees, task_relations, tasks};
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct TaskResponse {

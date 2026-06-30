@@ -10,14 +10,12 @@ use sea_orm::{
 };
 
 use crate::AppState;
-use crate::entities::project_members::ProjectRole;
-use crate::entities::{
-    project_members, projects, scopes::Scope, task_watchers, tasks, tenants, users,
-};
 use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::payload::project_members::*;
+use entity::project_members::ProjectRole;
+use entity::{project_members, projects, scopes::Scope, task_watchers, tasks, tenants, users};
 
 async fn get_project_in_tenant(
     state: &AppState,

@@ -14,9 +14,10 @@ use axum::{
 };
 use axum_session::{SameSite, SessionConfig, SessionLayer, SessionMode, SessionStore};
 use axum_session_redispool::SessionRedisPool;
+use entity::{github_integrations, oauth_connections, projects, tenants, users};
+
 use backend::{
     AppState,
-    entities::{github_integrations, oauth_connections, projects, tenants, users},
     jobs::{
         setup_github_webhook_storage, setup_password_reset_email_storage, setup_pool,
         setup_verification_email_storage,
@@ -122,7 +123,7 @@ async fn ensure_schema(db: &DatabaseConnection) {
                 .execute_unprepared("DROP INDEX IF EXISTS idx_projects_personal_owner")
                 .await;
 
-            db.get_schema_registry("backend::entities::*")
+            db.get_schema_registry("entity::*")
                 .sync(db)
                 .await
                 .expect("sync schema");

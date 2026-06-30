@@ -1,10 +1,10 @@
 mod common;
 
 use axum::http::StatusCode;
-use backend::entities::{audit_logs, project_statuses, tasks, users};
 use backend::error::AppError;
 use backend::handlers::admin_users::ensure_not_last_admin;
 use common::{TestApp, insert_personal_token_for_test, insert_tenant, insert_user};
+use entity::{audit_logs, project_statuses, tasks, users};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
@@ -183,8 +183,8 @@ async fn admin_users_integration_suite() {
         let pat_response = app.get_with_bearer("/v1/tenants", &pat).await;
         assert_eq!(pat_response.status(), StatusCode::UNAUTHORIZED);
 
-        let token_row = backend::entities::personal_tokens::Entity::find()
-            .filter(backend::entities::personal_tokens::Column::UserId.eq(target.id))
+        let token_row = entity::personal_tokens::Entity::find()
+            .filter(entity::personal_tokens::Column::UserId.eq(target.id))
             .one(&app.state.db)
             .await
             .expect("load pat")

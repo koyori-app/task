@@ -1,8 +1,8 @@
 mod common;
 
 use axum::http::StatusCode;
-use backend::entities::{oauth_connections, users};
 use common::{MockGitLabUser, TestApp, is_redirect};
+use entity::{oauth_connections, users};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use url::Url;
 

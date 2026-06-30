@@ -15,9 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
     let db = sea_orm::Database::connect(&settings.database_url).await?;
-    db.get_schema_registry("backend::entities::*")
-        .sync(&db)
-        .await?;
+    db.get_schema_registry("entity::*").sync(&db).await?;
 
     let smtp_client = SmtpClient::new(
         &settings.smtp_host,
@@ -61,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 起動時: システム上限を超過しているテナントを警告ログに出力
     if let Some(system_max) = drive_config.system_max_bytes_opt() {
-        use backend::entities::tenants;
+        use entity::tenants;
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
         let violators = tenants::Entity::find()
             .filter(tenants::Column::DriveQuotaBytes.gt(system_max))

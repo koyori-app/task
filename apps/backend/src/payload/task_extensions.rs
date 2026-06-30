@@ -5,7 +5,7 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::project_task_views;
+use entity::project_task_views;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ProjectTaskViewResponse {

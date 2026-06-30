@@ -13,7 +13,6 @@ use std::collections::HashMap;
 
 use crate::AppState;
 use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
-use crate::entities::{task_activities, task_comments, users};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
@@ -21,6 +20,7 @@ use crate::openapi::CrudErrors;
 use crate::payload::task_comments::*;
 use crate::utils::notifications::{notify_comment_added, notify_mentioned};
 use crate::utils::task_activities::{extract_mentions, record_activity};
+use entity::{task_activities, task_comments, users};
 
 fn comment_body(model: &task_comments::Model) -> Option<String> {
     if model.deleted_at.is_some() {
@@ -51,7 +51,7 @@ pub async fn list_comments(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<CommentListResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -163,7 +163,7 @@ pub async fn create_comment(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
     Valid(Json(payload)): Valid<Json<CreateCommentRequest>>,
 ) -> Result<(StatusCode, Json<TaskCommentResponse>), AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -254,7 +254,7 @@ pub async fn update_comment(
     Path((tenant_id, project_id, id, cid)): Path<(Uuid, Uuid, String, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateCommentRequest>>,
 ) -> Result<Json<TaskCommentResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -333,7 +333,7 @@ pub async fn delete_comment(
     auth: AuthUser,
     Path((tenant_id, project_id, id, cid)): Path<(Uuid, Uuid, String, Uuid)>,
 ) -> Result<StatusCode, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -390,7 +390,7 @@ pub async fn list_activities(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<ActivityListResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;

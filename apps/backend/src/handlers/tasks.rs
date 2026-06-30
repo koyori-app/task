@@ -15,10 +15,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::AppState;
 use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
-use crate::entities::{
-    labels, milestones, project_statuses, project_task_counters, sprints, task_assignees,
-    task_labels, task_relations, tasks,
-};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -29,6 +25,10 @@ use crate::utils::custom_fields::{
 use crate::utils::db::is_postgres_unique_violation;
 use crate::utils::notifications::{notify_assigned, notify_status_changed};
 use crate::utils::task_activities::{priority_label, record_activity, status_name};
+use entity::{
+    labels, milestones, project_statuses, project_task_counters, sprints, task_assignees,
+    task_labels, task_relations, tasks,
+};
 
 // ─── Task lookup (UUID or KEY-N) ─────────────────────────────────────────
 
@@ -46,8 +46,8 @@ pub(crate) async fn resolve_task(
             .await?
             .ok_or(AppError::NotFound);
     }
-    let project = crate::entities::projects::Entity::find_by_id(project_id)
-        .filter(crate::entities::projects::Column::TenantId.eq(tenant_id))
+    let project = entity::projects::Entity::find_by_id(project_id)
+        .filter(entity::projects::Column::TenantId.eq(tenant_id))
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
@@ -333,7 +333,7 @@ pub async fn list_tasks(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Query(q): Query<ListTasksQuery>,
 ) -> Result<Json<TaskListResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -403,7 +403,7 @@ pub async fn create_task(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<CreateTaskRequest>>,
 ) -> Result<(StatusCode, Json<TaskDetailResponse>), AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -562,7 +562,7 @@ pub async fn get_task(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<TaskDetailResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -595,7 +595,7 @@ pub async fn update_task(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
     Valid(Json(payload)): Valid<Json<UpdateTaskRequest>>,
 ) -> Result<Json<TaskDetailResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -805,7 +805,7 @@ pub async fn delete_task(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<StatusCode, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -840,7 +840,7 @@ pub async fn archive_task(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<TaskResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -884,7 +884,7 @@ pub async fn unarchive_task(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<TaskResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -930,7 +930,7 @@ pub async fn list_assignees(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<Vec<TaskAssigneeResponse>>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -965,7 +965,7 @@ pub async fn add_assignee(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
     Valid(Json(payload)): Valid<Json<AddAssigneeRequest>>,
 ) -> Result<(StatusCode, Json<TaskAssigneeResponse>), AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -1039,7 +1039,7 @@ pub async fn update_assignee(
     Path((tenant_id, project_id, id, user_id)): Path<(Uuid, Uuid, String, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateAssigneeRequest>>,
 ) -> Result<Json<TaskAssigneeResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -1077,7 +1077,7 @@ pub async fn remove_assignee(
     auth: AuthUser,
     Path((tenant_id, project_id, id, user_id)): Path<(Uuid, Uuid, String, Uuid)>,
 ) -> Result<StatusCode, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -1127,7 +1127,7 @@ pub async fn list_relations(
     auth: AuthUser,
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
 ) -> Result<Json<TaskRelationsResponse>, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::ReadTask)?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -1229,7 +1229,7 @@ pub async fn add_relation(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, String)>,
     Json(payload): Json<AddRelationRequest>,
 ) -> Result<(StatusCode, Json<TaskRelationResponse>), AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
@@ -1320,7 +1320,7 @@ pub async fn remove_relation(
     auth: AuthUser,
     Path((tenant_id, project_id, id, relation_id)): Path<(Uuid, Uuid, String, Uuid)>,
 ) -> Result<StatusCode, AppError> {
-    auth.require_scope(crate::entities::scopes::Scope::WriteTask)?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;

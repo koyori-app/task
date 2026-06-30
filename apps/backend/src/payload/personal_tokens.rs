@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::{personal_tokens, scopes::Scope, scopes::ScopeList};
+use entity::{personal_tokens, scopes::Scope, scopes::ScopeList};
 
 #[derive(Validate, Debug, Deserialize, ToSchema)]
 pub struct CreatePersonalTokenRequest {

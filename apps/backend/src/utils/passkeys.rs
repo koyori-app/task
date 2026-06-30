@@ -8,9 +8,9 @@ use sea_orm::{
 use uuid::Uuid;
 use webauthn_rs::prelude::{AttestationMetadata, AuthenticationResult, Credential, Passkey};
 
-use crate::entities::oauth_connections;
-use crate::entities::passkeys::{self, Entity as PasskeyEntity};
 use crate::utils::auth::AuthError;
+use entity::oauth_connections;
+use entity::passkeys::{self, Entity as PasskeyEntity};
 
 pub const MAX_PASSKEYS_PER_USER: u64 = 20;
 
@@ -161,8 +161,8 @@ pub async fn insert_passkey_under_user_lock(
     user_id: Uuid,
     model: passkeys::ActiveModel,
 ) -> Result<(), AuthError> {
-    use crate::entities::users;
     use crate::utils::db::is_postgres_unique_violation;
+    use entity::users;
 
     let txn = db.begin().await?;
     users::Entity::find_by_id(user_id)
@@ -223,7 +223,7 @@ pub async fn is_last_auth_method<C: ConnectionTrait>(
         return Ok(false);
     }
 
-    let user = crate::entities::users::Entity::find_by_id(user_id)
+    let user = entity::users::Entity::find_by_id(user_id)
         .one(db)
         .await?
         .ok_or_else(|| anyhow::anyhow!("user not found"))?;

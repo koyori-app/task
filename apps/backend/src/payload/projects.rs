@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::projects;
+use entity::projects;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ProjectResponse {

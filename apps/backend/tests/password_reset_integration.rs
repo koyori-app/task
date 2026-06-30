@@ -1,10 +1,10 @@
 mod common;
 
 use axum::http::StatusCode;
-use backend::entities::{personal_tokens, tenants, users};
 use backend::utils::password_reset;
 use chrono::Utc;
 use common::{TestApp, insert_personal_token_for_test, insert_tenant};
+use entity::{personal_tokens, tenants, users};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 
 const RESET_MESSAGE: &str =
@@ -123,7 +123,7 @@ async fn password_reset_integration_suite() {
         let me_revoked = app.get_with_session("/v1/auth/me").await;
         assert_eq!(me_revoked.status(), StatusCode::UNAUTHORIZED);
 
-        let row = backend::entities::users::Entity::find_by_id(user.id)
+        let row = entity::users::Entity::find_by_id(user.id)
             .one(&app.state.db)
             .await
             .expect("load user")
@@ -202,7 +202,7 @@ async fn password_reset_integration_suite() {
         let me_revoked = app.get_with_session("/v1/auth/me").await;
         assert_eq!(me_revoked.status(), StatusCode::UNAUTHORIZED);
 
-        let row = backend::entities::users::Entity::find_by_id(user.id)
+        let row = entity::users::Entity::find_by_id(user.id)
             .one(&app.state.db)
             .await
             .expect("load user")
@@ -283,7 +283,7 @@ async fn password_reset_integration_suite() {
             .await;
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
-        let _ = backend::entities::tenants::Entity::delete_by_id(tenant_id)
+        let _ = entity::tenants::Entity::delete_by_id(tenant_id)
             .exec(&app.state.db)
             .await;
         app.cleanup_user(user.id).await;

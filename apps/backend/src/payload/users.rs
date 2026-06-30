@@ -21,8 +21,8 @@ pub struct UserResponse {
     pub totp_enabled: bool,
 }
 
-impl From<crate::entities::users::Model> for UserResponse {
-    fn from(model: crate::entities::users::Model) -> Self {
+impl From<entity::users::Model> for UserResponse {
+    fn from(model: entity::users::Model) -> Self {
         Self {
             id: model.id,
             username: model.username,

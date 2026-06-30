@@ -1,13 +1,13 @@
 mod common;
 
 use axum::http::StatusCode;
-use backend::entities::{passkeys, users};
 use backend::utils::auth::AuthError;
 use backend::utils::passkeys::{
     MAX_PASSKEYS_PER_USER, count_user_passkeys, insert_passkey_under_user_lock,
 };
 use chrono::Utc;
 use common::{TestApp, insert_passkey_user};
+use entity::{passkeys, users};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use url::Url;
 use uuid::Uuid;

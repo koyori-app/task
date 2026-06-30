@@ -7,15 +7,11 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, prelude::Uuid};
 
 use sea_orm::{ConnectionTrait, Statement};
 
+use entity::{projects, tenants};
+
 use crate::{
-    AppState,
-    entities::{projects, tenants},
-    error::AppError,
-    extractors::AdminUser,
-    handlers::admin_audit::record_audit,
-    openapi::CrudErrors,
-    payload::admin_tenants::*,
-    payload::tenants::TenantResponse,
+    AppState, error::AppError, extractors::AdminUser, handlers::admin_audit::record_audit,
+    openapi::CrudErrors, payload::admin_tenants::*, payload::tenants::TenantResponse,
 };
 
 async fn table_exists<C: ConnectionTrait>(conn: &C, table: &str) -> Result<bool, AppError> {

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::entities::{task_timers, time_logs};
+use entity::{task_timers, time_logs};
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct TimeLogResponse {

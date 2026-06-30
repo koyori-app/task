@@ -1,11 +1,9 @@
 mod common;
 
 use axum::http::StatusCode;
-use backend::{
-    entities::github_integrations,
-    utils::github_oauth_state::{self, GithubOAuthStatePayload},
-};
+use backend::utils::github_oauth_state::{self, GithubOAuthStatePayload};
 use common::{TestApp, TestTenantProject};
+use entity::github_integrations;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
 use wiremock::matchers::{method, path, path_regex};
