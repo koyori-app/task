@@ -26,13 +26,14 @@ const coderAllowedHost = buildEnv.CODER_AGENT_URL
   ? `.${new URL(buildEnv.CODER_AGENT_URL).hostname}`
   : undefined;
 
-const sentryPlugin = buildEnv.FORCE_ENABLE_IN_DEV
-  ? sentryVitePlugin({
-      sourcemaps: {
-        disable: false,
-      },
-    })
-  : undefined;
+const sentryPlugin =
+  process.env.NODE_ENV?.includes('prod') || buildEnv.FORCE_ENABLE_IN_DEV
+    ? sentryVitePlugin({
+        sourcemaps: {
+          disable: false,
+        },
+      })
+    : undefined;
 
 // More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
 
