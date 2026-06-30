@@ -12,10 +12,10 @@ importers:
   .:
     devDependencies:
       husky:
-        specifier: ^9.1.7
+        specifier: 9.1.7
         version: 9.1.7
       lint-staged:
-        specifier: ^16.1.2
+        specifier: 16.4.0
         version: 16.4.0
 
 packages:
