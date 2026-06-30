@@ -19,7 +19,7 @@
   },
   "devDependencies": {
     "@types/js-yaml": "4.0.9",
-    "@types/node": "20.19.43",
+    "@types/node": "24.13.2",
     "ts-node": "10.9.2",
     "typescript": "5.9.3"
   }
