@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import pkg from "../package.json";
 import { registerAuthCommands } from "./commands/auth";
 import { registerConfigCommands } from "./commands/config";
 import { registerMyCommands } from "./commands/my";
@@ -8,10 +9,11 @@ import { registerTasksCommands } from "./commands/tasks";
 import { CliError } from "./utils/errors";
 
 async function main(): Promise<void> {
-  const program = new Command();
+  const program = new Command().allowExcessArguments();
 
   program
     .name("task")
+    .version(pkg.version)
     .description("Task management CLI")
     .option("--json", "Output JSON", false);
 
