@@ -9,7 +9,10 @@ allowBuilds:
   esbuild: true
   vue-demi: true
 catalog:
+  '@vitejs/devtools': 0.3.3
   vite: npm:@voidzero-dev/vite-plus-core@0.2.1
+  vite-plugin-inspect: 11.4.1
+  vite-plugin-vue-devtools: 8.1.5
   vite-plus: 0.2.1
 minimumReleaseAgeExclude:
   - '@koyori-app/openapi-vue-query'
