@@ -8,7 +8,7 @@ import { registerTasksCommands } from "./commands/tasks";
 import { CliError } from "./utils/errors";
 
 async function main(): Promise<void> {
-  const program = new Command();
+  const program = new Command().allowExcessArguments();
 
   program
     .name("task")
