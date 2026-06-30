@@ -1,4 +1,5 @@
 import type { Preview } from '@storybook/vue3-vite';
+// @ts-expect-error — Storybook CSS side-effect import (tailwind)
 import '@/assets/css/tailwind.css';
 
 const preview: Preview = {

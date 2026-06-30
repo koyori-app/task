@@ -2,7 +2,7 @@ import * as Sentry from '@sentry/vue';
 import { getCurrentInstance } from 'vue';
 
 export const sentryBrowserConfig = () => {
-  import.meta.env.PROD === true &&
+  if (import.meta.env.PROD) {
     Sentry.init({
       app: getCurrentInstance()?.appContext.app,
       dsn: import.meta.env.PUBLIC_ENV__SENTRY_DSN,
@@ -19,4 +19,5 @@ export const sentryBrowserConfig = () => {
       replaysSessionSampleRate: 0.1,
       replaysOnErrorSampleRate: 1.0,
     });
+  }
 };

@@ -17,7 +17,7 @@ export const authUserSchema = type({
 
 export type AuthUser = typeof authUserSchema.infer;
 
-type _BackendUser = components['schemas']['crate.entities.users.Model'];
+type _BackendUser = components['schemas']['UserResponse'];
 type _AuthUserConforms = AuthUser extends Pick<_BackendUser, keyof AuthUser> ? true : never;
 const _conform: _AuthUserConforms = true;
 

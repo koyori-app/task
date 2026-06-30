@@ -7,10 +7,10 @@ const meta = {
   title: 'Auth/PasswordInput',
   component: PasswordInput,
   tags: ['autodocs'],
-  render: (args) => ({
+  render: (args: Record<string, unknown>) => ({
     components: { PasswordInput },
     setup() {
-      const model = ref(args.modelValue ?? '');
+      const model = ref((args.modelValue as string) ?? '');
       return { args, model };
     },
     template: '<PasswordInput v-bind="args" v-model="model" />',
