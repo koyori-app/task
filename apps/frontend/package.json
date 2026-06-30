@@ -46,7 +46,7 @@
     "pinia-plugin-persistedstate": "4.7.1",
     "reka-ui": "2.10.0",
     "tailwind-merge": "3.6.0",
-    "vike": "0.4.259",
+    "vike": "0.4.260",
     "vike-vue": "0.9.11",
     "vike-vue-pinia": "0.2.6",
     "vike-vue-query": "0.2.3",
