@@ -4,8 +4,8 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import { useDefaultApi } from '@/composables/useDefaultApi';
 import type { components } from '@/generated/api';
 
-type Label = components['schemas']['crate.entities.labels.Model'];
-type Project = components['schemas']['crate.entities.projects.Model'];
+type Label = components['schemas']['LabelResponse'];
+type Project = components['schemas']['ProjectResponse'];
 
 const labels = ref<Label[]>([]);
 const loading = ref(true);
