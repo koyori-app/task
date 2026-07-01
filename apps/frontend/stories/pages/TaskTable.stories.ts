@@ -148,11 +148,27 @@ const sampleTasks = {
       updated_at: '2026-06-15T00:00:00Z',
       created_by: 'user-1',
     },
+    {
+      id: 'task-6',
+      seq_id: 6,
+      title: 'チーム全体ミーティング調整',
+      priority: 'Low' as const,
+      status_id: 's-backlog',
+      project_id: 'proj-eng',
+      soft_deadline: null,
+      hard_deadline: null,
+      is_archived: false,
+      progress_pct: 0,
+      created_at: '2026-06-01T00:00:00Z',
+      updated_at: '2026-06-15T00:00:00Z',
+      created_by: 'user-1',
+    },
   ],
-  total: 5,
+  total: 6,
 };
 
 const sampleAssignees = [
+  // task-1: 3 assignees（重ね表示＋オーバーフローなし）
   {
     id: 'assgn-1',
     task_id: 'task-1',
@@ -161,12 +177,28 @@ const sampleAssignees = [
     assigned_at: '2026-06-01T00:00:00Z',
   },
   {
+    id: 'assgn-1b',
+    task_id: 'task-1',
+    user_id: 'user-beta',
+    role: 'assignee',
+    assigned_at: '2026-06-01T00:00:00Z',
+  },
+  {
+    id: 'assgn-1c',
+    task_id: 'task-1',
+    user_id: 'user-gamma',
+    role: 'assignee',
+    assigned_at: '2026-06-01T00:00:00Z',
+  },
+  // task-2: 1 assignee（単一表示）
+  {
     id: 'assgn-2',
     task_id: 'task-2',
     user_id: 'user-beta',
     role: 'assignee',
     assigned_at: '2026-06-01T00:00:00Z',
   },
+  // task-3: 1 assignee（単一表示）
   {
     id: 'assgn-3',
     task_id: 'task-3',
@@ -174,10 +206,48 @@ const sampleAssignees = [
     role: 'assignee',
     assigned_at: '2026-06-01T00:00:00Z',
   },
+  // task-4: 0 assignees（未割当）
+  // task-5: 1 assignee（単一表示、テキスト→他N名とならぬ確認）
   {
     id: 'assgn-4',
     task_id: 'task-5',
     user_id: 'user-alpha',
+    role: 'assignee',
+    assigned_at: '2026-06-01T00:00:00Z',
+  },
+  // task-6: 5 assignees（オーバーフロー表示＋M）
+  {
+    id: 'assgn-6a',
+    task_id: 'task-6',
+    user_id: 'user-alpha',
+    role: 'assignee',
+    assigned_at: '2026-06-01T00:00:00Z',
+  },
+  {
+    id: 'assgn-6b',
+    task_id: 'task-6',
+    user_id: 'user-beta',
+    role: 'assignee',
+    assigned_at: '2026-06-01T00:00:00Z',
+  },
+  {
+    id: 'assgn-6c',
+    task_id: 'task-6',
+    user_id: 'user-gamma',
+    role: 'assignee',
+    assigned_at: '2026-06-01T00:00:00Z',
+  },
+  {
+    id: 'assgn-6d',
+    task_id: 'task-6',
+    user_id: 'user-delta',
+    role: 'assignee',
+    assigned_at: '2026-06-01T00:00:00Z',
+  },
+  {
+    id: 'assgn-6e',
+    task_id: 'task-6',
+    user_id: 'user-epsilon',
     role: 'assignee',
     assigned_at: '2026-06-01T00:00:00Z',
   },
@@ -254,9 +324,14 @@ export const Default: Story = {
   beforeEach: mockFetch,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    // 既存タスク
     await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
     await expect(canvas.findByText('ログイン画面の UI 実装')).resolves.toBeInTheDocument();
     await expect(canvas.findByText('ENG-1')).resolves.toBeInTheDocument();
+    // 新規タスク
+    await expect(canvas.findByText('チーム全体ミーティング調整')).resolves.toBeInTheDocument();
+    // 複数担当者表示（task-1 は3名 → user-alpha 他2名 → "user-alph… 他2名" が見えるはず）
+    await expect(canvas.findByText(/他2名/)).resolves.toBeInTheDocument();
   },
 };
 
