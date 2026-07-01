@@ -1,4 +1,7 @@
+import dotenv from 'dotenv';
 import arkenv from 'arkenv';
+
+dotenv.config({ path: './.env' });
 
 export const buildEnv = arkenv({
   'ANALYZE?': 'boolean',

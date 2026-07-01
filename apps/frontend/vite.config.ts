@@ -42,7 +42,7 @@ export default defineConfig({
   plugins: [
     ...(buildEnv.ANALYZE ? [unstableRolldownAdapter(analyzer())] : []),
     ...(buildEnv.VITE_DEVTOOLS ? [devtools()] : []),
-    ...(buildEnv.VUE_DEVTOOLS ? [VueDevTools({ appendTo: /\/src\/\+Layout\.vue/ })] : []),
+    ...(buildEnv.VUE_DEVTOOLS ? [VueDevTools({ appendTo: /\/src\/pages\/\+Layout\.vue/ })] : []),
     ...(buildEnv.VITE_INSPECT ? [Inspect({ build: false })] : []),
     vike(),
     ...(sentryPlugin ? [sentryPlugin] : []),
