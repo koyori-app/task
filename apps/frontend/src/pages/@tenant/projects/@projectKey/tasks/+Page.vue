@@ -40,7 +40,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import AvatarGroup from '@/components/AvatarGroup.vue';
 import { fetchClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
@@ -387,38 +387,8 @@ const columns: ColumnDef<TaskRow>[] = [
       if (userIds.length === 0) {
         return h('span', { class: 'text-muted-foreground text-xs' }, '−');
       }
-      // UUID スタブ表示 — バックエンドがユーザー名解決に対応したら置き換える
       // TODO: ユーザー名解決 API ができたら user_id → {name, avatar} に差し替え
-      const MAX_DISPLAY = 3;
-      const visibleIds = userIds.slice(0, MAX_DISPLAY);
-      const remaining = userIds.length - MAX_DISPLAY;
-      const avatars = visibleIds.map(() =>
-        h(Avatar, { class: 'size-5 ring-2 ring-background' }, () => [
-          h(AvatarFallback, { class: 'text-[10px] bg-muted text-muted-foreground' }, () => '?'),
-        ]),
-      );
-      if (remaining > 0) {
-        avatars.push(
-          h(
-            'div',
-            {
-              class:
-                'size-5 rounded-full bg-muted text-muted-foreground text-[10px] font-medium flex items-center justify-center ring-2 ring-background',
-            },
-            `+${remaining}`,
-          ),
-        );
-      }
-      return h('div', { class: 'flex items-center gap-1.5' }, [
-        h('div', { class: 'flex -space-x-3' }, avatars),
-        h(
-          'span',
-          { class: 'text-xs truncate max-w-28 text-muted-foreground' },
-          userIds.length === 1
-            ? userIds[0].slice(0, 8) + '…'
-            : `${userIds[0].slice(0, 8)}… 他${userIds.length - 1}名`,
-        ),
-      ]);
+      return h(AvatarGroup, { userIds, maxDisplay: 3 });
     },
   },
   {
