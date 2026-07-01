@@ -1,4 +1,4 @@
-name: Frontend Lint
+name: Frontend Lint Check
 
 on:
   push:
