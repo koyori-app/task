@@ -264,12 +264,12 @@ function sortableHeader(column: Column<TaskRow>, label: string) {
 }
 
 const PRIORITY_CONFIG: Record<ApiPriority, { label: string; color: string; icon: LucideIcon }> = {
-  CriticalFire: { label: '🔥', color: '#dc2626', icon: Signal },
-  Critical: { label: '‼️', color: '#ef4444', icon: Signal },
-  High: { label: '⬆️', color: '#f97316', icon: SignalHigh },
-  Medium: { label: '➡️', color: '#eab308', icon: SignalMedium },
-  Low: { label: '⬇️', color: '#6b7280', icon: SignalLow },
-  Trivial: { label: '💤', color: '#9ca3af', icon: SignalLow },
+  CriticalFire: { label: '緊急', color: '#dc2626', icon: Signal },
+  Critical: { label: '重大', color: '#ef4444', icon: Signal },
+  High: { label: '高', color: '#f97316', icon: SignalHigh },
+  Medium: { label: '中', color: '#eab308', icon: SignalMedium },
+  Low: { label: '低', color: '#6b7280', icon: SignalLow },
+  Trivial: { label: '些細', color: '#9ca3af', icon: SignalLow },
 };
 
 function taskKey(task: TaskRow) {
