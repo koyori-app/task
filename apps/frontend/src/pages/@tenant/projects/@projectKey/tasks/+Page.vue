@@ -119,11 +119,11 @@ const tasksQuery = useQuery({
   ]),
   queryFn: async ({ signal }) => {
     const { data, error } = await fetchClient.GET(LIST_TASKS_PATH, {
-      // generated type が query パラメータを path に誤分類しているため as any で回避
+      // query パラメータは openapi-typescript 7.13.0 が正しく operation レベルに生成する
       params: {
-        path: { tenant_id: tenantId.value, project_id: projectId.value },
+        path: { tenant_id: tenantId.value, project_id: projectId.value! },
         query: { limit: 20, offset: 0 },
-      } as any,
+      },
       signal,
     });
     if (error) throw error;
@@ -137,11 +137,11 @@ const statusesQuery = useQuery({
   queryKey: computed(() => [
     'get',
     LIST_STATUSES_PATH,
-    { params: { path: { tenant_id: tenantId.value, project_id: projectId.value } } },
+    { params: { path: { tenant_id: tenantId.value, project_id: projectId.value! } } },
   ]),
   queryFn: async ({ signal }) => {
     const { data, error } = await fetchClient.GET(LIST_STATUSES_PATH, {
-      params: { path: { tenant_id: tenantId.value, project_id: projectId.value } },
+      params: { path: { tenant_id: tenantId.value, project_id: projectId.value! } },
       signal,
     });
     if (error) throw error;
@@ -171,7 +171,7 @@ const assigneesQuery = useQuery({
         fetchClient
           .GET(LIST_ASSIGNEES_PATH, {
             params: {
-              path: { tenant_id: tenantId.value, project_id: projectId.value, id: t.id },
+              path: { tenant_id: tenantId.value, project_id: projectId.value!, id: t.id },
             },
             signal,
           })
@@ -217,12 +217,16 @@ const taskRows = computed<TaskRow[]>(() => {
   });
 });
 
+/** 初回ローディング表示。isLoading を使い、初回のみスピナー表示とする。
+ *  背景refetch中は古いデータを表示し続ける（isFetching だとrefetch毎にテーブルが
+ *  スピナーに置き換わりちらつくため）。refetch中の表示を強化したい場合は別途
+ *  インジケーターを追加すること。 */
 const isInitialLoading = computed(
   () =>
-    projectsQuery.isFetching.value ||
-    tasksQuery.isFetching.value ||
-    statusesQuery.isFetching.value ||
-    assigneesQuery.isFetching.value,
+    projectsQuery.isLoading.value ||
+    tasksQuery.isLoading.value ||
+    statusesQuery.isLoading.value ||
+    assigneesQuery.isLoading.value,
 );
 
 const isError = computed(

@@ -249,7 +249,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const WithTasks: Story = {
+export const Default: Story = {
   name: 'タスクあり',
   beforeEach: mockFetch,
   play: async ({ canvasElement }) => {
@@ -263,7 +263,7 @@ export const WithTasks: Story = {
 export const Empty: Story = {
   name: 'タスクなし',
   beforeEach() {
-    const restore = mockFetch();
+    const original = globalThis.fetch;
     globalThis.fetch = fn().mockImplementation(async (req: Request) => {
       const url = typeof req === 'string' ? req : req.url;
       if (
@@ -277,12 +277,17 @@ export const Empty: Story = {
       if (url.includes('/statuses')) {
         return jsonResponse(sampleStatuses);
       }
+      if (url.includes('/tasks') && url.includes('/assignees')) {
+        return jsonResponse([]);
+      }
       if (url.includes('/tasks')) {
         return jsonResponse({ tasks: [], total: 0 });
       }
       return jsonResponse({});
     });
-    return restore;
+    return () => {
+      globalThis.fetch = original;
+    };
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
