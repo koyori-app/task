@@ -25,7 +25,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres@sha256:2203e6282d9e7de7c24d7da234e2a744fb325df366a3fd8ed940e8abbee39527 # 17.10-trixie
+        image: postgres@sha256:4aabea78cf39b90e834caf3af7d602a18565f6fe2508705c8d01aa63245c2e20 # 17.10-trixie
         env:
           POSTGRES_USER: test
           POSTGRES_PASSWORD: test
