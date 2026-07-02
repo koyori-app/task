@@ -8,43 +8,42 @@ import { analyzer, unstableRolldownAdapter } from 'vite-bundle-analyzer';
 /// <reference types="@batijs/core/types" />
 
 import { devtools } from '@tanstack/devtools-vite';
+import Inspect from 'vite-plugin-inspect';
+import VueDevTools from 'vite-plugin-vue-devtools';
 import vike from 'vike/plugin';
 import { defineConfig } from 'vite-plus';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
 import { playwright } from '@vitest/browser-playwright';
+import { buildEnv } from './buildSrc/env';
 const dirname =
   typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 
 dotenv.config({ path: path.resolve(dirname, '.env') });
 
-const coderAllowedHost = process.env.CODER_AGENT_URL
-  ? `.${new URL(process.env.CODER_AGENT_URL).hostname}`
+const coderAllowedHost = buildEnv.CODER_AGENT_URL
+  ? `.${new URL(buildEnv.CODER_AGENT_URL).hostname}`
   : undefined;
 
-const analyze = process.env.ANALYZE === 'true';
-
-const sentryEnabled =
-  process.env.NODE_ENV?.includes('prod') || process.env.FORCE_ENABLE_IN_DEV === 'true';
-
-// console.log('FORCE_ENABLE_IN_DEV: ', process.env.FORCE_ENABLE_IN_DEV === 'true');
-// console.log('sentryEnabled: ', sentryEnabled);
-const sentryPlugin = sentryEnabled
-  ? sentryVitePlugin({
-      sourcemaps: {
-        disable: false,
-      },
-    })
-  : undefined;
+const sentryPlugin =
+  process.env.NODE_ENV?.includes('prod') || buildEnv.FORCE_ENABLE_IN_DEV
+    ? sentryVitePlugin({
+        sourcemaps: {
+          disable: false,
+        },
+      })
+    : undefined;
 
 // More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
 
 export default defineConfig({
   // Standalone build UI (vite build). Embedded client uses +onCreateApp inject.
   plugins: [
-    ...(analyze ? [unstableRolldownAdapter(analyzer())] : []),
-    devtools(),
+    ...(buildEnv.ANALYZE ? [unstableRolldownAdapter(analyzer())] : []),
+    ...(buildEnv.VITE_DEVTOOLS ? [devtools()] : []),
+    ...(buildEnv.VUE_DEVTOOLS ? [VueDevTools({ appendTo: /\/src\/pages\/\+Layout\.vue/ })] : []),
+    ...(buildEnv.VITE_INSPECT ? [Inspect({ build: false })] : []),
     vike(),
     ...(sentryPlugin ? [sentryPlugin] : []),
     tailwindcss(),
@@ -63,7 +62,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: process.env.API_BASE ?? 'http://localhost:3400',
+        target: buildEnv.API_BASE ?? 'http://localhost:3400',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
@@ -80,7 +79,7 @@ export default defineConfig({
     noExternal: ['@zxcvbn-ts/core', '@zxcvbn-ts/language-common', '@zxcvbn-ts/language-ja'],
   },
   build: {
-    sourcemap: analyze || process.env.NODE_ENV !== 'production',
+    sourcemap: buildEnv.ANALYZE || process.env.NODE_ENV !== 'production',
     rollupOptions: {
       output: {
         manualChunks(id: string) {
