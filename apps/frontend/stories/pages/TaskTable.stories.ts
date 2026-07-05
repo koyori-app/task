@@ -330,7 +330,7 @@ export const Default: Story = {
     await expect(canvas.findByText('ENG-1')).resolves.toBeInTheDocument();
     // 新規タスク
     await expect(canvas.findByText('チーム全体ミーティング調整')).resolves.toBeInTheDocument();
-    // 複数担当者表示（task-1 は3名 → user-alpha 他2名 → "user-alph… 他2名" が見えるはず）
+    // 複数担当者オーバーフロー表示（task-6 は5名, maxDisplay=3 → 他2名）
     await expect(canvas.findByText(/他2名/)).resolves.toBeInTheDocument();
   },
 };

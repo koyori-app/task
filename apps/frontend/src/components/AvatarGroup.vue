@@ -43,11 +43,10 @@ const firstId = computed(() => props.userIds[0] ?? '');
     <!-- 先頭名 + 他N名 テキスト（殿指示により維持） -->
     <span class="text-xs truncate max-w-28 text-muted-foreground">
       <template v-if="userIds.length === 1">{{ firstId.slice(0, 8) }}…</template>
-      <template v-else-if="userIds.length > 1"
-        >{{ firstId.slice(0, 8) }}… 他{{
-          remaining > 0 ? remaining : userIds.length - 1
-        }}名</template
+      <template v-else-if="userIds.length > 1 && remaining > 0"
+        >{{ firstId.slice(0, 8) }}… 他{{ remaining }}名</template
       >
+      <template v-else-if="userIds.length > 1">{{ firstId.slice(0, 8) }}…</template>
     </span>
   </div>
 </template>
