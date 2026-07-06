@@ -1,1 +1,9 @@
-pnpm exec lint-staged
+pnpm exec lint-staged || exit 1
+
+# Rust backend checks (only when backend files are staged)
+if git diff --cached --name-only | grep -q "^apps/backend/"; then
+  echo "▶ cargo fmt check..."
+  (cd apps/backend && cargo fmt --all -- --check) || exit 1
+  echo "▶ cargo clippy..."
+  (cd apps/backend && cargo clippy -- -D warnings) || exit 1
+fi
