@@ -83,7 +83,7 @@
     "vite-plugin-vue-devtools": "8.1.5",
     "vite-plus": "catalog:",
     "vitest": "4.1.9",
-    "vue-tsc": "3.3.5"
+    "vue-tsc": "3.3.6"
   },
   "packageManager": "pnpm@11.9.0"
 }
