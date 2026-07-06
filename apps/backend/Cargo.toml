@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/entity"]
+members = ["crates/entity", "crates/common"]
 exclude = ["migration"]
 
 [package]
@@ -10,6 +10,7 @@ default-run = "backend"
 
 [dependencies]
 entity = { path = "crates/entity" }
+common = { path = "crates/common" }
 axum = { version = "0.8.8", features = ["macros", "multipart"] }
 sea-orm = { version = "2.0.0-rc.38", features = [
     "sqlx-postgres",

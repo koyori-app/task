@@ -40,7 +40,7 @@ impl From<project_statuses::Model> for ProjectStatusResponse {
 pub struct CreateStatusRequest {
     #[validate(length(min = 1, max = 100))]
     pub name: String,
-    #[validate(regex(path = "crate::utils::validation::COLOR_REGEX"))]
+    #[validate(regex(path = "common::validation::COLOR_REGEX"))]
     pub color: String,
     pub position: i16,
     #[serde(default)]
@@ -53,7 +53,7 @@ pub struct CreateStatusRequest {
 pub struct UpdateStatusRequest {
     #[validate(length(min = 1, max = 100))]
     pub name: Option<String>,
-    #[validate(regex(path = "crate::utils::validation::COLOR_REGEX"))]
+    #[validate(regex(path = "common::validation::COLOR_REGEX"))]
     pub color: Option<String>,
     pub position: Option<i16>,
     pub is_default: Option<bool>,
