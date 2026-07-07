@@ -43,5 +43,5 @@ jobs:
           workspaces: apps/backend -> target
 
       - name: Run clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
         working-directory: apps/backend

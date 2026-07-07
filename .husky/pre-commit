@@ -5,5 +5,5 @@ if git diff --cached --name-only | grep -q "^apps/backend/"; then
   echo "▶ cargo fmt check..."
   (cd apps/backend && cargo fmt --all -- --check) || exit 1
   echo "▶ cargo clippy..."
-  (cd apps/backend && cargo clippy -- -D warnings) || exit 1
+  (cd apps/backend && cargo clippy --workspace --all-targets -- -D warnings) || exit 1
 fi
