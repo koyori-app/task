@@ -93,7 +93,7 @@ webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation
 [dev-dependencies]
 cookie = "0.18"
 http-body-util = "0.1"
-reqwest = { version = "0.13", default-features = false, features = ["cookies", "json", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["cookies", "json", "rustls", "multipart"] }
 tower = { version = "0.5.2", features = ["util"] }
 urlencoding = "2.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -327,6 +327,14 @@ pub async fn upload_file(
 
                 let folder_project_id = if let Some(fid) = folder_id {
                     let folder = load_folder_in_tenant(&state, tenant_id, fid).await?;
+                    // プロジェクトフォルダへの書き込みはオーナーかメンバーのみ
+                    // （共有受信者は読み取り専用。authorize_file_write と同方針）。
+                    if let Some(project_id) = folder.project_id
+                        && !is_tenant_owner(&state, tenant_id, auth.user_id).await?
+                        && !is_project_member(&state, project_id, auth.user_id).await?
+                    {
+                        return Err(AppError::Forbidden);
+                    }
                     folder.project_id
                 } else {
                     None
