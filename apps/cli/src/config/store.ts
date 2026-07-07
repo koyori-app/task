@@ -34,6 +34,9 @@ export function saveConfigFile(config: TaskConfig): void {
     encoding: "utf8",
     mode: 0o600,
   });
+  // writeFileSync の mode は新規作成時しか適用されない（既存ファイル更新時は
+  // 従来のパーミッションが残る）。トークンを含むため常に 0o600 を強制する。
+  fs.chmodSync(CONFIG_PATH, 0o600);
 }
 
 export function resolveRuntimeConfig(): Required<
