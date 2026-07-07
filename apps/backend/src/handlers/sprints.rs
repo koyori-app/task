@@ -619,5 +619,7 @@ pub async fn assign_tasks_to_sprint(
     }
 
     txn.commit().await?;
-    Ok(Json(updated.into_iter().map(Into::into).collect()))
+    Ok(Json(
+        crate::utils::task_responses::build_task_responses(&state.db, updated).await?,
+    ))
 }

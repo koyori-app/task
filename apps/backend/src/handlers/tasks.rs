@@ -25,6 +25,7 @@ use crate::utils::custom_fields::{
 use crate::utils::db::is_postgres_unique_violation;
 use crate::utils::notifications::{notify_assigned, notify_status_changed};
 use crate::utils::task_activities::{priority_label, record_activity, status_name};
+use crate::utils::task_responses::{build_task_response, build_task_responses};
 use entity::{
     labels, milestones, project_statuses, project_task_counters, sprints, task_assignees,
     task_labels, task_relations, tasks,
@@ -301,7 +302,7 @@ async fn build_task_detail_response(
 ) -> Result<TaskDetailResponse, AppError> {
     let custom_field_values = load_task_custom_field_values(&state.db, project_id, task.id).await?;
     Ok(TaskDetailResponse {
-        task: task.into(),
+        task: build_task_response(&state.db, task).await?,
         custom_field_values,
     })
 }
@@ -373,7 +374,7 @@ pub async fn list_tasks(
     let total = query.clone().count(&state.db).await?;
     let tasks_page = query.offset(q.offset).limit(limit).all(&state.db).await?;
     Ok(Json(TaskListResponse {
-        tasks: tasks_page.into_iter().map(Into::into).collect(),
+        tasks: build_task_responses(&state.db, tasks_page).await?,
         total,
     }))
 }
@@ -857,7 +858,7 @@ pub async fn archive_task(
     )
     .await?;
     txn.commit().await?;
-    Ok(Json(updated.into()))
+    Ok(Json(build_task_response(&state.db, updated).await?))
 }
 
 #[axum::debug_handler]
@@ -901,7 +902,7 @@ pub async fn unarchive_task(
     )
     .await?;
     txn.commit().await?;
-    Ok(Json(updated.into()))
+    Ok(Json(build_task_response(&state.db, updated).await?))
 }
 
 // ─── Assignees ───────────────────────────────────────────────────────────
@@ -1140,8 +1141,8 @@ pub async fn list_relations(
         .all(&state.db)
         .await?;
     let blocked_ids: Vec<Uuid> = blocks_rels.iter().map(|r| r.blocked_task_id).collect();
-    let blocked_tasks: HashMap<Uuid, tasks::Model> = if blocked_ids.is_empty() {
-        HashMap::new()
+    let blocked_models = if blocked_ids.is_empty() {
+        vec![]
     } else {
         tasks::Entity::find()
             .filter(tasks::Column::Id.is_in(blocked_ids))
@@ -1149,10 +1150,13 @@ pub async fn list_relations(
             .filter(tasks::Column::DeletedAt.is_null())
             .all(&state.db)
             .await?
+    };
+    let blocked_tasks: HashMap<Uuid, TaskResponse> =
+        build_task_responses(&state.db, blocked_models)
+            .await?
             .into_iter()
             .map(|t| (t.id, t))
-            .collect()
-    };
+            .collect();
     let blocks: Vec<RelationEntry> = blocks_rels
         .into_iter()
         .filter_map(|rel| {
@@ -1160,7 +1164,7 @@ pub async fn list_relations(
                 .get(&rel.blocked_task_id)
                 .map(|t| RelationEntry {
                     relation_id: rel.id,
-                    task: t.clone().into(),
+                    task: t.clone(),
                 })
         })
         .collect();
@@ -1170,8 +1174,8 @@ pub async fn list_relations(
         .all(&state.db)
         .await?;
     let blocker_ids: Vec<Uuid> = blocked_rels.iter().map(|r| r.blocker_task_id).collect();
-    let blocker_tasks: HashMap<Uuid, tasks::Model> = if blocker_ids.is_empty() {
-        HashMap::new()
+    let blocker_models = if blocker_ids.is_empty() {
+        vec![]
     } else {
         tasks::Entity::find()
             .filter(tasks::Column::Id.is_in(blocker_ids))
@@ -1179,10 +1183,13 @@ pub async fn list_relations(
             .filter(tasks::Column::DeletedAt.is_null())
             .all(&state.db)
             .await?
+    };
+    let blocker_tasks: HashMap<Uuid, TaskResponse> =
+        build_task_responses(&state.db, blocker_models)
+            .await?
             .into_iter()
             .map(|t| (t.id, t))
-            .collect()
-    };
+            .collect();
     let blocked_by: Vec<RelationEntry> = blocked_rels
         .into_iter()
         .filter_map(|rel| {
@@ -1190,13 +1197,13 @@ pub async fn list_relations(
                 .get(&rel.blocker_task_id)
                 .map(|t| RelationEntry {
                     relation_id: rel.id,
-                    task: t.clone().into(),
+                    task: t.clone(),
                 })
         })
         .collect();
 
     Ok(Json(TaskRelationsResponse {
-        subtasks: subtasks.into_iter().map(Into::into).collect(),
+        subtasks: build_task_responses(&state.db, subtasks).await?,
         blocks,
         blocked_by,
     }))

@@ -21,6 +21,26 @@ pub struct UserResponse {
     pub totp_enabled: bool,
 }
 
+/// 他リソースのレスポンスに埋め込む軽量なユーザー情報
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct UserSummary {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    pub username: String,
+    #[schema(nullable)]
+    pub avatar_url: Option<String>,
+}
+
+impl From<entity::users::Model> for UserSummary {
+    fn from(model: entity::users::Model) -> Self {
+        Self {
+            id: model.id,
+            username: model.username,
+            avatar_url: model.avatar_url,
+        }
+    }
+}
+
 impl From<entity::users::Model> for UserResponse {
     fn from(model: entity::users::Model) -> Self {
         Self {
