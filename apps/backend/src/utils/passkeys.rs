@@ -29,9 +29,10 @@ pub fn extract_aaguid(passkey: &Passkey) -> Option<Vec<u8>> {
     Some(uuid.as_bytes().to_vec())
 }
 
-pub fn passkey_to_model_fields(
-    passkey: &Passkey,
-) -> Result<(Vec<u8>, Vec<u8>, Option<Vec<u8>>, i64), anyhow::Error> {
+/// (credential_id, public_key, aaguid, sign_count)
+pub type PasskeyModelFields = (Vec<u8>, Vec<u8>, Option<Vec<u8>>, i64);
+
+pub fn passkey_to_model_fields(passkey: &Passkey) -> Result<PasskeyModelFields, anyhow::Error> {
     let credential_id = passkey.cred_id().to_vec();
     let public_key = serde_json::to_vec(passkey)?;
     let credential: Credential = passkey.clone().into();
@@ -95,46 +96,6 @@ pub(crate) fn verify_sign_counter_values(
         return Err(AuthError::PossibleCredentialClone);
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sign_counter_rejects_replay_when_counter_increments_normally() {
-        assert!(verify_sign_counter_values(5, 4).is_ok());
-    }
-
-    #[test]
-    fn sign_counter_rejects_equal_or_lower_counter() {
-        assert!(matches!(
-            verify_sign_counter_values(4, 4),
-            Err(AuthError::InvalidCredentials)
-        ));
-        assert!(matches!(
-            verify_sign_counter_values(3, 4),
-            Err(AuthError::InvalidCredentials)
-        ));
-    }
-
-    #[test]
-    fn sign_counter_detects_possible_clone_when_counter_resets_to_zero() {
-        assert!(matches!(
-            verify_sign_counter_values(0, 10),
-            Err(AuthError::PossibleCredentialClone)
-        ));
-    }
-
-    #[test]
-    fn sign_counter_allows_zero_counter_for_new_credentials() {
-        assert!(verify_sign_counter_values(0, 0).is_ok());
-    }
-
-    #[test]
-    fn max_passkeys_per_user_is_twenty() {
-        assert_eq!(MAX_PASSKEYS_PER_USER, 20);
-    }
 }
 
 pub fn model_to_passkey(model: &passkeys::Model) -> Result<Passkey, anyhow::Error> {
@@ -254,4 +215,44 @@ async fn oauth_connection_count<C: ConnectionTrait>(
         .all(db)
         .await?;
     Ok(rows.len() as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sign_counter_rejects_replay_when_counter_increments_normally() {
+        assert!(verify_sign_counter_values(5, 4).is_ok());
+    }
+
+    #[test]
+    fn sign_counter_rejects_equal_or_lower_counter() {
+        assert!(matches!(
+            verify_sign_counter_values(4, 4),
+            Err(AuthError::InvalidCredentials)
+        ));
+        assert!(matches!(
+            verify_sign_counter_values(3, 4),
+            Err(AuthError::InvalidCredentials)
+        ));
+    }
+
+    #[test]
+    fn sign_counter_detects_possible_clone_when_counter_resets_to_zero() {
+        assert!(matches!(
+            verify_sign_counter_values(0, 10),
+            Err(AuthError::PossibleCredentialClone)
+        ));
+    }
+
+    #[test]
+    fn sign_counter_allows_zero_counter_for_new_credentials() {
+        assert!(verify_sign_counter_values(0, 0).is_ok());
+    }
+
+    #[test]
+    fn max_passkeys_per_user_is_twenty() {
+        assert_eq!(MAX_PASSKEYS_PER_USER, 20);
+    }
 }

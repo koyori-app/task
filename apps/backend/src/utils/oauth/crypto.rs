@@ -14,10 +14,10 @@ pub fn encrypt_token(key: &[u8; 32], plaintext: &str) -> Result<String, anyhow::
 
     let mut nonce_bytes = [0u8; 12];
     OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Nonce::from(nonce_bytes);
 
     let ciphertext = cipher
-        .encrypt(nonce, plaintext.as_bytes())
+        .encrypt(&nonce, plaintext.as_bytes())
         .map_err(|e| anyhow::anyhow!("aes encrypt: {e}"))?;
 
     let mut out = nonce_bytes.to_vec();
@@ -37,10 +37,11 @@ pub fn decrypt_token(key: &[u8; 32], encoded: &str) -> Result<String, anyhow::Er
     let (nonce_bytes, ciphertext) = data.split_at(12);
     let cipher =
         Aes256Gcm::new_from_slice(key).map_err(|e| anyhow::anyhow!("aes key init: {e}"))?;
-    let nonce = Nonce::from_slice(nonce_bytes);
+    let nonce =
+        Nonce::try_from(nonce_bytes).map_err(|e| anyhow::anyhow!("invalid nonce length: {e}"))?;
 
     let plaintext = cipher
-        .decrypt(nonce, ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|e| anyhow::anyhow!("aes decrypt: {e}"))?;
 
     String::from_utf8(plaintext).map_err(|e| anyhow::anyhow!("utf8: {e}"))

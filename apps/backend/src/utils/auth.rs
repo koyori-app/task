@@ -388,7 +388,7 @@ type HmacSha256 = Hmac<Sha256>;
 pub fn generate_personal_token(secret: &str) -> Result<(String, String), AuthError> {
     let mut buf = [0u8; 32];
     OsRng.fill_bytes(&mut buf);
-    let token = format!("pat_{}", URL_SAFE_NO_PAD.encode(&buf));
+    let token = format!("pat_{}", URL_SAFE_NO_PAD.encode(buf));
     let token_hash = create_personal_token_hash(&token, secret)?;
     Ok((token, token_hash))
 }
@@ -424,10 +424,10 @@ pub async fn authenticate_personal_token(
         return Err(AuthError::Unauthorized);
     }
 
-    if let Some(expires) = &token.expires_at {
-        if expires < &Utc::now().fixed_offset() {
-            return Err(AuthError::Unauthorized);
-        }
+    if let Some(expires) = &token.expires_at
+        && expires < &Utc::now().fixed_offset()
+    {
+        return Err(AuthError::Unauthorized);
     }
 
     Ok(token)

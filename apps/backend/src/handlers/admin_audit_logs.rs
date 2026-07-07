@@ -61,15 +61,15 @@ pub async fn list_audit_logs(
     _headers: HeaderMap,
     Query(params): Query<AuditLogQuery>,
 ) -> Result<Json<AuditLogListResponse>, AppError> {
-    let limit = params.limit.clamp(1, 200) as u64;
+    let limit = params.limit.clamp(1, 200);
     let fetch = limit + 1;
 
     let mut query = audit_logs::Entity::find();
 
-    if let Some(action) = &params.action {
-        if !action.is_empty() {
-            query = query.filter(audit_logs::Column::Action.starts_with(action.as_str()));
-        }
+    if let Some(action) = &params.action
+        && !action.is_empty()
+    {
+        query = query.filter(audit_logs::Column::Action.starts_with(action.as_str()));
     }
     if let Some(rt) = &params.resource_type {
         query = query.filter(audit_logs::Column::ResourceType.eq(rt.as_str()));

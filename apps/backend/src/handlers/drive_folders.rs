@@ -263,15 +263,15 @@ pub async fn update_folder(
     if payload.name.is_none() && payload.parent_id.is_none() {
         return Ok(Json(folder.into()));
     }
-    if let Some(name) = &payload.name {
-        if name.is_empty() {
-            return Err(AppError::BadRequest);
-        }
+    if let Some(name) = &payload.name
+        && name.is_empty()
+    {
+        return Err(AppError::BadRequest);
     }
-    if let Some(parent_id) = &payload.parent_id {
-        if let Some(pid) = parent_id {
-            validate_parent_folder(&state, tenant_id, *pid, Some(folder_id)).await?;
-        }
+    if let Some(parent_id) = &payload.parent_id
+        && let Some(pid) = parent_id
+    {
+        validate_parent_folder(&state, tenant_id, *pid, Some(folder_id)).await?;
     }
     let mut active: drive_folders::ActiveModel = folder.into();
     if let Some(name) = payload.name {
@@ -399,7 +399,7 @@ pub async fn create_share(
         share_token: Set(share_token),
         permission: Set(permission),
         created_by: Set(auth.user_id),
-        expires_at: Set(payload.expires_at.map(Into::into)),
+        expires_at: Set(payload.expires_at),
         created_at: Set(Default::default()),
     };
     let model = share.insert(&state.db).await?;

@@ -381,7 +381,7 @@ async fn apply_bulk_update(
                 task_id,
                 Some(user_id),
                 "status_changed",
-                serde_json::json!({ "from": from, "to": to }).into(),
+                serde_json::json!({ "from": from, "to": to }),
             )
             .await?;
         }
@@ -424,7 +424,7 @@ async fn apply_bulk_update(
                 task_id,
                 Some(user_id),
                 "assignee_added",
-                serde_json::json!({ "user_id": assignee_id }).into(),
+                serde_json::json!({ "user_id": assignee_id }),
             )
             .await?;
         }
@@ -540,8 +540,8 @@ pub async fn create_task_view(
         created_by: Set(auth.user_id),
         name: Set(payload.name),
         is_shared: Set(payload.is_shared),
-        filters: Set(payload.filters.into()),
-        sort: Set(payload.sort.into()),
+        filters: Set(payload.filters),
+        sort: Set(payload.sort),
         view_type: Set(payload.view_type),
         created_at: Set(chrono::Utc::now().into()),
         updated_at: Set(chrono::Utc::now().into()),
@@ -599,10 +599,10 @@ pub async fn update_task_view(
         active.is_shared = Set(is_shared);
     }
     if let Some(filters) = payload.filters {
-        active.filters = Set(filters.into());
+        active.filters = Set(filters);
     }
     if let Some(sort) = payload.sort {
-        active.sort = Set(sort.into());
+        active.sort = Set(sort);
     }
     if let Some(view_type) = payload.view_type {
         active.view_type = Set(view_type);
@@ -746,10 +746,10 @@ pub async fn attach_task_file(
     if file.tenant_id != tenant_id {
         return Err(AppError::Forbidden);
     }
-    if let Some(pid) = file.project_id {
-        if pid != project_id {
-            return Err(AppError::Forbidden);
-        }
+    if let Some(pid) = file.project_id
+        && pid != project_id
+    {
+        return Err(AppError::Forbidden);
     }
 
     let already_attached = task_attachments::Entity::find()

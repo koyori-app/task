@@ -489,7 +489,7 @@ pub async fn create_my_task(
         model.id,
         Some(auth.user_id),
         "task_created",
-        serde_json::json!({}).into(),
+        serde_json::json!({}),
     )
     .await?;
 

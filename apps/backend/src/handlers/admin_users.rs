@@ -25,8 +25,7 @@ use sea_orm::prelude::Uuid;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    EntityTrait, ExecResult, ExprTrait, PaginatorTrait, QueryFilter, Statement, TransactionTrait,
-    Value,
+    EntityTrait, ExecResult, PaginatorTrait, QueryFilter, Statement, TransactionTrait, Value,
 };
 
 fn auth_error_to_app(e: AuthError) -> AppError {
@@ -392,46 +391,46 @@ pub async fn update_user(
     }
     let model = active.update(&state.db).await?;
 
-    if let Some(is_admin) = payload.is_admin {
-        if is_admin != before_admin {
-            let action = if is_admin {
-                "user.admin.grant"
-            } else {
-                "user.admin.revoke"
-            };
-            record_audit(
-                &state.db,
-                admin.user_id,
-                action,
-                "user",
-                &id.to_string(),
-                None,
-                Some(serde_json::json!({ "before": before_admin, "after": is_admin })),
-                &headers,
-            )
-            .await?;
-        }
+    if let Some(is_admin) = payload.is_admin
+        && is_admin != before_admin
+    {
+        let action = if is_admin {
+            "user.admin.grant"
+        } else {
+            "user.admin.revoke"
+        };
+        record_audit(
+            &state.db,
+            admin.user_id,
+            action,
+            "user",
+            &id.to_string(),
+            None,
+            Some(serde_json::json!({ "before": before_admin, "after": is_admin })),
+            &headers,
+        )
+        .await?;
     }
 
-    if let Some(is_suspended) = payload.is_suspended {
-        if is_suspended != before_suspended {
-            let action = if is_suspended {
-                "user.suspend"
-            } else {
-                "user.unsuspend"
-            };
-            record_audit(
-                &state.db,
-                admin.user_id,
-                action,
-                "user",
-                &id.to_string(),
-                None,
-                Some(serde_json::json!({ "before": before_suspended, "after": is_suspended })),
-                &headers,
-            )
-            .await?;
-        }
+    if let Some(is_suspended) = payload.is_suspended
+        && is_suspended != before_suspended
+    {
+        let action = if is_suspended {
+            "user.suspend"
+        } else {
+            "user.unsuspend"
+        };
+        record_audit(
+            &state.db,
+            admin.user_id,
+            action,
+            "user",
+            &id.to_string(),
+            None,
+            Some(serde_json::json!({ "before": before_suspended, "after": is_suspended })),
+            &headers,
+        )
+        .await?;
     }
 
     Ok(Json(model.into()))
@@ -516,7 +515,7 @@ pub async fn password_reset(
 
     if !password_reset::try_acquire_rate_limit(&state.redis_client, &send_to)
         .await
-        .map_err(|e| AppError::Internal(e))?
+        .map_err(AppError::Internal)?
     {
         return Err(AppError::Conflict);
     }
@@ -524,7 +523,7 @@ pub async fn password_reset(
     let token = generate_email_verification_token();
     password_reset::store_token(&state.redis_client, id, &token)
         .await
-        .map_err(|e| AppError::Internal(e))?;
+        .map_err(AppError::Internal)?;
 
     password_reset_delivery::send_password_reset_email(
         &state.smtp_client,
@@ -533,7 +532,7 @@ pub async fn password_reset(
         &token,
     )
     .await
-    .map_err(|e| AppError::Internal(e))?;
+    .map_err(AppError::Internal)?;
 
     record_audit(
         &state.db,

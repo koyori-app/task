@@ -1,5 +1,9 @@
 //! HTTP 統合テスト用の Axum アプリ構築ヘルパー（admin / GitHub App 共通）。
 
+// 各統合テストバイナリごとにコンパイルされるため、一部バイナリで未使用のヘルパーが
+// dead_code 誤検知になるのを抑止する。
+#![allow(dead_code)]
+
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};

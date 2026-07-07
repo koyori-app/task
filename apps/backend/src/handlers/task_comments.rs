@@ -91,7 +91,7 @@ pub async fn list_comments(
     }
 
     // トップレベル: 新しい順、リプライ: 古い順（スレッド内時系列）
-    top_level.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    top_level.sort_by_key(|c| std::cmp::Reverse(c.created_at));
 
     let comments = top_level
         .into_iter()
@@ -101,7 +101,7 @@ pub async fn list_comments(
                 .cloned()
                 .unwrap_or_else(|| "unknown".into());
             let mut thread_replies = replies_by_parent.remove(&parent.id).unwrap_or_default();
-            thread_replies.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            thread_replies.sort_by_key(|a| a.created_at);
             let replies = thread_replies
                 .into_iter()
                 .map(|reply| {
@@ -204,7 +204,7 @@ pub async fn create_comment(
         task.id,
         Some(auth.user_id),
         "comment_added",
-        serde_json::json!({ "comment_id": comment.id }).into(),
+        serde_json::json!({ "comment_id": comment.id }),
     )
     .await?;
     let actually_mentioned = notify_mentioned(
@@ -293,7 +293,7 @@ pub async fn update_comment(
         task.id,
         Some(auth.user_id),
         "comment_edited",
-        serde_json::json!({ "comment_id": comment_id }).into(),
+        serde_json::json!({ "comment_id": comment_id }),
     )
     .await?;
     // 編集時は新規メンションのみ通知する。notify_comment_added は呼ばない
@@ -362,7 +362,7 @@ pub async fn delete_comment(
         task_id,
         Some(auth.user_id),
         "comment_deleted",
-        serde_json::json!({ "comment_id": comment_id }).into(),
+        serde_json::json!({ "comment_id": comment_id }),
     )
     .await?;
     txn.commit().await?;
@@ -429,7 +429,7 @@ pub async fn list_activities(
                 id: row.id,
                 event_type: row.event_type,
                 user,
-                payload: row.payload.clone().into(),
+                payload: row.payload.clone(),
                 created_at: row.created_at.with_timezone(&Utc),
             }
         })

@@ -82,10 +82,10 @@ async fn folder_has_user_share(
             .filter(drive_folder_shares::Column::SharedWithUserId.eq(user_id))
             .one(&state.db)
             .await?;
-        if let Some(share) = share {
-            if share.expires_at.map(|e| e > Utc::now()).unwrap_or(true) {
-                return Ok(true);
-            }
+        if let Some(share) = share
+            && share.expires_at.map(|e| e > Utc::now()).unwrap_or(true)
+        {
+            return Ok(true);
         }
         let folder = drive_folders::Entity::find_by_id(fid)
             .one(&state.db)
@@ -134,10 +134,10 @@ async fn can_access_file_content(
     let project_id = file.project_id.expect("checked is_none above");
 
     if let Some(token) = share_token.filter(|t| !t.is_empty()) {
-        if let Some(folder_id) = file.folder_id {
-            if folder_has_token_share(state, folder_id, token).await? {
-                return Ok(());
-            }
+        if let Some(folder_id) = file.folder_id
+            && folder_has_token_share(state, folder_id, token).await?
+        {
+            return Ok(());
         }
         return Err(AppError::Forbidden);
     }
@@ -154,10 +154,10 @@ async fn can_access_file_content(
         return Ok(());
     }
 
-    if let Some(folder_id) = file.folder_id {
-        if folder_has_user_share(state, folder_id, auth_user.user_id).await? {
-            return Ok(());
-        }
+    if let Some(folder_id) = file.folder_id
+        && folder_has_user_share(state, folder_id, auth_user.user_id).await?
+    {
+        return Ok(());
     }
 
     Err(AppError::Forbidden)
@@ -180,10 +180,10 @@ async fn authorize_file_access(
     if is_project_member(state, project_id, user.user_id).await? {
         return Ok(());
     }
-    if let Some(folder_id) = file.folder_id {
-        if folder_has_user_share(state, folder_id, user.user_id).await? {
-            return Ok(());
-        }
+    if let Some(folder_id) = file.folder_id
+        && folder_has_user_share(state, folder_id, user.user_id).await?
+    {
+        return Ok(());
     }
     Err(AppError::Forbidden)
 }
@@ -239,13 +239,12 @@ pub async fn list_files(
     // フォルダ指定時: そのフォルダがプロジェクト配下なら ACL を確認する
     if let Some(folder_id) = query.folder_id {
         let folder = load_folder_in_tenant(&state, tenant_id, folder_id).await?;
-        if let Some(project_id) = folder.project_id {
-            if !is_tenant_owner(&state, tenant_id, auth.user_id).await?
-                && !is_project_member(&state, project_id, auth.user_id).await?
-                && !folder_has_user_share(&state, folder_id, auth.user_id).await?
-            {
-                return Err(AppError::Forbidden);
-            }
+        if let Some(project_id) = folder.project_id
+            && !is_tenant_owner(&state, tenant_id, auth.user_id).await?
+            && !is_project_member(&state, project_id, auth.user_id).await?
+            && !folder_has_user_share(&state, folder_id, auth.user_id).await?
+        {
+            return Err(AppError::Forbidden);
         }
     }
 
@@ -320,10 +319,10 @@ pub async fn upload_file(
 
                 // クォータ事前チェック（既に上限に達していれば即拒否）
                 let used = tenant_used_bytes(&state.db, tenant_id).await?;
-                if let Some(q) = effective_quota(&tenant, &state.drive_config) {
-                    if used >= q {
-                        return Err(AppError::ContentTooLarge);
-                    }
+                if let Some(q) = effective_quota(&tenant, &state.drive_config)
+                    && used >= q
+                {
+                    return Err(AppError::ContentTooLarge);
                 }
 
                 let folder_project_id = if let Some(fid) = folder_id {
@@ -408,10 +407,10 @@ pub async fn upload_file(
                         .await?
                         .ok_or(AppError::NotFound)?;
                     let used_now = tenant_used_bytes(&txn, tenant_id).await?;
-                    if let Some(q) = effective_quota(&tenant_q, &state.drive_config) {
-                        if used_now.saturating_add(actual_size as i64) > q {
-                            return Err(AppError::ContentTooLarge);
-                        }
+                    if let Some(q) = effective_quota(&tenant_q, &state.drive_config)
+                        && used_now.saturating_add(actual_size as i64) > q
+                    {
+                        return Err(AppError::ContentTooLarge);
                     }
                     let model = drive_files::ActiveModel {
                         id: Set(file_id),
@@ -681,10 +680,10 @@ pub async fn update_drive_quota(
         if quota_bytes < 0 {
             return Err(AppError::BadRequest);
         }
-        if let Some(system_max) = state.drive_config.system_max_bytes_opt() {
-            if quota_bytes > system_max {
-                return Err(AppError::BadRequest);
-            }
+        if let Some(system_max) = state.drive_config.system_max_bytes_opt()
+            && quota_bytes > system_max
+        {
+            return Err(AppError::BadRequest);
         }
     }
 

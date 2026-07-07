@@ -30,7 +30,7 @@ impl From<project_custom_fields::Model> for ProjectCustomFieldResponse {
             project_id: model.project_id,
             name: model.name,
             field_type: model.field_type,
-            options: model.options.map(|json| json.into()),
+            options: model.options,
             is_required: model.is_required,
             position: model.position,
             created_at: model.created_at.with_timezone(&Utc),

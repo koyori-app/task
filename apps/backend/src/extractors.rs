@@ -38,10 +38,10 @@ async fn user_from_session(parts: &mut Parts, state: &AppState) -> Result<users:
         .await?
         .ok_or(AuthError::Unauthorized)?;
 
-    if let Some(revoked_at) = user.sessions_revoked_at {
-        if issued_at_ms < revoked_at.timestamp_millis() {
-            return Err(AuthError::Unauthorized);
-        }
+    if let Some(revoked_at) = user.sessions_revoked_at
+        && issued_at_ms < revoked_at.timestamp_millis()
+    {
+        return Err(AuthError::Unauthorized);
     }
 
     Ok(user)
@@ -155,10 +155,10 @@ impl AuthUser {
                     return Err(AppError::Forbidden);
                 }
                 if let Some(project_id) = project_id {
-                    if let Some(allowed) = allowed_project_ids {
-                        if !allowed.contains(&project_id) {
-                            return Err(AppError::Forbidden);
-                        }
+                    if let Some(allowed) = allowed_project_ids
+                        && !allowed.contains(&project_id)
+                    {
+                        return Err(AppError::Forbidden);
                     }
                     verify_project_in_tenant(state, tenant_id, project_id).await?;
                 } else if allowed_project_ids.is_some() {
@@ -344,10 +344,10 @@ impl FromRequestParts<AppState> for HalfAuthedUser {
         if user.is_suspended {
             return Err(AuthError::Suspended);
         }
-        if let Some(revoked_at) = user.sessions_revoked_at {
-            if issued_at_ms < revoked_at.timestamp_millis() {
-                return Err(AuthError::Unauthorized);
-            }
+        if let Some(revoked_at) = user.sessions_revoked_at
+            && issued_at_ms < revoked_at.timestamp_millis()
+        {
+            return Err(AuthError::Unauthorized);
         }
         Ok(HalfAuthedUser { user_id: user.id })
     }

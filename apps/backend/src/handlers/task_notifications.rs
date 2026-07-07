@@ -236,7 +236,7 @@ pub async fn list_notifications(
                     id: row.id,
                     notification_type: row.notification_type,
                     task,
-                    payload: row.payload.clone().into(),
+                    payload: row.payload.clone(),
                     read_at: row.read_at.map(|dt| dt.with_timezone(&Utc)),
                     created_at: row.created_at.with_timezone(&Utc),
                 }
@@ -264,10 +264,10 @@ pub async fn mark_notification_read(
     if let Some(tid) = notification.task_id {
         let proj_ids = accessible_project_ids(&state.db, auth.user_id).await?;
         let task = tasks::Entity::find_by_id(tid).one(&state.db).await?;
-        if let Some(t) = task {
-            if !proj_ids.contains(&t.project_id) {
-                return Err(AppError::NotFound);
-            }
+        if let Some(t) = task
+            && !proj_ids.contains(&t.project_id)
+        {
+            return Err(AppError::NotFound);
         }
     }
 
@@ -294,7 +294,7 @@ pub async fn mark_notification_read(
         id: row.id,
         notification_type: row.notification_type,
         task,
-        payload: row.payload.clone().into(),
+        payload: row.payload.clone(),
         read_at: row.read_at.map(|dt| dt.with_timezone(&Utc)),
         created_at: row.created_at.with_timezone(&Utc),
     }))

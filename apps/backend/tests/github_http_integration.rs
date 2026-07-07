@@ -25,7 +25,7 @@ async fn mount_github_api_mocks(server: &MockServer) {
             let installation_id = req
                 .url
                 .path_segments()
-                .and_then(|segments| segments.last())
+                .and_then(|mut segments| segments.next_back())
                 .and_then(|id| id.parse::<i64>().ok())
                 .unwrap_or(0);
             ResponseTemplate::new(200).set_body_json(serde_json::json!({

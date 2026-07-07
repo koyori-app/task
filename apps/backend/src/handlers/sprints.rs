@@ -95,9 +95,7 @@ fn build_burndown(
 
     while cursor <= end_cap {
         let day_offset = (cursor - sprint.start_date).num_days();
-        let ideal_remaining = if span_days <= 0 {
-            0
-        } else if total_at_start == 0 {
+        let ideal_remaining = if span_days <= 0 || total_at_start == 0 {
             0
         } else {
             let remaining_ratio = 1.0 - (day_offset as f64 / span_days as f64);
@@ -484,10 +482,10 @@ pub async fn complete_sprint(
         return Err(AppError::BadRequest);
     }
 
-    if let Some(target_id) = payload.move_incomplete_to_sprint_id {
-        if target_id == id {
-            return Err(AppError::BadRequest);
-        }
+    if let Some(target_id) = payload.move_incomplete_to_sprint_id
+        && target_id == id
+    {
+        return Err(AppError::BadRequest);
     }
 
     let done_statuses = done_status_ids(&state, project_id).await?;
@@ -534,10 +532,8 @@ pub async fn complete_sprint(
 
     let new_sprint_id = if payload.move_incomplete_to_backlog {
         None
-    } else if let Some(target_id) = payload.move_incomplete_to_sprint_id {
-        Some(target_id)
     } else {
-        None
+        payload.move_incomplete_to_sprint_id
     };
 
     for task in incomplete {
