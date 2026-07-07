@@ -47,8 +47,8 @@ impl ActiveModelBehavior for ActiveModel {
 
 fn active_option_uuid(value: &ActiveValue<Option<Uuid>>) -> Option<Option<Uuid>> {
     match value {
-        ActiveValue::Set(v) => Some(v.clone()),
-        ActiveValue::Unchanged(v) => Some(v.clone()),
+        ActiveValue::Set(v) => Some(*v),
+        ActiveValue::Unchanged(v) => Some(*v),
         ActiveValue::NotSet => None,
     }
 }

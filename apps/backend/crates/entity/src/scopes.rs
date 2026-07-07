@@ -45,20 +45,25 @@ impl Scope {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+}
+
+impl std::str::FromStr for Scope {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "read:project" => Some(Scope::ReadProject),
-            "write:project" => Some(Scope::WriteProject),
-            "read:drive" => Some(Scope::ReadDrive),
-            "write:drive" => Some(Scope::WriteDrive),
-            "admin:tenant" => Some(Scope::AdminTenant),
-            "read:task" => Some(Scope::ReadTask),
-            "write:task" => Some(Scope::WriteTask),
-            "read:milestone" => Some(Scope::ReadMilestone),
-            "write:milestone" => Some(Scope::WriteMilestone),
-            "read:sprint" => Some(Scope::ReadSprint),
-            "write:sprint" => Some(Scope::WriteSprint),
-            _ => None,
+            "read:project" => Ok(Scope::ReadProject),
+            "write:project" => Ok(Scope::WriteProject),
+            "read:drive" => Ok(Scope::ReadDrive),
+            "write:drive" => Ok(Scope::WriteDrive),
+            "admin:tenant" => Ok(Scope::AdminTenant),
+            "read:task" => Ok(Scope::ReadTask),
+            "write:task" => Ok(Scope::WriteTask),
+            "read:milestone" => Ok(Scope::ReadMilestone),
+            "write:milestone" => Ok(Scope::WriteMilestone),
+            "read:sprint" => Ok(Scope::ReadSprint),
+            "write:sprint" => Ok(Scope::WriteSprint),
+            _ => Err(()),
         }
     }
 }
