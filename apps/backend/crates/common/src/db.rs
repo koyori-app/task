@@ -42,6 +42,13 @@ where
 ///
 /// SeaORM の [`Statement::from_sql_and_values`] は SQL を無変換で sqlx に渡すため、
 /// Postgres では `?` のままだと実行時に構文エラーになる。
+///
+/// # 制約
+///
+/// char 単位の無条件置換のため、テンプレート中の `?` は**バインドプレースホルダ専用**。
+/// Postgres の jsonb 演算子（`?` / `?|` / `?&`）や文字列リテラル中の `?` を含む SQL を
+/// 渡してはならない（それらも `$N` に化けて壊れる）。jsonb のキー存在判定が必要な場合は
+/// この関数を通さず `$N` を直接書くか、`jsonb_exists()` 関数形式を使うこと。
 pub fn bind_sql(backend: DbBackend, template: &str) -> String {
     if backend != DbBackend::Postgres {
         return template.to_string();
