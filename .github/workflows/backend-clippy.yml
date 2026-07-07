@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - 'apps/backend/**'
+      - 'rust-toolchain.toml'
       - '.github/workflows/backend-clippy.yml'
   pull_request:
     paths:
       - 'apps/backend/**'
+      - 'rust-toolchain.toml'
       - '.github/workflows/backend-clippy.yml'
 
 concurrency:
