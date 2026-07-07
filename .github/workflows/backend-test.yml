@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - 'apps/backend/**'
+      - 'rust-toolchain.toml'
       - '.github/workflows/backend-test.yml'
   pull_request:
     paths:
       - 'apps/backend/**'
+      - 'rust-toolchain.toml'
       - '.github/workflows/backend-test.yml'
 
 concurrency:
