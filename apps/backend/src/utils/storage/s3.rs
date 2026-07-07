@@ -21,6 +21,7 @@ const MULTIPART_PART_SIZE: usize = 5 * 1024 * 1024;
 pub struct S3StorageBackend {
     store: Arc<dyn ObjectStore>,
     bucket: String,
+    #[allow(dead_code)]
     public_base_url: String,
 }
 

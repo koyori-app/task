@@ -160,27 +160,27 @@ pub async fn update_status(
     }
     let updated = active.update(&txn).await?;
 
-    if let Some(new_is_done) = payload.is_done_state {
-        if new_is_done != old_is_done_state {
-            let mut task_update = tasks::Entity::update_many()
-                .filter(tasks::Column::StatusId.eq(id))
-                .filter(tasks::Column::DeletedAt.is_null());
-            task_update = if new_is_done {
-                task_update.col_expr(
-                    tasks::Column::CompletedAt,
-                    Expr::expr(Func::coalesce([
-                        Expr::col(tasks::Column::CompletedAt),
-                        Expr::current_timestamp(),
-                    ])),
-                )
-            } else {
-                task_update.col_expr(
-                    tasks::Column::CompletedAt,
-                    Expr::value(Option::<chrono::DateTime<chrono::Utc>>::None),
-                )
-            };
-            task_update.exec(&txn).await?;
-        }
+    if let Some(new_is_done) = payload.is_done_state
+        && new_is_done != old_is_done_state
+    {
+        let mut task_update = tasks::Entity::update_many()
+            .filter(tasks::Column::StatusId.eq(id))
+            .filter(tasks::Column::DeletedAt.is_null());
+        task_update = if new_is_done {
+            task_update.col_expr(
+                tasks::Column::CompletedAt,
+                Expr::expr(Func::coalesce([
+                    Expr::col(tasks::Column::CompletedAt),
+                    Expr::current_timestamp(),
+                ])),
+            )
+        } else {
+            task_update.col_expr(
+                tasks::Column::CompletedAt,
+                Expr::value(Option::<chrono::DateTime<chrono::Utc>>::None),
+            )
+        };
+        task_update.exec(&txn).await?;
     }
 
     txn.commit().await?;

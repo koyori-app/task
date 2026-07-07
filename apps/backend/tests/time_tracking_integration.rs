@@ -9,6 +9,7 @@ use uuid::Uuid;
 struct TaskFixture {
     tp: TestTenantProject,
     task_id: Uuid,
+    #[allow(dead_code)]
     status_id: Uuid,
 }
 

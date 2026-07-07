@@ -216,7 +216,7 @@ pub async fn github_callback(
         active.repo_owner = Set(repo_owner);
         active.repo_name = Set(repo_name);
         active.access_token_enc = Set(token_enc);
-        active.token_expires_at = Set(access.expires_at.into());
+        active.token_expires_at = Set(access.expires_at);
         active.update(&state.db).await?;
     } else {
         github_integrations::ActiveModel {
@@ -226,7 +226,7 @@ pub async fn github_callback(
             repo_owner: Set(repo_owner),
             repo_name: Set(repo_name),
             access_token_enc: Set(token_enc),
-            token_expires_at: Set(access.expires_at.into()),
+            token_expires_at: Set(access.expires_at),
             created_by: Set(auth.user_id),
             created_at: Set(now.into()),
         }

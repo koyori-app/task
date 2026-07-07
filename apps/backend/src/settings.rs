@@ -125,7 +125,7 @@ fn default_allow_origin() -> String {
 
 /// AES-256 鍵素材は 32 バイト固定（マルチバイト文字の文字数ではなくバイト長で検証）。
 fn validate_totp_encryption_key_bytes(raw: &str) -> Result<(), validator::ValidationError> {
-    if raw.as_bytes().len() == 32 {
+    if raw.len() == 32 {
         Ok(())
     } else {
         Err(validator::ValidationError::new("totp_key_bytes"))

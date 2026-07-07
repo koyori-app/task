@@ -145,11 +145,7 @@ pub async fn get_milestone(
         0
     };
 
-    let progress_pct = if total > 0 {
-        (done * 100 / total) as u32
-    } else {
-        0
-    };
+    let progress_pct = (done * 100).checked_div(total).unwrap_or(0) as u32;
 
     Ok(Json(MilestoneDetail {
         milestone: milestone.into(),

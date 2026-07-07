@@ -1,11 +1,12 @@
 //! 管理者操作の監査ログ記録ヘルパー。
 
 use axum::http::HeaderMap;
-use sea_orm::prelude::{Json, Uuid};
+use sea_orm::prelude::Uuid;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
 
 use entity::audit_logs;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn record_audit(
     db: &DatabaseConnection,
     actor_id: Uuid,
@@ -34,7 +35,7 @@ pub async fn record_audit(
         resource_type: Set(resource_type.to_string()),
         resource_id: Set(resource_id.to_string()),
         tenant_id: Set(tenant_id),
-        metadata: Set(metadata.map(Json::from)),
+        metadata: Set(metadata),
         ip_address: Set(ip_address),
         user_agent: Set(user_agent),
         created_at: Set(chrono::Utc::now().into()),

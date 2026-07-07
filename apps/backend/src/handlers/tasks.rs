@@ -52,16 +52,16 @@ pub(crate) async fn resolve_task(
         .await?
         .ok_or(AppError::NotFound)?;
     let prefix = format!("{}-", project.key);
-    if let Some(n_str) = id_str.strip_prefix(&prefix) {
-        if let Ok(seq) = n_str.parse::<i32>() {
-            return tasks::Entity::find()
-                .filter(tasks::Column::ProjectId.eq(project_id))
-                .filter(tasks::Column::SeqId.eq(seq))
-                .filter(tasks::Column::DeletedAt.is_null())
-                .one(&state.db)
-                .await?
-                .ok_or(AppError::NotFound);
-        }
+    if let Some(n_str) = id_str.strip_prefix(&prefix)
+        && let Ok(seq) = n_str.parse::<i32>()
+    {
+        return tasks::Entity::find()
+            .filter(tasks::Column::ProjectId.eq(project_id))
+            .filter(tasks::Column::SeqId.eq(seq))
+            .filter(tasks::Column::DeletedAt.is_null())
+            .one(&state.db)
+            .await?
+            .ok_or(AppError::NotFound);
     }
     Err(AppError::NotFound)
 }
@@ -74,36 +74,35 @@ async fn record_task_field_activities<C: ConnectionTrait>(
     before: &tasks::Model,
     payload: &UpdateTaskRequest,
 ) -> Result<(), AppError> {
-    if let Some(new_status_id) = payload.status_id {
-        if new_status_id != before.status_id {
-            let from = status_name(db, before.status_id).await?;
-            let to = status_name(db, new_status_id).await?;
-            record_activity(
-                db,
-                task_id,
-                Some(user_id),
-                "status_changed",
-                serde_json::json!({ "from": from, "to": to }).into(),
-            )
-            .await?;
-            notify_status_changed(db, project_id, task_id, user_id, &from, &to).await?;
-        }
+    if let Some(new_status_id) = payload.status_id
+        && new_status_id != before.status_id
+    {
+        let from = status_name(db, before.status_id).await?;
+        let to = status_name(db, new_status_id).await?;
+        record_activity(
+            db,
+            task_id,
+            Some(user_id),
+            "status_changed",
+            serde_json::json!({ "from": from, "to": to }),
+        )
+        .await?;
+        notify_status_changed(db, project_id, task_id, user_id, &from, &to).await?;
     }
-    if let Some(new_priority) = payload.priority {
-        if new_priority != before.priority {
-            record_activity(
-                db,
-                task_id,
-                Some(user_id),
-                "priority_changed",
-                serde_json::json!({
-                    "from": priority_label(before.priority),
-                    "to": priority_label(new_priority),
-                })
-                .into(),
-            )
-            .await?;
-        }
+    if let Some(new_priority) = payload.priority
+        && new_priority != before.priority
+    {
+        record_activity(
+            db,
+            task_id,
+            Some(user_id),
+            "priority_changed",
+            serde_json::json!({
+                "from": priority_label(before.priority),
+                "to": priority_label(new_priority),
+            }),
+        )
+        .await?;
     }
     if payload.clear_soft_deadline || payload.soft_deadline.is_some() {
         let before_soft = before.soft_deadline.map(|dt| dt.with_timezone(&Utc));
@@ -122,8 +121,7 @@ async fn record_task_field_activities<C: ConnectionTrait>(
                     "field": "soft_deadline",
                     "from": before_soft,
                     "to": new_soft,
-                })
-                .into(),
+                }),
             )
             .await?;
         }
@@ -145,24 +143,23 @@ async fn record_task_field_activities<C: ConnectionTrait>(
                     "field": "hard_deadline",
                     "from": before_hard,
                     "to": new_hard,
-                })
-                .into(),
+                }),
             )
             .await?;
         }
     }
-    if let Some(archived) = payload.is_archived {
-        if archived != before.is_archived {
-            let event_type = if archived { "archived" } else { "unarchived" };
-            record_activity(
-                db,
-                task_id,
-                Some(user_id),
-                event_type,
-                serde_json::json!({}).into(),
-            )
-            .await?;
-        }
+    if let Some(archived) = payload.is_archived
+        && archived != before.is_archived
+    {
+        let event_type = if archived { "archived" } else { "unarchived" };
+        record_activity(
+            db,
+            task_id,
+            Some(user_id),
+            event_type,
+            serde_json::json!({}),
+        )
+        .await?;
     }
     let _ = project_id;
     Ok(())
@@ -240,10 +237,10 @@ async fn would_create_cycle<C: ConnectionTrait>(
         if cur == blocker {
             return Ok(true);
         }
-        if visited.insert(cur) {
-            if let Some(nexts) = graph.get(&cur) {
-                queue.extend(nexts);
-            }
+        if visited.insert(cur)
+            && let Some(nexts) = graph.get(&cur)
+        {
+            queue.extend(nexts);
         }
     }
     Ok(false)
@@ -408,10 +405,10 @@ pub async fn create_task(
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
-    if let (Some(s), Some(h)) = (payload.soft_deadline, payload.hard_deadline) {
-        if s >= h {
-            return Err(AppError::BadRequest);
-        }
+    if let (Some(s), Some(h)) = (payload.soft_deadline, payload.hard_deadline)
+        && s >= h
+    {
+        return Err(AppError::BadRequest);
     }
 
     let txn = state.db.begin().await?;
@@ -531,7 +528,7 @@ pub async fn create_task(
         model.id,
         Some(auth.user_id),
         "task_created",
-        serde_json::json!({}).into(),
+        serde_json::json!({}),
     )
     .await?;
     txn.commit().await?;
@@ -704,10 +701,10 @@ pub async fn update_task(
     } else {
         existing_hard
     };
-    if let (Some(s), Some(h)) = (effective_soft, effective_hard) {
-        if s >= h {
-            return Err(AppError::BadRequest);
-        }
+    if let (Some(s), Some(h)) = (effective_soft, effective_hard)
+        && s >= h
+    {
+        return Err(AppError::BadRequest);
     }
 
     if payload.clear_estimated_minutes {
@@ -856,7 +853,7 @@ pub async fn archive_task(
         task_id,
         Some(auth.user_id),
         "archived",
-        serde_json::json!({}).into(),
+        serde_json::json!({}),
     )
     .await?;
     txn.commit().await?;
@@ -900,7 +897,7 @@ pub async fn unarchive_task(
         task_id,
         Some(auth.user_id),
         "unarchived",
-        serde_json::json!({}).into(),
+        serde_json::json!({}),
     )
     .await?;
     txn.commit().await?;
@@ -998,8 +995,7 @@ pub async fn add_assignee(
         serde_json::json!({
             "user_id": payload.user_id,
             "role": role,
-        })
-        .into(),
+        }),
     )
     .await?;
     notify_assigned(
@@ -1097,7 +1093,7 @@ pub async fn remove_assignee(
         task.id,
         Some(auth.user_id),
         "assignee_removed",
-        serde_json::json!({ "user_id": user_id }).into(),
+        serde_json::json!({ "user_id": user_id }),
     )
     .await?;
     txn.commit().await?;
@@ -1289,8 +1285,7 @@ pub async fn add_relation(
         serde_json::json!({
             "type": relation_type,
             "target_seq_id": target_task.seq_id,
-        })
-        .into(),
+        }),
     )
     .await?;
     txn.commit().await?;
@@ -1359,8 +1354,7 @@ pub async fn remove_relation(
         serde_json::json!({
             "type": relation_type,
             "target_seq_id": other_task.seq_id,
-        })
-        .into(),
+        }),
     )
     .await?;
     txn.commit().await?;

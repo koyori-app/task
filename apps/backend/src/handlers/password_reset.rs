@@ -37,7 +37,7 @@ pub async fn password_reset_request(
     let email = normalize_email(&payload.email);
     if !password_reset::try_acquire_rate_limit(&state.redis_client, &email)
         .await
-        .map_err(|e| AuthError::Internal(e.into()))?
+        .map_err(AuthError::Internal)?
     {
         return Err(AuthError::TooManyRequests);
     }
@@ -81,7 +81,7 @@ pub async fn password_reset_verify(
 ) -> Result<StatusCode, AuthError> {
     let valid = password_reset::lookup_token_user_id(&state.redis_client, &payload.token)
         .await
-        .map_err(|e| AuthError::Internal(e.into()))?
+        .map_err(AuthError::Internal)?
         .is_some();
     if valid {
         Ok(StatusCode::OK)
@@ -105,7 +105,7 @@ pub async fn password_reset_complete(
     // consume を commit 前に実行すると DB 失敗時にトークンだけ失効し再試行不能になる。
     let user_id = password_reset::lookup_token_user_id(&state.redis_client, &payload.token)
         .await
-        .map_err(|e| AuthError::Internal(e.into()))?
+        .map_err(AuthError::Internal)?
         .ok_or(AuthError::InvalidPasswordResetToken)?;
     let password_hash = create_password_hash(&payload.new_password)?;
 
@@ -136,7 +136,7 @@ pub async fn password_reset_complete(
     // commit 成功後にトークンを消費。Redis 失敗時もパスワードは既に変更済み（許容）。
     let consumed_id = password_reset::consume_token(&state.redis_client, &payload.token)
         .await
-        .map_err(|e| AuthError::Internal(e.into()))?
+        .map_err(AuthError::Internal)?
         .ok_or(AuthError::InvalidPasswordResetToken)?;
     if consumed_id != user_id {
         return Err(AuthError::Internal(anyhow::anyhow!(

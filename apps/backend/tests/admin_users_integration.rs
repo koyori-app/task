@@ -72,16 +72,15 @@ async fn admin_users_integration_suite() {
             .collect();
 
         for (id, _) in &saved_admins {
-            if *id != sole_admin.id {
-                if let Some(user) = users::Entity::find_by_id(*id)
+            if *id != sole_admin.id
+                && let Some(user) = users::Entity::find_by_id(*id)
                     .one(&app.state.db)
                     .await
                     .expect("load admin")
-                {
-                    let mut active: users::ActiveModel = user.into();
-                    active.is_admin = sea_orm::ActiveValue::Set(false);
-                    active.update(&app.state.db).await.expect("demote admin");
-                }
+            {
+                let mut active: users::ActiveModel = user.into();
+                active.is_admin = sea_orm::ActiveValue::Set(false);
+                active.update(&app.state.db).await.expect("demote admin");
             }
         }
 

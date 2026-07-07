@@ -136,8 +136,7 @@ pub async fn notify_assigned<C: ConnectionTrait>(
         serde_json::json!({
             "assigned_by": assigner_name,
             "role": role,
-        })
-        .into(),
+        }),
     )
     .await
 }
@@ -216,8 +215,7 @@ pub async fn notify_mentioned<C: ConnectionTrait>(
     let payload: Json = serde_json::json!({
         "comment_id": comment_id,
         "author": author_name,
-    })
-    .into();
+    });
     let mut notified = Vec::new();
     for user_id in mentioned_user_ids {
         if *user_id == author_id {
@@ -250,8 +248,7 @@ pub async fn notify_comment_added<C: ConnectionTrait>(
     let payload: Json = serde_json::json!({
         "comment_id": comment_id,
         "author": author_name,
-    })
-    .into();
+    });
     let mut exclude = vec![author_id];
     exclude.extend_from_slice(mentioned_user_ids);
     notify_watchers(
@@ -287,8 +284,7 @@ pub async fn notify_status_changed<C: ConnectionTrait>(
             "from": from,
             "to": to,
             "changed_by": actor_name,
-        })
-        .into(),
+        }),
         &[actor_id],
     )
     .await

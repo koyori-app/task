@@ -21,16 +21,12 @@ struct OAuthTokenJson {
     refresh_token: Option<String>,
     #[serde(default)]
     expires_in: Option<i64>,
-    #[serde(default)]
-    token_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct GitHubUser {
     id: i64,
     login: String,
-    #[serde(default)]
-    email: Option<String>,
     avatar_url: Option<String>,
 }
 
@@ -168,55 +164,6 @@ async fn fetch_github_verified_email(
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn pick_github_email(emails: &[GitHubEmail]) -> (Option<String>, Option<bool>) {
-        let verified: Vec<&GitHubEmail> = emails.iter().filter(|e| e.verified).collect();
-        let pick = verified
-            .iter()
-            .find(|e| e.primary)
-            .copied()
-            .or(verified.first().copied());
-        match pick {
-            Some(e) => (Some(e.email.clone()), Some(true)),
-            None => (None, None),
-        }
-    }
-
-    #[test]
-    fn github_email_uses_verified_primary_only() {
-        let emails = vec![
-            GitHubEmail {
-                email: "unverified@example.com".into(),
-                primary: true,
-                verified: false,
-            },
-            GitHubEmail {
-                email: "verified@example.com".into(),
-                primary: false,
-                verified: true,
-            },
-        ];
-        let (email, verified) = pick_github_email(&emails);
-        assert_eq!(email.as_deref(), Some("verified@example.com"));
-        assert_eq!(verified, Some(true));
-    }
-
-    #[test]
-    fn github_email_none_when_no_verified() {
-        let emails = vec![GitHubEmail {
-            email: "bad@example.com".into(),
-            primary: true,
-            verified: false,
-        }];
-        let (email, verified) = pick_github_email(&emails);
-        assert!(email.is_none());
-        assert!(verified.is_none());
-    }
-}
-
 async fn fetch_gitlab_user(
     http: &reqwest::Client,
     userinfo_url: &str,
@@ -278,4 +225,53 @@ fn github_headers(access_token: &str) -> HeaderMap {
     headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
     headers.insert(USER_AGENT, HeaderValue::from_static("task-oauth-backend"));
     headers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pick_github_email(emails: &[GitHubEmail]) -> (Option<String>, Option<bool>) {
+        let verified: Vec<&GitHubEmail> = emails.iter().filter(|e| e.verified).collect();
+        let pick = verified
+            .iter()
+            .find(|e| e.primary)
+            .copied()
+            .or(verified.first().copied());
+        match pick {
+            Some(e) => (Some(e.email.clone()), Some(true)),
+            None => (None, None),
+        }
+    }
+
+    #[test]
+    fn github_email_uses_verified_primary_only() {
+        let emails = vec![
+            GitHubEmail {
+                email: "unverified@example.com".into(),
+                primary: true,
+                verified: false,
+            },
+            GitHubEmail {
+                email: "verified@example.com".into(),
+                primary: false,
+                verified: true,
+            },
+        ];
+        let (email, verified) = pick_github_email(&emails);
+        assert_eq!(email.as_deref(), Some("verified@example.com"));
+        assert_eq!(verified, Some(true));
+    }
+
+    #[test]
+    fn github_email_none_when_no_verified() {
+        let emails = vec![GitHubEmail {
+            email: "bad@example.com".into(),
+            primary: true,
+            verified: false,
+        }];
+        let (email, verified) = pick_github_email(&emails);
+        assert!(email.is_none());
+        assert!(verified.is_none());
+    }
 }

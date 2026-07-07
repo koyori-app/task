@@ -623,10 +623,10 @@ async fn resolve_user_and_connection(
     .await?;
 
     if let Some(conn) = existing {
-        if let Some(expected_user_id) = link_user_id {
-            if conn.user_id != expected_user_id {
-                return Err(OAuthError::ConnectionExists);
-            }
+        if let Some(expected_user_id) = link_user_id
+            && conn.user_id != expected_user_id
+        {
+            return Err(OAuthError::ConnectionExists);
         }
         let user_id = conn.user_id;
         update_connection_tokens(state, conn, token).await?;
@@ -768,7 +768,6 @@ async fn insert_connection_txn(
         token_expires_at: Set(token.expires_at.map(Into::into)),
         created_at: Set(now.into()),
         updated_at: Set(now.into()),
-        ..Default::default()
     };
 
     oauth_connections::Entity::insert(connection)
@@ -862,7 +861,6 @@ async fn create_oauth_user_and_connection(
         token_expires_at: Set(token.expires_at.map(Into::into)),
         created_at: Set(now.into()),
         updated_at: Set(now.into()),
-        ..Default::default()
     };
 
     with_transaction::<Uuid, OAuthError, _>(&state.db, |txn| {
