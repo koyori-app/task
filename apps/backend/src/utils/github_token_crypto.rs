@@ -15,9 +15,9 @@ pub fn encrypt_token(key_material: &str, plaintext: &str) -> Result<String, anyh
     let cipher = Aes256Gcm::new(&key.into());
     let mut nonce_bytes = [0u8; NONCE_LEN];
     rand::rng().fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Nonce::from(nonce_bytes);
     let ciphertext = cipher
-        .encrypt(nonce, plaintext.as_bytes())
+        .encrypt(&nonce, plaintext.as_bytes())
         .map_err(|e| anyhow!("encrypt token: {e}"))?;
     let mut out = Vec::with_capacity(NONCE_LEN + ciphertext.len());
     out.extend_from_slice(&nonce_bytes);
@@ -33,9 +33,9 @@ pub fn decrypt_token(key_material: &str, encoded: &str) -> Result<String, anyhow
         return Err(anyhow!("encrypted token too short"));
     }
     let (nonce_bytes, ciphertext) = bytes.split_at(NONCE_LEN);
-    let nonce = Nonce::from_slice(nonce_bytes);
+    let nonce = Nonce::try_from(nonce_bytes).map_err(|_| anyhow!("invalid nonce length"))?;
     let plaintext = cipher
-        .decrypt(nonce, ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|e| anyhow!("decrypt token: {e}"))?;
     String::from_utf8(plaintext).context("token utf8")
 }

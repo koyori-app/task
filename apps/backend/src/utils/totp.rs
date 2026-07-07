@@ -58,9 +58,9 @@ pub fn encrypt_totp_secret(plain_secret: &str, key: &str) -> Result<String, Auth
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("aes key: {e}")))?;
     let mut nonce_bytes = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Nonce::from(nonce_bytes);
     let ciphertext = cipher
-        .encrypt(nonce, plain_secret.as_bytes())
+        .encrypt(&nonce, plain_secret.as_bytes())
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("aes encrypt: {e}")))?;
     let mut out = Vec::with_capacity(NONCE_LEN + ciphertext.len());
     out.extend_from_slice(&nonce_bytes);
@@ -79,9 +79,10 @@ pub fn decrypt_totp_secret(secret_enc: &str, key: &str) -> Result<String, AuthEr
     let aes_key = derive_totp_aes_key(key)?;
     let cipher = Aes256Gcm::new_from_slice(&aes_key)
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("aes key: {e}")))?;
-    let nonce = Nonce::from_slice(nonce_bytes);
+    let nonce = Nonce::try_from(nonce_bytes)
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!("invalid nonce length: {e}")))?;
     let plain = cipher
-        .decrypt(nonce, ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("aes decrypt: {e}")))?;
     String::from_utf8(plain).map_err(|e| AuthError::Internal(anyhow::anyhow!("utf8 secret: {e}")))
 }
