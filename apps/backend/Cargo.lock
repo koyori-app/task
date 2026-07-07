@@ -871,6 +871,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "common",
  "config",
  "cookie",
  "dotenvy",
@@ -1228,6 +1229,27 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "config",
+ "dotenvy",
+ "entity",
+ "redis",
+ "redis_pool",
+ "regex",
+ "sea-orm",
+ "serde",
+ "thiserror 2.0.18",
+ "tracing",
+ "url",
+ "utoipa",
+ "validator",
 ]
 
 [[package]]

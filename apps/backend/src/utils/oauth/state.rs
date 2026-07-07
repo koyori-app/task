@@ -6,7 +6,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::config::OAuthSettings;
-use crate::utils::redis::RedisConnection;
+use common::cache::redis::RedisConnection;
 
 /// OAuth state の TTL（秒）。仕様: 10 分。
 pub const STATE_TTL_SECS: u64 = 10 * 60;

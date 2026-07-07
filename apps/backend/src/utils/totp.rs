@@ -181,7 +181,7 @@ const MAX_ATTEMPTS: i64 = 5;
 const LOCKOUT_SECS: u64 = 900;
 
 pub async fn check_2fa_lockout(
-    redis: &crate::utils::redis::RedisConnection,
+    redis: &common::cache::redis::RedisConnection,
     user_id: Uuid,
 ) -> Result<(), AuthError> {
     let key = format!("{ATTEMPT_KEY_PREFIX}{user_id}");
@@ -202,7 +202,7 @@ pub async fn check_2fa_lockout(
 }
 
 pub async fn record_2fa_failure(
-    redis: &crate::utils::redis::RedisConnection,
+    redis: &common::cache::redis::RedisConnection,
     user_id: Uuid,
 ) -> Result<(), AuthError> {
     let key = format!("{ATTEMPT_KEY_PREFIX}{user_id}");
@@ -225,7 +225,7 @@ pub async fn record_2fa_failure(
 }
 
 pub async fn clear_2fa_attempts(
-    redis: &crate::utils::redis::RedisConnection,
+    redis: &common::cache::redis::RedisConnection,
     user_id: Uuid,
 ) -> Result<(), AuthError> {
     let key = format!("{ATTEMPT_KEY_PREFIX}{user_id}");

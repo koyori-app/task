@@ -1,7 +1,6 @@
 pub mod auth;
 pub mod bootstrap_admin;
 pub mod custom_fields;
-pub mod db;
 pub mod drive;
 pub mod email;
 pub mod email_verification;
@@ -18,12 +17,14 @@ pub mod password_reset;
 pub mod password_reset_delivery;
 pub mod password_reset_email_delivery;
 pub mod password_reset_log;
-pub mod redis;
 pub mod smtp;
 pub mod storage;
-pub mod system_settings;
 pub mod task_activities;
 pub mod totp;
-pub mod validation;
 pub mod verification_email_delivery;
 pub mod webauthn;
+
+pub use common::cache::redis;
+pub use common::db;
+pub use common::system_settings;
+pub use common::validation;
