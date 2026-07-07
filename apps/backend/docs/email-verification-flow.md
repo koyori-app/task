@@ -2,7 +2,7 @@
 
 登録からメール確認・ログインまでのシーケンス（Apalis + PostgreSQL ジョブキュー）。
 
-運用 UI: [Apalis Board](https://github.com/apalis-dev/apalis-board) を `http://localhost:3400/` で提供（キュー `verification_email` の監視・再試行状況）。
+運用 UI: [Apalis Board](https://github.com/apalis-dev/apalis-board) を `http://localhost:3400/` で提供（キュー `verification_email` の監視・再試行状況）。ジョブペイロードに認証トークン・メールアドレスが含まれるため、board の UI/API は管理者セッション必須。
 
 ## シーケンス図
 

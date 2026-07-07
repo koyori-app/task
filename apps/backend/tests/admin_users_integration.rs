@@ -262,6 +262,10 @@ async fn admin_users_integration_suite() {
             .expect("load task")
             .expect("task still exists (not physically deleted)");
         assert_eq!(task_row.created_by, target.id);
+        assert!(
+            task_row.deleted_at.is_some(),
+            "cascade must soft-delete owned tasks"
+        );
 
         let user_row = users::Entity::find_by_id(target.id)
             .one(&app.state.db)
@@ -271,6 +275,26 @@ async fn admin_users_integration_suite() {
         assert!(user_row.email.starts_with("deleted+"));
         assert!(user_row.is_suspended);
         assert!(user_row.password_hash.is_none());
+
+        app.cleanup_user(target.id).await;
+        app.cleanup_user(admin.id).await;
+    }
+
+    // Test 7: 2FA 強制リセットは 2FA 未設定ユーザーに対しても 204 を返す
+    // （information_schema 検査の `?` プレースホルダ未変換で常に 500 だった回帰の検知）
+    {
+        let target = app.insert_user(false, false).await;
+        let admin = app.insert_user(true, false).await;
+        app.reset_session_client();
+        app.login_session(&admin.email, &admin.password).await;
+
+        let response = app
+            .post_json_with_session(
+                &format!("/v1/admin/users/{}/reset-2fa", target.id),
+                serde_json::json!({}),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
         app.cleanup_user(target.id).await;
         app.cleanup_user(admin.id).await;

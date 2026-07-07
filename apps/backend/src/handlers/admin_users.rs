@@ -20,12 +20,13 @@ use axum::{
 };
 use axum_valid::Valid;
 use chrono::Utc;
+use common::db::{column_exists, execute_bound, table_exists};
 use entity::{personal_tokens, project_members, tasks, users};
 use sea_orm::prelude::Uuid;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    EntityTrait, ExecResult, PaginatorTrait, QueryFilter, Statement, TransactionTrait, Value,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait,
+    PaginatorTrait, QueryFilter, TransactionTrait,
 };
 
 fn auth_error_to_app(e: AuthError) -> AppError {
@@ -33,53 +34,6 @@ fn auth_error_to_app(e: AuthError) -> AppError {
         AuthError::Internal(err) => AppError::Internal(err),
         _ => AppError::Internal(anyhow::anyhow!("{e}")),
     }
-}
-
-async fn execute_bound<C: ConnectionTrait>(
-    conn: &C,
-    sql: &str,
-    values: Vec<Value>,
-) -> Result<ExecResult, AppError> {
-    let stmt = Statement::from_sql_and_values(conn.get_database_backend(), sql, values);
-    Ok(conn.execute_raw(stmt).await?)
-}
-
-async fn table_exists<C: ConnectionTrait>(conn: &C, table: &str) -> Result<bool, AppError> {
-    let sql = "SELECT EXISTS (
-            SELECT FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_name = ?
-        )";
-    let row = conn
-        .query_one_raw(Statement::from_sql_and_values(
-            conn.get_database_backend(),
-            sql,
-            vec![table.into()],
-        ))
-        .await?;
-    Ok(row
-        .and_then(|r| r.try_get_by_index::<bool>(0).ok())
-        .unwrap_or(false))
-}
-
-async fn column_exists<C: ConnectionTrait>(
-    conn: &C,
-    table: &str,
-    column: &str,
-) -> Result<bool, AppError> {
-    let sql = "SELECT EXISTS (
-            SELECT FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = ? AND column_name = ?
-        )";
-    let row = conn
-        .query_one_raw(Statement::from_sql_and_values(
-            conn.get_database_backend(),
-            sql,
-            vec![table.into(), column.into()],
-        ))
-        .await?;
-    Ok(row
-        .and_then(|r| r.try_get_by_index::<bool>(0).ok())
-        .unwrap_or(false))
 }
 
 async fn revoke_user_sessions(db: &DatabaseConnection, user_id: Uuid) -> Result<(), AppError> {
@@ -159,82 +113,70 @@ pub async fn ensure_not_last_admin(
 }
 
 async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(), AppError> {
-    if table_exists(db, "tasks").await.unwrap_or(false)
-        && column_exists(db, "tasks", "deleted_at")
-            .await
-            .unwrap_or(false)
-    {
+    if table_exists(db, "tasks").await? && column_exists(db, "tasks", "deleted_at").await? {
         let owned = tasks::Entity::find()
             .filter(tasks::Column::CreatedBy.eq(user_id))
             .filter(tasks::Column::DeletedAt.is_null())
             .all(db)
-            .await
-            .unwrap_or_default();
+            .await?;
         let now = Utc::now();
         for task in owned {
             let mut active: tasks::ActiveModel = task.into();
             active.deleted_at = Set(Some(now.into()));
             active.updated_at = Set(now.into());
-            let _ = active.update(db).await;
+            active.update(db).await?;
         }
     }
 
-    if table_exists(db, "task_assignees").await.unwrap_or(false) {
-        let _ = execute_bound(
+    if table_exists(db, "task_assignees").await? {
+        execute_bound(
             db,
             "DELETE FROM task_assignees WHERE user_id = ?",
             vec![user_id.into()],
         )
-        .await;
+        .await?;
     }
 
-    if table_exists(db, "project_members").await.unwrap_or(false) {
-        let _ = project_members::Entity::delete_many()
+    if table_exists(db, "project_members").await? {
+        project_members::Entity::delete_many()
             .filter(project_members::Column::UserId.eq(user_id))
             .exec(db)
-            .await;
+            .await?;
     }
 
-    if table_exists(db, "personal_tokens").await.unwrap_or(false)
-        && column_exists(db, "personal_tokens", "revoked")
-            .await
-            .unwrap_or(false)
+    if table_exists(db, "personal_tokens").await?
+        && column_exists(db, "personal_tokens", "revoked").await?
     {
-        let _ = personal_tokens::Entity::update_many()
+        personal_tokens::Entity::update_many()
             .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
             .filter(personal_tokens::Column::UserId.eq(user_id))
             .exec(db)
-            .await;
+            .await?;
     }
 
-    if column_exists(db, "users", "sessions_revoked_at")
-        .await
-        .unwrap_or(false)
-    {
-        let _ = revoke_user_sessions(db, user_id).await;
+    if column_exists(db, "users", "sessions_revoked_at").await? {
+        revoke_user_sessions(db, user_id).await?;
     }
 
-    if table_exists(db, "totp_credentials").await.unwrap_or(false)
-        || table_exists(db, "recovery_codes").await.unwrap_or(false)
-    {
-        let _ = reset_2fa_for_user(db, user_id).await;
+    if table_exists(db, "totp_credentials").await? || table_exists(db, "recovery_codes").await? {
+        reset_2fa_for_user(db, user_id).await?;
     }
 
-    if table_exists(db, "passkeys").await.unwrap_or(false) {
-        let _ = execute_bound(
+    if table_exists(db, "passkeys").await? {
+        execute_bound(
             db,
             "DELETE FROM passkeys WHERE user_id = ?",
             vec![user_id.into()],
         )
-        .await;
+        .await?;
     }
-    if table_exists(db, "oauth_connections").await.unwrap_or(false) {
-        let _ = execute_bound(
+    if table_exists(db, "oauth_connections").await? {
+        execute_bound(
             db,
             "DELETE FROM oauth_connections WHERE user_id = ?",
             vec![user_id.into()],
         )
-        .await;
+        .await?;
     }
 
     let txn = db.begin().await?;

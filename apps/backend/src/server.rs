@@ -54,6 +54,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
 
     let is_prod = std::env::var("RUST_ENV").unwrap_or_default() == "production";
     let settings = &state.settings;
+    let addr = settings.listen_addr.clone();
 
     let session_config = SessionConfig::default()
         .with_secure(is_prod)
@@ -67,8 +68,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         Some(state.redis_client.conn.clone().into()),
         session_config,
     )
-    .await
-    .unwrap();
+    .await?;
 
     let (router, mut openapi) = utoipa_axum::router::OpenApiRouter::new()
         .merge(crate::routes::create_routes())
@@ -147,24 +147,40 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
 
     let api = router
         .merge(Scalar::with_url("/scalar", openapi.clone()))
-        .with_state(state)
+        .with_state(state.clone())
         .layer(cors)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::middlewares::csrf::csrf_origin_check,
+        ))
         .layer(middleware::from_fn(logging_middleware))
-        .layer(SessionLayer::new(session_store))
+        .layer(SessionLayer::new(session_store.clone()))
         .layer(ServiceBuilder::new().layer(NewSentryLayer::<Request<Body>>::new_from_top()));
 
     // apalis-board の UI はビルド時に API=/api/v1・静的ファイル=/ 直下を前提とする。
     // /jobs にネストすると JS/WASM が 404 になり真っ白になる。
-    let app = Router::new()
-        .merge(api)
+    // ジョブペイロード（メール認証トークン・メールアドレス）と SSE ログを露出するため、
+    // board 系ルートはすべて管理者セッション必須。board API は再試行等の状態変更を持ち
+    // 公開 API と同じ SameSite=None セッション Cookie で認証するため、CSRF 検査も api と同様に通す。
+    let board = Router::new()
         .nest("/api/v1", board_api)
         .route("/jobs", get(|| async { Redirect::permanent("/") }))
         .route("/jobs/", get(|| async { Redirect::permanent("/") }))
+        .fallback_service(ServeUI::new())
         .layer(Extension(broadcaster))
-        .fallback_service(ServeUI::new());
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::middlewares::admin_gate::require_admin_session,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state,
+            crate::middlewares::csrf::csrf_origin_check,
+        ))
+        .layer(SessionLayer::new(session_store));
 
-    let addr = "0.0.0.0:3400";
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let app = Router::new().merge(api).merge(board);
+
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("Listening on http://{addr}");
     info!("Apalis board: http://{addr}/");
 
