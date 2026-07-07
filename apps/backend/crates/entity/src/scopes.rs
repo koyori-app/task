@@ -44,7 +44,6 @@ impl Scope {
             Scope::WriteSprint => "write:sprint",
         }
     }
-
 }
 
 impl std::str::FromStr for Scope {
