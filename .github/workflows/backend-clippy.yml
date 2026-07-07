@@ -43,6 +43,12 @@ jobs:
           workspaces: apps/backend -> target
           cache-on-failure: true
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
       - name: Run clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
         working-directory: apps/backend
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
