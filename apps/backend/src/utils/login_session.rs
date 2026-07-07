@@ -4,8 +4,9 @@
 use axum_session::Session;
 use axum_session_redispool::SessionRedisPool;
 use chrono::Utc;
-use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement, Value};
+use sea_orm::DatabaseConnection;
 
+use common::db::{column_exists, query_one_bool, table_exists};
 use entity::users;
 
 #[derive(Debug, Clone, Copy)]
@@ -18,70 +19,6 @@ impl Login2faFlags {
     pub fn needs_second_factor(self) -> bool {
         self.requires_2fa || self.requires_2fa_setup
     }
-}
-
-fn bind_sql(backend: DbBackend, template: &str) -> String {
-    if backend != DbBackend::Postgres {
-        return template.to_string();
-    }
-    let mut out = String::with_capacity(template.len());
-    let mut index = 0;
-    for ch in template.chars() {
-        if ch == '?' {
-            index += 1;
-            out.push('$');
-            out.push_str(&index.to_string());
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
-async fn query_one_bool<C: ConnectionTrait>(
-    conn: &C,
-    sql: &str,
-    values: Vec<Value>,
-) -> Result<bool, sea_orm::DbErr> {
-    let backend = conn.get_database_backend();
-    let row = conn
-        .query_one_raw(Statement::from_sql_and_values(
-            backend,
-            bind_sql(backend, sql),
-            values,
-        ))
-        .await?;
-    Ok(row
-        .and_then(|r| r.try_get_by_index::<bool>(0).ok())
-        .unwrap_or(false))
-}
-
-async fn table_exists<C: ConnectionTrait>(conn: &C, table: &str) -> Result<bool, sea_orm::DbErr> {
-    query_one_bool(
-        conn,
-        "SELECT EXISTS (
-            SELECT 1 FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_name = ?
-        )",
-        vec![table.into()],
-    )
-    .await
-}
-
-async fn column_exists<C: ConnectionTrait>(
-    conn: &C,
-    table: &str,
-    column: &str,
-) -> Result<bool, sea_orm::DbErr> {
-    query_one_bool(
-        conn,
-        "SELECT EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = ? AND column_name = ?
-        )",
-        vec![table.into(), column.into()],
-    )
-    .await
 }
 
 async fn user_has_active_2fa(
