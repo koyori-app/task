@@ -25,9 +25,7 @@ async fn session_from_parts(parts: &mut Parts, state: &AppState) -> Result<Sessi
         .map_err(|_| AuthError::Internal(anyhow::anyhow!("session layer missing")))
 }
 
-async fn user_from_session(parts: &mut Parts, state: &AppState) -> Result<users::Model, AuthError> {
-    let session = session_from_parts(parts, state).await?;
-
+async fn user_from_session(session: &Session, state: &AppState) -> Result<users::Model, AuthError> {
     let user_id = session
         .get::<Uuid>("user_id")
         .ok_or(AuthError::Unauthorized)?;
@@ -301,7 +299,7 @@ impl FromRequestParts<AppState> for AuthUser {
             if session_is_half_authed(&session) {
                 return Err(AuthError::Forbidden);
             }
-            let user = user_from_session(parts, state).await?;
+            let user = user_from_session(&session, state).await?;
             if user.is_suspended {
                 return Err(AuthError::Suspended);
             }
@@ -368,7 +366,8 @@ impl FromRequestParts<AppState> for LoggedInUser {
         if bearer_token_from_parts(parts).is_some() {
             return Err(AuthError::Forbidden);
         }
-        let user = user_from_session(parts, state).await?;
+        let session = session_from_parts(parts, state).await?;
+        let user = user_from_session(&session, state).await?;
         if user.is_suspended {
             return Err(AuthError::Suspended);
         }
@@ -392,7 +391,7 @@ impl FromRequestParts<AppState> for AdminUser {
         if session_is_half_authed(&session) {
             return Err(AuthError::Forbidden);
         }
-        let user = user_from_session(parts, state).await?;
+        let user = user_from_session(&session, state).await?;
         if user.is_suspended {
             return Err(AuthError::Suspended);
         }
@@ -425,7 +424,7 @@ impl FromRequestParts<AppState> for CurrentUser {
         if session_is_half_authed(&session) {
             return Err(AuthError::Forbidden);
         }
-        let user = user_from_session(parts, state).await?;
+        let user = user_from_session(&session, state).await?;
         if user.is_suspended {
             return Err(AuthError::Suspended);
         }

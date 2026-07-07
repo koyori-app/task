@@ -29,6 +29,9 @@ pub struct Settings {
     pub sentry_dsn: Option<String>,
     #[serde(default = "default_allow_origin")]
     pub allow_origin: String,
+    /// HTTP サーバーの bind アドレス（例: `127.0.0.1:3400`）
+    #[serde(default = "default_listen_addr")]
+    pub listen_addr: String,
     pub smtp_host: String,
     pub smtp_port: u16,
     pub smtp_username: String,
@@ -121,6 +124,10 @@ fn default_github_webhook_worker_concurrency() -> usize {
 
 fn default_allow_origin() -> String {
     "http://localhost:3000".to_string()
+}
+
+fn default_listen_addr() -> String {
+    "0.0.0.0:3400".to_string()
 }
 
 /// AES-256 鍵素材は 32 バイト固定（マルチバイト文字の文字数ではなくバイト長で検証）。
@@ -235,6 +242,7 @@ mod tests {
             redis_url: String::new(),
             sentry_dsn: None,
             allow_origin: String::new(),
+            listen_addr: default_listen_addr(),
             smtp_host: String::new(),
             smtp_port: 0,
             smtp_username: String::new(),

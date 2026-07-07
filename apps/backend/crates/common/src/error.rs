@@ -7,7 +7,7 @@ use axum::{
 };
 use serde::Serialize;
 use thiserror::Error;
-use tracing::debug;
+use tracing::error;
 use utoipa::ToSchema;
 
 /// API 共通のエラー応答ボディ。
@@ -54,7 +54,7 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {
             AppError::Internal(e) => {
-                debug!("app error: {:#?}", e);
+                error!("app error: {:#?}", e);
                 internal_server_error().into_response()
             }
             AppError::NotFound => (

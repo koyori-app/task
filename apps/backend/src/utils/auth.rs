@@ -18,7 +18,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use thiserror::Error;
-use tracing::{debug, warn};
+use tracing::{error, warn};
 
 use chrono::Utc;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -94,7 +94,7 @@ impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
         match self {
             AuthError::Internal(e) => {
-                debug!("auth error: {:#?}", e);
+                error!("auth error: {:#?}", e);
                 internal_server_error().into_response()
             }
             AuthError::Unauthorized => (
@@ -168,7 +168,7 @@ impl IntoResponse for AuthError {
             )
                 .into_response(),
             AuthError::VerificationEmailEnqueueFailed(e) => {
-                debug!("verification email enqueue failed: {:#?}", e);
+                warn!("verification email enqueue failed: {:#?}", e);
                 (
                     StatusCode::SERVICE_UNAVAILABLE,
                     Json(ServerError {
