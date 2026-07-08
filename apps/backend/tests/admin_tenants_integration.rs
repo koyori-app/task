@@ -51,9 +51,11 @@ async fn insert_task(app: &TestApp, project_id: Uuid, created_by: Uuid, title: &
     task_id
 }
 
-/// プロジェクト配下タスク一覧（管理者）が 200 を返し、タスクが載る。
-/// information_schema 検査とタスク SELECT の `?` プレースホルダ未変換
-/// （Postgres では実行時構文エラー → 常に 500）の回帰検知。
+/// テナント配下プロジェクト一覧・プロジェクト配下タスク一覧（管理者）が
+/// ドキュメントどおりの URL で 200 を返し、内容が載る。回帰検知の対象:
+/// - routes/admin.rs の nest 二重連結（登録パスがズレて常に 404 だった）
+/// - information_schema 検査とタスク SELECT の `?` プレースホルダ未変換
+///   （Postgres では実行時構文エラー → 500）
 #[tokio::test]
 async fn admin_lists_tenant_project_tasks() {
     let mut app = TestApp::new().await;
@@ -65,6 +67,21 @@ async fn admin_lists_tenant_project_tasks() {
     let admin = app.insert_user(true, false).await;
     app.reset_session_client();
     app.login_session(&admin.email, &admin.password).await;
+
+    let projects_response = app
+        .get_with_session(&format!("/v1/admin/tenants/{}/projects", tp.tenant_id))
+        .await;
+    assert_eq!(projects_response.status(), StatusCode::OK);
+    let projects_body: serde_json::Value = projects_response.json().await.expect("json body");
+    let projects = projects_body["projects"]
+        .as_array()
+        .expect("projects array");
+    assert!(
+        projects
+            .iter()
+            .any(|p| p["id"] == tp.project_id.to_string()),
+        "project list must contain the seeded project"
+    );
 
     let response = app
         .get_with_session(&format!(

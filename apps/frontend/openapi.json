@@ -628,11 +628,11 @@
         }
       }
     },
-    "/v1/admin/tenants/{tenant_id}/projects/{project_id}/tasks/{tenant_id}/projects/{project_id}/tasks": {
+    "/v1/admin/tenants/{tenant_id}/projects": {
       "get": {
         "tags": ["Admin Tenants"],
-        "summary": "プロジェクト配下タスク一覧（管理者・読取専用）",
-        "operationId": "list_tenant_project_tasks",
+        "summary": "テナント配下プロジェクト一覧（管理者・読取専用）",
+        "operationId": "list_tenant_projects",
         "parameters": [
           {
             "name": "tenant_id",
@@ -643,25 +643,15 @@
               "type": "string",
               "format": "uuid"
             }
-          },
-          {
-            "name": "project_id",
-            "in": "path",
-            "description": "プロジェクトID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
           }
         ],
         "responses": {
           "200": {
-            "description": "タスク一覧",
+            "description": "プロジェクト一覧",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminTaskListResponse"
+                  "$ref": "#/components/schemas/AdminProjectListResponse"
                 }
               }
             }
@@ -741,11 +731,11 @@
         }
       }
     },
-    "/v1/admin/tenants/{tenant_id}/projects/{tenant_id}/projects": {
+    "/v1/admin/tenants/{tenant_id}/projects/{project_id}/tasks": {
       "get": {
         "tags": ["Admin Tenants"],
-        "summary": "テナント配下プロジェクト一覧（管理者・読取専用）",
-        "operationId": "list_tenant_projects",
+        "summary": "プロジェクト配下タスク一覧（管理者・読取専用）",
+        "operationId": "list_tenant_project_tasks",
         "parameters": [
           {
             "name": "tenant_id",
@@ -756,15 +746,25 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "プロジェクト一覧",
+            "description": "タスク一覧",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminProjectListResponse"
+                  "$ref": "#/components/schemas/AdminTaskListResponse"
                 }
               }
             }
@@ -19796,6 +19796,18 @@
           }
         }
       },
+      "TaskAssigneeSummary": {
+        "type": "object",
+        "required": ["role", "user"],
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserSummary"
+          }
+        }
+      },
       "TaskAttachmentListResponse": {
         "type": "object",
         "required": ["attachments"],
@@ -20002,11 +20014,17 @@
           "priority",
           "progress_pct",
           "is_archived",
-          "created_by",
+          "assignees",
           "created_at",
           "updated_at"
         ],
         "properties": {
+          "assignees": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskAssigneeSummary"
+            }
+          },
           "completed_at": {
             "type": ["string", "null"],
             "format": "date-time"
@@ -20016,8 +20034,15 @@
             "format": "date-time"
           },
           "created_by": {
-            "type": "string",
-            "format": "uuid"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserSummary",
+                "description": "作成者。ユーザー行が欠損している場合（FK 制約外の経路で削除された等）は null"
+              }
+            ]
           },
           "deleted_at": {
             "type": ["string", "null"],
@@ -20626,6 +20651,23 @@
           "username": {
             "type": "string",
             "format": "username"
+          }
+        }
+      },
+      "UserSummary": {
+        "type": "object",
+        "description": "他リソースのレスポンスに埋め込む軽量なユーザー情報",
+        "required": ["id", "username"],
+        "properties": {
+          "avatar_url": {
+            "type": ["string", "null"]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
           }
         }
       },
