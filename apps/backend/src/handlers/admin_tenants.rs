@@ -7,29 +7,13 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, prelude::Uuid};
 
 use sea_orm::{ConnectionTrait, Statement};
 
+use common::db::table_exists;
 use entity::{projects, tenants};
 
 use crate::{
     AppState, error::AppError, extractors::AdminUser, handlers::admin_audit::record_audit,
     openapi::CrudErrors, payload::admin_tenants::*, payload::tenants::TenantResponse,
 };
-
-async fn table_exists<C: ConnectionTrait>(conn: &C, table: &str) -> Result<bool, AppError> {
-    let sql = "SELECT EXISTS (
-            SELECT FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_name = ?
-        )";
-    let row = conn
-        .query_one_raw(Statement::from_sql_and_values(
-            conn.get_database_backend(),
-            sql,
-            vec![table.into()],
-        ))
-        .await?;
-    Ok(row
-        .and_then(|r| r.try_get_by_index::<bool>(0).ok())
-        .unwrap_or(false))
-}
 
 #[axum::debug_handler]
 #[utoipa::path(
@@ -186,7 +170,7 @@ pub async fn list_tenant_project_tasks(
     }
 
     let sql = "SELECT id, project_id, title FROM tasks
-         WHERE project_id = ? AND deleted_at IS NULL
+         WHERE project_id = $1 AND deleted_at IS NULL
          ORDER BY created_at DESC";
     let rows = state
         .db
