@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/entity", "crates/common", "crates/payload"]
+members = ["crates/entity", "crates/common", "crates/payload", "crates/service", "crates/job", "crates/handler"]
 exclude = ["migration"]
 
 [workspace.dependencies]
@@ -28,79 +28,50 @@ default-run = "backend"
 [dependencies]
 entity = { path = "crates/entity" }
 common = { path = "crates/common" }
-payload = { path = "crates/payload" }
+service = { path = "crates/service" }
+job = { path = "crates/job" }
+handler = { path = "crates/handler" }
+apalis = { version = "1.0.0-rc.9", features = ["limit", "retry", "tracing"] }
+apalis-board = { version = "1.0.0-rc.8", features = ["axum", "ui", "events"] }
 axum = { workspace = true, features = ["multipart"] }
+axum_session = { version = "0.20.0" }
+axum_session_redispool = { version = "0.11.0" }
 sea-orm = { workspace = true, features = [
     "entity-registry",
     "schema-sync",
     "with-chrono",
     "postgres-array",
 ] }
-serde = { workspace = true }
+sentry = { version = "0.48.2", features = ["tower-axum-matched-path"] }
 serde_json = { workspace = true }
 tokio = { version = "1.52.1", features = ["fs", "io-util", "macros", "rt-multi-thread", "net", "signal"] }
+tower = "0.5.2"
+tower-http = { version = "0.7", features = ["cors", "limit"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-utoipa = { workspace = true }
-uuid = { version = "1", features = ["serde"] }
 utoipa-axum = "0.2.0"
 utoipa-scalar = { version = "0.3.0", features = ["axum"] }
-tower-http = { version = "0.7", features = ["cors", "limit"] }
-axum_session = { version = "0.20.0" }
-axum_session_redispool = { version = "0.11.0" }
-dotenvy = { workspace = true }
-config = { workspace = true }
-axum-valid = "0.25.0"
-validator = { workspace = true }
-sentry = { version = "0.48.2", features = ["tower-axum-matched-path"] }
-tower = "0.5.2"
-argon2 = "0.5.3"
-anyhow = { workspace = true }
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
-thiserror = { workspace = true }
-base64 = "0.22.1"
-redis_pool = { workspace = true }
-redis = { workspace = true }
-url = { workspace = true }
-urlencoding = "2.1"
-hmac = "0.13"
-sha2 = "0.11"
-rand = "0.10"
-regex = { workspace = true }
-subtle = "2.4"
-strum = { version = "0.28.0", features = ["derive"] }
-strum_macros = "0.28"
-lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport","tokio1", "tokio1-rustls-tls"] }
-apalis = { version = "1.0.0-rc.9", features = ["limit", "retry", "tracing"] }
-apalis-postgres = { version = "1.0.0-rc.8", default-features = false, features = ["migrate", "tokio-comp", "time"] }
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "time"] }
-apalis-board = { version = "1.0.0-rc.8", features = ["axum", "ui", "events"] }
-async-trait = "0.1"
-bytes = "1"
-futures = "0.3"
-tokio-util = { version = "0.7", features = ["io"] }
-object_store = { version = "0.11", features = ["aws", "http"] }
-mime_guess = "2"
-time = { version = "0.3", features = ["serde"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form"] }
-jsonwebtoken = { version = "9", features = ["use_pem"] }
-aes-gcm = "0.11"
-hex = "0.4"
-totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
-qrcode = "0.14"
-image = { version = "0.25", default-features = false, features = ["png"] }
-webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation", "danger-credential-internals", "conditional-ui"] }
 
 [dev-dependencies]
+dotenvy = { workspace = true }
+hex = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 cookie = "0.18"
+hmac = "0.13"
 http-body-util = "0.1"
+redis = { workspace = true }
+redis_pool = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["cookies", "json", "rustls", "multipart"] }
-tower = { version = "0.5.2", features = ["util"] }
-urlencoding = "2.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-wiremock = "0.6"
+serde = { workspace = true }
 serial_test = "3"
+sha2 = "0.11"
+tower = { version = "0.5.2", features = ["util"] }
+url = { workspace = true }
+urlencoding = "2.1"
+uuid = { version = "1", features = ["serde"] }
 webauthn-authenticator-rs = { version = "0.5.5", default-features = false, features = ["softtoken"] }
+webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation", "danger-credential-internals", "conditional-ui"] }
+wiremock = "0.6"
 
 [profile.dev]
 debug = 1

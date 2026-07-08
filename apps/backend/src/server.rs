@@ -24,16 +24,15 @@ use tracing::{info, warn};
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa_scalar::{Scalar, Servable};
 
-use crate::{
-    AppState,
-    jobs::{
-        github_webhook::{self, QUEUE_NAME as GITHUB_WEBHOOK_QUEUE},
-        password_reset_email::{
-            self, MAX_RETRIES as PW_RESET_MAX_RETRIES, QUEUE_NAME as PW_RESET_QUEUE,
-        },
-        verification_email::{self, MAX_RETRIES, QUEUE_NAME},
+use handler::AppState;
+use handler::middlewares::logging::logging_middleware;
+use job::{
+    JobState,
+    github_webhook::{self, QUEUE_NAME as GITHUB_WEBHOOK_QUEUE},
+    password_reset_email::{
+        self, MAX_RETRIES as PW_RESET_MAX_RETRIES, QUEUE_NAME as PW_RESET_QUEUE,
     },
-    middlewares::logging::logging_middleware,
+    verification_email::{self, MAX_RETRIES, QUEUE_NAME},
 };
 
 pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
@@ -71,10 +70,10 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     .await?;
 
     let (router, mut openapi) = utoipa_axum::router::OpenApiRouter::new()
-        .merge(crate::routes::create_routes())
+        .merge(handler::routes::create_routes())
         .split_for_parts();
 
-    crate::openapi::register_schemas(&mut openapi);
+    handler::openapi::register_schemas(&mut openapi);
 
     let cors = CorsLayer::new()
         .allow_origin(settings.allow_origin.parse::<HeaderValue>()?)
@@ -93,8 +92,15 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .register(email_storage)
         .build();
 
+    // ワーカーには AppState 全体ではなく、実際に使う依存だけを渡す（job → handler の循環回避）。
+    let job_state = JobState {
+        settings: state.settings.clone(),
+        redis_client: state.redis_client.clone(),
+        smtp_client: state.smtp_client.clone(),
+    };
+
     let email_worker_storage = state.verification_email_storage.as_ref().clone();
-    let worker_state = state.clone();
+    let worker_state = job_state.clone();
     let worker_concurrency = verification_email::worker_concurrency(settings);
     let email_worker = WorkerBuilder::new(format!("{QUEUE_NAME}-worker"))
         .backend(email_worker_storage)
@@ -105,7 +111,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .build(verification_email::process);
 
     let pw_reset_worker_storage = state.password_reset_email_storage.as_ref().clone();
-    let pw_reset_worker_state = state.clone();
+    let pw_reset_worker_state = job_state.clone();
     let pw_reset_worker = WorkerBuilder::new(format!("{PW_RESET_QUEUE}-worker"))
         .backend(pw_reset_worker_storage)
         .retry(RetryPolicy::retries(PW_RESET_MAX_RETRIES))
@@ -117,7 +123,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let worker_shutdown = shutdown_rx.clone();
     let github_worker_storage = state.github_webhook_storage.as_ref().clone();
-    let github_worker_state = state.clone();
+    let github_worker_state = job_state;
     let github_worker = WorkerBuilder::new(format!("{GITHUB_WEBHOOK_QUEUE}-worker"))
         .backend(github_worker_storage)
         .retry(RetryPolicy::retries(github_webhook::MAX_RETRIES))
@@ -151,7 +157,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .layer(cors)
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            crate::middlewares::csrf::csrf_origin_check,
+            handler::middlewares::csrf::csrf_origin_check,
         ))
         .layer(middleware::from_fn(logging_middleware))
         .layer(SessionLayer::new(session_store.clone()))
@@ -170,11 +176,11 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .layer(Extension(broadcaster))
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            crate::middlewares::admin_gate::require_admin_session,
+            handler::middlewares::admin_gate::require_admin_session,
         ))
         .layer(middleware::from_fn_with_state(
             state,
-            crate::middlewares::csrf::csrf_origin_check,
+            handler::middlewares::csrf::csrf_origin_check,
         ))
         .layer(SessionLayer::new(session_store));
 

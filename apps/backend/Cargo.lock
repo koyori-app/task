@@ -857,67 +857,41 @@ dependencies = [
 name = "backend"
 version = "0.1.0"
 dependencies = [
- "aes-gcm 0.11.0",
- "anyhow",
  "apalis",
  "apalis-board",
- "apalis-postgres",
- "argon2",
- "async-trait",
  "axum",
- "axum-valid",
  "axum_session",
  "axum_session_redispool",
- "base64 0.22.1",
- "bytes",
  "chrono",
  "common",
- "config",
  "cookie",
  "dotenvy",
  "entity",
- "futures",
+ "handler",
  "hex",
  "hmac 0.13.0",
  "http-body-util",
- "image",
- "jsonwebtoken",
- "lettre",
- "mime_guess",
- "object_store",
- "payload",
- "qrcode",
- "rand 0.10.2",
+ "job",
  "redis",
  "redis_pool",
- "regex",
  "reqwest 0.13.4",
  "sea-orm",
  "sentry",
  "serde",
  "serde_json",
  "serial_test",
+ "service",
  "sha2 0.11.0",
- "sqlx 0.8.6",
- "strum",
- "strum_macros",
- "subtle",
- "thiserror 2.0.18",
- "time",
  "tokio",
- "tokio-util",
- "totp-rs",
  "tower",
  "tower-http 0.7.0",
  "tracing",
  "tracing-subscriber",
  "url",
  "urlencoding",
- "utoipa",
  "utoipa-axum",
  "utoipa-scalar",
  "uuid",
- "validator",
  "webauthn-authenticator-rs",
  "webauthn-rs",
  "wiremock",
@@ -2185,6 +2159,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "handler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apalis-postgres",
+ "axum",
+ "axum-valid",
+ "axum_session",
+ "axum_session_redispool",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "common",
+ "entity",
+ "futures",
+ "hex",
+ "hmac 0.13.0",
+ "job",
+ "payload",
+ "rand 0.10.2",
+ "reqwest 0.13.4",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "service",
+ "sha2 0.11.0",
+ "subtle",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower-http 0.7.0",
+ "tracing",
+ "urlencoding",
+ "utoipa",
+ "utoipa-axum",
+ "uuid",
+ "validator",
+ "webauthn-rs",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2766,6 +2780,23 @@ checksum = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264"
 dependencies = [
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "job"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apalis",
+ "apalis-postgres",
+ "chrono",
+ "common",
+ "serde",
+ "serde_json",
+ "service",
+ "sqlx 0.8.6",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -5096,6 +5127,55 @@ dependencies = [
 ]
 
 [[package]]
+name = "service"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm 0.11.0",
+ "anyhow",
+ "argon2",
+ "async-trait",
+ "axum",
+ "axum_session",
+ "axum_session_redispool",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "common",
+ "dotenvy",
+ "entity",
+ "futures",
+ "hex",
+ "hmac 0.13.0",
+ "image",
+ "jsonwebtoken",
+ "lettre",
+ "mime_guess",
+ "object_store",
+ "payload",
+ "qrcode",
+ "rand 0.10.2",
+ "redis",
+ "redis_pool",
+ "regex",
+ "reqwest 0.13.4",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "subtle",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "totp-rs",
+ "tracing",
+ "url",
+ "urlencoding",
+ "utoipa",
+ "uuid",
+ "webauthn-rs",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5704,21 +5784,6 @@ name = "strum"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9628de9b8791db39ceda2b119bbe13134770b56c138ec1d3af810d045c04f9bd"
-dependencies = [
- "strum_macros",
-]
-
-[[package]]
-name = "strum_macros"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab85eea0270ee17587ed4156089e10b9e6880ee688791d45a905f5b1ca36f664"
-dependencies = [
- "heck 0.5.0",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
 
 [[package]]
 name = "subtle"
