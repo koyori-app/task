@@ -1,3 +1,5 @@
+//! リクエスト/レスポンス DTO（payload クレート）。依存は entity / common のみに閉じる（#151 Phase 3）。
+
 pub mod admin_audit_logs;
 pub mod admin_settings;
 pub mod admin_tenants;

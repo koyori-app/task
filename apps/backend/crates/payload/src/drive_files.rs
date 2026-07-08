@@ -1,13 +1,18 @@
 use chrono::{DateTime, Utc};
 use sea_orm::prelude::Uuid;
 
-use crate::utils::drive::content_url;
 use entity::drive_files;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
 pub const DEFAULT_LIST_LIMIT: u32 = 50;
+
+/// ファイル本文取得エンドポイントの相対 URL。
+/// レスポンス DTO（[`DriveFileResponse::from`]）が埋め込むためここに置く。
+pub fn content_url(file_id: Uuid) -> String {
+    format!("/v1/drive/files/{file_id}/content")
+}
 
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]

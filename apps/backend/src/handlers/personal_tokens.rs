@@ -14,13 +14,13 @@ use crate::AppState;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::{CrudErrors, SessionAuthErrors};
-use crate::payload::personal_tokens::*;
 use crate::utils::auth;
 use entity::scopes::ScopeList;
 use entity::{
     personal_tokens::{self},
     projects, tenants,
 };
+use payload::personal_tokens::*;
 
 fn token_last_four(token: &str) -> String {
     token[token.len().saturating_sub(4)..].to_string()

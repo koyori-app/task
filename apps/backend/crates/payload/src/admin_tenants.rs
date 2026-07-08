@@ -2,7 +2,7 @@ use sea_orm::prelude::Uuid;
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use crate::payload::{projects::ProjectResponse, tenants::TenantResponse};
+use crate::{projects::ProjectResponse, tenants::TenantResponse};
 
 #[derive(Serialize, ToSchema)]
 pub struct AdminTenantListResponse {

@@ -6,9 +6,7 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
-use crate::payload::task_extensions::*;
 use crate::utils::db::is_postgres_unique_violation;
-use crate::utils::drive::content_url;
 use crate::utils::task_activities::{record_activity, status_name};
 use axum::{
     Json,
@@ -21,6 +19,8 @@ use entity::{
     drive_files, labels, project_statuses, project_task_views, sprints, task_assignees,
     task_attachments, task_labels, tasks,
 };
+use payload::drive_files::content_url;
+use payload::task_extensions::*;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait, EntityTrait,

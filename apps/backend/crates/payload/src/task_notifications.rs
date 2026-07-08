@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::utils::notifications::KNOWN_EVENT_TYPES;
+use common::notifications::KNOWN_EVENT_TYPES;
 
 fn validate_known_event_types(events: &Vec<String>) -> Result<(), validator::ValidationError> {
     for e in events {

@@ -16,8 +16,8 @@ use crate::auth_helpers::require_member_or_owner;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use crate::payload::statuses::*;
 use entity::{project_statuses, tasks};
+use payload::statuses::*;
 #[axum::debug_handler]
 #[utoipa::path(
     get,

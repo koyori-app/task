@@ -15,11 +15,11 @@ use crate::openapi::{
     PasswordChangeErrors, PasswordResetCompleteErrors, PasswordResetRequestErrors,
     PasswordResetVerifyErrors,
 };
-use crate::payload::password_reset::*;
 use crate::utils::auth::{AuthError, create_password_hash, verify_password};
 use crate::utils::email::normalize_email;
 use crate::utils::{password_reset, password_reset_log};
 use entity::{personal_tokens, users};
+use payload::password_reset::*;
 
 type AuthSession = axum_session::Session<SessionRedisPool>;
 

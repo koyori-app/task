@@ -22,8 +22,6 @@ use crate::{
     error::ServerError,
     extractors::{AuthUser, HalfAuthedUser, LoggedInUser},
     openapi::{CrudErrors, SessionAuthErrors},
-    payload::auth_2fa::*,
-    payload::tenants::TenantResponse,
     utils::{
         auth::AuthError,
         totp::{
@@ -34,6 +32,8 @@ use crate::{
         },
     },
 };
+use payload::auth_2fa::*;
+use payload::tenants::TenantResponse;
 
 pub async fn user_has_active_2fa(
     db: &sea_orm::DatabaseConnection,

@@ -12,8 +12,8 @@ use crate::error::AppError;
 use crate::extractors::AuthMethod;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use crate::payload::tenants::*;
 use entity::{scopes::Scope, tenants};
+use payload::tenants::*;
 
 #[axum::debug_handler]
 #[utoipa::path(

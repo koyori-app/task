@@ -18,12 +18,12 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
-use crate::payload::task_notifications::*;
 use crate::utils::notifications::{DEFAULT_IN_APP_EVENTS, ensure_watcher};
 use entity::{
     notification_settings, notifications, project_members, projects, task_watchers, tasks, tenants,
     users,
 };
+use payload::task_notifications::*;
 
 /// ユーザーがアクセス可能なプロジェクトID一覧を返す（メンバー or テナントオーナー）。
 /// list / count / read-all / read-one で共用するアクセス制御ロジック。

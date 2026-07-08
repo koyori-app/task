@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::payload::users::UserSummary;
-use crate::utils::custom_fields::{CustomFieldValueInput, TaskCustomFieldValueResponse};
+use crate::custom_fields::{CustomFieldValueInput, TaskCustomFieldValueResponse};
+use crate::users::UserSummary;
 use entity::{task_assignees, task_relations, tasks};
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

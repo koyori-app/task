@@ -3,7 +3,6 @@ use crate::auth_helpers::require_member_or_owner;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use crate::payload::custom_fields::*;
 use crate::utils::custom_fields::validate_select_options;
 use axum::{
     Json,
@@ -12,6 +11,7 @@ use axum::{
 };
 use axum_valid::Valid;
 use entity::project_custom_fields;
+use payload::custom_fields::*;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
     prelude::Uuid,

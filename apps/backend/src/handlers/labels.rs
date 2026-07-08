@@ -3,7 +3,6 @@ use crate::auth_helpers::require_member_or_owner;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use crate::payload::labels::*;
 use axum::{
     Json,
     extract::{Path, State},
@@ -11,6 +10,7 @@ use axum::{
 };
 use axum_valid::Valid;
 use entity::labels;
+use payload::labels::*;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
     prelude::Uuid,

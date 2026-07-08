@@ -17,10 +17,10 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
-use crate::payload::task_comments::*;
 use crate::utils::notifications::{notify_comment_added, notify_mentioned};
 use crate::utils::task_activities::{extract_mentions, record_activity};
 use entity::{task_activities, task_comments, users};
+use payload::task_comments::*;
 
 fn comment_body(model: &task_comments::Model) -> Option<String> {
     if model.deleted_at.is_some() {

@@ -13,9 +13,9 @@ use crate::AppState;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use crate::payload::projects::*;
 use crate::utils::db::is_postgres_unique_violation;
 use entity::{drive_folders, project_members, projects, scopes::Scope, tenants};
+use payload::projects::*;
 
 fn generate_project_key(name: &str) -> String {
     let upper: String = name

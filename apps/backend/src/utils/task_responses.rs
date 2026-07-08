@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, prelude::Uuid};
 
 use crate::error::AppError;
-use crate::payload::tasks::{TaskAssigneeSummary, TaskResponse};
-use crate::payload::users::UserSummary;
 use entity::{task_assignees, tasks, users};
+use payload::tasks::{TaskAssigneeSummary, TaskResponse};
+use payload::users::UserSummary;
 
 /// tasks::Model の集合からユーザー情報（作成者・担当者）を埋め込んだ
 /// TaskResponse を組み立てる。ユーザーと担当者はバッチ取得（追加クエリ2本）。
