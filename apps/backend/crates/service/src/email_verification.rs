@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use uuid::Uuid;
 
 use super::email::normalize_email;
-use super::redis::RedisConnection;
+use common::cache::redis::RedisConnection;
 
 /// 世代チェック後、旧 token キー削除 → 新 token/user/gen キー SET を一括実行。
 /// 返却: 1 = 反映した, 0 = より新しい世代、または同世代で別トークンのためスキップ。

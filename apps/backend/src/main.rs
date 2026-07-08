@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
              "SMTP client initialization failed. If email is required in this environment, check smtp_host/smtp_port/smtp_username/smtp_password. Underlying error: {err}"
          ))
      })?;
-    let redis_client = backend::utils::redis::RedisConnection::new(&settings.redis_url);
+    let redis_client = common::cache::redis::RedisConnection::new(&settings.redis_url);
     redis_client.ping().await?;
 
     let pg_pool = backend::jobs::setup_pool(&settings.database_url).await?;

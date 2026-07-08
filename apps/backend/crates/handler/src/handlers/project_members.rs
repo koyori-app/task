@@ -10,11 +10,12 @@ use sea_orm::{
 };
 
 use crate::AppState;
+use crate::auth_helpers::is_tenant_owner;
 use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use entity::project_members::ProjectRole;
-use entity::{project_members, projects, scopes::Scope, task_watchers, tasks, tenants, users};
+use entity::{project_members, projects, scopes::Scope, task_watchers, tasks, users};
 use payload::project_members::*;
 
 async fn get_project_in_tenant(
@@ -29,18 +30,6 @@ async fn get_project_in_tenant(
         .ok_or(AppError::NotFound)
 }
 
-async fn is_tenant_owner(
-    state: &AppState,
-    tenant_id: Uuid,
-    user_id: Uuid,
-) -> Result<bool, AppError> {
-    let tenant = tenants::Entity::find_by_id(tenant_id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(tenant.owner_id == user_id)
-}
-
 pub(crate) async fn require_project_admin(
     state: &AppState,
     tenant_id: Uuid,
@@ -48,7 +37,7 @@ pub(crate) async fn require_project_admin(
     user_id: Uuid,
 ) -> Result<(), AppError> {
     let _ = get_project_in_tenant(state, tenant_id, project_id).await?;
-    if is_tenant_owner(state, tenant_id, user_id).await? {
+    if is_tenant_owner(&state.db, tenant_id, user_id).await? {
         return Ok(());
     }
     let member = project_members::Entity::find()

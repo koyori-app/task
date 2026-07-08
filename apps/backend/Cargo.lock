@@ -2791,7 +2791,6 @@ dependencies = [
  "apalis-postgres",
  "chrono",
  "common",
- "sea-orm",
  "serde",
  "serde_json",
  "service",

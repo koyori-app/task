@@ -32,13 +32,13 @@ use backend::{
         drive::DriveConfig,
         http::create_http_client,
         oauth::config::{OAuthSettings, ProviderConfig},
-        redis::RedisConnection,
         smtp::SmtpClient,
         storage::setup_storage,
         totp::build_totp,
         webauthn::build_webauthn,
     },
 };
+use common::cache::redis::RedisConnection;
 use cookie::Key;
 use http_body_util::BodyExt;
 use reqwest::{Client, Response, redirect::Policy};

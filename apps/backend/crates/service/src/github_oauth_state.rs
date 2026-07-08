@@ -7,7 +7,7 @@ use redis::AsyncCommands;
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 
-use super::redis::RedisConnection;
+use common::cache::redis::RedisConnection;
 
 const KEY_PREFIX: &str = "github_oauth_state:";
 pub const TTL_SECS: u64 = 600;

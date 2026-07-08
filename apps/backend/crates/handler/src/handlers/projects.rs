@@ -10,10 +10,11 @@ use sea_orm::{
 };
 
 use crate::AppState;
+use crate::auth_helpers::is_tenant_owner;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use entity::{drive_folders, project_members, projects, scopes::Scope, tenants};
+use entity::{drive_folders, project_members, projects, scopes::Scope};
 use payload::projects::*;
 use service::db::is_postgres_unique_violation;
 
@@ -42,24 +43,12 @@ fn validate_project_key(key: &str) -> bool {
 
 const INVALID_PROJECT_KEY_MESSAGE: &str = "key は 2〜10 文字で、先頭は大文字英字、残りは大文字英字または数字で入力してください（例: ENG, BACK）";
 
-async fn is_tenant_owner(
-    state: &AppState,
-    tenant_id: Uuid,
-    user_id: Uuid,
-) -> Result<bool, AppError> {
-    let tenant = tenants::Entity::find_by_id(tenant_id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(tenant.owner_id == user_id)
-}
-
 async fn require_tenant_owner(
     state: &AppState,
     tenant_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), AppError> {
-    if is_tenant_owner(state, tenant_id, user_id).await? {
+    if is_tenant_owner(&state.db, tenant_id, user_id).await? {
         Ok(())
     } else {
         Err(AppError::Forbidden)
@@ -72,7 +61,7 @@ async fn require_project_readable(
     project_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), AppError> {
-    if is_tenant_owner(state, tenant_id, user_id).await? {
+    if is_tenant_owner(&state.db, tenant_id, user_id).await? {
         return Ok(());
     }
     let is_member = project_members::Entity::find()
@@ -189,7 +178,7 @@ pub async fn list_projects(
 ) -> Result<Json<Vec<ProjectResponse>>, AppError> {
     auth.require_scope(Scope::ReadProject)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
-    if is_tenant_owner(&state, tenant_id, auth.user_id).await? {
+    if is_tenant_owner(&state.db, tenant_id, auth.user_id).await? {
         let list = projects::Entity::find()
             .filter(projects::Column::TenantId.eq(tenant_id))
             .filter(projects::Column::IsPersonal.eq(false))

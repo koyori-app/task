@@ -6,7 +6,7 @@ use webauthn_rs::prelude::{
     DiscoverableAuthentication, PasskeyAuthentication, PasskeyRegistration,
 };
 
-use super::redis::RedisConnection;
+use common::cache::redis::RedisConnection;
 
 pub const CHALLENGE_TTL_SECS: u64 = 5 * 60;
 /// 登録 start〜finish を保護する排他ロック TTL（チャレンジ TTL と揃える）

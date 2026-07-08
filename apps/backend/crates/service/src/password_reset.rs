@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 use uuid::Uuid;
 
 use super::email::normalize_email;
-use super::redis::RedisConnection;
+use common::cache::redis::RedisConnection;
 
 static STORE_TOKEN_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
     redis::Script::new(

@@ -1,20 +1,11 @@
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, prelude::Uuid};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, prelude::Uuid};
 
 use crate::AppState;
 use crate::error::AppError;
-use entity::{project_members, tenants};
+use entity::project_members;
 
-pub async fn is_tenant_owner(
-    db: &DatabaseConnection,
-    tenant_id: Uuid,
-    user_id: Uuid,
-) -> Result<bool, AppError> {
-    let tenant = tenants::Entity::find_by_id(tenant_id)
-        .one(db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(tenant.owner_id == user_id)
-}
+// 実装は service 側に一本化（レビュー指摘: 同一実装の重複解消）。
+pub use service::drive::is_tenant_owner;
 
 pub async fn require_member_or_owner(
     state: &AppState,
