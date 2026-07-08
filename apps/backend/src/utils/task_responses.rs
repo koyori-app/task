@@ -46,21 +46,17 @@ pub async fn build_task_responses<C: ConnectionTrait>(
         }
     }
 
-    task_models
+    Ok(task_models
         .into_iter()
         .map(|t| {
-            // created_by は users への FK なので通常必ず解決できる
-            let created_by = user_map.get(&t.created_by).cloned().ok_or_else(|| {
-                AppError::Internal(anyhow::anyhow!(
-                    "task {} creator {} not found",
-                    t.id,
-                    t.created_by
-                ))
-            })?;
+            // created_by は users への FK なので通常必ず解決できるが、FK 制約外の経路
+            // （直接 DB 操作等）で作成者行だけ欠損しても一覧全体を落とさず null に
+            // 縮退する（担当者欠損のスキップと同方針で可用性を優先）。
+            let created_by = user_map.get(&t.created_by).cloned();
             let assignees = assignees_by_task.remove(&t.id).unwrap_or_default();
-            Ok(TaskResponse::from_parts(t, created_by, assignees))
+            TaskResponse::from_parts(t, created_by, assignees)
         })
-        .collect()
+        .collect())
 }
 
 pub async fn build_task_response<C: ConnectionTrait>(

@@ -35,7 +35,9 @@ pub struct TaskResponse {
     #[schema(nullable)]
     pub estimated_minutes: Option<i32>,
     pub is_archived: bool,
-    pub created_by: UserSummary,
+    /// 作成者。ユーザー行が欠損している場合（FK 制約外の経路で削除された等）は null
+    #[schema(nullable)]
+    pub created_by: Option<UserSummary>,
     pub assignees: Vec<TaskAssigneeSummary>,
     #[schema(value_type = String, format = "date-time")]
     pub created_at: DateTime<Utc>,
@@ -56,7 +58,7 @@ pub struct TaskAssigneeSummary {
 impl TaskResponse {
     pub fn from_parts(
         model: tasks::Model,
-        created_by: UserSummary,
+        created_by: Option<UserSummary>,
         assignees: Vec<TaskAssigneeSummary>,
     ) -> Self {
         Self {
