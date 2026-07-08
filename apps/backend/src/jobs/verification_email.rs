@@ -109,3 +109,27 @@ pub async fn process(job: VerificationEmailJob, state: Data<AppState>) -> Result
 pub fn worker_concurrency(settings: &Settings) -> usize {
     settings.verification_email_worker_concurrency.max(1)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ジョブペイロードは Postgres の apalis.jobs に平文で永続化されるため、
+    /// 認証トークン等の機微情報を含めてはならない。型定義から `token` /
+    /// `issued_at` を排除したこと（トークンは Redis のみに保持）の回帰ガード。
+    /// フィールド追加でこのテストが落ちた場合は、機微情報でないことを
+    /// 確認したうえで期待キー集合を更新すること。
+    #[test]
+    fn payload_contains_no_sensitive_fields() {
+        let job = VerificationEmailJob::new(Uuid::new_v4(), "user@example.com".into());
+        let value = serde_json::to_value(&job).expect("serialize job");
+        let mut keys: Vec<&str> = value
+            .as_object()
+            .expect("payload is a JSON object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["email", "user_id"]);
+    }
+}
