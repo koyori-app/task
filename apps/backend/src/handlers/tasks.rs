@@ -18,7 +18,6 @@ use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use crate::payload::tasks::*;
 use crate::utils::custom_fields::{
     ensure_required_custom_fields, load_task_custom_field_values, upsert_task_custom_field_values,
 };
@@ -30,6 +29,7 @@ use entity::{
     labels, milestones, project_statuses, project_task_counters, sprints, task_assignees,
     task_labels, task_relations, tasks,
 };
+use payload::tasks::*;
 
 // ─── Task lookup (UUID or KEY-N) ─────────────────────────────────────────
 

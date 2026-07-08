@@ -1,53 +1,16 @@
 use crate::error::AppError;
+// DTO 型（CustomFieldDefinitionSummary 等）は payload 側へ移動済み。ここはロジックのみ。
 use chrono::NaiveDate;
 use entity::{project_custom_fields, task_custom_field_values};
+use payload::custom_fields::{
+    CustomFieldDefinitionSummary, CustomFieldValueInput, TaskCustomFieldValueResponse,
+};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
     QueryOrder, prelude::Uuid,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use utoipa::ToSchema;
-
-#[derive(Serialize, ToSchema)]
-pub struct CustomFieldDefinitionSummary {
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    pub name: String,
-    pub field_type: project_custom_fields::CustomFieldType,
-    pub is_required: bool,
-    pub position: i16,
-}
-
-impl From<&project_custom_fields::Model> for CustomFieldDefinitionSummary {
-    fn from(field: &project_custom_fields::Model) -> Self {
-        Self {
-            id: field.id,
-            name: field.name.clone(),
-            field_type: field.field_type,
-            is_required: field.is_required,
-            position: field.position,
-        }
-    }
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct CustomFieldValueInput {
-    #[schema(value_type = String, format = "uuid")]
-    pub field_id: Uuid,
-    #[schema(nullable)]
-    pub value: Option<String>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct TaskCustomFieldValueResponse {
-    pub field: CustomFieldDefinitionSummary,
-    #[schema(nullable)]
-    pub value: Option<String>,
-    #[schema(nullable)]
-    pub display_value: Option<String>,
-}
 
 pub fn validate_select_options(options: &Option<Value>) -> Result<(), AppError> {
     let Some(options) = options else {

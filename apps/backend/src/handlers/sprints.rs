@@ -18,11 +18,11 @@ use crate::auth_helpers::require_member_or_owner;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use crate::payload::sprints::*;
-use crate::payload::tasks::TaskResponse;
 use crate::utils::db::is_postgres_unique_violation;
 use entity::sprints::SprintStatus;
 use entity::{project_statuses, sprints, tasks};
+use payload::sprints::*;
+use payload::tasks::TaskResponse;
 
 fn validate_date_range(start: NaiveDate, end: NaiveDate) -> Result<(), AppError> {
     if start > end {

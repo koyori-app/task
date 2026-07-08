@@ -13,10 +13,8 @@ use serde::{Deserialize, Serialize};
 
 use entity::audit_logs;
 
-use crate::{
-    AppState, error::AppError, extractors::AdminUser, openapi::CrudErrors,
-    payload::admin_audit_logs::*,
-};
+use crate::{AppState, error::AppError, extractors::AdminUser, openapi::CrudErrors};
+use payload::admin_audit_logs::*;
 
 #[derive(Serialize, Deserialize)]
 struct AuditLogCursor {

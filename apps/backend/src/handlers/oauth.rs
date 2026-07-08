@@ -32,12 +32,12 @@ use crate::utils::oauth::provider::{
 use crate::utils::passkeys::count_user_passkeys;
 use entity::{oauth_connections, users};
 
-use crate::payload::oauth::*;
 use crate::utils::login_session::establish_login_session;
 use crate::utils::oauth::state::{
     OAuthStatePayload, build_frontend_oauth_error_redirect, build_frontend_redirect, consume_state,
     sanitize_redirect_path, store_state,
 };
+use payload::oauth::*;
 
 use crate::AppState;
 

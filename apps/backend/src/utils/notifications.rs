@@ -11,30 +11,11 @@ use entity::{
     notification_settings, notifications, project_members, projects, task_watchers, tenants, users,
 };
 
-pub const TYPE_ASSIGNED: &str = "assigned";
-pub const TYPE_MENTIONED: &str = "mentioned";
-pub const TYPE_STATUS_CHANGED: &str = "status_changed";
-pub const TYPE_COMMENT_ADDED: &str = "comment_added";
-
-/// バリデーションに使用する既知のイベントタイプ一覧。
-/// `pr_merged` / `deadline_soon` はまだハンドラ未実装だが将来の拡張のため登録済み。
-pub const KNOWN_EVENT_TYPES: &[&str] = &[
-    TYPE_ASSIGNED,
-    TYPE_MENTIONED,
+// 定数本体は common へ移動（DTO からも参照するため）。既存の参照パス互換用に再公開。
+pub use common::notifications::{
+    DEFAULT_IN_APP_EVENTS, KNOWN_EVENT_TYPES, TYPE_ASSIGNED, TYPE_COMMENT_ADDED, TYPE_MENTIONED,
     TYPE_STATUS_CHANGED,
-    TYPE_COMMENT_ADDED,
-    "deadline_soon",
-    "pr_merged",
-];
-
-pub const DEFAULT_IN_APP_EVENTS: &[&str] = &[
-    TYPE_ASSIGNED,
-    TYPE_MENTIONED,
-    TYPE_STATUS_CHANGED,
-    "deadline_soon",
-    TYPE_COMMENT_ADDED,
-    "pr_merged",
-];
+};
 
 pub async fn ensure_watcher<C: ConnectionTrait>(
     db: &C,

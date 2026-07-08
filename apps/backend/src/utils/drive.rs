@@ -83,10 +83,6 @@ pub fn effective_quota(tenant: &tenants::Model, config: &DriveConfig) -> Option<
     }
 }
 
-pub fn content_url(file_id: Uuid) -> String {
-    format!("/v1/drive/files/{file_id}/content")
-}
-
 pub async fn tenant_used_bytes<C: ConnectionTrait>(
     db: &C,
     tenant_id: Uuid,

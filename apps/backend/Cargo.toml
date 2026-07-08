@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/entity", "crates/common"]
+members = ["crates/entity", "crates/common", "crates/payload"]
 exclude = ["migration"]
 
 [workspace.dependencies]
@@ -28,6 +28,7 @@ default-run = "backend"
 [dependencies]
 entity = { path = "crates/entity" }
 common = { path = "crates/common" }
+payload = { path = "crates/payload" }
 axum = { workspace = true, features = ["multipart"] }
 sea-orm = { workspace = true, features = [
     "entity-registry",

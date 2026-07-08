@@ -11,8 +11,10 @@ use entity::{projects, tenants};
 
 use crate::{
     AppState, error::AppError, extractors::AdminUser, handlers::admin_audit::record_audit,
-    openapi::CrudErrors, payload::admin_tenants::*, payload::tenants::TenantResponse,
+    openapi::CrudErrors,
 };
+use payload::admin_tenants::*;
+use payload::tenants::TenantResponse;
 
 async fn table_exists<C: ConnectionTrait>(conn: &C, table: &str) -> Result<bool, AppError> {
     let sql = "SELECT EXISTS (

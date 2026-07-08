@@ -22,7 +22,6 @@ use crate::AppState;
 use crate::error::AppError;
 use crate::extractors::{AuthUser, OptionalAuthUser};
 use crate::openapi::CrudErrors;
-use crate::payload::drive_files::*;
 use crate::utils::drive::{
     current_storage_type, effective_quota, guess_mime, is_tenant_owner, tenant_used_bytes,
 };
@@ -30,6 +29,7 @@ use crate::utils::storage::{ByteStream, StorageError};
 use entity::{
     drive_files, drive_folder_shares, drive_folders, project_members, scopes::Scope, tenants,
 };
+use payload::drive_files::*;
 
 const MAX_LIST_LIMIT: u32 = 200;
 

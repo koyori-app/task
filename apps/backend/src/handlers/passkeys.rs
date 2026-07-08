@@ -19,7 +19,6 @@ use webauthn_rs::prelude::{
 use crate::AppState;
 use crate::extractors::CurrentUser;
 use crate::openapi::SessionAuthErrors;
-use crate::payload::passkeys::*;
 use crate::utils::auth::AuthError;
 use crate::utils::email::normalize_email;
 use crate::utils::passkey_challenges;
@@ -29,6 +28,7 @@ use crate::utils::passkeys::{
     passkey_to_model_fields, update_passkey_after_authentication,
 };
 use entity::{passkeys as passkey_entity, users};
+use payload::passkeys::*;
 
 type AppSession = Session<SessionRedisPool>;
 

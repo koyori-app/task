@@ -62,3 +62,42 @@ pub struct UpdateCustomFieldRequest {
 pub struct CustomFieldListResponse {
     pub fields: Vec<ProjectCustomFieldResponse>,
 }
+
+#[derive(Serialize, ToSchema)]
+pub struct CustomFieldDefinitionSummary {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    pub name: String,
+    pub field_type: project_custom_fields::CustomFieldType,
+    pub is_required: bool,
+    pub position: i16,
+}
+
+impl From<&project_custom_fields::Model> for CustomFieldDefinitionSummary {
+    fn from(field: &project_custom_fields::Model) -> Self {
+        Self {
+            id: field.id,
+            name: field.name.clone(),
+            field_type: field.field_type,
+            is_required: field.is_required,
+            position: field.position,
+        }
+    }
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct CustomFieldValueInput {
+    #[schema(value_type = String, format = "uuid")]
+    pub field_id: Uuid,
+    #[schema(nullable)]
+    pub value: Option<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct TaskCustomFieldValueResponse {
+    pub field: CustomFieldDefinitionSummary,
+    #[schema(nullable)]
+    pub value: Option<String>,
+    #[schema(nullable)]
+    pub display_value: Option<String>,
+}

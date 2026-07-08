@@ -4,9 +4,6 @@ use crate::AppState;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::{DriveFolderErrors, PublicShareErrors};
-use crate::payload::drive_files::DriveFileResponse;
-use crate::payload::drive_folder_shares::DriveFolderShareResponse;
-use crate::payload::drive_folders::*;
 use crate::utils::drive::is_tenant_owner;
 use axum::{
     Json,
@@ -22,6 +19,9 @@ use entity::{
     scopes::Scope,
     users,
 };
+use payload::drive_files::DriveFileResponse;
+use payload::drive_folder_shares::DriveFolderShareResponse;
+use payload::drive_folders::*;
 use rand::RngExt;
 use sea_orm::prelude::Uuid;
 use sea_orm::{

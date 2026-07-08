@@ -11,7 +11,6 @@ pub mod handlers;
 pub mod jobs;
 pub mod middlewares;
 pub mod openapi;
-pub mod payload;
 pub mod routes;
 pub mod server;
 pub mod utils;

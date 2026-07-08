@@ -22,9 +22,9 @@ pub fn register_schemas(openapi: &mut OpenApi) {
         .get_or_insert_with(utoipa::openapi::Components::new);
 
     register_schema::<ServerError>(components);
-    register_schema::<crate::payload::auth_2fa::Login2faResponse>(components);
-    register_schema::<crate::payload::auth_2fa::TotpSetupResponse>(components);
-    register_schema::<crate::payload::auth_2fa::VerifySetupResponse>(components);
+    register_schema::<payload::auth_2fa::Login2faResponse>(components);
+    register_schema::<payload::auth_2fa::TotpSetupResponse>(components);
+    register_schema::<payload::auth_2fa::VerifySetupResponse>(components);
     register_security_schemes(components);
     register_tags(openapi);
 }
