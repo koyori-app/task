@@ -1,0 +1,40 @@
+[package]
+name = "handler"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+common = { path = "../common" }
+entity = { path = "../entity" }
+job = { path = "../job" }
+payload = { path = "../payload" }
+service = { path = "../service" }
+anyhow = { workspace = true }
+apalis-postgres = { version = "1.0.0-rc.8", default-features = false, features = ["migrate", "tokio-comp", "time"] }
+axum = { workspace = true, features = ["multipart"] }
+axum-valid = "0.25.0"
+axum_session = { version = "0.20.0" }
+axum_session_redispool = { version = "0.11.0" }
+base64 = "0.22.1"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+futures = "0.3"
+hex = "0.4"
+hmac = "0.13"
+rand = "0.10"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form"] }
+sea-orm = { workspace = true, features = ["with-chrono", "postgres-array"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.11"
+subtle = "2.4"
+tokio = { version = "1.52.1", features = ["fs", "io-util", "macros", "rt-multi-thread", "net"] }
+thiserror = { workspace = true }
+tower-http = { version = "0.7", features = ["cors", "limit"] }
+tracing = { workspace = true }
+urlencoding = "2.1"
+utoipa = { workspace = true }
+utoipa-axum = "0.2.0"
+uuid = { version = "1", features = ["serde"] }
+validator = { workspace = true }
+webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation", "danger-credential-internals", "conditional-ui"] }

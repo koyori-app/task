@@ -1,0 +1,49 @@
+[package]
+name = "service"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+entity = { path = "../entity" }
+common = { path = "../common" }
+payload = { path = "../payload" }
+aes-gcm = "0.11"
+anyhow = { workspace = true }
+argon2 = "0.5.3"
+axum = { workspace = true }
+axum_session = { version = "0.20.0" }
+axum_session_redispool = { version = "0.11.0" }
+base64 = "0.22.1"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+futures = "0.3"
+hex = "0.4"
+hmac = "0.13"
+image = { version = "0.25", default-features = false, features = ["png"] }
+jsonwebtoken = { version = "9", features = ["use_pem"] }
+lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls-tls"] }
+mime_guess = "2"
+object_store = { version = "0.11", features = ["aws", "http"] }
+qrcode = "0.14"
+rand = "0.10"
+redis = { workspace = true }
+redis_pool = { workspace = true }
+regex = { workspace = true }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form"] }
+sea-orm = { workspace = true, features = ["with-chrono", "postgres-array"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.11"
+subtle = "2.4"
+thiserror = { workspace = true }
+async-trait = "0.1"
+dotenvy = { workspace = true }
+tokio = { version = "1.52.1", features = ["fs", "io-util", "macros", "rt-multi-thread", "net"] }
+tokio-util = { version = "0.7", features = ["io"] }
+totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
+tracing = { workspace = true }
+url = { workspace = true }
+urlencoding = "2.1"
+utoipa = { workspace = true }
+uuid = { version = "1", features = ["serde"] }
+webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation", "danger-credential-internals", "conditional-ui"] }
