@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::payload::users::UserSummary;
 use crate::utils::custom_fields::{CustomFieldValueInput, TaskCustomFieldValueResponse};
 use entity::{task_assignees, task_relations, tasks};
 
@@ -34,8 +35,10 @@ pub struct TaskResponse {
     #[schema(nullable)]
     pub estimated_minutes: Option<i32>,
     pub is_archived: bool,
-    #[schema(value_type = String, format = "uuid")]
-    pub created_by: Uuid,
+    /// 作成者。ユーザー行が欠損している場合（FK 制約外の経路で削除された等）は null
+    #[schema(nullable)]
+    pub created_by: Option<UserSummary>,
+    pub assignees: Vec<TaskAssigneeSummary>,
     #[schema(value_type = String, format = "date-time")]
     pub created_at: DateTime<Utc>,
     #[schema(value_type = String, format = "date-time")]
@@ -46,8 +49,18 @@ pub struct TaskResponse {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
-impl From<tasks::Model> for TaskResponse {
-    fn from(model: tasks::Model) -> Self {
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TaskAssigneeSummary {
+    pub role: String,
+    pub user: UserSummary,
+}
+
+impl TaskResponse {
+    pub fn from_parts(
+        model: tasks::Model,
+        created_by: Option<UserSummary>,
+        assignees: Vec<TaskAssigneeSummary>,
+    ) -> Self {
         Self {
             id: model.id,
             project_id: model.project_id,
@@ -64,7 +77,8 @@ impl From<tasks::Model> for TaskResponse {
             hard_deadline: model.hard_deadline.map(|dt| dt.with_timezone(&Utc)),
             estimated_minutes: model.estimated_minutes,
             is_archived: model.is_archived,
-            created_by: model.created_by,
+            created_by,
+            assignees,
             created_at: model.created_at.with_timezone(&Utc),
             updated_at: model.updated_at.with_timezone(&Utc),
             completed_at: model.completed_at.map(|dt| dt.with_timezone(&Utc)),

@@ -494,5 +494,8 @@ pub async fn create_my_task(
     .await?;
 
     txn.commit().await?;
-    Ok((StatusCode::CREATED, Json(model.into())))
+    Ok((
+        StatusCode::CREATED,
+        Json(crate::utils::task_responses::build_task_response(&state.db, model).await?),
+    ))
 }
