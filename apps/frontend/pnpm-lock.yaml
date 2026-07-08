@@ -42,8 +42,8 @@ importers:
         specifier: 8.21.3
         version: 8.21.3(vue@3.5.39(typescript@6.0.3))
       '@unhead/vue':
-        specifier: 3.1.6
-        version: 3.1.6(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(lightningcss@1.32.0)(rolldown@1.1.4)(typescript@6.0.3)(vue@3.5.39(typescript@6.0.3))
+        specifier: 3.1.7
+        version: 3.1.7(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(lightningcss@1.32.0)(rolldown@1.1.4)(typescript@6.0.3)(vue@3.5.39(typescript@6.0.3))
       '@universal-middleware/core':
         specifier: 0.4.18
         version: 0.4.18(elysia@1.4.29(@sinclair/typebox@0.34.49)(exact-mirror@1.2.2)(file-type@22.0.1)(openapi-types@12.1.3)(typescript@6.0.3))(h3@1.15.11)(srvx@0.11.17)
@@ -2299,14 +2299,14 @@ packages:
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
-  '@unhead/bundler@3.1.6':
-    resolution: {integrity: sha512-JHSABL4fy2jMpIi5Y3Gy3eAq5bgkgix8dXM9/NsZDTMBgvIlnyzlgamH1foNeVJk5QJQBZ2AUapYAnHsvDsH7A==}
+  '@unhead/bundler@3.1.7':
+    resolution: {integrity: sha512-yJPDwKZ3NOSmzB1a4ea5MEbeaXBq9EvOcGnav46SsPnslE7jq7QKkx42UQzxJk0q6yFPGdCZbFae2IO1HTtLPA==}
     peerDependencies:
-      '@unhead/cli': ^3.1.6
+      '@unhead/cli': ^3.1.7
       esbuild: '>=0.17.0'
       lightningcss: '>=1.20.0'
       rolldown: '>=1.0.0-beta.0'
-      unhead: ^3.1.6
+      unhead: ^3.1.7
       vite: '>=6.4.2'
       webpack: '>=5.0.0'
     peerDependenciesMeta:
@@ -2323,8 +2323,8 @@ packages:
       webpack:
         optional: true
 
-  '@unhead/vue@3.1.6':
-    resolution: {integrity: sha512-0UygrH5VlaFzktOwLjEaLmMGC/lVIwibgPW2ypv++163T1RCA9V9p1o2cuFxiQXhn/bBUbDRrgOXGFBfsiu+PQ==}
+  '@unhead/vue@3.1.7':
+    resolution: {integrity: sha512-UK/hy7RT9qB4TBsUfRwXGUi5p3J6O6MtA/971emkKC3G+YpezaF7cPdxJOG9o+mFtqLIjkKd+QjRg8SiJLmBGg==}
     peerDependencies:
       vite: '>=6.4.2'
       vue: '>=3.5.18'
@@ -2415,11 +2415,6 @@ packages:
     peerDependencies:
       elysia: ^1.0.0
       vike: ^0.4.255
-
-  '@vitejs/devtools-kit@0.3.3':
-    resolution: {integrity: sha512-noXyK0szYxh8ALsA7PIoFANOWx13K9NoMKqk3J1pCwGMdnhxWgSqtbhki+/REoK4itbxIFUfc0EwqsoZIKiqyg==}
-    peerDependencies:
-      vite: '*'
 
   '@vitejs/devtools-kit@0.3.4':
     resolution: {integrity: sha512-QHvb3wF0KZxvbfEplzzdGenB/dWoPBQlUnw3VVBm5qUYTdoud8rOoem9QI6h/+7a+iwy88LmLigxbSXbbv2Uyg==}
@@ -3696,9 +3691,6 @@ packages:
   nostics@0.2.0:
     resolution: {integrity: sha512-/WQpI46UMbqvy1okYb+V+9wW3J8/m6GJ33wm691n/tyi6YtJiZ6ssJjENAU7y4evfYrrgYN9HllKDzPvffil1w==}
 
-  nostics@0.3.0:
-    resolution: {integrity: sha512-tP0hvxK4n2hZO9kK5Az7dLXIFukANDpcdtMae3tvtyRQun48gZIBVyXCJc8zk+qsdOpY7ngashH0ivQGOGzmeg==}
-
   nostics@1.1.4:
     resolution: {integrity: sha512-U4FApICSLCQ0dYiN59pxUCEZC053palQXi57yLaNdMaL6TBY4C4q3qZrJKUGcor2dGv8EhEwt8y5KvU2bo2kFg==}
 
@@ -4311,8 +4303,8 @@ packages:
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
 
-  unhead@3.1.6:
-    resolution: {integrity: sha512-hjHJeCAdzQOLsBTgq+9QC2srXgSk37jcZobZT5WulzereMBnE26bdsodJCotYNrPzauo6nyXscfU8BQ5pFjXlw==}
+  unhead@3.1.7:
+    resolution: {integrity: sha512-Db1M8yQmxdzhQFMmlZ6cr/ZlpGPRabTMDPBE4GGBv69TYUNP6jV8z54H8PTU08gMsWXVtqPBs9VwCldjrqknGw==}
     peerDependencies:
       vite: '>=6.4.2'
     peerDependenciesMeta:
@@ -4334,6 +4326,39 @@ packages:
   unplugin@3.0.0:
     resolution: {integrity: sha512-0Mqk3AT2TZCXWKdcoaufeXNukv2mTrEZExeXlHIOZXdqYoHHr4n51pymnwV8x2BOVxwXbK2HLlI7usrqMpycdg==}
     engines: {node: ^20.19.0 || >=22.12.0}
+
+  unplugin@3.3.0:
+    resolution: {integrity: sha512-qa66K+crbfyE6JK10GjvbJeRrOsuC/JpbnHctfyp/i4oBTxWOzJfRZyDiOk1PtErMFRu8JhsU/wPvOdBNWe5Rg==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    peerDependencies:
+      '@farmfe/core': '*'
+      '@rspack/core': '*'
+      bun-types-no-globals: '*'
+      esbuild: '*'
+      rolldown: '*'
+      rollup: '*'
+      unloader: '*'
+      vite: '*'
+      webpack: '*'
+    peerDependenciesMeta:
+      '@farmfe/core':
+        optional: true
+      '@rspack/core':
+        optional: true
+      bun-types-no-globals:
+        optional: true
+      esbuild:
+        optional: true
+      rolldown:
+        optional: true
+      rollup:
+        optional: true
+      unloader:
+        optional: true
+      vite:
+        optional: true
+      webpack:
+        optional: true
 
   unstorage@1.17.5:
     resolution: {integrity: sha512-0i3iqvRfx29hkNntHyQvJTpf5W9dQ9ZadSoRU8+xVlhVtT7jAX57fazYO9EHvcRCfBCyi5YRya7XCDOsbTgkPg==}
@@ -6290,45 +6315,55 @@ snapshots:
     dependencies:
       '@types/node': 24.13.2
 
-  '@unhead/bundler@3.1.6(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(lightningcss@1.32.0)(rolldown@1.1.4)(typescript@6.0.3)(unhead@3.1.6(@voidzero-dev/vite-plus-core@0.2.1))':
+  '@unhead/bundler@3.1.7(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(lightningcss@1.32.0)(rolldown@1.1.4)(typescript@6.0.3)(unhead@3.1.7(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(rolldown@1.1.4))':
     dependencies:
-      '@vitejs/devtools-kit': 0.3.3(@voidzero-dev/vite-plus-core@0.2.1)(typescript@6.0.3)
+      '@vitejs/devtools-kit': 0.3.4(@voidzero-dev/vite-plus-core@0.2.1)(typescript@6.0.3)
       magic-string: 0.30.21
       oxc-parser: 0.137.0
       oxc-walker: 1.0.0(oxc-parser@0.137.0)(rolldown@1.1.4)
       ufo: 1.6.4
-      unhead: 3.1.6(@voidzero-dev/vite-plus-core@0.2.1)
-      unplugin: 3.0.0
+      unhead: 3.1.7(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(rolldown@1.1.4)
+      unplugin: 3.3.0(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(rolldown@1.1.4)
     optionalDependencies:
       esbuild: 0.28.1
       lightningcss: 1.32.0
       rolldown: 1.1.4
       vite: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.13.2)(@vitejs/devtools@0.3.4)(esbuild@0.28.1)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)'
     transitivePeerDependencies:
+      - '@farmfe/core'
       - '@modelcontextprotocol/sdk'
+      - '@rspack/core'
       - bufferutil
+      - bun-types-no-globals
       - crossws
+      - rollup
       - typescript
+      - unloader
       - utf-8-validate
 
-  '@unhead/vue@3.1.6(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(lightningcss@1.32.0)(rolldown@1.1.4)(typescript@6.0.3)(vue@3.5.39(typescript@6.0.3))':
+  '@unhead/vue@3.1.7(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(lightningcss@1.32.0)(rolldown@1.1.4)(typescript@6.0.3)(vue@3.5.39(typescript@6.0.3))':
     dependencies:
-      '@unhead/bundler': 3.1.6(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(lightningcss@1.32.0)(rolldown@1.1.4)(typescript@6.0.3)(unhead@3.1.6(@voidzero-dev/vite-plus-core@0.2.1))
+      '@unhead/bundler': 3.1.7(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(lightningcss@1.32.0)(rolldown@1.1.4)(typescript@6.0.3)(unhead@3.1.7(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(rolldown@1.1.4))
       hookable: 6.1.1
-      unhead: 3.1.6(@voidzero-dev/vite-plus-core@0.2.1)
-      unplugin: 3.0.0
+      unhead: 3.1.7(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(rolldown@1.1.4)
+      unplugin: 3.3.0(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(rolldown@1.1.4)
       vue: 3.5.39(typescript@6.0.3)
     optionalDependencies:
       vite: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.13.2)(@vitejs/devtools@0.3.4)(esbuild@0.28.1)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)'
     transitivePeerDependencies:
+      - '@farmfe/core'
       - '@modelcontextprotocol/sdk'
+      - '@rspack/core'
       - '@unhead/cli'
       - bufferutil
+      - bun-types-no-globals
       - crossws
       - esbuild
       - lightningcss
       - rolldown
+      - rollup
       - typescript
+      - unloader
       - utf-8-validate
 
   '@universal-deploy/netlify@0.2.2(@voidzero-dev/vite-plus-core@0.2.1)(srvx@0.11.17)':
@@ -6443,24 +6478,6 @@ snapshots:
       - h3
       - hono
       - srvx
-
-  '@vitejs/devtools-kit@0.3.3(@voidzero-dev/vite-plus-core@0.2.1)(typescript@6.0.3)':
-    dependencies:
-      '@devframes/hub': 0.5.4(devframe@0.5.4(typescript@6.0.3))
-      birpc: 4.0.0
-      devframe: 0.5.4(typescript@6.0.3)
-      mlly: 1.8.2
-      nostics: 0.3.0
-      pathe: 2.0.3
-      perfect-debounce: 2.1.0
-      tinyexec: 1.2.4
-      vite: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.13.2)(@vitejs/devtools@0.3.4)(esbuild@0.28.1)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)'
-    transitivePeerDependencies:
-      - '@modelcontextprotocol/sdk'
-      - bufferutil
-      - crossws
-      - typescript
-      - utf-8-validate
 
   '@vitejs/devtools-kit@0.3.4(@voidzero-dev/vite-plus-core@0.2.1)(typescript@6.0.3)':
     dependencies:
@@ -7785,12 +7802,6 @@ snapshots:
       oxc-parser: 0.132.0
       unplugin: 3.0.0
 
-  nostics@0.3.0:
-    dependencies:
-      magic-string: 0.30.21
-      oxc-parser: 0.132.0
-      unplugin: 3.0.0
-
   nostics@1.1.4: {}
 
   object-assign@4.1.1: {}
@@ -8540,12 +8551,21 @@ snapshots:
 
   undici-types@7.18.2: {}
 
-  unhead@3.1.6(@voidzero-dev/vite-plus-core@0.2.1):
+  unhead@3.1.7(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(rolldown@1.1.4):
     dependencies:
       hookable: 6.1.1
-      unplugin: 3.0.0
+      unplugin: 3.3.0(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(rolldown@1.1.4)
     optionalDependencies:
       vite: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.13.2)(@vitejs/devtools@0.3.4)(esbuild@0.28.1)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)'
+    transitivePeerDependencies:
+      - '@farmfe/core'
+      - '@rspack/core'
+      - bun-types-no-globals
+      - esbuild
+      - rolldown
+      - rollup
+      - unloader
+      - webpack
 
   universalify@2.0.1: {}
 
@@ -8566,6 +8586,16 @@ snapshots:
       '@jridgewell/remapping': 2.3.5
       picomatch: 4.0.4
       webpack-virtual-modules: 0.6.2
+
+  unplugin@3.3.0(@voidzero-dev/vite-plus-core@0.2.1)(esbuild@0.28.1)(rolldown@1.1.4):
+    dependencies:
+      '@jridgewell/remapping': 2.3.5
+      picomatch: 4.0.4
+      webpack-virtual-modules: 0.6.2
+    optionalDependencies:
+      esbuild: 0.28.1
+      rolldown: 1.1.4
+      vite: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.13.2)(@vitejs/devtools@0.3.4)(esbuild@0.28.1)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)'
 
   unstorage@1.17.5:
     dependencies:
