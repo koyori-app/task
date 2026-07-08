@@ -24,23 +24,18 @@ fn admin_users_routes() -> OpenApiRouter<AppState> {
 }
 
 fn admin_tenants_routes() -> OpenApiRouter<AppState> {
+    // ハンドラーの #[utoipa::path] が nest 位置からの相対パスを持つため、
+    // ここで追加の nest を挟むとパスが二重連結されて 404 になる（実際になっていた）。
     OpenApiRouter::<AppState>::new()
         .routes(routes!(crate::handlers::admin_tenants::list_tenants))
         .routes(routes!(crate::handlers::admin_tenants::get_tenant))
         .routes(routes!(crate::handlers::admin_tenants::delete_tenant))
-        .nest(
-            "/{tenant_id}/projects",
-            OpenApiRouter::<AppState>::new()
-                .routes(routes!(
-                    crate::handlers::admin_tenants::list_tenant_projects
-                ))
-                .nest(
-                    "/{project_id}/tasks",
-                    OpenApiRouter::<AppState>::new().routes(routes!(
-                        crate::handlers::admin_tenants::list_tenant_project_tasks
-                    )),
-                ),
-        )
+        .routes(routes!(
+            crate::handlers::admin_tenants::list_tenant_projects
+        ))
+        .routes(routes!(
+            crate::handlers::admin_tenants::list_tenant_project_tasks
+        ))
 }
 
 fn admin_audit_logs_routes() -> OpenApiRouter<AppState> {
