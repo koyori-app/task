@@ -10,44 +10,25 @@ use apalis_postgres::{Config, JsonCodec, PgPool, PostgresStorage};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::utils::auth::generate_email_verification_token;
 use crate::utils::{email_verification, verification_email_delivery};
 use crate::{AppState, settings::Settings};
 
 pub const QUEUE_NAME: &str = "verification_email";
 pub const MAX_RETRIES: usize = 8;
 
-/// 認証メール送信ワーカーが処理する Apalis ジョブペイロード。
+/// 認証メール送信ワーカーが処理する Apalis ジョブペイロード（トークンは Redis のみに保持）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerificationEmailJob {
     /// 認証対象ユーザーの ID。
     pub user_id: Uuid,
     /// 送信先メールアドレス（正規化済みを想定）。
     pub email: String,
-    /// メール本文の認証リンクに埋め込むトークン。
-    pub token: String,
-    /// トークン発行世代（Unix ミリ秒）。[`email_verification::store_token`] は
-    /// Redis 上の現世代より大きい値のときのみトークンを反映する。
-    #[serde(default)]
-    pub issued_at: u64,
 }
 
 impl VerificationEmailJob {
-    /// キュー投入用のジョブを組み立て、`issued_at` に現在時刻（ミリ秒）を付与する。
-    ///
-    /// # Arguments
-    /// * `user_id` - 認証対象ユーザー ID
-    /// * `email` - 送信先メールアドレス
-    /// * `token` - 認証トークン文字列
-    ///
-    /// # Returns
-    /// * `issued_at` が設定された [`VerificationEmailJob`]
-    pub fn new(user_id: Uuid, email: String, token: String) -> Self {
-        Self {
-            user_id,
-            email,
-            token,
-            issued_at: chrono::Utc::now().timestamp_millis() as u64,
-        }
+    pub fn new(user_id: Uuid, email: String) -> Self {
+        Self { user_id, email }
     }
 }
 
@@ -90,13 +71,14 @@ pub async fn enqueue(
     Ok(())
 }
 
-/// 認証メールジョブを処理する（Redis にトークン保存 → SMTP 送信）。
+/// 認証メールジョブを処理する（トークン生成 → Redis に保存 → SMTP 送信）。
 ///
+/// トークンと発行世代（`issued_at`）はワーカー内で生成し、Redis のみに保持する。
 /// 再送などでより新しい `issued_at` が既に Redis にある場合はトークン保存と送信を
 /// スキップし、古いジョブの Apalis リトライが最新リンクを無効化しないようにする。
 ///
 /// # Arguments
-/// * `job` - 送信対象のユーザー・メール・トークン・発行世代
+/// * `job` - 送信対象のユーザー ID・メールアドレス
 /// * `state` - DB / Redis / SMTP などを含むアプリ状態
 ///
 /// # Returns
@@ -105,13 +87,11 @@ pub async fn enqueue(
 /// # Errors
 /// * Redis・SMTP など下位処理の失敗（Apalis がリトライする）
 pub async fn process(job: VerificationEmailJob, state: Data<AppState>) -> Result<(), BoxDynError> {
-    let stored = email_verification::store_token(
-        &state.redis_client,
-        job.user_id,
-        &job.token,
-        job.issued_at,
-    )
-    .await?;
+    let token = generate_email_verification_token();
+    let issued_at = chrono::Utc::now().timestamp_millis() as u64;
+    let stored =
+        email_verification::store_token(&state.redis_client, job.user_id, &token, issued_at)
+            .await?;
     if !stored {
         // 再送などでより新しい世代が既に Redis にある。旧ジョブのリトライは送信しない。
         return Ok(());
@@ -120,7 +100,7 @@ pub async fn process(job: VerificationEmailJob, state: Data<AppState>) -> Result
         &state.smtp_client,
         &job.email,
         &state.settings,
-        &job.token,
+        &token,
     )
     .await?;
     Ok(())
@@ -128,4 +108,28 @@ pub async fn process(job: VerificationEmailJob, state: Data<AppState>) -> Result
 
 pub fn worker_concurrency(settings: &Settings) -> usize {
     settings.verification_email_worker_concurrency.max(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ジョブペイロードは Postgres の apalis.jobs に平文で永続化されるため、
+    /// 認証トークン等の機微情報を含めてはならない。型定義から `token` /
+    /// `issued_at` を排除したこと（トークンは Redis のみに保持）の回帰ガード。
+    /// フィールド追加でこのテストが落ちた場合は、機微情報でないことを
+    /// 確認したうえで期待キー集合を更新すること。
+    #[test]
+    fn payload_contains_no_sensitive_fields() {
+        let job = VerificationEmailJob::new(Uuid::new_v4(), "user@example.com".into());
+        let value = serde_json::to_value(&job).expect("serialize job");
+        let mut keys: Vec<&str> = value
+            .as_object()
+            .expect("payload is a JSON object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["email", "user_id"]);
+    }
 }

@@ -18,10 +18,7 @@ use crate::openapi::{
 use crate::payload::auth::*;
 use crate::payload::auth_2fa::Login2faResponse;
 use crate::payload::users::UserResponse;
-use crate::utils::auth::{
-    AuthError, create_password_hash, dummy_password_hash, generate_email_verification_token,
-    verify_password,
-};
+use crate::utils::auth::{AuthError, create_password_hash, dummy_password_hash, verify_password};
 use crate::utils::db::{is_postgres_unique_violation, with_transaction};
 use crate::utils::email::normalize_email;
 use crate::utils::email_verification;
@@ -117,7 +114,6 @@ pub async fn register(
     }
 
     let password_hash = create_password_hash(&password)?;
-    let verification_token = generate_email_verification_token();
     let user_id = Uuid::new_v4();
 
     let user = users::ActiveModel {
@@ -154,7 +150,7 @@ pub async fn register(
 
     verification_email::enqueue(
         state.verification_email_storage.as_ref(),
-        VerificationEmailJob::new(user_id, email.clone(), verification_token),
+        VerificationEmailJob::new(user_id, email.clone()),
     )
     .await
     .map_err(AuthError::VerificationEmailEnqueueFailed)?;
@@ -242,10 +238,9 @@ pub async fn resend_verification_email(
         return Err(AuthError::EmailAlreadyVerified);
     }
 
-    let token = generate_email_verification_token();
     verification_email::enqueue(
         state.verification_email_storage.as_ref(),
-        VerificationEmailJob::new(user.id, email.clone(), token),
+        VerificationEmailJob::new(user.id, email.clone()),
     )
     .await
     .map_err(AuthError::VerificationEmailEnqueueFailed)?;
