@@ -26,6 +26,7 @@ jobs:
 
     env:
       RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
 
     steps:
       - name: Checkout
@@ -39,10 +40,8 @@ jobs:
       - name: Install mold
         run: sudo apt-get install -y mold
 
-      - name: Install sccache
-        uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907 # v2.82.8
-        with:
-          tool: sccache
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Cache cargo registry
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
