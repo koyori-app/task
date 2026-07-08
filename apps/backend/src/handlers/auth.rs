@@ -18,9 +18,7 @@ use crate::openapi::{
 use crate::payload::auth::*;
 use crate::payload::auth_2fa::Login2faResponse;
 use crate::payload::users::UserResponse;
-use crate::utils::auth::{
-    AuthError, create_password_hash, dummy_password_hash, verify_password,
-};
+use crate::utils::auth::{AuthError, create_password_hash, dummy_password_hash, verify_password};
 use crate::utils::db::{is_postgres_unique_violation, with_transaction};
 use crate::utils::email::normalize_email;
 use crate::utils::email_verification;

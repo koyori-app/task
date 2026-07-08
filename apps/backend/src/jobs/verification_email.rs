@@ -90,7 +90,8 @@ pub async fn process(job: VerificationEmailJob, state: Data<AppState>) -> Result
     let token = generate_email_verification_token();
     let issued_at = chrono::Utc::now().timestamp_millis() as u64;
     let stored =
-        email_verification::store_token(&state.redis_client, job.user_id, &token, issued_at).await?;
+        email_verification::store_token(&state.redis_client, job.user_id, &token, issued_at)
+            .await?;
     if !stored {
         // 再送などでより新しい世代が既に Redis にある。旧ジョブのリトライは送信しない。
         return Ok(());
