@@ -62,6 +62,7 @@ cargo test --workspace --lib
 - エラーは握り潰さず `?` で伝播する（`unwrap_or(false)` / `let _ =` でのもみ消しが実バグを隠した前例あり）
 - コミットは Conventional Commits + 日本語（例: `fix(backend): …` / `refactor(workspace): …`）。1 Phase・1 関心 = 1 PR
 - PR 本文も日本語。「概要 / 変更内容 / 挙動の変化 / テスト」の構成
+- 作業用の git worktree（`.claude/worktrees/` 配下）は、PR マージなど作業が終わったら `git worktree remove <path>` で消す（上げっぱなし禁止。Docker コンテナと同じ扱い）
 
 ## 行動指針（汎用）
 
