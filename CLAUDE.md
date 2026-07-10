@@ -36,7 +36,15 @@ cargo clippy --workspace --all-targets
 cargo test --workspace --lib
 ```
 
-- 統合テスト（`tests/`）は Postgres/Redis 必須。ローカルに無ければ CI で確認し、PR 本文にその旨を書く
+- 統合テスト（`tests/`）は実 Postgres / Redis 必須（`.github/workflows/backend-test.yml` が正）。ローカルに無ければ CI で確認し、PR 本文にその旨を書く
+  1. CI と同じサービスを起動（`--rm` 付き。停止すれば自動でコンテナも消える）:
+     ```bash
+     docker run -d --rm --name koyori-test-pg -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=test -p 5432:5432 postgres:17
+     docker run -d --rm --name koyori-test-redis -p 6379:6379 valkey/valkey:8.1
+     ```
+  2. `apps/backend/.env`（gitignore 済み）に backend-test.yml の `env:` ブロックと同じ値を置く（ハーネスの `load_dotenv()` が読む）。GitHub App 系は設定不要（`load_github_test_env()` が自前注入）。SMTP は実サーバー不要
+  3. CI に合わせてシングルスレッドで実行: `cargo test -- --test-threads=1`（CI は `cargo nextest run --test-threads=1`）
+  4. 終わったら必ずコンテナを停止・削除する（上げっぱなし禁止）: `docker stop koyori-test-pg koyori-test-redis`
 - API 表面を変えたら: `cd apps/frontend && pnpm openapi && node_modules/.bin/vp fmt`
   - 整形は **`vp fmt`**（prettier は入っていない）。`api.d.ts` は gitignore 済み
   - API を変えていない PR では `openapi.json` の差分ゼロが検証項目になる
@@ -45,7 +53,7 @@ cargo test --workspace --lib
 
 - **SeaORM の生 SQL に `?` プレースホルダを書かない。** `Statement::from_sql_and_values` は SQL を無変換で sqlx に渡すため、Postgres では実行時構文エラーになる。`common::db` のヘルパー（`table_exists` / `column_exists` / `execute_bound` / `query_one_bool`）か `$N` 直書きを使う。この類のバグは過去に3箇所で見つかっている（#272 / #277）
 - **`#[utoipa::path]` の path は nest 位置からの相対パス。** routes 側で同じパスを `.nest()` すると二重連結された URL に登録されて 404 になる（#277 で実発生）。既存ハンドラーの登録方法に合わせること
-- **apalis のジョブペイロードは Postgres（apalis.jobs）に平文で永続化される。** トークン等の機微情報を載せない（Redis のみに保持する）。job クレートの「シリアライズ後キー集合」固定テストが回帰ガード
+- **apalis のジョブペイロードは Postgres（apalis.jobs）に平文で永続化される。** トークン等の機微情報を載せない（Redis のみに保持する）。job クレートの「シリアライズ後キー集合」固定テストが回帰ガード。再送競合は `issued_at` 世代（Unix ミリ秒）を process 時に生成し、`email_verification::store_token` の世代比較（Lua）で後勝ち解決する
 - **ワーカーに `AppState` を渡さない**（job → handler の循環になる）。必要な依存は `JobState` にフィールドを足す
 - 増分ビルドの計測に `cargo build -p <crate>` を使わない。feature 解決がワークスペース全体と変わり依存を作り直すため、数字が実態と乖離する
 
@@ -55,6 +63,7 @@ cargo test --workspace --lib
 - 統合テストは `tests/common` の `TestApp` を使う。拒否系（403/404）と対照の成功系（200/201、過剰拒否でないこと）をセットで書く
 - エラーは握り潰さず `?` で伝播する（`unwrap_or(false)` / `let _ =` でのもみ消しが実バグを隠した前例あり）
 - コミットは Conventional Commits + 日本語（例: `fix(backend): …` / `refactor(workspace): …`）。1 Phase・1 関心 = 1 PR
+- PR 本文も日本語。「概要 / 変更内容 / 挙動の変化 / テスト」の構成
 
 ## 行動指針（汎用）
 
