@@ -3693,6 +3693,24 @@
               }
             }
           },
+          "429": {
+            "description": "同一メールアドレスへの登録リクエストが連続しています。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "500": {
             "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
             "content": {

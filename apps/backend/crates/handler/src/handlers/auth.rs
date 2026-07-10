@@ -115,11 +115,19 @@ pub async fn register(
         return Err(AuthError::Forbidden);
     }
 
+    // #26: 既知アドレスへのメールフラッディング対策。存在オラクルにならないよう、
+    // 新規/既存の分岐より前で一律にレート制限を掛ける（枠なしは常に 429）。
+    if !email_verification::try_acquire_register_slot(&state.redis_client, &email)
+        .await
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis register cooldown: {e}")))?
+    {
+        return Err(AuthError::TooManyRequests);
+    }
+
     let password_hash = create_password_hash(&password)?;
-    let user_id = Uuid::new_v4();
 
     let user = users::ActiveModel {
-        id: Set(user_id),
+        id: Set(Uuid::new_v4()),
         username: Set(username),
         bio: Set(Some(String::new())),
         avatar_url: Set(None),
@@ -132,9 +140,9 @@ pub async fn register(
         totp_enabled: Set(false),
     };
 
-    let insert_result = with_transaction::<(), AuthError, _>(&state.db, |txn| {
+    let insert_result = with_transaction::<Uuid, AuthError, _>(&state.db, |txn| {
         Box::pin(async move {
-            users::Entity::insert(user.clone())
+            let res = users::Entity::insert(user.clone())
                 .exec(txn)
                 .await
                 .map_err(|e| {
@@ -145,7 +153,7 @@ pub async fn register(
                     }
                 })?;
 
-            Ok(())
+            Ok(res.last_insert_id)
         })
     })
     .await;
@@ -154,7 +162,7 @@ pub async fn register(
     // 既存メール宛には確認メールの代わりに「登録済みです」通知メールを送る。
     // 送信キュー投入失敗時も分岐によらず同じ AuthError（同一レスポンス）にする。
     match insert_result {
-        Ok(()) => {
+        Ok(user_id) => {
             verification_email::enqueue(
                 state.verification_email_storage.as_ref(),
                 VerificationEmailJob::new(user_id, email.clone()),

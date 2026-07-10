@@ -43,6 +43,11 @@ pub enum RegisterErrors {
     // #26: メールアドレス列挙対策のため、既存メールアドレスでの登録も 409 ではなく
     // 未使用時と同一の 201 を返す（Conflict は意図的に定義しない）。
     #[response(
+        status = 429,
+        description = "同一メールアドレスへの登録リクエストが連続しています。時間をおいて再度お試しください"
+    )]
+    TooManyRequests(#[to_schema] ServerError),
+    #[response(
         status = 503,
         description = "確認/通知メールの送信準備に失敗しました。時間をおいて再度お試しください"
     )]
