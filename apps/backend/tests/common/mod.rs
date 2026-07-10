@@ -198,6 +198,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal_owner
             .await
             .expect("prepare personal project columns");
 
+            // sync() は entity 定義からカラムデフォルトを作らないため、
+            // `ensure_system_settings_row` の `INSERT INTO system_settings (singleton)` が
+            // NOT NULL 制約違反 (23502) になる。マイグレーション
+            // （m20260520000000_initial_schema.rs）と同じデフォルトを付与する。
+            db.execute_unprepared(
+                r#"
+ALTER TABLE system_settings
+    ALTER COLUMN user_registration_enabled SET DEFAULT true,
+    ALTER COLUMN drive_default_quota_mb SET DEFAULT 10240,
+    ALTER COLUMN updated_at SET DEFAULT now(),
+    ALTER COLUMN drive_system_max_quota_mb SET DEFAULT 102400;
+"#,
+            )
+            .await
+            .expect("prepare system_settings defaults");
+
             // search_vector は GENERATED ALWAYS AS の tsvector カラムで entity 定義に無いため
             // sync() が作らない。手動で追加する。
             db.execute_unprepared(
