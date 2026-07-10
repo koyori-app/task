@@ -6,7 +6,10 @@ use std::sync::Arc;
 use apalis_postgres::PgPool;
 use common::cache::redis::RedisConnection;
 use common::settings::Settings;
-use job::{GithubWebhookStorage, PasswordResetEmailStorage, VerificationEmailStorage};
+use job::{
+    AlreadyRegisteredEmailStorage, GithubWebhookStorage, PasswordResetEmailStorage,
+    VerificationEmailStorage,
+};
 use sea_orm::DatabaseConnection;
 use service::{
     drive::DriveConfig, oauth::OAuthSettings, smtp::SmtpClient, storage::StorageBackend,
@@ -33,6 +36,7 @@ pub struct AppState {
     pub verification_email_storage: Arc<VerificationEmailStorage>,
     pub github_webhook_storage: Arc<GithubWebhookStorage>,
     pub password_reset_email_storage: Arc<PasswordResetEmailStorage>,
+    pub already_registered_email_storage: Arc<AlreadyRegisteredEmailStorage>,
     pub storage: Arc<dyn StorageBackend>,
     pub drive_config: DriveConfig,
     pub oauth_settings: OAuthSettings,

@@ -40,14 +40,11 @@ pub enum CredentialErrors {
 
 #[derive(IntoResponses)]
 pub enum RegisterErrors {
-    #[response(
-        status = 409,
-        description = "このメールアドレスはすでに登録されています"
-    )]
-    Conflict(#[to_schema] ServerError),
+    // #26: メールアドレス列挙対策のため、既存メールアドレスでの登録も 409 ではなく
+    // 未使用時と同一の 201 を返す（Conflict は意図的に定義しない）。
     #[response(
         status = 503,
-        description = "認証メールの送信準備に失敗しました。アカウントは作成済みのため、認証メールの再送をお試しください"
+        description = "確認/通知メールの送信準備に失敗しました。時間をおいて再度お試しください"
     )]
     VerificationEmailUnavailable(#[to_schema] ServerError),
     #[response(

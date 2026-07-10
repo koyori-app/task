@@ -14,7 +14,9 @@ use crate::openapi::{
     UnauthorizedErrors, VerifyEmailErrors,
 };
 use entity::{system_settings, users};
+use job::AlreadyRegisteredEmailJob;
 use job::VerificationEmailJob;
+use job::already_registered_email;
 use job::verification_email;
 use payload::auth::*;
 use payload::auth_2fa::Login2faResponse;
@@ -82,7 +84,7 @@ pub async fn login(
     responses(
         (
             status = 201,
-            description = "アカウントが作成されました。続けて送信されたメールで認証してください。",
+            description = "リクエストを受け付けました。続けて送信されたメールをご確認ください（メールアドレスが既に登録済みの場合も、列挙対策のため同一レスポンスを返します）。",
             body = String
         ),
         RegisterErrors,
@@ -130,7 +132,7 @@ pub async fn register(
         totp_enabled: Set(false),
     };
 
-    with_transaction::<(), AuthError, _>(&state.db, |txn| {
+    let insert_result = with_transaction::<(), AuthError, _>(&state.db, |txn| {
         Box::pin(async move {
             users::Entity::insert(user.clone())
                 .exec(txn)
@@ -146,14 +148,30 @@ pub async fn register(
             Ok(())
         })
     })
-    .await?;
+    .await;
 
-    verification_email::enqueue(
-        state.verification_email_storage.as_ref(),
-        VerificationEmailJob::new(user_id, email.clone()),
-    )
-    .await
-    .map_err(AuthError::VerificationEmailEnqueueFailed)?;
+    // #26: メールアドレス列挙対策。既存メールでも未使用時と同一の 201 レスポンスを返す。
+    // 既存メール宛には確認メールの代わりに「登録済みです」通知メールを送る。
+    // 送信キュー投入失敗時も分岐によらず同じ AuthError（同一レスポンス）にする。
+    match insert_result {
+        Ok(()) => {
+            verification_email::enqueue(
+                state.verification_email_storage.as_ref(),
+                VerificationEmailJob::new(user_id, email.clone()),
+            )
+            .await
+            .map_err(AuthError::VerificationEmailEnqueueFailed)?;
+        }
+        Err(AuthError::DuplicateEmail) => {
+            already_registered_email::enqueue(
+                state.already_registered_email_storage.as_ref(),
+                AlreadyRegisteredEmailJob::new(email.clone()),
+            )
+            .await
+            .map_err(AuthError::VerificationEmailEnqueueFailed)?;
+        }
+        Err(e) => return Err(e),
+    }
 
     Ok((StatusCode::CREATED, Json("Register successful".to_string())))
 }

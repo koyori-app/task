@@ -23,8 +23,8 @@ use entity::{github_integrations, oauth_connections, projects, tenants, users};
 use backend::{
     AppState,
     jobs::{
-        setup_github_webhook_storage, setup_password_reset_email_storage, setup_pool,
-        setup_verification_email_storage,
+        setup_already_registered_email_storage, setup_github_webhook_storage,
+        setup_password_reset_email_storage, setup_pool, setup_verification_email_storage,
     },
     routes, settings,
     utils::{
@@ -394,6 +394,10 @@ impl TestApp {
         let password_reset_email_storage = setup_password_reset_email_storage(&pg_pool, &settings)
             .await
             .expect("password reset email storage");
+        let already_registered_email_storage =
+            setup_already_registered_email_storage(&pg_pool, &settings)
+                .await
+                .expect("already registered email storage");
         let storage = setup_storage().await.expect("storage backend");
         let http_client = create_http_client().expect("http client");
         let webauthn = build_webauthn(&settings).expect("webauthn");
@@ -437,6 +441,7 @@ impl TestApp {
             verification_email_storage,
             github_webhook_storage,
             password_reset_email_storage,
+            already_registered_email_storage,
             storage,
             drive_config: DriveConfig::from_env(),
             oauth_settings,
