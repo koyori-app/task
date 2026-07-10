@@ -98,15 +98,17 @@ export const Default: Story = {
 };
 
 export const RegisterError: Story = {
-  name: '登録エラー（409）',
+  // #26: バックエンドは列挙対策で既存メールでも 201 を返すため 409 は発生しない。
+  // 登録失敗の代表としてサーバーエラー（500）をモックする。
+  name: '登録エラー（500）',
   beforeEach() {
     const original = globalThis.fetch;
     globalThis.fetch = fn().mockImplementation((input, init) => {
       const { url, method } = getRequestInfo(input, init);
       if (method === 'POST' && url.includes('/v1/auth/register')) {
         return Promise.resolve(
-          new Response(JSON.stringify({ message: 'Conflict' }), {
-            status: 409,
+          new Response(JSON.stringify({ message: 'internal-server-error' }), {
+            status: 500,
             headers: { 'Content-Type': 'application/json' },
           }),
         );
@@ -124,7 +126,7 @@ export const RegisterError: Story = {
     await fillSignUpForm(canvas);
     await userEvent.click(canvas.getByRole('button', { name: 'アカウント作成' }));
     await expect(
-      canvas.findByText('登録に失敗しました。メールアドレスが既に使われている可能性があります。'),
+      canvas.findByText('登録に失敗しました。時間をおいて再度お試しください。'),
     ).resolves.toBeInTheDocument();
   },
 };

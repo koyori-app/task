@@ -43,7 +43,7 @@ const form = useForm({
       });
       registeredEmail.value = value.email;
     } catch {
-      submitError.value = '登録に失敗しました。メールアドレスが既に使われている可能性があります。';
+      submitError.value = '登録に失敗しました。時間をおいて再度お試しください。';
     }
   },
 });
