@@ -5145,6 +5145,7 @@ dependencies = [
  "entity",
  "futures",
  "hex",
+ "hkdf 0.13.0",
  "hmac 0.13.0",
  "image",
  "jsonwebtoken",
