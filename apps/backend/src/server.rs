@@ -28,6 +28,9 @@ use handler::AppState;
 use handler::middlewares::logging::logging_middleware;
 use job::{
     JobState,
+    already_registered_email::{
+        self, MAX_RETRIES as ALREADY_REGISTERED_MAX_RETRIES, QUEUE_NAME as ALREADY_REGISTERED_QUEUE,
+    },
     github_webhook::{self, QUEUE_NAME as GITHUB_WEBHOOK_QUEUE},
     password_reset_email::{
         self, MAX_RETRIES as PW_RESET_MAX_RETRIES, QUEUE_NAME as PW_RESET_QUEUE,
@@ -120,6 +123,17 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .data(pw_reset_worker_state)
         .build(password_reset_email::process);
 
+    let already_registered_worker_storage = state.already_registered_email_storage.as_ref().clone();
+    let already_registered_worker_state = job_state.clone();
+    let already_registered_worker =
+        WorkerBuilder::new(format!("{ALREADY_REGISTERED_QUEUE}-worker"))
+            .backend(already_registered_worker_storage)
+            .retry(RetryPolicy::retries(ALREADY_REGISTERED_MAX_RETRIES))
+            .enable_tracing()
+            .concurrency(already_registered_email::worker_concurrency(settings))
+            .data(already_registered_worker_state)
+            .build(already_registered_email::process);
+
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let worker_shutdown = shutdown_rx.clone();
     let github_worker_storage = state.github_webhook_storage.as_ref().clone();
@@ -148,6 +162,13 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let pw_reset_worker_handle = tokio::spawn(async move {
         pw_reset_worker
             .run_until(wait_for_shutdown(pw_reset_shutdown))
+            .await
+    });
+
+    let already_registered_shutdown = shutdown_rx.clone();
+    let already_registered_worker_handle = tokio::spawn(async move {
+        already_registered_worker
+            .run_until(wait_for_shutdown(already_registered_shutdown))
             .await
     });
 
@@ -207,6 +228,11 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         Ok(Ok(())) => info!("password reset email worker stopped"),
         Ok(Err(e)) => warn!("password reset email worker error: {e}"),
         Err(e) => warn!("password reset email worker join error: {e}"),
+    }
+    match already_registered_worker_handle.await {
+        Ok(Ok(())) => info!("already registered email worker stopped"),
+        Ok(Err(e)) => warn!("already registered email worker error: {e}"),
+        Err(e) => warn!("already registered email worker join error: {e}"),
     }
 
     match github_worker_handle.await {

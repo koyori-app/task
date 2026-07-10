@@ -60,6 +60,13 @@ pub struct Settings {
     #[validate(range(min = 1, message = "github_webhook_worker_concurrency must be >= 1"))]
     #[serde(default = "default_github_webhook_worker_concurrency")]
     pub github_webhook_worker_concurrency: usize,
+    /// 登録済みメールアドレス通知（#26）Apalis ワーカーの並列度
+    #[validate(range(
+        min = 1,
+        message = "already_registered_email_worker_concurrency must be >= 1"
+    ))]
+    #[serde(default = "default_already_registered_email_worker_concurrency")]
+    pub already_registered_email_worker_concurrency: usize,
     /// PAT の HMAC-SHA256 署名に使う秘密鍵。起動時に必須。32バイト以上（256ビット）が必要。
     #[validate(length(
         min = 32,
@@ -119,6 +126,10 @@ fn default_password_reset_worker_concurrency() -> usize {
 }
 
 fn default_github_webhook_worker_concurrency() -> usize {
+    1
+}
+
+fn default_already_registered_email_worker_concurrency() -> usize {
     1
 }
 
@@ -252,6 +263,7 @@ mod tests {
             verification_email_worker_concurrency: 1,
             password_reset_worker_concurrency: 1,
             github_webhook_worker_concurrency: 1,
+            already_registered_email_worker_concurrency: 1,
             personal_token_secret: "a".repeat(32),
             recovery_code_secret: "c".repeat(32),
             totp_encryption_key: "b".repeat(32),

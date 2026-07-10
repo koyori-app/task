@@ -23,8 +23,8 @@ use entity::{github_integrations, oauth_connections, projects, tenants, users};
 use backend::{
     AppState,
     jobs::{
-        setup_github_webhook_storage, setup_password_reset_email_storage, setup_pool,
-        setup_verification_email_storage,
+        setup_already_registered_email_storage, setup_github_webhook_storage,
+        setup_password_reset_email_storage, setup_pool, setup_verification_email_storage,
     },
     routes, settings,
     utils::{
@@ -310,6 +310,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal_owner
             .await
             .expect("prepare personal project columns");
 
+            // sync() は entity 定義からカラムデフォルトを作らないため、
+            // `ensure_system_settings_row` の `INSERT INTO system_settings (singleton)` が
+            // NOT NULL 制約違反 (23502) になる。マイグレーション
+            // （m20260520000000_initial_schema.rs）と同じデフォルトを付与する。
+            db.execute_unprepared(
+                r#"
+ALTER TABLE system_settings
+    ALTER COLUMN user_registration_enabled SET DEFAULT true,
+    ALTER COLUMN drive_default_quota_mb SET DEFAULT 10240,
+    ALTER COLUMN updated_at SET DEFAULT now(),
+    ALTER COLUMN drive_system_max_quota_mb SET DEFAULT 102400;
+"#,
+            )
+            .await
+            .expect("prepare system_settings defaults");
+
             // search_vector は GENERATED ALWAYS AS の tsvector カラムで entity 定義に無いため
             // sync() が作らない。手動で追加する。
             db.execute_unprepared(
@@ -506,6 +522,10 @@ impl TestApp {
         let password_reset_email_storage = setup_password_reset_email_storage(&pg_pool, &settings)
             .await
             .expect("password reset email storage");
+        let already_registered_email_storage =
+            setup_already_registered_email_storage(&pg_pool, &settings)
+                .await
+                .expect("already registered email storage");
         let storage = setup_storage().await.expect("storage backend");
         let http_client = create_http_client().expect("http client");
         let webauthn = build_webauthn(&settings).expect("webauthn");
@@ -549,6 +569,7 @@ impl TestApp {
             verification_email_storage,
             github_webhook_storage,
             password_reset_email_storage,
+            already_registered_email_storage,
             storage,
             drive_config: DriveConfig::from_env(),
             oauth_settings,

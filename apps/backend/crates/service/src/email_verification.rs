@@ -72,11 +72,14 @@ static CONSUME_TOKEN_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
 pub const TOKEN_TTL_SECS: u64 = 15 * 60;
 /// 認証メール再送のクールダウン（秒）。
 pub const RESEND_COOLDOWN_SECS: u64 = 60;
+/// 登録リクエストの同一メールアドレスに対するクールダウン（秒）。
+pub const REGISTER_COOLDOWN_SECS: u64 = 60;
 
 const KEY_TOKEN: &str = "email_verify:t:";
 const KEY_USER: &str = "email_verify:u:";
 const KEY_GEN: &str = "email_verify:gen:";
 const KEY_RESEND: &str = "email_verify:resend:e:";
+const KEY_REGISTER: &str = "email_verify:register:e:";
 
 /// 認証トークンを Redis に保存する（Lua で原子的に user/token/世代を更新）。
 ///
@@ -175,23 +178,55 @@ pub async fn try_acquire_resend_slot(
     redis: &RedisConnection,
     email: &str,
 ) -> Result<bool, anyhow::Error> {
+    try_acquire_cooldown_slot(redis, KEY_RESEND, email, RESEND_COOLDOWN_SECS).await
+}
+
+/// メールアドレス単位で登録リクエストのクールダウン枠を取得する（`SET NX`）。
+///
+/// #26: メールアドレス列挙対策により register は既存メールでも 201 を返しつつ
+/// 通知メールを送るため、既知アドレスへのメールフラッディングを防ぐレート制限。
+/// 存在オラクルにならないよう、呼び出し側は新規/既存の分岐より前で一律に適用すること。
+///
+/// # Arguments
+/// * `redis` - クールダウンキーを保持する Redis 接続
+/// * `email` - 対象メールアドレス（内部で [`super::email::normalize_email`] する）
+///
+/// # Returns
+/// * `Ok(true)` - 枠を取得できた（登録処理を続行してよい）
+/// * `Ok(false)` - [`REGISTER_COOLDOWN_SECS`] 以内に同一メールで登録済み（429 相当）
+///
+/// # Errors
+/// * Redis 接続・コマンド実行に失敗した場合
+pub async fn try_acquire_register_slot(
+    redis: &RedisConnection,
+    email: &str,
+) -> Result<bool, anyhow::Error> {
+    try_acquire_cooldown_slot(redis, KEY_REGISTER, email, REGISTER_COOLDOWN_SECS).await
+}
+
+async fn try_acquire_cooldown_slot(
+    redis: &RedisConnection,
+    key_prefix: &str,
+    email: &str,
+    ttl_secs: u64,
+) -> Result<bool, anyhow::Error> {
     let mut conn = redis
         .conn
         .acquire()
         .await
         .map_err(|e| anyhow::anyhow!("redis acquire failed: {e}"))?;
 
-    let key = format!("{KEY_RESEND}{}", normalize_email(email));
+    let key = format!("{key_prefix}{}", normalize_email(email));
 
     let set_ok: Option<String> = redis::cmd("SET")
         .arg(&key)
         .arg("1")
         .arg("NX")
         .arg("EX")
-        .arg(RESEND_COOLDOWN_SECS)
+        .arg(ttl_secs)
         .query_async(&mut conn)
         .await
-        .map_err(|e| anyhow::anyhow!("redis SET NX resend cooldown: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("redis SET NX cooldown: {e}"))?;
 
     Ok(set_ok.is_some())
 }

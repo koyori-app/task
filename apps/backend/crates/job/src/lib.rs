@@ -1,5 +1,6 @@
 //! Apalis バックグラウンドジョブ
 
+pub mod already_registered_email;
 pub mod github_webhook;
 pub mod password_reset_email;
 pub mod verification_email;
@@ -10,6 +11,7 @@ use apalis_postgres::PgPool;
 
 use common::settings::Settings;
 
+pub use already_registered_email::{AlreadyRegisteredEmailJob, AlreadyRegisteredEmailStorage};
 pub use github_webhook::{GithubWebhookJob, GithubWebhookStorage};
 pub use password_reset_email::{PasswordResetEmailJob, PasswordResetEmailStorage};
 pub use verification_email::{
@@ -49,4 +51,11 @@ pub async fn setup_password_reset_email_storage(
     settings: &Settings,
 ) -> Result<Arc<PasswordResetEmailStorage>, sqlx::Error> {
     password_reset_email::setup(pool, settings).await
+}
+
+pub async fn setup_already_registered_email_storage(
+    pool: &PgPool,
+    settings: &Settings,
+) -> Result<Arc<AlreadyRegisteredEmailStorage>, sqlx::Error> {
+    already_registered_email::setup(pool, settings).await
 }
