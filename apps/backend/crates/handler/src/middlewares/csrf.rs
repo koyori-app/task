@@ -6,16 +6,34 @@
 //! 状態変更メソッドで Origin ヘッダが付いている場合は許可フロントエンド origin か
 //! API 自身の origin（Host 一致。Scalar UI 等）以外を 403 で拒否する。
 //! Origin なし（CLI・サーバー間・webhook）は素通しする。
+//!
+//! PAT（`Authorization: Bearer <token>`）はブラウザが自動付与する資格情報ではなく、
+//! クロスサイトの攻撃者ページから偽装できない（`Authorization` ヘッダ付きのクロスオリジン
+//! リクエストは常に CORS プリフライトの対象になり、許可外オリジンなら実リクエスト自体が
+//! ブラウザにブロックされる）ため CSRF の対象外。Bearer ヘッダが付いているリクエストは
+//! Origin 検査そのものをスキップする。セッション Cookie 専用の extractor（`CurrentUser` 等）
+//! を使うエンドポイントに誤って Bearer ヘッダが付いていても、そちらは Bearer を無視して
+//! Cookie セッションを要求するため安全性は変わらない。
 
 use axum::{
     body::Body,
     extract::State,
-    http::{Method, Request, header},
+    http::{HeaderMap, Method, Request, header},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 
 use crate::{AppState, error::AppError};
+
+/// `Authorization: Bearer <token>` が付いているか（PAT 経路かどうかの判定）。
+fn has_bearer_token(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::trim)
+        .is_some_and(|token| !token.is_empty())
+}
 
 pub async fn csrf_origin_check(
     State(state): State<AppState>,
@@ -23,6 +41,9 @@ pub async fn csrf_origin_check(
     next: Next,
 ) -> Response {
     if matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS) {
+        return next.run(req).await;
+    }
+    if has_bearer_token(req.headers()) {
         return next.run(req).await;
     }
     let Some(origin) = req.headers().get(header::ORIGIN) else {
@@ -113,5 +134,37 @@ mod tests {
             ALLOW,
             Some("localhost:3400")
         ));
+    }
+
+    fn headers_with_authorization(value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, value.parse().unwrap());
+        headers
+    }
+
+    #[test]
+    fn detects_pat_bearer_token() {
+        // PAT 経路（Authorization: Bearer）は Origin 検査の対象外にする
+        assert!(has_bearer_token(&headers_with_authorization(
+            "Bearer pat_abc123"
+        )));
+    }
+
+    #[test]
+    fn ignores_empty_bearer_token() {
+        assert!(!has_bearer_token(&headers_with_authorization("Bearer ")));
+    }
+
+    #[test]
+    fn ignores_non_bearer_authorization() {
+        // Basic 認証等、Bearer 以外は PAT 経路とみなさない
+        assert!(!has_bearer_token(&headers_with_authorization(
+            "Basic dXNlcjpwYXNz"
+        )));
+    }
+
+    #[test]
+    fn ignores_missing_authorization_header() {
+        assert!(!has_bearer_token(&HeaderMap::new()));
     }
 }
