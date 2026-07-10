@@ -72,6 +72,8 @@ uuid = { version = "1", features = ["serde"] }
 webauthn-authenticator-rs = { version = "0.5.5", default-features = false, features = ["softtoken"] }
 webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation", "danger-credential-internals", "conditional-ui"] }
 wiremock = "0.6"
+testcontainers-modules = { version = "0.15.0", features = ["postgres", "blocking"] }
+libc = "0.2.186"
 
 [profile.dev]
 debug = 1

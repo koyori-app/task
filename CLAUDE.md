@@ -36,15 +36,13 @@ cargo clippy --workspace --all-targets
 cargo test --workspace --lib
 ```
 
-- 統合テスト（`tests/`）は実 Postgres / Redis 必須（`.github/workflows/backend-test.yml` が正）。ローカルに無ければ CI で確認し、PR 本文にその旨を書く
-  1. CI と同じサービスを起動（`--rm` 付き。停止すれば自動でコンテナも消える）:
-     ```bash
-     docker run -d --rm --name koyori-test-pg -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=test -p 5432:5432 postgres:17
-     docker run -d --rm --name koyori-test-redis -p 6379:6379 valkey/valkey:8.1
-     ```
-  2. `apps/backend/.env`（gitignore 済み）に backend-test.yml の `env:` ブロックと同じ値を置く（ハーネスの `load_dotenv()` が読む）。GitHub App 系は設定不要（`load_github_test_env()` が自前注入）。SMTP は実サーバー不要
-  3. CI に合わせてシングルスレッドで実行: `cargo test -- --test-threads=1`（CI は `cargo nextest run --test-threads=1`）
-  4. 終わったら必ずコンテナを停止・削除する（上げっぱなし禁止）: `docker stop koyori-test-pg koyori-test-redis`
+- 統合テスト（`tests/`）は実 Postgres / Redis を使う（`.github/workflows/backend-test.yml` が正）。ローカルは docker さえ動いていればこれだけで動く:
+  ```bash
+  cargo test -- --test-threads=1   # CI は cargo nextest run --test-threads=1
+  ```
+  - ハーネス（`tests/common/mod.rs` の `ensure_test_env()`）が testcontainers で CI と同一イメージ（`postgres:17` / `valkey/valkey:8.1`）をランダムポートで起動する。手動の `docker run`・`apps/backend/.env` は不要。コンテナは各テストバイナリの終了時にハーネス（atexit）が自動削除する
+  - `DATABASE_URL` / `REDIS_URL` が環境か `.env` に設定済みならそれを優先する（CI と同じ経路。CI はこの経路のためワークフロー変更不要）
+  - SMTP・シークレット系の env はハーネスが CI と同じテスト用の値で補完する。GitHub App 系も設定不要（`load_github_test_env()` が自前注入）。SMTP は実サーバー不要
 - API 表面を変えたら: `cd apps/frontend && pnpm openapi && node_modules/.bin/vp fmt`
   - 整形は **`vp fmt`**（prettier は入っていない）。`api.d.ts` は gitignore 済み
   - API を変えていない PR では `openapi.json` の差分ゼロが検証項目になる

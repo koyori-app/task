@@ -47,6 +47,14 @@ use sea_orm::{
     EntityTrait, QueryFilter,
 };
 use serde::{Deserialize, Serialize};
+use testcontainers_modules::{
+    postgres::Postgres,
+    testcontainers::{
+        Container, GenericImage, ImageExt,
+        core::{IntoContainerPort, WaitFor},
+        runners::SyncRunner,
+    },
+};
 use tokio::{net::TcpListener, sync::OnceCell};
 use tower::ServiceExt;
 use url::Url;
@@ -86,9 +94,113 @@ fn load_dotenv() {
     let _ = dotenvy::from_path("/home/coder/task/apps/backend/.env").ok();
 }
 
+static TEST_ENV_READY: OnceLock<()> = OnceLock::new();
+
+/// 統合テストに必要な環境変数を整える（テストバイナリごとに1回だけ実行）。
+///
+/// - `.env` / プロセス環境に `DATABASE_URL` / `REDIS_URL` があればそのまま使う（CI 経路）
+/// - 無ければ testcontainers で CI と同一イメージ（`postgres:17` / `valkey/valkey:8.1`）を
+///   ランダムポートで起動し、接続文字列を注入する
+/// - SMTP 等の残りの必須 env は `backend-test.yml` の `env:` と同じテスト用の値で補完する
+fn ensure_test_env() {
+    TEST_ENV_READY.get_or_init(|| {
+        load_dotenv();
+
+        let need_pg = std::env::var("DATABASE_URL").is_err();
+        let need_redis = std::env::var("REDIS_URL").is_err();
+        if need_pg || need_redis {
+            // SyncRunner は内部で tokio ランタイムを使うため、テストのランタイム上から
+            // 直接呼ぶとパニックする。専用スレッドで起動して結果だけ受け取る。
+            let (pg_url, redis_url) =
+                std::thread::spawn(move || start_test_containers(need_pg, need_redis))
+                    .join()
+                    .expect("start test containers");
+            // SAFETY: test process is single-threaded before Tokio workers spawn.
+            unsafe {
+                if let Some(url) = pg_url {
+                    std::env::set_var("DATABASE_URL", url);
+                }
+                if let Some(url) = redis_url {
+                    std::env::set_var("REDIS_URL", url);
+                }
+            }
+        }
+
+        // `.env` なしでも動くよう、CI (`backend-test.yml`) と同じテスト用デフォルトを補完する。
+        set_default_env("SMTP_HOST", "localhost");
+        set_default_env("SMTP_PORT", "587");
+        set_default_env("SMTP_USERNAME", "test");
+        set_default_env("SMTP_PASSWORD", "test");
+        set_default_env("SMTP_FROM", "test@example.com");
+        set_default_env("EMAIL_VERIFICATION_APP_URL", "http://localhost:3000");
+        set_default_env("PERSONAL_TOKEN_SECRET", "00000000000000000000000000000000");
+        set_default_env("RECOVERY_CODE_SECRET", "00000000000000000000000000000000");
+        set_default_env("TOTP_ENCRYPTION_KEY", "01234567890123456789012345678901");
+        set_default_env("ARGON2_TEST_MODE", "true");
+    });
+}
+
+fn set_default_env(key: &str, value: &str) {
+    if std::env::var(key).is_err() {
+        // SAFETY: test process is single-threaded before Tokio workers spawn.
+        unsafe { std::env::set_var(key, value) };
+    }
+}
+
+/// テストバイナリのプロセス生存期間中コンテナを保持する static。
+/// testcontainers-rs 0.27 に ryuk（外部リーパー）は無く、削除は `Container` の
+/// Drop が担うため、`drop_test_containers`（atexit）で明示的に drop する。
+static PG_CONTAINER: Mutex<Option<Container<Postgres>>> = Mutex::new(None);
+static VALKEY_CONTAINER: Mutex<Option<Container<GenericImage>>> = Mutex::new(None);
+
+/// テストプロセス終了時（テストハーネスの `process::exit` 時）にコンテナを削除する。
+extern "C" fn drop_test_containers() {
+    if let Ok(mut guard) = PG_CONTAINER.lock() {
+        guard.take();
+    }
+    if let Ok(mut guard) = VALKEY_CONTAINER.lock() {
+        guard.take();
+    }
+}
+
+/// CI (`backend-test.yml`) と同一イメージのコンテナをランダムポートで起動する。
+///
+/// 戻り値は (`DATABASE_URL`, `REDIS_URL`)。コンテナはプロセス終了まで保持し、
+/// atexit ハンドラが自動削除する（SIGKILL 等の異常終了時のみ手動削除が必要）。
+fn start_test_containers(need_pg: bool, need_redis: bool) -> (Option<String>, Option<String>) {
+    // SAFETY: 登録するのはキャプチャ無しの extern "C" 関数で、libc の規約どおり。
+    unsafe {
+        libc::atexit(drop_test_containers);
+    }
+    let pg_url = need_pg.then(|| {
+        let container = Postgres::default()
+            .with_tag("17")
+            .start()
+            .expect("start postgres testcontainer");
+        let port = container
+            .get_host_port_ipv4(5432)
+            .expect("postgres host port");
+        *PG_CONTAINER.lock().expect("pg container slot") = Some(container);
+        format!("postgresql://postgres:postgres@127.0.0.1:{port}/postgres")
+    });
+    let redis_url = need_redis.then(|| {
+        let container = GenericImage::new("valkey/valkey", "8.1")
+            .with_exposed_port(6379.tcp())
+            .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"))
+            .start()
+            .expect("start valkey testcontainer");
+        let port = container
+            .get_host_port_ipv4(6379)
+            .expect("valkey host port");
+        *VALKEY_CONTAINER.lock().expect("valkey container slot") = Some(container);
+        format!("redis://127.0.0.1:{port}")
+    });
+    (pg_url, redis_url)
+}
+
 /// GitHub App HTTP 統合テスト用: 必須の GitHub 環境変数を設定する。
 pub fn load_github_test_env() {
-    load_dotenv();
+    ensure_test_env();
     // SAFETY: test process is single-threaded before Tokio workers spawn.
     unsafe {
         std::env::set_var("GITHUB_APP_ID", "1");
@@ -348,7 +460,7 @@ pub struct Enabled2fa {
 impl TestApp {
     pub async fn new() -> Self {
         init_tracing();
-        load_dotenv();
+        ensure_test_env();
         let mut settings = settings::load_settings().expect("load settings from .env");
         settings.email_verification_app_url = "http://localhost:3000".to_string();
         Self::build(settings).await
