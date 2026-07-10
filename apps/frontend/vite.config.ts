@@ -20,7 +20,7 @@ import { buildEnv } from './buildSrc/env';
 const dirname =
   typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 
-dotenv.config({ path: path.resolve(dirname, '.env') });
+dotenv.config({ path: path.resolve(dirname, '.env'), quiet: true });
 
 const coderAllowedHost = buildEnv.CODER_AGENT_URL
   ? `.${new URL(buildEnv.CODER_AGENT_URL).hostname}`
