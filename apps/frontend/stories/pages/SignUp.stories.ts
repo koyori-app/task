@@ -11,25 +11,10 @@ const mockContext = {
   routeParams: {},
 };
 
-let locationAssignSpy: ReturnType<typeof fn>;
-let originalLocationAssign: Location['assign'];
-
 const getRequestInfo = (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
   const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
   return { url, method };
-};
-
-const stubLocationAssign = () => {
-  locationAssignSpy = fn();
-  originalLocationAssign = Location.prototype.assign;
-  Location.prototype.assign = function (url: string | URL) {
-    locationAssignSpy(url);
-  };
-};
-
-const restoreLocationAssign = () => {
-  Location.prototype.assign = originalLocationAssign;
 };
 
 async function fillSignUpForm(canvas: ReturnType<typeof within>) {
@@ -132,15 +117,20 @@ export const RegisterError: Story = {
 };
 
 export const RegisterSuccess: Story = {
-  name: '登録成功（200）',
+  // #135: 列挙対策により API は新規/既存を区別せず 201 を返すため、
+  // 成功表示は常に同一で、既存アカウント向けの導線（サインイン/再設定）を含む。
+  name: '登録成功（201・成功表示と導線）',
   beforeEach() {
-    stubLocationAssign();
     const original = globalThis.fetch;
     globalThis.fetch = fn().mockImplementation((input, init) => {
       const { url, method } = getRequestInfo(input, init);
       if (method === 'POST' && url.includes('/v1/auth/register')) {
-        locationAssignSpy('/signin');
-        return new Promise<Response>(() => {});
+        return Promise.resolve(
+          new Response(JSON.stringify('Register successful'), {
+            status: 201,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
       }
       return Promise.resolve(
         new Response(JSON.stringify({ message: 'not found' }), { status: 404 }),
@@ -148,13 +138,20 @@ export const RegisterSuccess: Story = {
     });
     return () => {
       globalThis.fetch = original;
-      restoreLocationAssign();
     };
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await fillSignUpForm(canvas);
     await userEvent.click(canvas.getByRole('button', { name: 'アカウント作成' }));
-    await expect(locationAssignSpy).toHaveBeenCalledWith('/signin');
+    await expect(
+      canvas.findByRole('heading', { name: 'メールを送信しました' }),
+    ).resolves.toBeInTheDocument();
+    // 既存メールかどうかを推測できる文言（「確認メール」等）を表示しない
+    expect(canvas.queryByText(/確認メール/)).not.toBeInTheDocument();
+    await expect(canvas.findByRole('link', { name: 'サインインへ' })).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByRole('link', { name: 'パスワードを再設定する' }),
+    ).resolves.toBeInTheDocument();
   },
 };
