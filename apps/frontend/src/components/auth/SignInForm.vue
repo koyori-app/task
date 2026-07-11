@@ -101,7 +101,15 @@ const form = useForm({
             <form.Field name="password" :validators="{ onBlur: type('string >= 8') }">
               <template #default="{ field }">
                 <Field>
-                  <FieldLabel :for="field.name">パスワード</FieldLabel>
+                  <div class="flex items-center justify-between">
+                    <FieldLabel :for="field.name">パスワード</FieldLabel>
+                    <a
+                      href="/auth/reset-password"
+                      class="text-muted-foreground text-xs underline underline-offset-4"
+                    >
+                      パスワードをお忘れですか?
+                    </a>
+                  </div>
                   <PasswordInput
                     :id="field.name"
                     :name="field.name"
