@@ -71,6 +71,40 @@ const sampleStatuses = [
   },
 ];
 
+/** Chromatic 日次差分揺れ防止の固定ユーザー */
+const mockUsers = {
+  alpha: {
+    id: '11111111-1111-4111-8111-111111111101',
+    username: '田中太郎',
+    avatar_url: null,
+  },
+  beta: {
+    id: '11111111-1111-4111-8111-111111111102',
+    username: '佐藤花子',
+    avatar_url: null,
+  },
+  gamma: {
+    id: '11111111-1111-4111-8111-111111111103',
+    username: '鈴木一郎',
+    avatar_url: null,
+  },
+  delta: {
+    id: '11111111-1111-4111-8111-111111111104',
+    username: '高橋美咲',
+    avatar_url: null,
+  },
+  epsilon: {
+    id: '11111111-1111-4111-8111-111111111105',
+    username: '伊藤健太',
+    avatar_url: null,
+  },
+} as const;
+
+const assignee = (user: (typeof mockUsers)[keyof typeof mockUsers]) => ({
+  role: 'assignee',
+  user,
+});
+
 const sampleTasks = {
   tasks: [
     {
@@ -86,7 +120,8 @@ const sampleTasks = {
       progress_pct: 0,
       created_at: '2026-06-01T00:00:00Z',
       updated_at: '2026-06-15T00:00:00Z',
-      created_by: 'user-1',
+      created_by: mockUsers.alpha,
+      assignees: [assignee(mockUsers.alpha), assignee(mockUsers.beta), assignee(mockUsers.gamma)],
     },
     {
       id: 'task-2',
@@ -101,7 +136,8 @@ const sampleTasks = {
       progress_pct: 0,
       created_at: '2026-06-01T00:00:00Z',
       updated_at: '2026-06-15T00:00:00Z',
-      created_by: 'user-1',
+      created_by: mockUsers.alpha,
+      assignees: [assignee(mockUsers.beta)],
     },
     {
       id: 'task-3',
@@ -116,7 +152,8 @@ const sampleTasks = {
       progress_pct: 100,
       created_at: '2026-06-01T00:00:00Z',
       updated_at: '2026-06-15T00:00:00Z',
-      created_by: 'user-1',
+      created_by: mockUsers.alpha,
+      assignees: [assignee(mockUsers.gamma)],
     },
     {
       id: 'task-4',
@@ -131,7 +168,8 @@ const sampleTasks = {
       progress_pct: 0,
       created_at: '2026-06-01T00:00:00Z',
       updated_at: '2026-06-15T00:00:00Z',
-      created_by: 'user-1',
+      created_by: mockUsers.alpha,
+      assignees: [],
     },
     {
       id: 'task-5',
@@ -146,7 +184,8 @@ const sampleTasks = {
       progress_pct: 0,
       created_at: '2026-06-01T00:00:00Z',
       updated_at: '2026-06-15T00:00:00Z',
-      created_by: 'user-1',
+      created_by: mockUsers.alpha,
+      assignees: [assignee(mockUsers.alpha)],
     },
     {
       id: 'task-6',
@@ -161,97 +200,18 @@ const sampleTasks = {
       progress_pct: 0,
       created_at: '2026-06-01T00:00:00Z',
       updated_at: '2026-06-15T00:00:00Z',
-      created_by: 'user-1',
+      created_by: mockUsers.alpha,
+      assignees: [
+        assignee(mockUsers.alpha),
+        assignee(mockUsers.beta),
+        assignee(mockUsers.gamma),
+        assignee(mockUsers.delta),
+        assignee(mockUsers.epsilon),
+      ],
     },
   ],
   total: 6,
 };
-
-const sampleAssignees = [
-  // task-1: 3 assignees（重ね表示＋オーバーフローなし）
-  {
-    id: 'assgn-1',
-    task_id: 'task-1',
-    user_id: 'user-alpha',
-    role: 'assignee',
-    assigned_at: '2026-06-01T00:00:00Z',
-  },
-  {
-    id: 'assgn-1b',
-    task_id: 'task-1',
-    user_id: 'user-beta',
-    role: 'assignee',
-    assigned_at: '2026-06-01T00:00:00Z',
-  },
-  {
-    id: 'assgn-1c',
-    task_id: 'task-1',
-    user_id: 'user-gamma',
-    role: 'assignee',
-    assigned_at: '2026-06-01T00:00:00Z',
-  },
-  // task-2: 1 assignee（単一表示）
-  {
-    id: 'assgn-2',
-    task_id: 'task-2',
-    user_id: 'user-beta',
-    role: 'assignee',
-    assigned_at: '2026-06-01T00:00:00Z',
-  },
-  // task-3: 1 assignee（単一表示）
-  {
-    id: 'assgn-3',
-    task_id: 'task-3',
-    user_id: 'user-gamma',
-    role: 'assignee',
-    assigned_at: '2026-06-01T00:00:00Z',
-  },
-  // task-4: 0 assignees（未割当）
-  // task-5: 1 assignee（単一表示、テキスト→他N名とならぬ確認）
-  {
-    id: 'assgn-4',
-    task_id: 'task-5',
-    user_id: 'user-alpha',
-    role: 'assignee',
-    assigned_at: '2026-06-01T00:00:00Z',
-  },
-  // task-6: 5 assignees（オーバーフロー表示＋M）
-  {
-    id: 'assgn-6a',
-    task_id: 'task-6',
-    user_id: 'user-alpha',
-    role: 'assignee',
-    assigned_at: '2026-06-01T00:00:00Z',
-  },
-  {
-    id: 'assgn-6b',
-    task_id: 'task-6',
-    user_id: 'user-beta',
-    role: 'assignee',
-    assigned_at: '2026-06-01T00:00:00Z',
-  },
-  {
-    id: 'assgn-6c',
-    task_id: 'task-6',
-    user_id: 'user-gamma',
-    role: 'assignee',
-    assigned_at: '2026-06-01T00:00:00Z',
-  },
-  {
-    id: 'assgn-6d',
-    task_id: 'task-6',
-    user_id: 'user-delta',
-    role: 'assignee',
-    assigned_at: '2026-06-01T00:00:00Z',
-  },
-  {
-    id: 'assgn-6e',
-    task_id: 'task-6',
-    user_id: 'user-epsilon',
-    role: 'assignee',
-    assigned_at: '2026-06-01T00:00:00Z',
-  },
-];
 
 /**
  * fetch モックで全 API エンドポイントを差し替える
@@ -270,11 +230,6 @@ function mockFetch() {
     }
     if (url.includes('/statuses')) {
       return jsonResponse(sampleStatuses);
-    }
-    if (url.includes('/tasks') && url.includes('/assignees')) {
-      const taskId = url.split('/tasks/')[1]?.split('/')[0];
-      const assignees = sampleAssignees.filter((a) => a.task_id === taskId);
-      return jsonResponse(assignees);
     }
     if (url.includes('/tasks')) {
       return jsonResponse(sampleTasks);
@@ -351,9 +306,6 @@ export const Empty: Story = {
       }
       if (url.includes('/statuses')) {
         return jsonResponse(sampleStatuses);
-      }
-      if (url.includes('/tasks') && url.includes('/assignees')) {
-        return jsonResponse([]);
       }
       if (url.includes('/tasks')) {
         return jsonResponse({ tasks: [], total: 0 });

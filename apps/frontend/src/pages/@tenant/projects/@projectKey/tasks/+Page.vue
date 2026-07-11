@@ -48,11 +48,10 @@ import type { components } from '@/generated/api';
 const LIST_PROJECTS_PATH = '/v1/tenants/{tenant_id}/projects' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
-const LIST_ASSIGNEES_PATH =
-  '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/assignees' as const;
 
 // ---- 型定義 ----
 type ApiPriority = components['schemas']['TaskPriority'];
+type UserSummary = components['schemas']['UserSummary'];
 
 interface TaskRow {
   id: string;
@@ -61,18 +60,8 @@ interface TaskRow {
   title: string;
   status: { id: string; name: string; color: string };
   priority: ApiPriority;
-  /** UUID 配列（バックエンド拡充時の差し替えポイント） */
-  assignee_user_ids: string[];
+  assignees: UserSummary[];
   due_date?: string;
-}
-
-/** list_assignees の response 型をインライン定義 */
-interface AssigneeModel {
-  id: string;
-  task_id: string;
-  user_id: string;
-  role: string;
-  assigned_at: string;
 }
 
 // ---- ページコンテキスト ----
@@ -156,54 +145,14 @@ const statusMap = computed(() => {
   return new Map(statuses.map((s) => [s.id, { name: s.name, color: s.color }]));
 });
 
-// ---- クエリ④: 担当者一覧（タスク確定後、全タスクを並列取得） ----
-const assigneesQuery = useQuery({
-  queryKey: computed(() => [
-    'assignees',
-    tenantId.value,
-    projectId.value,
-    ...(tasksQuery.data.value?.tasks ?? []).map((t) => t.id),
-  ]),
-  queryFn: async ({ signal }) => {
-    const tasks = tasksQuery.data.value?.tasks ?? [];
-    const results = await Promise.all(
-      tasks.map((t) =>
-        fetchClient
-          .GET(LIST_ASSIGNEES_PATH, {
-            params: {
-              path: { tenant_id: tenantId.value, project_id: projectId.value!, id: t.id },
-            },
-            signal,
-          })
-          .then((r) => ({ taskId: t.id, assignees: r.data as AssigneeModel[] | undefined })),
-      ),
-    );
-    const map = new Map<string, string[]>();
-    for (const r of results) {
-      if (r.assignees) {
-        map.set(
-          r.taskId,
-          r.assignees.map((a) => a.user_id),
-        );
-        // assignee 情報をログ出力（バックエンド拡充時の参照用）
-        console.log({ task_id: r.taskId, assignee_user_ids: r.assignees.map((a) => a.user_id) });
-      }
-    }
-    return map;
-  },
-  enabled: computed(() => (tasksQuery.data.value?.tasks?.length ?? 0) > 0),
-});
-
 // ---- テーブルデータ構築 ----
 const taskRows = computed<TaskRow[]>(() => {
   const tasks = tasksQuery.data.value?.tasks;
   const sMap = statusMap.value;
-  const aMap = assigneesQuery.data.value;
   if (!tasks) return [];
 
   return tasks.map((t) => {
     const status = sMap.get(t.status_id) ?? { name: t.status_id, color: '#94a3b8' };
-    const assigneeUserIds = aMap?.get(t.id);
     return {
       id: t.id,
       seq_id: t.seq_id,
@@ -211,7 +160,7 @@ const taskRows = computed<TaskRow[]>(() => {
       title: t.title,
       status: { id: t.status_id, ...status },
       priority: t.priority,
-      assignee_user_ids: assigneeUserIds ?? [],
+      assignees: t.assignees.map((a) => a.user),
       due_date: t.soft_deadline ?? undefined,
     };
   });
@@ -223,18 +172,11 @@ const taskRows = computed<TaskRow[]>(() => {
  *  インジケーターを追加すること。 */
 const isInitialLoading = computed(
   () =>
-    projectsQuery.isLoading.value ||
-    tasksQuery.isLoading.value ||
-    statusesQuery.isLoading.value ||
-    assigneesQuery.isLoading.value,
+    projectsQuery.isLoading.value || tasksQuery.isLoading.value || statusesQuery.isLoading.value,
 );
 
 const isError = computed(
-  () =>
-    projectsQuery.isError.value ||
-    tasksQuery.isError.value ||
-    statusesQuery.isError.value ||
-    assigneesQuery.isError.value,
+  () => projectsQuery.isError.value || tasksQuery.isError.value || statusesQuery.isError.value,
 );
 
 // ---- ヘルパー ----
@@ -380,15 +322,14 @@ const columns: ColumnDef<TaskRow>[] = [
   },
   {
     id: 'assignee',
-    accessorFn: (row) => row.assignee_user_ids[0] ?? '',
+    accessorFn: (row) => row.assignees[0]?.username ?? '',
     header: ({ column }) => sortableHeader(column, '担当者'),
     cell: ({ row }) => {
-      const userIds = row.original.assignee_user_ids;
-      if (userIds.length === 0) {
+      const users = row.original.assignees;
+      if (users.length === 0) {
         return h('span', { class: 'text-muted-foreground text-xs' }, '−');
       }
-      // TODO: ユーザー名解決 API ができたら user_id → {name, avatar} に差し替え
-      return h(AvatarGroup, { userIds, maxDisplay: 3 });
+      return h(AvatarGroup, { users, maxDisplay: 3 });
     },
   },
   {
