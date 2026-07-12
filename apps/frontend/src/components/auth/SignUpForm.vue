@@ -2,9 +2,9 @@
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { ref } from 'vue';
-import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
 import PasswordInput from '@/components/auth/PasswordInput.vue';
 import PasswordStrengthBar from '@/components/auth/PasswordStrengthBar.vue';
+import SignUpCompleted from '@/components/auth/SignUpCompleted.vue';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -50,7 +50,7 @@ const form = useForm({
 </script>
 
 <template>
-  <EmailNotVerified v-if="registeredEmail" :email="registeredEmail" back-href="/signin" />
+  <SignUpCompleted v-if="registeredEmail" :email="registeredEmail" />
   <div v-else class="flex flex-col gap-6">
     <Card class="overflow-hidden p-0">
       <CardContent class="grid p-0 md:grid-cols-2">
