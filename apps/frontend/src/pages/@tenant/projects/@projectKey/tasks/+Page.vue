@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { Loader2 } from '@lucide/vue';
+import { Loader2, Signal, SignalHigh, SignalLow, SignalMedium } from '@lucide/vue';
+import type { LucideIcon } from '@lucide/vue';
 import type {
   ColumnDef,
   ColumnFiltersState,
+  PaginationState,
   SortingState,
   VisibilityState,
 } from '@tanstack/vue-table';
@@ -10,14 +12,11 @@ import {
   FlexRender,
   getCoreRowModel,
   getFilteredRowModel,
-  getPaginationRowModel,
   getSortedRowModel,
   useVueTable,
 } from '@tanstack/vue-table';
-import type { LucideIcon } from '@lucide/vue';
-import { Signal, SignalHigh, SignalLow, SignalMedium } from '@lucide/vue';
 import { PhCaretDown, PhCaretUp, PhCaretUpDown } from '@phosphor-icons/vue';
-import { computed, h, ref } from 'vue';
+import { computed, h, ref, watch } from 'vue';
 import type { Column } from '@tanstack/vue-table';
 import { useQuery } from '@tanstack/vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
@@ -48,6 +47,7 @@ import type { components } from '@/generated/api';
 const LIST_PROJECTS_PATH = '/v1/tenants/{tenant_id}/projects' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
+const TASKS_PAGE_SIZE = 20;
 
 // ---- 型定義 ----
 type ApiPriority = components['schemas']['TaskPriority'];
@@ -94,6 +94,25 @@ const projectId = computed(() => {
   return projects.find((p) => p.key === projectKey.value)?.id ?? null;
 });
 
+const isProjectNotFound = computed(
+  () =>
+    !!projectKey.value &&
+    projectsQuery.isSuccess.value &&
+    !projectsQuery.isFetching.value &&
+    projectId.value === null,
+);
+
+// ---- サーバーサイドページネーション ----
+const pagination = ref<PaginationState>({
+  pageIndex: 0,
+  pageSize: TASKS_PAGE_SIZE,
+});
+
+// プロジェクト切替時は先頭ページへ戻す
+watch(projectKey, () => {
+  pagination.value = { ...pagination.value, pageIndex: 0 };
+});
+
 // ---- クエリ②: タスク一覧 ----
 const tasksQuery = useQuery({
   queryKey: computed(() => [
@@ -102,7 +121,10 @@ const tasksQuery = useQuery({
     {
       params: {
         path: { tenant_id: tenantId.value, project_id: projectId.value },
-        query: { limit: 20, offset: 0 },
+        query: {
+          limit: pagination.value.pageSize,
+          offset: pagination.value.pageIndex * pagination.value.pageSize,
+        },
       },
     },
   ]),
@@ -111,7 +133,10 @@ const tasksQuery = useQuery({
       // query パラメータは openapi-typescript 7.13.0 が正しく operation レベルに生成する
       params: {
         path: { tenant_id: tenantId.value, project_id: projectId.value! },
-        query: { limit: 20, offset: 0 },
+        query: {
+          limit: pagination.value.pageSize,
+          offset: pagination.value.pageIndex * pagination.value.pageSize,
+        },
       },
       signal,
     });
@@ -121,12 +146,14 @@ const tasksQuery = useQuery({
   enabled: computed(() => !!tenantId.value && !!projectId.value),
 });
 
+const taskTotal = computed(() => tasksQuery.data.value?.total ?? 0);
+
 // ---- クエリ③: ステータス一覧 ----
 const statusesQuery = useQuery({
   queryKey: computed(() => [
     'get',
     LIST_STATUSES_PATH,
-    { params: { path: { tenant_id: tenantId.value, project_id: projectId.value! } } },
+    { params: { path: { tenant_id: tenantId.value, project_id: projectId.value } } },
   ]),
   queryFn: async ({ signal }) => {
     const { data, error } = await fetchClient.GET(LIST_STATUSES_PATH, {
@@ -180,7 +207,7 @@ const isError = computed(
 );
 
 // ---- ヘルパー ----
-const PRIORITY_ORDER: Record<string, number> = {
+const PRIORITY_ORDER: Record<ApiPriority, number> = {
   CriticalFire: 0,
   Critical: 1,
   High: 2,
@@ -305,8 +332,7 @@ const columns: ColumnDef<TaskRow>[] = [
   {
     id: 'priority',
     accessorFn: (row) => row.priority,
-    sortingFn: (a, b) =>
-      (PRIORITY_ORDER[a.original.priority] ?? 99) - (PRIORITY_ORDER[b.original.priority] ?? 99),
+    sortingFn: (a, b) => PRIORITY_ORDER[a.original.priority] - PRIORITY_ORDER[b.original.priority],
     header: ({ column }) => sortableHeader(column, '優先度'),
     cell: ({ row }) => {
       const pc = PRIORITY_CONFIG[row.original.priority];
@@ -365,13 +391,17 @@ const table = useVueTable({
   },
   columns,
   getCoreRowModel: getCoreRowModel(),
-  getPaginationRowModel: getPaginationRowModel(),
   getSortedRowModel: getSortedRowModel(),
   getFilteredRowModel: getFilteredRowModel(),
+  manualPagination: true,
+  get rowCount() {
+    return taskTotal.value;
+  },
   onSortingChange: (u) => valueUpdater(u, sorting),
   onColumnFiltersChange: (u) => valueUpdater(u, columnFilters),
   onColumnVisibilityChange: (u) => valueUpdater(u, columnVisibility),
   onRowSelectionChange: (u) => valueUpdater(u, rowSelection),
+  onPaginationChange: (u) => valueUpdater(u, pagination),
   state: {
     get sorting() {
       return sorting.value;
@@ -384,6 +414,9 @@ const table = useVueTable({
     },
     get rowSelection() {
       return rowSelection.value;
+    },
+    get pagination() {
+      return pagination.value;
     },
   },
 });
@@ -398,6 +431,13 @@ const table = useVueTable({
 
     <div v-else-if="isError" class="flex justify-center py-8 text-sm text-destructive">
       タスクの読み込みに失敗しました
+    </div>
+
+    <div
+      v-else-if="isProjectNotFound"
+      class="flex justify-center py-8 text-sm text-muted-foreground"
+    >
+      プロジェクトが見つかりません
     </div>
 
     <template v-else>
@@ -468,29 +508,36 @@ const table = useVueTable({
         </Table>
       </div>
 
-      <!-- ページネーション -->
+      <!-- ページネーション（API total 連動のサーバーサイド） -->
       <div class="flex items-center justify-between text-xs text-muted-foreground">
         <span>
-          {{ table.getFilteredSelectedRowModel().rows.length }} /
-          {{ table.getFilteredRowModel().rows.length }} 件選択
+          {{ table.getFilteredSelectedRowModel().rows.length }} / {{ taskTotal }} 件選択
         </span>
-        <div class="flex gap-1.5">
-          <Button
-            variant="outline"
-            size="sm"
-            class="h-7 text-xs"
-            :disabled="!table.getCanPreviousPage()"
-            @click="table.previousPage()"
-            >前へ</Button
-          >
-          <Button
-            variant="outline"
-            size="sm"
-            class="h-7 text-xs"
-            :disabled="!table.getCanNextPage()"
-            @click="table.nextPage()"
-            >次へ</Button
-          >
+        <div class="flex items-center gap-2">
+          <span>
+            {{ taskTotal === 0 ? 0 : pagination.pageIndex * pagination.pageSize + 1 }}–{{
+              Math.min((pagination.pageIndex + 1) * pagination.pageSize, taskTotal)
+            }}
+            / {{ taskTotal }} 件
+          </span>
+          <div class="flex gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              class="h-7 text-xs"
+              :disabled="!table.getCanPreviousPage()"
+              @click="table.previousPage()"
+              >前へ</Button
+            >
+            <Button
+              variant="outline"
+              size="sm"
+              class="h-7 text-xs"
+              :disabled="!table.getCanNextPage()"
+              @click="table.nextPage()"
+              >次へ</Button
+            >
+          </div>
         </div>
       </div>
     </template>

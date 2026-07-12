@@ -216,9 +216,23 @@ const sampleTasks = {
 /**
  * fetch モックで全 API エンドポイントを差し替える
  */
-function mockFetch() {
+function createMockFetch(
+  overrides: {
+    projects?: typeof sampleProjects;
+    statuses?: typeof sampleStatuses;
+    tasks?: { tasks: unknown[]; total: number };
+    rejectAll?: boolean;
+    hang?: boolean;
+  } = {},
+) {
   const original = globalThis.fetch;
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
+    if (overrides.rejectAll) {
+      throw new TypeError('Failed to fetch');
+    }
+    if (overrides.hang) {
+      return new Promise(() => {});
+    }
     const url = typeof req === 'string' ? req : req.url;
     if (
       url.includes('/v1/tenants/') &&
@@ -226,19 +240,23 @@ function mockFetch() {
       !url.includes('/tasks') &&
       !url.includes('/statuses')
     ) {
-      return jsonResponse(sampleProjects);
+      return jsonResponse(overrides.projects ?? sampleProjects);
     }
     if (url.includes('/statuses')) {
-      return jsonResponse(sampleStatuses);
+      return jsonResponse(overrides.statuses ?? sampleStatuses);
     }
     if (url.includes('/tasks')) {
-      return jsonResponse(sampleTasks);
+      return jsonResponse(overrides.tasks ?? sampleTasks);
     }
     return jsonResponse({});
   });
   return () => {
     globalThis.fetch = original;
   };
+}
+
+function mockFetch() {
+  return createMockFetch();
 }
 
 const meta = {
@@ -285,52 +303,50 @@ export const Default: Story = {
     await expect(canvas.findByText('ENG-1')).resolves.toBeInTheDocument();
     // 新規タスク
     await expect(canvas.findByText('チーム全体ミーティング調整')).resolves.toBeInTheDocument();
-    // 複数担当者オーバーフロー表示（task-6 は5名, maxDisplay=3 → 他2名）
+    // 複数担当者オーバーフロー表示（task-6 は5名, maxDisplay=3 → overflowCount=2 → 他2名）
     await expect(canvas.findByText(/他2名/)).resolves.toBeInTheDocument();
   },
 };
 
 export const Empty: Story = {
   name: 'タスクなし',
-  beforeEach() {
-    const original = globalThis.fetch;
-    globalThis.fetch = fn().mockImplementation(async (req: Request) => {
-      const url = typeof req === 'string' ? req : req.url;
-      if (
-        url.includes('/v1/tenants/') &&
-        url.includes('/projects') &&
-        !url.includes('/tasks') &&
-        !url.includes('/statuses')
-      ) {
-        return jsonResponse(sampleProjects);
-      }
-      if (url.includes('/statuses')) {
-        return jsonResponse(sampleStatuses);
-      }
-      if (url.includes('/tasks')) {
-        return jsonResponse({ tasks: [], total: 0 });
-      }
-      return jsonResponse({});
-    });
-    return () => {
-      globalThis.fetch = original;
-    };
-  },
+  beforeEach: () => createMockFetch({ tasks: { tasks: [], total: 0 } }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByText('タスクが見つかりません')).resolves.toBeInTheDocument();
   },
 };
 
+export const ProjectNotFound: Story = {
+  name: 'プロジェクトなし',
+  decorators: [
+    () => ({
+      setup() {
+        const queryClient = new QueryClient({
+          defaultOptions: {
+            queries: { retry: false, gcTime: 0, staleTime: 0 },
+            mutations: { retry: false },
+          },
+        });
+        provide(VUE_QUERY_CLIENT, queryClient);
+        provide(PAGE_CONTEXT_KEY, {
+          urlPathname: '/tenant-123/projects/UNKNOWN/tasks',
+          routeParams: { tenant: 'tenant-123', projectKey: 'UNKNOWN' },
+        });
+      },
+      template: '<story />',
+    }),
+  ],
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('プロジェクトが見つかりません')).resolves.toBeInTheDocument();
+  },
+};
+
 export const ApiError: Story = {
   name: 'API エラー',
-  beforeEach() {
-    const original = globalThis.fetch;
-    globalThis.fetch = fn().mockRejectedValue(new TypeError('Failed to fetch'));
-    return () => {
-      globalThis.fetch = original;
-    };
-  },
+  beforeEach: () => createMockFetch({ rejectAll: true }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByText('タスクの読み込みに失敗しました')).resolves.toBeInTheDocument();
@@ -339,13 +355,7 @@ export const ApiError: Story = {
 
 export const Loading: Story = {
   name: 'ロード中',
-  beforeEach() {
-    const original = globalThis.fetch;
-    globalThis.fetch = fn().mockImplementation(() => new Promise(() => {}));
-    return () => {
-      globalThis.fetch = original;
-    };
-  },
+  beforeEach: () => createMockFetch({ hang: true }),
 };
 
 export const Sorting: Story = {

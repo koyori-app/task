@@ -18,7 +18,8 @@ const props = withDefaults(
 );
 
 const visibleUsers = computed(() => props.users.slice(0, props.maxDisplay));
-const remaining = computed(() => Math.max(0, props.users.length - props.maxDisplay));
+/** maxDisplay を超えて非表示のアバター数。+N チップと「他N名」テキストの両方で同一の値を使う。 */
+const overflowCount = computed(() => Math.max(0, props.users.length - props.maxDisplay));
 const firstUser = computed(() => props.users[0]);
 
 function initials(username: string) {
@@ -44,19 +45,19 @@ function initials(username: string) {
       </div>
       <!-- +N オーバーフローチップ（comp-409 準拠） -->
       <div
-        v-if="remaining > 0"
+        v-if="overflowCount > 0"
         class="size-7 rounded-full bg-muted text-muted-foreground text-[10px] font-medium flex items-center justify-center ring-2 ring-background"
       >
-        +{{ remaining }}
+        +{{ overflowCount }}
       </div>
     </div>
-    <!-- 先頭名 + 他N名 テキスト（殿指示により維持） -->
+    <!-- 先頭名 + 他N名 テキスト（殿指示により維持。N は overflowCount と同義） -->
     <span class="text-xs truncate max-w-28 text-muted-foreground">
       <template v-if="users.length === 1">{{ firstUser?.username }}</template>
-      <template v-else-if="users.length > 1 && remaining > 0"
-        >{{ firstUser?.username }} 他{{ remaining }}名</template
+      <template v-else-if="overflowCount > 0"
+        >{{ firstUser?.username }} 他{{ overflowCount }}名</template
       >
-      <template v-else-if="users.length > 1">{{ firstUser?.username }}</template>
+      <template v-else>{{ firstUser?.username }}</template>
     </span>
   </div>
 </template>
