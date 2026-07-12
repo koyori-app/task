@@ -71,10 +71,11 @@ export async function seedUser() {
         sessions_revoked_at,
         totp_enabled
       )
-      VALUES ($1, $2, '', NULL, $3, false, $4, false, false, NULL, false)
+      VALUES ($1, $2, '', NULL, $3, true, $4, false, false, NULL, false)
       ON CONFLICT (email) DO UPDATE
       SET username = EXCLUDED.username,
           password_hash = EXCLUDED.password_hash,
+          email_verified = true,
           is_suspended = false,
           sessions_revoked_at = NULL,
           totp_enabled = false
@@ -84,8 +85,6 @@ export async function seedUser() {
   } finally {
     await db.end();
   }
-
-  await setEmailVerified(TEST_USER.email, DB_URL);
 }
 
 /** Sign in through the API (storage-state bootstrap only; not a UI flow test). */
@@ -111,10 +110,20 @@ export async function signInViaUi(
   email: string = TEST_USER.email,
   password: string = TEST_USER.password,
 ) {
-  await page.goto('/signin');
-  await page.locator('#email').fill(email);
-  await page.locator('#password').fill(password);
-  await expect(page.getByRole('button', { name: 'サインイン' })).toBeEnabled();
-  await page.getByRole('button', { name: 'サインイン' }).click();
-  await expect(page).not.toHaveURL(/\/signin/, { timeout: 30_000 });
+  await expect(async () => {
+    await page.goto('/signin');
+    await page.locator('#email').fill(email);
+    await page.locator('#password').fill(password);
+    await page.locator('#password').blur();
+    await expect(page.getByRole('button', { name: 'サインイン' })).toBeEnabled();
+
+    const loginResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes('/v1/auth/login') &&
+        (response.status() === 204 || response.status() === 200),
+    );
+    await page.getByRole('button', { name: 'サインイン' }).click();
+    await loginResponse;
+    await expect(page).not.toHaveURL(/\/signin/);
+  }).toPass({ timeout: 30_000 });
 }

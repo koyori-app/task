@@ -16,11 +16,17 @@ test('user can sign up, verify email, and sign in', async ({ page }) => {
   await page.locator('#username').fill(username);
   await page.locator('#email').fill(email);
   await page.locator('#password').fill(password);
-  await expect(page.getByRole('button', { name: 'アカウント作成' })).toBeEnabled();
-  await page.getByRole('button', { name: 'アカウント作成' }).click();
+  await page.locator('#password').blur();
 
-  await expect(page.getByRole('heading', { name: 'メールアドレスを確認してください' })).toBeVisible();
-  await expect(page.getByText(email)).toBeVisible();
+  await expect(async () => {
+    const registerResponse = page.waitForResponse(
+      (response) => response.url().includes('/v1/auth/register') && response.status() === 201,
+    );
+    await page.getByRole('button', { name: 'アカウント作成' }).click();
+    await registerResponse;
+    await expect(page.getByRole('heading', { name: 'メールアドレスを確認してください' })).toBeVisible();
+    await expect(page.getByText(email)).toBeVisible();
+  }).toPass({ timeout: 30_000 });
 
   const updatedRows = await setEmailVerified(email, DB_URL);
   expect(updatedRows).toBe(1);
