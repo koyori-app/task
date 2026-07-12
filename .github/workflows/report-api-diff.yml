@@ -66,14 +66,14 @@ jobs:
           } > /tmp/comment.md
 
       - name: Comment on pull request
-        uses: thollander/actions-comment-pull-request@4d69df5a1f85a96b2e085d6a43c98577a75eb5e6 # v3.0.1
+        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3.0.1
         with:
           comment-tag: openapi_diff
           file-path: /tmp/comment.md
 
       - name: Comment failure on pull request
         if: failure()
-        uses: thollander/actions-comment-pull-request@4d69df5a1f85a96b2e085d6a43c98577a75eb5e6 # v3.0.1
+        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3.0.1
         with:
           comment-tag: openapi_diff_error
           message: |
