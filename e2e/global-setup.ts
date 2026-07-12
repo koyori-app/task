@@ -88,8 +88,8 @@ export async function seedUser() {
   await setEmailVerified(TEST_USER.email, DB_URL);
 }
 
-/** Sign in through the API and verify the frontend accepts the session. */
-export async function signIn(page: Page) {
+/** Sign in through the API (storage-state bootstrap only; not a UI flow test). */
+export async function signInViaApi(page: Page) {
   await expect(async () => {
     const response = await page.request.post(`${API_URL}/v1/auth/login`, {
       data: {
@@ -103,4 +103,18 @@ export async function signIn(page: Page) {
     await page.goto('/');
     await expect(page).not.toHaveURL(/\/signin/);
   }).toPass({ timeout: 30_000 });
+}
+
+/** Sign in through the sign-in form UI. */
+export async function signInViaUi(
+  page: Page,
+  email: string = TEST_USER.email,
+  password: string = TEST_USER.password,
+) {
+  await page.goto('/signin');
+  await page.locator('#email').fill(email);
+  await page.locator('#password').fill(password);
+  await expect(page.getByRole('button', { name: 'サインイン' })).toBeEnabled();
+  await page.getByRole('button', { name: 'サインイン' }).click();
+  await expect(page).not.toHaveURL(/\/signin/, { timeout: 30_000 });
 }

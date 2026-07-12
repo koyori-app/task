@@ -1,5 +1,5 @@
 import { test as setup, expect } from '@playwright/test';
-import { seedUser, signIn, STORAGE_STATE } from '../global-setup';
+import { seedUser, signInViaUi, STORAGE_STATE } from '../global-setup';
 
 setup.setTimeout(60_000);
 
@@ -8,7 +8,7 @@ setup.setTimeout(60_000);
 // producer for the "authenticated" project (see playwright.config.ts).
 setup('sign in with email and password', async ({ page }) => {
   await seedUser();
-  await signIn(page);
+  await signInViaUi(page);
 
   await expect(page).not.toHaveURL(/\/signin/);
 
