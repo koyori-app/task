@@ -4,6 +4,7 @@ import { STORAGE_STATE } from './global-setup';
 const isCI = !!process.env.CI;
 
 export default defineConfig({
+  globalSetup: './global-migrate.ts',
   testDir: './tests',
   use: {
     baseURL: process.env.BASE_URL ?? 'http://localhost:3000',

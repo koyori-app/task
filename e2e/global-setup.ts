@@ -1,8 +1,7 @@
 // Shared e2e auth fixtures and helpers.
 //
-// Consumed by tests/auth.setup.ts rather than wired as legacy `globalSetup`:
-// Playwright webServer entries are guaranteed to be running before project
-// tests, so UI login always has dev/api servers available.
+// DB schema is applied by global-migrate.ts (migration crate) before webServers start.
+// This module only seeds rows and exposes UI/API helpers for tests.
 import { expect, type Page } from '@playwright/test';
 import { Client } from 'pg';
 import path from 'node:path';
@@ -45,23 +44,17 @@ export async function typeIntoFormField(page: Page, selector: string, value: str
   await field.press('Tab');
 }
 
+/** Ensure signup is allowed. Migration seeds system_settings with defaults; only flip the flag. */
 export async function ensureRegistrationEnabled(dbUrl = DB_URL) {
   const db = new Client({ connectionString: dbUrl });
   await db.connect();
 
   try {
     await db.query(`
-      INSERT INTO system_settings (
-        singleton,
-        user_registration_enabled,
-        drive_default_quota_mb,
-        drive_system_max_quota_mb,
-        updated_at
-      )
-      VALUES (true, true, 10240, 102400, now())
-      ON CONFLICT (singleton) DO UPDATE
+      UPDATE system_settings
       SET user_registration_enabled = true,
           updated_at = now()
+      WHERE singleton = true
     `);
   } finally {
     await db.end();

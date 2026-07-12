@@ -126,9 +126,8 @@ pub async fn register(
 
     let password_hash = create_password_hash(&password)?;
 
-    let user_id = Uuid::new_v4();
     let user = users::ActiveModel {
-        id: Set(user_id),
+        id: Set(Uuid::new_v4()),
         username: Set(username),
         bio: Set(Some(String::new())),
         avatar_url: Set(None),
@@ -141,17 +140,20 @@ pub async fn register(
         totp_enabled: Set(false),
     };
 
-    let insert_result = with_transaction::<(), AuthError, _>(&state.db, |txn| {
+    let insert_result = with_transaction::<Uuid, AuthError, _>(&state.db, |txn| {
         Box::pin(async move {
-            users::Entity::insert(user).exec(txn).await.map_err(|e| {
-                if is_postgres_unique_violation(&e) {
-                    AuthError::DuplicateEmail
-                } else {
-                    AuthError::Internal(anyhow::anyhow!("insert user: {e}"))
-                }
-            })?;
+            let res = users::Entity::insert(user.clone())
+                .exec(txn)
+                .await
+                .map_err(|e| {
+                    if is_postgres_unique_violation(&e) {
+                        AuthError::DuplicateEmail
+                    } else {
+                        AuthError::Internal(anyhow::anyhow!("insert user: {e}"))
+                    }
+                })?;
 
-            Ok(())
+            Ok(res.last_insert_id)
         })
     })
     .await;
@@ -160,7 +162,7 @@ pub async fn register(
     // 既存メール宛には確認メールの代わりに「登録済みです」通知メールを送る。
     // 送信キュー投入失敗時も分岐によらず同じ AuthError（同一レスポンス）にする。
     match insert_result {
-        Ok(()) => {
+        Ok(user_id) => {
             verification_email::enqueue(
                 state.verification_email_storage.as_ref(),
                 VerificationEmailJob::new(user_id, email.clone()),
