@@ -38,12 +38,14 @@ async function proxyToBackend(request: Request): Promise<Response> {
   const backendUrl = buildBackendUrl(request);
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
 
+  // Bun fetch + streaming request.body can throw "ReadableStream has already been used"
+  // when the runtime has touched the body before this handler (artifact run 29199214942).
+  const body = hasBody ? await request.arrayBuffer() : undefined;
+
   const backendResponse = await fetch(backendUrl, {
     method: request.method,
     headers: copyHeaders(request.headers),
-    body: hasBody ? request.body : undefined,
-    // @ts-expect-error Node fetch requires duplex when streaming a request body
-    duplex: hasBody ? 'half' : undefined,
+    body: body && body.byteLength > 0 ? body : undefined,
   });
 
   return new Response(backendResponse.body, {
