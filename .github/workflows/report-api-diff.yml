@@ -1,0 +1,81 @@
+# Posts PR comments showing openapi.json changes.
+# Design reference (simplified for git-tracked openapi.json):
+# https://github.com/misskey-dev/misskey/blob/develop/.github/workflows/report-api-diff.yml
+name: Report OpenAPI Diff
+
+on:
+  pull_request:
+    paths:
+      - 'apps/backend/**'
+      - 'apps/frontend/openapi.json'
+      - '.github/workflows/report-api-diff.yml'
+
+concurrency:
+  group: report-openapi-diff-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  report-diff:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch base branch
+        run: git fetch origin "${{ github.base_ref }}"
+
+      - name: Build diff comment
+        id: build-comment
+        run: |
+          set -euo pipefail
+          BASE_REF="origin/${{ github.base_ref }}"
+          DIFF_FILE=/tmp/openapi.json.diff
+
+          git diff -u --label=base --label=head \
+            "${BASE_REF}"...HEAD -- apps/frontend/openapi.json > "${DIFF_FILE}" || true
+
+          {
+            echo '## OpenAPI diff (apps/frontend/openapi.json)'
+            echo ''
+            if [ ! -s "${DIFF_FILE}" ] || [ "$(wc -c < "${DIFF_FILE}" | tr -d ' ')" -le 1 ]; then
+              echo '差分はありません。'
+            else
+              DIFF_BYTES="$(wc -c < "${DIFF_FILE}" | tr -d ' ')"
+              if [ "${DIFF_BYTES}" -gt 60000 ]; then
+                echo '<details>'
+                echo '<summary>openapi.json の差分（長いため折りたたみ）</summary>'
+                echo ''
+                echo '```diff'
+                cat "${DIFF_FILE}"
+                echo '```'
+                echo '</details>'
+              else
+                echo '```diff'
+                cat "${DIFF_FILE}"
+                echo '```'
+              fi
+            fi
+          } > /tmp/comment.md
+
+      - name: Comment on pull request
+        uses: thollander/actions-comment-pull-request@4d69df5a1f85a96b2e085d6a43c98577a75eb5e6 # v3.0.1
+        with:
+          comment-tag: openapi_diff
+          file-path: /tmp/comment.md
+
+      - name: Comment failure on pull request
+        if: failure()
+        uses: thollander/actions-comment-pull-request@4d69df5a1f85a96b2e085d6a43c98577a75eb5e6 # v3.0.1
+        with:
+          comment-tag: openapi_diff_error
+          message: |
+            openapi.json の差分コメント作成中にエラーが発生しました。
+            詳細は [Workflow のログ](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) を確認してください。
