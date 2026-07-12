@@ -15,19 +15,32 @@ test('user can sign up, verify email, and sign in', async ({ page }) => {
   await ensureRegistrationEnabled(DB_URL);
 
   await page.goto('/signup');
-  await page.locator('#username').fill(username);
-  await page.locator('#username').blur();
-  await page.locator('#email').fill(email);
-  await page.locator('#email').blur();
-  await page.locator('#password').fill(password);
-  await page.locator('#password').blur();
-  await expect(page.getByRole('button', { name: 'アカウント作成' })).toBeEnabled();
+  await expect(page.getByRole('heading', { name: 'アカウント作成' })).toBeVisible();
+
+  const usernameInput = page.getByLabelText('ユーザー名');
+  const emailInput = page.getByLabelText('メールアドレス');
+  const passwordInput = page.getByLabelText('パスワード');
+
+  await usernameInput.click();
+  await usernameInput.pressSequentially(username, { delay: 20 });
+  await emailInput.click();
+  await emailInput.pressSequentially(email, { delay: 20 });
+  await passwordInput.click();
+  await passwordInput.pressSequentially(password, { delay: 20 });
+  await passwordInput.blur();
+
+  await expect(usernameInput).toHaveValue(username);
+  await expect(emailInput).toHaveValue(email);
+  await expect(passwordInput).toHaveValue(password);
+
+  const submitButton = page.getByRole('button', { name: 'アカウント作成' });
+  await expect(submitButton).toBeEnabled();
 
   const registerResponse = page.waitForResponse(
     (response) => response.url().includes('/v1/auth/register') && response.status() === 201,
     { timeout: 30_000 },
   );
-  await page.getByRole('button', { name: 'アカウント作成' }).click();
+  await submitButton.click();
   await registerResponse;
 
   await expect(page.getByRole('heading', { name: 'メールアドレスを確認してください' })).toBeVisible();
