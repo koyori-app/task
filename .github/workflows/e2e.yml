@@ -114,7 +114,7 @@ jobs:
         working-directory: apps/frontend
 
       - name: Install e2e dependencies
-        run: pnpm install
+        run: pnpm install --ignore-workspace
         working-directory: e2e
 
       - name: Install Playwright browsers
