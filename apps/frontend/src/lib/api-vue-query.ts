@@ -50,6 +50,18 @@ export function useResendVerificationEmailMutation() {
   return apiClient.useMutation('post', '/v1/auth/resend-verification-email');
 }
 
+export function usePasswordResetRequestMutation() {
+  return apiClient.useMutation('post', '/v1/auth/password-reset/request');
+}
+
+export function usePasswordResetVerifyMutation() {
+  return apiClient.useMutation('post', '/v1/auth/password-reset/verify');
+}
+
+export function usePasswordResetCompleteMutation() {
+  return apiClient.useMutation('post', '/v1/auth/password-reset/complete');
+}
+
 export function createTestApiClient(fetchImpl: (input: Request) => Promise<Response>) {
   return createClient<paths>(
     createFetchClient<paths>({

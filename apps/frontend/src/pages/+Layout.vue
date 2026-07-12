@@ -24,7 +24,9 @@ const TanStackDevtools = import.meta.env.DEV
 const isDev = import.meta.env.DEV;
 
 const pageContext = usePageContext();
-const isAuthPage = computed(() => ['/signin', '/signup'].includes(pageContext.urlPathname));
+const isAuthPage = computed(() =>
+  ['/signin', '/signup', '/auth/reset-password'].includes(pageContext.urlPathname),
+);
 
 const { meQuery, logout } = useAuthSession({
   guard: computed(() => !isAuthPage.value),
