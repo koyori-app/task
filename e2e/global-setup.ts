@@ -6,7 +6,6 @@
 import { expect, type Page } from '@playwright/test';
 import { Client } from 'pg';
 import path from 'node:path';
-import { setEmailVerified } from './scripts/verify-email';
 
 const API_URL = process.env.API_URL ?? 'http://localhost:3400';
 const DB_URL = process.env.E2E_DATABASE_URL ?? 'postgresql://test:test@localhost:5432/task_e2e';
