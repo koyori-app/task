@@ -75,7 +75,7 @@ jobs:
           echo "::error::apps/frontend/openapi.json is out of sync with the backend API."
           echo ""
           echo "After changing the backend API, regenerate and commit openapi.json:"
-          echo "  cd apps/frontend && pnpm run openapi:export"
+          echo "  cd apps/frontend && pnpm openapi && node_modules/.bin/vp fmt"
           echo "  git add apps/frontend/openapi.json"
           echo ""
           echo "Diff (normalized):"
