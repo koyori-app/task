@@ -38,23 +38,36 @@ jobs:
           set -euo pipefail
           BASE_REF="origin/${{ github.base_ref }}"
           DIFF_FILE=/tmp/openapi.json.diff
+          TRUNCATED=false
 
-          git diff -u --label=base --label=head \
-            "${BASE_REF}"...HEAD -- apps/frontend/openapi.json > "${DIFF_FILE}" || true
+          set +e
+          git diff -u "${BASE_REF}"...HEAD -- apps/frontend/openapi.json > "${DIFF_FILE}"
+          DIFF_EXIT=$?
+          set -e
+
+          if [ "${DIFF_EXIT}" -gt 1 ]; then
+            echo "git diff failed with exit code ${DIFF_EXIT}" >&2
+            exit "${DIFF_EXIT}"
+          fi
 
           {
             echo '## OpenAPI diff (apps/frontend/openapi.json)'
             echo ''
-            if [ ! -s "${DIFF_FILE}" ] || [ "$(wc -c < "${DIFF_FILE}" | tr -d ' ')" -le 1 ]; then
+            if [ "${DIFF_EXIT}" -eq 0 ] || [ ! -s "${DIFF_FILE}" ]; then
               echo '差分はありません。'
             else
               DIFF_BYTES="$(wc -c < "${DIFF_FILE}" | tr -d ' ')"
               if [ "${DIFF_BYTES}" -gt 60000 ]; then
+                TRUNCATED=true
+                echo '> 差分が長いため先頭 60KB のみ表示します。全文は下記 Artifact または [Workflow ログ](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) を参照してください。'
+                echo ''
                 echo '<details>'
-                echo '<summary>openapi.json の差分（長いため折りたたみ）</summary>'
+                echo '<summary>openapi.json の差分（先頭 60KB）</summary>'
                 echo ''
                 echo '```diff'
-                cat "${DIFF_FILE}"
+                head -c 60000 "${DIFF_FILE}"
+                echo ''
+                echo '... (truncated)'
                 echo '```'
                 echo '</details>'
               else
@@ -64,6 +77,16 @@ jobs:
               fi
             fi
           } > /tmp/comment.md
+
+          echo "diff_truncated=${TRUNCATED}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload full openapi diff
+        if: steps.build-comment.outputs.diff_truncated == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: openapi-json-diff
+          path: /tmp/openapi.json.diff
+          if-no-files-found: error
 
       - name: Comment on pull request
         uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3.0.1
