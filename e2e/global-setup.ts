@@ -24,10 +24,12 @@ export const STORAGE_STATE = path.join(import.meta.dirname, '.auth/user.json');
 /** Type into a Vue/TanStack controlled field (fill() skips model updates in prod SSR). */
 export async function typeIntoFormField(page: Page, selector: string, value: string) {
   const field = page.locator(selector);
+  await expect(field).toBeEditable({ timeout: 15_000 });
   await field.click();
-  await field.clear();
+  // clear() desyncs TanStack form state on prod SSR; signup fields start empty.
   await field.pressSequentially(value, { delay: 10 });
-  await field.blur();
+  // Storybook SignUp.stories uses tab after type to trigger blur validators.
+  await field.press('Tab');
 }
 
 export async function ensureRegistrationEnabled(dbUrl = DB_URL) {

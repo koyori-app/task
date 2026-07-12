@@ -16,14 +16,19 @@ test('user can sign up, verify email, and sign in', async ({ page }) => {
 
   await page.goto('/signup');
   await expect(page.getByRole('heading', { name: 'アカウント作成' })).toBeVisible();
+  // Submit stays disabled while !isHydrated (artifact run 29198636129 / error-context.md).
+  await expect(page.locator('form[data-hydrated="true"]')).toBeVisible({ timeout: 15_000 });
 
-  // Storybook SignUp.stories uses userEvent.type + tab; fill() does not update TanStack form state in prod SSR.
   await typeIntoFormField(page, '#username', username);
   await typeIntoFormField(page, '#email', email);
   await typeIntoFormField(page, '#password', password);
 
+  await expect(page.locator('#username')).toHaveValue(username);
+  await expect(page.locator('#email')).toHaveValue(email);
+  await expect(page.locator('#password')).toHaveValue(password);
+
   const submitButton = page.getByRole('button', { name: 'アカウント作成' });
-  await expect(submitButton).toBeEnabled();
+  await expect(submitButton).toBeEnabled({ timeout: 15_000 });
 
   const registerResponse = page.waitForResponse(
     (response) => response.url().includes('/v1/auth/register') && response.status() === 201,
