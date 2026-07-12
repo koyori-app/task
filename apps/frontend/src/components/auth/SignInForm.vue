@@ -70,7 +70,7 @@ const form = useForm({
           v-slot="{ isHydrated }"
           class="p-6 md:p-8"
           data-testid="signin-form"
-          @submit="form.handleSubmit"
+          @submit="() => form.handleSubmit()"
         >
           <FieldGroup>
             <div class="flex flex-col items-center gap-2 text-center">
