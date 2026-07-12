@@ -137,6 +137,17 @@ export async function signInViaUi(
     await page.goto('/signin');
     await typeIntoFormField(page, '#email', email);
     await typeIntoFormField(page, '#password', password);
+
+    // Artifact 29200471250: sign-in hydration could replace only the email
+    // input after it was typed, while the later password input survived.
+    // Re-enter through the UI when the controlled value was reset.
+    const emailField = page.locator('#email');
+    if ((await emailField.inputValue()) !== email) {
+      await typeIntoFormField(page, '#email', email);
+    }
+
+    await expect(emailField).toHaveValue(email);
+    await expect(page.locator('#password')).toHaveValue(password);
     await expect(page.getByRole('button', { name: 'サインイン' })).toBeEnabled();
 
     const loginResponse = page.waitForResponse(
