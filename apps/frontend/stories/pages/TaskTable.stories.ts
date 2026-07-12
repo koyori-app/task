@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { expect, fn, userEvent, within } from 'storybook/test';
-import { provide } from 'vue';
+import { provide, reactive, nextTick } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import TaskTablePage from '@/pages/@tenant/projects/@projectKey/tasks/+Page.vue';
 
@@ -22,6 +22,14 @@ const sampleProjects = [
     id: 'proj-eng',
     key: 'ENG',
     name: 'エンジニアリング',
+    description: '',
+    tenant_id: 'tenant-123',
+    is_personal: false,
+  },
+  {
+    id: 'proj-mkt',
+    key: 'MKT',
+    name: 'マーケティング',
     description: '',
     tenant_id: 'tenant-123',
     is_personal: false,
@@ -259,6 +267,107 @@ function mockFetch() {
   return createMockFetch();
 }
 
+const mktStatuses = [
+  {
+    id: 'm-backlog',
+    name: 'Backlog',
+    color: '#94a3b8',
+    position: 0,
+    is_default: true,
+    is_done_state: false,
+    project_id: 'proj-mkt',
+    created_at: '2026-01-01T00:00:00Z',
+  },
+];
+
+const mktSampleTasks = {
+  tasks: [
+    {
+      id: 'mkt-task-1',
+      seq_id: 1,
+      title: 'SNSキャンペーン企画',
+      priority: 'High' as const,
+      status_id: 'm-backlog',
+      project_id: 'proj-mkt',
+      soft_deadline: null,
+      hard_deadline: null,
+      is_archived: false,
+      progress_pct: 0,
+      created_at: '2026-06-01T00:00:00Z',
+      updated_at: '2026-06-15T00:00:00Z',
+      created_by: mockUsers.alpha,
+      assignees: [assignee(mockUsers.beta)],
+    },
+  ],
+  total: 1,
+};
+
+type ProjectSwitchMock = {
+  restore: () => void;
+  releaseMktTasks: () => void;
+};
+
+function createProjectSwitchMockFetch(): ProjectSwitchMock {
+  const original = globalThis.fetch;
+  let releaseMktTasks: (() => void) | null = null;
+  const mktTasksGate = new Promise<void>((resolve) => {
+    releaseMktTasks = resolve;
+  });
+
+  globalThis.fetch = fn().mockImplementation(async (req: Request) => {
+    const url = typeof req === 'string' ? req : req.url;
+    if (
+      url.includes('/v1/tenants/') &&
+      url.includes('/projects') &&
+      !url.includes('/tasks') &&
+      !url.includes('/statuses')
+    ) {
+      return jsonResponse(sampleProjects);
+    }
+    if (url.includes('/statuses') && url.includes('proj-mkt')) {
+      return jsonResponse(mktStatuses);
+    }
+    if (url.includes('/statuses')) {
+      return jsonResponse(sampleStatuses);
+    }
+    if (url.includes('/tasks') && url.includes('proj-mkt')) {
+      await mktTasksGate;
+      return jsonResponse(mktSampleTasks);
+    }
+    if (url.includes('/tasks')) {
+      return jsonResponse(sampleTasks);
+    }
+    return jsonResponse({});
+  });
+
+  return {
+    restore: () => {
+      globalThis.fetch = original;
+    },
+    releaseMktTasks: () => releaseMktTasks?.(),
+  };
+}
+
+let reactivePageContext: ReturnType<typeof reactive<typeof mockContext>> | null = null;
+let projectSwitchMock: ProjectSwitchMock | null = null;
+
+function storyDecoratorReactive() {
+  return () => ({
+    setup() {
+      const queryClient = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false, gcTime: 0, staleTime: 0 },
+          mutations: { retry: false },
+        },
+      });
+      provide(VUE_QUERY_CLIENT, queryClient);
+      reactivePageContext = reactive({ ...mockContext });
+      provide(PAGE_CONTEXT_KEY, reactivePageContext);
+    },
+    template: '<story />',
+  });
+}
+
 function storyDecorator(
   context: { urlPathname: string; routeParams: Record<string, string> } = mockContext,
 ) {
@@ -360,5 +469,44 @@ export const Sorting: Story = {
     const titleHeader = await canvas.findByRole('button', { name: /タイトル/ });
     await user.click(titleHeader);
     await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
+  },
+};
+
+export const ProjectSwitch: Story = {
+  name: 'プロジェクト切替で旧タスク非表示',
+  decorators: [storyDecoratorReactive()],
+  beforeEach() {
+    projectSwitchMock = createProjectSwitchMockFetch();
+    return () => {
+      projectSwitchMock?.restore();
+      projectSwitchMock = null;
+      reactivePageContext = null;
+    };
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    if (!projectSwitchMock) {
+      throw new Error('project switch mock is not initialized');
+    }
+
+    await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
+
+    if (!reactivePageContext) {
+      throw new Error('reactive page context is not initialized');
+    }
+    reactivePageContext.urlPathname = '/tenant-123/projects/MKT/tasks';
+    reactivePageContext.routeParams.projectKey = 'MKT';
+    await nextTick();
+
+    const engTitle = 'OAuth 対応を実装する';
+    const pollUntil = Date.now() + 2000;
+    while (Date.now() < pollUntil) {
+      expect(canvas.queryByText(engTitle)).not.toBeInTheDocument();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    projectSwitchMock.releaseMktTasks();
+    await expect(canvas.findByText('SNSキャンペーン企画')).resolves.toBeInTheDocument();
+    expect(canvas.queryByText(engTitle)).not.toBeInTheDocument();
   },
 };

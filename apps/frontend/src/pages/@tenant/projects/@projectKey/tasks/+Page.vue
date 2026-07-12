@@ -49,6 +49,13 @@ const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
 const TASKS_PAGE_SIZE = 20;
 
+type TasksListQueryKeyParams = {
+  params?: {
+    path?: { tenant_id?: string; project_id?: string | null };
+    query?: { limit?: number; offset?: number };
+  };
+};
+
 // ---- 型定義 ----
 type ApiPriority = components['schemas']['TaskPriority'];
 type UserSummary = components['schemas']['UserSummary'];
@@ -144,7 +151,14 @@ const tasksQuery = useQuery({
     return data;
   },
   enabled: computed(() => !!tenantId.value && !!projectId.value),
-  placeholderData: keepPreviousData,
+  placeholderData: (previousData, previousQuery) => {
+    const prevParams = previousQuery?.queryKey[2] as TasksListQueryKeyParams | undefined;
+    const prevProjectId = prevParams?.params?.path?.project_id;
+    if (prevProjectId && projectId.value && prevProjectId === projectId.value) {
+      return keepPreviousData(previousData);
+    }
+    return undefined;
+  },
 });
 
 const taskTotal = computed(() => tasksQuery.data.value?.total ?? 0);
