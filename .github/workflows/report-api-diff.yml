@@ -65,7 +65,7 @@ jobs:
                 echo '<summary>openapi.json の差分（先頭 60KB）</summary>'
                 echo ''
                 echo '```diff'
-                head -c 60000 "${DIFF_FILE}"
+                head -c 60000 "${DIFF_FILE}" | sed '$d'
                 echo ''
                 echo '... (truncated)'
                 echo '```'
