@@ -1,6 +1,9 @@
 # Posts PR comments showing openapi.json changes.
 # Design reference (simplified for git-tracked openapi.json):
 # https://github.com/misskey-dev/misskey/blob/develop/.github/workflows/report-api-diff.yml
+#
+# Fork PRs: GITHUB_TOKEN is read-only on the head repo, so PR comments are skipped
+# (job still succeeds). For fork comment support, consider pull_request_target later.
 name: Report OpenAPI Diff
 
 on:
@@ -29,9 +32,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Fetch base branch
-        run: git fetch origin "${{ github.base_ref }}"
-
       - name: Build diff comment
         id: build-comment
         run: |
@@ -41,7 +41,7 @@ jobs:
           TRUNCATED=false
 
           set +e
-          git diff -u "${BASE_REF}"...HEAD -- apps/frontend/openapi.json > "${DIFF_FILE}"
+          git diff --exit-code -u "${BASE_REF}"...HEAD -- apps/frontend/openapi.json > "${DIFF_FILE}"
           DIFF_EXIT=$?
           set -e
 
@@ -53,7 +53,7 @@ jobs:
           {
             echo '## OpenAPI diff (apps/frontend/openapi.json)'
             echo ''
-            if [ "${DIFF_EXIT}" -eq 0 ] || [ ! -s "${DIFF_FILE}" ]; then
+            if [ "${DIFF_EXIT}" -eq 0 ]; then
               echo '差分はありません。'
             else
               DIFF_BYTES="$(wc -c < "${DIFF_FILE}" | tr -d ' ')"
@@ -89,13 +89,14 @@ jobs:
           if-no-files-found: error
 
       - name: Comment on pull request
+        if: github.event.pull_request.head.repo.full_name == github.repository
         uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3.0.1
         with:
           comment-tag: openapi_diff
           file-path: /tmp/comment.md
 
       - name: Comment failure on pull request
-        if: failure()
+        if: failure() && github.event.pull_request.head.repo.full_name == github.repository
         uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3.0.1
         with:
           comment-tag: openapi_diff_error
