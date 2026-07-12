@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { ensureRegistrationEnabled, signInViaUi, typeIntoFormField } from '../global-setup';
+import {
+  ensureRegistrationEnabled,
+  signInViaUi,
+  typeIntoFormField,
+  waitForClientHydration,
+} from '../global-setup';
 import { setEmailVerified } from '../scripts/verify-email';
 
 const DB_URL = process.env.E2E_DATABASE_URL ?? 'postgresql://test:test@localhost:5432/task_e2e';
@@ -15,13 +20,16 @@ test('user can sign up, verify email, and sign in', async ({ page }) => {
   await ensureRegistrationEnabled(DB_URL);
 
   await page.goto('/signup');
-  await expect(page.getByRole('heading', { name: 'アカウント作成' })).toBeVisible();
-  // Submit stays disabled while !isHydrated (artifact run 29198636129 / error-context.md).
-  await expect(page.locator('form[data-hydrated="true"]')).toBeVisible({ timeout: 15_000 });
+  const heading = page.getByRole('heading', { name: 'アカウント作成' });
+  await expect(heading).toBeVisible();
+  // Artifact 29198636129: typing before hydration left submit disabled (!isHydrated).
+  await waitForClientHydration(page);
 
   await typeIntoFormField(page, '#username', username);
   await typeIntoFormField(page, '#email', email);
   await typeIntoFormField(page, '#password', password);
+  // Blur password (Tab lands on visibility toggle) and re-run onBlur validators.
+  await heading.click();
 
   await expect(page.locator('#username')).toHaveValue(username);
   await expect(page.locator('#email')).toHaveValue(email);

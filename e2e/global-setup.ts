@@ -21,6 +21,19 @@ export const TEST_USER = {
 
 export const STORAGE_STATE = path.join(import.meta.dirname, '.auth/user.json');
 
+/** Wait until HydrationSafeForm removes the pre-hydration onsubmit guard (artifact 29198636129). */
+export async function waitForClientHydration(page: Page) {
+  await page.waitForFunction(
+    () => {
+      const form = document.querySelector('form');
+      if (!form) return false;
+      // :onsubmit.attr="isHydrated ? null : 'return false;'" — guard gone after onMounted.
+      return form.getAttribute('onsubmit') === null;
+    },
+    { timeout: 15_000 },
+  );
+}
+
 /** Type into a Vue/TanStack controlled field (fill() skips model updates in prod SSR). */
 export async function typeIntoFormField(page: Page, selector: string, value: string) {
   const field = page.locator(selector);
