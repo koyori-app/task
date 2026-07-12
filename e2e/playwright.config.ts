@@ -4,7 +4,6 @@ import { STORAGE_STATE } from './global-setup';
 const isCI = !!process.env.CI;
 
 export default defineConfig({
-  globalSetup: './global-migrate.ts',
   testDir: './tests',
   use: {
     baseURL: process.env.BASE_URL ?? 'http://localhost:3000',
@@ -33,9 +32,9 @@ export default defineConfig({
   ],
   webServer: [
     {
-      // CI: pass BACKEND_BIN=<absolute path> to skip rebuild
-      command: process.env.BACKEND_BIN ?? 'cargo run --bin backend',
-      cwd: process.env.BACKEND_BIN ? '.' : '../apps/backend',
+      // CI: BACKEND_BIN + MIGRATION_BIN skip rebuild; migration runs in start-backend.sh
+      command: 'bash scripts/start-backend.sh',
+      cwd: '.',
       url: 'http://localhost:3400/v1/auth/me',
       reuseExistingServer: !isCI,
       timeout: 120_000,
