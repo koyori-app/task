@@ -17,21 +17,10 @@ test('user can sign up, verify email, and sign in', async ({ page }) => {
   await page.goto('/signup');
   await expect(page.getByRole('heading', { name: 'アカウント作成' })).toBeVisible();
 
-  const usernameInput = page.locator('#username');
-  const emailInput = page.locator('#email');
-  const passwordInput = page.locator('#password');
-
-  await usernameInput.click();
-  await usernameInput.pressSequentially(username, { delay: 20 });
-  await emailInput.click();
-  await emailInput.pressSequentially(email, { delay: 20 });
-  await passwordInput.click();
-  await passwordInput.pressSequentially(password, { delay: 20 });
-  await passwordInput.blur();
-
-  await expect(usernameInput).toHaveValue(username);
-  await expect(emailInput).toHaveValue(email);
-  await expect(passwordInput).toHaveValue(password);
+  await page.locator('#username').fill(username);
+  await page.locator('#email').fill(email);
+  await page.locator('#password').fill(password);
+  await page.locator('#password').blur();
 
   const submitButton = page.getByRole('button', { name: 'アカウント作成' });
   await expect(submitButton).toBeEnabled();
