@@ -1,0 +1,105 @@
+# Posts PR comments showing openapi.json changes.
+# Design reference (simplified for git-tracked openapi.json):
+# https://github.com/misskey-dev/misskey/blob/develop/.github/workflows/report-api-diff.yml
+#
+# Fork PRs: GITHUB_TOKEN is read-only on the head repo, so PR comments are skipped
+# (job still succeeds). For fork comment support, consider pull_request_target later.
+name: Report OpenAPI Diff
+
+on:
+  pull_request:
+    paths:
+      - 'apps/backend/**'
+      - 'apps/frontend/openapi.json'
+      - '.github/workflows/report-api-diff.yml'
+
+concurrency:
+  group: report-openapi-diff-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  report-diff:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build diff comment
+        id: build-comment
+        run: |
+          set -euo pipefail
+          BASE_REF="origin/${{ github.base_ref }}"
+          DIFF_FILE=/tmp/openapi.json.diff
+          TRUNCATED=false
+
+          set +e
+          git diff --exit-code -u "${BASE_REF}"...HEAD -- apps/frontend/openapi.json > "${DIFF_FILE}"
+          DIFF_EXIT=$?
+          set -e
+
+          if [ "${DIFF_EXIT}" -gt 1 ]; then
+            echo "git diff failed with exit code ${DIFF_EXIT}" >&2
+            exit "${DIFF_EXIT}"
+          fi
+
+          {
+            echo '## OpenAPI diff (apps/frontend/openapi.json)'
+            echo ''
+            if [ "${DIFF_EXIT}" -eq 0 ]; then
+              echo '差分はありません。'
+            else
+              DIFF_BYTES="$(wc -c < "${DIFF_FILE}" | tr -d ' ')"
+              if [ "${DIFF_BYTES}" -gt 60000 ]; then
+                TRUNCATED=true
+                echo '> 差分が長いため先頭 60KB のみ表示します。全文は下記 Artifact または [Workflow ログ](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) を参照してください。'
+                echo ''
+                echo '<details>'
+                echo '<summary>openapi.json の差分（先頭 60KB）</summary>'
+                echo ''
+                echo '```diff'
+                head -c 60000 "${DIFF_FILE}" | sed '$d'
+                echo ''
+                echo '... (truncated)'
+                echo '```'
+                echo '</details>'
+              else
+                echo '```diff'
+                cat "${DIFF_FILE}"
+                echo '```'
+              fi
+            fi
+          } > /tmp/comment.md
+
+          echo "diff_truncated=${TRUNCATED}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload full openapi diff
+        if: steps.build-comment.outputs.diff_truncated == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: openapi-json-diff
+          path: /tmp/openapi.json.diff
+          if-no-files-found: error
+
+      - name: Comment on pull request
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3.0.1
+        with:
+          comment-tag: openapi_diff
+          file-path: /tmp/comment.md
+
+      - name: Comment failure on pull request
+        if: failure() && github.event.pull_request.head.repo.full_name == github.repository
+        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3.0.1
+        with:
+          comment-tag: openapi_diff_error
+          message: |
+            openapi.json の差分コメント作成中にエラーが発生しました。
+            詳細は [Workflow のログ](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) を確認してください。
