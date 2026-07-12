@@ -17,9 +17,9 @@ test('user can sign up, verify email, and sign in', async ({ page }) => {
   await page.goto('/signup');
   await expect(page.getByRole('heading', { name: 'アカウント作成' })).toBeVisible();
 
-  const usernameInput = page.getByLabel('ユーザー名');
-  const emailInput = page.getByLabel('メールアドレス');
-  const passwordInput = page.getByLabel('パスワード');
+  const usernameInput = page.locator('#username');
+  const emailInput = page.locator('#email');
+  const passwordInput = page.locator('#password');
 
   await usernameInput.click();
   await usernameInput.pressSequentially(username, { delay: 20 });
