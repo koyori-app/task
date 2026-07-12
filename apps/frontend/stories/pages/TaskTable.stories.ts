@@ -501,12 +501,12 @@ export const ProjectSwitch: Story = {
     const engTitle = 'OAuth 対応を実装する';
     const pollUntil = Date.now() + 2000;
     while (Date.now() < pollUntil) {
-      expect(canvas.queryByText(engTitle)).not.toBeInTheDocument();
+      await expect(canvas.queryByText(engTitle)).not.toBeInTheDocument();
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
     projectSwitchMock.releaseMktTasks();
     await expect(canvas.findByText('SNSキャンペーン企画')).resolves.toBeInTheDocument();
-    expect(canvas.queryByText(engTitle)).not.toBeInTheDocument();
+    await expect(canvas.queryByText(engTitle)).not.toBeInTheDocument();
   },
 };

@@ -22,7 +22,7 @@ const getRequestInfo = (input: RequestInfo | URL, init?: RequestInit) => {
 
 const stubLocationAssign = () => {
   locationAssignSpy = fn();
-  originalLocationAssign = Location.prototype.assign;
+  originalLocationAssign = Reflect.get(Location.prototype, 'assign') as Location['assign'];
   Location.prototype.assign = function (url: string | URL) {
     locationAssignSpy(url);
   };
