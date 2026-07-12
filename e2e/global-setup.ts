@@ -19,6 +19,8 @@ export const TEST_USER = {
   password: 'E2ePassword1!',
 };
 
+export const STORAGE_STATE = path.join(import.meta.dirname, '.auth/user.json');
+
 /** Type into a Vue/TanStack controlled field (fill() skips model updates in prod SSR). */
 export async function typeIntoFormField(page: Page, selector: string, value: string) {
   const field = page.locator(selector);
