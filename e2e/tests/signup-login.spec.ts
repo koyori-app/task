@@ -16,6 +16,7 @@ test('user can sign up, verify email, and sign in', async ({ page }) => {
 
   await page.goto('/signup');
   await expect(page.getByRole('heading', { name: 'アカウント作成' })).toBeVisible();
+  await expect(page.locator('form[data-hydrated=\"true\"]')).toBeVisible({ timeout: 15_000 });
 
   await page.locator('#username').fill(username);
   await page.locator('#email').fill(email);
