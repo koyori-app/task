@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { ensureRegistrationEnabled, signInViaUi } from '../global-setup';
+import { ensureRegistrationEnabled, signInViaUi, typeIntoFormField } from '../global-setup';
 import { setEmailVerified } from '../scripts/verify-email';
 
 const DB_URL = process.env.E2E_DATABASE_URL ?? 'postgresql://test:test@localhost:5432/task_e2e';
@@ -16,12 +16,11 @@ test('user can sign up, verify email, and sign in', async ({ page }) => {
 
   await page.goto('/signup');
   await expect(page.getByRole('heading', { name: 'アカウント作成' })).toBeVisible();
-  await expect(page.locator('form[data-hydrated=\"true\"]')).toBeVisible({ timeout: 15_000 });
 
-  await page.locator('#username').fill(username);
-  await page.locator('#email').fill(email);
-  await page.locator('#password').fill(password);
-  await page.locator('#password').blur();
+  // Storybook SignUp.stories uses userEvent.type + tab; fill() does not update TanStack form state in prod SSR.
+  await typeIntoFormField(page, '#username', username);
+  await typeIntoFormField(page, '#email', email);
+  await typeIntoFormField(page, '#password', password);
 
   const submitButton = page.getByRole('button', { name: 'アカウント作成' });
   await expect(submitButton).toBeEnabled();

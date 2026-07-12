@@ -7,9 +7,9 @@ export default defineConfig({
   testDir: './tests',
   use: {
     baseURL: process.env.BASE_URL ?? 'http://localhost:3000',
-    trace: 'on-first-retry',
+    trace: isCI ? 'retain-on-failure' : 'on-first-retry',
   },
-  reporter: isCI ? 'github' : 'list',
+  reporter: isCI ? [['github'], ['html', { open: 'never' }]] : 'list',
   projects: [
     // Logs in once and saves the session for authenticated specs.
     {

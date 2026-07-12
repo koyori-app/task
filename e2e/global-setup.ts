@@ -19,7 +19,14 @@ export const TEST_USER = {
   password: 'E2ePassword1!',
 };
 
-export const STORAGE_STATE = path.join(import.meta.dirname, '.auth/user.json');
+/** Type into a Vue/TanStack controlled field (fill() skips model updates in prod SSR). */
+export async function typeIntoFormField(page: Page, selector: string, value: string) {
+  const field = page.locator(selector);
+  await field.click();
+  await field.clear();
+  await field.pressSequentially(value, { delay: 10 });
+  await field.blur();
+}
 
 export async function ensureRegistrationEnabled(dbUrl = DB_URL) {
   const db = new Client({ connectionString: dbUrl });
@@ -111,9 +118,8 @@ export async function signInViaUi(
 ) {
   await expect(async () => {
     await page.goto('/signin');
-    await page.locator('#email').fill(email);
-    await page.locator('#password').fill(password);
-    await page.locator('#password').blur();
+    await typeIntoFormField(page, '#email', email);
+    await typeIntoFormField(page, '#password', password);
     await expect(page.getByRole('button', { name: 'サインイン' })).toBeEnabled();
 
     const loginResponse = page.waitForResponse(
