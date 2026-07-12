@@ -149,9 +149,12 @@ export const RegisterSuccess: Story = {
     ).resolves.toBeInTheDocument();
     // 既存メールかどうかを推測できる文言（「確認メール」等）を表示しない
     expect(canvas.queryByText(/確認メール/)).not.toBeInTheDocument();
-    await expect(canvas.findByRole('link', { name: 'サインインへ' })).resolves.toBeInTheDocument();
+    await expect(canvas.findByRole('link', { name: 'サインインへ' })).resolves.toHaveAttribute(
+      'href',
+      '/signin',
+    );
     await expect(
       canvas.findByRole('link', { name: 'パスワードを再設定する' }),
-    ).resolves.toBeInTheDocument();
+    ).resolves.toHaveAttribute('href', '/auth/reset-password');
   },
 };

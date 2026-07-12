@@ -21,13 +21,13 @@ defineProps<{ email: string }>();
         <p class="text-muted-foreground text-sm">
           すでにアカウントをお持ちの場合は、サインインするか、パスワードを再設定できます。
         </p>
-        <div class="flex items-center gap-3">
-          <a href="/signin">
-            <Button variant="outline">サインインへ</Button>
-          </a>
-          <a href="/auth/reset-password">
-            <Button variant="ghost">パスワードを再設定する</Button>
-          </a>
+        <div class="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-center">
+          <Button as-child variant="outline" class="w-full sm:w-auto">
+            <a href="/signin">サインインへ</a>
+          </Button>
+          <Button as-child variant="ghost" class="w-full sm:w-auto">
+            <a href="/auth/reset-password">パスワードを再設定する</a>
+          </Button>
         </div>
       </div>
     </div>
