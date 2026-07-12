@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import { Loader2, Signal, SignalHigh, SignalLow, SignalMedium } from '@lucide/vue';
+import type { LucideIcon } from '@lucide/vue';
 import type {
   ColumnDef,
   ColumnFiltersState,
+  PaginationState,
   SortingState,
   VisibilityState,
 } from '@tanstack/vue-table';
@@ -9,15 +12,14 @@ import {
   FlexRender,
   getCoreRowModel,
   getFilteredRowModel,
-  getPaginationRowModel,
   getSortedRowModel,
   useVueTable,
 } from '@tanstack/vue-table';
-import type { LucideIcon } from '@lucide/vue';
-import { Signal, SignalHigh, SignalLow, SignalMedium } from '@lucide/vue';
 import { PhCaretDown, PhCaretUp, PhCaretUpDown } from '@phosphor-icons/vue';
-import { h, ref } from 'vue';
+import { computed, h, ref, watch } from 'vue';
 import type { Column } from '@tanstack/vue-table';
+import { useQuery, keepPreviousData } from '@tanstack/vue-query';
+import { usePageContext } from 'vike-vue/usePageContext';
 
 import { valueUpdater } from '@/components/ui/table/utils';
 import { Button } from '@/components/ui/button';
@@ -37,38 +39,200 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import AvatarGroup from '@/components/AvatarGroup.vue';
+import { fetchClient } from '@/lib/api-vue-query';
+import type { components } from '@/generated/api';
+
+// ---- 定数 ----
+const LIST_PROJECTS_PATH = '/v1/tenants/{tenant_id}/projects' as const;
+const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
+const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
+const TASKS_PAGE_SIZE = 20;
+
+type TasksListQueryKeyParams = {
+  params?: {
+    path?: { tenant_id?: string; project_id?: string | null };
+    query?: { limit?: number; offset?: number };
+  };
+};
 
 // ---- 型定義 ----
-type Priority = 'urgent' | 'high' | 'medium' | 'low';
+type ApiPriority = components['schemas']['TaskPriority'];
+type UserSummary = components['schemas']['UserSummary'];
 
-interface TaskStatus {
-  id: string;
-  name: string;
-  color: string;
-}
-
-interface TaskAssignee {
-  name: string;
-  initials: string;
-}
-
-interface Task {
+interface TaskRow {
   id: string;
   seq_id: number;
   project_key: string;
   title: string;
-  status: TaskStatus;
-  priority: Priority;
-  assignee?: TaskAssignee;
+  status: { id: string; name: string; color: string };
+  priority: ApiPriority;
+  assignees: UserSummary[];
   due_date?: string;
 }
 
+// ---- ページコンテキスト ----
+const pageContext = usePageContext();
+const tenantId = computed(() => String(pageContext.routeParams.tenant ?? ''));
+const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
+
+// ---- クエリ①: プロジェクト一覧 ----
+const projectsQuery = useQuery({
+  queryKey: computed(() => [
+    'get',
+    LIST_PROJECTS_PATH,
+    { params: { path: { tenant_id: tenantId.value } } },
+  ]),
+  queryFn: async ({ signal }) => {
+    const { data, error } = await fetchClient.GET(LIST_PROJECTS_PATH, {
+      params: { path: { tenant_id: tenantId.value } },
+      signal,
+    });
+    if (error) throw error;
+    return data;
+  },
+  enabled: computed(() => !!tenantId.value),
+});
+
+/** projectKey から project_id を解決 */
+const projectId = computed(() => {
+  const projects = projectsQuery.data.value;
+  if (!projects || !projectKey.value) return null;
+  return projects.find((p) => p.key === projectKey.value)?.id ?? null;
+});
+
+const isProjectNotFound = computed(
+  () =>
+    !!projectKey.value &&
+    projectsQuery.isSuccess.value &&
+    !projectsQuery.isFetching.value &&
+    projectId.value === null,
+);
+
+// ---- サーバーサイドページネーション ----
+const pagination = ref<PaginationState>({
+  pageIndex: 0,
+  pageSize: TASKS_PAGE_SIZE,
+});
+
+// プロジェクト切替時は先頭ページへ戻す
+watch(projectKey, () => {
+  pagination.value = { ...pagination.value, pageIndex: 0 };
+});
+
+// ---- クエリ②: タスク一覧 ----
+const tasksQuery = useQuery({
+  queryKey: computed(() => [
+    'get',
+    LIST_TASKS_PATH,
+    {
+      params: {
+        path: { tenant_id: tenantId.value, project_id: projectId.value },
+        query: {
+          limit: pagination.value.pageSize,
+          offset: pagination.value.pageIndex * pagination.value.pageSize,
+        },
+      },
+    },
+  ]),
+  queryFn: async ({ signal }) => {
+    const { data, error } = await fetchClient.GET(LIST_TASKS_PATH, {
+      // query パラメータは openapi-typescript 7.13.0 が正しく operation レベルに生成する
+      params: {
+        path: { tenant_id: tenantId.value, project_id: projectId.value! },
+        query: {
+          limit: pagination.value.pageSize,
+          offset: pagination.value.pageIndex * pagination.value.pageSize,
+        },
+      },
+      signal,
+    });
+    if (error) throw error;
+    return data;
+  },
+  enabled: computed(() => !!tenantId.value && !!projectId.value),
+  placeholderData: (previousData, previousQuery) => {
+    const prevParams = previousQuery?.queryKey[2] as TasksListQueryKeyParams | undefined;
+    const prevProjectId = prevParams?.params?.path?.project_id;
+    if (prevProjectId && projectId.value && prevProjectId === projectId.value) {
+      return keepPreviousData(previousData);
+    }
+    return undefined;
+  },
+});
+
+const taskTotal = computed(() => tasksQuery.data.value?.total ?? 0);
+
+// ---- クエリ③: ステータス一覧 ----
+const statusesQuery = useQuery({
+  queryKey: computed(() => [
+    'get',
+    LIST_STATUSES_PATH,
+    { params: { path: { tenant_id: tenantId.value, project_id: projectId.value } } },
+  ]),
+  queryFn: async ({ signal }) => {
+    const { data, error } = await fetchClient.GET(LIST_STATUSES_PATH, {
+      params: { path: { tenant_id: tenantId.value, project_id: projectId.value! } },
+      signal,
+    });
+    if (error) throw error;
+    return data;
+  },
+  enabled: computed(() => !!tenantId.value && !!projectId.value),
+});
+
+/** status_id → { name, color } 解決用 Map */
+const statusMap = computed(() => {
+  const statuses = statusesQuery.data.value ?? [];
+  return new Map(statuses.map((s) => [s.id, { name: s.name, color: s.color }]));
+});
+
+// ---- テーブルデータ構築 ----
+const taskRows = computed<TaskRow[]>(() => {
+  const tasks = tasksQuery.data.value?.tasks;
+  const sMap = statusMap.value;
+  if (!tasks) return [];
+
+  return tasks.map((t) => {
+    const status = sMap.get(t.status_id) ?? { name: t.status_id, color: '#94a3b8' };
+    return {
+      id: t.id,
+      seq_id: t.seq_id,
+      project_key: projectKey.value,
+      title: t.title,
+      status: { id: t.status_id, ...status },
+      priority: t.priority,
+      assignees: t.assignees.map((a) => a.user),
+      due_date: t.soft_deadline ?? undefined,
+    };
+  });
+});
+
+/** 初回ローディング表示。isLoading を使い、初回のみスピナー表示とする。
+ *  背景refetch中は古いデータを表示し続ける（isFetching だとrefetch毎にテーブルが
+ *  スピナーに置き換わりちらつくため）。refetch中の表示を強化したい場合は別途
+ *  インジケーターを追加すること。 */
+const isInitialLoading = computed(
+  () =>
+    projectsQuery.isLoading.value || tasksQuery.isLoading.value || statusesQuery.isLoading.value,
+);
+
+const isError = computed(
+  () => projectsQuery.isError.value || tasksQuery.isError.value || statusesQuery.isError.value,
+);
+
 // ---- ヘルパー ----
-const PRIORITY_ORDER: Record<Priority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+const PRIORITY_ORDER: Record<ApiPriority, number> = {
+  CriticalFire: 0,
+  Critical: 1,
+  High: 2,
+  Medium: 3,
+  Low: 4,
+  Trivial: 5,
+};
 
 /** ソート可能な列ヘッダー: 矢印アイコン付きボタンを返す */
-function sortableHeader(column: Column<Task>, label: string) {
+function sortableHeader(column: Column<TaskRow>, label: string) {
   const sorted = column.getIsSorted();
   const icon =
     sorted === 'asc'
@@ -87,14 +251,16 @@ function sortableHeader(column: Column<Task>, label: string) {
   );
 }
 
-const PRIORITY_CONFIG: Record<Priority, { label: string; color: string; icon: LucideIcon }> = {
-  urgent: { label: '緊急', color: '#ef4444', icon: Signal },
-  high: { label: '高', color: '#f97316', icon: SignalHigh },
-  medium: { label: '中', color: '#eab308', icon: SignalMedium },
-  low: { label: '低', color: '#6b7280', icon: SignalLow },
+const PRIORITY_CONFIG: Record<ApiPriority, { label: string; color: string; icon: LucideIcon }> = {
+  CriticalFire: { label: '緊急', color: '#dc2626', icon: Signal },
+  Critical: { label: '重大', color: '#ef4444', icon: Signal },
+  High: { label: '高', color: '#f97316', icon: SignalHigh },
+  Medium: { label: '中', color: '#eab308', icon: SignalMedium },
+  Low: { label: '低', color: '#6b7280', icon: SignalLow },
+  Trivial: { label: '些細', color: '#9ca3af', icon: SignalLow },
 };
 
-function taskKey(task: Task) {
+function taskKey(task: TaskRow) {
   return `${task.project_key}-${task.seq_id}`;
 }
 
@@ -113,59 +279,8 @@ function formatDate(iso?: string) {
   };
 }
 
-// ---- モックデータ ----
-const data: Task[] = [
-  {
-    id: '1',
-    seq_id: 1,
-    project_key: 'ENG',
-    title: 'OAuth 対応を実装する',
-    status: { id: 's1', name: 'In Progress', color: '#3b82f6' },
-    priority: 'high',
-    assignee: { name: '田中 太郎', initials: '田' },
-    due_date: new Date(Date.now() + 2 * 86400000).toISOString(),
-  },
-  {
-    id: '2',
-    seq_id: 2,
-    project_key: 'ENG',
-    title: 'ログイン画面の UI 実装',
-    status: { id: 's2', name: 'In Review', color: '#8b5cf6' },
-    priority: 'medium',
-    assignee: { name: '鈴木 花子', initials: '鈴' },
-    due_date: new Date(Date.now() - 1 * 86400000).toISOString(),
-  },
-  {
-    id: '3',
-    seq_id: 3,
-    project_key: 'ENG',
-    title: 'DB スキーマ設計',
-    status: { id: 's3', name: 'Done', color: '#22c55e' },
-    priority: 'urgent',
-    assignee: { name: '山田 次郎', initials: '山' },
-  },
-  {
-    id: '4',
-    seq_id: 4,
-    project_key: 'ENG',
-    title: '通知メール送信機能',
-    status: { id: 's1', name: 'In Progress', color: '#3b82f6' },
-    priority: 'low',
-    due_date: new Date(Date.now() + 14 * 86400000).toISOString(),
-  },
-  {
-    id: '5',
-    seq_id: 5,
-    project_key: 'ENG',
-    title: 'タスク一覧 API の実装',
-    status: { id: 's0', name: 'Backlog', color: '#94a3b8' },
-    priority: 'medium',
-    assignee: { name: '田中 太郎', initials: '田' },
-  },
-];
-
 // ---- テーブル列定義 ----
-const columns: ColumnDef<Task>[] = [
+const columns: ColumnDef<TaskRow>[] = [
   {
     id: 'select',
     header: ({ table }) =>
@@ -248,17 +363,14 @@ const columns: ColumnDef<Task>[] = [
   },
   {
     id: 'assignee',
-    accessorFn: (row) => row.assignee?.name ?? '',
+    accessorFn: (row) => row.assignees[0]?.username ?? '',
     header: ({ column }) => sortableHeader(column, '担当者'),
     cell: ({ row }) => {
-      const a = row.original.assignee;
-      if (!a) return h('span', { class: 'text-muted-foreground text-xs' }, '−');
-      return h('div', { class: 'flex items-center gap-1.5' }, [
-        h(Avatar, { class: 'size-5' }, () => [
-          h(AvatarFallback, { class: 'text-[10px]' }, () => a.initials),
-        ]),
-        h('span', { class: 'text-xs truncate max-w-24' }, a.name),
-      ]);
+      const users = row.original.assignees;
+      if (users.length === 0) {
+        return h('span', { class: 'text-muted-foreground text-xs' }, '−');
+      }
+      return h(AvatarGroup, { users, maxDisplay: 3 });
     },
   },
   {
@@ -289,16 +401,23 @@ const columnVisibility = ref<VisibilityState>({});
 const rowSelection = ref({});
 
 const table = useVueTable({
-  data,
+  get data() {
+    return taskRows.value;
+  },
   columns,
+  getRowId: (row) => row.id,
   getCoreRowModel: getCoreRowModel(),
-  getPaginationRowModel: getPaginationRowModel(),
   getSortedRowModel: getSortedRowModel(),
   getFilteredRowModel: getFilteredRowModel(),
+  manualPagination: true,
+  get rowCount() {
+    return taskTotal.value;
+  },
   onSortingChange: (u) => valueUpdater(u, sorting),
   onColumnFiltersChange: (u) => valueUpdater(u, columnFilters),
   onColumnVisibilityChange: (u) => valueUpdater(u, columnVisibility),
   onRowSelectionChange: (u) => valueUpdater(u, rowSelection),
+  onPaginationChange: (u) => valueUpdater(u, pagination),
   state: {
     get sorting() {
       return sorting.value;
@@ -312,103 +431,131 @@ const table = useVueTable({
     get rowSelection() {
       return rowSelection.value;
     },
+    get pagination() {
+      return pagination.value;
+    },
   },
 });
 </script>
 
 <template>
   <div class="flex flex-col gap-3">
-    <!-- ツールバー -->
-    <div class="flex items-center gap-2">
-      <Input
-        class="h-8 max-w-xs text-sm"
-        placeholder="タイトルで絞り込み..."
-        :model-value="(table.getColumn('title')?.getFilterValue() as string) ?? ''"
-        @update:model-value="table.getColumn('title')?.setFilterValue($event)"
-      />
-      <DropdownMenu>
-        <DropdownMenuTrigger as-child>
-          <Button variant="outline" size="sm" class="ml-auto h-8 text-xs">
-            列 <PhCaretDown class="ml-1 size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuCheckboxItem
-            v-for="col in table.getAllColumns().filter((c) => c.getCanHide())"
-            :key="col.id"
-            class="text-sm"
-            :model-value="col.getIsVisible()"
-            @update:model-value="(v) => col.toggleVisibility(!!v)"
-          >
-            {{ col.id }}
-          </DropdownMenuCheckboxItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+    <!-- ローディング / エラー表示 -->
+    <div v-if="isInitialLoading" class="flex justify-center py-8">
+      <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
     </div>
 
-    <!-- テーブル -->
-    <div class="rounded-md border overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow v-for="hg in table.getHeaderGroups()" :key="hg.id">
-            <TableHead v-for="header in hg.headers" :key="header.id" class="h-9 text-xs px-3">
-              <FlexRender
-                v-if="!header.isPlaceholder"
-                :render="header.column.columnDef.header"
-                :props="header.getContext()"
-              />
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <template v-if="table.getRowModel().rows?.length">
-            <TableRow
-              v-for="row in table.getRowModel().rows"
-              :key="row.id"
-              :data-state="row.getIsSelected() && 'selected'"
-              class="h-10"
+    <div v-else-if="isError" class="flex justify-center py-8 text-sm text-destructive">
+      タスクの読み込みに失敗しました
+    </div>
+
+    <div
+      v-else-if="isProjectNotFound"
+      class="flex justify-center py-8 text-sm text-muted-foreground"
+    >
+      プロジェクトが見つかりません
+    </div>
+
+    <template v-else>
+      <!-- ツールバー（ソート・タイトル絞り込みは現在ページ内の行のみ対象。サーバー側未対応） -->
+      <div class="flex items-center gap-2">
+        <Input
+          class="h-8 max-w-xs text-sm"
+          placeholder="タイトルで絞り込み..."
+          :model-value="(table.getColumn('title')?.getFilterValue() as string) ?? ''"
+          @update:model-value="table.getColumn('title')?.setFilterValue($event)"
+        />
+        <DropdownMenu>
+          <DropdownMenuTrigger as-child>
+            <Button variant="outline" size="sm" class="ml-auto h-8 text-xs">
+              列 <PhCaretDown class="ml-1 size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuCheckboxItem
+              v-for="col in table.getAllColumns().filter((c) => c.getCanHide())"
+              :key="col.id"
+              class="text-sm"
+              :model-value="col.getIsVisible()"
+              @update:model-value="(v) => col.toggleVisibility(!!v)"
             >
-              <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id" class="py-1.5 px-3">
-                <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
+              {{ col.id }}
+            </DropdownMenuCheckboxItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <!-- テーブル -->
+      <div class="rounded-md border overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow v-for="hg in table.getHeaderGroups()" :key="hg.id">
+              <TableHead v-for="header in hg.headers" :key="header.id" class="h-9 text-xs px-3">
+                <FlexRender
+                  v-if="!header.isPlaceholder"
+                  :render="header.column.columnDef.header"
+                  :props="header.getContext()"
+                />
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <template v-if="table.getRowModel().rows?.length">
+              <TableRow
+                v-for="row in table.getRowModel().rows"
+                :key="row.id"
+                :data-state="row.getIsSelected() && 'selected'"
+                class="h-10"
+              >
+                <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id" class="py-1.5 px-3">
+                  <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
+                </TableCell>
+              </TableRow>
+            </template>
+            <TableRow v-else>
+              <TableCell
+                :colspan="columns.length"
+                class="h-24 text-center text-sm text-muted-foreground"
+              >
+                タスクが見つかりません
               </TableCell>
             </TableRow>
-          </template>
-          <TableRow v-else>
-            <TableCell
-              :colspan="columns.length"
-              class="h-24 text-center text-sm text-muted-foreground"
-            >
-              タスクが見つかりません
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
-    </div>
-
-    <!-- ページネーション -->
-    <div class="flex items-center justify-between text-xs text-muted-foreground">
-      <span>
-        {{ table.getFilteredSelectedRowModel().rows.length }} /
-        {{ table.getFilteredRowModel().rows.length }} 件選択
-      </span>
-      <div class="flex gap-1.5">
-        <Button
-          variant="outline"
-          size="sm"
-          class="h-7 text-xs"
-          :disabled="!table.getCanPreviousPage()"
-          @click="table.previousPage()"
-          >前へ</Button
-        >
-        <Button
-          variant="outline"
-          size="sm"
-          class="h-7 text-xs"
-          :disabled="!table.getCanNextPage()"
-          @click="table.nextPage()"
-          >次へ</Button
-        >
+          </TableBody>
+        </Table>
       </div>
-    </div>
+
+      <!-- ページネーション（API total 連動のサーバーサイド） -->
+      <div class="flex items-center justify-between text-xs text-muted-foreground">
+        <span>
+          {{ table.getFilteredSelectedRowModel().rows.length }} / {{ taskTotal }} 件選択
+        </span>
+        <div class="flex items-center gap-2">
+          <span>
+            {{ taskTotal === 0 ? 0 : pagination.pageIndex * pagination.pageSize + 1 }}–{{
+              Math.min((pagination.pageIndex + 1) * pagination.pageSize, taskTotal)
+            }}
+            / {{ taskTotal }} 件
+          </span>
+          <div class="flex gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              class="h-7 text-xs"
+              :disabled="!table.getCanPreviousPage()"
+              @click="table.previousPage()"
+              >前へ</Button
+            >
+            <Button
+              variant="outline"
+              size="sm"
+              class="h-7 text-xs"
+              :disabled="!table.getCanNextPage()"
+              @click="table.nextPage()"
+              >次へ</Button
+            >
+          </div>
+        </div>
+      </div>
+    </template>
   </div>
 </template>
