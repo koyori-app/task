@@ -259,6 +259,24 @@ function mockFetch() {
   return createMockFetch();
 }
 
+function storyDecorator(
+  context: { urlPathname: string; routeParams: Record<string, string> } = mockContext,
+) {
+  return () => ({
+    setup() {
+      const queryClient = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false, gcTime: 0, staleTime: 0 },
+          mutations: { retry: false },
+        },
+      });
+      provide(VUE_QUERY_CLIENT, queryClient);
+      provide(PAGE_CONTEXT_KEY, context);
+    },
+    template: '<story />',
+  });
+}
+
 const meta = {
   title: 'Pages/TaskTable',
   component: TaskTablePage,
@@ -268,25 +286,12 @@ const meta = {
     docs: {
       description: {
         component:
-          'プロジェクトタスク一覧の TanStack Table ビュー。fetch モックで全 API エンドポイントを差し替え。',
+          'プロジェクトタスク一覧の TanStack Table ビュー。fetch モックで全 API エンドポイントを差し替え。' +
+          ' ソート・タイトル絞り込みはクライアント側で現在ページ内の行のみ対象（サーバー側未対応）。',
       },
     },
   },
-  decorators: [
-    () => ({
-      setup() {
-        const queryClient = new QueryClient({
-          defaultOptions: {
-            queries: { retry: false, gcTime: 0, staleTime: 0 },
-            mutations: { retry: false },
-          },
-        });
-        provide(VUE_QUERY_CLIENT, queryClient);
-        provide(PAGE_CONTEXT_KEY, mockContext);
-      },
-      template: '<story />',
-    }),
-  ],
+  decorators: [storyDecorator()],
 } satisfies Meta<typeof TaskTablePage>;
 
 export default meta;
@@ -320,21 +325,9 @@ export const Empty: Story = {
 export const ProjectNotFound: Story = {
   name: 'プロジェクトなし',
   decorators: [
-    () => ({
-      setup() {
-        const queryClient = new QueryClient({
-          defaultOptions: {
-            queries: { retry: false, gcTime: 0, staleTime: 0 },
-            mutations: { retry: false },
-          },
-        });
-        provide(VUE_QUERY_CLIENT, queryClient);
-        provide(PAGE_CONTEXT_KEY, {
-          urlPathname: '/tenant-123/projects/UNKNOWN/tasks',
-          routeParams: { tenant: 'tenant-123', projectKey: 'UNKNOWN' },
-        });
-      },
-      template: '<story />',
+    storyDecorator({
+      urlPathname: '/tenant-123/projects/UNKNOWN/tasks',
+      routeParams: { tenant: 'tenant-123', projectKey: 'UNKNOWN' },
     }),
   ],
   beforeEach: mockFetch,

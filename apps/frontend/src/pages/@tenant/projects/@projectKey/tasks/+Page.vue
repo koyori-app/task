@@ -18,7 +18,7 @@ import {
 import { PhCaretDown, PhCaretUp, PhCaretUpDown } from '@phosphor-icons/vue';
 import { computed, h, ref, watch } from 'vue';
 import type { Column } from '@tanstack/vue-table';
-import { useQuery } from '@tanstack/vue-query';
+import { useQuery, keepPreviousData } from '@tanstack/vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
 
 import { valueUpdater } from '@/components/ui/table/utils';
@@ -144,6 +144,7 @@ const tasksQuery = useQuery({
     return data;
   },
   enabled: computed(() => !!tenantId.value && !!projectId.value),
+  placeholderData: keepPreviousData,
 });
 
 const taskTotal = computed(() => tasksQuery.data.value?.total ?? 0);
@@ -390,6 +391,7 @@ const table = useVueTable({
     return taskRows.value;
   },
   columns,
+  getRowId: (row) => row.id,
   getCoreRowModel: getCoreRowModel(),
   getSortedRowModel: getSortedRowModel(),
   getFilteredRowModel: getFilteredRowModel(),
@@ -441,7 +443,7 @@ const table = useVueTable({
     </div>
 
     <template v-else>
-      <!-- ツールバー -->
+      <!-- ツールバー（ソート・タイトル絞り込みは現在ページ内の行のみ対象。サーバー側未対応） -->
       <div class="flex items-center gap-2">
         <Input
           class="h-8 max-w-xs text-sm"
