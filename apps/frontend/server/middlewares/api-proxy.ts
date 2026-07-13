@@ -3,7 +3,7 @@ import { Elysia } from 'elysia';
 const API_BASE = process.env.API_BASE ?? 'http://localhost:3400';
 
 /** Align with backend UPLOAD_MAX_SIZE_MB default (100). */
-const MAX_PROXY_BODY_BYTES = 100 * 1024 * 1024;
+export const MAX_PROXY_BODY_BYTES = 100 * 1024 * 1024;
 
 const HOP_BY_HOP = new Set([
   'connection',
