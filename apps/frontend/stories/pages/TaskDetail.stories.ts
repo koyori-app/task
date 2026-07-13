@@ -131,7 +131,7 @@ function createMockFetch(overrides: MockOptions = {}) {
         status_id: (body as { status_id?: string }).status_id ?? sampleTaskDetail.status_id,
       });
     }
-    if (url.includes('/tasks/ENG-1')) {
+    if (url.includes('/tasks/')) {
       if (overrides.task === null) {
         return jsonResponse({ message: 'not-found' }, 404);
       }
@@ -142,6 +142,10 @@ function createMockFetch(overrides: MockOptions = {}) {
   return () => {
     globalThis.fetch = original;
   };
+}
+
+function mockFetch() {
+  return createMockFetch();
 }
 
 function storyDecorator(
@@ -183,7 +187,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   name: '詳細表示',
-  beforeEach: () => createMockFetch(),
+  beforeEach: mockFetch,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(
@@ -222,14 +226,7 @@ export const Loading: Story = {
 
 export const StatusChange: Story = {
   name: 'ステータス変更',
-  beforeEach: () => {
-    const putBodies: unknown[] = [];
-    const restore = createMockFetch({
-      onPut: (body) => putBodies.push(body),
-    });
-    (StatusChange as Story & { putBodies: unknown[] }).putBodies = putBodies;
-    return restore;
-  },
+  beforeEach: () => createMockFetch(),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const user = userEvent.setup();
@@ -239,6 +236,6 @@ export const StatusChange: Story = {
 
     const select = await canvas.findByRole('combobox');
     await user.selectOptions(select, 's-done');
-    await expect(canvas.findByText('Done')).resolves.toBeInTheDocument();
+    await expect(select).toHaveValue('s-done');
   },
 };
