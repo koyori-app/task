@@ -2,16 +2,14 @@
 import type { SidebarProps } from '@/components/ui/sidebar';
 import { useAuthSession } from '@/composables/useAuthSession';
 import { useAuthStore } from '@/stores/auth';
+import { useTenantStore, type Tenant } from '@/stores/tenant';
 import { usePageContext } from 'vike-vue/usePageContext';
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 
 import {
-  AudioWaveform,
   BookOpen,
   Bot,
-  Command,
   Frame,
-  GalleryVerticalEnd,
   ListTodo,
   Map,
   PieChart,
@@ -37,6 +35,7 @@ const props = withDefaults(defineProps<SidebarProps>(), {
 
 const pageContext = usePageContext();
 const authStore = useAuthStore();
+const tenantStore = useTenantStore();
 const { logout } = useAuthSession();
 
 const tenantSlug = computed(() => {
@@ -54,6 +53,16 @@ const labelsUrl = computed(() => {
   return '#';
 });
 
+onMounted(() => tenantStore.loadTenants(tenantSlug.value));
+
+function selectTenant(tenant: Tenant) {
+  tenantStore.selectTenant(tenant);
+  if (tenant.display_id !== tenantSlug.value) {
+    // Use a full navigation so tenant-scoped application state is reset.
+    window.location.assign(`/${tenant.display_id}/my-tasks`);
+  }
+}
+
 // This is sample data.
 const data = computed(() => ({
   user: {
@@ -61,23 +70,6 @@ const data = computed(() => ({
     email: authStore.user?.email ?? '',
     avatar: '/avatars/shadcn.jpg',
   },
-  teams: [
-    {
-      name: 'Acme Inc',
-      logo: GalleryVerticalEnd,
-      plan: 'Enterprise',
-    },
-    {
-      name: 'Acme Corp.',
-      logo: AudioWaveform,
-      plan: 'Startup',
-    },
-    {
-      name: 'Evil Corp.',
-      logo: Command,
-      plan: 'Free',
-    },
-  ],
   navMain: [
     {
       title: 'My Tasks',
@@ -199,7 +191,14 @@ const data = computed(() => ({
 <template>
   <Sidebar v-bind="props">
     <SidebarHeader>
-      <TenantSwitcher :tenants="data.teams" />
+      <TenantSwitcher
+        :tenants="tenantStore.tenants"
+        :selected-tenant-id="tenantStore.selectedTenantId"
+        :loading="tenantStore.isLoading"
+        :error="tenantStore.error"
+        @select="selectTenant"
+        @retry="tenantStore.loadTenants(tenantSlug)"
+      />
     </SidebarHeader>
     <SidebarContent>
       <NavMain :items="data.navMain" />
