@@ -87,6 +87,18 @@ describe('tenant store', () => {
     expect(store.error).toBeNull();
   });
 
+  it('does not fall back to another tenant when the route tenant does not exist', async () => {
+    vi.mocked(apiClient.GET).mockResolvedValue({ data: tenants, response: new Response() });
+    const store = useTenantStore();
+    store.selectTenant(tenants[0]);
+
+    await store.loadTenants('missing');
+
+    expect(store.tenants).toEqual(tenants);
+    expect(store.selectedTenantId).toBeNull();
+    expect(store.selectedTenant).toBeNull();
+  });
+
   it('does not issue another tenant request while one is already loading', async () => {
     let resolveRequest: ((value: { data: Tenant[]; response: Response }) => void) | undefined;
     vi.mocked(apiClient.GET).mockImplementation(

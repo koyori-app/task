@@ -34,10 +34,10 @@ const emit = defineEmits<{
 const { isMobile } = useSidebar();
 const createDialogOpen = ref(false);
 const activeTenant = computed(
-  () =>
-    props.tenants.find((tenant) => tenant.id === props.selectedTenantId) ??
-    props.tenants[0] ??
-    null,
+  () => props.tenants.find((tenant) => tenant.id === props.selectedTenantId) ?? null,
+);
+const tenantNotFound = computed(
+  () => !props.loading && !props.error && props.tenants.length > 0 && !activeTenant.value,
 );
 </script>
 
@@ -64,10 +64,18 @@ const activeTenant = computed(
             </div>
             <div class="grid flex-1 text-left text-sm leading-tight">
               <span class="truncate font-medium">
-                {{ loading ? 'テナントを読み込み中…' : (activeTenant?.name ?? '所属テナントなし') }}
+                {{
+                  loading
+                    ? 'テナントを読み込み中…'
+                    : tenantNotFound
+                      ? '指定されたテナントが見つかりません'
+                      : (activeTenant?.name ?? '所属テナントなし')
+                }}
               </span>
               <span class="truncate text-xs">{{
-                activeTenant?.display_id ?? '利用可能なテナントがありません'
+                tenantNotFound
+                  ? 'URLを確認してください'
+                  : (activeTenant?.display_id ?? '利用可能なテナントがありません')
               }}</span>
             </div>
             <PhCaretUpDown class="ml-auto" />

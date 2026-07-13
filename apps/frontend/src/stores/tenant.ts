@@ -31,11 +31,12 @@ export const useTenantStore = defineStore(
         if (response.error) throw response.error;
         tenants.value = Array.isArray(response.data) ? response.data : [];
 
-        const routeMatch = tenants.value.find(
-          (tenant) => tenant.display_id === routeTenant || tenant.id === routeTenant,
-        );
-        const persistedMatch = tenants.value.find((tenant) => tenant.id === selectedTenantId.value);
-        const nextTenant = routeMatch ?? persistedMatch ?? tenants.value[0];
+        const nextTenant = routeTenant
+          ? tenants.value.find(
+              (tenant) => tenant.display_id === routeTenant || tenant.id === routeTenant,
+            )
+          : (tenants.value.find((tenant) => tenant.id === selectedTenantId.value) ??
+            tenants.value[0]);
         selectedTenantId.value = nextTenant?.id ?? null;
       } catch (e) {
         console.error('loadTenants failed:', e);

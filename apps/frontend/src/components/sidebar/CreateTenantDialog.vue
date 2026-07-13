@@ -32,8 +32,10 @@ const slugify = (value: string) =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 50);
 
+const nonBlankName = type('string').narrow((name) => name.trim().length >= 1);
+
 const schema = type({
-  name: 'string >= 1',
+  name: nonBlankName,
   display_id: /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
   description: 'string',
   icon_url: 'string',
