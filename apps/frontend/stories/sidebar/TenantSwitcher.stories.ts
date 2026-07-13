@@ -132,11 +132,14 @@ export const SingleTenant: Story = {
 };
 
 export const MissingSelectionFallsBack: Story = {
+  name: 'Missing Selection Shows Not Found',
   render: renderWithStore({
     tenants: [primaryTenant, secondaryTenant],
     selectedTenantId: '00000000-0000-4000-8000-000000000099',
   }),
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('Acme')).toBeInTheDocument();
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText('指定されたテナントが見つかりません')).toBeInTheDocument();
+    await expect(canvas.queryByText('Acme')).not.toBeInTheDocument();
   },
 };
