@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   formatDeadline,
   formatTaskDate,
@@ -6,6 +6,14 @@ import {
   taskDetailHref,
   taskSeqKey,
 } from '../task-display';
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('taskSeqKey', () => {
   it('プロジェクトキーと連番から KEY-N を組み立てる', () => {
@@ -32,7 +40,34 @@ describe('formatTaskDate', () => {
 });
 
 describe('formatDeadline', () => {
-  it('期限超過を検出する', () => {
+  it('1時間前の期限は超過と判定する（時刻比較）', () => {
+    const now = new Date('2026-07-14T12:00:00');
+    vi.setSystemTime(now);
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+    const result = formatDeadline(oneHourAgo);
+    expect(result?.overdue).toBe(true);
+    expect(result?.label).toBe('今日');
+  });
+
+  it('1時間後の期限は未超過と判定する', () => {
+    const now = new Date('2026-07-14T12:00:00');
+    vi.setSystemTime(now);
+    const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000).toISOString();
+    const result = formatDeadline(oneHourLater);
+    expect(result?.overdue).toBe(false);
+    expect(result?.label).toBe('今日');
+  });
+
+  it('日付境界を跨ぐとカレンダー日で超過日数を表示する', () => {
+    const now = new Date('2026-07-14T12:00:00');
+    vi.setSystemTime(now);
+    const yesterday = new Date('2026-07-13T23:59:00').toISOString();
+    const result = formatDeadline(yesterday);
+    expect(result?.overdue).toBe(true);
+    expect(result?.label).toBe('1日超過');
+  });
+
+  it('遠い過去は超過を検出する', () => {
     const result = formatDeadline('2020-01-01T00:00:00Z');
     expect(result?.overdue).toBe(true);
   });

@@ -36,15 +36,29 @@ export function formatTaskDate(iso?: string | null): string | null {
   });
 }
 
+function startOfLocalDay(date: Date): Date {
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
 export function formatDeadline(iso?: string | null): { label: string; overdue: boolean } | null {
   if (!iso) return null;
   const d = new Date(iso);
   const now = new Date();
   const diff = d.getTime() - now.getTime();
-  const days = Math.ceil(diff / 86400000);
-  if (days < 0) return { label: `${Math.abs(days)}日超過`, overdue: true };
-  if (days === 0) return { label: '今日', overdue: false };
-  if (days <= 7) return { label: `${days}日後`, overdue: false };
+  const overdue = diff < 0;
+
+  const deadlineDay = startOfLocalDay(d);
+  const today = startOfLocalDay(now);
+  const calendarDays = Math.round((deadlineDay.getTime() - today.getTime()) / 86400000);
+
+  if (overdue) {
+    if (calendarDays === 0) return { label: '今日', overdue: true };
+    return { label: `${Math.abs(calendarDays)}日超過`, overdue: true };
+  }
+  if (calendarDays === 0) return { label: '今日', overdue: false };
+  if (calendarDays <= 7) return { label: `${calendarDays}日後`, overdue: false };
   return {
     label: d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' }),
     overdue: false,
