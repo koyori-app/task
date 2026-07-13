@@ -56,7 +56,7 @@ function rejectIfContentLengthTooLarge(request: Request): Response | null {
   return null;
 }
 
-function limitReadableStream(
+export function limitReadableStream(
   body: ReadableStream<Uint8Array>,
   maxBytes: number,
 ): ReadableStream<Uint8Array> {

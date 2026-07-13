@@ -2,7 +2,7 @@
 import { Elysia } from 'elysia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MAX_PROXY_BODY_BYTES, apiProxyPlugin } from '../api-proxy';
+import { MAX_PROXY_BODY_BYTES, apiProxyPlugin, limitReadableStream } from '../api-proxy';
 
 const app = new Elysia().use(apiProxyPlugin);
 
@@ -34,6 +34,30 @@ async function readStreamBody(body: ReadableStream<Uint8Array> | null): Promise<
   return merged;
 }
 
+describe('limitReadableStream', () => {
+  it('cancels the source reader when streamed bytes exceed the configured max', async () => {
+    let sourceCancelCalled = false;
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(64));
+      },
+      cancel() {
+        sourceCancelCalled = true;
+      },
+    });
+
+    const limited = limitReadableStream(source, 96);
+    const reader = limited.getReader();
+
+    await expect(reader.read()).resolves.toEqual({
+      done: false,
+      value: new Uint8Array(64),
+    });
+    await expect(reader.read()).rejects.toThrow('Payload Too Large');
+    expect(sourceCancelCalled).toBe(true);
+  });
+});
+
 describe('apiProxyPlugin', () => {
   const fetchMock = vi.fn<typeof fetch>();
 
@@ -63,13 +87,12 @@ describe('apiProxyPlugin', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('returns 413 and cancels the source stream when chunked body exceeds MAX_PROXY_BODY_BYTES', async () => {
-    let readerCancelCalled = false;
+  it('returns 413 when chunked body exceeds MAX_PROXY_BODY_BYTES without Content-Length', async () => {
     const totalBytes = MAX_PROXY_BODY_BYTES + 1;
     const chunkSize = 64 * 1024;
     let sent = 0;
 
-    const trackedBody = new ReadableStream({
+    const oversizedBody = new ReadableStream({
       pull(controller) {
         if (sent >= totalBytes) {
           controller.close();
@@ -82,19 +105,6 @@ describe('apiProxyPlugin', () => {
       },
     });
 
-    const originalGetReader = ReadableStream.prototype.getReader.bind(ReadableStream.prototype);
-    vi.spyOn(trackedBody, 'getReader').mockImplementation(
-      function (this: ReadableStream<Uint8Array>) {
-        const reader = originalGetReader.call(this);
-        const originalCancel = reader.cancel.bind(reader);
-        reader.cancel = async (...args: [] | [reason?: unknown]) => {
-          readerCancelCalled = true;
-          return originalCancel(...(args as [reason?: unknown]));
-        };
-        return reader;
-      },
-    );
-
     fetchMock.mockImplementation(async (_url, init) => {
       await readStreamBody(init?.body as ReadableStream<Uint8Array> | null);
       return new Response('ok', { status: 200 });
@@ -104,7 +114,7 @@ describe('apiProxyPlugin', () => {
       new Request('http://localhost/api/v1/upload', {
         method: 'POST',
         headers: { 'content-type': 'application/octet-stream' },
-        body: trackedBody,
+        body: oversizedBody,
         // @ts-expect-error Node fetch requires duplex when streaming a request body
         duplex: 'half',
       }),
@@ -112,7 +122,6 @@ describe('apiProxyPlugin', () => {
 
     expect(response.status).toBe(413);
     expect(await response.text()).toBe('Payload Too Large');
-    expect(readerCancelCalled).toBe(true);
   });
 
   it('forwards an under-limit streamed body to the backend unchanged', async () => {
