@@ -4,7 +4,7 @@ import { apiClient } from '@/lib/api';
 import { useTenantStore, type Tenant } from '@/stores/tenant';
 
 vi.mock('@/lib/api', () => ({
-  apiClient: { GET: vi.fn() },
+  apiClient: { GET: vi.fn(), POST: vi.fn() },
 }));
 
 const tenants: Tenant[] = [
@@ -32,6 +32,35 @@ describe('tenant store', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.mocked(apiClient.GET).mockReset();
+    vi.mocked(apiClient.POST).mockReset();
+  });
+
+  it('creates a tenant, refetches the list, and selects the new tenant', async () => {
+    vi.mocked(apiClient.POST).mockResolvedValue({
+      data: tenants[1],
+      response: new Response(null, { status: 201 }),
+    });
+    vi.mocked(apiClient.GET).mockResolvedValue({ data: tenants, response: new Response() });
+    const store = useTenantStore();
+
+    await store.createTenant({ name: 'Beta', display_id: 'beta' });
+
+    expect(apiClient.POST).toHaveBeenCalledWith('/v1/tenants', {
+      body: { name: 'Beta', display_id: 'beta' },
+    });
+    expect(store.selectedTenantId).toBe('tenant-2');
+  });
+
+  it('surfaces a display id conflict', async () => {
+    vi.mocked(apiClient.POST).mockResolvedValue({
+      error: { message: 'conflict' },
+      response: new Response(null, { status: 409 }),
+    });
+    const store = useTenantStore();
+
+    await expect(store.createTenant({ name: 'Alpha', display_id: 'alpha' })).rejects.toThrow(
+      'この表示IDはすでに使用されています',
+    );
   });
 
   it('loads /v1/tenants and selects the tenant from the route', async () => {

@@ -4,6 +4,7 @@ import type { components } from '@/generated/api';
 import { apiClient } from '@/lib/api';
 
 export type Tenant = components['schemas']['TenantResponse'];
+export type CreateTenantInput = components['schemas']['CreateTenantRequest'];
 
 export const useTenantStore = defineStore(
   'tenant',
@@ -45,6 +46,19 @@ export const useTenantStore = defineStore(
       }
     }
 
+    async function createTenant(input: CreateTenantInput) {
+      const response = await apiClient.POST('/v1/tenants', { body: input });
+      if (response.error || !response.data) {
+        if (response.response.status === 409) {
+          throw new Error('この表示IDはすでに使用されています');
+        }
+        throw new Error('テナントを作成できませんでした');
+      }
+
+      await loadTenants(response.data.display_id);
+      return response.data;
+    }
+
     return {
       tenants,
       selectedTenantId,
@@ -53,6 +67,7 @@ export const useTenantStore = defineStore(
       error,
       selectTenant,
       loadTenants,
+      createTenant,
     };
   },
   { persist: { pick: ['selectedTenantId'] } },

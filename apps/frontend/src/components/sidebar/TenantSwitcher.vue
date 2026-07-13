@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { PhBuildings, PhCaretUpDown, PhPlus, PhWarningCircle } from '@phosphor-icons/vue';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+import CreateTenantDialog from './CreateTenantDialog.vue';
 import type { Tenant } from '@/stores/tenant';
 import {
   DropdownMenu,
@@ -31,6 +32,7 @@ const emit = defineEmits<{
 }>();
 
 const { isMobile } = useSidebar();
+const createDialogOpen = ref(false);
 const activeTenant = computed(
   () =>
     props.tenants.find((tenant) => tenant.id === props.selectedTenantId) ??
@@ -103,8 +105,7 @@ const activeTenant = computed(
             {{ tenant.name }}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <!-- TODO: Enable when the tenant creation flow is implemented. -->
-          <DropdownMenuItem disabled class="gap-2 p-2">
+          <DropdownMenuItem class="gap-2 p-2" @select="createDialogOpen = true">
             <div class="flex size-6 items-center justify-center rounded-md border bg-transparent">
               <PhPlus class="size-4" />
             </div>
@@ -114,4 +115,5 @@ const activeTenant = computed(
       </DropdownMenu>
     </SidebarMenuItem>
   </SidebarMenu>
+  <CreateTenantDialog v-model:open="createDialogOpen" />
 </template>
