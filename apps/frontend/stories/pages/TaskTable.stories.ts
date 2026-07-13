@@ -384,6 +384,21 @@ function createProjectSwitchMockFetch(): ProjectSwitchMock {
 let reactivePageContext: ReturnType<typeof reactive<typeof mockContext>> | null = null;
 let projectSwitchMock: ProjectSwitchMock | null = null;
 
+let locationAssignSpy: ReturnType<typeof fn>;
+let originalLocationAssign: Location['assign'];
+
+const stubLocationAssign = () => {
+  locationAssignSpy = fn();
+  originalLocationAssign = Location.prototype.assign;
+  Location.prototype.assign = function (url: string | URL) {
+    locationAssignSpy(url);
+  };
+};
+
+const restoreLocationAssign = () => {
+  Location.prototype.assign = originalLocationAssign;
+};
+
 function storyDecoratorReactive() {
   return () => ({
     setup() {
@@ -551,5 +566,36 @@ export const ProjectSwitch: Story = {
     projectSwitchMock.releaseMktTasks();
     await expect(canvas.findByText('SNSキャンペーン企画')).resolves.toBeInTheDocument();
     expect(canvas.queryByText(engTitle)).not.toBeInTheDocument();
+  },
+};
+
+export const RowKeyboardNavigation: Story = {
+  name: '行キーボード操作（子コントロール除外）',
+  beforeEach() {
+    const restoreFetch = mockFetch();
+    stubLocationAssign();
+    return () => {
+      restoreFetch();
+      restoreLocationAssign();
+    };
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
+
+    const titleCell = await canvas.findByText('OAuth 対応を実装する');
+    const taskRow = titleCell.closest('[role="button"]');
+    if (!(taskRow instanceof HTMLElement)) {
+      throw new Error('task row not found');
+    }
+    const rowCheckbox = taskRow.querySelector('[role="checkbox"]');
+    if (!(rowCheckbox instanceof HTMLElement)) {
+      throw new Error('row checkbox not found');
+    }
+    rowCheckbox.focus();
+    locationAssignSpy.mockClear();
+    rowCheckbox.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    expect(locationAssignSpy).not.toHaveBeenCalled();
   },
 };

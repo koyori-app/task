@@ -43,6 +43,7 @@ import AvatarGroup from '@/components/AvatarGroup.vue';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { fetchClient } from '@/lib/api-vue-query';
 import { formatDeadline, taskDetailHref } from '@/lib/task-display';
+import { handleRowKeydownNavigate, isRowInteractiveTarget } from '@/lib/table-row-navigation';
 import type { components } from '@/generated/api';
 
 // ---- 定数 ----
@@ -284,15 +285,11 @@ function navigateToTask(task: TaskRow) {
 }
 
 function onRowKeydown(task: TaskRow, event: KeyboardEvent) {
-  if (event.key === 'Enter' || event.key === ' ') {
-    event.preventDefault();
-    navigateToTask(task);
-  }
+  handleRowKeydownNavigate(event, () => navigateToTask(task));
 }
 
 function onRowClick(task: TaskRow, event: MouseEvent) {
-  const target = event.target as HTMLElement;
-  if (target.closest('button, a, input, [role="checkbox"]')) return;
+  if (isRowInteractiveTarget(event)) return;
   navigateToTask(task);
 }
 
