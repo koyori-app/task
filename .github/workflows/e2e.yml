@@ -54,6 +54,7 @@ jobs:
     env:
       RUSTC_WRAPPER: sccache
       SCCACHE_GHA_ENABLED: 'true'
+      CARGO_INCREMENTAL: '0'
 
     steps:
       - name: Checkout
@@ -73,17 +74,22 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          workspaces: apps/backend -> target
+          workspaces: |
+            apps/backend -> target
+            apps/backend/migration -> target
 
       - name: Build backend
-        run: cargo build --bin backend
+        run: cargo build --release --bin backend
         working-directory: apps/backend
         env:
           SQLX_OFFLINE: 'true'
 
       - name: Build migration CLI
-        run: cargo build
+        run: cargo build --release
         working-directory: apps/backend/migration
+
+      - name: sccache stats (post-build)
+        run: sccache --show-stats
 
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
@@ -128,8 +134,8 @@ jobs:
         working-directory: e2e
         env:
           CI: 'true'
-          BACKEND_BIN: ${{ github.workspace }}/apps/backend/target/debug/backend
-          MIGRATION_BIN: ${{ github.workspace }}/apps/backend/migration/target/debug/migration
+          BACKEND_BIN: ${{ github.workspace }}/apps/backend/target/release/backend
+          MIGRATION_BIN: ${{ github.workspace }}/apps/backend/migration/target/release/migration
           E2E_DATABASE_URL: postgresql://test:test@localhost:5432/task_e2e
           E2E_REDIS_URL: redis://localhost:6379
 
