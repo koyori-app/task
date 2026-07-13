@@ -100,9 +100,10 @@ export const Loading: Story = {
 export const NoMemberships: Story = {
   render: renderWithStore({ tenants: [], selectedTenantId: null }),
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await expect(canvas.getByText('所属テナントなし')).toBeInTheDocument();
-    await expect(canvas.getByRole('button')).toBeDisabled();
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(page.getByRole('button', { name: /所属テナントなし/ }));
+    await expect(await page.findByText('所属テナントがありません')).toBeInTheDocument();
+    await expect(page.getByText('Add tenant')).toBeInTheDocument();
   },
 };
 
