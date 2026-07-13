@@ -1,0 +1,52 @@
+import type { LucideIcon } from '@lucide/vue';
+import { Signal, SignalHigh, SignalLow, SignalMedium } from '@lucide/vue';
+import type { components } from '@/generated/api';
+
+export type ApiPriority = components['schemas']['TaskPriority'];
+
+export const PRIORITY_CONFIG: Record<
+  ApiPriority,
+  { label: string; color: string; icon: LucideIcon }
+> = {
+  CriticalFire: { label: '緊急', color: '#dc2626', icon: Signal },
+  Critical: { label: '重大', color: '#ef4444', icon: Signal },
+  High: { label: '高', color: '#f97316', icon: SignalHigh },
+  Medium: { label: '中', color: '#eab308', icon: SignalMedium },
+  Low: { label: '低', color: '#6b7280', icon: SignalLow },
+  Trivial: { label: '些細', color: '#9ca3af', icon: SignalLow },
+};
+
+export function taskSeqKey(projectKey: string, seqId: number): string {
+  return `${projectKey}-${seqId}`;
+}
+
+export function taskDetailHref(tenant: string, projectKey: string, seqId: number): string {
+  return `/${tenant}/projects/${projectKey}/tasks/${taskSeqKey(projectKey, seqId)}`;
+}
+
+export function formatTaskDate(iso?: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return d.toLocaleDateString('ja-JP', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+export function formatDeadline(iso?: string | null): { label: string; overdue: boolean } | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = d.getTime() - now.getTime();
+  const days = Math.ceil(diff / 86400000);
+  if (days < 0) return { label: `${Math.abs(days)}日超過`, overdue: true };
+  if (days === 0) return { label: '今日', overdue: false };
+  if (days <= 7) return { label: `${days}日後`, overdue: false };
+  return {
+    label: d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' }),
+    overdue: false,
+  };
+}

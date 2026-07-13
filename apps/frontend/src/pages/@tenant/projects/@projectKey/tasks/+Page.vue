@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/table';
 import AvatarGroup from '@/components/AvatarGroup.vue';
 import { fetchClient } from '@/lib/api-vue-query';
+import { taskDetailHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 
 // ---- 定数 ----
@@ -264,6 +265,16 @@ function taskKey(task: TaskRow) {
   return `${task.project_key}-${task.seq_id}`;
 }
 
+function navigateToTask(task: TaskRow) {
+  window.location.href = taskDetailHref(tenantId.value, projectKey.value, task.seq_id);
+}
+
+function onRowClick(task: TaskRow, event: MouseEvent) {
+  const target = event.target as HTMLElement;
+  if (target.closest('button, a, input, [role="checkbox"]')) return;
+  navigateToTask(task);
+}
+
 function formatDate(iso?: string) {
   if (!iso) return null;
   const d = new Date(iso);
@@ -317,9 +328,18 @@ const columns: ColumnDef<TaskRow>[] = [
     cell: ({ row }) => {
       const task = row.original;
       const pc = PRIORITY_CONFIG[task.priority];
+      const href = taskDetailHref(tenantId.value, projectKey.value, task.seq_id);
       return h('div', { class: 'flex items-center gap-2 min-w-0' }, [
         h(pc.icon, { class: 'size-4 shrink-0', style: { color: pc.color } }),
-        h('span', { class: 'truncate text-sm' }, task.title),
+        h(
+          'a',
+          {
+            href,
+            class: 'truncate text-sm text-primary hover:underline',
+            onClick: (e: MouseEvent) => e.stopPropagation(),
+          },
+          task.title,
+        ),
       ]);
     },
   },
@@ -505,7 +525,8 @@ const table = useVueTable({
                 v-for="row in table.getRowModel().rows"
                 :key="row.id"
                 :data-state="row.getIsSelected() && 'selected'"
-                class="h-10"
+                class="h-10 cursor-pointer"
+                @click="onRowClick(row.original, $event)"
               >
                 <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id" class="py-1.5 px-3">
                   <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
