@@ -4798,8 +4798,8 @@
               }
             }
           },
-          "404": {
-            "description": "リソースが見つかりません",
+          "409": {
+            "description": "指定した表示IDはすでに使用されています",
             "content": {
               "application/json": {
                 "schema": {
