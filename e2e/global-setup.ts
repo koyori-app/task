@@ -128,6 +128,7 @@ export async function signInViaUi(
 ) {
   await expect(async () => {
     await page.goto('/signin');
+    await waitForClientHydration(page);
     await typeIntoFormField(page, '#email', email);
     await typeIntoFormField(page, '#password', password);
 
