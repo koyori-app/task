@@ -1,4 +1,5 @@
 name: E2E Tests
+# cache verification run 2 — same branch re-run after rust-cache warm-up
 
 on:
   push:
