@@ -58,6 +58,7 @@ onMounted(() => tenantStore.loadTenants(tenantSlug.value));
 function selectTenant(tenant: Tenant) {
   tenantStore.selectTenant(tenant);
   if (tenant.display_id !== tenantSlug.value) {
+    // Use a full navigation so tenant-scoped application state is reset.
     window.location.assign(`/${tenant.display_id}/my-tasks`);
   }
 }

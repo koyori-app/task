@@ -27,8 +27,7 @@ export const useTenantStore = defineStore(
       try {
         const response = await apiClient.GET('/v1/tenants');
         if (response.error) throw response.error;
-        const payload: unknown = response.data;
-        tenants.value = Array.isArray(payload) ? (payload as Tenant[]) : [];
+        tenants.value = Array.isArray(response.data) ? response.data : [];
 
         const routeMatch = tenants.value.find(
           (tenant) => tenant.display_id === routeTenant || tenant.id === routeTenant,
@@ -36,7 +35,8 @@ export const useTenantStore = defineStore(
         const persistedMatch = tenants.value.find((tenant) => tenant.id === selectedTenantId.value);
         const nextTenant = routeMatch ?? persistedMatch ?? tenants.value[0];
         selectedTenantId.value = nextTenant?.id ?? null;
-      } catch {
+      } catch (e) {
+        console.error('loadTenants failed:', e);
         tenants.value = [];
         selectedTenantId.value = null;
         error.value = 'テナント一覧を取得できませんでした';

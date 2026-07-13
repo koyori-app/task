@@ -103,7 +103,8 @@ const activeTenant = computed(
             {{ tenant.name }}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem class="gap-2 p-2">
+          <!-- TODO: Enable when the tenant creation flow is implemented. -->
+          <DropdownMenuItem disabled class="gap-2 p-2">
             <div class="flex size-6 items-center justify-center rounded-md border bg-transparent">
               <PhPlus class="size-4" />
             </div>
