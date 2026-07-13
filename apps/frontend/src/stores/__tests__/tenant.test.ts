@@ -1,6 +1,5 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { operations } from '@/generated/api';
 import { apiClient } from '@/lib/api';
 import { useTenantStore, type Tenant } from '@/stores/tenant';
 
@@ -29,10 +28,6 @@ const tenants: Tenant[] = [
   },
 ];
 
-const tenantConflict = {
-  message: 'conflict',
-} satisfies operations['create_tenant']['responses'][409]['content']['application/json'];
-
 describe('tenant store', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -40,31 +35,43 @@ describe('tenant store', () => {
     vi.mocked(apiClient.POST).mockReset();
   });
 
-  it('creates a tenant, refetches the list, and selects the new tenant', async () => {
+  it('creates a tenant without refetching the list before navigation', async () => {
     vi.mocked(apiClient.POST).mockResolvedValue({
       data: tenants[1],
       response: new Response(null, { status: 201 }),
     });
-    vi.mocked(apiClient.GET).mockResolvedValue({ data: tenants, response: new Response() });
     const store = useTenantStore();
 
-    await store.createTenant({ name: 'Beta', display_id: 'beta' });
+    const tenant = await store.createTenant({ name: 'Beta', display_id: 'beta' });
 
     expect(apiClient.POST).toHaveBeenCalledWith('/v1/tenants', {
       body: { name: 'Beta', display_id: 'beta' },
     });
-    expect(store.selectedTenantId).toBe('tenant-2');
+    expect(apiClient.GET).not.toHaveBeenCalled();
+    expect(tenant).toEqual(tenants[1]);
   });
 
-  it('surfaces a display id conflict', async () => {
+  it('surfaces a display id conflict based on the 409 response status', async () => {
     vi.mocked(apiClient.POST).mockResolvedValue({
-      error: tenantConflict,
+      error: { message: 'backend wording may change' },
       response: new Response(null, { status: 409 }),
     });
     const store = useTenantStore();
 
     await expect(store.createTenant({ name: 'Alpha', display_id: 'alpha' })).rejects.toThrow(
       'この表示IDはすでに使用されています',
+    );
+  });
+
+  it('does not treat an internal conflict message as a duplicate without a 409 status', async () => {
+    vi.mocked(apiClient.POST).mockResolvedValue({
+      error: { message: 'conflict' },
+      response: new Response(null, { status: 500 }),
+    });
+    const store = useTenantStore();
+
+    await expect(store.createTenant({ name: 'Alpha', display_id: 'alpha' })).rejects.toThrow(
+      'テナントを作成できませんでした',
     );
   });
 
