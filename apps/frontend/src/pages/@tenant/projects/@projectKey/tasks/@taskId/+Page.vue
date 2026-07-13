@@ -21,6 +21,7 @@ const {
   tenantId,
   isTenantNotFound,
   isResolving: isTenantResolving,
+  isError: isTenantResolveError,
 } = useResolvedTenantId(tenantDisplayId);
 const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
 const taskId = computed(() => String(pageContext.routeParams.taskId ?? ''));
@@ -192,7 +193,11 @@ const isLoading = computed(
 );
 
 const isError = computed(
-  () => projectsQuery.isError.value || taskQuery.isError.value || statusesQuery.isError.value,
+  () =>
+    isTenantResolveError.value ||
+    projectsQuery.isError.value ||
+    taskQuery.isError.value ||
+    statusesQuery.isError.value,
 );
 
 const isNotFound = computed(

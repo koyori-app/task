@@ -80,6 +80,7 @@ const {
   tenantId,
   isTenantNotFound,
   isResolving: isTenantResolving,
+  isError: isTenantResolveError,
 } = useResolvedTenantId(tenantDisplayId);
 const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
 
@@ -228,7 +229,11 @@ const isInitialLoading = computed(
 );
 
 const isError = computed(
-  () => projectsQuery.isError.value || tasksQuery.isError.value || statusesQuery.isError.value,
+  () =>
+    isTenantResolveError.value ||
+    projectsQuery.isError.value ||
+    tasksQuery.isError.value ||
+    statusesQuery.isError.value,
 );
 
 // ---- ヘルパー ----

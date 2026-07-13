@@ -34,9 +34,9 @@ const isListTenantsUrl = (url: string) => {
   }
 };
 
-const jsonResponse = (data: unknown) =>
+const jsonResponse = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
-    status: 200,
+    status,
     headers: { 'Content-Type': 'application/json' },
   });
 
@@ -253,6 +253,7 @@ function createMockFetch(
     statuses?: typeof sampleStatuses;
     tasks?: { tasks: unknown[]; total: number };
     rejectAll?: boolean;
+    rejectTenantsList?: boolean;
     hang?: boolean;
   } = {},
 ) {
@@ -260,6 +261,9 @@ function createMockFetch(
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
     const url = typeof req === 'string' ? req : req.url;
     if (isListTenantsUrl(url)) {
+      if (overrides.rejectTenantsList) {
+        return jsonResponse({ message: 'server error' }, 500);
+      }
       return jsonResponse(sampleTenants(mockContext.routeParams.tenant));
     }
     if (overrides.rejectAll) {
@@ -481,6 +485,16 @@ export const ApiError: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByText('タスクの読み込みに失敗しました')).resolves.toBeInTheDocument();
+  },
+};
+
+export const TenantResolveError: Story = {
+  name: 'テナント解決エラー',
+  beforeEach: () => createMockFetch({ rejectTenantsList: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('タスクの読み込みに失敗しました')).resolves.toBeInTheDocument();
+    expect(canvas.queryByText('タスクが見つかりません')).toBeNull();
   },
 };
 

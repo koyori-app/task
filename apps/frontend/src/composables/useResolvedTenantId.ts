@@ -37,11 +37,16 @@ export function useResolvedTenantId(tenantDisplayId: MaybeRefOrGetter<string>) {
 
   const isResolving = computed(() => tenantsQuery.isLoading.value);
 
+  const isError = computed(() => tenantsQuery.isError.value);
+  const error = computed(() => tenantsQuery.error.value);
+
   return {
     tenantDisplayId: displayId,
     tenantId,
     isTenantNotFound,
     isResolving,
+    isError,
+    error,
     tenantsQuery,
   };
 }

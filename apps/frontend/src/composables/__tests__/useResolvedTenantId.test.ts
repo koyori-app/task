@@ -67,5 +67,17 @@ describe('useResolvedTenantId', () => {
     await flush();
     expect(get().tenantId.value).toBeNull();
     expect(get().isTenantNotFound.value).toBe(true);
+    expect(get().isError.value).toBe(false);
+  });
+
+  it('GET /v1/tenants 失敗時は isError を立てる', async () => {
+    getMock.mockImplementation(async () => {
+      throw { status: 500, message: 'server error' };
+    });
+    const { get, flush } = mountComposable('acme');
+    await flush();
+    expect(get().tenantId.value).toBeNull();
+    expect(get().isTenantNotFound.value).toBe(false);
+    expect(get().isError.value).toBe(true);
   });
 });
