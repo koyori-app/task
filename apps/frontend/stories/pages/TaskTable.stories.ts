@@ -11,6 +11,29 @@ const mockContext = {
   routeParams: { tenant: 'tenant-123', projectKey: 'ENG' },
 };
 
+const TENANT_UUID = '11111111-1111-1111-1111-111111111111';
+
+const sampleTenants = (displayId: string) => [
+  {
+    id: TENANT_UUID,
+    display_id: displayId,
+    name: 'テストテナント',
+    description: '',
+    icon_url: '',
+    owner_id: '00000000-0000-0000-0000-000000000002',
+    require_2fa: false,
+  },
+];
+
+const isListTenantsUrl = (url: string) => {
+  try {
+    const pathname = new URL(url, 'http://localhost').pathname;
+    return /\/v1\/tenants\/?$/.test(pathname);
+  } catch {
+    return /\/v1\/tenants\/?(?:\?|$)/.test(url) && !/\/v1\/tenants\/[^/?]/.test(url);
+  }
+};
+
 const jsonResponse = (data: unknown) =>
   new Response(JSON.stringify(data), {
     status: 200,
@@ -235,13 +258,16 @@ function createMockFetch(
 ) {
   const original = globalThis.fetch;
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
+    const url = typeof req === 'string' ? req : req.url;
+    if (isListTenantsUrl(url)) {
+      return jsonResponse(sampleTenants(mockContext.routeParams.tenant));
+    }
     if (overrides.rejectAll) {
       throw new TypeError('Failed to fetch');
     }
     if (overrides.hang) {
       return new Promise(() => {});
     }
-    const url = typeof req === 'string' ? req : req.url;
     if (
       url.includes('/v1/tenants/') &&
       url.includes('/projects') &&
@@ -316,6 +342,9 @@ function createProjectSwitchMockFetch(): ProjectSwitchMock {
 
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
     const url = typeof req === 'string' ? req : req.url;
+    if (isListTenantsUrl(url)) {
+      return jsonResponse(sampleTenants(mockContext.routeParams.tenant));
+    }
     if (
       url.includes('/v1/tenants/') &&
       url.includes('/projects') &&
