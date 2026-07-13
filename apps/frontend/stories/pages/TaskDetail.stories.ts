@@ -123,6 +123,7 @@ type MockOptions = {
   task?: typeof sampleTaskDetail | null;
   rejectAll?: boolean;
   rejectTenantsList?: boolean;
+  rejectPut?: number;
   hang?: boolean;
   onPut?: (body: unknown) => void;
 };
@@ -153,6 +154,9 @@ function createMockFetch(overrides: MockOptions = {}) {
       return jsonResponse(sampleStatuses);
     }
     if (method === 'PUT' && url.includes('/tasks/')) {
+      if (overrides.rejectPut) {
+        return jsonResponse({ message: 'update failed' }, overrides.rejectPut);
+      }
       const body = await req.json();
       overrides.onPut?.(body);
       return jsonResponse({
@@ -273,8 +277,44 @@ export const StatusChange: Story = {
       canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).resolves.toBeInTheDocument();
 
-    const select = await canvas.findByRole('combobox');
+    const select = await canvas.findByRole('combobox', { name: 'ステータス' });
     await user.selectOptions(select, 's-done');
     await expect(select).toHaveValue('s-done');
+  },
+};
+
+export const StatusChangeFailure500: Story = {
+  name: 'ステータス変更失敗（500）',
+  beforeEach: () => createMockFetch({ rejectPut: 500 }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).resolves.toBeInTheDocument();
+
+    const select = await canvas.findByRole('combobox', { name: 'ステータス' });
+    await expect(select).toHaveValue('s-progress');
+    await user.selectOptions(select, 's-done');
+    await expect(canvas.findByText('ステータスの更新に失敗しました')).resolves.toBeInTheDocument();
+    await expect(select).toHaveValue('s-progress');
+  },
+};
+
+export const StatusChangeFailure413: Story = {
+  name: 'ステータス変更失敗（413）',
+  beforeEach: () => createMockFetch({ rejectPut: 413 }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).resolves.toBeInTheDocument();
+
+    const select = await canvas.findByRole('combobox', { name: 'ステータス' });
+    await expect(select).toHaveValue('s-progress');
+    await user.selectOptions(select, 's-done');
+    await expect(canvas.findByText('ステータスの更新に失敗しました')).resolves.toBeInTheDocument();
+    await expect(select).toHaveValue('s-progress');
   },
 };

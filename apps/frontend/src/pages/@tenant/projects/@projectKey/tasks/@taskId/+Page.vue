@@ -90,12 +90,6 @@ const taskQuery = useQuery({
     return data;
   },
   enabled: computed(() => !!tenantId.value && !!projectId.value && !!taskId.value),
-  retry: (failureCount, error) => {
-    if (error && typeof error === 'object' && 'status' in error && error.status === 404) {
-      return false;
-    }
-    return failureCount < 1;
-  },
 });
 
 const statusesQuery = useQuery({
@@ -154,11 +148,10 @@ const updateStatusMutation = apiClient.useMutation('put', GET_TASK_PATH, {
   },
 });
 
-async function onStatusChange(nextStatusId: string) {
+function onStatusChange(nextStatusId: string) {
   if (!tenantId.value || !projectId.value || !taskId.value) return;
   if (nextStatusId === taskQuery.data.value?.status_id) return;
 
-  const previous = selectedStatusId.value;
   selectedStatusId.value = nextStatusId;
   statusError.value = null;
 
@@ -166,20 +159,16 @@ async function onStatusChange(nextStatusId: string) {
     status_id: nextStatusId,
   };
 
-  try {
-    await updateStatusMutation.mutateAsync({
-      params: {
-        path: {
-          tenant_id: tenantId.value,
-          project_id: projectId.value,
-          id: taskId.value,
-        },
+  updateStatusMutation.mutate({
+    params: {
+      path: {
+        tenant_id: tenantId.value,
+        project_id: projectId.value,
+        id: taskId.value,
       },
-      body,
-    });
-  } catch {
-    selectedStatusId.value = previous;
-  }
+    },
+    body,
+  });
 }
 
 const listHref = computed(() => `/${tenantDisplayId.value}/projects/${projectKey.value}/tasks`);

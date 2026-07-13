@@ -2,8 +2,10 @@ import { computed, type MaybeRefOrGetter, toValue } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 
 import { fetchClient } from '@/lib/api-vue-query';
+import type { components } from '@/generated/api';
 
 const LIST_TENANTS_PATH = '/v1/tenants' as const;
+type TenantResponse = components['schemas']['TenantResponse'];
 
 /** Route param (display_id) を GET /v1/tenants で UUID に解決する。 */
 export function useResolvedTenantId(tenantDisplayId: MaybeRefOrGetter<string>) {
@@ -14,7 +16,8 @@ export function useResolvedTenantId(tenantDisplayId: MaybeRefOrGetter<string>) {
     queryFn: async ({ signal }) => {
       const { data, error } = await fetchClient.GET(LIST_TENANTS_PATH, { signal });
       if (error) throw error;
-      return data;
+      if (!data) return [] as TenantResponse[];
+      return (Array.isArray(data) ? data : data.tenants) as TenantResponse[];
     },
     enabled: computed(() => !!displayId.value),
     staleTime: 60_000,
@@ -23,8 +26,7 @@ export function useResolvedTenantId(tenantDisplayId: MaybeRefOrGetter<string>) {
   const tenantId = computed(() => {
     const data = tenantsQuery.data.value;
     if (!data || !displayId.value) return null;
-    const tenants = Array.isArray(data) ? data : data.tenants;
-    return tenants.find((t) => t.display_id === displayId.value)?.id ?? null;
+    return data.find((t) => t.display_id === displayId.value)?.id ?? null;
   });
 
   const isTenantNotFound = computed(

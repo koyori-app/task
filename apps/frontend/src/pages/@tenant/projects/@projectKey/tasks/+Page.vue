@@ -280,7 +280,14 @@ function taskKey(task: TaskRow) {
 }
 
 function navigateToTask(task: TaskRow) {
-  window.location.href = taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id);
+  window.location.assign(taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id));
+}
+
+function onRowKeydown(task: TaskRow, event: KeyboardEvent) {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    navigateToTask(task);
+  }
 }
 
 function onRowClick(task: TaskRow, event: MouseEvent) {
@@ -536,7 +543,10 @@ const table = useVueTable({
                 :key="row.id"
                 :data-state="row.getIsSelected() && 'selected'"
                 class="h-10 cursor-pointer"
+                role="button"
+                tabindex="0"
                 @click="onRowClick(row.original, $event)"
+                @keydown="onRowKeydown(row.original, $event)"
               >
                 <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id" class="py-1.5 px-3">
                   <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />

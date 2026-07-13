@@ -72,6 +72,7 @@ function resolveStatus(statusId: string) {
           <section class="rounded-lg border p-4">
             <h2 class="mb-3 text-sm font-medium text-muted-foreground">ステータス</h2>
             <select
+              aria-label="ステータス"
               class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
               :value="statusId"
               :disabled="statusUpdating"
