@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { operations } from '@/generated/api';
 import { apiClient } from '@/lib/api';
 import { useTenantStore, type Tenant } from '@/stores/tenant';
 
@@ -28,6 +29,10 @@ const tenants: Tenant[] = [
   },
 ];
 
+const tenantConflict = {
+  message: 'conflict',
+} satisfies operations['create_tenant']['responses'][409]['content']['application/json'];
+
 describe('tenant store', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -53,7 +58,7 @@ describe('tenant store', () => {
 
   it('surfaces a display id conflict', async () => {
     vi.mocked(apiClient.POST).mockResolvedValue({
-      error: { message: 'conflict' },
+      error: tenantConflict,
       response: new Response(null, { status: 409 }),
     });
     const store = useTenantStore();

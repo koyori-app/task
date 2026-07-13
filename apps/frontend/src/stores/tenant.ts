@@ -1,10 +1,16 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import type { components } from '@/generated/api';
+import type { components, operations } from '@/generated/api';
 import { apiClient } from '@/lib/api';
 
 export type Tenant = components['schemas']['TenantResponse'];
 export type CreateTenantInput = components['schemas']['CreateTenantRequest'];
+type CreateTenantConflict =
+  operations['create_tenant']['responses'][409]['content']['application/json'];
+
+const isCreateTenantConflict = (
+  error: CreateTenantConflict | undefined,
+): error is CreateTenantConflict => error?.message === 'conflict';
 
 export const useTenantStore = defineStore(
   'tenant',
@@ -51,7 +57,7 @@ export const useTenantStore = defineStore(
     async function createTenant(input: CreateTenantInput) {
       const response = await apiClient.POST('/v1/tenants', { body: input });
       if (response.error || !response.data) {
-        if (response.response.status === 409) {
+        if (isCreateTenantConflict(response.error)) {
           throw new Error('この表示IDはすでに使用されています');
         }
         throw new Error('テナントを作成できませんでした');
