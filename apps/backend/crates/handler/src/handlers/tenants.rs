@@ -11,7 +11,7 @@ use crate::AppState;
 use crate::error::AppError;
 use crate::extractors::AuthMethod;
 use crate::extractors::AuthUser;
-use crate::openapi::CrudErrors;
+use crate::openapi::{CrudErrors, TenantCreateErrors};
 use entity::{scopes::Scope, tenants};
 use payload::tenants::*;
 
@@ -24,7 +24,7 @@ use payload::tenants::*;
     request_body = CreateTenantRequest,
     responses(
         (status = 201, description = "作成されたテナント", body = TenantResponse),
-        CrudErrors,
+        TenantCreateErrors,
     )
 )]
 pub async fn create_tenant(

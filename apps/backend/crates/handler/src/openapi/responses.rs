@@ -91,6 +91,23 @@ pub enum UnauthorizedErrors {
 )]
 pub struct InternalOnlyError(#[to_schema] ServerError);
 
+/// テナント作成専用のエラー。`display_id` の重複で 409 を返し得るため
+/// `CrudErrors` から 404 を除き 409 を足した形状。
+#[derive(IntoResponses)]
+pub enum TenantCreateErrors {
+    #[response(status = 401, description = "ログインまたはセッションが必要です")]
+    Unauthorized(#[to_schema] ServerError),
+    #[response(status = 403, description = "この操作は許可されていません")]
+    Forbidden(#[to_schema] ServerError),
+    #[response(status = 409, description = "指定した表示IDはすでに使用されています")]
+    Conflict(#[to_schema] ServerError),
+    #[response(
+        status = 500,
+        description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
+    )]
+    Internal(#[to_schema] ServerError),
+}
+
 #[derive(IntoResponses)]
 pub enum CrudErrors {
     #[response(status = 401, description = "ログインまたはセッションが必要です")]
