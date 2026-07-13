@@ -45,7 +45,7 @@ const form = useForm({
   onSubmit: async ({ value }) => {
     submitError.value = null;
     try {
-      await store.createTenant({
+      const tenant = await store.createTenant({
         name: value.name.trim(),
         display_id: value.display_id,
         ...(value.description.trim() ? { description: value.description.trim() } : {}),
@@ -54,6 +54,7 @@ const form = useForm({
       emit('update:open', false);
       form.reset();
       displayIdEdited.value = false;
+      window.location.assign(`/${tenant.display_id}/my-tasks`);
     } catch (error) {
       submitError.value = error instanceof Error ? error.message : 'テナントを作成できませんでした';
     }
@@ -63,7 +64,11 @@ const form = useForm({
 watch(
   () => props.open,
   (open) => {
-    if (!open) submitError.value = null;
+    if (!open) {
+      submitError.value = null;
+      form.reset();
+      displayIdEdited.value = false;
+    }
   },
 );
 </script>

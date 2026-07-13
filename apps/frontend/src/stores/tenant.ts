@@ -23,6 +23,8 @@ export const useTenantStore = defineStore(
     }
 
     async function loadTenants(routeTenant?: string) {
+      if (isLoading.value) return;
+
       isLoading.value = true;
       error.value = null;
       try {

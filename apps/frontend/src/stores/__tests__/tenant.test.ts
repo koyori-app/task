@@ -75,6 +75,25 @@ describe('tenant store', () => {
     expect(store.error).toBeNull();
   });
 
+  it('does not issue another tenant request while one is already loading', async () => {
+    let resolveRequest: ((value: { data: Tenant[]; response: Response }) => void) | undefined;
+    vi.mocked(apiClient.GET).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRequest = resolve;
+        }),
+    );
+    const store = useTenantStore();
+
+    const firstRequest = store.loadTenants('alpha');
+    await store.loadTenants('beta');
+
+    expect(apiClient.GET).toHaveBeenCalledTimes(1);
+    resolveRequest?.({ data: tenants, response: new Response() });
+    await firstRequest;
+    expect(store.selectedTenant?.display_id).toBe('alpha');
+  });
+
   it('uses the first tenant when there is no route or persisted selection', async () => {
     vi.mocked(apiClient.GET).mockResolvedValue({ data: tenants, response: new Response() });
     const store = useTenantStore();

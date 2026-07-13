@@ -48,7 +48,7 @@ const activeTenant = computed(
         <DropdownMenuTrigger as-child>
           <SidebarMenuButton
             size="lg"
-            :disabled="loading || (!activeTenant && !error)"
+            :disabled="loading"
             class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
           >
             <div
