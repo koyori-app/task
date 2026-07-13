@@ -76,13 +76,13 @@ jobs:
           workspaces: apps/backend -> target
 
       - name: Build backend
-        run: cargo build --release --bin backend
+        run: cargo build --bin backend
         working-directory: apps/backend
         env:
           SQLX_OFFLINE: 'true'
 
       - name: Build migration CLI
-        run: cargo build --release
+        run: cargo build
         working-directory: apps/backend/migration
 
       - name: Setup Node.js
@@ -128,8 +128,8 @@ jobs:
         working-directory: e2e
         env:
           CI: 'true'
-          BACKEND_BIN: ${{ github.workspace }}/apps/backend/target/release/backend
-          MIGRATION_BIN: ${{ github.workspace }}/apps/backend/migration/target/release/migration
+          BACKEND_BIN: ${{ github.workspace }}/apps/backend/target/debug/backend
+          MIGRATION_BIN: ${{ github.workspace }}/apps/backend/migration/target/debug/migration
           E2E_DATABASE_URL: postgresql://test:test@localhost:5432/task_e2e
           E2E_REDIS_URL: redis://localhost:6379
 
