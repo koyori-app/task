@@ -69,7 +69,6 @@ const form = useForm({
         <HydrationSafeForm
           v-slot="{ isHydrated }"
           class="p-6 md:p-8"
-          data-testid="signin-form"
           @submit="() => form.handleSubmit()"
         >
           <FieldGroup>

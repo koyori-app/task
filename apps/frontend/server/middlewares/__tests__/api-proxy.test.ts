@@ -47,7 +47,7 @@ describe('limitReadableStream', () => {
     });
 
     const limited = limitReadableStream(source, 96);
-    const reader = limited.getReader();
+    const reader = limited.stream.getReader();
 
     await expect(reader.read()).resolves.toEqual({
       done: false,
@@ -106,7 +106,12 @@ describe('apiProxyPlugin', () => {
     });
 
     fetchMock.mockImplementation(async (_url, init) => {
-      await readStreamBody(init?.body as ReadableStream<Uint8Array> | null);
+      try {
+        await readStreamBody(init?.body as ReadableStream<Uint8Array> | null);
+      } catch (cause) {
+        // undici wraps stream errors as TypeError('fetch failed', { cause })
+        throw new TypeError('fetch failed', { cause });
+      }
       return new Response('ok', { status: 200 });
     });
 

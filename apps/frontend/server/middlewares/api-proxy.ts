@@ -3,7 +3,7 @@ import { Elysia } from 'elysia';
 const API_BASE = process.env.API_BASE ?? 'http://localhost:3400';
 
 /** Align with backend UPLOAD_MAX_SIZE_MB default (100). */
-export const MAX_PROXY_BODY_BYTES = 100 * 1024 * 1024;
+export const MAX_PROXY_BODY_BYTES = Number(process.env.UPLOAD_MAX_SIZE_MB ?? 100) * 1024 * 1024;
 
 const HOP_BY_HOP = new Set([
   'connection',
@@ -56,14 +56,20 @@ function rejectIfContentLengthTooLarge(request: Request): Response | null {
   return null;
 }
 
+export type LimitedReadableStream = {
+  stream: ReadableStream<Uint8Array>;
+  readonly exceeded: boolean;
+};
+
 export function limitReadableStream(
   body: ReadableStream<Uint8Array>,
   maxBytes: number,
-): ReadableStream<Uint8Array> {
+): LimitedReadableStream {
   let consumed = 0;
+  let exceeded = false;
   const reader = body.getReader();
 
-  return new ReadableStream({
+  const stream = new ReadableStream({
     async pull(controller) {
       const { done, value } = await reader.read();
       if (done) {
@@ -73,6 +79,7 @@ export function limitReadableStream(
 
       consumed += value.byteLength;
       if (consumed > maxBytes) {
+        exceeded = true;
         await reader.cancel();
         controller.error(new BodyTooLargeError());
         return;
@@ -84,6 +91,13 @@ export function limitReadableStream(
       return reader.cancel(reason);
     },
   });
+
+  return {
+    stream,
+    get exceeded() {
+      return exceeded;
+    },
+  };
 }
 
 async function proxyToBackend(request: Request): Promise<Response> {
@@ -95,8 +109,9 @@ async function proxyToBackend(request: Request): Promise<Response> {
 
   // parse: 'none' keeps Elysia from consuming the body (b9022093). Stream it through
   // instead of buffering the full payload (bea9a39a workaround).
-  const body =
+  const limited =
     hasBody && request.body ? limitReadableStream(request.body, MAX_PROXY_BODY_BYTES) : undefined;
+  const body = limited?.stream;
 
   try {
     const backendResponse = await fetch(backendUrl, {
@@ -113,7 +128,12 @@ async function proxyToBackend(request: Request): Promise<Response> {
       headers: copyHeaders(backendResponse.headers),
     });
   } catch (error) {
-    if (error instanceof BodyTooLargeError) {
+    const cause = error instanceof Error ? error.cause : undefined;
+    if (
+      limited?.exceeded ||
+      error instanceof BodyTooLargeError ||
+      cause instanceof BodyTooLargeError
+    ) {
       return new Response('Payload Too Large', { status: 413 });
     }
     throw error;
