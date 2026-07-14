@@ -7,7 +7,7 @@ const meta = {
   title: 'Auth/PasswordInput',
   component: PasswordInput,
   tags: ['autodocs'],
-  render: (args: Record<string, unknown>) => ({
+  render: (args) => ({
     components: { PasswordInput },
     setup() {
       const model = ref((args.modelValue as string) ?? '');
