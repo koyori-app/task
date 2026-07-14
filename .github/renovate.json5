@@ -66,7 +66,10 @@
     {
       "matchManagers": ["npm"],
       "matchPackageNames": ["vite", "vite-plus", "vitest"],
-      "matchPackagePatterns": ["^@voidzero-dev/"],
+      // vite-plus bundles a pinned vitest; @vitest/* providers (coverage-v8,
+      // browser-playwright, ...) must match that exact version, so group them
+      // all into one PR to avoid a version-skew split (see #248 / #293).
+      "matchPackagePatterns": ["^@voidzero-dev/", "^@vitest/"],
       "groupName": "vite-plus"
     }
   ]
