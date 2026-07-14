@@ -33,11 +33,11 @@ const projectsQuery = useQuery({
   queryKey: computed(() => [
     'get',
     LIST_PROJECTS_PATH,
-    { params: { path: { tenant_id: tenantId.value } } },
+    { params: { path: { tenant_id: tenantId.value! } } },
   ]),
   queryFn: async ({ signal }) => {
     const { data, error } = await fetchClient.GET(LIST_PROJECTS_PATH, {
-      params: { path: { tenant_id: tenantId.value } },
+      params: { path: { tenant_id: tenantId.value! } },
       signal,
     });
     if (error) throw error;
@@ -67,8 +67,8 @@ const taskQuery = useQuery({
     {
       params: {
         path: {
-          tenant_id: tenantId.value,
-          project_id: projectId.value,
+          tenant_id: tenantId.value!,
+          project_id: projectId.value!,
           id: taskId.value,
         },
       },
@@ -78,7 +78,7 @@ const taskQuery = useQuery({
     const { data, error, response } = await fetchClient.GET(GET_TASK_PATH, {
       params: {
         path: {
-          tenant_id: tenantId.value,
+          tenant_id: tenantId.value!,
           project_id: projectId.value!,
           id: taskId.value,
         },
@@ -96,11 +96,11 @@ const statusesQuery = useQuery({
   queryKey: computed(() => [
     'get',
     LIST_STATUSES_PATH,
-    { params: { path: { tenant_id: tenantId.value, project_id: projectId.value } } },
+    { params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } } },
   ]),
   queryFn: async ({ signal }) => {
     const { data, error } = await fetchClient.GET(LIST_STATUSES_PATH, {
-      params: { path: { tenant_id: tenantId.value, project_id: projectId.value! } },
+      params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } },
       signal,
     });
     if (error) throw error;

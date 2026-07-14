@@ -90,11 +90,11 @@ const projectsQuery = useQuery({
   queryKey: computed(() => [
     'get',
     LIST_PROJECTS_PATH,
-    { params: { path: { tenant_id: tenantId.value } } },
+    { params: { path: { tenant_id: tenantId.value! } } },
   ]),
   queryFn: async ({ signal }) => {
     const { data, error } = await fetchClient.GET(LIST_PROJECTS_PATH, {
-      params: { path: { tenant_id: tenantId.value } },
+      params: { path: { tenant_id: tenantId.value! } },
       signal,
     });
     if (error) throw error;
@@ -136,7 +136,7 @@ const tasksQuery = useQuery({
     LIST_TASKS_PATH,
     {
       params: {
-        path: { tenant_id: tenantId.value, project_id: projectId.value },
+        path: { tenant_id: tenantId.value!, project_id: projectId.value! },
         query: {
           limit: pagination.value.pageSize,
           offset: pagination.value.pageIndex * pagination.value.pageSize,
@@ -148,7 +148,7 @@ const tasksQuery = useQuery({
     const { data, error } = await fetchClient.GET(LIST_TASKS_PATH, {
       // query パラメータは openapi-typescript 7.13.0 が正しく operation レベルに生成する
       params: {
-        path: { tenant_id: tenantId.value, project_id: projectId.value! },
+        path: { tenant_id: tenantId.value!, project_id: projectId.value! },
         query: {
           limit: pagination.value.pageSize,
           offset: pagination.value.pageIndex * pagination.value.pageSize,
@@ -177,11 +177,11 @@ const statusesQuery = useQuery({
   queryKey: computed(() => [
     'get',
     LIST_STATUSES_PATH,
-    { params: { path: { tenant_id: tenantId.value, project_id: projectId.value } } },
+    { params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } } },
   ]),
   queryFn: async ({ signal }) => {
     const { data, error } = await fetchClient.GET(LIST_STATUSES_PATH, {
-      params: { path: { tenant_id: tenantId.value, project_id: projectId.value! } },
+      params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } },
       signal,
     });
     if (error) throw error;
