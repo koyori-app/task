@@ -3,18 +3,31 @@ import { expect, userEvent, within } from 'storybook/test';
 import { ref } from 'vue';
 import PasswordInput from '@/components/auth/PasswordInput.vue';
 
+type PasswordInputStoryArgs = {
+  id?: string;
+  name?: string;
+  placeholder?: string;
+  autocomplete?: string;
+  modelValue?: string;
+};
+
+const passwordInputRender = (args: PasswordInputStoryArgs) => {
+  const initialModelValue = args.modelValue ?? '';
+  return {
+    components: { PasswordInput },
+    setup() {
+      const model = ref(initialModelValue);
+      return { args, model };
+    },
+    template: '<PasswordInput v-bind="args" v-model="model" />',
+  };
+};
+
 const meta = {
   title: 'Auth/PasswordInput',
   component: PasswordInput,
   tags: ['autodocs'],
-  render: (args) => ({
-    components: { PasswordInput },
-    setup() {
-      const model = ref((args.modelValue as string) ?? '');
-      return { args, model };
-    },
-    template: '<PasswordInput v-bind="args" v-model="model" />',
-  }),
+  render: passwordInputRender,
   args: {
     id: 'password',
     name: 'password',
