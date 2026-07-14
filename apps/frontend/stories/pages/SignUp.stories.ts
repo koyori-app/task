@@ -147,6 +147,40 @@ export const RegisterError: Story = {
   },
 };
 
+export const RegisterSubmitting: Story = {
+  name: '登録進行中',
+  parameters: {
+    docs: {
+      description: {
+        story: 'register API を意図的に pending にし、submitting 状態をカバーします。',
+      },
+    },
+  },
+  beforeEach() {
+    const original = globalThis.fetch;
+    globalThis.fetch = fn().mockImplementation((input, init) => {
+      const { url, method } = getRequestInfo(input, init);
+      if (method === 'POST' && url.includes('/v1/auth/register')) {
+        return new Promise<Response>(() => {});
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ message: 'not found' }), { status: 404 }),
+      );
+    });
+    return () => {
+      globalThis.fetch = original;
+    };
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await fillSignUpForm(canvas);
+    await userEvent.click(canvas.getByRole('button', { name: 'アカウント作成' }));
+
+    const submittingButton = await canvas.findByRole('button', { name: '登録中…' });
+    await expect(submittingButton).toBeDisabled();
+  },
+};
+
 export const RegisterSuccess: Story = {
   name: '登録成功（200）',
   beforeEach() {
