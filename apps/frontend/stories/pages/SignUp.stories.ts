@@ -11,25 +11,10 @@ const mockContext = {
   routeParams: {},
 };
 
-let locationAssignSpy: ReturnType<typeof fn>;
-let originalLocationAssign: Location['assign'];
-
 const getRequestInfo = (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
   const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
   return { url, method };
-};
-
-const stubLocationAssign = () => {
-  locationAssignSpy = fn();
-  originalLocationAssign = Reflect.get(Location.prototype, 'assign') as Location['assign'];
-  Location.prototype.assign = function (url: string | URL) {
-    locationAssignSpy(url);
-  };
-};
-
-const restoreLocationAssign = () => {
-  Location.prototype.assign = originalLocationAssign;
 };
 
 async function fillSignUpForm(canvas: ReturnType<typeof within>) {
@@ -50,6 +35,37 @@ async function fillSignUpForm(canvas: ReturnType<typeof within>) {
   await userEvent.tab();
 
   await expect(canvas.getByRole('button', { name: 'アカウント作成' })).toBeEnabled();
+}
+
+function mockSuccessfulRegistration(status: 200 | 201) {
+  const original = globalThis.fetch;
+  globalThis.fetch = fn().mockImplementation((input, init) => {
+    const { url, method } = getRequestInfo(input, init);
+    if (method === 'POST' && url.includes('/v1/auth/register')) {
+      return Promise.resolve(new Response(null, { status }));
+    }
+    return Promise.resolve(new Response(JSON.stringify({ message: 'not found' }), { status: 404 }));
+  });
+  return () => {
+    globalThis.fetch = original;
+  };
+}
+
+async function assertRegistrationCompleted(canvasElement: HTMLElement) {
+  const canvas = within(canvasElement);
+  await fillSignUpForm(canvas);
+  await userEvent.click(canvas.getByRole('button', { name: 'アカウント作成' }));
+  await expect(
+    canvas.findByRole('heading', { name: 'メールアドレスを確認してください' }),
+  ).resolves.toBeInTheDocument();
+  await expect(canvas.getByRole('link', { name: 'サインインページへ戻る' })).toHaveAttribute(
+    'href',
+    '/signin',
+  );
+  await expect(canvas.getByRole('link', { name: 'パスワードを再設定する' })).toHaveAttribute(
+    'href',
+    '/auth/reset-password',
+  );
 }
 
 const meta = {
@@ -134,27 +150,15 @@ export const RegisterError: Story = {
 export const RegisterSuccess: Story = {
   name: '登録成功（200）',
   beforeEach() {
-    stubLocationAssign();
-    const original = globalThis.fetch;
-    globalThis.fetch = fn().mockImplementation((input, init) => {
-      const { url, method } = getRequestInfo(input, init);
-      if (method === 'POST' && url.includes('/v1/auth/register')) {
-        locationAssignSpy('/signin');
-        return new Promise<Response>(() => {});
-      }
-      return Promise.resolve(
-        new Response(JSON.stringify({ message: 'not found' }), { status: 404 }),
-      );
-    });
-    return () => {
-      globalThis.fetch = original;
-      restoreLocationAssign();
-    };
+    return mockSuccessfulRegistration(200);
   },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await fillSignUpForm(canvas);
-    await userEvent.click(canvas.getByRole('button', { name: 'アカウント作成' }));
-    await expect(locationAssignSpy).toHaveBeenCalledWith('/signin');
+  play: async ({ canvasElement }) => assertRegistrationCompleted(canvasElement),
+};
+
+export const RegisterSuccess201: Story = {
+  name: '登録成功（201）',
+  beforeEach() {
+    return mockSuccessfulRegistration(201);
   },
+  play: async ({ canvasElement }) => assertRegistrationCompleted(canvasElement),
 };

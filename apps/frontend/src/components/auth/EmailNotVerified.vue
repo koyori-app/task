@@ -3,7 +3,7 @@ import { ref } from 'vue';
 import { Button } from '@/components/ui/button';
 import { useResendVerificationEmailMutation } from '@/lib/api-vue-query';
 
-const props = defineProps<{ email: string; backHref?: string }>();
+const props = defineProps<{ email: string; backHref?: string; resetHref?: string }>();
 const emit = defineEmits<{ logout: [] }>();
 
 const resendMutation = useResendVerificationEmailMutation();
@@ -40,6 +40,9 @@ async function resend() {
           <Button variant="ghost" size="sm">サインインページへ戻る</Button>
         </a>
         <Button v-else variant="ghost" size="sm" @click="emit('logout')">サインアウト</Button>
+        <a v-if="props.resetHref" :href="props.resetHref">
+          <Button variant="ghost" size="sm">パスワードを再設定する</Button>
+        </a>
       </div>
     </div>
   </div>

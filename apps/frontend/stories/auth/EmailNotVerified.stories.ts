@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
+import { expect, within } from 'storybook/test';
 import { provide } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
@@ -38,3 +39,21 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const RegistrationCompleted: Story = {
+  args: {
+    backHref: '/signin',
+    resetHref: '/auth/reset-password',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('link', { name: 'サインインページへ戻る' })).toHaveAttribute(
+      'href',
+      '/signin',
+    );
+    await expect(canvas.getByRole('link', { name: 'パスワードを再設定する' })).toHaveAttribute(
+      'href',
+      '/auth/reset-password',
+    );
+  },
+};
