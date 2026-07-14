@@ -1,5 +1,4 @@
 name: E2E Tests
-# cache verification run 2 — same branch re-run after rust-cache warm-up
 
 on:
   push:
@@ -69,6 +68,9 @@ jobs:
       - name: Install mold
         run: sudo apt-get install -y mold
 
+      - name: Install postgresql-client
+        run: sudo apt-get install -y postgresql-client
+
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
@@ -86,7 +88,7 @@ jobs:
           SQLX_OFFLINE: 'true'
 
       - name: Build migration CLI
-        run: cargo build --release
+        run: cargo build --release --bin migration
         working-directory: apps/backend/migration
 
       - name: sccache stats (post-build)

@@ -6,6 +6,7 @@ cd "$(dirname "$0")/.."
 if [[ -z "${E2E_DATABASE_URL:-}" && -z "${DATABASE_URL:-}" ]]; then
   backend_env="apps/backend/.env"
   if [[ -f "$backend_env" ]]; then
+    # Best-effort parser: expects KEY=value, uppercase keys, and values without '='.
     db_url=$(awk '
       /^[[:space:]]*(#|$)/ { next }
       {

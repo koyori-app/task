@@ -3,7 +3,8 @@ import { Elysia } from 'elysia';
 const API_BASE = process.env.API_BASE ?? 'http://localhost:3400';
 
 /** Align with backend UPLOAD_MAX_SIZE_MB default (100). */
-export const MAX_PROXY_BODY_BYTES = Number(process.env.UPLOAD_MAX_SIZE_MB ?? 100) * 1024 * 1024;
+const mb = Number(process.env.UPLOAD_MAX_SIZE_MB ?? 100);
+export const MAX_PROXY_BODY_BYTES = (Number.isFinite(mb) && mb > 0 ? mb : 100) * 1024 * 1024;
 
 const HOP_BY_HOP = new Set([
   'connection',
@@ -107,8 +108,8 @@ async function proxyToBackend(request: Request): Promise<Response> {
   const backendUrl = buildBackendUrl(request);
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
 
-  // parse: 'none' keeps Elysia from consuming the body (b9022093). Stream it through
-  // instead of buffering the full payload (bea9a39a workaround).
+  // parse: 'none' keeps Elysia from consuming the body, so the proxy can stream it
+  // through with a byte limit instead of buffering the full payload.
   const limited =
     hasBody && request.body ? limitReadableStream(request.body, MAX_PROXY_BODY_BYTES) : undefined;
   const body = limited?.stream;

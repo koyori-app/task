@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_PROXY_BODY_BYTES, apiProxyPlugin, limitReadableStream } from '../api-proxy';
 
 const app = new Elysia().use(apiProxyPlugin);
+const DEFAULT_MAX_PROXY_BODY_BYTES = 100 * 1024 * 1024;
 
 async function proxyRequest(request: Request): Promise<Response> {
   return app.handle(request);
@@ -56,6 +57,26 @@ describe('limitReadableStream', () => {
     await expect(reader.read()).rejects.toThrow('Payload Too Large');
     expect(sourceCancelCalled).toBe(true);
   });
+});
+
+describe('MAX_PROXY_BODY_BYTES', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it.each(['abc', '', '-1'])(
+    'falls back to 100 MiB when UPLOAD_MAX_SIZE_MB is %j',
+    async (value) => {
+      vi.stubEnv('UPLOAD_MAX_SIZE_MB', value);
+      vi.resetModules();
+
+      const proxy = await import('../api-proxy');
+
+      expect(proxy.MAX_PROXY_BODY_BYTES).toBe(DEFAULT_MAX_PROXY_BODY_BYTES);
+      expect(Number.isFinite(proxy.MAX_PROXY_BODY_BYTES)).toBe(true);
+    },
+  );
 });
 
 describe('apiProxyPlugin', () => {
