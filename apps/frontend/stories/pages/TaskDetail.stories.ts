@@ -105,8 +105,8 @@ const sampleTaskDetail = {
   priority: 'High' as const,
   status_id: 's-progress',
   project_id: 'proj-eng',
-  soft_deadline: '2026-07-02T00:00:00Z',
-  hard_deadline: null,
+  soft_deadline: '2026-07-02T00:00:00Z' as string | null,
+  hard_deadline: null as string | null,
   is_archived: false,
   progress_pct: 30,
   created_at: '2026-06-01T00:00:00Z',
@@ -128,7 +128,32 @@ type MockOptions = {
   onPut?: (body: unknown) => void;
 };
 
+function applyPutBody(
+  task: typeof sampleTaskDetail,
+  body: Record<string, unknown>,
+): typeof sampleTaskDetail {
+  const next = { ...task };
+
+  if (body.clear_description) next.description = '';
+  else if (typeof body.description === 'string') next.description = body.description;
+
+  if (body.clear_soft_deadline) next.soft_deadline = null;
+  else if (typeof body.soft_deadline === 'string') next.soft_deadline = body.soft_deadline;
+
+  if (body.clear_hard_deadline) next.hard_deadline = null;
+  else if (typeof body.hard_deadline === 'string') next.hard_deadline = body.hard_deadline;
+
+  if (typeof body.progress_pct === 'number') next.progress_pct = body.progress_pct;
+  if (typeof body.title === 'string') next.title = body.title;
+  if (typeof body.status_id === 'string') next.status_id = body.status_id;
+
+  return next;
+}
+
+let mutableTaskDetail = { ...sampleTaskDetail };
+
 function createMockFetch(overrides: MockOptions = {}) {
+  mutableTaskDetail = { ...(overrides.task ?? sampleTaskDetail) };
   const original = globalThis.fetch;
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
     const url = typeof req === 'string' ? req : req.url;
@@ -157,18 +182,16 @@ function createMockFetch(overrides: MockOptions = {}) {
       if (overrides.rejectPut) {
         return jsonResponse({ message: 'update failed' }, overrides.rejectPut);
       }
-      const body = await req.json();
+      const body = (await req.json()) as Record<string, unknown>;
       overrides.onPut?.(body);
-      return jsonResponse({
-        ...sampleTaskDetail,
-        status_id: (body as { status_id?: string }).status_id ?? sampleTaskDetail.status_id,
-      });
+      mutableTaskDetail = applyPutBody(mutableTaskDetail, body);
+      return jsonResponse(mutableTaskDetail);
     }
     if (url.includes('/tasks/')) {
       if (overrides.task === null) {
         return jsonResponse({ message: 'not-found' }, 404);
       }
-      return jsonResponse(overrides.task ?? sampleTaskDetail);
+      return jsonResponse(overrides.task ?? mutableTaskDetail);
     }
     return jsonResponse({});
   });
@@ -208,7 +231,7 @@ const meta = {
     docs: {
       description: {
         component:
-          'タスク詳細ハブ（増分1）。GET 表示・ステータス変更・loading/404/error を fetch モックで検証。',
+          'タスク詳細ハブ（増分2）。GET 表示・ステータス/フィールドのインライン編集・loading/404/error を fetch モックで検証。',
       },
     },
   },
@@ -316,5 +339,168 @@ export const StatusChangeFailure413: Story = {
     await user.selectOptions(select, 's-done');
     await expect(canvas.findByText('ステータスの更新に失敗しました')).resolves.toBeInTheDocument();
     await expect(select).toHaveValue('s-progress');
+  },
+};
+
+export const TitleEdit: Story = {
+  name: 'タイトル編集',
+  beforeEach: () => {
+    const puts: unknown[] = [];
+    const restore = createMockFetch({
+      onPut: (body) => puts.push(body),
+    });
+    (TitleEdit as { puts?: unknown[] }).puts = puts;
+    return restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).resolves.toBeInTheDocument();
+
+    await user.click(canvas.getByRole('heading', { name: 'OAuth 対応を実装する' }));
+    const input = await canvas.findByRole('textbox', { name: 'タイトル' });
+    await user.clear(input);
+    await user.type(input, '新しいタイトル');
+    await user.tab();
+
+    await expect(
+      canvas.findByRole('heading', { name: '新しいタイトル' }),
+    ).resolves.toBeInTheDocument();
+    const puts = (TitleEdit as { puts?: unknown[] }).puts ?? [];
+    await expect(puts).toContainEqual({ title: '新しいタイトル' });
+  },
+};
+
+export const DescriptionEdit: Story = {
+  name: '説明編集',
+  beforeEach: () => {
+    const puts: unknown[] = [];
+    const restore = createMockFetch({
+      onPut: (body) => puts.push(body),
+    });
+    (DescriptionEdit as { puts?: unknown[] }).puts = puts;
+    return restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByText('OIDC フローとセッション管理を実装する。'),
+    ).resolves.toBeInTheDocument();
+
+    await user.click(canvas.getByText('OIDC フローとセッション管理を実装する。'));
+    const textarea = await canvas.findByRole('textbox', { name: '説明' });
+    await user.clear(textarea);
+    await user.type(textarea, '更新後の説明');
+    await user.tab();
+
+    await expect(canvas.findByText('更新後の説明')).resolves.toBeInTheDocument();
+    const puts = (DescriptionEdit as { puts?: unknown[] }).puts ?? [];
+    await expect(puts).toContainEqual({ description: '更新後の説明' });
+  },
+};
+
+export const DescriptionClear: Story = {
+  name: '説明クリア',
+  beforeEach: () => {
+    const puts: unknown[] = [];
+    const restore = createMockFetch({
+      onPut: (body) => puts.push(body),
+    });
+    (DescriptionClear as { puts?: unknown[] }).puts = puts;
+    return restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByText('OIDC フローとセッション管理を実装する。'),
+    ).resolves.toBeInTheDocument();
+
+    await user.click(canvas.getByText('OIDC フローとセッション管理を実装する。'));
+    await user.click(await canvas.findByRole('button', { name: 'クリア' }));
+
+    await expect(
+      canvas.findByText('説明はありません（クリックして追加）'),
+    ).resolves.toBeInTheDocument();
+    const puts = (DescriptionClear as { puts?: unknown[] }).puts ?? [];
+    await expect(puts).toContainEqual({ clear_description: true });
+  },
+};
+
+export const ProgressEdit: Story = {
+  name: '進捗編集',
+  beforeEach: () => {
+    const puts: unknown[] = [];
+    const restore = createMockFetch({
+      onPut: (body) => puts.push(body),
+    });
+    (ProgressEdit as { puts?: unknown[] }).puts = puts;
+    return restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(canvas.findByText('30%')).resolves.toBeInTheDocument();
+
+    await user.click(canvas.getByText('30%'));
+    const input = await canvas.findByRole('spinbutton', { name: '進捗率' });
+    await user.clear(input);
+    await user.type(input, '75');
+    await user.tab();
+
+    await expect(canvas.findByText('75%')).resolves.toBeInTheDocument();
+    const puts = (ProgressEdit as { puts?: unknown[] }).puts ?? [];
+    await expect(puts).toContainEqual({ progress_pct: 75 });
+  },
+};
+
+export const SoftDeadlineClear: Story = {
+  name: 'ソフト期限クリア',
+  beforeEach: () => {
+    const puts: unknown[] = [];
+    const restore = createMockFetch({
+      onPut: (body) => puts.push(body),
+    });
+    (SoftDeadlineClear as { puts?: unknown[] }).puts = puts;
+    return restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(canvas.findByText('ソフト期限')).resolves.toBeInTheDocument();
+
+    const row = canvas.getByText('ソフト期限').parentElement;
+    expect(row).toBeTruthy();
+    const section = within(row!);
+    await user.click(section.getByRole('button'));
+    const input = await section.findByLabelText('ソフト期限');
+    await user.clear(input);
+    await user.tab();
+
+    await expect(section.findByText('未設定（クリックして設定）')).resolves.toBeInTheDocument();
+    const puts = (SoftDeadlineClear as { puts?: unknown[] }).puts ?? [];
+    await expect(puts).toContainEqual({ clear_soft_deadline: true });
+  },
+};
+
+export const FieldEditFailureRollback: Story = {
+  name: 'フィールド編集失敗ロールバック',
+  beforeEach: () => createMockFetch({ rejectPut: 500 }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(canvas.findByText('30%')).resolves.toBeInTheDocument();
+
+    await user.click(canvas.getByText('30%'));
+    const input = await canvas.findByRole('spinbutton', { name: '進捗率' });
+    await user.clear(input);
+    await user.type(input, '80');
+    await user.tab();
+
+    await expect(canvas.findByText('更新に失敗しました')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('30%')).resolves.toBeInTheDocument();
   },
 };

@@ -1,12 +1,25 @@
 <script setup lang="ts">
-import { Loader2 } from '@lucide/vue';
-import { computed } from 'vue';
+import { Loader2, Pencil, X } from '@lucide/vue';
+import { computed, nextTick, ref } from 'vue';
 import type { components } from '@/generated/api';
 import AvatarGroup from '@/components/AvatarGroup.vue';
-import { PRIORITY_CONFIG, formatDeadline, formatTaskDate, taskSeqKey } from '@/lib/task-display';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  PRIORITY_CONFIG,
+  clampProgressPct,
+  formatDeadline,
+  formatProgressPct,
+  formatTaskDate,
+  isoToLocalDateInput,
+  taskSeqKey,
+} from '@/lib/task-display';
 
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type StatusOption = components['schemas']['ProjectStatusResponse'];
+
+type EditableField = 'title' | 'description' | 'progress_pct' | 'soft_deadline' | 'hard_deadline';
 
 const props = defineProps<{
   task: TaskDetail | null;
@@ -15,6 +28,8 @@ const props = defineProps<{
   statusId: string;
   statusUpdating?: boolean;
   statusError?: string | null;
+  fieldUpdating?: Partial<Record<EditableField, boolean>>;
+  fieldErrors?: Partial<Record<EditableField, string>>;
   loading?: boolean;
   notFound?: boolean;
   error?: boolean;
@@ -22,15 +37,124 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:statusId': [value: string];
+  'save:title': [value: string];
+  'save:description': [value: string | null];
+  'save:progress_pct': [value: number];
+  'save:soft_deadline': [value: string | null];
+  'save:hard_deadline': [value: string | null];
 }>();
 
 const resolvedStatus = computed(() =>
   props.statuses.find((status) => status.id === props.statusId),
 );
+const editingField = ref<EditableField | null>(null);
+const draftValue = ref('');
+
+function isFieldUpdating(field: EditableField) {
+  return props.fieldUpdating?.[field] ?? false;
+}
+
+function fieldError(field: EditableField) {
+  return props.fieldErrors?.[field] ?? null;
+}
+
+async function startEditing(field: EditableField) {
+  if (!props.task || isFieldUpdating(field)) return;
+  editingField.value = field;
+  switch (field) {
+    case 'title':
+      draftValue.value = props.task.title;
+      break;
+    case 'description':
+      draftValue.value = props.task.description ?? '';
+      break;
+    case 'progress_pct':
+      draftValue.value = String(props.task.progress_pct);
+      break;
+    case 'soft_deadline':
+      draftValue.value = isoToLocalDateInput(props.task.soft_deadline);
+      break;
+    case 'hard_deadline':
+      draftValue.value = isoToLocalDateInput(props.task.hard_deadline);
+      break;
+  }
+  await nextTick();
+  const root = document.activeElement?.closest('[data-task-detail-hub]') ?? document;
+  const input = root.querySelector<HTMLElement>(`[data-editing="${field}"]`);
+  input?.focus();
+}
+
+function cancelEditing() {
+  editingField.value = null;
+  draftValue.value = '';
+}
+
+function commitEditing(field: EditableField) {
+  if (!props.task) return;
+
+  switch (field) {
+    case 'title': {
+      const next = draftValue.value.trim();
+      if (!next) {
+        cancelEditing();
+        return;
+      }
+      if (next !== props.task.title) emit('save:title', next);
+      break;
+    }
+    case 'description': {
+      const trimmed = draftValue.value.trim();
+      const current = props.task.description ?? '';
+      if (trimmed === current) break;
+      emit('save:description', trimmed.length ? trimmed : null);
+      break;
+    }
+    case 'progress_pct': {
+      const parsed = Number(draftValue.value);
+      if (!Number.isFinite(parsed)) break;
+      const next = clampProgressPct(parsed);
+      if (next !== props.task.progress_pct) emit('save:progress_pct', next);
+      break;
+    }
+    case 'soft_deadline': {
+      const current = isoToLocalDateInput(props.task.soft_deadline);
+      if (draftValue.value === current) break;
+      emit('save:soft_deadline', draftValue.value.trim() ? draftValue.value.trim() : null);
+      break;
+    }
+    case 'hard_deadline': {
+      const current = isoToLocalDateInput(props.task.hard_deadline);
+      if (draftValue.value === current) break;
+      emit('save:hard_deadline', draftValue.value.trim() ? draftValue.value.trim() : null);
+      break;
+    }
+  }
+
+  cancelEditing();
+}
+
+function onEditKeydown(event: KeyboardEvent, field: EditableField) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    cancelEditing();
+    return;
+  }
+  if (event.key === 'Enter' && field !== 'description') {
+    event.preventDefault();
+    commitEditing(field);
+  }
+}
+
+function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
+  if (isFieldUpdating(field)) return;
+  if (field === 'soft_deadline') emit('save:soft_deadline', null);
+  else emit('save:hard_deadline', null);
+  cancelEditing();
+}
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
+  <div class="flex flex-col gap-6" data-task-detail-hub>
     <div v-if="loading" class="flex justify-center py-16">
       <Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
     </div>
@@ -52,18 +176,92 @@ const resolvedStatus = computed(() =>
           <slot name="breadcrumb" />
           <span class="font-mono">{{ taskSeqKey(projectKey, task.seq_id) }}</span>
         </div>
-        <h1 class="text-2xl font-semibold tracking-tight">{{ task.title }}</h1>
+
+        <div v-if="editingField === 'title'" class="flex flex-col gap-1">
+          <Input
+            v-model="draftValue"
+            data-editing="title"
+            class="text-2xl font-semibold"
+            :disabled="isFieldUpdating('title')"
+            aria-label="タイトル"
+            @keydown="onEditKeydown($event, 'title')"
+            @blur="commitEditing('title')"
+          />
+          <p v-if="fieldError('title')" class="text-xs text-destructive">
+            {{ fieldError('title') }}
+          </p>
+        </div>
+        <button
+          v-else
+          type="button"
+          class="group flex items-start gap-2 text-left"
+          :disabled="isFieldUpdating('title')"
+          @click="startEditing('title')"
+        >
+          <h1 class="text-2xl font-semibold tracking-tight group-hover:text-primary">
+            {{ task.title }}
+          </h1>
+          <Pencil
+            class="mt-1 size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+            aria-hidden="true"
+          />
+        </button>
+        <p v-if="editingField !== 'title' && fieldError('title')" class="text-xs text-destructive">
+          {{ fieldError('title') }}
+        </p>
+
         <slot name="header-actions" />
       </header>
 
       <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <main class="flex flex-col gap-6 lg:col-span-2">
           <section class="rounded-lg border p-4">
-            <h2 class="mb-2 text-sm font-medium text-muted-foreground">説明</h2>
-            <p v-if="task.description" class="whitespace-pre-wrap text-sm leading-relaxed">
-              {{ task.description }}
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <h2 class="text-sm font-medium text-muted-foreground">説明</h2>
+              <Button
+                v-if="editingField === 'description' && task.description"
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="h-7 px-2"
+                :disabled="isFieldUpdating('description')"
+                @mousedown.prevent
+                @click="
+                  emit('save:description', null);
+                  cancelEditing();
+                "
+              >
+                クリア
+              </Button>
+            </div>
+
+            <Textarea
+              v-if="editingField === 'description'"
+              v-model="draftValue"
+              data-editing="description"
+              class="min-h-28"
+              :disabled="isFieldUpdating('description')"
+              aria-label="説明"
+              @keydown="onEditKeydown($event, 'description')"
+              @blur="commitEditing('description')"
+            />
+            <button
+              v-else
+              type="button"
+              class="group w-full rounded-md text-left transition-colors hover:bg-muted/40"
+              :disabled="isFieldUpdating('description')"
+              @click="startEditing('description')"
+            >
+              <p v-if="task.description" class="whitespace-pre-wrap text-sm leading-relaxed">
+                {{ task.description }}
+              </p>
+              <p v-else class="text-sm text-muted-foreground">
+                説明はありません（クリックして追加）
+              </p>
+            </button>
+            <p v-if="fieldError('description')" class="mt-2 text-xs text-destructive">
+              {{ fieldError('description') }}
             </p>
-            <p v-else class="text-sm text-muted-foreground">説明はありません</p>
           </section>
 
           <slot name="main" />
@@ -98,6 +296,38 @@ const resolvedStatus = computed(() =>
           </section>
 
           <section class="rounded-lg border p-4">
+            <h2 class="mb-3 text-sm font-medium text-muted-foreground">進捗</h2>
+            <Input
+              v-if="editingField === 'progress_pct'"
+              v-model="draftValue"
+              data-editing="progress_pct"
+              type="number"
+              min="0"
+              max="100"
+              :disabled="isFieldUpdating('progress_pct')"
+              aria-label="進捗率"
+              @keydown="onEditKeydown($event, 'progress_pct')"
+              @blur="commitEditing('progress_pct')"
+            />
+            <button
+              v-else
+              type="button"
+              class="group flex w-full items-center justify-between rounded-md text-left hover:bg-muted/40"
+              :disabled="isFieldUpdating('progress_pct')"
+              @click="startEditing('progress_pct')"
+            >
+              <span class="text-sm">{{ formatProgressPct(task.progress_pct) }}</span>
+              <Pencil
+                class="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                aria-hidden="true"
+              />
+            </button>
+            <p v-if="fieldError('progress_pct')" class="mt-2 text-xs text-destructive">
+              {{ fieldError('progress_pct') }}
+            </p>
+          </section>
+
+          <section class="rounded-lg border p-4">
             <h2 class="mb-3 text-sm font-medium text-muted-foreground">優先度</h2>
             <div
               class="inline-flex items-center gap-1.5 text-sm"
@@ -120,18 +350,126 @@ const resolvedStatus = computed(() =>
 
           <section class="rounded-lg border p-4">
             <h2 class="mb-3 text-sm font-medium text-muted-foreground">日付</h2>
-            <dl class="space-y-2 text-sm">
-              <div v-if="formatDeadline(task.soft_deadline)" class="flex justify-between gap-2">
-                <dt class="text-muted-foreground">期限</dt>
-                <dd
-                  :class="
-                    formatDeadline(task.soft_deadline)!.overdue ? 'text-red-500 font-medium' : ''
-                  "
-                >
-                  {{ formatDeadline(task.soft_deadline)!.label }}
+            <dl class="space-y-3 text-sm">
+              <div class="flex flex-col gap-1">
+                <dt class="text-muted-foreground">ソフト期限</dt>
+                <dd>
+                  <div v-if="editingField === 'soft_deadline'" class="flex items-center gap-2">
+                    <Input
+                      v-model="draftValue"
+                      data-editing="soft_deadline"
+                      type="date"
+                      class="flex-1"
+                      :disabled="isFieldUpdating('soft_deadline')"
+                      aria-label="ソフト期限"
+                      @keydown="onEditKeydown($event, 'soft_deadline')"
+                      @blur="commitEditing('soft_deadline')"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      class="size-8 shrink-0"
+                      aria-label="ソフト期限をクリア"
+                      :disabled="isFieldUpdating('soft_deadline')"
+                      @mousedown.prevent
+                      @click="clearDeadline('soft_deadline')"
+                    >
+                      <X class="size-4" />
+                    </Button>
+                  </div>
+                  <button
+                    v-else
+                    type="button"
+                    class="group flex w-full items-center justify-between rounded-md text-left hover:bg-muted/40"
+                    :disabled="isFieldUpdating('soft_deadline')"
+                    @click="startEditing('soft_deadline')"
+                  >
+                    <span
+                      :class="
+                        formatDeadline(task.soft_deadline)?.overdue
+                          ? 'text-red-500 font-medium'
+                          : ''
+                      "
+                    >
+                      {{
+                        formatDeadline(task.soft_deadline)?.label ??
+                        (task.soft_deadline
+                          ? formatTaskDate(task.soft_deadline)
+                          : '未設定（クリックして設定）')
+                      }}
+                    </span>
+                    <Pencil
+                      class="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <p v-if="fieldError('soft_deadline')" class="mt-1 text-xs text-destructive">
+                    {{ fieldError('soft_deadline') }}
+                  </p>
                 </dd>
               </div>
-              <div class="flex justify-between gap-2">
+
+              <div class="flex flex-col gap-1">
+                <dt class="text-muted-foreground">ハード期限</dt>
+                <dd>
+                  <div v-if="editingField === 'hard_deadline'" class="flex items-center gap-2">
+                    <Input
+                      v-model="draftValue"
+                      data-editing="hard_deadline"
+                      type="date"
+                      class="flex-1"
+                      :disabled="isFieldUpdating('hard_deadline')"
+                      aria-label="ハード期限"
+                      @keydown="onEditKeydown($event, 'hard_deadline')"
+                      @blur="commitEditing('hard_deadline')"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      class="size-8 shrink-0"
+                      aria-label="ハード期限をクリア"
+                      :disabled="isFieldUpdating('hard_deadline')"
+                      @mousedown.prevent
+                      @click="clearDeadline('hard_deadline')"
+                    >
+                      <X class="size-4" />
+                    </Button>
+                  </div>
+                  <button
+                    v-else
+                    type="button"
+                    class="group flex w-full items-center justify-between rounded-md text-left hover:bg-muted/40"
+                    :disabled="isFieldUpdating('hard_deadline')"
+                    @click="startEditing('hard_deadline')"
+                  >
+                    <span
+                      :class="
+                        formatDeadline(task.hard_deadline)?.overdue
+                          ? 'text-red-500 font-medium'
+                          : ''
+                      "
+                    >
+                      {{
+                        formatDeadline(task.hard_deadline)?.label ??
+                        (task.hard_deadline
+                          ? formatTaskDate(task.hard_deadline)
+                          : '未設定（クリックして設定）')
+                      }}
+                    </span>
+                    <Pencil
+                      class="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <p v-if="fieldError('hard_deadline')" class="mt-1 text-xs text-destructive">
+                    {{ fieldError('hard_deadline') }}
+                  </p>
+                </dd>
+              </div>
+
+              <div class="flex justify-between gap-2 border-t pt-2">
                 <dt class="text-muted-foreground">作成</dt>
                 <dd>{{ formatTaskDate(task.created_at) }}</dd>
               </div>

@@ -1,7 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
+  clampProgressPct,
   formatDeadline,
+  formatProgressPct,
   formatTaskDate,
+  isoToLocalDateInput,
+  localDateInputToIso,
   PRIORITY_CONFIG,
   taskDetailHref,
   taskListHref,
@@ -84,5 +88,30 @@ describe('PRIORITY_CONFIG', () => {
   it('全優先度にラベルがある', () => {
     expect(PRIORITY_CONFIG.High.label).toBe('高');
     expect(PRIORITY_CONFIG.Trivial.label).toBe('些細');
+  });
+});
+
+describe('isoToLocalDateInput / localDateInputToIso', () => {
+  it('ローカル日付入力と ISO を相互変換する', () => {
+    const iso = '2026-07-02T00:00:00Z';
+    const local = isoToLocalDateInput(iso);
+    expect(local).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(localDateInputToIso(local)).toBe(new Date(`${local}T00:00:00`).toISOString());
+  });
+
+  it('空値は空文字を返す', () => {
+    expect(isoToLocalDateInput(null)).toBe('');
+  });
+});
+
+describe('formatProgressPct / clampProgressPct', () => {
+  it('進捗率を 0-100 にクランプする', () => {
+    expect(clampProgressPct(-5)).toBe(0);
+    expect(clampProgressPct(150)).toBe(100);
+    expect(clampProgressPct(42.6)).toBe(43);
+  });
+
+  it('進捗率をパーセント表示する', () => {
+    expect(formatProgressPct(30)).toBe('30%');
   });
 });
