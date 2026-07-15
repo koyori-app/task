@@ -1,9 +1,9 @@
 import { computed, type MaybeRefOrGetter, toValue } from 'vue';
-import { useQuery } from '@tanstack/vue-query';
 
-import { fetchClient } from '@/lib/api-vue-query';
+import { useProjectsQuery } from '@/lib/api-vue-query';
+import type { components } from '@/generated/api';
 
-const LIST_PROJECTS_PATH = '/v1/tenants/{tenant_id}/projects' as const;
+type ProjectResponse = components['schemas']['ProjectResponse'];
 
 /** Route param (projectKey) をテナント配下の project UUID に解決する。 */
 export function useResolvedProjectId(
@@ -13,27 +13,15 @@ export function useResolvedProjectId(
   const resolvedTenantId = computed(() => toValue(tenantId) ?? null);
   const resolvedProjectKey = computed(() => String(toValue(projectKey) ?? ''));
 
-  const projectsQuery = useQuery({
-    queryKey: computed(() => [
-      'get',
-      LIST_PROJECTS_PATH,
-      { params: { path: { tenant_id: resolvedTenantId.value! } } },
-    ]),
-    queryFn: async ({ signal }) => {
-      const { data, error } = await fetchClient.GET(LIST_PROJECTS_PATH, {
-        params: { path: { tenant_id: resolvedTenantId.value! } },
-        signal,
-      });
-      if (error) throw error;
-      return data;
-    },
-    enabled: computed(() => !!resolvedTenantId.value && !!resolvedProjectKey.value),
-  });
+  const projectsQuery = useProjectsQuery(resolvedTenantId);
 
   const projectId = computed(() => {
     const projects = projectsQuery.data.value;
     if (!projects || !resolvedProjectKey.value) return null;
-    return projects.find((project) => project.key === resolvedProjectKey.value)?.id ?? null;
+    return (
+      projects.find((project: ProjectResponse) => project.key === resolvedProjectKey.value)?.id ??
+      null
+    );
   });
 
   const isProjectNotFound = computed(

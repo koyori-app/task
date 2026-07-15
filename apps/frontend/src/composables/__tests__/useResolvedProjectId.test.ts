@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { computed, defineComponent } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
-import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
+import { VueQueryPlugin, QueryClient, useQuery } from '@tanstack/vue-query';
 
 const projects = [
   {
@@ -18,7 +18,18 @@ const { getMock } = vi.hoisted(() => ({
   getMock: vi.fn(async () => ({ data: projects, error: undefined })),
 }));
 
-vi.mock('@/lib/api-vue-query', () => ({ fetchClient: { GET: getMock } }));
+vi.mock('@/lib/api-vue-query', () => ({
+  useProjectsQuery: (tenantId: { value: string | null }) =>
+    useQuery({
+      queryKey: computed(() => ['get', 'projects', tenantId.value]),
+      queryFn: async () => {
+        const { data, error } = await getMock();
+        if (error) throw error;
+        return data;
+      },
+      enabled: computed(() => !!tenantId.value),
+    }),
+}));
 
 import { useResolvedProjectId } from '../useResolvedProjectId';
 

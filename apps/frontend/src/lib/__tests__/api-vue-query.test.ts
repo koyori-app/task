@@ -6,6 +6,7 @@ import {
   AUTH_ME_STALE_TIME_MS,
   createTestApiClient,
   fetchClient,
+  LIST_PROJECTS_PATH,
   meQueryOptions,
   projectLabelsQueryOptions,
   projectsQueryOptions,
@@ -131,9 +132,10 @@ describe('api-vue-query PoC', () => {
     const options = projectsQueryOptions('tenant-uuid-1');
     expect(options.queryKey).toEqual([
       'get',
-      '/v1/tenants/{tenant_id}/projects',
+      LIST_PROJECTS_PATH,
       { params: { path: { tenant_id: 'tenant-uuid-1' } } },
     ]);
+    expect(options.staleTime).toBe(AUTH_ME_STALE_TIME_MS);
   });
 
   it('useProjectsQuery fetches tenant projects via projectsQueryOptions', async () => {

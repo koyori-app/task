@@ -30,9 +30,12 @@ export const projectLabelsQueryOptions = (tenantId: string, projectId: string) =
   });
 
 export const projectsQueryOptions = (tenantId: string) =>
-  apiClient.queryOptions('get', LIST_PROJECTS_PATH, {
-    params: { path: { tenant_id: tenantId } },
-  });
+  apiClient.queryOptions(
+    'get',
+    LIST_PROJECTS_PATH,
+    { params: { path: { tenant_id: tenantId } } },
+    { staleTime: AUTH_ME_STALE_TIME_MS },
+  );
 
 export function useProjectsQuery(tenantId: MaybeRefOrGetter<string | null | undefined>) {
   const resolvedTenantId = computed(() => toValue(tenantId) ?? '');
