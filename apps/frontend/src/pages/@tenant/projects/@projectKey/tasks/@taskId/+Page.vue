@@ -37,20 +37,25 @@ const {
   isError: isProjectResolveError,
 } = useResolvedProjectId(tenantId, projectKey);
 
-const taskQuery = useQuery({
-  queryKey: computed(() => [
-    'get',
-    GET_TASK_PATH,
-    {
-      params: {
-        path: {
-          tenant_id: tenantId.value!,
-          project_id: projectId.value!,
-          id: taskId.value,
+const taskQueryKey = computed(
+  () =>
+    [
+      'get',
+      GET_TASK_PATH,
+      {
+        params: {
+          path: {
+            tenant_id: tenantId.value!,
+            project_id: projectId.value!,
+            id: taskId.value,
+          },
         },
       },
-    },
-  ]),
+    ] as const,
+);
+
+const taskQuery = useQuery({
+  queryKey: taskQueryKey,
   queryFn: async ({ signal }) => {
     const { data, error, response } = await fetchClient.GET(GET_TASK_PATH, {
       params: {
@@ -97,22 +102,7 @@ watch(
 const updateStatusMutation = apiClient.useMutation('put', GET_TASK_PATH, {
   onSuccess: (data: components['schemas']['TaskDetailResponse']) => {
     statusError.value = null;
-    queryClient.setQueryData(
-      [
-        'get',
-        GET_TASK_PATH,
-        {
-          params: {
-            path: {
-              tenant_id: tenantId.value,
-              project_id: projectId.value,
-              id: taskId.value,
-            },
-          },
-        },
-      ],
-      data,
-    );
+    queryClient.setQueryData(taskQueryKey.value, data);
     queryClient.invalidateQueries({
       queryKey: ['get', LIST_TASKS_PATH],
     });
