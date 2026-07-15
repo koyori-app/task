@@ -58,7 +58,6 @@ const navProjects = computed(() => projectsQuery.data.value ?? []);
 const navProjectsLoading = computed(
   () =>
     projectsQuery.isLoading.value ||
-    projectsQuery.isFetching.value ||
     (Boolean(tenantSlug.value) && routeAlignedTenantId.value === null && tenantStore.isLoading),
 );
 
