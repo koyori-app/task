@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ref, nextTick } from 'vue';
-import { mount, flushPromises } from '@vue/test-utils';
+import { mount, flushPromises, DOMWrapper } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 
 const isPending = ref(false);
@@ -51,22 +51,45 @@ const createdTask = {
   priority: 'Medium',
 };
 
-function mountDialog(queryClient: QueryClient) {
+type MountOptions = {
+  navigateOnSuccess?: boolean;
+  open?: boolean;
+};
+
+function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
   return mount(CreateTaskDialog, {
     props: {
-      open: true,
+      open: options.open ?? true,
       tenantId: 'tenant-uuid',
       tenantDisplayId: 'tenant',
       projectId: 'project-uuid',
       projectKey: 'PROJ',
       statuses,
-      navigateOnSuccess: false,
+      navigateOnSuccess: options.navigateOnSuccess ?? false,
     },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
     },
     attachTo: document.body,
   });
+}
+
+function getTitleInput() {
+  const input = document.body.querySelector('input[name="title"]');
+  if (!input) throw new Error('title input not found');
+  return input as HTMLInputElement;
+}
+
+function getForm() {
+  const form = document.body.querySelector('form');
+  if (!form) throw new Error('form not found');
+  return form;
+}
+
+function getDialog() {
+  const dialog = document.body.querySelector('[role="dialog"]');
+  if (!dialog) throw new Error('dialog not found');
+  return dialog as HTMLElement;
 }
 
 describe('CreateTaskDialog double-submit guard', () => {
@@ -100,9 +123,11 @@ describe('CreateTaskDialog double-submit guard', () => {
 
   it('does not fire a second mutation while create is pending (submit + Enter)', async () => {
     const wrapper = mountDialog(queryClient);
+    await nextTick();
 
-    await wrapper.get('input[name="title"]').setValue('New task');
-    const form = wrapper.get('form');
+    const titleInput = new DOMWrapper(getTitleInput());
+    await titleInput.setValue('New task');
+    const form = new DOMWrapper(getForm());
 
     await form.trigger('submit');
     await nextTick();
@@ -127,5 +152,97 @@ describe('CreateTaskDialog double-submit guard', () => {
     await flushPromises();
 
     wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog a11y and cache invalidation', () => {
+  let queryClient: QueryClient;
+  let invalidateSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    invalidateSpy = vi
+      .spyOn(queryClient, 'invalidateQueries')
+      .mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('closes on Escape from a focused field', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    const titleInput = getTitleInput();
+    titleInput.focus();
+
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await nextTick();
+
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it('keeps Tab focus within the dialog', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    const dialog = getDialog();
+    const focusables = dialog.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
+    );
+    expect(focusables.length).toBeGreaterThan(1);
+
+    focusables[0]?.focus();
+    for (let i = 0; i < focusables.length + 2; i += 1) {
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }),
+      );
+      await nextTick();
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    }
+
+    wrapper.unmount();
+  });
+
+  it('invalidates the task list when staying on the page', async () => {
+    const wrapper = mountDialog(queryClient, { navigateOnSuccess: false });
+    await nextTick();
+    const titleInput = new DOMWrapper(getTitleInput());
+    await titleInput.setValue('New task');
+    await new DOMWrapper(getForm()).trigger('submit');
+    await flushPromises();
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks'],
+    });
+    wrapper.unmount();
+  });
+
+  it('skips invalidate when navigating away on success', async () => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign });
+
+    const wrapper = mountDialog(queryClient, { navigateOnSuccess: true });
+    await nextTick();
+    const titleInput = new DOMWrapper(getTitleInput());
+    await titleInput.setValue('New task');
+    await new DOMWrapper(getForm()).trigger('submit');
+    await flushPromises();
+
+    expect(invalidateSpy).not.toHaveBeenCalled();
+    expect(assign).toHaveBeenCalledWith('/tenant/projects/proj/tasks/1');
+    wrapper.unmount();
+    vi.unstubAllGlobals();
   });
 });
