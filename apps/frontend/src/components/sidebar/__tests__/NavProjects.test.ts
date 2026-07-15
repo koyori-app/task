@@ -107,4 +107,13 @@ describe('NavProjects', () => {
     await wrapper.find('button').trigger('click');
     expect(wrapper.vm.retried).toBe(true);
   });
+
+  it('does not render invalid task links when tenant slug is empty', () => {
+    const wrapper = mountNavProjects({ tenantSlug: '' });
+    const links = wrapper.findAll('a');
+    const hrefs = links.map((link) => link.attributes('href'));
+    expect(hrefs).not.toContain('#');
+    expect(hrefs.some((href) => href?.includes('/projects/'))).toBe(false);
+    expect(wrapper.text()).toContain('Team Alpha');
+  });
 });

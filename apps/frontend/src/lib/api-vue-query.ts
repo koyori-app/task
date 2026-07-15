@@ -37,18 +37,15 @@ export const projectsQueryOptions = (tenantId: string) =>
 export function useProjectsQuery(tenantId: MaybeRefOrGetter<string | null | undefined>) {
   const resolvedTenantId = computed(() => toValue(tenantId) ?? '');
 
-  return useQuery({
-    queryKey: computed(() => projectsQueryOptions(resolvedTenantId.value).queryKey),
-    queryFn: async ({ signal }) => {
-      const { data, error } = await fetchClient.GET(LIST_PROJECTS_PATH, {
-        params: { path: { tenant_id: resolvedTenantId.value } },
-        signal,
-      });
-      if (error) throw error;
-      return data ?? [];
-    },
-    enabled: computed(() => !!resolvedTenantId.value),
-  });
+  return useQuery(
+    computed(() => {
+      const id = resolvedTenantId.value;
+      return {
+        ...projectsQueryOptions(id),
+        enabled: !!id,
+      };
+    }),
+  );
 }
 
 export function useMeQuery(options?: { enabled?: MaybeRefOrGetter<boolean> }) {

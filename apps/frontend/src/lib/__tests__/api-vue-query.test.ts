@@ -12,6 +12,7 @@ import {
   useLoginMutation,
   useLogoutMutation,
   useMeQuery,
+  useProjectsQuery,
   useRegisterMutation,
 } from '../api-vue-query';
 
@@ -133,6 +134,64 @@ describe('api-vue-query PoC', () => {
       '/v1/tenants/{tenant_id}/projects',
       { params: { path: { tenant_id: 'tenant-uuid-1' } } },
     ]);
+  });
+
+  it('useProjectsQuery fetches tenant projects via projectsQueryOptions', async () => {
+    const projects = [
+      {
+        id: '00000000-0000-4000-8000-000000000010',
+        tenant_id: 'tenant-uuid-1',
+        name: 'Alpha',
+        description: null,
+        key: 'alpha',
+        is_personal: false,
+        icon_emoji: null,
+        icon_url: null,
+        personal_owner_id: null,
+      },
+    ];
+    const fetchSpy = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const req = input instanceof Request ? input : new Request(input);
+      if (
+        req.method.toUpperCase() === 'GET' &&
+        req.url.includes('/v1/tenants/tenant-uuid-1/projects')
+      ) {
+        return new Response(JSON.stringify(projects), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ message: 'not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    globalThis.fetch = fetchSpy;
+
+    const query = withQuery(() => useProjectsQuery('tenant-uuid-1'));
+
+    await flushPromises();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(query.isSuccess.value).toBe(true);
+    expect(query.data.value).toEqual(projects);
+  });
+
+  it('useProjectsQuery does not fetch when tenant id is empty', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    globalThis.fetch = fetchSpy;
+
+    const query = withQuery(() => useProjectsQuery(''));
+
+    await flushPromises();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(query.isFetched.value).toBe(false);
   });
 
   it('useMutation posts to /v1/auth/login via mocked fetch', async () => {

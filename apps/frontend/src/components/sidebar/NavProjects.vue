@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PhDotsThree, PhFolder, PhFolderOpen, PhShare, PhTrash, PhUser } from '@phosphor-icons/vue';
+import { PhDotsThree, PhFolderOpen, PhShare, PhTrash, PhUser } from '@phosphor-icons/vue';
 import { computed } from 'vue';
 import type { components } from '@/generated/api';
 
@@ -43,7 +43,6 @@ const sortedProjects = computed(() =>
 );
 
 function projectTasksUrl(project: components['schemas']['ProjectResponse']) {
-  if (!props.tenantSlug) return '#';
   return `/${props.tenantSlug}/projects/${project.key}/tasks`;
 }
 </script>
@@ -74,12 +73,12 @@ function projectTasksUrl(project: components['schemas']['ProjectResponse']) {
     </SidebarMenu>
     <SidebarMenu v-else>
       <SidebarMenuItem v-for="project in sortedProjects" :key="project.id">
-        <SidebarMenuButton as-child>
+        <SidebarMenuButton v-if="tenantSlug" as-child>
           <a :href="projectTasksUrl(project)">
             <img
               v-if="project.icon_url"
               :src="project.icon_url"
-              alt=""
+              :alt="project.name"
               class="size-4 shrink-0 rounded-sm object-cover"
             />
             <span v-else-if="project.icon_emoji" class="text-base leading-none">{{
@@ -89,6 +88,20 @@ function projectTasksUrl(project: components['schemas']['ProjectResponse']) {
             <PhFolderOpen v-else />
             <span>{{ project.name }}</span>
           </a>
+        </SidebarMenuButton>
+        <SidebarMenuButton v-else>
+          <img
+            v-if="project.icon_url"
+            :src="project.icon_url"
+            :alt="project.name"
+            class="size-4 shrink-0 rounded-sm object-cover"
+          />
+          <span v-else-if="project.icon_emoji" class="text-base leading-none">{{
+            project.icon_emoji
+          }}</span>
+          <PhUser v-else-if="project.is_personal" />
+          <PhFolderOpen v-else />
+          <span>{{ project.name }}</span>
         </SidebarMenuButton>
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
@@ -103,7 +116,7 @@ function projectTasksUrl(project: components['schemas']['ProjectResponse']) {
             :align="isMobile ? 'end' : 'start'"
           >
             <DropdownMenuItem>
-              <PhFolder class="text-muted-foreground" />
+              <PhFolderOpen class="text-muted-foreground" />
               <span>View Project</span>
             </DropdownMenuItem>
             <DropdownMenuItem>
