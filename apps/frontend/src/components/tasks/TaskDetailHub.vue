@@ -109,7 +109,9 @@ function commitEditing(field: EditableField) {
       break;
     }
     case 'progress_pct': {
-      const parsed = Number(draftValue.value);
+      const raw = String(draftValue.value);
+      if (!raw.trim()) break;
+      const parsed = Number(raw);
       if (!Number.isFinite(parsed)) break;
       const next = clampProgressPct(parsed);
       if (next !== props.task.progress_pct) emit('save:progress_pct', next);
