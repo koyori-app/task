@@ -62,7 +62,12 @@ const form = useForm({
 </script>
 
 <template>
-  <EmailNotVerified v-if="unverifiedEmail" :email="unverifiedEmail" back-href="/signin" />
+  <EmailNotVerified
+    v-if="unverifiedEmail"
+    :email="unverifiedEmail"
+    back-href="/signin"
+    reset-href="/auth/reset-password"
+  />
   <div v-else class="flex flex-col gap-6">
     <Card class="overflow-hidden p-0">
       <CardContent class="grid p-0 md:grid-cols-2">
