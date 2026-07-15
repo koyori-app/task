@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
 
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
+import type { EditableField } from '@/components/tasks/editable-field';
 import { Button } from '@/components/ui/button';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
@@ -21,8 +22,6 @@ const navigateAfterDelete = inject<(href: string) => void>('navigateAfterDelete'
 
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type UpdateTaskRequest = components['schemas']['UpdateTaskRequest'];
-
-type EditableField = 'title' | 'description' | 'progress_pct' | 'soft_deadline' | 'hard_deadline';
 
 const pageContext = usePageContext();
 const queryClient = useQueryClient();

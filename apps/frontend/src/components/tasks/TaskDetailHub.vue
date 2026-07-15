@@ -3,6 +3,7 @@ import { Loader2, Pencil, X } from '@lucide/vue';
 import { computed, nextTick, ref } from 'vue';
 import type { components } from '@/generated/api';
 import AvatarGroup from '@/components/AvatarGroup.vue';
+import type { EditableField } from '@/components/tasks/editable-field';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -18,8 +19,6 @@ import {
 
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type StatusOption = components['schemas']['ProjectStatusResponse'];
-
-type EditableField = 'title' | 'description' | 'progress_pct' | 'soft_deadline' | 'hard_deadline';
 
 const props = defineProps<{
   task: TaskDetail | null;

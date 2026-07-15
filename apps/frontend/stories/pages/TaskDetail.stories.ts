@@ -101,7 +101,7 @@ const sampleTaskDetail = {
   id: 'task-1',
   seq_id: 1,
   title: 'OAuth 対応を実装する',
-  description: 'OIDC フローとセッション管理を実装する。',
+  description: 'OIDC フローとセッション管理を実装する。' as string | null,
   priority: 'High' as const,
   status_id: 's-progress',
   project_id: 'proj-eng',
@@ -136,7 +136,7 @@ function applyPutBody(
 ): typeof sampleTaskDetail {
   const next = { ...task };
 
-  if (body.clear_description) next.description = '';
+  if (body.clear_description) next.description = null;
   else if (typeof body.description === 'string') next.description = body.description;
 
   if (body.clear_soft_deadline) next.soft_deadline = null;
