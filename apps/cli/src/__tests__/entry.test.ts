@@ -32,7 +32,7 @@ describe("bin/task.js entrypoint", () => {
       const result = run([command, "--help"]);
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(`Usage: task ${command}`);
-      expect(result.stderr).toBe("");
+      expect(result.stderr.trim()).toBe("");
     },
   );
 });

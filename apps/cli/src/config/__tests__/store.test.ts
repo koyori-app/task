@@ -1,17 +1,26 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ home: "" }));
+const state = vi.hoisted(() => ({ home: "", tmpRoot: "" }));
+const { realTmpdir } = vi.hoisted(() => {
+  // Capture the real tmpdir before vi.mock replaces node:os.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const nodeOs = require("node:os") as typeof import("node:os");
+  return { realTmpdir: nodeOs.tmpdir.bind(nodeOs) };
+});
 
 vi.mock("node:os", () => ({
-  default: { homedir: () => state.home, tmpdir: () => "/tmp" },
+  default: {
+    homedir: () => state.home,
+    tmpdir: () => state.tmpRoot,
+  },
 }));
 
 describe("config store", () => {
   beforeEach(() => {
-    state.home = fs.mkdtempSync(path.join(os.tmpdir(), "task-cli-test-"));
+    state.tmpRoot = realTmpdir();
+    state.home = fs.mkdtempSync(path.join(state.tmpRoot, "task-cli-test-"));
     vi.resetModules();
   });
 
