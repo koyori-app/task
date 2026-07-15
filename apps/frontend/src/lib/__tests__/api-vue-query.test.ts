@@ -8,6 +8,7 @@ import {
   fetchClient,
   meQueryOptions,
   projectLabelsQueryOptions,
+  projectsQueryOptions,
   useLoginMutation,
   useLogoutMutation,
   useMeQuery,
@@ -122,6 +123,15 @@ describe('api-vue-query PoC', () => {
       'get',
       '/v1/tenants/{tenant_id}/projects/{project_id}/labels',
       { params: { path: { tenant_id: 'tenant-1', project_id: 'project-1' } } },
+    ]);
+  });
+
+  it('projectsQueryOptions builds tenant projects query key', () => {
+    const options = projectsQueryOptions('tenant-uuid-1');
+    expect(options.queryKey).toEqual([
+      'get',
+      '/v1/tenants/{tenant_id}/projects',
+      { params: { path: { tenant_id: 'tenant-uuid-1' } } },
     ]);
   });
 

@@ -3,19 +3,11 @@ import type { SidebarProps } from '@/components/ui/sidebar';
 import { useAuthSession } from '@/composables/useAuthSession';
 import { useAuthStore } from '@/stores/auth';
 import { useTenantStore, type Tenant } from '@/stores/tenant';
+import { useProjectsQuery } from '@/lib/api-vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { computed, onMounted } from 'vue';
 
-import {
-  BookOpen,
-  Bot,
-  Frame,
-  ListTodo,
-  Map,
-  PieChart,
-  Settings2,
-  SquareTerminal,
-} from '@lucide/vue';
+import { BookOpen, Bot, ListTodo, Settings2, SquareTerminal } from '@lucide/vue';
 import NavMain from '@/components/sidebar/NavMain.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
 import NavUser from '@/components/sidebar/NavUser.vue';
@@ -53,6 +45,10 @@ const labelsUrl = computed(() => {
   return '#';
 });
 
+const projectsQuery = useProjectsQuery(computed(() => tenantStore.selectedTenantId));
+
+const navProjects = computed(() => projectsQuery.data.value ?? []);
+
 onMounted(() => tenantStore.loadTenants(tenantSlug.value));
 
 function selectTenant(tenant: Tenant) {
@@ -63,7 +59,10 @@ function selectTenant(tenant: Tenant) {
   }
 }
 
-// This is sample data.
+function retryProjects() {
+  void projectsQuery.refetch();
+}
+
 const data = computed(() => ({
   user: {
     name: authStore.user?.username ?? 'User',
@@ -168,23 +167,6 @@ const data = computed(() => ({
       ],
     },
   ],
-  projects: [
-    {
-      name: 'Design Engineering',
-      url: '#',
-      icon: Frame,
-    },
-    {
-      name: 'Sales & Marketing',
-      url: '#',
-      icon: PieChart,
-    },
-    {
-      name: 'Travel',
-      url: '#',
-      icon: Map,
-    },
-  ],
 }));
 </script>
 
@@ -202,7 +184,13 @@ const data = computed(() => ({
     </SidebarHeader>
     <SidebarContent>
       <NavMain :items="data.navMain" />
-      <NavProjects :projects="data.projects" />
+      <NavProjects
+        :tenant-slug="tenantSlug"
+        :projects="navProjects"
+        :loading="projectsQuery.isLoading.value"
+        :error="projectsQuery.isError.value"
+        @retry="retryProjects"
+      />
     </SidebarContent>
     <SidebarFooter>
       <NavUser :user="data.user" :on-logout="logout" />
