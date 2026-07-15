@@ -1,4 +1,4 @@
-import { defineComponent } from 'vue';
+import { defineComponent, h, inject, provide, ref, type Ref } from 'vue';
 import { afterEach, describe, expect, it } from 'vitest';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
 import type { Tenant } from '@/stores/tenant';
@@ -28,8 +28,48 @@ const tenants: Tenant[] = [
   },
 ];
 
+const DROPDOWN_OPEN = Symbol('dropdown-open');
+
+const DropdownMenu = defineComponent({
+  name: 'DropdownMenu',
+  setup(_, { slots }) {
+    const open = ref(false);
+    provide(DROPDOWN_OPEN, open);
+    return () => slots.default?.();
+  },
+});
+
+const DropdownMenuTrigger = defineComponent({
+  name: 'DropdownMenuTrigger',
+  inheritAttrs: false,
+  setup(_, { slots, attrs }) {
+    const open = inject<Ref<boolean>>(DROPDOWN_OPEN)!;
+    return () =>
+      h(
+        'button',
+        {
+          ...attrs,
+          type: 'button',
+          'data-testid': 'tenant-switcher-trigger',
+          onClick: () => {
+            open.value = !open.value;
+          },
+        },
+        slots.default?.(),
+      );
+  },
+});
+
+const DropdownMenuContent = defineComponent({
+  name: 'DropdownMenuContent',
+  setup(_, { slots }) {
+    const open = inject<Ref<boolean>>(DROPDOWN_OPEN)!;
+    return () =>
+      open.value ? h('div', { 'data-testid': 'tenant-switcher-menu' }, slots.default?.()) : null;
+  },
+});
+
 const PassThrough = defineComponent({ template: '<div><slot /></div>' });
-const Trigger = defineComponent({ template: '<div><slot /></div>' });
 const Item = defineComponent({
   inheritAttrs: false,
   template: '<button v-bind="$attrs"><slot /></button>',
@@ -54,9 +94,9 @@ function mountSwitcher(props: {
     {
       global: {
         stubs: {
-          DropdownMenu: PassThrough,
-          DropdownMenuTrigger: Trigger,
-          DropdownMenuContent: PassThrough,
+          DropdownMenu,
+          DropdownMenuTrigger,
+          DropdownMenuContent,
           DropdownMenuLabel: PassThrough,
           DropdownMenuSeparator: PassThrough,
           DropdownMenuItem: Item,
@@ -71,25 +111,32 @@ function mountSwitcher(props: {
 }
 
 describe('TenantSwitcher', () => {
-  it('shows all tenants and emits the selected tenant', async () => {
+  it('opens the tenant menu and emits the selected tenant', async () => {
     const wrapper = mountSwitcher({ tenants, selectedTenantId: 'tenant-1' });
 
     expect(wrapper.text()).toContain('Alpha');
-    expect(wrapper.text()).toContain('alpha');
-    expect(wrapper.text()).toContain('Beta');
+    expect(wrapper.text()).not.toContain('Beta');
 
-    const beta = wrapper.findAll('button').find((button) => button.text().includes('Beta'))!;
+    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
+    const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
+    expect(menu.text()).toContain('Beta');
+
+    const beta = menu.findAll('button').find((button) => button.text().includes('Beta'))!;
     await beta.trigger('click');
 
     expect(wrapper.findComponent(TenantSwitcher).emitted('select')).toEqual([[tenants[1]]]);
   });
 
-  it('shows the empty state when the user has no tenant memberships', () => {
+  it('shows the empty state when the user has no tenant memberships', async () => {
     const wrapper = mountSwitcher({ tenants: [], selectedTenantId: null });
 
     expect(wrapper.text()).toContain('所属テナントなし');
     expect(wrapper.text()).toContain('利用可能なテナントがありません');
-    expect(wrapper.text()).toContain('所属テナントがありません');
+
+    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
+    expect(wrapper.get('[data-testid="tenant-switcher-menu"]').text()).toContain(
+      '所属テナントがありません',
+    );
   });
 
   it('shows a disabled loading state', () => {
@@ -106,7 +153,10 @@ describe('TenantSwitcher', () => {
       error: 'テナント一覧を取得できませんでした',
     });
 
+    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
+
     const retry = wrapper
+      .get('[data-testid="tenant-switcher-menu"]')
       .findAll('button')
       .find((button) => button.text().includes('テナント一覧を取得できませんでした'))!;
     expect(retry.text()).toContain('再試行');

@@ -19,6 +19,8 @@ const createdTenant = {
 };
 
 const input = (id: string) => document.querySelector<HTMLInputElement>(`#${id}`)!;
+const overlay = () =>
+  document.querySelector<HTMLElement>('[data-testid="create-tenant-dialog-overlay"]')!;
 
 function updateInput(id: string, value: string) {
   const element = input(id);
@@ -42,6 +44,21 @@ function mountDialog() {
     attachTo: document.body,
   });
   return wrapper;
+}
+
+async function expectFormResetAfterReopen(
+  wrapper: VueWrapper,
+  reopenName: string,
+  expectedSlug: string,
+) {
+  await wrapper.setProps({ open: true });
+  await flushPromises();
+  expect(input('name').value).toBe('');
+  expect(input('display_id').value).toBe('');
+
+  updateInput('name', reopenName);
+  await flushPromises();
+  expect(input('display_id').value).toBe(expectedSlug);
 }
 
 describe('CreateTenantDialog', () => {
@@ -99,60 +116,56 @@ describe('CreateTenantDialog', () => {
     expect(apiClient.POST).not.toHaveBeenCalled();
   });
 
-  it('resets form values and manual display-id state after cancellation', async () => {
-    const wrapper = mountDialog();
-    await flushPromises();
+  it.each([
+    {
+      label: 'cancellation',
+      close: async (wrapper: VueWrapper) => {
+        const cancel = Array.from(document.querySelectorAll('button')).find(
+          (button) => button.textContent === 'キャンセル',
+        )!;
+        cancel.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await flushPromises();
+        expect(wrapper.emitted('update:open')).toContainEqual([false]);
+      },
+      initialName: 'First Tenant',
+      customDisplayId: 'custom-id',
+      ignoredSlugName: 'Ignored Slug',
+      reopenName: 'Second Tenant',
+      expectedSlug: 'second-tenant',
+    },
+    {
+      label: 'overlay close',
+      close: async (wrapper: VueWrapper) => {
+        overlay().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        overlay().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await flushPromises();
+        expect(wrapper.emitted('update:open')).toContainEqual([false]);
+      },
+      initialName: 'Overlay Tenant',
+      customDisplayId: 'overlay-custom',
+      ignoredSlugName: 'After Overlay',
+      reopenName: 'After Overlay',
+      expectedSlug: 'after-overlay',
+    },
+  ])(
+    'resets form values and manual display-id state after $label',
+    async ({ close, initialName, customDisplayId, ignoredSlugName, reopenName, expectedSlug }) => {
+      const wrapper = mountDialog();
+      await flushPromises();
 
-    updateInput('name', 'First Tenant');
-    await flushPromises();
-    expect(input('display_id').value).toBe('first-tenant');
-    updateInput('display_id', 'custom-id');
-    await flushPromises();
-    updateInput('name', 'Ignored Slug');
-    await flushPromises();
-    expect(input('display_id').value).toBe('custom-id');
+      updateInput('name', initialName);
+      await flushPromises();
+      expect(input('display_id').value).toBe(initialName.toLowerCase().replace(/\s+/g, '-'));
+      updateInput('display_id', customDisplayId);
+      await flushPromises();
+      updateInput('name', ignoredSlugName);
+      await flushPromises();
+      expect(input('display_id').value).toBe(customDisplayId);
 
-    const cancel = Array.from(document.querySelectorAll('button')).find(
-      (button) => button.textContent === 'キャンセル',
-    )!;
-    cancel.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await flushPromises();
-    expect(wrapper.emitted('update:open')).toContainEqual([false]);
-
-    await wrapper.setProps({ open: true });
-    await flushPromises();
-    expect(input('name').value).toBe('');
-    expect(input('display_id').value).toBe('');
-
-    updateInput('name', 'Second Tenant');
-    await flushPromises();
-    expect(input('display_id').value).toBe('second-tenant');
-  });
-
-  it('resets form values and manual display-id state after an overlay close', async () => {
-    const wrapper = mountDialog();
-    await flushPromises();
-
-    updateInput('name', 'Overlay Tenant');
-    await flushPromises();
-    updateInput('display_id', 'overlay-custom');
-    await flushPromises();
-
-    const overlay = document.querySelector<HTMLElement>('.bg-black\\/50')!;
-    overlay.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-    overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await flushPromises();
-    expect(wrapper.emitted('update:open')).toContainEqual([false]);
-
-    await wrapper.setProps({ open: true });
-    await flushPromises();
-    expect(input('name').value).toBe('');
-    expect(input('display_id').value).toBe('');
-
-    updateInput('name', 'After Overlay');
-    await flushPromises();
-    expect(input('display_id').value).toBe('after-overlay');
-  });
+      await close(wrapper);
+      await expectFormResetAfterReopen(wrapper, reopenName, expectedSlug);
+    },
+  );
 
   it('shows the duplicate display-id message returned for a 409 response', async () => {
     vi.mocked(apiClient.POST).mockResolvedValue({
