@@ -1,10 +1,13 @@
+import arkenv from 'arkenv';
 import { Elysia } from 'elysia';
 
-const API_BASE = process.env.API_BASE ?? 'http://localhost:3400';
+const env = arkenv({
+  API_BASE: "string = 'http://localhost:3400'",
+  UPLOAD_MAX_SIZE_MB: 'number > 0 = 100',
+});
 
 /** Align with backend UPLOAD_MAX_SIZE_MB default (100). */
-const mb = Number(process.env.UPLOAD_MAX_SIZE_MB ?? 100);
-export const MAX_PROXY_BODY_BYTES = (Number.isFinite(mb) && mb > 0 ? mb : 100) * 1024 * 1024;
+export const MAX_PROXY_BODY_BYTES = env.UPLOAD_MAX_SIZE_MB * 1024 * 1024;
 
 const HOP_BY_HOP = new Set([
   'connection',
@@ -28,7 +31,7 @@ class BodyTooLargeError extends Error {
 function buildBackendUrl(request: Request): string {
   const url = new URL(request.url);
   const backendPath = url.pathname.replace(/^\/api/, '') + url.search;
-  return `${API_BASE}${backendPath}`;
+  return `${env.API_BASE}${backendPath}`;
 }
 
 function copyHeaders(source: Headers, skipHopByHop = true): Headers {

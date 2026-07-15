@@ -65,18 +65,30 @@ describe('MAX_PROXY_BODY_BYTES', () => {
     vi.resetModules();
   });
 
-  it.each(['abc', '', '-1'])(
-    'falls back to 100 MiB when UPLOAD_MAX_SIZE_MB is %j',
-    async (value) => {
-      vi.stubEnv('UPLOAD_MAX_SIZE_MB', value);
-      vi.resetModules();
+  it('parses a positive UPLOAD_MAX_SIZE_MB value', async () => {
+    vi.stubEnv('UPLOAD_MAX_SIZE_MB', '2.5');
+    vi.resetModules();
 
-      const proxy = await import('../api-proxy');
+    const proxy = await import('../api-proxy');
 
-      expect(proxy.MAX_PROXY_BODY_BYTES).toBe(DEFAULT_MAX_PROXY_BODY_BYTES);
-      expect(Number.isFinite(proxy.MAX_PROXY_BODY_BYTES)).toBe(true);
-    },
-  );
+    expect(proxy.MAX_PROXY_BODY_BYTES).toBe(2.5 * 1024 * 1024);
+  });
+
+  it('defaults to 100 MiB when UPLOAD_MAX_SIZE_MB is unset', async () => {
+    vi.stubEnv('UPLOAD_MAX_SIZE_MB', undefined);
+    vi.resetModules();
+
+    const proxy = await import('../api-proxy');
+
+    expect(proxy.MAX_PROXY_BODY_BYTES).toBe(DEFAULT_MAX_PROXY_BODY_BYTES);
+  });
+
+  it.each(['abc', 'NaN', '0', '-1'])('fails fast when UPLOAD_MAX_SIZE_MB is %j', async (value) => {
+    vi.stubEnv('UPLOAD_MAX_SIZE_MB', value);
+    vi.resetModules();
+
+    await expect(import('../api-proxy')).rejects.toThrow(/UPLOAD_MAX_SIZE_MB/);
+  });
 });
 
 describe('apiProxyPlugin', () => {
