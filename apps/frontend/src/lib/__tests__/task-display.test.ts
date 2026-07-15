@@ -92,11 +92,16 @@ describe('PRIORITY_CONFIG', () => {
 });
 
 describe('isoToLocalDateInput / localDateInputToIso', () => {
-  it('ローカル日付入力と ISO を相互変換する', () => {
-    const iso = '2026-07-02T00:00:00Z';
-    const local = isoToLocalDateInput(iso);
-    expect(local).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(localDateInputToIso(local)).toBe(new Date(`${local}T00:00:00`).toISOString());
+  it('日付入力を UTC ISO に変換して相互変換する', () => {
+    const date = '2026-07-02';
+    const iso = localDateInputToIso(date);
+    expect(iso).toBe('2026-07-02T00:00:00.000Z');
+    expect(isoToLocalDateInput(iso)).toBe(date);
+  });
+
+  it('表示側のタイムゾーンにかかわらず保存されたカレンダー日を保持する', () => {
+    expect(isoToLocalDateInput('2026-07-02T00:00:00+14:00')).toBe('2026-07-02');
+    expect(isoToLocalDateInput('2026-07-02T00:00:00-11:00')).toBe('2026-07-02');
   });
 
   it('空値は空文字を返す', () => {

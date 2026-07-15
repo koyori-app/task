@@ -23,6 +23,24 @@ const task: TaskDetail = {
 };
 
 describe('TaskDetailHub', () => {
+  it('emits the selected soft deadline through the SET path', async () => {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task,
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+
+    await wrapper.get('button[aria-label="ソフト期限を編集"]').trigger('click');
+    const deadlineInput = wrapper.get('input[aria-label="ソフト期限"]');
+    await deadlineInput.setValue('2026-08-23');
+    await deadlineInput.trigger('blur');
+
+    expect(wrapper.emitted('save:soft_deadline')).toEqual([['2026-08-23']]);
+  });
+
   it('does not save an empty progress value as zero percent', async () => {
     const wrapper = mount(TaskDetailHub, {
       props: {

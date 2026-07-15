@@ -69,19 +69,16 @@ export function formatDeadline(iso?: string | null): { label: string; overdue: b
   };
 }
 
-/** ISO datetime → `<input type="date">` value in local timezone. */
+/** ISO datetime → calendar date without applying the viewer's timezone. */
 export function isoToLocalDateInput(iso?: string | null): string {
   if (!iso) return '';
-  const d = new Date(iso);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  const calendarDate = /^(\d{4}-\d{2}-\d{2})(?:T|$)/.exec(iso)?.[1];
+  return calendarDate ?? new Date(iso).toISOString().slice(0, 10);
 }
 
-/** Local date input → ISO datetime (start of local day). */
+/** Calendar date input → stable UTC ISO datetime. */
 export function localDateInputToIso(dateValue: string): string {
-  return new Date(`${dateValue}T00:00:00`).toISOString();
+  return `${dateValue}T00:00:00.000Z`;
 }
 
 export function formatProgressPct(value: number): string {

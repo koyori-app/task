@@ -41,7 +41,10 @@ const deleteError = ref<string | null>(null);
 const fieldErrors = ref<Partial<Record<EditableField, string>>>({});
 const selectedStatusId = ref('');
 const optimisticTask = ref<Partial<TaskDetail>>({});
-const updatingField = ref<EditableField | 'status_id' | null>(null);
+type MutatingField = EditableField | 'status_id';
+const pendingFieldRevisions = ref<Partial<Record<MutatingField, number>>>({});
+const appliedFieldRevisions: Partial<Record<MutatingField, number>> = {};
+let nextMutationRevision = 0;
 const deleteDialogRef = ref<HTMLDialogElement | null>(null);
 
 const {
@@ -120,29 +123,23 @@ const displayTask = computed(() => {
 });
 
 const fieldUpdating = computed(() => {
-  const field = updatingField.value;
-  if (!field || field === 'status_id') return {};
-  return { [field]: updateTaskMutation.isPending.value };
+  const pending = pendingFieldRevisions.value;
+  return {
+    title: pending.title !== undefined,
+    description: pending.description !== undefined,
+    progress_pct: pending.progress_pct !== undefined,
+    soft_deadline: pending.soft_deadline !== undefined,
+    hard_deadline: pending.hard_deadline !== undefined,
+  };
 });
 
-const updateTaskMutation = apiClient.useMutation('put', GET_TASK_PATH, {
-  onSuccess: (data: TaskDetail) => {
-    statusError.value = null;
-    fieldErrors.value = {};
-    optimisticTask.value = {};
-    updatingField.value = null;
-    queryClient.setQueryData(taskQueryKey.value, data);
-    if (data.status_id) selectedStatusId.value = data.status_id;
-    queryClient.invalidateQueries({
-      queryKey: ['get', LIST_TASKS_PATH],
-    });
-  },
-});
+const updateTaskMutation = apiClient.useMutation('put', GET_TASK_PATH);
 
 const deleteTaskMutation = apiClient.useMutation('delete', GET_TASK_PATH, {
   onSuccess: async () => {
     deleteError.value = null;
     closeDeleteDialog();
+    queryClient.removeQueries({ queryKey: taskQueryKey.value, exact: true });
     await queryClient.invalidateQueries({
       queryKey: ['get', LIST_TASKS_PATH],
     });
@@ -153,21 +150,52 @@ const deleteTaskMutation = apiClient.useMutation('delete', GET_TASK_PATH, {
   },
 });
 
-function rollbackOptimistic(
-  field: EditableField | 'status_id',
-  previous: TaskDetail | null | undefined,
-) {
-  optimisticTask.value = {};
-  updatingField.value = null;
+function rollbackOptimistic(field: MutatingField, revision: number) {
+  if (pendingFieldRevisions.value[field] !== revision) return;
+
+  const nextOptimistic = { ...optimisticTask.value };
+  delete nextOptimistic[field];
+  optimisticTask.value = nextOptimistic;
+  const nextPending = { ...pendingFieldRevisions.value };
+  delete nextPending[field];
+  pendingFieldRevisions.value = nextPending;
+
   if (field === 'status_id') {
     statusError.value = 'ステータスの更新に失敗しました';
-    if (previous?.status_id) selectedStatusId.value = previous.status_id;
+    const currentStatusId = taskQuery.data.value?.status_id;
+    if (currentStatusId) selectedStatusId.value = currentStatusId;
     return;
   }
   fieldErrors.value = {
     ...fieldErrors.value,
     [field]: '更新に失敗しました',
   };
+}
+
+function applyMutationSuccess(field: MutatingField, revision: number, data: TaskDetail) {
+  const appliedRevision = appliedFieldRevisions[field] ?? 0;
+  if (revision > appliedRevision) {
+    appliedFieldRevisions[field] = revision;
+    queryClient.setQueryData<TaskDetail | null>(taskQueryKey.value, (current) =>
+      current ? { ...current, [field]: data[field] } : data,
+    );
+  }
+
+  if (pendingFieldRevisions.value[field] !== revision) return;
+
+  const nextOptimistic = { ...optimisticTask.value };
+  delete nextOptimistic[field];
+  optimisticTask.value = nextOptimistic;
+  const nextPending = { ...pendingFieldRevisions.value };
+  delete nextPending[field];
+  pendingFieldRevisions.value = nextPending;
+
+  if (field === 'status_id') {
+    statusError.value = null;
+    if (data.status_id) selectedStatusId.value = data.status_id;
+  } else {
+    fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
+  }
 }
 
 function mutateTask(
@@ -177,9 +205,9 @@ function mutateTask(
 ) {
   if (!tenantId.value || !projectId.value || !taskId.value) return;
 
-  const previous = taskQuery.data.value;
+  const revision = ++nextMutationRevision;
   optimisticTask.value = { ...optimisticTask.value, ...optimistic };
-  updatingField.value = field;
+  pendingFieldRevisions.value = { ...pendingFieldRevisions.value, [field]: revision };
   if (field === 'status_id') statusError.value = null;
   else fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
 
@@ -195,7 +223,11 @@ function mutateTask(
       body,
     },
     {
-      onError: () => rollbackOptimistic(field, previous),
+      onSuccess: (data: TaskDetail) => {
+        applyMutationSuccess(field, revision, data);
+        queryClient.invalidateQueries({ queryKey: ['get', LIST_TASKS_PATH] });
+      },
+      onError: () => rollbackOptimistic(field, revision),
     },
   );
 }
@@ -325,7 +357,7 @@ const isNotFound = computed(
     :project-key="projectKey"
     :statuses="statusesQuery.data.value ?? []"
     :status-id="selectedStatusId"
-    :status-updating="updatingField === 'status_id' && updateTaskMutation.isPending.value"
+    :status-updating="pendingFieldRevisions.status_id !== undefined"
     :status-error="statusError"
     :field-updating="fieldUpdating"
     :field-errors="fieldErrors"

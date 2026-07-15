@@ -466,6 +466,31 @@ export const ProgressEdit: Story = {
   },
 };
 
+export const SoftDeadlineSet: Story = {
+  name: 'ソフト期限設定',
+  beforeEach: () => {
+    const puts: unknown[] = [];
+    const restore = createMockFetch({
+      task: { ...sampleTaskDetail, soft_deadline: null },
+      onPut: (body) => puts.push(body),
+    });
+    (SoftDeadlineSet as { puts?: unknown[] }).puts = puts;
+    return restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+
+    await user.click(await canvas.findByRole('button', { name: 'ソフト期限を編集' }));
+    const input = await canvas.findByLabelText('ソフト期限');
+    await user.type(input, '2026-08-23');
+    await user.tab();
+
+    const puts = (SoftDeadlineSet as { puts?: unknown[] }).puts ?? [];
+    await expect(puts).toContainEqual({ soft_deadline: '2026-08-23T00:00:00.000Z' });
+  },
+};
+
 export const SoftDeadlineClear: Story = {
   name: 'ソフト期限クリア',
   beforeEach: () => {

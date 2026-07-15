@@ -382,6 +382,7 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                   <button
                     v-else
                     type="button"
+                    aria-label="ソフト期限を編集"
                     class="group flex w-full items-center justify-between rounded-md text-left hover:bg-muted/40"
                     :disabled="isFieldUpdating('soft_deadline')"
                     @click="startEditing('soft_deadline')"
@@ -441,6 +442,7 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                   <button
                     v-else
                     type="button"
+                    aria-label="ハード期限を編集"
                     class="group flex w-full items-center justify-between rounded-md text-left hover:bg-muted/40"
                     :disabled="isFieldUpdating('hard_deadline')"
                     @click="startEditing('hard_deadline')"
