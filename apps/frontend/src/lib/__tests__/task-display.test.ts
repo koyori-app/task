@@ -4,6 +4,7 @@ import {
   formatTaskDate,
   PRIORITY_CONFIG,
   taskDetailHref,
+  taskListHref,
   taskSeqKey,
 } from '../task-display';
 
@@ -24,6 +25,12 @@ describe('taskSeqKey', () => {
 describe('taskDetailHref', () => {
   it('詳細ページ URL を生成する', () => {
     expect(taskDetailHref('acme', 'ENG', 42)).toBe('/acme/projects/ENG/tasks/ENG-42');
+  });
+});
+
+describe('taskListHref', () => {
+  it('一覧ページ URL を生成する', () => {
+    expect(taskListHref('acme', 'ENG')).toBe('/acme/projects/ENG/tasks');
   });
 });
 

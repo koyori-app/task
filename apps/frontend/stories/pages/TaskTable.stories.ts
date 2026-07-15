@@ -384,21 +384,6 @@ function createProjectSwitchMockFetch(): ProjectSwitchMock {
 let reactivePageContext: ReturnType<typeof reactive<typeof mockContext>> | null = null;
 let projectSwitchMock: ProjectSwitchMock | null = null;
 
-let locationAssignSpy: ReturnType<typeof fn>;
-let originalLocationAssign: Location['assign'];
-
-const stubLocationAssign = () => {
-  locationAssignSpy = fn();
-  originalLocationAssign = Location.prototype.assign;
-  Location.prototype.assign = function (url: string | URL) {
-    locationAssignSpy(url);
-  };
-};
-
-const restoreLocationAssign = () => {
-  Location.prototype.assign = originalLocationAssign;
-};
-
 function storyDecoratorReactive() {
   return () => ({
     setup() {
@@ -409,7 +394,10 @@ function storyDecoratorReactive() {
         },
       });
       provide(VUE_QUERY_CLIENT, queryClient);
-      reactivePageContext = reactive({ ...mockContext });
+      reactivePageContext = reactive({
+        ...mockContext,
+        routeParams: { ...mockContext.routeParams },
+      });
       provide(PAGE_CONTEXT_KEY, reactivePageContext);
     },
     template: '<story />',
@@ -569,15 +557,11 @@ export const ProjectSwitch: Story = {
   },
 };
 
-export const RowKeyboardNavigation: Story = {
-  name: '行キーボード操作（子コントロール除外）',
+export const RowAccessibility: Story = {
+  name: '行の stretched link と独立コントロール',
   beforeEach() {
     const restoreFetch = mockFetch();
-    stubLocationAssign();
-    return () => {
-      restoreFetch();
-      restoreLocationAssign();
-    };
+    return () => restoreFetch();
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -585,17 +569,26 @@ export const RowKeyboardNavigation: Story = {
     await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
 
     const titleCell = await canvas.findByText('OAuth 対応を実装する');
-    const taskRow = titleCell.closest('[role="button"]');
+    const taskLink = titleCell.closest('a');
+    const taskRow = titleCell.closest('tr');
+    if (!(taskLink instanceof HTMLAnchorElement)) {
+      throw new Error('task link not found');
+    }
     if (!(taskRow instanceof HTMLElement)) {
       throw new Error('task row not found');
     }
+    await expect(taskRow).not.toHaveAttribute('role');
+    await expect(taskRow).not.toHaveAttribute('tabindex');
+    await expect(taskLink).toHaveAttribute('href', '/tenant-123/projects/ENG/tasks/ENG-1');
     const rowCheckbox = taskRow.querySelector('[role="checkbox"]');
     if (!(rowCheckbox instanceof HTMLElement)) {
       throw new Error('row checkbox not found');
     }
     rowCheckbox.focus();
-    locationAssignSpy.mockClear();
     rowCheckbox.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
-    expect(locationAssignSpy).not.toHaveBeenCalled();
+    await expect(rowCheckbox).toHaveFocus();
+
+    await userEvent.click(taskLink);
+    await expect(window.location.pathname).toBe('/tenant-123/projects/ENG/tasks/ENG-1');
   },
 };

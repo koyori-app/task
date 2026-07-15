@@ -24,6 +24,10 @@ export function taskDetailHref(tenant: string, projectKey: string, seqId: number
   return `/${tenant}/projects/${projectKey}/tasks/${taskSeqKey(projectKey, seqId)}`;
 }
 
+export function taskListHref(tenant: string, projectKey: string): string {
+  return `/${tenant}/projects/${projectKey}/tasks`;
+}
+
 export function formatTaskDate(iso?: string | null): string | null {
   if (!iso) return null;
   const d = new Date(iso);

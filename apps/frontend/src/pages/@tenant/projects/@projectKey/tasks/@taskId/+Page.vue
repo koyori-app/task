@@ -4,11 +4,12 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
 
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
+import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { fetchClient, apiClient } from '@/lib/api-vue-query';
+import { taskListHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 
-const LIST_PROJECTS_PATH = '/v1/tenants/{tenant_id}/projects' as const;
 const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
@@ -29,36 +30,12 @@ const taskId = computed(() => String(pageContext.routeParams.taskId ?? ''));
 const statusError = ref<string | null>(null);
 const selectedStatusId = ref('');
 
-const projectsQuery = useQuery({
-  queryKey: computed(() => [
-    'get',
-    LIST_PROJECTS_PATH,
-    { params: { path: { tenant_id: tenantId.value! } } },
-  ]),
-  queryFn: async ({ signal }) => {
-    const { data, error } = await fetchClient.GET(LIST_PROJECTS_PATH, {
-      params: { path: { tenant_id: tenantId.value! } },
-      signal,
-    });
-    if (error) throw error;
-    return data;
-  },
-  enabled: computed(() => !!tenantId.value),
-});
-
-const projectId = computed(() => {
-  const projects = projectsQuery.data.value;
-  if (!projects || !projectKey.value) return null;
-  return projects.find((p) => p.key === projectKey.value)?.id ?? null;
-});
-
-const isProjectNotFound = computed(
-  () =>
-    !!projectKey.value &&
-    projectsQuery.isSuccess.value &&
-    !projectsQuery.isFetching.value &&
-    projectId.value === null,
-);
+const {
+  projectId,
+  isProjectNotFound,
+  isResolving: isProjectResolving,
+  isError: isProjectResolveError,
+} = useResolvedProjectId(tenantId, projectKey);
 
 const taskQuery = useQuery({
   queryKey: computed(() => [
@@ -171,12 +148,12 @@ function onStatusChange(nextStatusId: string) {
   });
 }
 
-const listHref = computed(() => `/${tenantDisplayId.value}/projects/${projectKey.value}/tasks`);
+const listHref = computed(() => taskListHref(tenantDisplayId.value, projectKey.value));
 
 const isLoading = computed(
   () =>
     isTenantResolving.value ||
-    projectsQuery.isLoading.value ||
+    isProjectResolving.value ||
     taskQuery.isLoading.value ||
     statusesQuery.isLoading.value,
 );
@@ -184,7 +161,7 @@ const isLoading = computed(
 const isError = computed(
   () =>
     isTenantResolveError.value ||
-    projectsQuery.isError.value ||
+    isProjectResolveError.value ||
     taskQuery.isError.value ||
     statusesQuery.isError.value,
 );

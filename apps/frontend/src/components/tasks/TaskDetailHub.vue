@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Loader2 } from '@lucide/vue';
+import { computed } from 'vue';
 import type { components } from '@/generated/api';
 import AvatarGroup from '@/components/AvatarGroup.vue';
 import { PRIORITY_CONFIG, formatDeadline, formatTaskDate, taskSeqKey } from '@/lib/task-display';
@@ -23,9 +24,9 @@ const emit = defineEmits<{
   'update:statusId': [value: string];
 }>();
 
-function resolveStatus(statusId: string) {
-  return props.statuses.find((s) => s.id === statusId);
-}
+const resolvedStatus = computed(() =>
+  props.statuses.find((status) => status.id === props.statusId),
+);
 </script>
 
 <template>
@@ -84,15 +85,15 @@ function resolveStatus(statusId: string) {
             </select>
             <p v-if="statusError" class="mt-2 text-xs text-destructive">{{ statusError }}</p>
             <p
-              v-else-if="resolveStatus(statusId)"
+              v-else-if="resolvedStatus"
               class="mt-2 inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium"
               :style="{
-                backgroundColor: resolveStatus(statusId)!.color + '1a',
-                borderColor: resolveStatus(statusId)!.color + '66',
-                color: resolveStatus(statusId)!.color,
+                backgroundColor: resolvedStatus.color + '1a',
+                borderColor: resolvedStatus.color + '66',
+                color: resolvedStatus.color,
               }"
             >
-              {{ resolveStatus(statusId)!.name }}
+              {{ resolvedStatus.name }}
             </p>
           </section>
 

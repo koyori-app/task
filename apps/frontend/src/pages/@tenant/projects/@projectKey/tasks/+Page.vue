@@ -19,6 +19,7 @@ import { PhCaretDown, PhCaretUp, PhCaretUpDown } from '@phosphor-icons/vue';
 import { computed, h, ref, watch } from 'vue';
 import type { Column } from '@tanstack/vue-table';
 import { useQuery, keepPreviousData } from '@tanstack/vue-query';
+import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 
 import { valueUpdater } from '@/components/ui/table/utils';
@@ -40,14 +41,13 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import AvatarGroup from '@/components/AvatarGroup.vue';
+import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { fetchClient } from '@/lib/api-vue-query';
 import { formatDeadline, taskDetailHref } from '@/lib/task-display';
-import { handleRowKeydownNavigate, isRowInteractiveTarget } from '@/lib/table-row-navigation';
 import type { components } from '@/generated/api';
 
 // ---- 定数 ----
-const LIST_PROJECTS_PATH = '/v1/tenants/{tenant_id}/projects' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
 const TASKS_PAGE_SIZE = 20;
@@ -84,39 +84,12 @@ const {
   isError: isTenantResolveError,
 } = useResolvedTenantId(tenantDisplayId);
 const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
-
-// ---- クエリ①: プロジェクト一覧 ----
-const projectsQuery = useQuery({
-  queryKey: computed(() => [
-    'get',
-    LIST_PROJECTS_PATH,
-    { params: { path: { tenant_id: tenantId.value! } } },
-  ]),
-  queryFn: async ({ signal }) => {
-    const { data, error } = await fetchClient.GET(LIST_PROJECTS_PATH, {
-      params: { path: { tenant_id: tenantId.value! } },
-      signal,
-    });
-    if (error) throw error;
-    return data;
-  },
-  enabled: computed(() => !!tenantId.value),
-});
-
-/** projectKey から project_id を解決 */
-const projectId = computed(() => {
-  const projects = projectsQuery.data.value;
-  if (!projects || !projectKey.value) return null;
-  return projects.find((p) => p.key === projectKey.value)?.id ?? null;
-});
-
-const isProjectNotFound = computed(
-  () =>
-    !!projectKey.value &&
-    projectsQuery.isSuccess.value &&
-    !projectsQuery.isFetching.value &&
-    projectId.value === null,
-);
+const {
+  projectId,
+  isProjectNotFound,
+  isResolving: isProjectResolving,
+  isError: isProjectResolveError,
+} = useResolvedProjectId(tenantId, projectKey);
 
 // ---- サーバーサイドページネーション ----
 const pagination = ref<PaginationState>({
@@ -224,7 +197,7 @@ const taskRows = computed<TaskRow[]>(() => {
 const isInitialLoading = computed(
   () =>
     isTenantResolving.value ||
-    projectsQuery.isLoading.value ||
+    isProjectResolving.value ||
     tasksQuery.isLoading.value ||
     statusesQuery.isLoading.value,
 );
@@ -232,7 +205,7 @@ const isInitialLoading = computed(
 const isError = computed(
   () =>
     isTenantResolveError.value ||
-    projectsQuery.isError.value ||
+    isProjectResolveError.value ||
     tasksQuery.isError.value ||
     statusesQuery.isError.value,
 );
@@ -280,21 +253,11 @@ function taskKey(task: TaskRow) {
   return `${task.project_key}-${task.seq_id}`;
 }
 
-function navigateToTask(task: TaskRow) {
-  window.location.assign(taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id));
-}
-
-function onRowKeydown(task: TaskRow, event: KeyboardEvent) {
-  handleRowKeydownNavigate(event, () => navigateToTask(task));
-}
-
-function onRowClick(task: TaskRow, event: MouseEvent) {
-  if (isRowInteractiveTarget(event)) return;
-  navigateToTask(task);
-}
-
-function formatDate(iso?: string) {
-  return formatDeadline(iso);
+function navigateToTask(task: TaskRow, event: MouseEvent) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+    return;
+  event.preventDefault();
+  void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id));
 }
 
 // ---- テーブル列定義 ----
@@ -303,6 +266,7 @@ const columns: ColumnDef<TaskRow>[] = [
     id: 'select',
     header: ({ table }) =>
       h(Checkbox, {
+        class: 'relative z-10',
         modelValue:
           table.getIsAllPageRowsSelected() ||
           (table.getIsSomePageRowsSelected() && 'indeterminate'),
@@ -342,8 +306,9 @@ const columns: ColumnDef<TaskRow>[] = [
           'a',
           {
             href,
-            class: 'truncate text-sm text-primary hover:underline',
-            onClick: (e: MouseEvent) => e.stopPropagation(),
+            class:
+              "truncate text-sm text-primary hover:underline after:absolute after:inset-0 after:content-['']",
+            onClick: (event: MouseEvent) => navigateToTask(task, event),
           },
           task.title,
         ),
@@ -405,7 +370,7 @@ const columns: ColumnDef<TaskRow>[] = [
     accessorFn: (row) => row.due_date ?? '',
     header: ({ column }) => sortableHeader(column, '期限'),
     cell: ({ row }) => {
-      const formatted = formatDate(row.original.due_date);
+      const formatted = formatDeadline(row.original.due_date);
       if (!formatted) return h('span', { class: 'text-muted-foreground text-xs' }, '−');
       return h(
         'span',
@@ -539,11 +504,7 @@ const table = useVueTable({
                 v-for="row in table.getRowModel().rows"
                 :key="row.id"
                 :data-state="row.getIsSelected() && 'selected'"
-                class="h-10 cursor-pointer"
-                role="button"
-                tabindex="0"
-                @click="onRowClick(row.original, $event)"
-                @keydown="onRowKeydown(row.original, $event)"
+                class="relative h-10"
               >
                 <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id" class="py-1.5 px-3">
                   <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
