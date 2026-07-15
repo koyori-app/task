@@ -16,6 +16,13 @@ import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import type { components } from '@/generated/api';
 import { apiClient } from '@/lib/api-vue-query';
@@ -168,17 +175,17 @@ async function submit() {
 
         <div class="space-y-1.5">
           <Label for="task-status"> ステータス <span class="text-destructive">*</span> </Label>
-          <select
-            id="task-status"
-            v-model="statusId"
-            name="status_id"
-            class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-          >
-            <option disabled value="">選択してください</option>
-            <option v-for="status in statuses" :key="status.id" :value="status.id">
-              {{ status.name }}
-            </option>
-          </select>
+          <Select v-model="statusId">
+            <SelectTrigger id="task-status" class="w-full">
+              <SelectValue placeholder="選択してください" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="status in statuses" :key="status.id" :value="status.id">
+                {{ status.name }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <input type="hidden" name="status_id" :value="statusId" />
         </div>
 
         <div class="space-y-1.5">
@@ -209,18 +216,19 @@ async function submit() {
 
         <div class="space-y-1.5">
           <Label for="task-priority">優先度</Label>
-          <select
-            id="task-priority"
-            v-model="priority"
-            name="priority"
-            class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-          >
-            <option value="Critical">重大</option>
-            <option value="High">高</option>
-            <option value="Medium">中</option>
-            <option value="Low">低</option>
-            <option value="Trivial">些細</option>
-          </select>
+          <Select v-model="priority">
+            <SelectTrigger id="task-priority" class="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Critical">重大</SelectItem>
+              <SelectItem value="High">高</SelectItem>
+              <SelectItem value="Medium">中</SelectItem>
+              <SelectItem value="Low">低</SelectItem>
+              <SelectItem value="Trivial">些細</SelectItem>
+            </SelectContent>
+          </Select>
+          <input type="hidden" name="priority" :value="priority" />
         </div>
 
         <p v-if="validationMessage" role="alert" class="text-sm text-destructive">

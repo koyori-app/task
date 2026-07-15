@@ -3,11 +3,12 @@ import { ref, nextTick } from 'vue';
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 
+const isHydrated = ref(true);
 const isPending = ref(false);
 const mutateAsync = vi.fn();
 
 vi.mock('@/composables/useHydrated', () => ({
-  useHydrated: () => ref(true),
+  useHydrated: () => isHydrated,
 }));
 
 vi.mock('@/lib/task-display', () => ({
@@ -97,6 +98,7 @@ describe('CreateTaskDialog double-submit guard', () => {
   let resolveMutation: ((value: typeof createdTask) => void) | undefined;
 
   beforeEach(() => {
+    isHydrated.value = true;
     isPending.value = false;
     mutateAsync.mockReset();
     resolveMutation = undefined;
@@ -160,6 +162,7 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
   let invalidateSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    isHydrated.value = true;
     isPending.value = false;
     mutateAsync.mockReset();
     mutateAsync.mockResolvedValue(createdTask);
@@ -244,5 +247,27 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     expect(assign).toHaveBeenCalledWith('/tenant/projects/proj/tasks/1');
     wrapper.unmount();
     vi.unstubAllGlobals();
+  });
+});
+
+describe('CreateTaskDialog pre-hydration form values', () => {
+  it('keeps selected status and priority in native FormData before hydration', async () => {
+    isHydrated.value = false;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    const queryClient = new QueryClient();
+
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    const form = getForm();
+    const formData = new FormData(form);
+
+    expect(form.getAttribute('onsubmit')).toBe('return false;');
+    expect(formData.get('status_id')).toBe('status-1');
+    expect(formData.get('priority')).toBe('Medium');
+
+    wrapper.unmount();
+    isHydrated.value = true;
   });
 });

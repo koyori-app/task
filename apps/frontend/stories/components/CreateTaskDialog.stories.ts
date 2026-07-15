@@ -107,7 +107,7 @@ export const Default: Story = {
     const canvas = within(canvasElement.ownerDocument.body);
     await expect(canvas.findByRole('dialog', { name: '新規タスク' })).resolves.toBeInTheDocument();
     await expect(canvas.getByLabelText(/タイトル/)).toBeInTheDocument();
-    await expect(canvas.getByLabelText(/ステータス/)).toHaveValue('status-backlog');
+    await expect(canvas.getByLabelText(/ステータス/)).toHaveTextContent('Backlog');
   },
 };
 
@@ -124,8 +124,9 @@ export const Success201: Story = {
     await user.type(canvas.getByLabelText('説明'), 'Storybook から作成');
     await user.type(canvas.getByLabelText('期限'), '2026-07-15');
     await user.type(canvas.getByLabelText('最終期限'), '2026-07-31');
-    await user.selectOptions(canvas.getByLabelText('優先度'), 'High');
-    const submit = canvas.getByRole('button', { name: '作成' });
+    await user.click(canvas.getByLabelText('優先度'));
+    await user.click(await canvas.findByRole('option', { name: '高' }));
+    const submit = await canvas.findByRole('button', { name: '作成' });
     await waitFor(() => expect(submit).toBeEnabled());
     await user.click(submit);
 
