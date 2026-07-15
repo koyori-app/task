@@ -1,8 +1,13 @@
 import arkenv from 'arkenv';
+import dotenv from 'dotenv';
 import { Elysia } from 'elysia';
 
+// The production SSR entry runs independently of Vite, so load runtime values
+// before arkenv validates process.env. Existing process variables still win.
+dotenv.config({ quiet: true });
+
 const env = arkenv({
-  API_BASE: "string = 'http://localhost:3400'",
+  API_BASE: "string.url = 'http://localhost:3400'",
   UPLOAD_MAX_SIZE_MB: 'number > 0 = 100',
 });
 

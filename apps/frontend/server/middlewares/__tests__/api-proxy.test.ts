@@ -1,5 +1,8 @@
 // @vitest-environment node
 import { Elysia } from 'elysia';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MAX_PROXY_BODY_BYTES, apiProxyPlugin, limitReadableStream } from '../api-proxy';
@@ -83,11 +86,78 @@ describe('MAX_PROXY_BODY_BYTES', () => {
     expect(proxy.MAX_PROXY_BODY_BYTES).toBe(DEFAULT_MAX_PROXY_BODY_BYTES);
   });
 
-  it.each(['abc', 'NaN', '0', '-1'])('fails fast when UPLOAD_MAX_SIZE_MB is %j', async (value) => {
-    vi.stubEnv('UPLOAD_MAX_SIZE_MB', value);
+  it.each(['', 'abc', 'NaN', '0', '-1'])(
+    'fails fast when UPLOAD_MAX_SIZE_MB is %j',
+    async (value) => {
+      vi.stubEnv('UPLOAD_MAX_SIZE_MB', value);
+      vi.resetModules();
+
+      await expect(import('../api-proxy')).rejects.toThrow(/UPLOAD_MAX_SIZE_MB/);
+    },
+  );
+});
+
+describe('API_BASE', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it.each(['', 'not-a-url'])('fails fast when API_BASE is %j', async (value) => {
+    vi.stubEnv('API_BASE', value);
     vi.resetModules();
 
-    await expect(import('../api-proxy')).rejects.toThrow(/UPLOAD_MAX_SIZE_MB/);
+    await expect(import('../api-proxy')).rejects.toThrow(/API_BASE/);
+  });
+
+  it('defaults to localhost when API_BASE is unset', async () => {
+    vi.stubEnv('API_BASE', undefined);
+    vi.resetModules();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response('ok'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { apiProxyPlugin: defaultProxyPlugin } = await import('../api-proxy');
+    const defaultApp = new Elysia().use(defaultProxyPlugin);
+    await defaultApp.handle(new Request('http://localhost/api/v1/items'));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:3400/v1/items', expect.any(Object));
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('.env loading', () => {
+  const originalCwd = process.cwd();
+  let temporaryDirectory: string | undefined;
+
+  afterEach(async () => {
+    process.chdir(originalCwd);
+    delete process.env.API_BASE;
+    delete process.env.UPLOAD_MAX_SIZE_MB;
+    vi.unstubAllGlobals();
+    vi.resetModules();
+    if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true });
+    temporaryDirectory = undefined;
+  });
+
+  it('loads API_BASE and UPLOAD_MAX_SIZE_MB from the runtime .env before validation', async () => {
+    temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'api-proxy-env-'));
+    await writeFile(
+      path.join(temporaryDirectory, '.env'),
+      'API_BASE=https://api.example.com\nUPLOAD_MAX_SIZE_MB=2.5\n',
+    );
+    delete process.env.API_BASE;
+    delete process.env.UPLOAD_MAX_SIZE_MB;
+    process.chdir(temporaryDirectory);
+    vi.resetModules();
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response('ok'));
+    vi.stubGlobal('fetch', fetchMock);
+    const proxy = await import('../api-proxy');
+    const envApp = new Elysia().use(proxy.apiProxyPlugin);
+    await envApp.handle(new Request('http://localhost/api/v1/items'));
+
+    expect(proxy.MAX_PROXY_BODY_BYTES).toBe(2.5 * 1024 * 1024);
+    expect(fetchMock).toHaveBeenCalledWith('https://api.example.com/v1/items', expect.any(Object));
   });
 });
 
