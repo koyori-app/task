@@ -124,8 +124,10 @@ type MockOptions = {
   rejectAll?: boolean;
   rejectTenantsList?: boolean;
   rejectPut?: number;
+  rejectDelete?: number;
   hang?: boolean;
   onPut?: (body: unknown) => void;
+  onDelete?: () => void;
 };
 
 function applyPutBody(
@@ -187,6 +189,13 @@ function createMockFetch(overrides: MockOptions = {}) {
       mutableTaskDetail = applyPutBody(mutableTaskDetail, body);
       return jsonResponse(mutableTaskDetail);
     }
+    if (method === 'DELETE' && url.includes('/tasks/')) {
+      if (overrides.rejectDelete) {
+        return jsonResponse({ message: 'delete failed' }, overrides.rejectDelete);
+      }
+      overrides.onDelete?.();
+      return new Response(null, { status: 204 });
+    }
     if (url.includes('/tasks/')) {
       if (overrides.task === null) {
         return jsonResponse({ message: 'not-found' }, 404);
@@ -231,7 +240,7 @@ const meta = {
     docs: {
       description: {
         component:
-          'タスク詳細ハブ（増分2）。GET 表示・ステータス/フィールドのインライン編集・loading/404/error を fetch モックで検証。',
+          'タスク詳細ハブ（増分2）。GET 表示・ステータス/フィールドのインライン編集・ソフト削除・loading/404/error を fetch モックで検証。',
       },
     },
   },
@@ -502,5 +511,101 @@ export const FieldEditFailureRollback: Story = {
 
     await expect(canvas.findByText('更新に失敗しました')).resolves.toBeInTheDocument();
     await expect(canvas.findByText('30%')).resolves.toBeInTheDocument();
+  },
+};
+
+export const DeleteConfirmAndNavigate: Story = {
+  name: '削除確認→204→一覧遷移',
+  decorators: [
+    () => ({
+      setup() {
+        const queryClient = new QueryClient({
+          defaultOptions: {
+            queries: { retry: false, gcTime: 0, staleTime: 0 },
+            mutations: { retry: false },
+          },
+        });
+        const locationAssignSpy = fn();
+        provide(VUE_QUERY_CLIENT, queryClient);
+        provide(PAGE_CONTEXT_KEY, mockContext);
+        provide('navigateAfterDelete', (href: string) => {
+          locationAssignSpy(href);
+        });
+        (
+          DeleteConfirmAndNavigate as { locationAssignSpy?: ReturnType<typeof fn> }
+        ).locationAssignSpy = locationAssignSpy;
+      },
+      template: '<story />',
+    }),
+  ],
+  beforeEach: () => {
+    let deleted = false;
+    const restore = createMockFetch({
+      onDelete: () => {
+        deleted = true;
+      },
+    });
+    (DeleteConfirmAndNavigate as { wasDeleted?: () => boolean }).wasDeleted = () => deleted;
+    return restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).resolves.toBeInTheDocument();
+
+    await user.click(canvas.getByRole('button', { name: '削除' }));
+    const dialog = await canvas.findByRole('dialog');
+    await expect(
+      within(dialog).findByRole('heading', { name: 'タスクを削除しますか？' }),
+    ).resolves.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: '削除する' }));
+
+    const locationAssignSpy = (
+      DeleteConfirmAndNavigate as { locationAssignSpy?: ReturnType<typeof fn> }
+    ).locationAssignSpy;
+    await expect(locationAssignSpy).toHaveBeenCalledWith('/tenant-123/projects/ENG/tasks');
+    expect((DeleteConfirmAndNavigate as { wasDeleted?: () => boolean }).wasDeleted?.()).toBe(true);
+  },
+};
+
+export const DeleteCancel: Story = {
+  name: '削除キャンセル',
+  beforeEach: () => createMockFetch(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).resolves.toBeInTheDocument();
+
+    await user.click(canvas.getByRole('button', { name: '削除' }));
+    const dialog = await canvas.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'キャンセル' }));
+
+    await expect(canvas.queryByRole('dialog')).toBeNull();
+    await expect(canvas.getByRole('heading', { name: 'OAuth 対応を実装する' })).toBeInTheDocument();
+  },
+};
+
+export const DeleteFailure: Story = {
+  name: '削除失敗',
+  beforeEach: () => createMockFetch({ rejectDelete: 500 }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).resolves.toBeInTheDocument();
+
+    await user.click(canvas.getByRole('button', { name: '削除' }));
+    const dialog = await canvas.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: '削除する' }));
+
+    await expect(
+      within(dialog).findByText('タスクの削除に失敗しました'),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.getByRole('heading', { name: 'OAuth 対応を実装する' })).toBeInTheDocument();
   },
 };

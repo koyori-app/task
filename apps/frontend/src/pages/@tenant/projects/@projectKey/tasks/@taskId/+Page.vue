@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, inject, ref, watch } from 'vue';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
 
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
+import { Button } from '@/components/ui/button';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { fetchClient, apiClient } from '@/lib/api-vue-query';
@@ -13,6 +14,10 @@ import type { components } from '@/generated/api';
 const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
+
+const navigateAfterDelete = inject<(href: string) => void>('navigateAfterDelete', (href) =>
+  window.location.assign(href),
+);
 
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type UpdateTaskRequest = components['schemas']['UpdateTaskRequest'];
@@ -33,10 +38,12 @@ const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? '
 const taskId = computed(() => String(pageContext.routeParams.taskId ?? ''));
 
 const statusError = ref<string | null>(null);
+const deleteError = ref<string | null>(null);
 const fieldErrors = ref<Partial<Record<EditableField, string>>>({});
 const selectedStatusId = ref('');
 const optimisticTask = ref<Partial<TaskDetail>>({});
 const updatingField = ref<EditableField | 'status_id' | null>(null);
+const deleteDialogRef = ref<HTMLDialogElement | null>(null);
 
 const {
   projectId,
@@ -130,6 +137,20 @@ const updateTaskMutation = apiClient.useMutation('put', GET_TASK_PATH, {
     queryClient.invalidateQueries({
       queryKey: ['get', LIST_TASKS_PATH],
     });
+  },
+});
+
+const deleteTaskMutation = apiClient.useMutation('delete', GET_TASK_PATH, {
+  onSuccess: async () => {
+    deleteError.value = null;
+    closeDeleteDialog();
+    await queryClient.invalidateQueries({
+      queryKey: ['get', LIST_TASKS_PATH],
+    });
+    navigateAfterDelete(listHref.value);
+  },
+  onError: () => {
+    deleteError.value = 'タスクの削除に失敗しました';
   },
 });
 
@@ -247,6 +268,34 @@ function onSaveHardDeadline(value: string | null) {
 
 const listHref = computed(() => taskListHref(tenantDisplayId.value, projectKey.value));
 
+function openDeleteDialog() {
+  deleteError.value = null;
+  deleteDialogRef.value?.showModal();
+}
+
+function closeDeleteDialog() {
+  deleteDialogRef.value?.close();
+}
+
+function onDeleteDialogCancel(event: Event) {
+  event.preventDefault();
+  closeDeleteDialog();
+}
+
+function confirmDelete() {
+  if (!tenantId.value || !projectId.value || !taskId.value) return;
+  deleteError.value = null;
+  deleteTaskMutation.mutate({
+    params: {
+      path: {
+        tenant_id: tenantId.value,
+        project_id: projectId.value,
+        id: taskId.value,
+      },
+    },
+  });
+}
+
 const isLoading = computed(
   () =>
     isTenantResolving.value ||
@@ -294,6 +343,47 @@ const isNotFound = computed(
     <template #breadcrumb>
       <a :href="listHref" class="text-primary hover:underline">タスク一覧</a>
       <span aria-hidden="true">/</span>
+    </template>
+    <template #header-actions>
+      <Button
+        type="button"
+        variant="destructive"
+        size="sm"
+        :disabled="deleteTaskMutation.isPending.value"
+        @click="openDeleteDialog"
+      >
+        削除
+      </Button>
+      <dialog
+        ref="deleteDialogRef"
+        class="fixed top-1/2 left-1/2 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-6 shadow-lg backdrop:bg-black/50 open:flex open:flex-col open:gap-4"
+        aria-labelledby="delete-task-dialog-title"
+        @cancel="onDeleteDialogCancel"
+      >
+        <h2 id="delete-task-dialog-title" class="text-lg font-semibold">タスクを削除しますか？</h2>
+        <p class="text-sm text-muted-foreground">
+          「{{ displayTask?.title }}」を削除します。この操作は取り消せません。
+        </p>
+        <p v-if="deleteError" class="text-sm text-destructive">{{ deleteError }}</p>
+        <div class="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            :disabled="deleteTaskMutation.isPending.value"
+            @click="closeDeleteDialog"
+          >
+            キャンセル
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="deleteTaskMutation.isPending.value"
+            @click="confirmDelete"
+          >
+            {{ deleteTaskMutation.isPending.value ? '削除中…' : '削除する' }}
+          </Button>
+        </div>
+      </dialog>
     </template>
     <template #footer>
       <p class="text-xs text-muted-foreground">
