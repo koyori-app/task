@@ -3,8 +3,10 @@
 # Playwright starts webServers before globalSetup, so migration must run here.
 set -eu
 
-DB_URL="${E2E_DATABASE_URL:-postgresql://test:test@localhost:5432/task_e2e}"
-export DATABASE_URL="$DB_URL"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=resolve-database-url.sh
+source "$SCRIPT_DIR/resolve-database-url.sh"
+export_e2e_database_urls
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 MIGRATION_DIR="$ROOT/apps/backend/migration"

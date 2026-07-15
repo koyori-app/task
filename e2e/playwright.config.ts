@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { resolveE2eDatabaseUrl } from './env';
 import { STORAGE_STATE } from './global-setup';
 
 const isCI = !!process.env.CI;
@@ -39,7 +40,7 @@ export default defineConfig({
       reuseExistingServer: !isCI,
       timeout: 120_000,
       env: {
-        DATABASE_URL: process.env.E2E_DATABASE_URL ?? 'postgresql://test:test@localhost:5432/task_e2e',
+        DATABASE_URL: resolveE2eDatabaseUrl(),
         REDIS_URL: process.env.E2E_REDIS_URL ?? 'redis://localhost:6379',
         PERSONAL_TOKEN_SECRET: '00000000000000000000000000000000',
         RECOVERY_CODE_SECRET: '00000000000000000000000000000000',

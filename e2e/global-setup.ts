@@ -1,13 +1,14 @@
 // Shared e2e auth fixtures and helpers.
 //
-// DB schema is applied by global-migrate.ts (migration crate) before webServers start.
+// DB schema is applied by scripts/start-backend.sh (migration crate) before webServers start.
 // This module only seeds rows and exposes UI/API helpers for tests.
 import { expect, type Page } from '@playwright/test';
 import { Client } from 'pg';
 import path from 'node:path';
+import { resolveE2eDatabaseUrl } from './env';
 
 const API_URL = process.env.API_URL ?? 'http://localhost:3400';
-const DB_URL = process.env.E2E_DATABASE_URL ?? 'postgresql://test:test@localhost:5432/task_e2e';
+export const DB_URL = resolveE2eDatabaseUrl();
 const TEST_USER_ID = '00000000-0000-4000-8000-000000000001';
 export const TEST_USER_PASSWORD_HASH =
   '$argon2id$v=19$m=8192,t=1,p=1$aNpLkTJIWZxc4xa7NVwxmw$DELLN8xZHSjOXOavtdqze+x5XD86fGvZJ4XThahxSFI';

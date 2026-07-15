@@ -1,13 +1,12 @@
 import { expect, test } from '@playwright/test';
 import {
+  DB_URL,
   ensureRegistrationEnabled,
   signInViaUi,
   typeIntoFormField,
   waitForClientHydration,
 } from '../global-setup';
 import { setEmailVerified } from '../scripts/verify-email';
-
-const DB_URL = process.env.E2E_DATABASE_URL ?? 'postgresql://test:test@localhost:5432/task_e2e';
 
 test('user can sign up, verify email, and sign in', async ({ page }) => {
   test.setTimeout(90_000);
