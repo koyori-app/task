@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { LucideIcon } from '@lucide/vue';
-import { PhFolder, PhShare, PhDotsThree, PhTrash } from '@phosphor-icons/vue';
+import { PhDotsThree, PhFolderOpen, PhShare, PhTrash, PhUser } from '@phosphor-icons/vue';
+import { computed } from 'vue';
+import type { components } from '@/generated/api';
 
 import {
   DropdownMenu,
@@ -19,27 +20,88 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 
-defineProps<{
-  projects: {
-    name: string;
-    url: string;
-    icon: LucideIcon;
-  }[];
+export type ProjectNavItem = components['schemas']['ProjectResponse'];
+
+const props = defineProps<{
+  tenantSlug: string;
+  projects: components['schemas']['ProjectResponse'][];
+  loading?: boolean;
+  error?: boolean;
+}>();
+
+const emit = defineEmits<{
+  retry: [];
 }>();
 
 const { isMobile } = useSidebar();
+
+const sortedProjects = computed(() =>
+  [...props.projects].sort((a, b) => {
+    if (a.is_personal === b.is_personal) return a.name.localeCompare(b.name);
+    return a.is_personal ? -1 : 1;
+  }),
+);
+
+function projectTasksUrl(project: components['schemas']['ProjectResponse']) {
+  return `/${props.tenantSlug}/projects/${project.key}/tasks`;
+}
 </script>
 
 <template>
   <SidebarGroup class="group-data-[collapsible=icon]:hidden">
     <SidebarGroupLabel>Projects</SidebarGroupLabel>
-    <SidebarMenu>
-      <SidebarMenuItem v-for="item in projects" :key="item.name">
-        <SidebarMenuButton as-child>
-          <a :href="item.url">
-            <component :is="item.icon" />
-            <span>{{ item.name }}</span>
+    <SidebarMenu v-if="loading">
+      <SidebarMenuItem>
+        <SidebarMenuButton disabled>
+          <span class="text-muted-foreground text-sm">プロジェクトを読み込み中…</span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
+    <SidebarMenu v-else-if="error">
+      <SidebarMenuItem>
+        <SidebarMenuButton class="text-destructive" @click="emit('retry')">
+          プロジェクト一覧を取得できませんでした（再試行）
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
+    <SidebarMenu v-else-if="sortedProjects.length === 0">
+      <SidebarMenuItem>
+        <SidebarMenuButton disabled>
+          <span class="text-muted-foreground text-sm">プロジェクトがありません</span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
+    <SidebarMenu v-else>
+      <SidebarMenuItem v-for="project in sortedProjects" :key="project.id">
+        <SidebarMenuButton v-if="tenantSlug" as-child>
+          <a :href="projectTasksUrl(project)">
+            <img
+              v-if="project.icon_url"
+              :src="project.icon_url"
+              :alt="project.name"
+              class="size-4 shrink-0 rounded-sm object-cover"
+            />
+            <span v-else-if="project.icon_emoji" class="text-base leading-none">{{
+              project.icon_emoji
+            }}</span>
+            <PhUser v-else-if="project.is_personal" />
+            <PhFolderOpen v-else />
+            <span>{{ project.name }}</span>
           </a>
+        </SidebarMenuButton>
+        <SidebarMenuButton v-else>
+          <img
+            v-if="project.icon_url"
+            :src="project.icon_url"
+            :alt="project.name"
+            class="size-4 shrink-0 rounded-sm object-cover"
+          />
+          <span v-else-if="project.icon_emoji" class="text-base leading-none">{{
+            project.icon_emoji
+          }}</span>
+          <PhUser v-else-if="project.is_personal" />
+          <PhFolderOpen v-else />
+          <span>{{ project.name }}</span>
         </SidebarMenuButton>
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
@@ -54,7 +116,7 @@ const { isMobile } = useSidebar();
             :align="isMobile ? 'end' : 'start'"
           >
             <DropdownMenuItem>
-              <PhFolder class="text-muted-foreground" />
+              <PhFolderOpen class="text-muted-foreground" />
               <span>View Project</span>
             </DropdownMenuItem>
             <DropdownMenuItem>
@@ -68,12 +130,6 @@ const { isMobile } = useSidebar();
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </SidebarMenuItem>
-      <SidebarMenuItem>
-        <SidebarMenuButton class="text-sidebar-foreground/70">
-          <PhDotsThree class="text-sidebar-foreground/70" />
-          <span>More</span>
-        </SidebarMenuButton>
       </SidebarMenuItem>
     </SidebarMenu>
   </SidebarGroup>
