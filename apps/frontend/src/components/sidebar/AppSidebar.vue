@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { SidebarProps } from '@/components/ui/sidebar';
 import { useAuthSession } from '@/composables/useAuthSession';
+import { useRouteAlignedTenantId } from '@/composables/useRouteAlignedTenantId';
 import { useAuthStore } from '@/stores/auth';
 import { useTenantStore, type Tenant } from '@/stores/tenant';
 import { useProjectsQuery } from '@/lib/api-vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
-import { computed, onMounted } from 'vue';
+import { computed, watch } from 'vue';
 
 import { BookOpen, Bot, ListTodo, Settings2, SquareTerminal } from '@lucide/vue';
 import NavMain from '@/components/sidebar/NavMain.vue';
@@ -45,11 +46,29 @@ const labelsUrl = computed(() => {
   return '#';
 });
 
-const projectsQuery = useProjectsQuery(computed(() => tenantStore.selectedTenantId));
+const routeAlignedTenantId = useRouteAlignedTenantId(
+  computed(() => tenantStore.tenants),
+  tenantSlug,
+);
+
+const projectsQuery = useProjectsQuery(routeAlignedTenantId);
 
 const navProjects = computed(() => projectsQuery.data.value ?? []);
 
-onMounted(() => tenantStore.loadTenants(tenantSlug.value));
+const navProjectsLoading = computed(
+  () =>
+    projectsQuery.isLoading.value ||
+    projectsQuery.isFetching.value ||
+    (Boolean(tenantSlug.value) && routeAlignedTenantId.value === null && tenantStore.isLoading),
+);
+
+watch(
+  tenantSlug,
+  (slug) => {
+    if (slug) void tenantStore.loadTenants(slug);
+  },
+  { immediate: true },
+);
 
 function selectTenant(tenant: Tenant) {
   tenantStore.selectTenant(tenant);
@@ -187,7 +206,7 @@ const data = computed(() => ({
       <NavProjects
         :tenant-slug="tenantSlug"
         :projects="navProjects"
-        :loading="projectsQuery.isLoading.value"
+        :loading="navProjectsLoading"
         :error="projectsQuery.isError.value"
         @retry="retryProjects"
       />
