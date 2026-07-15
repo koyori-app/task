@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import type { components } from '@/generated/api';
 import { apiClient } from '@/lib/api-vue-query';
 import { taskDetailHref } from '@/lib/task-display';
+import { toIsoDate } from '@/lib/task-date';
 
 const CREATE_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 
@@ -75,10 +76,7 @@ function resetForm() {
   priority.value = 'Medium';
   validationMessage.value = null;
   requestError.value = null;
-}
-
-function toIsoDate(value: string) {
-  return value ? new Date(`${value}T00:00:00`).toISOString() : undefined;
+  successMessage.value = null;
 }
 
 async function submit() {
@@ -112,9 +110,9 @@ async function submit() {
       body,
     });
     await queryClient.invalidateQueries({ queryKey: ['get', CREATE_TASK_PATH] });
-    successMessage.value = 'タスクを作成しました';
     emit('created', created);
     resetForm();
+    successMessage.value = 'タスクを作成しました';
     if (props.navigateOnSuccess) {
       window.location.assign(
         taskDetailHref(props.tenantDisplayId, props.projectKey, created.seq_id),
@@ -138,6 +136,7 @@ async function submit() {
       aria-modal="true"
       aria-labelledby="create-task-title"
       class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border bg-background p-6 shadow-lg"
+      @keydown.esc="close"
     >
       <header class="mb-5 flex items-start justify-between gap-4">
         <div>

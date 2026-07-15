@@ -47,6 +47,7 @@ const createdTask = {
 
 let invalidateQueriesSpy: ReturnType<typeof fn>;
 const createdSpy = fn();
+const openChangeSpy = fn();
 
 function decorator() {
   return () => ({
@@ -94,6 +95,7 @@ const meta = {
     statuses,
     navigateOnSuccess: false,
     onCreated: createdSpy,
+    'onUpdate:open': openChangeSpy,
   },
 } satisfies Meta<typeof CreateTaskDialog>;
 
@@ -120,6 +122,8 @@ export const Success201: Story = {
     const user = userEvent.setup();
     await user.type(await canvas.findByLabelText(/タイトル/), '  新しいタスク  ');
     await user.type(canvas.getByLabelText('説明'), 'Storybook から作成');
+    await user.type(canvas.getByLabelText('期限'), '2026-07-15');
+    await user.type(canvas.getByLabelText('最終期限'), '2026-07-31');
     await user.selectOptions(canvas.getByLabelText('優先度'), 'High');
     const submit = canvas.getByRole('button', { name: '作成' });
     await waitFor(() => expect(submit).toBeEnabled());
@@ -136,6 +140,8 @@ export const Success201: Story = {
       status_id: 'status-backlog',
       description: 'Storybook から作成',
       priority: 'High',
+      soft_deadline: '2026-07-15T00:00:00.000Z',
+      hard_deadline: '2026-07-31T00:00:00.000Z',
     });
     await expect(invalidateQueriesSpy).toHaveBeenCalledWith({
       queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks'],
@@ -143,6 +149,20 @@ export const Success201: Story = {
     await expect(createdSpy).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'task-created', seq_id: 42 }),
     );
+  },
+};
+
+export const EscapeCloses: Story = {
+  beforeEach() {
+    openChangeSpy.mockClear();
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const titleInput = await canvas.findByLabelText(/タイトル/);
+    await user.click(titleInput);
+    await user.keyboard('{Escape}');
+    await expect(openChangeSpy).toHaveBeenCalledWith(false);
   },
 };
 
