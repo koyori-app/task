@@ -80,6 +80,8 @@ function resetForm() {
 }
 
 async function submit() {
+  if (createMutation.isPending.value) return;
+
   const normalizedTitle = title.value.trim();
   validationMessage.value = null;
   requestError.value = null;
