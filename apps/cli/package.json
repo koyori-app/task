@@ -11,7 +11,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "ts-node src/index.ts",
-    "test": "pnpm run build && vitest run"
+    "test": "pnpm run build && vitest run",
+    "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
     "commander": "14.0.3",

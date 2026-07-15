@@ -57,6 +57,10 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: apps/cli
 
+      - name: Type-check contract tests
+        run: pnpm typecheck:test
+        working-directory: apps/cli
+
       - name: Run tests
         run: pnpm test
         working-directory: apps/cli
