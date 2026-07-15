@@ -27,7 +27,7 @@ describe("bin/task.js entrypoint", () => {
   });
 
   it.each(["auth", "config", "my", "projects", "sprints", "tasks"])(
-    "starts the %s command without API or config access",
+    "renders help for %s",
     (command) => {
       const result = run([command, "--help"]);
       expect(result.status).toBe(0);
