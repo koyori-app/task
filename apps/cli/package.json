@@ -10,7 +10,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "test": "pnpm run build && vitest run"
   },
   "dependencies": {
     "commander": "14.0.3",
@@ -21,6 +22,7 @@
     "@types/js-yaml": "4.0.9",
     "@types/node": "24.13.3",
     "ts-node": "10.9.2",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
   }
 }
