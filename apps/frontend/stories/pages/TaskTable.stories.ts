@@ -11,9 +11,32 @@ const mockContext = {
   routeParams: { tenant: 'tenant-123', projectKey: 'ENG' },
 };
 
-const jsonResponse = (data: unknown) =>
+const TENANT_UUID = '11111111-1111-1111-1111-111111111111';
+
+const sampleTenants = (displayId: string) => [
+  {
+    id: TENANT_UUID,
+    display_id: displayId,
+    name: 'テストテナント',
+    description: '',
+    icon_url: '',
+    owner_id: '00000000-0000-0000-0000-000000000002',
+    require_2fa: false,
+  },
+];
+
+const isListTenantsUrl = (url: string) => {
+  try {
+    const pathname = new URL(url, 'http://localhost').pathname;
+    return /\/v1\/tenants\/?$/.test(pathname);
+  } catch {
+    return /\/v1\/tenants\/?(?:\?|$)/.test(url) && !/\/v1\/tenants\/[^/?]/.test(url);
+  }
+};
+
+const jsonResponse = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
-    status: 200,
+    status,
     headers: { 'Content-Type': 'application/json' },
   });
 
@@ -230,18 +253,25 @@ function createMockFetch(
     statuses?: typeof sampleStatuses;
     tasks?: { tasks: unknown[]; total: number };
     rejectAll?: boolean;
+    rejectTenantsList?: boolean;
     hang?: boolean;
   } = {},
 ) {
   const original = globalThis.fetch;
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
+    const url = typeof req === 'string' ? req : req.url;
+    if (isListTenantsUrl(url)) {
+      if (overrides.rejectTenantsList) {
+        return jsonResponse({ message: 'server error' }, 500);
+      }
+      return jsonResponse(sampleTenants(mockContext.routeParams.tenant));
+    }
     if (overrides.rejectAll) {
       throw new TypeError('Failed to fetch');
     }
     if (overrides.hang) {
       return new Promise(() => {});
     }
-    const url = typeof req === 'string' ? req : req.url;
     if (
       url.includes('/v1/tenants/') &&
       url.includes('/projects') &&
@@ -316,6 +346,9 @@ function createProjectSwitchMockFetch(): ProjectSwitchMock {
 
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
     const url = typeof req === 'string' ? req : req.url;
+    if (isListTenantsUrl(url)) {
+      return jsonResponse(sampleTenants(mockContext.routeParams.tenant));
+    }
     if (
       url.includes('/v1/tenants/') &&
       url.includes('/projects') &&
@@ -361,7 +394,10 @@ function storyDecoratorReactive() {
         },
       });
       provide(VUE_QUERY_CLIENT, queryClient);
-      reactivePageContext = reactive({ ...mockContext });
+      reactivePageContext = reactive({
+        ...mockContext,
+        routeParams: { ...mockContext.routeParams },
+      });
       provide(PAGE_CONTEXT_KEY, reactivePageContext);
     },
     template: '<story />',
@@ -455,6 +491,16 @@ export const ApiError: Story = {
   },
 };
 
+export const TenantResolveError: Story = {
+  name: 'テナント解決エラー',
+  beforeEach: () => createMockFetch({ rejectTenantsList: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('タスクの読み込みに失敗しました')).resolves.toBeInTheDocument();
+    expect(canvas.queryByText('タスクが見つかりません')).toBeNull();
+  },
+};
+
 export const Loading: Story = {
   name: 'ロード中',
   beforeEach: () => createMockFetch({ hang: true }),
@@ -508,5 +554,41 @@ export const ProjectSwitch: Story = {
     projectSwitchMock.releaseMktTasks();
     await expect(canvas.findByText('SNSキャンペーン企画')).resolves.toBeInTheDocument();
     await expect(canvas.queryByText(engTitle)).not.toBeInTheDocument();
+  },
+};
+
+export const RowAccessibility: Story = {
+  name: '行の stretched link と独立コントロール',
+  beforeEach() {
+    const restoreFetch = mockFetch();
+    return () => restoreFetch();
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
+
+    const titleCell = await canvas.findByText('OAuth 対応を実装する');
+    const taskLink = titleCell.closest('a');
+    const taskRow = titleCell.closest('tr');
+    if (!(taskLink instanceof HTMLAnchorElement)) {
+      throw new Error('task link not found');
+    }
+    if (!(taskRow instanceof HTMLElement)) {
+      throw new Error('task row not found');
+    }
+    await expect(taskRow).not.toHaveAttribute('role');
+    await expect(taskRow).not.toHaveAttribute('tabindex');
+    await expect(taskLink).toHaveAttribute('href', '/tenant-123/projects/ENG/tasks/ENG-1');
+    const rowCheckbox = taskRow.querySelector('[role="checkbox"]');
+    if (!(rowCheckbox instanceof HTMLElement)) {
+      throw new Error('row checkbox not found');
+    }
+    rowCheckbox.focus();
+    rowCheckbox.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    await expect(rowCheckbox).toHaveFocus();
+
+    await userEvent.click(taskLink);
+    await expect(window.location.pathname).toBe('/tenant-123/projects/ENG/tasks/ENG-1');
   },
 };

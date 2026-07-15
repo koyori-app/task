@@ -19,6 +19,7 @@ import { PhCaretDown, PhCaretUp, PhCaretUpDown } from '@phosphor-icons/vue';
 import { computed, h, ref, watch } from 'vue';
 import type { Column } from '@tanstack/vue-table';
 import { useQuery, keepPreviousData } from '@tanstack/vue-query';
+import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 
 import { valueUpdater } from '@/components/ui/table/utils';
@@ -40,11 +41,13 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import AvatarGroup from '@/components/AvatarGroup.vue';
+import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
+import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { fetchClient } from '@/lib/api-vue-query';
+import { formatDeadline, taskDetailHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 
 // ---- 定数 ----
-const LIST_PROJECTS_PATH = '/v1/tenants/{tenant_id}/projects' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
 const TASKS_PAGE_SIZE = 20;
@@ -73,41 +76,20 @@ interface TaskRow {
 
 // ---- ページコンテキスト ----
 const pageContext = usePageContext();
-const tenantId = computed(() => String(pageContext.routeParams.tenant ?? ''));
+const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
+const {
+  tenantId,
+  isTenantNotFound,
+  isResolving: isTenantResolving,
+  isError: isTenantResolveError,
+} = useResolvedTenantId(tenantDisplayId);
 const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
-
-// ---- クエリ①: プロジェクト一覧 ----
-const projectsQuery = useQuery({
-  queryKey: computed(() => [
-    'get',
-    LIST_PROJECTS_PATH,
-    { params: { path: { tenant_id: tenantId.value } } },
-  ]),
-  queryFn: async ({ signal }) => {
-    const { data, error } = await fetchClient.GET(LIST_PROJECTS_PATH, {
-      params: { path: { tenant_id: tenantId.value } },
-      signal,
-    });
-    if (error) throw error;
-    return data;
-  },
-  enabled: computed(() => !!tenantId.value),
-});
-
-/** projectKey から project_id を解決 */
-const projectId = computed(() => {
-  const projects = projectsQuery.data.value;
-  if (!projects || !projectKey.value) return null;
-  return projects.find((p) => p.key === projectKey.value)?.id ?? null;
-});
-
-const isProjectNotFound = computed(
-  () =>
-    !!projectKey.value &&
-    projectsQuery.isSuccess.value &&
-    !projectsQuery.isFetching.value &&
-    projectId.value === null,
-);
+const {
+  projectId,
+  isProjectNotFound,
+  isResolving: isProjectResolving,
+  isError: isProjectResolveError,
+} = useResolvedProjectId(tenantId, projectKey);
 
 // ---- サーバーサイドページネーション ----
 const pagination = ref<PaginationState>({
@@ -127,7 +109,7 @@ const tasksQuery = useQuery({
     LIST_TASKS_PATH,
     {
       params: {
-        path: { tenant_id: tenantId.value, project_id: projectId.value },
+        path: { tenant_id: tenantId.value!, project_id: projectId.value! },
         query: {
           limit: pagination.value.pageSize,
           offset: pagination.value.pageIndex * pagination.value.pageSize,
@@ -139,7 +121,7 @@ const tasksQuery = useQuery({
     const { data, error } = await fetchClient.GET(LIST_TASKS_PATH, {
       // query パラメータは openapi-typescript 7.13.0 が正しく operation レベルに生成する
       params: {
-        path: { tenant_id: tenantId.value, project_id: projectId.value! },
+        path: { tenant_id: tenantId.value!, project_id: projectId.value! },
         query: {
           limit: pagination.value.pageSize,
           offset: pagination.value.pageIndex * pagination.value.pageSize,
@@ -168,11 +150,11 @@ const statusesQuery = useQuery({
   queryKey: computed(() => [
     'get',
     LIST_STATUSES_PATH,
-    { params: { path: { tenant_id: tenantId.value, project_id: projectId.value } } },
+    { params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } } },
   ]),
   queryFn: async ({ signal }) => {
     const { data, error } = await fetchClient.GET(LIST_STATUSES_PATH, {
-      params: { path: { tenant_id: tenantId.value, project_id: projectId.value! } },
+      params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } },
       signal,
     });
     if (error) throw error;
@@ -214,11 +196,18 @@ const taskRows = computed<TaskRow[]>(() => {
  *  インジケーターを追加すること。 */
 const isInitialLoading = computed(
   () =>
-    projectsQuery.isLoading.value || tasksQuery.isLoading.value || statusesQuery.isLoading.value,
+    isTenantResolving.value ||
+    isProjectResolving.value ||
+    tasksQuery.isLoading.value ||
+    statusesQuery.isLoading.value,
 );
 
 const isError = computed(
-  () => projectsQuery.isError.value || tasksQuery.isError.value || statusesQuery.isError.value,
+  () =>
+    isTenantResolveError.value ||
+    isProjectResolveError.value ||
+    tasksQuery.isError.value ||
+    statusesQuery.isError.value,
 );
 
 // ---- ヘルパー ----
@@ -264,19 +253,11 @@ function taskKey(task: TaskRow) {
   return `${task.project_key}-${task.seq_id}`;
 }
 
-function formatDate(iso?: string) {
-  if (!iso) return null;
-  const d = new Date(iso);
-  const now = new Date();
-  const diff = d.getTime() - now.getTime();
-  const days = Math.ceil(diff / 86400000);
-  if (days < 0) return { label: `${Math.abs(days)}日超過`, overdue: true };
-  if (days === 0) return { label: '今日', overdue: false };
-  if (days <= 7) return { label: `${days}日後`, overdue: false };
-  return {
-    label: d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' }),
-    overdue: false,
-  };
+function navigateToTask(task: TaskRow, event: MouseEvent) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+    return;
+  event.preventDefault();
+  void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id));
 }
 
 // ---- テーブル列定義 ----
@@ -285,6 +266,7 @@ const columns: ColumnDef<TaskRow>[] = [
     id: 'select',
     header: ({ table }) =>
       h(Checkbox, {
+        class: 'relative z-10',
         modelValue:
           table.getIsAllPageRowsSelected() ||
           (table.getIsSomePageRowsSelected() && 'indeterminate'),
@@ -317,9 +299,19 @@ const columns: ColumnDef<TaskRow>[] = [
     cell: ({ row }) => {
       const task = row.original;
       const pc = PRIORITY_CONFIG[task.priority];
+      const href = taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id);
       return h('div', { class: 'flex items-center gap-2 min-w-0' }, [
         h(pc.icon, { class: 'size-4 shrink-0', style: { color: pc.color } }),
-        h('span', { class: 'truncate text-sm' }, task.title),
+        h(
+          'a',
+          {
+            href,
+            class:
+              "truncate text-sm text-primary hover:underline after:absolute after:inset-0 after:content-['']",
+            onClick: (event: MouseEvent) => navigateToTask(task, event),
+          },
+          task.title,
+        ),
       ]);
     },
   },
@@ -378,7 +370,7 @@ const columns: ColumnDef<TaskRow>[] = [
     accessorFn: (row) => row.due_date ?? '',
     header: ({ column }) => sortableHeader(column, '期限'),
     cell: ({ row }) => {
-      const formatted = formatDate(row.original.due_date);
+      const formatted = formatDeadline(row.original.due_date);
       if (!formatted) return h('span', { class: 'text-muted-foreground text-xs' }, '−');
       return h(
         'span',
@@ -450,6 +442,13 @@ const table = useVueTable({
     </div>
 
     <div
+      v-else-if="isTenantNotFound"
+      class="flex justify-center py-8 text-sm text-muted-foreground"
+    >
+      テナントが見つかりません
+    </div>
+
+    <div
       v-else-if="isProjectNotFound"
       class="flex justify-center py-8 text-sm text-muted-foreground"
     >
@@ -505,7 +504,7 @@ const table = useVueTable({
                 v-for="row in table.getRowModel().rows"
                 :key="row.id"
                 :data-state="row.getIsSelected() && 'selected'"
-                class="h-10"
+                class="relative h-10"
               >
                 <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id" class="py-1.5 px-3">
                   <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
