@@ -41,6 +41,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import AvatarGroup from '@/components/AvatarGroup.vue';
+import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { fetchClient } from '@/lib/api-vue-query';
@@ -144,6 +145,7 @@ const tasksQuery = useQuery({
 });
 
 const taskTotal = computed(() => tasksQuery.data.value?.total ?? 0);
+const isCreateDialogOpen = ref(false);
 
 // ---- クエリ③: ステータス一覧 ----
 const statusesQuery = useQuery({
@@ -464,9 +466,12 @@ const table = useVueTable({
           :model-value="(table.getColumn('title')?.getFilterValue() as string) ?? ''"
           @update:model-value="table.getColumn('title')?.setFilterValue($event)"
         />
+        <Button size="sm" class="ml-auto h-8 text-xs" @click="isCreateDialogOpen = true">
+          新規タスク
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
-            <Button variant="outline" size="sm" class="ml-auto h-8 text-xs">
+            <Button variant="outline" size="sm" class="h-8 text-xs">
               列 <PhCaretDown class="ml-1 size-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -483,6 +488,16 @@ const table = useVueTable({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <CreateTaskDialog
+        v-if="tenantId && projectId"
+        v-model:open="isCreateDialogOpen"
+        :tenant-id="tenantId"
+        :tenant-display-id="tenantDisplayId"
+        :project-id="projectId"
+        :project-key="projectKey"
+        :statuses="statusesQuery.data.value ?? []"
+      />
 
       <!-- テーブル -->
       <div class="rounded-md border overflow-x-auto">
