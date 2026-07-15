@@ -54,7 +54,11 @@ const form = useForm({
   <div v-else class="flex flex-col gap-6">
     <Card class="overflow-hidden p-0">
       <CardContent class="grid p-0 md:grid-cols-2">
-        <HydrationSafeForm v-slot="{ isHydrated }" class="p-6 md:p-8" @submit="form.handleSubmit">
+        <HydrationSafeForm
+          v-slot="{ isHydrated }"
+          class="p-6 md:p-8"
+          @submit="() => form.handleSubmit()"
+        >
           <FieldGroup>
             <div class="flex flex-col items-center gap-2 text-center">
               <h1 class="text-2xl font-bold">アカウント作成</h1>

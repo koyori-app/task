@@ -1,0 +1,54 @@
+import { expect, test } from '@playwright/test';
+import {
+  DB_URL,
+  ensureRegistrationEnabled,
+  signInViaUi,
+  typeIntoFormField,
+  waitForClientHydration,
+} from '../global-setup';
+import { setEmailVerified } from '../scripts/verify-email';
+
+test('user can sign up, verify email, and sign in', async ({ page }) => {
+  test.setTimeout(90_000);
+
+  const unique = Date.now();
+  const username = `e2euser${unique}`;
+  const email = `e2e.signup.${unique}@example.com`;
+  const password = 'E2ePassword1!';
+
+  await ensureRegistrationEnabled(DB_URL);
+
+  await page.goto('/signup');
+  const heading = page.getByRole('heading', { name: 'アカウント作成' });
+  await expect(heading).toBeVisible();
+  // Artifact 29198636129: typing before hydration left submit disabled (!isHydrated).
+  await waitForClientHydration(page);
+
+  await typeIntoFormField(page, '#username', username);
+  await typeIntoFormField(page, '#email', email);
+  await typeIntoFormField(page, '#password', password);
+  // Blur password (Tab lands on visibility toggle) and re-run onBlur validators.
+  await heading.click();
+
+  await expect(page.locator('#username')).toHaveValue(username);
+  await expect(page.locator('#email')).toHaveValue(email);
+  await expect(page.locator('#password')).toHaveValue(password);
+
+  const submitButton = page.getByRole('button', { name: 'アカウント作成' });
+  await expect(submitButton).toBeEnabled({ timeout: 15_000 });
+
+  const registerResponse = page.waitForResponse(
+    (response) => response.url().includes('/v1/auth/register') && response.status() === 201,
+    { timeout: 30_000 },
+  );
+  await submitButton.click();
+  await registerResponse;
+
+  await expect(page.getByRole('heading', { name: 'メールアドレスを確認してください' })).toBeVisible();
+  await expect(page.getByText(email)).toBeVisible();
+
+  const updatedRows = await setEmailVerified(email, DB_URL);
+  expect(updatedRows).toBe(1);
+
+  await signInViaUi(page, email, password);
+});

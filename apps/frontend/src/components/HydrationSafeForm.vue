@@ -25,6 +25,7 @@ function preventPrehydrationEnter(event: KeyboardEvent) {
 
 <template>
   <form
+    :data-hydrated="isHydrated ? 'true' : 'false'"
     :onsubmit.attr="isHydrated ? null : 'return false;'"
     @submit.prevent="handleSubmit"
     @keydown.enter="preventPrehydrationEnter"
