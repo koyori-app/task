@@ -3,18 +3,19 @@ import { Loader2, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import {
+  Dialog,
   DialogClose,
   DialogContent,
   DialogDescription,
-  DialogOverlay,
-  DialogPortal,
-  DialogRoot,
+  DialogFooter,
+  DialogHeader,
   DialogTitle,
-} from 'reka-ui';
+} from '@/components/ui/dialog';
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import type { components } from '@/generated/api';
 import { apiClient } from '@/lib/api-vue-query';
@@ -139,19 +140,12 @@ async function submit() {
 </script>
 
 <template>
-  <DialogRoot v-if="open" :open="true" @update:open="onOpenChange">
-    <DialogPortal>
-      <DialogOverlay class="fixed inset-0 z-50 bg-black/50" />
-      <DialogContent
-        class="fixed top-1/2 left-1/2 z-50 max-h-[90vh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg"
-      >
-        <header class="mb-5 flex items-start justify-between gap-4">
-          <div>
-            <DialogTitle class="text-lg font-semibold">新規タスク</DialogTitle>
-            <DialogDescription class="mt-1 text-sm text-muted-foreground">
-              {{ projectKey }} にタスクを追加します
-            </DialogDescription>
-          </div>
+  <Dialog v-if="open" :open="true" @update:open="onOpenChange">
+    <DialogContent class="max-h-[90vh] overflow-y-auto" :show-close-button="false">
+      <DialogHeader class="relative mb-1 pr-10">
+        <DialogTitle>新規タスク</DialogTitle>
+        <DialogDescription> {{ projectKey }} にタスクを追加します </DialogDescription>
+        <div class="absolute -top-2 -right-2">
           <DialogClose as-child>
             <Button
               type="button"
@@ -163,85 +157,97 @@ async function submit() {
               <X class="size-4" />
             </Button>
           </DialogClose>
-        </header>
+        </div>
+      </DialogHeader>
 
-        <HydrationSafeForm v-slot="{ isHydrated }" class="space-y-4" @submit="submit">
-          <label class="block space-y-1.5 text-sm font-medium">
-            タイトル <span class="text-destructive">*</span>
-            <Input v-model="title" name="title" autocomplete="off" autofocus />
-          </label>
+      <HydrationSafeForm v-slot="{ isHydrated }" class="space-y-4" @submit="submit">
+        <div class="space-y-1.5">
+          <Label for="task-title"> タイトル <span class="text-destructive">*</span> </Label>
+          <Input id="task-title" v-model="title" name="title" autocomplete="off" autofocus />
+        </div>
 
-          <label class="block space-y-1.5 text-sm font-medium">
-            ステータス <span class="text-destructive">*</span>
-            <select
-              v-model="statusId"
-              name="status_id"
-              class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option disabled value="">選択してください</option>
-              <option v-for="status in statuses" :key="status.id" :value="status.id">
-                {{ status.name }}
-              </option>
-            </select>
-          </label>
+        <div class="space-y-1.5">
+          <Label for="task-status"> ステータス <span class="text-destructive">*</span> </Label>
+          <select
+            id="task-status"
+            v-model="statusId"
+            name="status_id"
+            class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option disabled value="">選択してください</option>
+            <option v-for="status in statuses" :key="status.id" :value="status.id">
+              {{ status.name }}
+            </option>
+          </select>
+        </div>
 
-          <label class="block space-y-1.5 text-sm font-medium">
-            説明
-            <Textarea v-model="description" name="description" rows="3" />
-          </label>
+        <div class="space-y-1.5">
+          <Label for="task-description">説明</Label>
+          <Textarea id="task-description" v-model="description" name="description" rows="3" />
+        </div>
 
-          <div class="grid gap-4 sm:grid-cols-2">
-            <label class="block space-y-1.5 text-sm font-medium">
-              期限
-              <Input v-model="softDeadline" name="soft_deadline" type="date" />
-            </label>
-            <label class="block space-y-1.5 text-sm font-medium">
-              最終期限
-              <Input v-model="hardDeadline" name="hard_deadline" type="date" />
-            </label>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="space-y-1.5">
+            <Label for="task-soft-deadline">期限</Label>
+            <Input
+              id="task-soft-deadline"
+              v-model="softDeadline"
+              name="soft_deadline"
+              type="date"
+            />
           </div>
+          <div class="space-y-1.5">
+            <Label for="task-hard-deadline">最終期限</Label>
+            <Input
+              id="task-hard-deadline"
+              v-model="hardDeadline"
+              name="hard_deadline"
+              type="date"
+            />
+          </div>
+        </div>
 
-          <label class="block space-y-1.5 text-sm font-medium">
-            優先度
-            <select
-              v-model="priority"
-              name="priority"
-              class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="Critical">重大</option>
-              <option value="High">高</option>
-              <option value="Medium">中</option>
-              <option value="Low">低</option>
-              <option value="Trivial">些細</option>
-            </select>
-          </label>
+        <div class="space-y-1.5">
+          <Label for="task-priority">優先度</Label>
+          <select
+            id="task-priority"
+            v-model="priority"
+            name="priority"
+            class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option value="Critical">重大</option>
+            <option value="High">高</option>
+            <option value="Medium">中</option>
+            <option value="Low">低</option>
+            <option value="Trivial">些細</option>
+          </select>
+        </div>
 
-          <p v-if="validationMessage" role="alert" class="text-sm text-destructive">
-            {{ validationMessage }}
-          </p>
-          <p v-if="requestError" role="alert" class="text-sm text-destructive">
-            {{ requestError }}
-          </p>
-          <p v-if="successMessage" role="status" class="text-sm text-emerald-600">
-            {{ successMessage }}
-          </p>
+        <p v-if="validationMessage" role="alert" class="text-sm text-destructive">
+          {{ validationMessage }}
+        </p>
+        <p v-if="requestError" role="alert" class="text-sm text-destructive">
+          {{ requestError }}
+        </p>
+        <p v-if="successMessage" role="status" class="text-sm text-emerald-600">
+          {{ successMessage }}
+        </p>
 
-          <footer class="flex justify-end gap-2 pt-2">
-            <DialogClose as-child>
-              <Button type="button" variant="outline" :disabled="createMutation.isPending.value">
-                キャンセル
-              </Button>
-            </DialogClose>
-            <Button
-              type="submit"
-              :disabled="createMutation.isPending.value || !isHydrated || !statusId"
-            >
-              <Loader2 v-if="createMutation.isPending.value" class="mr-2 size-4 animate-spin" />
-              {{ createMutation.isPending.value ? '作成中...' : '作成' }}
+        <DialogFooter>
+          <DialogClose as-child>
+            <Button type="button" variant="outline" :disabled="createMutation.isPending.value">
+              キャンセル
             </Button>
-          </footer>
-        </HydrationSafeForm>
-      </DialogContent>
-    </DialogPortal>
-  </DialogRoot>
+          </DialogClose>
+          <Button
+            type="submit"
+            :disabled="createMutation.isPending.value || !isHydrated || !statusId"
+          >
+            <Loader2 v-if="createMutation.isPending.value" class="mr-2 size-4 animate-spin" />
+            {{ createMutation.isPending.value ? '作成中...' : '作成' }}
+          </Button>
+        </DialogFooter>
+      </HydrationSafeForm>
+    </DialogContent>
+  </Dialog>
 </template>

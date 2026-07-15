@@ -104,7 +104,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     await expect(canvas.findByRole('dialog', { name: '新規タスク' })).resolves.toBeInTheDocument();
     await expect(canvas.getByLabelText(/タイトル/)).toBeInTheDocument();
     await expect(canvas.getByLabelText(/ステータス/)).toHaveValue('status-backlog');
@@ -118,7 +118,7 @@ export const Success201: Story = {
     return mock.restore;
   },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const user = userEvent.setup();
     await user.type(await canvas.findByLabelText(/タイトル/), '  新しいタスク  ');
     await user.type(canvas.getByLabelText('説明'), 'Storybook から作成');
@@ -157,7 +157,7 @@ export const EscapeCloses: Story = {
     openChangeSpy.mockClear();
   },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const user = userEvent.setup();
     const titleInput = await canvas.findByLabelText(/タイトル/);
     await user.click(titleInput);
@@ -168,7 +168,7 @@ export const EscapeCloses: Story = {
 
 export const ValidationError: Story = {
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const submit = await canvas.findByRole('button', { name: '作成' });
     await waitFor(() => expect(submit).toBeEnabled());
     await userEvent.click(submit);
@@ -184,7 +184,7 @@ export const ApiFailure: Story = {
     return mock.restore;
   },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const user = userEvent.setup();
     await user.type(await canvas.findByLabelText(/タイトル/), '失敗するタスク');
     const submit = canvas.getByRole('button', { name: '作成' });
