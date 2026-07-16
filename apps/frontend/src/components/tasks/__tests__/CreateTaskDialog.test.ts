@@ -61,7 +61,6 @@ const createdTask = {
 };
 
 type MountOptions = {
-  navigateOnSuccess?: boolean;
   open?: boolean;
 };
 
@@ -70,11 +69,9 @@ function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
     props: {
       open: options.open ?? true,
       tenantId: 'tenant-uuid',
-      tenantDisplayId: 'tenant',
       projectId: 'project-uuid',
       projectKey: 'PROJ',
       statuses,
-      navigateOnSuccess: options.navigateOnSuccess ?? false,
     },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
@@ -226,8 +223,8 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     wrapper.unmount();
   });
 
-  it('invalidates the task list when staying on the page', async () => {
-    const wrapper = mountDialog(queryClient, { navigateOnSuccess: false });
+  it('always invalidates the task list after successful create', async () => {
+    const wrapper = mountDialog(queryClient);
     await nextTick();
     const titleInput = new DOMWrapper(getTitleInput());
     await titleInput.setValue('New task');
@@ -236,19 +233,8 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
 
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks'],
+      refetchType: 'none',
     });
-    wrapper.unmount();
-  });
-
-  it('skips invalidate when parent navigates on success via created', async () => {
-    const wrapper = mountDialog(queryClient, { navigateOnSuccess: true });
-    await nextTick();
-    const titleInput = new DOMWrapper(getTitleInput());
-    await titleInput.setValue('New task');
-    await new DOMWrapper(getForm()).trigger('submit');
-    await flushPromises();
-
-    expect(invalidateSpy).not.toHaveBeenCalled();
     expect(wrapper.emitted('created')?.[0]).toEqual([createdTask]);
     wrapper.unmount();
   });

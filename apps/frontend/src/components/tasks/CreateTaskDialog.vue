@@ -40,18 +40,13 @@ const priorityOptions = Object.entries(PRIORITY_CONFIG) as [
   (typeof PRIORITY_CONFIG)[Priority],
 ][];
 
-const props = withDefaults(
-  defineProps<{
-    open: boolean;
-    tenantId: string;
-    tenantDisplayId: string;
-    projectId: string;
-    projectKey: string;
-    statuses: Status[];
-    navigateOnSuccess?: boolean;
-  }>(),
-  { navigateOnSuccess: true },
-);
+const props = defineProps<{
+  open: boolean;
+  tenantId: string;
+  projectId: string;
+  projectKey: string;
+  statuses: Status[];
+}>();
 
 const emit = defineEmits<{
   'update:open': [value: boolean];
@@ -135,9 +130,10 @@ async function submit() {
       params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
       body,
     });
-    if (!props.navigateOnSuccess) {
-      await queryClient.invalidateQueries({ queryKey: ['get', CREATE_TASK_PATH] });
-    }
+    void queryClient.invalidateQueries({
+      queryKey: ['get', CREATE_TASK_PATH],
+      refetchType: 'none',
+    });
     emit('created', created);
     resetForm();
     successMessage.value = 'タスクを作成しました';

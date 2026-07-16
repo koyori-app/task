@@ -500,7 +500,6 @@ const table = useVueTable({
         v-if="tenantId && projectId"
         v-model:open="isCreateDialogOpen"
         :tenant-id="tenantId"
-        :tenant-display-id="tenantDisplayId"
         :project-id="projectId"
         :project-key="projectKey"
         :statuses="statusesQuery.data.value ?? []"

@@ -89,11 +89,9 @@ const meta = {
   args: {
     open: true,
     tenantId: 'tenant-uuid',
-    tenantDisplayId: 'tenant-demo',
     projectId: 'project-1',
     projectKey: 'ENG',
     statuses,
-    navigateOnSuccess: false,
     onCreated: createdSpy,
     'onUpdate:open': openChangeSpy,
   },
@@ -146,6 +144,7 @@ export const Success201: Story = {
     });
     await expect(invalidateQueriesSpy).toHaveBeenCalledWith({
       queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks'],
+      refetchType: 'none',
     });
     await expect(createdSpy).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'task-created', seq_id: 42 }),
