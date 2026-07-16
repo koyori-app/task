@@ -7,8 +7,11 @@ import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
 
 /** Session /me cache duration — auth source of truth refresh interval. */
 export const AUTH_ME_STALE_TIME_MS = 60_000;
+export const TASK_SEARCH_STALE_TIME_MS = 30_000;
 
 export const LIST_PROJECTS_PATH = '/v1/tenants/{tenant_id}/projects' as const;
+export const TASK_SEARCH_PATH =
+  '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/search' as const;
 
 export const fetchClient = createFetchClient<paths>({
   baseUrl: import.meta.env.VITE_API_BASE ?? '/api',
@@ -39,6 +42,24 @@ export const projectsQueryOptions = (tenantId: TenantUuid | null | undefined) =>
     LIST_PROJECTS_PATH,
     { params: { path: { tenant_id: tenantId ?? '' } } },
     { staleTime: AUTH_ME_STALE_TIME_MS },
+  );
+
+export const taskSearchQueryOptions = (
+  tenantId: string,
+  projectId: string,
+  query: string,
+  pagination: { limit?: number; offset?: number } = {},
+) =>
+  apiClient.queryOptions(
+    'get',
+    TASK_SEARCH_PATH,
+    {
+      params: {
+        path: { tenant_id: tenantId, project_id: projectId },
+        query: { q: query, ...pagination },
+      },
+    },
+    { staleTime: TASK_SEARCH_STALE_TIME_MS, retry: false },
   );
 
 export function useProjectsQuery(tenantId: MaybeRefOrGetter<TenantUuid | null | undefined>) {

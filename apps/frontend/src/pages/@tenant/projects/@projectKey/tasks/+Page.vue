@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Loader2, Signal, SignalHigh, SignalLow, SignalMedium } from '@lucide/vue';
+import { Loader2, Search, Signal, SignalHigh, SignalLow, SignalMedium, X } from '@lucide/vue';
 import type { LucideIcon } from '@lucide/vue';
 import type {
   ColumnDef,
@@ -16,7 +16,7 @@ import {
   useVueTable,
 } from '@tanstack/vue-table';
 import { PhCaretDown, PhCaretUp, PhCaretUpDown } from '@phosphor-icons/vue';
-import { computed, h, ref, watch } from 'vue';
+import { computed, h, onUnmounted, ref, watch } from 'vue';
 import type { Column } from '@tanstack/vue-table';
 import { useQuery, keepPreviousData } from '@tanstack/vue-query';
 import { navigate } from 'vike/client/router';
@@ -42,9 +42,10 @@ import {
 } from '@/components/ui/table';
 import AvatarGroup from '@/components/AvatarGroup.vue';
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
+import TaskTitleLink from '@/components/tasks/TaskTitleLink.vue';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
-import { fetchClient } from '@/lib/api-vue-query';
+import { fetchClient, taskSearchQueryOptions } from '@/lib/api-vue-query';
 import { formatDeadline, taskDetailHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 
@@ -52,11 +53,19 @@ import type { components } from '@/generated/api';
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
 const TASKS_PAGE_SIZE = 20;
+const SEARCH_PAGE_SIZE = 50;
+const SEARCH_DEBOUNCE_MS = 300;
 
 type TasksListQueryKeyParams = {
   params?: {
     path?: { tenant_id?: string; project_id?: string | null };
     query?: { limit?: number; offset?: number };
+  };
+};
+
+type TaskSearchQueryKeyParams = {
+  params?: {
+    path?: { tenant_id?: string; project_id?: string };
   };
 };
 
@@ -91,6 +100,65 @@ const {
   isResolving: isProjectResolving,
   isError: isProjectResolveError,
 } = useResolvedProjectId(tenantId, projectKey);
+
+// ---- サーバー側検索 ----
+const searchInput = ref('');
+const submittedSearchQuery = ref('');
+let searchDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+function updateSubmittedSearchQuery() {
+  submittedSearchQuery.value = searchInput.value.trim();
+}
+
+function scheduleSearch(value: string | number) {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+  searchInput.value = String(value);
+  if (!searchInput.value.trim()) {
+    submittedSearchQuery.value = '';
+    return;
+  }
+  searchDebounceTimer = setTimeout(updateSubmittedSearchQuery, SEARCH_DEBOUNCE_MS);
+}
+
+function submitSearch() {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+  updateSubmittedSearchQuery();
+}
+
+function clearSearch() {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+  searchInput.value = '';
+  submittedSearchQuery.value = '';
+}
+
+onUnmounted(() => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+});
+
+const taskSearchQuery = useQuery(
+  computed(() => ({
+    ...taskSearchQueryOptions(
+      tenantId.value ?? '',
+      projectId.value ?? '',
+      submittedSearchQuery.value,
+      { limit: SEARCH_PAGE_SIZE, offset: 0 },
+    ),
+    enabled: !!tenantId.value && !!projectId.value && !!submittedSearchQuery.value,
+    placeholderData: (previousData, previousQuery) => {
+      const previousParams = previousQuery?.queryKey[2] as TaskSearchQueryKeyParams | undefined;
+      const previousPath = previousParams?.params?.path;
+      if (
+        previousPath?.tenant_id === tenantId.value &&
+        previousPath.project_id === projectId.value
+      ) {
+        return keepPreviousData(previousData);
+      }
+      return undefined;
+    },
+  })),
+);
+
+const isSearchActive = computed(() => !!submittedSearchQuery.value);
 
 // ---- サーバーサイドページネーション ----
 const pagination = ref<PaginationState>({
@@ -255,13 +323,6 @@ function taskKey(task: TaskRow) {
   return `${task.project_key}-${task.seq_id}`;
 }
 
-function navigateToTask(task: TaskRow, event: MouseEvent) {
-  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
-    return;
-  event.preventDefault();
-  void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id));
-}
-
 type CreatedTask = components['schemas']['TaskDetailResponse'];
 
 function onTaskCreated(task: CreatedTask) {
@@ -308,19 +369,14 @@ const columns: ColumnDef<TaskRow>[] = [
     cell: ({ row }) => {
       const task = row.original;
       const pc = PRIORITY_CONFIG[task.priority];
-      const href = taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id);
       return h('div', { class: 'flex items-center gap-2 min-w-0' }, [
         h(pc.icon, { class: 'size-4 shrink-0', style: { color: pc.color } }),
-        h(
-          'a',
-          {
-            href,
-            class:
-              "truncate text-sm text-primary hover:underline after:absolute after:inset-0 after:content-['']",
-            onClick: (event: MouseEvent) => navigateToTask(task, event),
-          },
-          task.title,
-        ),
+        h(TaskTitleLink, {
+          tenantDisplayId: tenantDisplayId.value,
+          projectKey: projectKey.value,
+          seqId: task.seq_id,
+          title: task.title,
+        }),
       ]);
     },
   },
@@ -465,18 +521,56 @@ const table = useVueTable({
     </div>
 
     <template v-else>
-      <!-- ツールバー（ソート・タイトル絞り込みは現在ページ内の行のみ対象。サーバー側未対応） -->
+      <!-- サーバー側検索ツールバー -->
       <div class="flex items-center gap-2">
-        <Input
-          class="h-8 max-w-xs text-sm"
-          placeholder="タイトルで絞り込み..."
-          :model-value="(table.getColumn('title')?.getFilterValue() as string) ?? ''"
-          @update:model-value="table.getColumn('title')?.setFilterValue($event)"
-        />
+        <form
+          class="flex w-full max-w-md items-center gap-2"
+          role="search"
+          @submit.prevent="submitSearch"
+        >
+          <div class="relative min-w-0 flex-1">
+            <Search
+              class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              type="search"
+              class="h-8 pl-8 pr-8 text-sm"
+              placeholder="タスクを検索..."
+              aria-label="タスクを検索"
+              :model-value="searchInput"
+              @update:model-value="scheduleSearch"
+            />
+            <Button
+              v-if="searchInput"
+              type="button"
+              variant="ghost"
+              size="icon"
+              class="absolute right-0 top-0 size-8"
+              aria-label="検索をクリア"
+              @click="clearSearch"
+            >
+              <X class="size-4" />
+            </Button>
+          </div>
+          <Button
+            type="submit"
+            variant="outline"
+            size="sm"
+            class="h-8"
+            :disabled="!searchInput.trim()"
+          >
+            <Loader2
+              v-if="taskSearchQuery.isFetching.value && isSearchActive"
+              class="mr-1.5 size-4 animate-spin"
+            />
+            <Search v-else class="mr-1.5 size-4" />
+            検索
+          </Button>
+        </form>
         <Button size="sm" class="ml-auto h-8 text-xs" @click="isCreateDialogOpen = true">
           新規タスク
         </Button>
-        <DropdownMenu>
+        <DropdownMenu v-if="!isSearchActive">
           <DropdownMenuTrigger as-child>
             <Button variant="outline" size="sm" class="h-8 text-xs">
               列 <PhCaretDown class="ml-1 size-4" />
@@ -506,8 +600,66 @@ const table = useVueTable({
         @created="onTaskCreated"
       />
 
-      <!-- テーブル -->
-      <div class="rounded-md border overflow-x-auto">
+      <!-- 検索結果。API は検索ヒットの最小情報のみ返すため、虚偽の状態値は補完しない。 -->
+      <div
+        v-if="isSearchActive && taskSearchQuery.isLoading.value && !taskSearchQuery.data.value"
+        class="flex justify-center py-8"
+      >
+        <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+      <div
+        v-else-if="isSearchActive && taskSearchQuery.isError.value"
+        class="flex flex-col items-center gap-2 py-8 text-sm text-destructive"
+      >
+        <span>検索に失敗しました</span>
+        <Button variant="outline" size="sm" @click="taskSearchQuery.refetch()">再試行</Button>
+      </div>
+      <template v-else-if="isSearchActive">
+        <div class="rounded-md border overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead class="h-9 px-3 text-xs">ID</TableHead>
+                <TableHead class="h-9 px-3 text-xs">タイトル</TableHead>
+                <TableHead class="h-9 px-3 text-xs">一致箇所</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow
+                v-for="task in taskSearchQuery.data.value?.tasks ?? []"
+                :key="task.id"
+                class="relative h-10"
+              >
+                <TableCell class="px-3 py-1.5 font-mono text-xs text-muted-foreground">
+                  {{ projectKey }}-{{ task.seq_id }}
+                </TableCell>
+                <TableCell class="px-3 py-1.5">
+                  <TaskTitleLink
+                    :tenant-display-id="tenantDisplayId"
+                    :project-key="projectKey"
+                    :seq-id="task.seq_id"
+                    :title="task.title"
+                  />
+                </TableCell>
+                <TableCell class="max-w-md truncate px-3 py-1.5 text-xs text-muted-foreground">
+                  {{ task.highlight }}
+                </TableCell>
+              </TableRow>
+              <TableRow v-if="!taskSearchQuery.data.value?.tasks.length">
+                <TableCell :colspan="3" class="h-24 text-center text-sm text-muted-foreground">
+                  検索結果がありません
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+        <div class="text-xs text-muted-foreground">
+          {{ taskSearchQuery.data.value?.total ?? 0 }} 件
+        </div>
+      </template>
+
+      <!-- 通常一覧テーブル -->
+      <div v-else class="rounded-md border overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow v-for="hg in table.getHeaderGroups()" :key="hg.id">
@@ -546,7 +698,10 @@ const table = useVueTable({
       </div>
 
       <!-- ページネーション（API total 連動のサーバーサイド） -->
-      <div class="flex items-center justify-between text-xs text-muted-foreground">
+      <div
+        v-if="!isSearchActive"
+        class="flex items-center justify-between text-xs text-muted-foreground"
+      >
         <span>
           {{ table.getFilteredSelectedRowModel().rows.length }} / {{ taskTotal }} 件選択
         </span>

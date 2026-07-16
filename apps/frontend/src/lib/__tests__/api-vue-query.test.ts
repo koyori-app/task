@@ -11,6 +11,9 @@ import {
   meQueryOptions,
   projectLabelsQueryOptions,
   projectsQueryOptions,
+  TASK_SEARCH_PATH,
+  TASK_SEARCH_STALE_TIME_MS,
+  taskSearchQueryOptions,
   useLoginMutation,
   useLogoutMutation,
   useMeQuery,
@@ -140,6 +143,26 @@ describe('api-vue-query PoC', () => {
       { params: { path: { tenant_id: 'tenant-uuid-1' } } },
     ]);
     expect(options.staleTime).toBe(AUTH_ME_STALE_TIME_MS);
+  });
+
+  it('taskSearchQueryOptions builds the typed scoped search query', () => {
+    const options = taskSearchQueryOptions('tenant-1', 'project-1', 'OAuth', {
+      limit: 50,
+      offset: 0,
+    });
+
+    expect(options.queryKey).toEqual([
+      'get',
+      TASK_SEARCH_PATH,
+      {
+        params: {
+          path: { tenant_id: 'tenant-1', project_id: 'project-1' },
+          query: { q: 'OAuth', limit: 50, offset: 0 },
+        },
+      },
+    ]);
+    expect(options.staleTime).toBe(TASK_SEARCH_STALE_TIME_MS);
+    expect(options.retry).toBe(false);
   });
 
   it('useProjectsQuery fetches tenant projects via projectsQueryOptions', async () => {
