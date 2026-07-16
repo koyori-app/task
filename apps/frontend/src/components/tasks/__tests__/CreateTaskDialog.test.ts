@@ -13,6 +13,14 @@ vi.mock('@/composables/useHydrated', () => ({
 
 vi.mock('@/lib/task-display', () => ({
   taskDetailHref: vi.fn(() => '/tenant/projects/proj/tasks/1'),
+  PRIORITY_CONFIG: {
+    CriticalFire: { label: '緊急', color: '#dc2626', icon: {} },
+    Critical: { label: '重大', color: '#ef4444', icon: {} },
+    High: { label: '高', color: '#f97316', icon: {} },
+    Medium: { label: '中', color: '#eab308', icon: {} },
+    Low: { label: '低', color: '#6b7280', icon: {} },
+    Trivial: { label: '些細', color: '#9ca3af', icon: {} },
+  },
 }));
 
 vi.mock('@/lib/api-vue-query', async (importOriginal) => {
@@ -232,10 +240,7 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     wrapper.unmount();
   });
 
-  it('skips invalidate when navigating away on success', async () => {
-    const assign = vi.fn();
-    vi.stubGlobal('location', { ...window.location, assign });
-
+  it('skips invalidate when parent navigates on success via created', async () => {
     const wrapper = mountDialog(queryClient, { navigateOnSuccess: true });
     await nextTick();
     const titleInput = new DOMWrapper(getTitleInput());
@@ -244,9 +249,22 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     await flushPromises();
 
     expect(invalidateSpy).not.toHaveBeenCalled();
-    expect(assign).toHaveBeenCalledWith('/tenant/projects/proj/tasks/1');
+    expect(wrapper.emitted('created')?.[0]).toEqual([createdTask]);
     wrapper.unmount();
-    vi.unstubAllGlobals();
+  });
+
+  it('resets form when the dialog closes', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('Draft title');
+
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await nextTick();
+
+    expect(getTitleInput().value).toBe('');
+    wrapper.unmount();
   });
 });
 

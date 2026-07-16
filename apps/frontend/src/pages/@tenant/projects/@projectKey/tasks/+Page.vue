@@ -262,6 +262,13 @@ function navigateToTask(task: TaskRow, event: MouseEvent) {
   void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id));
 }
 
+type CreatedTask = components['schemas']['TaskDetailResponse'];
+
+function onTaskCreated(task: CreatedTask) {
+  isCreateDialogOpen.value = false;
+  void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id));
+}
+
 // ---- テーブル列定義 ----
 const columns: ColumnDef<TaskRow>[] = [
   {
@@ -497,6 +504,7 @@ const table = useVueTable({
         :project-id="projectId"
         :project-key="projectKey"
         :statuses="statusesQuery.data.value ?? []"
+        @created="onTaskCreated"
       />
 
       <!-- テーブル -->

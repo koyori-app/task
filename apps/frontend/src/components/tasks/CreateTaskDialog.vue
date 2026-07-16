@@ -26,7 +26,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import type { components } from '@/generated/api';
 import { apiClient } from '@/lib/api-vue-query';
-import { taskDetailHref } from '@/lib/task-display';
+import { PRIORITY_CONFIG } from '@/lib/task-display';
 import { toIsoDate } from '@/lib/task-date';
 
 const CREATE_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
@@ -34,6 +34,11 @@ const CREATE_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' a
 type Priority = components['schemas']['TaskPriority'];
 type Status = components['schemas']['ProjectStatusResponse'];
 type CreatedTask = components['schemas']['TaskDetailResponse'];
+
+const priorityOptions = Object.entries(PRIORITY_CONFIG) as [
+  Priority,
+  (typeof PRIORITY_CONFIG)[Priority],
+][];
 
 const props = withDefaults(
   defineProps<{
@@ -82,6 +87,7 @@ watch(
 
 function onOpenChange(value: boolean) {
   if (!value && createMutation.isPending.value) return;
+  if (!value) resetForm();
   emit('update:open', value);
 }
 
@@ -135,11 +141,6 @@ async function submit() {
     emit('created', created);
     resetForm();
     successMessage.value = 'タスクを作成しました';
-    if (props.navigateOnSuccess) {
-      window.location.assign(
-        taskDetailHref(props.tenantDisplayId, props.projectKey, created.seq_id),
-      );
-    }
   } catch {
     requestError.value = 'タスクの作成に失敗しました。もう一度お試しください';
   }
@@ -221,11 +222,9 @@ async function submit() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="Critical">重大</SelectItem>
-              <SelectItem value="High">高</SelectItem>
-              <SelectItem value="Medium">中</SelectItem>
-              <SelectItem value="Low">低</SelectItem>
-              <SelectItem value="Trivial">些細</SelectItem>
+              <SelectItem v-for="[value, config] in priorityOptions" :key="value" :value="value">
+                {{ config.label }}
+              </SelectItem>
             </SelectContent>
           </Select>
           <input type="hidden" name="priority" :value="priority" />
