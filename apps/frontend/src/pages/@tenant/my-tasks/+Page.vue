@@ -1,38 +1,21 @@
 <script setup lang="ts">
 import { Check, Loader2 } from '@lucide/vue';
-import { computed, ref } from 'vue';
-import { useQuery, useQueryClient } from '@tanstack/vue-query';
+import { computed, ref, watch } from 'vue';
+import { keepPreviousData, useQuery } from '@tanstack/vue-query';
+import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 
 import { Button } from '@/components/ui/button';
-import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import type { components } from '@/generated/api';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
-import { fetchClient, apiClient } from '@/lib/api-vue-query';
+import type { components } from '@/generated/api';
+import { fetchClient } from '@/lib/api-vue-query';
+import { taskDetailHref } from '@/lib/task-display';
 
 type FilterTab = 'today' | 'week' | 'no_due_date' | 'overdue' | 'all';
-
-interface MyTaskItem {
-  id: string;
-  seq_key: string;
-  title: string;
-  priority: string;
-  soft_deadline: string | null;
-  hard_deadline: string | null;
-  is_personal: boolean;
-  project: { id: string; name: string; key: string; is_personal: boolean };
-  status: { id: string; name: string; color: string; is_done_state?: boolean };
-}
+type MyTaskItem = components['schemas']['MyTaskItem'];
 
 const TASKS_PATH = '/v1/tenants/{tenant_id}/users/me/tasks' as const;
+const TASKS_PAGE_LIMIT = 50;
 
 const pageContext = usePageContext();
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
@@ -42,7 +25,6 @@ const {
   isResolving: isTenantResolving,
   isError: isTenantResolveError,
 } = useResolvedTenantId(tenantDisplayId);
-const queryClient = useQueryClient();
 
 const tabs: { key: FilterTab; label: string }[] = [
   { key: 'today', label: '今日' },
@@ -53,33 +35,82 @@ const tabs: { key: FilterTab; label: string }[] = [
 ];
 
 const activeFilter = ref<FilterTab>('today');
-const captureTitle = ref('');
-const captureDeadline = ref('');
-const capturePriority = ref<components['schemas']['TaskPriority']>('Medium');
-const errorMessage = ref<string | null>(null);
+const offset = ref(0);
+const loadedTasks = ref<MyTaskItem[]>([]);
+const taskTotal = ref(0);
 
-const tasksQuery = useQuery({
-  queryKey: computed(() => [
+function myTasksQueryKey(
+  resolvedTenantId: string,
+  filter: FilterTab,
+  limit: number,
+  queryOffset: number,
+) {
+  return [
     'get',
     TASKS_PATH,
-    { params: { path: { tenant_id: tenantId.value! }, query: { filter: activeFilter.value } } },
-  ]),
-  queryFn: async ({ signal }) => {
-    const { data, error } = await fetchClient.GET(TASKS_PATH, {
-      // generated type incorrectly puts filter in path; pass as query at runtime
+    {
       params: {
-        path: { tenant_id: tenantId.value! },
-        query: { filter: activeFilter.value },
-      } as any,
+        path: { tenant_id: resolvedTenantId },
+        query: { filter, limit, offset: queryOffset },
+      },
+    },
+  ] as const;
+}
+
+const tasksQuery = useQuery({
+  queryKey: computed(() =>
+    myTasksQueryKey(tenantId.value!, activeFilter.value, TASKS_PAGE_LIMIT, offset.value),
+  ),
+  queryFn: async ({ queryKey, signal }) => {
+    const { data, error } = await fetchClient.GET(TASKS_PATH, {
+      params: queryKey[2].params,
       signal,
     });
     if (error) throw error;
     return data;
   },
   enabled: computed(() => !!tenantId.value),
+  placeholderData: (previousData, previousQuery) => {
+    const previousTenantId = previousQuery?.queryKey[2]?.params.path.tenant_id;
+    if (previousTenantId === tenantId.value) return keepPreviousData(previousData);
+    return undefined;
+  },
 });
 
-const allTasks = computed(() => (tasksQuery.data.value?.tasks ?? []) as MyTaskItem[]);
+watch(
+  activeFilter,
+  () => {
+    offset.value = 0;
+  },
+  { flush: 'sync' },
+);
+
+watch(tenantId, () => {
+  offset.value = 0;
+  loadedTasks.value = [];
+  taskTotal.value = 0;
+});
+
+watch(
+  () => tasksQuery.data.value,
+  (data) => {
+    if (!data || tasksQuery.isPlaceholderData.value) return;
+    loadedTasks.value =
+      offset.value === 0
+        ? data.tasks
+        : [...loadedTasks.value.slice(0, offset.value), ...data.tasks];
+    taskTotal.value = data.total;
+  },
+  { immediate: true },
+);
+
+const allTasks = computed(() => loadedTasks.value);
+const hasMoreTasks = computed(() => allTasks.value.length < taskTotal.value);
+
+function loadMore() {
+  if (tasksQuery.isFetching.value || !hasMoreTasks.value) return;
+  offset.value += TASKS_PAGE_LIMIT;
+}
 
 const groupedTasks = computed(() => {
   const personal = allTasks.value.filter((t) => t.project.is_personal);
@@ -92,32 +123,11 @@ const groupedTasks = computed(() => {
   return { personal, byProject };
 });
 
-const captureMutation = apiClient.useMutation('post', TASKS_PATH, {
-  onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ['get', TASKS_PATH] });
-  },
-});
-
-async function submitCapture() {
-  if (!captureTitle.value.trim() || !tenantId.value) return;
-  const body: components['schemas']['QuickCaptureRequest'] = {
-    title: captureTitle.value.trim(),
-    priority: capturePriority.value,
-  };
-  if (captureDeadline.value) {
-    body.soft_deadline = new Date(`${captureDeadline.value}T00:00:00`).toISOString();
-  }
-  errorMessage.value = null;
-  try {
-    await captureMutation.mutateAsync({
-      params: { path: { tenant_id: tenantId.value } },
-      body,
-    });
-    captureTitle.value = '';
-    captureDeadline.value = '';
-  } catch {
-    errorMessage.value = 'タスクの追加に失敗しました';
-  }
+function navigateToTask(task: MyTaskItem, event: MouseEvent) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+    return;
+  event.preventDefault();
+  void navigate(taskDetailHref(tenantDisplayId.value, task.project.key, task.seq_id));
 }
 
 function formatDeadline(task: MyTaskItem) {
@@ -143,7 +153,7 @@ function priorityLabel(p: string) {
   <div class="mx-auto flex w-full max-w-3xl flex-col gap-6">
     <div>
       <h1 class="text-2xl font-semibold tracking-tight">My Tasks</h1>
-      <p class="text-sm text-muted-foreground">自分に割り当てられたタスクをテナント横断で管理</p>
+      <p class="text-sm text-muted-foreground">このテナントで自分に割り当てられたタスク</p>
     </div>
 
     <div class="flex flex-wrap gap-2">
@@ -158,39 +168,7 @@ function priorityLabel(p: string) {
       </Button>
     </div>
 
-    <HydrationSafeForm
-      v-slot="{ isHydrated }"
-      class="flex flex-col gap-3 rounded-lg border p-4"
-      @submit="submitCapture"
-    >
-      <p class="text-sm font-medium">クイックキャプチャ</p>
-      <div class="flex flex-col gap-2 sm:flex-row">
-        <Input v-model="captureTitle" placeholder="タスクを追加..." class="flex-1" />
-        <Input v-model="captureDeadline" type="date" class="w-full sm:w-40" />
-        <Select v-model="capturePriority">
-          <SelectTrigger class="w-full sm:w-24">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="High">高</SelectItem>
-            <SelectItem value="Medium">中</SelectItem>
-            <SelectItem value="Low">低</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button
-          type="submit"
-          :disabled="
-            captureMutation.isPending.value || !captureTitle.trim() || !isHydrated || !tenantId
-          "
-        >
-          <Loader2 v-if="captureMutation.isPending.value" class="mr-2 h-4 w-4 animate-spin" />
-          追加
-        </Button>
-      </div>
-      <p v-if="errorMessage" class="text-sm text-destructive mt-2">{{ errorMessage }}</p>
-    </HydrationSafeForm>
-
-    <div v-if="isTenantResolving || tasksQuery.isFetching.value" class="flex justify-center py-8">
+    <div v-if="isTenantResolving || tasksQuery.isLoading.value" class="flex justify-center py-8">
       <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
     </div>
 
@@ -206,6 +184,8 @@ function priorityLabel(p: string) {
     </p>
 
     <template v-else>
+      <p class="text-xs text-muted-foreground" aria-live="polite">{{ taskTotal }}件</p>
+
       <section v-if="groupedTasks.personal.length" class="space-y-2">
         <h2 class="text-sm font-medium text-muted-foreground">個人 Inbox</h2>
         <div
@@ -214,7 +194,13 @@ function priorityLabel(p: string) {
           class="flex items-center gap-3 rounded-md border px-3 py-2"
         >
           <Check class="h-4 w-4 text-muted-foreground" />
-          <span class="flex-1">{{ task.title }}</span>
+          <a
+            :href="taskDetailHref(tenantDisplayId, task.project.key, task.seq_id)"
+            class="flex-1 text-primary hover:underline"
+            @click="navigateToTask(task, $event)"
+          >
+            {{ task.title }}
+          </a>
           <span class="text-xs text-muted-foreground">{{ formatDeadline(task) }}</span>
           <span>{{ priorityLabel(task.priority) }}</span>
         </div>
@@ -234,7 +220,13 @@ function priorityLabel(p: string) {
           class="flex items-center gap-3 rounded-md border px-3 py-2"
         >
           <Check class="h-4 w-4 text-muted-foreground" />
-          <span class="flex-1">{{ task.title }}</span>
+          <a
+            :href="taskDetailHref(tenantDisplayId, task.project.key, task.seq_id)"
+            class="flex-1 text-primary hover:underline"
+            @click="navigateToTask(task, $event)"
+          >
+            {{ task.title }}
+          </a>
           <span class="rounded bg-muted px-2 py-0.5 text-xs">{{ task.project.key }}</span>
           <span class="text-xs text-muted-foreground">{{ formatDeadline(task) }}</span>
           <span>{{ priorityLabel(task.priority) }}</span>
@@ -242,8 +234,15 @@ function priorityLabel(p: string) {
       </section>
 
       <p v-if="!allTasks.length" class="py-8 text-center text-sm text-muted-foreground">
-        タスクがありません
+        割り当てられたタスクは0件です
       </p>
+
+      <div v-if="hasMoreTasks" class="flex justify-center pt-2">
+        <Button variant="outline" :disabled="tasksQuery.isFetching.value" @click="loadMore">
+          <Loader2 v-if="tasksQuery.isFetching.value" class="mr-2 h-4 w-4 animate-spin" />
+          もっと見る
+        </Button>
+      </div>
     </template>
   </div>
 </template>

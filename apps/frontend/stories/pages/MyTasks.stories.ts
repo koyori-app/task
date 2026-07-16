@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { expect, fn, within } from 'storybook/test';
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 import { provide } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import MyTasksPage from '@/pages/@tenant/my-tasks/+Page.vue';
@@ -43,6 +43,7 @@ const jsonResponse = (data: unknown, status = 200) =>
 const sampleTasks = [
   {
     id: 'task-1',
+    seq_id: 1,
     seq_key: 'FE-1',
     title: '仕様書のレビュー',
     priority: 'high',
@@ -54,6 +55,7 @@ const sampleTasks = [
   },
   {
     id: 'task-2',
+    seq_id: 5,
     seq_key: 'BE-5',
     title: 'APIのドキュメント作成',
     priority: 'medium',
@@ -65,6 +67,7 @@ const sampleTasks = [
   },
   {
     id: 'task-3',
+    seq_id: 1,
     seq_key: 'P-1',
     title: '個人メモ',
     priority: 'low',
@@ -95,7 +98,11 @@ function createMockFetch(overrides: MockOptions = {}) {
     }
     if (overrides.rejectTasks) throw new TypeError('Failed to fetch');
     if (overrides.hang) return new Promise<Response>(() => {});
-    return jsonResponse({ tasks: overrides.tasks ?? sampleTasks });
+    const tasks = overrides.tasks ?? sampleTasks;
+    const requestUrl = new URL(url, 'http://localhost');
+    const limit = Number(requestUrl.searchParams.get('limit') ?? 50);
+    const offset = Number(requestUrl.searchParams.get('offset') ?? 0);
+    return jsonResponse({ tasks: tasks.slice(offset, offset + limit), total: tasks.length });
   });
   globalThis.fetch = fetchSpy;
   return {
@@ -127,7 +134,7 @@ const meta = {
     docs: {
       description: {
         component:
-          'テナント横断のタスク一覧ページ。fetch モックで apiClient を差し替え済み（GET /v1/tenants で display_id → UUID を解決する）。',
+          '現在のテナントで自分に割り当てられたタスクの一覧ページ。fetch モックで typed client を差し替え済み（GET /v1/tenants で display_id → UUID を解決する）。',
       },
     },
   },
@@ -160,6 +167,8 @@ export const WithTasks: Story = {
     await expect(canvas.findByText('APIのドキュメント作成')).resolves.toBeInTheDocument();
     await expect(canvas.findByText('個人メモ')).resolves.toBeInTheDocument();
     await expect(canvas.findByText('個人 Inbox')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('3件')).resolves.toBeInTheDocument();
+    await expect(canvas.queryByText('クイックキャプチャ')).toBeNull();
   },
 };
 
@@ -189,7 +198,8 @@ export const Empty: Story = {
   beforeEach: mockDecoratorBeforeEach({ tasks: [] }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.findByText('タスクがありません')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('割り当てられたタスクは0件です')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('0件')).resolves.toBeInTheDocument();
   },
 };
 
@@ -208,7 +218,66 @@ export const TenantResolveError: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByText('タスクの読み込みに失敗しました')).resolves.toBeInTheDocument();
-    await expect(canvas.queryByText('タスクがありません')).toBeNull();
+    await expect(canvas.queryByText('割り当てられたタスクは0件です')).toBeNull();
+  },
+};
+
+export const FilterAndNavigate: Story = {
+  name: 'フィルター切替と詳細遷移',
+  beforeEach: mockDecoratorBeforeEach(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('仕様書のレビュー')).resolves.toBeInTheDocument();
+
+    await userEvent.click(canvas.getByRole('button', { name: 'すべて' }));
+    await waitFor(() =>
+      expect(
+        (activeMock!.fetchSpy.mock.calls as [Request | string][])
+          .map(([req]) => (typeof req === 'string' ? req : req.url))
+          .some((url) => url.includes('/users/me/tasks') && url.includes('filter=all')),
+      ).toBe(true),
+    );
+
+    await userEvent.click(canvas.getByRole('link', { name: '仕様書のレビュー' }));
+    await expect(window.location.pathname).toBe('/tenant-123/projects/FE/tasks/FE-1');
+  },
+};
+
+const manyTasks = Array.from({ length: 51 }, (_, index) => ({
+  ...sampleTasks[0],
+  id: `task-${index + 1}`,
+  seq_id: index + 1,
+  seq_key: `FE-${index + 1}`,
+  title: `割り当てタスク ${index + 1}`,
+}));
+
+export const Paginated: Story = {
+  name: '51件のページングとフィルター連動',
+  beforeEach: mockDecoratorBeforeEach({ tasks: manyTasks }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('51件')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('割り当てタスク 50')).resolves.toBeInTheDocument();
+    await expect(canvas.queryByText('割り当てタスク 51')).toBeNull();
+
+    await userEvent.click(canvas.getByRole('button', { name: 'もっと見る' }));
+    await expect(canvas.findByText('割り当てタスク 51')).resolves.toBeInTheDocument();
+    await expect(canvas.queryByRole('button', { name: 'もっと見る' })).toBeNull();
+
+    const taskRequestUrls = () =>
+      (activeMock!.fetchSpy.mock.calls as [Request | string][])
+        .map(([req]) => (typeof req === 'string' ? req : req.url))
+        .filter((url) => url.includes('/users/me/tasks'));
+    await expect(taskRequestUrls().some((url) => url.includes('offset=50'))).toBe(true);
+
+    await userEvent.click(canvas.getByRole('button', { name: 'すべて' }));
+    await waitFor(async () => {
+      const lastUrl = taskRequestUrls().at(-1);
+      await expect(lastUrl).toContain('filter=all');
+      await expect(lastUrl).toContain('limit=50');
+      await expect(lastUrl).toContain('offset=0');
+    });
+    await expect(canvas.findByRole('button', { name: 'もっと見る' })).resolves.toBeInTheDocument();
   },
 };
 
