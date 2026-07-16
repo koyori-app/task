@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { Loader2, Pencil, X } from '@lucide/vue';
+import { EllipsisVertical, Loader2, Pencil, X } from '@lucide/vue';
 import { computed, nextTick, ref } from 'vue';
 import type { components } from '@/generated/api';
 import AvatarGroup from '@/components/AvatarGroup.vue';
 import type { EditableField } from '@/components/tasks/editable-field';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -32,6 +38,7 @@ const props = defineProps<{
   loading?: boolean;
   notFound?: boolean;
   error?: boolean;
+  deleteDisabled?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -41,6 +48,7 @@ const emit = defineEmits<{
   'save:progress_pct': [value: number];
   'save:soft_deadline': [value: string | null];
   'save:hard_deadline': [value: string | null];
+  'delete-request': [];
 }>();
 
 const resolvedStatus = computed(() =>
@@ -211,7 +219,28 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
           {{ fieldError('title') }}
         </p>
 
-        <slot name="header-actions" />
+        <div class="flex items-center justify-end gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                class="size-8"
+                aria-label="タスク操作"
+                :disabled="deleteDisabled"
+              >
+                <EllipsisVertical class="size-4" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem variant="destructive" @select="emit('delete-request')">
+                削除
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <slot name="header-actions" />
+        </div>
       </header>
 
       <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">

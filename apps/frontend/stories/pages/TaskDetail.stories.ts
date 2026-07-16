@@ -231,6 +231,15 @@ function storyDecorator(
   });
 }
 
+async function openDeleteDialogFromKebabMenu(
+  canvas: ReturnType<typeof within>,
+  user: ReturnType<typeof userEvent.setup>,
+) {
+  await user.click(canvas.getByRole('button', { name: 'タスク操作' }));
+  const menu = within(document.body);
+  await user.click(await menu.findByRole('menuitem', { name: '削除' }));
+}
+
 const meta = {
   title: 'Pages/TaskDetail',
   component: TaskDetailPage,
@@ -580,7 +589,7 @@ export const DeleteConfirmAndNavigate: Story = {
       canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).resolves.toBeInTheDocument();
 
-    await user.click(canvas.getByRole('button', { name: '削除' }));
+    await openDeleteDialogFromKebabMenu(canvas, user);
     const dialog = await canvas.findByRole('dialog');
     await expect(
       within(dialog).findByRole('heading', { name: 'タスクを削除しますか？' }),
@@ -605,7 +614,7 @@ export const DeleteCancel: Story = {
       canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).resolves.toBeInTheDocument();
 
-    await user.click(canvas.getByRole('button', { name: '削除' }));
+    await openDeleteDialogFromKebabMenu(canvas, user);
     const dialog = await canvas.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: 'キャンセル' }));
 
@@ -624,7 +633,7 @@ export const DeleteFailure: Story = {
       canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).resolves.toBeInTheDocument();
 
-    await user.click(canvas.getByRole('button', { name: '削除' }));
+    await openDeleteDialogFromKebabMenu(canvas, user);
     const dialog = await canvas.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: '削除する' }));
 

@@ -62,4 +62,24 @@ describe('TaskDetailHub', () => {
     expect(wrapper.find('input[aria-label="進捗率"]').exists()).toBe(false);
     expect(wrapper.text()).toContain('30%');
   });
+
+  it('emits delete-request when the kebab menu delete item is selected', async () => {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task,
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+      attachTo: document.body,
+    });
+
+    await wrapper.get('button[aria-label="タスク操作"]').trigger('click');
+    const deleteItem = document.body.querySelector('[data-slot="dropdown-menu-item"]');
+    expect(deleteItem?.textContent).toContain('削除');
+    deleteItem?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(wrapper.emitted('delete-request')).toHaveLength(1);
+    wrapper.unmount();
+  });
 });

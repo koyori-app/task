@@ -370,21 +370,14 @@ const isNotFound = computed(
     @save:progress_pct="onSaveProgressPct"
     @save:soft_deadline="onSaveSoftDeadline"
     @save:hard_deadline="onSaveHardDeadline"
+    :delete-disabled="deleteTaskMutation.isPending.value"
+    @delete-request="openDeleteDialog"
   >
     <template #breadcrumb>
       <a :href="listHref" class="text-primary hover:underline">タスク一覧</a>
       <span aria-hidden="true">/</span>
     </template>
     <template #header-actions>
-      <Button
-        type="button"
-        variant="destructive"
-        size="sm"
-        :disabled="deleteTaskMutation.isPending.value"
-        @click="openDeleteDialog"
-      >
-        削除
-      </Button>
       <dialog
         ref="deleteDialogRef"
         class="fixed top-1/2 left-1/2 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-6 shadow-lg backdrop:bg-black/50 open:flex open:flex-col open:gap-4"
