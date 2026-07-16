@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Check, Loader2 } from '@lucide/vue';
-import { computed, ref } from 'vue';
-import { useQuery } from '@tanstack/vue-query';
+import { computed, ref, watch } from 'vue';
+import { keepPreviousData, useQuery } from '@tanstack/vue-query';
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 
@@ -15,6 +15,7 @@ type FilterTab = 'today' | 'week' | 'no_due_date' | 'overdue' | 'all';
 type MyTaskItem = components['schemas']['MyTaskItem'];
 
 const TASKS_PATH = '/v1/tenants/{tenant_id}/users/me/tasks' as const;
+const TASKS_PAGE_LIMIT = 50;
 
 const pageContext = usePageContext();
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
@@ -34,32 +35,82 @@ const tabs: { key: FilterTab; label: string }[] = [
 ];
 
 const activeFilter = ref<FilterTab>('today');
+const offset = ref(0);
+const loadedTasks = ref<MyTaskItem[]>([]);
+const taskTotal = ref(0);
 
-function myTasksQueryKey(resolvedTenantId: string, filter: FilterTab) {
+function myTasksQueryKey(
+  resolvedTenantId: string,
+  filter: FilterTab,
+  limit: number,
+  queryOffset: number,
+) {
   return [
     'get',
     TASKS_PATH,
-    { params: { path: { tenant_id: resolvedTenantId }, query: { filter } } },
+    {
+      params: {
+        path: { tenant_id: resolvedTenantId },
+        query: { filter, limit, offset: queryOffset },
+      },
+    },
   ] as const;
 }
 
 const tasksQuery = useQuery({
-  queryKey: computed(() => myTasksQueryKey(tenantId.value!, activeFilter.value)),
-  queryFn: async ({ signal }) => {
+  queryKey: computed(() =>
+    myTasksQueryKey(tenantId.value!, activeFilter.value, TASKS_PAGE_LIMIT, offset.value),
+  ),
+  queryFn: async ({ queryKey, signal }) => {
     const { data, error } = await fetchClient.GET(TASKS_PATH, {
-      params: {
-        path: { tenant_id: tenantId.value! },
-        query: { filter: activeFilter.value },
-      },
+      params: queryKey[2].params,
       signal,
     });
     if (error) throw error;
     return data;
   },
   enabled: computed(() => !!tenantId.value),
+  placeholderData: (previousData, previousQuery) => {
+    const previousTenantId = previousQuery?.queryKey[2]?.params.path.tenant_id;
+    if (previousTenantId === tenantId.value) return keepPreviousData(previousData);
+    return undefined;
+  },
 });
 
-const allTasks = computed(() => tasksQuery.data.value?.tasks ?? []);
+watch(
+  activeFilter,
+  () => {
+    offset.value = 0;
+  },
+  { flush: 'sync' },
+);
+
+watch(tenantId, () => {
+  offset.value = 0;
+  loadedTasks.value = [];
+  taskTotal.value = 0;
+});
+
+watch(
+  () => tasksQuery.data.value,
+  (data) => {
+    if (!data || tasksQuery.isPlaceholderData.value) return;
+    loadedTasks.value =
+      offset.value === 0
+        ? data.tasks
+        : [...loadedTasks.value.slice(0, offset.value), ...data.tasks];
+    taskTotal.value = data.total;
+  },
+  { immediate: true },
+);
+
+const allTasks = computed(() => loadedTasks.value);
+const hasMoreTasks = computed(() => allTasks.value.length < taskTotal.value);
+
+function loadMore() {
+  if (tasksQuery.isFetching.value || !hasMoreTasks.value) return;
+  offset.value += TASKS_PAGE_LIMIT;
+}
 
 const groupedTasks = computed(() => {
   const personal = allTasks.value.filter((t) => t.project.is_personal);
@@ -133,7 +184,7 @@ function priorityLabel(p: string) {
     </p>
 
     <template v-else>
-      <p class="text-xs text-muted-foreground" aria-live="polite">{{ allTasks.length }}件</p>
+      <p class="text-xs text-muted-foreground" aria-live="polite">{{ taskTotal }}件</p>
 
       <section v-if="groupedTasks.personal.length" class="space-y-2">
         <h2 class="text-sm font-medium text-muted-foreground">個人 Inbox</h2>
@@ -185,6 +236,13 @@ function priorityLabel(p: string) {
       <p v-if="!allTasks.length" class="py-8 text-center text-sm text-muted-foreground">
         割り当てられたタスクは0件です
       </p>
+
+      <div v-if="hasMoreTasks" class="flex justify-center pt-2">
+        <Button variant="outline" :disabled="tasksQuery.isFetching.value" @click="loadMore">
+          <Loader2 v-if="tasksQuery.isFetching.value" class="mr-2 h-4 w-4 animate-spin" />
+          もっと見る
+        </Button>
+      </div>
     </template>
   </div>
 </template>

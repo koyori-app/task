@@ -99,7 +99,10 @@ function createMockFetch(overrides: MockOptions = {}) {
     if (overrides.rejectTasks) throw new TypeError('Failed to fetch');
     if (overrides.hang) return new Promise<Response>(() => {});
     const tasks = overrides.tasks ?? sampleTasks;
-    return jsonResponse({ tasks, total: tasks.length });
+    const requestUrl = new URL(url, 'http://localhost');
+    const limit = Number(requestUrl.searchParams.get('limit') ?? 50);
+    const offset = Number(requestUrl.searchParams.get('offset') ?? 0);
+    return jsonResponse({ tasks: tasks.slice(offset, offset + limit), total: tasks.length });
   });
   globalThis.fetch = fetchSpy;
   return {
@@ -237,6 +240,44 @@ export const FilterAndNavigate: Story = {
 
     await userEvent.click(canvas.getByRole('link', { name: '仕様書のレビュー' }));
     await expect(window.location.pathname).toBe('/tenant-123/projects/FE/tasks/FE-1');
+  },
+};
+
+const manyTasks = Array.from({ length: 51 }, (_, index) => ({
+  ...sampleTasks[0],
+  id: `task-${index + 1}`,
+  seq_id: index + 1,
+  seq_key: `FE-${index + 1}`,
+  title: `割り当てタスク ${index + 1}`,
+}));
+
+export const Paginated: Story = {
+  name: '51件のページングとフィルター連動',
+  beforeEach: mockDecoratorBeforeEach({ tasks: manyTasks }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('51件')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('割り当てタスク 50')).resolves.toBeInTheDocument();
+    await expect(canvas.queryByText('割り当てタスク 51')).toBeNull();
+
+    await userEvent.click(canvas.getByRole('button', { name: 'もっと見る' }));
+    await expect(canvas.findByText('割り当てタスク 51')).resolves.toBeInTheDocument();
+    await expect(canvas.queryByRole('button', { name: 'もっと見る' })).toBeNull();
+
+    const taskRequestUrls = () =>
+      (activeMock!.fetchSpy.mock.calls as [Request | string][])
+        .map(([req]) => (typeof req === 'string' ? req : req.url))
+        .filter((url) => url.includes('/users/me/tasks'));
+    await expect(taskRequestUrls().some((url) => url.includes('offset=50'))).toBe(true);
+
+    await userEvent.click(canvas.getByRole('button', { name: 'すべて' }));
+    await waitFor(async () => {
+      const lastUrl = taskRequestUrls().at(-1);
+      await expect(lastUrl).toContain('filter=all');
+      await expect(lastUrl).toContain('limit=50');
+      await expect(lastUrl).toContain('offset=0');
+    });
+    await expect(canvas.findByRole('button', { name: 'もっと見る' })).resolves.toBeInTheDocument();
   },
 };
 
