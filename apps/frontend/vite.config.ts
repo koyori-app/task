@@ -154,7 +154,7 @@ export default defineConfig({
   },
   lint: {
     plugins: ['oxc', 'typescript', 'unicorn', 'vue'],
-    jsPlugins: ['./buildSrc/oxlint-plugin-api-path-params.mjs'],
+    jsPlugins: ['../../packages/oxlint-plugin-api-path-params/index.mjs'],
     ignorePatterns: ['scripts/fixtures/**'],
     rules: {
       'api-path-params/no-raw-route-id-in-api-path': 'error',

@@ -29,7 +29,7 @@ fi
 
 # GNU grep's -z mode lets the expression cover formatted, multi-line object
 # literals while [^}] confines it to one `path` object.
-pattern='(?s)params\s*:\s*\{\s*path\s*:\s*\{[^}]*?\b[A-Za-z_$][A-Za-z0-9_$]*_id\s*:\s*(?:(?:pageContext\.)?routeParams\.[A-Za-z_$][A-Za-z0-9_$]*|[A-Za-z_$][A-Za-z0-9_$]*(?:DisplayId|displayId|Key|Slug)(?:\.value)?|(?:tenant|project)(?:\.value)?)\b'
+pattern='(?s)params\s*:\s*\{\s*path\s*:\s*\{[^}]*?\b[A-Za-z_$][A-Za-z0-9_$]*_id\s*:\s*(?:(?:pageContext\.)?routeParams\.[A-Za-z_$][A-Za-z0-9_$]*|[A-Za-z_$][A-Za-z0-9_$]*(?:DisplayId|displayId|Key|Slug)(?:\.value)?|\b(?:tenant|project)\b(?:\.value)?(?!\.\w))'
 
 violations=0
 for file in "${files[@]}"; do
@@ -48,4 +48,4 @@ EOF
   exit 1
 fi
 
-echo "API path-param gate passed"
+echo "API path-param gate passed for $root"
