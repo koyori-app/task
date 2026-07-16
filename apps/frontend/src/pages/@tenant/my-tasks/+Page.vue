@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { components } from '@/generated/api';
+import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { fetchClient, apiClient } from '@/lib/api-vue-query';
 
 type FilterTab = 'today' | 'week' | 'no_due_date' | 'overdue' | 'all';
@@ -34,7 +35,13 @@ interface MyTaskItem {
 const TASKS_PATH = '/v1/tenants/{tenant_id}/users/me/tasks' as const;
 
 const pageContext = usePageContext();
-const tenantId = computed(() => String(pageContext.routeParams.tenant ?? ''));
+const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
+const {
+  tenantId,
+  isTenantNotFound,
+  isResolving: isTenantResolving,
+  isError: isTenantResolveError,
+} = useResolvedTenantId(tenantDisplayId);
 const queryClient = useQueryClient();
 
 const tabs: { key: FilterTab; label: string }[] = [
@@ -55,12 +62,15 @@ const tasksQuery = useQuery({
   queryKey: computed(() => [
     'get',
     TASKS_PATH,
-    { params: { path: { tenant_id: tenantId.value }, query: { filter: activeFilter.value } } },
+    { params: { path: { tenant_id: tenantId.value! }, query: { filter: activeFilter.value } } },
   ]),
   queryFn: async ({ signal }) => {
     const { data, error } = await fetchClient.GET(TASKS_PATH, {
       // generated type incorrectly puts filter in path; pass as query at runtime
-      params: { path: { tenant_id: tenantId.value }, query: { filter: activeFilter.value } } as any,
+      params: {
+        path: { tenant_id: tenantId.value! },
+        query: { filter: activeFilter.value },
+      } as any,
       signal,
     });
     if (error) throw error;
@@ -169,7 +179,9 @@ function priorityLabel(p: string) {
         </Select>
         <Button
           type="submit"
-          :disabled="captureMutation.isPending.value || !captureTitle.trim() || !isHydrated"
+          :disabled="
+            captureMutation.isPending.value || !captureTitle.trim() || !isHydrated || !tenantId
+          "
         >
           <Loader2 v-if="captureMutation.isPending.value" class="mr-2 h-4 w-4 animate-spin" />
           追加
@@ -178,12 +190,19 @@ function priorityLabel(p: string) {
       <p v-if="errorMessage" class="text-sm text-destructive mt-2">{{ errorMessage }}</p>
     </HydrationSafeForm>
 
-    <div v-if="tasksQuery.isFetching.value" class="flex justify-center py-8">
+    <div v-if="isTenantResolving || tasksQuery.isFetching.value" class="flex justify-center py-8">
       <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
     </div>
 
-    <p v-else-if="tasksQuery.isError.value" class="py-8 text-center text-sm text-destructive">
+    <p
+      v-else-if="isTenantResolveError || tasksQuery.isError.value"
+      class="py-8 text-center text-sm text-destructive"
+    >
       タスクの読み込みに失敗しました
+    </p>
+
+    <p v-else-if="isTenantNotFound" class="py-8 text-center text-sm text-muted-foreground">
+      テナントが見つかりません
     </p>
 
     <template v-else>
