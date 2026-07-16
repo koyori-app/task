@@ -534,7 +534,7 @@ const table = useVueTable({
             />
             <Input
               type="search"
-              class="h-8 pl-8 pr-8 text-sm"
+              class="h-8 appearance-none pl-8 pr-8 text-sm"
               placeholder="タスクを検索..."
               aria-label="タスクを検索"
               :model-value="searchInput"
@@ -641,9 +641,12 @@ const table = useVueTable({
                     :title="task.title"
                   />
                 </TableCell>
-                <TableCell class="max-w-md truncate px-3 py-1.5 text-xs text-muted-foreground">
-                  {{ task.highlight }}
-                </TableCell>
+                <!-- highlight は backend の ilike/tsvector/no-match 全経路で動的文字列を
+                     html_escape 済み。唯一 backend が付与する <em> のみ HTML として描画する。 -->
+                <TableCell
+                  class="max-w-md truncate px-3 py-1.5 text-xs text-muted-foreground"
+                  v-html="task.highlight"
+                />
               </TableRow>
               <TableRow v-if="!taskSearchQuery.data.value?.tasks.length">
                 <TableCell :colspan="3" class="h-24 text-center text-sm text-muted-foreground">
@@ -654,6 +657,7 @@ const table = useVueTable({
           </Table>
         </div>
         <div class="text-xs text-muted-foreground">
+          上位 {{ taskSearchQuery.data.value?.tasks.length ?? 0 }} 件 / 全
           {{ taskSearchQuery.data.value?.total ?? 0 }} 件
         </div>
       </template>

@@ -250,11 +250,11 @@ const sampleSearchTasks = {
       id: 'task-search-1',
       seq_id: 42,
       title: 'OAuth 検索結果',
-      highlight: 'OAuth 認証フローを更新する',
+      highlight: '<em>OAuth</em> 認証 &amp; フローを更新する',
       score: 0.98,
     },
   ],
-  total: 1,
+  total: 75,
 };
 
 /**
@@ -497,7 +497,13 @@ export const SearchResults: Story = {
     await userEvent.type(searchInput, 'OAuth');
 
     await expect(canvas.findByText('OAuth 検索結果')).resolves.toBeInTheDocument();
-    await expect(canvas.findByText('OAuth 認証フローを更新する')).resolves.toBeInTheDocument();
+    const highlight = canvasElement.querySelector('td em');
+    await expect(highlight).toBeInTheDocument();
+    await expect(highlight).toHaveTextContent('OAuth');
+    await expect(highlight?.closest('td')).toHaveTextContent('OAuth 認証 & フローを更新する');
+    await expect(
+      canvas.findByText(/上位\s+1\s+件\s+\/\s+全\s+75\s+件/),
+    ).resolves.toBeInTheDocument();
     await expect(canvas.findByText('ENG-42')).resolves.toBeInTheDocument();
     await expect(canvas.queryByText('ログイン画面の UI 実装')).not.toBeInTheDocument();
   },
@@ -526,7 +532,9 @@ export const SearchNoResults: Story = {
     await userEvent.type(searchInput, '存在しないタスク');
 
     await expect(canvas.findByText('検索結果がありません')).resolves.toBeInTheDocument();
-    await expect(canvas.findByText('0 件')).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByText(/上位\s+0\s+件\s+\/\s+全\s+0\s+件/),
+    ).resolves.toBeInTheDocument();
   },
 };
 
