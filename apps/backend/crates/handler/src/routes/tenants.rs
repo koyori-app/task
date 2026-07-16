@@ -141,7 +141,6 @@ pub fn routes() -> OpenApiRouter<AppState> {
             "/{tenant_id}/users/me",
             OpenApiRouter::<AppState>::new()
                 .routes(routes!(crate::handlers::my_tasks::get_personal_project))
-                .routes(routes!(crate::handlers::my_tasks::list_my_tasks))
-                .routes(routes!(crate::handlers::my_tasks::create_my_task)),
+                .routes(routes!(crate::handlers::my_tasks::list_my_tasks)),
         )
 }
