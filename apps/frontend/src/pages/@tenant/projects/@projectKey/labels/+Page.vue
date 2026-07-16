@@ -26,7 +26,7 @@ const {
 
 const labelsQuery = useQuery(
   computed(() => ({
-    ...projectLabelsQueryOptions(tenantId.value ?? '', projectId.value ?? ''),
+    ...projectLabelsQueryOptions(tenantId.value, projectId.value),
     enabled: !!tenantId.value && !!projectId.value,
   })),
 );

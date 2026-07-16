@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { computed, defineComponent } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient, useQuery } from '@tanstack/vue-query';
+import type { TenantUuid } from '@/lib/api-ids';
+
+const TENANT_UUID = 'tenant-uuid' as TenantUuid;
 
 const projects = [
   {
@@ -33,7 +36,7 @@ vi.mock('@/lib/api-vue-query', () => ({
 
 import { useResolvedProjectId } from '../useResolvedProjectId';
 
-function mountComposable(tenantId: string | null, projectKey: string) {
+function mountComposable(tenantId: TenantUuid | null, projectKey: string) {
   let result!: ReturnType<typeof useResolvedProjectId>;
   const Comp = defineComponent({
     setup() {
@@ -57,14 +60,14 @@ describe('useResolvedProjectId', () => {
   afterEach(() => vi.clearAllMocks());
 
   it('project key から project UUID を解決する', async () => {
-    const { get, flush } = mountComposable('tenant-uuid', 'ENG');
+    const { get, flush } = mountComposable(TENANT_UUID, 'ENG');
     await flush();
     expect(get().projectId.value).toBe('project-uuid');
     expect(get().isProjectNotFound.value).toBe(false);
   });
 
   it('未知の project key は not-found と判定する', async () => {
-    const { get, flush } = mountComposable('tenant-uuid', 'UNKNOWN');
+    const { get, flush } = mountComposable(TENANT_UUID, 'UNKNOWN');
     await flush();
     expect(get().projectId.value).toBeNull();
     expect(get().isProjectNotFound.value).toBe(true);
@@ -81,7 +84,7 @@ describe('useResolvedProjectId', () => {
     getMock.mockImplementation(async () => {
       throw new Error('server error');
     });
-    const { get, flush } = mountComposable('tenant-uuid', 'ENG');
+    const { get, flush } = mountComposable(TENANT_UUID, 'ENG');
     await flush();
     expect(get().isProjectNotFound.value).toBe(false);
     expect(get().isError.value).toBe(true);
