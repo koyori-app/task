@@ -229,11 +229,12 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     const titleInput = new DOMWrapper(getTitleInput());
     await titleInput.setValue('New task');
     await new DOMWrapper(getForm()).trigger('submit');
-    await flushPromises();
 
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks'],
-      refetchType: 'none',
+    await vi.waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks'],
+        refetchType: 'none',
+      });
     });
     expect(wrapper.emitted('created')?.[0]).toEqual([createdTask]);
     wrapper.unmount();
