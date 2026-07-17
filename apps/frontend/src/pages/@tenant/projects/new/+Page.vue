@@ -3,7 +3,7 @@ import { Loader2 } from '@lucide/vue';
 import { computed } from 'vue';
 import { usePageContext } from 'vike-vue/usePageContext';
 
-import ProjectForm from '@/components/projects/ProjectForm.vue';
+import ProjectCreateForm from '@/components/projects/ProjectCreateForm.vue';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 
 const pageContext = usePageContext();
@@ -30,6 +30,6 @@ const {
       テナントが見つかりません
     </p>
 
-    <ProjectForm v-else-if="tenantId" :tenant-id="tenantId" :tenant-slug="tenantDisplayId" />
+    <ProjectCreateForm v-else-if="tenantId" :tenant-id="tenantId" :tenant-slug="tenantDisplayId" />
   </div>
 </template>

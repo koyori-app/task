@@ -128,8 +128,13 @@ export const Default: Story = {
     ).resolves.toBeInTheDocument();
     await expect(canvas.findByLabelText('名前')).resolves.toBeInTheDocument();
     await expect(canvas.findByLabelText('キー')).resolves.toBeInTheDocument();
-    // 作成モードでは Danger zone は出ない
-    await expect(canvas.queryByText('Danger zone')).toBeNull();
+    // v2: 既定ステータスのプレビューカード
+    await expect(canvas.findByText('ワークフローステータス')).resolves.toBeInTheDocument();
+    for (const status of ['Backlog', 'Todo', 'In Progress', 'Done']) {
+      await expect(canvas.findByText(status)).resolves.toBeInTheDocument();
+    }
+    await expect(canvas.findByText('Default')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('Done state')).resolves.toBeInTheDocument();
   },
 };
 

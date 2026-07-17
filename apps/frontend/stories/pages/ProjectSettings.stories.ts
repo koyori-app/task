@@ -123,17 +123,21 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
-  name: '設定表示（プリフィル＋キー変更不可）',
+  name: '設定表示（一般セクション・プリフィル＋キー変更不可）',
   beforeEach: mockFetch(),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(
       canvas.findByRole('heading', { name: 'プロジェクト設定' }),
     ).resolves.toBeInTheDocument();
+    // v2: 左ナビ + 一般セクションが既定表示
+    await expect(
+      canvas.findByRole('navigation', { name: '設定セクション' }),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.findByRole('heading', { name: '一般' })).resolves.toBeInTheDocument();
     await expect(canvas.findByLabelText('名前')).resolves.toHaveValue('Team Alpha');
     await expect(canvas.getByLabelText('キー')).toBeDisabled();
     await expect(canvas.getByLabelText('キー')).toHaveValue('ALPHA');
-    await expect(canvas.findByText('Danger zone')).resolves.toBeInTheDocument();
   },
 };
 
@@ -158,14 +162,19 @@ export const SaveFlow: Story = {
 };
 
 export const DeleteFlow: Story = {
-  name: 'Danger zone → 削除確認 → DELETE',
+  name: '削除セクション → 確認 → DELETE',
   beforeEach: mockFetch(),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const page = within(canvasElement.ownerDocument.body);
     const user = userEvent.setup();
-    await expect(canvas.findByText('Danger zone')).resolves.toBeInTheDocument();
-    await user.click(canvas.getByRole('button', { name: '削除' }));
+    // ナビで削除セクションへ
+    const nav = await canvas.findByRole('navigation', { name: '設定セクション' });
+    await user.click(within(nav).getByRole('button', { name: '削除' }));
+    await expect(
+      canvas.findByText('このプロジェクトとすべてのタスクを完全に削除します。'),
+    ).resolves.toBeInTheDocument();
+    await user.click(canvas.getByRole('button', { name: 'プロジェクトを削除' }));
     await expect(
       page.findByText('「Team Alpha」を削除します。この操作は取り消せません。'),
     ).resolves.toBeInTheDocument();

@@ -3,7 +3,7 @@ import { Loader2 } from '@lucide/vue';
 import { computed } from 'vue';
 import { usePageContext } from 'vike-vue/usePageContext';
 
-import ProjectForm from '@/components/projects/ProjectForm.vue';
+import ProjectSettingsView from '@/components/projects/ProjectSettingsView.vue';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import type { components } from '@/generated/api';
@@ -51,7 +51,7 @@ const isNotFound = computed(() => isTenantNotFound.value || isProjectNotFound.va
       プロジェクトが見つかりません
     </p>
 
-    <ProjectForm
+    <ProjectSettingsView
       v-else-if="tenantId && project"
       :tenant-id="tenantId"
       :tenant-slug="tenantDisplayId"
