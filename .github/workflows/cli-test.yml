@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - 'apps/cli/**'
+      - 'apps/frontend/openapi.json'
       - '.github/workflows/cli-test.yml'
   push:
     branches: [main]
     paths:
       - 'apps/cli/**'
+      - 'apps/frontend/openapi.json'
       - '.github/workflows/cli-test.yml'
 
 concurrency:
@@ -57,8 +59,20 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: apps/cli
 
+      - name: Generate CLI OpenAPI types
+        run: pnpm openapi:generate
+        working-directory: apps/cli
+
+      - name: Type-check CLI application
+        run: pnpm build
+        working-directory: apps/cli
+
       - name: Type-check contract tests
         run: pnpm typecheck:test
+        working-directory: apps/cli
+
+      - name: Check generated CLI OpenAPI type drift
+        run: git diff --exit-code -- src/api/openapi.d.ts
         working-directory: apps/cli
 
       - name: Run tests
