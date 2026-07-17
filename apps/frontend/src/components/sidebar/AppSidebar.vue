@@ -6,9 +6,12 @@ import { useAuthStore } from '@/stores/auth';
 import { useTenantStore, type Tenant } from '@/stores/tenant';
 import { useProjectsQuery } from '@/lib/api-vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
-import { computed, watch } from 'vue';
+import { navigate } from 'vike/client/router';
+import { computed, ref, watch } from 'vue';
+import type { components } from '@/generated/api';
 
 import { BookOpen, Bot, ListTodo, Settings2, SquareTerminal } from '@lucide/vue';
+import DeleteProjectDialog from '@/components/sidebar/DeleteProjectDialog.vue';
 import NavMain from '@/components/sidebar/NavMain.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
 import NavUser from '@/components/sidebar/NavUser.vue';
@@ -79,6 +82,27 @@ function selectTenant(tenant: Tenant) {
 
 function retryProjects() {
   void projectsQuery.refetch();
+}
+
+// ---- プロジェクト CRUD（作成・編集はページ、削除は確認ダイアログ） ----
+type ProjectResponse = components['schemas']['ProjectResponse'];
+
+const deletingProject = ref<ProjectResponse | null>(null);
+
+function onCreateProject() {
+  void navigate(`/${tenantSlug.value}/projects/new`);
+}
+
+function onEditProject(project: ProjectResponse) {
+  void navigate(`/${tenantSlug.value}/projects/${project.key}/settings`);
+}
+
+function onProjectDeleted(project: ProjectResponse) {
+  deletingProject.value = null;
+  // 削除したプロジェクトのページを開いていた場合は退避
+  if (pageContext.urlPathname.startsWith(`/${tenantSlug.value}/projects/${project.key}/`)) {
+    void navigate(`/${tenantSlug.value}/my-tasks`);
+  }
 }
 
 const data = computed(() => ({
@@ -208,6 +232,17 @@ const data = computed(() => ({
         :loading="navProjectsLoading"
         :error="projectsQuery.isError.value"
         @retry="retryProjects"
+        @create="onCreateProject"
+        @edit="onEditProject"
+        @delete="(project) => (deletingProject = project)"
+      />
+      <DeleteProjectDialog
+        v-if="routeAlignedTenantId"
+        :open="!!deletingProject"
+        :tenant-id="routeAlignedTenantId"
+        :project="deletingProject"
+        @update:open="(open) => !open && (deletingProject = null)"
+        @deleted="onProjectDeleted"
       />
     </SidebarContent>
     <SidebarFooter>

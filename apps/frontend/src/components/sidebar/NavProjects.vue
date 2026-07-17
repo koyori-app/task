@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { PhDotsThree, PhFolderOpen, PhShare, PhTrash, PhUser } from '@phosphor-icons/vue';
+import {
+  PhDotsThree,
+  PhFolderOpen,
+  PhPencilSimple,
+  PhPlus,
+  PhTrash,
+  PhUser,
+} from '@phosphor-icons/vue';
 import { computed } from 'vue';
 import type { components } from '@/generated/api';
 
@@ -12,6 +19,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
   SidebarGroup,
+  SidebarGroupAction,
   SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuAction,
@@ -31,6 +39,9 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   retry: [];
+  create: [];
+  edit: [project: ProjectNavItem];
+  delete: [project: ProjectNavItem];
 }>();
 
 const { isMobile } = useSidebar();
@@ -50,6 +61,16 @@ function projectTasksUrl(project: components['schemas']['ProjectResponse']) {
 <template>
   <SidebarGroup class="group-data-[collapsible=icon]:hidden">
     <SidebarGroupLabel>Projects</SidebarGroupLabel>
+    <SidebarGroupAction
+      v-if="tenantSlug"
+      as="button"
+      type="button"
+      title="プロジェクトを作成"
+      @click="emit('create')"
+    >
+      <PhPlus />
+      <span class="sr-only">プロジェクトを作成</span>
+    </SidebarGroupAction>
     <SidebarMenu v-if="loading">
       <SidebarMenuItem>
         <SidebarMenuButton disabled>
@@ -103,9 +124,9 @@ function projectTasksUrl(project: components['schemas']['ProjectResponse']) {
           <PhFolderOpen v-else />
           <span>{{ project.name }}</span>
         </SidebarMenuButton>
-        <DropdownMenu>
+        <DropdownMenu v-if="!project.is_personal">
           <DropdownMenuTrigger as-child>
-            <SidebarMenuAction show-on-hover>
+            <SidebarMenuAction show-on-hover :aria-label="`${project.name} の操作`">
               <PhDotsThree />
               <span class="sr-only">More</span>
             </SidebarMenuAction>
@@ -115,18 +136,14 @@ function projectTasksUrl(project: components['schemas']['ProjectResponse']) {
             :side="isMobile ? 'bottom' : 'right'"
             :align="isMobile ? 'end' : 'start'"
           >
-            <DropdownMenuItem>
-              <PhFolderOpen class="text-muted-foreground" />
-              <span>View Project</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <PhShare class="text-muted-foreground" />
-              <span>Share Project</span>
+            <DropdownMenuItem @select="emit('edit', project)">
+              <PhPencilSimple class="text-muted-foreground" />
+              <span>編集</span>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
-              <PhTrash class="text-muted-foreground" />
-              <span>Delete Project</span>
+            <DropdownMenuItem variant="destructive" @select="emit('delete', project)">
+              <PhTrash />
+              <span>削除</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
