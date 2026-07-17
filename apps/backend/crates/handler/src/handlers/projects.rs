@@ -14,7 +14,7 @@ use crate::auth_helpers::is_tenant_owner;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use entity::{drive_folders, project_members, projects, scopes::Scope};
+use entity::{drive_folders, project_members, project_statuses, projects, scopes::Scope};
 use payload::projects::*;
 use service::db::is_postgres_unique_violation;
 
@@ -154,9 +154,40 @@ pub async fn create_project(
         created_at: Set(chrono::Utc::now().into()),
     };
     drive_folder.insert(&txn).await?;
+    seed_default_statuses(&txn, model.id).await?;
     txn.commit().await?;
 
     Ok((StatusCode::CREATED, Json(model.into())))
+}
+
+/// 新規プロジェクトに既定のワークフローステータスを seed する（#368）。
+/// personal project 側（my_tasks の seed_personal_project_defaults）と異なり、
+/// 通常プロジェクトはカンバン前提の 4 ステータスを用意する。
+async fn seed_default_statuses(
+    txn: &sea_orm::DatabaseTransaction,
+    project_id: Uuid,
+) -> Result<(), AppError> {
+    let defaults: [(&str, &str, bool, bool); 4] = [
+        ("Backlog", "#94a3b8", false, false),
+        ("Todo", "#3b82f6", true, false),
+        ("In Progress", "#f59e0b", false, false),
+        ("Done", "#22c55e", false, true),
+    ];
+    for (position, (name, color, is_default, is_done_state)) in defaults.into_iter().enumerate() {
+        project_statuses::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            project_id: Set(project_id),
+            name: Set(name.into()),
+            color: Set(color.into()),
+            position: Set(position as i16),
+            is_default: Set(is_default),
+            is_done_state: Set(is_done_state),
+            created_at: Set(chrono::Utc::now().into()),
+        }
+        .insert(txn)
+        .await?;
+    }
+    Ok(())
 }
 
 #[axum::debug_handler]
