@@ -6,6 +6,9 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import ProjectForm from '@/components/projects/ProjectForm.vue';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
+import type { components } from '@/generated/api';
+
+type ProjectResponse = components['schemas']['ProjectResponse'];
 
 const pageContext = usePageContext();
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
@@ -26,7 +29,7 @@ const {
 } = useResolvedProjectId(tenantId, projectKey);
 
 const project = computed(
-  () => projectsQuery.data.value?.find((p) => p.key === projectKey.value) ?? null,
+  () => projectsQuery.data.value?.find((p: ProjectResponse) => p.key === projectKey.value) ?? null,
 );
 
 const isLoading = computed(() => isTenantResolving.value || isProjectResolving.value);
