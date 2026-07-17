@@ -76,9 +76,19 @@ export const ProjectList: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText('Design Engineering')).toBeInTheDocument();
-    await expect(canvas.getByRole('link', { name: /Design Engineering/ })).toHaveAttribute(
+    // 行クリックで展開 → タスク/ラベル/設定の子リンク
+    await userEvent.click(canvas.getByRole('button', { name: /Design Engineering/ }));
+    await expect(canvas.getByRole('link', { name: 'タスク' })).toHaveAttribute(
       'href',
       '/acme/projects/design/tasks',
+    );
+    await expect(canvas.getByRole('link', { name: 'ラベル' })).toHaveAttribute(
+      'href',
+      '/acme/projects/design/labels',
+    );
+    await expect(canvas.getByRole('link', { name: '設定' })).toHaveAttribute(
+      'href',
+      '/acme/projects/design/settings',
     );
   },
 };
@@ -95,7 +105,10 @@ export const Empty: Story = {
   render: renderWithState({ projects: [] }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText('プロジェクトがありません')).toBeInTheDocument();
+    await expect(canvas.getByText('プロジェクトはまだありません。')).toBeInTheDocument();
+    // グループの「+」と空状態カードのボタンの2つが並存する
+    const createButtons = canvas.getAllByRole('button', { name: /プロジェクトを作成/ });
+    await expect(createButtons.length).toBe(2);
   },
 };
 
