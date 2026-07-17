@@ -1,14 +1,12 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::StatusCode,
 };
-use axum_valid::Valid;
 use chrono::{Duration, NaiveDate, Utc};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait, EntityTrait,
     JoinType, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, RelationTrait,
-    TransactionTrait, prelude::Uuid, sea_query::LockType,
+    TransactionTrait, prelude::Uuid,
 };
 
 use crate::AppState;
@@ -17,50 +15,14 @@ use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use entity::{
     drive_folders, project_members, project_statuses, project_task_counters, projects,
-    scopes::Scope, task_assignees, tasks, users,
+    scopes::Scope, tasks, users,
 };
 use payload::my_tasks::*;
 use payload::projects::ProjectResponse;
-use payload::tasks::TaskResponse;
 use service::db::is_postgres_unique_violation;
-use service::task_activities::record_activity;
 fn personal_project_key(user_id: Uuid) -> String {
     let id_hex = user_id.simple().to_string().to_ascii_uppercase();
     format!("ME{}", &id_hex[..4])
-}
-
-async fn next_seq_id(db: &sea_orm::DatabaseTransaction, project_id: Uuid) -> Result<i32, AppError> {
-    let existing = project_task_counters::Entity::find_by_id(project_id)
-        .lock(LockType::Update)
-        .one(db)
-        .await?;
-    Ok(match existing {
-        Some(c) => {
-            let new_seq = c.last_seq + 1;
-            let mut active: project_task_counters::ActiveModel = c.into();
-            active.last_seq = Set(new_seq);
-            active.update(db).await?.last_seq
-        }
-        None => {
-            project_task_counters::ActiveModel {
-                project_id: Set(project_id),
-                last_seq: Set(1),
-            }
-            .insert(db)
-            .await?
-            .last_seq
-        }
-    })
-}
-
-async fn default_status_id<C: ConnectionTrait>(db: &C, project_id: Uuid) -> Result<Uuid, AppError> {
-    project_statuses::Entity::find()
-        .filter(project_statuses::Column::ProjectId.eq(project_id))
-        .filter(project_statuses::Column::IsDefault.eq(true))
-        .one(db)
-        .await?
-        .map(|s| s.id)
-        .ok_or(AppError::NotFound)
 }
 
 async fn seed_personal_project_defaults<C: ConnectionTrait>(
@@ -418,84 +380,4 @@ pub async fn list_my_tasks(
         tasks: items,
         total,
     }))
-}
-
-#[axum::debug_handler]
-#[utoipa::path(
-    post,
-    path = "/tasks",
-    tag = "My Tasks",
-    summary = "クイックキャプチャ（個人プロジェクトへタスク作成）",
-    params(("tenant_id" = Uuid, Path, description = "テナントID")),
-    request_body = QuickCaptureRequest,
-    responses(
-        (status = 201, description = "作成されたタスク", body = TaskResponse),
-        CrudErrors,
-    )
-)]
-pub async fn create_my_task(
-    State(state): State<AppState>,
-    auth: AuthUser,
-    Path(tenant_id): Path<Uuid>,
-    Valid(Json(payload)): Valid<Json<QuickCaptureRequest>>,
-) -> Result<(StatusCode, Json<TaskResponse>), AppError> {
-    auth.require_scope(Scope::WriteTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, None).await?;
-
-    let personal = get_or_create_personal_project(&state, tenant_id, auth.user_id).await?;
-    let status_id = default_status_id(&state.db, personal.id).await?;
-
-    let txn = state.db.begin().await?;
-    let seq_id = next_seq_id(&txn, personal.id).await?;
-    let priority = payload.priority.unwrap_or(tasks::TaskPriority::Medium);
-
-    let model = tasks::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        project_id: Set(personal.id),
-        seq_id: Set(seq_id),
-        title: Set(payload.title),
-        description: Set(payload.note),
-        status_id: Set(status_id),
-        priority: Set(priority),
-        progress_pct: Set(0),
-        parent_task_id: Set(None),
-        milestone_id: Set(None),
-        sprint_id: Set(None),
-        soft_deadline: Set(payload.soft_deadline.map(Into::into)),
-        hard_deadline: Set(None),
-        estimated_minutes: Set(None),
-        is_archived: Set(false),
-        created_by: Set(auth.user_id),
-        created_at: Set(Utc::now().into()),
-        updated_at: Set(Utc::now().into()),
-        completed_at: Set(None),
-        deleted_at: Set(None),
-    }
-    .insert(&txn)
-    .await?;
-
-    task_assignees::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        task_id: Set(model.id),
-        user_id: Set(auth.user_id),
-        role: Set("assignee".into()),
-        assigned_at: Set(Utc::now().into()),
-    }
-    .insert(&txn)
-    .await?;
-
-    record_activity(
-        &txn,
-        model.id,
-        Some(auth.user_id),
-        "task_created",
-        serde_json::json!({}),
-    )
-    .await?;
-
-    txn.commit().await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(service::task_responses::build_task_response(&state.db, model).await?),
-    ))
 }

@@ -1,7 +1,6 @@
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use validator::Validate;
 
 use entity::tasks;
 
@@ -29,15 +28,6 @@ fn default_include_personal() -> bool {
 
 fn default_limit() -> u64 {
     50
-}
-
-#[derive(Validate, Deserialize, ToSchema)]
-pub struct QuickCaptureRequest {
-    #[validate(length(min = 1, max = 255))]
-    pub title: String,
-    pub soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
-    pub priority: Option<tasks::TaskPriority>,
-    pub note: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]

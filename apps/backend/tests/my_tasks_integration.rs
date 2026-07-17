@@ -68,8 +68,10 @@ async fn personal_project_is_idempotent() {
     assert_eq!(first, second);
 }
 
+/// quick-capture API 撤去の回帰テスト（#363）。
+/// 撤去前は 201 CREATED を返していたため、撤去前のコードでは fail する。
 #[tokio::test]
-async fn quick_capture_and_list() {
+async fn quick_capture_endpoint_is_removed() {
     let mut app = TestApp::new().await;
     let (_user, tp) = setup(&mut app).await;
     let base = my_tasks_base(tp.tenant_id);
@@ -80,21 +82,55 @@ async fn quick_capture_and_list() {
         )
         .await
         .status(),
+        StatusCode::METHOD_NOT_ALLOWED
+    );
+}
+
+#[tokio::test]
+async fn list_returns_only_assigned_tasks() {
+    let mut app = TestApp::new().await;
+    let (user, tp) = setup(&mut app).await;
+    let status_id = create_status(&app, &tp, "Todo", false).await;
+    let path = format!(
+        "/v1/tenants/{}/projects/{}/tasks",
+        tp.tenant_id, tp.project_id
+    );
+    let assignee = serde_json::json!([{"user_id": user.id, "role": "assignee"}]);
+    // 成功系: 自分に割り当てられたタスクは一覧に載る
+    assert_eq!(
+        app.post_json_with_session(
+            &path,
+            serde_json::json!({"title": "Assigned", "status_id": status_id, "assignees": assignee}),
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+    // 対照: 未割り当てのタスクは載らない
+    assert_eq!(
+        app.post_json_with_session(
+            &path,
+            serde_json::json!({"title": "Unassigned", "status_id": status_id}),
+        )
+        .await
+        .status(),
         StatusCode::CREATED
     );
     let body: serde_json::Value = app
-        .get_with_session(&format!("{base}/tasks?filter=all"))
+        .get_with_session(&format!("{}/tasks?filter=all", my_tasks_base(tp.tenant_id)))
         .await
         .json()
         .await
         .unwrap();
-    assert!(
-        body["tasks"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|t| t["title"] == "Buy milk")
-    );
+    let titles: Vec<&str> = body["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t["title"].as_str())
+        .collect();
+    assert!(titles.contains(&"Assigned"));
+    assert!(!titles.contains(&"Unassigned"));
+    assert_eq!(body["total"], 1);
 }
 
 #[tokio::test]
