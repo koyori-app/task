@@ -1,11 +1,15 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, flushPromises, DOMWrapper, enableAutoUnmount } from '@vue/test-utils';
-import { afterEach } from 'vitest';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 
-const { createMutateAsync, updateMutateAsync } = vi.hoisted(() => ({
+const { createMutateAsync, updateMutateAsync, navigateMock } = vi.hoisted(() => ({
   createMutateAsync: vi.fn(),
   updateMutateAsync: vi.fn(),
+  navigateMock: vi.fn(),
+}));
+
+vi.mock('vike/client/router', () => ({
+  navigate: navigateMock,
 }));
 
 vi.mock('@/lib/api-vue-query', async (importOriginal) => {
@@ -22,7 +26,7 @@ vi.mock('@/lib/api-vue-query', async (importOriginal) => {
   };
 });
 
-import ProjectFormDialog from '../ProjectFormDialog.vue';
+import ProjectForm from '../ProjectForm.vue';
 import type { components } from '@/generated/api';
 
 type ProjectResponse = components['schemas']['ProjectResponse'];
@@ -38,68 +42,67 @@ const sampleProject: ProjectResponse = {
   description: 'Shared project',
   key: 'ALPHA',
   is_personal: false,
-  icon_emoji: null,
+  icon_emoji: '🎨',
   icon_url: null,
   personal_owner_id: null,
 };
 
-function mountDialog(props: { project?: ProjectResponse | null } = {}) {
+function mountForm(props: { project?: ProjectResponse | null } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return mount(ProjectFormDialog, {
-    props: { open: true, tenantId: TENANT_UUID, ...props },
+  return mount(ProjectForm, {
+    props: { tenantId: TENANT_UUID, tenantSlug: 'acme', ...props },
     global: { plugins: [[VueQueryPlugin, { queryClient }]] },
     attachTo: document.body,
   });
 }
 
-function bodyInput(id: string) {
+function input(id: string) {
   const el = document.body.querySelector<HTMLInputElement>(`#${id}`);
   if (!el) throw new Error(`input #${id} not found`);
   return new DOMWrapper(el);
 }
 
-function bodyForm() {
+function formEl() {
   const el = document.body.querySelector('form');
   if (!el) throw new Error('form not found');
   return new DOMWrapper(el);
 }
 
-describe('ProjectFormDialog', () => {
+describe('ProjectForm', () => {
   beforeEach(() => {
     createMutateAsync.mockReset();
     updateMutateAsync.mockReset();
+    navigateMock.mockReset();
     document.body.innerHTML = '';
   });
 
-  it('作成モード: 名前からキーを自動提案し、POST に name/key を送る', async () => {
+  it('作成モード: 名前からキーを自動提案し、POST 後に新プロジェクトへ遷移する', async () => {
     createMutateAsync.mockResolvedValue({ ...sampleProject, key: 'NEWPROJ' });
-    const wrapper = mountDialog();
+    mountForm();
     await flushPromises();
 
-    await bodyInput('name').setValue('New Proj');
-    expect((bodyInput('key').element as HTMLInputElement).value).toBe('NEWPROJ');
+    await input('name').setValue('New Proj');
+    expect((input('key').element as HTMLInputElement).value).toBe('NEWPROJ');
 
-    await bodyForm().trigger('submit');
+    await formEl().trigger('submit');
     await flushPromises();
 
     expect(createMutateAsync).toHaveBeenCalledWith({
       params: { path: { tenant_id: TENANT_UUID } },
       body: { name: 'New Proj', key: 'NEWPROJ' },
     });
-    expect(wrapper.emitted('saved')?.[0]).toEqual([{ ...sampleProject, key: 'NEWPROJ' }]);
-    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    expect(navigateMock).toHaveBeenCalledWith('/acme/projects/NEWPROJ/tasks');
   });
 
   it('作成モード: キー空欄なら key を送らない（backend 自動生成に委ねる）', async () => {
     createMutateAsync.mockResolvedValue(sampleProject);
-    mountDialog();
+    mountForm();
     await flushPromises();
 
-    await bodyInput('name').setValue('プロジェクト');
-    // 日本語名 → suggestKey は空 → key は送られない
-    await bodyForm().trigger('submit');
+    await input('name').setValue('プロジェクト');
+    await formEl().trigger('submit');
     await flushPromises();
 
     expect(createMutateAsync).toHaveBeenCalledWith({
@@ -108,18 +111,15 @@ describe('ProjectFormDialog', () => {
     });
   });
 
-  it('編集モード: 既存値をプリフィルし、PUT に name/description を送る', async () => {
+  it('設定モード: 既存値をプリフィルし、PUT に name/description を送る', async () => {
     updateMutateAsync.mockResolvedValue({ ...sampleProject, name: 'Renamed' });
-    const wrapper = mountDialog({ project: sampleProject });
-    // open は初期 true のため watch を発火させる
-    await wrapper.setProps({ open: false });
-    await wrapper.setProps({ open: true });
+    mountForm({ project: sampleProject });
     await flushPromises();
 
-    expect((bodyInput('name').element as HTMLInputElement).value).toBe('Team Alpha');
+    expect((input('name').element as HTMLInputElement).value).toBe('Team Alpha');
 
-    await bodyInput('name').setValue('Renamed');
-    await bodyForm().trigger('submit');
+    await input('name').setValue('Renamed');
+    await formEl().trigger('submit');
     await flushPromises();
 
     expect(updateMutateAsync).toHaveBeenCalledWith({
@@ -129,29 +129,56 @@ describe('ProjectFormDialog', () => {
     expect(createMutateAsync).not.toHaveBeenCalled();
   });
 
-  it('編集モード: キー入力欄は無効化表示（編集不可）', async () => {
-    const wrapper = mountDialog({ project: sampleProject });
-    await wrapper.setProps({ open: false });
-    await wrapper.setProps({ open: true });
+  it('設定モード: アイコンを外すと clear_icon_emoji を送る', async () => {
+    updateMutateAsync.mockResolvedValue({ ...sampleProject, icon_emoji: null });
+    const wrapper = mountForm({ project: sampleProject });
+    await flushPromises();
+
+    // 絵文字メニューを開いて「アイコンなし」を選択
+    await wrapper.find('button[aria-label="アイコンを選択"]').trigger('click');
+    const clearButton = [...document.body.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === 'アイコンなし',
+    );
+    expect(clearButton).toBeTruthy();
+    clearButton!.click();
+    await flushPromises();
+
+    await formEl().trigger('submit');
+    await flushPromises();
+
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_UUID, id: sampleProject.id } },
+      body: { name: 'Team Alpha', description: 'Shared project', clear_icon_emoji: true },
+    });
+  });
+
+  it('設定モード: キー入力欄は無効化表示（編集不可）で Danger zone が出る', async () => {
+    mountForm({ project: sampleProject });
     await flushPromises();
 
     const keyInput = document.body.querySelector<HTMLInputElement>('#project-key-readonly');
     expect(keyInput).not.toBeNull();
     expect(keyInput!.disabled).toBe(true);
     expect(keyInput!.value).toBe('ALPHA');
+    expect(document.body.textContent).toContain('Danger zone');
   });
 
-  it('失敗時はエラーを表示し、ダイアログを閉じない', async () => {
+  it('作成モード: Danger zone は出ない', async () => {
+    mountForm();
+    await flushPromises();
+    expect(document.body.textContent).not.toContain('Danger zone');
+  });
+
+  it('失敗時はエラーを表示し、遷移しない', async () => {
     createMutateAsync.mockRejectedValue(new Error('server error'));
-    const wrapper = mountDialog();
+    mountForm();
     await flushPromises();
 
-    await bodyInput('name').setValue('X Project');
-    await bodyForm().trigger('submit');
+    await input('name').setValue('X Project');
+    await formEl().trigger('submit');
     await flushPromises();
 
     expect(document.body.textContent).toContain('プロジェクトを作成できませんでした');
-    expect(wrapper.emitted('update:open')).toBeUndefined();
-    expect(wrapper.emitted('saved')).toBeUndefined();
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 });

@@ -15,7 +15,6 @@ import DeleteProjectDialog from '@/components/sidebar/DeleteProjectDialog.vue';
 import NavMain from '@/components/sidebar/NavMain.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
 import NavUser from '@/components/sidebar/NavUser.vue';
-import ProjectFormDialog from '@/components/sidebar/ProjectFormDialog.vue';
 import TenantSwitcher from '@/components/sidebar/TenantSwitcher.vue';
 
 import {
@@ -85,15 +84,17 @@ function retryProjects() {
   void projectsQuery.refetch();
 }
 
-// ---- プロジェクト CRUD ダイアログ ----
+// ---- プロジェクト CRUD（作成・編集はページ、削除は確認ダイアログ） ----
 type ProjectResponse = components['schemas']['ProjectResponse'];
 
-const isCreateProjectOpen = ref(false);
-const editingProject = ref<ProjectResponse | null>(null);
 const deletingProject = ref<ProjectResponse | null>(null);
 
-function onProjectCreated(project: ProjectResponse) {
-  void navigate(`/${tenantSlug.value}/projects/${project.key}/tasks`);
+function onCreateProject() {
+  void navigate(`/${tenantSlug.value}/projects/new`);
+}
+
+function onEditProject(project: ProjectResponse) {
+  void navigate(`/${tenantSlug.value}/projects/${project.key}/settings`);
 }
 
 function onProjectDeleted(project: ProjectResponse) {
@@ -231,31 +232,18 @@ const data = computed(() => ({
         :loading="navProjectsLoading"
         :error="projectsQuery.isError.value"
         @retry="retryProjects"
-        @create="isCreateProjectOpen = true"
-        @edit="(project) => (editingProject = project)"
+        @create="onCreateProject"
+        @edit="onEditProject"
         @delete="(project) => (deletingProject = project)"
       />
-      <template v-if="routeAlignedTenantId">
-        <ProjectFormDialog
-          :open="isCreateProjectOpen"
-          :tenant-id="routeAlignedTenantId"
-          @update:open="isCreateProjectOpen = $event"
-          @saved="onProjectCreated"
-        />
-        <ProjectFormDialog
-          :open="!!editingProject"
-          :tenant-id="routeAlignedTenantId"
-          :project="editingProject"
-          @update:open="(open) => !open && (editingProject = null)"
-        />
-        <DeleteProjectDialog
-          :open="!!deletingProject"
-          :tenant-id="routeAlignedTenantId"
-          :project="deletingProject"
-          @update:open="(open) => !open && (deletingProject = null)"
-          @deleted="onProjectDeleted"
-        />
-      </template>
+      <DeleteProjectDialog
+        v-if="routeAlignedTenantId"
+        :open="!!deletingProject"
+        :tenant-id="routeAlignedTenantId"
+        :project="deletingProject"
+        @update:open="(open) => !open && (deletingProject = null)"
+        @deleted="onProjectDeleted"
+      />
     </SidebarContent>
     <SidebarFooter>
       <NavUser :user="data.user" :on-logout="logout" />
