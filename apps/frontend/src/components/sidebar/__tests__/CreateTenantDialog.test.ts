@@ -19,8 +19,7 @@ const createdTenant = {
 };
 
 const input = (id: string) => document.querySelector<HTMLInputElement>(`#${id}`)!;
-const overlay = () =>
-  document.querySelector<HTMLElement>('[data-testid="create-tenant-dialog-overlay"]')!;
+const overlay = () => document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]')!;
 
 function updateInput(id: string, value: string) {
   const element = input(id);
