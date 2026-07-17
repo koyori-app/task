@@ -94,14 +94,22 @@ function onDeleted() {
       </p>
     </div>
 
-    <div class="flex items-start gap-8">
+    <!-- モバイルは縦積み＋ナビ横スクロール、md 以上で横並び -->
+    <div class="flex flex-col gap-6 md:flex-row md:items-start md:gap-8">
       <!-- セクションナビ -->
-      <nav class="sticky top-2 flex w-[200px] shrink-0 flex-col gap-px" aria-label="設定セクション">
+      <nav
+        class="flex w-full gap-1 overflow-x-auto md:sticky md:top-2 md:w-[200px] md:shrink-0 md:flex-col md:gap-px"
+        aria-label="設定セクション"
+      >
         <template v-for="section in sections" :key="section.key">
-          <div v-if="section.danger" class="mx-2 my-2 h-px bg-border" aria-hidden="true" />
+          <div
+            v-if="section.danger"
+            class="mx-2 my-2 hidden h-px bg-border md:block"
+            aria-hidden="true"
+          />
           <button
             type="button"
-            class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm"
+            class="flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-sm md:w-full"
             :class="[
               activeSection === section.key ? 'bg-accent font-medium' : 'hover:bg-accent/50',
               section.danger ? 'text-destructive' : '',
@@ -117,7 +125,7 @@ function onDeleted() {
       </nav>
 
       <!-- セクション本体 -->
-      <div class="min-w-0 max-w-[640px] flex-1">
+      <div class="w-full min-w-0 max-w-[640px] flex-1">
         <!-- 一般 -->
         <form v-if="activeSection === 'general'" @submit.prevent="form.handleSubmit">
           <h2 class="mb-6 border-b pb-4 text-xl font-semibold">一般</h2>
