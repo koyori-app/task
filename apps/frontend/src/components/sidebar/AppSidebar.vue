@@ -6,12 +6,16 @@ import { useAuthStore } from '@/stores/auth';
 import { useTenantStore, type Tenant } from '@/stores/tenant';
 import { useProjectsQuery } from '@/lib/api-vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
-import { computed, watch } from 'vue';
+import { navigate } from 'vike/client/router';
+import { computed, ref, watch } from 'vue';
+import type { components } from '@/generated/api';
 
 import { BookOpen, Bot, ListTodo, Settings2, SquareTerminal } from '@lucide/vue';
+import DeleteProjectDialog from '@/components/sidebar/DeleteProjectDialog.vue';
 import NavMain from '@/components/sidebar/NavMain.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
 import NavUser from '@/components/sidebar/NavUser.vue';
+import ProjectFormDialog from '@/components/sidebar/ProjectFormDialog.vue';
 import TenantSwitcher from '@/components/sidebar/TenantSwitcher.vue';
 
 import {
@@ -79,6 +83,25 @@ function selectTenant(tenant: Tenant) {
 
 function retryProjects() {
   void projectsQuery.refetch();
+}
+
+// ---- プロジェクト CRUD ダイアログ ----
+type ProjectResponse = components['schemas']['ProjectResponse'];
+
+const isCreateProjectOpen = ref(false);
+const editingProject = ref<ProjectResponse | null>(null);
+const deletingProject = ref<ProjectResponse | null>(null);
+
+function onProjectCreated(project: ProjectResponse) {
+  void navigate(`/${tenantSlug.value}/projects/${project.key}/tasks`);
+}
+
+function onProjectDeleted(project: ProjectResponse) {
+  deletingProject.value = null;
+  // 削除したプロジェクトのページを開いていた場合は退避
+  if (pageContext.urlPathname.startsWith(`/${tenantSlug.value}/projects/${project.key}/`)) {
+    void navigate(`/${tenantSlug.value}/my-tasks`);
+  }
 }
 
 const data = computed(() => ({
@@ -208,7 +231,31 @@ const data = computed(() => ({
         :loading="navProjectsLoading"
         :error="projectsQuery.isError.value"
         @retry="retryProjects"
+        @create="isCreateProjectOpen = true"
+        @edit="(project) => (editingProject = project)"
+        @delete="(project) => (deletingProject = project)"
       />
+      <template v-if="routeAlignedTenantId">
+        <ProjectFormDialog
+          :open="isCreateProjectOpen"
+          :tenant-id="routeAlignedTenantId"
+          @update:open="isCreateProjectOpen = $event"
+          @saved="onProjectCreated"
+        />
+        <ProjectFormDialog
+          :open="!!editingProject"
+          :tenant-id="routeAlignedTenantId"
+          :project="editingProject"
+          @update:open="(open) => !open && (editingProject = null)"
+        />
+        <DeleteProjectDialog
+          :open="!!deletingProject"
+          :tenant-id="routeAlignedTenantId"
+          :project="deletingProject"
+          @update:open="(open) => !open && (deletingProject = null)"
+          @deleted="onProjectDeleted"
+        />
+      </template>
     </SidebarContent>
     <SidebarFooter>
       <NavUser :user="data.user" :on-logout="logout" />
