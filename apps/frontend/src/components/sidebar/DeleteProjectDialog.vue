@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { useQueryClient } from '@tanstack/vue-query';
-import {
-  DialogContent,
-  DialogDescription,
-  DialogOverlay,
-  DialogPortal,
-  DialogRoot,
-  DialogTitle,
-} from 'reka-ui';
 import { ref, watch } from 'vue';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
@@ -65,41 +65,33 @@ async function confirmDelete() {
 </script>
 
 <template>
-  <DialogRoot :open="open" @update:open="onOpenChange">
-    <DialogPortal>
-      <DialogOverlay
-        class="fixed inset-0 z-50 bg-black/50"
-        data-testid="delete-project-dialog-overlay"
-      />
-      <DialogContent
-        class="fixed left-1/2 top-1/2 z-50 grid w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-background p-6 shadow-lg"
-      >
-        <div class="space-y-1.5">
-          <DialogTitle class="text-lg font-semibold">プロジェクトを削除しますか？</DialogTitle>
-          <DialogDescription class="text-sm text-muted-foreground">
-            「{{ project?.name }}」を削除します。この操作は取り消せません。
-          </DialogDescription>
-        </div>
-        <p v-if="deleteError" role="alert" class="text-sm text-destructive">{{ deleteError }}</p>
-        <div class="flex justify-end gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            :disabled="deleteMutation.isPending.value"
-            @click="emit('update:open', false)"
-          >
-            キャンセル
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            :disabled="deleteMutation.isPending.value"
-            @click="confirmDelete"
-          >
-            {{ deleteMutation.isPending.value ? '削除中…' : '削除する' }}
-          </Button>
-        </div>
-      </DialogContent>
-    </DialogPortal>
-  </DialogRoot>
+  <Dialog v-if="open" :open="true" @update:open="onOpenChange">
+    <DialogContent class="max-w-md" :show-close-button="false">
+      <DialogHeader>
+        <DialogTitle>プロジェクトを削除しますか？</DialogTitle>
+        <DialogDescription>
+          「{{ project?.name }}」を削除します。この操作は取り消せません。
+        </DialogDescription>
+      </DialogHeader>
+      <p v-if="deleteError" role="alert" class="text-sm text-destructive">{{ deleteError }}</p>
+      <DialogFooter>
+        <Button
+          type="button"
+          variant="outline"
+          :disabled="deleteMutation.isPending.value"
+          @click="emit('update:open', false)"
+        >
+          キャンセル
+        </Button>
+        <Button
+          type="button"
+          variant="destructive"
+          :disabled="deleteMutation.isPending.value"
+          @click="confirmDelete"
+        >
+          {{ deleteMutation.isPending.value ? '削除中…' : '削除する' }}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </template>
