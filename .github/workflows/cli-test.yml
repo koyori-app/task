@@ -72,7 +72,22 @@ jobs:
         working-directory: apps/cli
 
       - name: Check generated CLI OpenAPI type drift
-        run: git diff --exit-code -- src/api/openapi.d.ts
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- src/api/openapi.d.ts; then
+            echo "CLI OpenAPI types are in sync."
+            exit 0
+          fi
+
+          echo "::error::apps/cli/src/api/openapi.d.ts is out of sync with apps/frontend/openapi.json."
+          echo ""
+          echo "After changing the API surface, regenerate and commit the CLI types:"
+          echo "  cd apps/cli && pnpm openapi:generate"
+          echo "  git add apps/cli/src/api/openapi.d.ts"
+          echo ""
+          echo "Diff:"
+          git diff -- src/api/openapi.d.ts | head -200 || true
+          exit 1
         working-directory: apps/cli
 
       - name: Run tests
