@@ -11,6 +11,11 @@ fi
 # API path parameters ending in `_id` must receive resolved IDs, not route-facing
 # display IDs/keys/slugs. Tests, stories, and generated clients are intentionally
 # excluded: this gate protects production API calls rather than mocks or fixtures.
+# This CLI gate is a single grep-based naming heuristic; it does not run oxlint.
+# A raw route value hidden behind a resolved-looking name (for example, tenantId)
+# is therefore undetectable, so this does not prevent the actual #357 bug shape.
+# It reliably catches the bare route-param shape from #361. Fully preventing #357
+# requires a follow-up companion rule that constrains values at the routeParams source.
 mapfile -d '' files < <(
   find "$root" -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.vue' \) \
     ! -path '*/__tests__/*' \

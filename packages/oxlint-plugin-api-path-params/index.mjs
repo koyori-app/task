@@ -1,5 +1,10 @@
 const RAW_ROUTE_NAME = /(?:DisplayId|displayId|Key|Slug)$/;
 
+// This rule is a call-site naming heuristic. It cannot detect a raw route value
+// assigned to a resolved-looking name (for example, tenantId), so it does not
+// prevent the actual #357 bug shape; it does catch #361's bare route-param shape.
+// Fully preventing #357 requires a follow-up companion rule at the routeParams source.
+
 function propertyName(node) {
   if (!node || node.computed) return undefined;
   if (node.key?.type === 'Identifier') return node.key.name;
