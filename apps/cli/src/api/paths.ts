@@ -468,21 +468,5 @@ export interface ApiPaths {
         200: { content: { "application/json": MyTasksListResponse } };
       };
     };
-    post: {
-      parameters: { path: { tenant_id: string } };
-      requestBody: {
-        content: {
-          "application/json": {
-            title: string;
-            soft_deadline?: string;
-            priority?: TaskPriority;
-            note?: string;
-          };
-        };
-      };
-      responses: {
-        201: { content: { "application/json": Task } };
-      };
-    };
   };
 }

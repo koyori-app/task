@@ -81,13 +81,15 @@ describe("command registration and primary branches", () => {
     expect(mocks.saveConfigFile).toHaveBeenCalledWith({ tenant_id: "tenant-2" });
   });
 
-  it("my parses add and sends its title and priority", async () => {
+  it("my parses list and sends its filter", async () => {
     await programWith(registerMyCommands).parseAsync([
-      "node", "task", "my", "add", "Golden task", "--priority", "high",
+      "node", "task", "my", "list", "--filter", "today",
     ]);
-    expect(mocks.POST).toHaveBeenCalledWith(
+    expect(mocks.GET).toHaveBeenCalledWith(
       "/v1/tenants/{tenant_id}/users/me/tasks",
-      expect.objectContaining({ body: { title: "Golden task", priority: "high" } }),
+      expect.objectContaining({
+        params: expect.objectContaining({ query: { filter: "today" } }),
+      }),
     );
   });
 

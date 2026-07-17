@@ -1,6 +1,5 @@
 import { Command } from "commander";
 import { getClient, getTenantId } from "../api/client";
-import type { TaskPriority } from "../api/paths";
 import { getOutputOptions } from "../utils/command";
 import type { OutputOptions } from "../utils/output";
 import { print } from "../utils/output";
@@ -10,7 +9,6 @@ import { findDoneStatusId } from "../utils/statuses";
 
 type MyCommandOptions = OutputOptions & {
   filter?: string;
-  priority?: string;
 };
 
 export function registerMyCommands(program: Command): void {
@@ -33,29 +31,6 @@ export function registerMyCommands(program: Command): void {
           path: { tenant_id: tenantId },
           query: { filter: opts.filter ?? "all" },
         },
-      });
-      print(unwrapApiResult(result), output);
-    });
-
-  my
-    .command("add")
-    .description("Quick-capture a task to personal inbox")
-    .argument("<title>", "Task title")
-    .option("--priority <priority>", "Task priority")
-    .action(async (title: string, opts: MyCommandOptions, cmd) => {
-      const output = getOutputOptions(cmd);
-      const client = getClient();
-      const tenantId = getTenantId();
-      const body: {
-        title: string;
-        priority?: TaskPriority;
-      } = { title };
-      if (opts.priority) {
-        body.priority = opts.priority as TaskPriority;
-      }
-      const result = await client.POST("/v1/tenants/{tenant_id}/users/me/tasks", {
-        params: { path: { tenant_id: tenantId } },
-        body,
       });
       print(unwrapApiResult(result), output);
     });
