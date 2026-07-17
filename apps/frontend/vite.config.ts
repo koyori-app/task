@@ -155,7 +155,6 @@ export default defineConfig({
   lint: {
     plugins: ['oxc', 'typescript', 'unicorn', 'vue'],
     jsPlugins: ['@koyori-app/oxlint-plugin-api-path-params'],
-    ignorePatterns: ['scripts/fixtures/**'],
     rules: {
       'api-path-params/no-raw-route-id-in-api-path': 'error',
     },
