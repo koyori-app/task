@@ -68,3 +68,23 @@ export function formatDeadline(iso?: string | null): { label: string; overdue: b
     overdue: false,
   };
 }
+
+/** ISO datetime → calendar date without applying the viewer's timezone. */
+export function isoToLocalDateInput(iso?: string | null): string {
+  if (!iso) return '';
+  const calendarDate = /^(\d{4}-\d{2}-\d{2})(?:T|$)/.exec(iso)?.[1];
+  return calendarDate ?? new Date(iso).toISOString().slice(0, 10);
+}
+
+/** Calendar date input → stable UTC ISO datetime. */
+export function localDateInputToIso(dateValue: string): string {
+  return `${dateValue}T00:00:00.000Z`;
+}
+
+export function formatProgressPct(value: number): string {
+  return `${Math.min(100, Math.max(0, value))}%`;
+}
+
+export function clampProgressPct(value: number): number {
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
