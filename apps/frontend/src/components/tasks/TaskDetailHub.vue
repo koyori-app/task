@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { EllipsisVertical, Loader2, Pencil, X } from '@lucide/vue';
 import { computed, nextTick, ref } from 'vue';
+import type { ComponentPublicInstance } from 'vue';
 import type { components } from '@/generated/api';
 import AvatarGroup from '@/components/AvatarGroup.vue';
 import type { EditableField } from '@/components/tasks/editable-field';
@@ -56,6 +57,7 @@ const resolvedStatus = computed(() =>
 );
 const editingField = ref<EditableField | null>(null);
 const draftValue = ref('');
+const editingControlRef = ref<HTMLElement | ComponentPublicInstance | null>(null);
 
 function isFieldUpdating(field: EditableField) {
   return props.fieldUpdating?.[field] ?? false;
@@ -86,9 +88,10 @@ async function startEditing(field: EditableField) {
       break;
   }
   await nextTick();
-  const root = document.activeElement?.closest('[data-task-detail-hub]') ?? document;
-  const input = root.querySelector<HTMLElement>(`[data-editing="${field}"]`);
-  input?.focus();
+  const control = editingControlRef.value;
+  const element =
+    control instanceof HTMLElement ? control : (control?.$el as HTMLElement | undefined);
+  element?.focus();
 }
 
 function cancelEditing() {
@@ -189,6 +192,7 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
         <div v-if="editingField === 'title'" class="flex flex-col gap-1">
           <Input
             v-model="draftValue"
+            ref="editingControlRef"
             data-editing="title"
             class="text-2xl font-semibold"
             :disabled="isFieldUpdating('title')"
@@ -268,6 +272,7 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
             <Textarea
               v-if="editingField === 'description'"
               v-model="draftValue"
+              ref="editingControlRef"
               data-editing="description"
               class="min-h-28"
               :disabled="isFieldUpdating('description')"
@@ -330,6 +335,7 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
             <Input
               v-if="editingField === 'progress_pct'"
               v-model="draftValue"
+              ref="editingControlRef"
               data-editing="progress_pct"
               type="number"
               min="0"
@@ -387,6 +393,7 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                   <div v-if="editingField === 'soft_deadline'" class="flex items-center gap-2">
                     <Input
                       v-model="draftValue"
+                      ref="editingControlRef"
                       data-editing="soft_deadline"
                       type="date"
                       class="flex-1"
@@ -447,6 +454,7 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                   <div v-if="editingField === 'hard_deadline'" class="flex items-center gap-2">
                     <Input
                       v-model="draftValue"
+                      ref="editingControlRef"
                       data-editing="hard_deadline"
                       type="date"
                       class="flex-1"

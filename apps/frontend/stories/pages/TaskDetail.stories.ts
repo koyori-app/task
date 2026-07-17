@@ -125,6 +125,7 @@ type MockOptions = {
   rejectTenantsList?: boolean;
   rejectPut?: number;
   rejectDelete?: number;
+  deleteResponse?: Promise<Response>;
   hang?: boolean;
   onPut?: (body: unknown) => void;
   onDelete?: () => void;
@@ -190,6 +191,7 @@ function createMockFetch(overrides: MockOptions = {}) {
       return jsonResponse(mutableTaskDetail);
     }
     if (method === 'DELETE' && url.includes('/tasks/')) {
+      if (overrides.deleteResponse) return overrides.deleteResponse;
       if (overrides.rejectDelete) {
         return jsonResponse({ message: 'delete failed' }, overrides.rejectDelete);
       }
@@ -559,15 +561,14 @@ export const DeleteConfirmAndNavigate: Story = {
             mutations: { retry: false },
           },
         });
-        const locationAssignSpy = fn();
+        const spaNavigateSpy = fn();
         provide(VUE_QUERY_CLIENT, queryClient);
         provide(PAGE_CONTEXT_KEY, mockContext);
         provide('navigateAfterDelete', (href: string) => {
-          locationAssignSpy(href);
+          spaNavigateSpy(href);
         });
-        (
-          DeleteConfirmAndNavigate as { locationAssignSpy?: ReturnType<typeof fn> }
-        ).locationAssignSpy = locationAssignSpy;
+        (DeleteConfirmAndNavigate as { spaNavigateSpy?: ReturnType<typeof fn> }).spaNavigateSpy =
+          spaNavigateSpy;
       },
       template: '<story />',
     }),
@@ -596,11 +597,47 @@ export const DeleteConfirmAndNavigate: Story = {
     ).resolves.toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: '削除する' }));
 
-    const locationAssignSpy = (
-      DeleteConfirmAndNavigate as { locationAssignSpy?: ReturnType<typeof fn> }
-    ).locationAssignSpy;
-    await expect(locationAssignSpy).toHaveBeenCalledWith('/tenant-123/projects/ENG/tasks');
+    const spaNavigateSpy = (DeleteConfirmAndNavigate as { spaNavigateSpy?: ReturnType<typeof fn> })
+      .spaNavigateSpy;
+    await expect(spaNavigateSpy).toHaveBeenCalledWith('/tenant-123/projects/ENG/tasks');
     expect((DeleteConfirmAndNavigate as { wasDeleted?: () => boolean }).wasDeleted?.()).toBe(true);
+  },
+};
+
+export const DeleteInFlightEscapeGuard: Story = {
+  name: '削除中は Escape で閉じず失敗を表示',
+  beforeEach: () => {
+    let resolveDelete: ((response: Response) => void) | undefined;
+    const deleteResponse = new Promise<Response>((resolve) => {
+      resolveDelete = resolve;
+    });
+    (DeleteInFlightEscapeGuard as { rejectDelete?: () => void }).rejectDelete = () => {
+      resolveDelete?.(jsonResponse({ message: 'delete failed' }, 500));
+    };
+    return createMockFetch({ deleteResponse });
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).resolves.toBeInTheDocument();
+
+    await openDeleteDialogFromKebabMenu(canvas, user);
+    const dialog = await canvas.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: '削除する' }));
+    await expect(within(dialog).findByRole('button', { name: '削除中…' })).resolves.toBeDisabled();
+
+    const cancelEvent = new Event('cancel', { cancelable: true });
+    dialog.dispatchEvent(cancelEvent);
+    expect(cancelEvent.defaultPrevented).toBe(true);
+    expect(dialog).toHaveAttribute('open');
+
+    (DeleteInFlightEscapeGuard as { rejectDelete?: () => void }).rejectDelete?.();
+    await expect(
+      within(dialog).findByText('タスクの削除に失敗しました'),
+    ).resolves.toBeInTheDocument();
+    expect(dialog).toHaveAttribute('open');
   },
 };
 

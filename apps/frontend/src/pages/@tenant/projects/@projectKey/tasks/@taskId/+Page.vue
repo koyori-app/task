@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
+import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
@@ -16,9 +17,9 @@ const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}'
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 
-const navigateAfterDelete = inject<(href: string) => void>('navigateAfterDelete', (href) =>
-  window.location.assign(href),
-);
+const navigateAfterDelete = inject<(href: string) => void>('navigateAfterDelete', (href) => {
+  void navigate(href);
+});
 
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type UpdateTaskRequest = components['schemas']['UpdateTaskRequest'];
@@ -309,6 +310,10 @@ function closeDeleteDialog() {
 }
 
 function onDeleteDialogCancel(event: Event) {
+  if (deleteTaskMutation.isPending.value) {
+    event.preventDefault();
+    return;
+  }
   event.preventDefault();
   closeDeleteDialog();
 }
