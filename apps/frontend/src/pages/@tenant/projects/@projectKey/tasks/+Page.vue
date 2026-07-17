@@ -534,7 +534,7 @@ const table = useVueTable({
             />
             <Input
               type="search"
-              class="h-8 appearance-none pl-8 pr-8 text-sm"
+              class="h-8 appearance-none pl-8 pr-8 text-sm [&::-webkit-search-cancel-button]:hidden"
               placeholder="タスクを検索..."
               aria-label="タスクを検索"
               :model-value="searchInput"
