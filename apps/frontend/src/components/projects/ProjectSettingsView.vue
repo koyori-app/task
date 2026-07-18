@@ -4,6 +4,7 @@ import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhSlidersHorizontal, PhWarning } from '@phosphor-icons/vue';
 import { navigate } from 'vike/client/router';
+import { usePageContext } from 'vike-vue/usePageContext';
 import { computed, ref } from 'vue';
 import { Button } from '@/components/ui/button';
 import { Field, FieldError, FieldLabel } from '@/components/ui/field';
@@ -30,10 +31,10 @@ const props = defineProps<{
 }>();
 
 const queryClient = useQueryClient();
+const pageContext = usePageContext();
 const submitError = ref<string | null>(null);
 const saveDone = ref(false);
 const isDeleteOpen = ref(false);
-const activeSection = ref<SettingsSection>('general');
 const icon = ref<string | null>(props.project.icon_emoji ?? null);
 
 const sections: { key: SettingsSection; label: string; danger?: boolean }[] = [
@@ -41,6 +42,18 @@ const sections: { key: SettingsSection; label: string; danger?: boolean }[] = [
   { key: 'integrations', label: '連携' },
   { key: 'danger', label: '削除', danger: true },
 ];
+
+/** `?section=` から初期表示セクションを決める（GitHub callback の戻り先が利用。#386） */
+function initialSection(): SettingsSection {
+  const search = (pageContext as { urlParsed?: { search?: Record<string, string> } } | undefined)
+    ?.urlParsed?.search;
+  const requested = search?.section;
+  return sections.some((section) => section.key === requested)
+    ? (requested as SettingsSection)
+    : 'general';
+}
+
+const activeSection = ref<SettingsSection>(initialSection());
 
 const nonBlankName = type('string').narrow((name) => name.trim().length >= 1);
 
