@@ -11,6 +11,7 @@ import { Field, FieldError, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import DeleteProjectDialog from '@/components/sidebar/DeleteProjectDialog.vue';
+import CustomFieldsSection from '@/components/projects/CustomFieldsSection.vue';
 import EmojiIconPicker from '@/components/projects/EmojiIconPicker.vue';
 import IntegrationsSection from '@/components/projects/IntegrationsSection.vue';
 import LabelsSection from '@/components/projects/LabelsSection.vue';
@@ -23,7 +24,7 @@ const LIST_PROJECTS_PATH = '/v1/tenants/{tenant_id}/projects' as const;
 const PROJECT_PATH = '/v1/tenants/{tenant_id}/projects/{id}' as const;
 
 /** 設定セクション。Workflow(#370)・Members(#371) ほかは増分で追加 */
-type SettingsSection = 'general' | 'labels' | 'integrations' | 'danger';
+type SettingsSection = 'general' | 'labels' | 'fields' | 'integrations' | 'danger';
 
 const props = defineProps<{
   tenantId: string;
@@ -41,6 +42,7 @@ const icon = ref<string | null>(props.project.icon_emoji ?? null);
 const sections: { key: SettingsSection; label: string; danger?: boolean }[] = [
   { key: 'general', label: '一般' },
   { key: 'labels', label: 'ラベル' },
+  { key: 'fields', label: 'カスタムフィールド' },
   { key: 'integrations', label: '連携' },
   { key: 'danger', label: '削除', danger: true },
 ];
@@ -232,6 +234,13 @@ function onDeleted() {
         <!-- ラベル -->
         <LabelsSection
           v-else-if="activeSection === 'labels'"
+          :tenant-id="tenantId"
+          :project-id="project.id"
+        />
+
+        <!-- カスタムフィールド -->
+        <CustomFieldsSection
+          v-else-if="activeSection === 'fields'"
           :tenant-id="tenantId"
           :project-id="project.id"
         />
