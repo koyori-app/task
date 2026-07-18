@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useQueryClient } from '@tanstack/vue-query';
+import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import LabelFormDialog from '@/components/projects/LabelFormDialog.vue';
-import { apiClient } from '@/lib/api-vue-query';
+import { apiClient, projectLabelsQueryOptions } from '@/lib/api-vue-query';
+import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
 import type { components } from '@/generated/api';
 
 type LabelResponse = components['schemas']['LabelResponse'];
@@ -31,9 +32,11 @@ const editingLabel = ref<LabelResponse | null>(null);
 const deleteTarget = ref<LabelResponse | null>(null);
 const deleteError = ref<string | null>(null);
 
-const labelsQuery = apiClient.useQuery('get', LABELS_PATH, {
-  params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
-});
+// 共有ヘルパーに寄せてキー構築・staleTime を一元管理する（#362 の branded 型を渡す。
+// props は親で解決済みの UUID）
+const labelsQuery = useQuery(
+  projectLabelsQueryOptions(props.tenantId as TenantUuid, props.projectId as ProjectUuid),
+);
 const labels = computed(() => labelsQuery.data.value ?? []);
 
 const deleteMutation = apiClient.useMutation('delete', LABEL_PATH);

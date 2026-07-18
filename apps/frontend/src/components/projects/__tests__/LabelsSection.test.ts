@@ -21,17 +21,26 @@ const { createMutateAsync, updateMutateAsync, deleteMutateAsync, queryState, mut
     },
   }));
 
+// LabelsSection は共有ヘルパー projectLabelsQueryOptions を素の useQuery で消費するため、
+// query は @tanstack/vue-query の useQuery をモックする（ヘルパー自体は実物 pass-through）。
+vi.mock('@tanstack/vue-query', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/vue-query')>();
+  return {
+    ...actual,
+    useQuery: vi.fn(() => ({
+      data: { value: queryState.labels },
+      isPending: { value: queryState.isPending },
+      isError: { value: queryState.isError },
+    })),
+  };
+});
+
 vi.mock('@/lib/api-vue-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api-vue-query')>();
   return {
     ...actual,
     apiClient: {
       ...actual.apiClient,
-      useQuery: vi.fn(() => ({
-        data: { value: queryState.labels },
-        isPending: { value: queryState.isPending },
-        isError: { value: queryState.isError },
-      })),
       useMutation: vi.fn((method: string) => ({
         mutateAsync:
           method === 'post'
