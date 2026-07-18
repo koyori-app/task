@@ -1,31 +1,28 @@
 <script setup lang="ts">
 import {
-  PhDotsThree,
+  PhCaretRight,
   PhFolderOpen,
-  PhPencilSimple,
+  PhGear,
+  PhListChecks,
   PhPlus,
-  PhTrash,
+  PhTag,
   PhUser,
 } from '@phosphor-icons/vue';
 import { computed } from 'vue';
 import type { components } from '@/generated/api';
 
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   SidebarGroup,
   SidebarGroupAction,
   SidebarGroupLabel,
   SidebarMenu,
-  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
 } from '@/components/ui/sidebar';
 
 export type ProjectNavItem = components['schemas']['ProjectResponse'];
@@ -33,6 +30,8 @@ export type ProjectNavItem = components['schemas']['ProjectResponse'];
 const props = defineProps<{
   tenantSlug: string;
   projects: components['schemas']['ProjectResponse'][];
+  /** 現在の URL パス。active 強調と初期展開の判定に使う */
+  currentPath?: string;
   loading?: boolean;
   error?: boolean;
 }>();
@@ -40,11 +39,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   retry: [];
   create: [];
-  edit: [project: ProjectNavItem];
-  delete: [project: ProjectNavItem];
 }>();
-
-const { isMobile } = useSidebar();
 
 const sortedProjects = computed(() =>
   [...props.projects].sort((a, b) => {
@@ -53,8 +48,41 @@ const sortedProjects = computed(() =>
   }),
 );
 
-function projectTasksUrl(project: components['schemas']['ProjectResponse']) {
-  return `/${props.tenantSlug}/projects/${project.key}/tasks`;
+function projectBaseUrl(project: ProjectNavItem) {
+  return `/${props.tenantSlug}/projects/${project.key}`;
+}
+
+/** プロジェクト配下のページを開いているか（初期展開・親の active 判定） */
+function isProjectActive(project: ProjectNavItem) {
+  return !!props.currentPath && props.currentPath.startsWith(`${projectBaseUrl(project)}/`);
+}
+
+interface ProjectChild {
+  label: string;
+  href: string;
+  icon: typeof PhListChecks;
+}
+
+function projectChildren(project: ProjectNavItem): ProjectChild[] {
+  const base = projectBaseUrl(project);
+  const children: ProjectChild[] = [
+    { label: 'タスク', href: `${base}/tasks`, icon: PhListChecks },
+    { label: 'ラベル', href: `${base}/labels`, icon: PhTag },
+  ];
+  // 個人プロジェクト（個人 Inbox）はシステム管理のため設定を出さない
+  if (!project.is_personal) {
+    children.push({ label: '設定', href: `${base}/settings`, icon: PhGear });
+  }
+  return children;
+}
+
+function isChildActive(child: ProjectChild) {
+  // 完全一致 or セグメント境界付き前方一致（tasks と tasks-archive のような
+  // 接頭辞衝突を防ぎつつ、配下ページ /…/tasks/T-1 でも「タスク」を active に保つ）
+  return (
+    !!props.currentPath &&
+    (props.currentPath === child.href || props.currentPath.startsWith(`${child.href}/`))
+  );
 }
 </script>
 
@@ -85,69 +113,59 @@ function projectTasksUrl(project: components['schemas']['ProjectResponse']) {
         </SidebarMenuButton>
       </SidebarMenuItem>
     </SidebarMenu>
-    <SidebarMenu v-else-if="sortedProjects.length === 0">
-      <SidebarMenuItem>
-        <SidebarMenuButton disabled>
-          <span class="text-muted-foreground text-sm">プロジェクトがありません</span>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-    </SidebarMenu>
+    <div v-else-if="sortedProjects.length === 0" class="p-2">
+      <div class="rounded-lg border border-dashed px-3 py-3.5 text-center">
+        <p class="mb-2.5 text-xs leading-snug text-muted-foreground">
+          プロジェクトはまだありません。
+        </p>
+        <Button v-if="tenantSlug" size="sm" class="h-8 w-full text-[13px]" @click="emit('create')">
+          <PhPlus class="size-3.5" />
+          プロジェクトを作成
+        </Button>
+      </div>
+    </div>
     <SidebarMenu v-else>
-      <SidebarMenuItem v-for="project in sortedProjects" :key="project.id">
-        <SidebarMenuButton v-if="tenantSlug" as-child>
-          <a :href="projectTasksUrl(project)">
-            <img
-              v-if="project.icon_url"
-              :src="project.icon_url"
-              :alt="project.name"
-              class="size-4 shrink-0 rounded-sm object-cover"
-            />
-            <span v-else-if="project.icon_emoji" class="text-base leading-none">{{
-              project.icon_emoji
-            }}</span>
-            <PhUser v-else-if="project.is_personal" />
-            <PhFolderOpen v-else />
-            <span>{{ project.name }}</span>
-          </a>
-        </SidebarMenuButton>
-        <SidebarMenuButton v-else>
-          <img
-            v-if="project.icon_url"
-            :src="project.icon_url"
-            :alt="project.name"
-            class="size-4 shrink-0 rounded-sm object-cover"
-          />
-          <span v-else-if="project.icon_emoji" class="text-base leading-none">{{
-            project.icon_emoji
-          }}</span>
-          <PhUser v-else-if="project.is_personal" />
-          <PhFolderOpen v-else />
-          <span>{{ project.name }}</span>
-        </SidebarMenuButton>
-        <DropdownMenu v-if="!project.is_personal">
-          <DropdownMenuTrigger as-child>
-            <SidebarMenuAction show-on-hover :aria-label="`${project.name} の操作`">
-              <PhDotsThree />
-              <span class="sr-only">More</span>
-            </SidebarMenuAction>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            class="w-48 rounded-lg"
-            :side="isMobile ? 'bottom' : 'right'"
-            :align="isMobile ? 'end' : 'start'"
-          >
-            <DropdownMenuItem @select="emit('edit', project)">
-              <PhPencilSimple class="text-muted-foreground" />
-              <span>編集</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" @select="emit('delete', project)">
-              <PhTrash />
-              <span>削除</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </SidebarMenuItem>
+      <Collapsible
+        v-for="project in sortedProjects"
+        :key="project.id"
+        as-child
+        :default-open="isProjectActive(project)"
+        class="group/collapsible"
+      >
+        <SidebarMenuItem>
+          <CollapsibleTrigger as-child>
+            <SidebarMenuButton :is-active="isProjectActive(project)">
+              <img
+                v-if="project.icon_url"
+                :src="project.icon_url"
+                :alt="project.name"
+                class="size-4 shrink-0 rounded-sm object-cover"
+              />
+              <span v-else-if="project.icon_emoji" class="text-base leading-none">{{
+                project.icon_emoji
+              }}</span>
+              <PhUser v-else-if="project.is_personal" />
+              <PhFolderOpen v-else />
+              <span>{{ project.name }}</span>
+              <PhCaretRight
+                class="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90"
+              />
+            </SidebarMenuButton>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <SidebarMenuSub v-if="tenantSlug">
+              <SidebarMenuSubItem v-for="child in projectChildren(project)" :key="child.href">
+                <SidebarMenuSubButton as-child :is-active="isChildActive(child)">
+                  <a :href="child.href">
+                    <component :is="child.icon" />
+                    <span>{{ child.label }}</span>
+                  </a>
+                </SidebarMenuSubButton>
+              </SidebarMenuSubItem>
+            </SidebarMenuSub>
+          </CollapsibleContent>
+        </SidebarMenuItem>
+      </Collapsible>
     </SidebarMenu>
   </SidebarGroup>
 </template>

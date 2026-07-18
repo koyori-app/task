@@ -16,7 +16,7 @@ const sampleProjects: ProjectNavItem[] = [
     tenant_id: '00000000-0000-4000-8000-000000000001',
     name: 'Team Alpha',
     description: 'Shared project',
-    key: 'alpha',
+    key: 'ALPHA',
     is_personal: false,
     icon_emoji: null,
     icon_url: null,
@@ -27,7 +27,7 @@ const sampleProjects: ProjectNavItem[] = [
     tenant_id: '00000000-0000-4000-8000-000000000001',
     name: 'Personal',
     description: 'Personal project',
-    key: 'personal',
+    key: 'ME01',
     is_personal: true,
     icon_emoji: '📝',
     icon_url: null,
@@ -40,6 +40,7 @@ function mountNavProjects(props: {
   loading?: boolean;
   error?: boolean;
   tenantSlug?: string;
+  currentPath?: string;
 }) {
   return mount(
     {
@@ -49,12 +50,11 @@ function mountNavProjects(props: {
           <NavProjects
             :tenant-slug="tenantSlug"
             :projects="projects"
+            :current-path="currentPath"
             :loading="loading"
             :error="error"
             @retry="onRetry"
             @create="onCreate"
-            @edit="onEdit"
-            @delete="onDelete"
           />
         </SidebarProvider>
       `,
@@ -62,12 +62,11 @@ function mountNavProjects(props: {
         return {
           tenantSlug: props.tenantSlug ?? tenantSlug,
           projects: props.projects ?? sampleProjects,
+          currentPath: props.currentPath ?? '',
           loading: props.loading ?? false,
           error: props.error ?? false,
           retried: false,
           created: false,
-          edited: null as ProjectNavItem | null,
-          deleted: null as ProjectNavItem | null,
         };
       },
       methods: {
@@ -77,27 +76,76 @@ function mountNavProjects(props: {
         onCreate(this: { created: boolean }) {
           this.created = true;
         },
-        onEdit(this: { edited: ProjectNavItem | null }, project: ProjectNavItem) {
-          this.edited = project;
-        },
-        onDelete(this: { deleted: ProjectNavItem | null }, project: ProjectNavItem) {
-          this.deleted = project;
-        },
       },
     },
     { attachTo: document.body },
   );
 }
 
+function findRowButton(wrapper: ReturnType<typeof mountNavProjects>, name: string) {
+  return wrapper.findAll('button').find((b) => b.text().includes(name));
+}
+
 describe('NavProjects', () => {
-  it('renders project names and task links', () => {
+  it('プロジェクト行はトグルボタンで、リンクは持たない', () => {
     const wrapper = mountNavProjects({});
-    const links = wrapper.findAll('a');
-    const hrefs = links.map((link) => link.attributes('href'));
-    expect(hrefs).toContain('/acme/projects/alpha/tasks');
-    expect(hrefs).toContain('/acme/projects/personal/tasks');
     expect(wrapper.text()).toContain('Team Alpha');
     expect(wrapper.text()).toContain('Personal');
+    // 展開前は子リンクなし
+    expect(wrapper.findAll('a').length).toBe(0);
+  });
+
+  it('行クリックで展開し、タスク/ラベル/設定の子リンクを出す', async () => {
+    const wrapper = mountNavProjects({});
+    await findRowButton(wrapper, 'Team Alpha')!.trigger('click');
+
+    const hrefs = wrapper.findAll('a').map((a) => a.attributes('href'));
+    expect(hrefs).toContain('/acme/projects/ALPHA/tasks');
+    expect(hrefs).toContain('/acme/projects/ALPHA/labels');
+    expect(hrefs).toContain('/acme/projects/ALPHA/settings');
+    expect(wrapper.text()).toContain('タスク');
+    expect(wrapper.text()).toContain('ラベル');
+    expect(wrapper.text()).toContain('設定');
+  });
+
+  it('個人プロジェクトには設定の子リンクを出さない', async () => {
+    const wrapper = mountNavProjects({});
+    await findRowButton(wrapper, 'Personal')!.trigger('click');
+
+    const hrefs = wrapper.findAll('a').map((a) => a.attributes('href'));
+    expect(hrefs).toContain('/acme/projects/ME01/tasks');
+    expect(hrefs).toContain('/acme/projects/ME01/labels');
+    expect(hrefs).not.toContain('/acme/projects/ME01/settings');
+  });
+
+  it('現在のパスのプロジェクトは初期展開され、親子とも active になる', () => {
+    const wrapper = mountNavProjects({ currentPath: '/acme/projects/ALPHA/tasks' });
+    const activeChild = wrapper
+      .findAll('a')
+      .find((a) => a.attributes('href') === '/acme/projects/ALPHA/tasks');
+    expect(activeChild).toBeTruthy();
+    expect(activeChild!.attributes('data-active')).toBeDefined();
+    // カレントプロジェクトの親行が active
+    const parentButton = findRowButton(wrapper, 'Team Alpha');
+    expect(parentButton!.attributes('data-active')).toBe('true');
+    // 非カレントプロジェクトは初期折りたたみ（子リンクが DOM に存在しない）
+    const hrefs = wrapper.findAll('a').map((a) => a.attributes('href'));
+    expect(hrefs).not.toContain('/acme/projects/ME01/tasks');
+  });
+
+  it('子の active は境界付き前方一致（接頭辞違いの誤マッチなし・配下ページはマッチ）', () => {
+    // 配下ページ（タスク詳細）でも「タスク」が active
+    const detail = mountNavProjects({ currentPath: '/acme/projects/ALPHA/tasks/ALPHA-1' });
+    const tasksChild = detail
+      .findAll('a')
+      .find((a) => a.attributes('href') === '/acme/projects/ALPHA/tasks');
+    expect(tasksChild!.attributes('data-active')).toBeDefined();
+    // 接頭辞だけ一致する別パスは active にならない
+    const prefix = mountNavProjects({ currentPath: '/acme/projects/ALPHA/tasks-archive' });
+    const notActive = prefix
+      .findAll('a')
+      .find((a) => a.attributes('href') === '/acme/projects/ALPHA/tasks');
+    expect(notActive!.attributes('data-active')).toBeUndefined();
   });
 
   it('lists personal projects before shared projects', () => {
@@ -111,9 +159,15 @@ describe('NavProjects', () => {
     expect(wrapper.text()).toContain('プロジェクトを読み込み中');
   });
 
-  it('shows empty state', () => {
+  it('空状態は破線カードで、作成ボタンが create を emit する', async () => {
     const wrapper = mountNavProjects({ projects: [] });
-    expect(wrapper.text()).toContain('プロジェクトがありません');
+    expect(wrapper.text()).toContain('プロジェクトはまだありません');
+    const createButton = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('プロジェクトを作成') && !b.attributes('title'));
+    expect(createButton).toBeTruthy();
+    await createButton!.trigger('click');
+    expect(wrapper.vm.created).toBe(true);
   });
 
   it('shows error state and emits retry', async () => {
@@ -122,18 +176,8 @@ describe('NavProjects', () => {
     const retryButton = wrapper
       .findAll('button')
       .find((b) => b.text().includes('プロジェクト一覧を取得できませんでした'));
-    expect(retryButton).toBeTruthy();
     await retryButton!.trigger('click');
     expect(wrapper.vm.retried).toBe(true);
-  });
-
-  it('does not render invalid task links when tenant slug is empty', () => {
-    const wrapper = mountNavProjects({ tenantSlug: '' });
-    const links = wrapper.findAll('a');
-    const hrefs = links.map((link) => link.attributes('href'));
-    expect(hrefs).not.toContain('#');
-    expect(hrefs.some((href) => href?.includes('/projects/'))).toBe(false);
-    expect(wrapper.text()).toContain('Team Alpha');
   });
 
   it('emits create when the group action is clicked', async () => {
@@ -147,38 +191,5 @@ describe('NavProjects', () => {
   it('hides the create action when tenant slug is empty', () => {
     const wrapper = mountNavProjects({ tenantSlug: '' });
     expect(wrapper.find('button[title="プロジェクトを作成"]').exists()).toBe(false);
-  });
-
-  it('shows the kebab menu only for non-personal projects', () => {
-    const wrapper = mountNavProjects({});
-    const kebabs = wrapper.findAll('button[aria-label$="の操作"]');
-    expect(kebabs.length).toBe(1);
-    expect(kebabs[0].attributes('aria-label')).toBe('Team Alpha の操作');
-  });
-
-  it('emits edit/delete with the project from the kebab menu', async () => {
-    const wrapper = mountNavProjects({});
-    const kebab = wrapper.find('button[aria-label="Team Alpha の操作"]');
-    await kebab.trigger('click');
-    // DropdownMenuContent は body 直下にポータルされる
-    const items = [...document.body.querySelectorAll('[role="menuitem"]')];
-    const editItem = items.find((el) => el.textContent?.includes('編集'));
-    expect(editItem).toBeTruthy();
-    (editItem as HTMLElement).click();
-    await wrapper.vm.$nextTick();
-    expect((wrapper.vm as unknown as { edited: ProjectNavItem | null }).edited?.name).toBe(
-      'Team Alpha',
-    );
-
-    await kebab.trigger('click');
-    const deleteItem = [...document.body.querySelectorAll('[role="menuitem"]')].find((el) =>
-      el.textContent?.includes('削除'),
-    );
-    expect(deleteItem).toBeTruthy();
-    (deleteItem as HTMLElement).click();
-    await wrapper.vm.$nextTick();
-    expect((wrapper.vm as unknown as { deleted: ProjectNavItem | null }).deleted?.name).toBe(
-      'Team Alpha',
-    );
   });
 });

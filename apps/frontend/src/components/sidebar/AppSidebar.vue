@@ -7,11 +7,9 @@ import { useTenantStore, type Tenant } from '@/stores/tenant';
 import { useProjectsQuery } from '@/lib/api-vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { navigate } from 'vike/client/router';
-import { computed, ref, watch } from 'vue';
-import type { components } from '@/generated/api';
+import { computed, watch } from 'vue';
 
-import { BookOpen, Bot, ListTodo, Settings2, SquareTerminal } from '@lucide/vue';
-import DeleteProjectDialog from '@/components/sidebar/DeleteProjectDialog.vue';
+import { ListTodo } from '@lucide/vue';
 import NavMain from '@/components/sidebar/NavMain.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
 import NavUser from '@/components/sidebar/NavUser.vue';
@@ -40,14 +38,6 @@ const tenantSlug = computed(() => {
 });
 
 const myTasksUrl = computed(() => (tenantSlug.value ? `/${tenantSlug.value}/my-tasks` : '#'));
-
-const labelsUrl = computed(() => {
-  const { tenant, projectKey } = pageContext.routeParams;
-  if (typeof tenant === 'string' && typeof projectKey === 'string') {
-    return `/${tenant}/projects/${projectKey}/labels`;
-  }
-  return '#';
-});
 
 const routeAlignedTenantId = useRouteAlignedTenantId(
   computed(() => tenantStore.tenants),
@@ -84,25 +74,9 @@ function retryProjects() {
   void projectsQuery.refetch();
 }
 
-// ---- プロジェクト CRUD（作成・編集はページ、削除は確認ダイアログ） ----
-type ProjectResponse = components['schemas']['ProjectResponse'];
-
-const deletingProject = ref<ProjectResponse | null>(null);
-
+// ---- プロジェクト作成導線（編集・削除は各プロジェクトの設定ページへ集約） ----
 function onCreateProject() {
   void navigate(`/${tenantSlug.value}/projects/new`);
-}
-
-function onEditProject(project: ProjectResponse) {
-  void navigate(`/${tenantSlug.value}/projects/${project.key}/settings`);
-}
-
-function onProjectDeleted(project: ProjectResponse) {
-  deletingProject.value = null;
-  // 削除したプロジェクトのページを開いていた場合は退避
-  if (pageContext.urlPathname.startsWith(`/${tenantSlug.value}/projects/${project.key}/`)) {
-    void navigate(`/${tenantSlug.value}/my-tasks`);
-  }
 }
 
 const data = computed(() => ({
@@ -117,96 +91,6 @@ const data = computed(() => ({
       url: myTasksUrl.value,
       icon: ListTodo,
       isActive: pageContext.urlPathname === `/${pageContext.routeParams.tenant}/my-tasks`,
-    },
-    {
-      title: 'Labels',
-      url: labelsUrl.value,
-      icon: SquareTerminal,
-      isActive: pageContext.urlPathname.endsWith('/labels'),
-    },
-    {
-      title: 'Playground',
-      url: '#',
-      icon: SquareTerminal,
-      items: [
-        {
-          title: 'History',
-          url: '#',
-        },
-        {
-          title: 'Starred',
-          url: '#',
-        },
-        {
-          title: 'Settings',
-          url: '#',
-        },
-      ],
-    },
-    {
-      title: 'Models',
-      url: '#',
-      icon: Bot,
-      items: [
-        {
-          title: 'Genesis',
-          url: '#',
-        },
-        {
-          title: 'Explorer',
-          url: '#',
-        },
-        {
-          title: 'Quantum',
-          url: '#',
-        },
-      ],
-    },
-    {
-      title: 'Documentation',
-      url: '#',
-      icon: BookOpen,
-      items: [
-        {
-          title: 'Introduction',
-          url: '#',
-        },
-        {
-          title: 'Get Started',
-          url: '#',
-        },
-        {
-          title: 'Tutorials',
-          url: '#',
-        },
-        {
-          title: 'Changelog',
-          url: '#',
-        },
-      ],
-    },
-    {
-      title: 'Settings',
-      url: '#',
-      icon: Settings2,
-      items: [
-        {
-          title: 'General',
-          url: '#',
-        },
-        {
-          title: 'Team',
-          url: '#',
-        },
-        {
-          title: 'Billing',
-          url: '#',
-        },
-        {
-          title: 'Limits',
-          url: '#',
-        },
-      ],
     },
   ],
 }));
@@ -229,20 +113,11 @@ const data = computed(() => ({
       <NavProjects
         :tenant-slug="tenantSlug"
         :projects="navProjects"
+        :current-path="pageContext.urlPathname"
         :loading="navProjectsLoading"
         :error="projectsQuery.isError.value"
         @retry="retryProjects"
         @create="onCreateProject"
-        @edit="onEditProject"
-        @delete="(project) => (deletingProject = project)"
-      />
-      <DeleteProjectDialog
-        v-if="routeAlignedTenantId"
-        :open="!!deletingProject"
-        :tenant-id="routeAlignedTenantId"
-        :project="deletingProject"
-        @update:open="(open) => !open && (deletingProject = null)"
-        @deleted="onProjectDeleted"
       />
     </SidebarContent>
     <SidebarFooter>
