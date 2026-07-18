@@ -10,20 +10,28 @@ type Metric = {
   rendered: number;
   gzip: number;
   brotli: number;
+  zstd: number;
 };
 
 type VisualizerReport = {
-  nodeParts?: Record<string, {
-    renderedLength?: number;
-    gzipLength?: number;
-    brotliLength?: number;
-  }>;
-  nodeMetas?: Record<string, {
-    moduleParts?: Record<string, string>;
-  }>;
+  nodeParts?: Record<
+    string,
+    {
+      renderedLength?: number;
+      gzipLength?: number;
+      brotliLength?: number;
+      zstdLength?: number;
+    }
+  >;
+  nodeMetas?: Record<
+    string,
+    {
+      moduleParts?: Record<string, string>;
+    }
+  >;
 };
 
-const emptyMetric = (): Metric => ({ rendered: 0, gzip: 0, brotli: 0 });
+const emptyMetric = (): Metric => ({ rendered: 0, gzip: 0, brotli: 0, zstd: 0 });
 
 function stableChunkName(file: string) {
   return file.replace(/([.-])[A-Za-z0-9_-]{8,}(?=\.(?:m?js|css)$)/, '$1[hash]');
@@ -40,6 +48,7 @@ function collectChunks(report: VisualizerReport) {
       metric.rendered += part.renderedLength ?? 0;
       metric.gzip += part.gzipLength ?? 0;
       metric.brotli += part.brotliLength ?? 0;
+      metric.zstd += part.zstdLength ?? 0;
       chunks.set(key, metric);
     }
   }
@@ -52,6 +61,7 @@ function sum(chunks: Map<string, Metric>) {
     total.rendered += metric.rendered;
     total.gzip += metric.gzip;
     total.brotli += metric.brotli;
+    total.zstd += metric.zstd;
   }
   return total;
 }
@@ -89,11 +99,12 @@ const lines = [
   `| Raw | ${metricCells(beforeTotal, afterTotal, 'rendered').join(' | ')} |`,
   `| Gzip | ${metricCells(beforeTotal, afterTotal, 'gzip').join(' | ')} |`,
   `| Brotli | ${metricCells(beforeTotal, afterTotal, 'brotli').join(' | ')} |`,
+  `| Zstd | ${metricCells(beforeTotal, afterTotal, 'zstd').join(' | ')} |`,
   '',
   '### Chunk changes',
   '',
-  '| Chunk | Status | Raw Δ | Raw Δ (%) | Gzip Δ | Gzip Δ (%) | Brotli Δ | Brotli Δ (%) |',
-  '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |',
+  '| Chunk | Status | Raw Δ | Raw Δ (%) | Gzip Δ | Gzip Δ (%) | Brotli Δ | Brotli Δ (%) | Zstd Δ | Zstd Δ (%) |',
+  '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
 ];
 
 let changedChunkCount = 0;
@@ -101,12 +112,22 @@ for (const name of names) {
   const beforeMetric = before.get(name) ?? emptyMetric();
   const afterMetric = after.get(name) ?? emptyMetric();
   const status = !before.has(name) ? 'new' : !after.has(name) ? 'removed' : 'changed';
-  if (status === 'changed' && beforeMetric.rendered === afterMetric.rendered && beforeMetric.gzip === afterMetric.gzip && beforeMetric.brotli === afterMetric.brotli) continue;
+  if (
+    status === 'changed' &&
+    beforeMetric.rendered === afterMetric.rendered &&
+    beforeMetric.gzip === afterMetric.gzip &&
+    beforeMetric.brotli === afterMetric.brotli &&
+    beforeMetric.zstd === afterMetric.zstd
+  )
+    continue;
   changedChunkCount += 1;
-  lines.push(`| \`${utility.escapeTableCell(name)}\` | ${status} | ${utility.formatDelta(afterMetric.rendered - beforeMetric.rendered)} | ${utility.formatPercent(beforeMetric.rendered, afterMetric.rendered)} | ${utility.formatDelta(afterMetric.gzip - beforeMetric.gzip)} | ${utility.formatPercent(beforeMetric.gzip, afterMetric.gzip)} | ${utility.formatDelta(afterMetric.brotli - beforeMetric.brotli)} | ${utility.formatPercent(beforeMetric.brotli, afterMetric.brotli)} |`);
+  lines.push(
+    `| \`${utility.escapeTableCell(name)}\` | ${status} | ${utility.formatDelta(afterMetric.rendered - beforeMetric.rendered)} | ${utility.formatPercent(beforeMetric.rendered, afterMetric.rendered)} | ${utility.formatDelta(afterMetric.gzip - beforeMetric.gzip)} | ${utility.formatPercent(beforeMetric.gzip, afterMetric.gzip)} | ${utility.formatDelta(afterMetric.brotli - beforeMetric.brotli)} | ${utility.formatPercent(beforeMetric.brotli, afterMetric.brotli)} | ${utility.formatDelta(afterMetric.zstd - beforeMetric.zstd)} | ${utility.formatPercent(beforeMetric.zstd, afterMetric.zstd)} |`,
+  );
 }
 
-if (changedChunkCount === 0) lines.push('| _No changed chunks_ | — | — | — | — | — | — | — |');
+if (changedChunkCount === 0)
+  lines.push('| _No changed chunks_ | — | — | — | — | — | — | — | — | — |');
 if (process.env.FRONTEND_BUNDLE_REPORT_ARTIFACT_URL) {
   lines.push('', `[Open interactive treemap](${process.env.FRONTEND_BUNDLE_REPORT_ARTIFACT_URL})`);
 }

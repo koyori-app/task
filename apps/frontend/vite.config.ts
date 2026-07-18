@@ -13,8 +13,11 @@ import Inspect from 'vite-plugin-inspect';
 import VueDevTools from 'vite-plugin-vue-devtools';
 import vike from 'vike/plugin';
 import { defineConfig } from 'vite-plus';
+import type { Plugin } from 'vite';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { zstdCompressSync } from 'node:zlib';
 import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
 import { playwright } from '@vitest/browser-playwright';
 import { buildEnv } from './buildSrc/env';
@@ -39,21 +42,57 @@ const sentryPlugin =
 function getBundleVisualizerPlugins() {
   if (process.env.FRONTEND_BUNDLE_VISUALIZER !== 'true') return [];
 
+  const projectRoot = path.resolve(dirname, '../..');
+  const statsFilename = process.env.FRONTEND_BUNDLE_VISUALIZER_FILE ?? 'bundle-stats.json';
   const commonOptions = {
     title: 'Task frontend bundle visualizer',
     gzipSize: true,
     brotliSize: true,
-    projectRoot: path.resolve(dirname, '../..'),
+    projectRoot,
+  };
+
+  type RawReport = {
+    nodeParts: Record<string, { zstdLength?: number }>;
+    nodeMetas: Record<string, { id: string; moduleParts: Record<string, string> }>;
+    options: Record<string, boolean>;
+  };
+
+  const zstdPlugin: Plugin = {
+    name: 'frontend-bundle-diagnostics-zstd',
+    async generateBundle(_outputOptions, outputBundle) {
+      const report = JSON.parse(await fs.readFile(statsFilename, 'utf8')) as RawReport;
+      const metasById = new Map(Object.values(report.nodeMetas).map((meta) => [meta.id, meta]));
+
+      for (const [bundleId, bundle] of Object.entries(outputBundle)) {
+        if (bundle.type !== 'chunk') continue;
+        for (const [moduleId, module] of Object.entries(bundle.modules)) {
+          const reportId = moduleId.startsWith(projectRoot)
+            ? moduleId.slice(projectRoot.length)
+            : moduleId.replace(projectRoot, '');
+          const partId = metasById.get(reportId)?.moduleParts[bundleId];
+          if (!partId) continue;
+          report.nodeParts[partId].zstdLength = module.code
+            ? zstdCompressSync(Buffer.from(module.code, 'utf8')).byteLength
+            : 0;
+        }
+      }
+
+      report.options.zstd = true;
+      await fs.writeFile(statsFilename, JSON.stringify(report));
+    },
   };
   const plugins = [
     Object.assign(
       visualizer({
         ...commonOptions,
-        filename: process.env.FRONTEND_BUNDLE_VISUALIZER_FILE ?? 'bundle-stats.json',
+        filename: statsFilename,
         template: 'raw-data',
       }),
       { applyToEnvironment: (environment: { name: string }) => environment.name === 'client' },
     ),
+    Object.assign(zstdPlugin, {
+      applyToEnvironment: (environment: { name: string }) => environment.name === 'client',
+    }),
   ];
 
   if (process.env.FRONTEND_BUNDLE_VISUALIZER_HTML_FILE) {
