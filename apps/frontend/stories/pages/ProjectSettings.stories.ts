@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { expect, fn, userEvent, within } from 'storybook/test';
+import { expect, fireEvent, fn, userEvent, waitFor, within } from 'storybook/test';
 import { provide } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import ProjectSettingsPage from '@/pages/@tenant/projects/@projectKey/settings/+Page.vue';
@@ -37,6 +37,39 @@ const sampleProject = {
   personal_owner_id: null,
 };
 
+const sampleStatuses = [
+  {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+    project_id: sampleProject.id,
+    name: 'Todo',
+    color: '#64748b',
+    position: 0,
+    is_default: true,
+    is_done_state: false,
+    created_at: '2026-07-18T00:00:00Z',
+  },
+  {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2',
+    project_id: sampleProject.id,
+    name: 'レビュー中',
+    color: '#f59e0b',
+    position: 1,
+    is_default: false,
+    is_done_state: false,
+    created_at: '2026-07-18T00:00:00Z',
+  },
+  {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3',
+    project_id: sampleProject.id,
+    name: 'Done',
+    color: '#22c55e',
+    position: 2,
+    is_default: false,
+    is_done_state: true,
+    created_at: '2026-07-18T00:00:00Z',
+  },
+];
+
 const isListTenantsUrl = (url: string) => {
   try {
     const pathname = new URL(url, 'http://localhost').pathname;
@@ -52,18 +85,64 @@ const jsonResponse = (data: unknown, status = 200) =>
     headers: { 'Content-Type': 'application/json' },
   });
 
-type MockOptions = { rejectWrite?: number; noProject?: boolean };
+type MockOptions = {
+  rejectWrite?: number;
+  rejectStatuses?: boolean;
+  hangStatuses?: boolean;
+  noProject?: boolean;
+  statuses?: typeof sampleStatuses;
+};
 
 let fetchSpy: ReturnType<typeof fn> | null = null;
 
 function mockFetch(overrides: MockOptions = {}) {
   return () => {
     const original = globalThis.fetch;
+    let currentStatuses = structuredClone(overrides.statuses ?? sampleStatuses);
     fetchSpy = fn().mockImplementation(async (req: Request | string) => {
       const url = typeof req === 'string' ? req : req.url;
       const method = typeof req === 'string' ? 'GET' : req.method;
+      const pathname = new URL(url, 'http://localhost').pathname;
       if (isListTenantsUrl(url)) {
         return jsonResponse(sampleTenants(mockContext.routeParams.tenant));
+      }
+      if (pathname.endsWith('/statuses')) {
+        if (overrides.hangStatuses) return new Promise<Response>(() => {});
+        if (overrides.rejectStatuses) return jsonResponse({ message: 'error' }, 500);
+        if (method === 'POST') {
+          const body = await (req as Request).json();
+          const created = {
+            ...body,
+            id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4',
+            project_id: sampleProject.id,
+            created_at: '2026-07-18T00:00:00Z',
+          };
+          currentStatuses.push(created);
+          return jsonResponse(created, 201);
+        }
+        return jsonResponse(currentStatuses);
+      }
+      if (pathname.endsWith('/statuses/reorder') && method === 'PUT') {
+        const body = await (req as Request).json();
+        currentStatuses = body.ids.map((id: string, position: number) => ({
+          ...currentStatuses.find((status) => status.id === id)!,
+          position,
+        }));
+        return jsonResponse(currentStatuses);
+      }
+      if (pathname.includes('/statuses/') && (method === 'PUT' || method === 'DELETE')) {
+        const id = pathname.split('/').at(-1)!;
+        if (method === 'DELETE') {
+          currentStatuses = currentStatuses.filter((status) => status.id !== id);
+          return new Response(null, { status: 204 });
+        }
+        const body = await (req as Request).json();
+        if (body.is_default === true) {
+          currentStatuses = currentStatuses.map((status) => ({ ...status, is_default: false }));
+        }
+        const index = currentStatuses.findIndex((status) => status.id === id);
+        currentStatuses[index] = { ...currentStatuses[index]!, ...body };
+        return jsonResponse(currentStatuses[index]);
       }
       if (method === 'PUT' || method === 'DELETE') {
         if (overrides.rejectWrite) {
@@ -186,6 +265,138 @@ export const DeleteFlow: Story = {
       .find((req) => req.method === 'DELETE');
     await expect(del).toBeTruthy();
     await expect(del!.url).toContain(`/projects/${sampleProject.id}`);
+  },
+};
+
+export const WorkflowListAndUuidResolution: Story = {
+  name: 'ワークフロー一覧・UUID 解決',
+  beforeEach: mockFetch(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await user.click(await canvas.findByRole('button', { name: 'ワークフロー' }));
+    await expect(canvas.findByLabelText('レビュー中の名前')).resolves.toHaveValue('レビュー中');
+    await expect(
+      canvas
+        .getAllByRole('checkbox', { name: 'Default' })
+        .filter((checkbox) => checkbox.getAttribute('aria-checked') === 'true'),
+    ).toHaveLength(1);
+    await expect(
+      canvas
+        .getAllByRole('checkbox', { name: 'Done state' })
+        .filter((checkbox) => checkbox.getAttribute('aria-checked') === 'true'),
+    ).toHaveLength(1);
+
+    const statusesRequest = (fetchSpy!.mock.calls as [Request | string][])
+      .map(([request]) => (typeof request === 'string' ? request : request.url))
+      .find((url) => url.endsWith('/statuses'));
+    await expect(statusesRequest).toContain(
+      `/v1/tenants/${TENANT_UUID}/projects/${sampleProject.id}/statuses`,
+    );
+    await expect(statusesRequest).not.toContain(mockContext.routeParams.tenant);
+    await expect(statusesRequest).not.toContain(mockContext.routeParams.projectKey);
+  },
+};
+
+export const WorkflowAddEditAndReorder: Story = {
+  name: '追加・名前色編集・並び替え',
+  beforeEach: mockFetch(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await user.click(await canvas.findByRole('button', { name: 'ワークフロー' }));
+    await canvas.findByLabelText('レビュー中の名前');
+
+    await user.type(canvas.getByLabelText('新しいステータス名'), 'Blocked');
+    await user.click(canvas.getByRole('button', { name: '追加' }));
+    await expect(canvas.findByLabelText('Blockedの名前')).resolves.toBeInTheDocument();
+
+    const reviewName = canvas.getByLabelText('レビュー中の名前');
+    await user.clear(reviewName);
+    await user.type(reviewName, '確認待ち');
+    await fireEvent.input(canvas.getByLabelText('レビュー中の色'), {
+      target: { value: '#a855f7' },
+    });
+    await user.click(canvas.getByRole('button', { name: 'レビュー中を保存' }));
+    await expect(canvas.findByLabelText('確認待ちの名前')).resolves.toHaveValue('確認待ち');
+
+    await user.click(canvas.getByRole('button', { name: '確認待ちを上へ' }));
+    const reorder = (fetchSpy!.mock.calls as [Request | string][])
+      .map(([request]) => request)
+      .filter((request): request is Request => typeof request !== 'string')
+      .find((request) => request.method === 'PUT' && request.url.endsWith('/statuses/reorder'));
+    await expect(reorder).toBeTruthy();
+  },
+};
+
+export const WorkflowUniqueFlagsAndDelete: Story = {
+  name: 'Default・Done 一意切替・削除確認',
+  beforeEach: mockFetch(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await user.click(await canvas.findByRole('button', { name: 'ワークフロー' }));
+    await canvas.findByLabelText('レビュー中の名前');
+
+    const getReviewRow = () => canvas.getByLabelText('レビュー中の名前').closest('li')!;
+    await user.click(within(getReviewRow()).getByRole('checkbox', { name: 'Default' }));
+    await waitFor(() =>
+      expect(within(getReviewRow()).getByRole('checkbox', { name: 'Default' })).toBeChecked(),
+    );
+    await user.click(within(getReviewRow()).getByRole('checkbox', { name: 'Done state' }));
+    await waitFor(() =>
+      expect(within(getReviewRow()).getByRole('checkbox', { name: 'Done state' })).toBeChecked(),
+    );
+
+    await user.click(canvas.getByRole('button', { name: 'Todoを削除' }));
+    await expect(
+      page.findByRole('heading', { name: 'ステータスを削除しますか？' }),
+    ).resolves.toBeInTheDocument();
+    await user.click(page.getByRole('button', { name: '削除する' }));
+    await waitFor(() => expect(canvas.queryByLabelText('Todoの名前')).not.toBeInTheDocument());
+
+    const writes = (fetchSpy!.mock.calls as [Request | string][])
+      .map(([request]) => request)
+      .filter((request): request is Request => typeof request !== 'string');
+    await expect(
+      writes.filter((request) => request.method === 'PUT').length,
+    ).toBeGreaterThanOrEqual(3);
+    await expect(writes.some((request) => request.method === 'DELETE')).toBe(true);
+  },
+};
+
+export const WorkflowEmpty: Story = {
+  name: 'ワークフロー空状態',
+  beforeEach: mockFetch({ statuses: [] }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: 'ワークフロー' }));
+    await expect(
+      canvas.findByText('ステータスがありません。最初のステータスを追加してください。'),
+    ).resolves.toBeInTheDocument();
+  },
+};
+
+export const WorkflowError: Story = {
+  name: 'ワークフロー取得エラー',
+  beforeEach: mockFetch({ rejectStatuses: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: 'ワークフロー' }));
+    await expect(
+      canvas.findByText('ステータスを読み込めませんでした'),
+    ).resolves.toBeInTheDocument();
+  },
+};
+
+export const WorkflowLoading: Story = {
+  name: 'ワークフロー読み込み中',
+  beforeEach: mockFetch({ hangStatuses: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: 'ワークフロー' }));
+    await expect(canvas.findByText('ステータスを読み込み中…')).resolves.toBeInTheDocument();
   },
 };
 
