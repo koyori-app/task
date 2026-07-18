@@ -15,6 +15,8 @@ type MockState = {
   installStatus?: number;
   /** 400 以上を設定すると DELETE /github/integration が失敗する */
   deleteStatus?: number;
+  /** true にすると DELETE /github/integration が解決せず、mutation が pending のままになる */
+  hangDelete?: boolean;
 };
 
 const jsonResponse = (data: unknown, status = 200) =>
@@ -48,6 +50,7 @@ function stubFetch(state: MockState) {
       );
     }
     if (method === 'DELETE' && pathname.endsWith('/github/integration')) {
+      if (state.hangDelete) return new Promise<Response>(() => {}); // 解決しない → isPending を保持
       if (state.deleteStatus) return jsonResponse({ message: 'error' }, state.deleteStatus);
       state.connected = false;
       return new Response(null, { status: 204 });
@@ -182,6 +185,28 @@ describe('IntegrationsSection', () => {
     await flushPromises();
 
     expect(document.body.textContent).toContain('連携を解除できませんでした');
+    expect(document.body.textContent).toContain('GitHub 連携を解除しますか？');
+  });
+
+  it('解除リクエスト進行中は確認ダイアログのクローズ要求を無視する', async () => {
+    // DELETE を hang させ、mutation が pending の間に Esc/オーバーレイ相当の
+    // update:open(false) を発火してもダイアログが閉じないことを検証する
+    stubFetch({ connected: true, hangDelete: true });
+    const wrapper = mountSection();
+    await flushPromises();
+
+    clickBodyButton('連携を解除');
+    await flushPromises();
+    expect(document.body.textContent).toContain('GitHub 連携を解除しますか？');
+
+    // 解除を開始（DELETE は never-resolve なので isPending が true のまま）
+    clickBodyButton('解除する');
+    await flushPromises();
+
+    const dialogRoot = wrapper.findComponent({ name: 'DialogRoot' });
+    dialogRoot.vm.$emit('update:open', false);
+    await flushPromises();
+
     expect(document.body.textContent).toContain('GitHub 連携を解除しますか？');
   });
 
