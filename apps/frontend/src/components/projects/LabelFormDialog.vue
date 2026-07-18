@@ -53,7 +53,11 @@ const emit = defineEmits<{ close: [] }>();
 const queryClient = useQueryClient();
 const submitError = ref<string | null>(null);
 
-const nonBlankName = type('string').narrow((name) => name.trim().length >= 1);
+// backend の CreateLabelRequest / UpdateLabelRequest（length(min=1, max=100)）と同じ制約
+const nonBlankName = type('string').narrow((name) => {
+  const length = name.trim().length;
+  return length >= 1 && length <= 100;
+});
 
 const schema = type({
   name: nonBlankName,
@@ -125,11 +129,14 @@ function onOpenChange(open: boolean) {
               <Input
                 id="label-name"
                 placeholder="bug"
+                maxlength="100"
                 :model-value="field.state.value"
                 @blur="field.handleBlur"
                 @update:model-value="(v) => field.handleChange(String(v))"
               />
-              <FieldError v-if="field.state.meta.errors.length">名前は必須です</FieldError>
+              <FieldError v-if="field.state.meta.errors.length"
+                >名前は 1〜100 文字で入力してください</FieldError
+              >
             </Field>
           </template>
         </form.Field>

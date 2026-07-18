@@ -2,16 +2,24 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, flushPromises, DOMWrapper, enableAutoUnmount } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 
-const { createMutateAsync, updateMutateAsync, deleteMutateAsync, queryState } = vi.hoisted(() => ({
-  createMutateAsync: vi.fn(),
-  updateMutateAsync: vi.fn(),
-  deleteMutateAsync: vi.fn(),
-  queryState: {
-    labels: [] as unknown[],
-    isPending: false,
-    isError: false,
-  },
-}));
+const { createMutateAsync, updateMutateAsync, deleteMutateAsync, queryState, mutationPending } =
+  vi.hoisted(() => ({
+    createMutateAsync: vi.fn(),
+    updateMutateAsync: vi.fn(),
+    deleteMutateAsync: vi.fn(),
+    queryState: {
+      labels: [] as unknown[],
+      isPending: false,
+      isError: false,
+    },
+    // vi.hoisted は import 前に走るため vue の ref は使えない。
+    // コンポーネントは .value を読むだけなので素のオブジェクトで足りる
+    mutationPending: {
+      post: { value: false },
+      put: { value: false },
+      delete: { value: false },
+    },
+  }));
 
 vi.mock('@/lib/api-vue-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api-vue-query')>();
@@ -31,7 +39,12 @@ vi.mock('@/lib/api-vue-query', async (importOriginal) => {
             : method === 'put'
               ? updateMutateAsync
               : deleteMutateAsync,
-        isPending: { value: false },
+        isPending:
+          method === 'post'
+            ? mutationPending.post
+            : method === 'put'
+              ? mutationPending.put
+              : mutationPending.delete,
       })),
     },
   };
@@ -110,6 +123,9 @@ describe('LabelsSection', () => {
     queryState.labels = [];
     queryState.isPending = false;
     queryState.isError = false;
+    mutationPending.post.value = false;
+    mutationPending.put.value = false;
+    mutationPending.delete.value = false;
     document.body.innerHTML = '';
   });
 
@@ -190,8 +206,73 @@ describe('LabelsSection', () => {
     await flushPromises();
 
     expect(createMutateAsync).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('名前は必須です');
+    expect(document.body.textContent).toContain('名前は 1〜100 文字で入力してください');
     expect(document.body.textContent).toContain('色は #RRGGBB 形式で入力してください');
+  });
+
+  it('名前 100 文字は送信でき、101 文字は送信せずエラーを表示する', async () => {
+    createMutateAsync.mockResolvedValue({ ...bugLabel, name: 'a'.repeat(100) });
+    mountView();
+    await flushPromises();
+
+    clickBodyButton('新しいラベル');
+    await flushPromises();
+
+    // 101 文字（maxlength は setValue では効かないため検証ロジック自体を確認できる）
+    await input('label-name').setValue('a'.repeat(101));
+    await formEl().trigger('submit');
+    await flushPromises();
+    expect(createMutateAsync).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('名前は 1〜100 文字で入力してください');
+
+    // 100 文字ちょうどは成功する
+    await input('label-name').setValue('a'.repeat(100));
+    await formEl().trigger('submit');
+    await flushPromises();
+    expect(createMutateAsync).toHaveBeenCalledTimes(1);
+    expect(createMutateAsync.mock.calls[0][0].body.name).toBe('a'.repeat(100));
+  });
+
+  it('名前入力には maxlength=100 が付いている', async () => {
+    mountView();
+    await flushPromises();
+    clickBodyButton('新しいラベル');
+    await flushPromises();
+    expect(input('label-name').attributes('maxlength')).toBe('100');
+  });
+
+  it('保存リクエスト進行中はフォームダイアログのクローズ要求を無視する', async () => {
+    mutationPending.post.value = true;
+    const wrapper = mountView();
+    await flushPromises();
+
+    clickBodyButton('新しいラベル');
+    await flushPromises();
+    expect(document.body.textContent).toContain('ラベルを作成');
+
+    // reka-ui の update:open(false)（Esc 等）を直接シミュレート
+    const dialogRoot = wrapper.findComponent({ name: 'DialogRoot' });
+    dialogRoot.vm.$emit('update:open', false);
+    await flushPromises();
+
+    expect(document.body.textContent).toContain('ラベルを作成');
+  });
+
+  it('削除リクエスト進行中は確認ダイアログのクローズ要求を無視する', async () => {
+    mutationPending.delete.value = true;
+    queryState.labels = [bugLabel];
+    const wrapper = mountView();
+    await flushPromises();
+
+    clickByAriaLabel('ラベル「bug」を削除');
+    await flushPromises();
+    expect(document.body.textContent).toContain('ラベルを削除しますか？');
+
+    const dialogRoot = wrapper.findComponent({ name: 'DialogRoot' });
+    dialogRoot.vm.$emit('update:open', false);
+    await flushPromises();
+
+    expect(document.body.textContent).toContain('ラベルを削除しますか？');
   });
 
   it('行の削除ボタン → 確認ダイアログで DELETE を送る', async () => {
