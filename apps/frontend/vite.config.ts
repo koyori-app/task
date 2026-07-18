@@ -4,6 +4,7 @@ import vue from '@vitejs/plugin-vue';
 import tailwindcss from '@tailwindcss/vite';
 import { sentryVitePlugin } from '@sentry/vite-plugin';
 import { analyzer, unstableRolldownAdapter } from 'vite-bundle-analyzer';
+import { visualizer } from 'rollup-plugin-visualizer';
 
 /// <reference types="@batijs/core/types" />
 
@@ -35,11 +36,48 @@ const sentryPlugin =
       })
     : undefined;
 
+function getBundleVisualizerPlugins() {
+  if (process.env.FRONTEND_BUNDLE_VISUALIZER !== 'true') return [];
+
+  const commonOptions = {
+    title: 'Task frontend bundle visualizer',
+    gzipSize: true,
+    brotliSize: true,
+    projectRoot: path.resolve(dirname, '../..'),
+  };
+  const plugins = [
+    Object.assign(
+      visualizer({
+        ...commonOptions,
+        filename: process.env.FRONTEND_BUNDLE_VISUALIZER_FILE ?? 'bundle-stats.json',
+        template: 'raw-data',
+      }),
+      { applyToEnvironment: (environment: { name: string }) => environment.name === 'client' },
+    ),
+  ];
+
+  if (process.env.FRONTEND_BUNDLE_VISUALIZER_HTML_FILE) {
+    plugins.push(
+      Object.assign(
+        visualizer({
+          ...commonOptions,
+          filename: process.env.FRONTEND_BUNDLE_VISUALIZER_HTML_FILE,
+          template: 'treemap',
+        }),
+        { applyToEnvironment: (environment: { name: string }) => environment.name === 'client' },
+      ),
+    );
+  }
+
+  return plugins;
+}
+
 // More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
 
 export default defineConfig({
   // Standalone build UI (vite build). Embedded client uses +onCreateApp inject.
   plugins: [
+    ...getBundleVisualizerPlugins(),
     ...(buildEnv.ANALYZE ? [unstableRolldownAdapter(analyzer())] : []),
     ...(buildEnv.VITE_DEVTOOLS ? [devtools()] : []),
     ...(buildEnv.VUE_DEVTOOLS ? [VueDevTools({ appendTo: /\/src\/pages\/\+Layout\.vue/ })] : []),

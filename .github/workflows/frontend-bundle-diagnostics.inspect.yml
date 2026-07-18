@@ -1,0 +1,112 @@
+name: Frontend bundle diagnostics (inspect)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'apps/frontend/**'
+      - 'packages/oxlint-plugin-api-path-params/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/scripts/frontend-bundle-diagnostics.*.mts'
+      - '.github/workflows/frontend-bundle-diagnostics.*.yml'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: frontend-bundle-diagnostics-inspect-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: before
+
+      - name: Checkout pull request
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: after
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: after/apps/frontend/package.json
+
+      - name: Prepare report output
+        run: mkdir -p "$RUNNER_TEMP/frontend-bundle-report"
+
+      # Only the first diagnostics PR needs this. After merge, base builds remain untouched.
+      - name: Bootstrap diagnostics for legacy base
+        shell: bash
+        run: |
+          if ! grep -q 'rollup-plugin-visualizer' before/apps/frontend/package.json; then
+            cp after/apps/frontend/vite.config.ts before/apps/frontend/vite.config.ts
+            cp after/apps/frontend/package.json before/apps/frontend/package.json
+            cp after/apps/frontend/pnpm-lock.yaml before/apps/frontend/pnpm-lock.yaml
+            cp after/pnpm-workspace.yaml before/pnpm-workspace.yaml
+          fi
+
+      - name: Build base bundle stats
+        working-directory: before/apps/frontend
+        env:
+          FRONTEND_BUNDLE_VISUALIZER: 'true'
+          FRONTEND_BUNDLE_VISUALIZER_FILE: ${{ runner.temp }}/frontend-bundle-report/before-stats.json
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm openapi:generate
+          pnpm exec vp build
+
+      - name: Build pull request bundle stats
+        working-directory: after/apps/frontend
+        env:
+          FRONTEND_BUNDLE_VISUALIZER: 'true'
+          FRONTEND_BUNDLE_VISUALIZER_FILE: ${{ runner.temp }}/frontend-bundle-report/after-stats.json
+          FRONTEND_BUNDLE_VISUALIZER_HTML_FILE: ${{ runner.temp }}/frontend-bundle-report/frontend-bundle-visualizer.html
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm openapi:generate
+          pnpm exec vp build
+
+      - name: Upload bundle visualizer
+        id: upload-visualizer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-bundle-visualizer
+          path: ${{ runner.temp }}/frontend-bundle-report/frontend-bundle-visualizer.html
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Generate report markdown
+        env:
+          FRONTEND_BUNDLE_REPORT_ARTIFACT_URL: ${{ steps.upload-visualizer.outputs.artifact-url }}
+        run: |
+          REPORT_DIR="$RUNNER_TEMP/frontend-bundle-report"
+          node after/.github/scripts/frontend-bundle-diagnostics.render-md.mts "$REPORT_DIR/before-stats.json" "$REPORT_DIR/after-stats.json" "$REPORT_DIR/frontend-bundle-diagnostics-report.md"
+          test -s "$REPORT_DIR/before-stats.json"
+          test -s "$REPORT_DIR/after-stats.json"
+          test -s "$REPORT_DIR/frontend-bundle-diagnostics-report.md"
+          cat "$REPORT_DIR/frontend-bundle-diagnostics-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload bundle report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-bundle-report
+          path: ${{ runner.temp }}/frontend-bundle-report/
+          if-no-files-found: error
+          retention-days: 7
