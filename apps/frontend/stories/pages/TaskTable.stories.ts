@@ -244,6 +244,19 @@ const sampleTasks = {
   total: 6,
 };
 
+const sampleSearchTasks = {
+  tasks: [
+    {
+      id: 'task-search-1',
+      seq_id: 42,
+      title: 'OAuth 検索結果',
+      highlight: '<em>OAuth</em> 認証 &amp; フローを更新する',
+      score: 0.98,
+    },
+  ],
+  total: 75,
+};
+
 /**
  * fetch モックで全 API エンドポイントを差し替える
  */
@@ -252,6 +265,8 @@ function createMockFetch(
     projects?: typeof sampleProjects;
     statuses?: typeof sampleStatuses;
     tasks?: { tasks: unknown[]; total: number };
+    searchTasks?: typeof sampleSearchTasks;
+    rejectSearch?: boolean;
     rejectAll?: boolean;
     rejectTenantsList?: boolean;
     hang?: boolean;
@@ -282,6 +297,12 @@ function createMockFetch(
     }
     if (url.includes('/statuses')) {
       return jsonResponse(overrides.statuses ?? sampleStatuses);
+    }
+    if (url.includes('/tasks/search')) {
+      if (overrides.rejectSearch) {
+        return jsonResponse({ message: 'search failed' }, 500);
+      }
+      return jsonResponse(overrides.searchTasks ?? sampleSearchTasks);
     }
     if (url.includes('/tasks')) {
       return jsonResponse(overrides.tasks ?? sampleTasks);
@@ -432,7 +453,7 @@ const meta = {
       description: {
         component:
           'プロジェクトタスク一覧の TanStack Table ビュー。fetch モックで全 API エンドポイントを差し替え。' +
-          ' ソート・タイトル絞り込みはクライアント側で現在ページ内の行のみ対象（サーバー側未対応）。',
+          ' 入力のデバウンス後にプロジェクトスコープのサーバー側検索 API へ接続する。',
       },
     },
   },
@@ -467,6 +488,69 @@ export const Empty: Story = {
   },
 };
 
+export const SearchResults: Story = {
+  name: 'サーバー検索・正常',
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const searchInput = await canvas.findByRole('searchbox', { name: 'タスクを検索' });
+    await userEvent.type(searchInput, 'OAuth');
+
+    await expect(canvas.findByText('OAuth 検索結果')).resolves.toBeInTheDocument();
+    const highlight = canvasElement.querySelector('td em');
+    await expect(highlight).toBeInTheDocument();
+    await expect(highlight).toHaveTextContent('OAuth');
+    await expect(highlight?.closest('td')).toHaveTextContent('OAuth 認証 & フローを更新する');
+    await expect(
+      canvas.findByText(/上位\s+1\s+件\s+\/\s+全\s+75\s+件/),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('ENG-42')).resolves.toBeInTheDocument();
+    await expect(canvas.queryByText('ログイン画面の UI 実装')).not.toBeInTheDocument();
+  },
+};
+
+export const EmptySearchInput: Story = {
+  name: 'サーバー検索・空入力',
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const searchInput = await canvas.findByRole('searchbox', { name: 'タスクを検索' });
+    await userEvent.type(searchInput, '   ');
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
+    await expect(canvas.queryByText('OAuth 検索結果')).not.toBeInTheDocument();
+  },
+};
+
+export const SearchNoResults: Story = {
+  name: 'サーバー検索・0件',
+  beforeEach: () => createMockFetch({ searchTasks: { tasks: [], total: 0 } }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const searchInput = await canvas.findByRole('searchbox', { name: 'タスクを検索' });
+    await userEvent.type(searchInput, '存在しないタスク');
+
+    await expect(canvas.findByText('検索結果がありません')).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByText(/上位\s+0\s+件\s+\/\s+全\s+0\s+件/),
+    ).resolves.toBeInTheDocument();
+  },
+};
+
+export const SearchApiError: Story = {
+  name: 'サーバー検索・APIエラー',
+  beforeEach: () => createMockFetch({ rejectSearch: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const searchInput = await canvas.findByRole('searchbox', { name: 'タスクを検索' });
+    await userEvent.type(searchInput, '失敗する検索');
+
+    await expect(canvas.findByText('検索に失敗しました')).resolves.toBeInTheDocument();
+    await expect(canvas.findByRole('button', { name: '再試行' })).resolves.toBeInTheDocument();
+  },
+};
+
 export const ProjectNotFound: Story = {
   name: 'プロジェクトなし',
   decorators: [
@@ -497,7 +581,7 @@ export const TenantResolveError: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByText('タスクの読み込みに失敗しました')).resolves.toBeInTheDocument();
-    expect(canvas.queryByText('タスクが見つかりません')).toBeNull();
+    await expect(canvas.queryByText('タスクが見つかりません')).not.toBeInTheDocument();
   },
 };
 
