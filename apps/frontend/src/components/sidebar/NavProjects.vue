@@ -77,7 +77,12 @@ function projectChildren(project: ProjectNavItem): ProjectChild[] {
 }
 
 function isChildActive(child: ProjectChild) {
-  return !!props.currentPath && props.currentPath.startsWith(child.href);
+  // 完全一致 or セグメント境界付き前方一致（tasks と tasks-archive のような
+  // 接頭辞衝突を防ぎつつ、配下ページ /…/tasks/T-1 でも「タスク」を active に保つ）
+  return (
+    !!props.currentPath &&
+    (props.currentPath === child.href || props.currentPath.startsWith(`${child.href}/`))
+  );
 }
 </script>
 

@@ -118,13 +118,34 @@ describe('NavProjects', () => {
     expect(hrefs).not.toContain('/acme/projects/ME01/settings');
   });
 
-  it('現在のパスのプロジェクトは初期展開され、子が active になる', () => {
+  it('現在のパスのプロジェクトは初期展開され、親子とも active になる', () => {
     const wrapper = mountNavProjects({ currentPath: '/acme/projects/ALPHA/tasks' });
     const activeChild = wrapper
       .findAll('a')
       .find((a) => a.attributes('href') === '/acme/projects/ALPHA/tasks');
     expect(activeChild).toBeTruthy();
     expect(activeChild!.attributes('data-active')).toBeDefined();
+    // カレントプロジェクトの親行が active
+    const parentButton = findRowButton(wrapper, 'Team Alpha');
+    expect(parentButton!.attributes('data-active')).toBe('true');
+    // 非カレントプロジェクトは初期折りたたみ（子リンクが DOM に存在しない）
+    const hrefs = wrapper.findAll('a').map((a) => a.attributes('href'));
+    expect(hrefs).not.toContain('/acme/projects/ME01/tasks');
+  });
+
+  it('子の active は境界付き前方一致（接頭辞違いの誤マッチなし・配下ページはマッチ）', () => {
+    // 配下ページ（タスク詳細）でも「タスク」が active
+    const detail = mountNavProjects({ currentPath: '/acme/projects/ALPHA/tasks/ALPHA-1' });
+    const tasksChild = detail
+      .findAll('a')
+      .find((a) => a.attributes('href') === '/acme/projects/ALPHA/tasks');
+    expect(tasksChild!.attributes('data-active')).toBeDefined();
+    // 接頭辞だけ一致する別パスは active にならない
+    const prefix = mountNavProjects({ currentPath: '/acme/projects/ALPHA/tasks-archive' });
+    const notActive = prefix
+      .findAll('a')
+      .find((a) => a.attributes('href') === '/acme/projects/ALPHA/tasks');
+    expect(notActive!.attributes('data-active')).toBeUndefined();
   });
 
   it('lists personal projects before shared projects', () => {
