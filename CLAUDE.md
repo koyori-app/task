@@ -44,6 +44,7 @@ cargo test --workspace --lib
   - `DATABASE_URL` / `REDIS_URL` が環境か `.env` に設定済みならそれを優先する（CI と同じ経路。CI はこの経路のためワークフロー変更不要）
   - SMTP・シークレット系の env はハーネスが CI と同じテスト用の値で補完する。GitHub App 系も設定不要（`load_github_test_env()` が自前注入）。SMTP は実サーバー不要
 - API 表面を変えたら: `cd apps/frontend && pnpm openapi && node_modules/.bin/vp fmt`
+  - CLI 型も再生成: `cd apps/cli && pnpm openapi:generate`
   - 整形は **`vp fmt`**（prettier は入っていない）。`api.d.ts` は gitignore 済み
   - API を変えていない PR では `openapi.json` の差分ゼロが検証項目になる
 

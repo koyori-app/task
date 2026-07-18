@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - 'apps/cli/**'
+      - 'apps/frontend/openapi.json'
       - '.github/workflows/cli-test.yml'
   push:
     branches: [main]
     paths:
       - 'apps/cli/**'
+      - 'apps/frontend/openapi.json'
       - '.github/workflows/cli-test.yml'
 
 concurrency:
@@ -57,8 +59,35 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: apps/cli
 
+      - name: Generate CLI OpenAPI types
+        run: pnpm openapi:generate
+        working-directory: apps/cli
+
+      - name: Type-check CLI application
+        run: pnpm build
+        working-directory: apps/cli
+
       - name: Type-check contract tests
         run: pnpm typecheck:test
+        working-directory: apps/cli
+
+      - name: Check generated CLI OpenAPI type drift
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- src/api/openapi.d.ts; then
+            echo "CLI OpenAPI types are in sync."
+            exit 0
+          fi
+
+          echo "::error::apps/cli/src/api/openapi.d.ts is out of sync with apps/frontend/openapi.json."
+          echo ""
+          echo "After changing the API surface, regenerate and commit the CLI types:"
+          echo "  cd apps/cli && pnpm openapi:generate"
+          echo "  git add apps/cli/src/api/openapi.d.ts"
+          echo ""
+          echo "Diff:"
+          git diff -- src/api/openapi.d.ts | head -200 || true
+          exit 1
         working-directory: apps/cli
 
       - name: Run tests
