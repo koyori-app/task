@@ -54,6 +54,7 @@
   },
   "devDependencies": {
     "@chromatic-com/storybook": "5.2.1",
+    "@koyori-app/oxlint-plugin-api-path-params": "workspace:*",
     "@sentry/vite-plugin": "5.4.0",
     "@storybook/addon-a11y": "10.5.0",
     "@storybook/addon-docs": "10.5.0",

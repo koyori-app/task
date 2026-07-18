@@ -1,13 +1,14 @@
 import { computed, type MaybeRefOrGetter, toValue } from 'vue';
 
 import { useProjectsQuery } from '@/lib/api-vue-query';
+import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
 import type { components } from '@/generated/api';
 
 type ProjectResponse = components['schemas']['ProjectResponse'];
 
 /** Route param (projectKey) をテナント配下の project UUID に解決する。 */
 export function useResolvedProjectId(
-  tenantId: MaybeRefOrGetter<string | null | undefined>,
+  tenantId: MaybeRefOrGetter<TenantUuid | null | undefined>,
   projectKey: MaybeRefOrGetter<string>,
 ) {
   const resolvedTenantId = computed(() => toValue(tenantId) ?? null);
@@ -15,13 +16,13 @@ export function useResolvedProjectId(
 
   const projectsQuery = useProjectsQuery(resolvedTenantId);
 
-  const projectId = computed(() => {
+  const projectId = computed<ProjectUuid | null>(() => {
     const projects = projectsQuery.data.value;
     if (!projects || !resolvedProjectKey.value) return null;
-    return (
-      projects.find((project: ProjectResponse) => project.key === resolvedProjectKey.value)?.id ??
-      null
-    );
+    const id = projects.find(
+      (project: ProjectResponse) => project.key === resolvedProjectKey.value,
+    )?.id;
+    return id ? (id as ProjectUuid) : null;
   });
 
   const isProjectNotFound = computed(

@@ -3,6 +3,7 @@ import { createClient } from '@koyori-app/openapi-vue-query';
 import { computed, toValue, type MaybeRefOrGetter } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 import type { paths } from '@/generated/api';
+import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
 
 /** Session /me cache duration — auth source of truth refresh interval. */
 export const AUTH_ME_STALE_TIME_MS = 60_000;
@@ -24,21 +25,24 @@ export const meQueryOptions = () =>
     retry: false,
   });
 
-export const projectLabelsQueryOptions = (tenantId: string, projectId: string) =>
+export const projectLabelsQueryOptions = (
+  tenantId: TenantUuid | null | undefined,
+  projectId: ProjectUuid | null | undefined,
+) =>
   apiClient.queryOptions('get', '/v1/tenants/{tenant_id}/projects/{project_id}/labels', {
-    params: { path: { tenant_id: tenantId, project_id: projectId } },
+    params: { path: { tenant_id: tenantId ?? '', project_id: projectId ?? '' } },
   });
 
-export const projectsQueryOptions = (tenantId: string) =>
+export const projectsQueryOptions = (tenantId: TenantUuid | null | undefined) =>
   apiClient.queryOptions(
     'get',
     LIST_PROJECTS_PATH,
-    { params: { path: { tenant_id: tenantId } } },
+    { params: { path: { tenant_id: tenantId ?? '' } } },
     { staleTime: AUTH_ME_STALE_TIME_MS },
   );
 
-export function useProjectsQuery(tenantId: MaybeRefOrGetter<string | null | undefined>) {
-  const resolvedTenantId = computed(() => toValue(tenantId) ?? '');
+export function useProjectsQuery(tenantId: MaybeRefOrGetter<TenantUuid | null | undefined>) {
+  const resolvedTenantId = computed(() => toValue(tenantId) ?? null);
 
   return useQuery(
     computed(() => {

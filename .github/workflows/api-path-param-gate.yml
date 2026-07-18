@@ -1,0 +1,86 @@
+name: API Path Param Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/frontend/**'
+      - 'apps/cli/**'
+      - 'packages/**'
+      - 'scripts/api-path-params/**'
+      - '.github/workflows/api-path-param-gate.yml'
+  pull_request:
+    paths:
+      - 'apps/frontend/**'
+      - 'apps/cli/**'
+      - 'packages/**'
+      - 'scripts/api-path-params/**'
+      - '.github/workflows/api-path-param-gate.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: apps/frontend/package.json
+
+      - name: Install frontend lint dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: apps/frontend
+
+      - name: Self-test Oxlint rule fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          run_fixture_pair() {
+            local label="$1"
+            local safe_fixture="$GITHUB_WORKSPACE/scripts/api-path-params/fixtures/$label-safe/src"
+            local anti_fixture="$GITHUB_WORKSPACE/scripts/api-path-params/fixtures/$label-anti-pattern/src"
+
+            pnpm --dir apps/frontend exec vp lint "$safe_fixture"
+
+            set +e
+            anti_output=$(pnpm --dir apps/frontend exec vp lint "$anti_fixture" 2>&1)
+            anti_status=$?
+            set -e
+            printf '%s\n' "$anti_output"
+
+            if [[ $anti_status -eq 0 ]]; then
+              echo "expected Oxlint to reject the $label anti-pattern fixture" >&2
+              exit 1
+            fi
+            grep -F 'api-path-params(no-raw-route-id-in-api-path)' <<<"$anti_output"
+            grep -F '1 error' <<<"$anti_output"
+          }
+
+          run_fixture_pair frontend
+          run_fixture_pair cli
+
+      - name: Self-test grep gate fixtures
+        run: bash scripts/api-path-params/check-api-path-params.test.sh
+
+      - name: Scan frontend and cli production sources
+        run: |
+          bash scripts/api-path-params/check-api-path-params.sh apps/frontend/src
+          bash scripts/api-path-params/check-api-path-params.sh apps/cli/src

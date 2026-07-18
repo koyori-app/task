@@ -2,6 +2,7 @@ import { computed, type MaybeRefOrGetter, toValue } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 
 import { fetchClient } from '@/lib/api-vue-query';
+import type { TenantUuid } from '@/lib/api-ids';
 import type { components } from '@/generated/api';
 
 const LIST_TENANTS_PATH = '/v1/tenants' as const;
@@ -23,10 +24,11 @@ export function useResolvedTenantId(tenantDisplayId: MaybeRefOrGetter<string>) {
     staleTime: 60_000,
   });
 
-  const tenantId = computed(() => {
+  const tenantId = computed<TenantUuid | null>(() => {
     const data = tenantsQuery.data.value;
     if (!data || !displayId.value) return null;
-    return data.find((t) => t.display_id === displayId.value)?.id ?? null;
+    const id = data.find((t) => t.display_id === displayId.value)?.id;
+    return id ? (id as TenantUuid) : null;
   });
 
   const isTenantNotFound = computed(

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { defineComponent, ref } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
+import type { ProjectUuid, TenantUuid } from '../api-ids';
 import {
   AUTH_ME_STALE_TIME_MS,
   createTestApiClient,
@@ -26,6 +27,9 @@ const mockUser = {
   is_suspended: false,
   totp_enabled: false,
 };
+
+const TENANT_UUID = 'tenant-uuid-1' as TenantUuid;
+const PROJECT_UUID = 'project-uuid-1' as ProjectUuid;
 
 function createFetchMock() {
   return vi.fn(async (input: Request) => {
@@ -120,16 +124,16 @@ describe('api-vue-query PoC', () => {
     const key = meQueryOptions().queryKey;
     expect(key).toEqual(['get', '/v1/auth/me']);
 
-    const keyWithInit = projectLabelsQueryOptions('tenant-1', 'project-1').queryKey;
+    const keyWithInit = projectLabelsQueryOptions(TENANT_UUID, PROJECT_UUID).queryKey;
     expect(keyWithInit).toEqual([
       'get',
       '/v1/tenants/{tenant_id}/projects/{project_id}/labels',
-      { params: { path: { tenant_id: 'tenant-1', project_id: 'project-1' } } },
+      { params: { path: { tenant_id: TENANT_UUID, project_id: PROJECT_UUID } } },
     ]);
   });
 
   it('projectsQueryOptions builds tenant projects query key', () => {
-    const options = projectsQueryOptions('tenant-uuid-1');
+    const options = projectsQueryOptions(TENANT_UUID);
     expect(options.queryKey).toEqual([
       'get',
       LIST_PROJECTS_PATH,
@@ -170,7 +174,7 @@ describe('api-vue-query PoC', () => {
     });
     globalThis.fetch = fetchSpy;
 
-    const query = withQuery(() => useProjectsQuery('tenant-uuid-1'));
+    const query = withQuery(() => useProjectsQuery(TENANT_UUID));
 
     await flushPromises();
 
@@ -179,7 +183,7 @@ describe('api-vue-query PoC', () => {
     expect(query.data.value).toEqual(projects);
   });
 
-  it('useProjectsQuery does not fetch when tenant id is empty', async () => {
+  it('useProjectsQuery does not fetch when tenant id is unresolved', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(
       new Response(JSON.stringify([]), {
         status: 200,
@@ -188,7 +192,7 @@ describe('api-vue-query PoC', () => {
     );
     globalThis.fetch = fetchSpy;
 
-    const query = withQuery(() => useProjectsQuery(''));
+    const query = withQuery(() => useProjectsQuery(null));
 
     await flushPromises();
 
@@ -367,11 +371,11 @@ describe('api-vue-query production client', () => {
   });
 
   it('projectLabelsQueryOptions builds tenant/project query key', () => {
-    const options = projectLabelsQueryOptions('tenant-a', 'project-b');
+    const options = projectLabelsQueryOptions(TENANT_UUID, PROJECT_UUID);
     expect(options.queryKey).toEqual([
       'get',
       '/v1/tenants/{tenant_id}/projects/{project_id}/labels',
-      { params: { path: { tenant_id: 'tenant-a', project_id: 'project-b' } } },
+      { params: { path: { tenant_id: TENANT_UUID, project_id: PROJECT_UUID } } },
     ]);
   });
 
