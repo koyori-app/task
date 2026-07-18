@@ -13,18 +13,28 @@ export type CustomFieldType = components['schemas']['CustomFieldType'];
 
 export type CustomFieldSelectOption = { label: string; value: string };
 
-/** デザインのアイコン対応（text-aa / hash / list / calendar-blank / link / check-square）に合わせた型メタ */
-export const CUSTOM_FIELD_TYPES: { value: CustomFieldType; label: string; icon: Component }[] = [
-  { value: 'text', label: 'テキスト', icon: PhTextAa },
-  { value: 'number', label: '数値', icon: PhHash },
-  { value: 'select', label: '選択', icon: PhList },
-  { value: 'date', label: '日付', icon: PhCalendarBlank },
-  { value: 'url', label: 'URL', icon: PhLink },
-  { value: 'checkbox', label: 'チェックボックス', icon: PhCheckSquare },
-];
+type FieldTypeMeta = { label: string; icon: Component };
 
-export function customFieldTypeMeta(fieldType: CustomFieldType) {
-  return CUSTOM_FIELD_TYPES.find((t) => t.value === fieldType) ?? CUSTOM_FIELD_TYPES[0];
+/**
+ * 型ごとのメタ（デザインのアイコン対応: text-aa / hash / list / calendar-blank / link / check-square）。
+ * `satisfies Record<CustomFieldType, …>` により、OpenAPI の CustomFieldType に
+ * enum が増減すると型エラーになる（キーの過不足をコンパイル時に検出）。
+ */
+const CUSTOM_FIELD_TYPE_META = {
+  text: { label: 'テキスト', icon: PhTextAa },
+  number: { label: '数値', icon: PhHash },
+  select: { label: '選択', icon: PhList },
+  date: { label: '日付', icon: PhCalendarBlank },
+  url: { label: 'URL', icon: PhLink },
+  checkbox: { label: 'チェックボックス', icon: PhCheckSquare },
+} satisfies Record<CustomFieldType, FieldTypeMeta>;
+
+export const CUSTOM_FIELD_TYPES: { value: CustomFieldType; label: string; icon: Component }[] = (
+  Object.keys(CUSTOM_FIELD_TYPE_META) as CustomFieldType[]
+).map((value) => ({ value, ...CUSTOM_FIELD_TYPE_META[value] }));
+
+export function customFieldTypeMeta(fieldType: CustomFieldType): FieldTypeMeta {
+  return CUSTOM_FIELD_TYPE_META[fieldType];
 }
 
 /**

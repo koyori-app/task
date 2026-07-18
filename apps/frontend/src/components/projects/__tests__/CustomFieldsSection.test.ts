@@ -177,6 +177,37 @@ describe('CustomFieldsSection', () => {
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
   });
 
+  it('名前 100 文字は送信でき、101 文字は送信せずフィールドエラーになる', async () => {
+    createMutateAsync.mockResolvedValue({});
+    mountSection();
+    await flushPromises();
+
+    bodyButton('フィールドを追加').click();
+    await flushPromises();
+
+    // 101 文字は送信されない
+    await nameInput().setValue('あ'.repeat(101));
+    await dialogForm().trigger('submit');
+    await flushPromises();
+    expect(createMutateAsync).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('名前は 1〜100 文字で入力してください');
+
+    // 100 文字ちょうどは成功する
+    await nameInput().setValue('あ'.repeat(100));
+    await dialogForm().trigger('submit');
+    await flushPromises();
+    expect(createMutateAsync).toHaveBeenCalledTimes(1);
+    expect(createMutateAsync.mock.calls[0][0].body.name).toBe('あ'.repeat(100));
+  });
+
+  it('名前入力には maxlength=100 が付いている', async () => {
+    mountSection();
+    await flushPromises();
+    bodyButton('フィールドを追加').click();
+    await flushPromises();
+    expect(nameInput().attributes('maxlength')).toBe('100');
+  });
+
   it('編集: 名前をプリフィルし、PATCH は name のみ送る（型セレクトは出さない）', async () => {
     updateMutateAsync.mockResolvedValue({});
     mountSection();

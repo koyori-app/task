@@ -1,16 +1,30 @@
 import { describe, it, expect } from 'vitest';
 import { CUSTOM_FIELD_TYPES, customFieldTypeMeta, parseSelectOptions } from '../custom-field-types';
+import type { CustomFieldType } from '../custom-field-types';
 
 describe('CUSTOM_FIELD_TYPES', () => {
-  it('openapi の CustomFieldType enum と同じ6種類を過不足なく提供する', () => {
-    expect(CUSTOM_FIELD_TYPES.map((t) => t.value)).toEqual([
-      'text',
-      'number',
-      'select',
-      'date',
-      'url',
-      'checkbox',
-    ]);
+  // enum との過不足は custom-field-types.ts の `satisfies Record<CustomFieldType, …>` が
+  // コンパイル時に保証する（値追加/削除で型エラー）。ここでは各型が meta とアイコンを
+  // 持ち、CustomFieldType の全メンバーを網羅していることを実行時にも確認する。
+  it('全メンバーが meta（ラベル・アイコン）を持ち、重複がない', () => {
+    // CustomFieldType のユニオンを網羅した参照リスト。
+    // openapi の enum に値が増えると、この Record のキー不足で型エラーになる
+    const expectedKeys = {
+      text: true,
+      number: true,
+      select: true,
+      date: true,
+      url: true,
+      checkbox: true,
+    } satisfies Record<CustomFieldType, true>;
+
+    const values = CUSTOM_FIELD_TYPES.map((t) => t.value);
+    expect(new Set(values).size).toBe(values.length); // 重複なし
+    expect(new Set(values)).toEqual(new Set(Object.keys(expectedKeys)));
+    for (const type of CUSTOM_FIELD_TYPES) {
+      expect(type.label.length).toBeGreaterThan(0);
+      expect(type.icon).toBeTruthy();
+    }
   });
 
   it('customFieldTypeMeta は型ごとの日本語ラベルを返す', () => {
