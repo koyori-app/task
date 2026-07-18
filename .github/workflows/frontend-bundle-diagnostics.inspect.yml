@@ -49,7 +49,9 @@ jobs:
           package_json_file: after/apps/frontend/package.json
 
       - name: Prepare report output
-        run: mkdir -p "$RUNNER_TEMP/frontend-bundle-report"
+        run: |
+          mkdir -p "$RUNNER_TEMP/frontend-bundle-report"
+          printf '%s' "${{ github.event.pull_request.number }}" > "$RUNNER_TEMP/frontend-bundle-report/pr-number.txt"
 
       # Only the first diagnostics PR needs this. After merge, base builds remain untouched.
       - name: Bootstrap diagnostics for legacy base
