@@ -1839,8 +1839,7 @@ export interface paths {
         /** 自分に割り当てられたタスク一覧（テナント横断） */
         get: operations["list_my_tasks"];
         put?: never;
-        /** クイックキャプチャ（個人プロジェクトへタスク作成） */
-        post: operations["create_my_task"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2566,13 +2565,6 @@ export interface components {
             /** Format: int64 */
             file_count: number;
             name: string;
-        };
-        QuickCaptureRequest: {
-            note?: string | null;
-            priority?: null | components["schemas"]["TaskPriority"];
-            /** Format: date-time */
-            soft_deadline?: string | null;
-            title: string;
         };
         RegisterRequest: {
             /** Format: email */
@@ -14123,81 +14115,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MyTasksListResponse"];
-                };
-            };
-            /** @description ログインまたはセッションが必要です */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @example internal-error */
-                        message: string;
-                    };
-                };
-            };
-            /** @description この操作は許可されていません */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @example internal-error */
-                        message: string;
-                    };
-                };
-            };
-            /** @description リソースが見つかりません */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @example internal-error */
-                        message: string;
-                    };
-                };
-            };
-            /** @description サーバー側で問題が発生しました。時間をおいて再度お試しください */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @example internal-error */
-                        message: string;
-                    };
-                };
-            };
-        };
-    };
-    create_my_task: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description テナントID */
-                tenant_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["QuickCaptureRequest"];
-            };
-        };
-        responses: {
-            /** @description 作成されたタスク */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskResponse"];
                 };
             };
             /** @description ログインまたはセッションが必要です */
