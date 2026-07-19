@@ -4,6 +4,7 @@ import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhSlidersHorizontal, PhWarning } from '@phosphor-icons/vue';
 import { navigate } from 'vike/client/router';
+import { usePageContext } from 'vike-vue/usePageContext';
 import { computed, ref } from 'vue';
 import { Button } from '@/components/ui/button';
 import { Field, FieldError, FieldLabel } from '@/components/ui/field';
@@ -11,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import DeleteProjectDialog from '@/components/sidebar/DeleteProjectDialog.vue';
 import EmojiIconPicker from '@/components/projects/EmojiIconPicker.vue';
+import IntegrationsSection from '@/components/projects/IntegrationsSection.vue';
 import { apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
@@ -20,7 +22,7 @@ const LIST_PROJECTS_PATH = '/v1/tenants/{tenant_id}/projects' as const;
 const PROJECT_PATH = '/v1/tenants/{tenant_id}/projects/{id}' as const;
 
 /** 設定セクション。Workflow(#370)・Members(#371)・Labels ほか(#373) は増分で追加 */
-type SettingsSection = 'general' | 'danger';
+type SettingsSection = 'general' | 'integrations' | 'danger';
 
 const props = defineProps<{
   tenantId: string;
@@ -29,16 +31,29 @@ const props = defineProps<{
 }>();
 
 const queryClient = useQueryClient();
+const pageContext = usePageContext();
 const submitError = ref<string | null>(null);
 const saveDone = ref(false);
 const isDeleteOpen = ref(false);
-const activeSection = ref<SettingsSection>('general');
 const icon = ref<string | null>(props.project.icon_emoji ?? null);
 
 const sections: { key: SettingsSection; label: string; danger?: boolean }[] = [
   { key: 'general', label: '一般' },
+  { key: 'integrations', label: '連携' },
   { key: 'danger', label: '削除', danger: true },
 ];
+
+/** `?section=` から初期表示セクションを決める（GitHub callback の戻り先が利用。#386） */
+function initialSection(): SettingsSection {
+  const search = (pageContext as { urlParsed?: { search?: Record<string, string> } } | undefined)
+    ?.urlParsed?.search;
+  const requested = search?.section;
+  return sections.some((section) => section.key === requested)
+    ? (requested as SettingsSection)
+    : 'general';
+}
+
+const activeSection = ref<SettingsSection>(initialSection());
 
 const nonBlankName = type('string').narrow((name) => name.trim().length >= 1);
 
@@ -211,6 +226,13 @@ function onDeleted() {
             </form.Subscribe>
           </div>
         </form>
+
+        <!-- 連携 -->
+        <IntegrationsSection
+          v-else-if="activeSection === 'integrations'"
+          :tenant-id="tenantId"
+          :project-id="project.id"
+        />
 
         <!-- 削除 -->
         <div v-else-if="activeSection === 'danger'">

@@ -47,13 +47,23 @@ const sampleProject: ProjectResponse = {
   personal_owner_id: null,
 };
 
-function mountView() {
+function mountView(options: { searchSection?: string } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return mount(ProjectSettingsView, {
     props: { tenantId: TENANT_UUID, tenantSlug: 'acme', project: sampleProject },
-    global: { plugins: [[VueQueryPlugin, { queryClient }]] },
+    global: {
+      plugins: [[VueQueryPlugin, { queryClient }]],
+      provide:
+        options.searchSection !== undefined
+          ? {
+              'vike-vue:usePageContext': {
+                urlParsed: { search: { section: options.searchSection } },
+              },
+            }
+          : {},
+    },
     attachTo: document.body,
   });
 }
@@ -179,5 +189,25 @@ describe('ProjectSettingsView', () => {
     await flushPromises();
 
     expect(document.body.textContent).toContain('プロジェクトを更新できませんでした');
+  });
+
+  it('?section=integrations で連携セクションを初期表示する（GitHub callback の戻り先）', async () => {
+    mountView({ searchSection: 'integrations' });
+    await flushPromises();
+
+    const nav = document.body.querySelector('nav[aria-label="設定セクション"]')!;
+    const activeNav = nav.querySelector('button[aria-current="true"]');
+    expect(activeNav?.textContent).toContain('連携');
+    // 一般セクションのフォームは表示されない
+    expect(document.body.querySelector('#name')).toBeNull();
+  });
+
+  it('?section が未知の値なら一般セクションを表示する', async () => {
+    mountView({ searchSection: 'unknown-section' });
+    await flushPromises();
+
+    const nav = document.body.querySelector('nav[aria-label="設定セクション"]')!;
+    const activeNav = nav.querySelector('button[aria-current="true"]');
+    expect(activeNav?.textContent).toContain('一般');
   });
 });
