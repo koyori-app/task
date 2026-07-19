@@ -629,8 +629,8 @@ export const ProjectSwitch: Story = {
     await nextTick();
 
     const engTitle = 'OAuth 対応を実装する';
-    const pollUntil = Date.now() + 2000;
-    while (Date.now() < pollUntil) {
+    const pollUntil = performance.now() + 2000;
+    while (performance.now() < pollUntil) {
       await expect(canvas.queryByText(engTitle)).not.toBeInTheDocument();
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
