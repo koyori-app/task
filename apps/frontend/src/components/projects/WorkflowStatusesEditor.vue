@@ -30,6 +30,7 @@ const props = defineProps<{
 
 const queryClient = useQueryClient();
 const operationError = ref<string | null>(null);
+const operationInFlight = ref(false);
 const newName = ref('');
 const newColor = ref('#64748b');
 const deleteTarget = ref<ProjectStatus | null>(null);
@@ -51,6 +52,7 @@ const reorderMutation = apiClient.useMutation('put', REORDER_PATH);
 const statuses = computed<ProjectStatus[]>(() => statusesQuery.data.value ?? []);
 const isMutating = computed(
   () =>
+    operationInFlight.value ||
     createMutation.isPending.value ||
     updateMutation.isPending.value ||
     deleteMutation.isPending.value ||
@@ -73,18 +75,31 @@ async function refresh() {
 
 async function run(message: string, action: () => Promise<unknown>) {
   operationError.value = null;
+  operationInFlight.value = true;
   try {
     await action();
-    await refresh();
   } catch {
     operationError.value = message;
+  } finally {
+    try {
+      await refresh();
+    } catch {
+      operationError.value ??= message;
+    }
+    operationInFlight.value = false;
   }
+}
+
+function statusNameError(name: string) {
+  const length = Array.from(name).length;
+  return length < 1 || length > 100 ? 'ステータス名は1〜100文字で入力してください' : null;
 }
 
 async function createStatus() {
   const name = newName.value.trim();
-  if (!name) {
-    operationError.value = 'ステータス名を入力してください';
+  const nameError = statusNameError(name);
+  if (nameError) {
+    operationError.value = nameError;
     return;
   }
   await run('ステータスを追加できませんでした', async () => {
@@ -105,8 +120,9 @@ async function createStatus() {
 async function saveStatus(status: ProjectStatus) {
   const draft = drafts.value[status.id];
   const name = draft?.name.trim() ?? '';
-  if (!name) {
-    operationError.value = 'ステータス名は空にできません';
+  const nameError = statusNameError(name);
+  if (nameError) {
+    operationError.value = nameError;
     return;
   }
   await run('ステータスを更新できませんでした', () =>
@@ -126,16 +142,8 @@ async function setUniqueFlag(status: ProjectStatus, flag: 'is_default' | 'is_don
     return;
   }
 
-  const current = statuses.value.find((item) => item[flag]);
   await run('ステータスの種別を変更できませんでした', async () => {
-    // Default は backend が同一 transaction で一意化する。
-    // Done state は UI 側で旧値を解除してから新値を設定する。
-    if (flag === 'is_done_state' && current) {
-      await updateMutation.mutateAsync({
-        params: { path: { ...pathParams.value, id: current.id } },
-        body: { [flag]: false },
-      });
-    }
+    // Backend atomically clears the previous unique flag and sets this status.
     await updateMutation.mutateAsync({
       params: { path: { ...pathParams.value, id: status.id } },
       body: { [flag]: true },
@@ -175,6 +183,15 @@ async function confirmDelete() {
     }),
   );
   if (!operationError.value) deleteTarget.value = null;
+}
+
+function handleDeleteDialogOpen(open: boolean) {
+  if (!open && isMutating.value) return;
+  if (!open) deleteTarget.value = null;
+}
+
+function preventDeleteDialogClose(event: Event) {
+  if (isMutating.value) event.preventDefault();
 }
 
 async function moveStatus(index: number, offset: -1 | 1) {
@@ -345,15 +362,13 @@ async function moveStatus(index: number, offset: -1 | 1) {
     </div>
   </section>
 
-  <Dialog
-    :open="!!deleteTarget"
-    @update:open="
-      (open) => {
-        if (!open) deleteTarget = null;
-      }
-    "
-  >
-    <DialogContent>
+  <Dialog :open="!!deleteTarget" @update:open="handleDeleteDialogOpen">
+    <DialogContent
+      :show-close-button="false"
+      @cancel="preventDeleteDialogClose"
+      @escape-key-down="preventDeleteDialogClose"
+      @pointer-down-outside="preventDeleteDialogClose"
+    >
       <DialogHeader>
         <DialogTitle>ステータスを削除しますか？</DialogTitle>
         <DialogDescription>

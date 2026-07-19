@@ -4,10 +4,10 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
-use sea_orm::sea_query::{Expr, Func};
+use sea_orm::sea_query::{Expr, Func, LockType};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, TransactionTrait, prelude::Uuid,
+    QueryOrder, QuerySelect, TransactionTrait, prelude::Uuid,
 };
 use std::collections::HashSet;
 
@@ -127,19 +127,64 @@ pub async fn update_status(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
-    let status = project_statuses::Entity::find_by_id(id)
+    let txn = state.db.begin().await?;
+    // Serialize status flag changes for the project. In particular, two concurrent requests
+    // must not both observe themselves as the next Done state.
+    let statuses = project_statuses::Entity::find()
         .filter(project_statuses::Column::ProjectId.eq(project_id))
-        .one(&state.db)
-        .await?
+        .lock(LockType::Update)
+        .all(&txn)
+        .await?;
+    let status = statuses
+        .iter()
+        .find(|status| status.id == id)
+        .cloned()
         .ok_or(AppError::NotFound)?;
     let old_is_done_state = status.is_done_state;
     let mut active: project_statuses::ActiveModel = status.into();
-    let txn = state.db.begin().await?;
     if payload.is_default == Some(true) {
         project_statuses::Entity::update_many()
             .col_expr(project_statuses::Column::IsDefault, Expr::value(false))
             .filter(project_statuses::Column::ProjectId.eq(project_id))
             .filter(project_statuses::Column::Id.ne(id))
+            .exec(&txn)
+            .await?;
+    }
+    if payload.is_done_state == Some(true) && !old_is_done_state {
+        let previous_done_ids: Vec<Uuid> = statuses
+            .iter()
+            .filter(|status| status.is_done_state && status.id != id)
+            .map(|status| status.id)
+            .collect();
+
+        project_statuses::Entity::update_many()
+            .col_expr(project_statuses::Column::IsDoneState, Expr::value(false))
+            .filter(project_statuses::Column::ProjectId.eq(project_id))
+            .filter(project_statuses::Column::Id.ne(id))
+            .exec(&txn)
+            .await?;
+
+        if !previous_done_ids.is_empty() {
+            tasks::Entity::update_many()
+                .col_expr(
+                    tasks::Column::CompletedAt,
+                    Expr::value(Option::<chrono::DateTime<chrono::Utc>>::None),
+                )
+                .filter(tasks::Column::StatusId.is_in(previous_done_ids))
+                .filter(tasks::Column::DeletedAt.is_null())
+                .exec(&txn)
+                .await?;
+        }
+        tasks::Entity::update_many()
+            .col_expr(
+                tasks::Column::CompletedAt,
+                Expr::expr(Func::coalesce([
+                    Expr::col(tasks::Column::CompletedAt),
+                    Expr::current_timestamp(),
+                ])),
+            )
+            .filter(tasks::Column::StatusId.eq(id))
+            .filter(tasks::Column::DeletedAt.is_null())
             .exec(&txn)
             .await?;
     }
@@ -162,6 +207,7 @@ pub async fn update_status(
 
     if let Some(new_is_done) = payload.is_done_state
         && new_is_done != old_is_done_state
+        && !new_is_done
     {
         let mut task_update = tasks::Entity::update_many()
             .filter(tasks::Column::StatusId.eq(id))
