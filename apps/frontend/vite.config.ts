@@ -225,9 +225,13 @@ export default defineConfig({
           storybookTest({
             configDir: path.join(dirname, '.storybook'),
           }),
-          argosVitestPlugin({
-            uploadToArgos: process.env.CI === 'true',
-          }),
+          ...(process.env.ARGOS_ENABLED === 'true'
+            ? [
+                argosVitestPlugin({
+                  uploadToArgos: process.env.CI === 'true',
+                }),
+              ]
+            : []),
         ],
         test: {
           name: 'storybook',

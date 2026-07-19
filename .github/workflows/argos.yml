@@ -42,3 +42,5 @@ jobs:
 
       - name: Capture and upload Storybook screenshots
         run: pnpm test:storybook
+        env:
+          ARGOS_ENABLED: "true"
