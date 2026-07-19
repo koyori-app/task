@@ -88,12 +88,16 @@ const form = useForm({
           name: value.name.trim(),
         };
         if (target.field_type === 'select') {
-          const options = parseSelectOptions(value.optionsText);
-          if (options.length === 0) {
-            formError.value = '選択肢を1行に1つ以上入力してください';
-            return;
+          // 選択肢に触れていなければ options を送らない（backend は未指定なら既存値を保持する）。
+          // 送る場合も既存 options を渡し、value 一致の label を引き継ぐ（表示名の破壊を防ぐ）。
+          if (value.optionsText !== serializeSelectOptions(target.options)) {
+            const options = parseSelectOptions(value.optionsText, target.options);
+            if (options.length === 0) {
+              formError.value = '選択肢を1行に1つ以上入力してください';
+              return;
+            }
+            body.options = options;
           }
-          body.options = options;
         }
         await updateMutation.mutateAsync({
           params: {

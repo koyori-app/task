@@ -40,15 +40,31 @@ export function customFieldTypeMeta(fieldType: CustomFieldType): FieldTypeMeta {
 /**
  * 「1行に1つ」形式の入力を select 型の options（label/value ペア）へ変換する。
  * backend は空配列・空文字・重複 value を拒否するため、ここで空行除去と重複排除を行う。
+ *
+ * backend は label と value が異なる option を許可し、タスクの表示名には label を使う
+ * （API 経由で作られたフィールドは label !== value になり得る）。この編集 UI は value のみを
+ * 行として扱うため、`existing` に既存 options を渡すと value 一致で label を引き継ぎ、
+ * 触っていない選択肢の表示名が value で上書きされるのを防ぐ。
  */
-export function parseSelectOptions(text: string): CustomFieldSelectOption[] {
+export function parseSelectOptions(text: string, existing?: unknown): CustomFieldSelectOption[] {
+  const labelByValue = new Map<string, string>();
+  if (Array.isArray(existing)) {
+    for (const option of existing) {
+      if (!option || typeof option !== 'object') continue;
+      const { label, value } = option as { label?: unknown; value?: unknown };
+      if (typeof label !== 'string' || typeof value !== 'string') continue;
+      if (!label || !value) continue;
+      labelByValue.set(value, label);
+    }
+  }
+
   const seen = new Set<string>();
   const options: CustomFieldSelectOption[] = [];
   for (const line of text.split('\n')) {
     const value = line.trim();
     if (!value || seen.has(value)) continue;
     seen.add(value);
-    options.push({ label: value, value });
+    options.push({ label: labelByValue.get(value) ?? value, value });
   }
   return options;
 }

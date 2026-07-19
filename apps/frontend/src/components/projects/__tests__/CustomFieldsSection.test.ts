@@ -63,6 +63,21 @@ const sampleFields: CustomFieldResponse[] = [
     position: 1,
     created_at: '2026-01-01T00:00:00Z',
   },
+  // backend は label !== value を許可し、タスク表示には label を使う
+  // （API 経由で作られたフィールドはこの形になり得る）
+  {
+    id: '00000000-0000-4000-8000-000000000103',
+    project_id: PROJECT_UUID,
+    name: '難易度',
+    field_type: 'select',
+    options: [
+      { label: '優先度：高', value: 'high' },
+      { label: '低め', value: 'low' },
+    ],
+    is_required: false,
+    position: 2,
+    created_at: '2026-01-01T00:00:00Z',
+  },
 ];
 
 function mountSection() {
@@ -303,6 +318,57 @@ describe('CustomFieldsSection', () => {
 
     expect(updateMutateAsync).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('選択肢を1行に1つ以上入力してください');
+  });
+
+  it('編集(select): 名前だけ変えたときは options を送らない（既存の label を壊さない）', async () => {
+    updateMutateAsync.mockResolvedValue({});
+    mountSection();
+    await flushPromises();
+
+    ariaButton('難易度 を編集').click();
+    await flushPromises();
+
+    // 編集 UI は value のみを行として表示する
+    const optionsTextarea = document.body.querySelector<HTMLTextAreaElement>('#optionsText');
+    expect(optionsTextarea!.value).toBe('high\nlow');
+
+    // 選択肢に触れず名前だけ変更する
+    await nameInput().setValue('むずかしさ');
+    await dialogForm().trigger('submit');
+    await flushPromises();
+
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: {
+        path: {
+          tenant_id: TENANT_UUID,
+          project_id: PROJECT_UUID,
+          field_id: sampleFields[2].id,
+        },
+      },
+      body: { name: 'むずかしさ' },
+    });
+    // options を送らない＝backend 側の既存 label がそのまま残る
+    expect(updateMutateAsync.mock.calls[0][0].body).not.toHaveProperty('options');
+  });
+
+  it('編集(select): 選択肢を追加しても既存 option の label は value で上書きされない', async () => {
+    updateMutateAsync.mockResolvedValue({});
+    mountSection();
+    await flushPromises();
+
+    ariaButton('難易度 を編集').click();
+    await flushPromises();
+
+    const optionsTextarea = document.body.querySelector<HTMLTextAreaElement>('#optionsText');
+    await new DOMWrapper(optionsTextarea!).setValue('high\nlow\nmid');
+    await dialogForm().trigger('submit');
+    await flushPromises();
+
+    expect(updateMutateAsync.mock.calls[0][0].body.options).toEqual([
+      { label: '優先度：高', value: 'high' },
+      { label: '低め', value: 'low' },
+      { label: 'mid', value: 'mid' },
+    ]);
   });
 
   it('削除: 確認ダイアログを経て DELETE を送る', async () => {

@@ -66,6 +66,40 @@ describe('parseSelectOptions', () => {
     expect(parseSelectOptions('')).toEqual([]);
     expect(parseSelectOptions(' \n \n')).toEqual([]);
   });
+
+  // backend は label !== value を許可し、タスク表示には label を使う。
+  // 編集 UI は value のみを行として扱うため、既存 options を渡して label を引き継ぐ。
+  it('既存 options を渡すと value 一致の label を引き継ぐ（表示名を value で潰さない）', () => {
+    const existing = [
+      { label: '優先度：高', value: 'high' },
+      { label: '低め', value: 'low' },
+    ];
+    expect(parseSelectOptions('high\nlow', existing)).toEqual(existing);
+  });
+
+  it('既存にない value は label = value になる（新規追加分）', () => {
+    const existing = [{ label: '優先度：高', value: 'high' }];
+    expect(parseSelectOptions('high\nmid', existing)).toEqual([
+      { label: '優先度：高', value: 'high' },
+      { label: 'mid', value: 'mid' },
+    ]);
+  });
+
+  it('行から消えた既存 option は結果に残らない', () => {
+    const existing = [
+      { label: '優先度：高', value: 'high' },
+      { label: '低め', value: 'low' },
+    ];
+    expect(parseSelectOptions('high', existing)).toEqual([{ label: '優先度：高', value: 'high' }]);
+  });
+
+  it('existing が配列でない・要素が壊れている場合は label = value にフォールバックする', () => {
+    expect(parseSelectOptions('high', null)).toEqual([{ label: 'high', value: 'high' }]);
+    expect(parseSelectOptions('high', 'not-an-array')).toEqual([{ label: 'high', value: 'high' }]);
+    expect(parseSelectOptions('high', [{ value: 'high' }, null, 42])).toEqual([
+      { label: 'high', value: 'high' },
+    ]);
+  });
 });
 
 describe('serializeSelectOptions', () => {
