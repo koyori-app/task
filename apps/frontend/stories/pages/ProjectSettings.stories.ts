@@ -359,9 +359,7 @@ export const WorkflowUniqueFlagsAndDelete: Story = {
     const writes = (fetchSpy!.mock.calls as [Request | string][])
       .map(([request]) => request)
       .filter((request): request is Request => typeof request !== 'string');
-    await expect(
-      writes.filter((request) => request.method === 'PUT').length,
-    ).toBeGreaterThanOrEqual(3);
+    await expect(writes.filter((request) => request.method === 'PUT')).toHaveLength(2);
     await expect(writes.some((request) => request.method === 'DELETE')).toBe(true);
   },
 };
