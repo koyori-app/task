@@ -15,7 +15,13 @@
       "@/sentry.browser.config": ["./sentry.browser.config.ts"]
     }
   },
-  "include": ["src/**/*", "server/**/*", "stories/**/*", "sentry.browser.config.ts"],
+  "include": [
+    "src/**/*",
+    "server/**/*",
+    "stories/**/*",
+    ".storybook/**/*",
+    "sentry.browser.config.ts"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }],
   "exclude": ["dist"]
 }
