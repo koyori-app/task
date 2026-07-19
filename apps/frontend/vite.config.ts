@@ -19,6 +19,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { zstdCompressSync } from 'node:zlib';
 import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
+import { argosVitestPlugin } from '@argos-ci/storybook/vitest-plugin';
 import { playwright } from '@vitest/browser-playwright';
 import { buildEnv } from './buildSrc/env';
 const dirname =
@@ -224,9 +225,13 @@ export default defineConfig({
           storybookTest({
             configDir: path.join(dirname, '.storybook'),
           }),
+          argosVitestPlugin({
+            uploadToArgos: process.env.CI === 'true',
+          }),
         ],
         test: {
           name: 'storybook',
+          setupFiles: ['./.storybook/vitest.setup.ts'],
           browser: {
             enabled: true,
             headless: true,
@@ -244,7 +249,12 @@ export default defineConfig({
   fmt: {
     singleQuote: true,
     trailingComma: 'all',
-    ignorePatterns: ['content/**/*.md', 'src/components/ui/**', 'src/components/originui/**'],
+    ignorePatterns: [
+      'content/**/*.md',
+      'screenshots/**',
+      'src/components/ui/**',
+      'src/components/originui/**',
+    ],
   },
   lint: {
     plugins: ['oxc', 'typescript', 'unicorn', 'vue'],

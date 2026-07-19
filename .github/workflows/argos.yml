@@ -1,0 +1,44 @@
+name: Argos Visual Testing
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - apps/frontend/**
+      - .github/workflows/argos.yml
+
+permissions:
+  contents: read
+
+jobs:
+  argos:
+    runs-on: ubuntu-latest
+    env:
+      ARGOS_TOKEN: ${{ secrets.ARGOS_TOKEN }}
+    defaults:
+      run:
+        working-directory: apps/frontend
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: apps/frontend/package.json
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/frontend/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build Storybook
+        run: pnpm build-storybook
+
+      - name: Capture and upload Storybook screenshots
+        run: pnpm test:storybook

@@ -8,6 +8,7 @@
     "prod": "vike build && bun ./dist/server/index.mjs",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
+    "test:storybook": "vp test --project storybook --run",
     "openapi:generate": "openapi-typescript ./openapi.json -o ./src/generated/api.d.ts",
     "openapi:export": "cargo run --manifest-path ../backend/Cargo.toml --bin export_openapi -- ./openapi.json",
     "openapi": "pnpm run openapi:export && pnpm run openapi:generate",
@@ -53,6 +54,7 @@
     "vue": "3.5.40"
   },
   "devDependencies": {
+    "@argos-ci/storybook": "6.1.6",
     "@chromatic-com/storybook": "5.2.1",
     "@koyori-app/oxlint-plugin-api-path-params": "workspace:*",
     "@sentry/vite-plugin": "5.4.0",
