@@ -200,12 +200,26 @@ describe('CustomFieldsSection', () => {
     expect(createMutateAsync.mock.calls[0][0].body.name).toBe('あ'.repeat(100));
   });
 
-  it('名前入力には maxlength=100 が付いている', async () => {
+  it('絵文字はコードポイント単位で数える（100 個は送信可・101 個は不可、backend の chars() と一致）', async () => {
+    createMutateAsync.mockResolvedValue({});
     mountSection();
     await flushPromises();
     bodyButton('フィールドを追加').click();
     await flushPromises();
-    expect(nameInput().attributes('maxlength')).toBe('100');
+
+    // '😀' は UTF-16 で 2 単位・コードポイントで 1。101 個は送信されない
+    await nameInput().setValue('😀'.repeat(101));
+    await dialogForm().trigger('submit');
+    await flushPromises();
+    expect(createMutateAsync).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('名前は 1〜100 文字で入力してください');
+
+    // 絵文字 100 個は送信できる（UTF-16 では 200 単位だが弾かれない）
+    await nameInput().setValue('😀'.repeat(100));
+    await dialogForm().trigger('submit');
+    await flushPromises();
+    expect(createMutateAsync).toHaveBeenCalledTimes(1);
+    expect(createMutateAsync.mock.calls[0][0].body.name).toBe('😀'.repeat(100));
   });
 
   it('編集: 名前をプリフィルし、PATCH は name のみ送る（型セレクトは出さない）', async () => {
@@ -234,6 +248,61 @@ describe('CustomFieldsSection', () => {
       body: { name: 'ポイント' },
     });
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('編集(select): 既存の選択肢をプリフィルし、options 込みで PATCH する', async () => {
+    updateMutateAsync.mockResolvedValue({});
+    mountSection();
+    await flushPromises();
+
+    ariaButton('優先度 を編集').click();
+    await flushPromises();
+
+    // 型セレクトは出ない（編集で型変更不可）
+    expect(document.body.querySelector('#custom-field-type')).toBeNull();
+    // 既存の選択肢がテキストへ復元される
+    const optionsTextarea = document.body.querySelector<HTMLTextAreaElement>('#optionsText');
+    expect(optionsTextarea).not.toBeNull();
+    expect(optionsTextarea!.value).toBe('高');
+
+    // 選択肢を追加して保存
+    await new DOMWrapper(optionsTextarea!).setValue('高\n中');
+    await dialogForm().trigger('submit');
+    await flushPromises();
+
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: {
+        path: {
+          tenant_id: TENANT_UUID,
+          project_id: PROJECT_UUID,
+          field_id: sampleFields[1].id,
+        },
+      },
+      body: {
+        name: '優先度',
+        options: [
+          { label: '高', value: '高' },
+          { label: '中', value: '中' },
+        ],
+      },
+    });
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('編集(select): 選択肢を空にすると送信せずエラーを表示する', async () => {
+    mountSection();
+    await flushPromises();
+
+    ariaButton('優先度 を編集').click();
+    await flushPromises();
+
+    const optionsTextarea = document.body.querySelector<HTMLTextAreaElement>('#optionsText');
+    await new DOMWrapper(optionsTextarea!).setValue('   ');
+    await dialogForm().trigger('submit');
+    await flushPromises();
+
+    expect(updateMutateAsync).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('選択肢を1行に1つ以上入力してください');
   });
 
   it('削除: 確認ダイアログを経て DELETE を送る', async () => {

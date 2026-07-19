@@ -27,6 +27,7 @@ import {
   CUSTOM_FIELD_TYPES,
   customFieldTypeMeta,
   parseSelectOptions,
+  serializeSelectOptions,
   type CustomFieldType,
 } from '@/components/projects/custom-field-types';
 import { apiClient } from '@/lib/api-vue-query';
@@ -60,9 +61,11 @@ const formError = ref<string | null>(null);
 const deleteTarget = ref<CustomFieldResponse | null>(null);
 const deleteError = ref<string | null>(null);
 
-// backend の CreateCustomFieldRequest / UpdateCustomFieldRequest（length(min=1, max=100)）と同じ制約
+// backend の CreateCustomFieldRequest / UpdateCustomFieldRequest（length(min=1, max=100)）と同じ制約。
+// validator crate は chars().count()（コードポイント単位）で数えるため、UTF-16 単位の
+// String.length / maxlength ではなく Array.from で数える（絵文字を 2 と数えない）
 const nonBlankName = type('string').narrow((name) => {
-  const length = name.trim().length;
+  const length = Array.from(name.trim()).length;
   return length >= 1 && length <= 100;
 });
 
@@ -80,12 +83,23 @@ const form = useForm({
     const target = editingField.value;
     try {
       if (target) {
-        // field_type は PATCH で変更できないため名前のみ更新する
+        // field_type は PATCH で変更できないが、select 型は選択肢を更新できる
+        const body: { name: string; options?: ReturnType<typeof parseSelectOptions> } = {
+          name: value.name.trim(),
+        };
+        if (target.field_type === 'select') {
+          const options = parseSelectOptions(value.optionsText);
+          if (options.length === 0) {
+            formError.value = '選択肢を1行に1つ以上入力してください';
+            return;
+          }
+          body.options = options;
+        }
         await updateMutation.mutateAsync({
           params: {
             path: { tenant_id: props.tenantId, project_id: props.projectId, field_id: target.id },
           },
-          body: { name: value.name.trim() },
+          body,
         });
       } else {
         const options = parseSelectOptions(value.optionsText);
@@ -135,6 +149,10 @@ function openEdit(field: CustomFieldResponse) {
   form.reset();
   form.setFieldValue('name', field.name);
   form.setFieldValue('fieldType', field.field_type);
+  // select 型は既存の選択肢を復元して編集できるようにする
+  if (field.field_type === 'select') {
+    form.setFieldValue('optionsText', serializeSelectOptions(field.options));
+  }
   isFormOpen.value = true;
 }
 
@@ -249,7 +267,6 @@ async function confirmDelete() {
                 <Input
                   :id="field.name"
                   placeholder="例: 見積もり"
-                  maxlength="100"
                   :model-value="field.state.value"
                   @blur="field.handleBlur"
                   @update:model-value="(v) => field.handleChange(String(v))"
@@ -261,43 +278,43 @@ async function confirmDelete() {
             </template>
           </form.Field>
 
-          <template v-if="!editingField">
-            <form.Field name="fieldType">
-              <template #default="{ field }">
-                <Field>
-                  <FieldLabel for="custom-field-type">型</FieldLabel>
-                  <Select
-                    :model-value="field.state.value"
-                    @update:model-value="(v) => field.handleChange(v as CustomFieldType)"
-                  >
-                    <SelectTrigger id="custom-field-type" class="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem v-for="t in CUSTOM_FIELD_TYPES" :key="t.value" :value="t.value">
-                        {{ t.label }}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </template>
-            </form.Field>
+          <!-- 型は作成時のみ選択可（PATCH で変更できないため編集時は非表示） -->
+          <form.Field v-if="!editingField" name="fieldType">
+            <template #default="{ field }">
+              <Field>
+                <FieldLabel for="custom-field-type">型</FieldLabel>
+                <Select
+                  :model-value="field.state.value"
+                  @update:model-value="(v) => field.handleChange(v as CustomFieldType)"
+                >
+                  <SelectTrigger id="custom-field-type" class="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="t in CUSTOM_FIELD_TYPES" :key="t.value" :value="t.value">
+                      {{ t.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </template>
+          </form.Field>
 
-            <form.Field v-if="formFieldType === 'select'" name="optionsText">
-              <template #default="{ field }">
-                <Field>
-                  <FieldLabel :for="field.name">選択肢（1行に1つ）</FieldLabel>
-                  <Textarea
-                    :id="field.name"
-                    rows="4"
-                    placeholder="高&#10;中&#10;低"
-                    :model-value="field.state.value"
-                    @update:model-value="(v) => field.handleChange(String(v))"
-                  />
-                </Field>
-              </template>
-            </form.Field>
-          </template>
+          <!-- 選択肢は select 型なら作成・編集とも表示・更新できる -->
+          <form.Field v-if="formFieldType === 'select'" name="optionsText">
+            <template #default="{ field }">
+              <Field>
+                <FieldLabel :for="field.name">選択肢（1行に1つ）</FieldLabel>
+                <Textarea
+                  :id="field.name"
+                  rows="4"
+                  placeholder="高&#10;中&#10;低"
+                  :model-value="field.state.value"
+                  @update:model-value="(v) => field.handleChange(String(v))"
+                />
+              </Field>
+            </template>
+          </form.Field>
 
           <p v-if="formError" role="alert" class="text-sm text-destructive">{{ formError }}</p>
           <DialogFooter>

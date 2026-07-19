@@ -52,3 +52,20 @@ export function parseSelectOptions(text: string): CustomFieldSelectOption[] {
   }
   return options;
 }
+
+/**
+ * ProjectCustomFieldResponse.options（`{ label, value }[]` 相当の JSON）を
+ * 編集フォームの「1行に1つ」テキストへ戻す（parseSelectOptions の逆）。
+ * backend のレスポンスは Option<Value> のため防御的に扱う。
+ */
+export function serializeSelectOptions(options: unknown): string {
+  if (!Array.isArray(options)) return '';
+  return options
+    .map((option) =>
+      option && typeof option === 'object' && 'value' in option
+        ? String((option as { value: unknown }).value)
+        : '',
+    )
+    .filter((value) => value.length > 0)
+    .join('\n');
+}
