@@ -22,5 +22,8 @@ export function formatPercent(before: number, after: number) {
 }
 
 export function escapeTableCell(value: string) {
-  return value.replaceAll('|', '\\|');
+  return value
+    .replaceAll(/[\r\n]+/g, ' ')
+    .replaceAll('`', "'")
+    .replaceAll('|', '\\|');
 }

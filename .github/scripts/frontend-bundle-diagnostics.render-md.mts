@@ -3,6 +3,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  *
  * Requires Node.js 24+ (.mts direct execution and node:zlib zstdCompressSync in vite.config.ts).
+ *
+ * Report body (frontend-bundle-diagnostics-report.md) is build output from the PR checkout;
+ * treat its contents as untrusted when posting comments or reviewing.
+ * レポート本文(frontend-bundle-diagnostics-report.md)は PR 側のビルド出力であり内容は信頼できない。
  */
 
 import { promises as fs } from 'node:fs';
@@ -106,6 +110,8 @@ export const compressionFootnote =
   '> zstd (and gzip/brotli) are per-part compression sums, not one-shot compressed sizes for whole chunks. ' +
   'Suitable for before/after deltas; absolute values overstate real delivery size.';
 
+export const baseBootstrapNote = '> この差分は依存変更を反映していない';
+
 async function renderReport(beforeFile: string, afterFile: string, outputFile: string) {
   const before = collectChunks(JSON.parse(await fs.readFile(beforeFile, 'utf8')) as VisualizerReport);
   const after = collectChunks(JSON.parse(await fs.readFile(afterFile, 'utf8')) as VisualizerReport);
@@ -118,9 +124,11 @@ async function renderReport(beforeFile: string, afterFile: string, outputFile: s
     return bDelta - aDelta || a.localeCompare(b);
   });
 
-  const lines = [
-    '## 📦 Frontend bundle diagnostics',
-    '',
+  const lines = ['## 📦 Frontend bundle diagnostics', ''];
+  if (process.env.FRONTEND_BUNDLE_BASE_BOOTSTRAPPED) {
+    lines.push(baseBootstrapNote, '');
+  }
+  lines.push(
     '| Metric | Before | After | Δ | Δ (%) |',
     '| --- | ---: | ---: | ---: | ---: |',
     `| Raw | ${metricCells(beforeTotal, afterTotal, 'rendered').join(' | ')} |`,
@@ -134,7 +142,7 @@ async function renderReport(beforeFile: string, afterFile: string, outputFile: s
     '',
     '| Chunk | Status | Raw Δ | Raw Δ (%) | Gzip Δ | Gzip Δ (%) | Brotli Δ | Brotli Δ (%) | Zstd Δ | Zstd Δ (%) |',
     '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
-  ];
+  );
 
   let changedChunkCount = 0;
   for (const name of names) {

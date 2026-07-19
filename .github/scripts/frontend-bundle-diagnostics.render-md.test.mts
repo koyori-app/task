@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  baseBootstrapNote,
   collectChunks,
   compressionFootnote,
   getChunkStatus,
@@ -88,5 +89,9 @@ describe('frontend-bundle-diagnostics.render-md', () => {
   it('documents per-part compression sums in the report footnote', () => {
     expect(compressionFootnote).toContain('per-part compression sums');
     expect(compressionFootnote).toContain('before/after deltas');
+  });
+
+  it('documents legacy base bootstrap caveat when base config was copied from after', () => {
+    expect(baseBootstrapNote).toBe('> この差分は依存変更を反映していない');
   });
 });

@@ -35,4 +35,13 @@ describe('frontend-bundle-diagnostics.utility', () => {
   it('escapes table cell pipes', () => {
     expect(escapeTableCell('a|b')).toBe('a\\|b');
   });
+
+  it('sanitizes chunk names with newlines, backticks, and HTML-like content', () => {
+    expect(escapeTableCell('chunk\nbreak')).toBe('chunk break');
+    expect(escapeTableCell('chunk\rbreak')).toBe('chunk break');
+    expect(escapeTableCell('chunk\r\nbreak')).toBe('chunk break');
+    expect(escapeTableCell('chunk`name')).toBe("chunk'name");
+    expect(escapeTableCell('assets/<script>alert.js')).toBe('assets/<script>alert.js');
+    expect(escapeTableCell('a|b\nc`d')).toBe("a\\|b c'd");
+  });
 });

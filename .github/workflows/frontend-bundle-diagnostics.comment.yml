@@ -1,3 +1,5 @@
+# Report body (frontend-bundle-diagnostics-report.md) is PR-side build output; do not trust its contents.
+# レポート本文(frontend-bundle-diagnostics-report.md)は PR 側のビルド出力であり内容は信頼できない。
 name: Frontend bundle diagnostics (comment)
 
 on:

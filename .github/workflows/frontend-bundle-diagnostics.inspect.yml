@@ -1,3 +1,5 @@
+# Report body (frontend-bundle-diagnostics-report.md) is PR-side build output; do not trust its contents.
+# レポート本文(frontend-bundle-diagnostics-report.md)は PR 側のビルド出力であり内容は信頼できない。
 name: Frontend bundle diagnostics (inspect)
 
 on:
@@ -62,6 +64,7 @@ jobs:
             cp after/apps/frontend/package.json before/apps/frontend/package.json
             cp after/apps/frontend/pnpm-lock.yaml before/apps/frontend/pnpm-lock.yaml
             cp after/pnpm-workspace.yaml before/pnpm-workspace.yaml
+            touch "$RUNNER_TEMP/frontend-bundle-report/base-bootstrapped.flag"
           fi
 
       - name: Build base bundle stats
@@ -99,6 +102,9 @@ jobs:
           FRONTEND_BUNDLE_REPORT_ARTIFACT_URL: ${{ steps.upload-visualizer.outputs.artifact-url }}
         run: |
           REPORT_DIR="$RUNNER_TEMP/frontend-bundle-report"
+          if [ -f "$REPORT_DIR/base-bootstrapped.flag" ]; then
+            export FRONTEND_BUNDLE_BASE_BOOTSTRAPPED=1
+          fi
           node after/.github/scripts/frontend-bundle-diagnostics.render-md.mts "$REPORT_DIR/before-stats.json" "$REPORT_DIR/after-stats.json" "$REPORT_DIR/frontend-bundle-diagnostics-report.md"
           test -s "$REPORT_DIR/before-stats.json"
           test -s "$REPORT_DIR/after-stats.json"
