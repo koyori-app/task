@@ -60,7 +60,20 @@ function getBundleVisualizerPlugins() {
   const zstdPlugin: Plugin = {
     name: 'frontend-bundle-diagnostics-zstd',
     async generateBundle(_outputOptions, outputBundle) {
-      const report = JSON.parse(await fs.readFile(statsFilename, 'utf8')) as RawReport;
+      const statsPath = path.resolve(dirname, statsFilename);
+      let raw: string;
+      try {
+        raw = await fs.readFile(statsPath, 'utf8');
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') {
+          throw new Error(
+            `frontend-bundle-diagnostics: missing ${statsFilename}; rollup-plugin-visualizer must emit stats.json before the zstd plugin runs`,
+          );
+        }
+        throw error;
+      }
+      const report = JSON.parse(raw) as RawReport;
       const metasById = new Map(Object.values(report.nodeMetas).map((meta) => [meta.id, meta]));
 
       for (const [bundleId, bundle] of Object.entries(outputBundle)) {
@@ -78,7 +91,7 @@ function getBundleVisualizerPlugins() {
       }
 
       report.options.zstd = true;
-      await fs.writeFile(statsFilename, JSON.stringify(report));
+      await fs.writeFile(statsPath, JSON.stringify(report));
     },
   };
   const plugins = [
@@ -195,7 +208,11 @@ export default defineConfig({
         test: {
           name: 'unit',
           environment: 'happy-dom',
-          include: ['src/**/*.{test,spec}.{ts,tsx}', 'server/**/*.{test,spec}.{ts,tsx}'],
+          include: [
+            'src/**/*.{test,spec}.{ts,tsx}',
+            'server/**/*.{test,spec}.{ts,tsx}',
+            '../../.github/scripts/**/*.{test,spec}.mts',
+          ],
           globals: true,
         },
       },
