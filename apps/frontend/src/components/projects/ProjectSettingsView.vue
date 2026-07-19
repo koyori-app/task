@@ -229,7 +229,7 @@ function onDeleted() {
           </div>
         </form>
 
-<!-- ラベル -->
+        <!-- ラベル -->
         <LabelsSection
           v-else-if="activeSection === 'labels'"
           :tenant-id="tenantId"
