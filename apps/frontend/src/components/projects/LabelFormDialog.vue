@@ -53,9 +53,11 @@ const emit = defineEmits<{ close: [] }>();
 const queryClient = useQueryClient();
 const submitError = ref<string | null>(null);
 
-// backend の CreateLabelRequest / UpdateLabelRequest（length(min=1, max=100)）と同じ制約
+// backend の CreateLabelRequest / UpdateLabelRequest（length(min=1, max=100)）と同じ制約。
+// validator crate は chars().count()（コードポイント単位）で数えるため、UTF-16 単位の
+// String.length / maxlength ではなく Array.from で数える（絵文字を 2 と数えない）
 const nonBlankName = type('string').narrow((name) => {
-  const length = name.trim().length;
+  const length = Array.from(name.trim()).length;
   return length >= 1 && length <= 100;
 });
 
@@ -129,7 +131,6 @@ function onOpenChange(open: boolean) {
               <Input
                 id="label-name"
                 placeholder="bug"
-                maxlength="100"
                 :model-value="field.state.value"
                 @blur="field.handleBlur"
                 @update:model-value="(v) => field.handleChange(String(v))"

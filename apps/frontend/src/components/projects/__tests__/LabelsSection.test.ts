@@ -227,7 +227,6 @@ describe('LabelsSection', () => {
     clickBodyButton('新しいラベル');
     await flushPromises();
 
-    // 101 文字（maxlength は setValue では効かないため検証ロジック自体を確認できる）
     await input('label-name').setValue('a'.repeat(101));
     await formEl().trigger('submit');
     await flushPromises();
@@ -242,12 +241,29 @@ describe('LabelsSection', () => {
     expect(createMutateAsync.mock.calls[0][0].body.name).toBe('a'.repeat(100));
   });
 
-  it('名前入力には maxlength=100 が付いている', async () => {
+  it('絵文字はコードポイント単位で数える（100 個は送信可・101 個は不可、backend の chars() と一致）', async () => {
+    // '😀' は UTF-16 で 2 単位・コードポイントで 1。String.length なら 100 個で 200 と数え
+    // 誤って弾くが、Array.from では 100 と数え backend（chars().count()）と一致する
+    createMutateAsync.mockResolvedValue({ ...bugLabel, name: '😀'.repeat(100) });
     mountView();
     await flushPromises();
+
     clickBodyButton('新しいラベル');
     await flushPromises();
-    expect(input('label-name').attributes('maxlength')).toBe('100');
+
+    // 絵文字 101 個は送信されない
+    await input('label-name').setValue('😀'.repeat(101));
+    await formEl().trigger('submit');
+    await flushPromises();
+    expect(createMutateAsync).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('名前は 1〜100 文字で入力してください');
+
+    // 絵文字 100 個は送信できる（UTF-16 では 200 単位だが弾かれない）
+    await input('label-name').setValue('😀'.repeat(100));
+    await formEl().trigger('submit');
+    await flushPromises();
+    expect(createMutateAsync).toHaveBeenCalledTimes(1);
+    expect(createMutateAsync.mock.calls[0][0].body.name).toBe('😀'.repeat(100));
   });
 
   it('保存リクエスト進行中はフォームダイアログのクローズ要求を無視する', async () => {
