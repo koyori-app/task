@@ -66,9 +66,28 @@ fn install_redirect_url(github: &GithubAppSettings, state: &str) -> String {
     )
 }
 
-fn settings_redirect_url(github: &GithubAppSettings, tenant_id: Uuid, project_id: Uuid) -> String {
+/// インストール完了後に戻す frontend の設定ページ URL。
+/// frontend のルートは display_id / プロジェクトキー基準（`/{display_id}/projects/{key}/settings`）
+/// のため、UUID から引き直して組み立てる（UUID 直書きの旧 URL は実在せず 404 になっていた）。
+async fn settings_redirect_url(
+    db: &sea_orm::DatabaseConnection,
+    github: &GithubAppSettings,
+    tenant_id: Uuid,
+    project_id: Uuid,
+) -> Result<String, AppError> {
+    let tenant = tenants::Entity::find_by_id(tenant_id)
+        .one(db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let project = projects::Entity::find_by_id(project_id)
+        .one(db)
+        .await?
+        .ok_or(AppError::NotFound)?;
     let base = github.github_app_frontend_base_url.trim_end_matches('/');
-    format!("{base}/tenants/{tenant_id}/projects/{project_id}/settings/github")
+    Ok(format!(
+        "{base}/{}/projects/{}/settings?section=integrations",
+        tenant.display_id, project.key
+    ))
 }
 
 /// GitHub Webhook 署名検証（HMAC-SHA256, ConstantTimeEq）。
@@ -234,7 +253,8 @@ pub async fn github_callback(
         .await?;
     }
 
-    let redirect_to = settings_redirect_url(github, payload.tenant_id, payload.project_id);
+    let redirect_to =
+        settings_redirect_url(&state.db, github, payload.tenant_id, payload.project_id).await?;
     Ok(Redirect::temporary(&redirect_to).into_response())
 }
 

@@ -3,7 +3,7 @@ mod common;
 use axum::http::StatusCode;
 use backend::utils::github_oauth_state::{self, GithubOAuthStatePayload};
 use common::{TestApp, TestTenantProject};
-use entity::github_integrations;
+use entity::{github_integrations, projects, tenants};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
 use wiremock::matchers::{method, path, path_regex};
@@ -143,10 +143,41 @@ async fn github_http_integration_suite() {
             .get_with_session(&callback_path(&state_token, installation_id))
             .await;
         let status = response.status();
+        let location = response
+            .headers()
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
         let body = response.text().await.unwrap_or_default();
         assert!(
             status == StatusCode::FOUND || status == StatusCode::TEMPORARY_REDIRECT,
             "callback failed: status={status} body={body}"
+        );
+
+        // 回帰テスト: 戻り先は frontend に実在するルート
+        // （display_id / プロジェクトキー基準 + section クエリ）であること。
+        // 修正前は /tenants/{uuid}/projects/{uuid}/settings/github（実在しない）だった。
+        let tenant = tenants::Entity::find_by_id(tp.tenant_id)
+            .one(&app.state.db)
+            .await
+            .expect("query tenant")
+            .expect("tenant row");
+        let project = projects::Entity::find_by_id(tp.project_id)
+            .one(&app.state.db)
+            .await
+            .expect("query project")
+            .expect("project row");
+        let location = location.expect("location header");
+        assert!(
+            location.ends_with(&format!(
+                "/{}/projects/{}/settings?section=integrations",
+                tenant.display_id, project.key
+            )),
+            "unexpected redirect location: {location}"
+        );
+        assert!(
+            !location.contains("/tenants/"),
+            "redirect still uses non-existent uuid route: {location}"
         );
 
         let row = github_integrations::Entity::find()
