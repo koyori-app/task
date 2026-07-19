@@ -13,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import DeleteProjectDialog from '@/components/sidebar/DeleteProjectDialog.vue';
 import EmojiIconPicker from '@/components/projects/EmojiIconPicker.vue';
 import IntegrationsSection from '@/components/projects/IntegrationsSection.vue';
+import LabelsSection from '@/components/projects/LabelsSection.vue';
 import { apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
@@ -21,8 +22,8 @@ type ProjectResponse = components['schemas']['ProjectResponse'];
 const LIST_PROJECTS_PATH = '/v1/tenants/{tenant_id}/projects' as const;
 const PROJECT_PATH = '/v1/tenants/{tenant_id}/projects/{id}' as const;
 
-/** 設定セクション。Workflow(#370)・Members(#371)・Labels ほか(#373) は増分で追加 */
-type SettingsSection = 'general' | 'integrations' | 'danger';
+/** 設定セクション。Workflow(#370)・Members(#371) ほかは増分で追加 */
+type SettingsSection = 'general' | 'labels' | 'integrations' | 'danger';
 
 const props = defineProps<{
   tenantId: string;
@@ -39,6 +40,7 @@ const icon = ref<string | null>(props.project.icon_emoji ?? null);
 
 const sections: { key: SettingsSection; label: string; danger?: boolean }[] = [
   { key: 'general', label: '一般' },
+  { key: 'labels', label: 'ラベル' },
   { key: 'integrations', label: '連携' },
   { key: 'danger', label: '削除', danger: true },
 ];
@@ -226,6 +228,13 @@ function onDeleted() {
             </form.Subscribe>
           </div>
         </form>
+
+        <!-- ラベル -->
+        <LabelsSection
+          v-else-if="activeSection === 'labels'"
+          :tenant-id="tenantId"
+          :project-id="project.id"
+        />
 
         <!-- 連携 -->
         <IntegrationsSection
