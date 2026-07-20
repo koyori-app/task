@@ -243,6 +243,7 @@ export default defineConfig({
             instances: [
               {
                 browser: 'chromium',
+                viewport: { width: 1440, height: 900 },
               },
             ],
           },
