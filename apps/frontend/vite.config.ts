@@ -229,6 +229,10 @@ export default defineConfig({
             ? [
                 argosVitestPlugin({
                   uploadToArgos: process.env.CI === 'true',
+                  fullPage: false,
+                  element: 'html',
+                  argosCSS:
+                    'html, body { height: 900px !important; min-height: 900px !important; overflow: hidden !important; }',
                 }),
               ]
             : []),
