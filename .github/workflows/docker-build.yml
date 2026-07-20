@@ -1,0 +1,102 @@
+name: Docker Build Check
+
+# 開発用 Docker 構成が壊れていないかを PR 時点で検知する。
+# Dockerfile やコンテナのビルドに関わるファイルが変わったときだけ走らせる
+# （Rust / TypeScript のソース変更では走らない。既存の build ワークフローが見ている）。
+# GitHub Actions は YAML のアンカーを解決しないため、paths は push / pull_request に
+# 同じ内容を書いている。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/backend/Dockerfile'
+      - 'apps/backend/.dockerignore'
+      - 'apps/backend/docker/**'
+      - 'apps/backend/Cargo.toml'
+      - 'apps/backend/Cargo.lock'
+      - 'apps/frontend/Dockerfile'
+      - 'apps/frontend/package.json'
+      - 'apps/frontend/pnpm-lock.yaml'
+      - 'docker-compose.yml'
+      - '.dockerignore'
+      - 'rust-toolchain.toml'
+      - 'pnpm-workspace.yaml'
+      - 'scripts/check-docker-versions.sh'
+      - '.github/workflows/docker-build.yml'
+      - '.github/workflows/frontend-build.yml'
+  pull_request:
+    paths:
+      - 'apps/backend/Dockerfile'
+      - 'apps/backend/.dockerignore'
+      - 'apps/backend/docker/**'
+      - 'apps/backend/Cargo.toml'
+      - 'apps/backend/Cargo.lock'
+      - 'apps/frontend/Dockerfile'
+      - 'apps/frontend/package.json'
+      - 'apps/frontend/pnpm-lock.yaml'
+      - 'docker-compose.yml'
+      - '.dockerignore'
+      - 'rust-toolchain.toml'
+      - 'pnpm-workspace.yaml'
+      - 'scripts/check-docker-versions.sh'
+      - '.github/workflows/docker-build.yml'
+      - '.github/workflows/frontend-build.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Dockerfile の版指定は参照元（rust-toolchain.toml / frontend-build.yml）を
+  # 自動では追わない。rust-toolchain.toml は backend のビルドコンテキストにも
+  # 含まれないため、ずれたままでもビルドは成功してしまう。突き合わせを先に行う。
+  version-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check pinned versions against their sources
+        run: bash scripts/check-docker-versions.sh
+
+  # 開発用の runtime ステージをビルドする。配布用の production ステージは
+  # publish-images.yml がタグ push 時にビルドする（release ビルドは時間がかかるため
+  # PR では回さない）。builder-base までは両者で共通なので大半はここで検証できる。
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: apps/backend
+            dockerfile: apps/backend/Dockerfile
+          - name: frontend
+            context: .
+            dockerfile: apps/frontend/Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build ${{ matrix.name }} (runtime)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          target: runtime
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=devbuild-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=devbuild-${{ matrix.name }}

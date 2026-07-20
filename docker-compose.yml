@@ -1,0 +1,126 @@
+# 開発・動作確認用のフルスタック構成。本番運用は想定していない。
+#
+#   起動:     docker compose up --build
+#   停止:     docker compose down
+#   DB も破棄: docker compose down -v
+#
+#   - frontend: http://localhost:3000
+#   - backend : http://localhost:3400
+#
+# ※ 下の環境変数のシークレット類はすべて開発専用のダミー値。本番では絶対に使わないこと。
+#    値自体に意味はなく、backend の設定バリデーション（32 バイト以上／ちょうど 32 バイト）を
+#    満たすためだけの文字列。
+#
+# ※ 公開ポートはすべて 127.0.0.1 に固定している。ホスト IP を省略した短縮記法
+#    （"5432:5432"）は 0.0.0.0 に bind するため、DB の task/task・認証なしの Valkey・
+#    既知のダミーシークレットを持つ backend が同一 LAN や VPN から到達可能になる。
+#    Docker は iptables を直接操作するのでホスト側のファイアウォールでは塞げない。
+#    実機確認などで LAN に出す必要があるときだけ、その場で 127.0.0.1 を外すこと。
+#
+# マイグレーションは migration サービス（one-shot）が `up` で適用する。`up` は冪等で
+# 既存データを保持する。まっさらにしたい時だけ明示的に:
+#   docker compose run --rm migration /app/migration fresh
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: task
+      POSTGRES_PASSWORD: task
+      POSTGRES_DB: task
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U task -d task"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: valkey/valkey:8.1
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # マイグレーション適用 + SeaORM sync 用の index drop（one-shot）
+  migration:
+    build:
+      context: ./apps/backend
+    image: task-backend:dev
+    command: ["/app/run-migration.sh"]
+    environment:
+      DATABASE_URL: postgresql://task:task@db:5432/task
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build:
+      context: ./apps/backend
+    image: task-backend:dev
+    environment:
+      DATABASE_URL: postgresql://task:task@db:5432/task
+      REDIS_URL: redis://redis:6379
+      LISTEN_ADDR: 0.0.0.0:3400
+      ALLOW_ORIGIN: http://localhost:3000
+      EMAIL_VERIFICATION_APP_URL: http://localhost:3000
+      # --- 開発専用ダミーシークレット（本番使用禁止） ---
+      PERSONAL_TOKEN_SECRET: "dev-only-dummy-personal-token-00"
+      RECOVERY_CODE_SECRET: "dev-only-dummy-recovery-code-000"
+      TOTP_ENCRYPTION_KEY: "dev-only-dummy-totp-key-00000000"
+      # --- SMTP はダミー（メール送信は失敗する。認証メールの中身は確認できない）---
+      SMTP_HOST: localhost
+      SMTP_PORT: "587"
+      SMTP_USERNAME: dummy
+      SMTP_PASSWORD: dummy
+      SMTP_FROM: no-reply@example.com
+    ports:
+      - "127.0.0.1:3400:3400"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    # backend にヘルスチェック用エンドポイントは無いので listen の有無だけを見る
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3400"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    environment:
+      # SSR サーバから backend へのプロキシ先（api-proxy.ts が参照）
+      API_BASE: http://backend:3400
+      APP_URL: http://localhost:3000
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
+    # SSR は起動直後から backend を呼ぶため、listen 開始まで待ってから起動する
+    depends_on:
+      backend:
+        condition: service_healthy
+    # runtime は Bun。イメージには node の fallback シムも入っているが、実行環境を bun に揃える
+    healthcheck:
+      test:
+        ["CMD", "bun", "-e", "require('net').connect(3000,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  pgdata:
