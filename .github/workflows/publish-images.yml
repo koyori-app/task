@@ -1,0 +1,74 @@
+name: Publish Images
+
+# v* のタグを push したときだけ、配布用イメージ（Dockerfile の production ステージ）を
+# ghcr.io へ公開する。main への push では動かない。
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # リリースのビルドは途中で打ち切らない
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      # 片方が失敗しても、もう片方のイメージは公開まで進める
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: apps/backend
+            dockerfile: apps/backend/Dockerfile
+          - name: frontend
+            context: .
+            dockerfile: apps/frontend/Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}-${{ matrix.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          target: production
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
