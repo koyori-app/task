@@ -4,6 +4,12 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    vite-plus:
+      specifier: 0.2.5
+      version: 0.2.5
+
 overrides:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.5
 
@@ -107,10 +113,10 @@ importers:
     devDependencies:
       '@argos-ci/cli':
         specifier: 6.3.0
-        version: 6.3.0(@types/node@24.13.3)
+        version: 6.3.0(@types/node@24.13.3)(supports-color@10.2.2)
       '@argos-ci/playwright':
         specifier: 7.3.6
-        version: 7.3.6(@types/node@24.13.3)
+        version: 7.3.6(@types/node@24.13.3)(supports-color@10.2.2)
       '@chromatic-com/storybook':
         specifier: 5.2.1
         version: 5.2.1(storybook@10.5.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite-plus@0.2.5(@types/node@24.13.3)(@vitejs/devtools@0.4.1)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(@voidzero-dev/vite-plus-core@0.2.5)(esbuild@0.28.1)(happy-dom@20.11.0)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)))
@@ -128,7 +134,7 @@ importers:
         version: 10.5.2(@types/react@19.2.17)(@voidzero-dev/vite-plus-core@0.2.5)(esbuild@0.28.1)(storybook@10.5.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite-plus@0.2.5(@types/node@24.13.3)(@vitejs/devtools@0.4.1)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(@voidzero-dev/vite-plus-core@0.2.5)(esbuild@0.28.1)(happy-dom@20.11.0)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)))
       '@storybook/test-runner':
         specifier: 0.24.4
-        version: 0.24.4(@swc/helpers@0.5.23)(@types/node@24.13.3)(storybook@10.5.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite-plus@0.2.5(@types/node@24.13.3)(@vitejs/devtools@0.4.1)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(@voidzero-dev/vite-plus-core@0.2.5)(esbuild@0.28.1)(happy-dom@20.11.0)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)))
+        version: 0.24.4(@swc/helpers@0.5.23)(@types/node@24.13.3)(storybook@10.5.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite-plus@0.2.5(@types/node@24.13.3)(@vitejs/devtools@0.4.1)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(@voidzero-dev/vite-plus-core@0.2.5)(esbuild@0.28.1)(happy-dom@20.11.0)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)))(supports-color@10.2.2)
       '@storybook/vue3-vite':
         specifier: 10.5.2
         version: 10.5.2(@voidzero-dev/vite-plus-core@0.2.5)(esbuild@0.28.1)(storybook@10.5.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite-plus@0.2.5(@types/node@24.13.3)(@vitejs/devtools@0.4.1)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(@voidzero-dev/vite-plus-core@0.2.5)(esbuild@0.28.1)(happy-dom@20.11.0)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)))(vue@3.5.40(typescript@6.0.3))
@@ -164,7 +170,7 @@ importers:
         version: 20.11.0
       http-server:
         specifier: 14.1.1
-        version: 14.1.1
+        version: 14.1.1(supports-color@10.2.2)
       openapi-typescript:
         specifier: 7.13.0
         version: 7.13.0(typescript@6.0.3)
@@ -202,7 +208,7 @@ importers:
         specifier: 8.1.5
         version: 8.1.5(@voidzero-dev/vite-plus-core@0.2.5)(vue@3.5.40(typescript@6.0.3))
       vite-plus:
-        specifier: 0.2.5
+        specifier: 'catalog:'
         version: 0.2.5(@types/node@24.13.3)(@vitejs/devtools@0.4.1)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(@voidzero-dev/vite-plus-core@0.2.5)(esbuild@0.28.1)(happy-dom@20.11.0)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)
       vitest:
         specifier: 4.1.10
@@ -6765,10 +6771,10 @@ snapshots:
 
   '@argos-ci/browser@6.4.4': {}
 
-  '@argos-ci/cli@6.3.0(@types/node@24.13.3)':
+  '@argos-ci/cli@6.3.0(@types/node@24.13.3)(supports-color@10.2.2)':
     dependencies:
       '@argos-ci/api-client': 0.26.0
-      '@argos-ci/core': 6.6.1(@types/node@24.13.3)
+      '@argos-ci/core': 6.6.1(@types/node@24.13.3)(supports-color@10.2.2)
       commander: 15.0.0
       open: 11.0.0
       ora: 9.4.1
@@ -6777,7 +6783,7 @@ snapshots:
       - '@types/node'
       - supports-color
 
-  '@argos-ci/core@6.6.1(@types/node@24.13.3)':
+  '@argos-ci/core@6.6.1(@types/node@24.13.3)(supports-color@10.2.2)':
     dependencies:
       '@argos-ci/api-client': 0.26.0
       '@argos-ci/util': 4.0.4
@@ -6792,10 +6798,10 @@ snapshots:
       - '@types/node'
       - supports-color
 
-  '@argos-ci/playwright@7.3.6(@types/node@24.13.3)':
+  '@argos-ci/playwright@7.3.6(@types/node@24.13.3)(supports-color@10.2.2)':
     dependencies:
       '@argos-ci/browser': 6.4.4
-      '@argos-ci/core': 6.6.1(@types/node@24.13.3)
+      '@argos-ci/core': 6.6.1(@types/node@24.13.3)(supports-color@10.2.2)
       '@argos-ci/util': 4.0.4
       chalk: 5.6.2
       debug: 4.4.3(supports-color@10.2.2)
@@ -7477,11 +7483,11 @@ snapshots:
       jest-util: 30.4.1
       slash: 3.0.0
 
-  '@jest/core@30.4.2':
+  '@jest/core@30.4.2(supports-color@10.2.2)':
     dependencies:
       '@jest/console': 30.4.1
       '@jest/pattern': 30.4.0
-      '@jest/reporters': 30.4.1
+      '@jest/reporters': 30.4.1(supports-color@10.2.2)
       '@jest/test-result': 30.4.1
       '@jest/transform': 30.4.1
       '@jest/types': 30.4.1
@@ -7562,7 +7568,7 @@ snapshots:
       '@types/node': 24.13.3
       jest-regex-util: 30.4.0
 
-  '@jest/reporters@30.4.1':
+  '@jest/reporters@30.4.1(supports-color@10.2.2)':
     dependencies:
       '@bcoe/v8-coverage': 0.2.3
       '@jest/console': 30.4.1
@@ -7579,7 +7585,7 @@ snapshots:
       istanbul-lib-coverage: 3.2.2
       istanbul-lib-instrument: 6.0.3
       istanbul-lib-report: 3.0.1
-      istanbul-lib-source-maps: 5.0.6
+      istanbul-lib-source-maps: 5.0.6(supports-color@10.2.2)
       istanbul-reports: 3.2.0
       jest-message-util: 30.4.1
       jest-util: 30.4.1
@@ -8579,7 +8585,7 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.17
 
-  '@storybook/test-runner@0.24.4(@swc/helpers@0.5.23)(@types/node@24.13.3)(storybook@10.5.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite-plus@0.2.5(@types/node@24.13.3)(@vitejs/devtools@0.4.1)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(@voidzero-dev/vite-plus-core@0.2.5)(esbuild@0.28.1)(happy-dom@20.11.0)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)))':
+  '@storybook/test-runner@0.24.4(@swc/helpers@0.5.23)(@types/node@24.13.3)(storybook@10.5.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite-plus@0.2.5(@types/node@24.13.3)(@vitejs/devtools@0.4.1)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(@voidzero-dev/vite-plus-core@0.2.5)(esbuild@0.28.1)(happy-dom@20.11.0)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3)))(supports-color@10.2.2)':
     dependencies:
       '@babel/core': 7.29.7
       '@babel/generator': 7.29.7
@@ -8589,15 +8595,15 @@ snapshots:
       '@swc/core': 1.15.46(@swc/helpers@0.5.23)
       '@swc/jest': 0.2.39(@swc/core@1.15.46(@swc/helpers@0.5.23))
       expect-playwright: 0.8.0
-      jest: 30.4.2(@types/node@24.13.3)
+      jest: 30.4.2(@types/node@24.13.3)(supports-color@10.2.2)
       jest-circus: 30.4.2
       jest-environment-node: 30.4.1
       jest-junit: 16.0.0
-      jest-process-manager: 0.4.0
+      jest-process-manager: 0.4.0(supports-color@10.2.2)
       jest-runner: 30.4.2
       jest-serializer-html: 7.1.0
-      jest-watch-typeahead: 3.0.1(jest@30.4.2(@types/node@24.13.3))
-      nyc: 15.1.0
+      jest-watch-typeahead: 3.0.1(jest@30.4.2(@types/node@24.13.3)(supports-color@10.2.2))
+      nyc: 15.1.0(supports-color@10.2.2)
       playwright: 1.61.1
       playwright-core: 1.61.1
       rimraf: 3.0.2
@@ -10818,7 +10824,7 @@ snapshots:
     transitivePeerDependencies:
       - debug
 
-  http-server@14.1.1:
+  http-server@14.1.1(supports-color@10.2.2):
     dependencies:
       basic-auth: 2.0.1
       chalk: 4.1.2
@@ -10829,7 +10835,7 @@ snapshots:
       mime: 1.6.0
       minimist: 1.2.8
       opener: 1.5.2
-      portfinder: 1.0.38
+      portfinder: 1.0.38(supports-color@10.2.2)
       secure-compare: 3.0.1
       union: 0.5.0
       url-join: 4.0.1
@@ -10997,7 +11003,7 @@ snapshots:
       make-dir: 4.0.0
       supports-color: 7.2.0
 
-  istanbul-lib-source-maps@4.0.1:
+  istanbul-lib-source-maps@4.0.1(supports-color@10.2.2):
     dependencies:
       debug: 4.4.3(supports-color@10.2.2)
       istanbul-lib-coverage: 3.2.2
@@ -11005,7 +11011,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  istanbul-lib-source-maps@5.0.6:
+  istanbul-lib-source-maps@5.0.6(supports-color@10.2.2):
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       debug: 4.4.3(supports-color@10.2.2)
@@ -11058,7 +11064,7 @@ snapshots:
 
   jest-cli@30.4.2(@types/node@24.13.3):
     dependencies:
-      '@jest/core': 30.4.2
+      '@jest/core': 30.4.2(supports-color@10.2.2)
       '@jest/test-result': 30.4.1
       '@jest/types': 30.4.1
       chalk: 4.1.2
@@ -11192,7 +11198,7 @@ snapshots:
     optionalDependencies:
       jest-resolve: 30.4.1
 
-  jest-process-manager@0.4.0:
+  jest-process-manager@0.4.0(supports-color@10.2.2):
     dependencies:
       '@types/wait-on': 5.3.4
       chalk: 4.1.2
@@ -11201,7 +11207,7 @@ snapshots:
       find-process: 1.4.11
       prompts: 2.4.2
       signal-exit: 3.0.7
-      spawnd: 5.0.0
+      spawnd: 5.0.0(supports-color@10.2.2)
       tree-kill: 1.2.2
       wait-on: 7.2.0
     transitivePeerDependencies:
@@ -11330,11 +11336,11 @@ snapshots:
       leven: 3.1.0
       pretty-format: 30.4.1
 
-  jest-watch-typeahead@3.0.1(jest@30.4.2(@types/node@24.13.3)):
+  jest-watch-typeahead@3.0.1(jest@30.4.2(@types/node@24.13.3)(supports-color@10.2.2)):
     dependencies:
       ansi-escapes: 7.3.0
       chalk: 5.6.2
-      jest: 30.4.2(@types/node@24.13.3)
+      jest: 30.4.2(@types/node@24.13.3)(supports-color@10.2.2)
       jest-regex-util: 30.4.0
       jest-watcher: 30.4.1
       slash: 5.1.0
@@ -11360,9 +11366,9 @@ snapshots:
       merge-stream: 2.0.0
       supports-color: 8.1.1
 
-  jest@30.4.2(@types/node@24.13.3):
+  jest@30.4.2(@types/node@24.13.3)(supports-color@10.2.2):
     dependencies:
-      '@jest/core': 30.4.2
+      '@jest/core': 30.4.2(supports-color@10.2.2)
       '@jest/types': 30.4.1
       import-local: 3.2.0
       jest-cli: 30.4.2(@types/node@24.13.3)
@@ -11707,7 +11713,7 @@ snapshots:
     dependencies:
       path-key: 3.1.1
 
-  nyc@15.1.0:
+  nyc@15.1.0(supports-color@10.2.2):
     dependencies:
       '@istanbuljs/load-nyc-config': 1.1.0
       '@istanbuljs/schema': 0.1.6
@@ -11724,7 +11730,7 @@ snapshots:
       istanbul-lib-instrument: 4.0.3
       istanbul-lib-processinfo: 2.0.3
       istanbul-lib-report: 3.0.1
-      istanbul-lib-source-maps: 4.0.1
+      istanbul-lib-source-maps: 4.0.1(supports-color@10.2.2)
       istanbul-reports: 3.2.0
       make-dir: 3.1.0
       node-preload: 0.2.1
@@ -12166,7 +12172,7 @@ snapshots:
 
   pngjs@7.0.0: {}
 
-  portfinder@1.0.38:
+  portfinder@1.0.38(supports-color@10.2.2):
     dependencies:
       async: 3.2.6
       debug: 4.4.3(supports-color@10.2.2)
@@ -12611,12 +12617,12 @@ snapshots:
       signal-exit: 3.0.7
       which: 2.0.2
 
-  spawnd@5.0.0:
+  spawnd@5.0.0(supports-color@10.2.2):
     dependencies:
       exit: 0.1.2
       signal-exit: 3.0.7
       tree-kill: 1.2.2
-      wait-port: 0.2.14
+      wait-port: 0.2.14(supports-color@10.2.2)
     transitivePeerDependencies:
       - supports-color
 
@@ -13253,7 +13259,7 @@ snapshots:
       - debug
       - supports-color
 
-  wait-port@0.2.14:
+  wait-port@0.2.14(supports-color@10.2.2):
     dependencies:
       chalk: 2.4.2
       commander: 3.0.2

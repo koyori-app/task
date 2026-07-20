@@ -11,6 +11,7 @@ allowBuilds:
   vue-demi: true
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.5
+  vite-plus: 0.2.5
 minimumReleaseAgeExclude:
   - '@koyori-app/openapi-vue-query'
 overrides:
