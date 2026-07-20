@@ -73,7 +73,7 @@
     "happy-dom": "20.11.0",
     "openapi-typescript": "7.13.0",
     "playwright": "1.61.1",
-    "rolldown": "1.1.5",
+    "rolldown": "1.2.0",
     "rollup-plugin-visualizer": "catalog:",
     "storybook": "10.5.2",
     "tailwindcss": "4.3.3",
