@@ -175,8 +175,8 @@ importers:
         specifier: 1.2.0
         version: 1.2.0
       rollup-plugin-visualizer:
-        specifier: 7.0.0
-        version: 7.0.0(rolldown@1.2.0)
+        specifier: 7.0.1
+        version: 7.0.1(rolldown@1.2.0)
       storybook:
         specifier: 10.5.2
         version: 10.5.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite-plus@0.2.5(@types/node@24.13.3)(@vitejs/devtools@0.4.1)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(@voidzero-dev/vite-plus-core@0.2.5)(esbuild@0.28.1)(happy-dom@20.11.0)(jiti@2.7.0)(publint@0.3.21)(typescript@6.0.3))
@@ -4183,8 +4183,8 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
 
-  rollup-plugin-visualizer@7.0.0:
-    resolution: {integrity: sha512-loo4kmhTg7GMO0hqaUv/azvLPUT2B4jXU3gNMG35gm1mWKpOzhV6rspb/Mqmsfg7oOTdkzdmOckCIwGB5Ca1CA==}
+  rollup-plugin-visualizer@7.0.1:
+    resolution: {integrity: sha512-UJUT4+1Ho4OcWmPYU3sYXgUqI8B8Ayfe06MX7y0qCJ1K8aGoKtR/NDd/2nZqM7ADkrzny+I99Ul7GgyoiVNAgg==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
@@ -8591,7 +8591,7 @@ snapshots:
       '@rolldown/binding-win32-arm64-msvc': 1.2.0
       '@rolldown/binding-win32-x64-msvc': 1.2.0
 
-  rollup-plugin-visualizer@7.0.0(rolldown@1.2.0):
+  rollup-plugin-visualizer@7.0.1(rolldown@1.2.0):
     dependencies:
       open: 11.0.0
       picomatch: 4.0.4
