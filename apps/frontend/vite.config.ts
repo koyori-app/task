@@ -248,21 +248,10 @@ export default defineConfig({
   },
   lint: {
     plugins: ['oxc', 'typescript', 'unicorn', 'vue'],
-    jsPlugins: [
-      '@koyori-app/oxlint-plugin-api-path-params',
-      path.resolve(dirname, 'oxlint-plugins/no-date-now.mjs'),
-    ],
+    jsPlugins: ['@koyori-app/oxlint-plugin-api-path-params'],
     rules: {
       'api-path-params/no-raw-route-id-in-api-path': 'error',
     },
-    overrides: [
-      {
-        files: ['src/**/*.{ts,tsx,vue}'],
-        rules: {
-          'no-date-now/no-date-now': 'error',
-        },
-      },
-    ],
     options: { typeAware: true, typeCheck: true },
   },
 });
