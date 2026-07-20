@@ -10,13 +10,7 @@ allowBuilds:
   esbuild: true
   vue-demi: true
 catalog:
-  '@argos-ci/cli': 6.3.0
-  '@argos-ci/playwright': 7.3.6
-  '@storybook/test-runner': 0.24.4
-  http-server: 14.1.1
-  rollup-plugin-visualizer: 7.0.0
   vite: npm:@voidzero-dev/vite-plus-core@0.2.5
-  vite-plus: 0.2.5
 minimumReleaseAgeExclude:
   - '@koyori-app/openapi-vue-query'
 overrides:
