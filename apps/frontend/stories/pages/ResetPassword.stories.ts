@@ -40,6 +40,7 @@ const meta = {
   tags: ['autodocs'],
   parameters: {
     layout: 'fullscreen',
+    argos: { fitToContent: false },
     docs: {
       description: {
         component:
