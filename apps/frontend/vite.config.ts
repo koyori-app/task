@@ -231,8 +231,7 @@ export default defineConfig({
                   uploadToArgos: process.env.CI === 'true',
                   fullPage: false,
                   element: 'html',
-                  argosCSS:
-                    'html, body { height: 900px !important; min-height: 900px !important; overflow: hidden !important; }',
+                  argosCSS: 'html, body { min-height: 900px !important; }',
                 }),
               ]
             : []),
