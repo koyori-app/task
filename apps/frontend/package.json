@@ -5,7 +5,7 @@
     "dev": "vike dev",
     "build": "vike build",
     "preview": "vike build && vike preview",
-    "prod": "vike build && node ./dist/server/index.mjs",
+    "prod": "vike build && bun ./dist/server/index.mjs",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
     "openapi:generate": "openapi-typescript ./openapi.json -o ./src/generated/api.d.ts",
