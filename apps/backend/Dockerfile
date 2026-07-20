@@ -1,8 +1,21 @@
 # syntax=docker/dockerfile:1
 # backend イメージ。用途ごとに最終ステージを使い分ける。
-#   runtime    … 開発・動作確認用（debug ビルド + psql 同梱）。docker-compose.yml が使う
-#   production … 配布用（release ビルド。psql と run-migration.sh は含まない）
+#   runtime    … 開発・動作確認用（debug ビルド）。docker-compose.yml が使う
+#   production … 配布用（release ビルド）
 # ステージを省略すると最後の production になるので、開発用は target を明示すること。
+#
+# ── 起動手順（配布用イメージでも同じ）─────────────────────────────
+#   1. /app/run-migration.sh   … migration up + UNIQUE INDEX 4 件の DROP
+#   2. /app/backend            … サーバー起動（既定の CMD）
+#
+# 手順 1 を飛ばして /app/migration up だけで済ませると backend は起動しない。
+# backend は起動時に SeaORM の schema sync を無条件で実行する（main.rs）。sync は
+# migration が作る UNIQUE INDEX を「制約」として DROP しようとするが、実体はインデックス
+# なので Postgres が 42704（constraint ... does not exist）を返し、プロセスが落ちる。
+# run-migration.sh はこの衝突を避けるため sync より先に該当インデックスを落とす。
+# 同じ DROP は e2e/scripts/start-backend.sh と apps/backend/tests/common/mod.rs でも
+# 行っており、環境を問わず必要な前処理になっている。
+# ─────────────────────────────────────────────────
 #
 # Rust のバージョンはリポジトリルートの rust-toolchain.toml と合わせること。
 # このイメージのビルドコンテキストは apps/backend なので rust-toolchain.toml はコンテキストに
@@ -50,32 +63,28 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 ########## runtime 共通 ##########
 FROM debian:bookworm-slim AS runtime-base
+# psql は run-migration.sh の DROP INDEX で使う。この DROP は開発専用の処理ではなく、
+# backend が起動するための前提なので配布用にも同梱する（下の「起動手順」を参照）。
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # root では動かさない
 RUN useradd --system --create-home --uid 10001 app
 WORKDIR /app
 
+COPY --chown=app:app --chmod=755 docker/run-migration.sh /app/run-migration.sh
+
 ########## runtime: 開発・動作確認用 ##########
 FROM runtime-base AS runtime
-# psql は run-migration.sh の DROP INDEX で使う
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY --from=builder-debug --chown=app:app /out/backend /app/backend
 COPY --from=builder-debug --chown=app:app /out/migration /app/migration
-COPY --chown=app:app --chmod=755 docker/run-migration.sh /app/run-migration.sh
 
 USER app
 EXPOSE 3400
 CMD ["/app/backend"]
 
 ########## production: 配布用 ##########
-# run-migration.sh の DROP INDEX は開発時の SeaORM schema sync 向けの処理なので含めない。
-# マイグレーションは同梱の /app/migration を明示的に実行して適用する。
 FROM runtime-base AS production
 COPY --from=builder-release --chown=app:app /out/backend /app/backend
 COPY --from=builder-release --chown=app:app /out/migration /app/migration
