@@ -6,9 +6,6 @@ settings:
 
 catalogs:
   default:
-    rollup-plugin-visualizer:
-      specifier: 7.0.0
-      version: 7.0.0
     vite-plus:
       specifier: 0.2.5
       version: 0.2.5
@@ -178,7 +175,7 @@ importers:
         specifier: 1.2.0
         version: 1.2.0
       rollup-plugin-visualizer:
-        specifier: 'catalog:'
+        specifier: 7.0.0
         version: 7.0.0(rolldown@1.2.0)
       storybook:
         specifier: 10.5.2
