@@ -231,7 +231,8 @@ export default defineConfig({
                   uploadToArgos: process.env.CI === 'true',
                   fullPage: false,
                   element: 'html',
-                  argosCSS: 'html, body { min-height: 900px !important; }',
+                  argosCSS:
+                    'html, body { min-height: 900px !important; } #storybook-root > .bg-muted { min-height: 900px !important; height: 900px !important; }',
                 }),
               ]
             : []),
