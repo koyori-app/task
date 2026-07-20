@@ -43,7 +43,21 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Capture and upload Storybook screenshots
-        run: pnpm test:storybook
+      - name: Serve Storybook and capture every story
+        run: |
+          pnpm exec http-server storybook-static --port 6006 --silent &
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:6006/index.json > /dev/null && break
+            if [ "$attempt" = 30 ]; then
+              echo "Storybook did not become ready" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          pnpm test-storybook
         env:
           ARGOS_ENABLED: "true"
+
+      - name: Upload screenshots to Argos
+        if: env.ARGOS_TOKEN != ''
+        run: pnpm exec argos upload screenshots

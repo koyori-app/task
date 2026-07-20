@@ -18,9 +18,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { zstdCompressSync } from 'node:zlib';
-import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
-import { argosVitestPlugin } from '@argos-ci/storybook/vitest-plugin';
-import { playwright } from '@vitest/browser-playwright';
 import { buildEnv } from './buildSrc/env';
 const dirname =
   typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
@@ -125,8 +122,6 @@ function getBundleVisualizerPlugins() {
   return plugins;
 }
 
-// More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
-
 export default defineConfig({
   // Standalone build UI (vite build). Embedded client uses +onCreateApp inject.
   plugins: [
@@ -217,53 +212,12 @@ export default defineConfig({
           globals: true,
         },
       },
-      {
-        extends: true,
-        plugins: [
-          // The plugin will run tests for the stories defined in your Storybook config
-          // See options at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon#storybooktest
-          storybookTest({
-            configDir: path.join(dirname, '.storybook'),
-          }),
-          ...(process.env.ARGOS_ENABLED === 'true'
-            ? [
-                argosVitestPlugin({
-                  uploadToArgos: process.env.CI === 'true',
-                  fullPage: false,
-                  element: 'html',
-                  argosCSS:
-                    'html, body { min-height: 900px !important; } #storybook-root > .bg-muted { min-height: 900px !important; height: 900px !important; }',
-                }),
-              ]
-            : []),
-        ],
-        test: {
-          name: 'storybook',
-          setupFiles: ['./.storybook/vitest.setup.ts'],
-          browser: {
-            enabled: true,
-            headless: true,
-            provider: playwright({}),
-            instances: [
-              {
-                browser: 'chromium',
-                viewport: { width: 1440, height: 900 },
-              },
-            ],
-          },
-        },
-      },
     ],
   },
   fmt: {
     singleQuote: true,
     trailingComma: 'all',
-    ignorePatterns: [
-      'content/**/*.md',
-      'screenshots/**',
-      'src/components/ui/**',
-      'src/components/originui/**',
-    ],
+    ignorePatterns: ['content/**/*.md', 'src/components/ui/**', 'src/components/originui/**'],
   },
   lint: {
     plugins: ['oxc', 'typescript', 'unicorn', 'vue'],

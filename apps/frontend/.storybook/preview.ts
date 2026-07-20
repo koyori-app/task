@@ -21,16 +21,6 @@ const preview: Preview = {
     };
   },
   parameters: {
-    viewport: {
-      defaultViewport: 'desktop1440',
-      viewports: {
-        desktop1440: {
-          name: 'Desktop 1440',
-          styles: { width: '1440px', height: '900px' },
-          type: 'desktop',
-        },
-      },
-    },
     controls: {
       matchers: {
         color: /(background|color)$/i,
