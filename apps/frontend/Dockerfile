@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
-# 開発・動作確認用の frontend イメージ（Vike + Elysia SSR）。
+# frontend イメージ（Vike + Elysia SSR）。
 # pnpm monorepo（catalog はルート pnpm-workspace.yaml）なのでビルドコンテキストはリポジトリルート。
 # build 時に openapi.json から API 型（src/generated/api.d.ts は gitignore）を生成する。
+#
+# vike build の成果物は開発でも配布でも同じなので、runtime と production は同一内容。
+# backend 側の Dockerfile と target 名を揃えるためにステージ名だけ分けてある。
 #
 # Node のバージョンは .github/workflows/frontend-build.yml の node-version と合わせること。
 
@@ -44,3 +47,7 @@ ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
 CMD ["bun", "./dist/server/index.mjs"]
+
+########## production: 配布用 ##########
+# runtime と同一内容。backend の Dockerfile と同じ target 名で参照できるようにするためのエイリアス。
+FROM runtime AS production

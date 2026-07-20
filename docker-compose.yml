@@ -52,6 +52,8 @@ services:
   migration:
     build:
       context: ./apps/backend
+      # 省略すると配布用の production（release ビルド）になるので明示する
+      target: runtime
     image: task-backend:dev
     command: ["/app/run-migration.sh"]
     environment:
@@ -64,6 +66,7 @@ services:
   backend:
     build:
       context: ./apps/backend
+      target: runtime
     image: task-backend:dev
     environment:
       DATABASE_URL: postgresql://task:task@db:5432/task
@@ -102,6 +105,7 @@ services:
     build:
       context: .
       dockerfile: apps/frontend/Dockerfile
+      target: runtime
     environment:
       # SSR サーバから backend へのプロキシ先（api-proxy.ts が参照）
       API_BASE: http://backend:3400
