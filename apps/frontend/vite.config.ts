@@ -211,6 +211,7 @@ export default defineConfig({
           include: [
             'src/**/*.{test,spec}.{ts,tsx}',
             'server/**/*.{test,spec}.{ts,tsx}',
+            'oxlint-plugins/**/*.{test,spec}.mjs',
             '../../.github/scripts/**/*.{test,spec}.mts',
           ],
           globals: true,
