@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: argos-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   argos:
     runs-on: ubuntu-latest

@@ -8,6 +8,10 @@ on:
       - apps/frontend/**
       - .github/workflows/chromatic.yml
 
+concurrency:
+  group: chromatic-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   chromatic:
     runs-on: ubuntu-latest
