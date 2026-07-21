@@ -8,7 +8,7 @@
     "prod": "vike build && bun ./dist/server/index.mjs",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
-    "test-storybook": "test-storybook --url http://127.0.0.1:6006 --maxWorkers=2",
+    "test-storybook": "test-storybook --url http://127.0.0.1:6006 --maxWorkers=2 --ci",
     "openapi:generate": "openapi-typescript ./openapi.json -o ./src/generated/api.d.ts",
     "openapi:export": "cargo run --manifest-path ../backend/Cargo.toml --bin export_openapi -- ./openapi.json",
     "openapi": "pnpm run openapi:export && pnpm run openapi:generate",
