@@ -1,8 +1,8 @@
 import type { Preview } from '@storybook/vue3-vite';
-// @ts-expect-error — Storybook CSS side-effect import (tailwind)
 import '@/assets/css/tailwind.css';
 
-const MOCKED_NOW = '2026-07-15T09:00:00+09:00';
+// Date.now は意図的に凍結していない(経過時間は performance.now を使う)
+const MOCKED_NOW = '2026-07-15T12:00:00+09:00';
 
 const preview: Preview = {
   beforeEach: () => {
