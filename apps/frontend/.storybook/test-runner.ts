@@ -9,7 +9,7 @@ const config: TestRunnerConfig = {
 
     await page.setViewportSize(VIEWPORT);
     await argosScreenshot(page, context.id, {
-      fullPage: false,
+      fullPage: true,
     });
   },
 };
