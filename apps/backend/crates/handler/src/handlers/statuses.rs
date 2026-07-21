@@ -4,10 +4,10 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
-use sea_orm::sea_query::{Expr, Func};
+use sea_orm::sea_query::{Expr, Func, LockType};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, TransactionTrait, prelude::Uuid,
+    QueryOrder, QuerySelect, TransactionTrait, prelude::Uuid,
 };
 use std::collections::HashSet;
 
@@ -16,7 +16,7 @@ use crate::auth_helpers::require_member_or_owner;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use entity::{project_statuses, tasks};
+use entity::{project_statuses, projects, tasks};
 use payload::statuses::*;
 #[axum::debug_handler]
 #[utoipa::path(
@@ -77,12 +77,50 @@ pub async fn create_status(
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let txn = state.db.begin().await?;
+    // A status row cannot be the mutex here: concurrent creates can insert rows
+    // outside the other transaction's locked snapshot. Lock the stable project
+    // row, using the same lock order as update_status, before reading statuses.
+    projects::Entity::find_by_id(project_id)
+        .lock(LockType::Update)
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let statuses = project_statuses::Entity::find()
+        .filter(project_statuses::Column::ProjectId.eq(project_id))
+        .lock(LockType::Update)
+        .all(&txn)
+        .await?;
     if payload.is_default {
         project_statuses::Entity::update_many()
             .col_expr(project_statuses::Column::IsDefault, Expr::value(false))
             .filter(project_statuses::Column::ProjectId.eq(project_id))
             .exec(&txn)
             .await?;
+    }
+    if payload.is_done_state {
+        let previous_done_ids: Vec<Uuid> = statuses
+            .iter()
+            .filter(|status| status.is_done_state)
+            .map(|status| status.id)
+            .collect();
+
+        project_statuses::Entity::update_many()
+            .col_expr(project_statuses::Column::IsDoneState, Expr::value(false))
+            .filter(project_statuses::Column::ProjectId.eq(project_id))
+            .exec(&txn)
+            .await?;
+
+        if !previous_done_ids.is_empty() {
+            tasks::Entity::update_many()
+                .col_expr(
+                    tasks::Column::CompletedAt,
+                    Expr::value(Option::<chrono::DateTime<chrono::Utc>>::None),
+                )
+                .filter(tasks::Column::StatusId.is_in(previous_done_ids))
+                .filter(tasks::Column::DeletedAt.is_null())
+                .exec(&txn)
+                .await?;
+        }
     }
     let status = project_statuses::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -127,19 +165,75 @@ pub async fn update_status(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
-    let status = project_statuses::Entity::find_by_id(id)
-        .filter(project_statuses::Column::ProjectId.eq(project_id))
-        .one(&state.db)
+    let txn = state.db.begin().await?;
+    // Serialize status flag changes for the project. In particular, two concurrent requests
+    // must not both observe themselves as the next Done state.
+    projects::Entity::find_by_id(project_id)
+        .lock(LockType::Update)
+        .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
+    let statuses = project_statuses::Entity::find()
+        .filter(project_statuses::Column::ProjectId.eq(project_id))
+        .lock(LockType::Update)
+        .all(&txn)
+        .await?;
+    let status = statuses
+        .iter()
+        .find(|status| status.id == id)
+        .cloned()
+        .ok_or(AppError::NotFound)?;
     let old_is_done_state = status.is_done_state;
+    if payload.is_default == Some(false) && status.is_default {
+        return Err(AppError::BadRequest);
+    }
+    if payload.is_done_state == Some(false) && old_is_done_state {
+        return Err(AppError::BadRequest);
+    }
     let mut active: project_statuses::ActiveModel = status.into();
-    let txn = state.db.begin().await?;
     if payload.is_default == Some(true) {
         project_statuses::Entity::update_many()
             .col_expr(project_statuses::Column::IsDefault, Expr::value(false))
             .filter(project_statuses::Column::ProjectId.eq(project_id))
             .filter(project_statuses::Column::Id.ne(id))
+            .exec(&txn)
+            .await?;
+    }
+    if payload.is_done_state == Some(true) && !old_is_done_state {
+        let previous_done_ids: Vec<Uuid> = statuses
+            .iter()
+            .filter(|status| status.is_done_state && status.id != id)
+            .map(|status| status.id)
+            .collect();
+
+        project_statuses::Entity::update_many()
+            .col_expr(project_statuses::Column::IsDoneState, Expr::value(false))
+            .filter(project_statuses::Column::ProjectId.eq(project_id))
+            .filter(project_statuses::Column::Id.ne(id))
+            .exec(&txn)
+            .await?;
+
+        if !previous_done_ids.is_empty() {
+            tasks::Entity::update_many()
+                .col_expr(
+                    tasks::Column::CompletedAt,
+                    Expr::value(Option::<chrono::DateTime<chrono::Utc>>::None),
+                )
+                .filter(tasks::Column::StatusId.is_in(previous_done_ids))
+                .filter(tasks::Column::DeletedAt.is_null())
+                .exec(&txn)
+                .await?;
+        }
+        tasks::Entity::update_many()
+            .col_expr(
+                tasks::Column::CompletedAt,
+                Expr::expr(Func::coalesce([
+                    Expr::col(tasks::Column::CompletedAt),
+                    Expr::current_timestamp(),
+                ])),
+            )
+            .filter(tasks::Column::StatusId.eq(id))
+            .filter(tasks::Column::DeletedAt.is_null())
             .exec(&txn)
             .await?;
     }
@@ -159,29 +253,6 @@ pub async fn update_status(
         active.is_done_state = Set(v);
     }
     let updated = active.update(&txn).await?;
-
-    if let Some(new_is_done) = payload.is_done_state
-        && new_is_done != old_is_done_state
-    {
-        let mut task_update = tasks::Entity::update_many()
-            .filter(tasks::Column::StatusId.eq(id))
-            .filter(tasks::Column::DeletedAt.is_null());
-        task_update = if new_is_done {
-            task_update.col_expr(
-                tasks::Column::CompletedAt,
-                Expr::expr(Func::coalesce([
-                    Expr::col(tasks::Column::CompletedAt),
-                    Expr::current_timestamp(),
-                ])),
-            )
-        } else {
-            task_update.col_expr(
-                tasks::Column::CompletedAt,
-                Expr::value(Option::<chrono::DateTime<chrono::Utc>>::None),
-            )
-        };
-        task_update.exec(&txn).await?;
-    }
 
     txn.commit().await?;
     Ok(Json(updated.into()))
@@ -277,20 +348,35 @@ pub async fn delete_status(
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
-    let status = project_statuses::Entity::find_by_id(id)
+    let txn = state.db.begin().await?;
+    let statuses = project_statuses::Entity::find()
         .filter(project_statuses::Column::ProjectId.eq(project_id))
-        .one(&state.db)
-        .await?
+        .lock(LockType::Update)
+        .all(&txn)
+        .await?;
+    let status = statuses
+        .iter()
+        .find(|status| status.id == id)
+        .cloned()
         .ok_or(AppError::NotFound)?;
 
     if status.is_default {
+        return Err(AppError::BadRequest);
+    }
+    if status.is_done_state
+        && statuses
+            .iter()
+            .filter(|status| status.is_done_state)
+            .count()
+            == 1
+    {
         return Err(AppError::BadRequest);
     }
 
     let task_count = tasks::Entity::find()
         .filter(tasks::Column::StatusId.eq(id))
         .filter(tasks::Column::DeletedAt.is_null())
-        .count(&state.db)
+        .count(&txn)
         .await?;
 
     if task_count > 0 {
@@ -298,14 +384,12 @@ pub async fn delete_status(
         if migrate_to == id {
             return Err(AppError::BadRequest);
         }
-        // Verify target status belongs to same project
-        let target_status = project_statuses::Entity::find_by_id(migrate_to)
-            .filter(project_statuses::Column::ProjectId.eq(project_id))
-            .one(&state.db)
-            .await?
+        // The locked snapshot also verifies that the target belongs to this project.
+        let target_status = statuses
+            .iter()
+            .find(|status| status.id == migrate_to)
             .ok_or(AppError::NotFound)?;
 
-        let txn = state.db.begin().await?;
         let mut update =
             tasks::Entity::update_many().col_expr(tasks::Column::StatusId, Expr::value(migrate_to));
         update = if target_status.is_done_state {
@@ -330,12 +414,12 @@ pub async fn delete_status(
         project_statuses::Entity::delete_by_id(id)
             .exec(&txn)
             .await?;
-        txn.commit().await?;
     } else {
         project_statuses::Entity::delete_by_id(id)
-            .exec(&state.db)
+            .exec(&txn)
             .await?;
     }
+    txn.commit().await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
