@@ -25,13 +25,7 @@ const LIST_PROJECTS_PATH = '/v1/tenants/{tenant_id}/projects' as const;
 const PROJECT_PATH = '/v1/tenants/{tenant_id}/projects/{id}' as const;
 
 /** 設定セクション。Members(#371) ほかは増分で追加 */
-type SettingsSection =
-  | 'general'
-  | 'workflow'
-  | 'labels'
-  | 'fields'
-  | 'integrations'
-  | 'danger';
+type SettingsSection = 'general' | 'workflow' | 'labels' | 'fields' | 'integrations' | 'danger';
 
 const props = defineProps<{
   tenantId: string;
