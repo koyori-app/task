@@ -16,7 +16,7 @@ use crate::auth_helpers::require_member_or_owner;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
-use entity::{project_statuses, tasks};
+use entity::{project_statuses, projects, tasks};
 use payload::statuses::*;
 #[axum::debug_handler]
 #[utoipa::path(
@@ -77,6 +77,19 @@ pub async fn create_status(
         .await?;
     require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let txn = state.db.begin().await?;
+    // A status row cannot be the mutex here: concurrent creates can insert rows
+    // outside the other transaction's locked snapshot. Lock the stable project
+    // row, using the same lock order as update_status, before reading statuses.
+    projects::Entity::find_by_id(project_id)
+        .lock(LockType::Update)
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let statuses = project_statuses::Entity::find()
+        .filter(project_statuses::Column::ProjectId.eq(project_id))
+        .lock(LockType::Update)
+        .all(&txn)
+        .await?;
     if payload.is_default {
         project_statuses::Entity::update_many()
             .col_expr(project_statuses::Column::IsDefault, Expr::value(false))
@@ -85,11 +98,29 @@ pub async fn create_status(
             .await?;
     }
     if payload.is_done_state {
+        let previous_done_ids: Vec<Uuid> = statuses
+            .iter()
+            .filter(|status| status.is_done_state)
+            .map(|status| status.id)
+            .collect();
+
         project_statuses::Entity::update_many()
             .col_expr(project_statuses::Column::IsDoneState, Expr::value(false))
             .filter(project_statuses::Column::ProjectId.eq(project_id))
             .exec(&txn)
             .await?;
+
+        if !previous_done_ids.is_empty() {
+            tasks::Entity::update_many()
+                .col_expr(
+                    tasks::Column::CompletedAt,
+                    Expr::value(Option::<chrono::DateTime<chrono::Utc>>::None),
+                )
+                .filter(tasks::Column::StatusId.is_in(previous_done_ids))
+                .filter(tasks::Column::DeletedAt.is_null())
+                .exec(&txn)
+                .await?;
+        }
     }
     let status = project_statuses::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -137,6 +168,11 @@ pub async fn update_status(
     let txn = state.db.begin().await?;
     // Serialize status flag changes for the project. In particular, two concurrent requests
     // must not both observe themselves as the next Done state.
+    projects::Entity::find_by_id(project_id)
+        .lock(LockType::Update)
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
     let statuses = project_statuses::Entity::find()
         .filter(project_statuses::Column::ProjectId.eq(project_id))
         .lock(LockType::Update)

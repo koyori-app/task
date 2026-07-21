@@ -122,7 +122,7 @@ async fn project_statuses(app: &TestApp, tp: &TestTenantProject) -> Vec<project_
 
 #[tokio::test]
 async fn creating_done_status_replaces_the_existing_done_status() {
-    let (app, tp, old_done_id, _default_id, _old_task_id, _next_task_id) = setup().await;
+    let (app, tp, old_done_id, _default_id, old_task_id, _next_task_id) = setup().await;
 
     let new_done_id = create_status(&app, &tp, "Released", false, true).await;
     let statuses = project_statuses(&app, &tp).await;
@@ -140,14 +140,57 @@ async fn creating_done_status_replaces_the_existing_done_status() {
             .unwrap()
             .is_done_state
     );
+    let old_task = tasks::Entity::find_by_id(old_task_id)
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(old_task.status_id, old_done_id);
+    assert!(old_task.completed_at.is_none());
 }
 
 #[tokio::test]
-async fn repeated_create_status_api_calls_cannot_create_multiple_done_statuses() {
+async fn concurrent_create_status_api_calls_cannot_create_multiple_done_statuses() {
     let (app, tp, _old_done_id, _default_id, _old_task_id, _next_task_id) = setup().await;
 
-    let first_created_id = create_status(&app, &tp, "Released", false, true).await;
-    let second_created_id = create_status(&app, &tp, "Archived", false, true).await;
+    let base = app.base_url();
+    let client = app.client().clone();
+    let path = format!(
+        "{base}/v1/tenants/{}/projects/{}/statuses",
+        tp.tenant_id, tp.project_id
+    );
+    let released = serde_json::json!({
+        "name": "Released",
+        "color": "#336699",
+        "position": 2,
+        "is_default": false,
+        "is_done_state": true,
+    });
+    let archived = serde_json::json!({
+        "name": "Archived",
+        "color": "#336699",
+        "position": 3,
+        "is_default": false,
+        "is_done_state": true,
+    });
+    let (first, second) = tokio::join!(
+        client.post(&path).json(&released).send(),
+        client.post(&path).json(&archived).send(),
+    );
+    let first = first.expect("create Released concurrently");
+    let second = second.expect("create Archived concurrently");
+    assert_eq!(first.status(), StatusCode::CREATED);
+    assert_eq!(second.status(), StatusCode::CREATED);
+    let first_created_id: Uuid = first.json::<serde_json::Value>().await.unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let second_created_id: Uuid = second.json::<serde_json::Value>().await.unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
     let statuses = project_statuses(&app, &tp).await;
     let done_statuses: Vec<_> = statuses
         .iter()
@@ -155,14 +198,8 @@ async fn repeated_create_status_api_calls_cannot_create_multiple_done_statuses()
         .collect();
 
     assert_eq!(done_statuses.len(), 1);
-    assert_eq!(done_statuses[0].id, second_created_id);
-    assert!(
-        !statuses
-            .iter()
-            .find(|status| status.id == first_created_id)
-            .unwrap()
-            .is_done_state
-    );
+    assert!([first_created_id, second_created_id].contains(&done_statuses[0].id));
+    assert_ne!(first_created_id, second_created_id);
 }
 
 #[tokio::test]
