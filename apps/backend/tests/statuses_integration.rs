@@ -86,6 +86,125 @@ async fn switch_done(app: &TestApp, tp: &TestTenantProject, status_id: Uuid) -> 
     .status()
 }
 
+async fn update_status(
+    app: &TestApp,
+    tp: &TestTenantProject,
+    status_id: Uuid,
+    payload: serde_json::Value,
+) -> StatusCode {
+    app.put_json_with_session(
+        &format!(
+            "/v1/tenants/{}/projects/{}/statuses/{status_id}",
+            tp.tenant_id, tp.project_id
+        ),
+        payload,
+    )
+    .await
+    .status()
+}
+
+async fn delete_status(app: &TestApp, tp: &TestTenantProject, status_id: Uuid) -> StatusCode {
+    app.delete_with_session(&format!(
+        "/v1/tenants/{}/projects/{}/statuses/{status_id}",
+        tp.tenant_id, tp.project_id
+    ))
+    .await
+    .status()
+}
+
+#[tokio::test]
+async fn current_default_cannot_be_explicitly_unset() {
+    let (app, tp, _old_done_id, default_id, _old_task_id, _next_task_id) = setup().await;
+
+    assert_eq!(
+        update_status(
+            &app,
+            &tp,
+            default_id,
+            serde_json::json!({ "is_default": false }),
+        )
+        .await,
+        StatusCode::BAD_REQUEST
+    );
+
+    let default = project_statuses::Entity::find_by_id(default_id)
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(default.is_default);
+}
+
+#[tokio::test]
+async fn current_done_cannot_be_explicitly_unset_and_completion_is_preserved() {
+    let (app, tp, done_id, _next_done_id, done_task_id, _next_task_id) = setup().await;
+    let completed_at_before = tasks::Entity::find_by_id(done_task_id)
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .completed_at;
+    assert!(completed_at_before.is_some());
+
+    assert_eq!(
+        update_status(
+            &app,
+            &tp,
+            done_id,
+            serde_json::json!({ "is_done_state": false }),
+        )
+        .await,
+        StatusCode::BAD_REQUEST
+    );
+
+    let done = project_statuses::Entity::find_by_id(done_id)
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let done_task = tasks::Entity::find_by_id(done_task_id)
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(done.is_done_state);
+    assert_eq!(done_task.completed_at, completed_at_before);
+}
+
+#[tokio::test]
+async fn only_done_status_cannot_be_deleted() {
+    let (app, tp, done_id, _next_done_id, _old_task_id, _next_task_id) = setup().await;
+
+    assert_eq!(
+        delete_status(&app, &tp, done_id).await,
+        StatusCode::BAD_REQUEST
+    );
+    assert!(
+        project_statuses::Entity::find_by_id(done_id)
+            .one(&app.state.db)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn default_status_cannot_be_deleted() {
+    let (app, tp, _done_id, default_id, _old_task_id, _next_task_id) = setup().await;
+
+    assert_eq!(
+        delete_status(&app, &tp, default_id).await,
+        StatusCode::BAD_REQUEST
+    );
+    assert!(
+        project_statuses::Entity::find_by_id(default_id)
+            .one(&app.state.db)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
 #[tokio::test]
 async fn done_switch_is_unique_and_migrates_task_completion_timestamps() {
     let (app, tp, old_done_id, next_done_id, old_task_id, next_task_id) = setup().await;
