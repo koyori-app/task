@@ -112,6 +112,78 @@ async fn delete_status(app: &TestApp, tp: &TestTenantProject, status_id: Uuid) -
     .status()
 }
 
+async fn project_statuses(app: &TestApp, tp: &TestTenantProject) -> Vec<project_statuses::Model> {
+    project_statuses::Entity::find()
+        .filter(project_statuses::Column::ProjectId.eq(tp.project_id))
+        .all(&app.state.db)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn creating_done_status_replaces_the_existing_done_status() {
+    let (app, tp, old_done_id, _default_id, _old_task_id, _next_task_id) = setup().await;
+
+    let new_done_id = create_status(&app, &tp, "Released", false, true).await;
+    let statuses = project_statuses(&app, &tp).await;
+    let done_statuses: Vec<_> = statuses
+        .iter()
+        .filter(|status| status.is_done_state)
+        .collect();
+
+    assert_eq!(done_statuses.len(), 1);
+    assert_eq!(done_statuses[0].id, new_done_id);
+    assert!(
+        !statuses
+            .iter()
+            .find(|status| status.id == old_done_id)
+            .unwrap()
+            .is_done_state
+    );
+}
+
+#[tokio::test]
+async fn repeated_create_status_api_calls_cannot_create_multiple_done_statuses() {
+    let (app, tp, _old_done_id, _default_id, _old_task_id, _next_task_id) = setup().await;
+
+    let first_created_id = create_status(&app, &tp, "Released", false, true).await;
+    let second_created_id = create_status(&app, &tp, "Archived", false, true).await;
+    let statuses = project_statuses(&app, &tp).await;
+    let done_statuses: Vec<_> = statuses
+        .iter()
+        .filter(|status| status.is_done_state)
+        .collect();
+
+    assert_eq!(done_statuses.len(), 1);
+    assert_eq!(done_statuses[0].id, second_created_id);
+    assert!(
+        !statuses
+            .iter()
+            .find(|status| status.id == first_created_id)
+            .unwrap()
+            .is_done_state
+    );
+}
+
+#[tokio::test]
+async fn creating_default_status_still_replaces_the_existing_default() {
+    let (app, tp, _old_done_id, old_default_id, _old_task_id, _next_task_id) = setup().await;
+
+    let new_default_id = create_status(&app, &tp, "Backlog", true, false).await;
+    let statuses = project_statuses(&app, &tp).await;
+    let default_statuses: Vec<_> = statuses.iter().filter(|status| status.is_default).collect();
+
+    assert_eq!(default_statuses.len(), 1);
+    assert_eq!(default_statuses[0].id, new_default_id);
+    assert!(
+        !statuses
+            .iter()
+            .find(|status| status.id == old_default_id)
+            .unwrap()
+            .is_default
+    );
+}
+
 #[tokio::test]
 async fn current_default_cannot_be_explicitly_unset() {
     let (app, tp, _old_done_id, default_id, _old_task_id, _next_task_id) = setup().await;

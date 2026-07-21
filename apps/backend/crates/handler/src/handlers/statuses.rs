@@ -84,6 +84,13 @@ pub async fn create_status(
             .exec(&txn)
             .await?;
     }
+    if payload.is_done_state {
+        project_statuses::Entity::update_many()
+            .col_expr(project_statuses::Column::IsDoneState, Expr::value(false))
+            .filter(project_statuses::Column::ProjectId.eq(project_id))
+            .exec(&txn)
+            .await?;
+    }
     let status = project_statuses::ActiveModel {
         id: Set(Uuid::new_v4()),
         project_id: Set(project_id),
