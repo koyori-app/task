@@ -1,0 +1,63 @@
+name: Argos Visual Testing
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - apps/frontend/**
+      - .github/workflows/argos.yml
+
+permissions:
+  contents: read
+
+jobs:
+  argos:
+    runs-on: ubuntu-latest
+    env:
+      ARGOS_TOKEN: ${{ secrets.ARGOS_TOKEN }}
+    defaults:
+      run:
+        working-directory: apps/frontend
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: apps/frontend/package.json
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/frontend/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build Storybook
+        run: pnpm build-storybook
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Serve Storybook and capture every story
+        run: |
+          pnpm exec http-server storybook-static --port 6006 --silent &
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:6006/index.json > /dev/null && break
+            if [ "$attempt" = 30 ]; then
+              echo "Storybook did not become ready" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          pnpm test-storybook
+        env:
+          ARGOS_ENABLED: "true"
+
+      - name: Upload screenshots to Argos
+        if: env.ARGOS_TOKEN != ''
+        run: pnpm exec argos upload screenshots
