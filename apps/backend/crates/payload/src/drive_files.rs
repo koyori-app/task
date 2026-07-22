@@ -41,6 +41,8 @@ pub struct DriveFileResponse {
     pub folder_id: Option<Uuid>,
     #[schema(value_type = String, format = "date-time")]
     pub created_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "date-time")]
+    pub updated_at: DateTime<Utc>,
 }
 
 impl From<drive_files::Model> for DriveFileResponse {
@@ -53,6 +55,7 @@ impl From<drive_files::Model> for DriveFileResponse {
             url: content_url(model.id),
             folder_id: model.folder_id,
             created_at: model.created_at.with_timezone(&Utc),
+            updated_at: model.updated_at.with_timezone(&Utc),
         }
     }
 }
@@ -68,6 +71,15 @@ pub struct UpdateFileRequest {
     #[validate(length(min = 1))]
     pub name: Option<String>,
     pub folder_id: Option<Option<Uuid>>,
+}
+
+/// ドライブファイルの本文差し替えリクエスト。
+///
+/// 空文字列は「中身を空にする編集」として許可する（アップロードが 0 バイトを
+/// 拒否するのとは意図的に扱いを変えている）。
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateFileContentRequest {
+    pub content: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

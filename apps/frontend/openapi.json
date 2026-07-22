@@ -5722,6 +5722,129 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/drive/files/{id}/content": {
+      "put": {
+        "tags": ["Drive Files"],
+        "summary": "ドライブファイル本文更新",
+        "operationId": "update_file_content",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ファイルID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateFileContentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "更新されたファイル",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriveFileResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/drive/folders": {
       "get": {
         "tags": ["Drive Folders"],
@@ -18408,7 +18531,16 @@
       },
       "DriveFileResponse": {
         "type": "object",
-        "required": ["id", "name", "size", "mime_type", "url", "folder_id", "created_at"],
+        "required": [
+          "id",
+          "name",
+          "size",
+          "mime_type",
+          "url",
+          "folder_id",
+          "created_at",
+          "updated_at"
+        ],
         "properties": {
           "created_at": {
             "type": "string",
@@ -18431,6 +18563,10 @@
           "size": {
             "type": "integer",
             "format": "int64"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
           },
           "url": {
             "type": "string"
@@ -20173,6 +20309,16 @@
           "position": {
             "type": ["integer", "null"],
             "format": "int32"
+          }
+        }
+      },
+      "UpdateFileContentRequest": {
+        "type": "object",
+        "description": "ドライブファイルの本文差し替えリクエスト。\n\n空文字列は「中身を空にする編集」として許可する（アップロードが 0 バイトを\n拒否するのとは意図的に扱いを変えている）。",
+        "required": ["content"],
+        "properties": {
+          "content": {
+            "type": "string"
           }
         }
       },

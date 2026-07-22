@@ -27,7 +27,8 @@ use entity::{
 };
 use payload::drive_files::*;
 use service::drive::{
-    current_storage_type, effective_quota, guess_mime, is_tenant_owner, tenant_used_bytes,
+    current_storage_type, effective_quota, guess_mime, is_editable_mime, is_tenant_owner,
+    source_mime_override, tenant_used_bytes,
 };
 use service::storage::{ByteStream, StorageError};
 
@@ -314,8 +315,14 @@ pub async fn upload_file(
                 let name = display_name
                     .or_else(|| original_filename.clone())
                     .ok_or(AppError::BadRequest)?;
-                let mime_type = content_type
-                    .unwrap_or_else(|| guess_mime(original_filename.as_deref().unwrap_or(&name)));
+                // ソースコード拡張子はクライアント申告より上書き表を優先する。
+                // ブラウザは .ts を video/mp2t のように申告することがあり、
+                // それを保存すると本文編集エンドポイントが弾いてしまう。
+                let mime_source = original_filename.as_deref().unwrap_or(name.as_str());
+                let mime_type = source_mime_override(mime_source)
+                    .map(str::to_string)
+                    .or(content_type)
+                    .unwrap_or_else(|| guess_mime(mime_source));
 
                 // クォータ事前チェック（既に上限に達していれば即拒否）
                 let used = tenant_used_bytes(&state.db, tenant_id).await?;
@@ -407,6 +414,7 @@ pub async fn upload_file(
                 upload_result.map_err(storage_to_app_error)?;
                 // テナント行を FOR UPDATE でロックしてクォータ確定チェックと INSERT をアトミックに実行。
                 // 並行アップロードが同時にクォータチェックを通過してしまう競合を防ぐ。
+                let now = Utc::now();
                 let result: Result<drive_files::Model, AppError> = async {
                     let txn = state.db.begin().await?;
                     let tenant_q = tenants::Entity::find_by_id(tenant_id)
@@ -431,7 +439,8 @@ pub async fn upload_file(
                         project_id: Set(folder_project_id),
                         uploader_id: Set(auth.user_id),
                         folder_id: Set(folder_id),
-                        created_at: Set(Utc::now().into()),
+                        created_at: Set(now.into()),
+                        updated_at: Set(now.into()),
                     };
                     let saved = model.insert(&txn).await?;
                     txn.commit().await?;
@@ -545,8 +554,110 @@ pub async fn update_file(
         active.project_id = Set(project_id);
     }
 
+    active.updated_at = Set(Utc::now().into());
     let updated = active.update(&state.db).await?;
     Ok(Json(updated.into()))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    put,
+    path = "/files/{id}/content",
+    tag = "Drive Files",
+    summary = "ドライブファイル本文更新",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("id" = Uuid, Path, description = "ファイルID"),
+    ),
+    request_body = UpdateFileContentRequest,
+    responses(
+        (status = 200, description = "更新されたファイル", body = DriveFileResponse),
+        CrudErrors,
+    )
+)]
+pub async fn update_file_content(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, id)): Path<(Uuid, Uuid)>,
+    Json(payload): Json<UpdateFileContentRequest>,
+) -> Result<Json<DriveFileResponse>, AppError> {
+    auth.require_scope(Scope::WriteDrive)?;
+    auth.ensure_tenant_access(&state, tenant_id, None).await?;
+
+    let file = load_tenant_file(&state, tenant_id, id).await?;
+    authorize_file_write(&state, &file, &auth).await?;
+
+    if !is_editable_mime(&file.mime_type) {
+        return Err(AppError::BadRequestDetail(format!(
+            "テキストとして編集できない MIME タイプです: {}",
+            file.mime_type
+        )));
+    }
+
+    let bytes = Bytes::from(payload.content.into_bytes());
+    let new_size = bytes.len() as u64;
+    if new_size > state.drive_config.upload_max_bytes {
+        return Err(AppError::ContentTooLarge);
+    }
+
+    // 既存キーを直接上書きすると、書き込み途中で失敗したときに元の内容が壊れる
+    // （ローカルバックエンドの upload は File::create で切り詰めるため）。
+    // 新しいキーへ書いてから DB を差し替え、コミット後に旧キーを削除する。
+    let old_storage_key = file.storage_key.clone();
+    let old_size = file.size;
+    let new_storage_key = Uuid::new_v4().to_string();
+    let stream: ByteStream = Box::pin(futures::stream::once(async move {
+        Ok::<Bytes, StorageError>(bytes)
+    }));
+    state
+        .storage
+        .upload(&new_storage_key, stream, new_size, &file.mime_type)
+        .await
+        .map_err(storage_to_app_error)?;
+
+    // テナント行を FOR UPDATE でロックしてクォータ確定チェックと UPDATE をアトミックに実行。
+    // 並行編集が同時にクォータチェックを通過する競合を防ぐ（upload_file と同方針）。
+    let new_key_for_update = new_storage_key.clone();
+    let result: Result<drive_files::Model, AppError> = async {
+        let txn = state.db.begin().await?;
+        let tenant = tenants::Entity::find_by_id(tenant_id)
+            .lock_exclusive()
+            .one(&txn)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        let used_now = tenant_used_bytes(&txn, tenant_id).await?;
+        // 差し替え後の使用量 = 現在の合計 − 旧サイズ + 新サイズ
+        let projected = used_now
+            .saturating_sub(old_size)
+            .saturating_add(new_size as i64);
+        if let Some(quota) = effective_quota(&tenant, &state.drive_config)
+            && projected > quota
+        {
+            return Err(AppError::ContentTooLarge);
+        }
+
+        let mut active: drive_files::ActiveModel = file.into();
+        active.size = Set(new_size as i64);
+        active.storage_key = Set(new_key_for_update);
+        active.storage_type = Set(current_storage_type());
+        active.updated_at = Set(Utc::now().into());
+        let saved = active.update(&txn).await?;
+        txn.commit().await?;
+        Ok(saved)
+    }
+    .await;
+
+    match result {
+        Ok(saved) => {
+            // DB は新キーを指しているので旧データは不要。削除に失敗しても更新自体は成立している。
+            let _ = state.storage.delete(&old_storage_key).await;
+            Ok(Json(saved.into()))
+        }
+        Err(e) => {
+            let _ = state.storage.delete(&new_storage_key).await;
+            Err(e)
+        }
+    }
 }
 
 #[axum::debug_handler]
