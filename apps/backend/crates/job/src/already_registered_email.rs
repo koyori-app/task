@@ -56,7 +56,7 @@ pub fn build_storage(pool: &PgPool, _settings: &Settings) -> AlreadyRegisteredEm
 pub async fn setup(
     pool: &PgPool,
     settings: &Settings,
-) -> Result<Arc<AlreadyRegisteredEmailStorage>, sqlx::Error> {
+) -> Result<Arc<AlreadyRegisteredEmailStorage>, anyhow::Error> {
     PostgresStorage::setup(pool).await?;
     Ok(Arc::new(build_storage(pool, settings)))
 }

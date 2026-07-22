@@ -28,34 +28,34 @@ pub struct JobState {
     pub smtp_client: service::smtp::SmtpClient,
 }
 
-pub async fn setup_pool(database_url: &str) -> Result<PgPool, sqlx::Error> {
-    PgPool::connect(database_url).await
+pub async fn setup_pool(database_url: &str) -> Result<PgPool, anyhow::Error> {
+    Ok(PgPool::connect(database_url).await?)
 }
 
 pub async fn setup_verification_email_storage(
     pool: &PgPool,
     settings: &Settings,
-) -> Result<Arc<VerificationEmailStorage>, sqlx::Error> {
+) -> Result<Arc<VerificationEmailStorage>, anyhow::Error> {
     verification_email::setup(pool, settings).await
 }
 
 pub async fn setup_github_webhook_storage(
     pool: &PgPool,
     settings: &Settings,
-) -> Result<Arc<GithubWebhookStorage>, sqlx::Error> {
+) -> Result<Arc<GithubWebhookStorage>, anyhow::Error> {
     github_webhook::setup(pool, settings).await
 }
 
 pub async fn setup_password_reset_email_storage(
     pool: &PgPool,
     settings: &Settings,
-) -> Result<Arc<PasswordResetEmailStorage>, sqlx::Error> {
+) -> Result<Arc<PasswordResetEmailStorage>, anyhow::Error> {
     password_reset_email::setup(pool, settings).await
 }
 
 pub async fn setup_already_registered_email_storage(
     pool: &PgPool,
     settings: &Settings,
-) -> Result<Arc<AlreadyRegisteredEmailStorage>, sqlx::Error> {
+) -> Result<Arc<AlreadyRegisteredEmailStorage>, anyhow::Error> {
     already_registered_email::setup(pool, settings).await
 }

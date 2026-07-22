@@ -3022,7 +3022,6 @@ dependencies = [
  "serde",
  "serde_json",
  "service",
- "sqlx 0.8.6",
  "tracing",
  "uuid",
 ]
