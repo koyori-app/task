@@ -89,11 +89,17 @@ pub async fn tenant_used_bytes<C: ConnectionTrait>(
     db: &C,
     tenant_id: Uuid,
 ) -> Result<i64, AppError> {
+    // Postgres の SUM(bigint) は NUMERIC を返すため、そのまま i64 で受け取ると
+    // 「NUMERIC は INT8 と互換でない」というデコードエラーになる。行が 0 件のときは
+    // SUM が NULL になり素通りするので、テナントにファイルが 1 件でもあると再現する。
+    // BIGINT へキャストしてから受け取る。
     let sum = drive_files::Entity::find()
         .filter(drive_files::Column::TenantId.eq(tenant_id))
         .select_only()
         .column_as(
-            sea_orm::sea_query::Expr::col(drive_files::Column::Size).sum(),
+            sea_orm::sea_query::Expr::col(drive_files::Column::Size)
+                .sum()
+                .cast_as("bigint"),
             "total",
         )
         .into_tuple::<Option<i64>>()
