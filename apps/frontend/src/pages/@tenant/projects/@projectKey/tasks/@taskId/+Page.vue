@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, inject, ref } from 'vue';
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 
@@ -8,6 +8,11 @@ import { Button } from '@/components/ui/button';
 import { useTaskDetail } from '@/composables/useTaskDetail';
 
 const pageContext = usePageContext();
+
+// 削除後遷移の seam。既定は SPA 遷移だが、テスト等が差し替えられるよう inject 経由にする。
+const navigateAfterDelete = inject<(href: string) => void>('navigateAfterDelete', (href) => {
+  void navigate(href);
+});
 
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
 const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
@@ -46,7 +51,7 @@ const {
   taskId,
   onAfterDelete: (href) => {
     closeDeleteDialog();
-    void navigate(href);
+    navigateAfterDelete(href);
   },
 });
 
