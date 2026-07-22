@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 common = { path = "../common" }
 entity = { path = "../entity" }
+github-integration = { path = "../github-integration" }
 job = { path = "../job" }
 payload = { path = "../payload" }
 service = { path = "../service" }

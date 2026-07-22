@@ -17,13 +17,13 @@ use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use crate::settings::GithubAppSettings;
 use entity::{github_integrations, projects, tenants};
-use job::github_webhook::{self, GithubWebhookJob};
-use payload::github::*;
-use service::{
+use github_integration::{
     github_api,
     github_oauth_state::{self, GithubOAuthStatePayload},
     github_token_crypto,
 };
+use job::github_webhook::{self, GithubWebhookJob};
+use payload::github::*;
 
 type HmacSha256 = Hmac<Sha256>;
 

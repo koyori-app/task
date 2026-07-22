@@ -7,7 +7,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::github_oauth_state::TTL_SECS;
-use crate::settings::GithubAppSettings;
+use common::settings::GithubAppSettings;
 
 fn github_api_base() -> &'static str {
     // テスト用オーバーライド以外は定数。OnceLock でキャッシュして毎回 env lookup しない。

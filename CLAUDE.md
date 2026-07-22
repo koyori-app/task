@@ -12,12 +12,14 @@
 
 ```
 entity → common → payload → service → job → handler → backend(bin)
+                ↘ github-integration ↗（service が再エクスポート）
 ```
 
 | クレート | 置くもの |
 |---|---|
 | `entity` | SeaORM エンティティ（sea-orm-cli 生成物。手で整形しない） |
 | `common` | error / settings / db ヘルパー / 通知定数など最下層の横断コード |
+| `github-integration` | OAuth プロトコル層（client / pkce / state / crypto）・GitHub App API・トークン暗号化。**依存は common ＋外部クレートのみ**（entity / axum 非依存。他プロジェクトへ持ち出し可能に保つ） |
 | `payload` | リクエスト/レスポンス DTO。**依存は entity + common のみに閉じる** |
 | `service` | ビジネスロジック・横断サービス（旧 `src/utils`） |
 | `job` | apalis ジョブ。ワーカーは `AppState` ではなく `JobState` を受け取る |
