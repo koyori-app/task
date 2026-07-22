@@ -7184,6 +7184,15 @@ export interface operations {
                     "application/json": components["schemas"]["DriveFileResponse"];
                 };
             };
+            /** @description テキストとして編集できない MIME タイプです */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerError"];
+                };
+            };
             /** @description ログインまたはセッションが必要です */
             401: {
                 headers: {
@@ -7218,6 +7227,15 @@ export interface operations {
                         /** @example internal-error */
                         message: string;
                     };
+                };
+            };
+            /** @description 本文がアップロード上限またはテナントのクォータを超えています */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerError"];
                 };
             };
             /** @description サーバー側で問題が発生しました。時間をおいて再度お試しください */

@@ -463,3 +463,103 @@ async fn update_content_enforces_quota_on_size_delta() {
 
     app.cleanup_user(owner.id).await;
 }
+
+/// 同一ファイルへの並行更新でも DB とストレージが整合し続けること。
+///
+/// ハンドラはテナント行と対象ファイル行をロックしてから旧サイズ・旧ストレージキーを
+/// 読む。ロックが正しく効いていれば、2 本の更新は直列化され、最終状態はどちらか一方の
+/// 内容と完全一致する（部分書き込みや DB と実体の食い違いが起きない）。500 も返さない。
+///
+/// 旧サイズをロック前に読んでいた頃は、並行更新が互いのサイズ差分を取り違えたり
+/// 中間キーを二重削除して壊れ得た。確定的に競合を再現するのは難しいが、`tokio::join`
+/// で 2 本同時に投げて「壊れない」ことを回帰として確認する。
+#[tokio::test]
+async fn update_content_concurrent_updates_stay_consistent() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+
+    let uploaded = upload_file(
+        &app,
+        tp.tenant_id,
+        None,
+        "race.txt",
+        "text/plain",
+        b"initial",
+    )
+    .await;
+    let file_id = file_id_of(&uploaded);
+
+    let url = format!("{}{}", app.base_url(), content_path(tp.tenant_id, file_id));
+    let body_a = "A".repeat(64);
+    let body_b = "B".repeat(128);
+
+    let client_a = app.session_client();
+    let client_b = app.session_client();
+    let (url_a, url_b) = (url.clone(), url.clone());
+    let (send_a, send_b) = (body_a.clone(), body_b.clone());
+
+    let (res_a, res_b) = tokio::join!(
+        async move {
+            client_a
+                .put(&url_a)
+                .json(&serde_json::json!({ "content": send_a }))
+                .send()
+                .await
+        },
+        async move {
+            client_b
+                .put(&url_b)
+                .json(&serde_json::json!({ "content": send_b }))
+                .send()
+                .await
+        },
+    );
+
+    let status_a = res_a.expect("request a").status();
+    let status_b = res_b.expect("request b").status();
+    for status in [status_a, status_b] {
+        assert_ne!(
+            status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "並行更新でサーバーエラーを返さない"
+        );
+        assert!(
+            status == StatusCode::OK || status == StatusCode::PAYLOAD_TOO_LARGE,
+            "更新は成功かクォータ超過のいずれか (実際: {status})"
+        );
+    }
+
+    // 最終状態はどちらか一方の内容と完全一致する（部分書き込みでない）。
+    let content = app
+        .get_with_session(&format!("/v1/drive/files/{file_id}/content"))
+        .await;
+    assert_eq!(content.status(), StatusCode::OK);
+    let final_body = content.text().await.expect("content body");
+    assert!(
+        final_body == body_a || final_body == body_b,
+        "最終内容はいずれかの更新と完全一致するべき (len={})",
+        final_body.len()
+    );
+
+    // メタデータの size が実体のバイト数と一致する（DB とストレージが食い違わない）。
+    let meta = app
+        .get_with_session(&format!(
+            "/v1/tenants/{}/drive/files/{file_id}",
+            tp.tenant_id
+        ))
+        .await;
+    assert_eq!(meta.status(), StatusCode::OK);
+    let meta_body: serde_json::Value = meta.json().await.expect("meta json");
+    assert_eq!(
+        meta_body["size"].as_i64(),
+        Some(final_body.len() as i64),
+        "size が配信される内容のバイト数と一致する"
+    );
+
+    app.cleanup_user(owner.id).await;
+}

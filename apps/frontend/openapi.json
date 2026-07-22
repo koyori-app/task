@@ -5770,6 +5770,16 @@
               }
             }
           },
+          "400": {
+            "description": "テキストとして編集できない MIME タイプです",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
           "401": {
             "description": "ログインまたはセッションが必要です",
             "content": {
@@ -5820,6 +5830,16 @@
                       "example": "internal-error"
                     }
                   }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "本文がアップロード上限またはテナントのクォータを超えています",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
                 }
               }
             }
