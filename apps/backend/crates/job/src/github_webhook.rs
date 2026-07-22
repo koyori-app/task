@@ -48,7 +48,7 @@ pub fn build_storage(pool: &PgPool, _settings: &Settings) -> GithubWebhookStorag
 pub async fn setup(
     pool: &PgPool,
     settings: &Settings,
-) -> Result<Arc<GithubWebhookStorage>, sqlx::Error> {
+) -> Result<Arc<GithubWebhookStorage>, anyhow::Error> {
     PostgresStorage::setup(pool).await?;
     Ok(Arc::new(build_storage(pool, settings)))
 }

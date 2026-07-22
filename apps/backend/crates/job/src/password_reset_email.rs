@@ -52,7 +52,7 @@ pub fn build_storage(pool: &PgPool, _settings: &Settings) -> PasswordResetEmailS
 pub async fn setup(
     pool: &PgPool,
     settings: &Settings,
-) -> Result<Arc<PasswordResetEmailStorage>, sqlx::Error> {
+) -> Result<Arc<PasswordResetEmailStorage>, anyhow::Error> {
     PostgresStorage::setup(pool).await?;
     Ok(Arc::new(build_storage(pool, settings)))
 }
