@@ -5,7 +5,7 @@ import { navigate } from 'vike/client/router';
 import type { EditableField } from '@/components/tasks/editable-field';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
-import { fetchClient, apiClient } from '@/lib/api-vue-query';
+import { fetchClient, apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
 import { clampProgressPct, localDateInputToIso, taskListHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 
@@ -151,13 +151,19 @@ export function useTaskDetail(params: UseTaskDetailParams) {
 
   const listHref = computed(() => taskListHref(tenantDisplayId.value, projectKey.value));
 
+  /** 通常一覧と検索結果の両方を古い内容のまま残さないための invalidate。 */
+  function invalidateTaskListCaches() {
+    return Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['get', LIST_TASKS_PATH] }),
+      queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),
+    ]);
+  }
+
   const deleteTaskMutation = apiClient.useMutation('delete', GET_TASK_PATH, {
     onSuccess: async () => {
       deleteError.value = null;
       queryClient.removeQueries({ queryKey: taskQueryKey.value, exact: true });
-      await queryClient.invalidateQueries({
-        queryKey: ['get', LIST_TASKS_PATH],
-      });
+      await invalidateTaskListCaches();
       onAfterDelete(listHref.value);
     },
     onError: () => {
@@ -187,11 +193,17 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     };
   }
 
-  function applyMutationSuccess(field: MutatingField, revision: number, data: TaskDetail) {
+  function applyMutationSuccess(
+    field: MutatingField,
+    revision: number,
+    data: TaskDetail,
+    // mutation 開始時点の key。ペイン切替後の完了でも対象タスクのキャッシュに書くための固定値
+    queryKey: typeof taskQueryKey.value,
+  ) {
     const appliedRevision = appliedFieldRevisions[field] ?? 0;
     if (revision > appliedRevision) {
       appliedFieldRevisions[field] = revision;
-      queryClient.setQueryData<TaskDetail | null>(taskQueryKey.value, (current) =>
+      queryClient.setQueryData<TaskDetail | null>(queryKey, (current) =>
         current ? { ...current, [field]: data[field] } : data,
       );
     }
@@ -226,8 +238,12 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     if (field === 'status_id') statusError.value = null;
     else fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
 
-    updateTaskMutation.mutate(
-      {
+    // mutate() のコールバックは observer の unmount（分割ビューのペイン切替）で
+    // 破棄されるため、unmount 後も完走する mutateAsync の Promise 側で
+    // キャッシュ更新と invalidate を行う。query key も開始時点で固定する。
+    const queryKey = taskQueryKey.value;
+    updateTaskMutation
+      .mutateAsync({
         params: {
           path: {
             tenant_id: tenantId.value,
@@ -236,15 +252,12 @@ export function useTaskDetail(params: UseTaskDetailParams) {
           },
         },
         body,
-      },
-      {
-        onSuccess: (data: TaskDetail) => {
-          applyMutationSuccess(field, revision, data);
-          void queryClient.invalidateQueries({ queryKey: ['get', LIST_TASKS_PATH] });
-        },
-        onError: () => rollbackOptimistic(field, revision),
-      },
-    );
+      })
+      .then((data: TaskDetail) => {
+        applyMutationSuccess(field, revision, data, queryKey);
+        void invalidateTaskListCaches();
+      })
+      .catch(() => rollbackOptimistic(field, revision));
   }
 
   function onStatusChange(nextStatusId: string) {
