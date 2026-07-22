@@ -20,24 +20,24 @@ use crate::error::{ServerError, internal_server_error};
 use crate::extractors::{AuthUser, CurrentUser, OptionalAuthUser};
 use crate::openapi::OAuthErrors;
 use entity::{oauth_connections, users};
-use service::auth::{AuthError, create_password_hash};
-use service::db::{is_postgres_unique_violation, with_transaction};
-use service::email::normalize_email;
-use service::oauth::client::{TokenResponse, exchange_code, fetch_user_info};
-use service::oauth::crypto::encrypt_token;
-use service::oauth::pkce::{generate_pkce_pair, generate_state};
-use service::oauth::provider::{
+use github_integration::oauth::client::{TokenResponse, exchange_code, fetch_user_info};
+use github_integration::oauth::crypto::encrypt_token;
+use github_integration::oauth::pkce::{generate_pkce_pair, generate_state};
+use github_integration::oauth::provider::{
     ProviderUserInfo, build_authorize_url, get_credentials, normalize_instance_url,
     resolve_endpoints,
 };
+use github_integration::oauth::state::{
+    OAuthStatePayload, build_frontend_oauth_error_redirect, build_frontend_redirect, consume_state,
+    sanitize_redirect_path, store_state,
+};
+use service::auth::{AuthError, create_password_hash};
+use service::db::{is_postgres_unique_violation, with_transaction};
+use service::email::normalize_email;
 use service::passkeys::count_user_passkeys;
 
 use payload::oauth::*;
 use service::login_session::establish_login_session;
-use service::oauth::state::{
-    OAuthStatePayload, build_frontend_oauth_error_redirect, build_frontend_redirect, consume_state,
-    sanitize_redirect_path, store_state,
-};
 
 use crate::AppState;
 
@@ -957,7 +957,7 @@ async fn classify_user_unique_violation(
 }
 
 fn resolve_disconnect_provider(
-    settings: &service::oauth::OAuthSettings,
+    settings: &github_integration::oauth::OAuthSettings,
     provider: &str,
 ) -> Result<String, OAuthError> {
     if provider == "oidc" {
