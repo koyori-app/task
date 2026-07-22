@@ -385,6 +385,7 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
               v-if="task.assignees.length"
               :users="task.assignees.map((a) => a.user)"
               :max-display="5"
+              hide-names
             />
             <p v-else class="text-sm text-muted-foreground">未割当</p>
           </section>

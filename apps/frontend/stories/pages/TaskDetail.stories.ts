@@ -273,7 +273,9 @@ export const Default: Story = {
     await expect(
       canvas.findByText('OIDC フローとセッション管理を実装する。'),
     ).resolves.toBeInTheDocument();
-    await expect(canvas.findByText('田中太郎')).resolves.toBeInTheDocument();
+    // 担当者はアバター（頭文字）のみ表示し、名前テキストは出さない（詳細では hideNames）
+    await expect(canvas.findByText('田')).resolves.toBeInTheDocument();
+    await expect(canvas.queryByText('田中太郎')).not.toBeInTheDocument();
   },
 };
 
