@@ -40,6 +40,11 @@ const props = defineProps<{
   notFound?: boolean;
   error?: boolean;
   deleteDisabled?: boolean;
+  /**
+   * 'page'（既定）はフルページ用に広画面で 3 カラムへ展開する。
+   * 'pane' は分割ビューの狭い右ペイン用に常に 1 カラムで縦積みにする。
+   */
+  layout?: 'page' | 'pane';
 }>();
 
 const emit = defineEmits<{
@@ -247,8 +252,8 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
         </div>
       </header>
 
-      <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <main class="flex flex-col gap-6 lg:col-span-2">
+      <div class="grid grid-cols-1 gap-6" :class="layout === 'pane' ? '' : 'lg:grid-cols-3'">
+        <main class="flex flex-col gap-6" :class="layout === 'pane' ? '' : 'lg:col-span-2'">
           <section class="rounded-lg border p-4">
             <div class="mb-2 flex items-center justify-between gap-2">
               <h2 class="text-sm font-medium text-muted-foreground">説明</h2>
@@ -380,6 +385,7 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
               v-if="task.assignees.length"
               :users="task.assignees.map((a) => a.user)"
               :max-display="5"
+              hide-names
             />
             <p v-else class="text-sm text-muted-foreground">未割当</p>
           </section>

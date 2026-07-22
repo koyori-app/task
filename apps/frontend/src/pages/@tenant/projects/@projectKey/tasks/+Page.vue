@@ -21,11 +21,14 @@ import type { Column } from '@tanstack/vue-table';
 import { useQuery, keepPreviousData } from '@tanstack/vue-query';
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
+import { useMediaQuery } from '@vueuse/core';
 
 import { valueUpdater } from '@/components/ui/table/utils';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
+import TaskDetailPane from '@/components/tasks/TaskDetailPane.vue';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -46,7 +49,7 @@ import TaskTitleLink from '@/components/tasks/TaskTitleLink.vue';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { fetchClient, taskSearchQueryOptions } from '@/lib/api-vue-query';
-import { formatDeadline, taskDetailHref } from '@/lib/task-display';
+import { formatDeadline, taskDetailHref, taskSeqKey } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 
 // ---- 定数 ----
@@ -100,6 +103,50 @@ const {
   isResolving: isProjectResolving,
   isError: isProjectResolveError,
 } = useResolvedProjectId(tenantId, projectKey);
+
+// ---- 分割ビュー: 選択タスクと詳細ペイン ----
+// selectedTaskId は URL/詳細ページと同形の seq key（例: "ENG-42"）を保持する。
+// これにより詳細クエリのキャッシュがフルページ詳細（@taskId）と共有される。
+const selectedTaskId = ref<string | null>(null);
+
+// 広い画面でのみ inline 分割を出す。狭い画面は従来どおり詳細ページへ遷移させる。
+const canInline = useMediaQuery('(min-width: 1024px)');
+const showDetail = computed(() => canInline.value && !!selectedTaskId.value);
+
+// 初期選択を URL クエリ（?selected=KEY）から読む（クライアントのみ）。
+if (!import.meta.env.SSR) {
+  const initialSelected = (
+    pageContext as { urlParsed?: { search?: Record<string, string> } } | undefined
+  )?.urlParsed?.search?.selected;
+  if (initialSelected) selectedTaskId.value = initialSelected;
+}
+
+// 選択の変更を URL に浅く同期する（history を汚さないよう replaceState）。
+function syncSelectionToUrl(seqKey: string | null) {
+  if (import.meta.env.SSR || typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (seqKey) url.searchParams.set('selected', seqKey);
+  else url.searchParams.delete('selected');
+  window.history.replaceState(window.history.state, '', url);
+}
+watch(selectedTaskId, (seqKey) => syncSelectionToUrl(seqKey));
+
+// プロジェクト切替時は選択を解除する（別プロジェクトのタスクを指したままにしない）。
+watch(projectKey, () => {
+  selectedTaskId.value = null;
+});
+
+function onSelectRow(seqId: number) {
+  selectedTaskId.value = taskSeqKey(projectKey.value, seqId);
+}
+
+function closeDetail() {
+  selectedTaskId.value = null;
+}
+
+function isRowActive(seqId: number) {
+  return !!selectedTaskId.value && taskSeqKey(projectKey.value, seqId) === selectedTaskId.value;
+}
 
 // ---- サーバー側検索 ----
 const searchInput = ref('');
@@ -327,6 +374,11 @@ type CreatedTask = components['schemas']['TaskDetailResponse'];
 
 function onTaskCreated(task: CreatedTask) {
   isCreateDialogOpen.value = false;
+  // 分割ビューが出せる画面では作成タスクを右ペインで開く。狭い画面は詳細ページへ遷移。
+  if (canInline.value) {
+    selectedTaskId.value = taskSeqKey(projectKey.value, task.seq_id);
+    return;
+  }
   void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id));
 }
 
@@ -376,6 +428,8 @@ const columns: ColumnDef<TaskRow>[] = [
           projectKey: projectKey.value,
           seqId: task.seq_id,
           title: task.title,
+          inlineSelect: canInline.value,
+          onSelect: onSelectRow,
         }),
       ]);
     },
@@ -496,7 +550,7 @@ const table = useVueTable({
 </script>
 
 <template>
-  <div class="flex flex-col gap-3">
+  <div class="flex min-h-0 flex-1 flex-col gap-3">
     <!-- ローディング / エラー表示 -->
     <div v-if="isInitialLoading" class="flex justify-center py-8">
       <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
@@ -520,222 +574,268 @@ const table = useVueTable({
       プロジェクトが見つかりません
     </div>
 
-    <template v-else>
-      <!-- サーバー側検索ツールバー -->
-      <div class="flex items-center gap-2">
-        <form
-          class="flex w-full max-w-md items-center gap-2"
-          role="search"
-          @submit.prevent="submitSearch"
-        >
-          <div class="relative min-w-0 flex-1">
-            <Search
-              class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              type="search"
-              class="h-8 appearance-none pl-8 pr-8 text-sm [&::-webkit-search-cancel-button]:hidden"
-              placeholder="タスクを検索..."
-              aria-label="タスクを検索"
-              :model-value="searchInput"
-              @update:model-value="scheduleSearch"
-            />
-            <Button
-              v-if="searchInput"
-              type="button"
-              variant="ghost"
-              size="icon"
-              class="absolute right-0 top-0 size-8"
-              aria-label="検索をクリア"
-              @click="clearSearch"
+    <!-- 一覧（左）＋ 詳細ペイン（右）の分割ビュー -->
+    <ResizablePanelGroup
+      v-else
+      direction="horizontal"
+      auto-save-id="tasks-split-view"
+      class="min-h-0 flex-1"
+    >
+      <ResizablePanel :order="1" :min-size="30" class="min-w-0">
+        <div class="flex h-full min-h-0 flex-col gap-3">
+          <!-- サーバー側検索ツールバー -->
+          <div class="flex items-center gap-2">
+            <form
+              class="flex w-full max-w-md items-center gap-2"
+              role="search"
+              @submit.prevent="submitSearch"
             >
-              <X class="size-4" />
-            </Button>
-          </div>
-          <Button
-            type="submit"
-            variant="outline"
-            size="sm"
-            class="h-8"
-            :disabled="!searchInput.trim()"
-          >
-            <Loader2
-              v-if="taskSearchQuery.isFetching.value && isSearchActive"
-              class="mr-1.5 size-4 animate-spin"
-            />
-            <Search v-else class="mr-1.5 size-4" />
-            検索
-          </Button>
-        </form>
-        <Button size="sm" class="ml-auto h-8 text-xs" @click="isCreateDialogOpen = true">
-          新規タスク
-        </Button>
-        <DropdownMenu v-if="!isSearchActive">
-          <DropdownMenuTrigger as-child>
-            <Button variant="outline" size="sm" class="h-8 text-xs">
-              列 <PhCaretDown class="ml-1 size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuCheckboxItem
-              v-for="col in table.getAllColumns().filter((c) => c.getCanHide())"
-              :key="col.id"
-              class="text-sm"
-              :model-value="col.getIsVisible()"
-              @update:model-value="(v) => col.toggleVisibility(!!v)"
-            >
-              {{ col.id }}
-            </DropdownMenuCheckboxItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      <CreateTaskDialog
-        v-if="tenantId && projectId"
-        v-model:open="isCreateDialogOpen"
-        :tenant-id="tenantId"
-        :project-id="projectId"
-        :project-key="projectKey"
-        :statuses="statusesQuery.data.value ?? []"
-        @created="onTaskCreated"
-      />
-
-      <!-- 検索結果。API は検索ヒットの最小情報のみ返すため、虚偽の状態値は補完しない。 -->
-      <div
-        v-if="isSearchActive && taskSearchQuery.isLoading.value && !taskSearchQuery.data.value"
-        class="flex justify-center py-8"
-      >
-        <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-      <div
-        v-else-if="isSearchActive && taskSearchQuery.isError.value"
-        class="flex flex-col items-center gap-2 py-8 text-sm text-destructive"
-      >
-        <span>検索に失敗しました</span>
-        <Button variant="outline" size="sm" @click="taskSearchQuery.refetch()">再試行</Button>
-      </div>
-      <template v-else-if="isSearchActive">
-        <div class="rounded-md border overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead class="h-9 px-3 text-xs">ID</TableHead>
-                <TableHead class="h-9 px-3 text-xs">タイトル</TableHead>
-                <TableHead class="h-9 px-3 text-xs">一致箇所</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow
-                v-for="task in taskSearchQuery.data.value?.tasks ?? []"
-                :key="task.id"
-                class="relative h-10"
+              <div class="relative min-w-0 flex-1">
+                <Search
+                  class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  type="search"
+                  class="h-8 appearance-none pl-8 pr-8 text-sm [&::-webkit-search-cancel-button]:hidden"
+                  placeholder="タスクを検索..."
+                  aria-label="タスクを検索"
+                  :model-value="searchInput"
+                  @update:model-value="scheduleSearch"
+                />
+                <Button
+                  v-if="searchInput"
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  class="absolute right-0 top-0 size-8"
+                  aria-label="検索をクリア"
+                  @click="clearSearch"
+                >
+                  <X class="size-4" />
+                </Button>
+              </div>
+              <Button
+                type="submit"
+                variant="outline"
+                size="sm"
+                class="h-8"
+                :disabled="!searchInput.trim()"
               >
-                <TableCell class="px-3 py-1.5 font-mono text-xs text-muted-foreground">
-                  {{ projectKey }}-{{ task.seq_id }}
-                </TableCell>
-                <TableCell class="px-3 py-1.5">
-                  <TaskTitleLink
-                    :tenant-display-id="tenantDisplayId"
-                    :project-key="projectKey"
-                    :seq-id="task.seq_id"
-                    :title="task.title"
-                  />
-                </TableCell>
-                <!-- highlight は backend の ilike/tsvector/no-match 全経路で動的文字列を
+                <Loader2
+                  v-if="taskSearchQuery.isFetching.value && isSearchActive"
+                  class="mr-1.5 size-4 animate-spin"
+                />
+                <Search v-else class="mr-1.5 size-4" />
+                検索
+              </Button>
+            </form>
+            <Button size="sm" class="ml-auto h-8 text-xs" @click="isCreateDialogOpen = true">
+              新規タスク
+            </Button>
+            <DropdownMenu v-if="!isSearchActive">
+              <DropdownMenuTrigger as-child>
+                <Button variant="outline" size="sm" class="h-8 text-xs">
+                  列 <PhCaretDown class="ml-1 size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuCheckboxItem
+                  v-for="col in table.getAllColumns().filter((c) => c.getCanHide())"
+                  :key="col.id"
+                  class="text-sm"
+                  :model-value="col.getIsVisible()"
+                  @update:model-value="(v) => col.toggleVisibility(!!v)"
+                >
+                  {{ col.id }}
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          <CreateTaskDialog
+            v-if="tenantId && projectId"
+            v-model:open="isCreateDialogOpen"
+            :tenant-id="tenantId"
+            :project-id="projectId"
+            :project-key="projectKey"
+            :statuses="statusesQuery.data.value ?? []"
+            @created="onTaskCreated"
+          />
+
+          <!-- スクロールするテーブル領域（ツールバーとページネーションは固定） -->
+          <div class="min-h-0 flex-1 overflow-y-auto">
+            <!-- 検索結果。API は検索ヒットの最小情報のみ返すため、虚偽の状態値は補完しない。 -->
+            <div
+              v-if="
+                isSearchActive && taskSearchQuery.isLoading.value && !taskSearchQuery.data.value
+              "
+              class="flex justify-center py-8"
+            >
+              <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+            <div
+              v-else-if="isSearchActive && taskSearchQuery.isError.value"
+              class="flex flex-col items-center gap-2 py-8 text-sm text-destructive"
+            >
+              <span>検索に失敗しました</span>
+              <Button variant="outline" size="sm" @click="taskSearchQuery.refetch()">再試行</Button>
+            </div>
+            <template v-else-if="isSearchActive">
+              <div class="rounded-md border overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead class="h-9 px-3 text-xs">ID</TableHead>
+                      <TableHead class="h-9 px-3 text-xs">タイトル</TableHead>
+                      <TableHead class="h-9 px-3 text-xs">一致箇所</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow
+                      v-for="task in taskSearchQuery.data.value?.tasks ?? []"
+                      :key="task.id"
+                      class="relative h-10"
+                      :class="isRowActive(task.seq_id) && 'bg-muted'"
+                    >
+                      <TableCell class="px-3 py-1.5 font-mono text-xs text-muted-foreground">
+                        {{ projectKey }}-{{ task.seq_id }}
+                      </TableCell>
+                      <TableCell class="px-3 py-1.5">
+                        <TaskTitleLink
+                          :tenant-display-id="tenantDisplayId"
+                          :project-key="projectKey"
+                          :seq-id="task.seq_id"
+                          :title="task.title"
+                          :inline-select="canInline"
+                          @select="onSelectRow"
+                        />
+                      </TableCell>
+                      <!-- highlight は backend の ilike/tsvector/no-match 全経路で動的文字列を
                      html_escape 済み。唯一 backend が付与する <em> のみ HTML として描画する。 -->
-                <TableCell
-                  class="max-w-md truncate px-3 py-1.5 text-xs text-muted-foreground"
-                  v-html="task.highlight"
-                />
-              </TableRow>
-              <TableRow v-if="!taskSearchQuery.data.value?.tasks.length">
-                <TableCell :colspan="3" class="h-24 text-center text-sm text-muted-foreground">
-                  検索結果がありません
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
-        <div class="text-xs text-muted-foreground">
-          上位 {{ taskSearchQuery.data.value?.tasks.length ?? 0 }} 件 / 全
-          {{ taskSearchQuery.data.value?.total ?? 0 }} 件
-        </div>
-      </template>
-
-      <!-- 通常一覧テーブル -->
-      <div v-else class="rounded-md border overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow v-for="hg in table.getHeaderGroups()" :key="hg.id">
-              <TableHead v-for="header in hg.headers" :key="header.id" class="h-9 text-xs px-3">
-                <FlexRender
-                  v-if="!header.isPlaceholder"
-                  :render="header.column.columnDef.header"
-                  :props="header.getContext()"
-                />
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            <template v-if="table.getRowModel().rows?.length">
-              <TableRow
-                v-for="row in table.getRowModel().rows"
-                :key="row.id"
-                :data-state="row.getIsSelected() && 'selected'"
-                class="relative h-10"
-              >
-                <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id" class="py-1.5 px-3">
-                  <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
-                </TableCell>
-              </TableRow>
+                      <TableCell
+                        class="max-w-md truncate px-3 py-1.5 text-xs text-muted-foreground"
+                        v-html="task.highlight"
+                      />
+                    </TableRow>
+                    <TableRow v-if="!taskSearchQuery.data.value?.tasks.length">
+                      <TableCell
+                        :colspan="3"
+                        class="h-24 text-center text-sm text-muted-foreground"
+                      >
+                        検索結果がありません
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+              <div class="text-xs text-muted-foreground">
+                上位 {{ taskSearchQuery.data.value?.tasks.length ?? 0 }} 件 / 全
+                {{ taskSearchQuery.data.value?.total ?? 0 }} 件
+              </div>
             </template>
-            <TableRow v-else>
-              <TableCell
-                :colspan="columns.length"
-                class="h-24 text-center text-sm text-muted-foreground"
-              >
-                タスクが見つかりません
-              </TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
-      </div>
 
-      <!-- ページネーション（API total 連動のサーバーサイド） -->
-      <div
-        v-if="!isSearchActive"
-        class="flex items-center justify-between text-xs text-muted-foreground"
-      >
-        <span>
-          {{ table.getFilteredSelectedRowModel().rows.length }} / {{ taskTotal }} 件選択
-        </span>
-        <div class="flex items-center gap-2">
-          <span>
-            {{ taskTotal === 0 ? 0 : pagination.pageIndex * pagination.pageSize + 1 }}–{{
-              Math.min((pagination.pageIndex + 1) * pagination.pageSize, taskTotal)
-            }}
-            / {{ taskTotal }} 件
-          </span>
-          <div class="flex gap-1.5">
-            <Button
-              variant="outline"
-              size="sm"
-              class="h-7 text-xs"
-              :disabled="!table.getCanPreviousPage()"
-              @click="table.previousPage()"
-              >前へ</Button
-            >
-            <Button
-              variant="outline"
-              size="sm"
-              class="h-7 text-xs"
-              :disabled="!table.getCanNextPage()"
-              @click="table.nextPage()"
-              >次へ</Button
-            >
+            <!-- 通常一覧テーブル -->
+            <div v-else class="rounded-md border overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow v-for="hg in table.getHeaderGroups()" :key="hg.id">
+                    <TableHead
+                      v-for="header in hg.headers"
+                      :key="header.id"
+                      class="h-9 text-xs px-3"
+                    >
+                      <FlexRender
+                        v-if="!header.isPlaceholder"
+                        :render="header.column.columnDef.header"
+                        :props="header.getContext()"
+                      />
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <template v-if="table.getRowModel().rows?.length">
+                    <TableRow
+                      v-for="row in table.getRowModel().rows"
+                      :key="row.id"
+                      :data-state="row.getIsSelected() && 'selected'"
+                      class="relative h-10"
+                      :class="isRowActive(row.original.seq_id) && 'bg-muted'"
+                    >
+                      <TableCell
+                        v-for="cell in row.getVisibleCells()"
+                        :key="cell.id"
+                        class="py-1.5 px-3"
+                      >
+                        <FlexRender
+                          :render="cell.column.columnDef.cell"
+                          :props="cell.getContext()"
+                        />
+                      </TableCell>
+                    </TableRow>
+                  </template>
+                  <TableRow v-else>
+                    <TableCell
+                      :colspan="columns.length"
+                      class="h-24 text-center text-sm text-muted-foreground"
+                    >
+                      タスクが見つかりません
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <!-- ページネーション（API total 連動のサーバーサイド） -->
+          <div
+            v-if="!isSearchActive"
+            class="flex items-center justify-between text-xs text-muted-foreground"
+          >
+            <span>
+              {{ table.getFilteredSelectedRowModel().rows.length }} / {{ taskTotal }} 件選択
+            </span>
+            <div class="flex items-center gap-2">
+              <span>
+                {{ taskTotal === 0 ? 0 : pagination.pageIndex * pagination.pageSize + 1 }}–{{
+                  Math.min((pagination.pageIndex + 1) * pagination.pageSize, taskTotal)
+                }}
+                / {{ taskTotal }} 件
+              </span>
+              <div class="flex gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-7 text-xs"
+                  :disabled="!table.getCanPreviousPage()"
+                  @click="table.previousPage()"
+                  >前へ</Button
+                >
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-7 text-xs"
+                  :disabled="!table.getCanNextPage()"
+                  @click="table.nextPage()"
+                  >次へ</Button
+                >
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </template>
+      </ResizablePanel>
+
+      <template v-if="showDetail">
+        <ResizableHandle with-handle />
+        <ResizablePanel :order="2" :default-size="40" :min-size="26" class="min-w-0">
+          <TaskDetailPane
+            :key="selectedTaskId ?? ''"
+            :tenant-display-id="tenantDisplayId"
+            :project-key="projectKey"
+            :task-id="selectedTaskId ?? ''"
+            @close="closeDetail"
+          />
+        </ResizablePanel>
+      </template>
+    </ResizablePanelGroup>
   </div>
 </template>

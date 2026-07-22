@@ -11,9 +11,12 @@ const props = withDefaults(
     users: UserSummary[];
     /** 重ね表示する最大数（超過分は +N チップ） */
     maxDisplay?: number;
+    /** true のとき「先頭名 + 他N名」テキストを出さずアバターのみ表示する */
+    hideNames?: boolean;
   }>(),
   {
     maxDisplay: 3,
+    hideNames: false,
   },
 );
 
@@ -51,8 +54,9 @@ function initials(username: string) {
         +{{ overflowCount }}
       </div>
     </div>
-    <!-- 先頭名 + 他N名 テキスト（殿指示により維持。N は overflowCount と同義） -->
-    <span class="text-xs truncate max-w-28 text-muted-foreground">
+    <!-- 先頭名 + 他N名 テキスト（殿指示により維持。N は overflowCount と同義）。
+         hideNames 指定時はアバターのみ（タスク詳細の担当者欄で使用） -->
+    <span v-if="!hideNames" class="text-xs truncate max-w-28 text-muted-foreground">
       <template v-if="users.length === 1">{{ firstUser?.username }}</template>
       <template v-else-if="overflowCount > 0"
         >{{ firstUser?.username }} 他{{ overflowCount }}名</template

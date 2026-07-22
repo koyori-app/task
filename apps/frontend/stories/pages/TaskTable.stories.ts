@@ -304,6 +304,15 @@ function createMockFetch(
       }
       return jsonResponse(overrides.searchTasks ?? sampleSearchTasks);
     }
+    // 単体タスク詳細（分割ビューのペインが叩く）: /tasks/{seqKey}
+    const detailMatch = url.match(/\/tasks\/([^/?]+)(?:\?|$)/);
+    if (detailMatch) {
+      const list = (overrides.tasks ?? sampleTasks).tasks as Array<{ seq_id: number }>;
+      const found = list.find(
+        (t) => `${mockContext.routeParams.projectKey}-${t.seq_id}` === detailMatch[1],
+      );
+      return jsonResponse(found ?? list[0]);
+    }
     if (url.includes('/tasks')) {
       return jsonResponse(overrides.tasks ?? sampleTasks);
     }
@@ -672,7 +681,12 @@ export const RowAccessibility: Story = {
     rowCheckbox.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
     await expect(rowCheckbox).toHaveFocus();
 
+    // 分割ビュー: 広い画面では素の左クリックで遷移せず、詳細を右ペインに inline 表示する。
+    // href（ディープリンク）は残しつつ、選択で右ペインが開き URL の ?selected= に反映される。
     await userEvent.click(taskLink);
-    await expect(window.location.pathname).toBe('/tenant-123/projects/ENG/tasks/ENG-1');
+    await expect(
+      canvas.findByRole('button', { name: '詳細を閉じる' }),
+    ).resolves.toBeInTheDocument();
+    await expect(new URLSearchParams(window.location.search).get('selected')).toBe('ENG-1');
   },
 };

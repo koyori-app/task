@@ -1,0 +1,201 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { defineComponent, ref } from 'vue';
+import { mount, flushPromises } from '@vue/test-utils';
+import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
+import type { paths } from '@/generated/api';
+import { useTaskDetail } from '../useTaskDetail';
+
+const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
+const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
+const TASK_SEARCH_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/search' as const;
+
+// vi.mock の factory から参照するため hoisted に置く
+const { TENANT_ID, PROJECT_ID, TASK_SEQ_KEY, baseTask, putControl, fetchMock } = vi.hoisted(() => {
+  const TENANT_ID = 'tenant-1';
+  const PROJECT_ID = 'project-1';
+  const TASK_SEQ_KEY = 'ENG-1';
+
+  const baseTask = {
+    id: '00000000-0000-0000-0000-000000000010',
+    seq_key: TASK_SEQ_KEY,
+    title: '元のタイトル',
+    description: null,
+    status_id: 'status-1',
+    progress_pct: 0,
+    soft_deadline: null,
+    hard_deadline: null,
+  };
+
+  function jsonResponse(body: unknown, status = 200) {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // PUT を保留して任意のタイミングで完了させるための deferred
+  const putControl: { resolve?: (task: Record<string, unknown>) => void } = {};
+
+  const fetchMock = async (input: Request) => {
+    const url = input.url;
+    const method = input.method.toUpperCase();
+
+    if (method === 'GET' && url.endsWith(`/tasks/${TASK_SEQ_KEY}`)) {
+      return jsonResponse(baseTask);
+    }
+    if (method === 'GET' && url.endsWith('/statuses')) {
+      return jsonResponse([]);
+    }
+    if (method === 'PUT' && url.endsWith(`/tasks/${TASK_SEQ_KEY}`)) {
+      return new Promise<Response>((resolve) => {
+        putControl.resolve = (task) => resolve(jsonResponse(task));
+      });
+    }
+    if (method === 'DELETE' && url.endsWith(`/tasks/${TASK_SEQ_KEY}`)) {
+      return new Response(null, { status: 204 });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  return { TENANT_ID, PROJECT_ID, TASK_SEQ_KEY, baseTask, putControl, fetchMock };
+});
+
+vi.mock('@/lib/api-vue-query', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api-vue-query')>();
+  const { default: createFetchClient } = await import('openapi-fetch');
+  const { createClient } = await import('@koyori-app/openapi-vue-query');
+  const testFetchClient = createFetchClient<paths>({
+    baseUrl: 'http://test.local/api',
+    fetch: (req: Request) => fetchMock(req),
+  });
+  return {
+    ...actual,
+    fetchClient: testFetchClient,
+    apiClient: createClient<paths>(testFetchClient),
+  };
+});
+
+vi.mock('@/composables/useResolvedTenantId', () => ({
+  useResolvedTenantId: () => ({
+    tenantId: ref(TENANT_ID),
+    isTenantNotFound: ref(false),
+    isResolving: ref(false),
+    isError: ref(false),
+  }),
+}));
+
+vi.mock('@/composables/useResolvedProjectId', () => ({
+  useResolvedProjectId: () => ({
+    projectId: ref(PROJECT_ID),
+    isProjectNotFound: ref(false),
+    isResolving: ref(false),
+    isError: ref(false),
+  }),
+}));
+
+const taskQueryKey = [
+  'get',
+  GET_TASK_PATH,
+  { params: { path: { tenant_id: TENANT_ID, project_id: PROJECT_ID, id: TASK_SEQ_KEY } } },
+] as const;
+const listQueryKey = [
+  'get',
+  LIST_TASKS_PATH,
+  { params: { path: { tenant_id: TENANT_ID, project_id: PROJECT_ID } } },
+] as const;
+const searchQueryKey = [
+  'get',
+  TASK_SEARCH_PATH,
+  {
+    params: {
+      path: { tenant_id: TENANT_ID, project_id: PROJECT_ID },
+      query: { q: '元の' },
+    },
+  },
+] as const;
+
+describe('useTaskDetail のキャッシュ同期', () => {
+  let queryClient: QueryClient;
+  let detail: ReturnType<typeof useTaskDetail>;
+  let onAfterDelete: ReturnType<typeof vi.fn<(listHref: string) => void>>;
+
+  function mountHost() {
+    const Host = defineComponent({
+      setup() {
+        detail = useTaskDetail({
+          tenantDisplayId: 'acme',
+          projectKey: 'ENG',
+          taskId: TASK_SEQ_KEY,
+          onAfterDelete,
+        });
+        return () => null;
+      },
+    });
+    return mount(Host, {
+      global: { plugins: [[VueQueryPlugin, { queryClient }]] },
+    });
+  }
+
+  function seedListAndSearchCaches() {
+    queryClient.setQueryData(listQueryKey, { tasks: [baseTask] });
+    queryClient.setQueryData(searchQueryKey, { tasks: [baseTask] });
+  }
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    onAfterDelete = vi.fn<(listHref: string) => void>();
+    putControl.resolve = undefined;
+  });
+
+  it('ペイン切替（unmount）後に完了した更新でも、詳細キャッシュ更新と一覧・検索の invalidate が走る', async () => {
+    const wrapper = mountHost();
+    await flushPromises();
+    expect(queryClient.getQueryData(taskQueryKey)).toMatchObject({ title: '元のタイトル' });
+
+    seedListAndSearchCaches();
+
+    detail.onSaveTitle('新しいタイトル');
+    await flushPromises();
+    expect(putControl.resolve).toBeDefined();
+
+    // PUT が完了する前にペインを切り替える（コンポーネント再生成で unmount）
+    wrapper.unmount();
+
+    putControl.resolve!({ ...baseTask, title: '新しいタイトル' });
+    await flushPromises();
+
+    expect(queryClient.getQueryData(taskQueryKey)).toMatchObject({ title: '新しいタイトル' });
+    expect(queryClient.getQueryState(listQueryKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(searchQueryKey)?.isInvalidated).toBe(true);
+  });
+
+  it('検索結果表示中の更新で検索キャッシュも invalidate される（mount したまま）', async () => {
+    mountHost();
+    await flushPromises();
+    seedListAndSearchCaches();
+
+    detail.onSaveTitle('新しいタイトル');
+    await flushPromises();
+    putControl.resolve!({ ...baseTask, title: '新しいタイトル' });
+    await flushPromises();
+
+    expect(queryClient.getQueryState(searchQueryKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(listQueryKey)?.isInvalidated).toBe(true);
+  });
+
+  it('削除成功時に検索キャッシュが invalidate され、詳細キャッシュは除去される', async () => {
+    mountHost();
+    await flushPromises();
+    seedListAndSearchCaches();
+
+    detail.confirmDelete();
+    await flushPromises();
+
+    expect(queryClient.getQueryState(taskQueryKey)).toBeUndefined();
+    expect(queryClient.getQueryState(listQueryKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(searchQueryKey)?.isInvalidated).toBe(true);
+    expect(onAfterDelete).toHaveBeenCalledWith('/acme/projects/ENG/tasks');
+  });
+});
