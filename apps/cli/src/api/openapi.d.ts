@@ -862,6 +862,23 @@ export interface paths {
         patch: operations["update_file"];
         trace?: never;
     };
+    "/v1/tenants/{tenant_id}/drive/files/{id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** ドライブファイル本文更新 */
+        put: operations["update_file_content"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tenants/{tenant_id}/drive/folders": {
         parameters: {
             query?: never;
@@ -2244,6 +2261,8 @@ export interface components {
             name: string;
             /** Format: int64 */
             size: number;
+            /** Format: date-time */
+            updated_at: string;
             url: string;
         };
         DriveFolderResponse: {
@@ -2854,6 +2873,15 @@ export interface components {
             options?: unknown;
             /** Format: int32 */
             position?: number | null;
+        };
+        /**
+         * @description ドライブファイルの本文差し替えリクエスト。
+         *
+         *     空文字列は「中身を空にする編集」として許可する（アップロードが 0 バイトを
+         *     拒否するのとは意図的に扱いを変えている）。
+         */
+        UpdateFileContentRequest: {
+            content: string;
         };
         UpdateFileRequest: {
             /** Format: uuid */
@@ -7113,6 +7141,101 @@ export interface operations {
                         /** @example internal-error */
                         message: string;
                     };
+                };
+            };
+            /** @description サーバー側で問題が発生しました。時間をおいて再度お試しください */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example internal-error */
+                        message: string;
+                    };
+                };
+            };
+        };
+    };
+    update_file_content: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description テナントID */
+                tenant_id: string;
+                /** @description ファイルID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateFileContentRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新されたファイル */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriveFileResponse"];
+                };
+            };
+            /** @description テキストとして編集できない MIME タイプです */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerError"];
+                };
+            };
+            /** @description ログインまたはセッションが必要です */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example internal-error */
+                        message: string;
+                    };
+                };
+            };
+            /** @description この操作は許可されていません */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example internal-error */
+                        message: string;
+                    };
+                };
+            };
+            /** @description リソースが見つかりません */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example internal-error */
+                        message: string;
+                    };
+                };
+            };
+            /** @description 本文がアップロード上限またはテナントのクォータを超えています */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerError"];
                 };
             };
             /** @description サーバー側で問題が発生しました。時間をおいて再度お試しください */

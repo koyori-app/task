@@ -147,6 +147,7 @@ impl MigrationTrait for Migration {
                 uploader_id  UUID NOT NULL REFERENCES users(id) ON DELETE NO ACTION,
                 folder_id    UUID REFERENCES drive_folders(id) ON DELETE SET NULL,
                 created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
                 CONSTRAINT drive_files_project_folder_check
                     CHECK (project_id IS NULL OR folder_id IS NOT NULL)
             )
