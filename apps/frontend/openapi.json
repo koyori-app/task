@@ -2488,6 +2488,15 @@
             }
           },
           {
+            "name": "error_redirect_after",
+            "in": "query",
+            "description": "プロバイダーエラー時の戻り先（OAuth ボタンのあるページ）",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "instance_url",
             "in": "query",
             "description": "GitLab self-hosted インスタンス URL",

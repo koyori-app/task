@@ -5,6 +5,9 @@ use validator::Validate;
 pub struct OAuthStartQuery {
     #[serde(default)]
     pub redirect_after: Option<String>,
+    /// プロバイダーエラー時の戻り先（OAuth ボタンのあるページ）。未指定なら redirect_after にフォールバック。
+    #[serde(default)]
+    pub error_redirect_after: Option<String>,
     #[serde(default)]
     pub instance_url: Option<String>,
 }

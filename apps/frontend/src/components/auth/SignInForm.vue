@@ -154,7 +154,7 @@ const form = useForm({
                 </Field>
               </template>
             </form.Subscribe>
-            <OAuthButtons redirect-after="/" />
+            <OAuthButtons redirect-after="/" error-redirect-after="/signin" />
             <FieldDescription class="text-center">
               アカウントをお持ちでない方は
               <a href="/signup" class="underline underline-offset-4">新規登録</a>

@@ -255,3 +255,56 @@ async fn oauth_providers_lists_only_configured() {
         "gitlab_selfhosted must require instance_url"
     );
 }
+
+#[tokio::test]
+async fn oauth_provider_error_uses_error_redirect_after() {
+    let app = TestApp::new().await;
+
+    // 成功用 redirect_after=/ とは別に error_redirect_after=/signin を指定して開始する。
+    let start = app
+        .get(&format!(
+            "/v1/auth/oauth/gitlab_selfhosted?instance_url={}&redirect_after=/&error_redirect_after=/signin",
+            urlencoding::encode(app.instance_url())
+        ))
+        .await;
+    assert!(is_redirect(start.status()), "oauth start redirect");
+    let authorize_url = start
+        .headers()
+        .get("location")
+        .expect("authorize redirect")
+        .to_str()
+        .expect("authorize url");
+    let state = Url::parse(authorize_url)
+        .expect("authorize url parse")
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .map(|(_, v)| v.to_string())
+        .expect("state query param");
+
+    // プロバイダーがエラーを返すと、成功用(/)ではなく error_redirect_after(/signin)へ
+    // oauth_error 付きで戻る（OAuth ボタンのあるページでエラーを表示させるため）。
+    let callback = app
+        .get(&format!(
+            "/v1/auth/oauth/gitlab_selfhosted/callback?error=access_denied&state={state}"
+        ))
+        .await;
+    assert!(is_redirect(callback.status()), "callback redirect");
+    let location = callback
+        .headers()
+        .get("location")
+        .expect("callback location")
+        .to_str()
+        .expect("callback location utf8");
+    let parsed = Url::parse(location).expect("callback location parse");
+    assert_eq!(
+        parsed.path(),
+        "/signin",
+        "provider error must return to error_redirect_after, got: {location}"
+    );
+    assert!(
+        parsed
+            .query_pairs()
+            .any(|(k, v)| k == "oauth_error" && v == "authorization_failed"),
+        "missing oauth_error marker: {location}"
+    );
+}

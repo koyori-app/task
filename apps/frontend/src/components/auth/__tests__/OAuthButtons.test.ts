@@ -78,7 +78,9 @@ describe('OAuthButtons', () => {
 
     bodyButton('GitLab で続ける')!.click();
 
-    expect(assignSpy).toHaveBeenCalledWith('/api/v1/auth/oauth/gitlab?redirect_after=%2F');
+    expect(assignSpy).toHaveBeenCalledWith(
+      '/api/v1/auth/oauth/gitlab?redirect_after=%2F&error_redirect_after=%2F',
+    );
   });
 
   it('redirect-after prop を遷移 URL に反映する', async () => {
@@ -89,7 +91,22 @@ describe('OAuthButtons', () => {
 
     bodyButton('GitHub で続ける')!.click();
 
-    expect(assignSpy).toHaveBeenCalledWith('/api/v1/auth/oauth/github?redirect_after=%2Fdashboard');
+    expect(assignSpy).toHaveBeenCalledWith(
+      '/api/v1/auth/oauth/github?redirect_after=%2Fdashboard&error_redirect_after=%2F',
+    );
+  });
+
+  it('error-redirect-after prop を遷移 URL に反映する', async () => {
+    stubProviders([{ provider: 'gitlab', requires_instance_url: false }]);
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    mountButtons({ errorRedirectAfter: '/signin' });
+    await flushPromises();
+
+    bodyButton('GitLab で続ける')!.click();
+
+    expect(assignSpy).toHaveBeenCalledWith(
+      '/api/v1/auth/oauth/gitlab?redirect_after=%2F&error_redirect_after=%2Fsignin',
+    );
   });
 
   it('self-hosted は URL 未入力ではボタンを無効化し遷移しない', async () => {
@@ -117,7 +134,7 @@ describe('OAuthButtons', () => {
     button!.click();
 
     expect(assignSpy).toHaveBeenCalledWith(
-      '/api/v1/auth/oauth/gitlab_selfhosted?redirect_after=%2F&instance_url=https%3A%2F%2Fgitlab.example.com',
+      '/api/v1/auth/oauth/gitlab_selfhosted?redirect_after=%2F&error_redirect_after=%2F&instance_url=https%3A%2F%2Fgitlab.example.com',
     );
   });
 });

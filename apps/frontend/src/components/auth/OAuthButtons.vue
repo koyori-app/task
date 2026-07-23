@@ -5,8 +5,9 @@ import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { useOAuthProvidersQuery } from '@/lib/api-vue-query';
 
-const props = withDefaults(defineProps<{ redirectAfter?: string }>(), {
+const props = withDefaults(defineProps<{ redirectAfter?: string; errorRedirectAfter?: string }>(), {
   redirectAfter: '/',
+  errorRedirectAfter: '/',
 });
 
 const { data } = useOAuthProvidersQuery();
@@ -35,6 +36,8 @@ function providerLabel(provider: string): string {
 function startOAuth(provider: string, requiresInstanceUrl: boolean) {
   const params = new URLSearchParams();
   params.set('redirect_after', props.redirectAfter);
+  // プロバイダーエラー時は OAuth ボタンのあるページ（signin/signup）へ戻してエラーを表示させる。
+  params.set('error_redirect_after', props.errorRedirectAfter);
   if (requiresInstanceUrl) {
     const instanceUrl = instanceUrls.value[provider]?.trim();
     if (!instanceUrl) return;

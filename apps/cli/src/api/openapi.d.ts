@@ -4866,6 +4866,8 @@ export interface operations {
             query?: {
                 /** @description ログイン後のフロント相対パス */
                 redirect_after?: string;
+                /** @description プロバイダーエラー時の戻り先（OAuth ボタンのあるページ） */
+                error_redirect_after?: string;
                 /** @description GitLab self-hosted インスタンス URL */
                 instance_url?: string;
             };
