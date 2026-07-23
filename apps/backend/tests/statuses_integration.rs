@@ -406,3 +406,96 @@ async fn done_switch_rolls_back_flags_and_task_timestamps_on_partial_failure() {
     assert!(old_task.completed_at.is_some());
     assert!(next_task.completed_at.is_none());
 }
+
+async fn reorder(app: &TestApp, tp: &TestTenantProject, ids: &serde_json::Value) -> StatusCode {
+    app.put_json_with_session(
+        &format!(
+            "/v1/tenants/{}/projects/{}/statuses/reorder",
+            tp.tenant_id, tp.project_id
+        ),
+        serde_json::json!({ "ids": ids }),
+    )
+    .await
+    .status()
+}
+
+#[tokio::test]
+async fn reorder_reassigns_positions_for_the_whole_set() {
+    let (app, tp, _old_done_id, _default_id, _old_task_id, _next_task_id) = setup().await;
+    create_status(&app, &tp, "Backlog", false, false).await;
+    create_status(&app, &tp, "In Progress", false, false).await;
+
+    // Request a genuinely different order (reverse of the current one).
+    let mut ids: Vec<Uuid> = project_statuses(&app, &tp)
+        .await
+        .iter()
+        .map(|status| status.id)
+        .collect();
+    ids.reverse();
+    assert!(ids.len() >= 2);
+
+    let response = app
+        .put_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/statuses/reorder",
+                tp.tenant_id, tp.project_id
+            ),
+            serde_json::json!({ "ids": ids }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // The response is ordered by the requested sequence with 0-based positions.
+    let body: Vec<serde_json::Value> = response.json().await.unwrap();
+    let returned_ids: Vec<Uuid> = body
+        .iter()
+        .map(|status| status["id"].as_str().unwrap().parse().unwrap())
+        .collect();
+    assert_eq!(returned_ids, ids);
+    for (pos, status) in body.iter().enumerate() {
+        assert_eq!(status["position"].as_i64().unwrap(), pos as i64);
+    }
+
+    // The database reflects the same reassignment.
+    let after = project_statuses(&app, &tp).await;
+    assert_eq!(after.len(), ids.len());
+    for (pos, id) in ids.iter().enumerate() {
+        let status = after.iter().find(|status| status.id == *id).unwrap();
+        assert_eq!(status.position, pos as i16);
+    }
+}
+
+#[tokio::test]
+async fn reorder_rejects_wrong_length() {
+    let (app, tp, old_done_id, _default_id, _old_task_id, _next_task_id) = setup().await;
+
+    // Fewer ids than the project owns must be rejected without touching positions.
+    let before = project_statuses(&app, &tp).await;
+    assert_eq!(
+        reorder(&app, &tp, &serde_json::json!([old_done_id])).await,
+        StatusCode::BAD_REQUEST
+    );
+    let after = project_statuses(&app, &tp).await;
+    for old in &before {
+        let now = after.iter().find(|status| status.id == old.id).unwrap();
+        assert_eq!(now.position, old.position);
+    }
+}
+
+#[tokio::test]
+async fn reorder_rejects_duplicate_or_unknown_ids() {
+    let (app, tp, old_done_id, default_id, _old_task_id, _next_task_id) = setup().await;
+
+    // Right length, but a duplicated id (and thus a missing one).
+    assert_eq!(
+        reorder(&app, &tp, &serde_json::json!([old_done_id, old_done_id])).await,
+        StatusCode::BAD_REQUEST
+    );
+
+    // Right length, but one id does not belong to this project.
+    let foreign = Uuid::new_v4();
+    assert_eq!(
+        reorder(&app, &tp, &serde_json::json!([default_id, foreign])).await,
+        StatusCode::BAD_REQUEST
+    );
+}
