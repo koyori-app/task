@@ -219,3 +219,39 @@ async fn oauth_callback_provider_error_redirects_with_oauth_error() {
         "unexpected redirect location: {location}"
     );
 }
+
+#[tokio::test]
+async fn oauth_providers_lists_only_configured() {
+    let app = TestApp::new().await;
+
+    let response = app.get("/v1/auth/oauth/providers").await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body: serde_json::Value = response.json().await.expect("providers json");
+    let providers = body["providers"].as_array().expect("providers array");
+    let slugs: Vec<&str> = providers
+        .iter()
+        .map(|p| p["provider"].as_str().expect("provider slug"))
+        .collect();
+
+    // テストハーネスは gitlab_selfhosted のみ設定済み → 有効なものだけ返る（出し分けの証明）。
+    assert!(
+        slugs.contains(&"gitlab_selfhosted"),
+        "configured provider must be listed: {slugs:?}"
+    );
+    assert!(
+        !slugs.contains(&"github") && !slugs.contains(&"gitlab") && !slugs.contains(&"google"),
+        "unconfigured providers must not be listed: {slugs:?}"
+    );
+
+    // self-hosted は instance_url 入力が必要というメタが付く。
+    let selfhosted = providers
+        .iter()
+        .find(|p| p["provider"] == "gitlab_selfhosted")
+        .expect("gitlab_selfhosted present");
+    assert_eq!(
+        selfhosted["requires_instance_url"].as_bool(),
+        Some(true),
+        "gitlab_selfhosted must require instance_url"
+    );
+}

@@ -382,6 +382,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/oauth/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 有効な OAuth プロバイダー一覧 */
+        get: operations["list_providers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/oauth/{provider}": {
         parameters: {
             query?: never;
@@ -2451,6 +2468,15 @@ export interface components {
         };
         OAuthConnectionsResponse: {
             connections: components["schemas"]["OAuthConnectionItem"][];
+        };
+        OAuthProviderItem: {
+            /** @description プロバイダー slug（github | gitlab | gitlab_selfhosted | google | oidc） */
+            provider: string;
+            /** @description ログイン開始時に self-hosted インスタンス URL の入力が必要か（gitlab_selfhosted のみ true） */
+            requires_instance_url: boolean;
+        };
+        OAuthProvidersResponse: {
+            providers: components["schemas"]["OAuthProviderItem"][];
         };
         PasskeyAuthenticationFinishRequest: {
             /** Format: uuid */
@@ -4811,6 +4837,26 @@ export interface operations {
                         /** @example internal-error */
                         message: string;
                     };
+                };
+            };
+        };
+    };
+    list_providers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 有効な OAuth プロバイダー一覧 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthProvidersResponse"];
                 };
             };
         };

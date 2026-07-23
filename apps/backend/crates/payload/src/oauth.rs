@@ -42,6 +42,19 @@ pub struct OAuthConnectionsResponse {
     pub connections: Vec<OAuthConnectionItem>,
 }
 
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct OAuthProviderItem {
+    /// プロバイダー slug（github | gitlab | gitlab_selfhosted | google | oidc）
+    pub provider: String,
+    /// ログイン開始時に self-hosted インスタンス URL の入力が必要か（gitlab_selfhosted のみ true）
+    pub requires_instance_url: bool,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct OAuthProvidersResponse {
+    pub providers: Vec<OAuthProviderItem>,
+}
+
 #[derive(Validate, Debug, Deserialize, utoipa::ToSchema)]
 pub struct SetPasswordRequest {
     #[schema(value_type = String, format = "password")]

@@ -453,6 +453,39 @@ pub async fn oauth_callback(
     Ok(Redirect::temporary(&frontend_redirect))
 }
 
+/// discovery で列挙する OAuth プロバイダー slug と、self-hosted インスタンス URL 入力の要否。
+const OAUTH_PROVIDER_SLUGS: [(&str, bool); 5] = [
+    ("github", false),
+    ("gitlab", false),
+    ("gitlab_selfhosted", true),
+    ("google", false),
+    ("oidc", false),
+];
+
+#[axum::debug_handler]
+#[utoipa::path(
+    get,
+    path = "/oauth/providers",
+    tag = "Auth",
+    summary = "有効な OAuth プロバイダー一覧",
+    responses(
+        (status = 200, description = "有効な OAuth プロバイダー一覧", body = OAuthProvidersResponse),
+    )
+)]
+pub async fn list_providers(State(state): State<AppState>) -> Json<OAuthProvidersResponse> {
+    let settings = &state.oauth_settings;
+    let providers = OAUTH_PROVIDER_SLUGS
+        .iter()
+        .filter(|(slug, _)| settings.is_provider_configured(slug))
+        .map(|(slug, requires_instance_url)| OAuthProviderItem {
+            provider: (*slug).to_string(),
+            requires_instance_url: *requires_instance_url,
+        })
+        .collect();
+
+    Json(OAuthProvidersResponse { providers })
+}
+
 #[axum::debug_handler]
 #[utoipa::path(
     get,
