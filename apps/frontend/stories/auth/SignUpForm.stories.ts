@@ -12,6 +12,11 @@ const meta = {
     layout: 'centered',
   },
   decorators: [
+    // Shown bare, this centered story has no width context; production SignUp.vue wraps the
+    // card in `w-full max-w-sm md:max-w-4xl`. Without it, Storybook's embed-sizing autosize
+    // (`#storybook-root > * { width: fit-content }`) collapses the card into a
+    // one-character-per-line column. Re-supply the md width (56rem = max-w-4xl) so the story
+    // renders as the production card.
     () => ({
       setup() {
         const queryClient = new QueryClient({
@@ -22,7 +27,7 @@ const meta = {
         });
         provide(VUE_QUERY_CLIENT, queryClient);
       },
-      template: '<story />',
+      template: '<div style="width: 56rem; max-width: 100%; margin-inline: auto;"><story /></div>',
     }),
   ],
 } satisfies Meta<typeof SignUpForm>;
