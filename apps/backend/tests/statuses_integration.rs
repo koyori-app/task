@@ -1,9 +1,15 @@
 mod common;
 
+use std::collections::HashSet;
+use std::time::Duration;
+
 use axum::http::StatusCode;
 use common::{TestApp, TestTenantProject};
-use entity::{project_statuses, tasks};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use entity::{project_statuses, projects, tasks};
+use sea_orm::sea_query::LockType;
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect, TransactionTrait,
+};
 use uuid::Uuid;
 
 async fn create_status(
@@ -497,5 +503,77 @@ async fn reorder_rejects_duplicate_or_unknown_ids() {
     assert_eq!(
         reorder(&app, &tp, &serde_json::json!([default_id, foreign])).await,
         StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn reorder_waits_for_the_project_row_lock() {
+    let (app, tp, _old_done_id, _next_done_id, _old_task_id, _next_task_id) = setup().await;
+    create_status(&app, &tp, "Backlog", false, false).await;
+    create_status(&app, &tp, "In Progress", false, false).await;
+
+    // Request the reverse of the current order so positions genuinely move.
+    let mut ids: Vec<Uuid> = project_statuses(&app, &tp)
+        .await
+        .iter()
+        .map(|status| status.id)
+        .collect();
+    ids.reverse();
+    assert!(ids.len() >= 2);
+
+    // Hold the project row that reorder_statuses locks first (FOR UPDATE) in a
+    // separate test transaction, so the handler must wait on that same row.
+    let lock_txn = app.state.db.begin().await.expect("begin lock txn");
+    projects::Entity::find_by_id(tp.project_id)
+        .lock(LockType::Update)
+        .one(&lock_txn)
+        .await
+        .expect("lock query")
+        .expect("project row exists");
+
+    // Fire reorder on a cookie-sharing clone of the session client from another task.
+    let client = app.session_client();
+    let url = format!(
+        "{}/v1/tenants/{}/projects/{}/statuses/reorder",
+        app.base_url(),
+        tp.tenant_id,
+        tp.project_id
+    );
+    let body = serde_json::json!({ "ids": ids });
+    let reorder_task =
+        tokio::spawn(async move { client.put(url).json(&body).send().await.expect("reorder") });
+
+    // While the lock is held, reorder cannot complete: FOR UPDATE blocks
+    // deterministically until the row is released, so this wait is not racy.
+    // If the FOR UPDATE lock were removed, reorder would finish here and this
+    // assertion would fail — that is exactly the regression this test guards.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !reorder_task.is_finished(),
+        "reorder must block while the project row is locked"
+    );
+
+    // Releasing the lock lets reorder proceed to completion.
+    lock_txn.commit().await.expect("release lock");
+
+    let response = tokio::time::timeout(Duration::from_secs(10), reorder_task)
+        .await
+        .expect("reorder must finish after the lock is released")
+        .expect("reorder task join");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // The serialized result matches the requested order and positions stay a
+    // gap-free bijection over 0..n.
+    let after = project_statuses(&app, &tp).await;
+    assert_eq!(after.len(), ids.len());
+    for (pos, id) in ids.iter().enumerate() {
+        let status = after.iter().find(|status| status.id == *id).unwrap();
+        assert_eq!(status.position, pos as i16);
+    }
+    let positions: HashSet<i16> = after.iter().map(|status| status.position).collect();
+    assert_eq!(
+        positions.len(),
+        after.len(),
+        "positions must remain a bijection with no gaps or duplicates"
     );
 }
