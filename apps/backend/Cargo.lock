@@ -869,7 +869,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c0cba26dfbdeff786711f747a51efd368c3864ab9574981ae532514dd492dd7"
 dependencies = [
  "axum",
- "validator",
+ "validator 0.20.0",
 ]
 
 [[package]]
@@ -1378,7 +1378,7 @@ dependencies = [
  "tracing",
  "url",
  "utoipa",
- "validator",
+ "validator 0.21.0",
 ]
 
 [[package]]
@@ -1988,7 +1988,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2446,7 +2446,7 @@ dependencies = [
  "utoipa",
  "utoipa-axum",
  "uuid",
- "validator",
+ "validator 0.21.0",
  "webauthn-rs",
 ]
 
@@ -2761,7 +2761,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "tokio",
  "tower-service",
  "tracing",
@@ -4083,7 +4083,7 @@ dependencies = [
  "serde",
  "serde_json",
  "utoipa",
- "validator",
+ "validator 0.21.0",
 ]
 
 [[package]]
@@ -4476,7 +4476,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -4514,7 +4514,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "tracing",
  "windows-sys 0.52.0",
 ]
@@ -4996,7 +4996,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5055,7 +5055,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6387,7 +6387,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7107,6 +7107,20 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "url",
+]
+
+[[package]]
+name = "validator"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d68c6633c483df6780cc5277a417c7c2d1bceee2649d06c8ab6b0fd2dd3c81"
+dependencies = [
+ "idna",
+ "regex",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "url",
  "validator_derive",
 ]
 
@@ -7480,7 +7494,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
