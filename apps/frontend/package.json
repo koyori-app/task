@@ -45,7 +45,7 @@
     "isomorphic-dompurify": "3.22.0",
     "lru-cache": "11.5.2",
     "openapi-fetch": "0.17.0",
-    "pinia": "3.0.4",
+    "pinia": "4.0.3",
     "pinia-plugin-persistedstate": "4.7.1",
     "rehype-stringify": "10.0.1",
     "reka-ui": "2.10.1",
