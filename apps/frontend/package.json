@@ -48,7 +48,7 @@
     "pinia": "3.0.4",
     "pinia-plugin-persistedstate": "4.7.1",
     "rehype-stringify": "10.0.1",
-    "reka-ui": "2.10.1",
+    "reka-ui": "2.10.3",
     "remark-gfm": "4.0.1",
     "remark-parse": "11.0.0",
     "remark-rehype": "11.1.2",
