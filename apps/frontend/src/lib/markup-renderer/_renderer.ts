@@ -9,12 +9,14 @@
  *   composition root (index.ts) が注入する。
  * - processor は profile ごとに 1 回だけ build して memoize する (N 重初期化回避)。
  */
+import type { Root } from 'hast';
 import type { LRUCache } from 'lru-cache';
 import rehypeStringify from 'rehype-stringify';
 import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
 import type { PluggableList } from 'unified';
 import { unified } from 'unified';
+import { visit } from 'unist-util-visit';
 import { buildCacheKey, createL1Cache } from './_cache';
 import type { SanitizeSchema } from './_sanitize';
 import { createSanitizer } from './_sanitize';
@@ -62,6 +64,8 @@ export type RenderOptions = {
    * 脚注 id の衝突回避 scope。同一ページへ複数の KFM 断片 (タスク本文＋コメント等) を
    * 並べる場合、断片ごとに決定的な scope (例: `comment-42`) を渡す。remark-rehype の
    * clobberPrefix へ `user-content-<scope>-` として反映され、キャッシュキーにも載る。
+   * `footnote-label` とそれを指す `aria-describedby` も core の rehype 層が同じ prefix で
+   * scope 化する。
    * random ではなく呼び出し側の決定的識別子である理由: 同一入力→同一 HTML を保たないと
    * L1 キャッシュ前提 (SSR/CSR 同一性) が崩れるため。[A-Za-z0-9_-]+ 以外は throw。
    * fn / fnref を `-` 区切りセグメントとして含む scope も throw
@@ -88,11 +92,54 @@ const SCOPE_RE = /^[A-Za-z0-9_-]+$/;
 // fn / fnref トークンが必ずマーカー由来となり、scope 境界が一意に復元できて衝突は起きない。
 const SCOPE_RESERVED_SEGMENT_RE = /(^|-)(fn|fnref)(-|$)/;
 
+// remark-rehype (mdast-util-to-hast) が脚注 footer 見出しへ焼き込む固定 id。
+// clobberPrefix は fn-* / fnref-* にしか効かず、この id と脚注参照側の
+// aria-describedby は scope を渡しても固定のまま残る。scope 契約 (1 ページ複数断片で
+// 全 id 一意) の一部としてコアが書き換える — プラグインへ出すと scope を知る層が
+// 二つに割れるため、clobberPrefix と同じ場所 (core) で完結させる。
+const FOOTNOTE_LABEL_ID = 'footnote-label';
+
+/**
+ * scope 付き描画専用の rehype 層。footnote-label の id と、それを指す
+ * aria-describedby の双方を `${clobberPrefix}footnote-label` へ書き換える。
+ * 片方だけでは aria の参照が切れる。scope 無し (既定) はこの層自体を挿さず、
+ * GitHub 互換の固定 footnote-label を保つ。
+ */
+function rehypeScopeFootnoteLabel(clobberPrefix: string) {
+  const scopedId = `${clobberPrefix}${FOOTNOTE_LABEL_ID}`;
+  return function transform(tree: Root): void {
+    visit(tree, 'element', (node) => {
+      if (node.properties.id === FOOTNOTE_LABEL_ID) {
+        node.properties.id = scopedId;
+      }
+      // 現行の mdast-util-to-hast は配列で emit するが、rehype 層が文字列を渡す場合も
+      // space-separated token 列へ正規化し、以後の置換経路を一つに保つ。
+      const describedBy = node.properties.ariaDescribedBy;
+      if (describedBy == null) {
+        return;
+      }
+      const describedByTokens = (Array.isArray(describedBy) ? describedBy : [describedBy])
+        .flatMap((value) => (typeof value === 'string' ? value.split(/\s+/) : []))
+        .filter(Boolean);
+      if (describedByTokens.includes(FOOTNOTE_LABEL_ID)) {
+        node.properties.ariaDescribedBy = describedByTokens.map((token) =>
+          token === FOOTNOTE_LABEL_ID ? scopedId : token,
+        );
+      }
+    });
+  };
+}
+
 function buildProcessor(definition: ProfileDefinition, clobberPrefix: string) {
+  // footnote-label の scope 書き換えは remark-rehype 直後 (他 rehype 層より前) に挿し、
+  // 後段プラグインには書き換え済みの id しか見せない
+  const scopeLayer: PluggableList =
+    clobberPrefix === DEFAULT_CLOBBER_PREFIX ? [] : [[rehypeScopeFootnoteLabel, clobberPrefix]];
   return unified()
     .use(remarkParse)
     .use(definition.remarkPlugins)
     .use(remarkRehype, { clobberPrefix })
+    .use(scopeLayer)
     .use(definition.rehypePlugins ?? [])
     .use(rehypeStringify)
     .freeze();
@@ -136,7 +183,7 @@ function buildPipelineFingerprint(options: CreateRendererOptions): string {
     classPatterns: (schema.classPatterns ?? []).map(String),
   }));
   return JSON.stringify({
-    core: ['remark-parse', 'remark-rehype', 'rehype-stringify'],
+    core: ['remark-parse', 'remark-rehype', 'rehype-scope-footnote-label', 'rehype-stringify'],
     plugins: pluginNames,
     sanitize: sanitizeShape,
   });
