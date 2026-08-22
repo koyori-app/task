@@ -5,10 +5,14 @@ Phase 1 の実体は **github profile（複製レンダラ）** = GFM ＋ GitHub
 コードブロック着色（starry-night）＋ 安全 core。
 本書は出荷した実装の説明であり、設計判断の根拠は設計書（別管理）を正とする。
 
-**Phase 1 の出荷範囲はレンダラ（`renderDescription`）の提供まで**。UI への接続
-（タスク詳細の `+data.ts` から呼び出して `v-html` へ渡す変更と、alert CSS の消費側
-import）は本 PR には含めず、別 PR で行う。現時点で `renderDescription` を呼ぶ本番
-コードは存在せず、後述の「利用方法」は接続時の使い方を先に示すものである。
+**Phase 1 の出荷範囲はレンダラ（`renderDescription`）の提供と、タスク詳細ページへの
+UI 接続まで**。本番の呼び出し元はタスク詳細の `+data.ts`（サーバ）で、描画済み HTML と
+描画元テキスト（stale 照合キー `descriptionSource`）を `+Page.vue` 経由で
+`TaskDetailHub.vue` へ渡し、最新の `task.description` と厳密一致するときだけ `v-html`
+する（不一致はプレーンテキスト表示へフォールバック）。サイドカー CSS 4 本も
+`TaskDetailHub.vue` が import 済み。後述の「利用方法」はこの接続実体の要約である。
+接続済みの消費側はこのタスク詳細ページ一つだけで、他の本文表示箇所
+（タスク一覧の分割ビューのペイン・コメント本文など）は未接続の残件である。
 
 ## 構成
 
@@ -165,8 +169,30 @@ DOMPurify を最終段に置くのは、remark プラグインが emit したも
 ## SSR / Hydration 契約
 
 - サーバ生成 HTML を唯一の入力とする。ページの `+data.ts` で
-  `descriptionHtml: await renderDescription(text)` を実行して `pageContext.data` に載せ、
-  コンポーネントは `v-html` で受けるだけにする
+  `descriptionHtml: await renderDescription(text)` を実行し、描画元テキスト
+  `descriptionSource`（renderDescription へ渡した入力そのもの）と**対で**
+  `pageContext.data` に載せる。消費側は descriptionSource がクライアントの持つ
+  最新の生テキスト（task.description）と厳密一致するときだけ descriptionHtml を
+  `v-html` へ流し、不一致（保存直後・reload 失敗・他者更新で HTML が古い）は
+  プレーンテキスト表示へフォールバックする。descriptionHtml を単独で受けて
+  無条件に `v-html` する消費側を作ってはならない
+- 編集保存後に KFM 表示へ戻す手段は、同一 URL へ
+  `navigate(href, { keepScrollPosition: true, overwriteLastHistoryEntry: true })` で
+  `+data.ts` を再実行すること（`reload()` はスクロール位置を維持できないため使わない）。
+  失敗時は descriptionSource 照合不一致によりプレーンテキスト表示のまま残る
+- **入力長の上限は 65536 文字**（GitHub issue 本文の上限と同値。KFM Phase 1 =
+  github profile の複製レンダラ）。上限は消費側の `+data.ts` が `renderDescription`
+  を呼ぶ**前**に敷き、超過は `descriptionHtml: null` = プレーンテキスト表示へ倒す
+  （エラー表示は出さない）。renderDescription の CPU も L1 キャッシュ
+  （full-text キー）のメモリも本文長に比例するため、SSR に非有界の入力を
+  入れない。新しい消費側（分割ビューのペイン・コメント本文等）を接続するときも
+  同じ上限を写すこと。
+  非対称に注意: backend は本文長を制限しないため、上限超の本文も保存はできる（表示だけプレーンへ倒れる）
+- SSR の消費側で KFM 描画前に backend 取得が必要なら、直列リクエストごとの timeout
+  ではなく、取得全体で共有する有界な fetch 予算を設けること。予算超過は
+  `descriptionHtml: null` としてプレーンテキスト表示へ倒し、ページ本体の表示・編集を
+  巻き添えにしない。これは backend の取得待ちだけの上限であり、SSR 全体の完了時間を
+  保証するものではない
 - 同一ページに複数の KFM 断片（タスク本文＋コメント等）を並べる場合は、断片ごとに
   **決定的な scope** を渡す: `renderDescription(text, { scope: 'comment-42' })`。
   ランダムにしないのは同一入力→同一 HTML（L1 キャッシュ・SSR/CSR 同一性）を保つため。
@@ -188,9 +214,11 @@ DOMPurify を最終段に置くのは、remark プラグインが emit したも
 ## 利用方法
 
 ```ts
-// +data.ts（サーバ側）
+// +data.ts（サーバ側）— 実体は tasks/@taskId/+data.ts。scope はタスク UUID で決定的。
+// HTML は描画元テキストと必ず対で返す（消費側の stale 照合キー）
 import { renderDescription } from '@/lib/markup-renderer';
-const descriptionHtml = await renderDescription(task.description); // 既定 profile = github
+const descriptionHtml = await renderDescription(task.description, { scope: `task-${task.id}` });
+return { descriptionHtml, descriptionSource: task.description };
 
 // 消費側レイアウトで alert / GFM / 着色 CSS を明示 import
 import '@/lib/remark-koyori-alerts/style.css';
@@ -200,8 +228,15 @@ import '@/lib/remark-kfm-mermaid/style.css';
 ```
 
 ```html
-<!-- 消費側コンポーネント: v-html する器に kfm-content を付ける（GFM CSS の scope） -->
-<div class="kfm-content" v-html="descriptionHtml" />
+<!-- 消費側コンポーネント: 描画元が最新の生テキストと厳密一致するときだけ v-html する。
+     器に kfm-content を付ける（GFM CSS の scope） -->
+<div
+  v-if="descriptionHtml && descriptionSource === task.description"
+  class="kfm-content"
+  v-html="descriptionHtml"
+/>
+<!-- 不一致・HTML なしはプレーンテキスト表示へフォールバック -->
+<p v-else>{{ task.description }}</p>
 ```
 
 四つのサイドカー CSS は消費契約の前提が異なる:
