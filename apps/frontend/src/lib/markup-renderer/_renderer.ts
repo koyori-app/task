@@ -1,11 +1,11 @@
 /**
  * _renderer.ts — controlled pipeline のコア (createRenderer)。
  *
- * pipeline: remark-parse → (profile 別 remark 層) → remark-rehype → rehype-stringify
- *           → DOMPurify (構造専任) → HTML 文字列。
+ * pipeline: remark-parse → (profile 別 remark 層) → remark-rehype → (profile 別 rehype 層)
+ *           → rehype-stringify → DOMPurify (構造専任) → HTML 文字列。
  * - allowDangerousHtml は使わない。mdast の生 html ノードは remark-rehype 既定で黙って
  *   消えるため、プラグインは data.hName / hProperties の型付き emit のみ行う契約。
- * - コアはプラグインを import しない。profile ごとの remark 層と sanitize スキーマは
+ * - コアはプラグインを import しない。profile ごとの remark / rehype 層と sanitize スキーマは
  *   composition root (index.ts) が注入する。
  * - processor は profile ごとに 1 回だけ build して memoize する (N 重初期化回避)。
  */
@@ -27,6 +27,17 @@ export type KfmProfile = 'github';
 export type ProfileDefinition = {
   /** 共有 core (remark-parse → remark-rehype → rehype-stringify) に挿す remark 層 */
   readonly remarkPlugins: PluggableList;
+  /**
+   * remark-rehype と rehype-stringify の間に挿す rehype 層 (省略 = なし)。
+   * async transformer を持つプラグイン (rehype-starry-night 等) も可 — process() が
+   * await する。プラグイン factory 自体は同期である前提 (unified の use() 契約どおり)
+   * のため、processor 構築 (getProcessor) は同期のまま。
+   * 注意: scope 付き描画は processor を都度構築する (getProcessor 参照) ため、attach の
+   * たびに高い初期化を始めるプラグインをそのまま渡すと初期化が描画回数ぶん走る。
+   * 重い async 初期化は factory 側で共有・自己回収すること
+   * (実例: rehype-starry-night/index.ts の createRehypeStarryNight)。
+   */
+  readonly rehypePlugins?: PluggableList;
 };
 
 export type CreateRendererOptions = {
@@ -82,6 +93,7 @@ function buildProcessor(definition: ProfileDefinition, clobberPrefix: string) {
     .use(remarkParse)
     .use(definition.remarkPlugins)
     .use(remarkRehype, { clobberPrefix })
+    .use(definition.rehypePlugins ?? [])
     .use(rehypeStringify)
     .freeze();
 }
@@ -94,18 +106,27 @@ type BuiltProcessor = ReturnType<typeof buildProcessor>;
  * プロセス内 (L1) 専用 —— 関数名は minify で変わり得るため、永続 L2 を導入する際は
  * ビルドを跨いで安定な名前へ置き換えること。
  */
+function describePluggableList(plugins: PluggableList): string[] {
+  return plugins.map((plugin) => {
+    if (Array.isArray(plugin)) {
+      const [fn, ...settings] = plugin;
+      const name = typeof fn === 'function' ? fn.name : JSON.stringify(fn);
+      return `${name}(${JSON.stringify(settings)})`;
+    }
+    return typeof plugin === 'function' ? plugin.name : JSON.stringify(plugin);
+  });
+}
+
 function buildPipelineFingerprint(options: CreateRendererOptions): string {
+  // remark 層と rehype 層を別キーで焼き込む。rehype 層を見ないと、rehypePlugins だけが
+  // 違う renderer が同一キーを作り、旧規則で通った HTML を返す (kfm-cache テストで固定)。
   const pluginNames = Object.fromEntries(
     Object.entries(options.profiles).map(([profile, definition]) => [
       profile,
-      definition.remarkPlugins.map((plugin) => {
-        if (Array.isArray(plugin)) {
-          const [fn, ...settings] = plugin;
-          const name = typeof fn === 'function' ? fn.name : JSON.stringify(fn);
-          return `${name}(${JSON.stringify(settings)})`;
-        }
-        return typeof plugin === 'function' ? plugin.name : JSON.stringify(plugin);
-      }),
+      {
+        remark: describePluggableList(definition.remarkPlugins),
+        rehype: describePluggableList(definition.rehypePlugins ?? []),
+      },
     ]),
   );
   const sanitizeShape = options.sanitizeSchemas.map((schema) => ({
@@ -139,8 +160,11 @@ export function createRenderer(options: CreateRendererOptions): RenderDescriptio
   function getProcessor(profile: KfmProfile, clobberPrefix: string): BuiltProcessor {
     // memoize は既定 prefix のみ。scope の値空間は非有界 (comment id 等) で、singleton
     // の SSR プロセスに scope ごとの processor を溜めるとメモリが漏れる。scope 付きは
-    // 都度構築する — 構築はプラグイン合成のみで、cache miss 時に必ず走る
-    // parse＋sanitize に比べ無視できる。
+    // 都度構築する — この「構築 = プラグイン合成のみで軽い」が成り立つのは、rehype 層の
+    // 高い初期化 (starry-night の WASM＋文法登録) がプラグイン factory 側で renderer
+    // スコープ共有されている前提 (rehype-starry-night/index.ts)。attach ごとに初期化を
+    // 始めるプラグインを直接渡すとこの前提が崩れる (ProfileDefinition.rehypePlugins の
+    // 注意書きを参照)。
     if (clobberPrefix !== DEFAULT_CLOBBER_PREFIX) {
       return buildProcessor(getDefinition(profile), clobberPrefix);
     }
@@ -178,7 +202,27 @@ export function createRenderer(options: CreateRendererOptions): RenderDescriptio
     const key = buildCacheKey(fingerprint, profile, scope ?? '', contentConfigJson, normalized);
     const cached = cache.get(key);
     if (cached !== undefined) return cached;
-    const html = sanitize(String(await getProcessor(profile, clobberPrefix).process(normalized)));
+    const processor = getProcessor(profile, clobberPrefix);
+    let rendered: string;
+    try {
+      rendered = String(await processor.process(normalized));
+    } catch (error) {
+      // process 失敗は「捨てて再試行」。renderDescription はプロセス全体で共有される
+      // singleton のため、失敗した実体を永久保持するとプロセス再起動まで復旧不能になる。
+      // 回収は二層:
+      // (1) 共有される starry-night 実体はプラグイン factory 側が transformer の reject
+      //     時に自分で捨てて作り直す。初期化 reject だけを識別する upstream の口が無く、
+      //     transform 例外も対象になる点は同モジュールの契約コメントを参照。
+      // (2) コア側は失敗した processor の memoize を破棄し、次回 render に再構築させる
+      //     (再構築は失敗時のみ発生し、成功するまで cache.set に到達しないので誤った
+      //     HTML が残ることはない)。
+      // instance guard は、遅れて reject した旧 processor が別 render の据えた新しい
+      // memoize を巻き添えで破棄するのを防ぐ。scope 付き描画の processor は
+      // memoize されないので、この guard は自然に空振りする (削除対象がない)。
+      if (processorCache.get(profile) === processor) processorCache.delete(profile);
+      throw error;
+    }
+    const html = sanitize(rendered);
     cache.set(key, html);
     return html;
   };

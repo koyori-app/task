@@ -1,7 +1,8 @@
 # KFM Phase 1 実装ノート（github profile）
 
 task 本文（GitHub issue 形式）のレンダラ **KFM (Koyori Flavored Markdown)** の Phase 1 実装を記す。
-Phase 1 の実体は **github profile（複製レンダラ）** = GFM ＋ GitHub alerts ＋ 安全 core。
+Phase 1 の実体は **github profile（複製レンダラ）** = GFM ＋ GitHub alerts ＋
+コードブロック着色（starry-night）＋ 安全 core。
 本書は出荷した実装の説明であり、設計判断の根拠は設計書（別管理）を正とする。
 
 **Phase 1 の出荷範囲はレンダラ（`renderDescription`）の提供まで**。UI への接続
@@ -21,6 +22,11 @@ apps/frontend/src/lib/
   remark-koyori-alerts/        KFM 拡張第一号: GitHub alerts (> [!NOTE] 等) → callout
     index.ts                   自前 transformer（GitHub alerts の境界規則）
     style.css                  サイドカー CSS（アイコンは名前空間クラス・inline style 不使用）
+  rehype-starry-night/         コードブロック着色 (rehype-starry-night の薄いラッパ)
+    index.ts                   createRehypeStarryNight（starry-night 実体の renderer
+                               スコープ共有・失敗回収）
+    schema.ts                  pl-* class の sanitize スキーマ
+    style.css                  サイドカー CSS（light シート固定 ＋ .dark ブリッジ）
   markup-renderer/             KFM コア
     index.ts                   composition root（renderDescription singleton・公開 API）
     _renderer.ts               createRenderer（controlled pipeline・profile memoize）
@@ -37,12 +43,16 @@ composition root が remark 層と sanitize スキーマを注入する。
 ただし client registry は例外で、composition root から再エクスポートしてはならない。
 `+client.ts` は `_client-registry.ts` を直接 import し、サーバ用レンダラ一式が client bundle へ
 混入するのを防ぐ。この非再エクスポート規約は bundle 境界であり、公開 API の整理ではない。
+同じ bundle 境界として、composition root は starry-night seam を `import()` で遅延ロードする。
+静的 import / re-export に戻すと common 文法一式を含む約 417.5 KB raw が root の静的グラフへ
+加わるため、`kfm-cache.test.ts` が副作用 import を含む静的参照の不在と実行時 import を固定する。
 
 ## パイプライン
 
 ```
 入力テキスト → 改行 LF 正規化 → remark-parse → remark-gfm → remark-koyori-alerts
-  → remark-rehype → rehype-stringify → DOMPurify → HTML 文字列 → <div v-html>
+  → remark-rehype → rehype-starry-night → rehype-stringify → DOMPurify
+  → HTML 文字列 → <div v-html>
 ```
 
 - `allowDangerousHtml` は使わない。mdast の生 `html` ノードは remark-rehype 既定で消える。
@@ -51,6 +61,8 @@ composition root が remark 層と sanitize スキーマを注入する。
   scope なし（既定 `clobberPrefix`）の経路のみ。scope 付き描画は毎回 build する——scope の
   値空間（comment id 等）は非有界で、singleton に溜めるとメモリが漏れるため
   （`_renderer.ts` の `getProcessor` の分岐）。
+  ただし build のたびに高い初期化が走るわけではない。starry-night の WASM 読み込みと
+  文法登録はプラグイン factory 側で renderer スコープに共有してあり、構築回数に比例しない。
 - 描画の既定 profile は composition root が `CreateRendererOptions.defaultProfile` へ
   `contentConfig.defaultProfile` を渡して接続する。未指定時の fallback は `github`。
 
@@ -104,6 +116,8 @@ DOMPurify を最終段に置くのは、remark プラグインが emit したも
   scope をキーに載せることは安全条件の一部——落とすと `clobberPrefix` の違う HTML を
   取り違え、別断片の脚注 id が付いた HTML を返す。
   fingerprint は plugin 列と sanitize スキーマから導出し、構成変更で旧 HTML が自動失効する
+- fingerprint が観測する非配列 plugin は `plugin.name` のみで、closure に閉じた設定値は見えない。
+  factory に options を追加する場合は、設定の直列化とキャッシュキー分離を同じ変更で実装する
 - `lru-cache` は `max` ＋ `maxSize` ＋ `sizeCalculation`（UTF-8 バイト長）で有界
 - L2（ブラウザ永続）は不採用。必要性を計測してから設計する
 
@@ -137,9 +151,10 @@ DOMPurify を最終段に置くのは、remark プラグインが emit したも
 import { renderDescription } from '@/lib/markup-renderer';
 const descriptionHtml = await renderDescription(task.description); // 既定 profile = github
 
-// 消費側レイアウトで alert / GFM CSS を明示 import
+// 消費側レイアウトで alert / GFM / 着色 CSS を明示 import
 import '@/lib/remark-koyori-alerts/style.css';
 import '@/lib/remark-gfm/style.css';
+import '@/lib/rehype-starry-night/style.css';
 ```
 
 ```html
@@ -147,13 +162,22 @@ import '@/lib/remark-gfm/style.css';
 <div class="kfm-content" v-html="descriptionHtml" />
 ```
 
-二つのサイドカー CSS は消費契約の前提が異なる:
+三つのサイドカー CSS は消費契約の前提が異なる:
 
 - **alerts CSS は import のみで当たる** — レンダラ自身が名前空間クラス
   （`.kfm-alert` 等）を emit し、CSS がそれを直接指すため器は不要
 - **GFM CSS は import ＋ 器クラスの二点契約** — GFM 出力は素の ul/ol/blockquote/a/del
   で掴む class が無く、bare 要素へ当てるとアプリ全体へ漏れるため、全ルールが
   `.kfm-content` 子孫限定。器クラスを付け忘れると一行も当たらない
+- **着色 CSS も import のみで当たる** — starry-night が emit する `pl-*` 名前空間クラスを
+  直接指す。実体は upstream の light シート固定 ＋ `.dark` ブリッジ（アプリの
+  class 戦略ダークに追従。OS 設定連動の both.css は使わない — 発火条件を
+  `.dark` の一系統に畳み、OS ダーク × アプリライトでコードだけ暗転する継ぎ目を防ぐ）
+
+着色 transformer の初期化・変換が reject した場合、`renderDescription` も reject する。
+未着色コードへ部分フォールバックはせず、`+data.ts` が本文 HTML を await する標準構成では
+ページデータ生成が失敗するため、コードブロックだけでなく本文全体が描画されない。呼出側が
+独自に継続表示させる場合は、失敗を握り潰さず本文全体の明示的なエラー表示へ切り替えること。
 
 器クラスの単一ソースは `remark-gfm/content-class.ts`（`KFM_CONTENT_CLASS`）。CSS との
 scope 一致は `kfm-gfm-css-contract.test.ts` が強制し、story の器も同じ定数を使う
@@ -182,7 +206,18 @@ scope 一致は `kfm-gfm-css-contract.test.ts` が強制し、story の器も同
 - `kfm-sanitize.test.ts` — FORBID style・class 完全一致・XSS 基本・カスタム要素 registry
 - `kfm-cache.test.ts` — djb2 衝突ペアの実衝突証明つき full-text キー検証・fingerprint 分離
 - `kfm-client-registry.test.ts` — SSR ガード（customElements 不在で no-op）・二重 define 安全
-- `kfm-gfm-css-contract.test.ts` — GFM サイドカー CSS の scope が器クラス単一ソースと一致
+- `kfm-gfm-css-contract.test.ts` — KFM サイドカー CSS（remark-* / rehype-*）を scope 方式で
+  全件分類し、器クラスまたは各プラグインの emit 名前空間から逸脱しないことを固定
+- `kfm-code-highlight.test.ts` — 着色の境界仕様（言語別 pl-*・style 属性禁止・未知言語
+  フォールバック・注入ペイロード封じ・sanitize 整合）
+- `kfm-starry-night-init-count.test.ts` — 文法初期化「回数」の機械計数（N scope 描画で
+  初期化 1 回・旧配線（factory 直挿し）が N 回になる陽性対照つき）
+- `kfm-starry-night-upstream-contract.test.ts` — upstream 実体（theme.js の classes 値域・
+  light/both/dark CSS）と sanitize 許可・サイドカー style.css の契約固定
+- `kfm-processor-memoize.test.ts` — processor 構築回数の機械計数（既定 prefix は memoize・
+  scope 付きは都度構築だが初期化回数とは独立）
+- `kfm-starry-night-init-failure.test.ts` — 初期化失敗（poisoned promise）を捨てて次描画で
+  作り直す回収経路
 - `kfm-story-fixtures.test.ts` — story fixture の drift 検査・孤立 rendered/*.html の検出
 
 セキュリティ上の要点（inline style 禁止・full-text キー・client ガード）はいずれも
