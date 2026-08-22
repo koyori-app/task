@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { KFM_MERMAID_TAG } from '../remark-kfm-mermaid/_tag';
 import { KFM_CONTENT_CLASS } from '../remark-gfm/content-class';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +32,8 @@ const EMITTED_NAMESPACE_SCOPED_PLUGINS = new Map<
     'rehype-starry-night',
     { selectorToken: /\.pl-[\w-]/, ownVariablePrefix: '--color-prettylights-syntax-' },
   ],
+  // mermaid のサイドカーは自身が emit する kfm-mermaid 要素を直に指すため器を要さない。
+  ['remark-kfm-mermaid', { selectorToken: new RegExp(`(?:^|[\\s>])${KFM_MERMAID_TAG}(?![\\w-])`) }],
 ]);
 const CONTAINER_SCOPED_CSS_PATHS = SIDECAR_CSS_PATHS.filter((cssPath) =>
   CONTAINER_SCOPED_PLUGINS.has(path.basename(path.dirname(cssPath))),
@@ -78,6 +81,27 @@ const extractRules = (css: string): Array<{ selectors: string[]; body: string }>
     })
     .filter((rule) => rule.selectors.length > 0);
 
+/** 自 namespace が selector の対象を実際に scope しているか (兄弟・:has 内からの脱出は不可) */
+const targetsEmittedNamespace = (selector: string, selectorToken: RegExp): boolean => {
+  const match = selector.match(selectorToken);
+  if (match?.index === undefined) return false;
+
+  // body:has(.kfm-alert) の token は条件に使われるだけで、対象 body を scope しない。
+  const prefix = selector.slice(0, match.index);
+  const openParentheses = Array.from(prefix).reduce((depth, character) => {
+    if (character === '(') return depth + 1;
+    if (character === ')') return Math.max(0, depth - 1);
+    return depth;
+  }, 0);
+  if (openParentheses > 0) return false;
+
+  // token と同じ compound の残りを飛ばし、最初の結合子だけを見る。
+  // 子孫・子結合子は namespace 内だが、+ / ~ は namespace の外を対象にする。
+  const suffix = selector.slice(match.index + match[0].length);
+  const relation = suffix.replace(/^[^\s>+~,{]*/, '').trimStart();
+  return !relation.startsWith('+') && !relation.startsWith('~');
+};
+
 /**
  * 免除サイドカーの自 namespace 逸脱ルールを列挙する。合格は二形のみ:
  * - 全セレクタが自身の emit 名前空間 (selectorToken) を指す
@@ -89,7 +113,8 @@ const emittedNamespaceViolations = (
 ): string[] =>
   extractRules(css)
     .filter((rule) => {
-      if (rule.selectors.every((selector) => spec.selectorToken.test(selector))) return false;
+      if (rule.selectors.every((selector) => targetsEmittedNamespace(selector, spec.selectorToken)))
+        return false;
       if (spec.ownVariablePrefix === undefined) return true;
       const declarations = rule.body
         .split(';')
@@ -171,11 +196,21 @@ describe('KFM サイドカー CSS の消費契約 (scope 一致の機構)', () =
       [],
     );
     expect(emittedNamespaceViolations('.dark .kfm-alert--note { color: red }', spec)).toEqual([]);
+    expect(emittedNamespaceViolations('.kfm-alert > p { color: red }', spec)).toEqual([]);
     expect(emittedNamespaceViolations('.dark { --kfm-alert-bg: #000 }', spec)).toEqual([]);
     // 他人の要素を指す・部分一致・他変数や実プロパティ混じりのブリッジは逸脱
     expect(emittedNamespaceViolations('ul { margin: 0 }', spec)).toEqual(['ul']);
     expect(emittedNamespaceViolations('.kfm-alert-like { color: red }', spec)).toEqual([
       '.kfm-alert-like',
+    ]);
+    expect(emittedNamespaceViolations('.kfm-alert + p { color: red }', spec)).toEqual([
+      '.kfm-alert + p',
+    ]);
+    expect(emittedNamespaceViolations('.kfm-alert ~ p { color: red }', spec)).toEqual([
+      '.kfm-alert ~ p',
+    ]);
+    expect(emittedNamespaceViolations('body:has(.kfm-alert) { color: red }', spec)).toEqual([
+      'body:has(.kfm-alert)',
     ]);
     expect(emittedNamespaceViolations('.dark { --other-var: #000 }', spec)).toEqual(['.dark']);
     expect(emittedNamespaceViolations('.dark { --kfm-alert-bg: #000; color: red }', spec)).toEqual([
@@ -187,6 +222,13 @@ describe('KFM サイドカー CSS の消費契約 (scope 一致の機構)', () =
       'ul',
     ]);
   });
+
+  it.each([...EMITTED_NAMESPACE_SCOPED_PLUGINS])(
+    '%s の免除検査は違反セレクタを拒む',
+    (_plugin, spec) => {
+      expect(emittedNamespaceViolations('body { color: red }', spec)).toEqual(['body']);
+    },
+  );
 
   it('免除サイドカーの全ルールが自身の emit 名前空間限定 (theme ブリッジは自変数のみ)', () => {
     const discoveredPlugins = new Map(

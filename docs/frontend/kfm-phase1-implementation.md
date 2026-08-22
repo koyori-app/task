@@ -27,13 +27,17 @@ apps/frontend/src/lib/
                                スコープ共有・失敗回収）
     schema.ts                  pl-* class の sanitize スキーマ
     style.css                  サイドカー CSS（light シート固定 ＋ .dark ブリッジ）
+  remark-kfm-mermaid/          mermaid フェンス → client 描画 custom element
+    index.ts                   remark 変換と sanitize スキーマ
+    element.ts                 遅延ロード・SVG 描画・再接続処理
+    style.css                  JS 無効/描画失敗時のソース表示フォールバック
   markup-renderer/             KFM コア
     index.ts                   composition root（renderDescription singleton・公開 API）
     _renderer.ts               createRenderer（controlled pipeline・profile memoize）
     _sanitize.ts               DOMPurify 設定（構造専任・registry 方式）
     _cache.ts                  L1 キャッシュ（full-text キー）
     _config.ts                 多層 config 解決（Phase 1 はコード既定＋system 層）
-    _client-registry.ts        カスタム要素の client 登録（登録タグは現状空）
+    _client-registry.ts        カスタム要素の client 登録（kfm-mermaid）
 apps/frontend/src/pages/
   +client.ts                   client 専用 entry（カスタム要素登録の呼び出し口）
 ```
@@ -51,8 +55,8 @@ composition root が remark 層と sanitize スキーマを注入する。
 
 ```
 入力テキスト → 改行 LF 正規化 → remark-parse → remark-gfm → remark-koyori-alerts
-  → remark-rehype → rehype-starry-night → rehype-stringify → DOMPurify
-  → HTML 文字列 → <div v-html>
+  → remark-kfm-mermaid → remark-rehype → rehype-starry-night → rehype-stringify
+  → DOMPurify → HTML 文字列 → <div v-html>
 ```
 
 - `allowDangerousHtml` は使わない。mdast の生 `html` ノードは remark-rehype 既定で消える。
@@ -77,6 +81,43 @@ GitHub 完全互換の境界仕様をテストで固定している:
 - 出力: `div.kfm-alert.kfm-alert--{type}` ＋ `p.kfm-alert__title`。inline style は一切出さない
 - アイコン・配色は `style.css` の名前空間クラスで当てる（消費側で明示 import するサイドカー方式）
 
+## mermaid 図（remark-kfm-mermaid）
+
+設計上の決定（変更するときは理由ごと書き換える）:
+
+- **client 専用描画** — SSR は不活性 `<kfm-mermaid>` ＋エスケープ済みソーステキスト
+  だけを出す。mermaid は本質的にブラウザ描画（レイアウト計測に DOM が要る）であり、
+  SVG をサーバで焼く方式は採らない。mermaid 本体（重量）は custom element の
+  connectedCallback 内 dynamic import のみで参照し、図が実在するページでだけ落ちてくる
+- **securityLevel は strict 固定**（緩める変更は禁止）。`suppressErrorRendering` で
+  構文エラー時のエラー図 DOM 注入も止め、失敗は状態値で表す。なお strict でも
+  `click A "https://…"` の URL リンクは `<a>` として出力される（strict が殺すのは
+  callback 実行であってリンクではない）
+- **shadow DOM は成功時のみ張る** — 失敗時に張ると light DOM のソーステキスト
+  （JS 無効時・失敗時のフォールバック表示）まで隠れるため。描画成功の SVG は
+  shadow に入れ、ページ側 CSS から隔離する
+- **完了シグナルは `data-kfm-mermaid` の二値**（`rendered` / `error`。属性なし＝未処理）。
+  VRT / E2E はこの属性の出現を待つ（時間待ち禁止の口）。状態を増やす変更は
+  待ち側（story play・VRT）を全部数えてから
+- **挿入前の最終防御は sink と同じ HTML パース**（`element.ts` の `parseSafeSvg`）。
+  XML パーサでの検査は、mermaid の正常出力（click 付き flowchart の
+  `<a xlink:href>` は `xmlns:xlink` 宣言なし）を偽陽性で落とし、逆に HTML 再パースで
+  構造が変わる mXSS を素通しする。検査を通った同一ノードをそのまま挿入する
+- **href スキーム拒否は要素種別で分ける** — `<a>`（遷移 sink）と画像以外の href は
+  実行可能スキーム（`javascript:` / `vbscript:` / `data:` 全体）を拒否。
+  `<image>` / `<img>` は画像として解釈される sink であり `data:image/` だけを許す。
+  `data:` 一律拒否は不可: C4 図は Person アイコンを
+  `<image xlink:href="data:image/png;base64,…">` で埋める（mermaid@11.16.1 実測）ため、
+  一律拒否は C4 図全体を error へ倒す（DOMPurify 側の「data: は画像系のみ」既定とも整合）
+- **一時描画コンテナは自要素内の不可視ノード** — render 第三引数を省くと mermaid が
+  一時ノードを document.body 末尾へ置き図が一瞬露出するため、接続中の自要素内へ置いて
+  成否にかかわらず撤去する。副作用が二つあり両方に手当て済み: 描画ソースは textContent
+  でなく直下 text node のみから組む（描画中の再接続でコンテナ中身がソースへ混入しない）。
+  テキスト計測は祖先 CSS を継承するため、非 rendered 状態専用サイドカー CSS の
+  `white-space: pre` だけはコンテナ側で明示的に打ち消す（計測と表示の非対称を断つ）
+- **テーマは描画時スナップショット** — `.dark` ancestor を描画時に一度だけ見る。
+  描画後のテーマ切替に追従はしない（Phase 1 の割り切り）
+
 ## サニタイズ（_sanitize.ts）
 
 DOMPurify は HTML 構造の allowlist に専念する:
@@ -87,7 +128,7 @@ DOMPurify は HTML 構造の allowlist に専念する:
   で合成した registry が単一ソース
 - 動的 class は `SanitizeSchema.classPatterns` で明示した固定形だけを許可する。Phase 1 では
   コードフェンスの `language-*` に限定し、任意のアプリ class を通す汎用パターンにはしない
-- `CUSTOM_ELEMENT_HANDLING` は registry 登録制（Phase 1 は登録タグ空）。
+- `CUSTOM_ELEMENT_HANDLING` は registry 登録制（現在は kfm-mermaid を許可、属性は許可しない）。
   `allowCustomizedBuiltInElements: false` で `is=""` 経路を封鎖
 - `classPatterns` の正規表現に `g` / `y` フラグは使えない（`lastIndex` 状態で `.test()` の
   判定が呼び出し履歴により反転するため、registry 組立時に fail-fast で throw する）
@@ -155,6 +196,7 @@ const descriptionHtml = await renderDescription(task.description); // 既定 pro
 import '@/lib/remark-koyori-alerts/style.css';
 import '@/lib/remark-gfm/style.css';
 import '@/lib/rehype-starry-night/style.css';
+import '@/lib/remark-kfm-mermaid/style.css';
 ```
 
 ```html
@@ -162,7 +204,7 @@ import '@/lib/rehype-starry-night/style.css';
 <div class="kfm-content" v-html="descriptionHtml" />
 ```
 
-三つのサイドカー CSS は消費契約の前提が異なる:
+四つのサイドカー CSS は消費契約の前提が異なる:
 
 - **alerts CSS は import のみで当たる** — レンダラ自身が名前空間クラス
   （`.kfm-alert` 等）を emit し、CSS がそれを直接指すため器は不要
@@ -173,6 +215,8 @@ import '@/lib/rehype-starry-night/style.css';
   直接指す。実体は upstream の light シート固定 ＋ `.dark` ブリッジ（アプリの
   class 戦略ダークに追従。OS 設定連動の both.css は使わない — 発火条件を
   `.dark` の一系統に畳み、OS ダーク × アプリライトでコードだけ暗転する継ぎ目を防ぐ）
+- **mermaid CSS は import のみで当たる** — JS 無効時または描画失敗時の light DOM ソースを
+  `white-space: pre` と横スクロールで読める状態に保つ
 
 着色 transformer の初期化・変換が reject した場合、`renderDescription` も reject する。
 未着色コードへ部分フォールバックはせず、`+data.ts` が本文 HTML を await する標準構成では
@@ -219,6 +263,9 @@ scope 一致は `kfm-gfm-css-contract.test.ts` が強制し、story の器も同
 - `kfm-starry-night-init-failure.test.ts` — 初期化失敗（poisoned promise）を捨てて次描画で
   作り直す回収経路
 - `kfm-story-fixtures.test.ts` — story fixture の drift 検査・孤立 rendered/*.html の検出
+- `kfm-mermaid.test.ts` — mermaid フェンス変換（remark 層）と custom element（client 層・
+  mermaid mock）の契約固定（strict 固定・.dark テーマ切替・SVG 挿入前検査・error フォールバック）
+- `kfm-mermaid-fixtures.test.ts` — mermaid story fixture（rendered/mermaid-*.html）の drift 検査
 
 セキュリティ上の要点（inline style 禁止・full-text キー・client ガード）はいずれも
 「その規約を破る変更を入れるとテストが落ちる」形で書かれている。
@@ -230,7 +277,9 @@ KFM の Storybook story (`stories/kfm/*`) は本番と同じ「サーバ生成 H
 （`remark-gfm/content-class.ts` の定数を import）で、GFM サイドカー CSS が本番と同じ条件で
 当たる。fixture の運用は次の四点:
 
-- 入力の単一ソースは `src/lib/kfm-story-fixtures/inputs.ts`（キー 1 つ = fixture 1 枚 = story 1 つが基本）
+- 入力の単一ソースは `src/lib/kfm-story-fixtures/inputs.ts` と `inputs-mermaid.ts`
+  （キー 1 つ = fixture 1 枚 = story 1 つが基本。他枝と fixture 名を重ねないため mermaid 分は
+  `mermaid-` 接頭辞の別ファイル・drift 検査は `kfm-mermaid-fixtures.test.ts`）
 - `rendered/*.html` は `renderDescription` の事前生成物で、手で書き換えない
 - 再生成は `pnpm test:unit --update`（`kfm-story-fixtures.test.ts` の `toMatchFileSnapshot` が drift を CI で強制）
 - `vite.config.ts` の `fmt.ignorePatterns` から `rendered/**` を外すと drift 検査が偽陽性で落ちる（生成 HTML の整形差分を formatter が触るため）
