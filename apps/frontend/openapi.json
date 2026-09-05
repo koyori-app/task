@@ -4859,7 +4859,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/TenantResponse"
+                    "$ref": "#/components/schemas/TenantListItemResponse"
                   }
                 }
               }
@@ -22590,6 +22590,47 @@
           }
         }
       },
+      "TenantListItemResponse": {
+        "type": "object",
+        "description": "`GET /v1/tenants` 専用のレスポンス。テナントの欄に `membership` の印を加えたもの。\n\n客分（membership=Guest）のテナントは一覧に出る。客分に開く tenant-wide の口は\nプロジェクト一覧・My Tasks（いずれも己の分に絞る）だけで、テナント取得などは\n開かないため、クライアントはこの印で開ける口を見分ける。\n取得・作成・更新は従来どおり `TenantResponse`。",
+        "required": ["id", "display_id", "name", "description", "icon_url", "membership"],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "display_id": {
+            "type": "string"
+          },
+          "drive_quota_bytes": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "テナント設定の欄。客分（membership=Guest）には返さない（null）"
+          },
+          "icon_url": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "membership": {
+            "$ref": "#/components/schemas/TenantMembershipKind",
+            "description": "この利用者から見た関わり方（Owner / Member / Guest）"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "テナント設定の欄。客分（membership=Guest）には返さない（null）"
+          },
+          "require_2fa": {
+            "type": ["boolean", "null"],
+            "description": "テナント設定の欄。客分（membership=Guest）には返さない（null）"
+          }
+        }
+      },
       "TenantMemberResponse": {
         "type": "object",
         "required": ["id", "tenant_id", "user_id", "role", "user"],
@@ -22614,6 +22655,11 @@
             "format": "uuid"
           }
         }
+      },
+      "TenantMembershipKind": {
+        "type": "string",
+        "description": "テナント一覧における、この利用者から見た関わり方の印。\n`TenantRole` と同じ流儀（PascalCase の文字列）で返す。",
+        "enum": ["Owner", "Member", "Guest"]
       },
       "TenantResponse": {
         "type": "object",
