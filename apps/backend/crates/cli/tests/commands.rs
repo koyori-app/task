@@ -9,6 +9,21 @@ use wiremock::{Mock, ResponseTemplate};
 
 const TODO_STATUS: &str = "33333333-3333-4333-8333-333333333333";
 const DONE_STATUS: &str = "66666666-6666-4666-8666-666666666666";
+const ALICE_ID: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const BOB_ID: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const BUG_LABEL: &str = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const STALE_LABEL: &str = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+
+fn label_json(id: &str, name: &str) -> serde_json::Value {
+    json!({
+        "id": id,
+        "name": name,
+        "description": "",
+        "color": "#112233",
+        "icon_url": null,
+        "project_id": PROJECT_ID,
+    })
+}
 
 /// プロジェクトのキー解決と状態一覧は、ほぼ全てのコマンドの前段になる。
 async fn mount_project_lookup(harness: &Harness) {
@@ -282,6 +297,241 @@ async fn tasks_create_falls_back_to_the_projects_default_status() {
         ])
         .await
         .unwrap();
+    assert_eq!(code, 0);
+}
+
+#[tokio::test]
+async fn tasks_update_sends_all_changes_in_one_request() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    Mock::given(method("GET"))
+        .and(path(project_path("labels")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            label_json(BUG_LABEL, "bug"),
+            label_json(STALE_LABEL, "stale"),
+        ])))
+        .mount(&harness.server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(project_path("tasks/APP-7")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(task_detail_json()))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+    harness
+        .run(&[
+            "task",
+            "tasks",
+            "update",
+            "APP-7",
+            "--title",
+            "Updated",
+            "--add-label",
+            "bug",
+            "--remove-label",
+            "stale",
+            "--assignee",
+            ALICE_ID,
+            "--assignee",
+            BOB_ID,
+        ])
+        .await
+        .unwrap();
+    let requests = harness.server.received_requests().await.unwrap();
+    let writes: Vec<_> = requests
+        .iter()
+        .filter(|r| r.method.as_str() != "GET")
+        .collect();
+    assert_eq!(writes.len(), 1);
+    let body: serde_json::Value = serde_json::from_slice(&writes[0].body).unwrap();
+    assert_eq!(body["title"], "Updated");
+    assert!(body["label_ids"].is_null());
+    assert_eq!(body["add_label_ids"], json!([BUG_LABEL]));
+    assert_eq!(body["remove_label_ids"], json!([STALE_LABEL]));
+    assert_eq!(
+        body["assignees"],
+        json!([
+            { "user_id": ALICE_ID, "role": "assignee" },
+            { "user_id": BOB_ID, "role": "assignee" },
+        ])
+    );
+    assert!(
+        !requests
+            .iter()
+            .any(|r| r.method.as_str() == "GET" && r.url.path().ends_with("tasks/APP-7"))
+    );
+}
+
+#[tokio::test]
+async fn tasks_update_clears_every_assignee_in_the_update_request() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    Mock::given(method("PUT"))
+        .and(path(project_path("tasks/APP-7")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(task_detail_json()))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+    harness
+        .run(&["task", "tasks", "update", "APP-7", "--clear-assignees"])
+        .await
+        .unwrap();
+    let requests = harness.server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 2);
+    let body: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+    assert_eq!(body["assignees"], json!([]));
+}
+
+#[tokio::test]
+async fn tasks_update_propagates_rejection_and_failure_without_further_writes() {
+    for status in [403, 422, 503] {
+        let harness = harness().await;
+        mount_project_lookup(&harness).await;
+        Mock::given(method("PUT"))
+            .and(path(project_path("tasks/APP-7")))
+            .respond_with(
+                ResponseTemplate::new(status).set_body_json(json!({ "message": "update failed" })),
+            )
+            .expect(1)
+            .mount(&harness.server)
+            .await;
+        let error = harness
+            .run(&[
+                "task",
+                "tasks",
+                "update",
+                "APP-7",
+                "--title",
+                "Rejected",
+                "--add-label",
+                BUG_LABEL,
+                "--assignee",
+                ALICE_ID,
+            ])
+            .await
+            .unwrap_err();
+        assert_eq!(error.exit_code, if status == 403 { 4 } else { 1 });
+        let requests = harness.server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn tasks_create_deduplicates_resolved_assignees() {
+    for second in ["alice", "Alice", ALICE_ID] {
+        let harness = harness().await;
+        mount_project_lookup(&harness).await;
+        mount_statuses(&harness).await;
+        Mock::given(method("GET"))
+            .and(path(project_path("assignable-users")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                { "id": ALICE_ID, "username": "alice", "avatar_url": null },
+            ])))
+            .mount(&harness.server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path(project_path("tasks")))
+            .respond_with(ResponseTemplate::new(201).set_body_json(task_detail_json()))
+            .expect(1)
+            .mount(&harness.server)
+            .await;
+        harness
+            .run(&[
+                "task",
+                "tasks",
+                "create",
+                "--project",
+                "APP",
+                "--title",
+                "One assignee",
+                "--assignee",
+                "alice",
+                "--assignee",
+                second,
+            ])
+            .await
+            .unwrap();
+        let requests = harness.server.received_requests().await.unwrap();
+        let create = requests
+            .iter()
+            .find(|r| r.method.as_str() == "POST")
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&create.body).unwrap();
+        assert_eq!(
+            body["assignees"],
+            json!([{ "user_id": ALICE_ID, "role": "assignee" }])
+        );
+    }
+}
+
+#[tokio::test]
+async fn ambiguous_assignee_names_fail_before_updating() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    Mock::given(method("GET"))
+        .and(path(project_path("assignable-users")))
+        .and(query_param("username", "alice"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": ALICE_ID, "username": "alice", "avatar_url": null },
+            { "id": BOB_ID, "username": "alice", "avatar_url": null },
+        ])))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+    let error = harness
+        .run(&["task", "tasks", "update", "APP-7", "--assignee", "alice"])
+        .await
+        .unwrap_err();
+    assert_eq!(error.exit_code, 2);
+    assert!(error.message.contains(ALICE_ID));
+    assert!(error.message.contains(BOB_ID));
+    assert!(
+        harness
+            .server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .all(|r| r.method.as_str() == "GET")
+    );
+}
+
+/// 一覧の絞り込みで担当者を名前で指すとき、候補の列挙（`write:task` が要る）は使わない。
+/// 読むだけの PAT でも `--assignee` を名前で書けるようにする。
+#[tokio::test]
+async fn tasks_list_resolves_the_assignee_name_without_listing_candidates() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    Mock::given(method("GET"))
+        .and(path(project_path("assignable-users")))
+        .and(query_param("username", "alice"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": ALICE_ID, "username": "alice", "avatar_url": null }
+        ])))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(project_path("tasks")))
+        .and(query_param("assignee_id", ALICE_ID))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "tasks": [], "total": 0 })))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+
+    let code = harness
+        .run(&[
+            "task",
+            "tasks",
+            "list",
+            "--project",
+            "APP",
+            "--assignee",
+            "alice",
+        ])
+        .await
+        .unwrap();
+
     assert_eq!(code, 0);
 }
 
