@@ -131,7 +131,8 @@ fn status_names(statuses: &[ProjectStatusResponse]) -> String {
 fn pick_done_status(statuses: &[ProjectStatusResponse]) -> Result<Uuid> {
     statuses
         .iter()
-        .find(|status| status.is_done_state)
+        .find(|status| status.is_default_done && status.is_done_state)
+        .or_else(|| statuses.iter().find(|status| status.is_done_state))
         .or_else(|| {
             statuses.iter().find(|status| {
                 let name = status.name.to_ascii_lowercase();
@@ -171,6 +172,7 @@ mod tests {
             position,
             is_default,
             is_done_state,
+            is_default_done: false,
             created_at: Utc::now(),
         }
     }
@@ -284,6 +286,16 @@ mod tests {
             status("Completed archive", false, false, 0),
             status("Shipped", true, false, 1),
         ];
+        assert_eq!(pick_done_status(&statuses).unwrap(), statuses[1].id);
+    }
+
+    #[test]
+    fn prefers_the_default_done_status_when_several_statuses_are_done() {
+        let mut statuses = vec![
+            status("No Planning", true, false, 0),
+            status("Done", true, false, 1),
+        ];
+        statuses[1].is_default_done = true;
         assert_eq!(pick_done_status(&statuses).unwrap(), statuses[1].id);
     }
 

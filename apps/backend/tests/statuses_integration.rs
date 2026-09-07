@@ -127,36 +127,122 @@ async fn project_statuses(app: &TestApp, tp: &TestTenantProject) -> Vec<project_
 }
 
 #[tokio::test]
-async fn creating_done_status_replaces_the_existing_done_status() {
+async fn creating_another_done_status_keeps_the_existing_one() {
     let (app, tp, old_done_id, _default_id, old_task_id, _next_task_id) = setup().await;
 
     let new_done_id = create_status(&app, &tp, "Released", false, true).await;
     let statuses = project_statuses(&app, &tp).await;
-    let done_statuses: Vec<_> = statuses
+    let done_ids: HashSet<Uuid> = statuses
         .iter()
         .filter(|status| status.is_done_state)
+        .map(|status| status.id)
         .collect();
 
-    assert_eq!(done_statuses.len(), 1);
-    assert_eq!(done_statuses[0].id, new_done_id);
-    assert!(
-        !statuses
-            .iter()
-            .find(|status| status.id == old_done_id)
-            .unwrap()
-            .is_done_state
-    );
+    assert_eq!(done_ids, HashSet::from([old_done_id, new_done_id]));
+    // 既定の完了は明示しない限り移らない。
+    let default_done: Vec<_> = statuses
+        .iter()
+        .filter(|status| status.is_default_done)
+        .collect();
+    assert_eq!(default_done.len(), 1);
+    assert_eq!(default_done[0].id, old_done_id);
+
+    // 先に完了していたタスクは完了のまま。
     let old_task = tasks::Entity::find_by_id(old_task_id)
         .one(&app.state.db)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(old_task.status_id, old_done_id);
-    assert!(old_task.completed_at.is_none());
+    assert!(old_task.completed_at.is_some());
 }
 
 #[tokio::test]
-async fn concurrent_create_status_api_calls_cannot_create_multiple_done_statuses() {
+async fn creating_a_default_done_status_moves_the_mark_from_the_previous_one() {
+    let (app, tp, old_done_id, _default_id, _old_task_id, _next_task_id) = setup().await;
+
+    let response = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/statuses",
+                tp.tenant_id, tp.project_id
+            ),
+            serde_json::json!({
+                "name": "Released",
+                "color": "#336699",
+                "position": 2,
+                "is_done_state": true,
+                "is_default_done": true,
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let new_done_id: Uuid = response.json::<serde_json::Value>().await.unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let statuses = project_statuses(&app, &tp).await;
+    let default_done: Vec<_> = statuses
+        .iter()
+        .filter(|status| status.is_default_done)
+        .collect();
+    assert_eq!(default_done.len(), 1);
+    assert_eq!(default_done[0].id, new_done_id);
+    // 印が移っただけで、元の完了ステータスは完了のまま。
+    assert!(
+        statuses
+            .iter()
+            .find(|status| status.id == old_done_id)
+            .unwrap()
+            .is_done_state
+    );
+}
+
+#[tokio::test]
+async fn default_done_cannot_be_given_to_a_status_that_is_not_done() {
+    let (app, tp, _old_done_id, default_id, _old_task_id, _next_task_id) = setup().await;
+
+    let response = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/statuses",
+                tp.tenant_id, tp.project_id
+            ),
+            serde_json::json!({
+                "name": "Released",
+                "color": "#336699",
+                "position": 2,
+                "is_done_state": false,
+                "is_default_done": true,
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    assert_eq!(
+        update_status(
+            &app,
+            &tp,
+            default_id,
+            serde_json::json!({ "is_default_done": true }),
+        )
+        .await,
+        StatusCode::BAD_REQUEST
+    );
+    assert!(
+        !project_statuses::Entity::find_by_id(default_id)
+            .one(&app.state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_default_done
+    );
+}
+
+#[tokio::test]
+async fn concurrent_create_status_api_calls_cannot_create_multiple_default_done_statuses() {
     let (app, tp, _old_done_id, _default_id, _old_task_id, _next_task_id) = setup().await;
 
     let base = app.base_url();
@@ -171,6 +257,7 @@ async fn concurrent_create_status_api_calls_cannot_create_multiple_done_statuses
         "position": 2,
         "is_default": false,
         "is_done_state": true,
+        "is_default_done": true,
     });
     let archived = serde_json::json!({
         "name": "Archived",
@@ -178,6 +265,7 @@ async fn concurrent_create_status_api_calls_cannot_create_multiple_done_statuses
         "position": 3,
         "is_default": false,
         "is_done_state": true,
+        "is_default_done": true,
     });
     let (first, second) = tokio::join!(
         client.post(&path).json(&released).send(),
@@ -198,13 +286,21 @@ async fn concurrent_create_status_api_calls_cannot_create_multiple_done_statuses
         .parse()
         .unwrap();
     let statuses = project_statuses(&app, &tp).await;
-    let done_statuses: Vec<_> = statuses
+    let default_done: Vec<_> = statuses
         .iter()
-        .filter(|status| status.is_done_state)
+        .filter(|status| status.is_default_done)
         .collect();
 
-    assert_eq!(done_statuses.len(), 1);
-    assert!([first_created_id, second_created_id].contains(&done_statuses[0].id));
+    // 完了ステータスは 3 つ並ぶが、既定の完了は 1 つだけ。
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| status.is_done_state)
+            .count(),
+        3
+    );
+    assert_eq!(default_done.len(), 1);
+    assert!([first_created_id, second_created_id].contains(&default_done[0].id));
     assert_ne!(first_created_id, second_created_id);
 }
 
@@ -251,7 +347,7 @@ async fn current_default_cannot_be_explicitly_unset() {
 }
 
 #[tokio::test]
-async fn current_done_cannot_be_explicitly_unset_and_completion_is_preserved() {
+async fn the_last_done_status_cannot_be_unset_and_completion_is_preserved() {
     let (app, tp, done_id, _next_done_id, done_task_id, _next_task_id) = setup().await;
     let completed_at_before = tasks::Entity::find_by_id(done_task_id)
         .one(&app.state.db)
@@ -284,6 +380,124 @@ async fn current_done_cannot_be_explicitly_unset_and_completion_is_preserved() {
         .unwrap();
     assert!(done.is_done_state);
     assert_eq!(done_task.completed_at, completed_at_before);
+}
+
+#[tokio::test]
+async fn unsetting_one_of_several_done_statuses_clears_its_task_completion() {
+    let (app, tp, first_done_id, _default_id, first_task_id, _next_task_id) = setup().await;
+    let second_done_id = create_status(&app, &tp, "No Planning", false, true).await;
+    let second_task_id = create_task(&app, &tp, second_done_id, "Not going to happen").await;
+    assert!(
+        tasks::Entity::find_by_id(second_task_id)
+            .one(&app.state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some()
+    );
+
+    assert_eq!(
+        update_status(
+            &app,
+            &tp,
+            second_done_id,
+            serde_json::json!({ "is_done_state": false }),
+        )
+        .await,
+        StatusCode::OK
+    );
+
+    let second_done = project_statuses::Entity::find_by_id(second_done_id)
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!second_done.is_done_state);
+    assert!(!second_done.is_default_done);
+    // 完了でなくなったステータスのタスクだけ完了が外れる。
+    assert!(
+        tasks::Entity::find_by_id(second_task_id)
+            .one(&app.state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_none()
+    );
+    assert!(
+        tasks::Entity::find_by_id(first_task_id)
+            .one(&app.state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some()
+    );
+    assert!(
+        project_statuses::Entity::find_by_id(first_done_id)
+            .one(&app.state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_done_state
+    );
+}
+
+#[tokio::test]
+async fn current_default_done_cannot_be_explicitly_unset() {
+    let (app, tp, done_id, _default_id, _old_task_id, _next_task_id) = setup().await;
+
+    assert_eq!(
+        update_status(
+            &app,
+            &tp,
+            done_id,
+            serde_json::json!({ "is_default_done": false }),
+        )
+        .await,
+        StatusCode::BAD_REQUEST
+    );
+    assert!(
+        project_statuses::Entity::find_by_id(done_id)
+            .one(&app.state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_default_done
+    );
+}
+
+#[tokio::test]
+async fn default_done_moves_to_another_done_status_on_request() {
+    let (app, tp, first_done_id, _default_id, _old_task_id, _next_task_id) = setup().await;
+    let second_done_id = create_status(&app, &tp, "No Planning", false, true).await;
+
+    assert_eq!(
+        update_status(
+            &app,
+            &tp,
+            second_done_id,
+            serde_json::json!({ "is_default_done": true }),
+        )
+        .await,
+        StatusCode::OK
+    );
+
+    let statuses = project_statuses(&app, &tp).await;
+    let default_done: Vec<_> = statuses
+        .iter()
+        .filter(|status| status.is_default_done)
+        .collect();
+    assert_eq!(default_done.len(), 1);
+    assert_eq!(default_done[0].id, second_done_id);
+    assert!(
+        statuses
+            .iter()
+            .find(|status| status.id == first_done_id)
+            .unwrap()
+            .is_done_state
+    );
 }
 
 #[tokio::test]
@@ -321,7 +535,7 @@ async fn default_status_cannot_be_deleted() {
 }
 
 #[tokio::test]
-async fn done_switch_is_unique_and_migrates_task_completion_timestamps() {
+async fn promoting_a_second_done_status_completes_its_tasks_and_keeps_the_first() {
     let (app, tp, old_done_id, next_done_id, old_task_id, next_task_id) = setup().await;
 
     assert_eq!(switch_done(&app, &tp, next_done_id).await, StatusCode::OK);
@@ -332,8 +546,15 @@ async fn done_switch_is_unique_and_migrates_task_completion_timestamps() {
         .all(&app.state.db)
         .await
         .unwrap();
-    assert_eq!(done_statuses.len(), 1);
-    assert_eq!(done_statuses[0].id, next_done_id);
+    let done_ids: HashSet<Uuid> = done_statuses.iter().map(|status| status.id).collect();
+    assert_eq!(done_ids, HashSet::from([old_done_id, next_done_id]));
+    // 既定の完了は元のまま。
+    let default_done: Vec<_> = done_statuses
+        .iter()
+        .filter(|status| status.is_default_done)
+        .collect();
+    assert_eq!(default_done.len(), 1);
+    assert_eq!(default_done[0].id, old_done_id);
 
     let old_task = tasks::Entity::find_by_id(old_task_id)
         .one(&app.state.db)
@@ -346,12 +567,12 @@ async fn done_switch_is_unique_and_migrates_task_completion_timestamps() {
         .unwrap()
         .unwrap();
     assert_eq!(old_task.status_id, old_done_id);
-    assert!(old_task.completed_at.is_none());
+    assert!(old_task.completed_at.is_some());
     assert!(next_task.completed_at.is_some());
 }
 
 #[tokio::test]
-async fn done_switch_rolls_back_flags_and_task_timestamps_on_partial_failure() {
+async fn promoting_a_done_status_rolls_back_flags_and_task_timestamps_on_partial_failure() {
     let (app, tp, old_done_id, next_done_id, old_task_id, next_task_id) = setup().await;
     let suffix = Uuid::new_v4().simple().to_string();
     let function_name = format!("fail_done_switch_{suffix}");

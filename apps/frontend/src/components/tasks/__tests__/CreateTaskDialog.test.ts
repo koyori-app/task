@@ -54,6 +54,7 @@ const statuses = [
     color: '#2563eb',
     is_default: true,
     is_done_state: false,
+    is_default_done: false,
     created_at: '2026-01-01T00:00:00.000Z',
     position: 0,
     project_id: 'project-uuid',
