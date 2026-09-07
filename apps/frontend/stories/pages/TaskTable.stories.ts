@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { expect, fn, screen, userEvent, within } from 'storybook/test';
+import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test';
 import { provide, reactive, nextTick } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import TaskTablePage from '@/pages/@tenant/projects/@projectKey/tasks/+Page.vue';
@@ -337,6 +337,55 @@ const sampleMembers = [
   },
 ];
 
+type SortableStoryTask = {
+  id: string;
+  title: string;
+  priority: 'CriticalFire' | 'Critical' | 'High' | 'Medium' | 'Low' | 'Trivial';
+  soft_deadline: string | null;
+  assignees: Array<{ user: { username: string } }>;
+};
+
+const STORY_PRIORITY_RANK: Record<SortableStoryTask['priority'], number> = {
+  CriticalFire: 0,
+  Critical: 1,
+  High: 2,
+  Medium: 3,
+  Low: 4,
+  Trivial: 5,
+};
+
+function sortStoryTasks(tasks: SortableStoryTask[], sort: string | null) {
+  const match = /^(title|assignee|priority|deadline)_(asc|desc)$/.exec(sort ?? '');
+  if (!match) return tasks;
+  const [, column, direction] = match;
+  const keyOf = (task: SortableStoryTask): string | number | null => {
+    switch (column) {
+      case 'title':
+        return task.title;
+      case 'assignee':
+        return task.assignees.map((entry) => entry.user.username.toLowerCase()).sort()[0] ?? null;
+      case 'priority':
+        return STORY_PRIORITY_RANK[task.priority];
+      case 'deadline':
+        return task.soft_deadline;
+      default:
+        return null;
+    }
+  };
+
+  return [...tasks].sort((left, right) => {
+    const leftKey = keyOf(left);
+    const rightKey = keyOf(right);
+    if (leftKey === null && rightKey !== null) return 1;
+    if (leftKey !== null && rightKey === null) return -1;
+    if (leftKey !== null && rightKey !== null && leftKey !== rightKey) {
+      const comparison = leftKey < rightKey ? -1 : 1;
+      return direction === 'asc' ? comparison : -comparison;
+    }
+    return right.id.localeCompare(left.id);
+  });
+}
+
 function createMockFetch(
   overrides: {
     projects?: typeof sampleProjects;
@@ -406,11 +455,15 @@ function createMockFetch(
       return jsonResponse(sampleMembers);
     }
     // List 表示はステータスごとに問い合わせる。件数（total）もその絞り込みで返す
-    const statusFilter = new URL(url, 'http://localhost').searchParams.get('status_id');
+    const requestUrl = new URL(url, 'http://localhost');
+    const statusFilter = requestUrl.searchParams.get('status_id');
     if (statusFilter && url.includes('/tasks')) {
-      const all = (overrides.tasks ?? sampleTasks).tasks as Array<{ status_id: string }>;
+      const all = (overrides.tasks ?? sampleTasks).tasks as Array<
+        SortableStoryTask & { status_id: string }
+      >;
       const filtered = all.filter((task) => task.status_id === statusFilter);
-      return jsonResponse({ tasks: filtered, total: filtered.length });
+      const sorted = sortStoryTasks(filtered, requestUrl.searchParams.get('sort'));
+      return jsonResponse({ tasks: sorted, total: sorted.length });
     }
     if (url.includes('/tasks/search')) {
       if (overrides.rejectSearch) {
@@ -763,6 +816,7 @@ export const ListView: Story = {
   beforeEach: mockFetch,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    const user = userEvent.setup();
     // ステータスごとの塊で出る（Table のヘッダー行ではなく、グループの見出し）
     await expect(canvas.findByRole('tab', { name: 'List' })).resolves.toHaveAttribute(
       'aria-selected',
@@ -774,6 +828,30 @@ export const ListView: Story = {
     // ステータスはグループが表すので列にせず、名前の左の丸から変える
     await expect(canvas.findAllByLabelText(/^ステータス: /)).resolves.not.toHaveLength(0);
     await expect(canvas.findAllByLabelText('コメントを追加')).resolves.not.toHaveLength(0);
+
+    // Storybook の fetch モックも実 API と同様に sort クエリを反映する。
+    const progressToggle = await canvas.findByRole('button', { name: 'In Progress を折りたたむ' });
+    const progressSection = progressToggle.closest('section');
+    if (!(progressSection instanceof HTMLElement)) {
+      throw new Error('In Progress section not found');
+    }
+    const progress = within(progressSection);
+    await user.click(await progress.findByRole('button', { name: '優先度を並べ替え' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: '優先度が低い順' }));
+
+    const titlesInProgress = () =>
+      progress
+        .getAllByRole('button')
+        .map((button) => button.textContent?.trim())
+        .filter((title) => title === 'OAuth 対応を実装する' || title === '通知メール送信機能');
+    await waitFor(() =>
+      expect(titlesInProgress()).toEqual(['通知メール送信機能', 'OAuth 対応を実装する']),
+    );
+
+    await user.click(await progress.findByRole('button', { name: '優先度を優先度が高い順に反転' }));
+    await waitFor(() =>
+      expect(titlesInProgress()).toEqual(['OAuth 対応を実装する', '通知メール送信機能']),
+    );
   },
 };
 
