@@ -68,6 +68,22 @@ fn assert_user_summary(value: &serde_json::Value, expected_id: Uuid) {
     assert!(value.get("email").is_none(), "email must not be embedded");
 }
 
+async fn create_task(
+    app: &TestApp,
+    base: &str,
+    status_id: Uuid,
+    title: &str,
+    parent_task_id: Option<&str>,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({ "title": title, "status_id": status_id });
+    if let Some(parent_task_id) = parent_task_id {
+        body["parent_task_id"] = serde_json::Value::String(parent_task_id.to_string());
+    }
+    let response = app.post_json_with_session(base, body).await;
+    assert_eq!(response.status(), StatusCode::CREATED, "create {title}");
+    response.json().await.expect("task json")
+}
+
 /// 同時刻のタスクがページ境界をまたいでも、重複も欠落もしない。
 ///
 /// List 表示はステータスごとに `cursor` でページを継ぐ。既定の並びは `created_at DESC`
@@ -460,4 +476,168 @@ async fn task_list_rejects_a_cursor_made_for_another_sort() {
         .get_with_session(&format!("{base}?limit=1&offset=20&cursor={cursor}"))
         .await;
     assert_eq!(mixed.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn root_only_list_pages_only_root_tasks_without_duplicates() {
+    let mut app = TestApp::new().await;
+    let (_user, tp) = setup_project(&mut app).await;
+    let status_id = create_status(&app, &tp).await;
+    let base = tasks_base(&tp);
+
+    let mut roots = Vec::new();
+    for i in 0..24 {
+        let task = create_task(&app, &base, status_id, &format!("Root {i}"), None).await;
+        roots.push(task["id"].as_str().expect("root id").to_string());
+    }
+    for i in 0..5 {
+        create_task(
+            &app,
+            &base,
+            status_id,
+            &format!("Child {i}"),
+            Some(&roots[0]),
+        )
+        .await;
+    }
+
+    let all = app.get_with_session(&base).await;
+    assert_eq!(all.status(), StatusCode::OK);
+    let all_body: serde_json::Value = all.json().await.expect("all tasks json");
+    assert_eq!(all_body["total"].as_u64(), Some(29));
+
+    let scoped = format!("{base}?root_only=true&limit=10");
+    let mut seen = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let url = match &cursor {
+            Some(cursor) => format!("{scoped}&cursor={cursor}"),
+            None => scoped.clone(),
+        };
+        let response = app.get_with_session(&url).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = response.json().await.expect("root tasks json");
+        assert_eq!(body["total"].as_u64(), Some(24));
+        seen.extend(task_ids(&body));
+        cursor = next_cursor(&body);
+        if cursor.is_none() {
+            break;
+        }
+    }
+
+    let expected: std::collections::HashSet<_> = roots.iter().collect();
+    let actual: std::collections::HashSet<_> = seen.iter().collect();
+    assert_eq!(seen.len(), 24, "page boundary lost or duplicated a root");
+    assert_eq!(actual, expected, "a child leaked into the root list");
+}
+
+#[tokio::test]
+async fn root_only_treats_children_of_hidden_parents_as_roots() {
+    let mut app = TestApp::new().await;
+    let (_user, tp) = setup_project(&mut app).await;
+    let status_id = create_status(&app, &tp).await;
+    let base = tasks_base(&tp);
+
+    let archived_parent = create_task(&app, &base, status_id, "Archived parent", None).await;
+    let archived_parent_id = archived_parent["id"].as_str().expect("parent id");
+    let archived_child = create_task(
+        &app,
+        &base,
+        status_id,
+        "Child of archived parent",
+        Some(archived_parent_id),
+    )
+    .await;
+    let archived_child_id = archived_child["id"].as_str().expect("child id");
+    let archive = app
+        .put_json_with_session(
+            &format!("{base}/{archived_parent_id}"),
+            serde_json::json!({ "is_archived": true }),
+        )
+        .await;
+    assert_eq!(archive.status(), StatusCode::OK);
+
+    let deleted_parent = create_task(&app, &base, status_id, "Deleted parent", None).await;
+    let deleted_parent_id = deleted_parent["id"].as_str().expect("parent id");
+    let deleted_child = create_task(
+        &app,
+        &base,
+        status_id,
+        "Child of deleted parent",
+        Some(deleted_parent_id),
+    )
+    .await;
+    let deleted_child_id = deleted_child["id"].as_str().expect("child id");
+    let delete = app
+        .delete_with_session(&format!("{base}/{deleted_parent_id}"))
+        .await;
+    assert_eq!(delete.status(), StatusCode::NO_CONTENT);
+
+    let response = app
+        .get_with_session(&format!("{base}?root_only=true"))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.expect("root tasks json");
+    let ids: std::collections::HashSet<_> = task_ids(&body).into_iter().collect();
+    assert!(ids.contains(archived_child_id));
+    assert!(ids.contains(deleted_child_id));
+    assert!(!ids.contains(archived_parent_id));
+    assert!(!ids.contains(deleted_parent_id));
+}
+
+#[tokio::test]
+async fn relations_include_parent_and_stably_order_subtasks() {
+    let mut app = TestApp::new().await;
+    let (_user, tp) = setup_project(&mut app).await;
+    let status_id = create_status(&app, &tp).await;
+    let base = tasks_base(&tp);
+
+    let parent = create_task(&app, &base, status_id, "Parent", None).await;
+    let parent_id = parent["id"].as_str().expect("parent id");
+    let first = create_task(&app, &base, status_id, "First child", Some(parent_id)).await;
+    let second = create_task(&app, &base, status_id, "Second child", Some(parent_id)).await;
+
+    let parent_relations = app
+        .get_with_session(&format!("{base}/{parent_id}/relations"))
+        .await;
+    assert_eq!(parent_relations.status(), StatusCode::OK);
+    let body: serde_json::Value = parent_relations.json().await.expect("relations json");
+    assert!(body["parent"].is_null());
+    let child_ids: Vec<_> = body["subtasks"]
+        .as_array()
+        .expect("subtasks")
+        .iter()
+        .map(|task| task["id"].as_str().expect("child id"))
+        .collect();
+    assert_eq!(
+        child_ids,
+        vec![
+            first["id"].as_str().expect("first id"),
+            second["id"].as_str().expect("second id")
+        ]
+    );
+
+    let child_relations = app
+        .get_with_session(&format!(
+            "{base}/{}/relations",
+            first["id"].as_str().expect("first id")
+        ))
+        .await;
+    assert_eq!(child_relations.status(), StatusCode::OK);
+    let child_body: serde_json::Value = child_relations.json().await.expect("relations json");
+    assert_eq!(child_body["parent"]["id"].as_str(), Some(parent_id));
+
+    let delete = app
+        .delete_with_session(&format!("{base}/{parent_id}"))
+        .await;
+    assert_eq!(delete.status(), StatusCode::NO_CONTENT);
+    let orphan_relations = app
+        .get_with_session(&format!(
+            "{base}/{}/relations",
+            first["id"].as_str().expect("first id")
+        ))
+        .await;
+    assert_eq!(orphan_relations.status(), StatusCode::OK);
+    let orphan_body: serde_json::Value = orphan_relations.json().await.expect("relations json");
+    assert!(orphan_body["parent"].is_null());
 }

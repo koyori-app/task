@@ -4,7 +4,7 @@ import type { PaginationState } from '@tanstack/vue-table';
 export type TasksListQueryKeyParams = {
   params: {
     path: { tenant_id: string; project_id: string };
-    query: { limit: number; offset: number; label_id?: string };
+    query: { limit: number; offset: number; label_id?: string; root_only: boolean };
   };
 };
 
@@ -27,6 +27,7 @@ export function buildTasksListQueryParams(
         limit: pagination.pageSize,
         offset: pagination.pageIndex * pagination.pageSize,
         label_id: selectedLabelId ?? undefined,
+        root_only: true,
       },
     },
   };

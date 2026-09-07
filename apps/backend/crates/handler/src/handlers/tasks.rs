@@ -448,6 +448,19 @@ pub async fn list_tasks(
     if let Some(pid) = q.parent_task_id {
         query = query.filter(tasks::Column::ParentTaskId.eq(pid));
     }
+    if q.root_only {
+        // `parent_task_id IS NULL` だけでは、親を論理削除／アーカイブした子まで一覧から
+        // 消えてしまう。現在の一覧（is_archived が同じ）に親がいないタスクもルート相当と
+        // して返し、子だけが到達不能になるのを防ぐ。
+        query = query.filter(
+            Condition::any()
+                .add(tasks::Column::ParentTaskId.is_null())
+                .add(Expr::cust_with_values(
+                    "NOT EXISTS (SELECT 1 FROM tasks parent WHERE parent.id = tasks.parent_task_id AND parent.deleted_at IS NULL AND parent.is_archived = $1)",
+                    vec![sea_orm::Value::from(q.is_archived)],
+                )),
+        );
+    }
     if let Some(uid) = q.assignee_id {
         query = query.filter(Expr::cust_with_values(
             "EXISTS (SELECT 1 FROM task_assignees WHERE task_assignees.task_id = tasks.id AND task_assignees.user_id = $1)",
@@ -1358,9 +1371,21 @@ pub async fn list_relations(
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
+    let parent = if let Some(parent_id) = task.parent_task_id {
+        tasks::Entity::find_by_id(parent_id)
+            .filter(tasks::Column::ProjectId.eq(project_id))
+            .filter(tasks::Column::DeletedAt.is_null())
+            .one(&state.db)
+            .await?
+    } else {
+        None
+    };
+
     let subtasks = tasks::Entity::find()
         .filter(tasks::Column::ParentTaskId.eq(task.id))
         .filter(tasks::Column::DeletedAt.is_null())
+        .order_by_asc(tasks::Column::CreatedAt)
+        .order_by_asc(tasks::Column::Id)
         .all(&state.db)
         .await?;
 
@@ -1431,6 +1456,10 @@ pub async fn list_relations(
         .collect();
 
     Ok(Json(TaskRelationsResponse {
+        parent: match parent {
+            Some(parent) => Some(build_task_response(&state.db, parent).await?),
+            None => None,
+        },
         subtasks: build_task_responses(&state.db, subtasks).await?,
         blocks,
         blocked_by,

@@ -134,6 +134,18 @@ const sampleTaskDetail = {
   custom_field_values: [],
 };
 
+const sampleSubtask = {
+  ...sampleTaskDetail,
+  id: 'task-2',
+  seq_id: 2,
+  title: 'PKCE の検証を追加する',
+  description: null,
+  parent_task_id: sampleTaskDetail.id,
+  assignees: [],
+  labels: [],
+  custom_field_values: [],
+};
+
 const sampleLabels = [
   ...sampleTaskDetail.labels,
   {
@@ -269,6 +281,9 @@ function createMockFetch(overrides: MockOptions = {}) {
     }
     if (url.includes('/activities')) {
       return jsonResponse({ activities: [], total: 0 });
+    }
+    if (method === 'GET' && url.includes('/relations')) {
+      return jsonResponse({ parent: null, subtasks: [sampleSubtask], blocks: [], blocked_by: [] });
     }
     // /tasks/{id}/comments は /tasks/ の分岐より先に受ける
     if (url.includes('/comments')) {
@@ -442,10 +457,17 @@ export const Default: Story = {
     await expect(
       canvas.findByText('OIDC フローとセッション管理を実装する。'),
     ).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('PKCE の検証を追加する')).resolves.toBeInTheDocument();
     // 担当者はアバター（頭文字）のみ表示し、名前テキストは出さない。
     // 頭文字は avatarInitials の既定どおり 2 文字（田中太郎 → 田中）
     await expect(canvas.findByText('田中')).resolves.toBeInTheDocument();
     await expect(canvas.queryByText('田中太郎')).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(await canvas.findByRole('button', { name: 'サブタスクを追加' }));
+    const input = await canvas.findByRole('textbox', { name: 'サブタスク名' });
+    await user.type(input, 'リダイレクト検証{Enter}');
+    await expect(input).toHaveValue('');
   },
 };
 

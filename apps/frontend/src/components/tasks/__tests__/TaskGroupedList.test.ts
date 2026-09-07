@@ -60,6 +60,9 @@ function mountList(
   const wrapper = mount(TaskGroupedList, {
     props: {
       groups,
+      tenantId: 'tenant-1',
+      projectId: 'project-1',
+      projectKey: 'TASK',
       statuses,
       projectLabels: [bug],
       members,

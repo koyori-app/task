@@ -25,6 +25,10 @@ describe('タスク一覧のラベルフィルタ', () => {
       buildTasksListQueryParams('tenant-1', 'project-1', pagination.value, selectedLabelId.value)
         .params.query.label_id,
     ).toBe('label-bug');
+    expect(
+      buildTasksListQueryParams('tenant-1', 'project-1', pagination.value, selectedLabelId.value)
+        .params.query.root_only,
+    ).toBe(true);
     scope.stop();
   });
 

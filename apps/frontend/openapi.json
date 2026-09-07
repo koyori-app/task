@@ -14742,6 +14742,15 @@
             }
           },
           {
+            "name": "root_only",
+            "in": "query",
+            "description": "親が現在の一覧に存在しないタスクだけを返す。\n\n未指定時は従来どおり親子を区別せず返す。List 表示はこれを有効にし、\nサブタスクを親行の配下へ別途描画する。",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "is_archived",
             "in": "query",
             "required": false,
@@ -22746,7 +22755,7 @@
       },
       "TaskRelationsResponse": {
         "type": "object",
-        "required": ["subtasks", "blocks", "blocked_by"],
+        "required": ["parent", "subtasks", "blocks", "blocked_by"],
         "properties": {
           "blocked_by": {
             "type": "array",
@@ -22759,6 +22768,16 @@
             "items": {
               "$ref": "#/components/schemas/RelationEntry"
             }
+          },
+          "parent": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskResponse"
+              }
+            ]
           },
           "subtasks": {
             "type": "array",

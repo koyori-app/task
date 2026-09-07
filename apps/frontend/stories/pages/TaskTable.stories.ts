@@ -262,6 +262,16 @@ const sampleTasks = {
   total: 6,
 };
 
+const sampleSubtask = {
+  ...sampleTasks.tasks[0],
+  id: 'task-child-1',
+  seq_id: 21,
+  title: 'PKCE の検証を追加する',
+  parent_task_id: 'task-1',
+  assignees: [],
+  labels: [],
+};
+
 const sampleLabels = [
   {
     id: 'label-bug',
@@ -354,6 +364,7 @@ function createMockFetch(
   const original = globalThis.fetch;
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
     const url = typeof req === 'string' ? req : req.url;
+    const method = typeof req === 'string' ? 'GET' : req.method;
     if (isListTenantsUrl(url)) {
       if (overrides.rejectTenantsList) {
         return jsonResponse({ message: 'server error' }, 500);
@@ -404,6 +415,15 @@ function createMockFetch(
     }
     if (url.includes('/members')) {
       return jsonResponse(sampleMembers);
+    }
+    if (method === 'GET' && url.includes('/relations')) {
+      const hasChild = url.includes('/tasks/task-1/') || url.includes('/tasks/ENG-1/');
+      return jsonResponse({
+        parent: null,
+        subtasks: hasChild ? [sampleSubtask] : [],
+        blocks: [],
+        blocked_by: [],
+      });
     }
     // List 表示はステータスごとに問い合わせる。件数（total）もその絞り込みで返す
     const statusFilter = new URL(url, 'http://localhost').searchParams.get('status_id');
@@ -774,6 +794,31 @@ export const ListView: Story = {
     // ステータスはグループが表すので列にせず、名前の左の丸から変える
     await expect(canvas.findAllByLabelText(/^ステータス: /)).resolves.not.toHaveLength(0);
     await expect(canvas.findAllByLabelText('コメントを追加')).resolves.not.toHaveLength(0);
+  },
+};
+
+export const ListViewSubtasks: Story = {
+  name: 'List 表示のサブタスク展開',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const row = await canvas.findByLabelText('タスク「OAuth 対応を実装する」を選択');
+    const toggle = within(row).getByRole('button', { name: 'サブタスクを展開' });
+    await expect(toggle).toHaveClass('opacity-0');
+
+    await user.click(row);
+    await expect(toggle).toHaveClass('opacity-100');
+    await user.click(toggle);
+    await expect(canvas.findByText('PKCE の検証を追加する')).resolves.toBeInTheDocument();
+
+    const emptyRow = await canvas.findByLabelText('タスク「ログイン画面の UI 実装」を選択');
+    await user.click(emptyRow);
+    await user.click(within(emptyRow).getByRole('button', { name: 'サブタスクを展開' }));
+    await expect(
+      canvas.findByRole('textbox', { name: 'ログイン画面の UI 実装 のサブタスク名' }),
+    ).resolves.toBeInTheDocument();
   },
 };
 

@@ -7,6 +7,7 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import TaskActivityFeed from '@/components/tasks/TaskActivityFeed.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
+import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
 import { Button } from '@/components/ui/button';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
 import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
@@ -16,6 +17,10 @@ import { useTaskDetail } from '@/composables/useTaskDetail';
 import { useMeQuery } from '@/lib/api-vue-query';
 import type { Data } from './+data';
 import { refreshTaskDescription } from './task-description-navigation';
+import type { components } from '@/generated/api';
+import { taskDetailHref } from '@/lib/task-display';
+
+type TaskResponse = components['schemas']['TaskResponse'];
 
 const pageContext = usePageContext();
 // サーバ (+data.ts) が renderDescription した説明 HTML。クライアントは受けて v-html
@@ -180,6 +185,10 @@ function onDeleteDialogCancel(event: Event) {
   if (deletePending.value) return;
   closeDeleteDialog();
 }
+
+function openRelatedTask(task: TaskResponse) {
+  void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id));
+}
 </script>
 
 <template>
@@ -220,6 +229,18 @@ function onDeleteDialogCancel(event: Event) {
     :delete-disabled="deletePending"
     @delete-request="openDeleteDialog"
   >
+    <template v-if="displayTask" #main>
+      <TaskSubtaskPanel
+        :tenant-id="tenantId"
+        :project-id="projectId"
+        :task-id="taskId"
+        :task-uuid="displayTask.id"
+        :status-id="selectedStatusId"
+        :statuses="statuses"
+        :project-key="projectKey"
+        @open="openRelatedTask"
+      />
+    </template>
     <template #breadcrumb>
       <a :href="listHref" class="text-primary hover:underline">タスク一覧</a>
       <span aria-hidden="true">/</span>

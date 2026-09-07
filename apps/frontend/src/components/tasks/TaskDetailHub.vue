@@ -8,7 +8,6 @@ import {
   ChevronRight,
   ChevronUp,
   CircleDashed,
-  GitBranch,
   EllipsisVertical,
   Filter,
   Flag,
@@ -285,10 +284,9 @@ function toggleLabel(labelId: string, checked: boolean) {
   emit('save:label_ids', next);
 }
 
-/** モックにある導線のうち、対応する機能がまだ無いもの。disabled で形だけ置く。 */
+/** モックにある導線のうち、まだ対応していないもの。disabled で形だけ置く。 */
 const PENDING_ACTIONS = [
   { label: 'フィールドを追加', icon: SquarePen },
-  { label: 'サブタスクを追加', icon: GitBranch },
   { label: 'チェックリストを作成', icon: ListChecks },
   { label: 'ファイルを添付', icon: Paperclip },
 ];
@@ -933,7 +931,7 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
               </p>
             </div>
 
-            <!-- モックのアクション一覧。対応する機能がまだ無いので disabled で置く -->
+            <!-- モックのうち未対応のアクション。サブタスクは直後の main slot で実装済み -->
             <ul class="flex flex-col gap-1">
               <li v-for="action in PENDING_ACTIONS" :key="action.label">
                 <Button
