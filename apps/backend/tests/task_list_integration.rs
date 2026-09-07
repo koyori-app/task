@@ -641,3 +641,128 @@ async fn relations_include_parent_and_stably_order_subtasks() {
     let orphan_body: serde_json::Value = orphan_relations.json().await.expect("relations json");
     assert!(orphan_body["parent"].is_null());
 }
+
+#[tokio::test]
+async fn root_and_subtask_lists_apply_the_same_filters() {
+    let mut app = TestApp::new().await;
+    let (user, tp) = setup_project(&mut app).await;
+    let status_id = create_status(&app, &tp).await;
+    let base = tasks_base(&tp);
+    let project_base = base.strip_suffix("/tasks").unwrap();
+    let response = app
+        .post_json_with_session(
+            &format!("{project_base}/labels"),
+            serde_json::json!({ "name": "X", "color": "#336699" }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let label: serde_json::Value = response.json().await.unwrap();
+    let label_id = label["id"].as_str().unwrap();
+    let hidden_parent = create_task(&app, &base, status_id, "No label", None).await;
+    let parent = create_task(&app, &base, status_id, "Labelled parent", None).await;
+    let parent_id = parent["id"].as_str().unwrap();
+    let child = create_task(&app, &base, status_id, "Labelled child", Some(parent_id)).await;
+    let excluded = create_task(&app, &base, status_id, "Unlabelled child", Some(parent_id)).await;
+    let archived = create_task(&app, &base, status_id, "Archived child", Some(parent_id)).await;
+    let orphan = create_task(
+        &app,
+        &base,
+        status_id,
+        "Child of unlabelled parent",
+        hidden_parent["id"].as_str(),
+    )
+    .await;
+    for task in [&parent, &child, &archived, &orphan] {
+        let response = app
+            .put_json_with_session(
+                &format!("{base}/{}", task["id"].as_str().unwrap()),
+                serde_json::json!({ "label_ids": [label_id] }),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    let response = app
+        .put_json_with_session(
+            &format!("{base}/{}", archived["id"].as_str().unwrap()),
+            serde_json::json!({ "is_archived": true }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 親が条件外の子をルートとして数え、ページをまたいでも欠落・重複しない。
+    let mut seen = Vec::new();
+    let mut cursor = None;
+    loop {
+        let mut url =
+            format!("{base}?root_only=true&label_id={label_id}&status_id={status_id}&limit=1");
+        if let Some(c) = &cursor {
+            url.push_str(&format!("&cursor={c}"));
+        }
+        let response = app.get_with_session(&url).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(body["total"], 2);
+        seen.extend(task_ids(&body));
+        cursor = next_cursor(&body);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    seen.sort();
+    let mut expected = vec![
+        parent_id.to_string(),
+        orphan["id"].as_str().unwrap().to_string(),
+    ];
+    expected.sort();
+    assert_eq!(seen, expected);
+
+    // 展開は同じ一覧 API に parent_task_id を付ける。条件外・アーカイブ済みの子は混ざらない。
+    for (is_archived, expected) in [(false, &child), (true, &archived)] {
+        let response = app.get_with_session(&format!(
+            "{base}?parent_task_id={parent_id}&label_id={label_id}&status_id={status_id}&is_archived={is_archived}"
+        )).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(
+            task_ids(&body),
+            vec![expected["id"].as_str().unwrap().to_string()]
+        );
+    }
+    // ステータス・優先度・担当者も親の存在判定に含める。
+    let response = app
+        .post_json_with_session(
+            &format!("{project_base}/statuses"),
+            serde_json::json!({ "name": "Doing", "color": "#336699", "position": 2, "is_default": false, "is_done_state": false }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let other_status: serde_json::Value = response.json().await.unwrap();
+    let other_status = other_status["id"].as_str().unwrap();
+    let excluded_id = excluded["id"].as_str().unwrap();
+    let response = app
+        .put_json_with_session(
+            &format!("{base}/{excluded_id}"),
+            serde_json::json!({ "status_id": other_status, "priority": "High" }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = app
+        .post_json_with_session(
+            &format!("{base}/{excluded_id}/assignees"),
+            serde_json::json!({ "user_id": user.id, "role": "assignee" }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    for filter in [
+        format!("status_id={other_status}"),
+        "priority=high".to_string(),
+        format!("assignee_id={}", user.id),
+    ] {
+        let response = app
+            .get_with_session(&format!("{base}?root_only=true&{filter}"))
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(task_ids(&body), vec![excluded_id.to_string()]);
+    }
+}

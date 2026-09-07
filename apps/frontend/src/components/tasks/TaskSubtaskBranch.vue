@@ -5,7 +5,7 @@ import { computed, ref } from 'vue';
 import TaskGroupedRow from '@/components/tasks/TaskGroupedRow.vue';
 import TaskSubtaskComposer from '@/components/tasks/TaskSubtaskComposer.vue';
 import { Button } from '@/components/ui/button';
-import { useTaskSubtasks } from '@/composables/useTaskSubtasks';
+import { useTaskSubtasks, type TaskSubtaskFilters } from '@/composables/useTaskSubtasks';
 import type { TaskRowField } from '@/composables/useTaskRowMutations';
 import type { components } from '@/generated/api';
 
@@ -16,6 +16,7 @@ type ProjectMember = { id: string; username: string; avatar_url?: string | null 
 
 const props = defineProps<{
   parentTask: TaskResponse;
+  filters?: TaskSubtaskFilters;
   tenantId: string | null | undefined;
   projectId: string | null | undefined;
   statuses: StatusResponse[];
@@ -45,6 +46,7 @@ const subtasks = useTaskSubtasks({
   projectId: () => props.projectId,
   taskId: () => props.parentTask.id,
   taskUuid: () => props.parentTask.id,
+  filters: () => ({ is_archived: false, ...props.filters }),
 });
 
 function openComposer() {

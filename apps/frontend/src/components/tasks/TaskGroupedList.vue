@@ -36,6 +36,7 @@ const props = defineProps<{
   groups: TaskGroup[];
   tenantId: string | null | undefined;
   projectId: string | null | undefined;
+  labelId?: string | null;
   projectLabels: LabelResponse[];
   members: ProjectMember[];
   /** 担当者候補の取得状態。取得中・失敗を「候補 0 人」と混ぜない */
@@ -270,6 +271,11 @@ async function commitAdding(statusId: string) {
               <TaskSubtaskBranch
                 v-if="expandedTaskIds[task.id]"
                 :parent-task="task"
+                :filters="{
+                  status_id: group.status.id,
+                  label_id: labelId ?? undefined,
+                  is_archived: false,
+                }"
                 :tenant-id="tenantId"
                 :project-id="projectId"
                 :statuses="statuses"

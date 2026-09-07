@@ -10,7 +10,7 @@ use sea_orm::{
     ActiveModelTrait,
     ActiveValue::Set,
     ColumnTrait, Condition, ConnectionTrait, EntityTrait, IsolationLevel, PaginatorTrait,
-    QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
+    QueryFilter, QueryOrder, QuerySelect, QueryTrait, TransactionTrait,
     prelude::{DateTimeWithTimeZone, Uuid},
 };
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -448,19 +448,6 @@ pub async fn list_tasks(
     if let Some(pid) = q.parent_task_id {
         query = query.filter(tasks::Column::ParentTaskId.eq(pid));
     }
-    if q.root_only {
-        // `parent_task_id IS NULL` だけでは、親を論理削除／アーカイブした子まで一覧から
-        // 消えてしまう。現在の一覧（is_archived が同じ）に親がいないタスクもルート相当と
-        // して返し、子だけが到達不能になるのを防ぐ。
-        query = query.filter(
-            Condition::any()
-                .add(tasks::Column::ParentTaskId.is_null())
-                .add(Expr::cust_with_values(
-                    "NOT EXISTS (SELECT 1 FROM tasks parent WHERE parent.id = tasks.parent_task_id AND parent.deleted_at IS NULL AND parent.is_archived = $1)",
-                    vec![sea_orm::Value::from(q.is_archived)],
-                )),
-        );
-    }
     if let Some(uid) = q.assignee_id {
         query = query.filter(Expr::cust_with_values(
             "EXISTS (SELECT 1 FROM task_assignees WHERE task_assignees.task_id = tasks.id AND task_assignees.user_id = $1)",
@@ -472,6 +459,21 @@ pub async fn list_tasks(
             "EXISTS (SELECT 1 FROM task_labels WHERE task_labels.task_id = tasks.id AND task_labels.label_id = $1)",
             vec![sea_orm::Value::from(lid)],
         ));
+    }
+
+    if q.root_only {
+        // ページング前の同じ絞り込み条件を満たす親だけを存在扱いにする。
+        // 親が条件外で子だけが条件内なら、その子をルートとして返す。
+        let visible_parent_ids = query
+            .clone()
+            .select_only()
+            .column(tasks::Column::Id)
+            .into_query();
+        query = query.filter(
+            Condition::any()
+                .add(tasks::Column::ParentTaskId.is_null())
+                .add(tasks::Column::ParentTaskId.not_in_subquery(visible_parent_ids)),
+        );
     }
 
     let sort = TaskSort::parse(q.sort.as_deref());

@@ -426,10 +426,30 @@ function createMockFetch(
       });
     }
     // List 表示はステータスごとに問い合わせる。件数（total）もその絞り込みで返す
-    const statusFilter = new URL(url, 'http://localhost').searchParams.get('status_id');
+    const query = new URL(url, 'http://localhost').searchParams;
+    const statusFilter = query.get('status_id');
+    const labelFilter = query.get('label_id');
+    const parentFilter = query.get('parent_task_id');
+    if (parentFilter && url.includes('/tasks')) {
+      const children = [sampleSubtask].filter(
+        (task) =>
+          task.parent_task_id === parentFilter &&
+          (!statusFilter || task.status_id === statusFilter) &&
+          !labelFilter &&
+          task.is_archived === (query.get('is_archived') === 'true'),
+      );
+      return jsonResponse({ tasks: children, total: children.length, next_cursor: null });
+    }
     if (statusFilter && url.includes('/tasks')) {
-      const all = (overrides.tasks ?? sampleTasks).tasks as Array<{ status_id: string }>;
-      const filtered = all.filter((task) => task.status_id === statusFilter);
+      const all = (overrides.tasks ?? sampleTasks).tasks as Array<{
+        status_id: string;
+        labels: Array<{ id: string }>;
+      }>;
+      const filtered = all.filter(
+        (task) =>
+          task.status_id === statusFilter &&
+          (!labelFilter || task.labels.some((label) => label.id === labelFilter)),
+      );
       return jsonResponse({ tasks: filtered, total: filtered.length });
     }
     if (url.includes('/tasks/search')) {
@@ -819,6 +839,14 @@ export const ListViewSubtasks: Story = {
     await expect(
       canvas.findByRole('textbox', { name: 'ログイン画面の UI 実装 のサブタスク名' }),
     ).resolves.toBeInTheDocument();
+
+    // 展開中にラベルで絞ると、親は残り、ラベルのない子は消える。
+    await user.click(await canvas.findByRole('button', { name: 'ラベル' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: /bug/ }));
+    await expect(
+      canvas.findByRole('textbox', { name: 'OAuth 対応を実装する のサブタスク名' }),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.queryByText('PKCE の検証を追加する')).not.toBeInTheDocument();
   },
 };
 

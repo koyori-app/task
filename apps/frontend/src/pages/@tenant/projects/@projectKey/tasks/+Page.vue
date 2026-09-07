@@ -1086,6 +1086,7 @@ const table = useVueTable({
               :groups="taskGroups"
               :tenant-id="tenantId"
               :project-id="projectId"
+              :label-id="selectedLabelId"
               :statuses="workflowStatuses"
               :project-labels="projectLabels"
               :members="projectMembers"

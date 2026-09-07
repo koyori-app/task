@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { toValue } from 'vue';
+import type { UseTaskSubtasksParams } from '@/composables/useTaskSubtasks';
 
 const subtasksState = vi.hoisted(() => ({
   loading: { value: false },
@@ -9,10 +11,14 @@ const subtasksState = vi.hoisted(() => ({
   createError: { value: null as string | null },
   createSubtask: vi.fn(async () => true),
   refetch: vi.fn(),
+  params: null as UseTaskSubtasksParams | null,
 }));
 
 vi.mock('@/composables/useTaskSubtasks', () => ({
-  useTaskSubtasks: () => subtasksState,
+  useTaskSubtasks: (params: UseTaskSubtasksParams) => {
+    subtasksState.params = params;
+    return subtasksState;
+  },
 }));
 
 import TaskSubtaskBranch from '@/components/tasks/TaskSubtaskBranch.vue';
@@ -50,6 +56,23 @@ describe('TaskSubtaskBranch', () => {
   beforeEach(() => {
     subtasksState.subtasks.value = [];
     subtasksState.createSubtask.mockClear();
+  });
+
+  it('表示中の条件を取得処理へ渡し、展開中の条件変更にも追従する', async () => {
+    const wrapper = mountBranch({});
+    expect(toValue(subtasksState.params!.filters)).toEqual({ is_archived: false });
+    await wrapper.setProps({ filters: { label_id: 'X', status_id: 'todo' } });
+    expect(toValue(subtasksState.params!.filters)).toEqual({
+      is_archived: false,
+      label_id: 'X',
+      status_id: 'todo',
+    });
+    await wrapper.setProps({ filters: { label_id: 'Y', status_id: 'done', is_archived: true } });
+    expect(toValue(subtasksState.params!.filters)).toEqual({
+      is_archived: true,
+      label_id: 'Y',
+      status_id: 'done',
+    });
   });
 
   it('親のステータス更新中は追加UIを無効化し、作成ハンドラも拒否する', async () => {

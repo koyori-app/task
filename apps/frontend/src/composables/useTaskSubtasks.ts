@@ -2,7 +2,7 @@ import { computed, ref, toValue, type MaybeRefOrGetter } from 'vue';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 
 import { fetchClient } from '@/lib/api-vue-query';
-import type { components } from '@/generated/api';
+import type { components, paths } from '@/generated/api';
 
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
@@ -11,6 +11,10 @@ export const TASK_RELATIONS_PATH =
   '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/relations' as const;
 
 type TaskRelationsResponse = components['schemas']['TaskRelationsResponse'];
+export type TaskSubtaskFilters = Pick<
+  NonNullable<paths[typeof LIST_TASKS_PATH]['get']['parameters']['query']>,
+  'status_id' | 'label_id' | 'is_archived'
+>;
 
 export type UseTaskSubtasksParams = {
   tenantId: MaybeRefOrGetter<string | null | undefined>;
@@ -20,6 +24,8 @@ export type UseTaskSubtasksParams = {
   /** 作成 payload に入れる親タスク UUID。 */
   taskUuid: MaybeRefOrGetter<string | null | undefined>;
   enabled?: MaybeRefOrGetter<boolean>;
+  /** 一覧の展開では親行と同じ条件を使う。詳細画面では未指定。 */
+  filters?: MaybeRefOrGetter<TaskSubtaskFilters>;
 };
 
 /**
@@ -33,6 +39,11 @@ export function useTaskSubtasks(params: UseTaskSubtasksParams) {
   const taskId = computed(() => String(toValue(params.taskId) ?? ''));
   const taskUuid = computed(() => String(toValue(params.taskUuid) ?? ''));
   const enabled = computed(() => (params.enabled === undefined ? true : toValue(params.enabled)));
+  const filters = computed(() => toValue(params.filters));
+  const canFetch = computed(
+    () =>
+      enabled.value && !!tenantId.value && !!projectId.value && !!taskId.value && !!taskUuid.value,
+  );
 
   const queryKey = computed(
     () =>
@@ -61,15 +72,35 @@ export function useTaskSubtasks(params: UseTaskSubtasksParams) {
       if (error) throw error;
       return data;
     },
-    enabled: computed(
-      () =>
-        enabled.value &&
-        !!tenantId.value &&
-        !!projectId.value &&
-        !!taskId.value &&
-        !!taskUuid.value,
-    ),
+    enabled: computed(() => canFetch.value && !filters.value),
   });
+
+  const filteredQuery = useQuery(
+    computed(() => {
+      const path = { tenant_id: tenantId.value, project_id: projectId.value };
+      const query = { ...filters.value, parent_task_id: taskUuid.value, limit: 200 };
+      return {
+        queryKey: ['get', LIST_TASKS_PATH, { params: { path, query } }, 'subtasks'],
+        enabled: canFetch.value && !!filters.value,
+        queryFn: async ({ signal }: { signal: AbortSignal }) => {
+          const tasks: components['schemas']['TaskResponse'][] = [];
+          let cursor: string | undefined;
+          do {
+            const { data, error } = await fetchClient.GET(LIST_TASKS_PATH, {
+              params: { path, query: { ...query, cursor } },
+              signal,
+            });
+            if (error) throw error;
+            tasks.push(...data.tasks);
+            cursor = data.next_cursor ?? undefined;
+          } while (cursor);
+          // relations と同じ作成順。200件を超える子も最後まで取得する。
+          return tasks.reverse();
+        },
+      };
+    }),
+  );
+  const activeQuery = computed(() => (filters.value ? filteredQuery : relationsQuery));
 
   const createPending = ref(false);
   const createError = ref<string | null>(null);
@@ -118,11 +149,15 @@ export function useTaskSubtasks(params: UseTaskSubtasksParams) {
 
   return {
     relations: computed<TaskRelationsResponse | null>(() => relationsQuery.data.value ?? null),
-    subtasks: computed(() => relationsQuery.data.value?.subtasks ?? []),
+    subtasks: computed(() =>
+      filters.value
+        ? (filteredQuery.data.value ?? [])
+        : (relationsQuery.data.value?.subtasks ?? []),
+    ),
     parentTask: computed(() => relationsQuery.data.value?.parent ?? null),
-    loading: computed(() => relationsQuery.isLoading.value),
-    error: computed(() => relationsQuery.isError.value),
-    refetch: () => void relationsQuery.refetch(),
+    loading: computed(() => activeQuery.value.isLoading.value),
+    error: computed(() => activeQuery.value.isError.value),
+    refetch: () => void activeQuery.value.refetch(),
     createPending,
     createError,
     createSubtask,
