@@ -5,12 +5,14 @@ use axum::{
 };
 use axum_valid::Valid;
 use chrono::Utc;
-use sea_orm::sea_query::{Expr, ExprTrait, Func, LockType, NullOrdering, SimpleExpr};
+use sea_orm::sea_query::{
+    CaseStatement, Expr, ExprTrait, Func, LockType, NullOrdering, SimpleExpr,
+};
 use sea_orm::{
-    ActiveModelTrait,
+    ActiveEnum, ActiveModelTrait,
     ActiveValue::Set,
-    ColumnTrait, Condition, ConnectionTrait, EntityTrait, IsolationLevel, JoinType, Order,
-    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, RelationTrait, TransactionTrait,
+    ColumnTrait, Condition, ConnectionTrait, EntityTrait, IsolationLevel, Iterable, JoinType,
+    Order, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, RelationTrait, TransactionTrait,
     prelude::{DateTimeWithTimeZone, Uuid},
 };
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -322,11 +324,17 @@ enum TaskSort {
     DeadlineDesc,
 }
 
-const PRIORITY_SORT_KEY_SQL: &str = "CASE tasks.priority::text WHEN 'critical_fire' THEN 0 WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 WHEN 'trivial' THEN 5 END";
 const ASSIGNEE_SORT_KEY_SQL: &str = "(SELECT MIN(LOWER(users.username)) FROM task_assignees JOIN users ON users.id = task_assignees.user_id WHERE task_assignees.task_id = tasks.id)";
 
 fn priority_sort_key() -> SimpleExpr {
-    Expr::cust(PRIORITY_SORT_KEY_SQL)
+    let mut key = CaseStatement::new();
+    for priority in tasks::TaskPriority::iter() {
+        key = key.case(
+            Expr::cust("tasks.priority::text").eq(priority.to_value()),
+            priority_rank(priority),
+        );
+    }
+    key.into()
 }
 
 fn assignee_sort_key() -> SimpleExpr {
