@@ -131,6 +131,7 @@ export function useTaskSubtasks(params: UseTaskSubtasksParams) {
           title: normalizedTitle,
           status_id: statusId,
           parent_task_id: taskUuid.value,
+          ...(filters.value?.label_id ? { label_ids: [filters.value.label_id] } : {}),
         },
       });
       if (error) throw error;

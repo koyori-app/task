@@ -6,7 +6,7 @@ import type { paths } from '@/generated/api';
 
 import { useTaskSubtasks, type TaskSubtaskFilters } from '../useTaskSubtasks';
 
-const { control, requestLog, fetchMock } = vi.hoisted(() => {
+const { control, requestLog, fetchMock, createdChildren } = vi.hoisted(() => {
   const control: {
     holdPost: boolean;
     releasePost: (() => void) | null;
@@ -43,6 +43,7 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
     title: '既存の子',
     parent_task_id: 'parent-1',
   };
+  const createdChildren: (typeof child & { label_ids: string[] })[] = [];
 
   const fetchMock = async (request: Request) => {
     const entry: { method: string; url: string; body?: unknown } = {
@@ -61,12 +62,16 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
       if (nextPage && control.rejectNextPage)
         return response({ message: 'temporary failure' }, 503);
       const label = query.get('label_id') ?? 'all';
+      const visibleCreated = createdChildren.filter(
+        (task) => !query.has('label_id') || task.label_ids.includes(query.get('label_id')!),
+      );
+      const tasks = [
+        ...visibleCreated,
+        ...Array.from({ length: 203 }, (_, i) => ({ ...child, id: `${label}-${202 - i}` })),
+      ];
       return response({
-        tasks: Array.from({ length: nextPage ? 3 : 200 }, (_, i) => ({
-          ...child,
-          id: `${label}-${nextPage ? 2 - i : 202 - i}`,
-        })),
-        total: 203,
+        tasks: nextPage ? tasks.slice(200) : tasks.slice(0, 200),
+        total: tasks.length,
         next_cursor: nextPage ? null : 'next-page',
       });
     }
@@ -77,12 +82,20 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
         });
       }
       if (control.rejectPost) return response({ message: 'temporary failure' }, 503);
-      return response({ ...child, custom_field_values: [] }, 201);
+      const body = entry.body as { title: string; label_ids?: string[] };
+      const created = {
+        ...child,
+        id: `created-${createdChildren.length}`,
+        title: body.title,
+        label_ids: body.label_ids ?? [],
+      };
+      createdChildren.push(created);
+      return response({ ...created, custom_field_values: [] }, 201);
     }
     return response({});
   };
 
-  return { control, requestLog, fetchMock };
+  return { control, requestLog, fetchMock, createdChildren };
 });
 
 vi.mock('@/lib/api-vue-query', async (importOriginal) => {
@@ -125,6 +138,7 @@ describe('useTaskSubtasks', () => {
     control.rejectPost = false;
     control.rejectNextPage = false;
     requestLog.length = 0;
+    createdChildren.length = 0;
   });
 
   it('親と直下の子を relations API から取得する', async () => {
@@ -167,6 +181,29 @@ describe('useTaskSubtasks', () => {
     control.releasePost?.();
     await expect(first).resolves.toBe(true);
     expect(requestLog.filter((entry) => entry.method === 'POST')).toHaveLength(1);
+  });
+
+  it('作成時の選択ラベルを引き継ぎ、再取得後も子を表示する', async () => {
+    const filters = ref<TaskSubtaskFilters>({ label_id: 'X', is_archived: false });
+    mountHost(filters);
+    await flushPromises();
+
+    for (const label of ['X', 'Y', undefined]) {
+      filters.value = { label_id: label, is_archived: false };
+      await flushPromises();
+      const title = `new-${label ?? 'all'}`;
+      await expect(subtasks.createSubtask(title, 'status-1')).resolves.toBe(true);
+      expect(requestLog.findLast((entry) => entry.method === 'POST')?.body).toEqual({
+        title,
+        status_id: 'status-1',
+        parent_task_id: 'parent-1',
+        ...(label ? { label_ids: [label] } : {}),
+      });
+      expect(subtasks.subtasks.value.some((task) => task.title === title)).toBe(true);
+      if (label === 'Y') {
+        expect(subtasks.subtasks.value.some((task) => task.title === 'new-X')).toBe(false);
+      }
+    }
   });
 
   it('親を持つタスクには孫を作らず、親IDの変更にも追従する', async () => {

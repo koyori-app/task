@@ -25,11 +25,18 @@ describe('タスク一覧のラベルフィルタ', () => {
       buildTasksListQueryParams('tenant-1', 'project-1', pagination.value, selectedLabelId.value)
         .params.query.label_id,
     ).toBe('label-bug');
-    expect(
-      buildTasksListQueryParams('tenant-1', 'project-1', pagination.value, selectedLabelId.value)
-        .params.query.root_only,
-    ).toBe(true);
     scope.stop();
+  });
+
+  it.each([null, 'label-bug'])('Tableはラベル条件%sでも子を含む全タスクを取得する', (labelId) => {
+    const { query } = buildTasksListQueryParams(
+      'tenant-1',
+      'project-1',
+      { pageIndex: 2, pageSize: 20 },
+      labelId,
+    ).params;
+    expect(query).not.toHaveProperty('root_only');
+    expect(query).toEqual({ limit: 20, offset: 40, label_id: labelId ?? undefined });
   });
 
   it('同一ラベルのページ送りでは前ページのデータをplaceholderとして維持する', () => {
