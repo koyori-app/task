@@ -9,12 +9,14 @@ const props = withDefaults(
   defineProps<{
     onCreate: (title: string) => Promise<boolean>;
     pending?: boolean;
+    disabled?: boolean;
     error?: string | null;
     ariaLabel?: string;
     autofocus?: boolean;
   }>(),
   {
     pending: false,
+    disabled: false,
     error: null,
     ariaLabel: 'サブタスク名',
     autofocus: true,
@@ -37,7 +39,7 @@ onMounted(async () => {
 
 async function submit() {
   const title = draft.value.trim();
-  if (!title || props.pending) return;
+  if (!title || props.pending || props.disabled) return;
   if (!(await props.onCreate(title))) return;
   draft.value = '';
   emit('created');
@@ -55,15 +57,15 @@ async function submit() {
         class="h-8 min-w-0 flex-1 text-sm"
         :aria-label="ariaLabel"
         placeholder="サブタスク名を入力"
-        :disabled="pending"
+        :disabled="pending || disabled"
         @keydown.enter.prevent="submit"
-        @keydown.esc.prevent="emit('cancel')"
+        @keydown.esc.prevent="!disabled && emit('cancel')"
       />
       <Button
         type="button"
         size="sm"
         class="h-8 gap-1.5 px-2.5"
-        :disabled="pending || !draft.trim()"
+        :disabled="pending || disabled || !draft.trim()"
         @click="submit"
       >
         <Loader2 v-if="pending" class="size-3.5 animate-spin" aria-hidden="true" />
@@ -75,7 +77,7 @@ async function submit() {
         variant="ghost"
         size="icon"
         class="size-8 shrink-0"
-        :disabled="pending"
+        :disabled="pending || disabled"
         aria-label="サブタスクの追加をやめる"
         @click="emit('cancel')"
       >

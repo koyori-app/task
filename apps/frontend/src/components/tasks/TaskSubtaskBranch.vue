@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Loader2, Plus, RotateCcw } from '@lucide/vue';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 import TaskGroupedRow from '@/components/tasks/TaskGroupedRow.vue';
 import TaskSubtaskComposer from '@/components/tasks/TaskSubtaskComposer.vue';
@@ -39,6 +39,7 @@ const emit = defineEmits<{
 }>();
 
 const adding = ref(false);
+const statusUpdating = computed(() => props.pending[props.parentTask.id] === 'status_id');
 const subtasks = useTaskSubtasks({
   tenantId: () => props.tenantId,
   projectId: () => props.projectId,
@@ -46,12 +47,23 @@ const subtasks = useTaskSubtasks({
   taskUuid: () => props.parentTask.id,
 });
 
+function openComposer() {
+  if (statusUpdating.value) return;
+  adding.value = true;
+}
+
 function cancelComposer() {
+  if (statusUpdating.value) return;
   if (!subtasks.subtasks.value.length) {
     emit('collapse');
     return;
   }
   adding.value = false;
+}
+
+function createSubtask(title: string) {
+  if (statusUpdating.value) return Promise.resolve(false);
+  return subtasks.createSubtask(title, props.parentTask.status_id);
 }
 </script>
 
@@ -107,9 +119,10 @@ function cancelComposer() {
         <TaskSubtaskComposer
           v-if="adding || !subtasks.subtasks.value.length"
           :pending="subtasks.createPending.value"
+          :disabled="statusUpdating"
           :error="subtasks.createError.value"
           :aria-label="`${parentTask.title} のサブタスク名`"
-          :on-create="(title) => subtasks.createSubtask(title, parentTask.status_id)"
+          :on-create="createSubtask"
           @cancel="cancelComposer"
         />
         <Button
@@ -118,7 +131,8 @@ function cancelComposer() {
           variant="ghost"
           size="sm"
           class="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
-          @click="adding = true"
+          :disabled="statusUpdating"
+          @click="openComposer"
         >
           <Plus class="size-3.5" aria-hidden="true" />
           サブタスクを追加

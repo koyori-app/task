@@ -34,6 +34,18 @@ describe('TaskSubtaskComposer', () => {
     expect(wrapper.get('[role="alert"]').text()).toBe('サブタスクを作成できませんでした');
   });
 
+  it('disabled 中は UI とハンドラの両方で作成を止める', async () => {
+    const onCreate = vi.fn(async () => true);
+    const wrapper = mount(TaskSubtaskComposer, { props: { onCreate, disabled: true } });
+    const input = wrapper.get<HTMLInputElement>('input[aria-label="サブタスク名"]');
+
+    expect(input.attributes('disabled')).toBeDefined();
+    expect(wrapper.get('button:not([aria-label])').attributes('disabled')).toBeDefined();
+    await input.trigger('keydown', { key: 'Enter' });
+
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
   it('Escape で追加を取り消す', async () => {
     const wrapper = mount(TaskSubtaskComposer, {
       props: { onCreate: vi.fn(async () => true) },

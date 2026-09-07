@@ -19,6 +19,7 @@ const props = defineProps<{
   /** 作成する子へ設定する親 UUID。 */
   taskUuid: string;
   statusId: string;
+  statusUpdating: boolean;
   statuses: StatusResponse[];
   projectKey: string;
 }>();
@@ -36,6 +37,21 @@ const subtasks = useTaskSubtasks({
 });
 
 const statusesById = computed(() => new Map(props.statuses.map((status) => [status.id, status])));
+
+function openComposer() {
+  if (props.statusUpdating) return;
+  adding.value = true;
+}
+
+function cancelComposer() {
+  if (props.statusUpdating) return;
+  adding.value = false;
+}
+
+function createSubtask(title: string) {
+  if (props.statusUpdating) return Promise.resolve(false);
+  return subtasks.createSubtask(title, props.statusId);
+}
 </script>
 
 <template>
@@ -123,9 +139,10 @@ const statusesById = computed(() => new Map(props.statuses.map((status) => [stat
       <TaskSubtaskComposer
         v-if="adding"
         :pending="subtasks.createPending.value"
+        :disabled="statusUpdating"
         :error="subtasks.createError.value"
-        :on-create="(title) => subtasks.createSubtask(title, statusId)"
-        @cancel="adding = false"
+        :on-create="createSubtask"
+        @cancel="cancelComposer"
       />
       <Button
         v-else
@@ -133,7 +150,8 @@ const statusesById = computed(() => new Map(props.statuses.map((status) => [stat
         variant="ghost"
         size="sm"
         class="h-8 gap-2 px-2 text-sm font-normal text-muted-foreground"
-        @click="adding = true"
+        :disabled="statusUpdating"
+        @click="openComposer"
       >
         <Plus class="size-4" aria-hidden="true" />
         サブタスクを追加

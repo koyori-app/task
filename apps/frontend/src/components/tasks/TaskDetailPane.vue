@@ -242,6 +242,7 @@ function onDeleteDialogCancel(event: Event) {
             :task-id="taskId"
             :task-uuid="displayTask.id"
             :status-id="selectedStatusId"
+            :status-updating="statusUpdating"
             :statuses="statuses"
             :project-key="projectKey"
             @open="emit('open-task', $event)"

@@ -236,6 +236,7 @@ function openRelatedTask(task: TaskResponse) {
         :task-id="taskId"
         :task-uuid="displayTask.id"
         :status-id="selectedStatusId"
+        :status-updating="statusUpdating"
         :statuses="statuses"
         :project-key="projectKey"
         @open="openRelatedTask"
