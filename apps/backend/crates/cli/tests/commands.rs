@@ -23,8 +23,8 @@ async fn mount_statuses(harness: &Harness) {
     Mock::given(method("GET"))
         .and(path(project_path("statuses")))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            status_json(TODO_STATUS, "Todo", true, false, 0),
-            status_json(DONE_STATUS, "Complete", false, true, 1),
+            status_json(TODO_STATUS, "Todo", true, false, false, 0),
+            status_json(DONE_STATUS, "Complete", false, true, true, 1),
         ])))
         .mount(&harness.server)
         .await;

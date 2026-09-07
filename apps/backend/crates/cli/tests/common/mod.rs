@@ -93,6 +93,7 @@ pub fn status_json(
     name: &str,
     is_default: bool,
     is_done_state: bool,
+    is_default_done: bool,
     position: i16,
 ) -> serde_json::Value {
     serde_json::json!({
@@ -103,6 +104,7 @@ pub fn status_json(
         "position": position,
         "is_default": is_default,
         "is_done_state": is_done_state,
+        "is_default_done": is_default_done,
         "created_at": "2026-01-01T00:00:00Z",
     })
 }
