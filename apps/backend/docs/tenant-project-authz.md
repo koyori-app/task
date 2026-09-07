@@ -42,6 +42,12 @@ ACL の概念と、この実装での表現を対応づける。
 NTFS でグループから外してもファイルの explicit ACE が残るのと同じ理屈である。
 したがって、除名された人は残った明示 ACE のプロジェクトに客分として入り続ける。
 
+例外は個人プロジェクト（Inbox）の本人の行である。
+この行は Inbox を初めて開いたときに `my_tasks::seed_personal_project_defaults` が自動で作るもので、管理者が置いた ACE ではない。
+在籍中の入口は `is_personal` 分岐（本人なら通す）が担うので、この行は継承が前提の付随物にすぎない。
+客分の判定（`access::is_shared_project_explicit_member`、`guest_tenant_ids`、`explicit_member_project_ids`、`list_explicit_projects`）はすべて個人プロジェクトを外す。
+除名された人は自分だった Inbox にも入れず、その行だけではテナント一覧にも出ず、2FA 強制の対象にもならない。
+
 管理者が「除名したのにまだ入れる」と驚かないよう、`GET /v1/tenants/{id}/members/{user_id}/explicit-projects` でその人の明示 ACE（project_id、key、name、role）を名指しできる。
 除名の前に確かめる口だが、対象がテナントに居るかは問わないので、除名の後に「まだ何が残っているか」を見るのにも使える。
 呼び出し側が入れないプロジェクトは名前や key を出さず、`hidden_count` に件数だけを載せる（テナント Admin でもプロジェクトの閲覧は `list_projects` と同じ境界で絞られる）。
@@ -82,6 +88,8 @@ NTFS では「継承を無効にする」が明示の操作である。
 - Drive のファイル配信（`drive_files::can_access_project`）は客分を通さない
 - 客分もテナントの `require_2fa`（2FA 強制）の対象である
   （`login_session::user_in_require_2fa_tenant` が `access::guest_tenant_ids` で客分のテナントも見る）
+- 個人プロジェクト（Inbox）には客分として入れない。本人の自動生成行は継承が前提で、除名の後は効かない
+  （「除名が消すもの」）
 
 ### frontend が tenant-wide に叩く口と客分への扱い
 
@@ -227,6 +235,7 @@ ID とは別にユーザー名・アバターを引けるようにするため�
 | 除名は継承を外すだけで、明示 ACE を消さない | `tenant_members::remove_member` は `project_members` の行を消さない。残る行は `list_explicit_projects` で名指しできる |
 | 利用者を削除しても同じ（管理者による強制削除も明示 ACE を消さない） | `admin_users::delete_user_cascade` も `project_members` ではなく `tenant_members` の行を消す |
 | テナントに居ない人の明示 ACE は、そのプロジェクトの中だけの客分アクセスに限られる | `has_tenant_access` の客分分岐。tenant-wide・Drive・通知には及ばない |
+| 個人プロジェクトの自動生成行は客分の口にならない | `is_shared_project_explicit_member` / `guest_tenant_ids` / `explicit_member_project_ids` が `is_personal` を外す |
 | テナントに居ない人に通知が飛ばない | `project_accessible_user_ids` がテナント在籍者との積集合を返す |
 | テナントに居ない人がプロジェクトの Admin 枠を占有しない | `would_drop_last_admin` がテナントに残っている Admin だけを数える |
 | プロジェクト側の操作が最後の在籍 Admin を落とさない | `would_drop_last_admin` が 409。読みと書きの間に割り込まれないよう、プロジェクトメンバーの更新・削除と**テナントメンバーの除名**が同じテナント行を `FOR UPDATE` で掴む（`project_members::lock_membership_changes`） |

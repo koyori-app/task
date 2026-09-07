@@ -12,7 +12,8 @@ use entity::{projects, scopes::Scope, tenants, users};
 use std::collections::HashSet;
 
 use crate::auth_helpers::{
-    explicit_member_project_ids, is_project_member, is_tenant_member, project_is_open_or_member,
+    explicit_member_project_ids, is_shared_project_explicit_member, is_tenant_member,
+    project_is_open_or_member,
 };
 use crate::{AppState, error::AppError};
 use service::auth::{AuthError, authenticate_personal_token};
@@ -252,10 +253,12 @@ async fn has_tenant_access(
         // `project_members` に明示指定があればそのプロジェクトの中だけ通す。
         // 「メンバー未指定＝テナント全体に開放」の規則はテナントメンバー限りなので
         // 公開規則（`project_is_open_or_member`）ではなく明示指定だけを見る。
+        // 個人プロジェクト（Inbox）の自動生成行は客分の口にならない
+        // （`is_shared_project_explicit_member` の doc）。
         // 存在探りを許さないため、明示指定の確認をプロジェクト実在確認より先に行う
         // （無関係な利用者への応答は従来どおり 403 のまま変わらない）
         if let Some(pid) = project_id
-            && is_project_member(&state.db, pid, user_id).await?
+            && is_shared_project_explicit_member(&state.db, pid, user_id).await?
         {
             verify_project_in_tenant(state, tenant_id, pid).await?;
             return Ok(());

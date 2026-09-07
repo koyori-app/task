@@ -44,11 +44,35 @@ pub async fn is_project_member<C: ConnectionTrait>(
         .is_some())
 }
 
+/// 客分の口になる明示 ACE は、共有プロジェクトの行だけ。
+///
+/// 個人プロジェクト（Inbox）の本人の行は `my_tasks::seed_personal_project_defaults` が
+/// 自動で作るもので、管理者が手で置いた ACE ではない。テナントに居る間の入口は
+/// `project_is_open_or_member` の `is_personal` 分岐（本人なら通す）が担うので、
+/// この行は継承（在籍）が前提の付随物にすぎない。除名の後まで効かせると、
+/// テナントを去った人がそのテナントの Inbox に客分として入り続け、テナント一覧に
+/// Guest として出て、2FA 強制の対象にもなる。客分の判定はすべてここを通し、
+/// 個人プロジェクトを外す（apps/backend/docs/tenant-project-authz.md の「除名が消すもの」）
+pub async fn is_shared_project_explicit_member<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, AppError> {
+    if !is_project_member(db, project_id, user_id).await? {
+        return Ok(false);
+    }
+    Ok(projects::Entity::find_by_id(project_id)
+        .one(db)
+        .await?
+        .is_some_and(|p| !p.is_personal))
+}
+
 /// project-only の客分として関わるテナント（自分が `project_members` に明示指定されている
-/// プロジェクトを持つテナント）の id 集合。テナント一覧の印付けに使う。
+/// 共有プロジェクトを持つテナント）の id 集合。テナント一覧の印付けに使う。
 ///
 /// オーナー・テナントメンバーであるテナントもここに含まれうる（明示指定は絞り込みとしても
 /// 使われるため）。除く判定は呼び出し側で行う。
+/// 個人プロジェクトの行は数えない（`is_shared_project_explicit_member` の doc）。
 pub async fn guest_tenant_ids<C: ConnectionTrait>(
     db: &C,
     user_id: Uuid,
@@ -65,6 +89,7 @@ pub async fn guest_tenant_ids<C: ConnectionTrait>(
     }
     Ok(projects::Entity::find()
         .filter(projects::Column::Id.is_in(project_ids))
+        .filter(projects::Column::IsPersonal.eq(false))
         .select_only()
         .column(projects::Column::TenantId)
         .distinct()
@@ -75,11 +100,12 @@ pub async fn guest_tenant_ids<C: ConnectionTrait>(
         .collect())
 }
 
-/// そのテナント配下で自分が `project_members` に明示指定されている project の id 集合。
+/// そのテナント配下で自分が `project_members` に明示指定されている共有 project の id 集合。
 ///
 /// project-only の客分に開く一覧系 2 口（プロジェクト一覧・My Tasks）の絞り込みに使う。
 /// 公開規則（メンバー未指定＝テナント全体に開放）はここでは見ない —
 /// 公開 project は客分に開かないため、明示指定の行だけを数える。
+/// 個人プロジェクトの行も数えない（`is_shared_project_explicit_member` の doc）。
 pub async fn explicit_member_project_ids<C: ConnectionTrait>(
     db: &C,
     tenant_id: Uuid,
@@ -98,6 +124,7 @@ pub async fn explicit_member_project_ids<C: ConnectionTrait>(
     Ok(projects::Entity::find()
         .filter(projects::Column::Id.is_in(project_ids))
         .filter(projects::Column::TenantId.eq(tenant_id))
+        .filter(projects::Column::IsPersonal.eq(false))
         .select_only()
         .column(projects::Column::Id)
         .into_tuple::<Uuid>()

@@ -295,9 +295,14 @@ pub async fn list_explicit_projects(
         .find_also_related(projects::Entity)
         .all(&state.db)
         .await?;
+    // 個人プロジェクト（Inbox）の自動生成行は客分の口にならないので、残る ACE にも数えない
+    // （`access::is_shared_project_explicit_member` の doc）
     let mut aces: Vec<(project_members_entity::Model, projects::Model)> = rows
         .into_iter()
-        .filter_map(|(m, p)| p.filter(|p| p.tenant_id == tenant_id).map(|p| (m, p)))
+        .filter_map(|(m, p)| {
+            p.filter(|p| p.tenant_id == tenant_id && !p.is_personal)
+                .map(|p| (m, p))
+        })
         .collect();
 
     // 非公開プロジェクトの名前や key を、そのプロジェクトに入れない人へ出さない。
