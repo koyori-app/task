@@ -46,11 +46,12 @@ const subtasks = useTaskSubtasks({
   projectId: () => props.projectId,
   taskId: () => props.parentTask.id,
   taskUuid: () => props.parentTask.id,
+  parentTaskId: () => props.parentTask.parent_task_id,
   filters: () => ({ is_archived: false, ...props.filters }),
 });
 
 function openComposer() {
-  if (statusUpdating.value) return;
+  if (props.parentTask.parent_task_id || statusUpdating.value) return;
   adding.value = true;
 }
 
@@ -64,7 +65,7 @@ function cancelComposer() {
 }
 
 function createSubtask(title: string) {
-  if (statusUpdating.value) return Promise.resolve(false);
+  if (props.parentTask.parent_task_id || statusUpdating.value) return Promise.resolve(false);
   return subtasks.createSubtask(title, props.parentTask.status_id);
 }
 </script>
@@ -116,7 +117,7 @@ function createSubtask(title: string) {
         @toggle:label="(labelId, checked) => emit('toggle:label', subtask, labelId, checked)"
       />
 
-      <div class="min-w-[42rem] px-3 py-1.5">
+      <div v-if="!parentTask.parent_task_id" class="min-w-[42rem] px-3 py-1.5">
         <!-- 空なら展開した時点で作成欄を出す。既存の子があるときは明示操作で開く。 -->
         <TaskSubtaskComposer
           v-if="adding || !subtasks.subtasks.value.length"

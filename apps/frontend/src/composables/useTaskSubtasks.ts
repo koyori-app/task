@@ -23,6 +23,8 @@ export type UseTaskSubtasksParams = {
   taskId: MaybeRefOrGetter<string | null | undefined>;
   /** 作成 payload に入れる親タスク UUID。 */
   taskUuid: MaybeRefOrGetter<string | null | undefined>;
+  /** 現在のタスク自身の親。UI の作成は親＋子の1段までに制限する。 */
+  parentTaskId: MaybeRefOrGetter<string | null | undefined>;
   enabled?: MaybeRefOrGetter<boolean>;
   /** 一覧の展開では親行と同じ条件を使う。詳細画面では未指定。 */
   filters?: MaybeRefOrGetter<TaskSubtaskFilters>;
@@ -108,6 +110,7 @@ export function useTaskSubtasks(params: UseTaskSubtasksParams) {
   async function createSubtask(title: string, statusId: string): Promise<boolean> {
     const normalizedTitle = title.trim();
     if (
+      toValue(params.parentTaskId) ||
       !normalizedTitle ||
       !tenantId.value ||
       !projectId.value ||

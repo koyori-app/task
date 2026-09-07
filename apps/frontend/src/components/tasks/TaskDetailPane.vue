@@ -241,6 +241,7 @@ function onDeleteDialogCancel(event: Event) {
             :project-id="projectId"
             :task-id="taskId"
             :task-uuid="displayTask.id"
+            :parent-task-id="displayTask.parent_task_id ?? null"
             :status-id="selectedStatusId"
             :status-updating="statusUpdating"
             :statuses="statuses"

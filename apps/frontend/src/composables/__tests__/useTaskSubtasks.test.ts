@@ -101,7 +101,7 @@ describe('useTaskSubtasks', () => {
   let queryClient: QueryClient;
   let subtasks: ReturnType<typeof useTaskSubtasks>;
 
-  function mountHost(filters?: Ref<TaskSubtaskFilters>) {
+  function mountHost(filters?: Ref<TaskSubtaskFilters>, parentTaskId = ref<string | null>(null)) {
     const Host = defineComponent({
       setup() {
         subtasks = useTaskSubtasks({
@@ -109,6 +109,7 @@ describe('useTaskSubtasks', () => {
           projectId: 'project-1',
           taskId: 'TASK-11',
           taskUuid: 'parent-1',
+          parentTaskId,
           filters,
         });
         return () => null;
@@ -165,6 +166,20 @@ describe('useTaskSubtasks', () => {
     control.holdPost = false;
     control.releasePost?.();
     await expect(first).resolves.toBe(true);
+    expect(requestLog.filter((entry) => entry.method === 'POST')).toHaveLength(1);
+  });
+
+  it('親を持つタスクには孫を作らず、親IDの変更にも追従する', async () => {
+    const parentTaskId = ref<string | null>(null);
+    mountHost(undefined, parentTaskId);
+    await flushPromises();
+    parentTaskId.value = 'ancestor-id';
+    await expect(subtasks.createSubtask('作れない孫', 'status-1')).resolves.toBe(false);
+    expect(requestLog.filter((entry) => entry.method === 'POST')).toEqual([]);
+    expect(subtasks.createPending.value).toBe(false);
+
+    parentTaskId.value = null;
+    await expect(subtasks.createSubtask('作れる子', 'status-1')).resolves.toBe(true);
     expect(requestLog.filter((entry) => entry.method === 'POST')).toHaveLength(1);
   });
 

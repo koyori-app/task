@@ -18,6 +18,7 @@ const props = defineProps<{
   taskId: string;
   /** 作成する子へ設定する親 UUID。 */
   taskUuid: string;
+  parentTaskId: string | null;
   statusId: string;
   statusUpdating: boolean;
   statuses: StatusResponse[];
@@ -34,12 +35,13 @@ const subtasks = useTaskSubtasks({
   projectId: () => props.projectId,
   taskId: () => props.taskId,
   taskUuid: () => props.taskUuid,
+  parentTaskId: () => props.parentTaskId,
 });
 
 const statusesById = computed(() => new Map(props.statuses.map((status) => [status.id, status])));
 
 function openComposer() {
-  if (props.statusUpdating) return;
+  if (props.parentTaskId || props.statusUpdating) return;
   adding.value = true;
 }
 
@@ -49,7 +51,7 @@ function cancelComposer() {
 }
 
 function createSubtask(title: string) {
-  if (props.statusUpdating) return Promise.resolve(false);
+  if (props.parentTaskId || props.statusUpdating) return Promise.resolve(false);
   return subtasks.createSubtask(title, props.statusId);
 }
 </script>
@@ -137,7 +139,7 @@ function createSubtask(title: string) {
       <p v-else-if="!adding" class="py-1 text-sm text-muted-foreground">サブタスクはありません</p>
 
       <TaskSubtaskComposer
-        v-if="adding"
+        v-if="!parentTaskId && adding"
         :pending="subtasks.createPending.value"
         :disabled="statusUpdating"
         :error="subtasks.createError.value"
@@ -145,7 +147,7 @@ function createSubtask(title: string) {
         @cancel="cancelComposer"
       />
       <Button
-        v-else
+        v-else-if="!parentTaskId"
         type="button"
         variant="ghost"
         size="sm"

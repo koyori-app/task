@@ -110,6 +110,7 @@ const sampleTaskDetail = {
   priority: 'High' as const,
   status_id: 's-progress',
   project_id: 'proj-eng',
+  parent_task_id: null as string | null,
   soft_deadline: '2026-07-02T00:00:00Z' as string | null,
   hard_deadline: null as string | null,
   is_archived: false,
@@ -283,7 +284,12 @@ function createMockFetch(overrides: MockOptions = {}) {
       return jsonResponse({ activities: [], total: 0 });
     }
     if (method === 'GET' && url.includes('/relations')) {
-      return jsonResponse({ parent: null, subtasks: [sampleSubtask], blocks: [], blocked_by: [] });
+      return jsonResponse({
+        parent: mutableTaskDetail.parent_task_id ? sampleTaskDetail : null,
+        subtasks: mutableTaskDetail.id === sampleTaskDetail.id ? [sampleSubtask] : [],
+        blocks: [],
+        blocked_by: [],
+      });
     }
     // /tasks/{id}/comments は /tasks/ の分岐より先に受ける
     if (url.includes('/comments')) {
@@ -468,6 +474,24 @@ export const Default: Story = {
     const input = await canvas.findByRole('textbox', { name: 'サブタスク名' });
     await user.type(input, 'リダイレクト検証{Enter}');
     await expect(input).toHaveValue('');
+  },
+};
+
+export const Subtask: Story = {
+  name: '子タスク詳細では孫の作成UIを出さない',
+  beforeEach: () => createMockFetch({ task: sampleSubtask }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.findByRole('heading', { name: sampleSubtask.title }),
+    ).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByRole('button', { name: /親タスク.*OAuth 対応を実装する/ }),
+    ).resolves.toBeInTheDocument();
+    await expect(
+      canvas.queryByRole('button', { name: 'サブタスクを追加' }),
+    ).not.toBeInTheDocument();
+    await expect(canvas.queryByRole('textbox', { name: 'サブタスク名' })).not.toBeInTheDocument();
   },
 };
 

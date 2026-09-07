@@ -28,6 +28,7 @@ function mountPanel(statusUpdating = false) {
       projectId: 'project-id',
       taskId: 'TASK-1',
       taskUuid: 'task-id',
+      parentTaskId: null,
       statusId: 'status-todo',
       statusUpdating,
       statuses: [],
@@ -60,6 +61,30 @@ describe('TaskSubtaskPanel', () => {
     const onCreate = composer.props('onCreate') as (title: string) => Promise<boolean>;
     expect(composer.get('input').attributes('disabled')).toBeDefined();
     expect(await onCreate('競合する子')).toBe(false);
+    expect(subtasksState.createSubtask).not.toHaveBeenCalled();
+  });
+
+  it('親が取得できない子でも追加UIを出さず、既存の子への導線は残す', async () => {
+    subtasksState.subtasks.value = [
+      { id: 'grandchild-id', title: '既存の孫', status_id: 'status-todo' },
+    ];
+    const wrapper = mountPanel();
+    await wrapper.setProps({ parentTaskId: 'deleted-parent-id' });
+    expect(wrapper.findComponent(TaskSubtaskComposer).exists()).toBe(false);
+    expect(
+      wrapper.findAll('button').some((button) => button.text().includes('サブタスクを追加')),
+    ).toBe(false);
+    await wrapper.get('li button').trigger('click');
+    expect(wrapper.emitted('open')?.[0]).toEqual([subtasksState.subtasks.value[0]]);
+  });
+
+  it('Composerを開いた後に子タスクへ変わったら入力欄を閉じ、保持された送信も拒否する', async () => {
+    const wrapper = mountPanel();
+    await wrapper.get('button:not([aria-label])').trigger('click');
+    const onCreate = wrapper.getComponent(TaskSubtaskComposer).props('onCreate');
+    await wrapper.setProps({ parentTaskId: 'parent-id' });
+    expect(wrapper.findComponent(TaskSubtaskComposer).exists()).toBe(false);
+    expect(await onCreate('作れない孫')).toBe(false);
     expect(subtasksState.createSubtask).not.toHaveBeenCalled();
   });
 });
