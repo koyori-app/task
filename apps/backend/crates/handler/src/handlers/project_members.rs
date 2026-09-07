@@ -14,7 +14,7 @@ use sea_orm::{
 };
 
 use crate::AppState;
-use crate::auth_helpers::{is_tenant_member, is_tenant_owner};
+use crate::auth_helpers::is_tenant_owner;
 use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -311,7 +311,6 @@ pub async fn list_members(
     request_body = AddMemberRequest,
     responses(
         (status = 201, description = "追加されたメンバー", body = ProjectMemberResponse),
-        (status = 400, description = "テナントメンバーでない利用者は追加できません", body = ServerError),
         (status = 409, description = "既にメンバーとして登録済み", body = ServerError),
         CrudErrors,
     )
@@ -332,14 +331,13 @@ pub async fn add_member(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // プロジェクトメンバーはテナントメンバーの絞り込みなので、テナントに居ない人は入れない。
-    // ここを許すと「プロジェクトには居るがテナントには入れない」不整合な状態ができる（#568）
-    if !is_tenant_owner(&state.db, tenant_id, payload.user_id).await?
-        && !is_tenant_member(&state.db, tenant_id, payload.user_id).await?
-    {
-        return Err(AppError::BadRequest);
-    }
-
+    // テナントに居るかは問わない。明示 ACE はテナント所属（継承）と独立に置ける
+    // （apps/backend/docs/tenant-project-authz.md の「継承と明示」）。テナントに居ない人を
+    // 招けば、その人はその場で project-only の客分になる。GitHub の outside collaborator
+    // と同じ形で、招けるのは従来どおりプロジェクト Admin とオーナーだけ（`require_project_admin`）。
+    // テナント側で客分の招待を締める旗は別 Issue で扱う。
+    // テナント所属を見なくなったので、除名との競合（確認の後・insert の前に除名が通る）は
+    // 起きようがなく、テナント行のロックも要らない
     let existing = project_members::Entity::find()
         .filter(project_members::Column::ProjectId.eq(project_id))
         .filter(project_members::Column::UserId.eq(payload.user_id))

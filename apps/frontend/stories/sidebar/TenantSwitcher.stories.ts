@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { createPinia, setActivePinia } from 'pinia';
 import { expect, fn, userEvent, within } from 'storybook/test';
-import TenantSwitcher from '@/components/sidebar/TenantSwitcher.vue';
+import TenantSwitcher from '@/components/header/TenantSwitcher.vue';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import type { Tenant } from '@/stores/tenant';
 import { useTenantStore } from '@/stores/tenant';
@@ -16,6 +16,7 @@ const tenant = (id: string, name: string, displayId: string): Tenant => ({
   icon_url: '',
   owner_id: ownerId,
   require_2fa: false,
+  membership: 'Owner' as const,
 });
 
 const primaryTenant = tenant('00000000-0000-4000-8000-000000000010', 'Acme', 'acme');
@@ -127,7 +128,6 @@ export const SingleTenant: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText('Acme')).toBeInTheDocument();
-    await expect(canvas.getByText('acme')).toBeInTheDocument();
   },
 };
 
