@@ -74,21 +74,22 @@ project（GitHub 連携は要約コメントの投稿にだけ必要。無くて
 
 > **予定（[Git ホスティング↔タスク連携](/features/tasks/github-tasks) §2）**: `integration_id` / `repo_owner` /
 > `repo_name` / `pr_number` / `pr_title` / `pr_author` は PR の実体表 `forge_pull_requests` へ移り、
-> `reviews` は `pull_request_id` で参照する。採番の UNIQUE は `(pull_request_id, round)` になる。
-> 下記のリポジトリを含めた合流キーの考え方はそのまま PR 行の UNIQUE に引き継ぐ。API の形は変えない。
+> `reviews` は `pull_request_id` で参照する。PR の自然キーは `host` + `host_url` +
+> `repo_owner` + `repo_name` + `number`（プロジェクト境界を含む）で、採番の UNIQUE は
+> `(pull_request_id, round)` になる。API の読み取り指定は下記の host-aware な規則に従う。
 
 同一 PR への再レビューは**新しいラウンド**として作る（更新しない）。`round` はサーバーが
 PR 内で採番し、「どのラウンド（R1, R2, …）で出た指摘か」「どの head を見たか」が
-履歴として残る。採番には `UNIQUE (project_id, repo_owner, repo_name, pr_number, round)` を
-張り、同じ PR へほぼ同時にラウンドが確定しても番号が重ならないようにする（採番から
+履歴として残る。移行後の採番には `UNIQUE (pull_request_id, round)` を張り、同じ PR へ
+ほぼ同時にラウンドが確定しても番号が重ならないようにする（採番から
 挿入までをプロジェクト行のロックで直列化し、制約は最後の防波堤として残す）。番号が
 重なると R1, R2, … の表示と「どの head を見た判断か」の対応が崩れる。
 
-**PR を指すキーにリポジトリを含める。** プロジェクトの連携先は解除・再連携で
+**PR を指すキーにホストとリポジトリを含める。** プロジェクトの連携先は解除・再連携で
 差し替えられるので、`project_id + pr_number` だけだと、旧リポジトリの PR #10 と
 新リポジトリの PR #10 が同じ PR として続き、旧リポジトリ向けの指摘を新リポジトリへ
 投稿してしまう。採番・一覧・集計・要約更新ジョブの合流キーは、いずれもラウンドに
-控えたリポジトリを含めた単位で扱う。一覧と集計が見るのは**現在の連携先**
+控えた `host` / `host_url` / リポジトリを含めた単位で扱う。一覧と集計が見るのは**現在の連携先**
 （連携が無ければリポジトリ無し）のラウンドで、旧リポジトリのラウンドは
 履歴として残るが混ざらない。
 
@@ -213,13 +214,17 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
 | `GET  /v1/tenants/{t}/projects/{p}/review-findings?pr=618&state=&severity=` | PR の指摘一覧（状態・重大度で絞り込み）。CLI の `review list` と UI の一覧が使う |
 | `PATCH /v1/tenants/{t}/projects/{p}/review-findings/{id}` | 状態遷移（`state` と任意のコメント） |
 
+上表の PR 単位の読み取り（ラウンド一覧・集計・指摘一覧）は共通して `pr` と、任意の
+`repo=owner/name`、`host`、`host_url`、`pull_request_id` を受ける。`pull_request_id` を
+指定した場合は自然キーの候補探索を行わず、その PR 行だけを対象にする。
+
 - PR 番号は**1 以上の整数**として検証する。実在確認まではしない（それは要約コメントの
   投稿時に判明する。投稿失敗は起票を巻き戻さない）
 - 状態遷移後も要約更新ジョブを投入する
 - 絞り込みクエリに未知の値が混ざっていたら 400。黙って無視すると「絞り込みが
   効いていない」ことに気づけない
 - ラウンドの採番はプロジェクト行のロックで直列化する
-  （`UNIQUE (project_id, repo_owner, repo_name, pr_number, round)` が最終的な防波堤）
+  （移行後の `UNIQUE (pull_request_id, round)` が最終的な防波堤）
 - 409 は理由を本文（`message`）に入れる（High / Medium の繰り延べ・規則にない遷移・
   既定ステータスが無い）。共通の `conflict` だけでは、CLI から使うレビュワーが
   「直すのか、取り下げるのか」を選べない
@@ -227,6 +232,11 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
   （§3）。過去の連携先や、連携を張る前に溜めたラウンドを読むために、
   **リポジトリを明示する絞り込みを用意する**。これが無いと「履歴として残る」と言いながら
   読む手段が無く、旧リポジトリの指摘を作成者が整理することもできない
+- 読み取りの PR 選択は `repo=owner/name` + `pr=N` に加えて `host` / `host_url` または
+  `pull_request_id` を受け付ける。`pull_request_id` は単独で対象を確定し、repo + pr だけの
+  指定は同じプロジェクト内の候補が 1 件のときだけ許可する。複数候補は 409 とし、host
+  または `pull_request_id` の再指定を要求する。候補が無い場合も現在の連携先へ暗黙に
+  フォールバックしない
 - **マージ可否は「ラウンドが 1 件以上ある」かつ「open / fixed の High・Medium が 0」**。
   件数だけで判定すると、**一度もレビューされていない PR が 0 件として「可」で通る**。
   これはマージ前ゲートとして最も危ない誤りなので、レビューの不在と「指摘なし」を
@@ -289,6 +299,8 @@ task review summary --project TASK --pr 618 --allow-unlinked  # 連携なしプ�
 # ラウンドを読む、連携を張る前のラウンド（空文字）を読む、のどちらにも使う
 task review list   --project TASK --pr 618 --repo acme/old
 task review rounds --project TASK --pr 618 --repo ""
+task review list   --project TASK --pr 618 --repo org/app --host-url https://forgejo.example.com
+task review rounds --project TASK --pull-request-id 00000000-0000-0000-0000-000000000000
 ```
 
 投入 JSON と絞り込みの値は**送信前に CLI 側でも検証する**。綴り違い
@@ -296,10 +308,12 @@ task review rounds --project TASK --pr 618 --repo ""
 どの項目かを添えて終了コード 2 で弾く。サーバー側の検証に任せきりにすると、
 AI が生成した JSON の取り違えを直す手がかりが薄くなる。
 
-読み取りの 3 コマンド（`list` / `rounds` / `summary`）は `--repo` を受ける。API の
-リポジトリ絞り込み（§5）を CLI からも使えるようにするためで、これが無いと AI
-レビュワーの主経路から過去の連携先のラウンドへ到達できない。値は `owner/name`、
-空文字は連携を張る前のラウンドを指す。形式が違えば終了コード 2 で弾く
+読み取りの 3 コマンド（`list` / `rounds` / `summary`）は `--repo` に加えて
+`--host` / `--host-url` / `--pull-request-id` を受ける。API のリポジトリ絞り込み（§5）を
+CLI からも使えるようにするためで、これが無いと AI レビュワーの主経路から過去の連携先の
+ラウンドへ到達できない。`--repo owner/name --pr N` だけの指定は候補が一意なときだけ許可し、
+複数候補なら終了コード 2 以外の非 0 で失敗して host または PR ID の再指定を要求する。
+値は `owner/name`、空文字は連携を張る前のラウンドを指す。形式が違えば終了コード 2 で弾く
 （黙って現在の連携先へ落とすと、読めていないことに気づけない）。
 
 `summary` は次のいずれかで**非 0 終了**する。ゲートとして使う以上、判断できない
@@ -521,6 +535,10 @@ AI が生成した JSON の取り違えを直す手がかりが薄くなる。
 - リポジトリの同定: 連携を別リポジトリへ差し替えると、同じ PR 番号でも R1 から始まり、
   旧リポジトリのラウンドは一覧・集計に混ざらない。要約コメントは控えたリポジトリが
   現在の連携先と違えば投稿しない
+- ホスト移行時の履歴選択: GitHub と Forgejo に同じ `org/app` の PR #10 があるとき、
+  `--repo org/app --pr 10` または `repo=org/app&pr=10` だけの指定は 409 / CLI 非 0 になり、
+  `host_url`（必要なら `host`）または `pull_request_id` を指定した場合だけ対象が確定する。
+  候補が 1 件の repo-only 指定は成功する
 - マージ可否: レビューが 1 件も無い PR は「可」にならない（対照: 指摘ゼロの
   ラウンドが 1 件あれば「可」）。集計は最新ラウンドの `head_sha` を返す
 - CLI の鮮度検査: 最新ラウンドの `head_sha` と照合対象の HEAD が違えば非 0 終了。
@@ -620,6 +638,9 @@ AI が生成した JSON の取り違えを直す手がかりが薄くなる。
 - 2026-08-31: 読み取りの 3 コマンドに `--repo` を置く（`owner/name`、空文字は連携前）。
   API 側の絞り込み（§5）だけでは、CLI を主経路にする AI レビュワーが過去の連携先の
   ラウンドを読めない
+- 2026-09-07: レビュー履歴の PR 選択に `host` / `host_url` / `pull_request_id` を追加し、
+  `repo + pr` だけは候補が一意な場合に限定する。GitHub と Forgejo の同名リポジトリ・同番 PR
+  は API 409 / CLI 非 0 で再指定を要求する
 - 2026-08-26: レビューの反復の呼称は「ラウンド」（表示は R1, R2, …）。「巡」表記は使わない
 - 2026-08-26: レビュワーは AI（PAT + CLI）と人間（セッション + Web UI）を同格に扱う。
   ラウンドは確定時一括作成・追記不可で、人間の下書きは UI 側の関心事（サーバーは持たない）
