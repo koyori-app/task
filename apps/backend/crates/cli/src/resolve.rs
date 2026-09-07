@@ -140,23 +140,60 @@ fn not_found_with_candidates(kind: &str, name: &str, candidates: Vec<String>) ->
     ))
 }
 
+/// 完全一致を優先し、同名候補が残る場合は UUID による指定を求める。
+fn pick_named_id<'a>(
+    kind: &str,
+    name: &str,
+    candidates: impl IntoIterator<Item = (Uuid, &'a str)>,
+) -> Result<Uuid> {
+    let candidates: Vec<_> = candidates.into_iter().collect();
+    let exact: Vec<_> = candidates
+        .iter()
+        .filter(|(_, value)| *value == name)
+        .collect();
+    let matches = if exact.is_empty() {
+        candidates
+            .iter()
+            .filter(|(_, value)| value.eq_ignore_ascii_case(name))
+            .collect()
+    } else {
+        exact
+    };
+    match matches.as_slice() {
+        [(id, _)] => Ok(*id),
+        [] => Err(not_found_with_candidates(
+            kind,
+            name,
+            candidates
+                .iter()
+                .map(|(_, value)| (*value).to_string())
+                .collect(),
+        )),
+        _ => Err(CliError::validation(format!(
+            "Ambiguous {kind}: {name} (candidates: {}); specify a UUID",
+            matches
+                .iter()
+                .map(|(id, value)| format!("{value} ({id})"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
 pub async fn list_labels(api: &ApiClient, project_id: Uuid) -> Result<Vec<LabelResponse>> {
     list_under_project(api, project_id, "labels", &[]).await
 }
 
 pub async fn resolve_label_id(api: &ApiClient, project_id: Uuid, name: &str) -> Result<Uuid> {
+    if let Ok(uuid) = Uuid::parse_str(name) {
+        return Ok(uuid);
+    }
     let labels = list_labels(api, project_id).await?;
-    labels
-        .iter()
-        .find(|label| label.name.eq_ignore_ascii_case(name))
-        .map(|label| label.id)
-        .ok_or_else(|| {
-            not_found_with_candidates(
-                "Label",
-                name,
-                labels.iter().map(|label| label.name.clone()).collect(),
-            )
-        })
+    pick_named_id(
+        "Label",
+        name,
+        labels.iter().map(|item| (item.id, item.name.as_str())),
+    )
 }
 
 pub async fn list_milestones(api: &ApiClient, project_id: Uuid) -> Result<Vec<MilestoneResponse>> {
@@ -168,20 +205,11 @@ pub async fn resolve_milestone_id(api: &ApiClient, project_id: Uuid, name: &str)
         return Ok(uuid);
     }
     let milestones = list_milestones(api, project_id).await?;
-    milestones
-        .iter()
-        .find(|milestone| milestone.name.eq_ignore_ascii_case(name))
-        .map(|milestone| milestone.id)
-        .ok_or_else(|| {
-            not_found_with_candidates(
-                "Milestone",
-                name,
-                milestones
-                    .iter()
-                    .map(|milestone| milestone.name.clone())
-                    .collect(),
-            )
-        })
+    pick_named_id(
+        "Milestone",
+        name,
+        milestones.iter().map(|item| (item.id, item.name.as_str())),
+    )
 }
 
 pub async fn list_sprints(api: &ApiClient, project_id: Uuid) -> Result<Vec<SprintResponse>> {
@@ -193,17 +221,11 @@ pub async fn resolve_sprint_id(api: &ApiClient, project_id: Uuid, name: &str) ->
         return Ok(uuid);
     }
     let sprints = list_sprints(api, project_id).await?;
-    sprints
-        .iter()
-        .find(|sprint| sprint.name.eq_ignore_ascii_case(name))
-        .map(|sprint| sprint.id)
-        .ok_or_else(|| {
-            not_found_with_candidates(
-                "Sprint",
-                name,
-                sprints.iter().map(|sprint| sprint.name.clone()).collect(),
-            )
-        })
+    pick_named_id(
+        "Sprint",
+        name,
+        sprints.iter().map(|item| (item.id, item.name.as_str())),
+    )
 }
 
 pub async fn list_assignable_users(api: &ApiClient, project_id: Uuid) -> Result<Vec<UserSummary>> {
@@ -226,11 +248,15 @@ pub async fn resolve_user_id(api: &ApiClient, project_id: Uuid, name: &str) -> R
         &[("username", name.to_string())],
     )
     .await?;
-    if let Some(user) = matched
-        .into_iter()
-        .find(|user| user.username.eq_ignore_ascii_case(name))
+    if matched
+        .iter()
+        .any(|user| user.username.eq_ignore_ascii_case(name))
     {
-        return Ok(user.id);
+        return pick_named_id(
+            "Assignable user",
+            name,
+            matched.iter().map(|user| (user.id, user.username.as_str())),
+        );
     }
     let candidates = list_assignable_users(api, project_id)
         .await
@@ -243,11 +269,16 @@ pub async fn resolve_user_id(api: &ApiClient, project_id: Uuid, name: &str) -> R
 }
 
 fn pick_status_by_name(statuses: &[ProjectStatusResponse], name: &str) -> Result<Uuid> {
-    statuses
-        .iter()
-        .find(|status| status.name.eq_ignore_ascii_case(name))
-        .map(|status| status.id)
-        .ok_or_else(|| CliError::not_found(format!("Status not found: {name}")))
+    if let Ok(uuid) = Uuid::parse_str(name) {
+        return Ok(uuid);
+    }
+    pick_named_id(
+        "Status",
+        name,
+        statuses
+            .iter()
+            .map(|status| (status.id, status.name.as_str())),
+    )
 }
 
 fn pick_done_status(statuses: &[ProjectStatusResponse]) -> Result<Uuid> {
@@ -277,6 +308,36 @@ fn pick_default_status(statuses: &[ProjectStatusResponse]) -> Result<Uuid> {
 mod tests {
     use super::*;
     use chrono::Utc;
+
+    #[test]
+    fn named_resources_prefer_exact_matches_and_reject_ambiguity() {
+        let first = Uuid::from_u128(1);
+        let second = Uuid::from_u128(2);
+        for kind in ["Label", "Milestone", "Sprint", "Assignable user", "Status"] {
+            for candidates in [
+                [(first, "Bug"), (second, "bug")],
+                [(second, "bug"), (first, "Bug")],
+            ] {
+                assert_eq!(pick_named_id(kind, "Bug", candidates).unwrap(), first);
+                assert_eq!(pick_named_id(kind, "bug", candidates).unwrap(), second);
+                let error = pick_named_id(kind, "BUG", candidates).unwrap_err();
+                assert_eq!(error.exit_code, 2);
+                for expected in [first.to_string(), second.to_string(), "UUID".into()] {
+                    assert!(error.message.contains(&expected), "{}", error.message);
+                }
+            }
+            // 同じ綴りが複数あれば、完全一致でも任意の一件を選ばない。
+            assert!(pick_named_id(kind, "Bug", [(first, "Bug"), (second, "Bug")]).is_err());
+            assert_eq!(pick_named_id(kind, "BUG", [(first, "Bug")]).unwrap(), first);
+            assert_eq!(
+                pick_named_id(kind, "missing", [(first, "Bug")])
+                    .unwrap_err()
+                    .exit_code,
+                5
+            );
+            assert_eq!(pick_named_id(kind, "missing", []).unwrap_err().exit_code, 5);
+        }
+    }
 
     fn status(
         name: &str,

@@ -4,12 +4,9 @@ use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
 use entity::tasks::TaskPriority;
 use payload::projects::ProjectResponse;
 use payload::task_comments::{CreateCommentRequest, TaskCommentResponse};
-use payload::task_extensions::{
-    BulkUpdateFields, BulkUpdateRequest, BulkUpdateResponse, SearchTasksResponse,
-};
+use payload::task_extensions::SearchTasksResponse;
 use payload::tasks::{
-    AddAssigneeRequest, AssigneeInput, CreateTaskRequest, TaskAssigneeResponse,
-    TaskAssigneeSummary, TaskDetailResponse, TaskListResponse, UpdateTaskRequest,
+    AssigneeInput, CreateTaskRequest, TaskDetailResponse, TaskListResponse, UpdateTaskRequest,
 };
 use sea_orm::ActiveEnum;
 use serde_json::json;
@@ -104,7 +101,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             if output.json {
                 print(&tasks, output);
             } else {
-                print_listing(&tasks, output, page, limit);
+                print_listing(&tasks, output, page);
             }
         }
         TasksCommand::Search {
@@ -227,16 +224,6 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             if clears.clear_assignees {
                 resolved.assignees = Some(Vec::new());
             }
-            // 担当者の置き換えは「今の顔ぶれ」が要る。ラベルの差分はサーバー側で
-            // 当てるので、そのためだけに詳細は引かない
-            let current: Option<TaskDetailResponse> = if resolved.assignees.is_some() {
-                Some(
-                    api.get(&borrow(&task_path(api, project.id, &task_id)), &[])
-                        .await?,
-                )
-            } else {
-                None
-            };
             let body = update_request(UpdateFields {
                 title,
                 description,
@@ -248,33 +235,10 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 is_archived: archive.then_some(true).or(unarchive.then_some(false)),
             });
             check_deadline_order(body.soft_deadline, body.hard_deadline)?;
-            // 担当者とラベルの差分は更新の本文では動かせない。先にタスク本体を更新することで、
-            // 本体の検証に失敗したときに担当者だけが変わる状態を避ける。
             let updated: TaskDetailResponse = api
                 .put(&borrow(&task_path(api, project.id, &task_id)), &body)
                 .await?;
-            let changed_labels = apply_label_changes(api, project.id, &updated, &resolved).await?;
-            let mut synced_assignees = false;
-            if let (Some(current), Some(desired)) = (&current, &resolved.assignees) {
-                sync_assignees(api, project.id, &task_id, &current.task.assignees, desired).await?;
-                synced_assignees = true;
-            }
-            if changed_labels || synced_assignees {
-                // PUT の応答には専用 endpoint で反映したラベル・担当者がまだ含まれないため、
-                // 成功時の出力は最終状態を再取得する。
-                let final_task: TaskDetailResponse = api
-                    .get(&borrow(&task_path(api, project.id, &task_id)), &[])
-                    .await
-                    .map_err(|error| {
-                        CliError::new(format!(
-                            "The task was updated, but fetching the final task failed: {}",
-                            error.message
-                        ))
-                    })?;
-                print(&final_task, output);
-            } else {
-                print(&updated, output);
-            }
+            print(&updated, output);
         }
         TasksCommand::Complete { task_ref, project } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
@@ -388,6 +352,9 @@ fn update_request(fields: UpdateFields) -> UpdateTaskRequest {
         clear_estimated_minutes: clears.clear_estimate,
         is_archived: fields.is_archived,
         label_ids: fields.label_ids,
+        add_label_ids: resolved.add_label_ids.clone(),
+        remove_label_ids: resolved.remove_label_ids.clone(),
+        assignees: resolved.assignees.clone(),
         custom_field_values: None,
     }
 }
@@ -484,9 +451,14 @@ async fn resolve_fields(
     resolved.remove_label_ids = resolve_labels(api, project.id, &fields.remove_labels).await?;
     if !fields.assignees.is_empty() {
         let mut assignees = Vec::with_capacity(fields.assignees.len());
+        let mut seen = std::collections::HashSet::new();
         for name in &fields.assignees {
+            let user_id = resolve_user_id(api, project.id, name).await?;
+            if !seen.insert(user_id) {
+                continue;
+            }
             assignees.push(AssigneeInput {
-                user_id: resolve_user_id(api, project.id, name).await?,
+                user_id,
                 role: ASSIGNEE_ROLE.to_string(),
             });
         }
@@ -495,226 +467,12 @@ async fn resolve_fields(
     Ok(resolved)
 }
 
-/// 更新で `--assignee` に渡された顔ぶれへ寄せる。付け外しは専用の endpoint しかないので、
-/// 今の担当者との差分を当てる。途中で失敗したら元の顔ぶれへ戻す。
-async fn sync_assignees(
-    api: &ApiClient,
-    project_id: Uuid,
-    task_id: &str,
-    current: &[TaskAssigneeSummary],
-    desired: &[AssigneeInput],
-) -> Result<()> {
-    let (added, removed) = assignee_changes(
-        current.iter().map(|assignee| assignee.user.id),
-        desired.iter().map(|assignee| assignee.user_id),
-    );
-
-    for user_id in added {
-        // 役割は作成のときと同じ綴りを使う（`--assignee` は役割を受けない）
-        let role = desired
-            .iter()
-            .find(|assignee| assignee.user_id == user_id)
-            .map_or(ASSIGNEE_ROLE, |assignee| assignee.role.as_str());
-        if let Err(error) = add_assignee(api, project_id, task_id, user_id, role).await {
-            return restore_assignees(api, project_id, task_id, current, error).await;
-        }
-    }
-    for user_id in removed {
-        if let Err(error) = remove_assignee(api, project_id, task_id, user_id).await {
-            return restore_assignees(api, project_id, task_id, current, error).await;
-        }
-    }
-    Ok(())
-}
-
-async fn add_assignee(
-    api: &ApiClient,
-    project_id: Uuid,
-    task_id: &str,
-    user_id: Uuid,
-    role: &str,
-) -> Result<()> {
-    let mut segments = task_path(api, project_id, task_id);
-    segments.push("assignees".into());
-    let _: TaskAssigneeResponse = api
-        .post(
-            &borrow(&segments),
-            &AddAssigneeRequest {
-                user_id,
-                role: role.to_string(),
-            },
-        )
-        .await?;
-    Ok(())
-}
-
-async fn remove_assignee(
-    api: &ApiClient,
-    project_id: Uuid,
-    task_id: &str,
-    user_id: Uuid,
-) -> Result<()> {
-    let mut segments = task_path(api, project_id, task_id);
-    segments.push("assignees".into());
-    segments.push(user_id.to_string());
-    api.delete(&borrow(&segments)).await
-}
-
-/// 担当者同期が途中で失敗したとき、本体更新後に残った部分更新を可能な範囲で戻す。
-///
-/// 「CLI から見て成功した操作」だけを戻すと足りない。サーバーが反映した後に応答だけ
-/// 失われた操作は失敗として記録されないので、その分が復元対象から漏れる。実際の担当者を
-/// 取り直してから差分を当て、取り直せないときは復元できたと言わない。
-async fn restore_assignees(
-    api: &ApiClient,
-    project_id: Uuid,
-    task_id: &str,
-    original: &[TaskAssigneeSummary],
-    original_error: CliError,
-) -> Result<()> {
-    let actual: TaskDetailResponse = match api
-        .get(&borrow(&task_path(api, project_id, task_id)), &[])
-        .await
-    {
-        Ok(task) => task,
-        Err(error) => {
-            return Err(CliError::new(format!(
-                "Task fields were updated, but assignee synchronization failed: {}; the current assignees could not be read, so they may have changed: {}",
-                original_error.message, error.message
-            )));
-        }
-    };
-
-    let (restore, undo) = assignee_changes(
-        actual
-            .task
-            .assignees
-            .iter()
-            .map(|assignee| assignee.user.id),
-        original.iter().map(|assignee| assignee.user.id),
-    );
-    let mut rollback_errors = Vec::new();
-
-    for user_id in restore {
-        let Some(previous) = original.iter().find(|assignee| assignee.user.id == user_id) else {
-            rollback_errors.push(format!(
-                "restore {user_id}: original assignee was not found"
-            ));
-            continue;
-        };
-        if let Err(error) = add_assignee(api, project_id, task_id, user_id, &previous.role).await {
-            rollback_errors.push(format!("restore {user_id}: {}", error.message));
-        }
-    }
-    for user_id in undo {
-        if let Err(error) = remove_assignee(api, project_id, task_id, user_id).await {
-            rollback_errors.push(format!("remove {user_id}: {}", error.message));
-        }
-    }
-
-    if rollback_errors.is_empty() {
-        let mut error = original_error;
-        error.message = format!(
-            "Task fields were updated, but assignee synchronization failed; assignees were restored: {}",
-            error.message
-        );
-        Err(error)
-    } else {
-        Err(CliError::new(format!(
-            "Task fields were updated, but assignee synchronization failed: {}; rollback was incomplete: {}",
-            original_error.message,
-            rollback_errors.join("; ")
-        )))
-    }
-}
-
-/// 今の担当者を頼まれた顔ぶれに合わせるための「足す・外す」。
-/// 既にいる利用者は触らない（外して付け直すと通知と履歴が余計に出る）。
-fn assignee_changes(
-    current: impl IntoIterator<Item = Uuid>,
-    desired: impl IntoIterator<Item = Uuid>,
-) -> (Vec<Uuid>, Vec<Uuid>) {
-    let current: Vec<Uuid> = current.into_iter().collect();
-    let desired: Vec<Uuid> = desired.into_iter().collect();
-    let mut added: Vec<Uuid> = Vec::new();
-    for user_id in &desired {
-        if !current.contains(user_id) && !added.contains(user_id) {
-            added.push(*user_id);
-        }
-    }
-    let removed = current
-        .into_iter()
-        .filter(|user_id| !desired.contains(user_id))
-        .collect();
-    (added, removed)
-}
-
 async fn resolve_labels(api: &ApiClient, project_id: Uuid, names: &[String]) -> Result<Vec<Uuid>> {
     let mut ids = Vec::with_capacity(names.len());
     for name in names {
         ids.push(resolve_label_id(api, project_id, name).await?);
     }
     Ok(ids)
-}
-
-/// `--add-label` / `--remove-label` の差分を一括更新 API に渡す。適用したら true。
-///
-/// CLI で今のラベルを読んでから `label_ids` で全置換すると、読んでから書くまでの間に
-/// 他の利用者が付けたラベルを消し、外したラベルを戻してしまう。差分の適用は
-/// サーバー側の 1 トランザクションに任せる。
-async fn apply_label_changes(
-    api: &ApiClient,
-    project_id: Uuid,
-    task: &TaskDetailResponse,
-    resolved: &ResolvedFields,
-) -> Result<bool> {
-    let Some(update) = label_change_fields(resolved) else {
-        return Ok(false);
-    };
-    let mut segments = tasks_path(api, project_id);
-    segments.push("bulk".into());
-    let body = BulkUpdateRequest {
-        task_ids: vec![task.task.id],
-        update,
-    };
-    // 一括更新は 1 件ごとの失敗を本文で返すので、状態と本文の両方を見る
-    let result: BulkUpdateResponse = api
-        .post(&borrow(&segments), &body)
-        .await
-        .map_err(|error| label_change_failed(&error.message))?;
-    if let Some(failure) = result.failed.first() {
-        return Err(label_change_failed(&failure.reason));
-    }
-    Ok(true)
-}
-
-/// 差分が無ければ None。ラベル以外は触らないので、他の項目は送らない。
-fn label_change_fields(resolved: &ResolvedFields) -> Option<BulkUpdateFields> {
-    // 同じラベルを足して外したら外すほうが勝つ。両方に入れると API が 400 を返す
-    let add: Vec<Uuid> = resolved
-        .add_label_ids
-        .iter()
-        .copied()
-        .filter(|id| !resolved.remove_label_ids.contains(id))
-        .collect();
-    let remove = resolved.remove_label_ids.clone();
-    if add.is_empty() && remove.is_empty() {
-        return None;
-    }
-    Some(BulkUpdateFields {
-        status_id: None,
-        assignee_id: None,
-        add_label_ids: (!add.is_empty()).then_some(add),
-        remove_label_ids: (!remove.is_empty()).then_some(remove),
-        sprint_id: None,
-        clear_sprint_id: false,
-    })
-}
-
-fn label_change_failed(reason: &str) -> CliError {
-    CliError::new(format!(
-        "Task fields were updated, but changing the labels failed: {reason}"
-    ))
 }
 
 /// 親タスクは `KEY-N` でも指せる。API は UUID を要求するので詳細を 1 度引く。
@@ -797,14 +555,11 @@ fn offset_for(page: u64, limit: u64) -> Result<u64> {
 }
 
 /// 人間向けの一覧。総件数を出さないと、既定の 50 件で切れていることに気付けない。
-fn print_listing(tasks: &TaskListResponse, output: OutputOptions, page: u64, limit: u64) {
+fn print_listing(tasks: &TaskListResponse, output: OutputOptions, page: u64) {
     if !tasks.tasks.is_empty() {
         print(tasks, output);
     }
-    println!(
-        "{}",
-        page_summary(tasks.tasks.len(), tasks.total, page, limit)
-    );
+    println!("{}", listing_summary(tasks, page));
 }
 
 fn print_hits(project: &ProjectResponse, hits: &SearchTasksResponse, page: u64, limit: u64) {
@@ -817,7 +572,15 @@ fn print_hits(project: &ProjectResponse, hits: &SearchTasksResponse, page: u64, 
     }
     println!(
         "{}",
-        page_summary(hits.tasks.len(), hits.total, page, limit)
+        page_summary(
+            hits.tasks.len(),
+            hits.total,
+            page,
+            page.saturating_sub(1)
+                .saturating_mul(limit)
+                .saturating_add(hits.tasks.len() as u64)
+                < hits.total
+        )
     );
 }
 
@@ -854,9 +617,17 @@ fn plain_snippet(highlight: &str) -> String {
     out
 }
 
-fn page_summary(shown: usize, total: u64, page: u64, limit: u64) -> String {
-    let seen = page.saturating_sub(1).saturating_mul(limit) + shown as u64;
-    if seen < total {
+fn listing_summary(tasks: &TaskListResponse, page: u64) -> String {
+    page_summary(
+        tasks.tasks.len(),
+        tasks.total,
+        page,
+        tasks.next_cursor.is_some(),
+    )
+}
+
+fn page_summary(shown: usize, total: u64, page: u64, has_next: bool) -> String {
+    if has_next {
         format!(
             "{shown} 件表示 / 全 {total} 件（--page {} で続き）",
             page + 1
@@ -1042,15 +813,31 @@ mod tests {
     }
 
     #[test]
+    fn task_listing_uses_the_cursor_even_when_the_total_disagrees() {
+        let mut tasks = TaskListResponse {
+            tasks: vec![],
+            total: 100,
+            next_cursor: None,
+        };
+        assert_eq!(listing_summary(&tasks, 1), "0 件表示 / 全 100 件");
+        tasks.total = 0;
+        tasks.next_cursor = Some("next".into());
+        assert_eq!(
+            listing_summary(&tasks, 1),
+            "0 件表示 / 全 0 件（--page 2 で続き）"
+        );
+    }
+
+    #[test]
     fn points_at_the_next_page_only_while_rows_remain() {
         // 既定の 50 件で切れていることに気付けないと、古いタスクを見落とす
         assert_eq!(
-            page_summary(50, 181, 1, 50),
+            page_summary(50, 181, 1, true),
             "50 件表示 / 全 181 件（--page 2 で続き）"
         );
-        assert_eq!(page_summary(31, 181, 4, 50), "31 件表示 / 全 181 件");
-        assert_eq!(page_summary(0, 181, 9, 50), "0 件表示 / 全 181 件");
-        assert_eq!(page_summary(0, 0, 1, 50), "0 件表示 / 全 0 件");
+        assert_eq!(page_summary(31, 181, 4, false), "31 件表示 / 全 181 件");
+        assert_eq!(page_summary(0, 181, 9, false), "0 件表示 / 全 181 件");
+        assert_eq!(page_summary(0, 0, 1, false), "0 件表示 / 全 0 件");
     }
 
     #[test]
@@ -1115,44 +902,6 @@ mod tests {
         assert_eq!(err.exit_code, 2);
         assert!(check_deadline_order(Some(soft), None).is_ok());
         assert!(check_deadline_order(None, None).is_ok());
-    }
-
-    fn label_changes(add: &[Uuid], remove: &[Uuid]) -> Option<BulkUpdateFields> {
-        label_change_fields(&ResolvedFields {
-            add_label_ids: add.to_vec(),
-            remove_label_ids: remove.to_vec(),
-            ..ResolvedFields::default()
-        })
-    }
-
-    /// 差分は「今のラベル」を CLI で組み直さず、そのまま一括更新 API に渡す。
-    /// 読んでから全置換すると、その間に他の利用者が変えたラベルを巻き戻す。
-    #[test]
-    fn sends_label_changes_as_a_diff_instead_of_a_replacement() {
-        let (added, removed) = (uuid(2), uuid(3));
-
-        let fields = label_changes(&[added], &[removed]).expect("差分がある");
-        assert_eq!(fields.add_label_ids, Some(vec![added]));
-        assert_eq!(fields.remove_label_ids, Some(vec![removed]));
-        // ラベル以外は触らない
-        assert!(fields.status_id.is_none());
-        assert!(fields.assignee_id.is_none());
-        assert!(fields.sprint_id.is_none());
-        assert!(!fields.clear_sprint_id);
-    }
-
-    #[test]
-    fn removing_a_label_wins_over_adding_the_same_one() {
-        // 両方に同じ ID を入れると API が 400 を返すので、足すほうから外す
-        let added = uuid(2);
-        let fields = label_changes(&[added], &[added]).expect("外す指定は残る");
-        assert_eq!(fields.add_label_ids, None);
-        assert_eq!(fields.remove_label_ids, Some(vec![added]));
-    }
-
-    #[test]
-    fn sends_no_label_change_when_none_were_given() {
-        assert!(label_changes(&[], &[]).is_none());
     }
 
     /// 未指定のラベルで空配列を送ると、API 側は「全解除」と解釈する。
@@ -1233,30 +982,6 @@ mod tests {
         ] {
             assert_eq!(json[key], false, "{key}");
         }
-    }
-
-    /// `--assignee` は顔ぶれの置き換え。更新の本文には担当者が無いので、差分を別に当てる。
-    #[test]
-    fn turns_the_requested_assignees_into_what_to_add_and_remove() {
-        let (kept, added, removed) = (uuid(1), uuid(2), uuid(3));
-
-        let (add, remove) = assignee_changes([kept, removed], [kept, added]);
-        assert_eq!(add, vec![added]);
-        assert_eq!(remove, vec![removed]);
-
-        // 既にいる利用者は触らない（外して付け直すと通知と履歴が余計に出る）
-        let (add, remove) = assignee_changes([kept], [kept]);
-        assert!(add.is_empty(), "{add:?}");
-        assert!(remove.is_empty(), "{remove:?}");
-
-        // 同じ利用者を 2 回渡しても足すのは 1 度
-        let (add, _) = assignee_changes([], [added, added]);
-        assert_eq!(add, vec![added]);
-
-        // 誰も指定していない状態は「全員外す」
-        let (add, remove) = assignee_changes([kept, removed], []);
-        assert!(add.is_empty(), "{add:?}");
-        assert_eq!(remove, vec![kept, removed]);
     }
 
     /// 抜粋は画面用の HTML。端末にタグや実体参照が出ると読めない。

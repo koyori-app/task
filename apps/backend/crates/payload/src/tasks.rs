@@ -91,7 +91,7 @@ impl TaskResponse {
     }
 }
 
-#[derive(Deserialize, ToSchema, serde::Serialize)]
+#[derive(Clone, Deserialize, ToSchema, serde::Serialize)]
 pub struct AssigneeInput {
     pub user_id: Uuid,
     pub role: String,
@@ -166,6 +166,14 @@ pub struct UpdateTaskRequest {
     pub is_archived: Option<bool>,
     /// タスクのラベルをこの ID 集合で置き換える（`Some(vec![])` で全解除）。None は変更なし
     pub label_ids: Option<Vec<Uuid>>,
+    /// 置き換え後（未指定なら現在の集合）へ追加し、その後 remove_label_ids を外す。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub add_label_ids: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remove_label_ids: Vec<Uuid>,
+    /// 担当者集合を置き換える。空配列で全解除、None は変更なし。既存の担当者の役割は維持する。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignees: Option<Vec<AssigneeInput>>,
     pub custom_field_values: Option<Vec<CustomFieldValueInput>>,
 }
 

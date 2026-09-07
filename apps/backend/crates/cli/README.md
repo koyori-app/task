@@ -121,11 +121,14 @@ task tasks list --project TASK --archived
 task tasks search --project TASK ページング
 ```
 
-`--status` / `--label` / `--assignee` / `--milestone` / `--sprint` は名前で指せる。
+`--status` / `--label` / `--assignee` / `--milestone` / `--sprint` は名前または UUID で指せる。
+名前は完全一致を優先し、それがなければ大文字小文字を無視して照合する。候補が複数あるときは
+候補 ID を含むエラーを返すので、UUID で指定する。
 綴りを外すと、そのプロジェクトで使える名前が並ぶ。担当者の候補一覧には `write:task`
 が要るので、読み取りだけのトークンでは名前解決はできても候補は並ばない。
 
 作成と更新は同じ綴りの項目を受ける。
+更新は本体・ラベル差分・担当者置換を一度の API 呼び出しで反映し、途中失敗時はすべて取り消す。
 
 ```bash
 task tasks create --project TASK --title 直す \
@@ -139,7 +142,8 @@ task tasks update TASK-181 --clear-sprint --archive
 - ソフト期限はハード期限より**前**でなければならない。同時刻は API が 400 を返す
 - `--label` は今のラベルを**置き換える**。残したまま増減するなら `--add-label` / `--remove-label`
 - `--assignee` も今の担当者を**置き換える**。更新では足りない人を足し、外れた人を外す
-  （既にいる人の役割は変えない）。全員外すときは `--clear-assignees`
+  （既にいる人の役割は変えない）。全員外すときは `--clear-assignees`。作成・更新とも、
+  同じユーザー ID に解決される指定は一人分にまとめる
 - 渡さなかった項目は送らないので、既存の値は消えない。消すときは `--clear-*` を使う
 
 ## 設定

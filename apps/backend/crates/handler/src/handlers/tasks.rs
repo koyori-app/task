@@ -721,10 +721,7 @@ pub async fn update_task(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
-    let task_snapshot = task.clone();
     let task_id = task.id;
-    let existing_soft = task.soft_deadline.map(|dt| dt.with_timezone(&Utc));
-    let existing_hard = task.hard_deadline.map(|dt| dt.with_timezone(&Utc));
     let parent_changes = payload.clear_parent_task_id || payload.parent_task_id.is_some();
     let txn = if parent_changes {
         state
@@ -734,6 +731,26 @@ pub async fn update_task(
     } else {
         state.db.begin().await?
     };
+
+    // 本体・ラベル・担当者のスナップショットを同じロックの下で取得する。
+    let task = tasks::Entity::find_by_id(task_id)
+        .filter(tasks::Column::ProjectId.eq(project_id))
+        .filter(tasks::Column::DeletedAt.is_null())
+        .lock(LockType::Update)
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let task_snapshot = task.clone();
+    let existing_soft = task.soft_deadline.map(|dt| dt.with_timezone(&Utc));
+    let existing_hard = task.hard_deadline.map(|dt| dt.with_timezone(&Utc));
+    if let Some(ref assignees) = payload.assignees {
+        for assignee in assignees {
+            if assignee.role.is_empty() {
+                return Err(AppError::BadRequest);
+            }
+            require_project_access(&state, tenant_id, project_id, assignee.user_id).await?;
+        }
+    }
 
     let mut active: tasks::ActiveModel = task.into();
     if let Some(ref v) = payload.title {
@@ -841,21 +858,20 @@ pub async fn update_task(
     }
     active.updated_at = Set(chrono::Utc::now().into());
 
-    if let Some(ref label_ids) = payload.label_ids {
-        // task_labels が空でも同じタスクへのラベル置換を直列化するため、
-        // 関連行ではなく必ず存在する親タスク行を共通のロック対象にする。
-        // 一括更新もラベル操作前の tasks UPDATE で同じ行ロックを取る。
-        tasks::Entity::find_by_id(task_id)
-            .filter(tasks::Column::ProjectId.eq(project_id))
-            .filter(tasks::Column::DeletedAt.is_null())
-            .lock(LockType::Update)
-            .one(&txn)
-            .await?
-            .ok_or(AppError::NotFound)?;
-
-        let mut unique = label_ids.clone();
+    if payload.label_ids.is_some()
+        || !payload.add_label_ids.is_empty()
+        || !payload.remove_label_ids.is_empty()
+    {
+        let before_labels = task_label_entries(&txn, task_id).await?;
+        let mut unique = payload
+            .label_ids
+            .clone()
+            .unwrap_or_else(|| before_labels.iter().map(|(id, _)| *id).collect());
+        unique.extend(&payload.add_label_ids);
         unique.sort();
         unique.dedup();
+        // 除去が最後。同じ ID を追加・除去した場合は除去を優先する。
+        unique.retain(|id| !payload.remove_label_ids.contains(id));
         if !unique.is_empty() {
             let in_project = labels::Entity::find()
                 .filter(labels::Column::Id.is_in(unique.clone()))
@@ -866,7 +882,6 @@ pub async fn update_task(
                 return Err(AppError::BadRequest);
             }
         }
-        let before_labels = task_label_entries(&txn, task_id).await?;
         task_labels::Entity::delete_many()
             .filter(task_labels::Column::TaskId.eq(task_id))
             .exec(&txn)
@@ -915,51 +930,84 @@ pub async fn update_task(
                 .ok_or(AppError::NotFound)?;
             active.parent_task_id = Set(Some(new_parent_id));
         }
-
-        let updated = active.update(&txn).await?;
-        record_task_field_activities(
-            &txn,
-            task_id,
-            auth.user_id,
-            project_id,
-            &task_snapshot,
-            &payload,
-        )
-        .await?;
-        if let Some(ref values) = payload.custom_field_values {
-            upsert_task_custom_field_values(&txn, project_id, task_id, values).await?;
-        }
-        let linked = service::github::sync::mark_pending_push(&txn, task_id).await?;
-        txn.commit().await?;
-        if linked {
-            crate::handlers::github::enqueue_issue_push(&state, task_id).await;
-        }
-        Ok(Json(
-            build_task_detail_response(&state, project_id, updated).await?,
-        ))
-    } else {
-        let updated = active.update(&txn).await?;
-        record_task_field_activities(
-            &txn,
-            task_id,
-            auth.user_id,
-            project_id,
-            &task_snapshot,
-            &payload,
-        )
-        .await?;
-        if let Some(ref values) = payload.custom_field_values {
-            upsert_task_custom_field_values(&txn, project_id, task_id, values).await?;
-        }
-        let linked = service::github::sync::mark_pending_push(&txn, task_id).await?;
-        txn.commit().await?;
-        if linked {
-            crate::handlers::github::enqueue_issue_push(&state, task_id).await;
-        }
-        Ok(Json(
-            build_task_detail_response(&state, project_id, updated).await?,
-        ))
     }
+    let updated = active.update(&txn).await?;
+    if let Some(ref desired) = payload.assignees {
+        let current = task_assignees::Entity::find()
+            .filter(task_assignees::Column::TaskId.eq(task_id))
+            .all(&txn)
+            .await?;
+        let mut seen = HashSet::new();
+        for assignee in desired {
+            if !seen.insert(assignee.user_id)
+                || current.iter().any(|old| old.user_id == assignee.user_id)
+            {
+                continue;
+            }
+            task_assignees::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                task_id: Set(task_id),
+                user_id: Set(assignee.user_id),
+                role: Set(assignee.role.clone()),
+                assigned_at: Set(chrono::Utc::now().into()),
+            }
+            .insert(&txn)
+            .await?;
+            record_activity(
+                &txn,
+                task_id,
+                Some(auth.user_id),
+                "assignee_added",
+                serde_json::json!({ "user_id": assignee.user_id, "role": assignee.role }),
+            )
+            .await?;
+            notify_assigned(
+                &txn,
+                project_id,
+                task_id,
+                assignee.user_id,
+                auth.user_id,
+                &assignee.role,
+            )
+            .await?;
+        }
+        for assignee in current {
+            if !seen.contains(&assignee.user_id) {
+                task_assignees::Entity::delete_by_id(assignee.id)
+                    .exec(&txn)
+                    .await?;
+                record_activity(
+                    &txn,
+                    task_id,
+                    Some(auth.user_id),
+                    "assignee_removed",
+                    serde_json::json!({ "user_id": assignee.user_id }),
+                )
+                .await?;
+            }
+        }
+    }
+
+    record_task_field_activities(
+        &txn,
+        task_id,
+        auth.user_id,
+        project_id,
+        &task_snapshot,
+        &payload,
+    )
+    .await?;
+    if let Some(ref values) = payload.custom_field_values {
+        upsert_task_custom_field_values(&txn, project_id, task_id, values).await?;
+    }
+    let linked = service::github::sync::mark_pending_push(&txn, task_id).await?;
+    txn.commit().await?;
+    if linked {
+        crate::handlers::github::enqueue_issue_push(&state, task_id).await;
+    }
+    Ok(Json(
+        build_task_detail_response(&state, project_id, updated).await?,
+    ))
 }
 
 #[axum::debug_handler]

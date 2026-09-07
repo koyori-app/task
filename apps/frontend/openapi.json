@@ -23176,6 +23176,21 @@
       "UpdateTaskRequest": {
         "type": "object",
         "properties": {
+          "add_label_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "置き換え後（未指定なら現在の集合）へ追加し、その後 remove_label_ids を外す。"
+          },
+          "assignees": {
+            "type": ["array", "null"],
+            "items": {
+              "$ref": "#/components/schemas/AssigneeInput"
+            },
+            "description": "担当者集合を置き換える。空配列で全解除、None は変更なし。既存の担当者の役割は維持する。"
+          },
           "clear_description": {
             "type": "boolean"
           },
@@ -23246,6 +23261,13 @@
           "progress_pct": {
             "type": ["integer", "null"],
             "format": "int32"
+          },
+          "remove_label_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
           },
           "soft_deadline": {
             "type": ["string", "null"],
