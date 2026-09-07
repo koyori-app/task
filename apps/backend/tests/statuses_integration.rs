@@ -126,6 +126,182 @@ async fn project_statuses(app: &TestApp, tp: &TestTenantProject) -> Vec<project_
         .unwrap()
 }
 
+async fn remove_done(
+    app: &TestApp,
+    tp: &TestTenantProject,
+    id: Uuid,
+    migrate_to: Uuid,
+    delete: bool,
+) -> StatusCode {
+    if delete {
+        app.delete_with_session(&format!(
+            "/v1/tenants/{}/projects/{}/statuses/{id}?migrate_to_status_id={migrate_to}",
+            tp.tenant_id, tp.project_id
+        ))
+        .await
+        .status()
+    } else {
+        update_status(app, tp, id, serde_json::json!({ "is_done_state": false })).await
+    }
+}
+
+async fn assert_default_done(app: &TestApp, tp: &TestTenantProject, expected: Uuid) {
+    let statuses = project_statuses(app, tp).await;
+    let marked: Vec<_> = statuses.iter().filter(|s| s.is_default_done).collect();
+    assert_eq!(marked.len(), 1);
+    assert_eq!(marked[0].id, expected);
+    assert!(marked[0].is_done_state);
+}
+
+#[tokio::test]
+async fn removing_default_done_persists_the_fallback_across_inserts_and_reorders() {
+    for delete in [false, true] {
+        let (app, tp, old_done, _default, _old_task, _next_task) = setup().await;
+        let first = create_status(&app, &tp, "Released", false, true).await;
+        let second = create_status(&app, &tp, "Archived", false, true).await;
+        let later = create_status(&app, &tp, "Later", false, true).await;
+        for (id, position) in [(first, 9), (second, 9), (later, 20)] {
+            assert_eq!(
+                update_status(&app, &tp, id, serde_json::json!({ "position": position })).await,
+                StatusCode::OK
+            );
+        }
+        let expected = first.min(second);
+        assert_eq!(
+            remove_done(&app, &tp, old_done, expected, delete).await,
+            if delete {
+                StatusCode::NO_CONTENT
+            } else {
+                StatusCode::OK
+            }
+        );
+        assert_default_done(&app, &tp, expected).await;
+
+        // A newly inserted Done state sorts before the replacement, but must not take its mark.
+        let inserted = create_status(&app, &tp, "No Planning", false, true).await;
+        assert_default_done(&app, &tp, expected).await;
+        let mut ids: Vec<_> = project_statuses(&app, &tp)
+            .await
+            .iter()
+            .map(|s| s.id)
+            .collect();
+        ids.sort_by_key(|id| (*id != inserted, *id));
+        assert_eq!(
+            reorder(&app, &tp, &serde_json::json!(ids)).await,
+            StatusCode::OK
+        );
+        assert_default_done(&app, &tp, expected).await;
+
+        // Removing another Done state preserves the explicit choice even if it is no longer first.
+        assert_eq!(
+            remove_done(&app, &tp, later, expected, delete).await,
+            if delete {
+                StatusCode::NO_CONTENT
+            } else {
+                StatusCode::OK
+            }
+        );
+        assert_default_done(&app, &tp, expected).await;
+    }
+}
+
+#[tokio::test]
+async fn replacement_failure_rolls_back_status_removal_and_task_changes() {
+    for delete in [false, true] {
+        let (app, tp, old_done, _default, old_task, _next_task) = setup().await;
+        let replacement = create_status(&app, &tp, "Released", false, true).await;
+        let before = tasks::Entity::find_by_id(old_task)
+            .one(&app.state.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let suffix = Uuid::new_v4().simple().to_string();
+        let function = format!("fail_default_replacement_{suffix}");
+        let trigger = format!("fail_default_replacement_trigger_{suffix}");
+        app.state
+            .db
+            .execute_unprepared(&format!(
+                "CREATE FUNCTION {function}() RETURNS trigger AS $$
+             BEGIN RAISE EXCEPTION 'forced replacement failure'; END;
+             $$ LANGUAGE plpgsql;
+             CREATE TRIGGER {trigger} BEFORE UPDATE OF is_default_done ON project_statuses
+             FOR EACH ROW WHEN (NEW.id = '{replacement}'::uuid AND NEW.is_default_done = true)
+             EXECUTE FUNCTION {function}();"
+            ))
+            .await
+            .unwrap();
+
+        let result = remove_done(&app, &tp, old_done, replacement, delete).await;
+        app.state
+            .db
+            .execute_unprepared(&format!(
+                "DROP TRIGGER {trigger} ON project_statuses; DROP FUNCTION {function}();"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_default_done(&app, &tp, old_done).await;
+        let after = tasks::Entity::find_by_id(old_task)
+            .one(&app.state.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status_id, before.status_id);
+        assert_eq!(after.completed_at, before.completed_at);
+    }
+}
+
+#[tokio::test]
+async fn deleting_done_waits_for_the_project_lock_and_serializes_with_demotion() {
+    let (app, tp, old_done, default, _old_task, _next_task) = setup().await;
+    let second = create_status(&app, &tp, "Released", false, true).await;
+    let last = create_status(&app, &tp, "Archived", false, true).await;
+    let lock_txn = app.state.db.begin().await.unwrap();
+    projects::Entity::find_by_id(tp.project_id)
+        .lock(LockType::Update)
+        .one(&lock_txn)
+        .await
+        .unwrap()
+        .unwrap();
+    let client = app.session_client();
+    let url = format!(
+        "{}/v1/tenants/{}/projects/{}/statuses/{old_done}?migrate_to_status_id={default}",
+        app.base_url(),
+        tp.tenant_id,
+        tp.project_id
+    );
+    let deleting = tokio::spawn(async move { client.delete(url).send().await.unwrap() });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !deleting.is_finished(),
+        "delete must wait for the project row lock"
+    );
+    let client = app.session_client();
+    let url = format!(
+        "{}/v1/tenants/{}/projects/{}/statuses/{second}",
+        app.base_url(),
+        tp.tenant_id,
+        tp.project_id
+    );
+    let demoting = tokio::spawn(async move {
+        client
+            .put(url)
+            .json(&serde_json::json!({ "is_done_state": false }))
+            .send()
+            .await
+            .unwrap()
+    });
+    lock_txn.commit().await.unwrap();
+    let (deleted, demoted) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(deleting, demoting)
+    })
+    .await
+    .unwrap();
+    assert_eq!(deleted.unwrap().status(), StatusCode::NO_CONTENT);
+    assert_eq!(demoted.unwrap().status(), StatusCode::OK);
+    assert_default_done(&app, &tp, last).await;
+}
+
 #[tokio::test]
 async fn creating_another_done_status_keeps_the_existing_one() {
     let (app, tp, old_done_id, _default_id, old_task_id, _next_task_id) = setup().await;

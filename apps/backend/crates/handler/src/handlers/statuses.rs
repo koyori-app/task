@@ -6,8 +6,8 @@ use axum::{
 use axum_valid::Valid;
 use sea_orm::sea_query::{CaseStatement, Expr, Func, LockType};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, TransactionTrait, prelude::Uuid,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseTransaction, EntityTrait,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait, prelude::Uuid,
 };
 use std::collections::HashSet;
 
@@ -17,6 +17,28 @@ use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use entity::{project_statuses, projects, tasks};
 use payload::statuses::*;
+
+// Call after removing a Done state, while holding the project row lock. Persist
+// the fallback so later inserts or position changes cannot move the completion target.
+async fn ensure_default_done(txn: &DatabaseTransaction, project_id: Uuid) -> Result<(), AppError> {
+    let next = project_statuses::Entity::find()
+        .filter(project_statuses::Column::ProjectId.eq(project_id))
+        .filter(project_statuses::Column::IsDoneState.eq(true))
+        .order_by_desc(project_statuses::Column::IsDefaultDone)
+        .order_by_asc(project_statuses::Column::Position)
+        .order_by_asc(project_statuses::Column::Id)
+        .one(txn)
+        .await?;
+    if let Some(next) = next
+        && !next.is_default_done
+    {
+        let mut active: project_statuses::ActiveModel = next.into();
+        active.is_default_done = Set(true);
+        active.update(txn).await?;
+    }
+    Ok(())
+}
+
 #[axum::debug_handler]
 #[utoipa::path(
     get,
@@ -257,6 +279,9 @@ pub async fn update_status(
         active.is_default_done = Set(false);
     }
     let updated = active.update(&txn).await?;
+    if demoting_done {
+        ensure_default_done(&txn, project_id).await?;
+    }
 
     txn.commit().await?;
     Ok(Json(updated.into()))
@@ -373,6 +398,11 @@ pub async fn delete_status(
         .await?;
 
     let txn = state.db.begin().await?;
+    projects::Entity::find_by_id(project_id)
+        .lock(LockType::Update)
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
     let statuses = project_statuses::Entity::find()
         .filter(project_statuses::Column::ProjectId.eq(project_id))
         .lock(LockType::Update)
@@ -443,6 +473,7 @@ pub async fn delete_status(
             .exec(&txn)
             .await?;
     }
+    ensure_default_done(&txn, project_id).await?;
     txn.commit().await?;
 
     Ok(StatusCode::NO_CONTENT)
