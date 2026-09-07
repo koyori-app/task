@@ -600,7 +600,7 @@ pub async fn create_task(
     .await?;
 
     for a in &payload.assignees {
-        require_project_access(&state, tenant_id, project_id, a.user_id).await?;
+        require_project_access(&txn, tenant_id, project_id, a.user_id).await?;
         task_assignees::ActiveModel {
             id: Set(Uuid::new_v4()),
             task_id: Set(model.id),
@@ -732,6 +732,21 @@ pub async fn update_task(
         state.db.begin().await?
     };
 
+    // スプリント完了・一括割り当てと同じく、スプリント → タスクの順にロックする。
+    if !payload.clear_sprint_id
+        && let Some(sprint_id) = payload.sprint_id
+    {
+        let sprint = sprints::Entity::find_by_id(sprint_id)
+            .filter(sprints::Column::ProjectId.eq(project_id))
+            .lock(LockType::Update)
+            .one(&txn)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if sprint.status == sprints::SprintStatus::Completed {
+            return Err(AppError::Conflict);
+        }
+    }
+
     // 本体・ラベル・担当者のスナップショットを同じロックの下で取得する。
     let task = tasks::Entity::find_by_id(task_id)
         .filter(tasks::Column::ProjectId.eq(project_id))
@@ -748,7 +763,7 @@ pub async fn update_task(
             if assignee.role.is_empty() {
                 return Err(AppError::BadRequest);
             }
-            require_project_access(&state, tenant_id, project_id, assignee.user_id).await?;
+            require_project_access(&txn, tenant_id, project_id, assignee.user_id).await?;
         }
     }
 
@@ -806,15 +821,6 @@ pub async fn update_task(
     if payload.clear_sprint_id {
         active.sprint_id = Set(None);
     } else if let Some(v) = payload.sprint_id {
-        let sprint = sprints::Entity::find_by_id(v)
-            .filter(sprints::Column::ProjectId.eq(project_id))
-            .lock(LockType::Update)
-            .one(&txn)
-            .await?
-            .ok_or(AppError::NotFound)?;
-        if sprint.status == sprints::SprintStatus::Completed {
-            return Err(AppError::Conflict);
-        }
         active.sprint_id = Set(Some(v));
     }
     if payload.clear_soft_deadline {
@@ -1193,7 +1199,7 @@ pub async fn add_assignee(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
-    require_project_access(&state, tenant_id, project_id, payload.user_id).await?;
+    require_project_access(&state.db, tenant_id, project_id, payload.user_id).await?;
     let duplicate = task_assignees::Entity::find()
         .filter(task_assignees::Column::TaskId.eq(task.id))
         .filter(task_assignees::Column::UserId.eq(payload.user_id))

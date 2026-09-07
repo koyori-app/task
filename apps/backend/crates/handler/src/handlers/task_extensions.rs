@@ -415,7 +415,7 @@ async fn apply_bulk_update(
     active.update(&txn).await?;
 
     if let Some(assignee_id) = update.assignee_id {
-        require_project_access(state, tenant_id, project_id, assignee_id).await?;
+        require_project_access(&txn, tenant_id, project_id, assignee_id).await?;
         let exists = task_assignees::Entity::find()
             .filter(task_assignees::Column::TaskId.eq(task_id))
             .filter(task_assignees::Column::UserId.eq(assignee_id))
