@@ -22,7 +22,7 @@ import type { components } from '@/generated/api';
 import { useAuthStore } from '@/stores/auth';
 import { useTenantStore } from '@/stores/tenant';
 
-type TenantResponse = components['schemas']['TenantResponse'];
+type TenantResponse = Omit<components['schemas']['TenantListItemResponse'], 'membership'>;
 
 const LIST_TENANTS_PATH = '/v1/tenants' as const;
 const TENANT_PATH = '/v1/tenants/{id}' as const;
@@ -37,7 +37,9 @@ const submitError = ref<string | null>(null);
 const isDeleteOpen = ref(false);
 
 const currentUserId = computed(() => meQuery.data.value?.id ?? authStore.user?.id);
-const canEditGeneral = computed(() => currentUserId.value === props.tenant.owner_id);
+const canEditGeneral = computed(
+  () => !!currentUserId.value && currentUserId.value === props.tenant.owner_id,
+);
 
 /**
  * 保存はページ下の固定バーからまとめて行う。
@@ -112,7 +114,7 @@ async function save() {
   }
 }
 
-async function onDeleted(deletedTenant: TenantResponse) {
+async function onDeleted(deletedTenant: Pick<TenantResponse, 'id'>) {
   await tenantStore.loadTenants();
   const nextTenant = tenantStore.tenants.find((tenant) => tenant.id !== deletedTenant.id);
   await navigate(nextTenant ? `/${nextTenant.display_id}/my-tasks` : '/settings/profile');

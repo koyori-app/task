@@ -9,7 +9,10 @@ import { apiClient, useMeQuery } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 import { useAuthStore } from '@/stores/auth';
 
-type TenantResponse = components['schemas']['TenantResponse'];
+type TenantResponse = Pick<
+  components['schemas']['TenantListItemResponse'],
+  'id' | 'name' | 'owner_id'
+>;
 type TenantMemberResponse = components['schemas']['TenantMemberResponse'];
 type TenantRole = components['schemas']['TenantRole'];
 
@@ -61,7 +64,7 @@ const removeMutation = apiClient.useMutation('delete', MEMBER_PATH);
 const members = computed<TenantMemberResponse[]>(() => {
   const currentMembers = [...(membersQuery.data.value ?? [])];
   const me = currentUser.value;
-  if (me?.id === props.tenant.owner_id && !currentMembers.some((m) => m.user_id === me.id)) {
+  if (me && me.id === props.tenant.owner_id && !currentMembers.some((m) => m.user_id === me.id)) {
     currentMembers.unshift({
       id: me.id,
       tenant_id: props.tenant.id,

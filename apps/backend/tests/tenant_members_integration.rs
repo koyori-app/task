@@ -116,15 +116,40 @@ async fn tenant_members_gate_tenant_and_project_access() {
         "/v1/tenants/{}/projects/{}/members",
         tp.tenant_id, tp.project_id
     );
-    // テナントに居ない人はプロジェクトメンバーにできない
-    // （「プロジェクトには居るがテナントには入れない」不整合を作らせない）
-    let rejected = app
+    // テナントに居ない人も、プロジェクトへ直接招ける（明示 ACE はテナント所属と独立）。
+    // 招かれた人はその場で project-only の客分になり、そのプロジェクトにだけ入れる
+    let invited = app
         .post_json_with_session(
             &project_members_path,
             serde_json::json!({ "user_id": outsider.id, "role": "Member" }),
         )
         .await;
-    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        invited.status(),
+        StatusCode::CREATED,
+        "テナント外でも直接招ける"
+    );
+    app.reset_session_client();
+    app.login_session(&outsider.email, &outsider.password).await;
+    assert_eq!(
+        app.get_with_session(&project_path).await.status(),
+        StatusCode::OK,
+        "招かれたプロジェクトには客分として入れる"
+    );
+    assert_eq!(
+        app.get_with_session(&tenant_path).await.status(),
+        StatusCode::FORBIDDEN,
+        "テナント全体の口は閉じたまま"
+    );
+    // 以降の絞り込みの検証に影響しないよう、招いた行は外しておく
+    app.reset_session_client();
+    app.login_session(&owner.email, &owner.password).await;
+    assert_eq!(
+        app.delete_with_session(&format!("{project_members_path}/{}", outsider.id))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
 
     // テナントメンバーを 1 人プロジェクトに指定する
     let assignee = app.insert_user(false, false).await;
@@ -397,12 +422,41 @@ async fn removing_tenant_member_keeps_project_scoping() {
     // alice をテナントから外す
     app.reset_session_client();
     app.login_session(&owner.email, &owner.password).await;
+    // 除名の前に「除名しても何が残るか」を確かめる口。明示 ACE を名指しする
+    let explicit_path = format!("{members_path}/{}/explicit-projects", alice.id);
+    let preview = app.get_with_session(&explicit_path).await;
+    assert_eq!(preview.status(), StatusCode::OK);
+    let preview_body: Value = preview.json().await.expect("explicit projects json");
+    let acl = preview_body["explicit_projects"]
+        .as_array()
+        .expect("explicit_projects must be an array");
+    assert_eq!(acl.len(), 1, "残る明示 ACE は 1 件");
+    assert_eq!(
+        acl[0]["project_id"].as_str(),
+        Some(tp.project_id.to_string().as_str()),
+        "残る明示 ACE のプロジェクトを名指しする"
+    );
+    assert_eq!(acl[0]["role"].as_str(), Some("Member"));
+    assert_eq!(
+        preview_body["hidden_count"], 0,
+        "オーナーには隠すものが無い"
+    );
+
+    // 除名が消すのは継承（テナント所属）だけ。明示 ACE は残る
     assert_eq!(
         app.delete_with_session(&format!("{members_path}/{}", alice.id))
             .await
             .status(),
         StatusCode::NO_CONTENT
     );
+    // 除名の後に呼んでも同じ内容が返る（「まだ何が残っているか」の確認用）
+    let after: Value = app
+        .get_with_session(&explicit_path)
+        .await
+        .json()
+        .await
+        .expect("explicit projects json");
+    assert_eq!(after["explicit_projects"].as_array().map(Vec::len), Some(1));
     let remaining = app.get_with_session(&project_members_path).await;
     assert_eq!(remaining.status(), StatusCode::OK);
     let remaining_body: Value = remaining.json().await.expect("project members json");
@@ -412,7 +466,7 @@ async fn removing_tenant_member_keeps_project_scoping() {
             .expect("project members must be an array")
             .len(),
         1,
-        "再参加したときに戻せるよう、プロジェクトの指定自体は残す"
+        "明示 ACE（プロジェクトの指定）自体は残る。再参加したときはそのまま戻る"
     );
 
     // 絞り込みは壊れない。bob は依然として入れない
@@ -424,13 +478,16 @@ async fn removing_tenant_member_keeps_project_scoping() {
         "メンバーを外しても、絞り込み済みのプロジェクトは他のメンバーに開かない"
     );
 
-    // テナントから外れた alice も入れない（残った行はアクセスを与えない）
+    // 明示 ACE は継承元（テナント所属）と独立に残る——NTFS でグループから外しても
+    // ファイルの explicit ACE が残るのと同じ。テナントから外れた alice は
+    // project-only の客分になり、明示 ACE のあるプロジェクトには引き続き入れる。
+    // テナント全体の口が閉じたままであることは project_guest_access_integration.rs が固定する
     app.reset_session_client();
     app.login_session(&alice.email, &alice.password).await;
     assert_eq!(
         app.get_with_session(&project_path).await.status(),
-        StatusCode::FORBIDDEN,
-        "テナントから外れた人は入れない"
+        StatusCode::OK,
+        "残った明示 ACE は客分としてそのプロジェクトへ通す"
     );
 
     // テナントに戻せば、元のプロジェクト指定がそのまま効く
@@ -520,6 +577,17 @@ async fn removed_member_pat_loses_tenant_read_access() {
     // alice をテナントから外す
     app.reset_session_client();
     app.login_session(&owner.email, &owner.password).await;
+    let preview: Value = app
+        .get_with_session(&format!("{members_path}/{}/explicit-projects", alice.id))
+        .await
+        .json()
+        .await
+        .expect("explicit projects json");
+    assert_eq!(
+        preview["explicit_projects"].as_array().map(Vec::len),
+        Some(0),
+        "明示 ACE を持たない人は、残る ACE が空"
+    );
     assert_eq!(
         app.delete_with_session(&format!("{members_path}/{}", alice.id))
             .await
@@ -768,4 +836,185 @@ async fn deleting_user_keeps_project_scoping() {
     app.cleanup_user(bob.id).await;
     app.cleanup_user(admin.id).await;
     app.cleanup_user(owner.id).await;
+}
+
+/// 明示 ACE の一覧は、呼び出し側が見られるプロジェクトだけを名指しする。
+///
+/// テナント Admin はメンバーを除名できるが、プロジェクトの閲覧は `list_projects` と同じ
+/// 境界で絞られる。自分が入れない絞り込み済みプロジェクトの名前や key を、この口から
+/// 引けてはならない。件数だけを `hidden_count` で返す。
+#[tokio::test]
+async fn explicit_projects_hide_projects_the_caller_cannot_see() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let admin = app.insert_user(false, false).await;
+    let alice = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+
+    let members_path = format!("/v1/tenants/{}/members", tp.tenant_id);
+    let project_members_path = format!(
+        "/v1/tenants/{}/projects/{}/members",
+        tp.tenant_id, tp.project_id
+    );
+    let explicit_path = format!("{members_path}/{}/explicit-projects", alice.id);
+
+    app.reset_session_client();
+    app.login_session(&owner.email, &owner.password).await;
+    for (user, role) in [(&admin, "Admin"), (&alice, "Member")] {
+        let res = app
+            .post_json_with_session(
+                &members_path,
+                serde_json::json!({ "user_id": user.id, "role": role }),
+            )
+            .await;
+        assert_eq!(res.status(), StatusCode::CREATED);
+    }
+    // alice だけを指定して絞り込む。admin はこのプロジェクトに入れなくなる
+    let assigned = app
+        .post_json_with_session(
+            &project_members_path,
+            serde_json::json!({ "user_id": alice.id, "role": "Member" }),
+        )
+        .await;
+    assert_eq!(assigned.status(), StatusCode::CREATED);
+
+    // オーナーには名指しで見える
+    let by_owner: Value = app
+        .get_with_session(&explicit_path)
+        .await
+        .json()
+        .await
+        .expect("explicit projects json");
+    assert_eq!(
+        by_owner["explicit_projects"].as_array().map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(by_owner["hidden_count"], 0);
+
+    // 入れないテナント Admin には件数だけ
+    app.reset_session_client();
+    app.login_session(&admin.email, &admin.password).await;
+    let by_admin = app.get_with_session(&explicit_path).await;
+    assert_eq!(
+        by_admin.status(),
+        StatusCode::OK,
+        "テナント Admin は口自体には入れる"
+    );
+    let by_admin: Value = by_admin.json().await.expect("explicit projects json");
+    assert_eq!(
+        by_admin["explicit_projects"].as_array().map(Vec::len),
+        Some(0),
+        "入れないプロジェクトの名前や key は出さない"
+    );
+    assert_eq!(by_admin["hidden_count"], 1, "件数だけは伝える");
+
+    // 一般メンバーには口自体を閉じる
+    app.reset_session_client();
+    app.login_session(&alice.email, &alice.password).await;
+    assert_eq!(
+        app.get_with_session(&explicit_path).await.status(),
+        StatusCode::FORBIDDEN
+    );
+
+    app.cleanup_user(owner.id).await;
+    app.cleanup_user(admin.id).await;
+    app.cleanup_user(alice.id).await;
+}
+
+/// 個人 Inbox の自動生成行は、客分の口にならない。
+///
+/// Inbox を初めて開くと本人の `project_members` 行が自動で入る。この行は管理者が手で置いた
+/// 明示 ACE ではなく、在籍中の入口は `is_personal` 分岐が担う。除名の後まで効かせると、
+/// テナントを去った人がそのテナントの Inbox に客分として入り続け、テナント一覧に
+/// Guest として出てしまう。
+#[tokio::test]
+async fn removed_member_gets_no_guest_access_to_own_inbox() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let bob = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+
+    let members_path = format!("/v1/tenants/{}/members", tp.tenant_id);
+
+    app.reset_session_client();
+    app.login_session(&owner.email, &owner.password).await;
+    assert_eq!(
+        app.post_json_with_session(
+            &members_path,
+            serde_json::json!({ "user_id": bob.id, "role": "Member" }),
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+
+    // bob が Inbox を開く（本人の project_members 行が自動生成される）
+    app.reset_session_client();
+    app.login_session(&bob.email, &bob.password).await;
+    let personal = app
+        .get_with_session(&format!(
+            "/v1/tenants/{}/users/me/personal-project",
+            tp.tenant_id
+        ))
+        .await;
+    assert_eq!(personal.status(), StatusCode::OK);
+    let body: Value = personal.json().await.expect("personal project json");
+    let personal_id = body["id"].as_str().expect("personal project id");
+    let personal_tasks_path = format!(
+        "/v1/tenants/{}/projects/{}/tasks",
+        tp.tenant_id, personal_id
+    );
+    assert_eq!(
+        app.get_with_session(&personal_tasks_path).await.status(),
+        StatusCode::OK,
+        "在籍中は本人が Inbox に入れる"
+    );
+
+    // bob をテナントから外す。自動生成行は残る
+    app.reset_session_client();
+    app.login_session(&owner.email, &owner.password).await;
+    assert_eq!(
+        app.delete_with_session(&format!("{members_path}/{}", bob.id))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    let explicit: Value = app
+        .get_with_session(&format!("{members_path}/{}/explicit-projects", bob.id))
+        .await
+        .json()
+        .await
+        .expect("explicit projects json");
+    assert_eq!(
+        explicit["explicit_projects"].as_array().map(Vec::len),
+        Some(0),
+        "Inbox の自動生成行は残る明示 ACE として数えない"
+    );
+
+    // 去った人は自分の Inbox にも入れず、テナント一覧にも出ない
+    app.reset_session_client();
+    app.login_session(&bob.email, &bob.password).await;
+    assert_eq!(
+        app.get_with_session(&personal_tasks_path).await.status(),
+        StatusCode::FORBIDDEN,
+        "Inbox の自動生成行は客分の口にならない"
+    );
+    let tenants = app.get_with_session("/v1/tenants").await;
+    assert_eq!(tenants.status(), StatusCode::OK);
+    let tenants: Value = tenants.json().await.expect("tenants json");
+    let listed = tenants
+        .as_array()
+        .expect("tenants must be an array")
+        .iter()
+        .any(|t| t["id"].as_str() == Some(tp.tenant_id.to_string().as_str()));
+    assert!(
+        !listed,
+        "Inbox の行だけでは Guest としてテナント一覧に出ない"
+    );
+
+    // 個人プロジェクトが作った drive_folders が bob を参照するので、先にテナントごと消す
+    app.cleanup_user(owner.id).await;
+    app.cleanup_user(bob.id).await;
 }

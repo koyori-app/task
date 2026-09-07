@@ -4859,7 +4859,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/TenantResponse"
+                    "$ref": "#/components/schemas/TenantListItemResponse"
                   }
                 }
               }
@@ -7821,6 +7821,120 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/members/{user_id}/explicit-projects": {
+      "get": {
+        "tags": ["Tenant Members"],
+        "summary": "テナントメンバーが持つプロジェクト単位の明示 ACE",
+        "description": "テナント除名の前に「除名しても、この人はこれらのプロジェクトに入り続ける」と確かめるための口。除名の後に呼んでも同じ内容を返す。",
+        "operationId": "list_explicit_projects",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "ユーザーID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "明示 ACE の一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplicitProjectsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects": {
       "get": {
         "tags": ["Projects"],
@@ -8380,7 +8494,7 @@
       "get": {
         "tags": ["Project Members"],
         "summary": "担当者に指定できる利用者一覧",
-        "description": "メンバー一覧（`list_members`）とは別に置く。あちらはメンバー管理の口で\nプロジェクト管理者しか読めないが、担当者の割り当ては `WriteTask` があれば\nできるため、候補だけ取れずに 403 になる。返す集合も違う:\nメンバーを 1 人も指定していない共有プロジェクトはテナント全体へ開放されるので、\n`project_members` の行ではなく `assignable_user_ids` の判定で返す。\n\n**スコープは割り当て API（`add_assignee` / `remove_assignee`）と同じ `WriteTask`。**\nこれは担当者を編集するための候補一覧で、読むだけの主体に見せる情報ではない。\n`ReadTask` で通すと、read-only の PAT でも「そのプロジェクトで担当者にできる\n利用者全員」の名前とアイコン URL を列挙できてしまう。メンバー未指定の共有\nプロジェクトではテナント全体が返るので、既存タスクを読むだけでは分からない\n利用者まで公開範囲が広がる。",
+        "description": "メンバー一覧（`list_members`）とは別に置く。あちらはメンバー管理の口で\nプロジェクト管理者しか読めないが、担当者の割り当ては `WriteTask` があれば\nできるため、候補だけ取れずに 403 になる。返す集合も違う:\nメンバーを 1 人も指定していない共有プロジェクトはテナント全体へ開放されるので、\n`project_members` の行ではなく `assignable_user_ids` の判定で返す。\n\n**候補の列挙は割り当て API（`add_assignee` / `remove_assignee`）と同じ `WriteTask`。**\nこれは担当者を編集するための候補一覧で、読むだけの主体に見せる情報ではない。\n`ReadTask` で通すと、read-only の PAT でも「そのプロジェクトで担当者にできる\n利用者全員」の名前とアイコン URL を列挙できてしまう。メンバー未指定の共有\nプロジェクトではテナント全体が返るので、既存タスクを読むだけでは分からない\n利用者まで公開範囲が広がる。\n\n**`username` を指定した形だけは `ReadTask` でも通す。** 一覧を絞り込むには\n担当者を名前ではなく ID で指す必要があり、名前解決の口が書き込み専用だと\n「読めるのに絞り込めない」状態になる。返るのは指定した 1 人だけで、\n名前を知らないと引けないため、候補を列挙できるようにはならない。",
         "operationId": "list_assignable_users",
         "parameters": [
           {
@@ -8401,6 +8515,15 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "username",
+            "in": "query",
+            "description": "指定するとその利用者だけを返す（大文字小文字を無視した完全一致）。\n名前から ID を引くだけの経路で、候補の列挙とは公開範囲が違う。",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -10530,16 +10653,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProjectMemberResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "テナントメンバーでない利用者は追加できません",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ServerError"
                 }
               }
             }
@@ -20872,6 +20985,46 @@
           }
         }
       },
+      "ExplicitProjectAce": {
+        "type": "object",
+        "description": "その人が持つ、プロジェクト単位の明示 ACE。\nテナント所属（継承）を外しても明示 ACE は独立して残り、持ち主は客分としてそのプロジェクトに入り続ける。",
+        "required": ["project_id", "key", "name", "role"],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ProjectRole"
+          }
+        }
+      },
+      "ExplicitProjectsResponse": {
+        "type": "object",
+        "description": "その人がこのテナントで持つ明示 ACE の一覧。\nテナント除名の前に「除名しても、この人はこれらのプロジェクトに入り続ける」と確かめるために使う。\n管理者が「除名したのにまだ入れる」と驚かないためのもので、除名の後に呼んでも同じ内容を返す。",
+        "required": ["explicit_projects", "hidden_count"],
+        "properties": {
+          "explicit_projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExplicitProjectAce"
+            },
+            "description": "呼び出し側から見えるプロジェクトの明示 ACE。\n閉め出したい場合は、ここに挙がったプロジェクトのメンバーからも外す。"
+          },
+          "hidden_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "呼び出し側には見えないプロジェクトに残る明示 ACE の件数。\n非公開プロジェクトの名前や key を、そのプロジェクトに入れない人へ出さないために数だけ返す。",
+            "minimum": 0
+          }
+        }
+      },
       "FindingResponse": {
         "type": "object",
         "required": [
@@ -21476,8 +21629,12 @@
       },
       "OAuthProviderItem": {
         "type": "object",
-        "required": ["provider", "requires_instance_url"],
+        "required": ["provider", "connection_provider", "requires_instance_url"],
         "properties": {
+          "connection_provider": {
+            "type": "string",
+            "description": "連携一覧（`/oauth/connections`）でこのプロバイダーを指す識別子。\n汎用 OIDC は現在設定中の issuer を含む `oidc:{issuer}` で、開始用 slug と一致しない"
+          },
           "provider": {
             "type": "string",
             "description": "プロバイダー slug（github | gitlab | gitlab_selfhosted | google | oidc）"
@@ -22755,6 +22912,50 @@
           }
         }
       },
+      "TenantListItemResponse": {
+        "type": "object",
+        "description": "`GET /v1/tenants` 専用のレスポンス。テナントの欄に `membership` の印を加えたもの。\n\n客分（membership=Guest）のテナントは一覧に出る。客分に開く tenant-wide の口は\nプロジェクト一覧・My Tasks（いずれも己の分に絞る）だけで、テナント取得などは\n開かないため、クライアントはこの印で開ける口を見分ける。\n取得・作成・更新は従来どおり `TenantResponse`。",
+        "required": ["id", "display_id", "name", "description", "icon_url", "membership"],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "display_id": {
+            "type": "string"
+          },
+          "drive_quota_bytes": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "テナント設定の欄。客分（membership=Guest）には返さない（null）"
+          },
+          "icon_emoji": {
+            "type": ["string", "null"]
+          },
+          "icon_url": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "membership": {
+            "$ref": "#/components/schemas/TenantMembershipKind",
+            "description": "この利用者から見た関わり方（Owner / Member / Guest）"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "テナント設定の欄。客分（membership=Guest）には返さない（null）"
+          },
+          "require_2fa": {
+            "type": ["boolean", "null"],
+            "description": "テナント設定の欄。客分（membership=Guest）には返さない（null）"
+          }
+        }
+      },
       "TenantMemberResponse": {
         "type": "object",
         "required": ["id", "tenant_id", "user_id", "role", "user"],
@@ -22779,6 +22980,11 @@
             "format": "uuid"
           }
         }
+      },
+      "TenantMembershipKind": {
+        "type": "string",
+        "description": "テナント一覧における、この利用者から見た関わり方の印。\n`TenantRole` と同じ流儀（PascalCase の文字列）で返す。",
+        "enum": ["Owner", "Member", "Guest"]
       },
       "TenantResponse": {
         "type": "object",
@@ -22975,7 +23181,8 @@
         "properties": {
           "folder_id": {
             "type": ["string", "null"],
-            "format": "uuid"
+            "format": "uuid",
+            "description": "`null` でルート（フォルダなし）へ移動。フィールド省略時は変更なし。"
           },
           "name": {
             "type": ["string", "null"]
@@ -22998,7 +23205,6 @@
       },
       "UpdateFolderRequest": {
         "type": "object",
-        "required": ["parent_id"],
         "properties": {
           "name": {
             "type": ["string", "null"]
@@ -23170,6 +23376,21 @@
       "UpdateTaskRequest": {
         "type": "object",
         "properties": {
+          "add_label_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "置き換え後（未指定なら現在の集合）へ追加し、その後 remove_label_ids を外す。"
+          },
+          "assignees": {
+            "type": ["array", "null"],
+            "items": {
+              "$ref": "#/components/schemas/AssigneeInput"
+            },
+            "description": "担当者集合を置き換える。空配列で全解除、None は変更なし。既存の担当者の役割は維持する。"
+          },
           "clear_description": {
             "type": "boolean"
           },
@@ -23240,6 +23461,13 @@
           "progress_pct": {
             "type": ["integer", "null"],
             "format": "int32"
+          },
+          "remove_label_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
           },
           "soft_deadline": {
             "type": ["string", "null"],
@@ -23331,7 +23559,8 @@
           "email_verified",
           "is_admin",
           "is_suspended",
-          "totp_enabled"
+          "totp_enabled",
+          "has_password"
         ],
         "properties": {
           "avatar_url": {
@@ -23346,6 +23575,10 @@
           },
           "email_verified": {
             "type": "boolean"
+          },
+          "has_password": {
+            "type": "boolean",
+            "description": "パスワードでサインインできるか。ハッシュを出さずに認証方法の表示を出し分けるために返す。"
           },
           "id": {
             "type": "string",

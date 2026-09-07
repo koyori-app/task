@@ -15,7 +15,7 @@ import { Label } from '@/components/ui/label';
 import { apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
-type TenantResponse = components['schemas']['TenantResponse'];
+type TenantResponse = Pick<components['schemas']['TenantResponse'], 'id' | 'name' | 'display_id'>;
 
 const LIST_TENANTS_PATH = '/v1/tenants' as const;
 const TENANT_PATH = '/v1/tenants/{id}' as const;

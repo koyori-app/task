@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
 };
 use axum_valid::Valid;
@@ -14,7 +14,7 @@ use sea_orm::{
 };
 
 use crate::AppState;
-use crate::auth_helpers::{is_tenant_member, is_tenant_owner};
+use crate::auth_helpers::is_tenant_owner;
 use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -36,6 +36,7 @@ use service::access::assignable_user_ids;
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
         ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        AssignableUsersQuery,
     ),
     responses(
         (status = 200, description = "担当者候補", body = [UserSummary]),
@@ -50,18 +51,30 @@ use service::access::assignable_user_ids;
 /// メンバーを 1 人も指定していない共有プロジェクトはテナント全体へ開放されるので、
 /// `project_members` の行ではなく `assignable_user_ids` の判定で返す。
 ///
-/// **スコープは割り当て API（`add_assignee` / `remove_assignee`）と同じ `WriteTask`。**
+/// **候補の列挙は割り当て API（`add_assignee` / `remove_assignee`）と同じ `WriteTask`。**
 /// これは担当者を編集するための候補一覧で、読むだけの主体に見せる情報ではない。
 /// `ReadTask` で通すと、read-only の PAT でも「そのプロジェクトで担当者にできる
 /// 利用者全員」の名前とアイコン URL を列挙できてしまう。メンバー未指定の共有
 /// プロジェクトではテナント全体が返るので、既存タスクを読むだけでは分からない
 /// 利用者まで公開範囲が広がる。
+///
+/// **`username` を指定した形だけは `ReadTask` でも通す。** 一覧を絞り込むには
+/// 担当者を名前ではなく ID で指す必要があり、名前解決の口が書き込み専用だと
+/// 「読めるのに絞り込めない」状態になる。返るのは指定した 1 人だけで、
+/// 名前を知らないと引けないため、候補を列挙できるようにはならない。
 pub async fn list_assignable_users(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+    Query(query): Query<AssignableUsersQuery>,
 ) -> Result<Json<Vec<UserSummary>>, AppError> {
-    auth.require_scope(Scope::WriteTask)?;
+    match &query.username {
+        // 読み書きどちらかがあればよい（write:task だけの PAT も名前で指せる）
+        Some(_) => auth
+            .require_scope(Scope::ReadTask)
+            .or_else(|_| auth.require_scope(Scope::WriteTask))?,
+        None => auth.require_scope(Scope::WriteTask)?,
+    }
     // プロジェクト単位のアクセス可否はここで見る（担当者を触れる人が読める）
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
@@ -75,7 +88,17 @@ pub async fn list_assignable_users(
         .order_by_asc(users::Column::Username)
         .all(&state.db)
         .await?;
-    Ok(Json(users.into_iter().map(UserSummary::from).collect()))
+    // 突き合わせは DB ではなくここで行う。SQL の lower() と Rust の大文字小文字の
+    // 扱いがずれると、CLI が名前で引けたり引けなかったりする
+    let users = users
+        .into_iter()
+        .filter(|user| match &query.username {
+            Some(username) => user.username.eq_ignore_ascii_case(username),
+            None => true,
+        })
+        .map(UserSummary::from)
+        .collect();
+    Ok(Json(users))
 }
 
 async fn get_project_in_tenant(
@@ -288,7 +311,6 @@ pub async fn list_members(
     request_body = AddMemberRequest,
     responses(
         (status = 201, description = "追加されたメンバー", body = ProjectMemberResponse),
-        (status = 400, description = "テナントメンバーでない利用者は追加できません", body = ServerError),
         (status = 409, description = "既にメンバーとして登録済み", body = ServerError),
         CrudErrors,
     )
@@ -309,14 +331,13 @@ pub async fn add_member(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // プロジェクトメンバーはテナントメンバーの絞り込みなので、テナントに居ない人は入れない。
-    // ここを許すと「プロジェクトには居るがテナントには入れない」不整合な状態ができる（#568）
-    if !is_tenant_owner(&state.db, tenant_id, payload.user_id).await?
-        && !is_tenant_member(&state.db, tenant_id, payload.user_id).await?
-    {
-        return Err(AppError::BadRequest);
-    }
-
+    // テナントに居るかは問わない。明示 ACE はテナント所属（継承）と独立に置ける
+    // （apps/backend/docs/tenant-project-authz.md の「継承と明示」）。テナントに居ない人を
+    // 招けば、その人はその場で project-only の客分になる。GitHub の outside collaborator
+    // と同じ形で、招けるのは従来どおりプロジェクト Admin とオーナーだけ（`require_project_admin`）。
+    // テナント側で客分の招待を締める旗は別 Issue で扱う。
+    // テナント所属を見なくなったので、除名との競合（確認の後・insert の前に除名が通る）は
+    // 起きようがなく、テナント行のロックも要らない
     let existing = project_members::Entity::find()
         .filter(project_members::Column::ProjectId.eq(project_id))
         .filter(project_members::Column::UserId.eq(payload.user_id))

@@ -17,6 +17,7 @@ const tenants: Tenant[] = [
     icon_url: 'https://example.com/alpha.png',
     owner_id: 'owner-1',
     require_2fa: false,
+    membership: 'Owner' as const,
   },
   {
     id: 'tenant-2',
@@ -26,6 +27,7 @@ const tenants: Tenant[] = [
     icon_url: '',
     owner_id: 'owner-1',
     require_2fa: false,
+    membership: 'Owner' as const,
   },
 ];
 
