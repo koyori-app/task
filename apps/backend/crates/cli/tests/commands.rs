@@ -45,6 +45,7 @@ async fn auth_whoami_reads_the_current_account() {
             "is_admin": false,
             "is_suspended": false,
             "totp_enabled": false,
+            "has_password": true,
         })))
         .expect(1)
         .mount(&harness.server)
