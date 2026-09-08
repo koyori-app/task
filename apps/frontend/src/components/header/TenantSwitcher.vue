@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
+import { useAuthStore } from '@/stores/auth';
 
 const MEMBERS_PATH = '/v1/tenants/{tenant_id}/members' as const;
 
@@ -77,9 +78,18 @@ const membersQuery = useQuery(
   })),
 );
 
+const authStore = useAuthStore();
 const meQuery = useMeQuery();
+/**
+ * `/me` が返るまでは永続化された利用者で補う。AppHeader の歯車と同じ式にしないと、
+ * 初回描画で歯車は出るのにこの項目だけ出ない、という食い違いが出る。
+ */
+const currentUserId = computed(() => meQuery.data.value?.id ?? authStore.user?.id);
 const canManageGeneral = computed(
-  () => !!activeTenant.value && meQuery.data.value?.id === activeTenant.value.owner_id,
+  () =>
+    !!activeTenant.value &&
+    !!currentUserId.value &&
+    currentUserId.value === activeTenant.value.owner_id,
 );
 
 const memberSummary = computed(() => {

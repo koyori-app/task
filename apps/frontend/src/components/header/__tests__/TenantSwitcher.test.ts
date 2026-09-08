@@ -1,7 +1,9 @@
 import { defineComponent, h, inject, provide, ref, type Ref } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
+import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, describe, expect, it } from 'vitest';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { useAuthStore } from '@/stores/auth';
 import type { Tenant } from '@/stores/tenant';
 import SidebarProvider from '../../ui/sidebar/SidebarProvider.vue';
 import TenantSwitcher from '../TenantSwitcher.vue';
@@ -82,12 +84,29 @@ const ButtonStub = defineComponent({
   template: '<button v-bind="$attrs"><slot /></button>',
 });
 
-function mountSwitcher(props: {
-  tenants: Tenant[];
-  selectedTenantId: string | null;
-  loading?: boolean;
-  error?: string | null;
-}) {
+/** `authUserId` を渡すと、`/me` がまだ返っていない初回描画を再現できる。 */
+function mountSwitcher(
+  props: {
+    tenants: Tenant[];
+    selectedTenantId: string | null;
+    loading?: boolean;
+    error?: string | null;
+  },
+  authUserId?: string,
+) {
+  const pinia = createPinia();
+  setActivePinia(pinia);
+  if (authUserId) {
+    useAuthStore().setUser({
+      id: authUserId,
+      email: 'owner@example.com',
+      username: 'owner',
+      email_verified: true,
+      is_admin: false,
+      is_suspended: false,
+      totp_enabled: false,
+    });
+  }
   return mount(
     {
       components: { SidebarProvider, TenantSwitcher },
@@ -104,6 +123,7 @@ function mountSwitcher(props: {
     },
     {
       global: {
+        plugins: [pinia],
         stubs: {
           DropdownMenu,
           DropdownMenuTrigger,
@@ -193,6 +213,23 @@ describe('TenantSwitcher', () => {
     await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
     const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
     expect(menu.find('a[href="/alpha/settings/members"]').exists()).toBe(true);
+  });
+
+  it('keeps the tenant settings link before /me resolves', async () => {
+    // 永続化された利用者だけが居る初回描画。AppHeader の歯車と出方を揃える
+    const wrapper = mountSwitcher({ tenants, selectedTenantId: 'tenant-1' }, 'owner-1');
+
+    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
+    const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
+    expect(menu.find('a[href="/alpha/settings"]').exists()).toBe(true);
+  });
+
+  it('hides the tenant settings link from a non-owner', async () => {
+    const wrapper = mountSwitcher({ tenants, selectedTenantId: 'tenant-1' }, 'member-1');
+
+    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
+    const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
+    expect(menu.find('a[href="/alpha/settings"]').exists()).toBe(false);
   });
 
   it('shows not-found instead of silently displaying the first tenant', () => {
