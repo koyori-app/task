@@ -8,7 +8,6 @@ import {
   ChevronRight,
   ChevronUp,
   CircleDashed,
-  GitBranch,
   EllipsisVertical,
   Filter,
   Flag,
@@ -140,8 +139,12 @@ const priorityOptions = Object.entries(PRIORITY_CONFIG) as [
   (typeof PRIORITY_CONFIG)[TaskDetail['priority']],
 ][];
 
-/** 完了扱いのステータス。参照の ✓ ボタンで一手で移すために使う。 */
-const doneStatus = computed(() => props.statuses.find((status) => status.is_done_state));
+/** 「完了にする」の移動先。既定の完了に印が無ければ並び順で最初の完了へ倒す。 */
+const doneStatus = computed(
+  () =>
+    props.statuses.find((status) => status.is_done_state && status.is_default_done) ??
+    props.statuses.find((status) => status.is_done_state),
+);
 
 /** ワークフロー順に並べたステータス。「次へ」はこの並びで 1 つ進む。 */
 const orderedStatuses = computed(() => [...props.statuses].sort((a, b) => a.position - b.position));
@@ -285,10 +288,9 @@ function toggleLabel(labelId: string, checked: boolean) {
   emit('save:label_ids', next);
 }
 
-/** モックにある導線のうち、対応する機能がまだ無いもの。disabled で形だけ置く。 */
+/** モックにある導線のうち、まだ対応していないもの。disabled で形だけ置く。 */
 const PENDING_ACTIONS = [
   { label: 'フィールドを追加', icon: SquarePen },
-  { label: 'サブタスクを追加', icon: GitBranch },
   { label: 'チェックリストを作成', icon: ListChecks },
   { label: 'ファイルを添付', icon: Paperclip },
 ];
@@ -933,7 +935,7 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
               </p>
             </div>
 
-            <!-- モックのアクション一覧。対応する機能がまだ無いので disabled で置く -->
+            <!-- モックのうち未対応のアクション。サブタスクは直後の main slot で実装済み -->
             <ul class="flex flex-col gap-1">
               <li v-for="action in PENDING_ACTIONS" :key="action.label">
                 <Button

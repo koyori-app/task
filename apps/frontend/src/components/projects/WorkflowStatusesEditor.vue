@@ -133,12 +133,22 @@ async function saveStatus(status: ProjectStatus) {
   );
 }
 
-async function setUniqueFlag(status: ProjectStatus, flag: 'is_default' | 'is_done_state') {
-  if (status[flag]) {
+const doneStatuses = computed(() => statuses.value.filter((status) => status.is_done_state));
+
+/** 「完了にする」操作の移動先。印が無いときはバックエンドと同じく最初の完了へ倒す。 */
+const defaultDoneId = computed(
+  () =>
+    (doneStatuses.value.find((status) => status.is_default_done) ?? doneStatuses.value[0])?.id ??
+    null,
+);
+
+async function setUniqueFlag(status: ProjectStatus, flag: 'is_default' | 'is_default_done') {
+  const alreadySet = flag === 'is_default' ? status.is_default : defaultDoneId.value === status.id;
+  if (alreadySet) {
     operationError.value =
       flag === 'is_default'
         ? 'Default は常に1つ必要です。別のステータスを選んでください'
-        : 'Done state は常に1つ必要です。別のステータスを選んでください';
+        : '既定の完了は常に1つ必要です。別のステータスを選んでください';
     return;
   }
 
@@ -151,10 +161,25 @@ async function setUniqueFlag(status: ProjectStatus, flag: 'is_default' | 'is_don
   });
 }
 
+/** 完了ステータスは複数持てる。ただし 0 個にはできない。 */
+async function toggleDoneState(status: ProjectStatus) {
+  if (status.is_done_state && doneStatuses.value.length <= 1) {
+    operationError.value = '完了ステータスは1つ以上必要です';
+    return;
+  }
+
+  await run('ステータスの種別を変更できませんでした', async () => {
+    await updateMutation.mutateAsync({
+      params: { path: { ...pathParams.value, id: status.id } },
+      body: { is_done_state: !status.is_done_state },
+    });
+  });
+}
+
 function deleteBlockReason(status: ProjectStatus) {
   if (statuses.value.length <= 1) return '最後のステータスは削除できません';
   if (status.is_default) return 'Default のステータスは削除できません';
-  if (status.is_done_state && statuses.value.filter((item) => item.is_done_state).length <= 1) {
+  if (status.is_done_state && doneStatuses.value.length <= 1) {
     return '唯一の Done state は削除できません';
   }
   return null;
@@ -213,7 +238,7 @@ async function moveStatus(index: number, offset: -1 | 1) {
     <div class="mb-5 border-b pb-4">
       <h2 id="workflow-statuses-heading" class="text-xl font-semibold">ワークフローステータス</h2>
       <p class="mt-1 text-sm text-muted-foreground">
-        タスクの進行段階、色、既定値、完了状態を管理します。
+        タスクの進行段階、色、既定値、完了状態を管理します。完了状態は複数のステータスに付けられ、「完了にする」操作では「既定の完了」に印を付けたものへ移ります。
       </p>
     </div>
 
@@ -304,9 +329,20 @@ async function moveStatus(index: number, offset: -1 | 1) {
                 <Checkbox
                   :model-value="status.is_done_state"
                   :disabled="isMutating"
-                  @update:model-value="setUniqueFlag(status, 'is_done_state')"
+                  @update:model-value="toggleDoneState(status)"
                 />
                 Done state
+              </label>
+              <label
+                v-if="status.is_done_state"
+                class="flex cursor-pointer items-center gap-1.5 text-xs"
+              >
+                <Checkbox
+                  :model-value="defaultDoneId === status.id"
+                  :disabled="isMutating"
+                  @update:model-value="setUniqueFlag(status, 'is_default_done')"
+                />
+                既定の完了
               </label>
               <div class="flex">
                 <Button

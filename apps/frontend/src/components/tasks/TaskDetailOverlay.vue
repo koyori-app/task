@@ -19,6 +19,7 @@ defineProps<{
 
 const emit = defineEmits<{
   'update:open': [value: boolean];
+  'open-task': [task: import('@/generated/api').components['schemas']['TaskResponse']];
 }>();
 </script>
 
@@ -41,6 +42,7 @@ const emit = defineEmits<{
         :project-key="projectKey"
         :task-id="taskId"
         @close="emit('update:open', false)"
+        @open-task="emit('open-task', $event)"
       />
     </DialogContent>
   </Dialog>

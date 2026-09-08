@@ -70,6 +70,7 @@ const sampleStatuses = [
     position: 0,
     is_default: true,
     is_done_state: false,
+    is_default_done: false,
     project_id: 'proj-eng',
     created_at: '2026-01-01T00:00:00Z',
   },
@@ -80,6 +81,7 @@ const sampleStatuses = [
     position: 1,
     is_default: false,
     is_done_state: false,
+    is_default_done: false,
     project_id: 'proj-eng',
     created_at: '2026-01-01T00:00:00Z',
   },
@@ -90,6 +92,7 @@ const sampleStatuses = [
     position: 2,
     is_default: false,
     is_done_state: false,
+    is_default_done: false,
     project_id: 'proj-eng',
     created_at: '2026-01-01T00:00:00Z',
   },
@@ -100,6 +103,7 @@ const sampleStatuses = [
     position: 3,
     is_default: false,
     is_done_state: true,
+    is_default_done: true,
     project_id: 'proj-eng',
     created_at: '2026-01-01T00:00:00Z',
   },
@@ -262,6 +266,16 @@ const sampleTasks = {
   total: 6,
 };
 
+const sampleSubtask = {
+  ...sampleTasks.tasks[0],
+  id: 'task-child-1',
+  seq_id: 21,
+  title: 'PKCE の検証を追加する',
+  parent_task_id: 'task-1',
+  assignees: [],
+  labels: [],
+};
+
 const sampleLabels = [
   {
     id: 'label-bug',
@@ -354,6 +368,7 @@ function createMockFetch(
   const original = globalThis.fetch;
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
     const url = typeof req === 'string' ? req : req.url;
+    const method = typeof req === 'string' ? 'GET' : req.method;
     if (isListTenantsUrl(url)) {
       if (overrides.rejectTenantsList) {
         return jsonResponse({ message: 'server error' }, 500);
@@ -405,11 +420,40 @@ function createMockFetch(
     if (url.includes('/members')) {
       return jsonResponse(sampleMembers);
     }
+    if (method === 'GET' && url.includes('/relations')) {
+      const hasChild = url.includes('/tasks/task-1/') || url.includes('/tasks/ENG-1/');
+      return jsonResponse({
+        parent: null,
+        subtasks: hasChild ? [sampleSubtask] : [],
+        blocks: [],
+        blocked_by: [],
+      });
+    }
     // List 表示はステータスごとに問い合わせる。件数（total）もその絞り込みで返す
-    const statusFilter = new URL(url, 'http://localhost').searchParams.get('status_id');
+    const query = new URL(url, 'http://localhost').searchParams;
+    const statusFilter = query.get('status_id');
+    const labelFilter = query.get('label_id');
+    const parentFilter = query.get('parent_task_id');
+    if (parentFilter && url.includes('/tasks')) {
+      const children = [sampleSubtask].filter(
+        (task) =>
+          task.parent_task_id === parentFilter &&
+          (!statusFilter || task.status_id === statusFilter) &&
+          !labelFilter &&
+          task.is_archived === (query.get('is_archived') === 'true'),
+      );
+      return jsonResponse({ tasks: children, total: children.length, next_cursor: null });
+    }
     if (statusFilter && url.includes('/tasks')) {
-      const all = (overrides.tasks ?? sampleTasks).tasks as Array<{ status_id: string }>;
-      const filtered = all.filter((task) => task.status_id === statusFilter);
+      const all = (overrides.tasks ?? sampleTasks).tasks as Array<{
+        status_id: string;
+        labels: Array<{ id: string }>;
+      }>;
+      const filtered = all.filter(
+        (task) =>
+          task.status_id === statusFilter &&
+          (!labelFilter || task.labels.some((label) => label.id === labelFilter)),
+      );
       return jsonResponse({ tasks: filtered, total: filtered.length });
     }
     if (url.includes('/tasks/search')) {
@@ -455,6 +499,7 @@ const mktStatuses = [
     position: 0,
     is_default: true,
     is_done_state: false,
+    is_default_done: false,
     project_id: 'proj-mkt',
     created_at: '2026-01-01T00:00:00Z',
   },
@@ -774,6 +819,39 @@ export const ListView: Story = {
     // ステータスはグループが表すので列にせず、名前の左の丸から変える
     await expect(canvas.findAllByLabelText(/^ステータス: /)).resolves.not.toHaveLength(0);
     await expect(canvas.findAllByLabelText('コメントを追加')).resolves.not.toHaveLength(0);
+  },
+};
+
+export const ListViewSubtasks: Story = {
+  name: 'List 表示のサブタスク展開',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const row = await canvas.findByLabelText('タスク「OAuth 対応を実装する」を選択');
+    const toggle = within(row).getByRole('button', { name: 'サブタスクを展開' });
+    await expect(toggle).toHaveClass('opacity-0');
+
+    await user.click(row);
+    await expect(toggle).toHaveClass('opacity-100');
+    await user.click(toggle);
+    await expect(canvas.findByText('PKCE の検証を追加する')).resolves.toBeInTheDocument();
+
+    const emptyRow = await canvas.findByLabelText('タスク「ログイン画面の UI 実装」を選択');
+    await user.click(emptyRow);
+    await user.click(within(emptyRow).getByRole('button', { name: 'サブタスクを展開' }));
+    await expect(
+      canvas.findByRole('textbox', { name: 'ログイン画面の UI 実装 のサブタスク名' }),
+    ).resolves.toBeInTheDocument();
+
+    // 展開中にラベルで絞ると、親は残り、ラベルのない子は消える。
+    await user.click(await canvas.findByRole('button', { name: 'ラベル' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: /bug/ }));
+    await expect(
+      canvas.findByRole('textbox', { name: 'OAuth 対応を実装する のサブタスク名' }),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.queryByText('PKCE の検証を追加する')).not.toBeInTheDocument();
   },
 };
 

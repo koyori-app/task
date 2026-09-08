@@ -5,6 +5,7 @@ import { computed, ref } from 'vue';
 import TaskActivityFeed from '@/components/tasks/TaskActivityFeed.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
+import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
 import { Button } from '@/components/ui/button';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
 import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
@@ -13,6 +14,9 @@ import { useTaskComments } from '@/composables/useTaskComments';
 import { useRenderedDescription } from '@/composables/useRenderedDescription';
 import { useTaskDetail } from '@/composables/useTaskDetail';
 import { useMeQuery } from '@/lib/api-vue-query';
+import type { components } from '@/generated/api';
+
+type TaskResponse = components['schemas']['TaskResponse'];
 
 const props = withDefaults(
   defineProps<{
@@ -35,6 +39,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   close: [];
+  'open-task': [task: TaskResponse];
 }>();
 
 const deleteDialogRef = ref<HTMLDialogElement | null>(null);
@@ -230,6 +235,20 @@ function onDeleteDialogCancel(event: Event) {
         :delete-disabled="deletePending"
         @delete-request="openDeleteDialog"
       >
+        <template v-if="displayTask" #main>
+          <TaskSubtaskPanel
+            :tenant-id="tenantId"
+            :project-id="projectId"
+            :task-id="taskId"
+            :task-uuid="displayTask.id"
+            :parent-task-id="displayTask.parent_task_id ?? null"
+            :status-id="selectedStatusId"
+            :status-updating="statusUpdating"
+            :statuses="statuses"
+            :project-key="projectKey"
+            @open="emit('open-task', $event)"
+          />
+        </template>
         <template #sidebar>
           <TaskComments
             :threads="threads"

@@ -1,7 +1,11 @@
 //! キー・名前・参照から API が要る UUID を引く。
 
+use payload::labels::LabelResponse;
+use payload::milestones::MilestoneResponse;
 use payload::projects::ProjectResponse;
+use payload::sprints::SprintResponse;
 use payload::statuses::ProjectStatusResponse;
+use payload::users::UserSummary;
 use uuid::Uuid;
 
 use crate::api::ApiClient;
@@ -99,39 +103,191 @@ pub async fn default_status_id(api: &ApiClient, project_id: Uuid) -> Result<Uuid
     pick_default_status(&list_statuses(api, project_id).await?)
 }
 
-fn pick_status_by_name(statuses: &[ProjectStatusResponse], name: &str) -> Result<Uuid> {
-    statuses
-        .iter()
-        .find(|status| status.name.eq_ignore_ascii_case(name))
-        .map(|status| status.id)
-        .ok_or_else(|| {
-            // ステータスはプロジェクトごとに違うので、綴りを外したときに何が使えるか
-            // 分からないと詰まる。解決のために一覧はすでに取ってあるので、そのまま添える
-            CliError::not_found(format!(
-                "Status not found: {name} (this project has {})",
-                status_names(statuses)
-            ))
-        })
+/// プロジェクト配下の一覧を引く（`labels` / `milestones` / `sprints`）。
+async fn list_under_project<T: serde::de::DeserializeOwned>(
+    api: &ApiClient,
+    project_id: Uuid,
+    collection: &str,
+    query: &[(&str, String)],
+) -> Result<Vec<T>> {
+    let project_id = project_id.to_string();
+    api.get(
+        &[
+            "v1",
+            "tenants",
+            api.tenant_id(),
+            "projects",
+            &project_id,
+            collection,
+        ],
+        query,
+    )
+    .await
 }
 
-/// エラーに添えるステータス名。並び順は画面と揃える（position 昇順）。
-fn status_names(statuses: &[ProjectStatusResponse]) -> String {
-    if statuses.is_empty() {
-        return "none".into();
-    }
-    let mut sorted: Vec<&ProjectStatusResponse> = statuses.iter().collect();
-    sorted.sort_by_key(|status| status.position);
-    sorted
+/// 名前で引けなかったときのエラー。
+///
+/// ラベルもマイルストーンもプロジェクトごとに違うので、綴りを外したときに何が使えるか
+/// 分からないと詰まる。解決のために一覧はすでに取ってあるので、そのまま添える。
+fn not_found_with_candidates(kind: &str, name: &str, candidates: Vec<String>) -> CliError {
+    let listed = if candidates.is_empty() {
+        "none".to_string()
+    } else {
+        candidates.join(", ")
+    };
+    CliError::not_found(format!(
+        "{kind} not found: {name} (this project has {listed})"
+    ))
+}
+
+/// 完全一致を優先し、同名候補が残る場合は UUID による指定を求める。
+fn pick_named_id<'a>(
+    kind: &str,
+    name: &str,
+    candidates: impl IntoIterator<Item = (Uuid, &'a str)>,
+) -> Result<Uuid> {
+    let candidates: Vec<_> = candidates.into_iter().collect();
+    let exact: Vec<_> = candidates
         .iter()
-        .map(|status| status.name.as_str())
-        .collect::<Vec<_>>()
-        .join(", ")
+        .filter(|(_, value)| *value == name)
+        .collect();
+    let matches = if exact.is_empty() {
+        candidates
+            .iter()
+            .filter(|(_, value)| value.eq_ignore_ascii_case(name))
+            .collect()
+    } else {
+        exact
+    };
+    match matches.as_slice() {
+        [(id, _)] => Ok(*id),
+        [] => Err(not_found_with_candidates(
+            kind,
+            name,
+            candidates
+                .iter()
+                .map(|(_, value)| (*value).to_string())
+                .collect(),
+        )),
+        _ => Err(CliError::validation(format!(
+            "Ambiguous {kind}: {name} (candidates: {}); specify a UUID",
+            matches
+                .iter()
+                .map(|(id, value)| format!("{value} ({id})"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
+pub async fn list_labels(api: &ApiClient, project_id: Uuid) -> Result<Vec<LabelResponse>> {
+    list_under_project(api, project_id, "labels", &[]).await
+}
+
+pub async fn resolve_label_id(api: &ApiClient, project_id: Uuid, name: &str) -> Result<Uuid> {
+    if let Ok(uuid) = Uuid::parse_str(name) {
+        return Ok(uuid);
+    }
+    let labels = list_labels(api, project_id).await?;
+    pick_named_id(
+        "Label",
+        name,
+        labels.iter().map(|item| (item.id, item.name.as_str())),
+    )
+}
+
+pub async fn list_milestones(api: &ApiClient, project_id: Uuid) -> Result<Vec<MilestoneResponse>> {
+    list_under_project(api, project_id, "milestones", &[]).await
+}
+
+pub async fn resolve_milestone_id(api: &ApiClient, project_id: Uuid, name: &str) -> Result<Uuid> {
+    if let Ok(uuid) = Uuid::parse_str(name) {
+        return Ok(uuid);
+    }
+    let milestones = list_milestones(api, project_id).await?;
+    pick_named_id(
+        "Milestone",
+        name,
+        milestones.iter().map(|item| (item.id, item.name.as_str())),
+    )
+}
+
+pub async fn list_sprints(api: &ApiClient, project_id: Uuid) -> Result<Vec<SprintResponse>> {
+    list_under_project(api, project_id, "sprints", &[]).await
+}
+
+pub async fn resolve_sprint_id(api: &ApiClient, project_id: Uuid, name: &str) -> Result<Uuid> {
+    if let Ok(uuid) = Uuid::parse_str(name) {
+        return Ok(uuid);
+    }
+    let sprints = list_sprints(api, project_id).await?;
+    pick_named_id(
+        "Sprint",
+        name,
+        sprints.iter().map(|item| (item.id, item.name.as_str())),
+    )
+}
+
+pub async fn list_assignable_users(api: &ApiClient, project_id: Uuid) -> Result<Vec<UserSummary>> {
+    list_under_project(api, project_id, "assignable-users", &[]).await
+}
+
+/// 担当者はユーザー名で指す。UUID をそのまま渡す道も残す。
+///
+/// 名前を 1 つ引くだけの `?username=` は `read:task` でも通るので、一覧を読むだけの
+/// PAT でも `--assignee` を名前で書ける。候補の列挙には `write:task` が要るため、
+/// 綴りを外したときの候補は読めないことがある。そのときは候補なしで返す。
+pub async fn resolve_user_id(api: &ApiClient, project_id: Uuid, name: &str) -> Result<Uuid> {
+    if let Ok(uuid) = Uuid::parse_str(name) {
+        return Ok(uuid);
+    }
+    let matched: Vec<UserSummary> = list_under_project(
+        api,
+        project_id,
+        "assignable-users",
+        &[("username", name.to_string())],
+    )
+    .await?;
+    if matched
+        .iter()
+        .any(|user| user.username.eq_ignore_ascii_case(name))
+    {
+        return pick_named_id(
+            "Assignable user",
+            name,
+            matched.iter().map(|user| (user.id, user.username.as_str())),
+        );
+    }
+    let candidates = list_assignable_users(api, project_id)
+        .await
+        .unwrap_or_default();
+    Err(not_found_with_candidates(
+        "Assignable user",
+        name,
+        candidates.into_iter().map(|user| user.username).collect(),
+    ))
+}
+
+fn pick_status_by_name(statuses: &[ProjectStatusResponse], name: &str) -> Result<Uuid> {
+    if let Ok(uuid) = Uuid::parse_str(name) {
+        return Ok(uuid);
+    }
+    let mut statuses: Vec<_> = statuses.iter().collect();
+    statuses.sort_by_key(|status| status.position);
+    pick_named_id(
+        "Status",
+        name,
+        statuses
+            .iter()
+            .map(|status| (status.id, status.name.as_str())),
+    )
 }
 
 fn pick_done_status(statuses: &[ProjectStatusResponse]) -> Result<Uuid> {
     statuses
         .iter()
-        .find(|status| status.is_done_state)
+        .find(|status| status.is_default_done && status.is_done_state)
+        .or_else(|| statuses.iter().find(|status| status.is_done_state))
         .or_else(|| {
             statuses.iter().find(|status| {
                 let name = status.name.to_ascii_lowercase();
@@ -156,6 +312,36 @@ mod tests {
     use super::*;
     use chrono::Utc;
 
+    #[test]
+    fn named_resources_prefer_exact_matches_and_reject_ambiguity() {
+        let first = Uuid::from_u128(1);
+        let second = Uuid::from_u128(2);
+        for kind in ["Label", "Milestone", "Sprint", "Assignable user", "Status"] {
+            for candidates in [
+                [(first, "Bug"), (second, "bug")],
+                [(second, "bug"), (first, "Bug")],
+            ] {
+                assert_eq!(pick_named_id(kind, "Bug", candidates).unwrap(), first);
+                assert_eq!(pick_named_id(kind, "bug", candidates).unwrap(), second);
+                let error = pick_named_id(kind, "BUG", candidates).unwrap_err();
+                assert_eq!(error.exit_code, 2);
+                for expected in [first.to_string(), second.to_string(), "UUID".into()] {
+                    assert!(error.message.contains(&expected), "{}", error.message);
+                }
+            }
+            // 同じ綴りが複数あれば、完全一致でも任意の一件を選ばない。
+            assert!(pick_named_id(kind, "Bug", [(first, "Bug"), (second, "Bug")]).is_err());
+            assert_eq!(pick_named_id(kind, "BUG", [(first, "Bug")]).unwrap(), first);
+            assert_eq!(
+                pick_named_id(kind, "missing", [(first, "Bug")])
+                    .unwrap_err()
+                    .exit_code,
+                5
+            );
+            assert_eq!(pick_named_id(kind, "missing", []).unwrap_err().exit_code, 5);
+        }
+    }
+
     fn status(
         name: &str,
         is_done_state: bool,
@@ -171,6 +357,7 @@ mod tests {
             position,
             is_default,
             is_done_state,
+            is_default_done: false,
             created_at: Utc::now(),
         }
     }
@@ -288,6 +475,16 @@ mod tests {
     }
 
     #[test]
+    fn prefers_the_default_done_status_when_several_statuses_are_done() {
+        let mut statuses = vec![
+            status("No Planning", true, false, 0),
+            status("Done", true, false, 1),
+        ];
+        statuses[1].is_default_done = true;
+        assert_eq!(pick_done_status(&statuses).unwrap(), statuses[1].id);
+    }
+
+    #[test]
     fn falls_back_to_a_done_looking_name_when_no_state_is_marked() {
         let statuses = vec![
             status("Todo", false, true, 0),
@@ -320,5 +517,28 @@ mod tests {
         assert_eq!(pick_default_status(&unmarked).unwrap(), unmarked[1].id);
 
         assert!(pick_default_status(&[]).is_err());
+    }
+
+    /// ラベルやマイルストーンもプロジェクトごとに違う。綴りを外したとき、
+    /// 何が使えるか出さないと、名前を当てるまで総当たりになる。
+    #[test]
+    fn lists_the_candidates_when_a_name_does_not_match() {
+        let err =
+            not_found_with_candidates("Label", "buf", vec!["bug".into(), "enhancement".into()]);
+
+        assert!(
+            err.message.contains("Label not found: buf"),
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("bug, enhancement"), "{}", err.message);
+        assert_eq!(err.exit_code, 5);
+    }
+
+    #[test]
+    fn says_none_when_there_is_nothing_to_suggest() {
+        let err = not_found_with_candidates("Sprint", "week-1", vec![]);
+
+        assert!(err.message.contains("none"), "{}", err.message);
     }
 }

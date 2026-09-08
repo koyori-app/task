@@ -16,6 +16,7 @@ pub struct Model {
     pub position: i16,
     pub is_default: bool,
     pub is_done_state: bool,
+    pub is_default_done: bool,
     pub created_at: DateTimeWithTimeZone,
     #[sea_orm(
         belongs_to,
