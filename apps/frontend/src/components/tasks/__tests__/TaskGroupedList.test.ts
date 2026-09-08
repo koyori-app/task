@@ -11,6 +11,7 @@ enableAutoUnmount(afterEach);
 
 type StatusResponse = components['schemas']['ProjectStatusResponse'];
 type LabelResponse = components['schemas']['LabelResponse'];
+type TaskResponse = components['schemas']['TaskResponse'];
 
 const status: StatusResponse = {
   id: 'status-todo',
@@ -50,14 +51,16 @@ const group: TaskGroup = {
 };
 
 /** 順序の確認にだけ使う行。表示に要る欄だけ埋める。 */
-function taskFixture(id: string, title: string) {
+function taskFixture(id: string, title: string): TaskResponse {
   return {
     id,
     project_id: 'project-1',
+    seq_id: 1,
     title,
     description: null,
     status_id: status.id,
-    priority: 'Medium' as const,
+    priority: 'Medium',
+    progress_pct: 0,
     soft_deadline: null,
     hard_deadline: null,
     is_archived: false,
@@ -65,7 +68,7 @@ function taskFixture(id: string, title: string) {
     labels: [],
     created_at: '2026-06-01T00:00:00Z',
     updated_at: '2026-06-01T00:00:00Z',
-  } as unknown as TaskGroup['tasks'][number];
+  };
 }
 
 const doingStatus: StatusResponse = { ...status, id: 'status-doing', name: 'Doing', position: 1 };
