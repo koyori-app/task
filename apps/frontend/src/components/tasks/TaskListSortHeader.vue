@@ -1,4 +1,3 @@
-<!-- Hallmark · pre-emit critique: P5 H4 E4 S4 R5 V4 -->
 <script setup lang="ts">
 import { computed } from 'vue';
 import { PhArrowDown, PhArrowUp, PhCaretDown, PhCheck, PhX } from '@phosphor-icons/vue';
