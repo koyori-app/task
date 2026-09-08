@@ -20662,6 +20662,9 @@
           "is_default": {
             "type": "boolean"
           },
+          "is_default_done": {
+            "type": "boolean"
+          },
           "is_done_state": {
             "type": "boolean"
           },
@@ -21944,6 +21947,7 @@
           "position",
           "is_default",
           "is_done_state",
+          "is_default_done",
           "created_at"
         ],
         "properties": {
@@ -21960,6 +21964,10 @@
           },
           "is_default": {
             "type": "boolean"
+          },
+          "is_default_done": {
+            "type": "boolean",
+            "description": "「完了にする」操作で使う完了ステータス（プロジェクト内で 1 つ）。"
           },
           "is_done_state": {
             "type": "boolean"
@@ -23337,6 +23345,9 @@
             "type": ["string", "null"]
           },
           "is_default": {
+            "type": ["boolean", "null"]
+          },
+          "is_default_done": {
             "type": ["boolean", "null"]
           },
           "is_done_state": {

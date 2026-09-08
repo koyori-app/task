@@ -214,6 +214,7 @@ async fn admin_users_integration_suite() {
             position: Set(0),
             is_default: Set(true),
             is_done_state: Set(false),
+            is_default_done: Set(false),
             created_at: Set(chrono::Utc::now().into()),
         }
         .insert(&app.state.db)

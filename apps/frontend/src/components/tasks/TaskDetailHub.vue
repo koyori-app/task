@@ -140,8 +140,12 @@ const priorityOptions = Object.entries(PRIORITY_CONFIG) as [
   (typeof PRIORITY_CONFIG)[TaskDetail['priority']],
 ][];
 
-/** 完了扱いのステータス。参照の ✓ ボタンで一手で移すために使う。 */
-const doneStatus = computed(() => props.statuses.find((status) => status.is_done_state));
+/** 「完了にする」の移動先。既定の完了に印が無ければ並び順で最初の完了へ倒す。 */
+const doneStatus = computed(
+  () =>
+    props.statuses.find((status) => status.is_done_state && status.is_default_done) ??
+    props.statuses.find((status) => status.is_done_state),
+);
 
 /** ワークフロー順に並べたステータス。「次へ」はこの並びで 1 つ進む。 */
 const orderedStatuses = computed(() => [...props.statuses].sort((a, b) => a.position - b.position));
