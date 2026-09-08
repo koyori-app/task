@@ -54,6 +54,14 @@ const triggerLabel = computed(() => {
 });
 
 /**
+ * メンバー一覧はテナントに入れる人だけが読める。project にだけ招かれた客分
+ * （membership が Guest）には 403 が返るので、導線もメンバー数も出さない。
+ */
+const canSeeMembers = computed(
+  () => !!activeTenant.value && activeTenant.value.membership !== 'Guest',
+);
+
+/**
  * 頭のメンバー数。テナントが決まるまでは呼ばない。
  *
  * 参照デザインはここにプラン名も並べるが、テナントにプランの概念が無いので数だけ出す。
@@ -63,7 +71,7 @@ const membersQuery = useQuery(
     ...apiClient.queryOptions('get', MEMBERS_PATH, {
       params: { path: { tenant_id: activeTenant.value?.id ?? '' } },
     }),
-    enabled: !!activeTenant.value,
+    enabled: canSeeMembers.value,
     staleTime: 60_000,
     retry: false,
   })),
@@ -148,7 +156,7 @@ const membersHref = computed(() =>
             <span class="min-w-0 flex-1">テナント設定</span>
           </a>
         </DropdownMenuItem>
-        <DropdownMenuItem as-child class="gap-2">
+        <DropdownMenuItem v-if="canSeeMembers" as-child class="gap-2">
           <a :href="membersHref">
             <PhUsers class="size-4 shrink-0 text-muted-foreground" />
             <span class="min-w-0 flex-1">メンバー</span>

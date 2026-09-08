@@ -176,6 +176,25 @@ describe('TenantSwitcher', () => {
     expect(wrapper.findComponent(TenantSwitcher).emitted('retry')).toEqual([[]]);
   });
 
+  it('hides the members link from a project-only guest', async () => {
+    const guest: Tenant = { ...tenants[0], membership: 'Guest' as const };
+    const wrapper = mountSwitcher({ tenants: [guest], selectedTenantId: guest.id });
+
+    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
+    const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
+    // 客分はメンバー一覧 API が 403 になるので、押せば必ず失敗する導線は出さない
+    expect(menu.find('a[href="/alpha/settings/members"]').exists()).toBe(false);
+  });
+
+  it('keeps the members link for a tenant member', async () => {
+    const memberTenant: Tenant = { ...tenants[0], membership: 'Member' as const };
+    const wrapper = mountSwitcher({ tenants: [memberTenant], selectedTenantId: memberTenant.id });
+
+    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
+    const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
+    expect(menu.find('a[href="/alpha/settings/members"]').exists()).toBe(true);
+  });
+
   it('shows not-found instead of silently displaying the first tenant', () => {
     const wrapper = mountSwitcher({ tenants, selectedTenantId: null });
 
