@@ -48,6 +48,25 @@ const group: TaskGroup = {
   loadMore: () => {},
 };
 
+/** 順序の確認にだけ使う行。表示に要る欄だけ埋める。 */
+function taskFixture(id: string, title: string) {
+  return {
+    id,
+    project_id: 'project-1',
+    title,
+    description: null,
+    status_id: status.id,
+    priority: 'Medium' as const,
+    soft_deadline: null,
+    hard_deadline: null,
+    is_archived: false,
+    assignees: [],
+    labels: [],
+    created_at: '2026-06-01T00:00:00Z',
+    updated_at: '2026-06-01T00:00:00Z',
+  } as unknown as TaskGroup['tasks'][number];
+}
+
 const doingStatus: StatusResponse = { ...status, id: 'status-doing', name: 'Doing', position: 1 };
 const doingGroup: TaskGroup = { ...group, status: doingStatus };
 
@@ -246,6 +265,26 @@ describe('TaskGroupedList のタスク追加', () => {
     expect(
       wrapper.get<HTMLInputElement>('input[aria-label="Todo にタスクを追加"]').element.value,
     ).toBe('書き直した 1 件目');
+  });
+
+  // 続きは古い側に積まれるので、ボタンが行の下にあると押した場所の周りが変わらない
+  it('もっと見る をタスク行より上に出す', async () => {
+    const { wrapper } = mountList();
+    await wrapper.setProps({
+      groups: [
+        {
+          ...group,
+          tasks: [taskFixture('task-old', '古い 1 件目'), taskFixture('task-new', '新しい 1 件目')],
+          total: 30,
+          hasMore: true,
+        },
+      ],
+    });
+    await nextTick();
+
+    const html = wrapper.html();
+    expect(html).toContain('もっと見る（残り 28 件）');
+    expect(html.indexOf('もっと見る')).toBeLessThan(html.indexOf('古い 1 件目'));
   });
 
   it('ページの取得に失敗したら再試行を出す', async () => {

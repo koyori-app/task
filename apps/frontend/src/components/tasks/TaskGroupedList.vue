@@ -226,6 +226,24 @@ async function commitAdding(statusId: string) {
               <div class="px-2"></div>
             </div>
 
+            <!--
+              続きは古い側なので、増えた行は一覧の上へ入る。ボタンを行の下に置くと
+              押した場所の周りが変わらず、増えていないように見える。増える向きと
+              同じ側に置いて、読み込んだ分がボタンのすぐ下に出るようにする。
+            -->
+            <div v-if="group.hasMore" class="px-2 py-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="h-7 text-xs"
+                :disabled="group.isLoading"
+                @click="emit('more', group.status.id)"
+              >
+                もっと見る（残り {{ group.total - group.tasks.length }} 件）
+              </Button>
+            </div>
+
             <TaskGroupedRow
               v-for="task in group.tasks"
               :key="task.id"
@@ -437,19 +455,6 @@ async function commitAdding(statusId: string) {
               >
                 {{ createErrors[group.status.id] }}
               </p>
-            </div>
-
-            <div v-if="group.hasMore" class="px-2 py-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                class="h-7 text-xs"
-                :disabled="group.isLoading"
-                @click="emit('more', group.status.id)"
-              >
-                もっと見る（残り {{ group.total - group.tasks.length }} 件）
-              </Button>
             </div>
           </div>
         </div>
