@@ -152,6 +152,7 @@ async fn seed_default_statuses(
         ("Done", "#22c55e", false, true),
     ];
     for (position, (name, color, is_default, is_done_state)) in defaults.into_iter().enumerate() {
+        // 完了ステータスは Done ひとつだけなので、そのまま既定の完了にする。
         project_statuses::ActiveModel {
             id: Set(Uuid::new_v4()),
             project_id: Set(project_id),
@@ -160,6 +161,7 @@ async fn seed_default_statuses(
             position: Set(position as i16),
             is_default: Set(is_default),
             is_done_state: Set(is_done_state),
+            is_default_done: Set(is_done_state),
             created_at: Set(chrono::Utc::now().into()),
         }
         .insert(txn)

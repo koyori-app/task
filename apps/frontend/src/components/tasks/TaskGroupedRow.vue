@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue';
-import { PhCalendarBlank, PhCalendarPlus, PhChat, PhFlag, PhTag } from '@phosphor-icons/vue';
+import {
+  PhCalendarBlank,
+  PhCalendarPlus,
+  PhCaretRight,
+  PhChat,
+  PhFlag,
+  PhTag,
+} from '@phosphor-icons/vue';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,23 +36,39 @@ type LabelResponse = components['schemas']['LabelResponse'];
 type StatusResponse = components['schemas']['ProjectStatusResponse'];
 type ProjectMember = { id: string; username: string; avatar_url?: string | null };
 
-const props = defineProps<{
-  task: TaskResponse;
-  statuses: StatusResponse[];
-  projectLabels: LabelResponse[];
-  members: ProjectMember[];
-  /** 担当者候補の取得状態。取得中・失敗を「候補 0 人」と混ぜない */
-  membersState?: { loading?: boolean; error?: boolean; onRetry?: () => void };
-  /** 更新中の項目。飛行中は同じ行の操作を止める */
-  pendingField?: TaskRowField;
-  error?: string;
-  commentPending?: boolean;
-  /** コメントの追加。成功したときだけ下書きを捨てるので、成否を返してもらう */
-  onComment: (body: string) => Promise<boolean>;
-}>();
+const props = withDefaults(
+  defineProps<{
+    task: TaskResponse;
+    statuses: StatusResponse[];
+    projectLabels: LabelResponse[];
+    members: ProjectMember[];
+    /** 担当者候補の取得状態。取得中・失敗を「候補 0 人」と混ぜない */
+    membersState?: { loading?: boolean; error?: boolean; onRetry?: () => void };
+    /** 更新中の項目。飛行中は同じ行の操作を止める */
+    pendingField?: TaskRowField;
+    error?: string;
+    commentPending?: boolean;
+    /** 空白部分から選ばれた行。選択後だけ展開矢印を見せる。 */
+    selected?: boolean;
+    expanded?: boolean;
+    showSubtaskToggle?: boolean;
+    /** 一覧では 1 段だけネスト表示する。 */
+    depth?: 0 | 1;
+    /** コメントの追加。成功したときだけ下書きを捨てるので、成否を返してもらう */
+    onComment: (body: string) => Promise<boolean>;
+  }>(),
+  {
+    selected: false,
+    expanded: false,
+    showSubtaskToggle: true,
+    depth: 0,
+  },
+);
 
 const emit = defineEmits<{
   open: [taskId: string];
+  select: [];
+  'toggle:subtasks': [];
   'update:status': [statusId: string];
   'update:priority': [priority: TaskResponse['priority']];
   'update:softDeadline': [iso: string | null];
@@ -123,13 +146,72 @@ const visibleLabels = computed(() => {
 function hasLabel(labelId: string) {
   return props.task.labels.some((label) => label.id === labelId);
 }
+
+/** 既存の入力・メニュー・タイトル操作を横取りせず、行の空白だけを選択に使う。 */
+function selectFromBlank(event: MouseEvent) {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  if (
+    target.closest(
+      'button, a, input, textarea, select, [role="menuitem"], [role="checkbox"], [role="radio"], [contenteditable="true"]',
+    )
+  ) {
+    return;
+  }
+  emit('select');
+}
+
+function selectFromKeyboard(event: KeyboardEvent) {
+  if (event.target !== event.currentTarget) return;
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault();
+  emit('select');
+}
 </script>
 
 <template>
-  <div class="group border-b border-border/60 last:border-b-0">
-    <div :class="[TASK_ROW_GRID, 'transition-colors hover:bg-muted/40']">
+  <div
+    class="group border-b border-border/60 last:border-b-0"
+    :data-state="selected ? 'selected' : undefined"
+  >
+    <div
+      :class="[
+        TASK_ROW_GRID,
+        'transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset',
+        selected && 'bg-muted/55',
+      ]"
+      tabindex="0"
+      :aria-label="`タスク「${task.title}」を選択`"
+      @click="selectFromBlank"
+      @focus="emit('select')"
+      @keydown="selectFromKeyboard"
+    >
       <!-- 名前。タイトルの変更は詳細だけ（ここでは開く導線のみ） -->
-      <div class="flex min-w-0 items-center gap-2 px-2 py-1.5">
+      <div
+        class="flex min-w-0 items-center gap-2 px-2 py-1.5"
+        :class="depth === 1 ? 'pl-4' : undefined"
+      >
+        <button
+          v-if="showSubtaskToggle"
+          type="button"
+          class="grid size-6 shrink-0 place-items-center rounded transition-[background-color,opacity] duration-150 motion-reduce:transition-none"
+          :class="
+            selected || expanded
+              ? 'bg-muted text-foreground opacity-100 hover:bg-muted-foreground/15'
+              : 'pointer-events-none opacity-0'
+          "
+          :aria-label="expanded ? 'サブタスクを折りたたむ' : 'サブタスクを展開'"
+          :aria-expanded="expanded"
+          @click.stop="emit('toggle:subtasks')"
+        >
+          <PhCaretRight
+            class="size-3.5 transition-transform duration-150 motion-reduce:transition-none"
+            :class="expanded && 'rotate-90'"
+            aria-hidden="true"
+          />
+        </button>
+        <span v-else class="size-6 shrink-0" aria-hidden="true" />
+
         <!-- グループがステータスなので列は持たず、名前の左の丸から変える（参照デザイン） -->
         <DropdownMenu>
           <DropdownMenuTrigger as-child>

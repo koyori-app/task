@@ -38,6 +38,7 @@ async fn seed_personal_project_defaults<C: ConnectionTrait>(
         position: Set(0),
         is_default: Set(true),
         is_done_state: Set(false),
+        is_default_done: Set(false),
         created_at: Set(Utc::now().into()),
     }
     .insert(db)
@@ -51,6 +52,7 @@ async fn seed_personal_project_defaults<C: ConnectionTrait>(
         position: Set(1),
         is_default: Set(false),
         is_done_state: Set(true),
+        is_default_done: Set(true),
         created_at: Set(Utc::now().into()),
     }
     .insert(db)

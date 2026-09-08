@@ -88,7 +88,7 @@ async fn require_integration(
 }
 
 /// Issue の開閉状態に対応するステータスを引く。
-/// closed は `is_done_state`、open は既定ステータス。
+/// closed は既定の完了ステータス（印が無ければ並び順で最初の完了）、open は既定ステータス。
 async fn resolve_status<C: ConnectionTrait>(
     db: &C,
     project_id: Uuid,
@@ -102,6 +102,7 @@ async fn resolve_status<C: ConnectionTrait>(
     project_statuses::Entity::find()
         .filter(project_statuses::Column::ProjectId.eq(project_id))
         .filter(column.eq(true))
+        .order_by_desc(project_statuses::Column::IsDefaultDone)
         .order_by_asc(project_statuses::Column::Position)
         .one(db)
         .await?

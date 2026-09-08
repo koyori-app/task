@@ -24,6 +24,7 @@ async fn setup_task_fixture(app: &TestApp, owner_id: Uuid) -> TaskFixture {
         position: Set(0),
         is_default: Set(true),
         is_done_state: Set(false),
+        is_default_done: Set(false),
         created_at: Set(chrono::Utc::now().into()),
     }
     .insert(&app.state.db)

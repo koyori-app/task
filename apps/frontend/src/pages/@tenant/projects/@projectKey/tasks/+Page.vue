@@ -91,6 +91,7 @@ type TaskSearchQueryKeyParams = {
 type ApiPriority = components['schemas']['TaskPriority'];
 type UserSummary = components['schemas']['UserSummary'];
 type TaskLabel = components['schemas']['LabelResponse'];
+type TaskResponse = components['schemas']['TaskResponse'];
 
 interface TaskRow {
   id: string;
@@ -476,9 +477,7 @@ onUnmounted(() => {
   if (overlayCleanupTimer) clearTimeout(overlayCleanupTimer);
 });
 
-function openOverlay(taskId: string) {
-  const task = taskGroups.value.flatMap((group) => group.tasks).find((t) => t.id === taskId);
-  if (!task) return;
+function openOverlay(task: TaskResponse) {
   onSelectRow(task.seq_id);
 }
 watchAvailableTaskLabels(selectedLabelId, fetchedProjectLabels);
@@ -1085,6 +1084,9 @@ const table = useVueTable({
             <TaskGroupedList
               v-else-if="isListView"
               :groups="taskGroups"
+              :tenant-id="tenantId"
+              :project-id="projectId"
+              :label-id="selectedLabelId"
               :statuses="workflowStatuses"
               :project-labels="projectLabels"
               :members="projectMembers"
@@ -1211,6 +1213,7 @@ const table = useVueTable({
             :project-key="projectKey"
             :task-id="selectedTaskId ?? ''"
             @close="closeDetail"
+            @open-task="openOverlay"
           />
         </ResizablePanel>
       </template>
@@ -1224,6 +1227,7 @@ const table = useVueTable({
       :tenant-display-id="tenantDisplayId"
       :project-key="projectKey"
       :task-id="overlayRenderedTaskSeqKey"
+      @open-task="openOverlay"
       @update:open="
         (value) => {
           if (!value) selectedTaskId = null;

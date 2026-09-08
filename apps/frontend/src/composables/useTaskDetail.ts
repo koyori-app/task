@@ -9,6 +9,7 @@ import { fetchClient, apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
 import { clampProgressPct, localDateInputToIso, taskListHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
+import { TASK_RELATIONS_PATH } from '@/composables/useTaskSubtasks';
 
 const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
@@ -211,6 +212,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       queryClient.invalidateQueries({ queryKey: ['get', LIST_TASKS_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', ACTIVITIES_PATH] }),
+      queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] }),
     ]);
   }
 
@@ -221,6 +223,9 @@ export function useTaskDetail(params: UseTaskDetailParams) {
    * 「消したタスクの履歴を取り終わるまで一覧へ戻れない」ことになる（遷移が遅れる）。
    */
   function invalidateAfterTaskDelete() {
+    // 親側で開いているサブタスク一覧も更新する。ただし削除対象自身の relations query も
+    // active なため、これを待つと消したタスクの再取得が終わるまで一覧へ戻れない。
+    void queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] });
     return Promise.all([
       queryClient.invalidateQueries({ queryKey: ['get', LIST_TASKS_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),
