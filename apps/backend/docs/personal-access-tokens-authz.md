@@ -45,9 +45,29 @@ PAT による API 認証と、テナント・プロジェクトを横断しな�
 |---------|------|
 | `read:project` | プロジェクトの参照 |
 | `write:project` | プロジェクトの更新 |
+| `admin:project` | project 層の全スコープ（下表参照）を包含する wildcard。tenant 層は満たさない |
 | `admin:tenant` | 当該 PAT の `tenant_id` 内の管理操作（wildcard） |
 
 `admin:tenant` を持つトークンはすべての `require_scope` チェックを通過する（`ScopeList::has_scope` 参照）。
+
+#### スコープの層
+
+wildcard は「層」を単位に効く（`Scope::layer`）。スコープを増やしたら必ずどちらかの層へ割り振る。
+
+| 層 | スコープ |
+|----|---------|
+| project 層 | `read:project` / `write:project` / `read:task` / `write:task` / `read:milestone` / `write:milestone` / `read:sprint` / `write:sprint` / `read:review` / `write:review` / `read:drive` / `write:drive` / `admin:project` |
+| tenant 層 | `admin:tenant` |
+
+**決めたこと**: `admin:tenant` ⊃ `admin:project` とする。現行の `admin:tenant` wildcard は
+「要求されたスコープが何であれ通す」意味論であり、`admin:project` の要求もこれに含まれるため、
+包含しない形にすると wildcard の意味論を曲げることになる。逆向き（`admin:project` が
+`admin:tenant` を満たす）は無い。
+
+`admin:project` とリソース束縛の組み合わせ: `allowed_project_ids` を指定すれば
+「指定プロジェクトの中だけで project 層の全操作ができる」トークンになる（束縛外は従来どおり 403）。
+project-only の客分（#688）が `admin:project` の PAT を使う場合も、通る範囲は所属判定
+（明示 ACE のあるプロジェクトの中だけ）で決まり、スコープが所属を広げることはない。
 
 スコープ文字列にテナント ID を埋め込まない（例: `read:tenant:uuid` は採用しない）。  
 `/me` 等アカウント API はセッション専用のため `read:user` / `write:user` は存在しない。
@@ -152,6 +172,7 @@ path の ID と PAT の `tenant_id` / `allowed_project_ids` を突き合わせ�
 ## テスト要件
 
 - `ScopeList::has_scope`: `admin:tenant` は全スコープを通過、不足スコープは 403
+- `ScopeList::has_scope`: `admin:project` は project 層の全スコープを通過し、tenant 層（`admin:tenant`）は通過しない（両向きを固定）
 - `require_scope`: Session は常に OK、PAT は不足で 403
 - PAT が別テナントの path を叩く → 403
 - `allowed_project_ids` 外の project → 403、`NULL` ならテナント内任意 project → OK

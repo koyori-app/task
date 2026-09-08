@@ -452,6 +452,7 @@ GET /v1/drive/files/{id}/content?token={share_token}
 |---------|------|
 | `read:project` | プロジェクトの読み取り |
 | `write:project` | プロジェクトの作成・更新・削除 |
+| `admin:project` | project 層の全スコープを包含（tenant 層は含まない。層の表は apps/backend/docs/personal-access-tokens-authz.md） |
 | `admin:tenant` | テナント管理全般（他スコープを暗黙的に包含） |
 
 `admin:tenant` を持つ PAT はドライブ操作を含むすべての操作が可能（既存の `ScopeList::has_scope` が `AdminTenant` を最上位として扱う）。

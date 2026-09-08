@@ -22330,6 +22330,7 @@
           "read:drive",
           "write:drive",
           "admin:tenant",
+          "admin:project",
           "read:task",
           "write:task",
           "read:milestone",

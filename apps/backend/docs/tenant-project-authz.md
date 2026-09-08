@@ -200,6 +200,7 @@ Drive にはファイル ID だけで引ける経路がある（`GET /v1/drive/f
 ## API と権限
 
 テナント系エンドポイントは PAT に `admin:tenant` スコープを要求する。
+`admin:project`（project 層の wildcard。[personal-access-tokens-authz.md](./personal-access-tokens-authz.md) の層の割り振り表）ではこれらの口は開かない。
 
 | 操作 | 許可 |
 |---|---|
