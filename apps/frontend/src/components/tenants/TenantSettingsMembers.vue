@@ -123,12 +123,19 @@ const inviteRole = ref<TenantRole>('Member');
 
 // --- ロール変更 ---
 
+/**
+ * 同じメンバーへの PUT が並ぶと、後から完了した古い要求が最後の選択を上書きする。
+ * Admin の付与・剥奪が絡むので、変更が終わる（再取得まで含む）まで全操作を止める。
+ */
+const busy = ref(false);
+
 const roleError = ref<string | null>(null);
 
 async function onRoleChange(member: TenantMemberResponse, role: TenantRole) {
-  if (!canManageMembers.value || isOwner(member)) return;
+  if (!canManageMembers.value || isOwner(member) || busy.value) return;
   if (role === member.role) return;
   roleError.value = null;
+  busy.value = true;
   try {
     await updateMutation.mutateAsync({
       params: { path: { tenant_id: props.tenant.id, user_id: member.user_id } },
@@ -139,6 +146,8 @@ async function onRoleChange(member: TenantMemberResponse, role: TenantRole) {
     roleError.value = 'ロールを変更できませんでした。';
     // 表示は membersQuery のデータに束縛しているので、再取得で元のロールへ戻る
     await invalidateMembers();
+  } finally {
+    busy.value = false;
   }
 }
 
@@ -146,9 +155,19 @@ async function onRoleChange(member: TenantMemberResponse, role: TenantRole) {
 
 const removeError = ref<string | null>(null);
 
+/**
+ * 自分自身は外せない。除名した本人はテナントへの口を失うのに、この画面と
+ * テナント一覧・ストアはそのまま残り、再取得が 403 になって取り残される。
+ * 退出の導線（一覧とストアを取り直して別テナントへ移す）ができるまでは塞ぐ。
+ */
+function canRemove(member: TenantMemberResponse) {
+  return canManageMembers.value && !isOwner(member) && !isSelf(member);
+}
+
 async function onRemove(member: TenantMemberResponse) {
-  if (!canManageMembers.value || isOwner(member)) return;
+  if (!canRemove(member) || busy.value) return;
   removeError.value = null;
+  busy.value = true;
   try {
     await removeMutation.mutateAsync({
       params: { path: { tenant_id: props.tenant.id, user_id: member.user_id } },
@@ -156,6 +175,8 @@ async function onRemove(member: TenantMemberResponse) {
     await invalidateMembers();
   } catch {
     removeError.value = 'メンバーを外せませんでした。';
+  } finally {
+    busy.value = false;
   }
 }
 </script>
@@ -272,7 +293,7 @@ async function onRemove(member: TenantMemberResponse) {
               <template v-else>
                 <Select
                   :model-value="member.role"
-                  :disabled="!canManageMembers"
+                  :disabled="!canManageMembers || busy"
                   @update:model-value="onRoleChange(member, $event as TenantRole)"
                 >
                   <SelectTrigger
@@ -298,7 +319,7 @@ async function onRemove(member: TenantMemberResponse) {
                 <Button
                   variant="ghost"
                   size="icon"
-                  :disabled="!canManageMembers"
+                  :disabled="!canRemove(member) || busy"
                   class="size-7 shrink-0 text-muted-foreground"
                   :aria-label="`${member.user.username}を外す`"
                   @click="onRemove(member)"
