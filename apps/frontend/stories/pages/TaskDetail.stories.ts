@@ -113,6 +113,7 @@ const sampleTaskDetail = {
   priority: 'High' as const,
   status_id: 's-progress',
   project_id: 'proj-eng',
+  parent_task_id: null as string | null,
   soft_deadline: '2026-07-02T00:00:00Z' as string | null,
   hard_deadline: null as string | null,
   is_archived: false,
@@ -134,6 +135,18 @@ const sampleTaskDetail = {
       project_id: 'proj-eng',
     },
   ],
+  custom_field_values: [],
+};
+
+const sampleSubtask = {
+  ...sampleTaskDetail,
+  id: 'task-2',
+  seq_id: 2,
+  title: 'PKCE の検証を追加する',
+  description: null,
+  parent_task_id: sampleTaskDetail.id,
+  assignees: [],
+  labels: [],
   custom_field_values: [],
 };
 
@@ -272,6 +285,14 @@ function createMockFetch(overrides: MockOptions = {}) {
     }
     if (url.includes('/activities')) {
       return jsonResponse({ activities: [], total: 0 });
+    }
+    if (method === 'GET' && url.includes('/relations')) {
+      return jsonResponse({
+        parent: mutableTaskDetail.parent_task_id ? sampleTaskDetail : null,
+        subtasks: mutableTaskDetail.id === sampleTaskDetail.id ? [sampleSubtask] : [],
+        blocks: [],
+        blocked_by: [],
+      });
     }
     // /tasks/{id}/comments は /tasks/ の分岐より先に受ける
     if (url.includes('/comments')) {
@@ -445,10 +466,35 @@ export const Default: Story = {
     await expect(
       canvas.findByText('OIDC フローとセッション管理を実装する。'),
     ).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('PKCE の検証を追加する')).resolves.toBeInTheDocument();
     // 担当者はアバター（頭文字）のみ表示し、名前テキストは出さない。
     // 頭文字は avatarInitials の既定どおり 2 文字（田中太郎 → 田中）
     await expect(canvas.findByText('田中')).resolves.toBeInTheDocument();
     await expect(canvas.queryByText('田中太郎')).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(await canvas.findByRole('button', { name: 'サブタスクを追加' }));
+    const input = await canvas.findByRole('textbox', { name: 'サブタスク名' });
+    await user.type(input, 'リダイレクト検証{Enter}');
+    await expect(input).toHaveValue('');
+  },
+};
+
+export const Subtask: Story = {
+  name: '子タスク詳細では孫の作成UIを出さない',
+  beforeEach: () => createMockFetch({ task: sampleSubtask }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.findByRole('heading', { name: sampleSubtask.title }),
+    ).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByRole('button', { name: /親タスク.*OAuth 対応を実装する/ }),
+    ).resolves.toBeInTheDocument();
+    await expect(
+      canvas.queryByRole('button', { name: 'サブタスクを追加' }),
+    ).not.toBeInTheDocument();
+    await expect(canvas.queryByRole('textbox', { name: 'サブタスク名' })).not.toBeInTheDocument();
   },
 };
 

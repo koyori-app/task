@@ -10,7 +10,7 @@ use sea_orm::{
     ActiveModelTrait,
     ActiveValue::Set,
     ColumnTrait, Condition, ConnectionTrait, EntityTrait, IsolationLevel, PaginatorTrait,
-    QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
+    QueryFilter, QueryOrder, QuerySelect, QueryTrait, TransactionTrait,
     prelude::{DateTimeWithTimeZone, Uuid},
 };
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -459,6 +459,21 @@ pub async fn list_tasks(
             "EXISTS (SELECT 1 FROM task_labels WHERE task_labels.task_id = tasks.id AND task_labels.label_id = $1)",
             vec![sea_orm::Value::from(lid)],
         ));
+    }
+
+    if q.root_only {
+        // ページング前の同じ絞り込み条件を満たす親だけを存在扱いにする。
+        // 親が条件外で子だけが条件内なら、その子をルートとして返す。
+        let visible_parent_ids = query
+            .clone()
+            .select_only()
+            .column(tasks::Column::Id)
+            .into_query();
+        query = query.filter(
+            Condition::any()
+                .add(tasks::Column::ParentTaskId.is_null())
+                .add(tasks::Column::ParentTaskId.not_in_subquery(visible_parent_ids)),
+        );
     }
 
     let sort = TaskSort::parse(q.sort.as_deref());
@@ -1358,9 +1373,21 @@ pub async fn list_relations(
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
+    let parent = if let Some(parent_id) = task.parent_task_id {
+        tasks::Entity::find_by_id(parent_id)
+            .filter(tasks::Column::ProjectId.eq(project_id))
+            .filter(tasks::Column::DeletedAt.is_null())
+            .one(&state.db)
+            .await?
+    } else {
+        None
+    };
+
     let subtasks = tasks::Entity::find()
         .filter(tasks::Column::ParentTaskId.eq(task.id))
         .filter(tasks::Column::DeletedAt.is_null())
+        .order_by_asc(tasks::Column::CreatedAt)
+        .order_by_asc(tasks::Column::Id)
         .all(&state.db)
         .await?;
 
@@ -1431,6 +1458,10 @@ pub async fn list_relations(
         .collect();
 
     Ok(Json(TaskRelationsResponse {
+        parent: match parent {
+            Some(parent) => Some(build_task_response(&state.db, parent).await?),
+            None => None,
+        },
         subtasks: build_task_responses(&state.db, subtasks).await?,
         blocks,
         blocked_by,

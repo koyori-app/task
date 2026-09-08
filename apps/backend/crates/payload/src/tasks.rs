@@ -187,6 +187,12 @@ pub struct ListTasksQuery {
     pub milestone_id: Option<Uuid>,
     pub sprint_id: Option<Uuid>,
     pub parent_task_id: Option<Uuid>,
+    /// 親が現在の一覧に存在しないタスクだけを返す。
+    ///
+    /// 未指定時は従来どおり親子を区別せず返す。List 表示はこれを有効にし、
+    /// サブタスクを親行の配下へ別途描画する。
+    #[serde(default)]
+    pub root_only: bool,
     #[serde(default)]
     pub is_archived: bool,
     pub sort: Option<String>,
@@ -297,6 +303,8 @@ pub struct RelationEntry {
 
 #[derive(Serialize, ToSchema)]
 pub struct TaskRelationsResponse {
+    #[schema(required, nullable)]
+    pub parent: Option<TaskResponse>,
     pub subtasks: Vec<TaskResponse>,
     pub blocks: Vec<RelationEntry>,
     pub blocked_by: Vec<RelationEntry>,

@@ -15,6 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import TaskGroupedRow from '@/components/tasks/TaskGroupedRow.vue';
+import TaskSubtaskBranch from '@/components/tasks/TaskSubtaskBranch.vue';
 import type { components } from '@/generated/api';
 import type { CreateTaskInput, TaskRowField } from '@/composables/useTaskRowMutations';
 import type { TaskGroup } from '@/components/tasks/task-grouped-columns';
@@ -33,6 +34,9 @@ type ProjectMember = { id: string; username: string; avatar_url?: string | null 
 
 const props = defineProps<{
   groups: TaskGroup[];
+  tenantId: string | null | undefined;
+  projectId: string | null | undefined;
+  labelId?: string | null;
   projectLabels: LabelResponse[];
   members: ProjectMember[];
   /** 担当者候補の取得状態。取得中・失敗を「候補 0 人」と混ぜない */
@@ -52,7 +56,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  open: [taskId: string];
+  open: [task: TaskResponse];
   more: [statusId: string];
   'update:status': [task: TaskResponse, statusId: string];
   'update:priority': [task: TaskResponse, priority: TaskResponse['priority']];
@@ -63,9 +67,23 @@ const emit = defineEmits<{
 
 // 折りたたみは画面内の一時状態。URL には載せない（共有したい情報ではない）
 const collapsed = ref<Record<string, boolean>>({});
+const selectedTaskId = ref<string | null>(null);
+const expandedTaskIds = ref<Record<string, boolean>>({});
 
 function toggle(statusId: string) {
   collapsed.value = { ...collapsed.value, [statusId]: !collapsed.value[statusId] };
+}
+
+function selectTask(taskId: string) {
+  selectedTaskId.value = taskId;
+}
+
+function toggleSubtasks(task: TaskResponse) {
+  selectedTaskId.value = task.id;
+  expandedTaskIds.value = {
+    ...expandedTaskIds.value,
+    [task.id]: !expandedTaskIds.value[task.id],
+  };
 }
 
 // ---- グループ末尾からの追加 ----
@@ -226,25 +244,61 @@ async function commitAdding(statusId: string) {
               <div class="px-2"></div>
             </div>
 
-            <TaskGroupedRow
-              v-for="task in group.tasks"
-              :key="task.id"
-              :task="task"
-              :statuses="statuses"
-              :project-labels="projectLabels"
-              :members="members"
-              :pending-field="pending[task.id]"
-              :error="errors[task.id]"
-              :comment-pending="!!commentPendingTaskIds?.[task.id]"
-              @open="emit('open', $event)"
-              @update:status="(statusId) => emit('update:status', task, statusId)"
-              @update:priority="(priority) => emit('update:priority', task, priority)"
-              @update:soft-deadline="(iso) => emit('update:softDeadline', task, iso)"
-              @toggle:assignee="(userId, checked) => emit('toggle:assignee', task, userId, checked)"
-              @toggle:label="(labelId, checked) => emit('toggle:label', task, labelId, checked)"
-              :members-state="membersState"
-              :on-comment="(body: string) => onComment(task, body)"
-            />
+            <template v-for="task in group.tasks" :key="task.id">
+              <TaskGroupedRow
+                :task="task"
+                :statuses="statuses"
+                :project-labels="projectLabels"
+                :members="members"
+                :pending-field="pending[task.id]"
+                :error="errors[task.id]"
+                :comment-pending="!!commentPendingTaskIds?.[task.id]"
+                :selected="selectedTaskId === task.id"
+                :expanded="!!expandedTaskIds[task.id]"
+                @select="selectTask(task.id)"
+                @toggle:subtasks="toggleSubtasks(task)"
+                @open="emit('open', task)"
+                @update:status="(statusId) => emit('update:status', task, statusId)"
+                @update:priority="(priority) => emit('update:priority', task, priority)"
+                @update:soft-deadline="(iso) => emit('update:softDeadline', task, iso)"
+                @toggle:assignee="
+                  (userId, checked) => emit('toggle:assignee', task, userId, checked)
+                "
+                @toggle:label="(labelId, checked) => emit('toggle:label', task, labelId, checked)"
+                :members-state="membersState"
+                :on-comment="(body: string) => onComment(task, body)"
+              />
+              <TaskSubtaskBranch
+                v-if="expandedTaskIds[task.id]"
+                :parent-task="task"
+                :filters="{
+                  status_id: group.status.id,
+                  label_id: labelId ?? undefined,
+                  is_archived: false,
+                }"
+                :tenant-id="tenantId"
+                :project-id="projectId"
+                :statuses="statuses"
+                :project-labels="projectLabels"
+                :members="members"
+                :members-state="membersState"
+                :pending="pending"
+                :errors="errors"
+                :comment-pending-task-ids="commentPendingTaskIds"
+                :on-comment="onComment"
+                @collapse="expandedTaskIds = { ...expandedTaskIds, [task.id]: false }"
+                @open="emit('open', $event)"
+                @update:status="(child, statusId) => emit('update:status', child, statusId)"
+                @update:priority="(child, priority) => emit('update:priority', child, priority)"
+                @update:soft-deadline="(child, iso) => emit('update:softDeadline', child, iso)"
+                @toggle:assignee="
+                  (child, userId, checked) => emit('toggle:assignee', child, userId, checked)
+                "
+                @toggle:label="
+                  (child, labelId, checked) => emit('toggle:label', child, labelId, checked)
+                "
+              />
+            </template>
 
             <!-- 失敗したページは取り直せるようにする。導線が無いと、以降のページへ進めない -->
             <div v-if="group.isError" class="flex min-w-[42rem] items-center gap-2 px-3 py-2">
