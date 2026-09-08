@@ -69,6 +69,7 @@ function mountList(
       members,
       pending: {},
       errors: {},
+      sorting: [],
       onComment: vi.fn(async () => true),
       onCreate,
     },
