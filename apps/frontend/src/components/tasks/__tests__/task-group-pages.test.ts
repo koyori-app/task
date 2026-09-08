@@ -56,13 +56,29 @@ describe('toTaskGroup', () => {
         { tasks: [task('newest'), task('middle')], total: 3, next_cursor: 'c1' },
         { tasks: [task('oldest')], total: 3, next_cursor: null },
       ]),
+      true,
     );
 
     expect(group.tasks.map((item) => item.id)).toEqual(['oldest', 'middle', 'newest']);
+    expect(group.oldestFirst).toBe(true);
+  });
+
+  it('任意の並びは API の向きを反転しない', () => {
+    const group = toTaskGroup(
+      status,
+      state([
+        { tasks: [task('a'), task('b')], total: 3, next_cursor: 'c1' },
+        { tasks: [task('c')], total: 3, next_cursor: null },
+      ]),
+      false,
+    );
+
+    expect(group.tasks.map((item) => item.id)).toEqual(['a', 'b', 'c']);
+    expect(group.oldestFirst).toBe(false);
   });
 
   it('続きがあれば もっと見る を出す', () => {
-    const group = toTaskGroup(status, state([page(0, PAGE_SIZE, 75, 'c1')]));
+    const group = toTaskGroup(status, state([page(0, PAGE_SIZE, 75, 'c1')]), true);
     expect(group.tasks).toHaveLength(20);
     expect(group.total).toBe(75);
     expect(group.hasMore).toBe(true);
@@ -73,6 +89,7 @@ describe('toTaskGroup', () => {
     const group = toTaskGroup(
       status,
       state([page(0, PAGE_SIZE, 75, 'c1')], { isFetchingNextPage: true }),
+      true,
     );
     expect(group.isLoading).toBe(true);
     expect(group.hasMore).toBe(true);
@@ -84,7 +101,7 @@ describe('toTaskGroup', () => {
     const pages = Array.from({ length: 10 }, (_, i) =>
       page(i * PAGE_SIZE, PAGE_SIZE, 275, `c${i + 1}`),
     );
-    const group = toTaskGroup(status, state(pages));
+    const group = toTaskGroup(status, state(pages), true);
     expect(group.tasks).toHaveLength(200);
     expect(group.hasMore).toBe(true);
   });
@@ -93,6 +110,7 @@ describe('toTaskGroup', () => {
     const group = toTaskGroup(
       status,
       state([page(0, PAGE_SIZE, 35, 'c1'), page(20, 15, 35, null)]),
+      true,
     );
     expect(group.tasks).toHaveLength(35);
     expect(group.hasMore).toBe(false);
@@ -101,20 +119,24 @@ describe('toTaskGroup', () => {
   // 欠落の再発ガード。offset 方式では「取得済み < total かつ最後のページが埋まっていない」で
   // 打ち切っていたので、境界で 1 件飛んだまま もっと見る が消えていた
   it('取得済みが total に届いていなくても、続きが無ければ終わる', () => {
-    const group = toTaskGroup(status, state([page(0, 19, 20, null)]));
+    const group = toTaskGroup(status, state([page(0, 19, 20, null)]), true);
     expect(group.tasks).toHaveLength(19);
     expect(group.hasMore).toBe(false);
   });
 
   it('ページが埋まっていても続きがあるかぎり もっと見る を出す', () => {
     // 取得済み(20) が total(12) を上回るケース（読んでいるあいだに他の人が削除した）
-    const group = toTaskGroup(status, state([page(0, PAGE_SIZE, 12, 'c1')]));
+    const group = toTaskGroup(status, state([page(0, PAGE_SIZE, 12, 'c1')]), true);
     expect(group.hasMore).toBe(true);
   });
 
   // 穴を飛ばして先へ進ませない。失敗しているあいだは再試行へ寄せる
   it('失敗しているあいだは もっと見る を隠す', () => {
-    const group = toTaskGroup(status, state([page(0, PAGE_SIZE, 75, 'c1')], { isError: true }));
+    const group = toTaskGroup(
+      status,
+      state([page(0, PAGE_SIZE, 75, 'c1')], { isError: true }),
+      true,
+    );
     expect(group.isError).toBe(true);
     expect(group.hasMore).toBe(false);
     // 取得済みのページは残す（失敗で行が消えない）
@@ -123,14 +145,18 @@ describe('toTaskGroup', () => {
 
   it('retry は infinite query を取り直す（全ページを先頭から継ぎ直す）', () => {
     const refetch = vi.fn();
-    const group = toTaskGroup(status, state([page(0, PAGE_SIZE, 75, 'c1')], { refetch }));
+    const group = toTaskGroup(status, state([page(0, PAGE_SIZE, 75, 'c1')], { refetch }), true);
     group.retry();
     expect(refetch).toHaveBeenCalledTimes(1);
   });
 
   it('loadMore は次のページを足す', () => {
     const fetchNextPage = vi.fn();
-    const group = toTaskGroup(status, state([page(0, PAGE_SIZE, 75, 'c1')], { fetchNextPage }));
+    const group = toTaskGroup(
+      status,
+      state([page(0, PAGE_SIZE, 75, 'c1')], { fetchNextPage }),
+      true,
+    );
     group.loadMore();
     expect(fetchNextPage).toHaveBeenCalledTimes(1);
   });
@@ -143,12 +169,13 @@ describe('toTaskGroup', () => {
         page(0, 3, 6, 'c1'),
         { tasks: [task('task-2'), task('task-9')], total: 6, next_cursor: null },
       ]),
+      true,
     );
     expect(group.tasks.map((t) => t.id)).toEqual(['task-9', 'task-2', 'task-1', 'task-0']);
   });
 
   it('1 ページも返っていなければ もっと見る を出さない', () => {
-    const group = toTaskGroup(status, { isLoading: true });
+    const group = toTaskGroup(status, { isLoading: true }, true);
     expect(group.tasks).toEqual([]);
     expect(group.total).toBe(0);
     expect(group.isLoading).toBe(true);

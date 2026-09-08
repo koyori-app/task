@@ -28,6 +28,7 @@ const props = defineProps<{
   tenantId: string | null | undefined;
   projectId: string | null | undefined;
   labelId?: string | null;
+  sort: string;
   pageSize: number;
   enabled: boolean;
 }>();
@@ -40,6 +41,7 @@ const query = useInfiniteQuery(
     const query = {
       status_id: props.status.id,
       label_id: props.labelId ?? undefined,
+      sort: props.sort,
       is_archived: false,
       root_only: true,
       limit: props.pageSize,
@@ -66,15 +68,19 @@ const query = useInfiniteQuery(
 );
 
 const group = computed(() =>
-  toTaskGroup(props.status, {
-    data: query.data.value as { pages: TaskGroupPage[] } | undefined,
-    isLoading: query.isLoading.value,
-    isFetchingNextPage: query.isFetchingNextPage.value,
-    isError: query.isError.value,
-    hasNextPage: query.hasNextPage.value,
-    refetch: () => query.refetch(),
-    fetchNextPage: () => query.fetchNextPage(),
-  }),
+  toTaskGroup(
+    props.status,
+    {
+      data: query.data.value as { pages: TaskGroupPage[] } | undefined,
+      isLoading: query.isLoading.value,
+      isFetchingNextPage: query.isFetchingNextPage.value,
+      isError: query.isError.value,
+      hasNextPage: query.hasNextPage.value,
+      refetch: () => query.refetch(),
+      fetchNextPage: () => query.fetchNextPage(),
+    },
+    props.sort === 'created_at_desc',
+  ),
 );
 
 watch(group, (value) => emit('update:group', value), { immediate: true });

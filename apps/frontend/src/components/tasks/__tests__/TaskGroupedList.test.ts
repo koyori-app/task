@@ -46,6 +46,7 @@ const group: TaskGroup = {
   isLoading: false,
   isError: false,
   hasMore: false,
+  oldestFirst: true,
   retry: () => {},
   loadMore: () => {},
 };
@@ -91,6 +92,7 @@ function mountList(
       members,
       pending: {},
       errors: {},
+      sorting: [],
       onComment: vi.fn(async () => true),
       onCreate,
     },
@@ -292,6 +294,25 @@ describe('TaskGroupedList のタスク追加', () => {
     const html = wrapper.html();
     expect(html).toContain('もっと見る（残り 28 件）');
     expect(html.indexOf('もっと見る')).toBeLessThan(html.indexOf('古い 1 件目'));
+  });
+
+  it('任意の並びでは もっと見る をタスク行より下に出す', async () => {
+    const { wrapper } = mountList();
+    await wrapper.setProps({
+      groups: [
+        {
+          ...group,
+          tasks: [taskFixture('task-a', 'A のタスク'), taskFixture('task-b', 'B のタスク')],
+          total: 30,
+          hasMore: true,
+          oldestFirst: false,
+        },
+      ],
+    });
+    await nextTick();
+
+    const html = wrapper.html();
+    expect(html.indexOf('もっと見る')).toBeGreaterThan(html.indexOf('B のタスク'));
   });
 
   it('ページの取得に失敗したら再試行を出す', async () => {

@@ -26,6 +26,11 @@ import {
 } from '@/lib/task-display';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
 import { TASK_ROW_GRID } from '@/components/tasks/task-grouped-columns';
+import TaskListSortHeader from '@/components/tasks/TaskListSortHeader.vue';
+import {
+  TASK_LIST_SORT_COLUMNS,
+  type TaskListSortingState,
+} from '@/components/tasks/task-list-sort';
 
 type TaskResponse = components['schemas']['TaskResponse'];
 type LabelResponse = components['schemas']['LabelResponse'];
@@ -53,6 +58,7 @@ const props = defineProps<{
   onComment: (task: TaskResponse, body: string) => Promise<boolean>;
   /** タスクの作成。同上 */
   onCreate: (input: CreateTaskInput) => Promise<boolean>;
+  sorting: TaskListSortingState;
 }>();
 
 const emit = defineEmits<{
@@ -63,6 +69,7 @@ const emit = defineEmits<{
   'update:softDeadline': [task: TaskResponse, iso: string | null];
   'toggle:assignee': [task: TaskResponse, userId: string, checked: boolean];
   'toggle:label': [task: TaskResponse, labelId: string, checked: boolean];
+  'update:sorting': [sorting: TaskListSortingState];
 }>();
 
 // 折りたたみは画面内の一時状態。URL には載せない（共有したい情報ではない）
@@ -237,19 +244,18 @@ async function commitAdding(statusId: string) {
         <div class="overflow-hidden">
           <div class="overflow-x-auto" :inert="collapsed[group.status.id] || undefined">
             <div :class="[TASK_ROW_GRID, 'border-b text-xs text-muted-foreground']">
-              <div class="px-2 py-1.5">タスク</div>
-              <div class="px-2">担当</div>
-              <div class="px-2">期限</div>
-              <div class="px-2">優先度</div>
+              <TaskListSortHeader
+                v-for="column in TASK_LIST_SORT_COLUMNS"
+                :key="column.id"
+                :column="column"
+                :sorting="sorting"
+                @update:sorting="emit('update:sorting', $event)"
+              />
               <div class="px-2"></div>
             </div>
 
-            <!--
-              続きは古い側なので、増えた行は一覧の上へ入る。ボタンを行の下に置くと
-              押した場所の周りが変わらず、増えていないように見える。増える向きと
-              同じ側に置いて、読み込んだ分がボタンのすぐ下に出るようにする。
-            -->
-            <div v-if="group.hasMore" class="px-2 py-1">
+            <!-- 既定順では続きが一覧の上へ増えるので、ボタンも上に置く -->
+            <div v-if="group.oldestFirst && group.hasMore" class="px-2 py-1">
               <Button
                 type="button"
                 variant="ghost"
@@ -317,6 +323,20 @@ async function commitAdding(statusId: string) {
                 "
               />
             </template>
+
+            <!-- 任意の並びでは API 順の末尾へ続きが増えるので、ボタンも下に置く -->
+            <div v-if="!group.oldestFirst && group.hasMore" class="px-2 py-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="h-7 text-xs"
+                :disabled="group.isLoading"
+                @click="emit('more', group.status.id)"
+              >
+                もっと見る（残り {{ group.total - group.tasks.length }} 件）
+              </Button>
+            </div>
 
             <!-- 失敗したページは取り直せるようにする。導線が無いと、以降のページへ進めない -->
             <div v-if="group.isError" class="flex min-w-[42rem] items-center gap-2 px-3 py-2">

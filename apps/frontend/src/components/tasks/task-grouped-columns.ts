@@ -12,6 +12,8 @@ export type TaskGroup = {
   isError: boolean;
   /** まだ取れていない件があるか */
   hasMore: boolean;
+  /** List 表示用に API の新しい順を反転し、古い順で並べているか */
+  oldestFirst: boolean;
   /** 取得に失敗したページを取り直す。失敗したままだと先へ進めないので導線を出す */
   retry: () => void;
   /** 次のページを足す。カーソルはグループ自身が持つので、呼ぶ側は鍵を知らなくてよい */

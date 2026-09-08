@@ -14761,6 +14761,7 @@
           {
             "name": "sort",
             "in": "query",
+            "description": "`created_at_desc`（既定）、または `title` / `assignee` / `priority` / `deadline`\nと `_asc` / `_desc` の組み合わせ。",
             "required": false,
             "schema": {
               "type": "string"
@@ -22955,6 +22956,9 @@
             "format": "int64",
             "description": "テナント設定の欄。客分（membership=Guest）には返さない（null）"
           },
+          "icon_emoji": {
+            "type": ["string", "null"]
+          },
           "icon_url": {
             "type": "string"
           },
@@ -23031,6 +23035,9 @@
           "drive_quota_bytes": {
             "type": ["integer", "null"],
             "format": "int64"
+          },
+          "icon_emoji": {
+            "type": ["string", "null"]
           },
           "icon_url": {
             "type": "string"
@@ -23541,8 +23548,13 @@
           "description": {
             "type": ["string", "null"]
           },
+          "icon_emoji": {
+            "type": ["string", "null"],
+            "description": "画像を持たないテナントのアイコン。projects.icon_emoji と同じ上限。"
+          },
           "icon_url": {
-            "type": ["string", "null"]
+            "type": ["string", "null"],
+            "description": "data URL を受け付ける場合も DB 行と一覧レスポンスを膨らませない上限を設ける。"
           },
           "name": {
             "type": ["string", "null"]

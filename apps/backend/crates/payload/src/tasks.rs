@@ -195,6 +195,8 @@ pub struct ListTasksQuery {
     pub root_only: bool,
     #[serde(default)]
     pub is_archived: bool,
+    /// `created_at_desc`（既定）、または `title` / `assignee` / `priority` / `deadline`
+    /// と `_asc` / `_desc` の組み合わせ。
     pub sort: Option<String>,
     #[serde(default = "default_limit")]
     pub limit: u64,
