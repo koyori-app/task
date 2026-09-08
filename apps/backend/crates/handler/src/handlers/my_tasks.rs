@@ -38,6 +38,7 @@ async fn seed_personal_project_defaults<C: ConnectionTrait>(
         position: Set(0),
         is_default: Set(true),
         is_done_state: Set(false),
+        is_default_done: Set(false),
         created_at: Set(Utc::now().into()),
     }
     .insert(db)
@@ -51,6 +52,7 @@ async fn seed_personal_project_defaults<C: ConnectionTrait>(
         position: Set(1),
         is_default: Set(false),
         is_done_state: Set(true),
+        is_default_done: Set(true),
         created_at: Set(Utc::now().into()),
     }
     .insert(db)
@@ -290,7 +292,11 @@ pub async fn list_my_tasks(
     Query(q): Query<ListMyTasksQuery>,
 ) -> Result<Json<MyTasksListResponse>, AppError> {
     auth.require_scope(Scope::ReadTask)?;
-    auth.ensure_tenant_access(&state, tenant_id, None).await?;
+    // project-only の客分にも My Tasks を開く（テナント選択後の着地）。
+    // 客分には明示 member の project の分だけに絞る
+    let guest_project_ids = auth
+        .ensure_tenant_access_or_guest_scope(&state, tenant_id)
+        .await?;
 
     let mut query = tasks::Entity::find()
         .filter(tasks::Column::DeletedAt.is_null())
@@ -311,6 +317,10 @@ pub async fn list_my_tasks(
             )",
             vec![sea_orm::Value::from(tenant_id)],
         ));
+
+    if let Some(ids) = guest_project_ids {
+        query = query.filter(tasks::Column::ProjectId.is_in(ids.into_iter().collect::<Vec<_>>()));
+    }
 
     if !q.include_personal {
         query = query.filter(sea_orm::sea_query::Expr::cust(

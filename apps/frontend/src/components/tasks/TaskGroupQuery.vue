@@ -42,6 +42,8 @@ const query = useInfiniteQuery(
       status_id: props.status.id,
       label_id: props.labelId ?? undefined,
       sort: props.sort,
+      is_archived: false,
+      root_only: true,
       limit: props.pageSize,
     };
     return {

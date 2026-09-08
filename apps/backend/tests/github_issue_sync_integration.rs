@@ -152,6 +152,7 @@ async fn seed_statuses(app: &TestApp, project_id: Uuid) -> (Uuid, Uuid) {
             position: Set(position),
             is_default: Set(is_default),
             is_done_state: Set(is_done),
+            is_default_done: Set(is_done),
             created_at: Set(chrono::Utc::now().into()),
         }
         .insert(&app.state.db)
@@ -616,6 +617,7 @@ async fn github_issue_sync_suite() {
             position: Set(1),
             is_default: Set(false),
             is_done_state: Set(false),
+            is_default_done: Set(false),
             created_at: Set(chrono::Utc::now().into()),
         }
         .insert(&app.state.db)

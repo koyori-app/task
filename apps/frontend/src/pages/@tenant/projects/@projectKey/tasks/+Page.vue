@@ -92,6 +92,7 @@ type TaskSearchQueryKeyParams = {
 type ApiPriority = components['schemas']['TaskPriority'];
 type UserSummary = components['schemas']['UserSummary'];
 type TaskLabel = components['schemas']['LabelResponse'];
+type TaskResponse = components['schemas']['TaskResponse'];
 
 interface TaskRow {
   id: string;
@@ -381,10 +382,12 @@ const fetchedProjectLabels = computed(() => labelsQuery.data.value ?? null);
 const projectLabels = computed(() => fetchedProjectLabels.value ?? []);
 
 // ---- クエリ④: 担当者候補（List 表示の行から割り当てる）----
+// 担当者の候補が要るのは List 表示のピッカーと作成モーダル。どちらも出ていなければ
+// 取りに行かない（Table 表示でモーダルを閉じたままなら問い合わせは発生しない）
+const needsAssignableUsers = computed(() => isListView.value || isCreateDialogOpen.value);
 const membersQuery = useAssignableUsersQuery(
-  // 担当者の割り当ては List 表示でしか出さないので、Table のときは取りに行かない
-  () => (isListView.value ? tenantId.value : null),
-  () => (isListView.value ? projectId.value : null),
+  () => (needsAssignableUsers.value ? tenantId.value : null),
+  () => (needsAssignableUsers.value ? projectId.value : null),
 );
 
 const projectMembers = computed(() => membersQuery.data.value ?? []);
@@ -475,9 +478,7 @@ onUnmounted(() => {
   if (overlayCleanupTimer) clearTimeout(overlayCleanupTimer);
 });
 
-function openOverlay(taskId: string) {
-  const task = taskGroups.value.flatMap((group) => group.tasks).find((t) => t.id === taskId);
-  if (!task) return;
+function openOverlay(task: TaskResponse) {
   onSelectRow(task.seq_id);
 }
 watchAvailableTaskLabels(selectedLabelId, fetchedProjectLabels);
@@ -986,8 +987,12 @@ const table = useVueTable({
             :labels="labelsQuery.data.value"
             :labels-loading="labelsQuery.isLoading.value"
             :labels-error="labelsQuery.isError.value && !projectLabels.length"
+            :members="membersQuery.data.value"
+            :members-loading="membersQuery.isLoading.value"
+            :members-error="membersQuery.isError.value && !projectMembers.length"
             @created="onTaskCreated"
             @retry-labels="labelsQuery.refetch()"
+            @retry-members="membersQuery.refetch()"
           />
 
           <!--
@@ -1086,6 +1091,9 @@ const table = useVueTable({
             <TaskGroupedList
               v-else-if="isListView"
               :groups="taskGroups"
+              :tenant-id="tenantId"
+              :project-id="projectId"
+              :label-id="selectedLabelId"
               :statuses="workflowStatuses"
               :project-labels="projectLabels"
               :members="projectMembers"
@@ -1214,6 +1222,7 @@ const table = useVueTable({
             :project-key="projectKey"
             :task-id="selectedTaskId ?? ''"
             @close="closeDetail"
+            @open-task="openOverlay"
           />
         </ResizablePanel>
       </template>
@@ -1227,6 +1236,7 @@ const table = useVueTable({
       :tenant-display-id="tenantDisplayId"
       :project-key="projectKey"
       :task-id="overlayRenderedTaskSeqKey"
+      @open-task="openOverlay"
       @update:open="
         (value) => {
           if (!value) selectedTaskId = null;

@@ -91,7 +91,7 @@ impl TaskResponse {
     }
 }
 
-#[derive(Deserialize, ToSchema, serde::Serialize)]
+#[derive(Clone, Deserialize, ToSchema, serde::Serialize)]
 pub struct AssigneeInput {
     pub user_id: Uuid,
     pub role: String,
@@ -166,6 +166,14 @@ pub struct UpdateTaskRequest {
     pub is_archived: Option<bool>,
     /// タスクのラベルをこの ID 集合で置き換える（`Some(vec![])` で全解除）。None は変更なし
     pub label_ids: Option<Vec<Uuid>>,
+    /// 置き換え後（未指定なら現在の集合）へ追加し、その後 remove_label_ids を外す。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub add_label_ids: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remove_label_ids: Vec<Uuid>,
+    /// 担当者集合を置き換える。空配列で全解除、None は変更なし。既存の担当者の役割は維持する。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignees: Option<Vec<AssigneeInput>>,
     pub custom_field_values: Option<Vec<CustomFieldValueInput>>,
 }
 
@@ -179,6 +187,12 @@ pub struct ListTasksQuery {
     pub milestone_id: Option<Uuid>,
     pub sprint_id: Option<Uuid>,
     pub parent_task_id: Option<Uuid>,
+    /// 親が現在の一覧に存在しないタスクだけを返す。
+    ///
+    /// 未指定時は従来どおり親子を区別せず返す。List 表示はこれを有効にし、
+    /// サブタスクを親行の配下へ別途描画する。
+    #[serde(default)]
+    pub root_only: bool,
     #[serde(default)]
     pub is_archived: bool,
     /// `created_at_desc`（既定）、または `title` / `assignee` / `priority` / `deadline`
@@ -221,7 +235,7 @@ pub struct TaskDetailResponse {
     pub custom_field_values: Vec<TaskCustomFieldValueResponse>,
 }
 
-#[derive(Validate, Deserialize, ToSchema)]
+#[derive(Validate, Deserialize, ToSchema, serde::Serialize)]
 pub struct AddAssigneeRequest {
     pub user_id: Uuid,
     #[validate(length(min = 1))]
@@ -234,7 +248,7 @@ pub struct UpdateAssigneeRequest {
     pub role: String,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
 pub struct TaskAssigneeResponse {
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
@@ -291,6 +305,8 @@ pub struct RelationEntry {
 
 #[derive(Serialize, ToSchema)]
 pub struct TaskRelationsResponse {
+    #[schema(required, nullable)]
+    pub parent: Option<TaskResponse>,
     pub subtasks: Vec<TaskResponse>,
     pub blocks: Vec<RelationEntry>,
     pub blocked_by: Vec<RelationEntry>,

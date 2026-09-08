@@ -19,6 +19,7 @@ const status: StatusResponse = {
   position: 0,
   is_default: true,
   is_done_state: false,
+  is_default_done: false,
   project_id: 'project-1',
   created_at: '2026-06-01T00:00:00Z',
 };
@@ -60,6 +61,9 @@ function mountList(
   const wrapper = mount(TaskGroupedList, {
     props: {
       groups,
+      tenantId: 'tenant-1',
+      projectId: 'project-1',
+      projectKey: 'TASK',
       statuses,
       projectLabels: [bug],
       members,
