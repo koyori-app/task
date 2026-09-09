@@ -3,7 +3,7 @@ import { KFM_MERMAID_STORY_INPUTS } from '../kfm-story-fixtures/inputs-mermaid';
 import { renderDescription } from '../markup-renderer';
 
 /**
- * KFM mermaid story fixture の drift 検査 (cmd_670 方式と同型)。
+ * KFM mermaid story fixture の drift 検査 (fixture+v-html drift 検査方式と同型)。
  * stories/kfm/KfmMermaid.stories.ts が v-html する HTML fixture
  * (kfm-story-fixtures/rendered/mermaid-*.html) は renderDescription の事前生成物
  * (= SSR が出す不活性 <kfm-mermaid>。SVG は含まない)。レンダラ出力が変わったのに

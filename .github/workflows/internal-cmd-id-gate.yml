@@ -1,0 +1,41 @@
+name: Internal Cmd ID Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/**'
+      - 'docs/**'
+      - 'packages/**'
+      - 'scripts/internal-cmd-ids/**'
+      - '.github/workflows/internal-cmd-id-gate.yml'
+  pull_request:
+    paths:
+      - 'apps/**'
+      - 'docs/**'
+      - 'packages/**'
+      - 'scripts/internal-cmd-ids/**'
+      - '.github/workflows/internal-cmd-id-gate.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Self-test gate
+        run: bash scripts/internal-cmd-ids/check-internal-cmd-ids.test.sh
+
+      - name: Run gate
+        run: bash scripts/internal-cmd-ids/check-internal-cmd-ids.sh .

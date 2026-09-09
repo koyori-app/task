@@ -2,8 +2,8 @@
  * remark-kfm-mermaid — KFM 拡張: mermaid フェンス (```mermaid) を `<kfm-mermaid>` へ変換する。
  *
  * 捕捉は remark 層 (mdast の code ノード) に限定する:
- * - remark-rehype より前に hName を据えるため、rehype 層 (rehype-starry-night や
- *   cmd_672 の language-* 拡張) は mermaid フェンスを pre>code として見ることがなく、
+ * - remark-rehype より前に hName を据えるため、rehype 層 (rehype-starry-night の
+ *   language-* 拡張など) は mermaid フェンスを pre>code として見ることがなく、
  *   層間の順序争いが構造的に起きない。
  * - サーバは図を焼かない。SSR 出力は「不活性タグ ＋ light DOM のソーステキスト」のみで、
  *   SVG 化は client の custom element (element.ts) が行う (Bun SSR に jsdom/headless を
