@@ -5,7 +5,7 @@ use backend::utils::github::sync::{
     apply_issue_event, import_project, mark_pending_push, push_task,
 };
 use common::{TestApp, TestTenantProject};
-use entity::{github_integrations, github_issue_links, project_statuses, tasks};
+use entity::{github_integrations, github_issue_links, project_statuses, task_activities, tasks};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait,
     QueryFilter, QueryOrder, Statement,
@@ -208,6 +208,34 @@ async fn link_for_number(
         .expect("link row")
 }
 
+async fn assert_issue_activities(app: &TestApp, project_id: Uuid, number: i32, expected: &[&str]) {
+    let link = link_for_number(app, project_id, number).await;
+    let activities = task_activities::Entity::find()
+        .filter(task_activities::Column::TaskId.eq(link.task_id))
+        .order_by_asc(task_activities::Column::CreatedAt)
+        .all(&app.state.db)
+        .await
+        .expect("query issue activities");
+    assert_eq!(
+        activities
+            .iter()
+            .map(|a| a.event_type.as_str())
+            .collect::<Vec<_>>(),
+        expected,
+    );
+    for activity in activities {
+        assert_eq!(activity.user_id, None, "同期はシステム操作として記録する");
+        assert_eq!(
+            activity.payload,
+            serde_json::json!({
+                "repo_owner": REPO_OWNER,
+                "repo_name": REPO_NAME,
+                "issue_number": number,
+            })
+        );
+    }
+}
+
 // serial: GITHUB_API_BASE_URL を差し替えるため、他の GitHub テストと並列に走らせない。
 #[serial_test::serial]
 #[tokio::test]
@@ -385,6 +413,23 @@ async fn github_issue_sync_suite() {
         assert_eq!(rows[1].description, None, "本文 null は NULL のまま");
         assert_eq!(rows[1].status_id, done_id, "closed は完了ステータス");
         assert!(rows[1].completed_at.is_some());
+        for number in [1, 2] {
+            assert_issue_activities(&app, tp.project_id, number, &["github_issue_imported"]).await;
+        }
+
+        app.login_session(&owner.email, &owner.password).await;
+        let response = app
+            .get_with_session(&format!(
+                "/v1/tenants/{}/projects/{}/tasks/{}/activities",
+                tp.tenant_id, tp.project_id, rows[0].id,
+            ))
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = response.json().await.expect("activities response");
+        assert_eq!(body["activities"][0]["event_type"], "github_issue_imported");
+        assert!(body["activities"][0]["user"].is_null());
+        assert_eq!(body["activities"][0]["payload"]["issue_number"], 1);
+        app.reset_session_client();
 
         // 3. 同じ内容で再インポートしてもタスクは増えず、更新もされない
         let before = rows[0].updated_at;
@@ -400,6 +445,9 @@ async fn github_issue_sync_suite() {
         let rows = project_tasks(&app, tp.project_id).await;
         assert_eq!(rows.len(), 2, "重複したタスクを作らない");
         assert_eq!(rows[0].updated_at, before, "内容が同じなら書き込まない");
+        for number in [1, 2] {
+            assert_issue_activities(&app, tp.project_id, number, &["github_issue_imported"]).await;
+        }
 
         app.cleanup_user(owner.id).await;
     }
@@ -434,6 +482,13 @@ async fn github_issue_sync_suite() {
         let rows = project_tasks(&app, tp.project_id).await;
         assert_eq!(rows[0].status_id, done_id, "closed イベントで完了になる");
         assert!(rows[0].completed_at.is_some());
+        assert_issue_activities(
+            &app,
+            tp.project_id,
+            1,
+            &["github_issue_imported", "github_issue_synced"],
+        )
+        .await;
 
         let applied = apply_issue_event(
             &app.state.db,
@@ -451,6 +506,38 @@ async fn github_issue_sync_suite() {
             2,
             "deleted で新しいタスクを作らない"
         );
+
+        let opened = serde_json::json!({
+            "action": "opened",
+            "issue": issue_json(9, "新しい Issue", None, "open", T_EVENT),
+        });
+        for _ in 0..2 {
+            assert!(
+                apply_issue_event(&app.state.db, tp.project_id, &opened)
+                    .await
+                    .expect("apply opened")
+            );
+        }
+        assert_issue_activities(&app, tp.project_id, 9, &["github_issue_imported"]).await;
+
+        let reopened = serde_json::json!({
+            "action": "reopened",
+            "issue": issue_json(1, "ログインできない", Some("再現手順"), "open", T_ECHO),
+        });
+        apply_issue_event(&app.state.db, tp.project_id, &reopened)
+            .await
+            .expect("apply reopened");
+        assert_issue_activities(
+            &app,
+            tp.project_id,
+            1,
+            &[
+                "github_issue_imported",
+                "github_issue_synced",
+                "github_issue_synced",
+            ],
+        )
+        .await;
 
         app.cleanup_user(owner.id).await;
     }
@@ -588,6 +675,7 @@ async fn github_issue_sync_suite() {
             after_echo.updated_at > link.updated_at,
             "ウォーターマークだけ進めるときも版を進める"
         );
+        assert_issue_activities(&app, tp.project_id, 1, &["github_issue_imported"]).await;
 
         app.cleanup_user(owner.id).await;
     }
@@ -668,6 +756,13 @@ async fn github_issue_sync_suite() {
             "新しいタイトル",
             "古いイベントで巻き戻らない"
         );
+        assert_issue_activities(
+            &app,
+            tp.project_id,
+            1,
+            &["github_issue_imported", "github_issue_synced"],
+        )
+        .await;
 
         app.cleanup_user(owner.id).await;
     }
