@@ -18,7 +18,11 @@ use axum::{
 };
 use axum_session::{SameSite, SessionConfig, SessionLayer, SessionMode, SessionStore};
 use axum_session_redispool::SessionRedisPool;
-use entity::{github_integrations, oauth_connections, projects, tenant_members, tenants, users};
+use entity::{
+    github_integrations, oauth_connections, personal_tokens, projects,
+    scopes::{Scope, ScopeList},
+    tenant_members, tenants, users,
+};
 
 use backend::{
     AppState,
@@ -746,6 +750,26 @@ impl TestApp {
         }
     }
 
+    /// PAT を DB へ直に挿し、平文トークンを返す（発行 API を経ない）。
+    /// 発行 API そのものを試すテストは `POST /v1/personal_tokens` を叩くこと。
+    pub async fn insert_pat(
+        &self,
+        user_id: Uuid,
+        tenant_id: Uuid,
+        scopes: Vec<Scope>,
+        allowed_project_ids: Option<Vec<Uuid>>,
+    ) -> String {
+        insert_personal_token_for_test(
+            &self.state.db,
+            user_id,
+            tenant_id,
+            &self.state.settings.personal_token_secret,
+            scopes,
+            allowed_project_ids,
+        )
+        .await
+    }
+
     pub fn reset_session_client(&mut self) {
         self.client = Client::builder()
             .cookie_store(true)
@@ -1143,33 +1167,38 @@ pub fn current_totp_code(secret: &str, issuer: &str, email: &str) -> String {
     totp.generate_current().expect("code")
 }
 
+/// PAT を DB へ直に挿し、平文トークンを返す（発行 API を経ない）。
+///
+/// scopes と `allowed_project_ids` は呼び出し側が決める。scopes を `Vec<Scope>` で受けるのは、
+/// 生 SQL に JSON リテラルを書くと綴り違いが実行時の 403 にしかならぬため。
+/// `TestApp` を持っているなら `TestApp::insert_pat` の包み越しに呼ぶ方が短い。
 pub async fn insert_personal_token_for_test(
     db: &DatabaseConnection,
     user_id: Uuid,
     tenant_id: Uuid,
     secret: &str,
+    scopes: Vec<Scope>,
+    allowed_project_ids: Option<Vec<Uuid>>,
 ) -> String {
     use backend::utils::auth::generate_personal_token;
-    use sea_orm::Statement;
 
     let (token, token_hash) = generate_personal_token(secret).expect("generate pat");
-    let id = Uuid::new_v4();
-    let last_four = token[token.len().saturating_sub(4)..].to_string();
-    let stmt = Statement::from_sql_and_values(
-        db.get_database_backend(),
-        r#"INSERT INTO personal_tokens
-            (id, name, token_hash, token_last_four, user_id, tenant_id, revoked, scopes)
-            VALUES ($1, $2, $3, $4, $5, $6, false, '["admin:tenant"]'::json)"#,
-        vec![
-            id.into(),
-            "integration-test".into(),
-            token_hash.into(),
-            last_four.into(),
-            user_id.into(),
-            tenant_id.into(),
-        ],
-    );
-    db.execute_raw(stmt).await.expect("insert legacy pat");
+    personal_tokens::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        name: Set("integration-test".into()),
+        token_hash: Set(token_hash),
+        token_last_four: Set(token[token.len().saturating_sub(4)..].to_string()),
+        expires_at: Set(None),
+        last_used_at: Set(None),
+        revoked: Set(false),
+        user_id: Set(user_id),
+        tenant_id: Set(tenant_id),
+        scopes: Set(ScopeList(scopes)),
+        allowed_project_ids: Set(allowed_project_ids.map(|ids| serde_json::json!(ids))),
+    }
+    .insert(db)
+    .await
+    .expect("insert pat");
     token
 }
 

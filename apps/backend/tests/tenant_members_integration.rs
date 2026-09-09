@@ -1,7 +1,8 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::{TestApp, insert_personal_token_for_test};
+use common::TestApp;
+use entity::scopes::Scope;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value;
 use uuid::Uuid;
@@ -539,20 +540,12 @@ async fn removed_member_pat_loses_tenant_read_access() {
     assert_eq!(added.status(), StatusCode::CREATED);
 
     // alice のトークンはテナント T にバインドされ、プロジェクト制限は無い
-    let alice_pat = insert_personal_token_for_test(
-        &app.state.db,
-        alice.id,
-        tp.tenant_id,
-        &app.state.settings.personal_token_secret,
-    )
-    .await;
-    let owner_pat = insert_personal_token_for_test(
-        &app.state.db,
-        owner.id,
-        tp.tenant_id,
-        &app.state.settings.personal_token_secret,
-    )
-    .await;
+    let alice_pat = app
+        .insert_pat(alice.id, tp.tenant_id, vec![Scope::AdminTenant], None)
+        .await;
+    let owner_pat = app
+        .insert_pat(owner.id, tp.tenant_id, vec![Scope::AdminTenant], None)
+        .await;
 
     // メンバーで居るあいだは読める（過剰に拒否していないこと）
     assert_eq!(

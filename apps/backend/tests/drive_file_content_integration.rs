@@ -10,9 +10,7 @@ use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
 use common::TestApp;
 use entity::{
-    drive_folder_shares, drive_folders, personal_tokens, project_members, projects,
-    scopes::{Scope, ScopeList},
-    tenants,
+    drive_folder_shares, drive_folders, project_members, projects, scopes::Scope, tenants,
 };
 use reqwest::multipart::{Form, Part};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
@@ -76,29 +74,6 @@ async fn insert_tenant_folder(app: &TestApp, tenant_id: Uuid, created_by: Uuid) 
     .await
     .expect("insert tenant folder");
     folder_id
-}
-
-async fn insert_pat(app: &TestApp, user_id: Uuid, tenant_id: Uuid, scopes: Vec<Scope>) -> String {
-    let (token, token_hash) =
-        backend::utils::auth::generate_personal_token(&app.state.settings.personal_token_secret)
-            .expect("generate pat");
-    personal_tokens::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        name: Set("drive-content-test".into()),
-        token_last_four: Set(token[token.len().saturating_sub(4)..].to_string()),
-        token_hash: Set(token_hash),
-        expires_at: Set(None),
-        last_used_at: Set(None),
-        revoked: Set(false),
-        user_id: Set(user_id),
-        scopes: Set(ScopeList(scopes)),
-        tenant_id: Set(tenant_id),
-        allowed_project_ids: Set(None),
-    }
-    .insert(&app.state.db)
-    .await
-    .expect("insert pat");
-    token
 }
 
 async fn insert_token_share(
@@ -741,8 +716,9 @@ async fn tenant_level_file_content_enforces_pat_scope_but_allows_share_token() {
     let file_id = file_id_of(&uploaded);
     let path = format!("/v1/drive/files/{file_id}/content");
 
-    let pat_without_drive =
-        insert_pat(&app, owner.id, tp.tenant_id, vec![Scope::ReadProject]).await;
+    let pat_without_drive = app
+        .insert_pat(owner.id, tp.tenant_id, vec![Scope::ReadProject], None)
+        .await;
     let forbidden = app.get_with_bearer(&path, &pat_without_drive).await;
     assert_eq!(
         forbidden.status(),
@@ -750,7 +726,9 @@ async fn tenant_level_file_content_enforces_pat_scope_but_allows_share_token() {
         "read:drive を持たない PAT は読めない"
     );
 
-    let pat_with_drive = insert_pat(&app, owner.id, tp.tenant_id, vec![Scope::ReadDrive]).await;
+    let pat_with_drive = app
+        .insert_pat(owner.id, tp.tenant_id, vec![Scope::ReadDrive], None)
+        .await;
     let allowed = app.get_with_bearer(&path, &pat_with_drive).await;
     assert_eq!(
         allowed.status(),

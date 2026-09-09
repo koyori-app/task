@@ -1,7 +1,8 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::{TestApp, insert_personal_token_for_test, insert_tenant};
+use common::{TestApp, insert_tenant};
+use entity::scopes::Scope;
 
 /// 作成 API でトークンを 1 件発行し、その ID を返す。
 async fn create_token(app: &TestApp, tenant_id: uuid::Uuid, name: &str) -> uuid::Uuid {
@@ -40,8 +41,8 @@ async fn lists_only_own_active_tokens() {
     let other_tenant_id = insert_tenant(&app.state.db, other.id).await;
 
     // 他ユーザーのトークン（見えてはいけない）。
-    let secret = app.state.settings.personal_token_secret.clone();
-    insert_personal_token_for_test(&app.state.db, other.id, other_tenant_id, &secret).await;
+    app.insert_pat(other.id, other_tenant_id, vec![Scope::AdminTenant], None)
+        .await;
 
     app.reset_session_client();
     app.login_session_no_content(&user.email, &user.password)
@@ -137,8 +138,9 @@ async fn rejects_bearer_token_auth() {
 
     let user = app.insert_user_default().await;
     let tenant_id = insert_tenant(&app.state.db, user.id).await;
-    let secret = app.state.settings.personal_token_secret.clone();
-    let token = insert_personal_token_for_test(&app.state.db, user.id, tenant_id, &secret).await;
+    let token = app
+        .insert_pat(user.id, tenant_id, vec![Scope::AdminTenant], None)
+        .await;
 
     let res = app.get_with_bearer("/v1/personal_tokens", &token).await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
