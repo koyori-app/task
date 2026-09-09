@@ -44,25 +44,55 @@ PAT による API 認証と、テナント・プロジェクトを横断しな�
 | スコープ | 意味 |
 |---------|------|
 | `read:project` | プロジェクトの参照 |
-| `write:project` | プロジェクトの更新 |
+| `write:project` | プロジェクトの更新（`read:project` を含む） |
 | `admin:project` | project 層の全スコープ（下表参照）を包含する wildcard。tenant 層は満たさない |
-| `admin:tenant` | 当該 PAT の `tenant_id` 内の管理操作（wildcard） |
+| `admin:tenant` | 当該 PAT の `tenant_id` で行える操作すべて（層に依らない最上位の wildcard） |
 
 `admin:tenant` を持つトークンはすべての `require_scope` チェックを通過する（`ScopeList::has_scope` 参照）。
 
+#### 含意の規則
+
+包含関係は `Scope::implies`（持っている側の網羅 match）の一箇所に集める。`has_scope` は
+保持スコープのいずれかが要求スコープを含意するかを見るだけで、判定を散らさない。
+
+| 持っているスコープ | 満たせる要求 |
+|---|---|
+| `admin:tenant` | すべて（層に依らない） |
+| `admin:project` | project 層のスコープすべて |
+| `write:<資源>` | 同じ資源の `read:<資源>`（project を含む 6 対すべて） |
+| `read:<資源>` | 自分自身だけ |
+
+catch-all を置かないので、スコープを増やすと含意の規則を決めるまでコンパイルが通らない。
+
 #### スコープの層
 
-wildcard は「層」を単位に効く（`Scope::layer`）。スコープを増やしたら必ずどちらかの層へ割り振る。
+`admin:project` の効き目を限るために、各スコープを層へ割り振る（`Scope::layer`）。
+スコープを増やしたら必ずどちらかへ割り振る。
 
 | 層 | スコープ |
 |----|---------|
 | project 層 | `read:project` / `write:project` / `read:task` / `write:task` / `read:milestone` / `write:milestone` / `read:sprint` / `write:sprint` / `read:review` / `write:review` / `read:drive` / `write:drive` / `admin:project` |
 | tenant 層 | `admin:tenant` |
 
+この表は各スコープの帰属であって、`admin:tenant` の効き目の範囲ではない。層は
+`admin:project` を限る道具であり、`admin:tenant` を限る道具ではない。層を増やしても
+`admin:tenant` は通る。
+
 **決めたこと**: `admin:tenant` ⊃ `admin:project` とする。現行の `admin:tenant` wildcard は
 「要求されたスコープが何であれ通す」意味論であり、`admin:project` の要求もこれに含まれるため、
 包含しない形にすると wildcard の意味論を曲げることになる。逆向き（`admin:project` が
 `admin:tenant` を満たす）は無い。
+
+**決めたこと**: 層と `admin:tenant` の関係は、実装ではなく記述の側を直して揃えた。
+`admin:tenant` を「tenant 層かつ全層を包含」と定義し直す道もあったが、それは
+「層に依らない」と同義であって層が `admin:tenant` を限る道具にならない点は変わらず、
+既に 5 箇所（この文書の上下、drive.md、review-findings.md、PAT 作成 UI の文言）が
+「層に依らない最上位」で揃っている。実装を動かす利は無い。
+
+**決めたこと**: `write:project` は `read:project` を含意する。他の 5 対（task / drive /
+milestone / sprint / review）は当初からそう扱っており、project だけが対を欠いていた。
+`write:project` を発行できる者は `admin:project` も発行でき、そちらは `read:project` を
+満たすため、非対称は防御になっておらず不整合でしかなかった。
 
 `admin:project` とリソース束縛の組み合わせ: `allowed_project_ids` を指定すれば
 「指定プロジェクトの中だけで project 層の全操作ができる」トークンになる（束縛外は従来どおり 403）。
@@ -173,6 +203,7 @@ path の ID と PAT の `tenant_id` / `allowed_project_ids` を突き合わせ�
 
 - `ScopeList::has_scope`: `admin:tenant` は全スコープを通過、不足スコープは 403
 - `ScopeList::has_scope`: `admin:project` は project 層の全スコープを通過し、tenant 層（`admin:tenant`）は通過しない（両向きを固定）
+- `ScopeList::has_scope`: `write:<資源>` は同じ資源の `read:<資源>` を通過し、逆向きは通過しない。対はスコープ名から導いて全件を回す（写しを置かない）
 - `require_scope`: Session は常に OK、PAT は不足で 403
 - PAT が別テナントの path を叩く → 403
 - `allowed_project_ids` 外の project → 403、`NULL` ならテナント内任意 project → OK

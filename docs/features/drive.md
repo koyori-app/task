@@ -499,13 +499,19 @@ WriteDrive,
 ```
 
 `write:drive` は `read:drive` を暗黙的に包含する（`write` を持つなら `read` も可能）。
-`has_scope` の実装でこの包含関係を反映する:
+包含関係は `Scope::implies` の網羅 match が一箇所で持ち、`has_scope` はそれを引くだけである
+（規則の一覧は apps/backend/docs/personal-access-tokens-authz.md の「含意の規則」）:
 
 ```rust
-pub fn has_scope(&self, scope: Scope) -> bool {
-    self.0.contains(&scope)
-        || self.0.contains(&Scope::AdminTenant)
-        || (scope == Scope::ReadDrive && self.0.contains(&Scope::WriteDrive))
+pub fn implies(self, other: Scope) -> bool {
+    if self == other {
+        return true;
+    }
+    match self {
+        Scope::AdminTenant => true,
+        Scope::WriteDrive => other == Scope::ReadDrive,
+        // …他のスコープも同様に、含意する先を明示する
+    }
 }
 ```
 

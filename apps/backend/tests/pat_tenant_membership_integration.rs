@@ -1,7 +1,8 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::{TestApp, insert_personal_token_for_test, insert_tenant};
+use common::{TestApp, insert_tenant};
+use entity::scopes::Scope;
 use entity::tenant_members;
 use entity::tenants;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait};
@@ -53,8 +54,9 @@ async fn pat_reports_membership_missing_when_owner_drifts() {
     let other = app.insert_user_default().await;
     let tenant_id = insert_tenant(&app.state.db, user.id).await;
 
-    let secret = app.state.settings.personal_token_secret.clone();
-    let token = insert_personal_token_for_test(&app.state.db, user.id, tenant_id, &secret).await;
+    let token = app
+        .insert_pat(user.id, tenant_id, vec![Scope::AdminTenant], None)
+        .await;
     let path = format!("/v1/tenants/{tenant_id}");
 
     // 陽性対照: オーナーのうちは PAT で読める（owner 近道。ここが通らねば以降は何も証明しない）

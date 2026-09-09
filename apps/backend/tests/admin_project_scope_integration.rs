@@ -3,7 +3,7 @@ mod common;
 use axum::http::StatusCode;
 use common::TestApp;
 use entity::projects;
-use entity::scopes::{Scope, ScopeList};
+use entity::scopes::Scope;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
 use uuid::Uuid;
 
@@ -37,37 +37,6 @@ async fn insert_second_project(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid
     id
 }
 
-/// scopes と allowed_project_ids を指定して PAT を挿す
-/// （`insert_personal_token_for_test` は admin:tenant 固定のため）。
-async fn insert_pat(
-    app: &TestApp,
-    user_id: Uuid,
-    tenant_id: Uuid,
-    scopes: Vec<Scope>,
-    allowed_project_ids: Option<Vec<Uuid>>,
-) -> String {
-    let (token, token_hash) =
-        backend::utils::auth::generate_personal_token(&app.state.settings.personal_token_secret)
-            .expect("generate pat");
-    entity::personal_tokens::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        name: Set("admin-project-scope-test".into()),
-        token_last_four: Set(token[token.len().saturating_sub(4)..].to_string()),
-        token_hash: Set(token_hash),
-        expires_at: Set(None),
-        last_used_at: Set(None),
-        revoked: Set(false),
-        user_id: Set(user_id),
-        scopes: Set(ScopeList(scopes)),
-        tenant_id: Set(tenant_id),
-        allowed_project_ids: Set(allowed_project_ids.map(|ids| serde_json::json!(ids))),
-    }
-    .insert(&app.state.db)
-    .await
-    .expect("insert pat");
-    token
-}
-
 #[tokio::test]
 async fn admin_project_scope_layers_for_session_and_pat() {
     let mut app = TestApp::new().await;
@@ -93,7 +62,9 @@ async fn admin_project_scope_layers_for_session_and_pat() {
     );
 
     // admin:tenant 鍵: 両層の口が通る（既存 wildcard の対照）
-    let tenant_key = insert_pat(&app, owner.id, tp.tenant_id, vec![Scope::AdminTenant], None).await;
+    let tenant_key = app
+        .insert_pat(owner.id, tp.tenant_id, vec![Scope::AdminTenant], None)
+        .await;
     assert_eq!(
         app.get_with_bearer(&tenant_path, &tenant_key)
             .await
@@ -110,14 +81,9 @@ async fn admin_project_scope_layers_for_session_and_pat() {
     );
 
     // admin:project 鍵: project 層の口は通り、tenant 層の口は 403
-    let project_key = insert_pat(
-        &app,
-        owner.id,
-        tp.tenant_id,
-        vec![Scope::AdminProject],
-        None,
-    )
-    .await;
+    let project_key = app
+        .insert_pat(owner.id, tp.tenant_id, vec![Scope::AdminProject], None)
+        .await;
     assert_eq!(
         app.get_with_bearer(&projects_path, &project_key)
             .await
@@ -141,8 +107,9 @@ async fn admin_project_scope_layers_for_session_and_pat() {
     );
 
     // 列挙鍵（read:project）: project 層の該当する口は通り、tenant 層の口は 403
-    let enumerated_key =
-        insert_pat(&app, owner.id, tp.tenant_id, vec![Scope::ReadProject], None).await;
+    let enumerated_key = app
+        .insert_pat(owner.id, tp.tenant_id, vec![Scope::ReadProject], None)
+        .await;
     assert_eq!(
         app.get_with_bearer(&projects_path, &enumerated_key)
             .await
@@ -157,6 +124,27 @@ async fn admin_project_scope_layers_for_session_and_pat() {
         StatusCode::FORBIDDEN,
         "列挙鍵は tenant 層の口を通らない"
     );
+
+    // 陰性対照: 同じ project 層でも、その口が要求するスコープを持たぬ鍵は通らぬ。
+    // 所属も束縛も満たすオーナーの鍵ゆえ、403 の出所はスコープ判定だけである
+    // （この対照が無いと、口から read:project の要求が消えても気づけない）
+    let unrelated_key = app
+        .insert_pat(owner.id, tp.tenant_id, vec![Scope::ReadTask], None)
+        .await;
+    assert_eq!(
+        app.get_with_bearer(&projects_path, &unrelated_key)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN,
+        "read:task だけの鍵は project の口を通らない"
+    );
+    assert_eq!(
+        app.get_with_bearer(&project_path, &unrelated_key)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN,
+        "名指しの取得も同じく通らない"
+    );
 }
 
 #[tokio::test]
@@ -166,14 +154,14 @@ async fn admin_project_key_respects_allowed_project_ids_binding() {
     let tp = app.insert_tenant_project(owner.id).await;
     let other_project_id = insert_second_project(&app.state.db, tp.tenant_id).await;
 
-    let bound_key = insert_pat(
-        &app,
-        owner.id,
-        tp.tenant_id,
-        vec![Scope::AdminProject],
-        Some(vec![tp.project_id]),
-    )
-    .await;
+    let bound_key = app
+        .insert_pat(
+            owner.id,
+            tp.tenant_id,
+            vec![Scope::AdminProject],
+            Some(vec![tp.project_id]),
+        )
+        .await;
 
     let bound_path = format!("/v1/tenants/{}/projects/{}", tp.tenant_id, tp.project_id);
     let unbound_path = format!("/v1/tenants/{}/projects/{}", tp.tenant_id, other_project_id);
@@ -197,5 +185,59 @@ async fn admin_project_key_respects_allowed_project_ids_binding() {
             .status(),
         StatusCode::FORBIDDEN,
         "束縛つき鍵はテナント全体の口を通らない（既存規則の対照）"
+    );
+}
+
+/// `write:project` は `read:project` を含意する（他の write/read 対と同じ扱い）。
+///
+/// 修正前は project だけがこの含意を欠き、書き込みを許した鍵で一覧が読めなかった。
+/// project に PATCH の口は無いため、書き込み側の対照は作成（POST）で取る。
+#[tokio::test]
+async fn write_project_implies_read_project() {
+    let app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+
+    let write_only = app
+        .insert_pat(owner.id, tp.tenant_id, vec![Scope::WriteProject], None)
+        .await;
+
+    let projects_path = format!("/v1/tenants/{}/projects", tp.tenant_id);
+
+    // 対照: 同じ鍵で書き込みの口は通る（鍵そのものは生きている）
+    let created = app
+        .post_json_with_bearer(
+            &projects_path,
+            serde_json::json!({
+                "name": "write-only key",
+                // project key の制約 ^[A-Z][A-Z0-9]{1,9}$ を満たす一意な値
+                "key": format!("W{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
+            }),
+            &write_only,
+        )
+        .await;
+    assert_eq!(
+        created.status(),
+        StatusCode::CREATED,
+        "write:project 鍵は作成の口を通る"
+    );
+
+    // 本題: 読みの口も通る
+    assert_eq!(
+        app.get_with_bearer(&projects_path, &write_only)
+            .await
+            .status(),
+        StatusCode::OK,
+        "write:project は read:project を含意するはず"
+    );
+    assert_eq!(
+        app.get_with_bearer(
+            &format!("/v1/tenants/{}/projects/{}", tp.tenant_id, tp.project_id),
+            &write_only
+        )
+        .await
+        .status(),
+        StatusCode::OK,
+        "名指しの取得も同じく通るはず"
     );
 }

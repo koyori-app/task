@@ -3,8 +3,8 @@ mod common;
 use axum::http::StatusCode;
 use backend::error::AppError;
 use backend::handlers::admin_users::ensure_not_last_admin;
-use common::{TestApp, insert_personal_token_for_test, insert_tenant, insert_user};
-use entity::{audit_logs, project_statuses, tasks, users};
+use common::{TestApp, insert_tenant, insert_user};
+use entity::{audit_logs, project_statuses, scopes::Scope, tasks, users};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
@@ -30,13 +30,9 @@ async fn admin_users_integration_suite() {
         let tenant_id = insert_tenant(&app.state.db, user.id).await;
         app.reset_session_client();
         app.login_session(&user.email, &user.password).await;
-        let pat = insert_personal_token_for_test(
-            &app.state.db,
-            user.id,
-            tenant_id,
-            &app.state.settings.personal_token_secret,
-        )
-        .await;
+        let pat = app
+            .insert_pat(user.id, tenant_id, vec![Scope::AdminTenant], None)
+            .await;
 
         let active = users::Entity::find_by_id(user.id)
             .one(&app.state.db)
@@ -152,13 +148,9 @@ async fn admin_users_integration_suite() {
         app.reset_session_client();
         app.login_session(&target.email, &target.password).await;
         let target_session_client = app.session_client();
-        let pat = insert_personal_token_for_test(
-            &app.state.db,
-            target.id,
-            tenant_id,
-            &app.state.settings.personal_token_secret,
-        )
-        .await;
+        let pat = app
+            .insert_pat(target.id, tenant_id, vec![Scope::AdminTenant], None)
+            .await;
 
         let admin = app.insert_user(true, false).await;
         app.reset_session_client();

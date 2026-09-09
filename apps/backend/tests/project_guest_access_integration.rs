@@ -1,9 +1,9 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::{TestApp, TestUser, insert_personal_token_for_test};
-use entity::projects;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, DatabaseConnection};
+use common::{TestApp, TestUser};
+use entity::{projects, scopes::Scope};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -40,38 +40,6 @@ async fn insert_second_project(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid
     .await
     .expect("insert second project");
     id
-}
-
-/// scopes を指定して PAT を挿す（`insert_personal_token_for_test` は admin:tenant 固定のため、
-/// プロジェクト読み取りも試す本テスト用に read:project を足した版）。
-async fn insert_pat_with_project_read(
-    db: &DatabaseConnection,
-    user_id: Uuid,
-    tenant_id: Uuid,
-    secret: &str,
-) -> String {
-    use backend::utils::auth::generate_personal_token;
-    use sea_orm::Statement;
-
-    let (token, token_hash) = generate_personal_token(secret).expect("generate pat");
-    let id = Uuid::new_v4();
-    let last_four = token[token.len().saturating_sub(4)..].to_string();
-    let stmt = Statement::from_sql_and_values(
-        db.get_database_backend(),
-        r#"INSERT INTO personal_tokens
-            (id, name, token_hash, token_last_four, user_id, tenant_id, revoked, scopes)
-            VALUES ($1, $2, $3, $4, $5, $6, false, '["admin:tenant","read:project","read:task"]'::json)"#,
-        vec![
-            id.into(),
-            "guest-integration-test".into(),
-            token_hash.into(),
-            last_four.into(),
-            user_id.into(),
-            tenant_id.into(),
-        ],
-    );
-    db.execute_raw(stmt).await.expect("insert guest pat");
-    token
 }
 
 struct GuestSetup {
@@ -389,11 +357,17 @@ async fn pat_guest_passes_only_named_project_and_is_marked_in_list() {
     let mut app = TestApp::new().await;
     let s = setup_guest(&mut app).await;
 
-    let secret = app.state.settings.personal_token_secret.clone();
-    let guest_pat =
-        insert_pat_with_project_read(&app.state.db, s.guest.id, s.tenant_id, &secret).await;
-    let owner_pat =
-        insert_personal_token_for_test(&app.state.db, s.owner.id, s.tenant_id, &secret).await;
+    let guest_pat = app
+        .insert_pat(
+            s.guest.id,
+            s.tenant_id,
+            vec![Scope::AdminTenant, Scope::ReadProject, Scope::ReadTask],
+            None,
+        )
+        .await;
+    let owner_pat = app
+        .insert_pat(s.owner.id, s.tenant_id, vec![Scope::AdminTenant], None)
+        .await;
 
     let tenant_path = format!("/v1/tenants/{}", s.tenant_id);
     let projects_path = format!("/v1/tenants/{}/projects", s.tenant_id);
@@ -509,9 +483,14 @@ async fn ui_path_guest_reaches_own_project_and_member_list_stays_as_before() {
     );
 
     // --- PAT でも同じ
-    let secret = app.state.settings.personal_token_secret.clone();
-    let guest_pat =
-        insert_pat_with_project_read(&app.state.db, s.guest.id, s.tenant_id, &secret).await;
+    let guest_pat = app
+        .insert_pat(
+            s.guest.id,
+            s.tenant_id,
+            vec![Scope::AdminTenant, Scope::ReadProject, Scope::ReadTask],
+            None,
+        )
+        .await;
     let res = app.get_with_bearer(&projects_path, &guest_pat).await;
     assert_eq!(res.status(), StatusCode::OK, "② PAT でも一覧が開く");
     assert_eq!(
