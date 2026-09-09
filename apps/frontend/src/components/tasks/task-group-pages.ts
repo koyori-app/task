@@ -34,7 +34,11 @@ export type TaskGroupQueryState = {
  *
  * 「もっと見る」の出し入れは間違えやすいので、コンポーネントから切り出してテストする。
  */
-export function toTaskGroup(status: StatusResponse, query: TaskGroupQueryState): TaskGroup {
+export function toTaskGroup(
+  status: StatusResponse,
+  query: TaskGroupQueryState,
+  oldestFirst: boolean,
+): TaskGroup {
   const pages = query.data?.pages ?? [];
 
   // カーソルは created_at / id で継ぐので、並びの中でタスクが動くことは無い。
@@ -48,6 +52,10 @@ export function toTaskGroup(status: StatusResponse, query: TaskGroupQueryState):
       return true;
     });
 
+  // 既定の作成日時順だけは、作成したタスクが末尾の追加欄の直前へ出るよう反転する。
+  // ユーザーが選んだ並びは API の向きをそのまま表示する。
+  if (oldestFirst) tasks.reverse();
+
   const isError = !!query.isError;
 
   return {
@@ -59,6 +67,7 @@ export function toTaskGroup(status: StatusResponse, query: TaskGroupQueryState):
     // 見えると、続けて押されて同じページが二重に積まれる
     isLoading: !!query.isLoading || !!query.isFetchingNextPage,
     isError,
+    oldestFirst,
     // 続きの有無はサーバの next_cursor だけで決める（infinite query が
     // getNextPageParam で畳んだ結果を見る）。取得済み件数と total の比較でやると、
     // 読んでいるあいだに件数が動くだけで判定が狂う。失敗しているあいだは、穴を

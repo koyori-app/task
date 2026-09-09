@@ -68,15 +68,19 @@ const query = useInfiniteQuery(
 );
 
 const group = computed(() =>
-  toTaskGroup(props.status, {
-    data: query.data.value as { pages: TaskGroupPage[] } | undefined,
-    isLoading: query.isLoading.value,
-    isFetchingNextPage: query.isFetchingNextPage.value,
-    isError: query.isError.value,
-    hasNextPage: query.hasNextPage.value,
-    refetch: () => query.refetch(),
-    fetchNextPage: () => query.fetchNextPage(),
-  }),
+  toTaskGroup(
+    props.status,
+    {
+      data: query.data.value as { pages: TaskGroupPage[] } | undefined,
+      isLoading: query.isLoading.value,
+      isFetchingNextPage: query.isFetchingNextPage.value,
+      isError: query.isError.value,
+      hasNextPage: query.hasNextPage.value,
+      refetch: () => query.refetch(),
+      fetchNextPage: () => query.fetchNextPage(),
+    },
+    props.sort === 'created_at_desc',
+  ),
 );
 
 watch(group, (value) => emit('update:group', value), { immediate: true });

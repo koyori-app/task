@@ -254,6 +254,20 @@ async function commitAdding(statusId: string) {
               <div class="px-2"></div>
             </div>
 
+            <!-- 既定順では続きが一覧の上へ増えるので、ボタンも上に置く -->
+            <div v-if="group.oldestFirst && group.hasMore" class="px-2 py-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="h-7 text-xs"
+                :disabled="group.isLoading"
+                @click="emit('more', group.status.id)"
+              >
+                もっと見る（残り {{ group.total - group.tasks.length }} 件）
+              </Button>
+            </div>
+
             <template v-for="task in group.tasks" :key="task.id">
               <TaskGroupedRow
                 :task="task"
@@ -309,6 +323,20 @@ async function commitAdding(statusId: string) {
                 "
               />
             </template>
+
+            <!-- 任意の並びでは API 順の末尾へ続きが増えるので、ボタンも下に置く -->
+            <div v-if="!group.oldestFirst && group.hasMore" class="px-2 py-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="h-7 text-xs"
+                :disabled="group.isLoading"
+                @click="emit('more', group.status.id)"
+              >
+                もっと見る（残り {{ group.total - group.tasks.length }} 件）
+              </Button>
+            </div>
 
             <!-- 失敗したページは取り直せるようにする。導線が無いと、以降のページへ進めない -->
             <div v-if="group.isError" class="flex min-w-[42rem] items-center gap-2 px-3 py-2">
@@ -501,19 +529,6 @@ async function commitAdding(statusId: string) {
               >
                 {{ createErrors[group.status.id] }}
               </p>
-            </div>
-
-            <div v-if="group.hasMore" class="px-2 py-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                class="h-7 text-xs"
-                :disabled="group.isLoading"
-                @click="emit('more', group.status.id)"
-              >
-                もっと見る（残り {{ group.total - group.tasks.length }} 件）
-              </Button>
             </div>
           </div>
         </div>
