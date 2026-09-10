@@ -8,6 +8,7 @@ import {
   ChevronRight,
   ChevronUp,
   CircleDashed,
+  Copy,
   EllipsisVertical,
   Filter,
   Flag,
@@ -129,6 +130,21 @@ const emit = defineEmits<{
   'toggle:assignee': [userId: string, checked: boolean];
   'delete-request': [];
 }>();
+
+/** タスク ID のコピー結果。非 secure context では clipboard が無いので失敗も示す */
+const copyState = ref<'idle' | 'copied' | 'error'>('idle');
+let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function copyTaskId(seqKey: string) {
+  if (copyResetTimer) clearTimeout(copyResetTimer);
+  try {
+    await navigator.clipboard.writeText(seqKey);
+    copyState.value = 'copied';
+  } catch {
+    copyState.value = 'error';
+  }
+  copyResetTimer = setTimeout(() => (copyState.value = 'idle'), 2000);
+}
 
 const resolvedStatus = computed(() =>
   props.statuses.find((status) => status.id === props.statusId),
@@ -369,9 +385,25 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
             </div>
 
             <div class="ml-auto flex items-center gap-1">
-              <span class="mr-1 font-mono text-sm text-muted-foreground">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="mr-1 h-7 gap-1.5 px-2 font-mono text-sm font-normal text-muted-foreground"
+                :aria-label="
+                  copyState === 'copied'
+                    ? 'タスクIDをコピーしました'
+                    : copyState === 'error'
+                      ? 'タスクIDをコピーできませんでした'
+                      : `タスクID ${taskSeqKey(projectKey, task.seq_id)} をコピー`
+                "
+                @click="copyTaskId(taskSeqKey(projectKey, task.seq_id))"
+              >
                 {{ taskSeqKey(projectKey, task.seq_id) }}
-              </span>
+                <Check v-if="copyState === 'copied'" class="size-3.5" aria-hidden="true" />
+                <X v-else-if="copyState === 'error'" class="size-3.5" aria-hidden="true" />
+                <Copy v-else class="size-3.5" aria-hidden="true" />
+              </Button>
               <Button
                 type="button"
                 variant="ghost"
