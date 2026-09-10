@@ -50,6 +50,39 @@ export function activityText(item: ActivityItem): string {
   }
 }
 
+export type CommitActivity = {
+  /** ホスト上のアカウント名。無ければ git の author 名 */
+  author: string;
+  shortSha: string;
+  /** メッセージの先頭行 */
+  message: string;
+  /** http(s) 以外は null（`javascript:` 等をリンクにしない） */
+  url: string | null;
+};
+
+/** `forge_commit_linked` の表示要素。それ以外の履歴は null。 */
+export function commitActivity(item: ActivityItem): CommitActivity | null {
+  if (item.event_type !== 'forge_commit_linked') return null;
+  const payload = (item.payload ?? {}) as Record<string, unknown>;
+  const str = (key: string) => (typeof payload[key] === 'string' ? (payload[key] as string) : '');
+  const url = str('html_url');
+  return {
+    author: str('author_handle') || str('author_name'),
+    shortSha: str('sha').slice(0, 7),
+    message: str('message'),
+    url: /^https?:\/\//i.test(url) ? url : null,
+  };
+}
+
+/**
+ * 履歴の主語。コミットのリンクはシステムが積み、連携済みユーザーに結べないことが多いので、
+ * ホスト上の作者名で補う。
+ */
+export function activityActor(item: ActivityItem): string {
+  if (item.user) return item.user.name;
+  return commitActivity(item)?.author || 'システム';
+}
+
 /** 「1分前」形式。1 日以上は日付にする（履歴は古いものほど絶対時刻の方が読みやすい）。 */
 export function relativeTime(iso: string, now: Date = new Date()): string {
   const then = new Date(iso);

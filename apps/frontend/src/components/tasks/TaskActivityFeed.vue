@@ -1,7 +1,15 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+
 import { Button } from '@/components/ui/button';
 import { useNow } from '@/composables/useNow';
-import { activityText, relativeTime, type ActivityItem } from '@/lib/task-activity';
+import {
+  activityActor,
+  activityText,
+  commitActivity,
+  relativeTime,
+  type ActivityItem,
+} from '@/lib/task-activity';
 
 /**
  * タスクの操作履歴。
@@ -14,7 +22,7 @@ import { activityText, relativeTime, type ActivityItem } from '@/lib/task-activi
  *
  * 履歴は操作のたびに増えるので、全件は出さず「もっと見る」で足す。
  */
-defineProps<{
+const props = defineProps<{
   activities: ActivityItem[];
   loading?: boolean;
   error?: boolean;
@@ -27,6 +35,11 @@ defineProps<{
 
 // 相対時刻は開いたままでも進める（テンプレートで new Date() を作ると止まる）
 const now = useNow();
+
+// コミットの履歴は短縮 SHA をリンクにするので、本文を文字列 1 つで作れない
+const rows = computed(() =>
+  props.activities.map((item) => ({ item, commit: commitActivity(item) })),
+);
 </script>
 
 <template>
@@ -44,7 +57,7 @@ const now = useNow();
       <ul class="flex flex-col gap-2">
         <!-- 履歴はシステムの記録なので、本文（コメント）より薄い文字色にする -->
         <li
-          v-for="item in activities"
+          v-for="{ item, commit } in rows"
           :key="item.id"
           class="flex items-start gap-2 text-sm text-muted-foreground"
         >
@@ -52,8 +65,21 @@ const now = useNow();
             class="mt-2 size-1 shrink-0 rounded-full bg-muted-foreground/60"
             aria-hidden="true"
           />
-          <span class="min-w-0 flex-1">
-            {{ item.user?.name ?? 'システム' }}が{{ activityText(item) }}
+          <span v-if="commit" class="min-w-0 flex-1 break-words">
+            {{ activityActor(item) }}がコミット
+            <a
+              v-if="commit.url"
+              :href="commit.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="font-mono underline underline-offset-2 hover:text-foreground"
+              >{{ commit.shortSha }}</a
+            >
+            <span v-else class="font-mono">{{ commit.shortSha }}</span>
+            をリンクしました<template v-if="commit.message">「{{ commit.message }}」</template>
+          </span>
+          <span v-else class="min-w-0 flex-1">
+            {{ activityActor(item) }}が{{ activityText(item) }}
           </span>
           <span class="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
             {{ relativeTime(item.created_at, now) }}
