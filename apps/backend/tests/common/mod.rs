@@ -333,6 +333,16 @@ ALTER TABLE system_settings
             .await
             .expect("prepare system_settings defaults");
 
+            // dedupe_key の部分 UNIQUE は entity 定義で表せず sync() が作らないため、
+            // マイグレーション（m20260911000000_forge_commit_links.rs）と同じものを張る。
+            // これが無いと ON CONFLICT (dedupe_key) WHERE ... が競合対象を推論できず落ちる。
+            db.execute_unprepared(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_task_activities_dedupe_key
+                     ON task_activities(dedupe_key) WHERE dedupe_key IS NOT NULL",
+            )
+            .await
+            .expect("prepare task_activities dedupe_key index");
+
             // search_vector は GENERATED ALWAYS AS の tsvector カラムで entity 定義に無いため
             // sync() が作らない。手動で追加する。
             db.execute_unprepared(

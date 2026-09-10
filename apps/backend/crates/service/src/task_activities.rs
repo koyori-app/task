@@ -2,7 +2,7 @@ use regex::Regex;
 use sea_orm::entity::prelude::Json;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    prelude::Uuid,
+    Statement, prelude::Uuid,
 };
 use std::sync::LazyLock;
 
@@ -28,8 +28,41 @@ pub async fn record_activity<C: ConnectionTrait>(
         event_type: Set(event_type.to_string()),
         payload: Set(payload),
         created_at: Set(chrono::Utc::now().into()),
+        dedupe_key: Set(None),
     }
     .insert(db)
+    .await?;
+    Ok(())
+}
+
+/// 連携由来の出来事を、同じ `dedupe_key` につき 1 回だけ積む
+/// （docs/features/tasks/9.github-tasks.md §2「アクティビティ」）。
+///
+/// 既存行を数えて判定しない。並行する 2 つの処理の事前確認はすれ違うが、UNIQUE はすれ違わない。
+pub async fn record_activity_once<C: ConnectionTrait>(
+    db: &C,
+    task_id: Uuid,
+    user_id: Option<Uuid>,
+    event_type: &str,
+    payload: Json,
+    dedupe_key: &str,
+) -> Result<(), AppError> {
+    // 述語（WHERE dedupe_key IS NOT NULL）を書かないと、部分 UNIQUE インデックスを
+    // 競合対象として推論できずに実行時エラーになる
+    db.execute_raw(Statement::from_sql_and_values(
+        db.get_database_backend(),
+        "INSERT INTO task_activities (id, task_id, user_id, event_type, payload, created_at, dedupe_key)
+         VALUES ($1, $2, $3, $4, $5, now(), $6)
+         ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING",
+        [
+            Uuid::new_v4().into(),
+            task_id.into(),
+            user_id.into(),
+            event_type.into(),
+            payload.into(),
+            dedupe_key.into(),
+        ],
+    ))
     .await?;
     Ok(())
 }
