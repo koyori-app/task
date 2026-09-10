@@ -76,7 +76,6 @@ const {
   deleteError,
   deletePending,
   confirmDelete,
-  listHref,
 } = useTaskDetail({
   tenantDisplayId,
   projectKey,
@@ -242,10 +241,6 @@ function openRelatedTask(task: TaskResponse) {
         :project-key="projectKey"
         @open="openRelatedTask"
       />
-    </template>
-    <template #breadcrumb>
-      <a :href="listHref" class="text-primary hover:underline">タスク一覧</a>
-      <span aria-hidden="true">/</span>
     </template>
     <template #header-actions>
       <dialog
