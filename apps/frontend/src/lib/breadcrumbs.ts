@@ -33,6 +33,15 @@ export function toBreadcrumbList(segments: readonly BreadcrumbSegment[], origin:
   };
 }
 
+/**
+ * 段の組み立て方の種別。ここに無い綴りを台帳へ書くとコンパイルが通らない。
+ *
+ * 型を閉じておかないと `kind` が string に広がり、綴り違いが
+ * `useBreadcrumbs` のどの分岐にも当たらないまま task 扱いへ落ちて、
+ * 骨組みを出したまま固まる（「登録し忘れたら何も出さない」の決めが破れる）。
+ */
+type RouteKind = 'static' | 'home' | 'tenant' | 'project' | 'task';
+
 /** 共通レイアウトのルート台帳。未知のページに他ページの段を流用しない。 */
 export function breadcrumbRoute(pathname: string, params: Record<string, string | undefined>) {
   const tenant = encodeURIComponent(params.tenant ?? '');
@@ -40,7 +49,7 @@ export function breadcrumbRoute(pathname: string, params: Record<string, string 
   const task = encodeURIComponent(params.taskId ?? '');
   const tenantBase = `/${tenant}`;
   const projectBase = `${tenantBase}/projects/${project}`;
-  const routes = new Map([
+  const routes = new Map<string, { kind: RouteKind; name: string }>([
     ['/', { kind: 'static', name: 'ホーム' }],
     ['/settings/profile', { kind: 'static', name: 'プロフィール' }],
     ['/settings/security', { kind: 'static', name: 'セキュリティ' }],

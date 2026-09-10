@@ -364,10 +364,6 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
               <ChevronDown class="size-4" aria-hidden="true" />
             </Button>
 
-            <div class="ml-1 flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
-              <slot name="breadcrumb" />
-            </div>
-
             <div class="ml-auto flex items-center gap-1">
               <span class="mr-1 font-mono text-sm text-muted-foreground">
                 {{ taskSeqKey(projectKey, task.seq_id) }}
