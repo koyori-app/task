@@ -13,6 +13,7 @@ pub mod pr_comments;
 pub mod repositories;
 pub mod review_summary_queue;
 pub mod sync;
+pub mod webhook_events;
 
 pub use client::github_app;
 pub use import_lock::{

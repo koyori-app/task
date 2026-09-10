@@ -4,17 +4,21 @@ use sea_orm::entity::prelude::*;
 
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
-#[sea_orm(table_name = "task_activities")]
+#[sea_orm(table_name = "forge_commit_links")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
+    pub commit_id: Uuid,
+    #[sea_orm(primary_key, auto_increment = false)]
     pub task_id: Uuid,
-    pub user_id: Option<Uuid>,
-    pub event_type: String,
-    #[sea_orm(column_type = "JsonBinary")]
-    pub payload: Json,
     pub created_at: DateTimeWithTimeZone,
-    pub dedupe_key: Option<String>,
+    #[sea_orm(
+        belongs_to,
+        from = "commit_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub forge_commits: HasOne<super::forge_commits::Entity>,
     #[sea_orm(
         belongs_to,
         from = "task_id",
@@ -23,14 +27,6 @@ pub struct Model {
         on_delete = "Cascade"
     )]
     pub tasks: HasOne<super::tasks::Entity>,
-    #[sea_orm(
-        belongs_to,
-        from = "user_id",
-        to = "id",
-        on_update = "NoAction",
-        on_delete = "SetNull"
-    )]
-    pub users: HasOne<super::users::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
