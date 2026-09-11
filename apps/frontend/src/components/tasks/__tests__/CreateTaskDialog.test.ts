@@ -104,6 +104,22 @@ type MountOptions = {
   membersError?: boolean;
 };
 
+/**
+ * 担当者・ラベルのメニューはトリガーを押さないと描画されないので、中身を素の要素に
+ * 差し替えて直接読む。チェック項目は押すと反転した値を返すボタンにする。
+ */
+const dropdownStubs = {
+  DropdownMenu: { template: '<div><slot /></div>' },
+  DropdownMenuTrigger: { template: '<div><slot /></div>' },
+  DropdownMenuContent: { template: '<div><slot /></div>' },
+  DropdownMenuCheckboxItem: {
+    props: ['modelValue'],
+    emits: ['update:modelValue', 'select'],
+    template:
+      '<button type="button" role="menuitemcheckbox" :aria-checked="String(!!modelValue)" @click="$emit(\'update:modelValue\', !modelValue)"><slot /></button>',
+  },
+};
+
 function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
   return mount(CreateTaskDialog, {
     props: {
@@ -121,9 +137,19 @@ function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
     },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
+      stubs: dropdownStubs,
     },
     attachTo: document.body,
   });
+}
+
+/** 担当者・ラベルのメニューの項目（stub 済み）を表示名で引く */
+function menuItem(name: string) {
+  const item = [...document.body.querySelectorAll('[role="menuitemcheckbox"]')].find(
+    (el) => el.textContent?.trim() === name,
+  );
+  if (!item) throw new Error(`menu item ${name} not found`);
+  return item as HTMLButtonElement;
 }
 
 function getTitleInput() {
@@ -362,6 +388,81 @@ describe('CreateTaskDialog pre-hydration form values', () => {
   });
 });
 
+describe('CreateTaskDialog estimate', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  function getEstimateInput() {
+    const input = document.body.querySelector('input[name="estimated_minutes"]');
+    if (!input) throw new Error('estimate input not found');
+    return input as HTMLInputElement;
+  }
+
+  it('見積もり（分）を estimated_minutes として送る', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('見積もり付き');
+    await new DOMWrapper(getEstimateInput()).setValue('90');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.estimated_minutes).toBe(90);
+    wrapper.unmount();
+  });
+
+  it('見積もりが空なら estimated_minutes を送らない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('見積もりなし');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.estimated_minutes).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  // 境界: 1 分は通り、0 と小数は送らずに止める
+  it.each([
+    ['0', false],
+    ['1.5', false],
+    ['1', true],
+  ])('見積もり %s は送信可否 %s', async (value, accepted) => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('境界');
+    await new DOMWrapper(getEstimateInput()).setValue(value);
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    if (accepted) {
+      expect(mutateAsync.mock.calls[0][0].body.estimated_minutes).toBe(1);
+    } else {
+      expect(mutateAsync).not.toHaveBeenCalled();
+      expect(document.body.textContent).toContain(
+        '見積もりは 1 以上の整数（分）で入力してください',
+      );
+    }
+    wrapper.unmount();
+  });
+});
+
 describe('CreateTaskDialog label selection', () => {
   let queryClient: QueryClient;
 
@@ -383,22 +484,19 @@ describe('CreateTaskDialog label selection', () => {
     document.body.innerHTML = '';
   });
 
-  function labelButton(name: string) {
-    const button = Array.from(document.body.querySelectorAll('button[aria-pressed]')).find(
-      (el) => el.textContent?.trim() === name,
-    );
-    if (!button) throw new Error(`label button ${name} not found`);
-    return button as HTMLButtonElement;
-  }
+  const labelButton = menuItem;
 
   it('選択したラベルの label_ids を作成リクエストに含める', async () => {
     const wrapper = mountDialog(queryClient, { labels });
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('ラベル付きで作成');
+    expect(document.getElementById('task-labels-value')?.textContent).toContain('ラベルなし');
 
     labelButton('feature').click();
     await nextTick();
-    expect(labelButton('feature').getAttribute('aria-pressed')).toBe('true');
+    expect(labelButton('feature').getAttribute('aria-checked')).toBe('true');
+    // 選んだラベルは欄の中にも出る
+    expect(document.getElementById('task-labels-value')?.textContent).toContain('feature');
 
     getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await flushPromises();
@@ -430,7 +528,7 @@ describe('CreateTaskDialog label selection', () => {
     await nextTick();
     labelButton('bug').click();
     await nextTick();
-    expect(labelButton('bug').getAttribute('aria-pressed')).toBe('false');
+    expect(labelButton('bug').getAttribute('aria-checked')).toBe('false');
 
     getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await flushPromises();
@@ -458,7 +556,7 @@ describe('CreateTaskDialog label selection', () => {
     await wrapper.setProps({ projectId: 'other-project-uuid', labels: otherLabels });
     await nextTick();
 
-    expect(labelButton('campaign').getAttribute('aria-pressed')).toBe('false');
+    expect(labelButton('campaign').getAttribute('aria-checked')).toBe('false');
     await new DOMWrapper(getTitleInput()).setValue('切替後の作成');
     getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await flushPromises();
@@ -499,7 +597,7 @@ describe('CreateTaskDialog label selection', () => {
     await wrapper.setProps({ labels, labelsLoading: false });
     await nextTick();
 
-    expect(labelButton('feature').getAttribute('aria-pressed')).toBe('true');
+    expect(labelButton('feature').getAttribute('aria-checked')).toBe('true');
     getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await flushPromises();
 
@@ -538,7 +636,7 @@ describe('CreateTaskDialog labels query states', () => {
     const group = labelsGroup();
     expect(group).not.toBeNull();
     expect(group?.textContent).toContain('ラベルを読み込み中');
-    expect(group?.querySelector('button[aria-pressed]')).toBeNull();
+    expect(group?.querySelector('[role="menuitemcheckbox"]')).toBeNull();
     wrapper.unmount();
   });
 
@@ -600,13 +698,7 @@ describe('CreateTaskDialog assignee selection', () => {
     document.body.innerHTML = '';
   });
 
-  function memberButton(name: string) {
-    const button = [...document.body.querySelectorAll('button[aria-pressed]')].find(
-      (el) => el.textContent?.trim() === name,
-    );
-    if (!button) throw new Error(`member button ${name} not found`);
-    return button as HTMLButtonElement;
-  }
+  const memberButton = menuItem;
 
   /**
    * 担当者は作成後にしか付けられなかった。作成時に選べると、割り当て済みの状態で
@@ -617,9 +709,12 @@ describe('CreateTaskDialog assignee selection', () => {
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('担当者付きで作成');
 
+    expect(document.getElementById('task-assignees-value')?.textContent).toContain('未割り当て');
     memberButton('yupix').click();
     await nextTick();
-    expect(memberButton('yupix').getAttribute('aria-pressed')).toBe('true');
+    expect(memberButton('yupix').getAttribute('aria-checked')).toBe('true');
+    // 選んだ人は欄の中にも出る
+    expect(document.getElementById('task-assignees-value')?.textContent).toContain('yupix');
 
     getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await flushPromises();
