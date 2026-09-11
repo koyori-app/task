@@ -63,6 +63,95 @@ async fn oauth_start_callback_flow_issues_session() {
     app.cleanup_user(user_id).await;
 }
 
+/// OAuth でログインし直して、そのユーザー ID を返す（セッションは毎回作り直す）。
+async fn login_via_oauth(app: &mut TestApp) -> uuid::Uuid {
+    app.reset_session_client();
+    let start = app.oauth_start(false).await;
+    let callback = app.follow_oauth_start(start).await;
+    assert!(is_redirect(callback.status()), "oauth callback redirect");
+    let me = app.get_me().await;
+    assert_eq!(me.status(), StatusCode::OK);
+    let body: serde_json::Value = me.json().await.expect("me json");
+    body["id"]
+        .as_str()
+        .expect("user id")
+        .parse()
+        .expect("uuid parse")
+}
+
+async fn provider_login_of(app: &TestApp, user_id: uuid::Uuid) -> Option<String> {
+    oauth_connections::Entity::find()
+        .filter(oauth_connections::Column::UserId.eq(user_id))
+        .one(&app.state.db)
+        .await
+        .expect("query connection")
+        .expect("connection row")
+        .provider_login
+}
+
+/// ログイン名はログインのたびに小文字で接続へ控え、改名で同じ名前が別の人に移ったら
+/// 前の持ち主から外す（コミット作者の解決で 1 人に定まるようにする）。
+#[tokio::test]
+async fn oauth_login_records_provider_login_and_moves_it_on_rename() {
+    let mut app = TestApp::new().await;
+    let unique = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+    let provider_id = |n: u128| (uuid::Uuid::new_v4().as_u128() % 1_000_000_000 + n) as i64;
+    let a_id = provider_id(1_000_000_000);
+    let b_id = provider_id(2_000_000_000);
+    let taken = format!("login_{unique}");
+
+    // 大文字混じりのログイン名も小文字で控える
+    app.set_mock_user(MockGitLabUser {
+        id: a_id,
+        username: taken.to_uppercase(),
+        email: Some(format!("login-a-{unique}@example.com")),
+    });
+    let a = login_via_oauth(&mut app).await;
+    assert_eq!(
+        provider_login_of(&app, a).await.as_deref(),
+        Some(taken.as_str())
+    );
+
+    // A が改名した後、空いた名前を B が取ってログインする。A はまだログインし直していない
+    app.set_mock_user(MockGitLabUser {
+        id: b_id,
+        username: taken.clone(),
+        email: Some(format!("login-b-{unique}@example.com")),
+    });
+    let b = login_via_oauth(&mut app).await;
+    assert_ne!(a, b);
+    assert_eq!(
+        provider_login_of(&app, b).await.as_deref(),
+        Some(taken.as_str())
+    );
+    assert_eq!(
+        provider_login_of(&app, a).await,
+        None,
+        "名前が移ったら前の持ち主から外す"
+    );
+
+    // A が新しい名前でログインし直すと、控えも新しい名前になる（既存接続の更新経路）
+    let renamed = format!("renamed_{unique}");
+    app.set_mock_user(MockGitLabUser {
+        id: a_id,
+        username: renamed.clone(),
+        email: Some(format!("login-a-{unique}@example.com")),
+    });
+    assert_eq!(login_via_oauth(&mut app).await, a);
+    assert_eq!(
+        provider_login_of(&app, a).await.as_deref(),
+        Some(renamed.as_str())
+    );
+    assert_eq!(
+        provider_login_of(&app, b).await.as_deref(),
+        Some(taken.as_str()),
+        "別の名前での再ログインは他人の控えに触らない"
+    );
+
+    app.cleanup_user(a).await;
+    app.cleanup_user(b).await;
+}
+
 #[tokio::test]
 async fn oauth_callback_rejects_state_mismatch() {
     let app = TestApp::new().await;

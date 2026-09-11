@@ -81,7 +81,7 @@ cargo test --workspace --lib
 - **SeaORM の生 SQL に `?` プレースホルダを書かない。** `Statement::from_sql_and_values` は SQL を無変換で sqlx に渡すため、Postgres では実行時構文エラーになる。`common::db` のヘルパー（`table_exists` / `column_exists` / `execute_bound` / `query_one_bool`）か `$N` 直書きを使う。この類のバグは過去に3箇所で見つかっている（#272 / #277）
 - **`#[utoipa::path]` の path は nest 位置からの相対パス。** routes 側で同じパスを `.nest()` すると二重連結された URL に登録されて 404 になる（#277 / #678 で実発生）。既存ハンドラーの登録方法に合わせること。二重連結そのものは `routes/mod.rs` の `openapi_paths_are_mounted_once_under_v1` が落とす（`/v1/` の回数と隣接する同一セグメントを見る）が、重複しない形の間違った絶対パスは通るので、登録方法を合わせる原則は残る
 - **apalis のジョブペイロードは Postgres（apalis.jobs）に平文で永続化される。** トークン等の機微情報を載せない（Redis のみに保持する）。job クレートの「シリアライズ後キー集合」固定テストが回帰ガード。再送競合は `issued_at` 世代（Unix ミリ秒）を process 時に生成し、`email_verification::store_token` の世代比較（Lua）で後勝ち解決する
-- **部分 UNIQUE インデックス（`CREATE UNIQUE INDEX ... WHERE`）をマイグレーションで足さない。** 起動時とテストハーネスの SeaORM `sync()` が、entity の `unique` / `unique_key` と列の組が一致しない UNIQUE インデックスを `DROP CONSTRAINT` で消そうとして落ち、バックエンドが起動しない（#721 で実発生）。NULL を除外したいだけなら列の UNIQUE 制約で足りる（NULL 同士は重複扱いされない）ので、entity にも `#[sea_orm(unique)]` を付けて揃える
+- **部分 UNIQUE インデックス（`CREATE UNIQUE INDEX ... WHERE`）をマイグレーションで足さない。** 起動時とテストハーネスの SeaORM `sync()` が、entity の `unique` / `unique_key` と列の組が一致しない UNIQUE インデックスを `DROP CONSTRAINT` で消そうとして落ち、バックエンドが起動しない（#721 で実発生）。NULL を除外したいだけなら列の UNIQUE 制約で足りる（NULL 同士は重複扱いされない）ので、entity にも `#[sea_orm(unique)]` を付けて揃える。entity の 1 列に付けられる `unique_key` は 1 つだけなので、既存の複合 UNIQUE に入っている列を含む 2 つ目の複合 UNIQUE も表せず、こちらは制約なのでエラーにならず黙って DROP される（`oauth_connections.provider_login` はアプリ側で一意に保っている）
 - **ワーカーに `AppState` を渡さない**（job → handler の循環になる）。必要な依存は `JobState` にフィールドを足す
 - 増分ビルドの計測に `cargo build -p <crate>` を使わない。feature 解決がワークスペース全体と変わり依存を作り直すため、数字が実態と乖離する
 
