@@ -14,6 +14,7 @@ pub struct Model {
     #[sea_orm(column_type = "JsonBinary")]
     pub payload: Json,
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(unique)]
     pub dedupe_key: Option<String>,
     #[sea_orm(
         belongs_to,

@@ -47,13 +47,11 @@ pub async fn record_activity_once<C: ConnectionTrait>(
     payload: Json,
     dedupe_key: &str,
 ) -> Result<(), AppError> {
-    // 述語（WHERE dedupe_key IS NOT NULL）を書かないと、部分 UNIQUE インデックスを
-    // 競合対象として推論できずに実行時エラーになる
     db.execute_raw(Statement::from_sql_and_values(
         db.get_database_backend(),
         "INSERT INTO task_activities (id, task_id, user_id, event_type, payload, created_at, dedupe_key)
          VALUES ($1, $2, $3, $4, $5, now(), $6)
-         ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING",
+         ON CONFLICT (dedupe_key) DO NOTHING",
         [
             Uuid::new_v4().into(),
             task_id.into(),

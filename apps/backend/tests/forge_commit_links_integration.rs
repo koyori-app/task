@@ -61,20 +61,7 @@ async fn setup(app: &TestApp) -> Fixture {
         .key;
     let status_id = insert_status(app, tp.project_id).await;
     let installation_id = unique_installation_id();
-    github_integrations::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        project_id: Set(tp.project_id),
-        installation_id: Set(installation_id),
-        repo_owner: Set(REPO_OWNER.into()),
-        repo_name: Set(REPO_NAME.into()),
-        access_token_enc: Set("unused".into()),
-        token_expires_at: Set(chrono::Utc::now().into()),
-        created_by: Set(owner.id),
-        created_at: Set(chrono::Utc::now().into()),
-    }
-    .insert(&app.state.db)
-    .await
-    .expect("insert integration");
+    insert_integration(app, tp.project_id, installation_id, owner.id).await;
     Fixture {
         owner_id: owner.id,
         tp,
@@ -82,6 +69,29 @@ async fn setup(app: &TestApp) -> Fixture {
         status_id,
         installation_id,
     }
+}
+
+/// プロジェクトを `REPO_OWNER/REPO_NAME` に連携する。
+async fn insert_integration(
+    app: &TestApp,
+    project_id: Uuid,
+    installation_id: i64,
+    created_by: Uuid,
+) {
+    github_integrations::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        project_id: Set(project_id),
+        installation_id: Set(installation_id),
+        repo_owner: Set(REPO_OWNER.into()),
+        repo_name: Set(REPO_NAME.into()),
+        access_token_enc: Set("unused".into()),
+        token_expires_at: Set(chrono::Utc::now().into()),
+        created_by: Set(created_by),
+        created_at: Set(chrono::Utc::now().into()),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert integration");
 }
 
 async fn insert_status(app: &TestApp, project_id: Uuid) -> Uuid {
@@ -382,6 +392,40 @@ async fn invalid_signature_leaves_no_delivery_record() {
     app.cleanup_user(fx.owner_id).await;
 }
 
+/// 同じリポジトリを同じテナントの 2 プロジェクトへ連携しても、1 回の push で同じタスクへのリンクと
+/// 履歴は 1 つだけ。連携ごとにジョブが積まれ、キーはテナント全体で解決されるので、両方のジョブが
+/// 同じタスクに届く。
+#[tokio::test]
+async fn same_repository_linked_to_two_projects_links_once() {
+    let app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    let task_id = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, 1).await;
+    let second_project = insert_project(&app, fx.tp.tenant_id, &format!("Q{}", &fx.key[1..])).await;
+    insert_integration(&app, second_project, fx.installation_id, fx.owner_id).await;
+
+    let sha = sha();
+    let message = format!("fix: {}-1", fx.key);
+    let body = push_payload(fx.installation_id, &[(sha.as_str(), message.as_str())]);
+    let delivery = Uuid::new_v4().to_string();
+    assert_eq!(post_push(&app, &delivery, &body, None).await, 200);
+
+    let mut jobs = queued_jobs(&app, fx.tp.project_id).await;
+    jobs.extend(queued_jobs(&app, second_project).await);
+    assert_eq!(jobs.len(), 2, "連携ごとにジョブが積まれる");
+    run_jobs(&app, &jobs).await;
+
+    assert_eq!(link_rows(&app, task_id).await, 1);
+    assert_eq!(commit_activities(&app, task_id).await.len(), 1);
+    assert_eq!(project_commit_rows(&app, fx.tp.project_id).await, 1);
+    assert_eq!(
+        project_commit_rows(&app, second_project).await,
+        0,
+        "コミット行は受信した連携ではなくリンク先タスクのプロジェクトに置く"
+    );
+
+    app.cleanup_user(fx.owner_id).await;
+}
+
 /// 複数コミット・複数参照はそれぞれリンクし、同じテナントの別プロジェクトにも結ぶ。
 /// キーの無いコミット、存在しないタスク、別テナントのキーはリンクしない。
 #[tokio::test]
@@ -424,6 +468,11 @@ async fn push_links_each_reference_within_the_tenant() {
         project_commit_rows(&app, fx.tp.project_id).await,
         2,
         "タスクに結ばないコミットは積まない"
+    );
+    assert_eq!(
+        project_commit_rows(&app, sibling_project).await,
+        1,
+        "別プロジェクトのタスクに結ぶコミットの行はそのプロジェクトに置く"
     );
     assert_eq!(link_rows(&app, task1).await, 2);
     assert_eq!(link_rows(&app, task2).await, 1);

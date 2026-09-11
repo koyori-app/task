@@ -35,7 +35,6 @@ pub async fn apply_push(
             continue;
         }
 
-        let commit_id = upsert_commit(db, project_id, repo, commit).await?;
         let payload = serde_json::json!({
             "host": repo.host,
             "sha": commit.sha,
@@ -45,6 +44,10 @@ pub async fn apply_push(
             "html_url": commit.html_url,
         });
         for target in targets {
+            // コミット行は受信した連携ではなくリンク先タスクのプロジェクトに置く。キーはテナント全体で
+            // 解決するので、同じリポジトリを同じテナントの複数プロジェクトへ連携すると、連携ごとの
+            // ジョブが同じタスクに届く。行を連携側に置くと commit_id が分かれてリンクも履歴も重複する
+            let commit_id = upsert_commit(db, target.project_id, repo, commit).await?;
             db.execute_raw(Statement::from_sql_and_values(
                 db.get_database_backend(),
                 "INSERT INTO forge_commit_links (commit_id, task_id, created_at)

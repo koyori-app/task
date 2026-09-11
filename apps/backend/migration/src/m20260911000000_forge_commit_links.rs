@@ -69,17 +69,13 @@ impl MigrationTrait for Migration {
         "#,
             )
             .await?;
-        // 連携由来のアクティビティだけが冪等キーを持つ（既存行と手で行う操作は NULL のまま）
+        // 連携由来のアクティビティだけが冪等キーを持つ（既存行と手で行う操作は NULL のまま）。
+        // UNIQUE は NULL 同士を別物とみなすので NULL の行は何行でも積める。
+        // 部分 UNIQUE インデックスにすると、起動時の SeaORM の schema sync が entity に無い
+        // UNIQUE インデックスとして DROP CONSTRAINT しようとして落ちる
         manager
             .get_connection()
-            .execute_unprepared("ALTER TABLE task_activities ADD COLUMN dedupe_key VARCHAR")
-            .await?;
-        manager
-            .get_connection()
-            .execute_unprepared(
-                "CREATE UNIQUE INDEX uq_task_activities_dedupe_key
-                 ON task_activities(dedupe_key) WHERE dedupe_key IS NOT NULL",
-            )
+            .execute_unprepared("ALTER TABLE task_activities ADD COLUMN dedupe_key VARCHAR UNIQUE")
             .await?;
         Ok(())
     }
@@ -88,8 +84,7 @@ impl MigrationTrait for Migration {
         manager
             .get_connection()
             .execute_unprepared(
-                "DROP INDEX IF EXISTS uq_task_activities_dedupe_key;
-                 ALTER TABLE task_activities DROP COLUMN IF EXISTS dedupe_key;
+                "ALTER TABLE task_activities DROP COLUMN IF EXISTS dedupe_key;
                  DROP TABLE IF EXISTS forge_webhook_deliveries;
                  DROP TABLE IF EXISTS forge_commit_links;
                  DROP TABLE IF EXISTS forge_commits;",
