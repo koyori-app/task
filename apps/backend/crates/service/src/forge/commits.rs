@@ -14,7 +14,9 @@ use entity::{oauth_connections, projects, tenants};
 
 use super::events::{ForgeCommit, ForgeRepo};
 use super::task_refs;
-use crate::access::project_accessible_user_ids;
+use crate::access::{
+    is_shared_project_explicit_member, is_tenant_member, project_is_open_or_member,
+};
 use crate::task_activities::record_activity_once;
 
 pub const COMMIT_LINKED_EVENT: &str = "forge_commit_linked";
@@ -116,22 +118,27 @@ async fn author_user_id(
     })
 }
 
-/// リンク先のプロジェクトに入れる人か（`require_project_access` と同じ規則。テナントオーナーは常に可）。
-/// 入れない人の名前を、そのプロジェクトの履歴に載せないために見る。
+/// リンク先のプロジェクトに入れる人か。入れない人の名前を、そのプロジェクトの履歴に載せないために見る。
+///
+/// 規則は API のアクセス判定（handler の `has_tenant_access`）と同じ: テナントオーナーは常に可、
+/// テナントメンバーは公開規則かメンバー指定、テナントに居ないゲストは明示参加した共有プロジェクトだけ。
 async fn can_view_project(
     db: &DatabaseConnection,
     tenant_id: Uuid,
     project_id: Uuid,
     user_id: Uuid,
 ) -> Result<bool, anyhow::Error> {
-    let is_owner = tenants::Entity::find_by_id(tenant_id)
+    if tenants::Entity::find_by_id(tenant_id)
         .one(db)
         .await?
-        .is_some_and(|tenant| tenant.owner_id == user_id);
-    Ok(is_owner
-        || project_accessible_user_ids(db, project_id)
-            .await?
-            .contains(&user_id))
+        .is_some_and(|tenant| tenant.owner_id == user_id)
+    {
+        return Ok(true);
+    }
+    if is_tenant_member(db, tenant_id, user_id).await? {
+        return Ok(project_is_open_or_member(db, project_id, user_id).await?);
+    }
+    Ok(is_shared_project_explicit_member(db, project_id, user_id).await?)
 }
 
 /// 同じリポジトリの同じ SHA は 1 行にまとめ、その行の id を返す。
