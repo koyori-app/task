@@ -2,7 +2,11 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import IntegrationsSection from '../IntegrationsSection.vue';
-import { forgetSelectToken, stashSelectTokenFromUrl } from '@/lib/github-select-token';
+import {
+  forgetSelectToken,
+  keepSelectToken,
+  stashSelectTokenFromUrl,
+} from '@/lib/github-select-token';
 
 const TENANT_UUID = '11111111-1111-1111-1111-111111111111';
 const PROJECT_UUID = '00000000-0000-4000-8000-000000000010';
@@ -703,6 +707,35 @@ describe('IntegrationsSection', () => {
     const [connectCall] = requestsTo(fetchMock, '/github/connect');
     await expect(connectCall!.clone().json()).resolves.toMatchObject({
       select_token: REUSE_TOKEN,
+    });
+  });
+
+  it('再利用の選択中に別のアカウント・組織を追加して戻ったら、callback のトークンで選択 UI を出す', async () => {
+    // 再利用で受け取ったトークン（もう期限切れ）をタブ内に持ったまま、callback から戻ってきた
+    keepSelectToken(PROJECT_UUID, 'reuse-expired');
+    const fetchMock = stubFetch({
+      connected: false,
+      holdRepositories: {
+        token: 'reuse-expired',
+        response: Promise.resolve(jsonResponse({ message: 'error' }, 400)),
+      },
+    });
+    mountSection({ stashedToken: 'callback-token' });
+    await flushPromises();
+
+    expect(document.body.textContent).not.toContain('選択の有効期限が切れました');
+    expect(document.body.textContent).toContain('koyori-app/docs');
+    expect(
+      requestsTo(fetchMock, '/github/repositories').map((req) =>
+        req.headers.get('X-Github-Select-Token'),
+      ),
+    ).toEqual(['callback-token']);
+
+    clickSelectButton(1);
+    await flushPromises();
+    const [connectCall] = requestsTo(fetchMock, '/github/connect');
+    await expect(connectCall!.clone().json()).resolves.toMatchObject({
+      select_token: 'callback-token',
     });
   });
 
