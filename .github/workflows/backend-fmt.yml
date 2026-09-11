@@ -40,6 +40,9 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: apps/backend -> target
+          # キャッシュは main だけが書く。PR ごとに保存すると 10 GB の上限で main の分が追い出され、
+          # 全ジョブがコールドビルドになる（PR は main の分を読む）
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check formatting
         run: cargo fmt --all -- --check
