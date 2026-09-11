@@ -5,7 +5,7 @@ mod common;
 use common::{TestApp, TestTenantProject};
 use entity::{
     forge_commit_links, forge_commits, forge_webhook_deliveries, github_integrations,
-    oauth_connections, project_statuses, projects, task_activities, tasks,
+    oauth_connections, project_members, project_statuses, projects, task_activities, tasks,
 };
 use hmac::{Hmac, KeyInit, Mac};
 use job::github_webhook::{GithubWebhookJob, QUEUE_NAME};
@@ -451,6 +451,7 @@ async fn same_repository_linked_to_two_projects_links_once() {
 
 /// コミット作者のログイン名が Task ユーザーの GitHub 接続に一致すれば、履歴をそのユーザーの操作にする。
 /// 大文字小文字は区別しない。接続が無い作者と、リンク先のプロジェクトに入れない人は NULL のまま。
+/// テナントに所属せず共有プロジェクトに明示参加しているゲストは、そのプロジェクトでだけ解決される。
 #[tokio::test]
 async fn commit_author_resolves_to_linked_user_who_can_view_the_project() {
     let app = TestApp::new_with_github().await;
@@ -464,24 +465,51 @@ async fn commit_author_resolves_to_linked_user_who_can_view_the_project() {
     link_github_login(&app, fx.owner_id, &format!("owner-{unique}")).await;
     link_github_login(&app, outsider.id, &format!("outsider-{unique}")).await;
 
+    // テナントには居ない、共有プロジェクトへ明示参加しただけのゲスト。メンバー指定のあるプロジェクトは
+    // テナントメンバーに閉じるので、上のメンバーのケースと混ざらないよう別プロジェクトにする
+    let guest = app.insert_user(false, false).await;
+    link_github_login(&app, guest.id, &format!("guest-{unique}")).await;
+    let guest_key = format!("Q{}", &fx.key[1..]);
+    let guest_project = insert_project(&app, fx.tp.tenant_id, &guest_key).await;
+    let guest_status = insert_status(&app, guest_project).await;
+    project_members::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        project_id: Set(guest_project),
+        user_id: Set(guest.id),
+        role: Set(project_members::ProjectRole::Member),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert guest project member");
+
+    let main = (fx.tp.project_id, fx.status_id, fx.key.clone());
+    let guests = (guest_project, guest_status, guest_key);
     let cases = [
         // 大文字小文字違いでも一致する
-        (format!("Member-{}", unique.to_uppercase()), Some(member.id)),
+        (
+            &main,
+            format!("Member-{}", unique.to_uppercase()),
+            Some(member.id),
+        ),
         // テナントオーナーはどのプロジェクトも見られる
-        (format!("owner-{unique}"), Some(fx.owner_id)),
+        (&main, format!("owner-{unique}"), Some(fx.owner_id)),
         // GitHub を連携した Task ユーザーがいない
-        (format!("nobody-{unique}"), None),
+        (&main, format!("nobody-{unique}"), None),
         // 連携はしているが、リンク先のプロジェクトに入れない
-        (format!("outsider-{unique}"), None),
+        (&main, format!("outsider-{unique}"), None),
         // 作者のメールアドレスが GitHub アカウントに結び付いていない
-        (String::new(), None),
+        (&main, String::new(), None),
+        // ゲストは明示参加した共有プロジェクトで解決される
+        (&guests, format!("guest-{unique}"), Some(guest.id)),
+        // 対照: ゲストはテナント全体に開いたプロジェクトには入れない
+        (&main, format!("guest-{unique}"), None),
     ];
     let mut commits = Vec::new();
     let mut expected = Vec::new();
-    for (i, (author, user_id)) in cases.into_iter().enumerate() {
+    for (i, ((project_id, status_id, key), author, user_id)) in cases.into_iter().enumerate() {
         let seq = i as i32 + 1;
-        let task_id = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, seq).await;
-        let mut authored = commit(&format!("fix: {}-{seq}", fx.key));
+        let task_id = insert_task(&app, *project_id, *status_id, fx.owner_id, seq).await;
+        let mut authored = commit(&format!("fix: {key}-{seq}"));
         authored.author_handle = author.clone();
         commits.push(authored);
         expected.push((task_id, author, user_id));
@@ -498,6 +526,7 @@ async fn commit_author_resolves_to_linked_user_who_can_view_the_project() {
 
     app.cleanup_user(member.id).await;
     app.cleanup_user(outsider.id).await;
+    app.cleanup_user(guest.id).await;
     app.cleanup_user(fx.owner_id).await;
 }
 
