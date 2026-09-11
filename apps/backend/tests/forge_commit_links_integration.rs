@@ -5,7 +5,7 @@ mod common;
 use common::{TestApp, TestTenantProject};
 use entity::{
     forge_commit_links, forge_commits, forge_webhook_deliveries, github_integrations,
-    project_statuses, projects, task_activities, tasks,
+    oauth_connections, project_statuses, projects, task_activities, tasks,
 };
 use hmac::{Hmac, KeyInit, Mac};
 use job::github_webhook::{GithubWebhookJob, QUEUE_NAME};
@@ -92,6 +92,28 @@ async fn insert_integration(
     .insert(&app.state.db)
     .await
     .expect("insert integration");
+}
+
+/// Task ユーザーに GitHub を連携させる（OAuth ログインの代わりに接続行を直に入れる）。
+async fn link_github_login(app: &TestApp, user_id: Uuid, login: &str) {
+    let now = chrono::Utc::now();
+    oauth_connections::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        user_id: Set(user_id),
+        provider: Set("github".into()),
+        provider_user_id: Set(Uuid::new_v4().to_string()),
+        provider_email: Set(None),
+        instance_url: Set(None),
+        access_token_enc: Set(None),
+        refresh_token_enc: Set(None),
+        token_expires_at: Set(None),
+        created_at: Set(now.into()),
+        updated_at: Set(now.into()),
+        provider_login: Set(Some(login.to_lowercase())),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert oauth connection");
 }
 
 async fn insert_status(app: &TestApp, project_id: Uuid) -> Uuid {
@@ -334,6 +356,7 @@ async fn push_webhook_links_commit_once() {
     assert_eq!(commit_row.sha, sha);
     assert_eq!(commit_row.message, message, "実体はメッセージ全文を持つ");
     let activity = &activities[0];
+    // 作者（yupix）に GitHub を連携した Task ユーザーはいない
     assert_eq!(activity.user_id, None);
     assert_eq!(
         activity.dedupe_key.as_deref(),
@@ -423,6 +446,58 @@ async fn same_repository_linked_to_two_projects_links_once() {
         "コミット行は受信した連携ではなくリンク先タスクのプロジェクトに置く"
     );
 
+    app.cleanup_user(fx.owner_id).await;
+}
+
+/// コミット作者のログイン名が Task ユーザーの GitHub 接続に一致すれば、履歴をそのユーザーの操作にする。
+/// 大文字小文字は区別しない。接続が無い作者と、リンク先のプロジェクトに入れない人は NULL のまま。
+#[tokio::test]
+async fn commit_author_resolves_to_linked_user_who_can_view_the_project() {
+    let app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    let unique = Uuid::new_v4().simple().to_string()[..8].to_string();
+
+    let member = app.insert_user(false, false).await;
+    common::ensure_tenant_member_for_project(&app.state.db, fx.tp.project_id, member.id).await;
+    let outsider = app.insert_user(false, false).await;
+    link_github_login(&app, member.id, &format!("member-{unique}")).await;
+    link_github_login(&app, fx.owner_id, &format!("owner-{unique}")).await;
+    link_github_login(&app, outsider.id, &format!("outsider-{unique}")).await;
+
+    let cases = [
+        // 大文字小文字違いでも一致する
+        (format!("Member-{}", unique.to_uppercase()), Some(member.id)),
+        // テナントオーナーはどのプロジェクトも見られる
+        (format!("owner-{unique}"), Some(fx.owner_id)),
+        // GitHub を連携した Task ユーザーがいない
+        (format!("nobody-{unique}"), None),
+        // 連携はしているが、リンク先のプロジェクトに入れない
+        (format!("outsider-{unique}"), None),
+        // 作者のメールアドレスが GitHub アカウントに結び付いていない
+        (String::new(), None),
+    ];
+    let mut commits = Vec::new();
+    let mut expected = Vec::new();
+    for (i, (author, user_id)) in cases.into_iter().enumerate() {
+        let seq = i as i32 + 1;
+        let task_id = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, seq).await;
+        let mut authored = commit(&format!("fix: {}-{seq}", fx.key));
+        authored.author_handle = author.clone();
+        commits.push(authored);
+        expected.push((task_id, author, user_id));
+    }
+    apply_push(&app.state.db, fx.tp.project_id, &repo(), &commits)
+        .await
+        .expect("apply push");
+
+    for (task_id, author, user_id) in expected {
+        let activities = commit_activities(&app, task_id).await;
+        assert_eq!(activities.len(), 1, "author_handle = {author:?}");
+        assert_eq!(activities[0].user_id, user_id, "author_handle = {author:?}");
+    }
+
+    app.cleanup_user(member.id).await;
+    app.cleanup_user(outsider.id).await;
     app.cleanup_user(fx.owner_id).await;
 }
 

@@ -672,7 +672,7 @@ async fn resolve_user_and_connection(
             return Err(OAuthError::ConnectionExists);
         }
         let user_id = conn.user_id;
-        update_connection_tokens(state, conn, token).await?;
+        update_connection_tokens(state, conn, provider_info, token).await?;
         return Ok(user_id);
     }
 
@@ -799,6 +799,7 @@ async fn insert_connection_txn(
     };
 
     let now = Utc::now();
+    let login = provider_login(provider_info);
     let connection = oauth_connections::ActiveModel {
         id: Set(Uuid::new_v4()),
         user_id: Set(user_id),
@@ -811,8 +812,12 @@ async fn insert_connection_txn(
         token_expires_at: Set(token.expires_at.map(Into::into)),
         created_at: Set(now.into()),
         updated_at: Set(now.into()),
+        provider_login: Set(login.clone()),
     };
 
+    if let Some(login) = &login {
+        release_provider_login(db, provider, instance_url, login, None).await?;
+    }
     oauth_connections::Entity::insert(connection)
         .exec(db)
         .await
@@ -827,9 +832,46 @@ async fn insert_connection_txn(
     Ok(())
 }
 
+/// 接続に控えるログイン名。GitHub のログイン名は大文字小文字を区別しないので小文字に揃える。
+fn provider_login(provider_info: &ProviderUserInfo) -> Option<String> {
+    let login = provider_info.username.trim().to_lowercase();
+    (!login.is_empty()).then_some(login)
+}
+
+/// 同じプロバイダー・インスタンスで `login` を控えている別の接続から、その控えを外す。
+///
+/// ログイン名は改名で別の人に移るので、新しく控える前に前の持ち主から外す。一意性はこれと
+/// コミット作者の解決側の「ちょうど 1 件のときだけ採る」で保ち、UNIQUE 制約は張らない
+/// （entity は `provider` を含む 2 つ目の複合 UNIQUE を表せず、起動時の schema sync が消す）。
+async fn release_provider_login(
+    db: &impl sea_orm::ConnectionTrait,
+    provider: &str,
+    instance_url: Option<&str>,
+    login: &str,
+    keep: Option<Uuid>,
+) -> Result<(), sea_orm::DbErr> {
+    let mut update = oauth_connections::Entity::update_many()
+        .col_expr(
+            oauth_connections::Column::ProviderLogin,
+            sea_orm::sea_query::Expr::value(Option::<String>::None),
+        )
+        .filter(oauth_connections::Column::Provider.eq(provider))
+        .filter(oauth_connections::Column::ProviderLogin.eq(login));
+    update = match instance_url {
+        Some(url) => update.filter(oauth_connections::Column::InstanceUrl.eq(url)),
+        None => update.filter(oauth_connections::Column::InstanceUrl.is_null()),
+    };
+    if let Some(keep) = keep {
+        update = update.filter(oauth_connections::Column::Id.ne(keep));
+    }
+    update.exec(db).await?;
+    Ok(())
+}
+
 async fn update_connection_tokens(
     state: &AppState,
     conn: oauth_connections::Model,
+    provider_info: &ProviderUserInfo,
     token: &TokenResponse,
 ) -> Result<(), OAuthError> {
     let access_token_enc = encrypt_token(&state.oauth_settings.encryption_key, &token.access_token)
@@ -842,7 +884,21 @@ async fn update_connection_tokens(
         None => conn.refresh_token_enc.clone(),
     };
 
+    // 改名していれば新しい名前に付け替える（ログインのたびに控え直す）
+    let login = provider_login(provider_info);
+    if let Some(login) = &login {
+        release_provider_login(
+            &state.db,
+            &conn.provider,
+            conn.instance_url.as_deref(),
+            login,
+            Some(conn.id),
+        )
+        .await?;
+    }
+
     let mut active: oauth_connections::ActiveModel = conn.into();
+    active.provider_login = Set(login);
     active.access_token_enc = Set(Some(access_token_enc));
     active.refresh_token_enc = Set(refresh_token_enc);
     active.token_expires_at = Set(token.expires_at.map(Into::into));
@@ -878,6 +934,7 @@ async fn create_oauth_user_and_connection(
         None => None,
     };
     let now = Utc::now();
+    let login = provider_login(provider_info);
 
     let user = users::ActiveModel {
         id: Set(user_id),
@@ -904,7 +961,10 @@ async fn create_oauth_user_and_connection(
         token_expires_at: Set(token.expires_at.map(Into::into)),
         created_at: Set(now.into()),
         updated_at: Set(now.into()),
+        provider_login: Set(login.clone()),
     };
+    let provider = db_provider.to_string();
+    let instance_url = instance_url.map(str::to_string);
 
     with_transaction::<Uuid, OAuthError, _>(&state.db, |txn| {
         Box::pin(async move {
@@ -915,6 +975,10 @@ async fn create_oauth_user_and_connection(
                 return Err(OAuthError::Internal(e.into()));
             }
 
+            if let Some(login) = &login {
+                release_provider_login(txn, &provider, instance_url.as_deref(), login, None)
+                    .await?;
+            }
             oauth_connections::Entity::insert(connection)
                 .exec(txn)
                 .await

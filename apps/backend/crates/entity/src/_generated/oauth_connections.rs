@@ -23,6 +23,7 @@ pub struct Model {
     pub token_expires_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    pub provider_login: Option<String>,
     #[sea_orm(
         belongs_to,
         from = "user_id",
