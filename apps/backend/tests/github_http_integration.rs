@@ -1983,4 +1983,105 @@ async fn github_http_integration_suite() {
         app.cleanup_user(user.id).await;
         app.reset_session_client();
     }
+
+    // 15. callback の自動接続で、ロック内でのトークン取り直しだけが失敗しても、素の 500 を
+    // 返さず設定画面へ理由付きで戻す。一時障害なら installation を控え、鮮度が切れても再試行できる。
+    {
+        let user = app.insert_user(false, false).await;
+        let tp = app.insert_tenant_project(user.id).await;
+        app.login_session(&user.email, &user.password).await;
+
+        // 1 回目（callback 本体での取得）は通し、2 回目（ロック内での取り直し）だけ失敗させる
+        let fail_second_access_token = async |installation_id: i64, failure: ResponseTemplate| {
+            override_access_token(
+                &mock_server,
+                installation_id,
+                ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                    "token": "ghs_test_installation_token",
+                    "expires_at": "2030-01-01T00:00:00Z"
+                })),
+                Some(1),
+            )
+            .await;
+            Mock::given(method("POST"))
+                .and(path(format!(
+                    "/app/installations/{installation_id}/access_tokens"
+                )))
+                .respond_with(failure)
+                .up_to_n_times(1)
+                .with_priority(2)
+                .mount(&mock_server)
+                .await;
+        };
+        let callback_location = async |installation_id: i64| -> String {
+            let state_token = get_install_state(&app, &tp).await;
+            let response = app
+                .get_with_session(&callback_path(&state_token, installation_id))
+                .await;
+            let status = response.status();
+            assert!(
+                status == StatusCode::FOUND || status == StatusCode::TEMPORARY_REDIRECT,
+                "callback should redirect, got {status}"
+            );
+            response
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+                .expect("location header")
+        };
+
+        let flaky_id = unique_installation_id();
+        fail_second_access_token(flaky_id, ResponseTemplate::new(502)).await;
+        let location = callback_location(flaky_id).await;
+        assert!(
+            location.contains("github_error=github_unavailable"),
+            "unexpected redirect location: {location}"
+        );
+        assert!(find_integration(&app, &tp).await.is_none());
+        assert_eq!(
+            github_oauth_state::peek_pending_installation(&app.state.redis_client, tp.project_id)
+                .await
+                .expect("peek pending installation"),
+            Some(flaky_id),
+            "再試行が鮮度チェックで弾かれないよう控える"
+        );
+
+        // 取り直しが通れば、同じインストールで連携できる
+        let retry = callback_location(flaky_id).await;
+        assert!(
+            !retry.contains("github_error="),
+            "unexpected redirect location: {retry}"
+        );
+        assert_eq!(
+            find_integration(&app, &tp)
+                .await
+                .expect("integration row")
+                .installation_id,
+            flaky_id
+        );
+        assert_eq!(
+            app.delete_with_session(&integration_path(&tp))
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+
+        // 取り直しの間に GitHub 側で消えたインストールは、拒否として戻す
+        let gone_id = unique_installation_id();
+        fail_second_access_token(
+            gone_id,
+            ResponseTemplate::new(404).set_body_string("Not Found"),
+        )
+        .await;
+        let location = callback_location(gone_id).await;
+        assert!(
+            location.contains("github_error=installation_rejected"),
+            "unexpected redirect location: {location}"
+        );
+        assert!(find_integration(&app, &tp).await.is_none());
+
+        app.cleanup_user(user.id).await;
+        app.reset_session_client();
+    }
 }

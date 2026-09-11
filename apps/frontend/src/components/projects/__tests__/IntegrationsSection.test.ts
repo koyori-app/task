@@ -36,6 +36,8 @@ type MockState = {
   installationsStatus?: number;
   /** 400 以上を設定すると POST /github/reuse が失敗する */
   reuseStatus?: number;
+  /** このトークンの GET /github/repositories だけ、response が解決するまで返さない */
+  holdRepositories?: { token: string; response: Promise<Response> };
 };
 
 const DEFAULT_REPOSITORIES = [
@@ -80,6 +82,13 @@ function stubFetch(state: MockState) {
       );
     }
     if (method === 'GET' && pathname.endsWith('/github/repositories')) {
+      const held = state.holdRepositories;
+      if (
+        held &&
+        typeof req !== 'string' &&
+        req.headers.get('X-Github-Select-Token') === held.token
+      )
+        return held.response;
       if (state.repositoriesStatus)
         return jsonResponse({ message: 'error' }, state.repositoriesStatus);
       return jsonResponse({ repositories: state.repositories ?? DEFAULT_REPOSITORIES });
@@ -657,6 +666,44 @@ describe('IntegrationsSection', () => {
     await flushPromises();
     await flushPromises();
     expect(document.body.textContent).toContain('を連携中');
+  });
+
+  it('再読み込み中に候補を選び直しても、古いトークンの応答で新しいトークンと一覧を消さない', async () => {
+    let releaseStale!: (response: Response) => void;
+    const state: MockState = { connected: false, installations: [REUSE_CANDIDATE] };
+    const fetchMock = stubFetch(state);
+    mountSection({ selectToken: 'select-token-1' });
+    await flushPromises();
+    expect(document.body.textContent).toContain('koyori-app/docs');
+
+    // 古いトークンでの再読み込みが返らないうちに、候補から選び直す
+    state.holdRepositories = {
+      token: 'select-token-1',
+      response: new Promise((resolve) => {
+        releaseStale = resolve;
+      }),
+    };
+    clickBodyButton('再読み込み');
+    await flushPromises();
+    clickBodyButton('連携する');
+    await flushPromises();
+    clickBodyButton('これを使う');
+    await flushPromises();
+    expect(document.body.textContent).toContain('koyori-app/docs');
+
+    // 古いトークンの応答が、期限切れとして遅れて届く
+    releaseStale(jsonResponse({ message: 'error' }, 400));
+    await flushPromises();
+
+    expect(document.body.textContent).not.toContain('選択の有効期限が切れました');
+    expect(document.body.textContent).toContain('koyori-app/docs');
+
+    clickSelectButton(1);
+    await flushPromises();
+    const [connectCall] = requestsTo(fetchMock, '/github/connect');
+    await expect(connectCall!.clone().json()).resolves.toMatchObject({
+      select_token: REUSE_TOKEN,
+    });
   });
 
   it('再利用の選択トークンが切れたら、同じ候補から選び直して再開できる', async () => {

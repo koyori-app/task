@@ -464,7 +464,7 @@ pub async fn github_callback(
         );
     };
 
-    if let Err(e) = upsert_integration(
+    match upsert_integration(
         &state,
         github,
         payload.project_id,
@@ -475,12 +475,22 @@ pub async fn github_callback(
     )
     .await
     {
-        tracing::warn!(
-            project_id = %payload.project_id,
-            repo = %format!("{}/{}", repo.owner, repo.name),
-            "github callback: upsert_integration failed"
-        );
-        return Err(e);
+        Ok(Ok(())) => {}
+        // ロック内でのトークンの取り直しに失敗した。上の取得失敗と同じく、素のエラーではなく
+        // 設定画面へ理由付きで戻す（一時障害なら控えて、鮮度が切れても再試行できるようにする）。
+        Ok(Err(e)) if is_installation_gone(&e) => {
+            tracing::warn!(error = %e, "github callback: installation disappeared while connecting");
+            return callback_error_redirect(&redirect_to, "installation_rejected");
+        }
+        Ok(Err(e)) => return unavailable(e).await,
+        Err(e) => {
+            tracing::warn!(
+                project_id = %payload.project_id,
+                repo = %format!("{}/{}", repo.owner, repo.name),
+                "github callback: upsert_integration failed"
+            );
+            return Err(e);
+        }
     }
     // TODO(調査用ログ): 切り分けが済んだら削除する
     tracing::info!(
@@ -508,6 +518,10 @@ pub async fn github_callback(
 /// 取ってから書き込む。解除側が「共有判定 → アンインストール → 行削除」を行う間に
 /// ここが連携行を増減させると、アンインストール済みの installation を指す行だけが
 /// 残る（またはその逆の）競合が成立するため、installation の全変更経路で直列化する。
+///
+/// 内側の `Err` はロック内での Installation Access Token の取り直しの失敗（GitHub 側の
+/// 消滅か一時障害）。呼び出し元ごとに復旧の仕方が違う（callback は設定画面へ理由付きで
+/// 戻す、選択確定 API はステータスで返す）ので、DB などの失敗（外側の `Err`）と分けて返す。
 async fn upsert_integration(
     state: &AppState,
     github: &GithubAppSettings,
@@ -516,7 +530,7 @@ async fn upsert_integration(
     installation_id: i64,
     repo_owner: &str,
     repo_name: &str,
-) -> Result<(), AppError> {
+) -> Result<Result<(), anyhow::Error>, AppError> {
     let app = github_app(&state.http_client, github);
     let now = chrono::Utc::now();
 
@@ -563,21 +577,17 @@ async fn upsert_integration(
         // インストールがまだ使えることはロックの内側で確かめ、そのトークンを保存する。
         // ロックの外で済ませると、その後に最後の参照の解除がアンインストールまで終えた
         // installation へ連携行を作ってしまう（解除は同じロック下で GitHub 側を消す）。
-        let access = app
-            .installation_access_token(installation_id)
-            .await
-            .map_err(|e| {
+        let access = match app.installation_access_token(installation_id).await {
+            Ok(access) => access,
+            Err(e) => {
                 tracing::warn!(
                     error = %e,
                     installation_id,
                     "github installation access token failed while connecting"
                 );
-                if is_installation_gone(&e) {
-                    AppError::BadRequest
-                } else {
-                    AppError::Internal(e)
-                }
-            })?;
+                return Ok(Err(e));
+            }
+        };
         let token_enc =
             auth_core::crypto::encrypt_token(&github.github_token_encryption_key, &access.token)
                 .map_err(AppError::Internal)?;
@@ -616,7 +626,7 @@ async fn upsert_integration(
             .await?;
         }
         txn.commit().await?;
-        return Ok(());
+        return Ok(Ok(()));
     }
 }
 
@@ -823,7 +833,7 @@ pub async fn connect_github_repository(
         return Err(AppError::BadRequest);
     };
 
-    if let Err(e) = upsert_integration(
+    let upserted = match upsert_integration(
         &state,
         github,
         project_id,
@@ -834,6 +844,14 @@ pub async fn connect_github_repository(
     )
     .await
     {
+        Ok(Ok(())) => Ok(()),
+        // インストールがもう無ければ選択トークンは死んでいるので 4xx。
+        // 一時障害まで 4xx にすると、フロントが有効なトークンを捨ててしまう。
+        Ok(Err(e)) if is_installation_gone(&e) => Err(AppError::BadRequest),
+        Ok(Err(e)) => Err(AppError::Internal(e)),
+        Err(e) => Err(e),
+    };
+    if let Err(e) = upserted {
         // 連携できていないので、選び直せるようにトークンを戻す（有効期限は延ばさない）。
         if let Err(restore_err) = install_state::restore_select_token(
             &state.redis_client,

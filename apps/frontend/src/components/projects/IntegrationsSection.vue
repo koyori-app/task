@@ -133,10 +133,17 @@ function clearCallbackQuery() {
   window.history.replaceState(window.history.state, '', url);
 }
 
+/**
+ * 一覧取得の世代。再読み込みや候補の選び直しで次の取得が始まったら、前の応答は捨てる
+ * （古いトークンの期限切れ応答が遅れて届き、新しいトークンと一覧を消さないように）。
+ */
+let repositoriesRequest = 0;
+
 /** 選択トークンが切れていたら選択 UI を畳んで未連携表示に戻す */
 async function loadRepositories() {
   const token = selectToken.value;
   if (!token) return;
+  const request = ++repositoriesRequest;
   selectError.value = null;
   selectPending.value = true;
   try {
@@ -148,6 +155,7 @@ async function loadRepositories() {
         header: { 'X-Github-Select-Token': token },
       },
     });
+    if (request !== repositoriesRequest) return;
     if (error || !data) {
       // 4xx はトークンが無効（期限切れ・使用済み）。それ以外は一時障害なので
       // トークンを捨てず、再試行させる。
@@ -165,9 +173,9 @@ async function loadRepositories() {
     }
     repositories.value = data.repositories;
   } catch {
-    selectError.value = 'リポジトリ一覧を取得できませんでした';
+    if (request === repositoriesRequest) selectError.value = 'リポジトリ一覧を取得できませんでした';
   } finally {
-    selectPending.value = false;
+    if (request === repositoriesRequest) selectPending.value = false;
   }
 }
 
