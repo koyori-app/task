@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -42,6 +43,30 @@ pub struct GithubRepositoryItem {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct GithubRepositoriesResponse {
     pub repositories: Vec<GithubRepositoryItem>,
+}
+
+/// 同じテナントで利用中の GitHub インストール（再利用候補）。
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GithubReusableInstallationItem {
+    /// 代表となる既存連携行の ID。`POST /github/reuse` に渡す。
+    pub source_integration_id: Uuid,
+    /// 表示名（既存連携行のリポジトリオーナー）。
+    pub account_login: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GithubReusableInstallationsResponse {
+    pub installations: Vec<GithubReusableInstallationItem>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct GithubReuseRequest {
+    pub source_integration_id: Uuid,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GithubReuseResponse {
+    pub select_token: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

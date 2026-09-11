@@ -30,12 +30,24 @@ type MockState = {
   hangImport?: boolean;
   /** 連携先リポジトリ名（差し替えると連携先が変わった状況を作れる） */
   repoName?: string;
+  /** GET /github/installations が返す再利用候補（省略時は 0 件） */
+  installations?: { source_integration_id: string; account_login: string }[];
+  /** 400 以上を設定すると GET /github/installations が失敗する */
+  installationsStatus?: number;
+  /** 400 以上を設定すると POST /github/reuse が失敗する */
+  reuseStatus?: number;
 };
 
 const DEFAULT_REPOSITORIES = [
   { owner: 'koyori-app', name: 'koyori' },
   { owner: 'koyori-app', name: 'docs' },
 ];
+
+const REUSE_CANDIDATE = {
+  source_integration_id: '00000000-0000-4000-8000-0000000000aa',
+  account_login: 'acme-org',
+};
+const REUSE_TOKEN = 'reuse-token-1';
 
 const jsonResponse = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -71,6 +83,15 @@ function stubFetch(state: MockState) {
       if (state.repositoriesStatus)
         return jsonResponse({ message: 'error' }, state.repositoriesStatus);
       return jsonResponse({ repositories: state.repositories ?? DEFAULT_REPOSITORIES });
+    }
+    if (method === 'GET' && pathname.endsWith('/github/installations')) {
+      if (state.installationsStatus)
+        return jsonResponse({ message: 'error' }, state.installationsStatus);
+      return jsonResponse({ installations: state.installations ?? [] });
+    }
+    if (method === 'POST' && pathname.endsWith('/github/reuse')) {
+      if (state.reuseStatus) return jsonResponse({ message: 'error' }, state.reuseStatus);
+      return jsonResponse({ select_token: REUSE_TOKEN });
     }
     if (method === 'POST' && pathname.endsWith('/github/connect')) {
       if (state.connectStatus) return jsonResponse({ message: 'error' }, state.connectStatus);
@@ -139,6 +160,14 @@ function mountSection(
 async function passImportCooldown() {
   await vi.advanceTimersByTimeAsync(61_000);
   await flushPromises();
+}
+
+/** パスの末尾で絞る（`/github/install` と `/github/installations` を取り違えない） */
+function requestsTo(fetchMock: ReturnType<typeof stubFetch>, suffix: string) {
+  return fetchMock.mock.calls
+    .map(([req]) => req)
+    .filter((req): req is Request => typeof req !== 'string')
+    .filter((req) => new URL(req.url, 'http://localhost').pathname.endsWith(suffix));
 }
 
 function bodyButton(label: string) {
@@ -418,7 +447,7 @@ describe('IntegrationsSection', () => {
     expect(bodyButton('Issue を取り込む')).toBeUndefined();
   });
 
-  it('「連携する」でインストール URL を取得して GitHub へ遷移する', async () => {
+  it('候補が無ければ理由を出し、「別の GitHub アカウント・組織を追加」で GitHub へ遷移する', async () => {
     const fetchMock = stubFetch({ connected: false });
     const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
     mountSection();
@@ -427,11 +456,14 @@ describe('IntegrationsSection', () => {
     clickBodyButton('連携する');
     await flushPromises();
 
-    const installCall = fetchMock.mock.calls
-      .map(([req]) => req)
-      .filter((req): req is Request => typeof req !== 'string')
-      .find((req) => req.url.includes('/github/install'));
-    expect(installCall).toBeTruthy();
+    expect(document.body.textContent).toContain('利用中の GitHub アカウント・組織はありません');
+    // 「連携する」を押しただけでは GitHub へ進まない
+    expect(assignSpy).not.toHaveBeenCalled();
+
+    clickBodyButton('別の GitHub アカウント・組織を追加');
+    await flushPromises();
+
+    const [installCall] = requestsTo(fetchMock, '/github/install');
     expect(installCall!.url).toContain(`/tenants/${TENANT_UUID}/projects/${PROJECT_UUID}/`);
     expect(assignSpy).toHaveBeenCalledWith(INSTALL_URL);
   });
@@ -444,11 +476,213 @@ describe('IntegrationsSection', () => {
 
     clickBodyButton('連携する');
     await flushPromises();
+    clickBodyButton('別の GitHub アカウント・組織を追加');
+    await flushPromises();
 
     expect(document.body.textContent).toContain('GitHub のインストール URL を取得できませんでした');
     expect(assignSpy).not.toHaveBeenCalled();
     // 失敗後は再度押せる
-    expect(bodyButton('連携する')?.disabled).toBe(false);
+    expect(bodyButton('別の GitHub アカウント・組織を追加')?.disabled).toBe(false);
+  });
+
+  it('「連携する」→ 候補取得 → 再利用 → リポジトリ選択 → 接続を、GitHub へ遷移せずに通す', async () => {
+    const fetchMock = stubFetch({ connected: false, installations: [REUSE_CANDIDATE] });
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    mountSection();
+    await flushPromises();
+
+    clickBodyButton('連携する');
+    await flushPromises();
+    expect(document.body.textContent).toContain('acme-org');
+    // 候補を選ぶ間も、別のアカウント・組織を足す経路は残す
+    expect(bodyButton('別の GitHub アカウント・組織を追加')).toBeTruthy();
+
+    clickBodyButton('これを使う');
+    await flushPromises();
+
+    const [reuseCall] = requestsTo(fetchMock, '/github/reuse');
+    expect(reuseCall!.method).toBe('POST');
+    await expect(reuseCall!.clone().json()).resolves.toEqual({
+      source_integration_id: REUSE_CANDIDATE.source_integration_id,
+    });
+    const [listCall] = requestsTo(fetchMock, '/github/repositories');
+    expect(listCall!.headers.get('X-Github-Select-Token')).toBe(REUSE_TOKEN);
+    expect(document.body.textContent).toContain('koyori-app/docs');
+
+    clickSelectButton(1);
+    await flushPromises();
+
+    const [connectCall] = requestsTo(fetchMock, '/github/connect');
+    await expect(connectCall!.clone().json()).resolves.toEqual({
+      select_token: REUSE_TOKEN,
+      repo_owner: 'koyori-app',
+      repo_name: 'docs',
+    });
+
+    // 接続後は連携状態を取り直し、候補と選択 UI を片付ける
+    await flushPromises();
+    expect(document.body.textContent).toContain('を連携中');
+    expect(document.body.textContent).not.toContain('GitHub アカウント・組織を選択');
+    expect(document.body.textContent).not.toContain('連携するリポジトリを選択');
+
+    expect(requestsTo(fetchMock, '/github/install')).toHaveLength(0);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it('候補の取得に失敗しても GitHub へ転送せず、再試行で回復する', async () => {
+    const state: MockState = {
+      connected: false,
+      installations: [REUSE_CANDIDATE],
+      installationsStatus: 500,
+    };
+    stubFetch(state);
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    mountSection();
+    await flushPromises();
+
+    clickBodyButton('連携する');
+    await flushPromises();
+
+    expect(document.body.textContent).toContain(
+      '利用中の GitHub アカウント・組織を取得できませんでした',
+    );
+    // 0 件と取り違えない
+    expect(document.body.textContent).not.toContain('利用中の GitHub アカウント・組織はありません');
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(bodyButton('別の GitHub アカウント・組織を追加')).toBeTruthy();
+
+    state.installationsStatus = undefined;
+    clickBodyButton('再試行');
+    await flushPromises();
+
+    expect(document.body.textContent).toContain('acme-org');
+    expect(document.body.textContent).not.toContain('取得できませんでした');
+  });
+
+  it('再利用元の連携が解除されていたら（404）候補を取り直す', async () => {
+    const state: MockState = {
+      connected: false,
+      installations: [REUSE_CANDIDATE],
+      reuseStatus: 404,
+    };
+    const fetchMock = stubFetch(state);
+    mountSection();
+    await flushPromises();
+
+    clickBodyButton('連携する');
+    await flushPromises();
+    state.installations = [];
+    clickBodyButton('これを使う');
+    await flushPromises();
+
+    expect(requestsTo(fetchMock, '/github/installations')).toHaveLength(2);
+    expect(document.body.textContent).toContain('候補を読み込み直した');
+    expect(document.body.textContent).toContain('利用中の GitHub アカウント・組織はありません');
+    expect(document.body.textContent).not.toContain('連携するリポジトリを選択');
+  });
+
+  it('GitHub 側で削除済みのインストール（410）は、別のアカウント・組織の追加を案内する', async () => {
+    stubFetch({ connected: false, installations: [REUSE_CANDIDATE], reuseStatus: 410 });
+    mountSection();
+    await flushPromises();
+
+    clickBodyButton('連携する');
+    await flushPromises();
+    clickBodyButton('これを使う');
+    await flushPromises();
+
+    expect(document.body.textContent).toContain('GitHub App が削除されています');
+    expect(document.body.textContent).not.toContain('連携するリポジトリを選択');
+    expect(bodyButton('別の GitHub アカウント・組織を追加')).toBeTruthy();
+  });
+
+  it('再利用の開始が一時障害（5xx）なら候補を残し、押し直せば続けられる', async () => {
+    const state: MockState = {
+      connected: false,
+      installations: [REUSE_CANDIDATE],
+      reuseStatus: 502,
+    };
+    stubFetch(state);
+    mountSection();
+    await flushPromises();
+
+    clickBodyButton('連携する');
+    await flushPromises();
+    clickBodyButton('これを使う');
+    await flushPromises();
+    expect(document.body.textContent).toContain('もう一度お試しください');
+
+    state.reuseStatus = undefined;
+    clickBodyButton('これを使う');
+    await flushPromises();
+    expect(document.body.textContent).toContain('koyori-app/docs');
+  });
+
+  it('リポジトリが無ければ GitHub を別タブで開き、callback を待たずに再読み込みで続けられる', async () => {
+    const state: MockState = {
+      connected: false,
+      installations: [REUSE_CANDIDATE],
+      repositories: [],
+    };
+    stubFetch(state);
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    const tab = { opener: window as Window | null, location: { href: '' }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => tab as unknown as Window);
+    mountSection();
+    await flushPromises();
+
+    clickBodyButton('連携する');
+    await flushPromises();
+    clickBodyButton('これを使う');
+    await flushPromises();
+    expect(document.body.textContent).toContain('選択できるリポジトリがありません');
+
+    clickBodyButton('GitHub でアクセス対象を追加');
+    await flushPromises();
+    expect(openSpy).toHaveBeenCalledWith('', '_blank');
+    expect(tab.opener).toBeNull();
+    expect(tab.location.href).toBe(INSTALL_URL);
+    // 元のタブは移動しない（選択状態を残す）
+    expect(assignSpy).not.toHaveBeenCalled();
+
+    // GitHub 側でリポジトリを追加した
+    state.repositories = DEFAULT_REPOSITORIES;
+    clickBodyButton('再読み込み');
+    await flushPromises();
+    expect(document.body.textContent).toContain('koyori-app/docs');
+
+    clickSelectButton(0);
+    await flushPromises();
+    await flushPromises();
+    expect(document.body.textContent).toContain('を連携中');
+  });
+
+  it('再利用の選択トークンが切れたら、同じ候補から選び直して再開できる', async () => {
+    const state: MockState = {
+      connected: false,
+      installations: [REUSE_CANDIDATE],
+      repositoriesStatus: 400,
+    };
+    const fetchMock = stubFetch(state);
+    mountSection();
+    await flushPromises();
+
+    clickBodyButton('連携する');
+    await flushPromises();
+    clickBodyButton('これを使う');
+    await flushPromises();
+    expect(document.body.textContent).toContain('もう一度アカウント・組織を選んでください');
+    expect(document.body.textContent).toContain('acme-org');
+
+    state.repositoriesStatus = undefined;
+    clickBodyButton('これを使う');
+    await flushPromises();
+
+    expect(requestsTo(fetchMock, '/github/reuse')).toHaveLength(2);
+    expect(document.body.textContent).toContain('koyori-app/docs');
+    expect(document.body.textContent).not.toContain('選択の有効期限が切れました');
   });
 
   it('解除フロー: 確認ダイアログ → 解除する → DELETE 後に未連携表示へ戻る', async () => {

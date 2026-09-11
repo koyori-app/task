@@ -2,14 +2,14 @@ use axum::{
     Json,
     body::Bytes,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
 };
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::prelude::Uuid;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QuerySelect,
-    TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, TransactionTrait,
 };
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
@@ -472,7 +472,6 @@ pub async fn github_callback(
         query.installation_id,
         &repo.owner,
         &repo.name,
-        &access,
     )
     .await
     {
@@ -509,7 +508,6 @@ pub async fn github_callback(
 /// 取ってから書き込む。解除側が「共有判定 → アンインストール → 行削除」を行う間に
 /// ここが連携行を増減させると、アンインストール済みの installation を指す行だけが
 /// 残る（またはその逆の）競合が成立するため、installation の全変更経路で直列化する。
-#[allow(clippy::too_many_arguments)]
 async fn upsert_integration(
     state: &AppState,
     github: &GithubAppSettings,
@@ -518,12 +516,8 @@ async fn upsert_integration(
     installation_id: i64,
     repo_owner: &str,
     repo_name: &str,
-    access: &forge_github::InstallationAccessToken,
 ) -> Result<(), AppError> {
-    let token_enc =
-        auth_core::crypto::encrypt_token(&github.github_token_encryption_key, &access.token)
-            .map_err(AppError::Internal)?;
-
+    let app = github_app(&state.http_client, github);
     let now = chrono::Utc::now();
 
     // ロックすべき「現在行の installation_id」は読むまで分からないので、
@@ -565,6 +559,28 @@ async fn upsert_integration(
             txn.rollback().await?;
             continue;
         }
+
+        // インストールがまだ使えることはロックの内側で確かめ、そのトークンを保存する。
+        // ロックの外で済ませると、その後に最後の参照の解除がアンインストールまで終えた
+        // installation へ連携行を作ってしまう（解除は同じロック下で GitHub 側を消す）。
+        let access = app
+            .installation_access_token(installation_id)
+            .await
+            .map_err(|e| {
+                tracing::warn!(
+                    error = %e,
+                    installation_id,
+                    "github installation access token failed while connecting"
+                );
+                if is_installation_gone(&e) {
+                    AppError::BadRequest
+                } else {
+                    AppError::Internal(e)
+                }
+            })?;
+        let token_enc =
+            auth_core::crypto::encrypt_token(&github.github_token_encryption_key, &access.token)
+                .map_err(AppError::Internal)?;
 
         if let Some(model) = existing {
             // 再連携: created_by / created_at は変更しない
@@ -777,7 +793,7 @@ pub async fn connect_github_repository(
     let stored = install_state::peek_select_token(&state.redis_client, &body.select_token)
         .await
         .map_err(AppError::Internal)?;
-    let (payload, repositories, access) =
+    let (payload, repositories, _) =
         resolve_select_token(&state, &auth, tenant_id, project_id, stored).await?;
 
     // 別タブに残った古い選択トークンで、連携先が黙って巻き戻るのを防ぐ。
@@ -815,7 +831,6 @@ pub async fn connect_github_repository(
         claimed.installation_id,
         &body.repo_owner,
         &body.repo_name,
-        &access,
     )
     .await
     {
@@ -846,6 +861,126 @@ pub async fn connect_github_repository(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    get,
+    path = "/installations",
+    tag = "GitHub",
+    summary = "同じテナントで利用中の GitHub インストール一覧（再利用候補）",
+    params(
+        ("tenant_id" = Uuid, Path),
+        ("project_id" = Uuid, Path),
+    ),
+    responses((status = 200, body = GithubReusableInstallationsResponse), CrudErrors)
+)]
+pub async fn list_reusable_github_installations(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<GithubReusableInstallationsResponse>, AppError> {
+    state.settings.require_github_app()?;
+    auth.require_session()?;
+    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
+    require_project_in_tenant(&state, tenant_id, project_id).await?;
+
+    // 候補はこのテナントの連携行だけから作る（App 全体のインストール一覧は見せない）。
+    // 同じ installation を複数プロジェクトが使っていても 1 件にまとめ、最初の連携行を代表にする。
+    let rows = github_integrations::Entity::find()
+        .inner_join(projects::Entity)
+        .filter(projects::Column::TenantId.eq(tenant_id))
+        .order_by_asc(github_integrations::Column::CreatedAt)
+        .order_by_asc(github_integrations::Column::Id)
+        .all(&state.db)
+        .await?;
+    let mut seen = std::collections::HashSet::new();
+    let installations = rows
+        .into_iter()
+        .filter(|row| seen.insert(row.installation_id))
+        .map(|row| GithubReusableInstallationItem {
+            source_integration_id: row.id,
+            account_login: row.repo_owner,
+        })
+        .collect();
+
+    Ok(Json(GithubReusableInstallationsResponse { installations }))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    post,
+    path = "/reuse",
+    tag = "GitHub",
+    summary = "同じテナントで利用中のインストールからリポジトリ選択を開始",
+    params(
+        ("tenant_id" = Uuid, Path),
+        ("project_id" = Uuid, Path),
+    ),
+    request_body = GithubReuseRequest,
+    responses(
+        (status = 200, body = GithubReuseResponse, description = "選択トークン"),
+        (status = 410, description = "インストールが GitHub 側で削除済み", body = ServerError),
+        CrudErrors,
+    )
+)]
+pub async fn reuse_github_installation(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<GithubReuseRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let github = state.settings.require_github_app()?;
+    auth.require_session()?;
+    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
+    require_project_in_tenant(&state, tenant_id, project_id).await?;
+
+    // installation_id はリクエストで受け取らず、同じテナントの連携行から引く。
+    // 信頼する範囲は callback の `installation_used_in_tenant` と同じ。
+    let source = github_integrations::Entity::find_by_id(body.source_integration_id)
+        .inner_join(projects::Entity)
+        .filter(projects::Column::TenantId.eq(tenant_id))
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    // 利用中の連携から来ているので、新規インストール向けの鮮度チェックや code は求めない。
+    // GitHub 側で消えていれば 410。一時障害（403 を含む）は 5xx にして再試行させる。
+    github_app(&state.http_client, github)
+        .installation_access_token(source.installation_id)
+        .await
+        .map_err(|e| {
+            tracing::warn!(
+                error = %e,
+                installation_id = source.installation_id,
+                "github reuse: installation access token failed"
+            );
+            if is_installation_gone(&e) {
+                AppError::Gone
+            } else {
+                AppError::Internal(e)
+            }
+        })?;
+
+    // 以降は callback が発行したトークンと同じ経路（一覧 → 確定）に乗せる。
+    let select_token = install_state::new_state_token();
+    install_state::store_select_token(
+        &state.redis_client,
+        &select_token,
+        &RepoSelectPayload {
+            tenant_id,
+            project_id,
+            user_id: auth.user_id,
+            installation_id: source.installation_id,
+        },
+    )
+    .await
+    .map_err(AppError::Internal)?;
+
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(GithubReuseResponse { select_token }),
+    ))
 }
 
 #[axum::debug_handler]

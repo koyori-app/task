@@ -9440,6 +9440,117 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/github/installations": {
+      "get": {
+        "tags": ["GitHub"],
+        "summary": "同じテナントで利用中の GitHub インストール一覧（再利用候補）",
+        "operationId": "list_reusable_github_installations",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubReusableInstallationsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects/{project_id}/github/integration": {
       "get": {
         "tags": ["GitHub"],
@@ -9747,6 +9858,137 @@
                       "example": "internal-error"
                     }
                   }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/github/reuse": {
+      "post": {
+        "tags": ["GitHub"],
+        "summary": "同じテナントで利用中のインストールからリポジトリ選択を開始",
+        "operationId": "reuse_github_installation",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GithubReuseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "選択トークン",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubReuseResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "インストールが GitHub 側で削除済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
                 }
               }
             }
@@ -21222,6 +21464,53 @@
             "type": "string"
           },
           "owner": {
+            "type": "string"
+          }
+        }
+      },
+      "GithubReusableInstallationItem": {
+        "type": "object",
+        "description": "同じテナントで利用中の GitHub インストール（再利用候補）。",
+        "required": ["source_integration_id", "account_login"],
+        "properties": {
+          "account_login": {
+            "type": "string",
+            "description": "表示名（既存連携行のリポジトリオーナー）。"
+          },
+          "source_integration_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "代表となる既存連携行の ID。`POST /github/reuse` に渡す。"
+          }
+        }
+      },
+      "GithubReusableInstallationsResponse": {
+        "type": "object",
+        "required": ["installations"],
+        "properties": {
+          "installations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GithubReusableInstallationItem"
+            }
+          }
+        }
+      },
+      "GithubReuseRequest": {
+        "type": "object",
+        "required": ["source_integration_id"],
+        "properties": {
+          "source_integration_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "GithubReuseResponse": {
+        "type": "object",
+        "required": ["select_token"],
+        "properties": {
+          "select_token": {
             "type": "string"
           }
         }

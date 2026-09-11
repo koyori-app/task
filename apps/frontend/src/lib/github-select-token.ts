@@ -134,6 +134,12 @@ export function takeSelectToken(projectId: string): string | null {
   return stash.token;
 }
 
+/** 既存インストールの再利用で受け取ったトークンを、callback 経由のものと同じくタブ内に保持する */
+export function keepSelectToken(projectId: string, token: string) {
+  if (typeof window === 'undefined') return;
+  writeStorage(projectKey(projectId), token);
+}
+
 /** 使い終わった（または無効になった）トークンを捨てる */
 export function forgetSelectToken(projectId: string) {
   if (typeof window === 'undefined') return;
