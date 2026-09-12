@@ -47,6 +47,9 @@ const CALLBACK_ERRORS: Record<string, string> = {
     'インストールにリポジトリが 1 件も含まれていません。GitHub 側でリポジトリを追加してから、もう一度お試しください。',
   installation_rejected:
     'このインストールでは連携できませんでした。GitHub の設定から一度アンインストールしてから、もう一度お試しください。',
+  // 消えている相手にアンインストールは促せないので、installation_rejected とは分ける
+  installation_gone:
+    'このインストールは GitHub 側で削除されています。「別の GitHub アカウント・組織を追加」から、もう一度連携してください。',
   installation_forbidden:
     'このインストールはあなたのアカウントからは操作できません。ご自身がアクセスできるアカウントまたは Organization に、もう一度インストールしてください。',
   installation_authorization_required:

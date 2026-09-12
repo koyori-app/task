@@ -840,6 +840,17 @@ describe('IntegrationsSection', () => {
     expect(document.body.textContent).not.toContain('選択の有効期限が切れました');
   });
 
+  it('GitHub 側で削除済みのインストールで戻されたら、別のアカウント・組織の追加を促す', async () => {
+    stubFetch({ connected: false });
+    mountSection({ callbackError: 'installation_gone' });
+    await flushPromises();
+
+    expect(document.body.textContent).toContain('GitHub 側で削除されています');
+    // 消えている相手にはできない「アンインストールしてから」を促さない
+    expect(document.body.textContent).not.toContain('一度アンインストール');
+    expect(bodyButton('連携する')).toBeTruthy();
+  });
+
   it('解除フロー: 確認ダイアログ → 解除する → DELETE 後に未連携表示へ戻る', async () => {
     const state: MockState = { connected: true };
     const fetchMock = stubFetch(state);

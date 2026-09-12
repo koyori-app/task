@@ -2067,7 +2067,8 @@ async fn github_http_integration_suite() {
             StatusCode::NO_CONTENT
         );
 
-        // 取り直しの間に GitHub 側で消えたインストールは、拒否として戻す
+        // 取り直しの間に GitHub 側で消えたインストールは、消えたものとして戻す
+        // （アンインストールを促す installation_rejected だと、対象が無く行き止まりになる）
         let gone_id = unique_installation_id();
         fail_second_access_token(
             gone_id,
@@ -2076,7 +2077,22 @@ async fn github_http_integration_suite() {
         .await;
         let location = callback_location(gone_id).await;
         assert!(
-            location.contains("github_error=installation_rejected"),
+            location.contains("github_error=installation_gone"),
+            "unexpected redirect location: {location}"
+        );
+        assert!(find_integration(&app, &tp).await.is_none());
+
+        // 検証の時点で消えていた場合も同じ理由で戻す（入れ直し先が無いのは同じ）
+        let vanished_id = unique_installation_id();
+        Mock::given(method("GET"))
+            .and(path(format!("/app/installations/{vanished_id}")))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+        let location = callback_location(vanished_id).await;
+        assert!(
+            location.contains("github_error=installation_gone"),
             "unexpected redirect location: {location}"
         );
         assert!(find_integration(&app, &tp).await.is_none());

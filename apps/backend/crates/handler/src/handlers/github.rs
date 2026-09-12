@@ -370,7 +370,11 @@ pub async fn github_callback(
             // GitHub からの着地点なので、素のエラーではなく設定画面へ理由付きで戻す。
             // 選択を放棄したまま控えが切れたインストールもここに来る（対処は入れ直し）。
             // 一時障害でアンインストールを促さないよう、拒否と不調は分ける。
-            let reason = if is_installation_rejected(&e) {
+            // GitHub 側から消えている場合はアンインストールする対象が無いので、
+            // 入れ直しを促す拒否ともさらに分ける。
+            let reason = if is_installation_gone(&e) {
+                "installation_gone"
+            } else if is_installation_rejected(&e) {
                 "installation_rejected"
             } else {
                 "github_unavailable"
@@ -480,7 +484,7 @@ pub async fn github_callback(
         // 設定画面へ理由付きで戻す（一時障害なら控えて、鮮度が切れても再試行できるようにする）。
         Ok(Err(e)) if is_installation_gone(&e) => {
             tracing::warn!(error = %e, "github callback: installation disappeared while connecting");
-            return callback_error_redirect(&redirect_to, "installation_rejected");
+            return callback_error_redirect(&redirect_to, "installation_gone");
         }
         Ok(Err(e)) => return unavailable(e).await,
         Err(e) => {
