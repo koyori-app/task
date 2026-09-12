@@ -24,6 +24,8 @@ pub struct Model {
     pub drive_files: HasMany<super::drive_files::Entity>,
     #[sea_orm(has_many)]
     pub drive_folders: HasMany<super::drive_folders::Entity>,
+    #[sea_orm(has_many)]
+    pub forge_commits: HasMany<super::forge_commits::Entity>,
     #[sea_orm(has_one)]
     pub github_integrations: HasOne<super::github_integrations::Entity>,
     #[sea_orm(has_many)]

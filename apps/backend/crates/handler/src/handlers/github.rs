@@ -27,6 +27,7 @@ use service::github::{
     github_app,
     install_state::{self, GithubOAuthStatePayload, RepoSelectPayload, TTL_SECS},
     repositories::{contains_repository, select_primary_repository},
+    webhook_events,
 };
 
 type HmacSha256 = Hmac<Sha256>;
@@ -1043,6 +1044,13 @@ pub async fn github_webhook(
     let payload: serde_json::Value =
         serde_json::from_slice(&body).map_err(|_| AppError::BadRequest)?;
 
+    // push は受信口で正規化してから積む。ジョブ（apalis.jobs に永続化される）には
+    // ホスト固有のペイロードを残さず、タスク側の処理はホストを知らない形で受け取る。
+    let forge_event = match event.as_str() {
+        "push" => Some(webhook_events::push_event(&payload).map_err(|_| AppError::BadRequest)?),
+        _ => None,
+    };
+
     let installation_id = payload
         .get("installation")
         .and_then(|i| i.get("id"))
@@ -1087,15 +1095,36 @@ pub async fn github_webhook(
                 project_id: integration.project_id,
                 event: event.clone(),
                 delivery_id: delivery_id.clone(),
-                payload: payload.clone(),
+                payload: if forge_event.is_some() {
+                    serde_json::Value::Null
+                } else {
+                    payload.clone()
+                },
+                forge_event: forge_event.clone(),
             })
             .collect();
 
-        // TODO(#9b): Wave 1+ で delivery_id + integration_id ベースの重複排除を追加
-        for job in jobs {
-            github_webhook::enqueue(&state.github_webhook_storage, job)
+        match delivery_id.as_deref() {
+            // 受信記録とジョブ投入を 1 トランザクションで確定する。同じ配信の再送は何も積まない
+            Some(delivery_id) => {
+                github_webhook::enqueue_delivery(
+                    &state.pg_pool,
+                    webhook_events::HOST,
+                    webhook_events::HOST_URL,
+                    delivery_id,
+                    jobs,
+                )
                 .await
                 .map_err(AppError::Internal)?;
+            }
+            // 配信 ID が無いと再送を見分けられないので、そのまま積む
+            None => {
+                for job in jobs {
+                    github_webhook::enqueue(&state.github_webhook_storage, job)
+                        .await
+                        .map_err(AppError::Internal)?;
+                }
+            }
         }
     }
 

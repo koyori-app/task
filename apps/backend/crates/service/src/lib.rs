@@ -11,6 +11,7 @@ pub mod custom_fields;
 pub mod drive;
 pub mod email;
 pub mod email_verification;
+pub mod forge;
 pub mod github;
 pub mod http;
 pub mod login_session;

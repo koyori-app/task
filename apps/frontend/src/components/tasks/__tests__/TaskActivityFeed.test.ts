@@ -72,4 +72,65 @@ describe('TaskActivityFeed', () => {
       expect(wrapper.text()).toContain('分前');
     });
   });
+
+  describe('コミットのリンク', () => {
+    const sha = 'a3f92c1e7b81d4000000000000000000000000aa';
+    const payload = {
+      host: 'github',
+      sha,
+      message: 'fix: トークン期限切れを修正 TASK-1',
+      author_handle: 'yupix',
+      author_name: 'Yupix',
+      html_url: `https://github.com/acme/backend/commit/${sha}`,
+    };
+
+    function commitItem(
+      overrides: Record<string, unknown> = {},
+      user: ActivityItem['user'] = null,
+    ): ActivityItem {
+      return {
+        ...activity('commit-1', 10),
+        event_type: 'forge_commit_linked',
+        user,
+        payload: { ...payload, ...overrides },
+      } as ActivityItem;
+    }
+
+    it('短縮 SHA をコミットへのリンクにし、作者とメッセージを出す', () => {
+      const wrapper = mount(TaskActivityFeed, { props: { activities: [commitItem()] } });
+
+      expect(wrapper.text()).toContain(
+        'yupixがコミット a3f92c1 をリンクしました「fix: トークン期限切れを修正 TASK-1」',
+      );
+      const link = wrapper.get('a');
+      expect(link.text()).toBe('a3f92c1');
+      expect(link.attributes('href')).toBe(payload.html_url);
+      expect(link.attributes('target')).toBe('_blank');
+      expect(link.attributes('rel')).toBe('noopener noreferrer');
+    });
+
+    it('連携済みユーザーに結べていればそのユーザー名を出す', () => {
+      const wrapper = mount(TaskActivityFeed, {
+        props: {
+          activities: [commitItem({}, { id: 'user-1', name: 'ゆぴ' } as ActivityItem['user'])],
+        },
+      });
+      expect(wrapper.text()).toContain('ゆぴがコミット');
+    });
+
+    it('ホスト上のアカウント名が無ければ git の author 名を出す', () => {
+      const wrapper = mount(TaskActivityFeed, {
+        props: { activities: [commitItem({ author_handle: '' })] },
+      });
+      expect(wrapper.text()).toContain('Yupixがコミット');
+    });
+
+    it('http(s) 以外の URL はリンクにしない', () => {
+      const wrapper = mount(TaskActivityFeed, {
+        props: { activities: [commitItem({ html_url: 'javascript:alert(1)' })] },
+      });
+      expect(wrapper.find('a').exists()).toBe(false);
+      expect(wrapper.text()).toContain('コミット a3f92c1 をリンクしました');
+    });
+  });
 });
