@@ -6,6 +6,7 @@
 //! という前提に基づくリポジトリ選定。
 
 pub mod client;
+pub mod commits;
 pub mod import_lock;
 pub mod install_state;
 pub mod issues;

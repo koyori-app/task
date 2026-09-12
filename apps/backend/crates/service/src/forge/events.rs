@@ -34,6 +34,13 @@ pub enum ForgeEvent {
         repo: ForgeRepo,
         ref_name: String,
         forced: bool,
+        /// push 後の ref の先頭コミット（小文字 16 進）。
+        /// 切り詰められた `commits` を API で埋めるときの起点にする
+        after: String,
+        /// ホストが `commits` を上限で切り詰めている。
+        /// 足りない分は `after` から遡って取り直さないと、そのコミットは二度と処理されない
+        commits_truncated: bool,
+        /// 古い順。`commits_truncated` のときは新しい側が欠けている
         commits: Vec<ForgeCommit>,
     },
 }
