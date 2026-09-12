@@ -74,6 +74,16 @@ const candidatesPending = ref(false);
 const candidatesError = ref<string | null>(null);
 /** 再利用を開始している候補（二重押し防止と表示用） */
 const reusePendingId = ref<string | null>(null);
+/** 接続の確定中。一覧の取得中（`selectPending`）とは別に持つ */
+const connectPending = ref(false);
+/**
+ * 選択 UI の更新が走っている間は、候補の選び直しと確定を互いに止める。
+ * 同時に始められると、先に終わった方の後片付け（確定後の `forgetSelectToken` など）が
+ * もう一方の選択状態を消してしまう。
+ */
+const selectionBusy = computed(
+  () => selectPending.value || connectPending.value || reusePendingId.value !== null,
+);
 const addAccessError = ref<string | null>(null);
 const importError = ref<string | null>(null);
 const importStarted = ref(false);
@@ -210,7 +220,7 @@ async function connectRepository(owner: string, name: string) {
   const token = selectToken.value;
   if (!token) return;
   selectError.value = null;
-  selectPending.value = true;
+  connectPending.value = true;
   try {
     const { error, response } = await fetchClient.POST(GITHUB_CONNECT_PATH, {
       params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
@@ -236,7 +246,7 @@ async function connectRepository(owner: string, name: string) {
   } catch {
     selectError.value = 'リポジトリを連携できませんでした';
   } finally {
-    selectPending.value = false;
+    connectPending.value = false;
   }
 }
 
@@ -500,7 +510,7 @@ async function confirmDisconnect() {
               size="sm"
               variant="outline"
               class="shrink-0"
-              :disabled="reusePendingId !== null"
+              :disabled="selectionBusy"
               @click="reuseInstallation(candidate.source_integration_id)"
             >
               {{ reusePendingId === candidate.source_integration_id ? '確認中…' : 'これを使う' }}
@@ -578,7 +588,7 @@ async function confirmDisconnect() {
                 size="sm"
                 variant="outline"
                 class="shrink-0"
-                :disabled="selectPending"
+                :disabled="selectionBusy"
                 @click="connectRepository(repo.owner, repo.name)"
               >
                 選択
@@ -593,7 +603,7 @@ async function confirmDisconnect() {
             type="button"
             variant="outline"
             size="sm"
-            :disabled="selectPending"
+            :disabled="selectionBusy"
             @click="loadRepositories"
           >
             再試行
@@ -613,7 +623,7 @@ async function confirmDisconnect() {
               type="button"
               variant="outline"
               size="sm"
-              :disabled="selectPending"
+              :disabled="selectionBusy"
               @click="loadRepositories"
             >
               再読み込み

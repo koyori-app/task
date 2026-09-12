@@ -42,6 +42,10 @@ type MockState = {
   reuseStatus?: number;
   /** このトークンの GET /github/repositories だけ、response が解決するまで返さない */
   holdRepositories?: { token: string; response: Promise<Response> };
+  /** POST /github/connect を、この Promise が解決するまで返さない */
+  holdConnect?: Promise<Response>;
+  /** POST /github/reuse を、この Promise が解決するまで返さない */
+  holdReuse?: Promise<Response>;
 };
 
 const DEFAULT_REPOSITORIES = [
@@ -103,10 +107,12 @@ function stubFetch(state: MockState) {
       return jsonResponse({ installations: state.installations ?? [] });
     }
     if (method === 'POST' && pathname.endsWith('/github/reuse')) {
+      if (state.holdReuse) return state.holdReuse;
       if (state.reuseStatus) return jsonResponse({ message: 'error' }, state.reuseStatus);
       return jsonResponse({ select_token: REUSE_TOKEN });
     }
     if (method === 'POST' && pathname.endsWith('/github/connect')) {
+      if (state.holdConnect) return state.holdConnect;
       if (state.connectStatus) return jsonResponse({ message: 'error' }, state.connectStatus);
       state.connected = true;
       return new Response(null, { status: 204 });
@@ -672,37 +678,106 @@ describe('IntegrationsSection', () => {
     expect(document.body.textContent).toContain('を連携中');
   });
 
-  it('再読み込み中に候補を選び直しても、古いトークンの応答で新しいトークンと一覧を消さない', async () => {
-    let releaseStale!: (response: Response) => void;
+  it('一覧の再読み込み中は候補を選び直せず、遅れて届いた応答で選び直しの導線が残る', async () => {
+    let releaseReload!: (response: Response) => void;
     const state: MockState = { connected: false, installations: [REUSE_CANDIDATE] };
     const fetchMock = stubFetch(state);
     mountSection({ selectToken: 'select-token-1' });
     await flushPromises();
     expect(document.body.textContent).toContain('koyori-app/docs');
 
-    // 古いトークンでの再読み込みが返らないうちに、候補から選び直す
+    // 再読み込みの応答が返らないうちに、候補から選び直そうとする
     state.holdRepositories = {
       token: 'select-token-1',
       response: new Promise((resolve) => {
-        releaseStale = resolve;
+        releaseReload = resolve;
       }),
     };
     clickBodyButton('再読み込み');
     await flushPromises();
     clickBodyButton('連携する');
     await flushPromises();
+
+    expect(bodyButton('これを使う')?.disabled).toBe(true);
     clickBodyButton('これを使う');
     await flushPromises();
-    expect(document.body.textContent).toContain('koyori-app/docs');
+    expect(requestsTo(fetchMock, '/github/reuse')).toHaveLength(0);
 
-    // 古いトークンの応答が、期限切れとして遅れて届く
-    releaseStale(jsonResponse({ message: 'error' }, 400));
+    // 期限切れが遅れて届いたら、そのトークンの選択だけを畳んで候補からやり直させる
+    releaseReload(jsonResponse({ message: 'error' }, 400));
     await flushPromises();
 
-    expect(document.body.textContent).not.toContain('選択の有効期限が切れました');
-    expect(document.body.textContent).toContain('koyori-app/docs');
+    expect(document.body.textContent).toContain('もう一度アカウント・組織を選んでください');
+    expect(bodyButton('これを使う')?.disabled).toBe(false);
 
-    clickSelectButton(1);
+    clickBodyButton('これを使う');
+    await flushPromises();
+    const [reuseCall] = requestsTo(fetchMock, '/github/reuse');
+    expect(reuseCall).toBeTruthy();
+    expect(document.body.textContent).toContain('koyori-app/docs');
+  });
+
+  it('接続の確定中は候補を選び直せない（確定の完了が新しい選択状態を消さない）', async () => {
+    let releaseConnect!: (response: Response) => void;
+    const state: MockState = {
+      connected: false,
+      installations: [REUSE_CANDIDATE],
+      holdConnect: new Promise((resolve) => {
+        releaseConnect = resolve;
+      }),
+    };
+    const fetchMock = stubFetch(state);
+    mountSection({ selectToken: 'select-token-1' });
+    await flushPromises();
+    clickBodyButton('連携する');
+    await flushPromises();
+
+    clickSelectButton(0);
+    await flushPromises();
+
+    expect(bodyButton('これを使う')?.disabled).toBe(true);
+    clickBodyButton('これを使う');
+    await flushPromises();
+    expect(requestsTo(fetchMock, '/github/reuse')).toHaveLength(0);
+
+    state.connected = true;
+    releaseConnect(new Response(null, { status: 204 }));
+    await flushPromises();
+    await flushPromises();
+    expect(document.body.textContent).toContain('を連携中');
+  });
+
+  it('候補の確認中はリポジトリを選べない', async () => {
+    let releaseReuse!: (response: Response) => void;
+    const state: MockState = {
+      connected: false,
+      installations: [REUSE_CANDIDATE],
+      holdReuse: new Promise((resolve) => {
+        releaseReuse = resolve;
+      }),
+    };
+    const fetchMock = stubFetch(state);
+    mountSection({ selectToken: 'select-token-1' });
+    await flushPromises();
+    clickBodyButton('連携する');
+    await flushPromises();
+
+    clickBodyButton('これを使う');
+    await flushPromises();
+
+    const selectButtons = [...document.body.querySelectorAll('button')].filter(
+      (button) => button.textContent?.trim() === '選択',
+    );
+    expect(selectButtons.length).toBeGreaterThan(0);
+    expect(selectButtons.every((button) => button.disabled)).toBe(true);
+    clickSelectButton(0);
+    await flushPromises();
+    expect(requestsTo(fetchMock, '/github/connect')).toHaveLength(0);
+
+    // 候補が決まれば、そのトークンで選べるようになる
+    releaseReuse(jsonResponse({ select_token: REUSE_TOKEN }));
+    await flushPromises();
+    clickSelectButton(0);
     await flushPromises();
     const [connectCall] = requestsTo(fetchMock, '/github/connect');
     await expect(connectCall!.clone().json()).resolves.toMatchObject({
