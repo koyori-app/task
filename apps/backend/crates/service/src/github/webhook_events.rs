@@ -13,12 +13,23 @@ pub const HOST: &str = "github";
 /// GitHub App の連携先は github.com だけなので固定する
 pub const HOST_URL: &str = "https://github.com";
 
+/// GitHub が push の `commits` に載せる最大件数。
+///
+/// 「The array includes a maximum of 2048 commits.」
+/// <https://docs.github.com/en/webhooks/webhook-events-and-payloads#push>
+///
+/// ここに達した push は残りが欠けているので、ワーカーが API で取り直す。
+/// ペイロードには総件数を示すフィールドが無いため、この件数そのものを合図に使う。
+const COMMITS_MAX: usize = 2048;
+
 #[derive(Deserialize)]
 struct PushPayload {
     #[serde(rename = "ref")]
     ref_name: String,
     #[serde(default)]
     forced: bool,
+    /// push 後の ref の先頭コミット
+    after: String,
     repository: PushRepository,
     #[serde(default)]
     commits: Vec<PushCommit>,
@@ -64,6 +75,8 @@ pub fn push_event(payload: &serde_json::Value) -> Result<ForgeEvent, serde_json:
         },
         ref_name: push.ref_name,
         forced: push.forced,
+        after: push.after.to_ascii_lowercase(),
+        commits_truncated: push.commits.len() >= COMMITS_MAX,
         commits: push
             .commits
             .into_iter()
@@ -144,6 +157,8 @@ mod tests {
                 },
                 ref_name: "refs/heads/main".into(),
                 forced: true,
+                after: "a3f92c1e7b81d4000000000000000000000000aa".into(),
+                commits_truncated: false,
                 commits: vec![
                     ForgeCommit {
                         sha: "a3f92c1e7b81d4000000000000000000000000aa".into(),
@@ -175,6 +190,25 @@ mod tests {
         payload["commits"] = serde_json::json!([]);
         let ForgeEvent::Push { commits, .. } = push_event(&payload).expect("convert push");
         assert!(commits.is_empty());
+    }
+
+    /// 上限ちょうどで届いた push は、新しい側が欠けている合図として切り詰め扱いにする
+    /// （ペイロードに総件数を示すフィールドが無いので、件数そのものを合図に使う）
+    #[test]
+    fn push_at_the_commit_cap_is_marked_truncated() {
+        let mut payload = push_fixture();
+        let commit = payload["commits"][0].clone();
+        payload["commits"] = serde_json::Value::Array(vec![commit; COMMITS_MAX]);
+
+        let ForgeEvent::Push {
+            commits,
+            commits_truncated,
+            after,
+            ..
+        } = push_event(&payload).expect("convert push");
+        assert_eq!(commits.len(), COMMITS_MAX);
+        assert!(commits_truncated, "上限に達した push は取り直しの対象");
+        assert_eq!(after, "a3f92c1e7b81d4000000000000000000000000aa");
     }
 
     #[test]

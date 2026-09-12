@@ -1,5 +1,6 @@
 //! GitHub Webhook イベント処理ジョブ。
 
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -115,13 +116,44 @@ pub async fn enqueue_delivery(
 /// `issues` はタスクへ反映し、正規化済みの `push` はコミットをタスクへリンクする。
 /// それ以外は受信をログに残すのみ。
 pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(), BoxDynError> {
-    if let Some(ForgeEvent::Push { repo, commits, .. }) = &job.forge_event {
-        service::forge::commits::apply_push(&state.db, job.project_id, repo, commits).await?;
+    if let Some(ForgeEvent::Push {
+        repo,
+        commits,
+        after,
+        commits_truncated,
+        ..
+    }) = &job.forge_event
+    {
+        // ホストの上限で切り詰められた push は、欠けた分を取り直してから処理する。
+        // 取り直せなければ成功にせず再試行させる（成功にすると、この配信は受信済みとして
+        // 捨てられ、欠けたコミットは二度とタスクに結ばれない）。
+        let commits = if *commits_truncated {
+            let github = state
+                .settings
+                .require_github_app()
+                .map_err(|e| anyhow::anyhow!("github app settings are required: {e}"))?;
+            Cow::Owned(
+                service::github::commits::backfill_push_commits(
+                    &state.db,
+                    &state.http_client,
+                    github,
+                    job.project_id,
+                    repo,
+                    after,
+                    commits,
+                )
+                .await?,
+            )
+        } else {
+            Cow::Borrowed(commits.as_slice())
+        };
+        service::forge::commits::apply_push(&state.db, job.project_id, repo, &commits).await?;
         tracing::info!(
             integration_id = %job.integration_id,
             project_id = %job.project_id,
             delivery_id = ?job.delivery_id,
             commits = commits.len(),
+            truncated = *commits_truncated,
             "forge push event processed"
         );
         return Ok(());
@@ -192,6 +224,8 @@ mod tests {
                 },
                 ref_name: "refs/heads/main".into(),
                 forced: false,
+                after: "a3f92c1".into(),
+                commits_truncated: false,
                 commits: vec![ForgeCommit {
                     sha: "a3f92c1".into(),
                     message: "fix: TASK-1".into(),
@@ -217,7 +251,15 @@ mod tests {
         let event = &value["forge_event"];
         assert_eq!(
             sorted_keys(event),
-            vec!["commits", "forced", "kind", "ref_name", "repo"]
+            vec![
+                "after",
+                "commits",
+                "commits_truncated",
+                "forced",
+                "kind",
+                "ref_name",
+                "repo"
+            ]
         );
         assert_eq!(
             sorted_keys(&event["repo"]),

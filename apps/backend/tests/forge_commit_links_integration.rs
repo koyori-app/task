@@ -2,6 +2,7 @@
 
 mod common;
 
+use apalis::prelude::Data;
 use common::{TestApp, TestTenantProject};
 use entity::{
     forge_commit_links, forge_commits, forge_webhook_deliveries, github_integrations,
@@ -17,6 +18,8 @@ use service::forge::commits::{COMMIT_LINKED_EVENT, apply_push};
 use service::forge::events::{ForgeCommit, ForgeEvent, ForgeRepo};
 use sha2::Sha256;
 use uuid::Uuid;
+use wiremock::matchers::{method, path, path_regex};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// `load_github_test_env` が設定する webhook シークレット
 const WEBHOOK_SECRET: &str = "webhook-secret";
@@ -168,9 +171,22 @@ async fn insert_task(
 }
 
 fn push_payload(installation_id: i64, commits: &[(&str, &str)]) -> serde_json::Value {
+    let after = commits
+        .last()
+        .map_or("0000000000000000000000000000000000000000", |(sha, _)| *sha);
+    push_payload_with_head(installation_id, commits, after)
+}
+
+/// 切り詰められた push では、先頭コミットは `commits` に載らない
+fn push_payload_with_head(
+    installation_id: i64,
+    commits: &[(&str, &str)],
+    after: &str,
+) -> serde_json::Value {
     serde_json::json!({
         "ref": "refs/heads/main",
         "forced": false,
+        "after": after,
         "repository": { "name": REPO_NAME, "owner": { "login": REPO_OWNER } },
         "installation": { "id": installation_id },
         "sender": { "login": "yupix", "id": 20 },
@@ -291,6 +307,131 @@ async fn commit_activities(app: &TestApp, task_id: Uuid) -> Vec<task_activities:
         .all(&app.state.db)
         .await
         .expect("query activities")
+}
+
+/// GitHub が push の `commits` に載せる上限。これに達した push は新しい側が欠けている。
+const COMMITS_CAP: usize = 2048;
+
+fn job_state(app: &TestApp) -> job::JobState {
+    job::JobState {
+        settings: app.state.settings.clone(),
+        db: app.state.db.clone(),
+        redis_client: app.state.redis_client.clone(),
+        smtp_client: app.state.smtp_client.clone(),
+        http_client: app.state.http_client.clone(),
+        review_summary_storage: app.state.review_summary_storage.clone(),
+    }
+}
+
+/// List commits API が返すコミット 1 件。
+fn api_commit(sha: &str, message: &str) -> serde_json::Value {
+    serde_json::json!({
+        "sha": sha,
+        "html_url": format!("https://github.com/{REPO_OWNER}/{REPO_NAME}/commit/{sha}"),
+        "commit": {
+            "message": message,
+            "author": {
+                "name": "Yupix",
+                "email": "yupix@example.com",
+                "date": "2026-09-10T03:00:00Z"
+            }
+        },
+        "author": { "login": "yupix" }
+    })
+}
+
+/// 上限で切り詰められた push は、欠けたコミットを API で取り直してからリンクする。
+/// 取り直せない間はジョブを成功させない（配信は受信済みなので、成功にすると二度と処理されない）。
+// serial: GITHUB_API_BASE_URL を差し替えるため、他の GitHub テストと並列に走らせない。
+#[serial_test::serial]
+#[tokio::test]
+async fn truncated_push_backfills_missing_commits() {
+    let mock_server = MockServer::start().await;
+    // SAFETY: serial アトリビュートにより他テストとの並列実行を防いでいる。
+    unsafe {
+        std::env::set_var("GITHUB_API_BASE_URL", mock_server.uri());
+    }
+    Mock::given(method("POST"))
+        .and(path_regex(r"^/app/installations/\d+/access_tokens$"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "token": "ghs_test_installation_token",
+            "expires_at": "2030-01-01T00:00:00Z"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    let task_id = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, 1).await;
+
+    // 届くのは上限ちょうど。KEY-N を含むコミットは欠けた側にしかない
+    let delivered: Vec<(String, String)> = (0..COMMITS_CAP)
+        .map(|i| (sha(), format!("chore: 関係のないコミット {i}")))
+        .collect();
+    let newest_delivered = delivered.last().expect("delivered commits").0.clone();
+    let linked_sha = sha();
+    let head_sha = sha();
+    let linked_message = format!("fix: ログイン修正 {}-1", fx.key);
+
+    // 取り直しは after から遡り、受信済みの最新コミットで止まる
+    let commits_page = serde_json::json!([
+        api_commit(&head_sha, "chore: 先頭コミット"),
+        api_commit(&linked_sha, &linked_message),
+        api_commit(&newest_delivered, "chore: 受信済みの境界"),
+    ]);
+    let commits_path = format!("/repos/{REPO_OWNER}/{REPO_NAME}/commits");
+    // 最初の 1 回は一時障害にして、成功扱いにならないことを見る
+    Mock::given(method("GET"))
+        .and(path(commits_path.clone()))
+        .respond_with(ResponseTemplate::new(500))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(commits_path))
+        .respond_with(ResponseTemplate::new(200).set_body_json(commits_page))
+        .mount(&mock_server)
+        .await;
+
+    let delivered_refs: Vec<(&str, &str)> = delivered
+        .iter()
+        .map(|(sha, message)| (sha.as_str(), message.as_str()))
+        .collect();
+    let body = push_payload_with_head(fx.installation_id, &delivered_refs, &head_sha);
+    let delivery = Uuid::new_v4().to_string();
+    assert_eq!(post_push(&app, &delivery, &body, None).await, 200);
+
+    let jobs = queued_jobs(&app, fx.tp.project_id).await;
+    assert_eq!(jobs.len(), 1);
+
+    assert!(
+        job::github_webhook::process(jobs[0].clone(), Data::new(job_state(&app)))
+            .await
+            .is_err(),
+        "取り直せない push を成功扱いにしない（再試行させる）"
+    );
+    assert_eq!(link_rows(&app, task_id).await, 0);
+
+    // 取り直せたら、ペイロードに無かったコミットがタスクに結ばれる
+    job::github_webhook::process(jobs[0].clone(), Data::new(job_state(&app)))
+        .await
+        .expect("process job");
+
+    assert_eq!(link_rows(&app, task_id).await, 1);
+    assert_eq!(commit_activities(&app, task_id).await.len(), 1);
+    let commit_row = forge_commits::Entity::find()
+        .filter(forge_commits::Column::ProjectId.eq(fx.tp.project_id))
+        .one(&app.state.db)
+        .await
+        .expect("query commit")
+        .expect("commit row");
+    assert_eq!(
+        commit_row.sha, linked_sha,
+        "欠けていたコミットを API で取り直して結ぶ"
+    );
+
+    app.cleanup_user(fx.owner_id).await;
 }
 
 /// 署名済みの push が受信記録 1 行・ジョブ 1 件になり、処理するとコミットがタスクに結ばれる。
