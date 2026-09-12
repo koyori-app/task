@@ -3,8 +3,10 @@ mod common;
 use axum::http::StatusCode;
 use backend::utils::github::install_state::{self as github_oauth_state, GithubOAuthStatePayload};
 use common::{TestApp, TestTenantProject};
-use entity::{github_integrations, projects, tenants};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
+use entity::{github_integrations, projects, scopes::Scope, tenants};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+};
 use uuid::Uuid;
 use wiremock::matchers::{header, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -317,6 +319,143 @@ fn integration_path(tp: &TestTenantProject) -> String {
         "/v1/tenants/{}/projects/{}/github/integration",
         tp.tenant_id, tp.project_id
     )
+}
+
+fn installations_path(tp: &TestTenantProject) -> String {
+    format!(
+        "/v1/tenants/{}/projects/{}/github/installations",
+        tp.tenant_id, tp.project_id
+    )
+}
+
+fn reuse_path(tp: &TestTenantProject) -> String {
+    format!(
+        "/v1/tenants/{}/projects/{}/github/reuse",
+        tp.tenant_id, tp.project_id
+    )
+}
+
+/// 再利用候補を取得する（200 を前提に配列を返す）。
+async fn reusable_installations(app: &TestApp, tp: &TestTenantProject) -> Vec<serde_json::Value> {
+    let response = app.get_with_session(&installations_path(tp)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.expect("installations json");
+    body["installations"]
+        .as_array()
+        .expect("installations array")
+        .clone()
+}
+
+async fn post_reuse(app: &TestApp, tp: &TestTenantProject, source: Uuid) -> reqwest::Response {
+    app.post_json_with_session(
+        &reuse_path(tp),
+        serde_json::json!({ "source_integration_id": source }),
+    )
+    .await
+}
+
+/// 再利用を開始して選択トークンを受け取る（200 を前提にする）。
+async fn reuse_token(app: &TestApp, tp: &TestTenantProject, source: Uuid) -> String {
+    let response = post_reuse(app, tp, source).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.expect("reuse json");
+    body["select_token"]
+        .as_str()
+        .expect("select_token")
+        .to_owned()
+}
+
+async fn connect(
+    app: &TestApp,
+    tp: &TestTenantProject,
+    select_token: &str,
+    repo_name: &str,
+) -> reqwest::Response {
+    app.post_json_with_session(
+        &connect_path(tp),
+        serde_json::json!({
+            "select_token": select_token,
+            "repo_owner": "acme",
+            "repo_name": repo_name
+        }),
+    )
+    .await
+}
+
+async fn find_integration(
+    app: &TestApp,
+    tp: &TestTenantProject,
+) -> Option<github_integrations::Model> {
+    github_integrations::Entity::find()
+        .filter(github_integrations::Column::ProjectId.eq(tp.project_id))
+        .one(&app.state.db)
+        .await
+        .expect("query integration")
+}
+
+async fn insert_project_in_tenant(app: &TestApp, tenant_id: Uuid) -> TestTenantProject {
+    let project_id = Uuid::new_v4();
+    projects::ActiveModel {
+        id: Set(project_id),
+        name: Set("github-test".into()),
+        description: Set(String::new()),
+        tenant_id: Set(tenant_id),
+        icon_emoji: Set(None),
+        icon_url: Set(None),
+        key: Set(format!("R{}", &project_id.to_string()[..8].to_uppercase())),
+        is_personal: Set(false),
+        personal_owner_id: Set(None),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert project");
+    TestTenantProject {
+        tenant_id,
+        project_id,
+    }
+}
+
+/// 既存の連携行を DB へ直に作る（そのプロジェクトが過去に連携した状態の用意）。
+async fn insert_integration(
+    app: &TestApp,
+    tp: &TestTenantProject,
+    user_id: Uuid,
+    installation_id: i64,
+    repo_name: &str,
+) -> github_integrations::Model {
+    github_integrations::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        project_id: Set(tp.project_id),
+        installation_id: Set(installation_id),
+        repo_owner: Set("acme".into()),
+        repo_name: Set(repo_name.into()),
+        access_token_enc: Set("unused".into()),
+        token_expires_at: Set(chrono::Utc::now().into()),
+        created_by: Set(user_id),
+        created_at: Set(chrono::Utc::now().into()),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert github integration")
+}
+
+/// この installation のトークン発行だけ、指定の応答に差し替える（既定のモックより優先）。
+async fn override_access_token(
+    server: &MockServer,
+    installation_id: i64,
+    response: ResponseTemplate,
+    times: Option<u64>,
+) {
+    let mock = Mock::given(method("POST"))
+        .and(path(format!(
+            "/app/installations/{installation_id}/access_tokens"
+        )))
+        .respond_with(response)
+        .with_priority(1);
+    match times {
+        Some(n) => mock.up_to_n_times(n).mount(server).await,
+        None => mock.mount(server).await,
+    }
 }
 
 // serial: GITHUB_API_BASE_URL を OnceLock でキャッシュするため、
@@ -1490,6 +1629,473 @@ async fn github_http_integration_suite() {
             .expect("integration row survives the lock contention");
         assert_eq!(row.installation_id, installation_id);
         assert_eq!(row.repo_name, "repo-2");
+
+        app.cleanup_user(user.id).await;
+        app.reset_session_client();
+    }
+
+    // 14. 同じテナントで使用中のインストールを、callback を経ずに別プロジェクトへ連携できる（TASK-218）。
+    // 修正前は「連携する」が毎回 GitHub のインストール画面へ進み、既存の Organization では
+    // callback に戻らないため、B の連携を完了する経路が無かった。
+    {
+        let user = app.insert_user(false, false).await;
+        let a = app.insert_tenant_project(user.id).await;
+        let b = insert_project_in_tenant(&app, a.tenant_id).await;
+        let c = insert_project_in_tenant(&app, a.tenant_id).await;
+        let d = insert_project_in_tenant(&app, a.tenant_id).await;
+        app.login_session(&user.email, &user.password).await;
+
+        // 候補 0 件は空配列（エラーにしない）
+        assert!(reusable_installations(&app, &b).await.is_empty());
+
+        // A と C が同じ古いインストール（新規扱いの鮮度チェックに落ちる）を共有し、
+        // D が別のインストール（リポジトリ 1 件）を使う
+        let shared_id = unique_old_installation_id();
+        let a_row = insert_integration(&app, &a, user.id, shared_id, "repo-1").await;
+        let single = reusable_installations(&app, &b).await;
+        assert_eq!(single.len(), 1);
+        assert_eq!(single[0]["source_integration_id"], a_row.id.to_string());
+        assert_eq!(single[0]["account_login"], "acme");
+
+        insert_integration(&app, &c, user.id, shared_id, "repo-2").await;
+        let single_repo_id = unique_installation_id();
+        let d_row = insert_integration(&app, &d, user.id, single_repo_id, "backend").await;
+
+        let outsider = app.insert_user(false, false).await;
+        let foreign = app.insert_tenant_project(outsider.id).await;
+        let foreign_row = insert_integration(
+            &app,
+            &foreign,
+            outsider.id,
+            unique_multi_repo_installation_id(),
+            "repo-1",
+        )
+        .await;
+
+        let candidates = reusable_installations(&app, &b).await;
+        let sources: Vec<&str> = candidates
+            .iter()
+            .map(|item| item["source_integration_id"].as_str().expect("source id"))
+            .collect();
+        assert_eq!(
+            sources,
+            [a_row.id.to_string(), d_row.id.to_string()],
+            "同じ installation は 1 件にまとめ、他テナントの連携は含めない"
+        );
+
+        // 他テナント・存在しない再利用元は 404
+        assert_eq!(
+            post_reuse(&app, &b, foreign_row.id).await.status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            post_reuse(&app, &b, Uuid::new_v4()).await.status(),
+            StatusCode::NOT_FOUND
+        );
+
+        // 開始: 選択トークンだけを no-store で返し、この時点では B の連携行を作らない
+        let reuse = post_reuse(&app, &b, a_row.id).await;
+        assert_eq!(reuse.status(), StatusCode::OK);
+        assert_eq!(
+            reuse
+                .headers()
+                .get("cache-control")
+                .and_then(|v| v.to_str().ok()),
+            Some("no-store")
+        );
+        let body: serde_json::Value = reuse.json().await.expect("reuse json");
+        assert_eq!(
+            body.as_object().map(|fields| fields.len()),
+            Some(1),
+            "選択トークン以外を返さない: {body}"
+        );
+        let token = body["select_token"]
+            .as_str()
+            .expect("select_token")
+            .to_owned();
+        assert!(find_integration(&app, &b).await.is_none());
+
+        // 一覧はページ境界（100 件）を越えて返る。トークンは別プロジェクトには使えない
+        let list = get_repositories(&app, &b, &token).await;
+        assert_eq!(list.status(), StatusCode::OK);
+        let list: serde_json::Value = list.json().await.expect("repositories json");
+        assert_eq!(
+            list["repositories"].as_array().unwrap().len(),
+            MULTI_REPO_COUNT
+        );
+        assert_eq!(
+            get_repositories(&app, &c, &token).await.status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            connect(&app, &c, &token, "repo-3").await.status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        // 有効期限は 600 秒。期限の直前は使え、到達後は拒否される
+        // （600 秒待つ代わりに、取り上げた残り TTL を縮めて戻す）
+        let (payload, ttl) =
+            github_oauth_state::claim_select_token(&app.state.redis_client, &token)
+                .await
+                .expect("claim select token")
+                .expect("select token exists");
+        assert!((590_000..=600_000).contains(&ttl), "TTL は 600 秒: {ttl}");
+        github_oauth_state::restore_select_token(&app.state.redis_client, &token, &payload, 2_000)
+            .await
+            .expect("restore select token");
+        assert_eq!(
+            get_repositories(&app, &b, &token).await.status(),
+            StatusCode::OK
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(2_100)).await;
+        assert_eq!(
+            get_repositories(&app, &b, &token).await.status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            connect(&app, &b, &token, "repo-3").await.status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        // 同じ候補から取り直せば再開できる（入れ直しは要らない）
+        let token = reuse_token(&app, &b, a_row.id).await;
+
+        // 一覧に無い（取得後に外れた）リポジトリは接続しない
+        assert_eq!(
+            connect(&app, &b, &token, "repo-999").await.status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        // GitHub の一時障害では接続せず、同じトークンのまま再試行できる
+        override_access_token(&mock_server, shared_id, ResponseTemplate::new(502), Some(1)).await;
+        assert_eq!(
+            connect(&app, &b, &token, "repo-3").await.status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert!(find_integration(&app, &b).await.is_none());
+        assert_eq!(
+            connect(&app, &b, &token, "repo-3").await.status(),
+            StatusCode::NO_CONTENT
+        );
+
+        let b_row = find_integration(&app, &b).await.expect("b integration");
+        assert_eq!(b_row.installation_id, shared_id);
+        assert_eq!(b_row.repo_name, "repo-3");
+        assert_eq!(
+            find_integration(&app, &a)
+                .await
+                .expect("a integration")
+                .repo_name,
+            "repo-1",
+            "A の連携先は変わらない"
+        );
+
+        // 確定済みトークンでの二重確定は拒否
+        assert_eq!(
+            connect(&app, &b, &token, "repo-4").await.status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        // 共有しているうち A だけを解除しても、GitHub 側はアンインストールしない
+        let deletes_before = delete_installation_count(&mock_server, shared_id).await;
+        assert_eq!(
+            app.delete_with_session(&integration_path(&a))
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            delete_installation_count(&mock_server, shared_id).await,
+            deletes_before
+        );
+        assert!(find_integration(&app, &b).await.is_some());
+
+        // リポジトリ 1 件でも自動接続せずに選ばせる。開始時の一時障害は 5xx で、やり直せる
+        let e = insert_project_in_tenant(&app, a.tenant_id).await;
+        override_access_token(
+            &mock_server,
+            single_repo_id,
+            ResponseTemplate::new(502),
+            Some(1),
+        )
+        .await;
+        assert_eq!(
+            post_reuse(&app, &e, d_row.id).await.status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        let token = reuse_token(&app, &e, d_row.id).await;
+        let list: serde_json::Value = get_repositories(&app, &e, &token)
+            .await
+            .json()
+            .await
+            .expect("repositories json");
+        assert_eq!(list["repositories"].as_array().unwrap().len(), 1);
+        assert!(find_integration(&app, &e).await.is_none());
+
+        // 0 件（取得失敗とは区別して 200 の空配列）でも選択は始められ、GitHub 側で
+        // リポジトリを足せば callback なしの再読み込みだけで一覧に出て接続できる
+        let empty_source = insert_project_in_tenant(&app, a.tenant_id).await;
+        let empty_id = unique_no_repo_installation_id();
+        let empty_row =
+            insert_integration(&app, &empty_source, user.id, empty_id, "archived").await;
+        let f = insert_project_in_tenant(&app, a.tenant_id).await;
+        let token = reuse_token(&app, &f, empty_row.id).await;
+        let empty = get_repositories(&app, &f, &token).await;
+        assert_eq!(empty.status(), StatusCode::OK);
+        let empty: serde_json::Value = empty.json().await.expect("repositories json");
+        assert!(empty["repositories"].as_array().unwrap().is_empty());
+
+        override_access_token(
+            &mock_server,
+            empty_id,
+            ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "token": "ghs_added_repo_token",
+                "expires_at": "2030-01-01T00:00:00Z"
+            })),
+            None,
+        )
+        .await;
+        Mock::given(method("GET"))
+            .and(path("/installation/repositories"))
+            .and(header("authorization", "Bearer ghs_added_repo_token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "total_count": 1,
+                "repositories": [{ "full_name": "acme/added", "owner": { "login": "acme" } }]
+            })))
+            .mount(&mock_server)
+            .await;
+        let reloaded: serde_json::Value = get_repositories(&app, &f, &token)
+            .await
+            .json()
+            .await
+            .expect("repositories json");
+        assert_eq!(reloaded["repositories"][0]["name"], "added");
+        assert_eq!(
+            connect(&app, &f, &token, "added").await.status(),
+            StatusCode::NO_CONTENT
+        );
+
+        // GitHub 側で削除済みのインストールは 410 で案内し、再利用元の連携行は消さない
+        let gone_id = unique_installation_id();
+        let gone_source = insert_project_in_tenant(&app, a.tenant_id).await;
+        let gone_row = insert_integration(&app, &gone_source, user.id, gone_id, "legacy").await;
+        override_access_token(
+            &mock_server,
+            gone_id,
+            ResponseTemplate::new(404).set_body_string("Not Found"),
+            None,
+        )
+        .await;
+        assert_eq!(
+            post_reuse(&app, &e, gone_row.id).await.status(),
+            StatusCode::GONE
+        );
+        assert!(find_integration(&app, &gone_source).await.is_some());
+
+        // 再利用の確定と最後の参照の解除が競合しても、アンインストール済みの installation に
+        // 連携行を残さない。修正前は確定側の GitHub 確認がロックの外にあり、204 で行ができていた。
+        let last_id = unique_multi_repo_installation_id();
+        let last_source = insert_project_in_tenant(&app, a.tenant_id).await;
+        let last_row = insert_integration(&app, &last_source, user.id, last_id, "repo-1").await;
+        let racer = insert_project_in_tenant(&app, a.tenant_id).await;
+        let token = reuse_token(&app, &racer, last_row.id).await;
+
+        let blocker = app.state.db.begin().await.expect("begin blocker txn");
+        ::common::db::execute_bound(
+            &blocker,
+            "SELECT pg_advisory_xact_lock(?)",
+            vec![last_id.into()],
+        )
+        .await
+        .expect("acquire advisory lock");
+        {
+            let connect_fut = connect(&app, &racer, &token, "repo-2");
+            tokio::pin!(connect_fut);
+            let blocked =
+                tokio::time::timeout(std::time::Duration::from_millis(500), &mut connect_fut).await;
+            assert!(
+                blocked.is_err(),
+                "advisory lock 保持中に確定が完了してはいけない"
+            );
+
+            // 解除が先にロックを取り、GitHub 側を消して最後の連携行を削除した状態を作る
+            override_access_token(
+                &mock_server,
+                last_id,
+                ResponseTemplate::new(404).set_body_string("Not Found"),
+                None,
+            )
+            .await;
+            github_integrations::Entity::delete_by_id(last_row.id)
+                .exec(&blocker)
+                .await
+                .expect("delete last integration");
+            blocker.commit().await.expect("commit disconnect");
+
+            assert_eq!(connect_fut.await.status(), StatusCode::BAD_REQUEST);
+        }
+        assert!(
+            find_integration(&app, &racer).await.is_none(),
+            "アンインストール済みの installation に連携行を作らない"
+        );
+
+        // 拒否系: 未ログイン・API トークン・非オーナー（対照の成功系は上の B / F）
+        app.reset_session_client();
+        let reuse_body = serde_json::json!({ "source_integration_id": d_row.id });
+        assert_eq!(
+            app.get(&installations_path(&e)).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            app.post_json(&reuse_path(&e), reuse_body.clone())
+                .await
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let pat = app
+            .insert_pat(user.id, a.tenant_id, vec![Scope::AdminTenant], None)
+            .await;
+        assert_eq!(
+            app.get_with_bearer(&installations_path(&e), &pat)
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            app.post_json_with_bearer(&reuse_path(&e), reuse_body.clone(), &pat)
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        app.login_session(&outsider.email, &outsider.password).await;
+        assert_eq!(
+            app.get_with_session(&installations_path(&e)).await.status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            app.post_json_with_session(&reuse_path(&e), reuse_body)
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+
+        app.cleanup_user(outsider.id).await;
+        app.cleanup_user(user.id).await;
+        app.reset_session_client();
+    }
+
+    // 15. callback の自動接続で、ロック内でのトークン取り直しだけが失敗しても、素の 500 を
+    // 返さず設定画面へ理由付きで戻す。一時障害なら installation を控え、鮮度が切れても再試行できる。
+    {
+        let user = app.insert_user(false, false).await;
+        let tp = app.insert_tenant_project(user.id).await;
+        app.login_session(&user.email, &user.password).await;
+
+        // 1 回目（callback 本体での取得）は通し、2 回目（ロック内での取り直し）だけ失敗させる
+        let fail_second_access_token = async |installation_id: i64, failure: ResponseTemplate| {
+            override_access_token(
+                &mock_server,
+                installation_id,
+                ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                    "token": "ghs_test_installation_token",
+                    "expires_at": "2030-01-01T00:00:00Z"
+                })),
+                Some(1),
+            )
+            .await;
+            Mock::given(method("POST"))
+                .and(path(format!(
+                    "/app/installations/{installation_id}/access_tokens"
+                )))
+                .respond_with(failure)
+                .up_to_n_times(1)
+                .with_priority(2)
+                .mount(&mock_server)
+                .await;
+        };
+        let callback_location = async |installation_id: i64| -> String {
+            let state_token = get_install_state(&app, &tp).await;
+            let response = app
+                .get_with_session(&callback_path(&state_token, installation_id))
+                .await;
+            let status = response.status();
+            assert!(
+                status == StatusCode::FOUND || status == StatusCode::TEMPORARY_REDIRECT,
+                "callback should redirect, got {status}"
+            );
+            response
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+                .expect("location header")
+        };
+
+        let flaky_id = unique_installation_id();
+        fail_second_access_token(flaky_id, ResponseTemplate::new(502)).await;
+        let location = callback_location(flaky_id).await;
+        assert!(
+            location.contains("github_error=github_unavailable"),
+            "unexpected redirect location: {location}"
+        );
+        assert!(find_integration(&app, &tp).await.is_none());
+        assert_eq!(
+            github_oauth_state::peek_pending_installation(&app.state.redis_client, tp.project_id)
+                .await
+                .expect("peek pending installation"),
+            Some(flaky_id),
+            "再試行が鮮度チェックで弾かれないよう控える"
+        );
+
+        // 取り直しが通れば、同じインストールで連携できる
+        let retry = callback_location(flaky_id).await;
+        assert!(
+            !retry.contains("github_error="),
+            "unexpected redirect location: {retry}"
+        );
+        assert_eq!(
+            find_integration(&app, &tp)
+                .await
+                .expect("integration row")
+                .installation_id,
+            flaky_id
+        );
+        assert_eq!(
+            app.delete_with_session(&integration_path(&tp))
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+
+        // 取り直しの間に GitHub 側で消えたインストールは、消えたものとして戻す
+        // （アンインストールを促す installation_rejected だと、対象が無く行き止まりになる）
+        let gone_id = unique_installation_id();
+        fail_second_access_token(
+            gone_id,
+            ResponseTemplate::new(404).set_body_string("Not Found"),
+        )
+        .await;
+        let location = callback_location(gone_id).await;
+        assert!(
+            location.contains("github_error=installation_gone"),
+            "unexpected redirect location: {location}"
+        );
+        assert!(find_integration(&app, &tp).await.is_none());
+
+        // 検証の時点で消えていた場合も同じ理由で戻す（入れ直し先が無いのは同じ）
+        let vanished_id = unique_installation_id();
+        Mock::given(method("GET"))
+            .and(path(format!("/app/installations/{vanished_id}")))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+        let location = callback_location(vanished_id).await;
+        assert!(
+            location.contains("github_error=installation_gone"),
+            "unexpected redirect location: {location}"
+        );
+        assert!(find_integration(&app, &tp).await.is_none());
 
         app.cleanup_user(user.id).await;
         app.reset_session_client();

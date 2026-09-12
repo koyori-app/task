@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
   forgetSelectToken,
+  keepSelectToken,
   stashSelectTokenFromUrl,
   takeSelectToken,
 } from '../github-select-token';
@@ -96,6 +97,17 @@ describe('takeSelectToken', () => {
     window.sessionStorage.setItem('github-select-token:pending', '{壊れた JSON');
 
     expect(takeSelectToken(PROJECT_ID)).toBeNull();
+  });
+
+  it('callback から戻った直後のトークンは、以前から持っていた選択より優先する', () => {
+    // 既存インストールの再利用で受け取ったトークンを持ったまま、別のアカウント・組織を追加して戻った
+    keepSelectToken(PROJECT_ID, 'old-token');
+    visit(SETTINGS_PATH, '#github_select=new-token');
+    stashSelectTokenFromUrl();
+
+    expect(takeSelectToken(PROJECT_ID)).toBe('new-token');
+    // セクションを開き直しても新しい方を読む
+    expect(takeSelectToken(PROJECT_ID)).toBe('new-token');
   });
 });
 

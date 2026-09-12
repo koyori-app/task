@@ -2,14 +2,14 @@ use axum::{
     Json,
     body::Bytes,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
 };
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::prelude::Uuid;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QuerySelect,
-    TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, TransactionTrait,
 };
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
@@ -370,7 +370,11 @@ pub async fn github_callback(
             // GitHub からの着地点なので、素のエラーではなく設定画面へ理由付きで戻す。
             // 選択を放棄したまま控えが切れたインストールもここに来る（対処は入れ直し）。
             // 一時障害でアンインストールを促さないよう、拒否と不調は分ける。
-            let reason = if is_installation_rejected(&e) {
+            // GitHub 側から消えている場合はアンインストールする対象が無いので、
+            // 入れ直しを促す拒否ともさらに分ける。
+            let reason = if is_installation_gone(&e) {
+                "installation_gone"
+            } else if is_installation_rejected(&e) {
                 "installation_rejected"
             } else {
                 "github_unavailable"
@@ -464,7 +468,7 @@ pub async fn github_callback(
         );
     };
 
-    if let Err(e) = upsert_integration(
+    match upsert_integration(
         &state,
         github,
         payload.project_id,
@@ -472,16 +476,25 @@ pub async fn github_callback(
         query.installation_id,
         &repo.owner,
         &repo.name,
-        &access,
     )
     .await
     {
-        tracing::warn!(
-            project_id = %payload.project_id,
-            repo = %format!("{}/{}", repo.owner, repo.name),
-            "github callback: upsert_integration failed"
-        );
-        return Err(e);
+        Ok(Ok(())) => {}
+        // ロック内でのトークンの取り直しに失敗した。上の取得失敗と同じく、素のエラーではなく
+        // 設定画面へ理由付きで戻す（一時障害なら控えて、鮮度が切れても再試行できるようにする）。
+        Ok(Err(e)) if is_installation_gone(&e) => {
+            tracing::warn!(error = %e, "github callback: installation disappeared while connecting");
+            return callback_error_redirect(&redirect_to, "installation_gone");
+        }
+        Ok(Err(e)) => return unavailable(e).await,
+        Err(e) => {
+            tracing::warn!(
+                project_id = %payload.project_id,
+                repo = %format!("{}/{}", repo.owner, repo.name),
+                "github callback: upsert_integration failed"
+            );
+            return Err(e);
+        }
     }
     // TODO(調査用ログ): 切り分けが済んだら削除する
     tracing::info!(
@@ -509,7 +522,10 @@ pub async fn github_callback(
 /// 取ってから書き込む。解除側が「共有判定 → アンインストール → 行削除」を行う間に
 /// ここが連携行を増減させると、アンインストール済みの installation を指す行だけが
 /// 残る（またはその逆の）競合が成立するため、installation の全変更経路で直列化する。
-#[allow(clippy::too_many_arguments)]
+///
+/// 内側の `Err` はロック内での Installation Access Token の取り直しの失敗（GitHub 側の
+/// 消滅か一時障害）。呼び出し元ごとに復旧の仕方が違う（callback は設定画面へ理由付きで
+/// 戻す、選択確定 API はステータスで返す）ので、DB などの失敗（外側の `Err`）と分けて返す。
 async fn upsert_integration(
     state: &AppState,
     github: &GithubAppSettings,
@@ -518,12 +534,8 @@ async fn upsert_integration(
     installation_id: i64,
     repo_owner: &str,
     repo_name: &str,
-    access: &forge_github::InstallationAccessToken,
-) -> Result<(), AppError> {
-    let token_enc =
-        auth_core::crypto::encrypt_token(&github.github_token_encryption_key, &access.token)
-            .map_err(AppError::Internal)?;
-
+) -> Result<Result<(), anyhow::Error>, AppError> {
+    let app = github_app(&state.http_client, github);
     let now = chrono::Utc::now();
 
     // ロックすべき「現在行の installation_id」は読むまで分からないので、
@@ -566,6 +578,24 @@ async fn upsert_integration(
             continue;
         }
 
+        // インストールがまだ使えることはロックの内側で確かめ、そのトークンを保存する。
+        // ロックの外で済ませると、その後に最後の参照の解除がアンインストールまで終えた
+        // installation へ連携行を作ってしまう（解除は同じロック下で GitHub 側を消す）。
+        let access = match app.installation_access_token(installation_id).await {
+            Ok(access) => access,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    installation_id,
+                    "github installation access token failed while connecting"
+                );
+                return Ok(Err(e));
+            }
+        };
+        let token_enc =
+            auth_core::crypto::encrypt_token(&github.github_token_encryption_key, &access.token)
+                .map_err(AppError::Internal)?;
+
         if let Some(model) = existing {
             // 再連携: created_by / created_at は変更しない
             let repo_changed = model.repo_owner != repo_owner || model.repo_name != repo_name;
@@ -600,7 +630,7 @@ async fn upsert_integration(
             .await?;
         }
         txn.commit().await?;
-        return Ok(());
+        return Ok(Ok(()));
     }
 }
 
@@ -777,7 +807,7 @@ pub async fn connect_github_repository(
     let stored = install_state::peek_select_token(&state.redis_client, &body.select_token)
         .await
         .map_err(AppError::Internal)?;
-    let (payload, repositories, access) =
+    let (payload, repositories, _) =
         resolve_select_token(&state, &auth, tenant_id, project_id, stored).await?;
 
     // 別タブに残った古い選択トークンで、連携先が黙って巻き戻るのを防ぐ。
@@ -807,7 +837,7 @@ pub async fn connect_github_repository(
         return Err(AppError::BadRequest);
     };
 
-    if let Err(e) = upsert_integration(
+    let upserted = match upsert_integration(
         &state,
         github,
         project_id,
@@ -815,10 +845,17 @@ pub async fn connect_github_repository(
         claimed.installation_id,
         &body.repo_owner,
         &body.repo_name,
-        &access,
     )
     .await
     {
+        Ok(Ok(())) => Ok(()),
+        // インストールがもう無ければ選択トークンは死んでいるので 4xx。
+        // 一時障害まで 4xx にすると、フロントが有効なトークンを捨ててしまう。
+        Ok(Err(e)) if is_installation_gone(&e) => Err(AppError::BadRequest),
+        Ok(Err(e)) => Err(AppError::Internal(e)),
+        Err(e) => Err(e),
+    };
+    if let Err(e) = upserted {
         // 連携できていないので、選び直せるようにトークンを戻す（有効期限は延ばさない）。
         if let Err(restore_err) = install_state::restore_select_token(
             &state.redis_client,
@@ -846,6 +883,126 @@ pub async fn connect_github_repository(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    get,
+    path = "/installations",
+    tag = "GitHub",
+    summary = "同じテナントで利用中の GitHub インストール一覧（再利用候補）",
+    params(
+        ("tenant_id" = Uuid, Path),
+        ("project_id" = Uuid, Path),
+    ),
+    responses((status = 200, body = GithubReusableInstallationsResponse), CrudErrors)
+)]
+pub async fn list_reusable_github_installations(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<GithubReusableInstallationsResponse>, AppError> {
+    state.settings.require_github_app()?;
+    auth.require_session()?;
+    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
+    require_project_in_tenant(&state, tenant_id, project_id).await?;
+
+    // 候補はこのテナントの連携行だけから作る（App 全体のインストール一覧は見せない）。
+    // 同じ installation を複数プロジェクトが使っていても 1 件にまとめ、最初の連携行を代表にする。
+    let rows = github_integrations::Entity::find()
+        .inner_join(projects::Entity)
+        .filter(projects::Column::TenantId.eq(tenant_id))
+        .order_by_asc(github_integrations::Column::CreatedAt)
+        .order_by_asc(github_integrations::Column::Id)
+        .all(&state.db)
+        .await?;
+    let mut seen = std::collections::HashSet::new();
+    let installations = rows
+        .into_iter()
+        .filter(|row| seen.insert(row.installation_id))
+        .map(|row| GithubReusableInstallationItem {
+            source_integration_id: row.id,
+            account_login: row.repo_owner,
+        })
+        .collect();
+
+    Ok(Json(GithubReusableInstallationsResponse { installations }))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    post,
+    path = "/reuse",
+    tag = "GitHub",
+    summary = "同じテナントで利用中のインストールからリポジトリ選択を開始",
+    params(
+        ("tenant_id" = Uuid, Path),
+        ("project_id" = Uuid, Path),
+    ),
+    request_body = GithubReuseRequest,
+    responses(
+        (status = 200, body = GithubReuseResponse, description = "選択トークン"),
+        (status = 410, description = "インストールが GitHub 側で削除済み", body = ServerError),
+        CrudErrors,
+    )
+)]
+pub async fn reuse_github_installation(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<GithubReuseRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let github = state.settings.require_github_app()?;
+    auth.require_session()?;
+    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
+    require_project_in_tenant(&state, tenant_id, project_id).await?;
+
+    // installation_id はリクエストで受け取らず、同じテナントの連携行から引く。
+    // 信頼する範囲は callback の `installation_used_in_tenant` と同じ。
+    let source = github_integrations::Entity::find_by_id(body.source_integration_id)
+        .inner_join(projects::Entity)
+        .filter(projects::Column::TenantId.eq(tenant_id))
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    // 利用中の連携から来ているので、新規インストール向けの鮮度チェックや code は求めない。
+    // GitHub 側で消えていれば 410。一時障害（403 を含む）は 5xx にして再試行させる。
+    github_app(&state.http_client, github)
+        .installation_access_token(source.installation_id)
+        .await
+        .map_err(|e| {
+            tracing::warn!(
+                error = %e,
+                installation_id = source.installation_id,
+                "github reuse: installation access token failed"
+            );
+            if is_installation_gone(&e) {
+                AppError::Gone
+            } else {
+                AppError::Internal(e)
+            }
+        })?;
+
+    // 以降は callback が発行したトークンと同じ経路（一覧 → 確定）に乗せる。
+    let select_token = install_state::new_state_token();
+    install_state::store_select_token(
+        &state.redis_client,
+        &select_token,
+        &RepoSelectPayload {
+            tenant_id,
+            project_id,
+            user_id: auth.user_id,
+            installation_id: source.installation_id,
+        },
+    )
+    .await
+    .map_err(AppError::Internal)?;
+
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(GithubReuseResponse { select_token }),
+    ))
 }
 
 #[axum::debug_handler]

@@ -108,13 +108,25 @@ export function stashSelectTokenFromUrl() {
  * 一時退避されたものは、着地ページと同じパスで開かれたときだけ引き取り、
  * 以降はプロジェクト単位の退避先へ移す（設定セクションを切り替えると
  * セクションは破棄されるため、タブ内で保持し続ける必要がある）。
+ *
+ * 一時退避は callback から戻った直後のものなので、プロジェクト単位に残っている
+ * 以前の選択（再利用で受け取ったものや、選びかけのもの）より新しい。古い方を
+ * 優先すると新しいアカウント・組織を選べず、古い方が期限切れなら新しい方まで
+ * 一緒に捨ててしまうので、引き取れたら上書きする。
  */
 export function takeSelectToken(projectId: string): string | null {
   if (typeof window === 'undefined') return null;
 
-  const own = readStorage(projectKey(projectId));
-  if (own) return own;
+  const pending = takePendingToken();
+  if (pending) {
+    writeStorage(projectKey(projectId), pending);
+    return pending;
+  }
+  return readStorage(projectKey(projectId));
+}
 
+/** 着地ページで一時退避したトークンを 1 回だけ引き取る */
+function takePendingToken(): string | null {
   const raw = readStorage(PENDING_KEY);
   if (!raw) return null;
 
@@ -129,9 +141,13 @@ export function takeSelectToken(projectId: string): string | null {
     return null;
   }
   if (typeof stash?.token !== 'string' || stash.path !== window.location.pathname) return null;
-
-  writeStorage(projectKey(projectId), stash.token);
   return stash.token;
+}
+
+/** 既存インストールの再利用で受け取ったトークンを、callback 経由のものと同じくタブ内に保持する */
+export function keepSelectToken(projectId: string, token: string) {
+  if (typeof window === 'undefined') return;
+  writeStorage(projectKey(projectId), token);
 }
 
 /** 使い終わった（または無効になった）トークンを捨てる */
