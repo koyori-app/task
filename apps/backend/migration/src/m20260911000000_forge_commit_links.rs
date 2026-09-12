@@ -69,6 +69,17 @@ impl MigrationTrait for Migration {
         "#,
             )
             .await?;
+        // 掃除ジョブ（§5。古い受信記録を 30 日で消す）が `created_at <` で引くので、
+        // 表ができた時点で張っておく。行が積もってから足すと CREATE INDEX が
+        // ACCESS EXCLUSIVE ロックで webhook の受信を止める
+        // （避けるための CONCURRENTLY はマイグレーションのトランザクション内では使えない）
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "CREATE INDEX idx_forge_webhook_deliveries_created_at
+                 ON forge_webhook_deliveries(created_at)",
+            )
+            .await?;
         // 連携由来のアクティビティだけが冪等キーを持つ（既存行と手で行う操作は NULL のまま）。
         // UNIQUE は NULL 同士を別物とみなすので NULL の行は何行でも積める。
         // 部分 UNIQUE インデックスにすると、起動時の SeaORM の schema sync が entity に無い
