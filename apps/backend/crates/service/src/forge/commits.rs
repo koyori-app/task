@@ -5,17 +5,25 @@
 //! アクティビティは `dedupe_key` の UNIQUE で 1 回だけ積む。途中で失敗しても
 //! 再試行で同じ状態に収束するので、コミットごとのトランザクションは張らない。
 
-use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait, Statement, prelude::Uuid};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
+    Statement, prelude::Uuid,
+};
 
-use entity::projects;
+use entity::{oauth_connections, projects, tenants};
 
 use super::events::{ForgeCommit, ForgeRepo};
 use super::task_refs;
+use crate::access::{
+    is_shared_project_explicit_member, is_tenant_member, project_is_open_or_member,
+};
 use crate::task_activities::record_activity_once;
 
 pub const COMMIT_LINKED_EVENT: &str = "forge_commit_linked";
 
 /// `project_id` は webhook を受けた連携のプロジェクト。`KEY-N` はそのテナント内で解決する。
+/// 作者がホスト上のログイン名で Task ユーザーに結べて、リンク先のプロジェクトに入れる人なら、
+/// 履歴をそのユーザーの操作にする。
 pub async fn apply_push(
     db: &DatabaseConnection,
     project_id: Uuid,
@@ -35,6 +43,7 @@ pub async fn apply_push(
             continue;
         }
 
+        let author = author_user_id(db, repo, &commit.author_handle).await?;
         let payload = serde_json::json!({
             "host": repo.host,
             "sha": commit.sha,
@@ -56,10 +65,19 @@ pub async fn apply_push(
                 [commit_id.into(), target.task_id.into()],
             ))
             .await?;
+            let user_id = match author {
+                Some(user_id)
+                    if can_view_project(db, project.tenant_id, target.project_id, user_id)
+                        .await? =>
+                {
+                    Some(user_id)
+                }
+                _ => None,
+            };
             record_activity_once(
                 db,
                 target.task_id,
-                None,
+                user_id,
                 COMMIT_LINKED_EVENT,
                 payload.clone(),
                 &format!("{COMMIT_LINKED_EVENT}:{commit_id}:{}", target.task_id),
@@ -68,6 +86,59 @@ pub async fn apply_push(
         }
     }
     Ok(())
+}
+
+/// 作者を Task ユーザーに解決する。ホスト上のログイン名（小文字）を控えた接続がちょうど 1 件の
+/// ときだけ採る。ログイン名の一意性は保存側の付け替えで保っているので、競合で 2 件あっても決め打ちしない。
+///
+/// `author_handle` はホストがコミットのメールアドレスから解決した値で、署名の無いコミットなら
+/// 偽装できる。ここで得たユーザーは表示にだけ使い、通知や権限の根拠にしない。
+async fn author_user_id(
+    db: &DatabaseConnection,
+    repo: &ForgeRepo,
+    author_handle: &str,
+) -> Result<Option<Uuid>, anyhow::Error> {
+    if author_handle.is_empty() {
+        return Ok(None);
+    }
+    // ponytail: クラウド版（instance_url が NULL）の接続だけを見る。セルフホストの GitLab / Forgejo を足すときは host_url と instance_url を突き合わせる
+    let user_ids: Vec<Uuid> = oauth_connections::Entity::find()
+        .filter(oauth_connections::Column::Provider.eq(repo.host.as_str()))
+        .filter(oauth_connections::Column::InstanceUrl.is_null())
+        .filter(oauth_connections::Column::ProviderLogin.eq(author_handle.to_lowercase()))
+        .select_only()
+        .column(oauth_connections::Column::UserId)
+        .limit(2)
+        .into_tuple()
+        .all(db)
+        .await?;
+    Ok(match user_ids.as_slice() {
+        [user_id] => Some(*user_id),
+        _ => None,
+    })
+}
+
+/// リンク先のプロジェクトに入れる人か。入れない人の名前を、そのプロジェクトの履歴に載せないために見る。
+///
+/// 規則は API のアクセス判定（handler の `has_tenant_access`）と同じ: テナントオーナーは常に可、
+/// テナントメンバーは公開規則かメンバー指定、テナントに居ないゲストは明示参加した共有プロジェクトだけ。
+async fn can_view_project(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    project_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, anyhow::Error> {
+    if tenants::Entity::find_by_id(tenant_id)
+        .one(db)
+        .await?
+        .is_some_and(|tenant| tenant.owner_id == user_id)
+    {
+        return Ok(true);
+    }
+    if is_tenant_member(db, tenant_id, user_id).await? {
+        return Ok(project_is_open_or_member(db, project_id, user_id).await?);
+    }
+    Ok(is_shared_project_explicit_member(db, project_id, user_id).await?)
 }
 
 /// 同じリポジトリの同じ SHA は 1 行にまとめ、その行の id を返す。
