@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { nextTick } from 'vue';
 import type { components } from '@/generated/api';
 
 /*
@@ -152,6 +153,45 @@ describe('TaskDetailHub', () => {
         .findAll('[data-menu-item]')
         .every((item) => item.attributes('disabled') !== undefined),
     ).toBe(true);
+  });
+
+  /** happy-dom の既定に clipboard があるとは限らないので、都度 stub を据える */
+  function stubClipboard(writeText: (text: string) => Promise<void>) {
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  }
+
+  afterEach(() => {
+    delete (navigator as { clipboard?: unknown }).clipboard;
+  });
+
+  it('タスクIDのボタンを押すと clipboard へ TEST-1 を写す', async () => {
+    const writeText = vi.fn(async () => undefined);
+    stubClipboard(writeText);
+
+    const wrapper = mount(TaskDetailHub, {
+      props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id },
+    });
+
+    await wrapper.get('button[aria-label="タスクID TEST-1 をコピー"]').trigger('click');
+    await nextTick();
+
+    expect(writeText).toHaveBeenCalledWith('TEST-1');
+    expect(wrapper.find('button[aria-label="タスクIDをコピーしました"]').exists()).toBe(true);
+  });
+
+  it('コピーに失敗したら握り潰さず失敗を示す', async () => {
+    stubClipboard(vi.fn(async () => Promise.reject(new Error('denied'))));
+
+    const wrapper = mount(TaskDetailHub, {
+      props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id },
+    });
+
+    await wrapper.get('button[aria-label="タスクID TEST-1 をコピー"]').trigger('click');
+    await nextTick();
+
+    expect(wrapper.find('button[aria-label="タスクIDをコピーできませんでした"]').exists()).toBe(
+      true,
+    );
   });
 
   it('優先度の更新に失敗したら理由を出す', () => {
