@@ -8,7 +8,7 @@
  * (--border / --muted / --card) に寄せる — トークン自体が .dark で反転する。
  * トークンに対応の無い文字色 (帯とガター = 行番号の muted 文字色) だけ
  * --kfm-code-* 変数で持ち、.dark ブリッジで実値を差し替える
- * (alerts / starry-night が cmd_668 で踏んだ「ライト固定で沈む」への前例踏襲)。
+ * (alerts / starry-night が踏んだ「CSS ライト固定で .dark 下に沈む」問題への前例踏襲)。
  */
 
 :root {

@@ -14,7 +14,7 @@ import '@/lib/rehype-starry-night/style.css';
 import '@/lib/rehype-kfm-code/style.css';
 
 /*
- * KFM コードブロック着色 (starry-night) の story 群。cmd_670 の fixture+v-html 方式:
+ * KFM コードブロック着色 (starry-night) の story 群。fixture+v-html 方式:
  * fixture は renderDescription の事前生成 HTML (単一ソース =
  * src/lib/kfm-story-fixtures/inputs.ts、drift 検査 = kfm-story-fixtures.test.ts)。
  * v-html のみの同期描画で VRT が決定的になる。
@@ -145,7 +145,7 @@ export const UnknownLanguage: Story = {
 export const LongLine: Story = {
   name: '横に長い行（横溢れ）',
   args: { html: longLineHtml },
-  // 横溢れを絵にするため、狭い親 (max-w-md) に閉じ込めて描画する (cmd_670 の表と同形)
+  // 横溢れを絵にするため、狭い親 (max-w-md) に閉じ込めて描画する (KfmGfm の表（横溢れ）と同形)
   render: (args: KfmStoryArgs) => ({
     setup: () => ({ args }),
     template: `<div class="max-w-md"><div class="${KFM_CONTENT_CLASS}" v-html="args.html" /></div>`,

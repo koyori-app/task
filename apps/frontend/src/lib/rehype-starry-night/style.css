@@ -16,8 +16,8 @@
 /*
  * .dark ブリッジ (アプリの class 戦略ダークへの追従)。
  * 本アプリのダークは tailwind.css の .dark ancestor class 戦略 (@custom-variant dark)。
- * ブリッジが無いと .dark 配下でもコードがライト配色のまま沈む——alerts が cmd_668 で
- * 踏んだ「CSS ライト固定」と同型。alerts と同じ前例 (.dark で実値上書き・理由明記) に
+ * ブリッジが無いと .dark 配下でもコードがライト配色のまま沈む——alerts が踏んだ
+ * 「CSS ライト固定でダーク下に沈む」問題と同型。alerts と同じ前例 (.dark で実値上書き・理由明記) に
  * 倣い、dark パレットの変数値を .dark 配下へ複写する。
  * 値の出典: @wooorm/starry-night@3.10.0 style/dark.css の :root ブロック
  * (upstream 更新時は同期が必要。機械照合済)。
