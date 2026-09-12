@@ -49,9 +49,9 @@ jobs:
         with:
           workspaces: apps/backend -> target
           cache-on-failure: true
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+          # キャッシュは main だけが書く。PR ごとに保存すると 10 GB の上限で main の分が追い出され、
+          # 全ジョブがコールドビルドになる（PR は main の分を読む）
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
@@ -61,6 +61,3 @@ jobs:
       - name: Run tests
         run: cargo nextest run -p task-cli
         working-directory: apps/backend
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: sccache
