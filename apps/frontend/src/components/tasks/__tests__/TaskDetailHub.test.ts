@@ -194,6 +194,30 @@ describe('TaskDetailHub', () => {
     );
   });
 
+  /*
+   * 非 secure context では navigator.clipboard そのものが無い。いまは writeText の参照が
+   * 同期 TypeError になって catch に入るが、`navigator.clipboard?.writeText(...)` のような
+   * 整理を入れると undefined を await して resolve し、写していないのに成功と出る。
+   */
+  it('clipboard が無い環境では成功と誤表示せず失敗を示す', async () => {
+    // happy-dom は clipboard を自前で持っていて delete では消えないので、undefined を据える
+    // （afterEach の delete はこの上書きを外して既定へ戻す）
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    expect((navigator as { clipboard?: unknown }).clipboard).toBeUndefined();
+
+    const wrapper = mount(TaskDetailHub, {
+      props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id },
+    });
+
+    await wrapper.get('button[aria-label="タスクID TEST-1 をコピー"]').trigger('click');
+    await nextTick();
+
+    expect(wrapper.find('button[aria-label="タスクIDをコピーしました"]').exists()).toBe(false);
+    expect(wrapper.find('button[aria-label="タスクIDをコピーできませんでした"]').exists()).toBe(
+      true,
+    );
+  });
+
   it('優先度の更新に失敗したら理由を出す', () => {
     const wrapper = mount(TaskDetailHub, {
       props: {
