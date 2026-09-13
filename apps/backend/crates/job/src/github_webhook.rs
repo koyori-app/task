@@ -116,6 +116,22 @@ pub async fn enqueue_delivery(
     Ok(true)
 }
 
+/// 続きのページを読むジョブを組み立てる。
+///
+/// ペイロードのコミットは最初のジョブで処理済みで、続きの経路（`backfill_page` が `Some`）
+/// では読まないので運ばない。続きが生まれるのはホストの上限で切り詰められた push
+/// （2048 件）だけなので、そのまま複製すると数百 KB をページ数ぶん apalis.jobs
+/// （Postgres に永続化される）へ書くことになる。取り直しに使う `before` / `after` /
+/// `repo` は引き継ぐ。
+fn backfill_continuation(job: &GithubWebhookJob, next_page: u32) -> GithubWebhookJob {
+    let mut next = job.clone();
+    next.backfill_page = Some(next_page);
+    if let Some(ForgeEvent::Push { commits, .. }) = &mut next.forge_event {
+        commits.clear();
+    }
+    next
+}
+
 /// `issues` はタスクへ反映し、正規化済みの `push` はコミットをタスクへリンクする。
 /// それ以外は受信をログに残すのみ。
 pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(), BoxDynError> {
@@ -167,10 +183,7 @@ pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(),
             if let Some(next_page) = fetched.next_page {
                 enqueue(
                     &state.github_webhook_storage,
-                    GithubWebhookJob {
-                        backfill_page: Some(next_page),
-                        ..job.clone()
-                    },
+                    backfill_continuation(&job, next_page),
                 )
                 .await?;
             }
@@ -317,6 +330,74 @@ mod tests {
                 "sha"
             ]
         );
+    }
+
+    /// 切り詰められた push のジョブ（続きが生まれる形）
+    fn truncated_push_job() -> GithubWebhookJob {
+        GithubWebhookJob {
+            integration_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+            event: "push".into(),
+            delivery_id: Some("delivery".into()),
+            payload: serde_json::Value::Null,
+            backfill_page: None,
+            forge_event: Some(ForgeEvent::Push {
+                repo: ForgeRepo {
+                    host: "github".into(),
+                    host_url: "https://github.com".into(),
+                    repo_owner: "acme".into(),
+                    repo_name: "backend".into(),
+                },
+                ref_name: "refs/heads/main".into(),
+                forced: false,
+                before: Some("b17cd90".into()),
+                after: "a3f92c1".into(),
+                commits_truncated: true,
+                commits: vec![ForgeCommit {
+                    sha: "a3f92c1".into(),
+                    message: "fix: TASK-1".into(),
+                    author_handle: "yupix".into(),
+                    author_name: "Yupix".into(),
+                    committed_at: chrono::Utc::now(),
+                    html_url: "https://github.com/acme/backend/commit/a3f92c1".into(),
+                }],
+            }),
+        }
+    }
+
+    /// 続きのジョブは自分が読まないコミットを運ばない。運ぶと、切り詰めが起きた push
+    /// （2048 件）のペイロードをページ数ぶん Postgres へ書くことになる。
+    #[test]
+    fn backfill_continuation_drops_the_commits_it_will_not_read() {
+        let job = truncated_push_job();
+        let next = backfill_continuation(&job, 3);
+
+        assert_eq!(next.backfill_page, Some(3));
+        let Some(ForgeEvent::Push {
+            repo,
+            before,
+            after,
+            commits_truncated,
+            commits,
+            ..
+        }) = &next.forge_event
+        else {
+            panic!("続きのジョブは push の正規化イベントを持つ");
+        };
+        assert!(commits.is_empty());
+        // 取り直しに使う欄は引き継ぐ
+        assert_eq!(before.as_deref(), Some("b17cd90"));
+        assert_eq!(after, "a3f92c1");
+        assert!(commits_truncated);
+        assert_eq!(repo.repo_name, "backend");
+        assert_eq!(next.delivery_id, job.delivery_id);
+        assert_eq!(next.project_id, job.project_id);
+
+        // 元のジョブ（処理中のもの）は触らない
+        let Some(ForgeEvent::Push { commits, .. }) = &job.forge_event else {
+            panic!("元のジョブは push の正規化イベントを持つ");
+        };
+        assert_eq!(commits.len(), 1);
     }
 
     /// デプロイ前に積まれていたジョブ（forge_event が無い）も読める
