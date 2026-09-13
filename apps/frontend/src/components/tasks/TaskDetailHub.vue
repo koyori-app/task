@@ -28,7 +28,7 @@ import {
   UserPlus,
   X,
 } from '@lucide/vue';
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import type { components } from '@/generated/api';
 import AvatarGroup from '@/components/AvatarGroup.vue';
@@ -131,20 +131,43 @@ const emit = defineEmits<{
   'delete-request': [];
 }>();
 
+/** コピー結果を出しておく時間（ミリ秒） */
+const COPY_RESET_MS = 2000;
+
 /** タスク ID のコピー結果。非 secure context では clipboard が無いので失敗も示す */
 const copyState = ref<'idle' | 'copied' | 'error'>('idle');
 let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
+/** コピー操作の世代。連続して押したとき、最後の操作だけが表示とタイマーを持つ */
+let copyRequest = 0;
+
+function clearCopyReset() {
+  if (copyResetTimer) {
+    clearTimeout(copyResetTimer);
+    copyResetTimer = undefined;
+  }
+}
 
 async function copyTaskId(seqKey: string) {
-  if (copyResetTimer) clearTimeout(copyResetTimer);
+  const request = ++copyRequest;
+  // 実行中は前の結果を出したままにする（新しい操作の結果が出る前に消さない）
+  clearCopyReset();
+
+  let result: 'copied' | 'error';
   try {
     await navigator.clipboard.writeText(seqKey);
-    copyState.value = 'copied';
+    result = 'copied';
   } catch {
-    copyState.value = 'error';
+    result = 'error';
   }
-  copyResetTimer = setTimeout(() => (copyState.value = 'idle'), 2000);
+
+  // 遅れて返ってきた古い操作は、新しい操作の表示もタイマーも触らない
+  if (request !== copyRequest) return;
+  clearCopyReset();
+  copyState.value = result;
+  copyResetTimer = setTimeout(() => (copyState.value = 'idle'), COPY_RESET_MS);
 }
+
+onBeforeUnmount(clearCopyReset);
 
 const resolvedStatus = computed(() =>
   props.statuses.find((status) => status.id === props.statusId),
