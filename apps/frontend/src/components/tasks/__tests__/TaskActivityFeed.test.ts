@@ -18,6 +18,41 @@ function activity(id: string, secondsAgo: number): ActivityItem {
 }
 
 describe('TaskActivityFeed', () => {
+  it.each([
+    ['github_issue_imported', '作成'],
+    ['github_issue_synced', '同期'],
+  ])('GitHub の %s を同期元とともに表示する', (event_type, action) => {
+    const wrapper = mount(TaskActivityFeed, {
+      props: {
+        activities: [
+          {
+            ...activity('github-1', 10),
+            event_type,
+            user: null,
+            payload: { repo_owner: 'acme', repo_name: 'backend', issue_number: 42 },
+          },
+        ],
+      },
+    });
+    expect(wrapper.text()).toContain(
+      `システムがGitHub Issue（acme/backend#42）からタスクを${action}しました`,
+    );
+  });
+
+  it.each([null, {}, { repo_owner: 'acme', repo_name: 'backend', issue_number: '42' }])(
+    '同期元情報が不完全でも GitHub 同期であることを表示する: %j',
+    (payload) => {
+      const wrapper = mount(TaskActivityFeed, {
+        props: {
+          activities: [
+            { ...activity('github-1', 10), event_type: 'github_issue_synced', user: null, payload },
+          ],
+        },
+      });
+      expect(wrapper.text()).toContain('システムがGitHub Issueからタスクを同期しました');
+    },
+  );
+
   it('残りがあるときだけ段階取得の導線を出す', async () => {
     const onLoadMore = vi.fn();
     const wrapper = mount(TaskActivityFeed, {
