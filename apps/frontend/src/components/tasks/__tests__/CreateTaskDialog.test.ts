@@ -422,6 +422,8 @@ describe('CreateTaskDialog estimate', () => {
     await flushPromises();
 
     expect(mutateAsync.mock.calls[0][0].body.estimated_minutes).toBe(90);
+    // 入力側にも上限を出す（送信時の検証と同じ値）
+    expect(getEstimateInput().getAttribute('max')).toBe('2147483647');
     wrapper.unmount();
   });
 
@@ -437,12 +439,18 @@ describe('CreateTaskDialog estimate', () => {
     wrapper.unmount();
   });
 
-  // 境界: 1 分は通り、0 と小数は送らずに止める
+  /*
+   * 境界: 1 分と i32 の上限は通し、0・小数・上限超えは送らずに止める。
+   * 上限を超えた値を送ると backend の estimated_minutes（i32）のデシリアライズで
+   * 落ち、利用者には入力の誤りではなく「作成に失敗しました」しか出ない。
+   */
   it.each([
-    ['0', false],
-    ['1.5', false],
-    ['1', true],
-  ])('見積もり %s は送信可否 %s', async (value, accepted) => {
+    ['0', null],
+    ['1.5', null],
+    ['1', 1],
+    ['2147483647', 2147483647],
+    ['2147483648', null],
+  ])('見積もり %s は %s として送る（null は送らない）', async (value, sent) => {
     const wrapper = mountDialog(queryClient);
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('境界');
@@ -451,12 +459,12 @@ describe('CreateTaskDialog estimate', () => {
     getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await flushPromises();
 
-    if (accepted) {
-      expect(mutateAsync.mock.calls[0][0].body.estimated_minutes).toBe(1);
+    if (sent !== null) {
+      expect(mutateAsync.mock.calls[0][0].body.estimated_minutes).toBe(sent);
     } else {
       expect(mutateAsync).not.toHaveBeenCalled();
       expect(document.body.textContent).toContain(
-        '見積もりは 1 以上の整数（分）で入力してください',
+        '見積もりは 1 以上 2147483647 以下の整数（分）で入力してください',
       );
     }
     wrapper.unmount();

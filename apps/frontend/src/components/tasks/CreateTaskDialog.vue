@@ -46,6 +46,12 @@ type CreatedTask = components['schemas']['TaskDetailResponse'];
 /** 担当者に付ける役割。詳細から付けるときと同じ値にする（docs/features/tasks/1.core.md）。 */
 const ASSIGNEE_ROLE = 'primary';
 
+/**
+ * 見積もり（分）の上限。API の `estimated_minutes` は i32 なので、超えると backend の
+ * デシリアライズで落ち、利用者には入力の誤りではなく「作成に失敗しました」しか出ない。
+ */
+const MAX_ESTIMATE_MINUTES = 2_147_483_647;
+
 const priorityOptions = Object.entries(PRIORITY_CONFIG) as [
   Priority,
   (typeof PRIORITY_CONFIG)[Priority],
@@ -218,9 +224,11 @@ async function submit() {
   const estimatedMinutes = normalizedEstimate ? Number(normalizedEstimate) : undefined;
   if (
     estimatedMinutes !== undefined &&
-    (!Number.isInteger(estimatedMinutes) || estimatedMinutes < 1)
+    (!Number.isInteger(estimatedMinutes) ||
+      estimatedMinutes < 1 ||
+      estimatedMinutes > MAX_ESTIMATE_MINUTES)
   ) {
-    validationMessage.value = '見積もりは 1 以上の整数（分）で入力してください';
+    validationMessage.value = `見積もりは 1 以上 ${MAX_ESTIMATE_MINUTES} 以下の整数（分）で入力してください`;
     return;
   }
 
@@ -550,6 +558,7 @@ async function submit() {
                   name="estimated_minutes"
                   type="number"
                   min="1"
+                  :max="MAX_ESTIMATE_MINUTES"
                   step="1"
                   inputmode="numeric"
                   placeholder="未設定"
