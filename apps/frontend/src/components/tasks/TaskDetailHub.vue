@@ -8,6 +8,7 @@ import {
   ChevronRight,
   ChevronUp,
   CircleDashed,
+  Copy,
   EllipsisVertical,
   Filter,
   Flag,
@@ -27,7 +28,7 @@ import {
   UserPlus,
   X,
 } from '@lucide/vue';
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import type { components } from '@/generated/api';
 import AvatarGroup from '@/components/AvatarGroup.vue';
@@ -129,6 +130,44 @@ const emit = defineEmits<{
   'toggle:assignee': [userId: string, checked: boolean];
   'delete-request': [];
 }>();
+
+/** コピー結果を出しておく時間（ミリ秒） */
+const COPY_RESET_MS = 2000;
+
+/** タスク ID のコピー結果。非 secure context では clipboard が無いので失敗も示す */
+const copyState = ref<'idle' | 'copied' | 'error'>('idle');
+let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
+/** コピー操作の世代。連続して押したとき、最後の操作だけが表示とタイマーを持つ */
+let copyRequest = 0;
+
+function clearCopyReset() {
+  if (copyResetTimer) {
+    clearTimeout(copyResetTimer);
+    copyResetTimer = undefined;
+  }
+}
+
+async function copyTaskId(seqKey: string) {
+  const request = ++copyRequest;
+  // 実行中は前の結果を出したままにする（新しい操作の結果が出る前に消さない）
+  clearCopyReset();
+
+  let result: 'copied' | 'error';
+  try {
+    await navigator.clipboard.writeText(seqKey);
+    result = 'copied';
+  } catch {
+    result = 'error';
+  }
+
+  // 遅れて返ってきた古い操作は、新しい操作の表示もタイマーも触らない
+  if (request !== copyRequest) return;
+  clearCopyReset();
+  copyState.value = result;
+  copyResetTimer = setTimeout(() => (copyState.value = 'idle'), COPY_RESET_MS);
+}
+
+onBeforeUnmount(clearCopyReset);
 
 const resolvedStatus = computed(() =>
   props.statuses.find((status) => status.id === props.statusId),
@@ -365,9 +404,25 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
             </Button>
 
             <div class="ml-auto flex items-center gap-1">
-              <span class="mr-1 font-mono text-sm text-muted-foreground">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="mr-1 h-7 gap-1.5 px-2 font-mono text-sm font-normal text-muted-foreground"
+                :aria-label="
+                  copyState === 'copied'
+                    ? 'タスクIDをコピーしました'
+                    : copyState === 'error'
+                      ? 'タスクIDをコピーできませんでした'
+                      : `タスクID ${taskSeqKey(projectKey, task.seq_id)} をコピー`
+                "
+                @click="copyTaskId(taskSeqKey(projectKey, task.seq_id))"
+              >
                 {{ taskSeqKey(projectKey, task.seq_id) }}
-              </span>
+                <Check v-if="copyState === 'copied'" class="size-3.5" aria-hidden="true" />
+                <X v-else-if="copyState === 'error'" class="size-3.5" aria-hidden="true" />
+                <Copy v-else class="size-3.5" aria-hidden="true" />
+              </Button>
               <Button
                 type="button"
                 variant="ghost"

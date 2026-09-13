@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { nextTick } from 'vue';
 import type { components } from '@/generated/api';
 
 /*
@@ -152,6 +153,115 @@ describe('TaskDetailHub', () => {
         .findAll('[data-menu-item]')
         .every((item) => item.attributes('disabled') !== undefined),
     ).toBe(true);
+  });
+
+  /** happy-dom の既定に clipboard があるとは限らないので、都度 stub を据える */
+  function stubClipboard(writeText: (text: string) => Promise<void>) {
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  }
+
+  afterEach(() => {
+    delete (navigator as { clipboard?: unknown }).clipboard;
+    vi.useRealTimers();
+  });
+
+  it('タスクIDのボタンを押すと clipboard へ TEST-1 を写す', async () => {
+    const writeText = vi.fn(async () => undefined);
+    stubClipboard(writeText);
+
+    const wrapper = mount(TaskDetailHub, {
+      props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id },
+    });
+
+    await wrapper.get('button[aria-label="タスクID TEST-1 をコピー"]').trigger('click');
+    await nextTick();
+
+    expect(writeText).toHaveBeenCalledWith('TEST-1');
+    expect(wrapper.find('button[aria-label="タスクIDをコピーしました"]').exists()).toBe(true);
+  });
+
+  it('コピーに失敗したら握り潰さず失敗を示す', async () => {
+    stubClipboard(vi.fn(async () => Promise.reject(new Error('denied'))));
+
+    const wrapper = mount(TaskDetailHub, {
+      props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id },
+    });
+
+    await wrapper.get('button[aria-label="タスクID TEST-1 をコピー"]').trigger('click');
+    await nextTick();
+
+    expect(wrapper.find('button[aria-label="タスクIDをコピーできませんでした"]').exists()).toBe(
+      true,
+    );
+  });
+
+  /*
+   * 非 secure context では navigator.clipboard そのものが無い。いまは writeText の参照が
+   * 同期 TypeError になって catch に入るが、`navigator.clipboard?.writeText(...)` のような
+   * 整理を入れると undefined を await して resolve し、写していないのに成功と出る。
+   */
+  it('clipboard が無い環境では成功と誤表示せず失敗を示す', async () => {
+    // happy-dom は clipboard を自前で持っていて delete では消えないので、undefined を据える
+    // （afterEach の delete はこの上書きを外して既定へ戻す）
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    expect((navigator as { clipboard?: unknown }).clipboard).toBeUndefined();
+
+    const wrapper = mount(TaskDetailHub, {
+      props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id },
+    });
+
+    await wrapper.get('button[aria-label="タスクID TEST-1 をコピー"]').trigger('click');
+    await nextTick();
+
+    expect(wrapper.find('button[aria-label="タスクIDをコピーしました"]').exists()).toBe(false);
+    expect(wrapper.find('button[aria-label="タスクIDをコピーできませんでした"]').exists()).toBe(
+      true,
+    );
+  });
+
+  /*
+   * 連続して押すと複数のコピーが同時に走る。応答が逆順に返ると、古い操作の結果が
+   * 新しい操作の表示を上書きしうる。古い操作のタイマーが残っていると、最後に押してから
+   * 2 秒経つ前に表示も消える。
+   */
+  it('連続コピーで応答が逆順に返っても、最後の操作の結果を最後まで出す', async () => {
+    vi.useFakeTimers();
+    const pending: { resolve: () => void; reject: (reason: Error) => void }[] = [];
+    stubClipboard(
+      vi.fn(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            pending.push({ resolve, reject });
+          }),
+      ),
+    );
+
+    const wrapper = mount(TaskDetailHub, {
+      props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id },
+    });
+    const button = wrapper.get('button[aria-label="タスクID TEST-1 をコピー"]');
+
+    await button.trigger('click');
+    await button.trigger('click');
+    expect(pending).toHaveLength(2);
+
+    // 2 回目が先に成功し、1 回目の失敗があとから返る
+    pending[1]!.resolve();
+    await flushPromises();
+    expect(wrapper.find('button[aria-label="タスクIDをコピーしました"]').exists()).toBe(true);
+
+    pending[0]!.reject(new Error('denied'));
+    await flushPromises();
+    expect(wrapper.find('button[aria-label="タスクIDをコピーできませんでした"]').exists()).toBe(
+      false,
+    );
+    expect(wrapper.find('button[aria-label="タスクIDをコピーしました"]').exists()).toBe(true);
+
+    // 表示は最後の結果から 2 秒続く（古い操作のタイマーで早く消えない）
+    await vi.advanceTimersByTimeAsync(1_900);
+    expect(wrapper.find('button[aria-label="タスクIDをコピーしました"]').exists()).toBe(true);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(wrapper.find('button[aria-label="タスクID TEST-1 をコピー"]').exists()).toBe(true);
   });
 
   it('優先度の更新に失敗したら理由を出す', () => {
