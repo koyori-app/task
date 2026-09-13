@@ -1,12 +1,14 @@
 packages:
   - apps/frontend
   - packages/*
-sharedWorkspaceLockfile: false
 allowBuilds:
   '@nestjs/core': true
   '@openapitools/openapi-generator-cli': true
+  '@parcel/watcher': false
   '@sentry/cli': true
+  '@swc/core': false
   esbuild: true
+  unrs-resolver: false
   vue-demi: true
 catalog:
   '@codemirror/commands': 6.11.0
