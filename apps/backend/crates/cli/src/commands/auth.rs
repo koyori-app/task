@@ -1,6 +1,6 @@
 //! 認証。トークンの保存だけは API を呼ばずに済ませる。
 
-use payload::users::UserResponse;
+use payload::personal_tokens::PersonalTokenIdentityResponse;
 
 use crate::Context;
 use crate::cli::AuthCommand;
@@ -13,8 +13,9 @@ pub async fn run(command: AuthCommand, context: &Context, output: OutputOptions)
     match command {
         AuthCommand::Whoami => {
             let api = context.connect()?;
-            let user: UserResponse = api.get(&["v1", "auth", "me"], &[]).await?;
-            print(&user, output);
+            let token: PersonalTokenIdentityResponse =
+                api.get(&["v1", "personal_tokens", "me"], &[]).await?;
+            print(&token, output);
         }
         AuthCommand::Token { token } => {
             let token = match token

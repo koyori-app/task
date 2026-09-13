@@ -85,6 +85,20 @@ pub enum UnauthorizedErrors {
 }
 
 #[derive(IntoResponses)]
+pub enum PersonalTokenAuthErrors {
+    #[response(
+        status = 401,
+        description = "有効なパーソナルアクセストークンを Bearer で指定してください"
+    )]
+    Unauthorized(#[to_schema] ServerError),
+    #[response(
+        status = 500,
+        description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
+    )]
+    Internal(#[to_schema] ServerError),
+}
+
+#[derive(IntoResponses)]
 #[response(
     status = 500,
     description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
