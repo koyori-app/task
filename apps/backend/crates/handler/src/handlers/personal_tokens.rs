@@ -14,6 +14,7 @@ use sea_orm::{
 use crate::AppState;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
+use crate::handlers::tenant_members::require_tenant_admin;
 use crate::openapi::{CrudErrors, SessionAuthErrors};
 use entity::scopes::ScopeList;
 use entity::{
@@ -25,21 +26,6 @@ use service::auth;
 
 fn token_last_four(token: &str) -> String {
     token[token.len().saturating_sub(4)..].to_string()
-}
-
-async fn require_tenant_owner(
-    state: &AppState,
-    tenant_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    let tenant = tenants::Entity::find_by_id(tenant_id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if tenant.owner_id != user_id {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
 }
 
 async fn validate_project_ids(
@@ -136,7 +122,9 @@ pub async fn create_personal_token(
     Valid(Json(payload)): Valid<Json<CreatePersonalTokenRequest>>,
 ) -> Result<(StatusCode, Json<CreatePersonalTokenResponse>), AppError> {
     auth.require_session()?;
-    require_tenant_owner(&state, payload.tenant_id, auth.user_id).await?;
+    // 発行はオーナーとテナント Admin に許す。Admin はメンバーを足せるため、
+    // ここだけ主に閉じても迂回できてしまう（docs/personal-access-tokens-authz.md）。
+    require_tenant_admin(&state, payload.tenant_id, auth.user_id).await?;
 
     if let Some(ref project_ids) = payload.project_ids {
         validate_project_ids(&state, payload.tenant_id, project_ids).await?;
@@ -245,7 +233,15 @@ pub async fn revoke_all_personal_tokens(
     Valid(Json(payload)): Valid<Json<RevokeAllPersonalTokensRequest>>,
 ) -> Result<StatusCode, AppError> {
     auth.require_session()?;
-    require_tenant_owner(&state, payload.confirm_tenant_id, auth.user_id).await?;
+    // revoke-all は主に限ったまま（この境目はこの変更では広げない。
+    // 広げるべきかは別途裁きを仰ぐ）。
+    let tenant = tenants::Entity::find_by_id(payload.confirm_tenant_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if tenant.owner_id != auth.user_id {
+        return Err(AppError::Forbidden);
+    }
 
     personal_tokens::Entity::update_many()
         .col_expr(personal_tokens::Column::Revoked, Expr::value(true))

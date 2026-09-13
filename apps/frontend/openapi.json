@@ -23256,6 +23256,17 @@
             "type": "string",
             "format": "uuid"
           },
+          "member_role": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TenantRole",
+                "description": "membership=Member の時だけ、その member の role（Admin / Member / Viewer）。\nOwner と Guest では null。Admin 境界の口（鍵の発行など）を GUI が\n選択肢を作る段で見分けるための欄。"
+              }
+            ]
+          },
           "membership": {
             "$ref": "#/components/schemas/TenantMembershipKind",
             "description": "この利用者から見た関わり方（Owner / Member / Guest）"

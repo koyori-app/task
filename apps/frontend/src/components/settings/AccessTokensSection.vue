@@ -60,9 +60,14 @@ const tenantsQuery = useTenantsQuery();
 const createToken = useCreatePersonalTokenMutation();
 const revokeToken = useRevokePersonalTokenMutation();
 
-/** PAT はテナントオーナーしか発行できないため、選択肢を自分がオーナーのテナントに絞る。 */
-const ownedTenants = computed(() =>
-  (tenantsQuery.data.value ?? []).filter((t) => t.owner_id === props.user.id),
+/**
+ * PAT を発行できるのはテナントオーナーと Admin（API 側は require_tenant_admin）。
+ * 選択肢もそれと同じ条件で絞る——片方だけ広げると「選べるのに 403」になる。
+ */
+const issuableTenants = computed(() =>
+  (tenantsQuery.data.value ?? []).filter(
+    (t) => t.membership === 'Owner' || t.member_role === 'Admin',
+  ),
 );
 
 /** 一覧・取り消しダイアログでトークンの束縛先テナントを表示するための対応表。 */
@@ -90,7 +95,7 @@ const createdToken = ref<string | null>(null);
 const copied = ref(false);
 const copyError = ref<string | null>(null);
 
-const formTenantId = computed(() => selectedTenantId.value ?? ownedTenants.value[0]?.id ?? null);
+const formTenantId = computed(() => selectedTenantId.value ?? issuableTenants.value[0]?.id ?? null);
 
 function openForm() {
   isFormOpen.value = true;
@@ -158,7 +163,7 @@ async function onSubmit() {
     const status = (e as { response?: { status?: number } }).response?.status;
     submitError.value =
       status === 403
-        ? 'トークンを発行できるのは、選択したテナントのオーナーだけです。'
+        ? 'トークンを発行できるのは、選択したテナントのオーナーと Admin だけです。'
         : status === 400
           ? '入力内容を確認してください。'
           : 'トークンを発行できませんでした。時間をおいて再度お試しください。';
@@ -219,7 +224,7 @@ async function onRevokeConfirm() {
       <Button
         v-if="!isFormOpen"
         type="button"
-        :disabled="ownedTenants.length === 0"
+        :disabled="issuableTenants.length === 0"
         @click="openForm"
       >
         <PhPlus class="size-4" />
@@ -269,7 +274,8 @@ async function onRevokeConfirm() {
             <FieldError class="min-h-[1.25rem]">{{ nameError ?? '' }}</FieldError>
           </Field>
 
-          <Field v-if="ownedTenants.length > 1">
+          <!-- 候補が一つでも出す。出さぬと、どのテナントに縛られるかが発行後まで見えぬ。 -->
+          <Field v-if="issuableTenants.length > 0">
             <FieldLabel for="token-tenant">テナント</FieldLabel>
             <Select
               :model-value="formTenantId ?? undefined"
@@ -279,7 +285,7 @@ async function onRevokeConfirm() {
                 <SelectValue placeholder="選択してください" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem v-for="tenant in ownedTenants" :key="tenant.id" :value="tenant.id">
+                <SelectItem v-for="tenant in issuableTenants" :key="tenant.id" :value="tenant.id">
                   {{ tenant.name }}
                 </SelectItem>
               </SelectContent>
@@ -351,10 +357,10 @@ async function onRevokeConfirm() {
     </p>
     <template v-else-if="tokensQuery.isSuccess.value">
       <div
-        v-if="ownedTenants.length === 0 && !tenantsQuery.isPending.value"
+        v-if="issuableTenants.length === 0 && !tenantsQuery.isPending.value"
         class="text-muted-foreground text-sm"
       >
-        トークンを発行できるのは、自分がオーナーのテナントだけです。
+        トークンを発行できるのは、テナントオーナーと Admin だけです。
       </div>
 
       <p

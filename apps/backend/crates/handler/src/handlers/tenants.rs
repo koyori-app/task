@@ -11,14 +11,14 @@ use sea_orm::{
 };
 
 use crate::AppState;
-use std::collections::HashSet;
+use std::collections::HashMap;
 
-use crate::auth_helpers::{guest_tenant_ids, is_tenant_member};
+use crate::auth_helpers::guest_tenant_ids;
 use crate::error::AppError;
 use crate::extractors::AuthMethod;
 use crate::extractors::AuthUser;
 use crate::openapi::{CrudErrors, TenantCreateErrors};
-use entity::{scopes::Scope, tenant_members, tenants};
+use entity::{scopes::Scope, tenant_members, tenant_members::TenantRole, tenants};
 use payload::tenants::*;
 
 #[axum::debug_handler]
@@ -85,11 +85,13 @@ pub async fn list_tenants(
     auth.require_scope(Scope::AdminTenant)?;
     let items = match &auth.method {
         AuthMethod::Session => {
-            let joined_tenant_ids: HashSet<Uuid> = tenant_members::Entity::find()
+            // tenant_id → 自分の role。membership の判定と member_role の欄の両方に使う。
+            let joined_roles: HashMap<Uuid, TenantRole> = tenant_members::Entity::find()
                 .filter(tenant_members::Column::UserId.eq(auth.user_id))
                 .select_only()
                 .column(tenant_members::Column::TenantId)
-                .into_tuple::<Uuid>()
+                .column(tenant_members::Column::Role)
+                .into_tuple::<(Uuid, TenantRole)>()
                 .all(&state.db)
                 .await?
                 .into_iter()
@@ -102,8 +104,8 @@ pub async fn list_tenants(
                         .add(tenants::Column::OwnerId.eq(auth.user_id))
                         .add(
                             tenants::Column::Id.is_in(
-                                joined_tenant_ids
-                                    .iter()
+                                joined_roles
+                                    .keys()
                                     .chain(guest_ids.iter())
                                     .copied()
                                     .collect::<Vec<_>>(),
@@ -116,12 +118,13 @@ pub async fn list_tenants(
                 .map(|tenant| {
                     let membership = if tenant.owner_id == auth.user_id {
                         TenantMembershipKind::Owner
-                    } else if joined_tenant_ids.contains(&tenant.id) {
+                    } else if joined_roles.contains_key(&tenant.id) {
                         TenantMembershipKind::Member
                     } else {
                         TenantMembershipKind::Guest
                     };
-                    TenantListItemResponse::from_parts(tenant, membership)
+                    let member_role = joined_roles.get(&tenant.id).cloned();
+                    TenantListItemResponse::from_parts(tenant, membership, member_role)
                 })
                 .collect()
         }
@@ -135,9 +138,15 @@ pub async fn list_tenants(
                 .one(&state.db)
                 .await?
             {
+                let member_role = tenant_members::Entity::find()
+                    .filter(tenant_members::Column::TenantId.eq(*tenant_id))
+                    .filter(tenant_members::Column::UserId.eq(auth.user_id))
+                    .one(&state.db)
+                    .await?
+                    .map(|m| m.role);
                 let membership = if tenant.owner_id == auth.user_id {
                     Some(TenantMembershipKind::Owner)
-                } else if is_tenant_member(&state.db, *tenant_id, auth.user_id).await? {
+                } else if member_role.is_some() {
                     Some(TenantMembershipKind::Member)
                 } else if guest_tenant_ids(&state.db, auth.user_id)
                     .await?
@@ -148,7 +157,11 @@ pub async fn list_tenants(
                     None
                 };
                 if let Some(membership) = membership {
-                    visible.push(TenantListItemResponse::from_parts(tenant, membership));
+                    visible.push(TenantListItemResponse::from_parts(
+                        tenant,
+                        membership,
+                        member_role,
+                    ));
                 }
             }
             visible
