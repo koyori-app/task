@@ -36,8 +36,9 @@ pub struct JobState {
     /// ワーカーへ `AppState` を渡すと job → handler の循環になるので、
     /// 必要な依存はここに足す
     pub review_summary_storage: Arc<review_summary::ReviewSummaryStorage>,
-    /// 切り詰められた push の取り直しを、1 ページずつ次のジョブへ引き継ぐために持つ。
-    pub github_webhook_storage: Arc<github_webhook::GithubWebhookStorage>,
+    /// 切り詰められた push の続きのジョブを、投入の鍵（受信記録）と同じトランザクションで
+    /// 積むために持つ。storage 経由では別接続になり、鍵とジョブが一緒に確定しない。
+    pub pg_pool: PgPool,
 }
 
 pub async fn setup_pool(database_url: &str) -> Result<PgPool, anyhow::Error> {

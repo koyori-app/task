@@ -175,7 +175,7 @@ fn job_state(app: &TestApp) -> job::JobState {
         smtp_client: app.state.smtp_client.clone(),
         http_client: app.state.http_client.clone(),
         review_summary_storage: app.state.review_summary_storage.clone(),
-        github_webhook_storage: app.state.github_webhook_storage.clone(),
+        pg_pool: app.state.pg_pool.clone(),
     }
 }
 

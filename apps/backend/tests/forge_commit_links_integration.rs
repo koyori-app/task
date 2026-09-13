@@ -328,7 +328,7 @@ fn job_state(app: &TestApp) -> job::JobState {
         smtp_client: app.state.smtp_client.clone(),
         http_client: app.state.http_client.clone(),
         review_summary_storage: app.state.review_summary_storage.clone(),
-        github_webhook_storage: app.state.github_webhook_storage.clone(),
+        pg_pool: app.state.pg_pool.clone(),
     }
 }
 
@@ -467,6 +467,21 @@ async fn truncated_push_backfills_only_the_pushed_range() {
         .collect();
     assert_eq!(continuations.len(), 1, "続きのページはジョブとして積む");
     assert_eq!(continuations[0].backfill_page, Some(2));
+
+    // 続きを積んだあと、完了が記録される前にワーカーが落ちるとこのジョブは再実行される。
+    // そのとき同じ続きを積み直すと、続きのジョブがページごとに増えていく
+    job::github_webhook::process(jobs[0].clone(), Data::new(job_state(&app)))
+        .await
+        .expect("first backfill page again");
+    assert_eq!(
+        queued_jobs(&app, fx.tp.project_id)
+            .await
+            .iter()
+            .filter(|queued| queued.backfill_page.is_some())
+            .count(),
+        1,
+        "再実行で続きのジョブを増やさない"
+    );
 
     // 2 ページ目。ここで結ばれ、続きは積まれない
     job::github_webhook::process(continuations[0].clone(), Data::new(job_state(&app)))

@@ -132,6 +132,20 @@ fn backfill_continuation(job: &GithubWebhookJob, next_page: u32) -> GithubWebhoo
     next
 }
 
+/// 続きのジョブを一度だけ積むための鍵。
+///
+/// ページ N がページ N+1 を積んだあと、N の完了が記録される前にワーカーが落ちると N は
+/// 再実行される。素朴に積み直すと続きのジョブがページごとに増えるので、受信記録と同じ
+/// 台帳（`forge_webhook_deliveries`）へこの鍵を入れ、取れたときだけ積む。
+/// ホストの配信 ID は UUID なので、`backfill:` 前置と `after` / ページで名前空間が分かれる。
+fn backfill_schedule_key(job: &GithubWebhookJob, after: &str, page: u32) -> String {
+    let delivery = job.delivery_id.as_deref().unwrap_or("-");
+    format!(
+        "backfill:{delivery}:{}:{}:{after}:{page}",
+        job.integration_id, job.project_id
+    )
+}
+
 /// `issues` はタスクへ反映し、正規化済みの `push` はコミットをタスクへリンクする。
 /// それ以外は受信をログに残すのみ。
 pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(), BoxDynError> {
@@ -180,12 +194,25 @@ pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(),
 
             // 1 ジョブ 1 ページに区切り、続きは新しいジョブへ引き継ぐ。1 回で全部読もうとすると、
             // 極端に大きな push では何度再試行しても同じ場所で失敗して進まない。
+            //
+            // 投入は鍵の記録と 1 トランザクションで確定する。このジョブの再実行で同じページを
+            // 積み直すと、続きのジョブがページごとに増えていく。
             if let Some(next_page) = fetched.next_page {
-                enqueue(
-                    &state.github_webhook_storage,
-                    backfill_continuation(&job, next_page),
+                let scheduled = enqueue_delivery(
+                    &state.pg_pool,
+                    &repo.host,
+                    &repo.host_url,
+                    &backfill_schedule_key(&job, after, next_page),
+                    vec![backfill_continuation(&job, next_page)],
                 )
                 .await?;
+                if !scheduled {
+                    tracing::info!(
+                        project_id = %job.project_id,
+                        next_page,
+                        "forge push backfill continuation already scheduled"
+                    );
+                }
             }
             tracing::info!(
                 integration_id = %job.integration_id,
