@@ -90,8 +90,8 @@ importers:
         specifier: 14.4.0
         version: 14.4.0(vue@3.5.41(typescript@6.0.3))
       '@wooorm/starry-night':
-        specifier: 3.10.0
-        version: 3.10.0
+        specifier: 3.11.0
+        version: 3.11.0
       '@zxcvbn-ts/core':
         specifier: 4.1.2
         version: 4.1.2
@@ -3630,8 +3630,8 @@ packages:
   '@webcontainer/env@1.1.1':
     resolution: {integrity: sha512-6aN99yL695Hi9SuIk1oC88l9o0gmxL1nGWWQ/kNy81HigJ0FoaoTXpytCj6ItzgyCEwA9kF1wixsTuv5cjsgng==}
 
-  '@wooorm/starry-night@3.10.0':
-    resolution: {integrity: sha512-JRp2va6hfbC14fXgYQTmwdl4j1+4ZID9KKkCD+Mn/+B/j1QMlzZYPUtXOFNxA+CWrEo+IPha6EMVbsap2OFZig==}
+  '@wooorm/starry-night@3.11.0':
+    resolution: {integrity: sha512-xs0DlS8BYDIoLIYAezO+XRSPPUjeVhAwHWbOno/p16S4Ik63JRfHFjfkHO1wJwQ8r0Cq6leGuWqHKpH7G1BS6g==}
 
   '@yuku-codegen/binding-darwin-arm64@0.5.48':
     resolution: {integrity: sha512-yo96Oef12WzqnphInfz/eexVse3+kWgfGS5g2S3rFS3dcGn1ENW9xLFDZUP9rh+yP76DOq38wBoFi1+I9+6qBg==}
@@ -10710,7 +10710,7 @@ snapshots:
 
   '@webcontainer/env@1.1.1': {}
 
-  '@wooorm/starry-night@3.10.0':
+  '@wooorm/starry-night@3.11.0':
     dependencies:
       '@types/hast': 3.0.5
       import-meta-resolve: 4.2.0
@@ -13945,7 +13945,7 @@ snapshots:
   rehype-starry-night@2.2.0:
     dependencies:
       '@types/hast': 3.0.5
-      '@wooorm/starry-night': 3.10.0
+      '@wooorm/starry-night': 3.11.0
       hast-util-to-string: 3.0.1
       levenshtein-edit-distance: 3.0.1
       unist-util-visit-parents: 6.0.2
