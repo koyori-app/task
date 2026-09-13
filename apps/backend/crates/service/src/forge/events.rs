@@ -34,8 +34,11 @@ pub enum ForgeEvent {
         repo: ForgeRepo,
         ref_name: String,
         forced: bool,
+        /// push 前の ref の先頭コミット（小文字 16 進）。
+        /// ブランチの新規作成では `None`（比較の起点が無い）
+        before: Option<String>,
         /// push 後の ref の先頭コミット（小文字 16 進）。
-        /// 切り詰められた `commits` を API で埋めるときの起点にする
+        /// 切り詰められた `commits` を API で埋めるときの終点にする
         after: String,
         /// ホストが `commits` を上限で切り詰めている。
         /// 足りない分は `after` から遡って取り直さないと、そのコミットは二度と処理されない

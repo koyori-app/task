@@ -174,18 +174,26 @@ fn push_payload(installation_id: i64, commits: &[(&str, &str)]) -> serde_json::V
     let after = commits
         .last()
         .map_or("0000000000000000000000000000000000000000", |(sha, _)| *sha);
-    push_payload_with_head(installation_id, commits, after)
+    push_payload_with_range(
+        installation_id,
+        commits,
+        "0000000000000000000000000000000000000000",
+        after,
+    )
 }
 
 /// 切り詰められた push では、先頭コミットは `commits` に載らない
-fn push_payload_with_head(
+fn push_payload_with_range(
     installation_id: i64,
     commits: &[(&str, &str)],
+    before: &str,
     after: &str,
 ) -> serde_json::Value {
     serde_json::json!({
         "ref": "refs/heads/main",
         "forced": false,
+        "created": before.chars().all(|c| c == '0'),
+        "before": before,
         "after": after,
         "repository": { "name": REPO_NAME, "owner": { "login": REPO_OWNER } },
         "installation": { "id": installation_id },
@@ -320,6 +328,7 @@ fn job_state(app: &TestApp) -> job::JobState {
         smtp_client: app.state.smtp_client.clone(),
         http_client: app.state.http_client.clone(),
         review_summary_storage: app.state.review_summary_storage.clone(),
+        github_webhook_storage: app.state.github_webhook_storage.clone(),
     }
 }
 
@@ -340,12 +349,15 @@ fn api_commit(sha: &str, message: &str) -> serde_json::Value {
     })
 }
 
-/// 上限で切り詰められた push は、欠けたコミットを API で取り直してからリンクする。
-/// 取り直せない間はジョブを成功させない（配信は受信済みなので、成功にすると二度と処理されない）。
+/// 上限で切り詰められた push は、`before...after` の差分だけを取り直してリンクする。
+///
+/// - `after` からの履歴を辿ると、マージで別の親から辿れる push 前のコミットまで混ざる
+/// - 取り直しは 1 ジョブ 1 ページ。続きは次のジョブへ引き継ぐので、大きな push でも進む
+/// - 取り直せない間はジョブを成功させない（配信は受信済みなので、成功にすると二度と処理されない）
 // serial: GITHUB_API_BASE_URL を差し替えるため、他の GitHub テストと並列に走らせない。
 #[serial_test::serial]
 #[tokio::test]
-async fn truncated_push_backfills_missing_commits() {
+async fn truncated_push_backfills_only_the_pushed_range() {
     let mock_server = MockServer::start().await;
     // SAFETY: serial アトリビュートにより他テストとの並列実行を防いでいる。
     unsafe {
@@ -362,35 +374,64 @@ async fn truncated_push_backfills_missing_commits() {
 
     let app = TestApp::new_with_github().await;
     let fx = setup(&app).await;
-    let task_id = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, 1).await;
+    let pushed_task = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, 1).await;
+    let outside_task = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, 2).await;
 
     // 届くのは上限ちょうど。KEY-N を含むコミットは欠けた側にしかない
     let delivered: Vec<(String, String)> = (0..COMMITS_CAP)
         .map(|i| (sha(), format!("chore: 関係のないコミット {i}")))
         .collect();
-    let newest_delivered = delivered.last().expect("delivered commits").0.clone();
-    let linked_sha = sha();
+    let before_sha = sha();
     let head_sha = sha();
-    let linked_message = format!("fix: ログイン修正 {}-1", fx.key);
+    let linked_sha = sha();
+    let linked = api_commit(&linked_sha, &format!("fix: ログイン修正 {}-1", fx.key));
+    // 差分の 1 ページ目（KEY-N は無い）。2 ページ目に続く件数にする
+    let per_page = service::github::commits::PER_PAGE;
+    let first_page: Vec<serde_json::Value> = (0..per_page)
+        .map(|i| api_commit(&sha(), &format!("chore: 差分 {i}")))
+        .collect();
+    let total_commits = per_page + 1;
 
-    // 取り直しは after から遡り、受信済みの最新コミットで止まる
-    let commits_page = serde_json::json!([
-        api_commit(&head_sha, "chore: 先頭コミット"),
-        api_commit(&linked_sha, &linked_message),
-        api_commit(&newest_delivered, "chore: 受信済みの境界"),
-    ]);
-    let commits_path = format!("/repos/{REPO_OWNER}/{REPO_NAME}/commits");
+    let compare_path = format!("/repos/{REPO_OWNER}/{REPO_NAME}/compare/{before_sha}...{head_sha}");
     // 最初の 1 回は一時障害にして、成功扱いにならないことを見る
     Mock::given(method("GET"))
-        .and(path(commits_path.clone()))
+        .and(path(compare_path.clone()))
         .respond_with(ResponseTemplate::new(500))
         .up_to_n_times(1)
         .with_priority(1)
         .mount(&mock_server)
         .await;
     Mock::given(method("GET"))
-        .and(path(commits_path))
-        .respond_with(ResponseTemplate::new(200).set_body_json(commits_page))
+        .and(path(compare_path))
+        .respond_with(move |req: &wiremock::Request| {
+            let page = req
+                .url
+                .query_pairs()
+                .find(|(key, _)| key == "page")
+                .and_then(|(_, value)| value.parse::<u32>().ok())
+                .unwrap_or(1);
+            let commits = if page == 1 {
+                first_page.clone()
+            } else {
+                vec![linked.clone()]
+            };
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "total_commits": total_commits,
+                "commits": commits,
+            }))
+        })
+        .mount(&mock_server)
+        .await;
+
+    // 履歴を辿ると出てくるが、この push には含まれないコミット（別の親から辿れる古いもの）
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/{REPO_OWNER}/{REPO_NAME}/commits")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([api_commit(
+                &sha(),
+                &format!("fix: push の外 {}-2", fx.key)
+            )])),
+        )
         .mount(&mock_server)
         .await;
 
@@ -398,7 +439,7 @@ async fn truncated_push_backfills_missing_commits() {
         .iter()
         .map(|(sha, message)| (sha.as_str(), message.as_str()))
         .collect();
-    let body = push_payload_with_head(fx.installation_id, &delivered_refs, &head_sha);
+    let body = push_payload_with_range(fx.installation_id, &delivered_refs, &before_sha, &head_sha);
     let delivery = Uuid::new_v4().to_string();
     assert_eq!(post_push(&app, &delivery, &body, None).await, 200);
 
@@ -411,15 +452,38 @@ async fn truncated_push_backfills_missing_commits() {
             .is_err(),
         "取り直せない push を成功扱いにしない（再試行させる）"
     );
-    assert_eq!(link_rows(&app, task_id).await, 0);
+    assert_eq!(link_rows(&app, pushed_task).await, 0);
 
-    // 取り直せたら、ペイロードに無かったコミットがタスクに結ばれる
+    // 1 ページ目。KEY-N は 2 ページ目にあるので、この時点ではまだ結ばれない
     job::github_webhook::process(jobs[0].clone(), Data::new(job_state(&app)))
         .await
-        .expect("process job");
+        .expect("first backfill page");
+    assert_eq!(link_rows(&app, pushed_task).await, 0);
 
-    assert_eq!(link_rows(&app, task_id).await, 1);
-    assert_eq!(commit_activities(&app, task_id).await.len(), 1);
+    let continuations: Vec<GithubWebhookJob> = queued_jobs(&app, fx.tp.project_id)
+        .await
+        .into_iter()
+        .filter(|queued| queued.backfill_page.is_some())
+        .collect();
+    assert_eq!(continuations.len(), 1, "続きのページはジョブとして積む");
+    assert_eq!(continuations[0].backfill_page, Some(2));
+
+    // 2 ページ目。ここで結ばれ、続きは積まれない
+    job::github_webhook::process(continuations[0].clone(), Data::new(job_state(&app)))
+        .await
+        .expect("second backfill page");
+    assert_eq!(link_rows(&app, pushed_task).await, 1);
+    assert_eq!(commit_activities(&app, pushed_task).await.len(), 1);
+    assert_eq!(
+        queued_jobs(&app, fx.tp.project_id)
+            .await
+            .iter()
+            .filter(|queued| queued.backfill_page.is_some())
+            .count(),
+        1,
+        "終端では続きを積まない"
+    );
+
     let commit_row = forge_commits::Entity::find()
         .filter(forge_commits::Column::ProjectId.eq(fx.tp.project_id))
         .one(&app.state.db)
@@ -428,7 +492,12 @@ async fn truncated_push_backfills_missing_commits() {
         .expect("commit row");
     assert_eq!(
         commit_row.sha, linked_sha,
-        "欠けていたコミットを API で取り直して結ぶ"
+        "欠けていたコミットを差分から取り直して結ぶ"
+    );
+    assert_eq!(
+        link_rows(&app, outside_task).await,
+        0,
+        "push に含まれないコミットは結ばない"
     );
 
     app.cleanup_user(fx.owner_id).await;

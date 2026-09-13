@@ -1,6 +1,5 @@
 //! GitHub Webhook イベント処理ジョブ。
 
-use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,6 +29,10 @@ pub struct GithubWebhookJob {
     /// 受信口で正規化したイベント。これを足す前に積まれたジョブには無い
     #[serde(default)]
     pub forge_event: Option<ForgeEvent>,
+    /// 切り詰められた push の取り直しの続き（次に読むページ）。
+    /// ホストからの配信では常に `None`（このジョブが自分で積む）
+    #[serde(default)]
+    pub backfill_page: Option<u32>,
 }
 
 pub type GithubWebhookStorage = PostgresStorage<
@@ -119,41 +122,75 @@ pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(),
     if let Some(ForgeEvent::Push {
         repo,
         commits,
+        before,
         after,
         commits_truncated,
         ..
     }) = &job.forge_event
     {
-        // ホストの上限で切り詰められた push は、欠けた分を取り直してから処理する。
-        // 取り直せなければ成功にせず再試行させる（成功にすると、この配信は受信済みとして
-        // 捨てられ、欠けたコミットは二度とタスクに結ばれない）。
-        let commits = if *commits_truncated {
+        // 続きのジョブはペイロードのコミットを積み直さない（最初のジョブで処理済み）。
+        // ホストの上限で切り詰められていたら、取り直しの 1 ページ目へ進む。
+        let page = match job.backfill_page {
+            Some(page) => Some(page),
+            None => {
+                service::forge::commits::apply_push(&state.db, job.project_id, repo, commits)
+                    .await?;
+                commits_truncated.then_some(1)
+            }
+        };
+
+        if let Some(page) = page {
             let github = state
                 .settings
                 .require_github_app()
                 .map_err(|e| anyhow::anyhow!("github app settings are required: {e}"))?;
-            Cow::Owned(
-                service::github::commits::backfill_push_commits(
-                    &state.db,
-                    &state.http_client,
-                    github,
-                    job.project_id,
+            // 取り直せなければ成功にせず再試行させる（成功にすると、この配信は受信済みの
+            // ままなので、欠けたコミットは二度とタスクに結ばれない）。
+            let fetched = service::github::commits::fetch_push_commits_page(
+                &state.db,
+                &state.http_client,
+                github,
+                job.project_id,
+                service::github::commits::PushRange {
                     repo,
+                    before: before.as_deref(),
                     after,
-                    commits,
-                )
-                .await?,
+                    page,
+                },
             )
-        } else {
-            Cow::Borrowed(commits.as_slice())
-        };
-        service::forge::commits::apply_push(&state.db, job.project_id, repo, &commits).await?;
+            .await?;
+            service::forge::commits::apply_push(&state.db, job.project_id, repo, &fetched.commits)
+                .await?;
+
+            // 1 ジョブ 1 ページに区切り、続きは新しいジョブへ引き継ぐ。1 回で全部読もうとすると、
+            // 極端に大きな push では何度再試行しても同じ場所で失敗して進まない。
+            if let Some(next_page) = fetched.next_page {
+                enqueue(
+                    &state.github_webhook_storage,
+                    GithubWebhookJob {
+                        backfill_page: Some(next_page),
+                        ..job.clone()
+                    },
+                )
+                .await?;
+            }
+            tracing::info!(
+                integration_id = %job.integration_id,
+                project_id = %job.project_id,
+                delivery_id = ?job.delivery_id,
+                page,
+                commits = fetched.commits.len(),
+                next_page = ?fetched.next_page,
+                "forge push backfill page processed"
+            );
+            return Ok(());
+        }
+
         tracing::info!(
             integration_id = %job.integration_id,
             project_id = %job.project_id,
             delivery_id = ?job.delivery_id,
             commits = commits.len(),
-            truncated = *commits_truncated,
             "forge push event processed"
         );
         return Ok(());
@@ -215,6 +252,7 @@ mod tests {
             event: "push".into(),
             delivery_id: Some("delivery".into()),
             payload: serde_json::Value::Null,
+            backfill_page: None,
             forge_event: Some(ForgeEvent::Push {
                 repo: ForgeRepo {
                     host: "github".into(),
@@ -224,6 +262,7 @@ mod tests {
                 },
                 ref_name: "refs/heads/main".into(),
                 forced: false,
+                before: Some("b17cd90".into()),
                 after: "a3f92c1".into(),
                 commits_truncated: false,
                 commits: vec![ForgeCommit {
@@ -240,6 +279,7 @@ mod tests {
         assert_eq!(
             sorted_keys(&value),
             vec![
+                "backfill_page",
                 "delivery_id",
                 "event",
                 "forge_event",
@@ -253,6 +293,7 @@ mod tests {
             sorted_keys(event),
             vec![
                 "after",
+                "before",
                 "commits",
                 "commits_truncated",
                 "forced",

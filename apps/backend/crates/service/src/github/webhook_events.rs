@@ -28,6 +28,12 @@ struct PushPayload {
     ref_name: String,
     #[serde(default)]
     forced: bool,
+    /// ブランチを作った push。`before` はゼロ SHA になる
+    #[serde(default)]
+    created: bool,
+    /// push 前の ref の先頭コミット
+    #[serde(default)]
+    before: String,
     /// push 後の ref の先頭コミット
     after: String,
     repository: PushRepository,
@@ -63,6 +69,17 @@ struct PushCommitAuthor {
     username: Option<String>,
 }
 
+/// 比較の起点に使える `before` か。
+///
+/// ブランチを作った push の `before` はゼロ SHA で、比較の起点にならない。
+/// `created` が無いホストや古いペイロードでも弾けるよう、値そのものも見る。
+fn comparable_sha(before: &str, created: bool) -> Option<String> {
+    if created || before.is_empty() || before.chars().all(|c| c == '0') {
+        return None;
+    }
+    Some(before.to_ascii_lowercase())
+}
+
 /// `push` イベントを正規化する。
 pub fn push_event(payload: &serde_json::Value) -> Result<ForgeEvent, serde_json::Error> {
     let push = PushPayload::deserialize(payload)?;
@@ -75,6 +92,7 @@ pub fn push_event(payload: &serde_json::Value) -> Result<ForgeEvent, serde_json:
         },
         ref_name: push.ref_name,
         forced: push.forced,
+        before: comparable_sha(&push.before, push.created),
         after: push.after.to_ascii_lowercase(),
         commits_truncated: push.commits.len() >= COMMITS_MAX,
         commits: push
@@ -157,6 +175,8 @@ mod tests {
                 },
                 ref_name: "refs/heads/main".into(),
                 forced: true,
+                // 新しいブランチの push（ゼロ SHA）は比較の起点にしない
+                before: None,
                 after: "a3f92c1e7b81d4000000000000000000000000aa".into(),
                 commits_truncated: false,
                 commits: vec![
@@ -190,6 +210,30 @@ mod tests {
         payload["commits"] = serde_json::json!([]);
         let ForgeEvent::Push { commits, .. } = push_event(&payload).expect("convert push");
         assert!(commits.is_empty());
+    }
+
+    /// 既存ブランチへの push は `before` を比較の起点として持ち回る
+    #[test]
+    fn push_to_an_existing_branch_keeps_the_compare_base() {
+        let mut payload = push_fixture();
+        payload["before"] = "B17CD9000000000000000000000000000000000A".into();
+
+        let ForgeEvent::Push { before, .. } = push_event(&payload).expect("convert push");
+        assert_eq!(
+            before.as_deref(),
+            Some("b17cd9000000000000000000000000000000000a")
+        );
+    }
+
+    /// ブランチを作った push は、ゼロ SHA でなくても `created` で比較の起点を落とす
+    #[test]
+    fn created_branch_has_no_compare_base() {
+        let mut payload = push_fixture();
+        payload["created"] = true.into();
+        payload["before"] = "b17cd9000000000000000000000000000000000a".into();
+
+        let ForgeEvent::Push { before, .. } = push_event(&payload).expect("convert push");
+        assert!(before.is_none());
     }
 
     /// 上限ちょうどで届いた push は、新しい側が欠けている合図として切り詰め扱いにする

@@ -1101,6 +1101,8 @@ pub async fn github_webhook(
                     payload.clone()
                 },
                 forge_event: forge_event.clone(),
+                // 取り直しの続きはワーカーが自分で積む
+                backfill_page: None,
             })
             .collect();
 
