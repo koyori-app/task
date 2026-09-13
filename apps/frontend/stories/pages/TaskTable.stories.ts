@@ -1032,9 +1032,11 @@ export const ProjectSwitch: Story = {
     // 切替前: 作成ダイアログのラベル候補は ENG のもの。旧選択の持ち越し検証用に選択しておく
     await userEvent.click(await canvas.findByRole('button', { name: '新規タスク' }));
     const dialog = await screen.findByRole('dialog');
-    const bugButton = await within(dialog).findByRole('button', { name: /bug/ });
-    await userEvent.click(bugButton);
-    await expect(bugButton).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(await within(dialog).findByRole('button', { name: /^ラベル/ }));
+    const bugItem = await screen.findByRole('menuitemcheckbox', { name: /bug/ });
+    await userEvent.click(bugItem);
+    await expect(bugItem).toHaveAttribute('aria-checked', 'true');
+    await userEvent.keyboard('{Escape}');
 
     if (!reactivePageContext) {
       throw new Error('reactive page context is not initialized');
@@ -1061,11 +1063,11 @@ export const ProjectSwitch: Story = {
     await expect(
       within(dialogAfter).findByText('MKT にタスクを追加します'),
     ).resolves.toBeInTheDocument();
-    const campaignButton = await within(dialogAfter).findByRole('button', { name: /campaign/ });
-    await expect(campaignButton).toHaveAttribute('aria-pressed', 'false');
-    await expect(
-      within(dialogAfter).queryByRole('button', { name: /bug/ }),
-    ).not.toBeInTheDocument();
+    await userEvent.click(await within(dialogAfter).findByRole('button', { name: /^ラベル/ }));
+    const campaignItem = await screen.findByRole('menuitemcheckbox', { name: /campaign/ });
+    await expect(campaignItem).toHaveAttribute('aria-checked', 'false');
+    await expect(screen.queryByRole('menuitemcheckbox', { name: /bug/ })).not.toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
     await userEvent.click(await within(dialogAfter).findByRole('button', { name: '閉じる' }));
 
     // ラベルドロップダウンにも切替先プロジェクトのラベルだけが並ぶ

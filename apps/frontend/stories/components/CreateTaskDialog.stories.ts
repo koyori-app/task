@@ -30,6 +30,30 @@ const statuses = [
   },
 ];
 
+const labels = [
+  {
+    id: 'label-bug',
+    name: 'bug',
+    description: '',
+    color: '#e11d48',
+    icon_url: null,
+    project_id: 'project-1',
+  },
+  {
+    id: 'label-feature',
+    name: 'feature',
+    description: '',
+    color: '#3b82f6',
+    icon_url: null,
+    project_id: 'project-1',
+  },
+];
+
+const members = [
+  { id: 'user-1', username: 'yupix', avatar_url: null },
+  { id: 'user-2', username: 'sousuke', avatar_url: null },
+];
+
 const createdTask = {
   id: 'task-created',
   seq_id: 42,
@@ -94,6 +118,8 @@ const meta = {
     projectId: 'project-1',
     projectKey: 'ENG',
     statuses,
+    labels,
+    members,
     onCreated: createdSpy,
     'onUpdate:open': openChangeSpy,
   },
@@ -108,6 +134,9 @@ export const Default: Story = {
     await expect(canvas.findByRole('dialog', { name: '新規タスク' })).resolves.toBeInTheDocument();
     await expect(canvas.getByLabelText(/タイトル/)).toBeInTheDocument();
     await expect(canvas.getByLabelText(/ステータス/)).toHaveTextContent('Backlog');
+    // 右列の選択欄は未設定を薄い文字で出す
+    await expect(canvas.getByRole('button', { name: /^担当者/ })).toHaveTextContent('未割り当て');
+    await expect(canvas.getByRole('button', { name: /^ラベル/ })).toHaveTextContent('ラベルなし');
   },
 };
 
@@ -124,6 +153,7 @@ export const Success201: Story = {
     await user.type(canvas.getByLabelText('説明'), 'Storybook から作成');
     await user.type(canvas.getByLabelText('期限'), '2026-07-15');
     await user.type(canvas.getByLabelText('最終期限'), '2026-07-31');
+    await user.type(canvas.getByLabelText('見積もり'), '90');
     await user.click(canvas.getByLabelText('優先度'));
     await user.click(await canvas.findByRole('option', { name: '高' }));
     const submit = await canvas.findByRole('button', { name: '作成' });
@@ -142,6 +172,7 @@ export const Success201: Story = {
       description: 'Storybook から作成',
       priority: 'High',
       soft_deadline: '2026-07-15T00:00:00.000Z',
+      estimated_minutes: 90,
       hard_deadline: '2026-07-31T00:00:00.000Z',
     });
     await expect(invalidateQueriesSpy).toHaveBeenCalledWith({
