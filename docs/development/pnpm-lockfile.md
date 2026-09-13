@@ -2,7 +2,11 @@
 
 ## 現在の構成
 
-lockfile はリポジトリ根の `pnpm-lock.yaml` 一つに寄せている（`sharedWorkspaceLockfile` は pnpm の既定値 true）。
+lockfile はリポジトリ根の `pnpm-lock.yaml` 一つに寄せている。
+`pnpm-workspace.yaml` に `sharedWorkspaceLockfile: true` を明示で置いている。
+pnpm の既定値も true だが、既定に頼らないのは三つの理由による。
+既定は pnpm の版が変われば動きうる。行が在れば「寄せたのは意図である」と読み手に伝わる。
+同じ file の `allowBuilds` が依存を一つひとつ書き出す流儀であり、それに揃う。
 workspace の一員（`apps/frontend`・`packages/*`）は個別の lockfile を持たない。
 
 例外は `e2e/` である。
