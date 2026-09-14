@@ -785,7 +785,7 @@ dependencies = [
  "chrono",
  "hkdf 0.13.0",
  "rand 0.10.2",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -803,7 +803,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "auth-core",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "serde",
 ]
 
@@ -815,7 +815,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "auth-core",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "serde",
 ]
 
@@ -988,7 +988,7 @@ dependencies = [
  "libc",
  "redis",
  "redis_pool",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "sea-orm",
  "sentry",
  "serde",
@@ -2086,7 +2086,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2259,7 +2259,7 @@ dependencies = [
  "chrono",
  "forge-core",
  "jsonwebtoken",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "serde",
 ]
 
@@ -2540,7 +2540,7 @@ dependencies = [
  "job",
  "payload",
  "rand 0.10.2",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "sea-orm",
  "serde",
  "serde_json",
@@ -2870,7 +2870,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "tokio",
  "tower-service",
  "tracing",
@@ -3213,7 +3213,7 @@ dependencies = [
  "chrono",
  "common",
  "entity",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "sea-orm",
  "serde",
  "serde_json",
@@ -4610,7 +4610,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -4648,7 +4648,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "tracing",
  "windows-sys 0.52.0",
 ]
@@ -4928,11 +4928,11 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.13.4"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
+checksum = "16a1cfa75cc186dd73d5818e510e042e40927bccc9c236b061cea97e1eb08029"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "cookie",
  "cookie_store",
@@ -5130,7 +5130,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5189,7 +5189,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5456,7 +5456,7 @@ dependencies = [
  "cfg_aliases",
  "httpdate",
  "native-tls",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "sentry-actix",
  "sentry-backtrace",
  "sentry-contexts",
@@ -5809,7 +5809,7 @@ dependencies = [
  "redis",
  "redis_pool",
  "regex",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "sea-orm",
  "serde",
  "serde_json",
@@ -5976,7 +5976,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -6534,7 +6534,7 @@ dependencies = [
  "common",
  "entity",
  "payload",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "sea-orm",
  "serde",
  "serde_json",
@@ -6556,7 +6556,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7661,7 +7661,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
