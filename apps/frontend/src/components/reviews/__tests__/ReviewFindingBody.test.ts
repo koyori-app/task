@@ -72,6 +72,19 @@ describe('ReviewFindingBody', () => {
     expect(hrefs).toContain('https://example.com/fix');
   });
 
+  it('空行を挟まぬ単一改行は行送り (<br>) として出る', async () => {
+    // GitHub の comment 欄の流儀 (pre-wrap 時代の見え方と同じ)。profile 'comment' の
+    // remarkBreaks がこれを担う —— 連結 (CommonMark 既定) へ倒す変更はこの試験が捕まえる
+    const wrapper = await mountAndRender(
+      ['一行目の説明である。', '二行目の根拠である。'].join('\n'),
+    );
+    const container = wrapper.find('div[data-review-finding-body]');
+    expect(container.element.querySelectorAll('br').length).toBe(1);
+    expect(container.element.querySelectorAll('p').length).toBe(1);
+    expect(container.text()).toContain('一行目の説明である。');
+    expect(container.text()).toContain('二行目の根拠である。');
+  });
+
   it('空行で区切った段落が段落のまま出る', async () => {
     const wrapper = await mountAndRender(
       ['一段目の説明である。', '', '二段目の根拠である。', '', '→ 三段目の対処である。'].join('\n'),
