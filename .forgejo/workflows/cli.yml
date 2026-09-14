@@ -12,11 +12,15 @@ on:
     paths:
       - 'apps/cli/**'
       - 'apps/frontend/openapi.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - '.forgejo/workflows/cli.yml'
   pull_request:
     paths:
       - 'apps/cli/**'
       - 'apps/frontend/openapi.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - '.forgejo/workflows/cli.yml'
 
 concurrency:
@@ -53,7 +57,7 @@ jobs:
         uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.pnpm-cache.outputs.store }}
-          key: forgejo-pnpm-cli-${{ runner.os }}-${{ hashFiles('apps/cli/pnpm-lock.yaml') }}
+          key: forgejo-pnpm-cli-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             forgejo-pnpm-cli-${{ runner.os }}-
 
