@@ -48,9 +48,6 @@ import {
   type PersonalToken,
   type TokenScope,
 } from '@/lib/personal-tokens';
-import type { components } from '@/generated/api';
-
-const props = defineProps<{ user: components['schemas']['UserResponse'] }>();
 
 const TOKEN_NAME_MAX = 100;
 

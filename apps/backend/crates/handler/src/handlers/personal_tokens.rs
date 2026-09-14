@@ -12,6 +12,7 @@ use sea_orm::{
 };
 
 use crate::AppState;
+use crate::auth_helpers::require_tenant_owner;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tenant_members::require_tenant_admin;
@@ -19,7 +20,7 @@ use crate::openapi::{CrudErrors, SessionAuthErrors};
 use entity::scopes::ScopeList;
 use entity::{
     personal_tokens::{self},
-    projects, tenants,
+    projects,
 };
 use payload::personal_tokens::*;
 use service::auth;
@@ -122,8 +123,9 @@ pub async fn create_personal_token(
     Valid(Json(payload)): Valid<Json<CreatePersonalTokenRequest>>,
 ) -> Result<(StatusCode, Json<CreatePersonalTokenResponse>), AppError> {
     auth.require_session()?;
-    // 発行はオーナーとテナント Admin に許す。Admin はメンバーを足せるため、
-    // ここだけ主に閉じても迂回できてしまう（docs/personal-access-tokens-authz.md）。
+    // 発行はオーナーとテナント Admin に許す。PAT は発行者本人として動き
+    // （user_id は発行者に固定）、得られる力は発行者の持つ力を超えぬため、
+    // 主に閉じても守れる物が増えない（docs/personal-access-tokens-authz.md）。
     require_tenant_admin(&state, payload.tenant_id, auth.user_id).await?;
 
     if let Some(ref project_ids) = payload.project_ids {
@@ -234,14 +236,9 @@ pub async fn revoke_all_personal_tokens(
 ) -> Result<StatusCode, AppError> {
     auth.require_session()?;
     // revoke-all は主に限ったまま（この境目はこの変更では広げない。
-    // 広げるべきかは別途裁きを仰ぐ）。
-    let tenant = tenants::Entity::find_by_id(payload.confirm_tenant_id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if tenant.owner_id != auth.user_id {
-        return Err(AppError::Forbidden);
-    }
+    // 広げるべきかは別途裁きを仰ぐ）。判定は共用の require_tenant_owner に寄せる
+    // ——無いテナントは NotFound、主でなければ Forbidden で従前と同じ。
+    require_tenant_owner(&state.db, payload.confirm_tenant_id, auth.user_id).await?;
 
     personal_tokens::Entity::update_many()
         .col_expr(personal_tokens::Column::Revoked, Expr::value(true))

@@ -2,10 +2,8 @@
 import { usePageContext } from 'vike-vue/usePageContext';
 import AccountSettingsNav from '@/components/settings/AccountSettingsNav.vue';
 import AccessTokensSection from '@/components/settings/AccessTokensSection.vue';
-import { useMeQuery } from '@/lib/api-vue-query';
 
 const pageContext = usePageContext();
-const meQuery = useMeQuery();
 </script>
 
 <template>
@@ -21,8 +19,7 @@ const meQuery = useMeQuery();
       </aside>
 
       <section class="flex min-w-0 flex-1 flex-col gap-4">
-        <!-- 親レイアウトが /me の成功後だけページを描画する。 -->
-        <AccessTokensSection :user="meQuery.data.value!" />
+        <AccessTokensSection />
       </section>
     </div>
   </div>

@@ -10,6 +10,21 @@ pub use service::access::{
 };
 pub use service::drive::is_tenant_owner;
 
+/// 主（owner）だけに許す口の共通判定。テナントが無ければ NotFound、主でなければ Forbidden
+/// （`is_tenant_owner` が存在確認を兼ねる）。主の定義が変わる時はここ一箇所を直す——
+/// handler ごとに owner_id を直に比べる手書きを作らないこと。
+pub async fn require_tenant_owner<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    if is_tenant_owner(db, tenant_id, user_id).await? {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
+}
+
 /// **指定した利用者**がそのプロジェクトに入れるかを確認する。
 ///
 /// リクエスト元自身の認可は `AuthUser::ensure_tenant_access` が同じ判定を含んでいるので、
