@@ -691,10 +691,12 @@ async fn commit_author_resolves_to_linked_user_who_can_view_the_project() {
     link_github_login(&app, outsider.id, &format!("outsider-{unique}")).await;
 
     // 同じログイン名の接続が 2 人に張られた状態。保存側の付け替えはトランザクション外で走る
-    // 経路があるので、同時ログインなどで一時的に並びうる。「ちょうど 1 件」の分岐が最後の安全弁
+    // 経路があるので、同時ログインなどで一時的に並びうる。「ちょうど 1 件」の分岐が最後の安全弁。
+    // 2 人ともプロジェクトを見られる側にする。照合は ORDER BY を持たないので、片方を見られない
+    // 人にすると「先頭を採る」退行が行順序次第で可視性に弾かれ、検出できないことがある
     let duplicated = format!("dup-{unique}");
     link_github_login(&app, member.id, &duplicated).await;
-    link_github_login(&app, outsider.id, &duplicated).await;
+    link_github_login(&app, fx.owner_id, &duplicated).await;
 
     // テナントには居ない、共有プロジェクトへ明示参加しただけのゲスト。メンバー指定のあるプロジェクトは
     // テナントメンバーに閉じるので、上のメンバーのケースと混ざらないよう別プロジェクトにする
@@ -728,7 +730,7 @@ async fn commit_author_resolves_to_linked_user_who_can_view_the_project() {
         (&main, format!("nobody-{unique}"), None),
         // 連携はしているが、リンク先のプロジェクトに入れない
         (&main, format!("outsider-{unique}"), None),
-        // 同じログイン名が 2 件。片方はプロジェクトを見られるが、どちらとも決められないので解決しない
+        // 同じログイン名が 2 件。どちらもプロジェクトを見られるが、1 人に定まらないので解決しない
         (&main, duplicated.clone(), None),
         // 作者のメールアドレスが GitHub アカウントに結び付いていない
         (&main, String::new(), None),
