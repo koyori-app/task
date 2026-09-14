@@ -39,6 +39,8 @@
  * 本ファイルは composition root であり、プラグイン (remark 層 ＋ sanitize スキーマ) を
  * コアへ注入する。コア実装 (_renderer / _sanitize / _cache) はプラグインを import しない。
  */
+import remarkBreaks from 'remark-breaks';
+
 import { rehypeKfmCode } from '@/lib/rehype-kfm-code';
 import { remarkGfm } from '@/lib/remark-gfm';
 import { remarkKfmMermaid } from '@/lib/remark-kfm-mermaid';
@@ -104,6 +106,13 @@ export const renderDescription = createRenderer({
       // GitHub 同様のコードブロック着色。rehype 層 (remark-rehype の後段) に挿す。
       // rehypeKfmCode は着色済みの子を行分割して <kfm-code> で包むため、必ず
       // starry-night の後ろ (行分割は着色より後でしか成立しない)。
+      rehypePlugins: [rehypeStarryNight, rehypeKfmCode],
+    },
+    // comment profile = github ＋ remarkBreaks。GitHub の comment 欄の流儀
+    // (空行を挟まぬ単一改行を <br> として出す)。レビュー指摘の本文の消費側が使う。
+    // remarkBreaks は mdast の text 内改行を break へ割るだけで、他プラグインと干渉しない。
+    comment: {
+      remarkPlugins: [remarkGfm, remarkKoyoriAlerts, remarkKfmMermaid, remarkBreaks],
       rehypePlugins: [rehypeStarryNight, rehypeKfmCode],
     },
     // Phase 2 seam: kfm profile はここへ remark / rehype 層を足す (コアは不変)。

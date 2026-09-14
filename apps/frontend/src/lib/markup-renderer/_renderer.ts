@@ -21,10 +21,12 @@ import { buildCacheKey, createL1Cache } from './_cache';
 import type { SanitizeSchema } from './_sanitize';
 import { createSanitizer } from './_sanitize';
 
-export type KfmProfile = 'github';
+export type KfmProfile = 'github' | 'comment';
 // Phase 2 seam: 'kfm' (GFM ＋ alerts ＋ MFM ＋ Koyori 拡張)、将来 'gitlab' (GLFM) を
 // この union に足し、createRenderer へ渡す profiles にプラグイン列を追加するだけで
 // 拡張する (コア本体・sanitize・cache・SSR 契約は全 profile 共有で不変)。
+// 'comment' は GitHub の comment 欄の流儀 (単一改行 = soft break を <br> として出す)。
+// レビュー指摘の本文など、空行を強制されずに書かれた文の消費側が使う。
 
 export type ProfileDefinition = {
   /** 共有 core (remark-parse → remark-rehype → rehype-stringify) に挿す remark 層 */
