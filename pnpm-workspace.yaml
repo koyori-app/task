@@ -36,3 +36,4 @@ peerDependencyRules:
     vitest: '*'
 saveExact: true
 catalogMode: prefer
+# probe: 依存更新だけの変更で CI が起動するかの実地検め（使い捨て）
