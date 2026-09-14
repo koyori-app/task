@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import ReviewFindingBody from '@/components/reviews/ReviewFindingBody.vue';
 import ReviewRoundComposer from '@/components/reviews/ReviewRoundComposer.vue';
 import {
   REVIEWED_PRS_PATH,
@@ -439,7 +440,7 @@ async function onRoundCreated() {
                 >
                   {{ findingLocation(finding) }}
                 </p>
-                <p class="mt-2 text-sm whitespace-pre-wrap">{{ finding.body }}</p>
+                <ReviewFindingBody :body="finding.body" :finding-id="finding.id" />
 
                 <div class="mt-3 flex flex-wrap items-center gap-2">
                   <Button
