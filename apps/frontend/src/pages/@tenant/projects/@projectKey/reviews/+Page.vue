@@ -7,18 +7,19 @@ import ReviewFindingsView from '@/components/reviews/ReviewFindingsView.vue';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { useMeQuery } from '@/lib/api-vue-query';
+import { parseReviewFindingsUrlState } from '@/lib/review-findings-url-state';
 
 const pageContext = usePageContext();
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
 const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
 
-/** 要約コメントのリンク（`?pr=618`）から来たときは、その PR を開く。 */
-const initialPr = computed(() => {
-  const search = (pageContext as { urlParsed?: { search?: Record<string, string> } } | undefined)
-    ?.urlParsed?.search;
-  const raw = Number(search?.pr);
-  return Number.isInteger(raw) && raw > 0 ? raw : null;
-});
+/** SSR でも client navigation でも、最初に描く状態は URL だけから決める。 */
+const initialUrl = computed(() =>
+  parseReviewFindingsUrlState(
+    (pageContext as { urlParsed?: { search?: Record<string, string> } } | undefined)?.urlParsed
+      ?.search,
+  ),
+);
 
 const {
   tenantId,
@@ -77,7 +78,8 @@ const isNotFound = computed(() => isTenantNotFound.value || isProjectNotFound.va
       :project-key="projectKey"
       :viewer-id="meQuery.data.value.id"
       :tenant-owner-id="tenantOwnerId"
-      :initial-pr="initialPr"
+      :initial-url-state="initialUrl.state"
+      :initial-url-warnings="initialUrl.warnings"
     />
   </div>
 </template>

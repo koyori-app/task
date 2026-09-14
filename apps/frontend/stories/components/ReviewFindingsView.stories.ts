@@ -224,7 +224,13 @@ const meta = {
     projectId: PROJECT_UUID,
     projectKey: 'APP',
     viewerId: VIEWER_ID,
-    initialPr: 412,
+    initialUrlState: {
+      pr: 412,
+      round: null,
+      severity: null,
+      state: null,
+      finding: null,
+    },
   },
   parameters: {
     layout: 'padded',

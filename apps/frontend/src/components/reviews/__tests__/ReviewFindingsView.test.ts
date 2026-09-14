@@ -2,7 +2,9 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import ReviewFindingsView from '../ReviewFindingsView.vue';
+import { Select } from '@/components/ui/select';
 import type { components } from '@/generated/api';
+import type { ReviewFindingsUrlState } from '@/lib/review-findings-url-state';
 
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
 const PROJECT_ID = '00000000-0000-4000-8000-000000000010';
@@ -44,6 +46,8 @@ type MockState = {
   roundReviewerLeft?: boolean;
   /** これまでのラウンド数（0 = 未レビュー） */
   rounds?: number;
+  /** URL 履歴の試験では選び直せる PR を二つ用意する。 */
+  prNumbers?: number[];
   /** 集計対象のリポジトリ。null で「連携なし」を作る */
   repository?: string | null;
   /** 要約ジョブが確かめた現在の head。null で「鮮度不明」を作る */
@@ -73,18 +77,18 @@ function stubFetch(state: MockState) {
             (f.severity === 'high' || f.severity === 'medium') &&
             (f.state === 'open' || f.state === 'fixed'),
         ).length;
-      return jsonResponse([
-        {
-          pr_number: 618,
+      return jsonResponse(
+        (state.prNumbers ?? [618]).map((prNumber) => ({
+          pr_number: prNumber,
           rounds: state.rounds ?? 1,
-          pr_title: 'feat: レビュー指摘管理',
+          pr_title: `feat: PR ${prNumber}`,
           pr_author: 'yupix',
           unresolved: state.findings.filter((f) => f.state === 'open' || f.state === 'fixed')
             .length,
           blocking,
           last_reviewed_at: '2026-08-26T00:00:00Z',
-        },
-      ]);
+        })),
+      );
     }
     if (req.method === 'GET' && pathname.endsWith('/reviews/summary')) {
       const blocking =
@@ -155,7 +159,13 @@ function stubFetch(state: MockState) {
   return { patched };
 }
 
-function mountView(extraProps: { tenantOwnerId?: string | null } = {}) {
+function mountView(
+  extraProps: {
+    tenantOwnerId?: string | null;
+    initialUrlState?: ReviewFindingsUrlState;
+    initialUrlWarnings?: string[];
+  } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -166,7 +176,13 @@ function mountView(extraProps: { tenantOwnerId?: string | null } = {}) {
       projectId: PROJECT_ID,
       projectKey: 'APP',
       viewerId: VIEWER_ID,
-      initialPr: 618,
+      initialUrlState: extraProps.initialUrlState ?? {
+        pr: 618,
+        round: null,
+        severity: null,
+        state: null,
+        finding: null,
+      },
       ...extraProps,
     },
     global: { plugins: [[VueQueryPlugin, { queryClient }]] },
@@ -484,5 +500,122 @@ describe('ReviewFindingsView', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('レビューを読み込めませんでした');
+  });
+
+  it('冷えた URL から PR・絞り込み・指摘を復元して強調する', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/acme/projects/APP/reviews?pr=618&round=1&severity=high&state=open&finding=f-1',
+    );
+    stubFetch({
+      findings: [finding(), finding({ id: 'f-2', title: '軽微な指摘', severity: 'low' })],
+    });
+    const wrapper = mountView({
+      initialUrlState: {
+        pr: 618,
+        round: 1,
+        severity: 'high',
+        state: 'open',
+        finding: 'f-1',
+      },
+    });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="finding-list"]').text()).toContain('認可が抜けている');
+    expect(wrapper.get('[data-testid="finding-list"]').text()).not.toContain('軽微な指摘');
+    expect(wrapper.get('#finding-f-1').attributes('data-focused')).toBe('true');
+    const findingLink = wrapper
+      .get('a[aria-label*="認可が抜けている"]')
+      .element.getAttribute('href');
+    expect(findingLink).toContain('finding=f-1');
+  });
+
+  it('存在しない PR と指摘を指す URL でも壊れず理由を表示する', async () => {
+    stubFetch({ findings: [finding()] });
+    const wrapper = mountView({
+      initialUrlState: {
+        pr: 999,
+        round: null,
+        severity: null,
+        state: null,
+        finding: 'missing-finding',
+      },
+    });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="missing-pr"]').text()).toContain('PR #999');
+    expect(wrapper.get('[data-testid="missing-finding"]').text()).toContain('missing-finding');
+  });
+
+  it('不正な query を黙って捨てず警告する', async () => {
+    stubFetch({ findings: [finding()] });
+    const wrapper = mountView({
+      initialUrlWarnings: ['URL の重大度「urgent」は知らない値のため無視しました。'],
+    });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="url-warning"]').text()).toContain('urgent');
+  });
+
+  it('PR の選び直しを履歴へ積み、戻る・進むの popstate で URL を正本にする', async () => {
+    window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=617');
+    const pushSpy = vi.spyOn(window.history, 'pushState');
+    stubFetch({ findings: [finding()], prNumbers: [617, 618] });
+    const wrapper = mountView({
+      initialUrlState: {
+        pr: 617,
+        round: null,
+        severity: null,
+        state: null,
+        finding: null,
+      },
+    });
+    await flushPromises();
+
+    await wrapper
+      .findAll('nav[aria-label="レビューのある PR"] button')
+      .find((button) => button.text().includes('#618'))!
+      .trigger('click');
+    expect(pushSpy).toHaveBeenCalledOnce();
+    expect(new URL(window.location.href).searchParams.get('pr')).toBe('618');
+
+    window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=617');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await flushPromises();
+    const previous = wrapper
+      .findAll('nav[aria-label="レビューのある PR"] button')
+      .find((button) => button.text().includes('#617'))!;
+    expect(previous.attributes('aria-current')).toBe('true');
+
+    window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=618');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await flushPromises();
+    const next = wrapper
+      .findAll('nav[aria-label="レビューのある PR"] button')
+      .find((button) => button.text().includes('#618'))!;
+    expect(next.attributes('aria-current')).toBe('true');
+  });
+
+  it('絞り込み変更は履歴を積まず現在の URL を差し替える', async () => {
+    window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=618');
+    const replaceSpy = vi.spyOn(window.history, 'replaceState');
+    stubFetch({ findings: [finding()] });
+    const wrapper = mountView({
+      initialUrlState: {
+        pr: 618,
+        round: null,
+        severity: null,
+        state: null,
+        finding: null,
+      },
+    });
+    await flushPromises();
+
+    wrapper.findAllComponents(Select)[1].vm.$emit('update:modelValue', 'high');
+    await flushPromises();
+
+    expect(replaceSpy).toHaveBeenCalledOnce();
+    expect(new URL(window.location.href).searchParams.get('severity')).toBe('high');
   });
 });

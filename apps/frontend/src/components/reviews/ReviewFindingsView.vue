@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhCheckCircle, PhPlus, PhWarningCircle } from '@phosphor-icons/vue';
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -38,6 +38,13 @@ import {
   type Review,
   type ReviewFinding,
 } from '@/lib/review-findings';
+import {
+  DEFAULT_REVIEW_FINDINGS_URL_STATE,
+  applyReviewFindingsUrlState,
+  parseReviewFindingsUrlState,
+  reviewFindingHref,
+  type ReviewFindingsUrlState,
+} from '@/lib/review-findings-url-state';
 
 const props = defineProps<{
   tenantId: string;
@@ -48,16 +55,21 @@ const props = defineProps<{
   viewerId: string;
   /** テナントオーナー。不在の作成者に代わる取り下げの表示判定に使う（未解決なら null） */
   tenantOwnerId?: string | null;
-  /** 初期表示する PR（要約コメントのリンクから来たとき） */
-  initialPr?: number | null;
+  /** SSR が URL から復元した初期表示。 */
+  initialUrlState?: ReviewFindingsUrlState;
+  /** URL の不正値を黙って捨てず、利用者へ知らせる。 */
+  initialUrlWarnings?: string[];
 }>();
 
 const queryClient = useQueryClient();
 
-const selectedPr = ref<number | null>(props.initialPr ?? null);
-const roundFilter = ref<number | null>(null);
-const severityFilter = ref<FindingSeverity | null>(null);
-const stateFilter = ref<FindingState | null>(null);
+const initialUrlState = props.initialUrlState ?? DEFAULT_REVIEW_FINDINGS_URL_STATE;
+const selectedPr = ref<number | null>(initialUrlState.pr);
+const roundFilter = ref<number | null>(initialUrlState.round);
+const severityFilter = ref<FindingSeverity | null>(initialUrlState.severity);
+const stateFilter = ref<FindingState | null>(initialUrlState.state);
+const focusedFindingId = ref<string | null>(initialUrlState.finding);
+const urlWarnings = ref([...(props.initialUrlWarnings ?? [])]);
 const isComposerOpen = ref(false);
 const transitionError = ref<string | null>(null);
 
@@ -69,6 +81,37 @@ const updateState = useUpdateFindingStateMutation();
 
 const pullRequests = computed(() => prsQuery.data.value ?? []);
 const rounds = computed(() => roundsQuery.data.value ?? []);
+
+function currentUrlState(): ReviewFindingsUrlState {
+  return {
+    pr: selectedPr.value,
+    round: roundFilter.value,
+    severity: severityFilter.value,
+    state: stateFilter.value,
+    finding: focusedFindingId.value,
+  };
+}
+
+function writeUrl(mode: 'push' | 'replace') {
+  if (import.meta.env.SSR) return;
+  const next = applyReviewFindingsUrlState(new URL(window.location.href), currentUrlState());
+  window.history[mode === 'push' ? 'pushState' : 'replaceState'](window.history.state, '', next);
+}
+
+function restoreFromLocation() {
+  const parsed = parseReviewFindingsUrlState(new URL(window.location.href).searchParams);
+  selectedPr.value = parsed.state.pr;
+  roundFilter.value = parsed.state.round;
+  severityFilter.value = parsed.state.severity;
+  stateFilter.value = parsed.state.state;
+  focusedFindingId.value = parsed.state.finding;
+  urlWarnings.value = parsed.warnings;
+  isComposerOpen.value = false;
+  transitionError.value = null;
+}
+
+onMounted(() => window.addEventListener('popstate', restoreFromLocation));
+onUnmounted(() => window.removeEventListener('popstate', restoreFromLocation));
 
 /**
  * 指摘 → それを出したラウンドの作成者。取り下げを出してよいかの判定に使う。
@@ -108,36 +151,115 @@ const summary = computed(() => summaryQuery.data.value ?? null);
 watch(pullRequests, (list) => {
   if (selectedPr.value === null && list.length > 0) {
     selectedPr.value = list[0].pr_number;
+    writeUrl('replace');
   }
 });
 
 /** 絞り込みは画面側で適用する（API は PR 単位で全件返す）。 */
-const findings = computed(() => {
-  const all = sortFindings(findingsQuery.data.value ?? []);
-  return all.filter(
+const allFindings = computed(() => sortFindings(findingsQuery.data.value ?? []));
+const findings = computed(() =>
+  allFindings.value.filter(
     (finding) =>
       (roundFilter.value === null || finding.round === roundFilter.value) &&
       (severityFilter.value === null || finding.severity === severityFilter.value) &&
       (stateFilter.value === null || finding.state === stateFilter.value),
-  );
-});
+  ),
+);
 
 const hasFilters = computed(
   () => roundFilter.value !== null || severityFilter.value !== null || stateFilter.value !== null,
 );
 
-function clearFilters() {
+const selectedPrMissing = computed(
+  () =>
+    !prsQuery.isPending.value &&
+    selectedPr.value !== null &&
+    !pullRequests.value.some((pr) => pr.pr_number === selectedPr.value),
+);
+const focusedFindingMissing = computed(
+  () =>
+    !findingsQuery.isPending.value &&
+    focusedFindingId.value !== null &&
+    !allFindings.value.some((finding) => finding.id === focusedFindingId.value),
+);
+const focusedFindingFiltered = computed(
+  () =>
+    focusedFindingId.value !== null &&
+    !focusedFindingMissing.value &&
+    !findings.value.some((finding) => finding.id === focusedFindingId.value),
+);
+
+function resetFilters() {
   roundFilter.value = null;
   severityFilter.value = null;
   stateFilter.value = null;
 }
 
+function clearFilters() {
+  resetFilters();
+  focusedFindingId.value = null;
+  writeUrl('replace');
+}
+
+function setRoundFilter(value: unknown) {
+  roundFilter.value = value === 'all' || value == null ? null : Number(value);
+  focusedFindingId.value = null;
+  writeUrl('replace');
+}
+
+function setSeverityFilter(value: unknown) {
+  severityFilter.value = value === 'all' || value == null ? null : (value as FindingSeverity);
+  focusedFindingId.value = null;
+  writeUrl('replace');
+}
+
+function setStateFilter(value: unknown) {
+  stateFilter.value = value === 'all' || value == null ? null : (value as FindingState);
+  focusedFindingId.value = null;
+  writeUrl('replace');
+}
+
 function selectPr(pr: number) {
   selectedPr.value = pr;
-  clearFilters();
+  resetFilters();
+  focusedFindingId.value = null;
   isComposerOpen.value = false;
   transitionError.value = null;
+  writeUrl('push');
 }
+
+function findingHref(id: string): string {
+  const browserUrl = import.meta.env.SSR
+    ? new URL(
+        `/${encodeURIComponent(props.tenantSlug)}/projects/${encodeURIComponent(props.projectKey)}/reviews`,
+        'http://ssr.local',
+      )
+    : new URL(window.location.href);
+  const href = reviewFindingHref(browserUrl, currentUrlState(), id);
+  if (!import.meta.env.SSR) return href;
+  const next = new URL(href);
+  return `${next.pathname}${next.search}`;
+}
+
+async function focusFinding(event: MouseEvent, id: string) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+    return;
+  event.preventDefault();
+  focusedFindingId.value = id;
+  writeUrl('replace');
+  await nextTick();
+  document.getElementById(`finding-${id}`)?.scrollIntoView?.({ block: 'center' });
+}
+
+watch(
+  () => [focusedFindingId.value, findingsQuery.data.value] as const,
+  async ([id]) => {
+    if (!id) return;
+    await nextTick();
+    document.getElementById(`finding-${id}`)?.scrollIntoView?.({ block: 'center' });
+  },
+  { flush: 'post' },
+);
 
 async function invalidateAll() {
   await Promise.all([
@@ -205,6 +327,15 @@ async function onRoundCreated() {
     </p>
 
     <template v-else>
+      <div
+        v-if="urlWarnings.length > 0"
+        role="status"
+        class="bg-muted text-muted-foreground rounded-md border p-3 text-sm"
+        data-testid="url-warning"
+      >
+        <p v-for="warning in urlWarnings" :key="warning">{{ warning }}</p>
+      </div>
+
       <div class="flex flex-col gap-6 md:flex-row md:items-start">
         <!-- PR 一覧 -->
         <nav
@@ -314,9 +445,7 @@ async function onRoundCreated() {
                 <label for="filter-round" class="mb-1.5 block text-xs font-medium">Round</label>
                 <Select
                   :model-value="roundFilter === null ? 'all' : String(roundFilter)"
-                  @update:model-value="
-                    (v) => (roundFilter = v === 'all' || v == null ? null : Number(v))
-                  "
+                  @update:model-value="setRoundFilter"
                 >
                   <SelectTrigger id="filter-round" size="sm" class="w-full">
                     <SelectValue />
@@ -337,10 +466,7 @@ async function onRoundCreated() {
                 <label for="filter-severity" class="mb-1.5 block text-xs font-medium">重大度</label>
                 <Select
                   :model-value="severityFilter ?? 'all'"
-                  @update:model-value="
-                    (v) =>
-                      (severityFilter = v === 'all' || v == null ? null : (v as FindingSeverity))
-                  "
+                  @update:model-value="setSeverityFilter"
                 >
                   <SelectTrigger id="filter-severity" size="sm" class="w-full">
                     <SelectValue />
@@ -355,12 +481,7 @@ async function onRoundCreated() {
               </div>
               <div class="w-[130px]">
                 <label for="filter-state" class="mb-1.5 block text-xs font-medium">状態</label>
-                <Select
-                  :model-value="stateFilter ?? 'all'"
-                  @update:model-value="
-                    (v) => (stateFilter = v === 'all' || v == null ? null : (v as FindingState))
-                  "
-                >
+                <Select :model-value="stateFilter ?? 'all'" @update:model-value="setStateFilter">
                   <SelectTrigger id="filter-state" size="sm" class="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -407,6 +528,31 @@ async function onRoundCreated() {
               {{ transitionError }}
             </p>
 
+            <p
+              v-if="selectedPrMissing"
+              role="status"
+              class="text-muted-foreground text-sm"
+              data-testid="missing-pr"
+            >
+              URL で指定された PR #{{ selectedPr }} はレビュー一覧にありません。
+            </p>
+            <p
+              v-if="focusedFindingMissing"
+              role="status"
+              class="text-muted-foreground text-sm"
+              data-testid="missing-finding"
+            >
+              URL で指定された指摘 {{ focusedFindingId }} はこの PR にありません。
+            </p>
+            <p
+              v-else-if="focusedFindingFiltered"
+              role="status"
+              class="text-muted-foreground text-sm"
+              data-testid="filtered-finding"
+            >
+              URL で指定された指摘は現在の絞り込みでは非表示です。
+            </p>
+
             <p v-if="findingsQuery.isPending.value" class="text-muted-foreground text-sm">
               読み込み中…
             </p>
@@ -415,7 +561,19 @@ async function onRoundCreated() {
             </p>
 
             <ul v-else class="flex flex-col gap-3" data-testid="finding-list">
-              <li v-for="finding in findings" :key="finding.id" class="rounded-lg border p-4">
+              <li
+                v-for="finding in findings"
+                :id="`finding-${finding.id}`"
+                :key="finding.id"
+                class="rounded-lg border p-4"
+                :class="
+                  finding.id === focusedFindingId
+                    ? 'border-primary ring-primary/40 ring-2'
+                    : undefined
+                "
+                :aria-current="finding.id === focusedFindingId ? 'true' : undefined"
+                :data-focused="finding.id === focusedFindingId ? 'true' : undefined"
+              >
                 <div class="flex flex-wrap items-center gap-2">
                   <span
                     class="rounded-md border px-2 py-0.5 text-xs font-medium"
@@ -431,7 +589,14 @@ async function onRoundCreated() {
                     {{ STATE_LABELS[finding.state] }}
                   </span>
                   <span class="text-muted-foreground text-xs">R{{ finding.round }}</span>
-                  <span class="min-w-0 flex-1 truncate font-medium">{{ finding.title }}</span>
+                  <a
+                    class="hover:text-primary min-w-0 flex-1 truncate font-medium underline-offset-4 hover:underline"
+                    :href="findingHref(finding.id)"
+                    :aria-label="`指摘「${finding.title}」へのリンク`"
+                    @click="focusFinding($event, finding.id)"
+                  >
+                    {{ finding.title }}
+                  </a>
                 </div>
 
                 <p
