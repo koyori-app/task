@@ -285,13 +285,31 @@ async function submit() {
         <DialogDescription>{{ projectKey }} にタスクを追加します</DialogDescription>
       </DialogHeader>
 
+      <!--
+        閉じるボタンはダイアログの右上に 1 個だけ絶対配置する。右列の中に置くと、
+        狭い画面で右列が本文の下に積まれて × が画面の途中に現れる
+      -->
+      <DialogClose as-child>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          class="absolute top-2 right-3 z-10 size-8"
+          aria-label="閉じる"
+          :disabled="createMutation.isPending.value"
+        >
+          <X class="size-4" />
+        </Button>
+      </DialogClose>
+
       <HydrationSafeForm
         v-slot="{ isHydrated }"
         class="flex flex-col md:min-h-0 md:flex-1 md:flex-row"
         @submit="submit"
       >
         <div class="flex min-w-0 flex-col md:min-h-0 md:flex-1">
-          <div class="shrink-0 px-5 pt-5">
+          <!-- 狭い画面ではタイトル欄の右上に × が重なるので、その分だけ右を空ける -->
+          <div class="shrink-0 px-5 pt-5 pr-14 md:pr-5">
             <Label for="task-title" class="sr-only">タイトル（必須）</Label>
             <Input
               id="task-title"
@@ -342,20 +360,8 @@ async function submit() {
         </div>
 
         <div class="flex shrink-0 flex-col border-t bg-sidebar md:w-72 md:border-t-0 md:border-l">
-          <div class="flex shrink-0 items-center justify-end border-b px-3 py-2">
-            <DialogClose as-child>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                class="size-8"
-                aria-label="閉じる"
-                :disabled="createMutation.isPending.value"
-              >
-                <X class="size-4" />
-              </Button>
-            </DialogClose>
-          </div>
+          <!-- 広い画面で右上の × が載る余白。狭い画面では × が本文側に載るので出さない -->
+          <div class="hidden h-12 shrink-0 border-b md:block" />
 
           <div class="flex flex-col gap-3 px-3 py-3.5 md:min-h-0 md:flex-1 md:overflow-y-auto">
             <div class="space-y-1">

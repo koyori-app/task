@@ -147,11 +147,11 @@ async function deleteThread(threadId: string) {
 </script>
 
 <template>
-  <!--
-    アクティビティ列にそのまま収まる形にする（枠で囲わない・見出しは列側が持つ）。
-    一覧は伸びる領域として上に、入力欄は列の下端に貼り付ける。
-  -->
   <section class="flex min-h-0 flex-1 flex-col" data-task-comments>
+    <!--
+      アクティビティ列にそのまま収まる形にする（枠で囲わない・見出しは列側が持つ）。
+      一覧は伸びる領域として上に、入力欄は列の下端に貼り付ける。
+    -->
     <!-- スレッドを開いているときは、列の頭に戻る導線を出す（参照） -->
     <div v-if="openThread" class="-mx-4 flex items-center gap-2 border-b px-4 pb-2">
       <Button
