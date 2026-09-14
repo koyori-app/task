@@ -16,6 +16,19 @@ export function activityText(item: ActivityItem): string {
   switch (item.event_type) {
     case 'task_created':
       return 'タスクを作成しました';
+    case 'github_issue_imported':
+    case 'github_issue_synced': {
+      const owner = str('repo_owner');
+      const repo = str('repo_name');
+      const number = payload.issue_number;
+      const source =
+        owner && repo && typeof number === 'number' && Number.isInteger(number) && number > 0
+          ? `GitHub Issue（${owner}/${repo}#${number}）`
+          : 'GitHub Issue';
+      return item.event_type === 'github_issue_imported'
+        ? `${source}からタスクを作成しました`
+        : `${source}からタスクを同期しました`;
+    }
     case 'status_changed': {
       const to = str('to');
       return to ? `ステータスを ${to} に変更しました` : 'ステータスを変更しました';
