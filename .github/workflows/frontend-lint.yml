@@ -6,10 +6,14 @@ on:
     paths:
       - 'apps/frontend/**'
       - '.github/workflows/frontend-lint.yml'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
   pull_request:
     paths:
       - 'apps/frontend/**'
       - '.github/workflows/frontend-lint.yml'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

@@ -5,6 +5,8 @@ on:
     paths:
       - 'apps/frontend/**'
       - '.github/workflows/frontend-coverage.yml'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

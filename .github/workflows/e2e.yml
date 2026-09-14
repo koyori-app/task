@@ -8,12 +8,16 @@ on:
       - 'apps/frontend/**'
       - 'e2e/**'
       - '.github/workflows/e2e.yml'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
   pull_request:
     paths:
       - 'apps/backend/**'
       - 'apps/frontend/**'
       - 'e2e/**'
       - '.github/workflows/e2e.yml'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

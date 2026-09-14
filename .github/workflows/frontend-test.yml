@@ -6,6 +6,8 @@ on:
     paths:
       - 'apps/frontend/**'
       - '.github/workflows/frontend-test.yml'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
