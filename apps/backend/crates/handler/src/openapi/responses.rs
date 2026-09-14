@@ -92,6 +92,11 @@ pub enum PersonalTokenAuthErrors {
     )]
     Unauthorized(#[to_schema] ServerError),
     #[response(
+        status = 403,
+        description = "認証は通りましたが拒否されました。凍結された利用者のトークンは account-suspended、2FA が未完了のセッションは forbidden を返します"
+    )]
+    Forbidden(#[to_schema] ServerError),
+    #[response(
         status = 500,
         description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
     )]

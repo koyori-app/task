@@ -71,7 +71,7 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommand {
-    /// Show current user
+    /// Show the personal access token in use and its holder
     Whoami,
     /// Save personal access token to config
     Token {
