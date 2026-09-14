@@ -96,3 +96,17 @@ export function applyReviewFindingsUrlState(url: URL, state: ReviewFindingsUrlSt
 export function reviewFindingHref(url: URL, state: ReviewFindingsUrlState, id: string): string {
   return applyReviewFindingsUrlState(url, { ...state, finding: id }).href;
 }
+
+/**
+ * 指摘への链を pathname + search の相対形で返す。SSR と client が同じ属性文字列を
+ * 出すための唯一の口——base の origin に依らず、base が持つこの画面の外の query
+ * （tab= の類）も保たれる。両側の一致はこの関数の試験が契約として固める。
+ */
+export function relativeReviewFindingHref(
+  base: URL,
+  state: ReviewFindingsUrlState,
+  id: string,
+): string {
+  const next = new URL(reviewFindingHref(base, state, id));
+  return `${next.pathname}${next.search}`;
+}

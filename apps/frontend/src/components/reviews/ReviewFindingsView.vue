@@ -42,7 +42,7 @@ import {
   DEFAULT_REVIEW_FINDINGS_URL_STATE,
   applyReviewFindingsUrlState,
   parseReviewFindingsUrlState,
-  reviewFindingHref,
+  relativeReviewFindingHref,
   type ReviewFindingsUrlState,
 } from '@/lib/review-findings-url-state';
 
@@ -59,6 +59,11 @@ const props = defineProps<{
   initialUrlState?: ReviewFindingsUrlState;
   /** URL の不正値を黙って捨てず、利用者へ知らせる。 */
   initialUrlWarnings?: string[];
+  /**
+   * 現在の URL（pathname + search）。SSR で findingHref を組む土台に使い、
+   * この画面が持たぬ query（tab= の類）を SSR 出力の链でも保つ。
+   */
+  requestUrl?: string | null;
 }>();
 
 const queryClient = useQueryClient();
@@ -98,20 +103,44 @@ function writeUrl(mode: 'push' | 'replace') {
   window.history[mode === 'push' ? 'pushState' : 'replaceState'](window.history.state, '', next);
 }
 
-function restoreFromLocation() {
-  const parsed = parseReviewFindingsUrlState(new URL(window.location.href).searchParams);
-  selectedPr.value = parsed.state.pr;
-  roundFilter.value = parsed.state.round;
-  severityFilter.value = parsed.state.severity;
-  stateFilter.value = parsed.state.state;
-  focusedFindingId.value = parsed.state.finding;
-  urlWarnings.value = parsed.warnings;
+/** popstate・vike の遷移（props の更新）・URL 直読みの三経路が集まる唯一の復元口。 */
+function applyUrlState(state: ReviewFindingsUrlState, warnings: readonly string[]) {
+  selectedPr.value = state.pr;
+  roundFilter.value = state.round;
+  severityFilter.value = state.severity;
+  stateFilter.value = state.state;
+  focusedFindingId.value = state.finding;
+  urlWarnings.value = [...warnings];
   isComposerOpen.value = false;
   transitionError.value = null;
 }
 
+function restoreFromLocation() {
+  const parsed = parseReviewFindingsUrlState(new URL(window.location.href).searchParams);
+  applyUrlState(parsed.state, parsed.warnings);
+}
+
 onMounted(() => window.addEventListener('popstate', restoreFromLocation));
 onUnmounted(() => window.removeEventListener('popstate', restoreFromLocation));
+
+// vike は同じ +Page.vue に解決される URL 間の遷移で component を差し替えず patch する
+// （+Page.vue の :key の註）。setup で読んだ initialUrlState はそのままでは凍るため、
+// props の更新も同じ復元口へ流す。writeUrl は pageContext を動かさないので環はできない。
+// 値が現状と同じなら何もしない（復元は composer や transitionError まで畳むため）。
+watch(
+  () => [props.initialUrlState, props.initialUrlWarnings] as const,
+  ([state, warnings]) => {
+    const next = state ?? DEFAULT_REVIEW_FINDINGS_URL_STATE;
+    const nextWarnings = warnings ?? [];
+    if (
+      JSON.stringify(next) === JSON.stringify(currentUrlState()) &&
+      JSON.stringify(nextWarnings) === JSON.stringify(urlWarnings.value)
+    ) {
+      return;
+    }
+    applyUrlState(next, nextWarnings);
+  },
+);
 
 /**
  * 指摘 → それを出したラウンドの作成者。取り下げを出してよいかの判定に使う。
@@ -176,6 +205,12 @@ const selectedPrMissing = computed(
     selectedPr.value !== null &&
     !pullRequests.value.some((pr) => pr.pr_number === selectedPr.value),
 );
+const roundMissing = computed(
+  () =>
+    !roundsQuery.isPending.value &&
+    roundFilter.value !== null &&
+    !rounds.value.some((round: Review) => round.round === roundFilter.value),
+);
 const focusedFindingMissing = computed(
   () =>
     !findingsQuery.isPending.value &&
@@ -195,27 +230,41 @@ function resetFilters() {
   stateFilter.value = null;
 }
 
+/**
+ * 利用者の操作で URL を書き直した時に呼ぶ。書き直した時点で不正値は URL から
+ * 消えているため、出しっぱなしだった警告の帯も一緒に片付ける。
+ * （読み込み時の自動 PR 選択のような、操作でない書き換えでは呼ばない——
+ * 入場時の警告を読む前に消してしまうため。）
+ */
+function clearUrlWarnings() {
+  urlWarnings.value = [];
+}
+
 function clearFilters() {
   resetFilters();
   focusedFindingId.value = null;
+  clearUrlWarnings();
   writeUrl('replace');
 }
 
 function setRoundFilter(value: unknown) {
   roundFilter.value = value === 'all' || value == null ? null : Number(value);
   focusedFindingId.value = null;
+  clearUrlWarnings();
   writeUrl('replace');
 }
 
 function setSeverityFilter(value: unknown) {
   severityFilter.value = value === 'all' || value == null ? null : (value as FindingSeverity);
   focusedFindingId.value = null;
+  clearUrlWarnings();
   writeUrl('replace');
 }
 
 function setStateFilter(value: unknown) {
   stateFilter.value = value === 'all' || value == null ? null : (value as FindingState);
   focusedFindingId.value = null;
+  clearUrlWarnings();
   writeUrl('replace');
 }
 
@@ -225,20 +274,20 @@ function selectPr(pr: number) {
   focusedFindingId.value = null;
   isComposerOpen.value = false;
   transitionError.value = null;
+  clearUrlWarnings();
   writeUrl('push');
 }
 
 function findingHref(id: string): string {
-  const browserUrl = import.meta.env.SSR
-    ? new URL(
-        `/${encodeURIComponent(props.tenantSlug)}/projects/${encodeURIComponent(props.projectKey)}/reviews`,
-        'http://ssr.local',
-      )
+  // SSR は props.requestUrl（+Page が pageContext から渡す現在 URL）を土台にする。
+  // path を自前で組むと、この画面が持たぬ query（tab= の類）が SSR 出力の链から
+  // 落ちて client と食い違う。出力は relativeReviewFindingHref で両側とも
+  // pathname + search の相対形に揃える（client だけ絶対 URL だと、同じ属性が
+  // hydration で別の文字列になる）。
+  const base = import.meta.env.SSR
+    ? new URL(props.requestUrl ?? '/', 'http://ssr.local')
     : new URL(window.location.href);
-  const href = reviewFindingHref(browserUrl, currentUrlState(), id);
-  if (!import.meta.env.SSR) return href;
-  const next = new URL(href);
-  return `${next.pathname}${next.search}`;
+  return relativeReviewFindingHref(base, currentUrlState(), id);
 }
 
 async function focusFinding(event: MouseEvent, id: string) {
@@ -246,17 +295,34 @@ async function focusFinding(event: MouseEvent, id: string) {
     return;
   event.preventDefault();
   focusedFindingId.value = id;
+  clearUrlWarnings();
   writeUrl('replace');
   await nextTick();
   document.getElementById(`finding-${id}`)?.scrollIntoView?.({ block: 'center' });
+  scrolledFindingId.value = id;
 }
 
+/**
+ * 注目指摘への強制スクロールは、注目が変わった時の一度きり。済んだ id を覚え、
+ * 状態変更 → invalidate → 再取得で findings の data が入れ替わるたびに
+ * scrollIntoView が走って画面が勝手に戻るのを防ぐ。data も依存に残すのは、
+ * 共有 link 直入りでは data 到着まで要素が無く、到着後の再走で初回の
+ * スクロールを果たすため（要素が出るまでは済み扱いにしない）。
+ */
+const scrolledFindingId = ref<string | null>(null);
 watch(
   () => [focusedFindingId.value, findingsQuery.data.value] as const,
   async ([id]) => {
-    if (!id) return;
+    if (!id) {
+      scrolledFindingId.value = null;
+      return;
+    }
+    if (scrolledFindingId.value === id) return;
     await nextTick();
-    document.getElementById(`finding-${id}`)?.scrollIntoView?.({ block: 'center' });
+    const el = document.getElementById(`finding-${id}`);
+    if (!el) return;
+    el.scrollIntoView?.({ block: 'center' });
+    scrolledFindingId.value = id;
   },
   { flush: 'post' },
 );
@@ -535,6 +601,14 @@ async function onRoundCreated() {
               data-testid="missing-pr"
             >
               URL で指定された PR #{{ selectedPr }} はレビュー一覧にありません。
+            </p>
+            <p
+              v-if="roundMissing"
+              role="status"
+              class="text-muted-foreground text-sm"
+              data-testid="missing-round"
+            >
+              URL で指定された Round {{ roundFilter }} はこの PR にありません。
             </p>
             <p
               v-if="focusedFindingMissing"

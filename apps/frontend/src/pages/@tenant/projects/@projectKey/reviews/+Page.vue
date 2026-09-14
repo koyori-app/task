@@ -13,13 +13,28 @@ const pageContext = usePageContext();
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
 const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
 
+type UrlParsedContext = {
+  urlParsed?: {
+    search?: Record<string, string>;
+    pathname?: string;
+    searchOriginal?: string | null;
+  };
+};
+
 /** SSR でも client navigation でも、最初に描く状態は URL だけから決める。 */
 const initialUrl = computed(() =>
-  parseReviewFindingsUrlState(
-    (pageContext as { urlParsed?: { search?: Record<string, string> } } | undefined)?.urlParsed
-      ?.search,
-  ),
+  parseReviewFindingsUrlState((pageContext as UrlParsedContext | undefined)?.urlParsed?.search),
 );
+
+/**
+ * 現在の URL（pathname + search）。SSR の findingHref が path を自前で組まずに
+ * 済むよう渡す——自前で組むと、この画面が持たぬ query が SSR 出力の链から落ちる。
+ */
+const requestUrl = computed(() => {
+  const parsed = (pageContext as UrlParsedContext | undefined)?.urlParsed;
+  if (!parsed?.pathname) return null;
+  return `${parsed.pathname}${parsed.searchOriginal ?? ''}`;
+});
 
 const {
   tenantId,
@@ -80,6 +95,7 @@ const isNotFound = computed(() => isTenantNotFound.value || isProjectNotFound.va
       :tenant-owner-id="tenantOwnerId"
       :initial-url-state="initialUrl.state"
       :initial-url-warnings="initialUrl.warnings"
+      :request-url="requestUrl"
     />
   </div>
 </template>

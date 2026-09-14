@@ -4,6 +4,7 @@ import {
   DEFAULT_REVIEW_FINDINGS_URL_STATE,
   applyReviewFindingsUrlState,
   parseReviewFindingsUrlState,
+  relativeReviewFindingHref,
   reviewFindingHref,
 } from '@/lib/review-findings-url-state';
 
@@ -79,5 +80,26 @@ describe('review findings URL state', () => {
     expect(href).toBe(
       'https://app.example.com/acme/projects/APP/reviews?pr=738&round=2&severity=medium&state=fixed&finding=finding-2',
     );
+  });
+
+  it('relativeReviewFindingHref は SSR と client の base で同じ文字列を返し、画面の外の query を保つ', () => {
+    // SSR は requestUrl を仮の origin に載せ、client は window の絶対 URL を使う。
+    // 同じ属性が両者で別の文字列になれば hydration が食い違う——一致が契約である
+    const state = { pr: 738, round: null, severity: null, state: null, finding: null } as const;
+    const ssr = relativeReviewFindingHref(
+      new URL('/acme/projects/APP/reviews?pr=738&tab=activity', 'http://ssr.local'),
+      state,
+      'f-9',
+    );
+    const client = relativeReviewFindingHref(
+      new URL('https://app.example.com/acme/projects/APP/reviews?pr=738&tab=activity'),
+      state,
+      'f-9',
+    );
+    expect(ssr).toBe(client);
+    expect(ssr.startsWith('/acme/projects/APP/reviews?')).toBe(true);
+    // この画面が持たぬ query (tab=) は落とさない
+    expect(ssr).toContain('tab=activity');
+    expect(ssr).toContain('finding=f-9');
   });
 });

@@ -618,4 +618,74 @@ describe('ReviewFindingsView', () => {
     expect(replaceSpy).toHaveBeenCalledOnce();
     expect(new URL(window.location.href).searchParams.get('severity')).toBe('high');
   });
+
+  it('vike の遷移（props の更新）でも URL 状態が復元される', async () => {
+    // 同じ +Page.vue に解決される URL 間の遷移では component は差し替わらず props だけ
+    // 変わる。popstate は飛ばないため、props 経路の復元が無いと setup 時の状態で凍る
+    stubFetch({ findings: [finding()], prNumbers: [617, 618] });
+    const wrapper = mountView({
+      initialUrlState: { pr: 617, round: null, severity: null, state: null, finding: null },
+    });
+    await flushPromises();
+
+    await wrapper.setProps({
+      initialUrlState: { pr: 618, round: null, severity: null, state: null, finding: null },
+    });
+    await flushPromises();
+
+    const next = wrapper
+      .findAll('nav[aria-label="レビューのある PR"] button')
+      .find((button) => button.text().includes('#618'))!;
+    expect(next.attributes('aria-current')).toBe('true');
+  });
+
+  it('注目指摘への強制スクロールは一度きり——再取得で画面が勝手に戻らない', async () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=618&finding=f-1');
+    stubFetch({ findings: [finding()] });
+    const wrapper = mountView({
+      initialUrlState: { pr: 618, round: null, severity: null, state: null, finding: 'f-1' },
+    });
+    await flushPromises();
+    expect(scrollSpy).toHaveBeenCalledTimes(1);
+
+    // 状態変更 → invalidate → findings の再取得。ここで再スクロールしてはならない
+    // （一覧を繰った直後に画面が注目指摘へ戻る、最も起きてほしくない場面）
+    const fixedButton = wrapper
+      .findAll('#finding-f-1 button')
+      .find((button) => button.text().includes('修正した'))!;
+    await fixedButton.trigger('click');
+    await flushPromises();
+    expect(scrollSpy).toHaveBeenCalledTimes(1);
+    // @ts-expect-error jsdom には元より無いので試験専用の後片付け
+    delete Element.prototype.scrollIntoView;
+  });
+
+  it('PR を選び直して URL から不正値が消えたら、警告の帯も片付く', async () => {
+    stubFetch({ findings: [finding()], prNumbers: [617, 618] });
+    const wrapper = mountView({
+      initialUrlState: { pr: 617, round: null, severity: null, state: null, finding: null },
+      initialUrlWarnings: ['URL の重大度「urgent」は知らない値のため無視しました。'],
+    });
+    await flushPromises();
+    expect(wrapper.find('[data-testid="url-warning"]').exists()).toBe(true);
+
+    await wrapper
+      .findAll('nav[aria-label="レビューのある PR"] button')
+      .find((button) => button.text().includes('#618'))!
+      .trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="url-warning"]').exists()).toBe(false);
+  });
+
+  it('存在しない Round を指す URL には理由を表示する（pr・finding と同じ扱い）', async () => {
+    stubFetch({ findings: [finding()] });
+    const wrapper = mountView({
+      initialUrlState: { pr: 618, round: 99, severity: null, state: null, finding: null },
+    });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="missing-round"]').text()).toContain('Round 99');
+  });
 });
