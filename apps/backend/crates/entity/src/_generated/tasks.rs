@@ -102,6 +102,8 @@ pub struct Model {
         on_delete = "NoAction"
     )]
     pub users: HasOne<super::users::Entity>,
+    #[sea_orm(has_many, via = "forge_commit_links")]
+    pub forge_commits: HasMany<super::forge_commits::Entity>,
     #[sea_orm(has_many, via = "task_labels")]
     pub labels: HasMany<super::labels::Entity>,
     #[sea_orm(has_many, via = "task_custom_field_values")]

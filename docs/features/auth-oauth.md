@@ -45,6 +45,7 @@ pub struct Model {
     pub provider: String,           // "github" | "gitlab" | "google" | "oidc:{issuer}"
     pub provider_user_id: String,   // プロバイダー側のユーザー ID
     pub provider_email: Option<String>, // プロバイダーが返したメール（参照用）
+    pub provider_login: Option<String>, // プロバイダー上のログイン名（小文字。コミット作者の解決用）
     pub access_token_enc: Option<String>,  // AES-256-GCM 暗号化
     pub refresh_token_enc: Option<String>, // AES-256-GCM 暗号化
     pub token_expires_at: Option<DateTimeUtc>,
@@ -66,7 +67,18 @@ pub struct Model {
 | `token_expires_at` | TIMESTAMPTZ | NULLABLE | |
 | `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
 | `updated_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+| `provider_login` | VARCHAR | NULLABLE | プロバイダー上のログイン名（小文字）。下記 |
 | — | — | UNIQUE(provider, provider_user_id, instance_url) | self-hosted 複数インスタンス対応 |
+
+`provider_login` はログイン・連携のたびに `ProviderUserInfo.username` を小文字にして控え直す。
+ログイン名は改名できるので本人の識別には `provider_user_id` を使い、こちらはコミット作者を Task ユーザーに
+解決する用途（[Git ホスティング↔タスク連携](/features/tasks/github-tasks) §2「アクティビティ」）にだけ使う。
+
+改名で同じ名前が別の人に移ることがあるので、控えるときに同じ `provider` / `instance_url` で同じ名前を持つ
+別の接続からは外す。一意性はこの付け替えと、照合側の「ちょうど 1 件のときだけ採る」で保ち、UNIQUE 制約は
+張らない（SeaORM の entity は 1 列に `unique_key` を 1 つしか持てず、`provider` は上の複合 UNIQUE に
+入っているので表せない。表せない UNIQUE 制約は起動時の schema sync が黙って DROP する）。
+ログインし直さない人の改名は追えない。
 
 ---
 

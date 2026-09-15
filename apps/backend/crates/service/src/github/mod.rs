@@ -6,6 +6,7 @@
 //! という前提に基づくリポジトリ選定。
 
 pub mod client;
+pub mod commits;
 pub mod import_lock;
 pub mod install_state;
 pub mod issues;
@@ -13,6 +14,7 @@ pub mod pr_comments;
 pub mod repositories;
 pub mod review_summary_queue;
 pub mod sync;
+pub mod webhook_events;
 
 pub use client::github_app;
 pub use import_lock::{

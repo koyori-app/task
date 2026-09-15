@@ -69,6 +69,7 @@ async fn seed_activities(
             task_id: Set(task_id),
             user_id: Set(Some(user_id)),
             event_type: Set("status_changed".into()),
+            dedupe_key: Set(None),
             payload: Set(serde_json::json!({ "to": format!("状態 {i}") })),
             // 並びは created_at の降順なので、i が大きいほど新しくする
             created_at: Set((base + Duration::seconds(i as i64)).into()),
@@ -97,6 +98,7 @@ async fn seed_activities_at_same_instant(
             task_id: Set(task_id),
             user_id: Set(Some(user_id)),
             event_type: Set("status_changed".into()),
+            dedupe_key: Set(None),
             payload: Set(serde_json::json!({ "to": format!("同時刻 {i}") })),
             created_at: Set(at.into()),
         })
