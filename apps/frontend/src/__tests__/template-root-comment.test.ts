@@ -22,22 +22,53 @@ function rootTemplate(source: string): string | null {
   return match ? match[1] : null;
 }
 
-function startsWithCommentBeforeElement(template: string): boolean {
-  const body = template.trimStart();
-  if (!body.startsWith('<!--')) return false;
-  const end = body.indexOf('-->');
-  if (end === -1) return false;
-  return body.slice(end + 3).trim().length > 0;
+/** コメントを除いた残りに、要素やテキストが残るか */
+function hasContentBesideComments(fragment: string): boolean {
+  return fragment.replace(/<!--[\s\S]*?-->/g, '').trim().length > 0;
 }
 
+/**
+ * 根の要素と並ぶ HTML コメントがあるか。
+ *
+ * 先頭でも末尾でも、テンプレート直下のコメントは根の要素の兄弟になり、本番ビルドで
+ * 根がフラグメントになる。根の要素の内側のコメントと、要素を持たないテンプレートは対象外。
+ */
+function hasCommentBesideRootElement(template: string): boolean {
+  const body = template.trim();
+  if (body.startsWith('<!--')) {
+    const end = body.indexOf('-->');
+    if (end !== -1 && hasContentBesideComments(body.slice(end + 3))) return true;
+  }
+  // 根の要素は閉じタグか `/>` で終わるので、末尾が `-->` ならテンプレート直下のコメント
+  if (body.endsWith('-->')) {
+    const start = body.lastIndexOf('<!--');
+    if (start !== -1 && hasContentBesideComments(body.slice(0, start))) return true;
+  }
+  return false;
+}
+
+describe('hasCommentBesideRootElement', () => {
+  it.each([
+    ['先頭コメント + 要素', '<!-- 説明 -->\n<div />', true],
+    ['要素 + 末尾コメント', '<div />\n<!-- 説明 -->', true],
+    ['先頭と末尾の両方', '<!-- a -->\n<div />\n<!-- b -->', true],
+    ['コメントは根の要素の内側', '<div>\n  <!-- 説明 -->\n</div>', false],
+    ['コメントだけ（要素を持たない）', '<!-- 描画しない -->', false],
+    ['コメントが複数だけ', '<!-- a -->\n<!-- b -->', false],
+    ['コメントが無い', '<div />', false],
+  ])('%s', (_, template, expected) => {
+    expect(hasCommentBesideRootElement(template)).toBe(expected);
+  });
+});
+
 describe('SFC のテンプレートの根', () => {
-  it('先頭コメント + 要素（本番でフラグメント根になる形）を持たない', () => {
+  it('根の要素と並ぶコメント（本番でフラグメント根になる形）を持たない', () => {
     expect(Object.keys(sources).length).toBeGreaterThan(0);
 
     const offenders = Object.entries(sources)
       .filter(([, source]) => {
         const template = rootTemplate(source);
-        return template !== null && startsWithCommentBeforeElement(template);
+        return template !== null && hasCommentBesideRootElement(template);
       })
       .map(([path]) => path.replace('../', 'src/'));
 
