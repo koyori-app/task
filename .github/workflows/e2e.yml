@@ -8,12 +8,16 @@ on:
       - 'apps/frontend/**'
       - 'e2e/**'
       - '.github/workflows/e2e.yml'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
   pull_request:
     paths:
       - 'apps/backend/**'
       - 'apps/frontend/**'
       - 'e2e/**'
       - '.github/workflows/e2e.yml'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -113,7 +117,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.pnpm-cache.outputs.store }}
-          key: pnpm-store-e2e-${{ runner.os }}-${{ hashFiles('apps/frontend/pnpm-lock.yaml', 'e2e/pnpm-lock.yaml') }}
+          key: pnpm-store-e2e-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'e2e/pnpm-lock.yaml') }}
           restore-keys: |
             pnpm-store-e2e-${{ runner.os }}-
 

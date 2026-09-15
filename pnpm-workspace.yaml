@@ -1,12 +1,17 @@
 packages:
   - apps/frontend
   - packages/*
-sharedWorkspaceLockfile: false
+# 既定 (true) と同値だが明示で置く。既定は pnpm の版で動きうるし、
+# この file は allowBuilds を一つひとつ書き出す流儀ゆえ、意図は行で示す。
+sharedWorkspaceLockfile: true
 allowBuilds:
   '@nestjs/core': true
   '@openapitools/openapi-generator-cli': true
+  '@parcel/watcher': true
   '@sentry/cli': true
+  '@swc/core': true
   esbuild: true
+  unrs-resolver: true
   vue-demi: true
 catalog:
   '@codemirror/commands': 6.11.0
