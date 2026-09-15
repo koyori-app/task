@@ -1,6 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { mount } from '@vue/test-utils';
 import ReviewFindingBody from '../ReviewFindingBody.vue';
+
+// KFM 一式の初回 import は重く、混んだ box では最初の試験の既定 5s を食い潰す。
+// 先に温めて、どの試験が先頭に来ても刻切れせぬようにする
+beforeAll(async () => {
+  await import('@/lib/markup-renderer');
+}, 30_000);
 
 /*
  * 指摘の本文は書き手の入れた文字であり、KFM (markup-renderer) の既存経路で
