@@ -7,6 +7,8 @@ on:
     paths:
       - apps/frontend/**
       - .github/workflows/argos.yml
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
 
 permissions:
   contents: read
@@ -37,7 +39,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: apps/frontend/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
 
