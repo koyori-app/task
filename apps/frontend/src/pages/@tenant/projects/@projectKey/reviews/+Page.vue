@@ -7,17 +7,33 @@ import ReviewFindingsView from '@/components/reviews/ReviewFindingsView.vue';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { useMeQuery } from '@/lib/api-vue-query';
+import { parseReviewFindingsUrlState } from '@/lib/review-findings-url-state';
 
 const pageContext = usePageContext();
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
 const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
 
-/** 要約コメントのリンク（`?pr=618`）から来たときは、その PR を開く。 */
-const initialPr = computed(() => {
-  const search = (pageContext as { urlParsed?: { search?: Record<string, string> } } | undefined)
-    ?.urlParsed?.search;
-  const raw = Number(search?.pr);
-  return Number.isInteger(raw) && raw > 0 ? raw : null;
+type UrlParsedContext = {
+  urlParsed?: {
+    search?: Record<string, string>;
+    pathname?: string;
+    searchOriginal?: string | null;
+  };
+};
+
+/** SSR でも client navigation でも、最初に描く状態は URL だけから決める。 */
+const initialUrl = computed(() =>
+  parseReviewFindingsUrlState((pageContext as UrlParsedContext | undefined)?.urlParsed?.search),
+);
+
+/**
+ * 現在の URL（pathname + search）。SSR の findingHref が path を自前で組まずに
+ * 済むよう渡す——自前で組むと、この画面が持たぬ query が SSR 出力の链から落ちる。
+ */
+const requestUrl = computed(() => {
+  const parsed = (pageContext as UrlParsedContext | undefined)?.urlParsed;
+  if (!parsed?.pathname) return null;
+  return `${parsed.pathname}${parsed.searchOriginal ?? ''}`;
 });
 
 const {
@@ -77,7 +93,9 @@ const isNotFound = computed(() => isTenantNotFound.value || isProjectNotFound.va
       :project-key="projectKey"
       :viewer-id="meQuery.data.value.id"
       :tenant-owner-id="tenantOwnerId"
-      :initial-pr="initialPr"
+      :initial-url-state="initialUrl.state"
+      :initial-url-warnings="initialUrl.warnings"
+      :request-url="requestUrl"
     />
   </div>
 </template>
