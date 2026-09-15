@@ -14,9 +14,9 @@ use sea_orm::{
 use crate::AppState;
 use crate::auth_helpers::require_tenant_owner;
 use crate::error::AppError;
-use crate::extractors::AuthUser;
+use crate::extractors::{AuthMethod, AuthUser};
 use crate::handlers::tenant_members::require_tenant_admin;
-use crate::openapi::{CrudErrors, SessionAuthErrors};
+use crate::openapi::{CrudErrors, PersonalTokenAuthErrors, SessionAuthErrors};
 use entity::scopes::ScopeList;
 use entity::{
     personal_tokens::{self},
@@ -24,6 +24,7 @@ use entity::{
 };
 use payload::personal_tokens::*;
 use service::auth;
+use service::auth::AuthError;
 
 fn token_last_four(token: &str) -> String {
     token[token.len().saturating_sub(4)..].to_string()
@@ -62,6 +63,114 @@ async fn get_owned_token(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)
+}
+
+#[axum::debug_handler(state = AppState)]
+#[utoipa::path(
+    get,
+    path = "/me",
+    tag = "Personal Tokens",
+    summary = "使用中のパーソナルアクセストークンを表示",
+    security(("bearerAuth" = [])),
+    responses(
+        (
+            status = 200,
+            description = "Bearer 認証に使ったトークンと持ち主の識別情報",
+            body = PersonalTokenIdentityResponse
+        ),
+        PersonalTokenAuthErrors,
+    )
+)]
+pub async fn get_current_personal_token(
+    auth: AuthUser,
+) -> Result<Json<PersonalTokenIdentityResponse>, AuthError> {
+    let AuthMethod::PersonalToken {
+        token_id,
+        token_name,
+        allowed_project_ids,
+        scopes,
+        expires_at,
+        ..
+    } = auth.method
+    else {
+        return Err(AuthError::Unauthorized);
+    };
+
+    Ok(Json(PersonalTokenIdentityResponse {
+        id: token_id,
+        name: token_name,
+        user_id: auth.user_id,
+        username: auth.username,
+        scopes,
+        allowed_project_ids,
+        expires_at: expires_at.map(|value| value.with_timezone(&chrono::Utc)),
+    }))
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use chrono::{Duration, Utc};
+    use entity::scopes::{Scope, ScopeList};
+
+    use super::*;
+
+    fn personal_token_auth(scopes: ScopeList, project_ids: Option<Vec<Uuid>>) -> AuthUser {
+        AuthUser {
+            user_id: Uuid::new_v4(),
+            username: "automation".into(),
+            method: AuthMethod::PersonalToken {
+                token_id: Uuid::new_v4(),
+                token_name: "review-bot".into(),
+                tenant_id: Uuid::new_v4(),
+                allowed_project_ids: project_ids,
+                scopes,
+                expires_at: Some((Utc::now() + Duration::days(30)).into()),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn identity_requires_no_scope_and_reports_current_bounds() {
+        let projects = vec![Uuid::new_v4()];
+        let auth = personal_token_auth(ScopeList(vec![]), Some(projects.clone()));
+
+        let Json(identity) = get_current_personal_token(auth)
+            .await
+            .expect("PAT identity");
+
+        assert_eq!(identity.name, "review-bot");
+        assert_eq!(identity.username, "automation");
+        assert!(identity.scopes.0.is_empty());
+        assert_eq!(identity.allowed_project_ids, Some(projects));
+        assert!(identity.expires_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn identity_accepts_a_narrow_scope() {
+        let auth = personal_token_auth(ScopeList(vec![Scope::ReadTask]), None);
+
+        let Json(identity) = get_current_personal_token(auth)
+            .await
+            .expect("PAT identity");
+
+        assert_eq!(identity.scopes.0, vec![Scope::ReadTask]);
+        assert_eq!(identity.allowed_project_ids, None);
+    }
+
+    #[tokio::test]
+    async fn identity_rejects_a_session() {
+        let auth = AuthUser {
+            user_id: Uuid::new_v4(),
+            username: "session-user".into(),
+            method: AuthMethod::Session,
+        };
+
+        let error = get_current_personal_token(auth)
+            .await
+            .expect_err("session must not use PAT identity");
+
+        assert!(matches!(error, AuthError::Unauthorized));
+    }
 }
 
 #[axum::debug_handler]

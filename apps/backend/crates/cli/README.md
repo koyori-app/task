@@ -160,7 +160,7 @@ task tasks update TASK-181 --clear-sprint --archive
 task config set api_url https://task.example.com
 task config set tenant_id <tenant-uuid>
 task auth token < token.txt        # 引数を省くと標準入力から読む
-task auth whoami
+task auth whoami                   # 使用中の鍵と持ち主・scope・有効期限が出る
 ```
 
 ## 指定できる値の調べ方

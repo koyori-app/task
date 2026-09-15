@@ -5,7 +5,10 @@ use axum::{
     http::{header::AUTHORIZATION, request::Parts},
 };
 use axum_session_redispool::SessionRedisPool;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, prelude::Uuid};
+use sea_orm::{
+    ColumnTrait, EntityTrait, QueryFilter,
+    prelude::{DateTimeWithTimeZone, Uuid},
+};
 
 use entity::{projects, scopes::Scope, tenants, users};
 
@@ -66,15 +69,18 @@ pub enum AuthMethod {
     Session,
     PersonalToken {
         token_id: Uuid,
+        token_name: String,
         tenant_id: Uuid,
         allowed_project_ids: Option<Vec<Uuid>>,
         scopes: entity::scopes::ScopeList,
+        expires_at: Option<DateTimeWithTimeZone>,
     },
 }
 
 /// 認証済みユーザー（セッションまたは PAT）
 pub struct AuthUser {
     pub user_id: Uuid,
+    pub username: String,
     pub method: AuthMethod,
 }
 
@@ -322,8 +328,10 @@ impl FromRequestParts<AppState> for AuthUser {
             }
             Ok(AuthUser {
                 user_id: record.user_id,
+                username: user.username,
                 method: AuthMethod::PersonalToken {
                     token_id: record.id,
+                    token_name: record.name,
                     tenant_id: record.tenant_id,
                     allowed_project_ids: match record.allowed_project_ids.as_ref() {
                         None => None,
@@ -335,7 +343,8 @@ impl FromRequestParts<AppState> for AuthUser {
                             })?
                         }
                     },
-                    scopes: record.scopes.clone(),
+                    scopes: record.scopes,
+                    expires_at: record.expires_at,
                 },
             })
         } else {
@@ -349,6 +358,7 @@ impl FromRequestParts<AppState> for AuthUser {
             }
             Ok(AuthUser {
                 user_id: user.id,
+                username: user.username,
                 method: AuthMethod::Session,
             })
         }
