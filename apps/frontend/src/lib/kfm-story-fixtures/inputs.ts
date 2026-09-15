@@ -45,6 +45,12 @@ export const KFM_STORY_INPUTS = {
     '本文 https://example.com/very/long/path?query=1 を参照。',
   ].join('\n'),
 
+  'gfm-long-inline-text': [
+    `https://example.com/${'a'.repeat(240)}`,
+    '',
+    '`' + 'longIdentifier'.repeat(24) + '`',
+  ].join('\n'),
+
   'gfm-nested-lists': [
     '1. 番号付き一段目',
     '   1. 番号付き二段目',
