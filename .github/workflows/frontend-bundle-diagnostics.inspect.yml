@@ -62,7 +62,7 @@ jobs:
           if ! grep -q 'rollup-plugin-visualizer' before/apps/frontend/package.json; then
             cp after/apps/frontend/vite.config.ts before/apps/frontend/vite.config.ts
             cp after/apps/frontend/package.json before/apps/frontend/package.json
-            cp after/apps/frontend/pnpm-lock.yaml before/apps/frontend/pnpm-lock.yaml
+            cp after/pnpm-lock.yaml before/pnpm-lock.yaml
             cp after/pnpm-workspace.yaml before/pnpm-workspace.yaml
             touch "$RUNNER_TEMP/frontend-bundle-report/base-bootstrapped.flag"
           fi

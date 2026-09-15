@@ -46,27 +46,42 @@ async fn mount_statuses(harness: &Harness) {
 }
 
 #[tokio::test]
-async fn auth_whoami_reads_the_current_account() {
+async fn auth_whoami_reads_the_current_personal_token() {
     let harness = harness().await;
     Mock::given(method("GET"))
-        .and(path("/v1/auth/me"))
+        .and(path("/v1/personal_tokens/me"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "id": "77777777-7777-4777-8777-777777777777",
+            "name": "review-bot",
+            "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             "username": "yupix",
-            "bio": null,
-            "avatar_url": null,
-            "email": "yupix@example.invalid",
-            "email_verified": true,
-            "is_admin": false,
-            "is_suspended": false,
-            "totp_enabled": false,
-            "has_password": true,
+            "scopes": ["read:task"],
+            "allowed_project_ids": [PROJECT_ID],
+            "expires_at": "2026-12-31T00:00:00Z",
         })))
         .expect(1)
         .mount(&harness.server)
         .await;
 
     assert_eq!(harness.run(&["task", "auth", "whoami"]).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn auth_whoami_without_a_token_does_not_call_the_api() {
+    let harness = harness().await;
+    let mut config = harness.store().load().unwrap();
+    config.token = None;
+    harness.store().save(&config).unwrap();
+
+    let err = harness.run(&["task", "auth", "whoami"]).await.unwrap_err();
+
+    assert_eq!(err.exit_code, 2);
+    assert!(
+        err.message.contains("token (TASK_TOKEN)"),
+        "{}",
+        err.message
+    );
+    assert!(harness.sent_nothing().await);
 }
 
 #[tokio::test]
@@ -680,7 +695,7 @@ async fn an_expired_token_and_a_forbidden_resource_exit_with_distinct_codes() {
     for (status, expected) in [(401, 3), (403, 4), (404, 5)] {
         let harness = harness().await;
         Mock::given(method("GET"))
-            .and(path("/v1/auth/me"))
+            .and(path("/v1/personal_tokens/me"))
             .respond_with(ResponseTemplate::new(status).set_body_json(json!({ "message": "no" })))
             .mount(&harness.server)
             .await;
@@ -694,7 +709,7 @@ async fn an_expired_token_and_a_forbidden_resource_exit_with_distinct_codes() {
 async fn a_response_that_no_longer_matches_the_shared_type_is_reported_not_swallowed() {
     let harness = harness().await;
     Mock::given(method("GET"))
-        .and(path("/v1/auth/me"))
+        .and(path("/v1/personal_tokens/me"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": "not-a-user" })))
         .mount(&harness.server)
         .await;
