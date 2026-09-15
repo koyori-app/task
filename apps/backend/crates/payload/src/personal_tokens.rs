@@ -48,6 +48,22 @@ pub struct PersonalTokenResponse {
     pub user_id: Uuid,
 }
 
+/// PAT 自身の識別情報。アカウントの機微な状態は含めない。
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PersonalTokenIdentityResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    pub name: String,
+    #[schema(value_type = String, format = "uuid")]
+    pub user_id: Uuid,
+    pub username: String,
+    pub scopes: ScopeList,
+    #[schema(value_type = Vec<String>, format = "uuid", nullable)]
+    pub allowed_project_ids: Option<Vec<Uuid>>,
+    #[schema(value_type = String, format = "date-time", nullable)]
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
 impl TryFrom<personal_tokens::Model> for PersonalTokenResponse {
     type Error = serde_json::Error;
 

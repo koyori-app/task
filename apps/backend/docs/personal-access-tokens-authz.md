@@ -111,6 +111,21 @@ project-only の客分（#688）が `admin:project` の PAT を使う場合も�
 | `tenant_id` | `UUID` NOT NULL | PAT が有効なテナント（1 件固定） |
 | `allowed_project_ids` | `JSON` NULL 可 | 許可プロジェクト ID の配列。`NULL` = テナント内全プロジェクト |
 
+## PAT 自身の識別
+
+PAT を使う CLI は `GET /v1/personal_tokens/me` で、使用中の鍵と持ち主を識別する。
+応答は鍵の ID と名前、持ち主の user ID と username、scopes、allowed_project_ids、有効期限に限る。
+アカウント情報の `email`、`has_password`、`totp_enabled`、`is_admin` は、鍵を識別するために要らないので返さない。
+
+この endpoint は PAT 専用であり、Bearer がない要求と、認証済みの session Cookie の要求には 401 を返す。
+ただし `AuthUser` の拒否はそのまま外へ出るため、凍結された利用者の PAT には 403（`account-suspended`）、2FA が途中の session Cookie には 403（`forbidden`）が返る。
+`GET /v1/auth/me` と `PATCH /v1/auth/me` は session 専用のまま保つ。
+既存の session endpoint に認証方式の条件分岐を戻すと、session extractor が Bearer を必ず拒む境界が再び曖昧になるため、二つの認証方式を同じ `me` endpoint へ通さない。
+
+この endpoint は scope を要求しない。
+scope は鍵が実行できる操作を制限するための値であり、鍵自身の識別を拒むための値ではない。
+scope が空の鍵や狭い鍵ほど設定確認が必要になるため、認証に成功した PAT なら現在の制限をそのまま確認できる。
+
 ## 認証・認可の実装
 
 ### データ構造
