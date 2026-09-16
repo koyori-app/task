@@ -18,7 +18,8 @@ const props = defineProps<{
 }>();
 
 /**
- * renderDescription (sanitize 済み KFM HTML) の出力。v-html に入れてよいのはこれだけ。
+ * renderDescription (sanitize 済み KFM HTML) の出力。template の v-html に入れて
+ * よいのはこれだけ (markup-renderer の契約。生テキストを v-html へ流す経路を作らない)。
  * SSR とマウント直後は null で、素のテキスト表示へフォールバックする (SSR は
  * このページの指摘一覧が client 取得のため実質通らないが、通っても崩れない)。
  * composition root (@/lib/markup-renderer) は import しただけで KFM 一式が entry へ
@@ -51,7 +52,6 @@ watchEffect(async () => {
 </script>
 
 <template>
-  <!-- v-html は renderDescription (sanitize 済み) の出力のみ (markup-renderer の契約) -->
   <div
     v-if="html !== null"
     :class="KFM_CONTENT_CLASS"
