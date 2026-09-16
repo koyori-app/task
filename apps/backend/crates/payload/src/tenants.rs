@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use entity::tenant_members::TenantRole;
 use entity::tenants;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -103,13 +104,26 @@ pub struct TenantListItemResponse {
     pub require_2fa: Option<bool>,
     /// この利用者から見た関わり方（Owner / Member / Guest）
     pub membership: TenantMembershipKind,
+    /// membership=Member の時だけ、その member の role（Admin / Member / Viewer）。
+    /// Owner と Guest では null。Admin 境界の口（鍵の発行など）を GUI が
+    /// 選択肢を作る段で見分けるための欄。
+    #[schema(nullable)]
+    pub member_role: Option<TenantRole>,
 }
 
 impl TenantListItemResponse {
-    pub fn from_parts(model: tenants::Model, membership: TenantMembershipKind) -> Self {
+    pub fn from_parts(
+        model: tenants::Model,
+        membership: TenantMembershipKind,
+        member_role: Option<TenantRole>,
+    ) -> Self {
         // 客分にはテナント設定の欄を返さない（一覧の表示に要る display_id / name /
         // description / icon_url は残す）
         let is_guest = membership == TenantMembershipKind::Guest;
+        // member_role は Member の印にだけ意味を持たせる（Owner/Guest では常に null）。
+        let member_role = (membership == TenantMembershipKind::Member)
+            .then_some(member_role)
+            .flatten();
         Self {
             id: model.id,
             display_id: model.display_id,
@@ -125,6 +139,7 @@ impl TenantListItemResponse {
             },
             require_2fa: (!is_guest).then_some(model.require_2fa),
             membership,
+            member_role,
         }
     }
 }

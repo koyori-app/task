@@ -10,7 +10,7 @@ use sea_orm::{
 };
 
 use crate::AppState;
-use crate::auth_helpers::{is_tenant_owner, visible_project_ids};
+use crate::auth_helpers::{is_tenant_owner, require_tenant_owner, visible_project_ids};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -43,18 +43,6 @@ fn validate_project_key(key: &str) -> bool {
 
 const INVALID_PROJECT_KEY_MESSAGE: &str = "key は 2〜10 文字で、先頭は大文字英字、残りは大文字英字または数字で入力してください（例: ENG, BACK）";
 
-async fn require_tenant_owner(
-    state: &AppState,
-    tenant_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    if is_tenant_owner(&state.db, tenant_id, user_id).await? {
-        Ok(())
-    } else {
-        Err(AppError::Forbidden)
-    }
-}
-
 #[axum::debug_handler]
 #[utoipa::path(
     post,
@@ -76,7 +64,7 @@ pub async fn create_project(
 ) -> Result<(StatusCode, Json<ProjectResponse>), AppError> {
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
+    require_tenant_owner(&state.db, tenant_id, auth.user_id).await?;
     let explicit_key = payload.key;
     let mut key = match explicit_key.as_ref() {
         Some(k) if validate_project_key(k) => k.clone(),
@@ -289,7 +277,7 @@ pub async fn update_project(
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(id))
         .await?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
+    require_tenant_owner(&state.db, tenant_id, auth.user_id).await?;
     let project = projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))
         .one(&state.db)
@@ -340,7 +328,7 @@ pub async fn delete_project(
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(id))
         .await?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
+    require_tenant_owner(&state.db, tenant_id, auth.user_id).await?;
     projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))
         .one(&state.db)
