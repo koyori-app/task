@@ -65,6 +65,13 @@
 .kfm-content a {
   color: #0969da;
   text-decoration: underline;
+  /* 長い URL は単語境界を持たないため、折り返さないと器を突き抜ける */
+  overflow-wrap: anywhere;
+}
+
+/* 長い識別子を折り返す。pre 内の code はコードブロック側の横スクロールに任せる。 */
+.kfm-content :not(pre) > code {
+  overflow-wrap: anywhere;
 }
 
 .kfm-content del {

@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { expect } from 'storybook/test';
 import codeFenceHtml from '@/lib/kfm-story-fixtures/rendered/gfm-code-fence.html?raw';
 import deepQuoteHtml from '@/lib/kfm-story-fixtures/rendered/gfm-deep-quote.html?raw';
+import longInlineTextHtml from '@/lib/kfm-story-fixtures/rendered/gfm-long-inline-text.html?raw';
 import nestedListsHtml from '@/lib/kfm-story-fixtures/rendered/gfm-nested-lists.html?raw';
 import strikeAutolinkHtml from '@/lib/kfm-story-fixtures/rendered/gfm-strike-autolink.html?raw';
 import tableAlignmentHtml from '@/lib/kfm-story-fixtures/rendered/gfm-table-alignment.html?raw';
@@ -159,6 +160,30 @@ export const StrikeAutolink: Story = {
     // リンク色の実効 (#0969da)。旧検査 not.toBe('') は computed color が常に非空文字列の
     // ため何も検証していなかった (空振り)
     await expect(style?.color).toBe('rgb(9, 105, 218)');
+  },
+};
+
+export const LongInlineText: Story = {
+  name: '長い URL・インラインコード（折り返し）',
+  args: { html: longInlineTextHtml },
+  render: (args: KfmStoryArgs) => ({
+    setup: () => ({ args }),
+    template: `<div class="grid grid-cols-1 max-w-xs"><div class="${KFM_CONTENT_CLASS}" v-html="args.html" /></div>`,
+  }),
+  play: async ({ canvasElement }) => {
+    const frame = canvasElement.querySelector('.max-w-xs');
+    if (!(frame instanceof HTMLElement)) throw new Error('LongInlineText story に器が無い');
+    await expect(getComputedStyle(frame).maxWidth).toBe('320px');
+    await expect(frame.clientWidth).toBeGreaterThan(0);
+    for (const selector of ['a', 'code']) {
+      const element = frame.querySelector(selector);
+      if (!element) throw new Error(`LongInlineText story に ${selector} が無い`);
+      // 切り取りやスクロールで隠さず、テキスト自体が複数行になることを確認する。
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      await expect(range.getClientRects().length).toBeGreaterThan(1);
+    }
+    await expect(frame.scrollWidth).toBeLessThanOrEqual(frame.clientWidth);
   },
 };
 
