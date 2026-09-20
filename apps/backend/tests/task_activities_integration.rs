@@ -2,7 +2,7 @@ mod common;
 
 use axum::http::StatusCode;
 use chrono::{DateTime, Duration, Utc};
-use common::TestApp;
+use common::{TestApp, json_body};
 use entity::task_activities;
 use sea_orm::{ActiveValue::Set, EntityTrait, prelude::Uuid};
 use serde_json::Value;
@@ -15,10 +15,6 @@ use serde_json::Value;
 //
 // 継ぎ目に offset を使わないのは、履歴が積まれている最中にページを継ぐと
 // 境界がずれ、同じ行が 2 度出たり抜けたりするため。
-
-async fn json_body(res: reqwest::Response) -> Value {
-    res.json::<Value>().await.expect("json body")
-}
 
 /// 次のページの鍵。取り切っていれば `None`。
 fn next_cursor(body: &Value) -> Option<String> {

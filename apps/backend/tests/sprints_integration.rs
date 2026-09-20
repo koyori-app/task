@@ -1,7 +1,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::{TestApp, TestTenantProject, TestUser};
+use common::{TestApp, TestTenantProject, TestUser, create_status};
 use sea_orm::{ConnectionTrait, EntityTrait, Statement};
 use uuid::Uuid;
 
@@ -18,36 +18,6 @@ async fn setup_project(app: &mut TestApp) -> (TestUser, TestTenantProject) {
         .await;
     let tp = app.insert_tenant_project(user.id).await;
     (user, tp)
-}
-
-async fn create_status(app: &TestApp, tp: &TestTenantProject, name: &str, is_done: bool) -> Uuid {
-    let path = format!(
-        "/v1/tenants/{}/projects/{}/statuses",
-        tp.tenant_id, tp.project_id
-    );
-    let response = app
-        .post_json_with_session(
-            &path,
-            serde_json::json!({
-                "name": name,
-                "color": "#336699",
-                "position": if is_done { 2 } else { 1 },
-                "is_default": name == "Todo",
-                "is_done_state": is_done,
-            }),
-        )
-        .await;
-    assert_eq!(
-        response.status(),
-        StatusCode::CREATED,
-        "create status {name}"
-    );
-    let body: serde_json::Value = response.json().await.expect("status json");
-    body["id"]
-        .as_str()
-        .expect("status id")
-        .parse()
-        .expect("uuid")
 }
 
 async fn create_sprint(app: &TestApp, tp: &TestTenantProject, name: &str) -> Uuid {

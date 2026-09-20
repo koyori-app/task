@@ -1,7 +1,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::TestApp;
+use common::{TestApp, json_body};
 use uuid::Uuid;
 
 // 担当者候補（`GET /projects/{id}/assignable-users`）の統合テスト。
@@ -11,10 +11,6 @@ use uuid::Uuid;
 // タスクを編集できる人が候補だけ 403 になって担当者を触れなくなる。
 // 返す集合も違う: メンバーを 1 人も指定していない共有プロジェクトはテナント全体へ
 // 開放されるため、`project_members` の行だけを返すと候補が空になる。
-
-async fn json_body(res: reqwest::Response) -> serde_json::Value {
-    res.json::<serde_json::Value>().await.expect("json body")
-}
 
 /// 発行 API で PAT を作り、平文トークンを返す（スコープの検査を実経路で通す）。
 async fn issue_token(app: &TestApp, tenant_id: Uuid, name: &str, scopes: &[&str]) -> String {

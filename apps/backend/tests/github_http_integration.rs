@@ -2,7 +2,7 @@ mod common;
 
 use axum::http::StatusCode;
 use backend::utils::github::install_state::{self as github_oauth_state, GithubOAuthStatePayload};
-use common::{TestApp, TestTenantProject};
+use common::{TestApp, TestTenantProject, unique_installation_id};
 use entity::{github_integrations, projects, scopes::Scope, tenants};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
@@ -209,10 +209,6 @@ fn installation_id_from_url(url: &url::Url) -> i64 {
     url.path_segments()
         .and_then(|mut segments| segments.find_map(|segment| segment.parse::<i64>().ok()))
         .unwrap_or(0)
-}
-
-fn unique_installation_id() -> i64 {
-    300_000_000_000_i64 + (Uuid::new_v4().as_u128() % 900_000_000_000) as i64
 }
 
 fn unique_multi_repo_installation_id() -> i64 {

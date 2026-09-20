@@ -1,7 +1,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::TestApp;
+use common::{TestApp, json_body};
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, TransactionTrait};
 
 // プロジェクトメンバー管理（#317）の統合テスト。
@@ -9,10 +9,6 @@ use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, TransactionTrait};
 // メンバー管理 UI が名前・アバターを表示できるよう、メンバー系レスポンスに
 // `user`（UserSummary）を同梱したことの回帰テストを中心に置く。
 // `user` フィールドの検証は変更前の main では fail する（フィールド自体が無い）。
-
-async fn json_body(res: reqwest::Response) -> serde_json::Value {
-    res.json::<serde_json::Value>().await.expect("json body")
-}
 
 /// 一覧・追加・変更のレスポンスに表示用のユーザー情報が同梱される。
 #[tokio::test]

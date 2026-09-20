@@ -1,7 +1,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::TestApp;
+use common::{TestApp, unique_installation_id};
 use entity::{github_integrations, project_statuses};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
@@ -25,11 +25,6 @@ const REPO_KEY: &str = "acme/backend";
 const BOT_LOGIN: &str = "task-app[bot]";
 /// ラウンドが見た commit。PR メタの head と揃えると「鮮度あり」になる
 const REVIEWED_HEAD: &str = "60cdd7795f94fa4e4148ce996c2efb4c363e3f5e";
-
-fn unique_installation_id() -> i64 {
-    // 同じ DB を共有する他テストと衝突しない範囲で散らす
-    (Uuid::new_v4().as_u128() % 1_000_000) as i64 + 8_000_000
-}
 
 async fn mount_mocks(server: &MockServer, existing_comment: bool, marker: &str) {
     Mock::given(method("POST"))

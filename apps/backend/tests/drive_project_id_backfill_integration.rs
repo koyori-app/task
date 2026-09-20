@@ -1,7 +1,7 @@
 mod common;
 
-use common::TestApp;
-use entity::{drive_files, drive_folders, projects};
+use common::{TestApp, insert_extra_project};
+use entity::{drive_files, drive_folders};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait};
 use uuid::Uuid;
 
@@ -17,26 +17,6 @@ use uuid::Uuid;
 // テストハーネスはエンティティからスキーマを組む（マイグレーションを流さない）ので、
 // ここでは食い違った状態を作ってから SQL 本体を当てる。
 const BACKFILL_SQL: &str = include_str!("../sql/backfill_drive_project_ids.sql");
-
-async fn insert_extra_project(app: &TestApp, tenant_id: Uuid) -> Uuid {
-    let project_id = Uuid::new_v4();
-    let suffix = &project_id.to_string()[..8];
-    projects::ActiveModel {
-        id: Set(project_id),
-        name: Set("second-project".into()),
-        description: Set(String::new()),
-        tenant_id: Set(tenant_id),
-        icon_emoji: Set(None),
-        icon_url: Set(None),
-        key: Set(format!("Q{}", suffix.to_uppercase())),
-        is_personal: Set(false),
-        personal_owner_id: Set(None),
-    }
-    .insert(&app.state.db)
-    .await
-    .expect("insert project");
-    project_id
-}
 
 async fn insert_folder(
     app: &TestApp,

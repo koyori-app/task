@@ -7,37 +7,10 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::TestApp;
-use entity::{drive_files, drive_folders, project_members, projects};
+use common::{TestApp, insert_extra_project};
+use entity::{drive_files, drive_folders, project_members};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, TransactionTrait};
 use uuid::Uuid;
-
-/// プロジェクトフォルダ配下の境界を守れているかを見る。
-///
-/// 直したのは 4 つ:
-/// - 子フォルダを作っても `project_id` を継承せず、中のファイルが一般ファイル扱いになる
-/// - フォルダ移動で移動元・移動先の ACL を見ず、配下の `project_id` も揃えない
-/// - ファイル移動で移動先の ACL を見ない
-/// - 自動生成のプロジェクトルートフォルダを直接削除・移動できる
-async fn insert_extra_project(app: &TestApp, tenant_id: Uuid) -> Uuid {
-    let project_id = Uuid::new_v4();
-    let suffix = &project_id.to_string()[..8];
-    projects::ActiveModel {
-        id: Set(project_id),
-        name: Set("second-project".into()),
-        description: Set(String::new()),
-        tenant_id: Set(tenant_id),
-        icon_emoji: Set(None),
-        icon_url: Set(None),
-        key: Set(format!("Q{}", suffix.to_uppercase())),
-        is_personal: Set(false),
-        personal_owner_id: Set(None),
-    }
-    .insert(&app.state.db)
-    .await
-    .expect("insert project");
-    project_id
-}
 
 /// プロジェクト作成時に自動生成されるのと同じ形（`project_id` 付き・親なし）のルートフォルダ。
 async fn insert_project_root_folder(
