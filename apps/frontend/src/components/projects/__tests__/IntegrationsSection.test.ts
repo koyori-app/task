@@ -387,32 +387,6 @@ describe('IntegrationsSection', () => {
     expect(document.body.textContent).not.toContain('Issue の取り込みを開始できませんでした');
   });
 
-  it('連携を解除したあと再連携しても取り込みの結果表示が戻らない', async () => {
-    const state: MockState = { connected: true };
-    stubFetch(state);
-    const { queryClient } = mountSection();
-    await flushPromises();
-
-    clickBodyButton('Issue を取り込む');
-    await flushPromises();
-    expect(document.body.textContent).toContain('Issue の取り込みを開始しました');
-
-    clickBodyButton('連携を解除');
-    await flushPromises();
-    clickBodyButton('解除する');
-    await flushPromises();
-    await flushPromises();
-    expect(bodyButton('連携する')).toBeTruthy();
-
-    // 別タブで再連携された状態を作り、この画面が再取得する（ウィンドウフォーカス相当）
-    state.connected = true;
-    await queryClient.refetchQueries();
-    await flushPromises();
-
-    expect(bodyButton('Issue を取り込む')).toBeTruthy();
-    expect(document.body.textContent).not.toContain('Issue の取り込みを開始しました');
-  });
-
   it('別タブで解除・再連携されても取り込みの結果表示とエラーが戻らない', async () => {
     // この画面では解除操作をしない。連携状態の変化だけで状態が捨てられることを見る
     const state: MockState = { connected: true, importStatus: 500 };

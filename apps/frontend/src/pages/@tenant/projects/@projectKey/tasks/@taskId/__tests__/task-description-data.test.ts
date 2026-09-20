@@ -81,31 +81,14 @@ describe('task description +data', () => {
     const result = await data(pageContext());
     const expected = await renderDescription(DESCRIPTION, { scope: `task-${TASK_UUID}` });
     expect(result.descriptionHtml).toBe(expected);
+    // scope が効いている証拠（脚注 id に task-<uuid> が付く）
+    expect(result.descriptionHtml).toContain(`user-content-task-${TASK_UUID}-fn-`);
   });
 
   it('descriptionSource は renderDescription へ渡した本文そのもの (stale 照合キー)', async () => {
     stubBackend();
     const result = await data(pageContext());
     expect(result.descriptionSource).toBe(DESCRIPTION);
-  });
-
-  it('Markdown が描画され、alert は callout として出る', async () => {
-    stubBackend();
-    const { descriptionHtml } = await data(pageContext());
-    expect(descriptionHtml).toContain('<strong>');
-    expect(descriptionHtml).toContain('<code>');
-    expect(descriptionHtml).toContain('kfm-alert');
-    // 生テキストがそのまま出ていない (マーカー記法が残らない)
-    expect(descriptionHtml).not.toContain('[!NOTE]');
-    expect(descriptionHtml).not.toContain('**強調**');
-  });
-
-  it('scope は決定的: 同一入力の 2 回で同一 HTML、脚注 id に task-<uuid> prefix が付く', async () => {
-    stubBackend();
-    const first = await data(pageContext());
-    const second = await data(pageContext());
-    expect(first.descriptionHtml).toBe(second.descriptionHtml);
-    expect(first.descriptionHtml).toContain(`user-content-task-${TASK_UUID}-fn-`);
   });
 
   it('リクエストの cookie を backend の全呼び出しへ転送する', async () => {

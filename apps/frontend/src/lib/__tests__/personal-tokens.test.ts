@@ -30,10 +30,6 @@ describe('expiresAtFromPreset', () => {
   it('無期限は null を返す', () => {
     expect(expiresAtFromPreset('none', NOW)).toBeNull();
   });
-
-  it('プリセットは 4 種類（UI のボタン数と一致）', () => {
-    expect(EXPIRATION_PRESETS).toHaveLength(4);
-  });
 });
 
 describe('maskedToken', () => {

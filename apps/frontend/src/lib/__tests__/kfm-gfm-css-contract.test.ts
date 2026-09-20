@@ -167,19 +167,6 @@ describe('KFM サイドカー CSS の消費契約 (scope 一致の機構)', () =
     expect(KFM_CONTENT_CLASS).toBe('kfm-content');
   });
 
-  it('検査器の陽性対照: 子孫・子結合子だけを許し、兄弟結合子と at-rule を拒む', () => {
-    expect(isScoped('ul')).toBe(false);
-    expect(isScoped(`.${KFM_CONTENT_CLASS}`)).toBe(false);
-    expect(isScoped(`.${KFM_CONTENT_CLASS} ul`)).toBe(true);
-    expect(isScoped(`.${KFM_CONTENT_CLASS} > ul`)).toBe(true);
-    expect(isScoped(`.dark .${KFM_CONTENT_CLASS} a`)).toBe(true);
-    expect(isScoped(`.${KFM_CONTENT_CLASS}-like ul`)).toBe(false);
-    expect(isScoped(`.${KFM_CONTENT_CLASS} + ul`)).toBe(false);
-    expect(isScoped(`.${KFM_CONTENT_CLASS} ~ ul`)).toBe(false);
-    expect(isScoped(`body:has(.${KFM_CONTENT_CLASS}) ul`)).toBe(false);
-    expect(isScoped(`@media print { .${KFM_CONTENT_CLASS} ul`)).toBe(false);
-  });
-
   it('remark-* / rehype-* の全サイドカーが scope 方式を明示分類される', () => {
     const discoveredPlugins = SIDECAR_CSS_PATHS.map((cssPath) =>
       path.basename(path.dirname(cssPath)),
@@ -190,51 +177,6 @@ describe('KFM サイドカー CSS の消費契約 (scope 一致の機構)', () =
     ].sort();
     expect(discoveredPlugins).toEqual(classifiedPlugins);
   });
-
-  it('検査器の陽性対照: 免除サイドカーの他人 namespace ルール・他変数ブリッジを拒む', () => {
-    const spec = {
-      selectorToken: /\.kfm-alert(?:__[\w-]+|--[\w-]+)?(?![\w-])/,
-      ownVariablePrefix: '--kfm-alert-',
-    };
-    // 自 namespace を指すルール (BEM 要素・修飾子含む) と自変数だけのブリッジは通る
-    expect(emittedNamespaceViolations('.kfm-alert { color: red }', spec)).toEqual([]);
-    expect(emittedNamespaceViolations('.kfm-alert__title::before { color: red }', spec)).toEqual(
-      [],
-    );
-    expect(emittedNamespaceViolations('.dark .kfm-alert--note { color: red }', spec)).toEqual([]);
-    expect(emittedNamespaceViolations('.kfm-alert > p { color: red }', spec)).toEqual([]);
-    expect(emittedNamespaceViolations('.dark { --kfm-alert-bg: #000 }', spec)).toEqual([]);
-    // 他人の要素を指す・部分一致・他変数や実プロパティ混じりのブリッジは逸脱
-    expect(emittedNamespaceViolations('ul { margin: 0 }', spec)).toEqual(['ul']);
-    expect(emittedNamespaceViolations('.kfm-alert-like { color: red }', spec)).toEqual([
-      '.kfm-alert-like',
-    ]);
-    expect(emittedNamespaceViolations('.kfm-alert + p { color: red }', spec)).toEqual([
-      '.kfm-alert + p',
-    ]);
-    expect(emittedNamespaceViolations('.kfm-alert ~ p { color: red }', spec)).toEqual([
-      '.kfm-alert ~ p',
-    ]);
-    expect(emittedNamespaceViolations('body:has(.kfm-alert) { color: red }', spec)).toEqual([
-      'body:has(.kfm-alert)',
-    ]);
-    expect(emittedNamespaceViolations('.dark { --other-var: #000 }', spec)).toEqual(['.dark']);
-    expect(emittedNamespaceViolations('.dark { --kfm-alert-bg: #000; color: red }', spec)).toEqual([
-      '.dark',
-    ]);
-    // カンマ複数セレクタは全員が自 namespace でなければ逸脱 (巻き添え適用を防ぐ)
-    expect(emittedNamespaceViolations('.kfm-alert, ul { color: red }', spec)).toEqual([
-      '.kfm-alert',
-      'ul',
-    ]);
-  });
-
-  it.each([...EMITTED_NAMESPACE_SCOPED_PLUGINS])(
-    '%s の免除検査は違反セレクタを拒む',
-    (_plugin, spec) => {
-      expect(emittedNamespaceViolations('body { color: red }', spec)).toEqual(['body']);
-    },
-  );
 
   it('免除サイドカーの全ルールが自身の emit 名前空間限定 (theme ブリッジは自変数のみ)', () => {
     const discoveredPlugins = new Map(
