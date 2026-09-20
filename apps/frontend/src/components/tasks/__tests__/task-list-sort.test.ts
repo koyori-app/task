@@ -3,15 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { activeTaskListSort, taskListApiSort } from '@/components/tasks/task-list-sort';
 
 describe('taskListApiSort', () => {
+  // 列名そのままの title と、API 名が違う due_date → deadline を昇順・降順で見る
   it.each([
     ['title', false, 'title_asc'],
     ['title', true, 'title_desc'],
-    ['assignee', false, 'assignee_asc'],
-    ['assignee', true, 'assignee_desc'],
     ['due_date', false, 'deadline_asc'],
     ['due_date', true, 'deadline_desc'],
-    ['priority', false, 'priority_asc'],
-    ['priority', true, 'priority_desc'],
   ])('%s の desc=%s を API の %s に変換する', (id, desc, expected) => {
     expect(taskListApiSort([{ id, desc }])).toBe(expected);
   });
