@@ -15,5 +15,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "rus
 sea-orm = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# apalis-postgres と同じ版。webhook の受信記録とジョブ投入を 1 トランザクションにまとめるのに使う
+sqlx = { version = "0.8", default-features = false, features = ["postgres"] }
 tracing = { workspace = true }
 uuid = { version = "1", features = ["serde"] }

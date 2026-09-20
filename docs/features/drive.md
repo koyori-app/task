@@ -8,7 +8,7 @@ icon: lucide:hard-drive
 
 > ステータス: **バックエンド実装済み／フロントエンド未実装（既知の差分あり）**
 > 作成日: 2026-05-26
-> 最終更新: 2026-09-03（現在の実装・認可方針・既知の差分を反映）
+> 最終更新: 2026-09-20（公開共有・フォルダ境界の修正、PAT スコープ、残る差分を反映）
 
 ---
 
@@ -30,7 +30,7 @@ icon: lucide:hard-drive
 | ファイル CRUD | 実装済み | multipart/form-data アップロード、一覧、メタデータ、名前・配置・本文更新、削除 |
 | ストレージ | 実装済み | S3 互換またはローカルディスクを環境変数で切り替え |
 | ファイル配信 | 実装済み | 全バックエンドを `/v1/drive/files/{id}/content` からプロキシ配信 |
-| フォルダ CRUD | 実装済み | 階層フォルダの作成・一覧・更新・削除 |
+| フォルダ CRUD | 実装済み | 階層フォルダの作成・一覧・更新・削除、`project_id` 継承・移動先認可・プロジェクトルート保護 |
 | フォルダ共有 | 一部差分あり | ユーザー指定共有、公開リンク共有、共有トークンによる本文取得 |
 | クォータ | 実装済み | 使用量取得、テナント個別クォータ設定、アップロード・本文更新時の検証 |
 | タスク添付 | 実装済み | Drive ファイルとタスクの紐付け・解除 |
@@ -53,7 +53,7 @@ icon: lucide:hard-drive
 ### 3.1 `drive_folders` テーブル
 
 ```rust
-// entities/drive_folders.rs
+// apps/backend/crates/entity/src/_generated/drive_folders.rs（主なフィールド）
 pub struct Model {
     pub id: Uuid,
     pub name: String,
@@ -61,7 +61,7 @@ pub struct Model {
     pub tenant_id: Uuid,
     pub project_id: Option<Uuid>,  // プロジェクト紐付き（設定時はプロジェクトフォルダ）
     pub created_by: Uuid,          // FK → users
-    pub created_at: DateTimeUtc,
+    pub created_at: DateTimeWithTimeZone,
 }
 ```
 
@@ -80,7 +80,7 @@ pub struct Model {
 ### 3.2 `drive_files` テーブル
 
 ```rust
-// entities/drive_files.rs
+// apps/backend/crates/entity/src/_generated/drive_files.rs（主なフィールド）
 pub struct Model {
     pub id: Uuid,
     pub name: String,              // 表示名（元ファイル名）
@@ -93,8 +93,8 @@ pub struct Model {
     pub project_id: Option<Uuid>,  // 非正規化。フォルダの project_id を引き継ぐ
     pub uploader_id: Uuid,         // FK → users
     pub folder_id: Option<Uuid>,   // FK → drive_folders
-    pub created_at: DateTimeUtc,
-    pub updated_at: DateTimeUtc,
+    pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
 }
 ```
 
@@ -107,7 +107,7 @@ pub struct Model {
 | `storage_type` | VARCHAR(16) | NOT NULL | Rust 側では enum。`s3` または `local` |
 | `storage_key` | VARCHAR | NOT NULL | ストレージ固有キー（UUID v4）|
 | `tenant_id` | UUID | NOT NULL, FK→tenants CASCADE | |
-| `project_id` | UUID | NULLABLE | フォルダの `project_id` を非正規化コピー。アクセス制御の高速判定に使用 |
+| `project_id` | UUID | NULLABLE, FK→projects CASCADE | フォルダの `project_id` を非正規化コピー。アクセス制御の高速判定に使用 |
 | `uploader_id` | UUID | NOT NULL, FK→users | |
 | `folder_id` | UUID | NULLABLE, FK→drive_folders SET NULL | |
 | `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
@@ -129,7 +129,7 @@ CHECK (project_id IS NULL OR folder_id IS NOT NULL)
 フォルダの共有設定を管理する。ユーザー指定共有と公開リンク共有の 2 種類をサポートする。
 
 ```rust
-// entities/drive_folder_shares.rs
+// apps/backend/crates/entity/src/_generated/drive_folder_shares.rs（主なフィールド）
 pub struct Model {
     pub id: Uuid,
     pub folder_id: Uuid,                 // FK → drive_folders CASCADE
@@ -137,8 +137,8 @@ pub struct Model {
     pub share_token: Option<String>,     // 公開リンク用トークン（NULL = ユーザー指定共有）
     pub permission: SharePermission,     // enum: viewer | editor
     pub created_by: Uuid,                // FK → users
-    pub expires_at: Option<DateTimeUtc>, // 有効期限（NULL = 無期限）
-    pub created_at: DateTimeUtc,
+    pub expires_at: Option<DateTimeWithTimeZone>, // 有効期限（NULL = 無期限）
+    pub created_at: DateTimeWithTimeZone,
 }
 ```
 
@@ -166,7 +166,7 @@ pub struct Model {
 | `drive_quota_bytes` | BIGINT | NULLABLE | テナントのドライブ最大容量（バイト）。`NULL` = システムデフォルト適用 |
 
 ```rust
-// entities/tenants.rs に追加
+// apps/backend/crates/entity/src/_generated/tenants.rs
 pub drive_quota_bytes: Option<i64>, // NULL = システムデフォルト（DRIVE_DEFAULT_QUOTA_MB 参照）
 ```
 
@@ -174,7 +174,7 @@ pub drive_quota_bytes: Option<i64>, // NULL = システムデフォルト（DRIV
 
 ## 4. アクセス制御
 
-### 4.1 アクセスルール
+### 4.1 ファイル本文のアクセスルール
 
 | ファイルの種類 | 閲覧できる人 |
 |--------------|------------|
@@ -184,6 +184,8 @@ pub drive_quota_bytes: Option<i64>, // NULL = システムデフォルト（DRIV
 ①は「ファイルの `tenant_id` に所属していること」を先に確認したうえで、プロジェクトの公開規則で判定する。
 ファイル ID だけで引ける配信経路があるため、プロジェクト所属だけを見るとテナント境界を越えられる。
 判定の詳細は [テナント / プロジェクト認可](../../apps/backend/docs/tenant-project-authz.md) を参照。
+テナントに所属しないプロジェクト限定の客分（Guest）は、プロジェクトメンバーであるだけでは
+Drive へアクセスできない。
 
 ③のフォルダ共有は所属とは独立した明示的な付与なので、テナントから外しても失効しない。
 ただしテナント一般ファイルの本文取得ではユーザー指定共有を見ず、テナント所属か共有トークンだけで判定する。
@@ -228,7 +230,8 @@ fn can_access_file(file: &DriveFile, caller: &Caller) -> bool {
 }
 ```
 
-`has_user_share` / `has_token_share` はファイルの `folder_id` からフォルダ階層を**祖先方向へ辿り**、いずれかのフォルダに有効な共有レコードがあれば `true` を返す。フォルダ深度は通常浅い（3〜5 段）ため、再帰クエリで許容範囲。
+`has_user_share` / `has_token_share` はファイルの `folder_id` からフォルダ階層を**祖先方向へ辿り**、いずれかのフォルダに有効な共有レコードがあれば `true` を返す。現行実装は各階層を順に問い合わせる。
+空でない `token` を提示した場合はトークン判定を優先し、無効・期限切れなら認証済みでも `403` を返す。
 
 ### 4.3 権限レベル
 
@@ -255,9 +258,17 @@ S3 バックエンドであっても S3 の直 URL はクライアントに渡�
 | イベント | 動作 |
 |---------|------|
 | プロジェクト作成 | `drive_folders` にプロジェクトフォルダを自動作成（`project_id` セット） |
-| プロジェクト削除 | CASCADE により `drive_folders` → `drive_files` の順で削除。ストレージオブジェクトも連動削除 |
+| プロジェクト削除 | `project_id` の外部キーでフォルダ・ファイルの DB レコードを CASCADE 削除。ストレージ実体の連動削除は未実装（§12） |
+| 子フォルダ作成 | 親フォルダの `project_id` を継承し、親がプロジェクト配下ならそのプロジェクトへのアクセス権を確認 |
+| フォルダ移動 | 移動元・移動先のプロジェクト権限を確認し、フォルダと配下の全フォルダ・ファイルの `project_id` を同一トランザクションで同期 |
+| プロジェクトルートの移動・削除 | 通常のフォルダ API では空でも `409 Conflict`。プロジェクト削除による CASCADE に限る |
 | ファイルをプロジェクトフォルダへ移動 | `drive_files.project_id` を移動先フォルダの `project_id` に更新 |
 | ファイルをプロジェクトフォルダ外へ移動 | `drive_files.project_id` を `NULL` にリセット |
+
+作成・移動とフォルダ削除はテナント単位の Drive ロックで直列化し、ロック取得後に階層と
+プロジェクト権限を確認する。ファイル移動でも移動元・移動先の権限が必要。
+本文更新とファイル削除は対象ファイルの行ロック取得後に再認可する。
+既存データの `project_id` 不整合は backfill マイグレーションで補正する（§14）。
 
 ---
 
@@ -302,17 +313,18 @@ fn effective_quota(tenant: &Tenant, config: &DriveConfig) -> Option<i64> {
 **テナントオーナーがクォータを設定する際のバリデーション**:
 
 - `DRIVE_SYSTEM_MAX_QUOTA_MB > 0` の場合: `quota_bytes ≤ system_max` でなければ `400 Bad Request`
-- `DRIVE_SYSTEM_MAX_QUOTA_MB = 0`（天井なし）の場合: 制限なく設定可能
+- 負の `quota_bytes` は `400 Bad Request`。`0` は無制限の指定だが、システム上限があれば適用される
+- `DRIVE_SYSTEM_MAX_QUOTA_MB = 0`（天井なし）の場合: 非負の値を上限なく設定可能
 
 ### 5.2 使用量の計算
 
 使用量はアップロード時に `drive_files` テーブルを集計して算出する（キャッシュなし、常に正確な値）。
 
 ```sql
-SELECT COALESCE(SUM(size), 0) FROM drive_files WHERE tenant_id = $1
+SELECT COALESCE(SUM(size)::BIGINT, 0) FROM drive_files WHERE tenant_id = $1
 ```
 
-アップロード前に「現在の使用量 + 新ファイルのサイズ ≤ 有効クォータ」を検証し、超過する場合は `413 Content Too Large` を返す。有効クォータが `None`（無制限）の場合は検証をスキップする。
+アップロード開始前に既存の使用量が上限に達していないかを確認する。保存後、DB 登録前にテナント行をロックし、実測サイズで「現在の使用量 + 新ファイルのサイズ ≤ 有効クォータ」を再検証する。超過時は保存済みオブジェクトの削除を試み、`413 Content Too Large` を返す。有効クォータが `None`（無制限）の場合は容量の検証をスキップする。
 
 ### 5.3 クォータ取得 API
 
@@ -359,13 +371,13 @@ PATCH /v1/tenants/{tenant_id}/drive/quota
 ### 5.5 システム上限引き下げ時の挙動
 
 `DRIVE_SYSTEM_MAX_QUOTA_MB` を引き下げた場合、既存テナントの `drive_quota_bytes` 自体は変更しない。
-起動時に全テナントをスキャンし、超過テナントを警告ログに出力する:
+起動時に個別設定値がシステム上限を超えるテナントを抽出し、`tenant_id`・`quota_bytes`・`system_max_bytes` とともに警告を出力する:
 
 ```text
-WARN drive_quota: tenant {tenant_id} ({display_id}) quota {quota_bytes} exceeds system_max {system_max_bytes}
+WARN tenant drive quota exceeds system_max — update tenant quota or raise DRIVE_SYSTEM_MAX_QUOTA_MB
 ```
 
-将来の拡張で管理者向け監査エンドポイント（例: `GET /v1/admin/drive/quota-violations`）を追加し、超過テナント一覧を UI で確認できるようにする。実行時の有効クォータにはシステム上限が常に適用されるため、使用量が新しい上限以上のテナントでは、削除などで使用量を減らすまで新規アップロードと容量を増やす本文更新が `413 Content Too Large` になる。
+将来の拡張で管理者向け監査エンドポイント（例: `GET /v1/admin/drive/quota-violations`）を追加し、超過テナント一覧を UI で確認できるようにする。実行時の有効クォータにはシステム上限が常に適用される。使用量が上限以上なら新規アップロードを拒否し、本文更新は差し替え後の合計が上限を超える場合に `413 Content Too Large` を返す。本文を縮めても合計が上限を超えたままなら拒否する。
 
 ---
 
@@ -376,7 +388,7 @@ WARN drive_quota: tenant {tenant_id} ({display_id}) quota {quota_bytes} exceeds 
 ```rust
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
-    /// ストリーミングアップロード。大ファイルをメモリに全展開しない。
+    /// ストリームを受け取る。全量バッファの有無はバックエンド実装に依存する。
     async fn upload(
         &self,
         key: &str,
@@ -395,7 +407,7 @@ pub trait StorageBackend: Send + Sync {
 }
 ```
 
-> **ストリーミング設計の理由**: `Bytes` を受け取ると最大 `UPLOAD_MAX_SIZE_MB` 分をメモリに全展開してから S3/ローカルへ渡す。100MB ファイルを複数同時アップロードすると GByte 単位のメモリを消費しうる。`BoxStream` を使うことで axum の multipart ストリームをそのままバックエンドへ流し、メモリ使用量をチャンク単位に抑える。S3 の場合は `CreateMultipartUpload` と組み合わせ、ローカルの場合は `tokio::io::copy` でファイルに書き込む。
+> **ストリーミング設計の理由**: 100MB ファイルを複数同時に全量バッファすると GByte 単位のメモリを消費しうる。`BoxStream` でチャンクを受け取り、ローカル実装は `BufWriter` へ順に書き込む。S3 実装は既知の長さが 5MiB 以上なら multipart upload を使うが、通常のアップロード API は長さ不明として `0` を渡すため全量バッファになる（§12）。
 
 ### 6.2 S3 バックエンド
 
@@ -416,7 +428,7 @@ S3_FORCE_PATH_STYLE=true                  # MinIO 等で必要。false がデフ
 > **`S3_FORCE_PATH_STYLE`**: AWS S3 は仮想ホスト形式（`bucket.s3.amazonaws.com`）が標準だが、MinIO などのセルフホスト互換では `http://endpoint/bucket/key` 形式（パス形式）が必要。`true` に設定すると `AmazonS3Builder` の仮想ホスト形式を無効にする。
 
 **アップロードフロー（S3）**:
-1. クライアント → `POST /v1/tenants/{id}/drive/files` (multipart)
+1. クライアント → `POST /v1/tenants/{tenant_id}/drive/files` (multipart)
 2. バックエンドが multipart ストリームを受信
 3. `object_store` で単一 PUT または multipart upload を実行
 4. DB に `drive_files` レコードを登録（`storage_key` のみ保持、`url` カラムなし）
@@ -443,6 +455,7 @@ GET /v1/drive/files/{id}/content?token={share_token}
 - **テナント一般ファイル（`project_id = NULL`）**: テナント所属者・オーナー、または有効な `share_token` が必要
 - **プロジェクトファイル（`project_id` あり）**: 以下いずれかが必要
   - セッション or PAT 認証（そのプロジェクトに入れる人またはテナントオーナー）
+  - セッション or PAT 認証と有効なユーザー指定フォルダ共有（テナント外の受信者も可）
   - 有効な `share_token`（`?token=` クエリパラメータ）
   - いずれも満たさない場合 → `403 Forbidden`
 - `Content-Type` を `mime_type` から設定
@@ -462,11 +475,13 @@ GET /v1/drive/files/{id}/content?token={share_token}
 |---------|------|
 | `read:project` | プロジェクトの読み取り |
 | `write:project` | プロジェクトの作成・更新・削除 |
+| `admin:project` | project 層の全スコープを包含（tenant 層は含まない。層の表は apps/backend/docs/personal-access-tokens-authz.md） |
 | `admin:tenant` | テナント管理全般（他スコープを暗黙的に包含） |
 
-`admin:tenant` を持つ PAT はドライブ操作を含むすべての操作が可能（既存の `ScopeList::has_scope` が `AdminTenant` を最上位として扱う）。
+`admin:project` は `read:drive` / `write:drive` を包含するが、`admin:tenant` を要求するクォータ設定は含まない。
+`admin:tenant` は全スコープを包含する。いずれもスコープ要件を満たすだけであり、テナント所属・プロジェクト権限・オーナー限定の判定は別に行う。
 
-### 7.2 Drive 用新スコープ
+### 7.2 Drive 用スコープ
 
 | スコープ名 | 説明 |
 |-----------|------|
@@ -477,28 +492,29 @@ GET /v1/drive/files/{id}/content?token={share_token}
 
 | メソッド | パス | 必要スコープ | 備考 |
 |---------|------|------------|------|
-| `GET` | `/v1/tenants/{id}/drive/files` | `read:drive` | |
-| `POST` | `/v1/tenants/{id}/drive/files` | `write:drive` | クォータ検証あり |
-| `GET` | `/v1/tenants/{id}/drive/files/{id}` | `read:drive` | |
-| `PATCH` | `/v1/tenants/{id}/drive/files/{id}` | `write:drive` | |
-| `DELETE` | `/v1/tenants/{id}/drive/files/{id}` | `write:drive` | |
+| `GET` | `/v1/tenants/{tenant_id}/drive/files` | `read:drive` | |
+| `POST` | `/v1/tenants/{tenant_id}/drive/files` | `write:drive` | クォータ検証あり |
+| `GET` | `/v1/tenants/{tenant_id}/drive/files/{id}` | `read:drive` | |
+| `PATCH` | `/v1/tenants/{tenant_id}/drive/files/{id}` | `write:drive` | |
+| `PUT` | `/v1/tenants/{tenant_id}/drive/files/{id}/content` | `write:drive` | テキスト本文更新・クォータ検証あり |
+| `DELETE` | `/v1/tenants/{tenant_id}/drive/files/{id}` | `write:drive` | |
 | `GET` | `/v1/drive/files/{id}/content` | `read:drive` | 共有トークン利用時はスコープ不要 |
 | `GET` | `/v1/drive/files/{id}/content?token=` | スコープ不要 | 公開リンクトークンで代替 |
-| `GET` | `/v1/tenants/{id}/drive/usage` | `read:drive` | |
-| `PATCH` | `/v1/tenants/{id}/drive/quota` | `admin:tenant` | テナントオーナー限定 |
-| `GET` | `/v1/tenants/{id}/drive/folders` | `read:drive` | |
-| `POST` | `/v1/tenants/{id}/drive/folders` | `write:drive` | |
-| `PATCH` | `/v1/tenants/{id}/drive/folders/{id}` | `write:drive` | |
-| `DELETE` | `/v1/tenants/{id}/drive/folders/{id}` | `write:drive` | |
-| `GET` | `/v1/tenants/{id}/drive/folders/{id}/shares` | `read:drive` | |
-| `POST` | `/v1/tenants/{id}/drive/folders/{id}/shares` | `write:drive` | |
-| `DELETE` | `/v1/tenants/{id}/drive/folders/{id}/shares/{share_id}` | `write:drive` | |
+| `GET` | `/v1/tenants/{tenant_id}/drive/usage` | `read:drive` | |
+| `PATCH` | `/v1/tenants/{tenant_id}/drive/quota` | `admin:tenant` | テナントオーナー限定 |
+| `GET` | `/v1/tenants/{tenant_id}/drive/folders` | `read:drive` | |
+| `POST` | `/v1/tenants/{tenant_id}/drive/folders` | `write:drive` | |
+| `PATCH` | `/v1/tenants/{tenant_id}/drive/folders/{folder_id}` | `write:drive` | |
+| `DELETE` | `/v1/tenants/{tenant_id}/drive/folders/{folder_id}` | `write:drive` | |
+| `GET` | `/v1/tenants/{tenant_id}/drive/folders/{folder_id}/shares` | `read:drive` | |
+| `POST` | `/v1/tenants/{tenant_id}/drive/folders/{folder_id}/shares` | `write:drive` | |
+| `DELETE` | `/v1/tenants/{tenant_id}/drive/folders/{folder_id}/shares/{share_id}` | `write:drive` | |
 | `GET` | `/v1/drive/share/{token}` | スコープ不要 | 公開リンク（認証不要） |
 | `GET` | `/v1/drive/share/{token}/files` | スコープ不要 | 公開リンク（認証不要） |
 
 ### 7.4 実装上の注意
 
-`entities/scopes.rs` の `Scope` enum に以下を追加する:
+`apps/backend/crates/entity/src/scopes.rs` の `Scope` enum に定義済み:
 
 ```rust
 #[serde(rename = "read:drive")]
@@ -508,13 +524,20 @@ WriteDrive,
 ```
 
 `write:drive` は `read:drive` を暗黙的に包含する（`write` を持つなら `read` も可能）。
-`has_scope` の実装でこの包含関係を反映する:
+包含関係は `Scope::implies` の網羅 match が一箇所で持ち、`has_scope` はそれを引くだけである
+（規則の一覧は apps/backend/docs/personal-access-tokens-authz.md の「含意の規則」）:
 
 ```rust
-pub fn has_scope(&self, scope: Scope) -> bool {
-    self.0.contains(&scope)
-        || self.0.contains(&Scope::AdminTenant)
-        || (scope == Scope::ReadDrive && self.0.contains(&Scope::WriteDrive))
+pub fn implies(self, other: Scope) -> bool {
+    if self == other {
+        return true;
+    }
+    match self {
+        Scope::AdminTenant => true,
+        Scope::AdminProject => other.layer() == ScopeLayer::Project,
+        Scope::WriteDrive => other == Scope::ReadDrive,
+        // …他のスコープも同様に、含意する先を明示する
+    }
 }
 ```
 
@@ -548,7 +571,7 @@ pub fn has_scope(&self, scope: Scope) -> bool {
 | パラメータ | 型 | デフォルト | 説明 |
 |-----------|-----|----------|------|
 | `folder_id` | UUID? | - | フォルダ絞り込み（省略時はルート） |
-| `limit` | u32 | 50 | 取得件数（最大 200） |
+| `limit` | u32 | 50 | 取得件数（`1..=200` に補正。`0` は 1、200 超は 200） |
 | `offset` | u32 | 0 | オフセット |
 
 レスポンス:
@@ -590,6 +613,21 @@ OpenAPI だけでは表現できないため、クライアント実装でも明
 制限:
 - 最大ファイルサイズ: 環境変数 `UPLOAD_MAX_SIZE_MB` で設定（デフォルト 100MB）
 - 許可 MIME タイプ: 全種類
+- 空ファイルまたは `file` パートなし: `400 Bad Request`
+
+#### PATCH `/v1/tenants/{tenant_id}/drive/files/{id}`
+
+`name` で名前を変更し、`folder_id` に UUID を渡すとそのフォルダへ移動する。
+`folder_id` の省略は配置を維持し、明示的な `null` はドライブ直下へ移動する。
+移動元・移動先の権限が必要で、移動に合わせて `project_id` も更新する。
+
+#### PUT `/v1/tenants/{tenant_id}/drive/files/{id}/content`
+
+`{ "content": "更新後の本文" }` を受け取り、更新後の `DriveFile` を返す（`200 OK`）。
+`text/*`、`+json` / `+xml`、JSON・JavaScript・YAML 等の許可されたテキスト系 MIME が対象で、
+対象外は `400 Bad Request`。空文字列は許可する。UTF-8 のバイト数がファイルサイズ上限を
+超える場合、または差し替え後のテナント使用量がクォータを超える場合は `413` を返す。
+新しいストレージキーへ保存してから DB を更新し、成功後に旧キーの削除を試みる。
 
 ### 8.2 フォルダ API
 
@@ -597,23 +635,28 @@ OpenAPI だけでは表現できないため、クライアント実装でも明
 |---------|------|------|
 | `GET` | `/v1/tenants/{tenant_id}/drive/folders` | フォルダ一覧 |
 | `POST` | `/v1/tenants/{tenant_id}/drive/folders` | フォルダ作成 |
-| `PATCH` | `/v1/tenants/{tenant_id}/drive/folders/{id}` | フォルダ更新（名前変更・移動） |
-| `DELETE` | `/v1/tenants/{tenant_id}/drive/folders/{id}` | フォルダ削除 |
+| `PATCH` | `/v1/tenants/{tenant_id}/drive/folders/{folder_id}` | フォルダ更新（名前変更・移動） |
+| `DELETE` | `/v1/tenants/{tenant_id}/drive/folders/{folder_id}` | フォルダ削除 |
+
+作成時の `parent_id` で親フォルダを指定し、親の `project_id` を継承する。
+更新時の `parent_id` は省略で変更なし、明示的な `null` でドライブ直下への移動を表す。
+移動元・移動先の権限確認、配下の同期とルート保護は §4.5 に従う。
 
 フォルダ削除時の挙動:
 - 直下にファイルまたは子フォルダが存在する場合: **`409 Conflict`** を返し削除しない（強制削除は将来対応）
+- プロジェクトルートは空でも **`409 Conflict`**。権限のないプロジェクト配下の操作は先に `403` で拒否する
 
 ### 8.3 フォルダ共有 API
 
 | メソッド | パス | 説明 |
 |---------|------|------|
-| `GET` | `/v1/tenants/{tenant_id}/drive/folders/{id}/shares` | 共有一覧 |
-| `POST` | `/v1/tenants/{tenant_id}/drive/folders/{id}/shares` | 共有作成 |
-| `DELETE` | `/v1/tenants/{tenant_id}/drive/folders/{id}/shares/{share_id}` | 共有取り消し |
+| `GET` | `/v1/tenants/{tenant_id}/drive/folders/{folder_id}/shares` | 共有一覧 |
+| `POST` | `/v1/tenants/{tenant_id}/drive/folders/{folder_id}/shares` | 共有作成 |
+| `DELETE` | `/v1/tenants/{tenant_id}/drive/folders/{folder_id}/shares/{share_id}` | 共有取り消し |
 | `GET` | `/v1/drive/share/{token}` | 公開リンクでフォルダにアクセス（認証不要） |
 | `GET` | `/v1/drive/share/{token}/files` | 公開リンク経由でファイル一覧取得 |
 
-#### POST `/v1/tenants/{tenant_id}/drive/folders/{id}/shares`
+#### POST `/v1/tenants/{tenant_id}/drive/folders/{folder_id}/shares`
 
 リクエスト（ユーザー指定共有）:
 
@@ -655,8 +698,15 @@ OpenAPI だけでは表現できないため、クライアント実装でも明
 #### GET `/v1/drive/share/{token}`
 
 - 認証不要
-- フォルダメタデータ（名前、作成者名、ファイル数）を返す
+- フォルダメタデータ（名前、作成者名、直下のファイル数）を返す
+- 不明なトークンは `404 Not Found`
 - 有効期限切れの場合は `410 Gone`
+
+#### GET `/v1/drive/share/{token}/files`
+
+同じトークン検証を行い、共有フォルダ直下の `DriveFile` の配列を返す。子フォルダは列挙しない。
+返却される `url` にトークンは付かないため、共有リンクから本文を取得するクライアントは
+`?token={share_token}` を付ける。
 
 ### 8.4 タスク添付 API
 
@@ -730,8 +780,8 @@ Drive ファイル本体は削除しない。
 
 | 脅威 | 対策 |
 |------|------|
-| 他テナントのファイルへのアクセス | ファイル自身の `tenant_id` に対する所属、または有効な共有トークンを確認 |
-| プロジェクト外ユーザーによるファイルアクセス | `drive_files.project_id` で判定し、非メンバーは `403` |
+| 他テナントのファイルへのアクセス | ファイル自身の `tenant_id` に対する所属を確認。明示的な共有による本文アクセスは §4.1 の例外に従う |
+| プロジェクト外ユーザーによるファイルアクセス | `drive_files.project_id` に対する公開規則とフォルダ共有を確認し、どちらでも許可されなければ `403` |
 | S3 の直接 URL によるプロジェクトファイルの漏洩 | プロジェクトファイルの S3 URL はクライアントに渡さない。バックエンドプロキシ経由のみ |
 | 任意ファイル上書き | ストレージキーは UUID v4 で生成（衝突なし） |
 | 超大型ファイルによる DoS | `RequestBodyLimitLayer` とストリーム中の実測値を `UPLOAD_MAX_SIZE_MB` から設定 |
@@ -771,16 +821,15 @@ LOCAL_UPLOAD_DIR=./uploads
 
 ## 12. 現在の実装との差分・既知の問題
 
-2026-09-03 時点で、次の差分を確認している。ここに記載した項目は期待仕様ではなく、
+2026-09-20 時点で、次の差分を確認している。ここに記載した項目は期待仕様ではなく、
 修正対象として追跡するための現状説明である。
 
 | 優先度 | 項目 | 現状と影響 |
 |--------|------|------------|
-| 高 | 公開共有ルートの二重 prefix | `public_routes` を `/v1/drive` に nest している一方、共有ハンドラーも `/v1/drive/share/...` を宣言している。実際の OpenAPI は `/v1/drive/v1/drive/share/...` となり、仕様の URL でフォルダ情報・一覧を取得できない |
-| 高 | プロジェクトフォルダの継承・ACL | 手動作成した子フォルダは親がプロジェクトフォルダでも `project_id = NULL` になる。フォルダ／ファイル移動時も移動先 ACL と配下の `project_id` を同期しておらず、プロジェクト境界を跨ぐ階層を作れる。空のプロジェクトルートフォルダも通常の削除 API から削除できる |
 | 高 | S3 アップロードの全量バッファ | multipart からストレージへ `content_length = 0` を渡すため、S3 実装が常に単一 PUT 分岐へ入り、ファイル全体をメモリに保持する。§6.1 のストリーミング要件を満たしていない |
 | 高 | ストレージ削除の非同期整合性 | 個別削除は DB 削除後のストレージエラーを無視し、プロジェクト／テナントの CASCADE 削除ではストレージ削除自体を行わない。孤児オブジェクトを回収する仕組みが必要 |
 | 中 | ユーザー指定共有の一覧導線 | プロジェクトファイルの本文取得ではテナント外の共有受信者も許可できるが、ファイル・フォルダ一覧とメタデータ API が先にテナント所属を要求するため、共有受信者が対象を発見できない |
+| 中 | フォルダ一覧のプロジェクト別絞り込み | `list_folders` はテナント所属を確認した後、プロジェクト権限による絞り込みなしで全フォルダのメタデータを返す。ファイル一覧・本文の認可とは異なる |
 | 中 | 公開共有一覧の再帰性 | `/share/{token}/files` は共有フォルダ直下のファイルだけを返し、子フォルダとそのファイルを列挙しない。本文取得時のトークン判定だけは祖先方向へ継承する |
 | 中 | multipart の実効上限 | `UPLOAD_MAX_SIZE_MB` と同じ値をリクエスト body 全体へ適用するため、multipart のヘッダー・境界分だけ、受理できるファイル本体は設定値より小さい |
 | 中 | ストレージ種別切り替え | DB に `storage_type` を保存するが、取得・削除は起動中の単一バックエンドだけを使う。`STORAGE_BACKEND` を変更すると、変更前のファイルを取得・削除できない |
@@ -788,26 +837,33 @@ LOCAL_UPLOAD_DIR=./uploads
 | 低 | 未使用の S3 公開 URL 設定 | 実装は `S3_PUBLIC_BASE_URL` を読み込むが、全ファイルをプロキシ配信するため値は使われない |
 | 未実装 | フロントエンド | Drive ページ、ファイルブラウザ、アップロード、クォータ、共有 UI は未実装 |
 
-上記に加え、公開共有 API を直接検証する自動テストと、フォルダ CRUD・プロジェクト境界の
-統合テストが不足している。現在ある Drive 統合テストは主に本文更新・本文配信・クォータ・
-プロジェクトフォルダへの直接アップロードを対象としている。
+公開共有ルートの二重 prefix と、フォルダの `project_id` 継承・移動先認可・プロジェクトルート保護は修正済み。
+既存データの backfill、階層変更の直列化、ファイル更新・削除時のロック後の再認可も実装済み。
+関連する回帰テストは以下にある（パスは `apps/backend/` からの相対）。
+
+| テスト | 対象 |
+|--------|------|
+| `tests/drive_public_share_integration.rs` | 正規 URL、二重 prefix の排除、不明・期限切れトークン |
+| `tests/drive_folder_boundary_integration.rs` | 作成・移動・削除のプロジェクト境界、配下同期、ルート保護、ロック待ち後の再認可 |
+| `tests/drive_project_id_backfill_integration.rs` | 深い階層・移動済みルート、冪等性、異なるプロジェクトや循環の検出 |
+| `tests/drive_file_content_integration.rs` | 本文更新・配信、空本文、MIME、クォータ、並行更新、認可・共有トークン、配信ヘッダー |
+| `tests/drive_upload_acl_integration.rs` / `tests/drive_usage_integration.rs` | プロジェクトへのアップロード認可、複数ファイルの使用量集計 |
+| `crates/handler/src/routes/mod.rs` | OpenAPI 全体の prefix 重複検出 |
 
 ---
 
 ## 13. 今後の実装順序
 
-バックエンドの基本 API は揃っているため、先にデータ境界とストレージ整合性を直し、
+バックエンドの基本 API と階層変更の境界保護は揃っているため、残るストレージ・共有の差分を直し、
 その契約をテストで固定してからフロントエンドへ進む。
 
 | 順序 | 内容 | 完了条件 |
 |------|------|----------|
-| 1 | 公開共有ルートの prefix 修正 | 仕様どおりの2エンドポイントを統合テストし、OpenAPI を再生成する |
-| 2 | フォルダ階層の `project_id` 継承と ACL 修正 | 作成・移動・削除、異なるプロジェクト間、共有継承の境界テストが通る |
-| 3 | S3 ストリーミング修正 | 設定上限近くのファイルでも全量バッファせず multipart upload になる |
-| 4 | ストレージ削除の回収経路追加 | 個別・プロジェクト・テナント削除と失敗時再試行をテストできる |
-| 5 | 共有受信者向け一覧 API の整理 | テナント所属に依存せず、共有範囲だけを列挙できる |
-| 6 | ストレージバックエンド移行方針の決定 | `storage_type` ごとに取得するか、切り替え前の移行を必須化する |
-| 7 | フロントエンド実装 | ファイルブラウザ、アップロード、本文編集、クォータ、共有 UI を提供する |
+| 1 | S3 ストリーミング修正 | 設定上限近くのファイルでも全量バッファせず multipart upload になる |
+| 2 | ストレージ削除の回収経路追加 | 個別・プロジェクト・テナント削除と失敗時再試行をテストできる |
+| 3 | フォルダ・共有受信者向け一覧 API の整理 | プロジェクト権限と共有範囲に沿って、子フォルダを含む一覧を提供できる |
+| 4 | ストレージバックエンド移行方針の決定 | `storage_type` ごとに取得するか、切り替え前の移行を必須化する |
+| 5 | フロントエンド実装 | ファイルブラウザ、アップロード、本文編集、クォータ、共有 UI を提供する |
 
 ---
 
@@ -840,3 +896,6 @@ LOCAL_UPLOAD_DIR=./uploads
 | share_url | バックエンドは `share_token` のみ返す。フロントが `window.location.origin` で URL を組み立てる | 2026-05-26 |
 | 上限引き下げ時の挙動 | DB の個別設定値は変更せず起動時に警告。実効クォータは新しいシステム上限で cap する | 2026-09-03 |
 | タスク添付 | Drive ファイルとタスクの紐付け・解除 API は実装済み | 2026-09-03 |
+| 階層と `project_id` の整合 | フォルダの `project_id` は階層のルートから継承し、移動時は配下（フォルダ・ファイル）まで揃える。既に食い違っている行は backfill マイグレーション（`m20260904000000_drive_project_id_backfill`）で直す。起点は `project_id` を持つフォルダ全件（一般フォルダ配下へ移動されたプロジェクトルートも含む）で、そこから `project_id` が NULL の子孫だけへ伝播する。深さでは打ち切らない（打ち切ると残りが NULL のまま成功してしまう）。一般ツリーの配下に残った `project_id` は触らない（階層より厳しい判定になるだけで、NULL へ落とすと非メンバーへ開く） | 2026-09-04 |
+| backfill の中断条件 | 配下に**別プロジェクト**の `project_id` を持つ行（フォルダ・ファイルとも）があるツリー、または親子が循環しているツリーは 1 行も書き換えず、マイグレーションを失敗させる。継承で上書きするとそのプロジェクトのファイルが別プロジェクトのメンバーへ公開され、元のメンバーはアクセスを失う（修正前はプロジェクトルートの移動もできたため、この状態が既存データにありうる）。該当する行を人が直してから流し直す | 2026-09-04 |
+| 階層変更の直列化 | フォルダの作成・移動、ファイルの作成・移動は、テナント単位のアドバイザリロック（`pg_advisory_xact_lock`）で直列化する。ACL と親の `project_id` はロック取得後に同一トランザクションで読み、挿入・移動・子孫の同期まで同じトランザクションで終える。ロックの外で読むと、移動中のフォルダへ子を作ったときに移動前の `project_id` を継承した行が同期の後から挿入され、ACL 漏れが再発する | 2026-09-04 |

@@ -10,7 +10,7 @@ use sea_orm::{
 };
 
 use crate::AppState;
-use crate::auth_helpers::{is_tenant_owner, visible_project_ids};
+use crate::auth_helpers::{is_tenant_owner, require_tenant_owner, visible_project_ids};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -43,18 +43,6 @@ fn validate_project_key(key: &str) -> bool {
 
 const INVALID_PROJECT_KEY_MESSAGE: &str = "key は 2〜10 文字で、先頭は大文字英字、残りは大文字英字または数字で入力してください（例: ENG, BACK）";
 
-async fn require_tenant_owner(
-    state: &AppState,
-    tenant_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    if is_tenant_owner(&state.db, tenant_id, user_id).await? {
-        Ok(())
-    } else {
-        Err(AppError::Forbidden)
-    }
-}
-
 #[axum::debug_handler]
 #[utoipa::path(
     post,
@@ -76,7 +64,7 @@ pub async fn create_project(
 ) -> Result<(StatusCode, Json<ProjectResponse>), AppError> {
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
+    require_tenant_owner(&state.db, tenant_id, auth.user_id).await?;
     let explicit_key = payload.key;
     let mut key = match explicit_key.as_ref() {
         Some(k) if validate_project_key(k) => k.clone(),
@@ -152,6 +140,7 @@ async fn seed_default_statuses(
         ("Done", "#22c55e", false, true),
     ];
     for (position, (name, color, is_default, is_done_state)) in defaults.into_iter().enumerate() {
+        // 完了ステータスは Done ひとつだけなので、そのまま既定の完了にする。
         project_statuses::ActiveModel {
             id: Set(Uuid::new_v4()),
             project_id: Set(project_id),
@@ -160,6 +149,7 @@ async fn seed_default_statuses(
             position: Set(position as i16),
             is_default: Set(is_default),
             is_done_state: Set(is_done_state),
+            is_default_done: Set(is_done_state),
             created_at: Set(chrono::Utc::now().into()),
         }
         .insert(txn)
@@ -186,7 +176,21 @@ pub async fn list_projects(
     Path(tenant_id): Path<Uuid>,
 ) -> Result<Json<Vec<ProjectResponse>>, AppError> {
     auth.require_scope(Scope::ReadProject)?;
-    auth.ensure_tenant_access(&state, tenant_id, None).await?;
+    // project-only の客分には、明示 member の project だけに絞って返す（公開 project は
+    // 含めぬ）。frontend の project 解決（projectKey→UUID）がこの一覧に依存するため、
+    // 403 ではなく絞って開く（apps/backend/docs/tenant-project-authz.md）
+    if let Some(guest_project_ids) = auth
+        .ensure_tenant_access_or_guest_scope(&state, tenant_id)
+        .await?
+    {
+        let list = projects::Entity::find()
+            .filter(projects::Column::TenantId.eq(tenant_id))
+            .filter(projects::Column::IsPersonal.eq(false))
+            .filter(projects::Column::Id.is_in(guest_project_ids.into_iter().collect::<Vec<_>>()))
+            .all(&state.db)
+            .await?;
+        return Ok(Json(list.into_iter().map(Into::into).collect()));
+    }
     if is_tenant_owner(&state.db, tenant_id, auth.user_id).await? {
         let list = projects::Entity::find()
             .filter(projects::Column::TenantId.eq(tenant_id))
@@ -273,7 +277,7 @@ pub async fn update_project(
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(id))
         .await?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
+    require_tenant_owner(&state.db, tenant_id, auth.user_id).await?;
     let project = projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))
         .one(&state.db)
@@ -324,7 +328,7 @@ pub async fn delete_project(
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(id))
         .await?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
+    require_tenant_owner(&state.db, tenant_id, auth.user_id).await?;
     projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))
         .one(&state.db)

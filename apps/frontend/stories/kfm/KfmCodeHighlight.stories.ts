@@ -11,9 +11,10 @@ import { KFM_CONTENT_CLASS } from '@/lib/remark-gfm/content-class';
 // (器 .kfm-content のスタイルは GFM サイドカー側 — 他 story と同じ二枚組)
 import '@/lib/remark-gfm/style.css';
 import '@/lib/rehype-starry-night/style.css';
+import '@/lib/rehype-kfm-code/style.css';
 
 /*
- * KFM コードブロック着色 (starry-night) の story 群。cmd_670 の fixture+v-html 方式:
+ * KFM コードブロック着色 (starry-night) の story 群。fixture+v-html 方式:
  * fixture は renderDescription の事前生成 HTML (単一ソース =
  * src/lib/kfm-story-fixtures/inputs.ts、drift 検査 = kfm-story-fixtures.test.ts)。
  * v-html のみの同期描画で VRT が決定的になる。
@@ -35,9 +36,14 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** 着色経路が生きていることの共通 assert (pl- クラスの span が存在する) */
+/**
+ * 着色経路が生きていることの共通 assert。
+ * rehype-kfm-code の行 span (pl-line) は着色トークンではないのに [class^="pl-"] に
+ * 当たるため、:not(.pl-line) で除いて「着色トークンの存在」だけを主張する
+ * (unit 側 kfm-code-highlight.test.ts と同じ言い方)。
+ */
 async function expectHighlighted(canvasElement: HTMLElement) {
-  await expect(canvasElement.querySelector('[class^="pl-"]')).not.toBeNull();
+  await expect(canvasElement.querySelector('[class^="pl-"]:not(.pl-line)')).not.toBeNull();
 }
 
 export const TypeScript: Story = {
@@ -103,7 +109,10 @@ export const NoLanguage: Story = {
     },
   },
   play: async ({ canvasElement }) => {
-    await expect(canvasElement.querySelector('[class^="pl-"]')).toBeNull();
+    // 着色トークンが無い (pl-line は行分割の器であって着色ではないので除く)
+    await expect(canvasElement.querySelector('[class^="pl-"]:not(.pl-line)')).toBeNull();
+    // 行分割 (rehype-kfm-code) は言語なしでも効いている陽性対照
+    await expect(canvasElement.querySelector('.pl-line')).not.toBeNull();
     await expect(canvasElement.querySelector('code')?.getAttribute('class')).toBeNull();
     // コードテキスト内のタグ表記はテキストのまま (b 要素は生まれない)
     await expect(canvasElement.querySelector('code b')).toBeNull();
@@ -123,7 +132,10 @@ export const UnknownLanguage: Story = {
     },
   },
   play: async ({ canvasElement }) => {
-    await expect(canvasElement.querySelector('[class^="pl-"]')).toBeNull();
+    // 着色トークンが無い (pl-line は行分割の器であって着色ではないので除く)
+    await expect(canvasElement.querySelector('[class^="pl-"]:not(.pl-line)')).toBeNull();
+    // 行分割は未知言語でも効いている陽性対照
+    await expect(canvasElement.querySelector('.pl-line')).not.toBeNull();
     await expect(canvasElement.querySelector('code.language-definitelynotalang')).not.toBeNull();
     await expect(canvasElement.querySelector('code b')).toBeNull();
     await expect(canvasElement.querySelector('code')?.textContent).toContain('<b>');
@@ -133,7 +145,7 @@ export const UnknownLanguage: Story = {
 export const LongLine: Story = {
   name: '横に長い行（横溢れ）',
   args: { html: longLineHtml },
-  // 横溢れを絵にするため、狭い親 (max-w-md) に閉じ込めて描画する (cmd_670 の表と同形)
+  // 横溢れを絵にするため、狭い親 (max-w-md) に閉じ込めて描画する (KfmGfm の表（横溢れ）と同形)
   render: (args: KfmStoryArgs) => ({
     setup: () => ({ args }),
     template: `<div class="max-w-md"><div class="${KFM_CONTENT_CLASS}" v-html="args.html" /></div>`,

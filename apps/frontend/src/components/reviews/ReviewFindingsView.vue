@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhCheckCircle, PhPlus, PhWarningCircle } from '@phosphor-icons/vue';
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import ReviewFindingBody from '@/components/reviews/ReviewFindingBody.vue';
 import ReviewRoundComposer from '@/components/reviews/ReviewRoundComposer.vue';
 import {
   REVIEWED_PRS_PATH,
@@ -37,6 +38,13 @@ import {
   type Review,
   type ReviewFinding,
 } from '@/lib/review-findings';
+import {
+  DEFAULT_REVIEW_FINDINGS_URL_STATE,
+  applyReviewFindingsUrlState,
+  parseReviewFindingsUrlState,
+  relativeReviewFindingHref,
+  type ReviewFindingsUrlState,
+} from '@/lib/review-findings-url-state';
 
 const props = defineProps<{
   tenantId: string;
@@ -47,16 +55,26 @@ const props = defineProps<{
   viewerId: string;
   /** テナントオーナー。不在の作成者に代わる取り下げの表示判定に使う（未解決なら null） */
   tenantOwnerId?: string | null;
-  /** 初期表示する PR（要約コメントのリンクから来たとき） */
-  initialPr?: number | null;
+  /** SSR が URL から復元した初期表示。 */
+  initialUrlState?: ReviewFindingsUrlState;
+  /** URL の不正値を黙って捨てず、利用者へ知らせる。 */
+  initialUrlWarnings?: string[];
+  /**
+   * 現在の URL（pathname + search）。SSR で findingHref を組む土台に使い、
+   * この画面が持たぬ query（tab= の類）を SSR 出力の链でも保つ。
+   */
+  requestUrl?: string | null;
 }>();
 
 const queryClient = useQueryClient();
 
-const selectedPr = ref<number | null>(props.initialPr ?? null);
-const roundFilter = ref<number | null>(null);
-const severityFilter = ref<FindingSeverity | null>(null);
-const stateFilter = ref<FindingState | null>(null);
+const initialUrlState = props.initialUrlState ?? DEFAULT_REVIEW_FINDINGS_URL_STATE;
+const selectedPr = ref<number | null>(initialUrlState.pr);
+const roundFilter = ref<number | null>(initialUrlState.round);
+const severityFilter = ref<FindingSeverity | null>(initialUrlState.severity);
+const stateFilter = ref<FindingState | null>(initialUrlState.state);
+const focusedFindingId = ref<string | null>(initialUrlState.finding);
+const urlWarnings = ref([...(props.initialUrlWarnings ?? [])]);
 const isComposerOpen = ref(false);
 const transitionError = ref<string | null>(null);
 
@@ -68,6 +86,61 @@ const updateState = useUpdateFindingStateMutation();
 
 const pullRequests = computed(() => prsQuery.data.value ?? []);
 const rounds = computed(() => roundsQuery.data.value ?? []);
+
+function currentUrlState(): ReviewFindingsUrlState {
+  return {
+    pr: selectedPr.value,
+    round: roundFilter.value,
+    severity: severityFilter.value,
+    state: stateFilter.value,
+    finding: focusedFindingId.value,
+  };
+}
+
+function writeUrl(mode: 'push' | 'replace') {
+  if (import.meta.env.SSR) return;
+  const next = applyReviewFindingsUrlState(new URL(window.location.href), currentUrlState());
+  window.history[mode === 'push' ? 'pushState' : 'replaceState'](window.history.state, '', next);
+}
+
+/** popstate・vike の遷移（props の更新）・URL 直読みの三経路が集まる唯一の復元口。 */
+function applyUrlState(state: ReviewFindingsUrlState, warnings: readonly string[]) {
+  selectedPr.value = state.pr;
+  roundFilter.value = state.round;
+  severityFilter.value = state.severity;
+  stateFilter.value = state.state;
+  focusedFindingId.value = state.finding;
+  urlWarnings.value = [...warnings];
+  isComposerOpen.value = false;
+  transitionError.value = null;
+}
+
+function restoreFromLocation() {
+  const parsed = parseReviewFindingsUrlState(new URL(window.location.href).searchParams);
+  applyUrlState(parsed.state, parsed.warnings);
+}
+
+onMounted(() => window.addEventListener('popstate', restoreFromLocation));
+onUnmounted(() => window.removeEventListener('popstate', restoreFromLocation));
+
+// vike は同じ +Page.vue に解決される URL 間の遷移で component を差し替えず patch する
+// （+Page.vue の :key の註）。setup で読んだ initialUrlState はそのままでは凍るため、
+// props の更新も同じ復元口へ流す。writeUrl は pageContext を動かさないので環はできない。
+// 値が現状と同じなら何もしない（復元は composer や transitionError まで畳むため）。
+watch(
+  () => [props.initialUrlState, props.initialUrlWarnings] as const,
+  ([state, warnings]) => {
+    const next = state ?? DEFAULT_REVIEW_FINDINGS_URL_STATE;
+    const nextWarnings = warnings ?? [];
+    if (
+      JSON.stringify(next) === JSON.stringify(currentUrlState()) &&
+      JSON.stringify(nextWarnings) === JSON.stringify(urlWarnings.value)
+    ) {
+      return;
+    }
+    applyUrlState(next, nextWarnings);
+  },
+);
 
 /**
  * 指摘 → それを出したラウンドの作成者。取り下げを出してよいかの判定に使う。
@@ -107,36 +180,152 @@ const summary = computed(() => summaryQuery.data.value ?? null);
 watch(pullRequests, (list) => {
   if (selectedPr.value === null && list.length > 0) {
     selectedPr.value = list[0].pr_number;
+    writeUrl('replace');
   }
 });
 
 /** 絞り込みは画面側で適用する（API は PR 単位で全件返す）。 */
-const findings = computed(() => {
-  const all = sortFindings(findingsQuery.data.value ?? []);
-  return all.filter(
+const allFindings = computed(() => sortFindings(findingsQuery.data.value ?? []));
+const findings = computed(() =>
+  allFindings.value.filter(
     (finding) =>
       (roundFilter.value === null || finding.round === roundFilter.value) &&
       (severityFilter.value === null || finding.severity === severityFilter.value) &&
       (stateFilter.value === null || finding.state === stateFilter.value),
-  );
-});
+  ),
+);
 
 const hasFilters = computed(
   () => roundFilter.value !== null || severityFilter.value !== null || stateFilter.value !== null,
 );
 
-function clearFilters() {
+const selectedPrMissing = computed(
+  () =>
+    !prsQuery.isPending.value &&
+    selectedPr.value !== null &&
+    !pullRequests.value.some((pr) => pr.pr_number === selectedPr.value),
+);
+const roundMissing = computed(
+  () =>
+    !roundsQuery.isPending.value &&
+    roundFilter.value !== null &&
+    !rounds.value.some((round: Review) => round.round === roundFilter.value),
+);
+const focusedFindingMissing = computed(
+  () =>
+    !findingsQuery.isPending.value &&
+    focusedFindingId.value !== null &&
+    !allFindings.value.some((finding) => finding.id === focusedFindingId.value),
+);
+const focusedFindingFiltered = computed(
+  () =>
+    focusedFindingId.value !== null &&
+    !focusedFindingMissing.value &&
+    !findings.value.some((finding) => finding.id === focusedFindingId.value),
+);
+
+function resetFilters() {
   roundFilter.value = null;
   severityFilter.value = null;
   stateFilter.value = null;
 }
 
+/**
+ * 利用者の操作で URL を書き直した時に呼ぶ。書き直した時点で不正値は URL から
+ * 消えているため、出しっぱなしだった警告の帯も一緒に片付ける。
+ * （読み込み時の自動 PR 選択のような、操作でない書き換えでは呼ばない——
+ * 入場時の警告を読む前に消してしまうため。）
+ */
+function clearUrlWarnings() {
+  urlWarnings.value = [];
+}
+
+function clearFilters() {
+  resetFilters();
+  focusedFindingId.value = null;
+  clearUrlWarnings();
+  writeUrl('replace');
+}
+
+function setRoundFilter(value: unknown) {
+  roundFilter.value = value === 'all' || value == null ? null : Number(value);
+  focusedFindingId.value = null;
+  clearUrlWarnings();
+  writeUrl('replace');
+}
+
+function setSeverityFilter(value: unknown) {
+  severityFilter.value = value === 'all' || value == null ? null : (value as FindingSeverity);
+  focusedFindingId.value = null;
+  clearUrlWarnings();
+  writeUrl('replace');
+}
+
+function setStateFilter(value: unknown) {
+  stateFilter.value = value === 'all' || value == null ? null : (value as FindingState);
+  focusedFindingId.value = null;
+  clearUrlWarnings();
+  writeUrl('replace');
+}
+
 function selectPr(pr: number) {
   selectedPr.value = pr;
-  clearFilters();
+  resetFilters();
+  focusedFindingId.value = null;
   isComposerOpen.value = false;
   transitionError.value = null;
+  clearUrlWarnings();
+  writeUrl('push');
 }
+
+function findingHref(id: string): string {
+  // SSR は props.requestUrl（+Page が pageContext から渡す現在 URL）を土台にする。
+  // path を自前で組むと、この画面が持たぬ query（tab= の類）が SSR 出力の链から
+  // 落ちて client と食い違う。出力は relativeReviewFindingHref で両側とも
+  // pathname + search の相対形に揃える（client だけ絶対 URL だと、同じ属性が
+  // hydration で別の文字列になる）。
+  const base = import.meta.env.SSR
+    ? new URL(props.requestUrl ?? '/', 'http://ssr.local')
+    : new URL(window.location.href);
+  return relativeReviewFindingHref(base, currentUrlState(), id);
+}
+
+async function focusFinding(event: MouseEvent, id: string) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+    return;
+  event.preventDefault();
+  focusedFindingId.value = id;
+  clearUrlWarnings();
+  writeUrl('replace');
+  await nextTick();
+  document.getElementById(`finding-${id}`)?.scrollIntoView?.({ block: 'center' });
+  scrolledFindingId.value = id;
+}
+
+/**
+ * 注目指摘への強制スクロールは、注目が変わった時の一度きり。済んだ id を覚え、
+ * 状態変更 → invalidate → 再取得で findings の data が入れ替わるたびに
+ * scrollIntoView が走って画面が勝手に戻るのを防ぐ。data も依存に残すのは、
+ * 共有 link 直入りでは data 到着まで要素が無く、到着後の再走で初回の
+ * スクロールを果たすため（要素が出るまでは済み扱いにしない）。
+ */
+const scrolledFindingId = ref<string | null>(null);
+watch(
+  () => [focusedFindingId.value, findingsQuery.data.value] as const,
+  async ([id]) => {
+    if (!id) {
+      scrolledFindingId.value = null;
+      return;
+    }
+    if (scrolledFindingId.value === id) return;
+    await nextTick();
+    const el = document.getElementById(`finding-${id}`);
+    if (!el) return;
+    el.scrollIntoView?.({ block: 'center' });
+    scrolledFindingId.value = id;
+  },
+  { flush: 'post' },
+);
 
 async function invalidateAll() {
   await Promise.all([
@@ -204,6 +393,15 @@ async function onRoundCreated() {
     </p>
 
     <template v-else>
+      <div
+        v-if="urlWarnings.length > 0"
+        role="status"
+        class="bg-muted text-muted-foreground rounded-md border p-3 text-sm"
+        data-testid="url-warning"
+      >
+        <p v-for="warning in urlWarnings" :key="warning">{{ warning }}</p>
+      </div>
+
       <div class="flex flex-col gap-6 md:flex-row md:items-start">
         <!-- PR 一覧 -->
         <nav
@@ -313,9 +511,7 @@ async function onRoundCreated() {
                 <label for="filter-round" class="mb-1.5 block text-xs font-medium">Round</label>
                 <Select
                   :model-value="roundFilter === null ? 'all' : String(roundFilter)"
-                  @update:model-value="
-                    (v) => (roundFilter = v === 'all' || v == null ? null : Number(v))
-                  "
+                  @update:model-value="setRoundFilter"
                 >
                   <SelectTrigger id="filter-round" size="sm" class="w-full">
                     <SelectValue />
@@ -336,10 +532,7 @@ async function onRoundCreated() {
                 <label for="filter-severity" class="mb-1.5 block text-xs font-medium">重大度</label>
                 <Select
                   :model-value="severityFilter ?? 'all'"
-                  @update:model-value="
-                    (v) =>
-                      (severityFilter = v === 'all' || v == null ? null : (v as FindingSeverity))
-                  "
+                  @update:model-value="setSeverityFilter"
                 >
                   <SelectTrigger id="filter-severity" size="sm" class="w-full">
                     <SelectValue />
@@ -354,12 +547,7 @@ async function onRoundCreated() {
               </div>
               <div class="w-[130px]">
                 <label for="filter-state" class="mb-1.5 block text-xs font-medium">状態</label>
-                <Select
-                  :model-value="stateFilter ?? 'all'"
-                  @update:model-value="
-                    (v) => (stateFilter = v === 'all' || v == null ? null : (v as FindingState))
-                  "
-                >
+                <Select :model-value="stateFilter ?? 'all'" @update:model-value="setStateFilter">
                   <SelectTrigger id="filter-state" size="sm" class="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -406,6 +594,39 @@ async function onRoundCreated() {
               {{ transitionError }}
             </p>
 
+            <p
+              v-if="selectedPrMissing"
+              role="status"
+              class="text-muted-foreground text-sm"
+              data-testid="missing-pr"
+            >
+              URL で指定された PR #{{ selectedPr }} はレビュー一覧にありません。
+            </p>
+            <p
+              v-if="roundMissing"
+              role="status"
+              class="text-muted-foreground text-sm"
+              data-testid="missing-round"
+            >
+              URL で指定された Round {{ roundFilter }} はこの PR にありません。
+            </p>
+            <p
+              v-if="focusedFindingMissing"
+              role="status"
+              class="text-muted-foreground text-sm"
+              data-testid="missing-finding"
+            >
+              URL で指定された指摘 {{ focusedFindingId }} はこの PR にありません。
+            </p>
+            <p
+              v-else-if="focusedFindingFiltered"
+              role="status"
+              class="text-muted-foreground text-sm"
+              data-testid="filtered-finding"
+            >
+              URL で指定された指摘は現在の絞り込みでは非表示です。
+            </p>
+
             <p v-if="findingsQuery.isPending.value" class="text-muted-foreground text-sm">
               読み込み中…
             </p>
@@ -414,7 +635,19 @@ async function onRoundCreated() {
             </p>
 
             <ul v-else class="flex flex-col gap-3" data-testid="finding-list">
-              <li v-for="finding in findings" :key="finding.id" class="rounded-lg border p-4">
+              <li
+                v-for="finding in findings"
+                :id="`finding-${finding.id}`"
+                :key="finding.id"
+                class="rounded-lg border p-4"
+                :class="
+                  finding.id === focusedFindingId
+                    ? 'border-primary ring-primary/40 ring-2'
+                    : undefined
+                "
+                :aria-current="finding.id === focusedFindingId ? 'true' : undefined"
+                :data-focused="finding.id === focusedFindingId ? 'true' : undefined"
+              >
                 <div class="flex flex-wrap items-center gap-2">
                   <span
                     class="rounded-md border px-2 py-0.5 text-xs font-medium"
@@ -430,7 +663,14 @@ async function onRoundCreated() {
                     {{ STATE_LABELS[finding.state] }}
                   </span>
                   <span class="text-muted-foreground text-xs">R{{ finding.round }}</span>
-                  <span class="min-w-0 flex-1 truncate font-medium">{{ finding.title }}</span>
+                  <a
+                    class="hover:text-primary min-w-0 flex-1 truncate font-medium underline-offset-4 hover:underline"
+                    :href="findingHref(finding.id)"
+                    :aria-label="`指摘「${finding.title}」へのリンク`"
+                    @click="focusFinding($event, finding.id)"
+                  >
+                    {{ finding.title }}
+                  </a>
                 </div>
 
                 <p
@@ -439,7 +679,7 @@ async function onRoundCreated() {
                 >
                   {{ findingLocation(finding) }}
                 </p>
-                <p class="mt-2 text-sm whitespace-pre-wrap">{{ finding.body }}</p>
+                <ReviewFindingBody :body="finding.body" :finding-id="finding.id" />
 
                 <div class="mt-3 flex flex-wrap items-center gap-2">
                   <Button

@@ -14,6 +14,8 @@ pub struct CreatePersonalTokenRequest {
     pub tenant_id: Uuid,
     #[schema(value_type = Vec<String>, format = "uuid", nullable)]
     pub project_ids: Option<Vec<Uuid>>,
+    #[validate(length(min = 1))]
+    #[schema(min_items = 1)]
     pub scopes: Vec<Scope>,
     #[schema(value_type = String, format = "date-time", nullable)]
     pub expires_at: Option<DateTime<Utc>>,
@@ -44,6 +46,22 @@ pub struct PersonalTokenResponse {
     pub revoked: bool,
     #[schema(value_type = String, format = "uuid")]
     pub user_id: Uuid,
+}
+
+/// PAT 自身の識別情報。アカウントの機微な状態は含めない。
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PersonalTokenIdentityResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    pub name: String,
+    #[schema(value_type = String, format = "uuid")]
+    pub user_id: Uuid,
+    pub username: String,
+    pub scopes: ScopeList,
+    #[schema(value_type = Vec<String>, format = "uuid", nullable)]
+    pub allowed_project_ids: Option<Vec<Uuid>>,
+    #[schema(value_type = String, format = "date-time", nullable)]
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 impl TryFrom<personal_tokens::Model> for PersonalTokenResponse {

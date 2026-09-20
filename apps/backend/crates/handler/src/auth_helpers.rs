@@ -1,29 +1,47 @@
-use sea_orm::prelude::Uuid;
+use sea_orm::{ConnectionTrait, prelude::Uuid};
 
-use crate::AppState;
 use crate::error::AppError;
 
 // 実装は service 側に一本化（レビュー指摘: 同一実装の重複解消）。
-pub use service::access::{is_tenant_member, project_is_open_or_member, visible_project_ids};
+pub use service::access::{
+    explicit_member_project_ids, guest_tenant_ids, is_project_member,
+    is_shared_project_explicit_member, is_tenant_member, project_is_open_or_member,
+    visible_project_ids,
+};
 pub use service::drive::is_tenant_owner;
+
+/// 主（owner）だけに許す口の共通判定。テナントが無ければ NotFound、主でなければ Forbidden
+/// （`is_tenant_owner` が存在確認を兼ねる）。主の定義が変わる時はここ一箇所を直す——
+/// handler ごとに owner_id を直に比べる手書きを作らないこと。
+pub async fn require_tenant_owner<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    if is_tenant_owner(db, tenant_id, user_id).await? {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
+}
 
 /// **指定した利用者**がそのプロジェクトに入れるかを確認する。
 ///
 /// リクエスト元自身の認可は `AuthUser::ensure_tenant_access` が同じ判定を含んでいるので、
 /// ここを重ねて呼ぶ必要はない。担当者の追加など、自分以外を検証するときだけ使う。
-pub async fn require_project_access(
-    state: &AppState,
+pub async fn require_project_access<C: ConnectionTrait>(
+    db: &C,
     tenant_id: Uuid,
     project_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), AppError> {
-    if is_tenant_owner(&state.db, tenant_id, user_id).await? {
+    if is_tenant_owner(db, tenant_id, user_id).await? {
         return Ok(());
     }
-    if !is_tenant_member(&state.db, tenant_id, user_id).await? {
+    if !is_tenant_member(db, tenant_id, user_id).await? {
         return Err(AppError::Forbidden);
     }
-    if project_is_open_or_member(&state.db, project_id, user_id).await? {
+    if project_is_open_or_member(db, project_id, user_id).await? {
         Ok(())
     } else {
         Err(AppError::Forbidden)

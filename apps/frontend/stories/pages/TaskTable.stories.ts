@@ -1,14 +1,17 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { expect, fn, screen, userEvent, within } from 'storybook/test';
+import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test';
 import { provide, reactive, nextTick } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import TaskTablePage from '@/pages/@tenant/projects/@projectKey/tasks/+Page.vue';
 
 const PAGE_CONTEXT_KEY = 'vike-vue:usePageContext';
 
+// 一覧の既定表示は List になったので、この Table 用の story 群では view=table を明示する
+// （ページは pageContext.urlParsed.search から表示形式を読む）
 const mockContext = {
   urlPathname: '/tenant-123/projects/ENG/tasks',
   routeParams: { tenant: 'tenant-123', projectKey: 'ENG' },
+  urlParsed: { search: { view: 'table' } },
 };
 
 const TENANT_UUID = '11111111-1111-1111-1111-111111111111';
@@ -67,6 +70,7 @@ const sampleStatuses = [
     position: 0,
     is_default: true,
     is_done_state: false,
+    is_default_done: false,
     project_id: 'proj-eng',
     created_at: '2026-01-01T00:00:00Z',
   },
@@ -77,6 +81,7 @@ const sampleStatuses = [
     position: 1,
     is_default: false,
     is_done_state: false,
+    is_default_done: false,
     project_id: 'proj-eng',
     created_at: '2026-01-01T00:00:00Z',
   },
@@ -87,6 +92,7 @@ const sampleStatuses = [
     position: 2,
     is_default: false,
     is_done_state: false,
+    is_default_done: false,
     project_id: 'proj-eng',
     created_at: '2026-01-01T00:00:00Z',
   },
@@ -97,6 +103,7 @@ const sampleStatuses = [
     position: 3,
     is_default: false,
     is_done_state: true,
+    is_default_done: true,
     project_id: 'proj-eng',
     created_at: '2026-01-01T00:00:00Z',
   },
@@ -259,6 +266,16 @@ const sampleTasks = {
   total: 6,
 };
 
+const sampleSubtask = {
+  ...sampleTasks.tasks[0],
+  id: 'task-child-1',
+  seq_id: 21,
+  title: 'PKCE の検証を追加する',
+  parent_task_id: 'task-1',
+  assignees: [],
+  labels: [],
+};
+
 const sampleLabels = [
   {
     id: 'label-bug',
@@ -294,6 +311,95 @@ const sampleSearchTasks = {
 /**
  * fetch モックで全 API エンドポイントを差し替える
  */
+/** オーバーレイのアクティビティ欄で、コメントのカード表示を見るためのフィクスチャ。 */
+const sampleComments = [
+  {
+    id: 'comment-1',
+    body: 'ここは PKCE の検証を先に入れたほうがよさそうです。',
+    is_deleted: false,
+    created_at: '2026-06-10T00:00:00Z',
+    updated_at: '2026-06-10T00:00:00Z',
+    user: { id: 'user-1', name: 'yupix', avatar_url: null },
+    replies: [
+      {
+        id: 'comment-1-reply-1',
+        body: '対応しました。レビューお願いします。',
+        is_deleted: false,
+        created_at: '2026-06-11T00:00:00Z',
+        updated_at: '2026-06-11T00:00:00Z',
+        user: { id: 'user-2', name: 'sousuke', avatar_url: null },
+        replies: [],
+      },
+    ],
+  },
+];
+
+const sampleMembers = [
+  {
+    id: 'pm-1',
+    project_id: 'proj-eng',
+    user_id: 'user-1',
+    role: 'member',
+    user: { id: 'user-1', username: 'yupix', avatar_url: null },
+  },
+  {
+    id: 'pm-2',
+    project_id: 'proj-eng',
+    user_id: 'user-2',
+    role: 'member',
+    user: { id: 'user-2', username: 'sousuke', avatar_url: null },
+  },
+];
+
+type SortableStoryTask = {
+  id: string;
+  title: string;
+  priority: 'CriticalFire' | 'Critical' | 'High' | 'Medium' | 'Low' | 'Trivial';
+  soft_deadline: string | null;
+  assignees: Array<{ user: { username: string } }>;
+};
+
+const STORY_PRIORITY_RANK: Record<SortableStoryTask['priority'], number> = {
+  CriticalFire: 0,
+  Critical: 1,
+  High: 2,
+  Medium: 3,
+  Low: 4,
+  Trivial: 5,
+};
+
+function sortStoryTasks(tasks: SortableStoryTask[], sort: string | null) {
+  const match = /^(title|assignee|priority|deadline)_(asc|desc)$/.exec(sort ?? '');
+  if (!match) return tasks;
+  const [, column, direction] = match;
+  const keyOf = (task: SortableStoryTask): string | number | null => {
+    switch (column) {
+      case 'title':
+        return task.title;
+      case 'assignee':
+        return task.assignees.map((entry) => entry.user.username.toLowerCase()).sort()[0] ?? null;
+      case 'priority':
+        return STORY_PRIORITY_RANK[task.priority];
+      case 'deadline':
+        return task.soft_deadline;
+      default:
+        return null;
+    }
+  };
+
+  return [...tasks].sort((left, right) => {
+    const leftKey = keyOf(left);
+    const rightKey = keyOf(right);
+    if (leftKey === null && rightKey !== null) return 1;
+    if (leftKey !== null && rightKey === null) return -1;
+    if (leftKey !== null && rightKey !== null && leftKey !== rightKey) {
+      const comparison = leftKey < rightKey ? -1 : 1;
+      return direction === 'asc' ? comparison : -comparison;
+    }
+    return right.id.localeCompare(left.id);
+  });
+}
+
 function createMockFetch(
   overrides: {
     projects?: typeof sampleProjects;
@@ -305,11 +411,13 @@ function createMockFetch(
     rejectTenantsList?: boolean;
     rejectLabels?: boolean;
     hang?: boolean;
+    comments?: unknown[];
   } = {},
 ) {
   const original = globalThis.fetch;
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
     const url = typeof req === 'string' ? req : req.url;
+    const method = typeof req === 'string' ? 'GET' : req.method;
     if (isListTenantsUrl(url)) {
       if (overrides.rejectTenantsList) {
         return jsonResponse({ message: 'server error' }, 500);
@@ -331,6 +439,72 @@ function createMockFetch(
       }
       return jsonResponse(sampleLabels);
     }
+    if (url.includes('/activities')) {
+      return jsonResponse({
+        activities: [
+          {
+            id: 'act-2',
+            event_type: 'status_changed',
+            payload: { from: 'Backlog', to: 'In Progress' },
+            created_at: new Date(Date.now() - 60_000).toISOString(),
+            user: { id: 'user-1', name: 'yupix' },
+          },
+          {
+            id: 'act-1',
+            event_type: 'task_created',
+            payload: {},
+            created_at: '2026-06-01T00:00:00Z',
+            user: { id: 'user-1', name: 'yupix' },
+          },
+        ],
+      });
+    }
+    if (url.includes('/comments')) {
+      return jsonResponse({ comments: overrides.comments ?? [] });
+    }
+    // 担当者候補はメンバー一覧とは別の口（管理者でなくても読める）
+    if (url.includes('/assignable-users')) {
+      return jsonResponse(sampleMembers.map((member) => member.user));
+    }
+    if (url.includes('/members')) {
+      return jsonResponse(sampleMembers);
+    }
+    if (method === 'GET' && url.includes('/relations')) {
+      const hasChild = url.includes('/tasks/task-1/') || url.includes('/tasks/ENG-1/');
+      return jsonResponse({
+        parent: null,
+        subtasks: hasChild ? [sampleSubtask] : [],
+        blocks: [],
+        blocked_by: [],
+      });
+    }
+    // List 表示はステータスごとに問い合わせる。件数（total）もその絞り込みで返す
+    const query = new URL(url, 'http://localhost').searchParams;
+    const statusFilter = query.get('status_id');
+    const labelFilter = query.get('label_id');
+    const parentFilter = query.get('parent_task_id');
+    if (parentFilter && url.includes('/tasks')) {
+      const children = [sampleSubtask].filter(
+        (task) =>
+          task.parent_task_id === parentFilter &&
+          (!statusFilter || task.status_id === statusFilter) &&
+          !labelFilter &&
+          task.is_archived === (query.get('is_archived') === 'true'),
+      );
+      return jsonResponse({ tasks: children, total: children.length, next_cursor: null });
+    }
+    if (statusFilter && url.includes('/tasks')) {
+      const all = (overrides.tasks ?? sampleTasks).tasks as Array<
+        SortableStoryTask & { status_id: string; labels: Array<{ id: string }> }
+      >;
+      const filtered = all.filter(
+        (task) =>
+          task.status_id === statusFilter &&
+          (!labelFilter || task.labels.some((label) => label.id === labelFilter)),
+      );
+      const sorted = sortStoryTasks(filtered, query.get('sort'));
+      return jsonResponse({ tasks: sorted, total: sorted.length });
+    }
     if (url.includes('/tasks/search')) {
       if (overrides.rejectSearch) {
         return jsonResponse({ message: 'search failed' }, 500);
@@ -344,8 +518,9 @@ function createMockFetch(
       const found = list.find(
         (t) => `${mockContext.routeParams.projectKey}-${t.seq_id}` === detailMatch[1],
       );
-      // 詳細レスポンスは labels を含む（一覧用フィクスチャには無いのでここで補う）
-      return jsonResponse({ ...(found ?? list[0]), labels: [] });
+      // 一覧のフィクスチャが持つラベルをそのまま返す（詳細のラベル欄を story で見るため）
+      const task = (found ?? list[0]) as { labels?: unknown[] };
+      return jsonResponse({ ...task, labels: task.labels ?? [] });
     }
     if (url.includes('/tasks')) {
       return jsonResponse(overrides.tasks ?? sampleTasks);
@@ -373,6 +548,7 @@ const mktStatuses = [
     position: 0,
     is_default: true,
     is_done_state: false,
+    is_default_done: false,
     project_id: 'proj-mkt',
     created_at: '2026-01-01T00:00:00Z',
   },
@@ -540,7 +716,11 @@ function storyDecoratorReactive() {
 }
 
 function storyDecorator(
-  context: { urlPathname: string; routeParams: Record<string, string> } = mockContext,
+  context: {
+    urlPathname: string;
+    routeParams: Record<string, string>;
+    urlParsed?: { search?: Record<string, string> };
+  } = mockContext,
 ) {
   return () => ({
     setup() {
@@ -665,6 +845,120 @@ export const SearchApiError: Story = {
   },
 };
 
+const listContext = {
+  urlPathname: '/tenant-123/projects/ENG/tasks',
+  routeParams: { tenant: 'tenant-123', projectKey: 'ENG' },
+  urlParsed: { search: {} },
+};
+
+export const ListView: Story = {
+  name: 'List 表示（既定）',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    // ステータスごとの塊で出る（Table のヘッダー行ではなく、グループの見出し）
+    await expect(canvas.findByRole('tab', { name: 'List' })).resolves.toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(canvas.findAllByText('In Review')).resolves.not.toHaveLength(0);
+    // 行から直接触れる項目が出ている
+    await expect(canvas.findAllByLabelText('優先度')).resolves.not.toHaveLength(0);
+    // ステータスはグループが表すので列にせず、名前の左の丸から変える
+    await expect(canvas.findAllByLabelText(/^ステータス: /)).resolves.not.toHaveLength(0);
+    await expect(canvas.findAllByLabelText('コメントを追加')).resolves.not.toHaveLength(0);
+
+    // Storybook の fetch モックも実 API と同様に sort クエリを反映する。
+    const progressToggle = await canvas.findByRole('button', { name: 'In Progress を折りたたむ' });
+    const progressSection = progressToggle.closest('section');
+    if (!(progressSection instanceof HTMLElement)) {
+      throw new Error('In Progress section not found');
+    }
+    const progress = within(progressSection);
+    await user.click(await progress.findByRole('button', { name: '優先度を並べ替え' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: '優先度が低い順' }));
+
+    const titlesInProgress = () =>
+      progress
+        .getAllByRole('button')
+        .map((button) => button.textContent?.trim())
+        .filter((title) => title === 'OAuth 対応を実装する' || title === '通知メール送信機能');
+    await waitFor(() =>
+      expect(titlesInProgress()).toEqual(['通知メール送信機能', 'OAuth 対応を実装する']),
+    );
+
+    await user.click(await progress.findByRole('button', { name: '優先度を優先度が高い順に反転' }));
+    await waitFor(() =>
+      expect(titlesInProgress()).toEqual(['OAuth 対応を実装する', '通知メール送信機能']),
+    );
+  },
+};
+
+export const ListViewSubtasks: Story = {
+  name: 'List 表示のサブタスク展開',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const row = await canvas.findByLabelText('タスク「OAuth 対応を実装する」を選択');
+    const toggle = within(row).getByRole('button', { name: 'サブタスクを展開' });
+    await expect(toggle).toHaveClass('opacity-0');
+
+    await user.click(row);
+    await expect(toggle).toHaveClass('opacity-100');
+    await user.click(toggle);
+    await expect(canvas.findByText('PKCE の検証を追加する')).resolves.toBeInTheDocument();
+
+    const emptyRow = await canvas.findByLabelText('タスク「ログイン画面の UI 実装」を選択');
+    await user.click(emptyRow);
+    await user.click(within(emptyRow).getByRole('button', { name: 'サブタスクを展開' }));
+    await expect(
+      canvas.findByRole('textbox', { name: 'ログイン画面の UI 実装 のサブタスク名' }),
+    ).resolves.toBeInTheDocument();
+
+    // 展開中にラベルで絞ると、親は残り、ラベルのない子は消える。
+    await user.click(await canvas.findByRole('button', { name: 'ラベル' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: /bug/ }));
+    await expect(
+      canvas.findByRole('textbox', { name: 'OAuth 対応を実装する のサブタスク名' }),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.queryByText('PKCE の検証を追加する')).not.toBeInTheDocument();
+  },
+};
+
+export const ListViewDetailOverlay: Story = {
+  name: 'List 表示の詳細オーバーレイ（履歴とコメント）',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: () => createMockFetch({ comments: sampleComments }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // 行のタイトルから詳細をオーバーレイで開く（分割ビューではない）
+    const user = userEvent.setup();
+    await user.click(await canvas.findByRole('button', { name: 'OAuth 対応を実装する' }));
+
+    const dialog = await screen.findByRole('dialog');
+    // 履歴は箇条書き、コメントはカードで並ぶ
+    await expect(
+      within(dialog).findByText(/ステータスを In Progress に変更しました/),
+    ).resolves.toBeInTheDocument();
+    await expect(
+      within(dialog).findByText('ここは PKCE の検証を先に入れたほうがよさそうです。'),
+    ).resolves.toBeInTheDocument();
+    // 返信は一覧では展開せず、件数を押してスレッドへ入ってから読む
+    await user.click(await within(dialog).findByRole('button', { name: '1件の返信' }));
+    await expect(
+      within(dialog).findByText('対応しました。レビューお願いします。'),
+    ).resolves.toBeInTheDocument();
+    // タイトルの変更は詳細でだけできる
+    await expect(
+      within(dialog).getByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).toBeInTheDocument();
+  },
+};
+
 export const ProjectNotFound: Story = {
   name: 'プロジェクトなし',
   decorators: [
@@ -738,9 +1032,11 @@ export const ProjectSwitch: Story = {
     // 切替前: 作成ダイアログのラベル候補は ENG のもの。旧選択の持ち越し検証用に選択しておく
     await userEvent.click(await canvas.findByRole('button', { name: '新規タスク' }));
     const dialog = await screen.findByRole('dialog');
-    const bugButton = await within(dialog).findByRole('button', { name: /bug/ });
-    await userEvent.click(bugButton);
-    await expect(bugButton).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(await within(dialog).findByRole('button', { name: /^ラベル/ }));
+    const bugItem = await screen.findByRole('menuitemcheckbox', { name: /bug/ });
+    await userEvent.click(bugItem);
+    await expect(bugItem).toHaveAttribute('aria-checked', 'true');
+    await userEvent.keyboard('{Escape}');
 
     if (!reactivePageContext) {
       throw new Error('reactive page context is not initialized');
@@ -767,11 +1063,11 @@ export const ProjectSwitch: Story = {
     await expect(
       within(dialogAfter).findByText('MKT にタスクを追加します'),
     ).resolves.toBeInTheDocument();
-    const campaignButton = await within(dialogAfter).findByRole('button', { name: /campaign/ });
-    await expect(campaignButton).toHaveAttribute('aria-pressed', 'false');
-    await expect(
-      within(dialogAfter).queryByRole('button', { name: /bug/ }),
-    ).not.toBeInTheDocument();
+    await userEvent.click(await within(dialogAfter).findByRole('button', { name: /^ラベル/ }));
+    const campaignItem = await screen.findByRole('menuitemcheckbox', { name: /campaign/ });
+    await expect(campaignItem).toHaveAttribute('aria-checked', 'false');
+    await expect(screen.queryByRole('menuitemcheckbox', { name: /bug/ })).not.toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
     await userEvent.click(await within(dialogAfter).findByRole('button', { name: '閉じる' }));
 
     // ラベルドロップダウンにも切替先プロジェクトのラベルだけが並ぶ

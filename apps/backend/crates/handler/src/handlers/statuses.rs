@@ -6,8 +6,8 @@ use axum::{
 use axum_valid::Valid;
 use sea_orm::sea_query::{CaseStatement, Expr, Func, LockType};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, TransactionTrait, prelude::Uuid,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseTransaction, EntityTrait,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait, prelude::Uuid,
 };
 use std::collections::HashSet;
 
@@ -17,6 +17,28 @@ use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use entity::{project_statuses, projects, tasks};
 use payload::statuses::*;
+
+// Call after removing a Done state, while holding the project row lock. Persist
+// the fallback so later inserts or position changes cannot move the completion target.
+async fn ensure_default_done(txn: &DatabaseTransaction, project_id: Uuid) -> Result<(), AppError> {
+    let next = project_statuses::Entity::find()
+        .filter(project_statuses::Column::ProjectId.eq(project_id))
+        .filter(project_statuses::Column::IsDoneState.eq(true))
+        .order_by_desc(project_statuses::Column::IsDefaultDone)
+        .order_by_asc(project_statuses::Column::Position)
+        .order_by_asc(project_statuses::Column::Id)
+        .one(txn)
+        .await?;
+    if let Some(next) = next
+        && !next.is_default_done
+    {
+        let mut active: project_statuses::ActiveModel = next.into();
+        active.is_default_done = Set(true);
+        active.update(txn).await?;
+    }
+    Ok(())
+}
+
 #[axum::debug_handler]
 #[utoipa::path(
     get,
@@ -73,6 +95,11 @@ pub async fn create_status(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
+    // 完了ステータスは複数持てる。既定の完了（「完了にする」操作の移動先）だけが
+    // プロジェクト内で 1 つに限られ、完了ステータスにしか付けられない。
+    if payload.is_default_done && !payload.is_done_state {
+        return Err(AppError::BadRequest);
+    }
     let txn = state.db.begin().await?;
     // A status row cannot be the mutex here: concurrent creates can insert rows
     // outside the other transaction's locked snapshot. Lock the stable project
@@ -94,30 +121,16 @@ pub async fn create_status(
             .exec(&txn)
             .await?;
     }
-    if payload.is_done_state {
-        let previous_done_ids: Vec<Uuid> = statuses
-            .iter()
-            .filter(|status| status.is_done_state)
-            .map(|status| status.id)
-            .collect();
-
+    // 完了ステータスが 1 つも無いプロジェクトへ足す 1 つ目は既定の完了にする。
+    let is_first_done_state =
+        payload.is_done_state && !statuses.iter().any(|status| status.is_done_state);
+    let is_default_done = payload.is_default_done || is_first_done_state;
+    if is_default_done {
         project_statuses::Entity::update_many()
-            .col_expr(project_statuses::Column::IsDoneState, Expr::value(false))
+            .col_expr(project_statuses::Column::IsDefaultDone, Expr::value(false))
             .filter(project_statuses::Column::ProjectId.eq(project_id))
             .exec(&txn)
             .await?;
-
-        if !previous_done_ids.is_empty() {
-            tasks::Entity::update_many()
-                .col_expr(
-                    tasks::Column::CompletedAt,
-                    Expr::value(Option::<chrono::DateTime<chrono::Utc>>::None),
-                )
-                .filter(tasks::Column::StatusId.is_in(previous_done_ids))
-                .filter(tasks::Column::DeletedAt.is_null())
-                .exec(&txn)
-                .await?;
-        }
     }
     let status = project_statuses::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -127,6 +140,7 @@ pub async fn create_status(
         position: Set(payload.position),
         is_default: Set(payload.is_default),
         is_done_state: Set(payload.is_done_state),
+        is_default_done: Set(is_default_done),
         created_at: Set(chrono::Utc::now().into()),
     }
     .insert(&txn)
@@ -183,7 +197,21 @@ pub async fn update_status(
     if payload.is_default == Some(false) && status.is_default {
         return Err(AppError::BadRequest);
     }
-    if payload.is_done_state == Some(false) && old_is_done_state {
+    if payload.is_default_done == Some(false) && status.is_default_done {
+        return Err(AppError::BadRequest);
+    }
+    // 完了ステータスは複数持てるが、0 個にはできない（完了の行き先が無くなる）。
+    let demoting_done = payload.is_done_state == Some(false) && old_is_done_state;
+    if demoting_done
+        && !statuses
+            .iter()
+            .any(|status| status.is_done_state && status.id != id)
+    {
+        return Err(AppError::BadRequest);
+    }
+    // 既定の完了は完了ステータスにしか付けられない。
+    if payload.is_default_done == Some(true) && !payload.is_done_state.unwrap_or(old_is_done_state)
+    {
         return Err(AppError::BadRequest);
     }
     let mut active: project_statuses::ActiveModel = status.into();
@@ -195,31 +223,27 @@ pub async fn update_status(
             .exec(&txn)
             .await?;
     }
-    if payload.is_done_state == Some(true) && !old_is_done_state {
-        let previous_done_ids: Vec<Uuid> = statuses
-            .iter()
-            .filter(|status| status.is_done_state && status.id != id)
-            .map(|status| status.id)
-            .collect();
-
+    if payload.is_default_done == Some(true) {
         project_statuses::Entity::update_many()
-            .col_expr(project_statuses::Column::IsDoneState, Expr::value(false))
+            .col_expr(project_statuses::Column::IsDefaultDone, Expr::value(false))
             .filter(project_statuses::Column::ProjectId.eq(project_id))
             .filter(project_statuses::Column::Id.ne(id))
             .exec(&txn)
             .await?;
-
-        if !previous_done_ids.is_empty() {
-            tasks::Entity::update_many()
-                .col_expr(
-                    tasks::Column::CompletedAt,
-                    Expr::value(Option::<chrono::DateTime<chrono::Utc>>::None),
-                )
-                .filter(tasks::Column::StatusId.is_in(previous_done_ids))
-                .filter(tasks::Column::DeletedAt.is_null())
-                .exec(&txn)
-                .await?;
-        }
+    }
+    if demoting_done {
+        // 完了でなくなったので、このステータスに居るタスクの完了時刻を消す。
+        tasks::Entity::update_many()
+            .col_expr(
+                tasks::Column::CompletedAt,
+                Expr::value(Option::<chrono::DateTime<chrono::Utc>>::None),
+            )
+            .filter(tasks::Column::StatusId.eq(id))
+            .filter(tasks::Column::DeletedAt.is_null())
+            .exec(&txn)
+            .await?;
+    }
+    if payload.is_done_state == Some(true) && !old_is_done_state {
         tasks::Entity::update_many()
             .col_expr(
                 tasks::Column::CompletedAt,
@@ -248,7 +272,16 @@ pub async fn update_status(
     if let Some(v) = payload.is_done_state {
         active.is_done_state = Set(v);
     }
+    if let Some(v) = payload.is_default_done {
+        active.is_default_done = Set(v);
+    }
+    if demoting_done {
+        active.is_default_done = Set(false);
+    }
     let updated = active.update(&txn).await?;
+    if demoting_done {
+        ensure_default_done(&txn, project_id).await?;
+    }
 
     txn.commit().await?;
     Ok(Json(updated.into()))
@@ -365,6 +398,11 @@ pub async fn delete_status(
         .await?;
 
     let txn = state.db.begin().await?;
+    projects::Entity::find_by_id(project_id)
+        .lock(LockType::Update)
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
     let statuses = project_statuses::Entity::find()
         .filter(project_statuses::Column::ProjectId.eq(project_id))
         .lock(LockType::Update)
@@ -435,6 +473,7 @@ pub async fn delete_status(
             .exec(&txn)
             .await?;
     }
+    ensure_default_done(&txn, project_id).await?;
     txn.commit().await?;
 
     Ok(StatusCode::NO_CONTENT)

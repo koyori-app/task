@@ -25,6 +25,7 @@ const SCOPE_DESCRIPTIONS: Record<TokenScope, string> = {
   'write:review': 'レビュー指摘の投稿・状態変更',
   'read:drive': 'ドライブのファイル参照',
   'write:drive': 'ドライブのファイル管理',
+  'admin:project': 'プロジェクト層のすべての操作（read:*/write:* を包含。テナント管理は含まない）',
   'admin:tenant': 'テナント内のすべての操作（他のスコープを包含）',
 };
 

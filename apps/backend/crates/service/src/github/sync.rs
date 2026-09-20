@@ -88,7 +88,7 @@ async fn require_integration(
 }
 
 /// Issue の開閉状態に対応するステータスを引く。
-/// closed は `is_done_state`、open は既定ステータス。
+/// closed は既定の完了ステータス（印が無ければ並び順で最初の完了）、open は既定ステータス。
 async fn resolve_status<C: ConnectionTrait>(
     db: &C,
     project_id: Uuid,
@@ -102,6 +102,7 @@ async fn resolve_status<C: ConnectionTrait>(
     project_statuses::Entity::find()
         .filter(project_statuses::Column::ProjectId.eq(project_id))
         .filter(column.eq(true))
+        .order_by_desc(project_statuses::Column::IsDefaultDone)
         .order_by_asc(project_statuses::Column::Position)
         .one(db)
         .await?
@@ -135,7 +136,7 @@ pub async fn apply_issue(
         .one(&txn)
         .await?;
 
-    if let Some(link) = link {
+    let (task_id, event_type) = if let Some(link) = link {
         if issue.updated_at <= link.github_updated_at.with_timezone(&chrono::Utc) {
             // すでに新しい内容を適用済み。遅延・再送された古いイベントは捨てる。
             // GitHub の updated_at は秒精度なので、書き戻しと同じ秒に起きた対向編集も
@@ -183,11 +184,13 @@ pub async fn apply_issue(
         active.updated_at = Set(chrono::Utc::now().into());
         active.update(&txn).await?;
 
+        let task_id = link.task_id;
         let mut link_active: github_issue_links::ActiveModel = link.into();
         link_active.synced_hash = Set(hash);
         link_active.github_updated_at = Set(issue.updated_at.into());
         link_active.updated_at = Set(chrono::Utc::now().into());
         link_active.update(&txn).await?;
+        (task_id, "github_issue_synced")
     } else {
         let status = resolve_status(&txn, project_id, content.closed).await?;
         let seq_id = crate::tasks::next_seq_id(&txn, project_id).await?;
@@ -230,7 +233,21 @@ pub async fn apply_issue(
         }
         .insert(&txn)
         .await?;
-    }
+        (task.id, "github_issue_imported")
+    };
+
+    crate::task_activities::record_activity(
+        &txn,
+        task_id,
+        None,
+        event_type,
+        serde_json::json!({
+            "repo_owner": integration.repo_owner,
+            "repo_name": integration.repo_name,
+            "issue_number": issue.number,
+        }),
+    )
+    .await?;
 
     txn.commit().await?;
     Ok(())

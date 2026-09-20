@@ -7,6 +7,8 @@ on:
     paths:
       - apps/frontend/**
       - .github/workflows/chromatic.yml
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
 
 concurrency:
   group: chromatic-${{ github.ref }}
@@ -31,14 +33,14 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: apps/frontend/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
 
       - name: Build Storybook
         run: pnpm build-storybook --stats-json
 
-      - uses: chromaui/action@4cc98810d00b34b8f9e89d454d64a8ac3d088340 # v18.7.1
+      - uses: chromaui/action@259eda5f0e44c0c1eab38b672f1c4c967cc969b7 # v18.8.1
         with:
           workingDir: apps/frontend
           projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}

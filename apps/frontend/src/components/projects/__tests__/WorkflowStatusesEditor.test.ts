@@ -53,6 +53,7 @@ const baseStatuses: ProjectStatus[] = [
     position: 0,
     is_default: true,
     is_done_state: false,
+    is_default_done: false,
     created_at: '2026-01-01T00:00:00Z',
   },
   {
@@ -63,6 +64,7 @@ const baseStatuses: ProjectStatus[] = [
     position: 1,
     is_default: false,
     is_done_state: false,
+    is_default_done: false,
     created_at: '2026-01-01T00:00:00Z',
   },
   {
@@ -73,6 +75,7 @@ const baseStatuses: ProjectStatus[] = [
     position: 2,
     is_default: false,
     is_done_state: true,
+    is_default_done: true,
     created_at: '2026-01-01T00:00:00Z',
   },
 ];
@@ -81,7 +84,7 @@ let statuses: ProjectStatus[];
 let wrapper: VueWrapper;
 let queryClient: QueryClient;
 
-function checkbox(statusName: string, label: 'Default' | 'Done state') {
+function checkbox(statusName: string, label: 'Default' | 'Done state' | '既定の完了') {
   const row = wrapper
     .findAll('li')
     .find((item) => item.find(`input[aria-label="${statusName}の名前"]`).exists());
@@ -185,6 +188,58 @@ describe('WorkflowStatusesEditor', () => {
       },
       body: { is_done_state: true },
     });
+  });
+
+  it('Done state は複数付けられ、外すと is_done_state: false を送る', async () => {
+    await mountEditor([
+      baseStatuses[0]!,
+      { ...baseStatuses[1]!, is_done_state: true },
+      baseStatuses[2]!,
+    ]);
+
+    await checkbox('In Progress', 'Done state').trigger('click');
+    await flushPromises();
+    expect(updateMutateAsync).toHaveBeenCalledTimes(1);
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: {
+        path: { tenant_id: TENANT_ID, project_id: PROJECT_ID, id: PROGRESS_ID },
+      },
+      body: { is_done_state: false },
+    });
+  });
+
+  it('唯一の Done state は外せない', async () => {
+    await mountEditor();
+
+    await checkbox('Done', 'Done state').trigger('click');
+    await flushPromises();
+    expect(updateMutateAsync).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain('完了ステータスは1つ以上必要です');
+  });
+
+  it('既定の完了は完了ステータスにだけ出て、切替は is_default_done: true を送る', async () => {
+    await mountEditor([
+      baseStatuses[0]!,
+      { ...baseStatuses[1]!, is_done_state: true },
+      baseStatuses[2]!,
+    ]);
+
+    expect(() => checkbox('Todo', '既定の完了')).toThrow();
+    await checkbox('In Progress', '既定の完了').trigger('click');
+    await flushPromises();
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: {
+        path: { tenant_id: TENANT_ID, project_id: PROJECT_ID, id: PROGRESS_ID },
+      },
+      body: { is_default_done: true },
+    });
+
+    // 既に既定の完了になっているものを押し直しても PUT は飛ばない。
+    updateMutateAsync.mockClear();
+    await checkbox('Done', '既定の完了').trigger('click');
+    await flushPromises();
+    expect(updateMutateAsync).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain('既定の完了は常に1つ必要です');
   });
 
   it('Default/Done mutation の失敗時にも一覧を再取得して DB と同期する', async () => {

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use entity::tenant_members::TenantRole;
 use entity::tenants;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -13,6 +14,8 @@ pub struct TenantResponse {
     pub name: String,
     pub description: String,
     pub icon_url: String,
+    #[schema(nullable)]
+    pub icon_emoji: Option<String>,
     #[schema(value_type = String, format = "uuid")]
     pub owner_id: Uuid,
     #[schema(nullable)]
@@ -28,6 +31,7 @@ impl From<tenants::Model> for TenantResponse {
             name: model.name,
             description: model.description,
             icon_url: model.icon_url,
+            icon_emoji: model.icon_emoji,
             owner_id: model.owner_id,
             drive_quota_bytes: model.drive_quota_bytes,
             require_2fa: model.require_2fa,
@@ -44,6 +48,7 @@ pub struct CreateTenantRequest {
     #[serde(default)]
     pub description: String,
     #[serde(default)]
+    #[validate(length(max = 700_000))]
     pub icon_url: String,
 }
 
@@ -52,5 +57,89 @@ pub struct UpdateTenantRequest {
     #[validate(length(min = 1))]
     pub name: Option<String>,
     pub description: Option<String>,
+    /// data URL を受け付ける場合も DB 行と一覧レスポンスを膨らませない上限を設ける。
+    #[validate(length(max = 700_000))]
     pub icon_url: Option<String>,
+    /// 画像を持たないテナントのアイコン。projects.icon_emoji と同じ上限。
+    #[validate(length(max = 8))]
+    pub icon_emoji: Option<String>,
+}
+
+/// テナント一覧における、この利用者から見た関わり方の印。
+/// `TenantRole` と同じ流儀（PascalCase の文字列）で返す。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+pub enum TenantMembershipKind {
+    /// `tenants.owner_id` の本人
+    Owner,
+    /// `tenant_members` に行がある（ロールの内訳は `TenantRole` が別途表す）
+    Member,
+    /// project-only の客分（`project_members` の明示指定だけで関わる）
+    Guest,
+}
+
+/// `GET /v1/tenants` 専用のレスポンス。テナントの欄に `membership` の印を加えたもの。
+///
+/// 客分（membership=Guest）のテナントは一覧に出る。客分に開く tenant-wide の口は
+/// プロジェクト一覧・My Tasks（いずれも己の分に絞る）だけで、テナント取得などは
+/// 開かないため、クライアントはこの印で開ける口を見分ける。
+/// 取得・作成・更新は従来どおり `TenantResponse`。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TenantListItemResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    pub display_id: String,
+    pub name: String,
+    pub description: String,
+    pub icon_url: String,
+    #[schema(nullable)]
+    pub icon_emoji: Option<String>,
+    /// テナント設定の欄。客分（membership=Guest）には返さない（null）
+    #[schema(value_type = Option<String>, format = "uuid", nullable)]
+    pub owner_id: Option<Uuid>,
+    /// テナント設定の欄。客分（membership=Guest）には返さない（null）
+    #[schema(nullable)]
+    pub drive_quota_bytes: Option<i64>,
+    /// テナント設定の欄。客分（membership=Guest）には返さない（null）
+    #[schema(nullable)]
+    pub require_2fa: Option<bool>,
+    /// この利用者から見た関わり方（Owner / Member / Guest）
+    pub membership: TenantMembershipKind,
+    /// membership=Member の時だけ、その member の role（Admin / Member / Viewer）。
+    /// Owner と Guest では null。Admin 境界の口（鍵の発行など）を GUI が
+    /// 選択肢を作る段で見分けるための欄。
+    #[schema(nullable)]
+    pub member_role: Option<TenantRole>,
+}
+
+impl TenantListItemResponse {
+    pub fn from_parts(
+        model: tenants::Model,
+        membership: TenantMembershipKind,
+        member_role: Option<TenantRole>,
+    ) -> Self {
+        // 客分にはテナント設定の欄を返さない（一覧の表示に要る display_id / name /
+        // description / icon_url は残す）
+        let is_guest = membership == TenantMembershipKind::Guest;
+        // member_role は Member の印にだけ意味を持たせる（Owner/Guest では常に null）。
+        let member_role = (membership == TenantMembershipKind::Member)
+            .then_some(member_role)
+            .flatten();
+        Self {
+            id: model.id,
+            display_id: model.display_id,
+            name: model.name,
+            description: model.description,
+            icon_url: model.icon_url,
+            icon_emoji: model.icon_emoji,
+            owner_id: (!is_guest).then_some(model.owner_id),
+            drive_quota_bytes: if is_guest {
+                None
+            } else {
+                model.drive_quota_bytes
+            },
+            require_2fa: (!is_guest).then_some(model.require_2fa),
+            membership,
+            member_role,
+        }
+    }
 }

@@ -508,6 +508,8 @@ pub async fn close_deferred_task<C: ConnectionTrait>(
     let done = project_statuses::Entity::find()
         .filter(project_statuses::Column::ProjectId.eq(project_id))
         .filter(project_statuses::Column::IsDoneState.eq(true))
+        // 既定の完了へ移す。印が無ければ並び順で最初の完了。
+        .order_by_desc(project_statuses::Column::IsDefaultDone)
         .order_by_asc(project_statuses::Column::Position)
         .one(db)
         .await?;

@@ -93,6 +93,7 @@ pub fn status_json(
     name: &str,
     is_default: bool,
     is_done_state: bool,
+    is_default_done: bool,
     position: i16,
 ) -> serde_json::Value {
     serde_json::json!({
@@ -103,6 +104,7 @@ pub fn status_json(
         "position": position,
         "is_default": is_default,
         "is_done_state": is_done_state,
+        "is_default_done": is_default_done,
         "created_at": "2026-01-01T00:00:00Z",
     })
 }
@@ -173,6 +175,29 @@ pub fn finding_json() -> serde_json::Value {
         "updated_at": "2026-01-01T00:00:00Z",
         "transitions": [],
     })
+}
+
+/// 呼ばれるたびに次の応答へ進むモック。同じ URL でサーバー側の状態変化を表す。
+/// 最後の応答はそれ以降も返し続ける。
+pub struct Changing(std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>);
+
+impl Changing {
+    pub fn new(bodies: Vec<serde_json::Value>) -> Self {
+        assert!(!bodies.is_empty(), "応答を 1 つ以上渡すこと");
+        Self(std::sync::Mutex::new(bodies.into()))
+    }
+}
+
+impl wiremock::Respond for Changing {
+    fn respond(&self, _request: &wiremock::Request) -> wiremock::ResponseTemplate {
+        let mut bodies = self.0.lock().unwrap();
+        let body = if bodies.len() > 1 {
+            bodies.pop_front().expect("応答が残っている")
+        } else {
+            bodies[0].clone()
+        };
+        wiremock::ResponseTemplate::new(200).set_body_json(body)
+    }
 }
 
 pub fn project_path(suffix: &str) -> String {

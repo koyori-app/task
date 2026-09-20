@@ -12,6 +12,7 @@ import { KFM_CONTENT_CLASS } from '@/lib/remark-gfm/content-class';
 // (器 .kfm-content のスタイルは GFM サイドカー側 — 他 story と同じ二枚組＋mermaid 独自分)
 import '@/lib/remark-gfm/style.css';
 import '@/lib/rehype-starry-night/style.css';
+import '@/lib/rehype-kfm-code/style.css';
 import '@/lib/remark-kfm-mermaid/style.css';
 // 本番では +client.ts が行う client 登録を story でも同じ入口で行う (二重 define は registry 側で防止)
 import { registerKfmCustomElements } from '@/lib/markup-renderer/_client-registry';
@@ -101,23 +102,33 @@ export const State: Story = {
 };
 
 export const C4Context: Story = {
-  name: 'C4（data:image アイコン付き・正常出力の回帰）',
+  name: 'C4（Person が絵として出る・正常出力の回帰）',
   args: { html: c4Html },
   parameters: {
     docs: {
       description: {
         story:
-          '壊れたら: C4 は Person アイコンを <image xlink:href="data:image/png;base64,…"> で埋める唯一の図種。error へ倒れたら、挿入前検査 (element.ts) が data: を画像 sink まで一律拒否へ戻った崩れ——実 mermaid 出力を通すこの story がその回帰アンカー。',
+          '壊れたら: C4 の Person が絵として出なくなった崩れ。mermaid 11 は <image xlink:href="data:image/png;base64,…">（挿入前検査 (element.ts) が data: を画像 sink まで許すことの回帰アンカーを兼ねる）、12 は unified renderer の vector 形（g.c4-person の頭の circle ＋ 胴の rect）で描く。どちらの姿も無ければ、renderer の崩れか挿入前検査の退行。',
       },
     },
   },
   play: async ({ canvasElement }) => {
     const element = await expectRendered(canvasElement);
-    // 検査を通って挿入された実出力に data:image の Person アイコンが実在することまで測る
-    const icon = element.shadowRoot?.querySelector('image');
-    await expect(icon).not.toBeNull();
-    const href = icon?.getAttribute('xlink:href') ?? icon?.getAttribute('href') ?? '';
-    await expect(href.startsWith('data:image/')).toBe(true);
+    // 「Person が絵として出る」ことの釘。版で姿が違う:
+    //   mermaid 11: <image xlink:href="data:image/png;base64,…">（PNG 埋め込み）
+    //   mermaid 12: <g class="… c4-person"> の中の <circle>（頭）＋ rect（胴）の vector 形
+    // どちらか一方が実在すれば絵は出ておる。単なる null 裏返しにせぬ——
+    // 見つけた方の中身（data: 接頭辞 / person 形の頭）まで検める
+    const shadow = element.shadowRoot;
+    const icon = shadow?.querySelector('image') ?? null;
+    const person = shadow?.querySelector('g.c4-person') ?? null;
+    const personHead = person?.querySelector('circle') ?? null;
+    const personBody = person?.querySelector('rect') ?? null;
+    await expect(icon !== null || (personHead !== null && personBody !== null)).toBe(true);
+    if (icon) {
+      const href = icon.getAttribute('xlink:href') ?? icon.getAttribute('href') ?? '';
+      await expect(href.startsWith('data:image/')).toBe(true);
+    }
   },
 };
 

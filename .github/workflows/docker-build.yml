@@ -16,7 +16,7 @@ on:
       - 'apps/backend/Cargo.lock'
       - 'apps/frontend/Dockerfile'
       - 'apps/frontend/package.json'
-      - 'apps/frontend/pnpm-lock.yaml'
+      - 'pnpm-lock.yaml'
       - 'docker-compose.yml'
       - '.dockerignore'
       - 'rust-toolchain.toml'
@@ -33,7 +33,7 @@ on:
       - 'apps/backend/Cargo.lock'
       - 'apps/frontend/Dockerfile'
       - 'apps/frontend/package.json'
-      - 'apps/frontend/pnpm-lock.yaml'
+      - 'pnpm-lock.yaml'
       - 'docker-compose.yml'
       - '.dockerignore'
       - 'rust-toolchain.toml'
@@ -99,4 +99,5 @@ jobs:
           platforms: linux/amd64
           push: false
           cache-from: type=gha,scope=devbuild-${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=devbuild-${{ matrix.name }}
+          # レイヤーキャッシュは main だけが書く（理由は backend-test.yml の rust-cache と同じ）
+          cache-to: ${{ github.ref == 'refs/heads/main' && format('type=gha,mode=max,scope=devbuild-{0}', matrix.name) || '' }}

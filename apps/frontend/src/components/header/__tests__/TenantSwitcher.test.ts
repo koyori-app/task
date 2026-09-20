@@ -1,6 +1,9 @@
 import { defineComponent, h, inject, provide, ref, type Ref } from 'vue';
+import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
+import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, describe, expect, it } from 'vitest';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { useAuthStore } from '@/stores/auth';
 import type { Tenant } from '@/stores/tenant';
 import SidebarProvider from '../../ui/sidebar/SidebarProvider.vue';
 import TenantSwitcher from '../TenantSwitcher.vue';
@@ -16,6 +19,7 @@ const tenants: Tenant[] = [
     icon_url: 'https://example.com/alpha.png',
     owner_id: 'owner-1',
     require_2fa: false,
+    membership: 'Owner' as const,
   },
   {
     id: 'tenant-2',
@@ -25,6 +29,7 @@ const tenants: Tenant[] = [
     icon_url: '',
     owner_id: 'owner-1',
     require_2fa: false,
+    membership: 'Owner' as const,
   },
 ];
 
@@ -79,20 +84,46 @@ const ButtonStub = defineComponent({
   template: '<button v-bind="$attrs"><slot /></button>',
 });
 
-function mountSwitcher(props: {
-  tenants: Tenant[];
-  selectedTenantId: string | null;
-  loading?: boolean;
-  error?: string | null;
-}) {
+/** `authUserId` を渡すと、`/me` がまだ返っていない初回描画を再現できる。 */
+function mountSwitcher(
+  props: {
+    tenants: Tenant[];
+    selectedTenantId: string | null;
+    loading?: boolean;
+    error?: string | null;
+  },
+  authUserId?: string,
+) {
+  const pinia = createPinia();
+  setActivePinia(pinia);
+  if (authUserId) {
+    useAuthStore().setUser({
+      id: authUserId,
+      email: 'owner@example.com',
+      username: 'owner',
+      email_verified: true,
+      is_admin: false,
+      is_suspended: false,
+      totp_enabled: false,
+    });
+  }
   return mount(
     {
       components: { SidebarProvider, TenantSwitcher },
       template: '<SidebarProvider><TenantSwitcher v-bind="props" /></SidebarProvider>',
-      setup: () => ({ props }),
+      setup: () => {
+        provide(
+          VUE_QUERY_CLIENT,
+          new QueryClient({
+            defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
+          }),
+        );
+        return { props };
+      },
     },
     {
       global: {
+        plugins: [pinia],
         stubs: {
           DropdownMenu,
           DropdownMenuTrigger,
@@ -130,8 +161,8 @@ describe('TenantSwitcher', () => {
   it('shows the empty state when the user has no tenant memberships', async () => {
     const wrapper = mountSwitcher({ tenants: [], selectedTenantId: null });
 
+    // ヘッダーのトリガーは 1 行なので、状態は主文で伝える
     expect(wrapper.text()).toContain('所属テナントなし');
-    expect(wrapper.text()).toContain('利用可能なテナントがありません');
 
     await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
     expect(wrapper.get('[data-testid="tenant-switcher-menu"]').text()).toContain(
@@ -165,10 +196,45 @@ describe('TenantSwitcher', () => {
     expect(wrapper.findComponent(TenantSwitcher).emitted('retry')).toEqual([[]]);
   });
 
+  it('hides the members link from a project-only guest', async () => {
+    const guest: Tenant = { ...tenants[0], membership: 'Guest' as const };
+    const wrapper = mountSwitcher({ tenants: [guest], selectedTenantId: guest.id });
+
+    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
+    const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
+    // 客分はメンバー一覧 API が 403 になるので、押せば必ず失敗する導線は出さない
+    expect(menu.find('a[href="/alpha/settings/members"]').exists()).toBe(false);
+  });
+
+  it('keeps the members link for a tenant member', async () => {
+    const memberTenant: Tenant = { ...tenants[0], membership: 'Member' as const };
+    const wrapper = mountSwitcher({ tenants: [memberTenant], selectedTenantId: memberTenant.id });
+
+    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
+    const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
+    expect(menu.find('a[href="/alpha/settings/members"]').exists()).toBe(true);
+  });
+
+  it('keeps the tenant settings link before /me resolves', async () => {
+    // 永続化された利用者だけが居る初回描画。AppHeader の歯車と出方を揃える
+    const wrapper = mountSwitcher({ tenants, selectedTenantId: 'tenant-1' }, 'owner-1');
+
+    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
+    const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
+    expect(menu.find('a[href="/alpha/settings"]').exists()).toBe(true);
+  });
+
+  it('hides the tenant settings link from a non-owner', async () => {
+    const wrapper = mountSwitcher({ tenants, selectedTenantId: 'tenant-1' }, 'member-1');
+
+    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
+    const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
+    expect(menu.find('a[href="/alpha/settings"]').exists()).toBe(false);
+  });
+
   it('shows not-found instead of silently displaying the first tenant', () => {
     const wrapper = mountSwitcher({ tenants, selectedTenantId: null });
 
     expect(wrapper.text()).toContain('指定されたテナントが見つかりません');
-    expect(wrapper.text()).toContain('URLを確認してください');
   });
 });

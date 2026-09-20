@@ -63,6 +63,7 @@ async fn setup() -> Fixture {
             position: Set(position),
             is_default: Set(is_default),
             is_done_state: Set(is_done),
+            is_default_done: Set(is_done),
             created_at: Set(chrono::Utc::now().into()),
         }
         .insert(&app.state.db)

@@ -119,6 +119,7 @@ async fn seed_statuses(app: &TestApp, project_id: Uuid) {
             position: Set(position),
             is_default: Set(is_default),
             is_done_state: Set(is_done),
+            is_default_done: Set(is_done),
             created_at: Set(chrono::Utc::now().into()),
         }
         .insert(&app.state.db)
@@ -174,6 +175,7 @@ fn job_state(app: &TestApp) -> job::JobState {
         smtp_client: app.state.smtp_client.clone(),
         http_client: app.state.http_client.clone(),
         review_summary_storage: app.state.review_summary_storage.clone(),
+        pg_pool: app.state.pg_pool.clone(),
     }
 }
 

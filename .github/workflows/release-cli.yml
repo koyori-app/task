@@ -90,6 +90,10 @@ jobs:
         with:
           workspaces: apps/backend -> target
           key: ${{ matrix.target }}
+          # このワークフローは main では走らないので main の分を作れず、PR で保存しても
+          # 同じ PR の再 push でしか読めない。target ごとに 340 MB を PR 単位で溜めると
+          # 10 GB の上限で他ジョブの main の分を追い出すため保存しない
+          save-if: false
 
       # タグの版をそのままバイナリへ入れる。タグ以外のビルドはクレートの版のまま
       - name: Derive the version from the tag

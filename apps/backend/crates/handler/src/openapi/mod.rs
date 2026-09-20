@@ -11,8 +11,9 @@ pub use crate::error::ServerError;
 pub use responses::{
     CredentialErrors, CrudErrors, DriveFolderErrors, InternalOnlyError, OAuthErrors,
     PasswordChangeErrors, PasswordResetCompleteErrors, PasswordResetRequestErrors,
-    PasswordResetVerifyErrors, PublicShareErrors, RegisterErrors, ResendVerificationErrors,
-    SessionAuthErrors, TenantCreateErrors, UnauthorizedErrors, VerifyEmailErrors,
+    PasswordResetVerifyErrors, PersonalTokenAuthErrors, PublicShareErrors, RegisterErrors,
+    ResendVerificationErrors, SessionAuthErrors, TenantCreateErrors, UnauthorizedErrors,
+    VerifyEmailErrors,
 };
 
 /// スキーマのうち、ハンドラだけでは OpenAPI に載らないものを登録する。

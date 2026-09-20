@@ -16,11 +16,15 @@ const user: components['schemas']['UserResponse'] = {
   is_admin: false,
   is_suspended: false,
   totp_enabled: false,
+  has_password: true,
   bio: null,
   avatar_url: null,
 };
 
-function tenant(ownerId: string): components['schemas']['TenantResponse'] {
+function tenant(
+  ownerId: string,
+  memberRole: components['schemas']['TenantRole'] | null = null,
+): components['schemas']['TenantListItemResponse'] {
   return {
     id: TENANT_ID,
     display_id: 'acme',
@@ -30,6 +34,9 @@ function tenant(ownerId: string): components['schemas']['TenantResponse'] {
     owner_id: ownerId,
     drive_quota_bytes: null,
     require_2fa: false,
+    // API と同じ形: owner_id が自分なら Owner、さもなくば Member(role は指定次第)
+    membership: ownerId === USER_ID ? 'Owner' : 'Member',
+    member_role: ownerId === USER_ID ? null : memberRole,
   };
 }
 
@@ -54,6 +61,7 @@ function token(
 type MockState = {
   tokens: components['schemas']['PersonalTokenResponse'][];
   tenantOwnerId?: string;
+  tenantMemberRole?: components['schemas']['TenantRole'] | null;
   createStatus?: number;
   deleteStatus?: number;
 };
@@ -71,7 +79,7 @@ function stubFetch(state: MockState) {
     const pathname = new URL(req.url, 'http://localhost').pathname;
 
     if (req.method === 'GET' && pathname.endsWith('/v1/tenants')) {
-      return jsonResponse([tenant(state.tenantOwnerId ?? USER_ID)]);
+      return jsonResponse([tenant(state.tenantOwnerId ?? USER_ID, state.tenantMemberRole ?? null)]);
     }
     if (req.method === 'GET' && pathname.endsWith('/v1/personal_tokens')) {
       return jsonResponse(state.tokens);
@@ -343,7 +351,7 @@ describe('AccessTokensSection', () => {
     expect(wrapper.text()).toContain('スコープを 1 つ以上選択してください。');
   });
 
-  it('403 のときはオーナー限定であることを伝える', async () => {
+  it('403 のときはオーナーと Admin に限ることを伝える', async () => {
     stubFetch({ tokens: [], createStatus: 403 });
     const wrapper = mountSection();
     await flushPromises();
@@ -357,7 +365,7 @@ describe('AccessTokensSection', () => {
     await wrapper.find('form').trigger('submit');
     await flushPromises();
 
-    expect(wrapper.text()).toContain('オーナーだけです。');
+    expect(wrapper.text()).toContain('オーナーと Admin だけです。');
   });
 
   it('取り消しは確認ダイアログを経て DELETE を送り、一覧から消す', async () => {
@@ -408,12 +416,33 @@ describe('AccessTokensSection', () => {
     expect(wrapper.text()).toContain('CLI on MacBook');
   });
 
-  it('自分がオーナーのテナントが無ければ発行ボタンを無効にする', async () => {
+  it('オーナーでも Admin でもなければ、発行ボタンを無効にし理由を出す', async () => {
     stubFetch({ tokens: [], tenantOwnerId: OTHER_USER_ID });
     const wrapper = mountSection();
     await flushPromises();
 
-    expect(wrapper.text()).toContain('自分がオーナーのテナントだけです。');
+    expect(wrapper.text()).toContain('テナントオーナーと Admin だけです。');
     expect(bodyButton('トークンを発行')?.disabled).toBe(true);
+  });
+
+  it('候補が一つでも、どのテナントに紐づくかをフォームに出す', async () => {
+    stubFetch({ tokens: [] });
+    const wrapper = mountSection();
+    await flushPromises();
+
+    clickBodyButton('トークンを発行');
+    await flushPromises();
+
+    expect(wrapper.find('#token-tenant').exists()).toBe(true);
+    expect(wrapper.text()).toContain('Acme Inc');
+  });
+
+  it('role が Admin の member なら発行ボタンが有効になる', async () => {
+    stubFetch({ tokens: [], tenantOwnerId: OTHER_USER_ID, tenantMemberRole: 'Admin' });
+    const wrapper = mountSection();
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain('テナントオーナーと Admin だけです。');
+    expect(bodyButton('トークンを発行')?.disabled).toBe(false);
   });
 });

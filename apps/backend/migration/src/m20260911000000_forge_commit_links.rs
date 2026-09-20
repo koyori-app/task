@@ -1,0 +1,106 @@
+use sea_orm_migration::prelude::*;
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+/// コミットとタスクのリンク（docs/features/tasks/9.github-tasks.md §2 / §3 のうちコミット分）。
+/// PR 実体（forge_pull_requests）に依存する表は PR 連携で足す。
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .get_connection()
+            .execute_unprepared(
+                r#"
+            CREATE TABLE forge_commits (
+                id            UUID PRIMARY KEY,
+                project_id    UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                host          VARCHAR NOT NULL,
+                host_url      VARCHAR NOT NULL,
+                repo_owner    VARCHAR NOT NULL,
+                repo_name     VARCHAR NOT NULL,
+                sha           VARCHAR(40) NOT NULL,
+                message       TEXT NOT NULL,
+                author_handle VARCHAR NOT NULL DEFAULT '',
+                author_name   VARCHAR NOT NULL,
+                committed_at  TIMESTAMPTZ NOT NULL,
+                html_url      VARCHAR NOT NULL,
+                created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                CONSTRAINT uq_forge_commits_repo_sha
+                    UNIQUE (project_id, host, host_url, repo_owner, repo_name, sha)
+            )
+        "#,
+            )
+            .await?;
+        manager
+            .get_connection()
+            .execute_unprepared(
+                r#"
+            CREATE TABLE forge_commit_links (
+                commit_id  UUID NOT NULL REFERENCES forge_commits(id) ON DELETE CASCADE,
+                task_id    UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (commit_id, task_id)
+            )
+        "#,
+            )
+            .await?;
+        // タスク側から引く（タスク削除のカスケードも同じ列を使う）
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "CREATE INDEX idx_forge_commit_links_task ON forge_commit_links(task_id)",
+            )
+            .await?;
+        // 配信 ID はホストのインスタンス内でしか一意でないので host_url まで含める
+        manager
+            .get_connection()
+            .execute_unprepared(
+                r#"
+            CREATE TABLE forge_webhook_deliveries (
+                id          UUID PRIMARY KEY,
+                host        VARCHAR NOT NULL,
+                host_url    VARCHAR NOT NULL,
+                delivery_id VARCHAR NOT NULL,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                CONSTRAINT uq_forge_webhook_deliveries_delivery
+                    UNIQUE (host, host_url, delivery_id)
+            )
+        "#,
+            )
+            .await?;
+        // 掃除ジョブ（§5。古い受信記録を 30 日で消す）が `created_at <` で引くので、
+        // 表ができた時点で張っておく。行が積もってから足すと CREATE INDEX が
+        // ACCESS EXCLUSIVE ロックで webhook の受信を止める
+        // （避けるための CONCURRENTLY はマイグレーションのトランザクション内では使えない）
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "CREATE INDEX idx_forge_webhook_deliveries_created_at
+                 ON forge_webhook_deliveries(created_at)",
+            )
+            .await?;
+        // 連携由来のアクティビティだけが冪等キーを持つ（既存行と手で行う操作は NULL のまま）。
+        // UNIQUE は NULL 同士を別物とみなすので NULL の行は何行でも積める。
+        // 部分 UNIQUE インデックスにすると、起動時の SeaORM の schema sync が entity に無い
+        // UNIQUE インデックスとして DROP CONSTRAINT しようとして落ちる
+        manager
+            .get_connection()
+            .execute_unprepared("ALTER TABLE task_activities ADD COLUMN dedupe_key VARCHAR UNIQUE")
+            .await?;
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "ALTER TABLE task_activities DROP COLUMN IF EXISTS dedupe_key;
+                 DROP TABLE IF EXISTS forge_webhook_deliveries;
+                 DROP TABLE IF EXISTS forge_commit_links;
+                 DROP TABLE IF EXISTS forge_commits;",
+            )
+            .await?;
+        Ok(())
+    }
+}

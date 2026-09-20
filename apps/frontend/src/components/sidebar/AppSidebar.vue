@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import type { SidebarProps } from '@/components/ui/sidebar';
-import { useAuthSession } from '@/composables/useAuthSession';
 import { useRouteAlignedTenantId } from '@/composables/useRouteAlignedTenantId';
-import { useAuthStore } from '@/stores/auth';
-import { useTenantStore, type Tenant } from '@/stores/tenant';
+import { useTenantStore } from '@/stores/tenant';
 import { useProjectsQuery } from '@/lib/api-vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { navigate } from 'vike/client/router';
@@ -12,25 +10,19 @@ import { computed, watch } from 'vue';
 import { ListTodo } from '@lucide/vue';
 import NavMain from '@/components/sidebar/NavMain.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
-import NavUser from '@/components/sidebar/NavUser.vue';
-import TenantSwitcher from '@/components/sidebar/TenantSwitcher.vue';
-
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarHeader,
-  SidebarRail,
-} from '@/components/ui/sidebar';
+  closeSidebarForProgrammaticNavigate,
+  shouldCloseSidebarOnNavigate,
+} from '@/components/sidebar/sidebar-navigation';
+
+import { Sidebar, SidebarContent, SidebarRail, useSidebar } from '@/components/ui/sidebar';
 
 const props = withDefaults(defineProps<SidebarProps>(), {
   collapsible: 'icon',
 });
 
 const pageContext = usePageContext();
-const authStore = useAuthStore();
 const tenantStore = useTenantStore();
-const { logout } = useAuthSession();
 
 const tenantSlug = computed(() => {
   const { tenant } = pageContext.routeParams;
@@ -56,29 +48,20 @@ const navProjectsLoading = computed(
 
 watch(tenantSlug, (slug) => void tenantStore.loadTenants(slug || undefined), { immediate: true });
 
-function selectTenant(tenant: Tenant) {
-  tenantStore.selectTenant(tenant);
-  if (tenant.display_id !== tenantSlug.value) {
-    // Use a full navigation so tenant-scoped application state is reset.
-    window.location.assign(`/${tenant.display_id}/my-tasks`);
-  }
-}
-
 function retryProjects() {
   void projectsQuery.refetch();
 }
 
 // ---- プロジェクト作成導線（編集・削除は各プロジェクトの設定ページへ集約） ----
+const { isMobile, setOpenMobile } = useSidebar();
+
 function onCreateProject() {
+  // 作成ボタンはリンクではないので、SidebarContent のイベント委譲では閉じられない
+  closeSidebarForProgrammaticNavigate(isMobile.value, setOpenMobile);
   void navigate(`/${tenantSlug.value}/projects/new`);
 }
 
 const data = computed(() => ({
-  user: {
-    name: authStore.user?.username ?? 'User',
-    email: authStore.user?.email ?? '',
-    avatar: authStore.user?.avatar_url ?? '',
-  },
   navMain: [
     {
       title: 'My Tasks',
@@ -88,21 +71,16 @@ const data = computed(() => ({
     },
   ],
 }));
+
+/** ナビから遷移したらモバイルのサイドバーを閉じる（判定は sidebar-navigation に切り出し）。 */
+function closeOnNavigate(event: MouseEvent) {
+  if (shouldCloseSidebarOnNavigate(event, isMobile.value)) setOpenMobile(false);
+}
 </script>
 
 <template>
   <Sidebar v-bind="props">
-    <SidebarHeader>
-      <TenantSwitcher
-        :tenants="tenantStore.tenants"
-        :selected-tenant-id="tenantStore.selectedTenantId"
-        :loading="tenantStore.isLoading"
-        :error="tenantStore.error"
-        @select="selectTenant"
-        @retry="tenantStore.loadTenants(tenantSlug)"
-      />
-    </SidebarHeader>
-    <SidebarContent>
+    <SidebarContent @click="closeOnNavigate">
       <!-- テナント外のページ（/settings/... など）ではテナント文脈が無く、
            リンク先も一覧も作れないためテナント依存のナビ自体を出さない。 -->
       <NavMain v-if="tenantSlug" :items="data.navMain" />
@@ -117,9 +95,6 @@ const data = computed(() => ({
         @create="onCreateProject"
       />
     </SidebarContent>
-    <SidebarFooter>
-      <NavUser :user="data.user" :on-logout="logout" />
-    </SidebarFooter>
     <SidebarRail />
   </Sidebar>
 </template>

@@ -17,6 +17,8 @@ pub struct ProjectStatusResponse {
     pub position: i16,
     pub is_default: bool,
     pub is_done_state: bool,
+    /// 「完了にする」操作で使う完了ステータス（プロジェクト内で 1 つ）。
+    pub is_default_done: bool,
     #[schema(value_type = String, format = "date-time")]
     pub created_at: DateTime<Utc>,
 }
@@ -31,6 +33,7 @@ impl From<project_statuses::Model> for ProjectStatusResponse {
             position: model.position,
             is_default: model.is_default,
             is_done_state: model.is_done_state,
+            is_default_done: model.is_default_done,
             created_at: model.created_at.with_timezone(&Utc),
         }
     }
@@ -47,6 +50,8 @@ pub struct CreateStatusRequest {
     pub is_default: bool,
     #[serde(default)]
     pub is_done_state: bool,
+    #[serde(default)]
+    pub is_default_done: bool,
 }
 
 #[derive(Validate, Deserialize, ToSchema)]
@@ -58,6 +63,7 @@ pub struct UpdateStatusRequest {
     pub position: Option<i16>,
     pub is_default: Option<bool>,
     pub is_done_state: Option<bool>,
+    pub is_default_done: Option<bool>,
 }
 
 #[derive(Deserialize, ToSchema)]

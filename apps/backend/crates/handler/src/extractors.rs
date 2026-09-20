@@ -5,11 +5,19 @@ use axum::{
     http::{header::AUTHORIZATION, request::Parts},
 };
 use axum_session_redispool::SessionRedisPool;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, prelude::Uuid};
+use sea_orm::{
+    ColumnTrait, EntityTrait, QueryFilter,
+    prelude::{DateTimeWithTimeZone, Uuid},
+};
 
 use entity::{projects, scopes::Scope, tenants, users};
 
-use crate::auth_helpers::{is_tenant_member, project_is_open_or_member};
+use std::collections::HashSet;
+
+use crate::auth_helpers::{
+    explicit_member_project_ids, is_shared_project_explicit_member, is_tenant_member,
+    project_is_open_or_member,
+};
 use crate::{AppState, error::AppError};
 use service::auth::{AuthError, authenticate_personal_token};
 
@@ -61,15 +69,18 @@ pub enum AuthMethod {
     Session,
     PersonalToken {
         token_id: Uuid,
+        token_name: String,
         tenant_id: Uuid,
         allowed_project_ids: Option<Vec<Uuid>>,
         scopes: entity::scopes::ScopeList,
+        expires_at: Option<DateTimeWithTimeZone>,
     },
 }
 
 /// 認証済みユーザー（セッションまたは PAT）
 pub struct AuthUser {
     pub user_id: Uuid,
+    pub username: String,
     pub method: AuthMethod,
 }
 
@@ -164,6 +175,34 @@ impl AuthUser {
         // 所属判定はセッションと同じ経路に通す。
         has_tenant_access(state, self.user_id, tenant_id, project_id).await
     }
+
+    /// テナント一覧系の 2 口（プロジェクト一覧・My Tasks）専用: 通常の所属判定に加えて
+    /// project-only の客分も通す。
+    ///
+    /// 戻り値は客分なら `Some(明示 member の project id 集合)` — 呼び出し側はこれに
+    /// 絞って返す。owner / tenant member なら `None` — 従来どおりの規則で返す。
+    /// PAT の束縛・scope の層は `ensure_tenant_access` と同じ
+    /// （別テナントへの口・project 制限付き PAT のテナント全体操作は従来どおり 403）。
+    /// 客分の判別は所属欠落の 403（tenant-membership-missing）だけを拾い、
+    /// それ以外の失敗はそのまま返す。
+    pub async fn ensure_tenant_access_or_guest_scope(
+        &self,
+        state: &AppState,
+        tenant_id: Uuid,
+    ) -> Result<Option<HashSet<Uuid>>, AppError> {
+        match self.ensure_tenant_access(state, tenant_id, None).await {
+            Ok(()) => Ok(None),
+            Err(AppError::ForbiddenDetail(detail)) if detail == "tenant-membership-missing" => {
+                let ids = explicit_member_project_ids(&state.db, tenant_id, self.user_id).await?;
+                if ids.is_empty() {
+                    Err(AppError::ForbiddenDetail(detail))
+                } else {
+                    Ok(Some(ids))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
 }
 
 async fn verify_project_in_tenant(
@@ -185,6 +224,12 @@ async fn verify_project_in_tenant(
 
 /// テナントに入れるか（＋プロジェクト指定時はその中に入れるか）。
 /// セッションと PAT の双方が通る唯一の所属判定。
+///
+/// project にだけ参加しテナントに参加しない客分（project-only guest）は、
+/// 名指しされたプロジェクトの中だけ通る。名指しの無いテナント全体の口は従来どおり 403
+/// （apps/backend/docs/tenant-project-authz.md の「所属の 3 層」）。
+/// 一覧系 2 口（プロジェクト一覧・My Tasks）の客分への絞り込み開放は
+/// `ensure_tenant_access_or_guest_scope` が別途担う。
 async fn has_tenant_access(
     state: &AppState,
     user_id: Uuid,
@@ -203,9 +248,30 @@ async fn has_tenant_access(
         return Ok(());
     }
 
-    // テナントに入れるのはメンバーだけ。プロジェクト単位の絞り込みはその内側で行う
+    // テナントに入れるのはメンバーだけ。プロジェクト単位の絞り込みはその内側で行う。
+    // この 403 だけ理由を名指しする: オーナーでなくメンバー行も無い状態は、データ側の
+    // 不整合 (owner_id の付け替え・tenant_members の欠落) でも起きるため、一般の 403
+    // (プロジェクト非公開・スコープ不足) と見分けられないと「PAT が全 API で 403」の
+    // 原因へ利用者が辿り着けない。権限は一切広げない — status は 403 のまま、body の
+    // message だけを tenant-membership-missing にする
     if !is_tenant_member(&state.db, tenant_id, user_id).await? {
-        return Err(AppError::Forbidden);
+        // project-only の客分: テナントに行が無くても、名指しされたプロジェクトの
+        // `project_members` に明示指定があればそのプロジェクトの中だけ通す。
+        // 「メンバー未指定＝テナント全体に開放」の規則はテナントメンバー限りなので
+        // 公開規則（`project_is_open_or_member`）ではなく明示指定だけを見る。
+        // 個人プロジェクト（Inbox）の自動生成行は客分の口にならない
+        // （`is_shared_project_explicit_member` の doc）。
+        // 存在探りを許さないため、明示指定の確認をプロジェクト実在確認より先に行う
+        // （無関係な利用者への応答は従来どおり 403 のまま変わらない）
+        if let Some(pid) = project_id
+            && is_shared_project_explicit_member(&state.db, pid, user_id).await?
+        {
+            verify_project_in_tenant(state, tenant_id, pid).await?;
+            return Ok(());
+        }
+        return Err(AppError::ForbiddenDetail(
+            "tenant-membership-missing".into(),
+        ));
     }
 
     let Some(pid) = project_id else {
@@ -262,8 +328,10 @@ impl FromRequestParts<AppState> for AuthUser {
             }
             Ok(AuthUser {
                 user_id: record.user_id,
+                username: user.username,
                 method: AuthMethod::PersonalToken {
                     token_id: record.id,
+                    token_name: record.name,
                     tenant_id: record.tenant_id,
                     allowed_project_ids: match record.allowed_project_ids.as_ref() {
                         None => None,
@@ -275,7 +343,8 @@ impl FromRequestParts<AppState> for AuthUser {
                             })?
                         }
                     },
-                    scopes: record.scopes.clone(),
+                    scopes: record.scopes,
+                    expires_at: record.expires_at,
                 },
             })
         } else {
@@ -289,6 +358,7 @@ impl FromRequestParts<AppState> for AuthUser {
             }
             Ok(AuthUser {
                 user_id: user.id,
+                username: user.username,
                 method: AuthMethod::Session,
             })
         }

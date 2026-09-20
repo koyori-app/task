@@ -11,27 +11,23 @@ const TENANT_ID = '11111111-1111-1111-1111-111111111111';
 const TOKEN_A_ID = '00000000-0000-4000-8000-000000000021';
 const TOKEN_B_ID = '00000000-0000-4000-8000-000000000022';
 
-const storyUser = {
-  id: USER_ID,
-  username: 'shadcn',
-  email: 'm@example.com',
-  email_verified: true,
-  is_admin: false,
-  is_suspended: false,
-  totp_enabled: false,
-  bio: null,
-  avatar_url: null,
+/** 自分から見たテナントの関わり方。発行候補の絞りは membership と member_role で決まる。 */
+type TenantView = {
+  membership: 'Owner' | 'Member' | 'Guest';
+  member_role?: 'Admin' | 'Member' | 'Viewer' | null;
 };
 
-const tenant = (ownerId: string) => ({
+const tenant = (view: TenantView) => ({
   id: TENANT_ID,
   display_id: 'acme',
   name: 'Acme Inc',
   description: '',
   icon_url: '',
-  owner_id: ownerId,
+  owner_id: view.membership === 'Owner' ? USER_ID : OTHER_USER_ID,
   drive_quota_bytes: null,
   require_2fa: false,
+  membership: view.membership,
+  member_role: view.member_role ?? null,
 });
 
 const sampleTokens = [
@@ -70,7 +66,7 @@ const jsonResponse = (data: unknown, status = 200) =>
 let fetchSpy: ReturnType<typeof fn> | null = null;
 
 /** トークン系 API をインメモリの配列で応答する fetch モック */
-function mockFetch(overrides: { empty?: boolean; tenantOwnerId?: string } = {}) {
+function mockFetch(overrides: { empty?: boolean; tenantView?: TenantView } = {}) {
   return () => {
     const original = globalThis.fetch;
     let tokens = overrides.empty ? [] : sampleTokens.map((token) => ({ ...token }));
@@ -81,7 +77,7 @@ function mockFetch(overrides: { empty?: boolean; tenantOwnerId?: string } = {}) 
       const itemMatch = pathname.match(/\/v1\/personal_tokens\/([^/]+)$/);
 
       if (method === 'GET' && pathname.endsWith('/v1/tenants')) {
-        return jsonResponse([tenant(overrides.tenantOwnerId ?? USER_ID)]);
+        return jsonResponse([tenant(overrides.tenantView ?? { membership: 'Owner' })]);
       }
       if (method === 'GET' && pathname.endsWith('/v1/personal_tokens')) {
         return jsonResponse(tokens);
@@ -136,7 +132,6 @@ const meta = {
   title: 'Components/Settings/AccessTokensSection',
   component: AccessTokensSection,
   tags: ['autodocs'],
-  args: { user: storyUser },
   parameters: {
     layout: 'padded',
     docs: {
@@ -185,8 +180,13 @@ export const Empty: Story = {
 };
 
 export const GenerateFlow: Story = {
-  name: '発行（フォーム → POST → 平文トークンを 1 度だけ表示）',
-  beforeEach: mockFetch({ empty: true }),
+  name: '発行（Admin の候補が在れば作れる。フォーム → POST → 平文トークンを 1 度だけ表示）',
+  // 主ではなく role=Admin の member として発行する——Admin 境界の口が
+  // member_role で開くことをこの story が表す
+  beforeEach: mockFetch({
+    empty: true,
+    tenantView: { membership: 'Member', member_role: 'Admin' },
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const user = userEvent.setup();
@@ -209,12 +209,16 @@ export const GenerateFlow: Story = {
 };
 
 export const NoOwnedTenant: Story = {
-  name: 'オーナーのテナントが無い（発行ボタン無効）',
-  beforeEach: mockFetch({ empty: true, tenantOwnerId: OTHER_USER_ID }),
+  name: '主でも Admin でもない（発行ボタン無効）',
+  // role=Member 止まりの member。主でも Admin でもない者には発行の口が開かぬ
+  beforeEach: mockFetch({
+    empty: true,
+    tenantView: { membership: 'Member', member_role: 'Member' },
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(
-      canvas.findByText('トークンを発行できるのは、自分がオーナーのテナントだけです。'),
+      canvas.findByText('トークンを発行できるのは、テナントオーナーと Admin だけです。'),
     ).resolves.toBeInTheDocument();
     await expect(canvas.getByRole('button', { name: 'トークンを発行' })).toBeDisabled();
   },

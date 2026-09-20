@@ -5,6 +5,9 @@
 #     （.env.prod.example が必要な変数の一覧）
 #   - ${VAR:?...} は未設定なら起動せずエラーになる。ダミー値で本番が立ち上がるのを防ぐため、
 #     デフォルト値は付けない
+#   - イメージのタグは通常 IMAGE_TAG だけ設定すれば両方に効く。片方だけ別のタグで動かしたい
+#     ときは BACKEND_IMAGE_TAG / FRONTEND_IMAGE_TAG を設定すると、そちらが優先される
+#     （片方のイメージがまだ公開されていない状態で、もう片方だけ先に出せるようにするため）
 #   - ポートは公開しない。frontend だけ dokploy-network 経由で Traefik に出す。
 #     Dokploy の Domains タブで frontend / port 3000 にドメインを割り当てる
 
@@ -37,7 +40,7 @@ services:
 
   # マイグレーション適用（one-shot）。`up` は冪等なのでデプロイのたびに走らせてよい
   migration:
-    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER}/task-backend:${IMAGE_TAG:?set IMAGE_TAG}
+    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER}/task-backend:${BACKEND_IMAGE_TAG:-${IMAGE_TAG:?set IMAGE_TAG or BACKEND_IMAGE_TAG}}
     command: ["/app/run-migration.sh"]
     environment:
       DATABASE_URL: postgresql://task:${POSTGRES_PASSWORD}@db:5432/task
@@ -47,7 +50,7 @@ services:
     restart: "no"
 
   backend:
-    image: ghcr.io/${GHCR_OWNER}/task-backend:${IMAGE_TAG}
+    image: ghcr.io/${GHCR_OWNER}/task-backend:${BACKEND_IMAGE_TAG:-${IMAGE_TAG:?set IMAGE_TAG or BACKEND_IMAGE_TAG}}
     environment:
       DATABASE_URL: postgresql://task:${POSTGRES_PASSWORD}@db:5432/task
       REDIS_URL: redis://redis:6379
@@ -76,6 +79,29 @@ services:
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
       GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:-}
       GITHUB_TOKEN_ENCRYPTION_KEY: ${GITHUB_TOKEN_ENCRYPTION_KEY:-}
+      # ログイン用の OAuth（任意）。1 つでも有効にするなら OAUTH_ENCRYPTION_KEY が必須。
+      # 未設定なら list_providers が空を返し、サインイン画面にボタンが出ないだけで起動はする。
+      #
+      # APP_BASE_URL は **ブラウザから見た backend の入口**。backend は frontend の
+      # SSR サーバ（/api/* を転送）越しにしか公開されていないので、/api を含める。
+      # ここを間違えると provider へ渡す redirect_uri が届かない先になり、
+      # 認可画面から戻れなくなる（コールバック後の遷移先は APP_ORIGIN 側で別に決まる）。
+      APP_BASE_URL: ${APP_ORIGIN}/api
+      OAUTH_ENCRYPTION_KEY: ${OAUTH_ENCRYPTION_KEY:-}
+      OAUTH_GITHUB_CLIENT_ID: ${OAUTH_GITHUB_CLIENT_ID:-}
+      OAUTH_GITHUB_CLIENT_SECRET: ${OAUTH_GITHUB_CLIENT_SECRET:-}
+      OAUTH_GITLAB_CLIENT_ID: ${OAUTH_GITLAB_CLIENT_ID:-}
+      OAUTH_GITLAB_CLIENT_SECRET: ${OAUTH_GITLAB_CLIENT_SECRET:-}
+      OAUTH_GITLAB_SELFHOSTED_CLIENT_ID: ${OAUTH_GITLAB_SELFHOSTED_CLIENT_ID:-}
+      OAUTH_GITLAB_SELFHOSTED_CLIENT_SECRET: ${OAUTH_GITLAB_SELFHOSTED_CLIENT_SECRET:-}
+      OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID:-}
+      OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET:-}
+      OAUTH_OIDC_ISSUER_URL: ${OAUTH_OIDC_ISSUER_URL:-}
+      OAUTH_OIDC_CLIENT_ID: ${OAUTH_OIDC_CLIENT_ID:-}
+      OAUTH_OIDC_CLIENT_SECRET: ${OAUTH_OIDC_CLIENT_SECRET:-}
+      # ログイン後の既定の遷移先（redirect_after を渡さなかったとき）。
+      # 既定値は backend が持つので、ここでは他のキーと同じく空を渡す
+      OAUTH_DEFAULT_REDIRECT_PATH: ${OAUTH_DEFAULT_REDIRECT_PATH:-}
       # Drive のアップロード先。オブジェクトストレージに載せ替えるときは
       # STORAGE_BACKEND=s3 と S3_* を足す（apps/backend/.env.example 参照）
       STORAGE_BACKEND: local
@@ -99,7 +125,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ghcr.io/${GHCR_OWNER}/task-frontend:${IMAGE_TAG}
+    image: ghcr.io/${GHCR_OWNER}/task-frontend:${FRONTEND_IMAGE_TAG:-${IMAGE_TAG:?set IMAGE_TAG or FRONTEND_IMAGE_TAG}}
     environment:
       # SSR サーバから backend へのプロキシ先（api-proxy.ts が参照）
       API_BASE: http://backend:3400
