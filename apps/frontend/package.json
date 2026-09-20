@@ -27,6 +27,8 @@
     "@codemirror/state": "catalog:",
     "@codemirror/view": "catalog:",
     "@elysiajs/static": "1.4.10",
+    "@koyori-app/arc": "file:../../../arc/crates/koyori-arc-core/pkg",
+    "@koyori-app/arc-vue": "file:../../../arc/packages/arc-vue",
     "@koyori-app/openapi-vue-query": "0.1.4",
     "@lezer/highlight": "catalog:",
     "@lucide/vue": "1.31.0",

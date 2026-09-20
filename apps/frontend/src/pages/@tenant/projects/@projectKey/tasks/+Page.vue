@@ -16,7 +16,7 @@ import {
   useVueTable,
 } from '@tanstack/vue-table';
 import { PhCaretDown, PhCaretUp, PhCaretUpDown, PhRows, PhTable } from '@phosphor-icons/vue';
-import { computed, h, onUnmounted, ref, watch, type Component } from 'vue';
+import { computed, defineAsyncComponent, h, onUnmounted, ref, watch, type Component } from 'vue';
 import type { Column } from '@tanstack/vue-table';
 import { useQuery, keepPreviousData } from '@tanstack/vue-query';
 import { navigate } from 'vike/client/router';
@@ -81,6 +81,10 @@ const LIST_LABELS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/labels' 
 const TASKS_PAGE_SIZE = 20;
 const SEARCH_PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
+const arcGanttEnabled = import.meta.env.VITE_ARC_GANTT_ENABLED === 'true';
+const ArcGanttPreview = arcGanttEnabled
+  ? defineAsyncComponent(() => import('@/features/arc-gantt/ArcGanttPreview.vue'))
+  : null;
 
 type TaskSearchQueryKeyParams = {
   params?: {
@@ -839,6 +843,12 @@ const table = useVueTable({
     >
       <ResizablePanel :order="1" :min-size="30" class="min-w-0">
         <div class="flex h-full min-h-0 flex-col gap-3">
+          <ArcGanttPreview
+            v-if="ArcGanttPreview && tenantId && projectId"
+            :tenant-id="tenantId"
+            :project-id="projectId"
+          />
+
           <!-- サーバー側検索ツールバー -->
           <div class="flex items-center gap-2">
             <form
