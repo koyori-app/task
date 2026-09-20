@@ -120,102 +120,47 @@ async fn task_notifications_integration_suite() {
         .filter_map(|n| n["notification_type"].as_str())
         .collect();
     assert!(types.contains(&"mentioned"));
-}
 
-#[tokio::test]
-async fn watcher_manual_watch_and_unwatch() {
-    let mut app = TestApp::new().await;
-    let owner = app.insert_user(false, false).await;
+    // 手動ウォッチは一覧に出て、解除すると消える
+    app.reset_session_client();
     app.login_session_no_content(&owner.email, &owner.password)
         .await;
-    let tp = app.insert_tenant_project(owner.id).await;
-
-    let status_resp = app
-        .post_json_with_session(
-            &format!(
-                "/v1/tenants/{}/projects/{}/statuses",
-                tp.tenant_id, tp.project_id
-            ),
-            serde_json::json!({"name":"Todo","color":"#aabbcc","position":0,"is_default":true}),
-        )
-        .await;
-    let status_id = status_resp.json::<Value>().await.expect("json")["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    let task_resp = app
-        .post_json_with_session(
-            &format!(
-                "/v1/tenants/{}/projects/{}/tasks",
-                tp.tenant_id, tp.project_id
-            ),
-            serde_json::json!({"title":"Watch test","status_id":status_id}),
-        )
-        .await;
-    let task_id = task_resp.json::<Value>().await.expect("json")["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let task_base = format!(
-        "/v1/tenants/{}/projects/{}/tasks/{}",
-        tp.tenant_id, tp.project_id, task_id
+    let owner_id = owner.id.to_string();
+    let watching: Value = app
+        .get_with_session(&format!("{task_base}/watchers"))
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert!(
+        watching["watchers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["id"].as_str() == Some(owner_id.as_str())),
+        "手動ウォッチした本人が一覧に出る"
     );
 
-    let watcher = app.insert_user(false, false).await;
-    common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, watcher.id).await;
-    app.post_json_with_session(
-        &format!(
-            "/v1/tenants/{}/projects/{}/members",
-            tp.tenant_id, tp.project_id
-        ),
-        serde_json::json!({"user_id": watcher.id, "role": "Member"}),
-    )
-    .await;
-
-    // 手動ウォッチ
-    app.reset_session_client();
-    app.login_session_no_content(&watcher.email, &watcher.password)
-        .await;
-    let watch_resp = app
-        .post_json_with_session(&format!("{task_base}/watch"), serde_json::json!({}))
-        .await;
-    assert_eq!(watch_resp.status(), StatusCode::CREATED);
-
-    // ウォッチャー一覧に追加されていることを確認
-    app.reset_session_client();
-    app.login_session_no_content(&owner.email, &owner.password)
-        .await;
-    let watchers_resp = app.get_with_session(&format!("{task_base}/watchers")).await;
-    let watchers_body: Value = watchers_resp.json().await.expect("json");
-    let watcher_ids: Vec<&str> = watchers_body["watchers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|w| w["id"].as_str())
-        .collect();
-    assert!(watcher_ids.contains(&watcher.id.to_string().as_str()));
-
-    // ウォッチ解除
-    app.reset_session_client();
-    app.login_session_no_content(&watcher.email, &watcher.password)
-        .await;
-    let unwatch_resp = app.delete_with_session(&format!("{task_base}/watch")).await;
-    assert_eq!(unwatch_resp.status(), StatusCode::NO_CONTENT);
-
-    // ウォッチャー一覧から削除されていることを確認
-    app.reset_session_client();
-    app.login_session_no_content(&owner.email, &owner.password)
-        .await;
-    let watchers_resp2 = app.get_with_session(&format!("{task_base}/watchers")).await;
-    let watchers_body2: Value = watchers_resp2.json().await.expect("json");
-    let watcher_ids2: Vec<&str> = watchers_body2["watchers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|w| w["id"].as_str())
-        .collect();
-    assert!(!watcher_ids2.contains(&watcher.id.to_string().as_str()));
+    assert_eq!(
+        app.delete_with_session(&format!("{task_base}/watch"))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    let unwatched: Value = app
+        .get_with_session(&format!("{task_base}/watchers"))
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert!(
+        !unwatched["watchers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["id"].as_str() == Some(owner_id.as_str())),
+        "解除すると一覧から消える"
+    );
 }
 
 #[tokio::test]

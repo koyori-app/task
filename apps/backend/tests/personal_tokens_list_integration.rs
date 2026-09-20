@@ -48,6 +48,9 @@ async fn lists_only_own_active_tokens() {
     app.login_session_no_content(&user.email, &user.password)
         .await;
 
+    // 1 件も持たないうちは空配列が返る（404 等にしない）。
+    assert!(list_tokens(&app).await.is_empty(), "まだ 1 件も無い");
+
     // 名前順を確認するため、あえて逆順で作る。
     create_token(&app, tenant_id, "b-second").await;
     create_token(&app, tenant_id, "a-first").await;
@@ -101,22 +104,6 @@ async fn revoked_tokens_disappear_from_list() {
     let after = list_tokens(&app).await;
     assert_eq!(after.len(), 1, "取り消した分だけ消える");
     assert_eq!(after[0]["id"], keep_id.to_string());
-
-    app.cleanup_user(user.id).await;
-}
-
-/// トークンを 1 件も持たないユーザーには空配列が返る（404 等にしない）。
-#[tokio::test]
-async fn empty_list_for_user_without_tokens() {
-    let mut app = TestApp::new().await;
-
-    let user = app.insert_user_default().await;
-    app.reset_session_client();
-    app.login_session_no_content(&user.email, &user.password)
-        .await;
-
-    let tokens = list_tokens(&app).await;
-    assert!(tokens.is_empty());
 
     app.cleanup_user(user.id).await;
 }

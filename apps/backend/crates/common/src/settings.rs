@@ -308,13 +308,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_single_slash_after_scheme() {
-        assert!(!check("http:/localhost:3000"));
-        assert!(!check("https:/example.com"));
-    }
-
-    #[test]
-    fn rejects_missing_slashes() {
-        assert!(!check("http:localhost:3000"));
+    fn rejects_urls_without_the_scheme_separator() {
+        for url in [
+            "http:/localhost:3000",
+            "https:/example.com",
+            "http:localhost:3000",
+        ] {
+            assert!(!check(url), "{url}");
+        }
     }
 }

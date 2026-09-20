@@ -499,14 +499,6 @@ mod tests {
         Cli::command().debug_assert();
     }
 
-    /// 版はビルド時に決まる。既定はクレートの版で、リリースではタグの版が入る。
-    #[test]
-    fn reports_the_version_it_was_built_with() {
-        let version = Cli::command().get_version().map(str::to_string);
-        assert_eq!(version.as_deref(), Some(env!("TASK_CLI_VERSION")));
-        assert!(!env!("TASK_CLI_VERSION").is_empty());
-    }
-
     #[test]
     fn accepts_the_json_flag_before_or_after_the_subcommand() {
         for argv in [

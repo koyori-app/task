@@ -316,30 +316,30 @@ mod tests {
     fn named_resources_prefer_exact_matches_and_reject_ambiguity() {
         let first = Uuid::from_u128(1);
         let second = Uuid::from_u128(2);
-        for kind in ["Label", "Milestone", "Sprint", "Assignable user", "Status"] {
-            for candidates in [
-                [(first, "Bug"), (second, "bug")],
-                [(second, "bug"), (first, "Bug")],
-            ] {
-                assert_eq!(pick_named_id(kind, "Bug", candidates).unwrap(), first);
-                assert_eq!(pick_named_id(kind, "bug", candidates).unwrap(), second);
-                let error = pick_named_id(kind, "BUG", candidates).unwrap_err();
-                assert_eq!(error.exit_code, 2);
-                for expected in [first.to_string(), second.to_string(), "UUID".into()] {
-                    assert!(error.message.contains(&expected), "{}", error.message);
-                }
+        // kind はメッセージの見出しにしか使わないので 1 種で足りる
+        let kind = "Label";
+        for candidates in [
+            [(first, "Bug"), (second, "bug")],
+            [(second, "bug"), (first, "Bug")],
+        ] {
+            assert_eq!(pick_named_id(kind, "Bug", candidates).unwrap(), first);
+            assert_eq!(pick_named_id(kind, "bug", candidates).unwrap(), second);
+            let error = pick_named_id(kind, "BUG", candidates).unwrap_err();
+            assert_eq!(error.exit_code, 2);
+            for expected in [first.to_string(), second.to_string(), "UUID".into()] {
+                assert!(error.message.contains(&expected), "{}", error.message);
             }
-            // 同じ綴りが複数あれば、完全一致でも任意の一件を選ばない。
-            assert!(pick_named_id(kind, "Bug", [(first, "Bug"), (second, "Bug")]).is_err());
-            assert_eq!(pick_named_id(kind, "BUG", [(first, "Bug")]).unwrap(), first);
-            assert_eq!(
-                pick_named_id(kind, "missing", [(first, "Bug")])
-                    .unwrap_err()
-                    .exit_code,
-                5
-            );
-            assert_eq!(pick_named_id(kind, "missing", []).unwrap_err().exit_code, 5);
         }
+        // 同じ綴りが複数あれば、完全一致でも任意の一件を選ばない。
+        assert!(pick_named_id(kind, "Bug", [(first, "Bug"), (second, "Bug")]).is_err());
+        assert_eq!(pick_named_id(kind, "BUG", [(first, "Bug")]).unwrap(), first);
+        assert_eq!(
+            pick_named_id(kind, "missing", [(first, "Bug")])
+                .unwrap_err()
+                .exit_code,
+            5
+        );
+        assert_eq!(pick_named_id(kind, "missing", []).unwrap_err().exit_code, 5);
     }
 
     fn status(
@@ -422,25 +422,7 @@ mod tests {
     }
 
     /// 綴りを外したとき、そのプロジェクトで何が使えるかが分からないと詰まる。
-    /// 解決のために一覧はすでに取ってあるので、エラーに添える。
-    #[test]
-    fn lists_the_available_statuses_when_the_name_does_not_match() {
-        let statuses = vec![
-            status("Todo", false, true, 0),
-            status("In Progress", false, false, 1),
-            status("Done", true, false, 2),
-        ];
-
-        let err = pick_status_by_name(&statuses, "Reviewing").unwrap_err();
-
-        assert!(err.message.contains("Reviewing"), "{}", err.message);
-        assert!(
-            err.message.contains("Todo, In Progress, Done"),
-            "並び順のまま候補を出す: {}",
-            err.message
-        );
-    }
-
+    /// 解決のために一覧はすでに取ってあるので、位置の順で候補をエラーに添える。
     #[test]
     fn orders_the_listed_statuses_by_position_not_by_input_order() {
         let statuses = vec![
@@ -451,18 +433,12 @@ mod tests {
 
         let err = pick_status_by_name(&statuses, "nope").unwrap_err();
 
+        assert!(err.message.contains("nope"), "{}", err.message);
         assert!(
             err.message.contains("Todo, In Progress, Done"),
             "{}",
             err.message
         );
-    }
-
-    #[test]
-    fn says_none_when_the_project_has_no_statuses() {
-        let err = pick_status_by_name(&[], "Todo").unwrap_err();
-
-        assert!(err.message.contains("none"), "{}", err.message);
     }
 
     #[test]

@@ -831,21 +831,17 @@ mod tests {
         }
     }
 
-    /// 1 ラウンドの指摘は 200 件まで。境界そのものは通し、超えた側だけ弾く。
+    /// 1 ラウンドの指摘は 200 件まで。境界ちょうどは
+    /// `accepts_values_that_sit_exactly_on_the_limits` が通す。
     #[test]
     fn rejects_a_round_that_exceeds_the_findings_limit() {
-        let finding = json!({ "severity": "nit", "title": "t", "body": "b" });
-        let round = |count: usize| {
-            json!({
-                "pr": 1,
-                "head_sha": HEAD_SHA,
-                "findings": vec![finding.clone(); count],
-            })
-        };
+        let round = json!({
+            "pr": 1,
+            "head_sha": HEAD_SHA,
+            "findings": vec![json!({ "severity": "nit", "title": "t", "body": "b" }); 201],
+        });
 
-        assert!(parse_submit_payload(&round(200), None).is_ok());
-
-        let err = parse_submit_payload(&round(201), None).unwrap_err();
+        let err = parse_submit_payload(&round, None).unwrap_err();
         assert!(err.message.contains("findings"), "{}", err.message);
         assert_eq!(err.exit_code, 2);
     }
@@ -868,13 +864,13 @@ mod tests {
             "pr": 1,
             "head_sha": HEAD_SHA,
             "summary": "あ".repeat(20000),
-            "findings": [{
+            "findings": vec![json!({
                 "severity": "high",
                 "title": "x".repeat(200),
                 "body": "b",
                 "file": "f".repeat(1000),
                 "line": 1,
-            }],
+            }); 200],
         });
         assert!(parse_submit_payload(&input, None).is_ok());
     }

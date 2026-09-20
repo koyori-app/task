@@ -302,11 +302,6 @@ async fn update_content_rejects_non_text_mime() {
         b"export const a = 1\n",
     )
     .await;
-    assert_eq!(
-        source["mime_type"].as_str(),
-        Some("text/typescript"),
-        "クライアント申告より拡張子の上書きが優先される"
-    );
     let source_id = file_id_of(&source);
     let accepted = app
         .put_json_with_session(

@@ -499,27 +499,29 @@ async fn creating_default_status_still_replaces_the_existing_default() {
     );
 }
 
+/// 既定の印は「別のものへ移す」ことしかできない。外せると印の無い状態になる。
 #[tokio::test]
-async fn current_default_cannot_be_explicitly_unset() {
-    let (app, tp, _old_done_id, default_id, _old_task_id, _next_task_id) = setup().await;
+async fn the_current_default_marks_cannot_be_explicitly_unset() {
+    let (app, tp, done_id, default_id, _old_task_id, _next_task_id) = setup().await;
 
-    assert_eq!(
-        update_status(
-            &app,
-            &tp,
-            default_id,
-            serde_json::json!({ "is_default": false }),
-        )
-        .await,
-        StatusCode::BAD_REQUEST
-    );
-
-    let default = project_statuses::Entity::find_by_id(default_id)
-        .one(&app.state.db)
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(default.is_default);
+    for (status_id, field) in [(default_id, "is_default"), (done_id, "is_default_done")] {
+        assert_eq!(
+            update_status(&app, &tp, status_id, serde_json::json!({ field: false })).await,
+            StatusCode::BAD_REQUEST,
+            "{field}"
+        );
+        let status = project_statuses::Entity::find_by_id(status_id)
+            .one(&app.state.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let still_marked = if field == "is_default" {
+            status.is_default
+        } else {
+            status.is_default_done
+        };
+        assert!(still_marked, "{field}");
+    }
 }
 
 #[tokio::test]
@@ -620,94 +622,27 @@ async fn unsetting_one_of_several_done_statuses_clears_its_task_completion() {
     );
 }
 
+/// 唯一の完了ステータスも既定ステータスも消せない。消せると、完了にできない /
+/// 新規タスクの置き場が無いプロジェクトが作れてしまう。
 #[tokio::test]
-async fn current_default_done_cannot_be_explicitly_unset() {
-    let (app, tp, done_id, _default_id, _old_task_id, _next_task_id) = setup().await;
+async fn the_only_done_status_and_the_default_status_cannot_be_deleted() {
+    let (app, tp, done_id, default_id, _old_task_id, _next_task_id) = setup().await;
 
-    assert_eq!(
-        update_status(
-            &app,
-            &tp,
-            done_id,
-            serde_json::json!({ "is_default_done": false }),
-        )
-        .await,
-        StatusCode::BAD_REQUEST
-    );
-    assert!(
-        project_statuses::Entity::find_by_id(done_id)
-            .one(&app.state.db)
-            .await
-            .unwrap()
-            .unwrap()
-            .is_default_done
-    );
-}
-
-#[tokio::test]
-async fn default_done_moves_to_another_done_status_on_request() {
-    let (app, tp, first_done_id, _default_id, _old_task_id, _next_task_id) = setup().await;
-    let second_done_id = create_status(&app, &tp, "No Planning", false, true).await;
-
-    assert_eq!(
-        update_status(
-            &app,
-            &tp,
-            second_done_id,
-            serde_json::json!({ "is_default_done": true }),
-        )
-        .await,
-        StatusCode::OK
-    );
-
-    let statuses = project_statuses(&app, &tp).await;
-    let default_done: Vec<_> = statuses
-        .iter()
-        .filter(|status| status.is_default_done)
-        .collect();
-    assert_eq!(default_done.len(), 1);
-    assert_eq!(default_done[0].id, second_done_id);
-    assert!(
-        statuses
-            .iter()
-            .find(|status| status.id == first_done_id)
-            .unwrap()
-            .is_done_state
-    );
-}
-
-#[tokio::test]
-async fn only_done_status_cannot_be_deleted() {
-    let (app, tp, done_id, _next_done_id, _old_task_id, _next_task_id) = setup().await;
-
-    assert_eq!(
-        delete_status(&app, &tp, done_id).await,
-        StatusCode::BAD_REQUEST
-    );
-    assert!(
-        project_statuses::Entity::find_by_id(done_id)
-            .one(&app.state.db)
-            .await
-            .unwrap()
-            .is_some()
-    );
-}
-
-#[tokio::test]
-async fn default_status_cannot_be_deleted() {
-    let (app, tp, _done_id, default_id, _old_task_id, _next_task_id) = setup().await;
-
-    assert_eq!(
-        delete_status(&app, &tp, default_id).await,
-        StatusCode::BAD_REQUEST
-    );
-    assert!(
-        project_statuses::Entity::find_by_id(default_id)
-            .one(&app.state.db)
-            .await
-            .unwrap()
-            .is_some()
-    );
+    for status_id in [done_id, default_id] {
+        assert_eq!(
+            delete_status(&app, &tp, status_id).await,
+            StatusCode::BAD_REQUEST,
+            "{status_id}"
+        );
+        assert!(
+            project_statuses::Entity::find_by_id(status_id)
+                .one(&app.state.db)
+                .await
+                .unwrap()
+                .is_some(),
+            "{status_id}"
+        );
+    }
 }
 
 #[tokio::test]

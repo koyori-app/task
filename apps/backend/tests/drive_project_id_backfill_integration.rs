@@ -173,6 +173,8 @@ async fn run_backfill(app: &TestApp) {
 }
 
 /// プロジェクトルート配下は、何段下でもルートの `project_id` に揃う。
+/// ルートが 2 本あればそれぞれのルートの値になり、2 回流しても結果は変わらない
+/// （デプロイのたびに適用されても壊れない）。
 #[tokio::test]
 #[serial_test::file_serial(drive)]
 async fn backfill_propagates_the_project_down_the_whole_subtree() {
@@ -180,6 +182,7 @@ async fn backfill_propagates_the_project_down_the_whole_subtree() {
 
     let owner = app.insert_user(false, false).await;
     let tp = app.insert_tenant_project(owner.id).await;
+    let other_project = insert_extra_project(&app, tp.tenant_id).await;
 
     // プロジェクトルート（自動生成と同じ形）
     let root = insert_folder(&app, tp.tenant_id, owner.id, None, Some(tp.project_id)).await;
@@ -198,6 +201,11 @@ async fn backfill_propagates_the_project_down_the_whole_subtree() {
         files.push(insert_file(&app, tp.tenant_id, Some(*folder), owner.id).await);
     }
 
+    // 別プロジェクトのツリーが混ざっても、それぞれのルートの値になる
+    let root_b = insert_folder(&app, tp.tenant_id, owner.id, None, Some(other_project)).await;
+    let child_b = insert_folder(&app, tp.tenant_id, owner.id, Some(root_b), None).await;
+    let file_b = insert_file(&app, tp.tenant_id, Some(child_b), owner.id).await;
+
     // 前提: backfill 前は配下が一般ファイル扱い
     for folder in &chain {
         assert_eq!(folder_project_id(&app, *folder).await, None);
@@ -206,6 +214,8 @@ async fn backfill_propagates_the_project_down_the_whole_subtree() {
         assert_eq!(file_project_id(&app, *file).await, None);
     }
 
+    // 2 回流しても結果が変わらない（2 回目が書き換えたら以下の検査が落ちる）
+    run_backfill(&app).await;
     run_backfill(&app).await;
 
     assert_eq!(
@@ -230,6 +240,8 @@ async fn backfill_propagates_the_project_down_the_whole_subtree() {
             depth + 1
         );
     }
+    assert_eq!(folder_project_id(&app, child_b).await, Some(other_project));
+    assert_eq!(file_project_id(&app, file_b).await, Some(other_project));
 }
 
 /// プロジェクトの外は触らない。
@@ -281,32 +293,6 @@ async fn backfill_leaves_rows_outside_project_roots_alone() {
     assert_eq!(file_project_id(&app, loose_file).await, None);
 }
 
-/// 別プロジェクトのツリーが混ざっても、それぞれのルートの値になる。
-#[tokio::test]
-#[serial_test::file_serial(drive)]
-async fn backfill_keeps_projects_separate() {
-    let app = new_app().await;
-
-    let owner = app.insert_user(false, false).await;
-    let tp = app.insert_tenant_project(owner.id).await;
-    let other_project = insert_extra_project(&app, tp.tenant_id).await;
-
-    let root_a = insert_folder(&app, tp.tenant_id, owner.id, None, Some(tp.project_id)).await;
-    let child_a = insert_folder(&app, tp.tenant_id, owner.id, Some(root_a), None).await;
-    let file_a = insert_file(&app, tp.tenant_id, Some(child_a), owner.id).await;
-
-    let root_b = insert_folder(&app, tp.tenant_id, owner.id, None, Some(other_project)).await;
-    let child_b = insert_folder(&app, tp.tenant_id, owner.id, Some(root_b), None).await;
-    let file_b = insert_file(&app, tp.tenant_id, Some(child_b), owner.id).await;
-
-    run_backfill(&app).await;
-
-    assert_eq!(folder_project_id(&app, child_a).await, Some(tp.project_id));
-    assert_eq!(file_project_id(&app, file_a).await, Some(tp.project_id));
-    assert_eq!(folder_project_id(&app, child_b).await, Some(other_project));
-    assert_eq!(file_project_id(&app, file_b).await, Some(other_project));
-}
-
 /// 別プロジェクトのルートが入れ子になっている既存データは、書き換えずに失敗させる。
 ///
 /// 修正前はプロジェクトルートの移動も移動先 ACL の無視もできたので、
@@ -354,36 +340,6 @@ async fn backfill_refuses_to_absorb_a_nested_foreign_project_root() {
         file_after,
         Some(tp.project_id),
         "A のファイルを B のものにしない"
-    );
-}
-
-/// 2 回流しても結果が変わらない（デプロイのたびに適用されても壊れない）。
-#[tokio::test]
-#[serial_test::file_serial(drive)]
-async fn backfill_is_idempotent() {
-    let app = new_app().await;
-
-    let owner = app.insert_user(false, false).await;
-    let tp = app.insert_tenant_project(owner.id).await;
-
-    let root = insert_folder(&app, tp.tenant_id, owner.id, None, Some(tp.project_id)).await;
-    let child = insert_folder(&app, tp.tenant_id, owner.id, Some(root), None).await;
-    let file = insert_file(&app, tp.tenant_id, Some(child), owner.id).await;
-
-    run_backfill(&app).await;
-    let after_first = (
-        folder_project_id(&app, child).await,
-        file_project_id(&app, file).await,
-    );
-    run_backfill(&app).await;
-
-    assert_eq!(after_first, (Some(tp.project_id), Some(tp.project_id)));
-    assert_eq!(
-        after_first,
-        (
-            folder_project_id(&app, child).await,
-            file_project_id(&app, file).await
-        )
     );
 }
 

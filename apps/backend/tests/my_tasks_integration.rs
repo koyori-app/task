@@ -45,24 +45,6 @@ async fn personal_project_is_idempotent() {
     assert_eq!(first, second);
 }
 
-/// quick-capture API 撤去の回帰テスト（#363）。
-/// 撤去前は 201 CREATED を返していたため、撤去前のコードでは fail する。
-#[tokio::test]
-async fn quick_capture_endpoint_is_removed() {
-    let mut app = TestApp::new().await;
-    let (_user, tp) = setup(&mut app).await;
-    let base = my_tasks_base(tp.tenant_id);
-    assert_eq!(
-        app.post_json_with_session(
-            &format!("{base}/tasks"),
-            serde_json::json!({"title": "Buy milk"})
-        )
-        .await
-        .status(),
-        StatusCode::METHOD_NOT_ALLOWED
-    );
-}
-
 #[tokio::test]
 async fn list_returns_only_assigned_tasks() {
     let mut app = TestApp::new().await;

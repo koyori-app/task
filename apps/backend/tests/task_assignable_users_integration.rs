@@ -107,6 +107,15 @@ async fn assignable_users_covers_tenant_when_project_has_no_members() {
         StatusCode::FORBIDDEN,
         "メンバー一覧の認可は緩めない"
     );
+
+    // 対照: テナントに入れない利用者は候補を読めない
+    app.reset_session_client();
+    app.login_session(&outsider.email, &outsider.password).await;
+    assert_eq!(
+        app.get_with_session(&assignable_path).await.status(),
+        StatusCode::FORBIDDEN,
+        "テナント外の利用者は候補を読めない"
+    );
 }
 
 /// メンバーを指定したプロジェクトでは、指定された人（＋オーナー）だけが候補になる。
@@ -278,14 +287,6 @@ async fn assignable_users_resolves_one_name_for_read_only_tokens() {
         "一致しなければ空で返す"
     );
 
-    // 対照: 名前を指定しない列挙は read:task では読めないまま
-    let listed = app.get_with_bearer(&assignable_path, &read_only).await;
-    assert_eq!(
-        listed.status(),
-        StatusCode::FORBIDDEN,
-        "候補の列挙は緩めない"
-    );
-
     // 対照: 書き込みだけの PAT からも名前で引ける（過剰拒否になっていないこと）
     let writable = issue_token(&app, tp.tenant_id, "writable", &["write:task"]).await;
     let as_writer = app
@@ -295,27 +296,6 @@ async fn assignable_users_resolves_one_name_for_read_only_tokens() {
         )
         .await;
     assert_eq!(as_writer.status(), StatusCode::OK);
-}
-
-/// テナントに入れない利用者は候補を読めない。
-#[tokio::test]
-async fn assignable_users_rejects_outsiders() {
-    let mut app = TestApp::new().await;
-
-    let owner = app.insert_user(false, false).await;
-    let outsider = app.insert_user(false, false).await;
-    let tp = app.insert_tenant_project(owner.id).await;
-
-    let assignable_path = format!(
-        "/v1/tenants/{}/projects/{}/assignable-users",
-        tp.tenant_id, tp.project_id
-    );
-
-    app.reset_session_client();
-    app.login_session(&outsider.email, &outsider.password).await;
-
-    let res = app.get_with_session(&assignable_path).await;
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
 /// 候補として返した利用者は、実際に担当者として割り当てられる

@@ -475,17 +475,7 @@ async fn github_http_integration_suite() {
     let mut app = TestApp::new_with_github().await;
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-    // 1. GET /install — GitHub インストール URL を JSON で返す
-    {
-        let user = app.insert_user(false, false).await;
-        let tp = app.insert_tenant_project(user.id).await;
-        app.login_session(&user.email, &user.password).await;
-
-        let _ = get_install_state(&app, &tp).await;
-
-        app.cleanup_user(user.id).await;
-        app.reset_session_client();
-    }
+    // 1. GET /install — URL と state の形は get_install_state が見ている
 
     // 2. GET /callback 正常系 — /install の state を /callback に渡して DB に integration 作成
     {

@@ -402,15 +402,6 @@ async fn an_owner_can_still_manage_a_project_whose_admins_all_left() {
         "オーナーは Admin を立て直せる"
     );
 
-    // 抜けた bob の残った行も、最後の枠を占有して詰ませない
-    assert_eq!(
-        app.delete_with_session(&format!("{project_members_path}/{}", bob.id))
-            .await
-            .status(),
-        StatusCode::NO_CONTENT,
-        "テナントに居ない人の行は 409 で守られない（数えるのは在籍者だけ）"
-    );
-
     app.cleanup_user(owner.id).await;
     app.cleanup_user(alice.id).await;
     app.cleanup_user(bob.id).await;

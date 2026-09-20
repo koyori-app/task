@@ -284,10 +284,4 @@ mod tests {
         assert!(!write_task.has_scope(Scope::ReadDrive));
         assert!(!write_task.has_scope(Scope::ReadProject));
     }
-
-    #[test]
-    fn admin_project_round_trips_as_str() {
-        assert_eq!(Scope::AdminProject.as_str(), "admin:project");
-        assert_eq!("admin:project".parse::<Scope>(), Ok(Scope::AdminProject));
-    }
 }

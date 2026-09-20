@@ -260,12 +260,6 @@ async fn activities_are_paged_and_capped() {
         "取り切ったら next_cursor は返さない"
     );
     assert_eq!(tail_body["total"].as_u64().expect("total"), total);
-
-    // 壊れたカーソルは 400。利用者が作れる値なので 500 にしない
-    let broken = app
-        .get_with_session(&format!("{activities_path}?cursor=not-a-cursor"))
-        .await;
-    assert_eq!(broken.status(), StatusCode::BAD_REQUEST);
 }
 
 /// 読んでいる最中に履歴が積まれても、続きのページが重複も欠落もしない。

@@ -544,124 +544,142 @@ async fn task_list_rejects_a_cursor_made_for_another_sort() {
     assert_eq!(mixed.status(), StatusCode::BAD_REQUEST);
 }
 
+/// ソートは鍵ごとに要る fixtures が違うので、組ごとに並べて 1 本で見る。
+/// 既定ページ（20 件）の境界跨ぎは title の組で 1 度だけ見る。
 #[tokio::test]
-async fn task_list_sorts_titles_across_the_default_page_boundary() {
+async fn task_list_sorts_by_every_supported_key() {
     let mut app = TestApp::new().await;
-    let (_user, tp) = setup_project(&mut app).await;
-    let status_id = create_status(&app, &tp).await;
-    let base = tasks_base(&tp);
 
-    for i in (0..27).rev() {
+    // --- title: 既定ページを跨ぐ 27 件
+    {
+        let (_user, tp) = setup_project(&mut app).await;
+        let status_id = create_status(&app, &tp).await;
+        let base = tasks_base(&tp);
+        for i in (0..27).rev() {
+            create_sort_task(
+                &app,
+                &tp,
+                status_id,
+                &format!("Task {i:02}"),
+                None,
+                None,
+                None,
+            )
+            .await;
+        }
+
+        let asc: Vec<String> = (0..27).map(|i| format!("Task {i:02}")).collect();
+        let desc: Vec<String> = asc.iter().rev().cloned().collect();
+        for (sort, expected) in [("title_asc", asc), ("title_desc", desc)] {
+            assert_eq!(
+                sorted_titles(&app, &base, sort, 20).await,
+                expected,
+                "{sort}"
+            );
+        }
+    }
+
+    // --- priority / deadline
+    {
+        let (_user, tp) = setup_project(&mut app).await;
+        let status_id = create_status(&app, &tp).await;
+        let base = tasks_base(&tp);
+        let fixtures = [
+            ("Fire", "CriticalFire", None),
+            ("Critical", "Critical", Some("2026-06-01T00:00:00Z")),
+            ("High", "High", Some("2026-01-01T00:00:00Z")),
+            ("Medium", "Medium", Some("2026-03-01T00:00:00Z")),
+            ("Low", "Low", Some("2026-02-01T00:00:00Z")),
+            ("Trivial", "Trivial", Some("2026-05-01T00:00:00Z")),
+        ];
+        for (title, priority, deadline) in fixtures {
+            create_sort_task(&app, &tp, status_id, title, Some(priority), deadline, None).await;
+        }
+
+        for (sort, expected) in [
+            (
+                "priority_asc",
+                ["Fire", "Critical", "High", "Medium", "Low", "Trivial"],
+            ),
+            (
+                "priority_desc",
+                ["Trivial", "Low", "Medium", "High", "Critical", "Fire"],
+            ),
+            (
+                "deadline_asc",
+                ["High", "Low", "Medium", "Trivial", "Critical", "Fire"],
+            ),
+            (
+                "deadline_desc",
+                ["Critical", "Trivial", "Medium", "Low", "High", "Fire"],
+            ),
+        ] {
+            assert_eq!(
+                sorted_titles(&app, &base, sort, 2).await,
+                expected,
+                "{sort}"
+            );
+        }
+    }
+
+    // --- assignee: 大文字小文字を無視し、未割り当ては末尾
+    {
+        let (owner, tp) = setup_project(&mut app).await;
+        let status_id = create_status(&app, &tp).await;
+        let base = tasks_base(&tp);
+        let akira = app.insert_user_default().await;
+        let zeta = app.insert_user_default().await;
+        add_project_member(&app, tp.project_id, akira.id).await;
+        add_project_member(&app, tp.project_id, zeta.id).await;
+        for (name, id) in [("Mika", owner.id), ("akira", akira.id), ("Zeta", zeta.id)] {
+            common::execute_sql(
+                &app.state.db,
+                "UPDATE users SET username = $1 WHERE id = $2",
+                vec![name.into(), id.into()],
+            )
+            .await;
+        }
+
+        create_sort_task(&app, &tp, status_id, "Unassigned", None, None, None).await;
         create_sort_task(
             &app,
             &tp,
             status_id,
-            &format!("Task {i:02}"),
+            "Mika task",
             None,
             None,
-            None,
+            Some(owner.id),
         )
         .await;
-    }
-
-    let expected_asc: Vec<String> = (0..27).map(|i| format!("Task {i:02}")).collect();
-    let expected_desc: Vec<String> = expected_asc.iter().rev().cloned().collect();
-    assert_eq!(
-        sorted_titles(&app, &base, "title_asc", 20).await,
-        expected_asc
-    );
-    assert_eq!(
-        sorted_titles(&app, &base, "title_desc", 20).await,
-        expected_desc
-    );
-}
-
-#[tokio::test]
-async fn task_list_sorts_priority_and_deadline_in_both_directions() {
-    let mut app = TestApp::new().await;
-    let (_user, tp) = setup_project(&mut app).await;
-    let status_id = create_status(&app, &tp).await;
-    let base = tasks_base(&tp);
-    let fixtures = [
-        ("Fire", "CriticalFire", None),
-        ("Critical", "Critical", Some("2026-06-01T00:00:00Z")),
-        ("High", "High", Some("2026-01-01T00:00:00Z")),
-        ("Medium", "Medium", Some("2026-03-01T00:00:00Z")),
-        ("Low", "Low", Some("2026-02-01T00:00:00Z")),
-        ("Trivial", "Trivial", Some("2026-05-01T00:00:00Z")),
-    ];
-    for (title, priority, deadline) in fixtures {
-        create_sort_task(&app, &tp, status_id, title, Some(priority), deadline, None).await;
-    }
-
-    assert_eq!(
-        sorted_titles(&app, &base, "priority_asc", 2).await,
-        ["Fire", "Critical", "High", "Medium", "Low", "Trivial"]
-    );
-    assert_eq!(
-        sorted_titles(&app, &base, "priority_desc", 2).await,
-        ["Trivial", "Low", "Medium", "High", "Critical", "Fire"]
-    );
-    assert_eq!(
-        sorted_titles(&app, &base, "deadline_asc", 2).await,
-        ["High", "Low", "Medium", "Trivial", "Critical", "Fire"]
-    );
-    assert_eq!(
-        sorted_titles(&app, &base, "deadline_desc", 2).await,
-        ["Critical", "Trivial", "Medium", "Low", "High", "Fire"]
-    );
-}
-
-#[tokio::test]
-async fn task_list_sorts_assignees_case_insensitively_and_keeps_unassigned_last() {
-    let mut app = TestApp::new().await;
-    let (owner, tp) = setup_project(&mut app).await;
-    let status_id = create_status(&app, &tp).await;
-    let base = tasks_base(&tp);
-    let akira = app.insert_user_default().await;
-    let zeta = app.insert_user_default().await;
-    add_project_member(&app, tp.project_id, akira.id).await;
-    add_project_member(&app, tp.project_id, zeta.id).await;
-    for (name, id) in [("Mika", owner.id), ("akira", akira.id), ("Zeta", zeta.id)] {
-        common::execute_sql(
-            &app.state.db,
-            "UPDATE users SET username = $1 WHERE id = $2",
-            vec![name.into(), id.into()],
+        create_sort_task(
+            &app,
+            &tp,
+            status_id,
+            "Akira task",
+            None,
+            None,
+            Some(akira.id),
         )
         .await;
+        create_sort_task(&app, &tp, status_id, "Zeta task", None, None, Some(zeta.id)).await;
+
+        for (sort, expected) in [
+            (
+                "assignee_asc",
+                ["Akira task", "Mika task", "Zeta task", "Unassigned"],
+            ),
+            (
+                "assignee_desc",
+                ["Zeta task", "Mika task", "Akira task", "Unassigned"],
+            ),
+        ] {
+            assert_eq!(
+                sorted_titles(&app, &base, sort, 2).await,
+                expected,
+                "{sort}"
+            );
+        }
     }
-
-    create_sort_task(&app, &tp, status_id, "Unassigned", None, None, None).await;
-    create_sort_task(
-        &app,
-        &tp,
-        status_id,
-        "Mika task",
-        None,
-        None,
-        Some(owner.id),
-    )
-    .await;
-    create_sort_task(
-        &app,
-        &tp,
-        status_id,
-        "Akira task",
-        None,
-        None,
-        Some(akira.id),
-    )
-    .await;
-    create_sort_task(&app, &tp, status_id, "Zeta task", None, None, Some(zeta.id)).await;
-
-    assert_eq!(
-        sorted_titles(&app, &base, "assignee_asc", 2).await,
-        ["Akira task", "Mika task", "Zeta task", "Unassigned"]
-    );
-    assert_eq!(
-        sorted_titles(&app, &base, "assignee_desc", 2).await,
-        ["Zeta task", "Mika task", "Akira task", "Unassigned"]
-    );
 }
 
 #[tokio::test]

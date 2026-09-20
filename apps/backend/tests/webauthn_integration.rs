@@ -152,20 +152,7 @@ async fn webauthn_integration_suite() {
         app.cleanup_user(user.id).await;
     }
 
-    // 正常な登録フロー（start → finish）→ 201
-    {
-        let mut app = TestApp::new().await;
-        let user = app
-            .insert_passkey_user(true, Some("TestPassword123!"))
-            .await;
-        app.login_session(&user.email, &user.password).await;
-
-        let (soft, _) = SoftToken::new(true).expect("softtoken");
-        let mut wa = WebauthnAuthenticator::new(soft);
-        soft_register_finish(&app, &mut wa, "integration-key").await;
-
-        app.cleanup_user(user.id).await;
-    }
+    // 正常な登録フロー（start → finish）→ 201 は soft_register_finish が見ている
 
     // 正常な認証フロー（start → finish）→ 204
     {

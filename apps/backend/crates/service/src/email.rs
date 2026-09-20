@@ -21,10 +21,6 @@ mod tests {
     #[test]
     fn trims_and_lowercases() {
         assert_eq!(normalize_email("  User@Example.COM  "), "user@example.com");
-    }
-
-    #[test]
-    fn leaves_already_normalized_unchanged() {
         assert_eq!(normalize_email("a@b.co"), "a@b.co");
     }
 }

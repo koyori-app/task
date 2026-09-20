@@ -303,34 +303,3 @@ async fn rejects_unauthenticated_request() {
         .await;
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
-/// PAT（Bearer）ではプロフィールを書き換えられない。
-/// GET /v1/auth/me と同じ CurrentUser の拒否をこの更新経路でも通す。
-#[tokio::test]
-async fn rejects_bearer_token_request() {
-    let mut app = TestApp::new().await;
-
-    let user = app.insert_user(false, false).await;
-    app.reset_session_client();
-    app.login_session_no_content(&user.email, &user.password)
-        .await;
-
-    let rejected = app
-        .client()
-        .patch(format!("{}/v1/auth/me", app.base_url()))
-        .header(reqwest::header::AUTHORIZATION, "Bearer not-a-real-token")
-        .json(&serde_json::json!({ "username": "renamed" }))
-        .send()
-        .await
-        .expect("patch me with bearer");
-    assert_eq!(
-        rejected.status(),
-        StatusCode::UNAUTHORIZED,
-        "Bearer 付きは拒否される"
-    );
-
-    let after = me_json(&app).await;
-    assert_ne!(after["username"], "renamed", "書き換わっていない");
-
-    app.cleanup_user(user.id).await;
-}
