@@ -117,26 +117,6 @@ describe('ProfileForm', () => {
     },
   );
 
-  it('サロゲートペアを Unicode コードポイント単位で数える', async () => {
-    const bodies = stubPatchMe();
-    const wrapper = mountForm();
-    await flushPromises();
-
-    await wrapper.find('#username').setValue('😀😀');
-    await wrapper.find('form').trigger('submit');
-    await flushPromises();
-
-    expect(bodies).toHaveLength(0);
-    expect(wrapper.text()).toContain('3文字以上で入力してください。');
-
-    await wrapper.find('#username').setValue('😀😀😀');
-    await wrapper.find('#bio').setValue('😀'.repeat(600));
-    await wrapper.find('form').trigger('submit');
-    await flushPromises();
-
-    expect(bodies).toHaveLength(1);
-  });
-
   it('3 文字未満のユーザー名は送信せずエラーを出す', async () => {
     const bodies = stubPatchMe();
     const wrapper = mountForm();

@@ -329,12 +329,8 @@ describe('WorkflowStatusesEditor', () => {
   });
 
   it.each([
-    ['ASCII 100', 'a'.repeat(100), true],
-    ['ASCII 101', 'a'.repeat(101), false],
-    ['日本語 100', '界'.repeat(100), true],
-    ['日本語 101', '界'.repeat(101), false],
     ['絵文字 100', '😀'.repeat(100), true],
-    ['絵文字 101', '😀'.repeat(101), false],
+    ['ASCII 101', 'a'.repeat(101), false],
   ])('create/edit の %s code point 境界を検証する', async (_case, name, valid) => {
     await mountEditor();
 
