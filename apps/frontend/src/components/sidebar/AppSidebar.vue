@@ -7,7 +7,7 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import { navigate } from 'vike/client/router';
 import { computed, watch } from 'vue';
 
-import { ListTodo } from '@lucide/vue';
+import { House, ListTodo } from '@lucide/vue';
 import NavMain from '@/components/sidebar/NavMain.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
 import {
@@ -63,6 +63,12 @@ function onCreateProject() {
 
 const data = computed(() => ({
   navMain: [
+    {
+      title: 'ホーム',
+      url: tenantSlug.value ? `/${tenantSlug.value}` : '/',
+      icon: House,
+      isActive: pageContext.urlPathname === `/${tenantSlug.value}`,
+    },
     {
       title: 'My Tasks',
       url: myTasksUrl.value,

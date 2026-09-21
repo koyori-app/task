@@ -219,7 +219,7 @@ fn apply_my_tasks_filter(
     }
 }
 
-fn build_my_task_item(
+pub(crate) fn build_my_task_item(
     task: tasks::Model,
     project: &projects::Model,
     status: &project_statuses::Model,
