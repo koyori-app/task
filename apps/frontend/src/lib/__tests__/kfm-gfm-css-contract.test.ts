@@ -167,6 +167,21 @@ describe('KFM サイドカー CSS の消費契約 (scope 一致の機構)', () =
     expect(KFM_CONTENT_CLASS).toBe('kfm-content');
   });
 
+  // 下の契約テストは toEqual([]) 型なので、検査器が違反を見落とすようになると黙って緑になる。
+  it('検査器の陽性対照: isScoped / emittedNamespaceViolations が違反を拒む', () => {
+    expect(isScoped(`.${KFM_CONTENT_CLASS} ul`)).toBe(true);
+    expect(isScoped(`.${KFM_CONTENT_CLASS} + ul`)).toBe(false);
+    expect(isScoped(`body:has(.${KFM_CONTENT_CLASS}) ul`)).toBe(false);
+    expect(isScoped(`@media print { .${KFM_CONTENT_CLASS} ul`)).toBe(false);
+
+    const spec = { selectorToken: /\.kfm-alert(?:__[\w-]+|--[\w-]+)?(?![\w-])/ };
+    expect(emittedNamespaceViolations('.kfm-alert { color: red }', spec)).toEqual([]);
+    expect(emittedNamespaceViolations('ul { margin: 0 }', spec)).toEqual(['ul']);
+    expect(emittedNamespaceViolations('.kfm-alert-like { color: red }', spec)).toEqual([
+      '.kfm-alert-like',
+    ]);
+  });
+
   it('remark-* / rehype-* の全サイドカーが scope 方式を明示分類される', () => {
     const discoveredPlugins = SIDECAR_CSS_PATHS.map((cssPath) =>
       path.basename(path.dirname(cssPath)),
