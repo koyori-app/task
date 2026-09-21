@@ -45,6 +45,7 @@ async fn token_without_scopes_can_identify_itself() {
     assert_eq!(body["name"], record.name);
     assert_eq!(body["user_id"], user.id.to_string());
     assert_eq!(body["username"], username);
+    assert_eq!(body["tenant_id"], tenant_id.to_string());
     assert_eq!(body["scopes"], serde_json::json!([]));
     assert_eq!(body["allowed_project_ids"], serde_json::Value::Null);
     assert_eq!(body["expires_at"], serde_json::Value::Null);
@@ -82,6 +83,39 @@ async fn scoped_and_project_bound_token_reports_its_bounds() {
     assert_eq!(body["allowed_project_ids"], serde_json::json!(project_ids));
 
     app.cleanup_user(user.id).await;
+}
+
+#[tokio::test]
+async fn identity_returns_only_the_tenant_bound_to_the_token() {
+    let app = TestApp::new().await;
+    let user_a = app.insert_user_default().await;
+    let tenant_a = insert_tenant(&app.state.db, user_a.id).await;
+    let token_a = app.insert_pat(user_a.id, tenant_a, vec![], None).await;
+    let user_b = app.insert_user_default().await;
+    let tenant_b = insert_tenant(&app.state.db, user_b.id).await;
+    let token_b = app.insert_pat(user_b.id, tenant_b, vec![], None).await;
+
+    // それぞれの鍵は、己のバインド先だけを名乗る——他方の陣は現れぬ
+    let body_a = app
+        .get_with_bearer("/v1/personal_tokens/me", &token_a)
+        .await
+        .json::<serde_json::Value>()
+        .await
+        .expect("identity body a");
+    assert_eq!(body_a["tenant_id"], tenant_a.to_string());
+    assert_ne!(body_a["tenant_id"], tenant_b.to_string());
+
+    let body_b = app
+        .get_with_bearer("/v1/personal_tokens/me", &token_b)
+        .await
+        .json::<serde_json::Value>()
+        .await
+        .expect("identity body b");
+    assert_eq!(body_b["tenant_id"], tenant_b.to_string());
+    assert_ne!(body_b["tenant_id"], tenant_a.to_string());
+
+    app.cleanup_user(user_a.id).await;
+    app.cleanup_user(user_b.id).await;
 }
 
 #[tokio::test]
