@@ -66,17 +66,7 @@ pub async fn get_dashboard(
         _ => return Err(AppError::BadRequest),
     };
     let timezone = q.timezone.as_deref().unwrap_or("UTC");
-    if timezone.len() > 100
-        || state
-            .db
-            .query_one_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                "SELECT name FROM pg_timezone_names WHERE name = $1",
-                [timezone.into()],
-            ))
-            .await?
-            .is_none()
-    {
+    if timezone.len() > 100 || !service::timezone::exists(&state.db, timezone).await? {
         return Err(AppError::BadRequest);
     }
     let limit = q.limit.unwrap_or(5).clamp(1, 50);
