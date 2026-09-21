@@ -22160,6 +22160,7 @@
           "name",
           "user_id",
           "username",
+          "tenant_id",
           "scopes",
           "allowed_project_ids",
           "expires_at"
@@ -22185,6 +22186,11 @@
           },
           "scopes": {
             "$ref": "#/components/schemas/ScopeList"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "この PAT がバインドされたテナント。鍵だけ渡された自動化クライアントが\n行き先（/v1/tenants/{id}/... の {id}）を自力で知るための欄"
           },
           "user_id": {
             "type": "string",
