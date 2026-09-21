@@ -16,6 +16,7 @@ async fn insert_task(app: &TestApp, project_id: Uuid, created_by: Uuid, title: &
         position: Set(0),
         is_default: Set(true),
         is_done_state: Set(false),
+        is_default_done: Set(false),
         created_at: Set(chrono::Utc::now().into()),
     }
     .insert(&app.state.db)

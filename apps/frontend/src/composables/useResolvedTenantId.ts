@@ -6,7 +6,7 @@ import type { TenantUuid } from '@/lib/api-ids';
 import type { components } from '@/generated/api';
 
 const LIST_TENANTS_PATH = '/v1/tenants' as const;
-type TenantResponse = components['schemas']['TenantResponse'];
+type TenantResponse = components['schemas']['TenantListItemResponse'];
 
 /** Route param (display_id) を GET /v1/tenants で UUID に解決する。 */
 export function useResolvedTenantId(tenantDisplayId: MaybeRefOrGetter<string>) {
@@ -17,19 +17,25 @@ export function useResolvedTenantId(tenantDisplayId: MaybeRefOrGetter<string>) {
     queryFn: async ({ signal }) => {
       const { data, error } = await fetchClient.GET(LIST_TENANTS_PATH, { signal });
       if (error) throw error;
-      if (!data) return [] as TenantResponse[];
-      return (Array.isArray(data) ? data : data.tenants) as TenantResponse[];
+      return (data ?? []) as TenantResponse[];
     },
     enabled: computed(() => !!displayId.value),
     staleTime: 60_000,
   });
 
-  const tenantId = computed<TenantUuid | null>(() => {
+  const resolvedTenant = computed<TenantResponse | null>(() => {
     const data = tenantsQuery.data.value;
     if (!data || !displayId.value) return null;
-    const id = data.find((t) => t.display_id === displayId.value)?.id;
+    return data.find((t) => t.display_id === displayId.value) ?? null;
+  });
+
+  const tenantId = computed<TenantUuid | null>(() => {
+    const id = resolvedTenant.value?.id;
     return id ? (id as TenantUuid) : null;
   });
+
+  /** 解決したテナントのオーナー。代行系の表示判定（レビュー画面など）が使う。 */
+  const tenantOwnerId = computed(() => resolvedTenant.value?.owner_id ?? null);
 
   const isTenantNotFound = computed(
     () =>
@@ -47,6 +53,9 @@ export function useResolvedTenantId(tenantDisplayId: MaybeRefOrGetter<string>) {
   return {
     tenantDisplayId: displayId,
     tenantId,
+    /** 解決したテナントそのもの。設定画面は id 以外（名前・説明・アイコン）も要る。 */
+    resolvedTenant,
+    tenantOwnerId,
     isTenantNotFound,
     isResolving,
     isError,

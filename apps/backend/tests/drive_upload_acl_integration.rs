@@ -1,3 +1,9 @@
+// Drive の行を作るテストは、backfill のテスト（`drive_project_id_backfill_integration`）が
+// 実行前に `TRUNCATE drive_files, drive_folders CASCADE` を流すのと同じ鍵で直列化する。
+// backfill の SQL はテナントを跨いで全行を見るので、あちらは Drive を空にしてからでないと
+// 他のファイルの残骸で落ちる。鍵を共有しないと、その TRUNCATE がこちらの実行中の行を
+// 巻き添えにする（CASCADE は drive_folder_shares と task_attachments にも及ぶ）。
+
 mod common;
 
 use axum::http::StatusCode;
@@ -51,6 +57,7 @@ async fn insert_project_folder(
 }
 
 async fn add_member(app: &TestApp, project_id: Uuid, user_id: Uuid) {
+    common::ensure_tenant_member_for_project(&app.state.db, project_id, user_id).await;
     project_members::ActiveModel {
         id: Set(Uuid::new_v4()),
         project_id: Set(project_id),
@@ -89,6 +96,7 @@ async fn upload_status(app: &TestApp, tenant_id: Uuid, folder_id: Uuid) -> Statu
 /// プロジェクト B のフォルダへのアップロードは、B の非メンバーには 403。
 /// メンバーには 201。プロジェクトファイルの読み取り/更新/削除と同じ ACL を作成にも適用する。
 #[tokio::test]
+#[serial_test::file_serial(drive)]
 async fn upload_into_project_folder_enforces_membership() {
     let mut app = TestApp::new().await;
 
@@ -96,6 +104,12 @@ async fn upload_into_project_folder_enforces_membership() {
     let tp = app.insert_tenant_project(owner.id).await; // tenant T + project A
     let project_b = insert_extra_project(&app, tp.tenant_id).await;
     let folder_b = insert_project_folder(&app, tp.tenant_id, project_b, owner.id).await;
+
+    // プロジェクト B にメンバーを 1 人指定して「絞り込み状態」にする。
+    // #568 でメンバー未指定のプロジェクトはテナント全体に開放されるため、
+    // プロジェクト単位の隔離を試すには先に指定が要る。
+    let member = app.insert_user(false, false).await;
+    add_member(&app, project_b, member.id).await;
 
     // 攻撃者: プロジェクト A のメンバー（テナントアクセスは通る）だが B の非メンバー。
     let attacker = app.insert_user(false, false).await;
@@ -112,8 +126,6 @@ async fn upload_into_project_folder_enforces_membership() {
     );
 
     // 対照: プロジェクト B のメンバーは同じフォルダへアップロードできる（過剰拒否でない）。
-    let member = app.insert_user(false, false).await;
-    add_member(&app, project_b, member.id).await;
     app.reset_session_client();
     app.login_session_no_content(&member.email, &member.password)
         .await;

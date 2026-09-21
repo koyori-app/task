@@ -24,6 +24,7 @@ async fn setup_task_fixture(app: &TestApp, owner_id: Uuid) -> TaskFixture {
         position: Set(0),
         is_default: Set(true),
         is_done_state: Set(false),
+        is_default_done: Set(false),
         created_at: Set(chrono::Utc::now().into()),
     }
     .insert(&app.state.db)
@@ -176,6 +177,7 @@ async fn time_tracking_integration_suite() {
 
     // 7. 他人のログ編集は 403（メンバーとして追加）
     let member = insert_user(&app.state.db, false, false).await;
+    common::ensure_tenant_member_for_project(&app.state.db, fixture.tp.project_id, member.id).await;
     entity::project_members::ActiveModel {
         id: Set(Uuid::new_v4()),
         project_id: Set(fixture.tp.project_id),

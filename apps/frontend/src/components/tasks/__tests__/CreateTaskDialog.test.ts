@@ -37,6 +37,14 @@ vi.mock('@/lib/api-vue-query', async (importOriginal) => {
   };
 });
 
+/*
+ * MarkdownEditor (CodeMirror) は happy-dom では起動できないため textarea の
+ * 代役に差し替える (説明は stub 側)。実物は story が実ブラウザで見る。
+ */
+vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
+  default: (await import('@/components/markdown/__tests__/markdown-editor-stub')).default,
+}));
+
 import CreateTaskDialog from '../CreateTaskDialog.vue';
 
 const statuses = [
@@ -46,6 +54,7 @@ const statuses = [
     color: '#2563eb',
     is_default: true,
     is_done_state: false,
+    is_default_done: false,
     created_at: '2026-01-01T00:00:00.000Z',
     position: 0,
     project_id: 'project-uuid',
@@ -60,8 +69,55 @@ const createdTask = {
   priority: 'Medium',
 };
 
+const labels = [
+  {
+    id: 'label-bug',
+    name: 'bug',
+    description: '',
+    color: '#e11d48',
+    icon_url: null,
+    project_id: 'project-uuid',
+  },
+  {
+    id: 'label-feature',
+    name: 'feature',
+    description: '',
+    color: '#3b82f6',
+    icon_url: null,
+    project_id: 'project-uuid',
+  },
+];
+
+/** 担当者の候補。`assignable-users` はメンバー行ではなく利用者そのものを返す */
+const members = [
+  { id: 'user-1', username: 'yupix', avatar_url: null },
+  { id: 'user-2', username: 'sousuke', avatar_url: null },
+];
+
 type MountOptions = {
   open?: boolean;
+  labels?: typeof labels;
+  labelsLoading?: boolean;
+  labelsError?: boolean;
+  members?: typeof members;
+  membersLoading?: boolean;
+  membersError?: boolean;
+};
+
+/**
+ * 担当者・ラベルのメニューはトリガーを押さないと描画されないので、中身を素の要素に
+ * 差し替えて直接読む。チェック項目は押すと反転した値を返すボタンにする。
+ */
+const dropdownStubs = {
+  DropdownMenu: { template: '<div><slot /></div>' },
+  DropdownMenuTrigger: { template: '<div><slot /></div>' },
+  DropdownMenuContent: { template: '<div><slot /></div>' },
+  DropdownMenuCheckboxItem: {
+    props: ['modelValue'],
+    emits: ['update:modelValue', 'select'],
+    template:
+      '<button type="button" role="menuitemcheckbox" :aria-checked="String(!!modelValue)" @click="$emit(\'update:modelValue\', !modelValue)"><slot /></button>',
+  },
 };
 
 function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
@@ -72,12 +128,28 @@ function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
       projectId: 'project-uuid',
       projectKey: 'PROJ',
       statuses,
+      labels: options.labels,
+      labelsLoading: options.labelsLoading,
+      labelsError: options.labelsError,
+      members: options.members,
+      membersLoading: options.membersLoading,
+      membersError: options.membersError,
     },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
+      stubs: dropdownStubs,
     },
     attachTo: document.body,
   });
+}
+
+/** 担当者・ラベルのメニューの項目（stub 済み）を表示名で引く */
+function menuItem(name: string) {
+  const item = [...document.body.querySelectorAll('[role="menuitemcheckbox"]')].find(
+    (el) => el.textContent?.trim() === name,
+  );
+  if (!item) throw new Error(`menu item ${name} not found`);
+  return item as HTMLButtonElement;
 }
 
 function getTitleInput() {
@@ -240,6 +312,45 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     wrapper.unmount();
   });
 
+  /**
+   * 作成に成功すると親が created を受けて open を false にする。その経路は
+   * onOpenChange を通らないので、成功表示を閉じるときに捨てないと次に開いた
+   * 瞬間に前回の「タスクを作成しました」が出る。
+   */
+  it('閉じて開き直したとき、前回の成功表示が残らない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    await new DOMWrapper(getTitleInput()).setValue('New task');
+    await new DOMWrapper(getForm()).trigger('submit');
+    await flushPromises();
+
+    expect(document.body.textContent).toContain('タスクを作成しました');
+
+    // 親が閉じる（created を受けた側の挙動）
+    await wrapper.setProps({ open: false });
+    await nextTick();
+    await wrapper.setProps({ open: true });
+    await nextTick();
+
+    expect(document.body.textContent).not.toContain('タスクを作成しました');
+  });
+
+  it('閉じて開き直したとき、前回の入力が残らない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    await new DOMWrapper(getTitleInput()).setValue('書きかけ');
+    expect(getTitleInput().value).toBe('書きかけ');
+
+    await wrapper.setProps({ open: false });
+    await nextTick();
+    await wrapper.setProps({ open: true });
+    await nextTick();
+
+    expect(getTitleInput().value).toBe('');
+  });
+
   it('resets form when the dialog closes', async () => {
     const wrapper = mountDialog(queryClient);
     await nextTick();
@@ -274,5 +385,487 @@ describe('CreateTaskDialog pre-hydration form values', () => {
 
     wrapper.unmount();
     isHydrated.value = true;
+  });
+});
+
+describe('CreateTaskDialog estimate', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  function getEstimateInput() {
+    const input = document.body.querySelector('input[name="estimated_minutes"]');
+    if (!input) throw new Error('estimate input not found');
+    return input as HTMLInputElement;
+  }
+
+  it('見積もり（分）を estimated_minutes として送る', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('見積もり付き');
+    await new DOMWrapper(getEstimateInput()).setValue('90');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.estimated_minutes).toBe(90);
+    // 入力側にも上限を出す（送信時の検証と同じ値）
+    expect(getEstimateInput().getAttribute('max')).toBe('2147483647');
+    wrapper.unmount();
+  });
+
+  it('見積もりが空なら estimated_minutes を送らない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('見積もりなし');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.estimated_minutes).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  /*
+   * 境界: 1 分と i32 の上限は通し、0・小数・上限超えは送らずに止める。
+   * 上限を超えた値を送ると backend の estimated_minutes（i32）のデシリアライズで
+   * 落ち、利用者には入力の誤りではなく「作成に失敗しました」しか出ない。
+   */
+  it.each([
+    ['0', null],
+    ['1.5', null],
+    ['1', 1],
+    ['2147483647', 2147483647],
+    ['2147483648', null],
+  ])('見積もり %s は %s として送る（null は送らない）', async (value, sent) => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('境界');
+    await new DOMWrapper(getEstimateInput()).setValue(value);
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    if (sent !== null) {
+      expect(mutateAsync.mock.calls[0][0].body.estimated_minutes).toBe(sent);
+    } else {
+      expect(mutateAsync).not.toHaveBeenCalled();
+      expect(document.body.textContent).toContain(
+        '見積もりは 1 以上 2147483647 以下の整数（分）で入力してください',
+      );
+    }
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog label selection', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  const labelButton = menuItem;
+
+  it('選択したラベルの label_ids を作成リクエストに含める', async () => {
+    const wrapper = mountDialog(queryClient, { labels });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('ラベル付きで作成');
+    expect(document.getElementById('task-labels-value')?.textContent).toContain('ラベルなし');
+
+    labelButton('feature').click();
+    await nextTick();
+    expect(labelButton('feature').getAttribute('aria-checked')).toBe('true');
+    // 選んだラベルは欄の中にも出る
+    expect(document.getElementById('task-labels-value')?.textContent).toContain('feature');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+    expect(mutateAsync.mock.calls[0][0].body.label_ids).toEqual(['label-feature']);
+    wrapper.unmount();
+  });
+
+  it('未選択なら label_ids をリクエストに含めない', async () => {
+    const wrapper = mountDialog(queryClient, { labels });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('ラベルなしで作成');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+    expect(mutateAsync.mock.calls[0][0].body.label_ids).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('トグル解除でラベルの選択が外れる', async () => {
+    const wrapper = mountDialog(queryClient, { labels });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('トグル確認');
+
+    labelButton('bug').click();
+    await nextTick();
+    labelButton('bug').click();
+    await nextTick();
+    expect(labelButton('bug').getAttribute('aria-checked')).toBe('false');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.label_ids).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('projectId が変わったら旧プロジェクトのラベル選択を持ち越さない', async () => {
+    const wrapper = mountDialog(queryClient, { labels });
+    await nextTick();
+    labelButton('bug').click();
+    await nextTick();
+
+    const otherLabels = [
+      {
+        id: 'label-campaign',
+        name: 'campaign',
+        description: '',
+        color: '#8b5cf6',
+        icon_url: null,
+        project_id: 'other-project-uuid',
+      },
+    ];
+    await wrapper.setProps({ projectId: 'other-project-uuid', labels: otherLabels });
+    await nextTick();
+
+    expect(labelButton('campaign').getAttribute('aria-checked')).toBe('false');
+    await new DOMWrapper(getTitleInput()).setValue('切替後の作成');
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+    expect(mutateAsync.mock.calls[0][0].params.path.project_id).toBe('other-project-uuid');
+    expect(mutateAsync.mock.calls[0][0].body.label_ids).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('ラベル一覧の再取得で消えた ID は選択から外れて送信されない', async () => {
+    const wrapper = mountDialog(queryClient, { labels });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('削除済みラベル');
+    labelButton('bug').click();
+    labelButton('feature').click();
+    await nextTick();
+
+    await wrapper.setProps({ labels: labels.filter((label) => label.id !== 'label-bug') });
+    await nextTick();
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.label_ids).toEqual(['label-feature']);
+    wrapper.unmount();
+  });
+
+  it('labels が undefined（ロード中・エラー）になっても選択は保持される', async () => {
+    const wrapper = mountDialog(queryClient, { labels });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('取得中の選択保持');
+    labelButton('feature').click();
+    await nextTick();
+
+    await wrapper.setProps({ labels: undefined, labelsLoading: true });
+    await nextTick();
+    await wrapper.setProps({ labels, labelsLoading: false });
+    await nextTick();
+
+    expect(labelButton('feature').getAttribute('aria-checked')).toBe('true');
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.label_ids).toEqual(['label-feature']);
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog labels query states', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  function labelsGroup() {
+    return document.body.querySelector('[role="group"][aria-labelledby="task-labels-label"]');
+  }
+
+  it('ロード中はラベル欄にロード中表示を出す', async () => {
+    const wrapper = mountDialog(queryClient, { labelsLoading: true });
+    await nextTick();
+
+    const group = labelsGroup();
+    expect(group).not.toBeNull();
+    expect(group?.textContent).toContain('ラベルを読み込み中');
+    expect(group?.querySelector('[role="menuitemcheckbox"]')).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('取得エラーはエラー表示と再試行を出し、正常な空一覧と区別する', async () => {
+    const wrapper = mountDialog(queryClient, { labelsError: true });
+    await nextTick();
+
+    const group = labelsGroup();
+    expect(group?.textContent).toContain('ラベルの取得に失敗しました');
+    const retry = Array.from(group?.querySelectorAll('button') ?? []).find(
+      (el) => el.textContent?.trim() === '再試行',
+    );
+    if (!retry) throw new Error('retry button not found');
+    retry.click();
+    await nextTick();
+    expect(wrapper.emitted('retryLabels')).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it('正常な 0 件ではラベル欄を表示しない', async () => {
+    const wrapper = mountDialog(queryClient, { labels: [] });
+    await nextTick();
+
+    expect(labelsGroup()).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('ラベル欄は role=group で「ラベル」見出しに関連付く', async () => {
+    const wrapper = mountDialog(queryClient, { labels });
+    await nextTick();
+
+    const group = labelsGroup();
+    expect(group).not.toBeNull();
+    const heading = document.getElementById('task-labels-label');
+    expect(heading?.textContent).toContain('ラベル');
+    expect(group?.contains(heading)).toBe(true);
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog assignee selection', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  const memberButton = menuItem;
+
+  /**
+   * 担当者は作成後にしか付けられなかった。作成時に選べると、割り当て済みの状態で
+   * 一覧に出せる。role は詳細から付けるときと同じ primary に揃える。
+   */
+  it('選択した担当者を assignees として作成リクエストに含める', async () => {
+    const wrapper = mountDialog(queryClient, { members });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('担当者付きで作成');
+
+    expect(document.getElementById('task-assignees-value')?.textContent).toContain('未割り当て');
+    memberButton('yupix').click();
+    await nextTick();
+    expect(memberButton('yupix').getAttribute('aria-checked')).toBe('true');
+    // 選んだ人は欄の中にも出る
+    expect(document.getElementById('task-assignees-value')?.textContent).toContain('yupix');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toEqual([
+      { user_id: 'user-1', role: 'primary' },
+    ]);
+    wrapper.unmount();
+  });
+
+  it('担当者を選ばなければ assignees を送らない', async () => {
+    const wrapper = mountDialog(queryClient, { members });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('未割当で作成');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('トグル解除で担当者の選択が外れる', async () => {
+    const wrapper = mountDialog(queryClient, { members });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('選んで外す');
+
+    memberButton('yupix').click();
+    await nextTick();
+    memberButton('yupix').click();
+    await nextTick();
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  // 候補の再取得で消えた利用者を送ると、backend が 404 で弾く（ラベルと同じ理由）
+  it('候補の再取得で消えた ID は選択から外れて送信されない', async () => {
+    const wrapper = mountDialog(queryClient, { members });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('抜けた人を送らない');
+
+    memberButton('yupix').click();
+    memberButton('sousuke').click();
+    await nextTick();
+
+    await wrapper.setProps({ members: [members[1]] });
+    await nextTick();
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toEqual([
+      { user_id: 'user-2', role: 'primary' },
+    ]);
+    wrapper.unmount();
+  });
+
+  it('members が undefined（ロード中・エラー）になっても選択は保持される', async () => {
+    const wrapper = mountDialog(queryClient, { members });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('取得が揺れても保つ');
+
+    memberButton('yupix').click();
+    await nextTick();
+
+    await wrapper.setProps({ members: undefined, membersLoading: true });
+    await nextTick();
+    await wrapper.setProps({ members, membersLoading: false });
+    await nextTick();
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toEqual([
+      { user_id: 'user-1', role: 'primary' },
+    ]);
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog assignable-users query states', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('ロード中は担当者欄にロード中表示を出す', async () => {
+    const wrapper = mountDialog(queryClient, { membersLoading: true });
+    await nextTick();
+
+    expect(document.body.textContent).toContain('担当者');
+    expect(document.body.textContent).toContain('メンバーを読み込み中...');
+    wrapper.unmount();
+  });
+
+  it('取得エラーはエラー表示と再試行を出し、正常な空一覧と区別する', async () => {
+    const wrapper = mountDialog(queryClient, { membersError: true });
+    await nextTick();
+
+    expect(document.body.textContent).toContain('メンバーの取得に失敗しました');
+    const retry = [...document.body.querySelectorAll('button')].find(
+      (el) => el.textContent?.trim() === '再試行',
+    );
+    expect(retry).toBeDefined();
+    retry!.click();
+    await nextTick();
+    expect(wrapper.emitted('retryMembers')).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  // 候補が 0 人なのは正常な状態。節ごと出さない（ラベルと同じ）
+  it('正常な 0 件では担当者欄を表示しない', async () => {
+    const wrapper = mountDialog(queryClient, { members: [] });
+    await nextTick();
+
+    expect(document.body.textContent).not.toContain('担当者');
+    wrapper.unmount();
+  });
+
+  it('担当者欄は role=group で「担当者」見出しに関連付く', async () => {
+    const wrapper = mountDialog(queryClient, { members });
+    await nextTick();
+
+    const group = document.body.querySelector('[aria-labelledby="task-assignees-label"]');
+    expect(group).not.toBeNull();
+    expect(group!.getAttribute('role')).toBe('group');
+    expect(document.getElementById('task-assignees-label')?.textContent).toContain('担当者');
+    wrapper.unmount();
   });
 });

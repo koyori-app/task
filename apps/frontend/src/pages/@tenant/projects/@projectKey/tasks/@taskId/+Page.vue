@@ -1,13 +1,34 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue';
 import { navigate } from 'vike/client/router';
+import { useData } from 'vike-vue/useData';
 import { usePageContext } from 'vike-vue/usePageContext';
 
+import TaskActivityFeed from '@/components/tasks/TaskActivityFeed.vue';
+import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
+import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
 import { Button } from '@/components/ui/button';
+import { useAssignableUsersQuery } from '@/lib/api-vue-query';
+import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
+import { useTaskActivities } from '@/composables/useTaskActivities';
+import { useTaskComments } from '@/composables/useTaskComments';
 import { useTaskDetail } from '@/composables/useTaskDetail';
+import { useMeQuery } from '@/lib/api-vue-query';
+import type { Data } from './+data';
+import { refreshTaskDescription } from './task-description-navigation';
+import type { components } from '@/generated/api';
+import { taskDetailHref } from '@/lib/task-display';
+
+type TaskResponse = components['schemas']['TaskResponse'];
 
 const pageContext = usePageContext();
+// サーバ (+data.ts) が renderDescription した説明 HTML。クライアントは受けて v-html
+// するだけで、再パースしない (SSR 契約: @/lib/markup-renderer/index.ts)。
+// Storybook は +Page.vue を直接マウントし data を provide しないため undefined になる。
+// 型で undefined を認め、参照側で null へ倒す（descriptionHtml は元々 null 許容で、
+// null ならプレーンテキスト表示へフォールバックする）。
+const data = useData<Data>() as Data | undefined;
 
 // 削除後遷移の seam。既定は SPA 遷移だが、テスト等が差し替えられるよう inject 経由にする。
 const navigateAfterDelete = inject<(href: string) => void>('navigateAfterDelete', (href) => {
@@ -25,26 +46,36 @@ function closeDeleteDialog() {
 }
 
 const {
+  tenantId,
+  projectId,
   displayTask,
   statuses,
+  projectLabels,
+  projectLabelsLoading,
+  projectLabelsError,
   selectedStatusId,
   statusUpdating,
   statusError,
+  priorityUpdating,
+  priorityError,
+  labelsUpdating,
+  labelsError,
   fieldUpdating,
   fieldErrors,
   isLoading,
   isNotFound,
   isError,
   onStatusChange,
+  onPriorityChange,
   onSaveTitle,
   onSaveDescription,
   onSaveProgressPct,
   onSaveSoftDeadline,
   onSaveHardDeadline,
+  onSaveLabels,
   deleteError,
   deletePending,
   confirmDelete,
-  listHref,
 } = useTaskDetail({
   tenantDisplayId,
   projectKey,
@@ -53,7 +84,95 @@ const {
     closeDeleteDialog();
     navigateAfterDelete(href);
   },
+  // 説明の保存直後、クライアントは生テキストしか持たない。クライアントで KFM を
+  // 描画せず (バンドル退行 +417.5 KB の再来防止)、+data.ts をサーバで再実行して
+  // 描画済み HTML を取り直す。保存確定後に同じ URL へ再ナビゲートするため、backend は
+  // 既に新しい本文を返す。keepScrollPosition と overwriteLastHistoryEntry で
+  // 長い本文の編集位置を維持しつつブラウザ履歴を増やさない。
+  // 再ナビゲート失敗は黙殺しない: 保存済みデータは失われず、descriptionSource の
+  // 照合不一致でプレーンテキスト表示へ倒れる (SSR 契約) ため UI エラーにはしないが、
+  // 「KFM 表示に戻らない」調査の手がかりとして記録は残す。
+  onAfterFieldSaved: (field) => {
+    if (field === 'description') {
+      refreshTaskDescription().catch((error: unknown) => {
+        console.error('説明保存後の再読み込みに失敗 (プレーンテキスト表示のまま):', error);
+      });
+    }
+  },
 });
+
+// コメントは client 取得（SSR 一回契約の対象外）。読み込み失敗はコメント節の中で
+// 倒し、タスク詳細本体には影響させない
+const {
+  threads,
+  commentsLoading,
+  commentsError,
+  refetchComments,
+  submitPending,
+  submitError,
+  replyError,
+  replyErrorThreadId,
+  updatingCommentId,
+  updateError,
+  updateErrorCommentId,
+  deletingCommentId,
+  deleteError: commentDeleteError,
+  deleteErrorCommentId,
+  clearReplyError,
+  clearUpdateError,
+  clearDeleteError,
+  submitComment,
+  updateComment,
+  deleteComment,
+} = useTaskComments({ tenantId, projectId, taskId });
+
+// 担当者の割り当て（詳細でも一覧の行と同じ口を使う）
+const membersQuery = useAssignableUsersQuery(tenantId, projectId);
+const members = computed(() => membersQuery.data.value ?? []);
+
+// 候補の取得状態はピッカーへ渡す（取得中・失敗を「候補 0 人」と混ぜない）
+const membersState = computed(() => ({
+  loading: membersQuery.isLoading.value,
+  error: membersQuery.isError.value,
+  onRetry: () => void membersQuery.refetch(),
+}));
+const rowMutations = useTaskRowMutations({ tenantId, projectId });
+
+function onToggleAssignee(userId: string, checked: boolean) {
+  const task = displayTask.value;
+  if (!task) return;
+  void rowMutations.toggleAssignee(task, userId, checked);
+}
+
+// 担当者の更新は行と同じ口を使うので、飛行中と失敗をこの画面にも出す
+// （出さないと失敗が無表示、送信中も押せて 2 回目が無言で捨てられる）
+const assigneeUpdating = computed(() => {
+  const id = displayTask.value?.id;
+  return !!id && rowMutations.pending.value[id] === 'assignees';
+});
+const assigneeError = computed(() => {
+  const id = displayTask.value?.id;
+  return id ? (rowMutations.errors.value[id] ?? null) : null;
+});
+
+const {
+  activities,
+  activitiesLoading,
+  activitiesError,
+  hasMoreActivities,
+  activitiesFetchingMore,
+  loadMoreActivities,
+  refetchActivities,
+} = useTaskActivities({
+  tenantId,
+  projectId,
+  taskId,
+});
+
+// 編集ボタンの出し分け用（TaskCommentItem 参照）。Layout の useAuthSession が
+// 同じ query key で /v1/auth/me を取得済みのため追加リクエストにはならない
+const meQuery = useMeQuery();
+const currentUserId = computed(() => meQuery.data.value?.id ?? null);
 
 function openDeleteDialog() {
   deleteError.value = null;
@@ -65,33 +184,63 @@ function onDeleteDialogCancel(event: Event) {
   if (deletePending.value) return;
   closeDeleteDialog();
 }
+
+function openRelatedTask(task: TaskResponse) {
+  void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id));
+}
 </script>
 
 <template>
   <TaskDetailHub
     :task="displayTask"
+    :description-html="data?.descriptionHtml ?? null"
+    :description-source="data?.descriptionSource ?? null"
     :project-key="projectKey"
     :statuses="statuses"
+    :project-labels="projectLabels"
+    :project-labels-loading="projectLabelsLoading"
+    :project-labels-error="projectLabelsError"
     :status-id="selectedStatusId"
     :status-updating="statusUpdating"
     :status-error="statusError"
+    :priority-updating="priorityUpdating"
+    :priority-error="priorityError"
+    :labels-updating="labelsUpdating"
+    :labels-error="labelsError"
     :field-updating="fieldUpdating"
     :field-errors="fieldErrors"
     :loading="isLoading"
     :not-found="isNotFound"
     :error="isError"
     @update:status-id="onStatusChange"
+    @change:priority="onPriorityChange"
     @save:title="onSaveTitle"
     @save:description="onSaveDescription"
     @save:progress_pct="onSaveProgressPct"
     @save:soft_deadline="onSaveSoftDeadline"
     @save:hard_deadline="onSaveHardDeadline"
+    @save:label_ids="onSaveLabels"
+    :members="members"
+    :assignee-updating="assigneeUpdating"
+    :assignee-error="assigneeError"
+    :members-state="membersState"
+    @toggle:assignee="onToggleAssignee"
     :delete-disabled="deletePending"
     @delete-request="openDeleteDialog"
   >
-    <template #breadcrumb>
-      <a :href="listHref" class="text-primary hover:underline">タスク一覧</a>
-      <span aria-hidden="true">/</span>
+    <template v-if="displayTask" #main>
+      <TaskSubtaskPanel
+        :tenant-id="tenantId"
+        :project-id="projectId"
+        :task-id="taskId"
+        :task-uuid="displayTask.id"
+        :parent-task-id="displayTask.parent_task_id ?? null"
+        :status-id="selectedStatusId"
+        :status-updating="statusUpdating"
+        :statuses="statuses"
+        :project-key="projectKey"
+        @open="openRelatedTask"
+      />
     </template>
     <template #header-actions>
       <dialog
@@ -124,6 +273,44 @@ function onDeleteDialogCancel(event: Event) {
           </Button>
         </div>
       </dialog>
+    </template>
+    <!-- モックに合わせ、コメント（アクティビティ）は右の欄に置く -->
+    <template #sidebar>
+      <TaskComments
+        :threads="threads"
+        :loading="commentsLoading"
+        :list-error="commentsError"
+        :on-retry="refetchComments"
+        :current-user-id="currentUserId"
+        :submit-pending="submitPending"
+        :submit-error="submitError"
+        :reply-error="replyError"
+        :reply-error-thread-id="replyErrorThreadId"
+        :updating-comment-id="updatingCommentId"
+        :update-error="updateError"
+        :update-error-comment-id="updateErrorCommentId"
+        :deleting-comment-id="deletingCommentId"
+        :delete-error="commentDeleteError"
+        :delete-error-comment-id="deleteErrorCommentId"
+        :on-submit="submitComment"
+        :on-update="updateComment"
+        :on-delete="deleteComment"
+        :on-clear-reply-error="clearReplyError"
+        :on-clear-update-error="clearUpdateError"
+        :on-clear-delete-error="clearDeleteError"
+      >
+        <template #before-list>
+          <TaskActivityFeed
+            :activities="activities"
+            :loading="activitiesLoading"
+            :error="activitiesError"
+            :on-retry="refetchActivities"
+            :has-more="hasMoreActivities"
+            :fetching-more="activitiesFetchingMore"
+            :on-load-more="loadMoreActivities"
+          />
+        </template>
+      </TaskComments>
     </template>
     <template #footer>
       <p class="text-xs text-muted-foreground">

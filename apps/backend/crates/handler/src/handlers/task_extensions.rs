@@ -1,7 +1,7 @@
 //! 全文検索・バルク操作・保存済みビュー・ファイル添付。
 
 use crate::AppState;
-use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
+use crate::auth_helpers::{is_tenant_owner, require_project_access};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
@@ -26,7 +26,10 @@ use sea_orm::{
     prelude::Uuid,
 };
 use service::db::is_postgres_unique_violation;
-use service::task_activities::{record_activity, status_name};
+use service::task_activities::{
+    record_activity, record_label_diff, status_name, task_label_entries,
+};
+use std::collections::HashSet;
 
 const BULK_MAX_TASKS: usize = 100;
 
@@ -62,7 +65,6 @@ pub async fn search_tasks(
     auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
     let query = q.q.trim();
     if query.is_empty() {
@@ -111,6 +113,8 @@ async fn search_tasks_ilike(
     let total = base.clone().count(&state.db).await?;
     let rows = base
         .order_by_desc(tasks::Column::UpdatedAt)
+        // 同じ更新時刻が並ぶと offset のページ境界で行が重複・欠落する
+        .order_by_asc(tasks::Column::Id)
         .limit(limit)
         .offset(offset)
         .all(&state.db)
@@ -227,7 +231,8 @@ async fn search_tasks_tsvector(
         WHERE project_id = $1
           AND deleted_at IS NULL
           AND search_vector @@ plainto_tsquery('pg_catalog.simple', $2)
-        ORDER BY score DESC
+        -- score は同値が頻発する。並びが一意でないと offset のページ境界で行が重複・欠落する
+        ORDER BY score DESC, id ASC
         LIMIT $3 OFFSET $4
     "#;
     let rows = state
@@ -290,10 +295,18 @@ pub async fn bulk_update_tasks(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
     if payload.task_ids.len() > BULK_MAX_TASKS {
         return Err(AppError::BadRequest);
+    }
+    if let (Some(add), Some(remove)) = (
+        &payload.update.add_label_ids,
+        &payload.update.remove_label_ids,
+    ) {
+        let remove: HashSet<&Uuid> = remove.iter().collect();
+        if add.iter().any(|id| remove.contains(id)) {
+            return Err(AppError::BadRequest);
+        }
     }
 
     let mut unique_ids = payload.task_ids.clone();
@@ -402,7 +415,7 @@ async fn apply_bulk_update(
     active.update(&txn).await?;
 
     if let Some(assignee_id) = update.assignee_id {
-        require_member_or_owner(state, tenant_id, project_id, assignee_id).await?;
+        require_project_access(&txn, tenant_id, project_id, assignee_id).await?;
         let exists = task_assignees::Entity::find()
             .filter(task_assignees::Column::TaskId.eq(task_id))
             .filter(task_assignees::Column::UserId.eq(assignee_id))
@@ -429,6 +442,16 @@ async fn apply_bulk_update(
             .await?;
         }
     }
+
+    // ラベル変更の前後スナップショット。実際に集合が変わったときだけ記録する。
+    // ラベルを変える入力が増えたら、この判定式に足すこと。
+    // ここを忘れると記録だけが静かに欠ける
+    let labels_will_change = update.add_label_ids.is_some() || update.remove_label_ids.is_some();
+    let before_labels = if labels_will_change {
+        Some(task_label_entries(&txn, task_id).await?)
+    } else {
+        None
+    };
 
     if let Some(ref label_ids) = update.add_label_ids {
         let mut unique = label_ids.clone();
@@ -462,7 +485,29 @@ async fn apply_bulk_update(
         }
     }
 
+    if let Some(ref label_ids) = update.remove_label_ids {
+        let mut unique = label_ids.clone();
+        unique.sort();
+        unique.dedup();
+        if !unique.is_empty() {
+            task_labels::Entity::delete_many()
+                .filter(task_labels::Column::TaskId.eq(task_id))
+                .filter(task_labels::Column::LabelId.is_in(unique))
+                .exec(&txn)
+                .await?;
+        }
+    }
+
+    if let Some(before_labels) = before_labels {
+        let after_labels = task_label_entries(&txn, task_id).await?;
+        record_label_diff(&txn, task_id, Some(user_id), &before_labels, &after_labels).await?;
+    }
+
+    let linked = service::github::sync::mark_pending_push(&txn, task_id).await?;
     txn.commit().await?;
+    if linked {
+        crate::handlers::github::enqueue_issue_push(state, task_id).await;
+    }
     Ok(())
 }
 
@@ -489,7 +534,6 @@ pub async fn list_task_views(
     auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
     let views = project_task_views::Entity::find()
         .filter(project_task_views::Column::ProjectId.eq(project_id))
@@ -532,7 +576,6 @@ pub async fn create_task_view(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
     let model = project_task_views::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -578,7 +621,6 @@ pub async fn update_task_view(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
     let view = project_task_views::Entity::find_by_id(view_id)
         .filter(project_task_views::Column::ProjectId.eq(project_id))
@@ -637,7 +679,6 @@ pub async fn delete_task_view(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
     let view = project_task_views::Entity::find_by_id(view_id)
         .filter(project_task_views::Column::ProjectId.eq(project_id))
@@ -680,7 +721,6 @@ pub async fn list_task_attachments(
     auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
     let rows = task_attachments::Entity::find()
@@ -735,7 +775,6 @@ pub async fn attach_task_file(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
     let file = drive_files::Entity::find_by_id(payload.drive_file_id)
@@ -816,7 +855,6 @@ pub async fn detach_task_file(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
     let attachment = task_attachments::Entity::find()

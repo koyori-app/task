@@ -2,10 +2,18 @@
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
-import { PhKanban, PhSlidersHorizontal, PhWarning } from '@phosphor-icons/vue';
+import {
+  PhGear,
+  PhKanban,
+  PhPlugsConnected,
+  PhTag,
+  PhTextbox,
+  PhUsers,
+  PhWarning,
+} from '@phosphor-icons/vue';
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
-import { computed, ref } from 'vue';
+import { computed, ref, watch, type Component } from 'vue';
 import { Button } from '@/components/ui/button';
 import { Field, FieldError, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -15,6 +23,7 @@ import CustomFieldsSection from '@/components/projects/CustomFieldsSection.vue';
 import EmojiIconPicker from '@/components/projects/EmojiIconPicker.vue';
 import IntegrationsSection from '@/components/projects/IntegrationsSection.vue';
 import LabelsSection from '@/components/projects/LabelsSection.vue';
+import MembersSection from '@/components/projects/MembersSection.vue';
 import WorkflowStatusesEditor from '@/components/projects/WorkflowStatusesEditor.vue';
 import { apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
@@ -24,8 +33,15 @@ type ProjectResponse = components['schemas']['ProjectResponse'];
 const LIST_PROJECTS_PATH = '/v1/tenants/{tenant_id}/projects' as const;
 const PROJECT_PATH = '/v1/tenants/{tenant_id}/projects/{id}' as const;
 
-/** 設定セクション。Members(#371) ほかは増分で追加 */
-type SettingsSection = 'general' | 'workflow' | 'labels' | 'fields' | 'integrations' | 'danger';
+/** 設定セクション。残りは増分で追加 */
+type SettingsSection =
+  | 'general'
+  | 'members'
+  | 'workflow'
+  | 'labels'
+  | 'fields'
+  | 'integrations'
+  | 'danger';
 
 const props = defineProps<{
   tenantId: string;
@@ -40,13 +56,24 @@ const saveDone = ref(false);
 const isDeleteOpen = ref(false);
 const icon = ref<string | null>(props.project.icon_emoji ?? null);
 
-const sections: { key: SettingsSection; label: string; danger?: boolean }[] = [
-  { key: 'general', label: '一般' },
-  { key: 'workflow', label: 'ワークフロー' },
-  { key: 'labels', label: 'ラベル' },
-  { key: 'fields', label: 'カスタムフィールド' },
-  { key: 'integrations', label: '連携' },
-  { key: 'danger', label: '削除', danger: true },
+/**
+ * アイコンは section ごとに持たせる。テンプレート側で key を条件分岐していたときは
+ * 当てはまらない節が全部フォールバックの 1 つに落ち、一般・ラベル・カスタムフィールド・
+ * 連携の 4 つが同じ絵になっていた。ここで必須にすれば足し忘れが型で分かる。
+ */
+const sections: {
+  key: SettingsSection;
+  label: string;
+  icon: Component;
+  danger?: boolean;
+}[] = [
+  { key: 'general', label: '一般', icon: PhGear },
+  { key: 'members', label: 'メンバー', icon: PhUsers },
+  { key: 'workflow', label: 'ワークフロー', icon: PhKanban },
+  { key: 'labels', label: 'ラベル', icon: PhTag },
+  { key: 'fields', label: 'カスタムフィールド', icon: PhTextbox },
+  { key: 'integrations', label: '連携', icon: PhPlugsConnected },
+  { key: 'danger', label: '削除', icon: PhWarning, danger: true },
 ];
 
 /** `?section=` から初期表示セクションを決める（GitHub callback の戻り先が利用。#386） */
@@ -98,6 +125,27 @@ const form = useForm({
   },
 });
 
+/**
+ * プロジェクトが差し替わったらフォームとアイコンを引き直す。
+ *
+ * 一般タブの入力値だけは props から一度コピーして持つので、追従しないと A の
+ * 名前と説明を表示したまま B へ保存できてしまう。親の `:key` でも作り直されるが、
+ * 各セクションと同じくここだけでも成立させる（`:key` を外した人が
+ * この一番重い経路を静かに壊せる状態にしない）。
+ */
+watch(
+  () => props.project.id,
+  () => {
+    submitError.value = null;
+    saveDone.value = false;
+    icon.value = props.project.icon_emoji ?? null;
+    form.reset({
+      name: props.project.name,
+      description: props.project.description,
+    });
+  },
+);
+
 const isPending = computed(() => updateMutation.isPending.value);
 
 function onDeleted() {
@@ -138,9 +186,11 @@ function onDeleted() {
             :aria-current="activeSection === section.key ? 'true' : undefined"
             @click="activeSection = section.key"
           >
-            <PhWarning v-if="section.danger" class="size-4" />
-            <PhKanban v-else-if="section.key === 'workflow'" class="size-4 text-muted-foreground" />
-            <PhSlidersHorizontal v-else class="size-4 text-muted-foreground" />
+            <component
+              :is="section.icon"
+              class="size-4"
+              :class="section.danger ? '' : 'text-muted-foreground'"
+            />
             <span class="flex-1">{{ section.label }}</span>
           </button>
         </template>
@@ -233,6 +283,13 @@ function onDeleted() {
             </form.Subscribe>
           </div>
         </form>
+
+        <!-- メンバー -->
+        <MembersSection
+          v-else-if="activeSection === 'members'"
+          :tenant-id="tenantId"
+          :project-id="project.id"
+        />
 
         <!-- ワークフロー -->
         <WorkflowStatusesEditor

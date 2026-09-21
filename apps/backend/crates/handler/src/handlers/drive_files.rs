@@ -14,20 +14,19 @@ use chrono::Utc;
 use futures::{SinkExt, channel::mpsc as fmpsc};
 use sea_orm::prelude::Uuid;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
 };
 
 use crate::AppState;
-use crate::error::AppError;
+use crate::error::{AppError, ServerError};
 use crate::extractors::{AuthUser, OptionalAuthUser};
 use crate::openapi::CrudErrors;
-use entity::{
-    drive_files, drive_folder_shares, drive_folders, project_members, scopes::Scope, tenants,
-};
+use entity::{drive_files, drive_folder_shares, drive_folders, scopes::Scope, tenants};
 use payload::drive_files::*;
 use service::drive::{
-    current_storage_type, effective_quota, guess_mime, is_tenant_owner, tenant_used_bytes,
+    can_access_project, current_storage_type, effective_quota, guess_mime, is_editable_mime,
+    is_tenant_owner, lock_tenant_drive, source_mime_override, tenant_used_bytes,
 };
 use service::storage::{ByteStream, StorageError};
 
@@ -38,9 +37,18 @@ async fn load_tenant_file(
     tenant_id: Uuid,
     file_id: Uuid,
 ) -> Result<drive_files::Model, AppError> {
+    load_tenant_file_conn(&state.db, tenant_id, file_id).await
+}
+
+/// トランザクション内から読むための版。ロックを取ったあとに読み直す経路で使う。
+async fn load_tenant_file_conn<C: ConnectionTrait>(
+    conn: &C,
+    tenant_id: Uuid,
+    file_id: Uuid,
+) -> Result<drive_files::Model, AppError> {
     drive_files::Entity::find_by_id(file_id)
         .filter(drive_files::Column::TenantId.eq(tenant_id))
-        .one(&state.db)
+        .one(conn)
         .await?
         .ok_or(AppError::NotFound)
 }
@@ -50,24 +58,20 @@ async fn load_folder_in_tenant(
     tenant_id: Uuid,
     folder_id: Uuid,
 ) -> Result<drive_folders::Model, AppError> {
-    drive_folders::Entity::find_by_id(folder_id)
-        .filter(drive_folders::Column::TenantId.eq(tenant_id))
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)
+    load_folder_in_tenant_conn(&state.db, tenant_id, folder_id).await
 }
 
-async fn is_project_member(
-    state: &AppState,
-    project_id: Uuid,
-    user_id: Uuid,
-) -> Result<bool, AppError> {
-    let member = project_members::Entity::find()
-        .filter(project_members::Column::ProjectId.eq(project_id))
-        .filter(project_members::Column::UserId.eq(user_id))
-        .one(&state.db)
-        .await?;
-    Ok(member.is_some())
+/// トランザクション内から読むための版。ロックを取ったあとに読み直す経路で使う。
+async fn load_folder_in_tenant_conn<C: ConnectionTrait>(
+    conn: &C,
+    tenant_id: Uuid,
+    folder_id: Uuid,
+) -> Result<drive_folders::Model, AppError> {
+    drive_folders::Entity::find_by_id(folder_id)
+        .filter(drive_folders::Column::TenantId.eq(tenant_id))
+        .one(conn)
+        .await?
+        .ok_or(AppError::NotFound)
 }
 
 async fn folder_has_user_share(
@@ -127,12 +131,7 @@ async fn can_access_file_content(
     auth: &OptionalAuthUser,
     share_token: Option<&str>,
 ) -> Result<(), AppError> {
-    if file.project_id.is_none() {
-        return Ok(());
-    }
-
-    let project_id = file.project_id.expect("checked is_none above");
-
+    // 共有トークンはフォルダ単位で判定する。テナントレベルファイルも同じ経路に載せる。
     if let Some(token) = share_token.filter(|t| !t.is_empty()) {
         if let Some(folder_id) = file.folder_id
             && folder_has_token_share(state, folder_id, token).await?
@@ -145,12 +144,22 @@ async fn can_access_file_content(
     let Some(auth_user) = &auth.0 else {
         return Err(AppError::Forbidden);
     };
+    auth_user.require_scope(Scope::ReadDrive)?;
+
+    // この経路は URL に tenant_id を含まず、ファイル ID だけで引く。テナントレベルファイル
+    // （project_id が NULL）を無条件に許可すると、ID を知る第三者に内容が渡るため、
+    // ファイル自身の tenant_id に対してテナント境界を確認する。
+    let Some(project_id) = file.project_id else {
+        return auth_user
+            .ensure_tenant_access(state, file.tenant_id, None)
+            .await;
+    };
 
     if is_tenant_owner(&state.db, file.tenant_id, auth_user.user_id).await? {
         return Ok(());
     }
 
-    if is_project_member(state, project_id, auth_user.user_id).await? {
+    if can_access_project(&state.db, file.tenant_id, project_id, auth_user.user_id).await? {
         return Ok(());
     }
 
@@ -177,7 +186,7 @@ async fn authorize_file_access(
     if is_tenant_owner(&state.db, file.tenant_id, user.user_id).await? {
         return Ok(());
     }
-    if is_project_member(state, project_id, user.user_id).await? {
+    if can_access_project(&state.db, file.tenant_id, project_id, user.user_id).await? {
         return Ok(());
     }
     if let Some(folder_id) = file.folder_id
@@ -189,18 +198,22 @@ async fn authorize_file_access(
 }
 
 /// プロジェクトファイルの書き込み権限を確認する（共有受信者は読み取り専用のため除外）。
-async fn authorize_file_write(
-    state: &AppState,
+///
+/// ロックを取ったトランザクションからも呼べるように接続を受け取る。移動を伴う経路は
+/// ロックの内側で読み直したファイルを渡すこと（外で認可すると、ロック待ちのあいだの
+/// 移動を見落とす）。
+async fn authorize_file_write<C: ConnectionTrait>(
+    conn: &C,
     file: &drive_files::Model,
     user: &AuthUser,
 ) -> Result<(), AppError> {
     let Some(project_id) = file.project_id else {
         return Ok(());
     };
-    if is_tenant_owner(&state.db, file.tenant_id, user.user_id).await? {
+    if is_tenant_owner(conn, file.tenant_id, user.user_id).await? {
         return Ok(());
     }
-    if is_project_member(state, project_id, user.user_id).await? {
+    if can_access_project(conn, file.tenant_id, project_id, user.user_id).await? {
         return Ok(());
     }
     Err(AppError::Forbidden)
@@ -241,7 +254,7 @@ pub async fn list_files(
         let folder = load_folder_in_tenant(&state, tenant_id, folder_id).await?;
         if let Some(project_id) = folder.project_id
             && !is_tenant_owner(&state.db, tenant_id, auth.user_id).await?
-            && !is_project_member(&state, project_id, auth.user_id).await?
+            && !can_access_project(&state.db, tenant_id, project_id, auth.user_id).await?
             && !folder_has_user_share(&state, folder_id, auth.user_id).await?
         {
             return Err(AppError::Forbidden);
@@ -314,8 +327,14 @@ pub async fn upload_file(
                 let name = display_name
                     .or_else(|| original_filename.clone())
                     .ok_or(AppError::BadRequest)?;
-                let mime_type = content_type
-                    .unwrap_or_else(|| guess_mime(original_filename.as_deref().unwrap_or(&name)));
+                // ソースコード拡張子はクライアント申告より上書き表を優先する。
+                // ブラウザは .ts を video/mp2t のように申告することがあり、
+                // それを保存すると本文編集エンドポイントが弾いてしまう。
+                let mime_source = original_filename.as_deref().unwrap_or(name.as_str());
+                let mime_type = source_mime_override(mime_source)
+                    .map(str::to_string)
+                    .or(content_type)
+                    .unwrap_or_else(|| guess_mime(mime_source));
 
                 // クォータ事前チェック（既に上限に達していれば即拒否）
                 let used = tenant_used_bytes(&state.db, tenant_id).await?;
@@ -325,20 +344,20 @@ pub async fn upload_file(
                     return Err(AppError::ContentTooLarge);
                 }
 
-                let folder_project_id = if let Some(fid) = folder_id {
+                // 本文を流す前に落とすための先読み。確定値は下の txn 内で取り直す
+                // （アップロード中にフォルダが移動すると、ここで読んだ project_id は古い）
+                if let Some(fid) = folder_id {
                     let folder = load_folder_in_tenant(&state, tenant_id, fid).await?;
                     // プロジェクトフォルダへの書き込みはオーナーかメンバーのみ
                     // （共有受信者は読み取り専用。authorize_file_write と同方針）。
                     if let Some(project_id) = folder.project_id
                         && !is_tenant_owner(&state.db, tenant_id, auth.user_id).await?
-                        && !is_project_member(&state, project_id, auth.user_id).await?
+                        && !can_access_project(&state.db, tenant_id, project_id, auth.user_id)
+                            .await?
                     {
                         return Err(AppError::Forbidden);
                     }
-                    folder.project_id
-                } else {
-                    None
-                };
+                }
 
                 // Field<'a> は 'static でないため stream::unfold 不可。
                 // mpsc channel の Receiver は 'static なので ByteStream として使える。
@@ -407,8 +426,26 @@ pub async fn upload_file(
                 upload_result.map_err(storage_to_app_error)?;
                 // テナント行を FOR UPDATE でロックしてクォータ確定チェックと INSERT をアトミックに実行。
                 // 並行アップロードが同時にクォータチェックを通過してしまう競合を防ぐ。
+                let now = Utc::now();
                 let result: Result<drive_files::Model, AppError> = async {
                     let txn = state.db.begin().await?;
+                    // 階層の読みと挿入を直列化する。ロックの外で読むと、アップロード中に
+                    // フォルダが別プロジェクトへ移動していても古い project_id で入り、
+                    // 配下の同期が終わった後の行として残ってしまう
+                    lock_tenant_drive(&txn, tenant_id).await?;
+                    let folder_project_id = if let Some(fid) = folder_id {
+                        let folder = load_folder_in_tenant_conn(&txn, tenant_id, fid).await?;
+                        if let Some(project_id) = folder.project_id
+                            && !is_tenant_owner(&txn, tenant_id, auth.user_id).await?
+                            && !can_access_project(&txn, tenant_id, project_id, auth.user_id)
+                                .await?
+                        {
+                            return Err(AppError::Forbidden);
+                        }
+                        folder.project_id
+                    } else {
+                        None
+                    };
                     let tenant_q = tenants::Entity::find_by_id(tenant_id)
                         .lock_exclusive()
                         .one(&txn)
@@ -431,7 +468,8 @@ pub async fn upload_file(
                         project_id: Set(folder_project_id),
                         uploader_id: Set(auth.user_id),
                         folder_id: Set(folder_id),
-                        created_at: Set(Utc::now().into()),
+                        created_at: Set(now.into()),
+                        updated_at: Set(now.into()),
                     };
                     let saved = model.insert(&txn).await?;
                     txn.commit().await?;
@@ -526,8 +564,17 @@ pub async fn update_file(
     auth.require_scope(Scope::WriteDrive)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
 
-    let file = load_tenant_file(&state, tenant_id, id).await?;
-    authorize_file_write(&state, &file, &auth).await?;
+    // 取得・認可・更新をすべて同じロックの内側で行う。ロックの外で読むと、そのフォルダが
+    // 別プロジェクトへ移動している最中に古い project_id を書いてしまう。
+    // **認可もロックの内側でやり直す。** 外で認可すると、ロックを待っているあいだに
+    // 別のリクエストがそのファイルを自分の入れないプロジェクトへ移していても、
+    // 古いモデルと古い認可結果のまま名前を変えたりルートへ持ち出したりできる
+    let txn = state.db.begin().await?;
+    lock_tenant_drive(&txn, tenant_id).await?;
+
+    let file = load_tenant_file_conn(&txn, tenant_id, id).await?;
+    authorize_file_write(&txn, &file, &auth).await?;
+
     let mut active: drive_files::ActiveModel = file.into();
 
     if let Some(name) = payload.name {
@@ -536,7 +583,17 @@ pub async fn update_file(
 
     if let Some(folder_id) = payload.folder_id {
         let project_id = if let Some(fid) = folder_id {
-            let folder = load_folder_in_tenant(&state, tenant_id, fid).await?;
+            let folder = load_folder_in_tenant_conn(&txn, tenant_id, fid).await?;
+            // 移動先の ACL。authorize_file_write は移動「元」しか見ないので、
+            // これが無いと自分が入れないプロジェクトのフォルダへ送り込める
+            // （送り込んだ側は以後そのファイルを読めなくなるが、相手の
+            // プロジェクトに他人のファイルを置ける）。upload と同方針
+            if let Some(project_id) = folder.project_id
+                && !is_tenant_owner(&txn, tenant_id, auth.user_id).await?
+                && !can_access_project(&txn, tenant_id, project_id, auth.user_id).await?
+            {
+                return Err(AppError::Forbidden);
+            }
             folder.project_id
         } else {
             None
@@ -545,8 +602,137 @@ pub async fn update_file(
         active.project_id = Set(project_id);
     }
 
-    let updated = active.update(&state.db).await?;
+    active.updated_at = Set(Utc::now().into());
+    let updated = active.update(&txn).await?;
+    txn.commit().await?;
     Ok(Json(updated.into()))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    put,
+    path = "/files/{id}/content",
+    tag = "Drive Files",
+    summary = "ドライブファイル本文更新",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("id" = Uuid, Path, description = "ファイルID"),
+    ),
+    request_body = UpdateFileContentRequest,
+    responses(
+        (status = 200, description = "更新されたファイル", body = DriveFileResponse),
+        (
+            status = 400,
+            description = "テキストとして編集できない MIME タイプです",
+            body = ServerError
+        ),
+        (
+            status = 413,
+            description = "本文がアップロード上限またはテナントのクォータを超えています",
+            body = ServerError
+        ),
+        CrudErrors,
+    )
+)]
+pub async fn update_file_content(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, id)): Path<(Uuid, Uuid)>,
+    Json(payload): Json<UpdateFileContentRequest>,
+) -> Result<Json<DriveFileResponse>, AppError> {
+    auth.require_scope(Scope::WriteDrive)?;
+    auth.ensure_tenant_access(&state, tenant_id, None).await?;
+
+    let file = load_tenant_file(&state, tenant_id, id).await?;
+    authorize_file_write(&state.db, &file, &auth).await?;
+
+    if !is_editable_mime(&file.mime_type) {
+        return Err(AppError::BadRequestDetail(format!(
+            "テキストとして編集できない MIME タイプです: {}",
+            file.mime_type
+        )));
+    }
+
+    let bytes = Bytes::from(payload.content.into_bytes());
+    let new_size = bytes.len() as u64;
+    if new_size > state.drive_config.upload_max_bytes {
+        return Err(AppError::ContentTooLarge);
+    }
+
+    // mime_type はファイルの不変属性なのでロック外で読んだ値で構わない。
+    let mime_type = file.mime_type.clone();
+
+    // 既存キーを直接上書きすると、書き込み途中で失敗したときに元の内容が壊れる
+    // （ローカルバックエンドの upload は File::create で切り詰めるため）。
+    // 新しいキーへ書いてから DB を差し替え、コミット後に旧キーを削除する。
+    let new_storage_key = Uuid::new_v4().to_string();
+    let stream: ByteStream = Box::pin(futures::stream::once(async move {
+        Ok::<Bytes, StorageError>(bytes)
+    }));
+    state
+        .storage
+        .upload(&new_storage_key, stream, new_size, &mime_type)
+        .await
+        .map_err(storage_to_app_error)?;
+
+    // テナント行と対象ファイル行を FOR UPDATE でロックし、クォータ確定チェックと
+    // UPDATE をアトミックに実行する。旧サイズ・旧ストレージキーは必ずロック取得後の
+    // 値を使う。ロック前に読んだ file の値で計算・削除すると、同一ファイルへの並行更新が
+    // 互いの旧サイズを差し引いて実クォータ超過を許したり、同じ旧キーを二重削除して
+    // 先行処理の中間キーを孤児化する。
+    let new_key_for_update = new_storage_key.clone();
+    let result: Result<(drive_files::Model, String), AppError> = async {
+        let txn = state.db.begin().await?;
+        let tenant = tenants::Entity::find_by_id(tenant_id)
+            .lock_exclusive()
+            .one(&txn)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        let locked = drive_files::Entity::find_by_id(id)
+            .filter(drive_files::Column::TenantId.eq(tenant_id))
+            .lock_exclusive()
+            .one(&txn)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        // 認可もロックの内側でやり直す。ロック前の結果で通すと、アップロードを待っている
+        // あいだに別のリクエストがこのファイルを呼び出し元の入れないプロジェクトへ移しても、
+        // 本文とストレージキーを差し替えられる（窓はロック待ちではなくアップロード完走ぶん）。
+        // ここで弾いた場合はアップロード済みの新キーが下の Err 枝で消える
+        authorize_file_write(&txn, &locked, &auth).await?;
+        let old_storage_key = locked.storage_key.clone();
+        let used_now = tenant_used_bytes(&txn, tenant_id).await?;
+        // 差し替え後の使用量 = 現在の合計 − ロック時点の旧サイズ + 新サイズ
+        let projected = used_now
+            .saturating_sub(locked.size)
+            .saturating_add(new_size as i64);
+        if let Some(quota) = effective_quota(&tenant, &state.drive_config)
+            && projected > quota
+        {
+            return Err(AppError::ContentTooLarge);
+        }
+
+        let mut active: drive_files::ActiveModel = locked.into();
+        active.size = Set(new_size as i64);
+        active.storage_key = Set(new_key_for_update);
+        active.storage_type = Set(current_storage_type());
+        active.updated_at = Set(Utc::now().into());
+        let saved = active.update(&txn).await?;
+        txn.commit().await?;
+        Ok((saved, old_storage_key))
+    }
+    .await;
+
+    match result {
+        Ok((saved, old_storage_key)) => {
+            // DB は新キーを指しているので旧データは不要。削除に失敗しても更新自体は成立している。
+            let _ = state.storage.delete(&old_storage_key).await;
+            Ok(Json(saved.into()))
+        }
+        Err(e) => {
+            let _ = state.storage.delete(&new_storage_key).await;
+            Err(e)
+        }
+    }
 }
 
 #[axum::debug_handler]
@@ -572,12 +758,22 @@ pub async fn delete_file(
     auth.require_scope(Scope::WriteDrive)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
 
-    let file = load_tenant_file(&state, tenant_id, id).await?;
-    authorize_file_write(&state, &file, &auth).await?;
-    let storage_key = file.storage_key.clone();
-    drive_files::Entity::delete_by_id(id)
-        .exec(&state.db)
-        .await?;
+    // 取得・認可・削除を同じトランザクションの内側で行う。別々の接続で読んでから消すと、
+    // その間に別のリクエストがこのファイルを呼び出し元の入れないプロジェクトへ移しても、
+    // 古い認可結果のまま消せる（update_file と同じ筋）
+    let txn = state.db.begin().await?;
+    let locked = drive_files::Entity::find_by_id(id)
+        .filter(drive_files::Column::TenantId.eq(tenant_id))
+        .lock_exclusive()
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    authorize_file_write(&txn, &locked, &auth).await?;
+    let storage_key = locked.storage_key.clone();
+    drive_files::Entity::delete_by_id(id).exec(&txn).await?;
+    txn.commit().await?;
+
+    // 実体の削除はコミット後。失敗しても行はもう無いので、更新自体は成立させる
     let _ = state.storage.delete(&storage_key).await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -617,7 +813,9 @@ pub async fn get_file_content(
         .map_err(storage_to_app_error)?;
 
     let body = Body::from_stream(stream);
-    let disposition = format!("inline; filename=\"{}\"", sanitize_filename(&file.name));
+    // mime_type はアップロード時のクライアント申告に由来しうる（text/html も保存できる）。
+    // inline で返すとブラウザが API と同一オリジンで内容を実行してしまうため、常に attachment で配信する。
+    let disposition = format!("attachment; filename=\"{}\"", sanitize_filename(&file.name));
 
     Response::builder()
         .status(StatusCode::OK)

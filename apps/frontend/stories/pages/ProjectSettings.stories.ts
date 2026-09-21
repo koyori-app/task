@@ -46,6 +46,7 @@ const sampleStatuses = [
     position: 0,
     is_default: true,
     is_done_state: false,
+    is_default_done: false,
     created_at: '2026-07-18T00:00:00Z',
   },
   {
@@ -56,6 +57,7 @@ const sampleStatuses = [
     position: 1,
     is_default: false,
     is_done_state: false,
+    is_default_done: false,
     created_at: '2026-07-18T00:00:00Z',
   },
   {
@@ -66,6 +68,7 @@ const sampleStatuses = [
     position: 2,
     is_default: false,
     is_done_state: true,
+    is_default_done: true,
     created_at: '2026-07-18T00:00:00Z',
   },
 ];

@@ -1,1 +1,5 @@
 target/
+
+# ローカルストレージバックエンド（LOCAL_UPLOAD_DIR 既定 ./uploads）の生成物。
+# 統合テストやローカル起動でファイルアップロードすると作られる
+uploads/

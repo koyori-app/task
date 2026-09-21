@@ -3,8 +3,8 @@ mod common;
 use axum::http::StatusCode;
 use backend::utils::password_reset;
 use chrono::Utc;
-use common::{TestApp, insert_personal_token_for_test, insert_tenant};
-use entity::{personal_tokens, tenants, users};
+use common::{TestApp, insert_tenant};
+use entity::{personal_tokens, scopes::Scope, tenants, users};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 
 const RESET_MESSAGE: &str =
@@ -94,13 +94,9 @@ async fn password_reset_integration_suite() {
             .expect("store token");
 
         let tenant_id = insert_tenant(&app.state.db, user.id).await;
-        let _pat = insert_personal_token_for_test(
-            &app.state.db,
-            user.id,
-            tenant_id,
-            &app.state.settings.personal_token_secret,
-        )
-        .await;
+        let _pat = app
+            .insert_pat(user.id, tenant_id, vec![Scope::AdminTenant], None)
+            .await;
         let pat_id = personal_tokens::Entity::find()
             .filter(personal_tokens::Column::UserId.eq(user.id))
             .one(&app.state.db)
@@ -263,13 +259,9 @@ async fn password_reset_integration_suite() {
         let app = TestApp::new().await;
         let user = app.insert_user(false, false).await;
         let tenant_id = insert_tenant(&app.state.db, user.id).await;
-        let pat = insert_personal_token_for_test(
-            &app.state.db,
-            user.id,
-            tenant_id,
-            &app.state.settings.personal_token_secret,
-        )
-        .await;
+        let pat = app
+            .insert_pat(user.id, tenant_id, vec![Scope::AdminTenant], None)
+            .await;
 
         let resp = app
             .post_json_with_bearer(

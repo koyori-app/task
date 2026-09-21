@@ -45,6 +45,7 @@ pub struct Model {
     pub provider: String,           // "github" | "gitlab" | "google" | "oidc:{issuer}"
     pub provider_user_id: String,   // プロバイダー側のユーザー ID
     pub provider_email: Option<String>, // プロバイダーが返したメール（参照用）
+    pub provider_login: Option<String>, // プロバイダー上のログイン名（小文字。コミット作者の解決用）
     pub access_token_enc: Option<String>,  // AES-256-GCM 暗号化
     pub refresh_token_enc: Option<String>, // AES-256-GCM 暗号化
     pub token_expires_at: Option<DateTimeUtc>,
@@ -66,7 +67,18 @@ pub struct Model {
 | `token_expires_at` | TIMESTAMPTZ | NULLABLE | |
 | `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
 | `updated_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+| `provider_login` | VARCHAR | NULLABLE | プロバイダー上のログイン名（小文字）。下記 |
 | — | — | UNIQUE(provider, provider_user_id, instance_url) | self-hosted 複数インスタンス対応 |
+
+`provider_login` はログイン・連携のたびに `ProviderUserInfo.username` を小文字にして控え直す。
+ログイン名は改名できるので本人の識別には `provider_user_id` を使い、こちらはコミット作者を Task ユーザーに
+解決する用途（[Git ホスティング↔タスク連携](/features/tasks/github-tasks) §2「アクティビティ」）にだけ使う。
+
+改名で同じ名前が別の人に移ることがあるので、控えるときに同じ `provider` / `instance_url` で同じ名前を持つ
+別の接続からは外す。一意性はこの付け替えと、照合側の「ちょうど 1 件のときだけ採る」で保ち、UNIQUE 制約は
+張らない（SeaORM の entity は 1 列に `unique_key` を 1 つしか持てず、`provider` は上の複合 UNIQUE に
+入っているので表せない。表せない UNIQUE 制約は起動時の schema sync が黙って DROP する）。
+ログインし直さない人の改名は追えない。
 
 ---
 
@@ -147,6 +159,42 @@ GitLab.com と異なり、OAuth エンドポイントがインスタンスごと
 **OAuth アプリの事前登録**: self-hosted 利用には、対象インスタンスに管理者がシステムの OAuth アプリ（Client ID / Secret）を登録しておく必要がある。`callback URL` は `{APP_BASE_URL}/v1/auth/oauth/gitlab_selfhosted/callback` に統一する。
 
 ---
+
+### §4b. 本番（Dokploy）の設定
+
+`list_providers` は `is_provider_configured` で client id と secret が**両方**入っている
+プロバイダーだけ返し、`OAuthButtons.vue` は `providers.length > 0` のときだけ描画する。
+つまり未設定だとボタンも「または」の区切り線も出ない（エラーにはならない）。
+
+**Dokploy の Environment に入れただけでは効かない。** compose の `backend.environment`
+に列挙したキーしかコンテナへ渡らないので、`docker-compose.prod.yml` 側にも書く。
+
+**Redirect URI には `/api` を含める。**
+
+```
+{APP_ORIGIN}/api/v1/auth/oauth/{provider}/callback
+```
+
+backend は frontend の SSR サーバ（`/api/*` を転送し、`redirect: 'manual'` で
+バックエンドの 302 をそのまま返す）越しにしか公開されていない。プロバイダーへ渡す
+`redirect_uri` は `APP_BASE_URL` から組むので、compose は `APP_BASE_URL` に
+`${APP_ORIGIN}/api` を渡す。ここを `${APP_ORIGIN}` にすると、認可画面から
+`/v1/auth/...` へ戻されて frontend のルーティングに落ち、コールバックが届かない。
+
+コールバック後にユーザーを戻す先は別で、`EMAIL_VERIFICATION_APP_URL`（= `APP_ORIGIN`）
+から組む（`build_frontend_redirect`）。`/api` は付かない。
+
+`OAUTH_ENCRYPTION_KEY` は 32 文字以上。実際の鍵は `auth_core::crypto` の HKDF が
+導出するので、文字列であればよい（`openssl rand -base64 48`）。**一度決めたら変えない。**
+変えると保存済みのリフレッシュトークンが復号できず、連携済みのユーザーは
+OAuth をやり直すことになる。
+
+設定できているかは discovery を叩くのが早い。
+
+```bash
+curl -s https://<domain>/api/v1/auth/oauth/providers
+# {"providers":[]} なら backend に渡っていない
+```
 
 ## 5. OAuth フロー（Authorization Code + PKCE）
 
@@ -306,30 +354,39 @@ DELETE /v1/auth/oauth/connections/{provider}
 └─────────────────────────────────────────────┘
 ```
 
-### アカウント設定「連携済みサービス」
+### アカウント設定「認証方法」
+
+連携の一覧・追加・解除は、パスワードと同じ「サインインできる方法」として
+`/settings/security` にまとめた。どちらも「最低 1 つは残す」という同じ制約を共有するため、
+別々の画面にしていない。画面の仕様は
+[アカウント設定](/features/account-settings) §7 を正とする。
 
 ```text
-/settings/account
+/settings/security
 ```
 
 ```text
 ┌─────────────────────────────────────────────┐
-│ 連携済みサービス                              │
+│ 認証方法                                      │
 ├─────────────────────────────────────────────┤
-│ GitHub   user@example.com    [解除]          │
-│ GitLab   —                   [連携する]      │
-│ Google   —                   [連携する]      │
-│                                             │
-│ パスワード: 未設定            [パスワードを設定] │
+│ パスワード  設定済み          [パスワードを変更] │
+│ GitHub     user@example.com  [解除]          │
+├─ 追加できる連携 ─────────────────────────────┤
+│ Google     —                 [連携する]      │
 └─────────────────────────────────────────────┘
 ```
+
+連携の追加は既存の開始 URL（`GET /v1/auth/oauth/{provider}`）をそのまま使い、
+`redirect_after` にこの画面を指定して戻す。ログイン済みで開始した場合の連携追加は §6.3 の経路。
 
 ### コンポーネント
 
 | コンポーネント | ファイル |
 |--------------|---------|
 | `OAuthButtons` | `components/auth/OAuthButtons.vue` |
-| `ConnectedServices` | `components/settings/ConnectedServices.vue` |
+| `AuthMethodsSection` | `components/settings/AuthMethodsSection.vue` |
+| `PasswordMethodRow` | `components/settings/PasswordMethodRow.vue` |
+| プロバイダー表示名・開始 URL | `lib/oauth-providers.ts`（サインイン画面と共通） |
 
 ---
 

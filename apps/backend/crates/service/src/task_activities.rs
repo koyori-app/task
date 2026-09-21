@@ -2,12 +2,14 @@ use regex::Regex;
 use sea_orm::entity::prelude::Json;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    prelude::Uuid,
+    Statement, prelude::Uuid,
 };
 use std::sync::LazyLock;
 
 use crate::error::AppError;
-use entity::{project_members, project_statuses, projects, task_activities, tasks, tenants, users};
+use entity::{
+    labels, project_statuses, projects, task_activities, task_labels, tasks, tenants, users,
+};
 
 static MENTION_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"@([a-zA-Z0-9_-]+)").expect("mention regex"));
@@ -26,8 +28,39 @@ pub async fn record_activity<C: ConnectionTrait>(
         event_type: Set(event_type.to_string()),
         payload: Set(payload),
         created_at: Set(chrono::Utc::now().into()),
+        dedupe_key: Set(None),
     }
     .insert(db)
+    .await?;
+    Ok(())
+}
+
+/// 連携由来の出来事を、同じ `dedupe_key` につき 1 回だけ積む
+/// （docs/features/tasks/9.github-tasks.md §2「アクティビティ」）。
+///
+/// 既存行を数えて判定しない。並行する 2 つの処理の事前確認はすれ違うが、UNIQUE はすれ違わない。
+pub async fn record_activity_once<C: ConnectionTrait>(
+    db: &C,
+    task_id: Uuid,
+    user_id: Option<Uuid>,
+    event_type: &str,
+    payload: Json,
+    dedupe_key: &str,
+) -> Result<(), AppError> {
+    db.execute_raw(Statement::from_sql_and_values(
+        db.get_database_backend(),
+        "INSERT INTO task_activities (id, task_id, user_id, event_type, payload, created_at, dedupe_key)
+         VALUES ($1, $2, $3, $4, $5, now(), $6)
+         ON CONFLICT (dedupe_key) DO NOTHING",
+        [
+            Uuid::new_v4().into(),
+            task_id.into(),
+            user_id.into(),
+            event_type.into(),
+            payload.into(),
+            dedupe_key.into(),
+        ],
+    ))
     .await?;
     Ok(())
 }
@@ -38,6 +71,65 @@ pub async fn status_name<C: ConnectionTrait>(db: &C, status_id: Uuid) -> Result<
         .await?
         .map(|s| s.name)
         .ok_or(AppError::NotFound)
+}
+
+/// タスクに現在付与されているラベルの (id, 名前) 一覧（名前・ID 順ソート済み）。
+/// label_added / label_removed アクティビティの前後スナップショットに使う。
+pub async fn task_label_entries<C: ConnectionTrait>(
+    db: &C,
+    task_id: Uuid,
+) -> Result<Vec<(Uuid, String)>, AppError> {
+    let label_ids: Vec<Uuid> = task_labels::Entity::find()
+        .filter(task_labels::Column::TaskId.eq(task_id))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|tl| tl.label_id)
+        .collect();
+    let mut entries: Vec<(Uuid, String)> = labels::Entity::find()
+        .filter(labels::Column::Id.is_in(label_ids))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|l| (l.id, l.name))
+        .collect();
+    entries.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
+    Ok(entries)
+}
+
+/// 前後スナップショットの差分から label_added / label_removed を 1 ラベルにつき
+/// 1 件ずつ記録する（docs/features/tasks/4.collaboration.md の event_type 定義に対応）。
+/// 集合に変化が無ければ何も記録しない。
+pub async fn record_label_diff<C: ConnectionTrait>(
+    db: &C,
+    task_id: Uuid,
+    user_id: Option<Uuid>,
+    before: &[(Uuid, String)],
+    after: &[(Uuid, String)],
+) -> Result<(), AppError> {
+    let before_ids: std::collections::HashSet<Uuid> = before.iter().map(|(id, _)| *id).collect();
+    let after_ids: std::collections::HashSet<Uuid> = after.iter().map(|(id, _)| *id).collect();
+    for (id, name) in after.iter().filter(|(id, _)| !before_ids.contains(id)) {
+        record_activity(
+            db,
+            task_id,
+            user_id,
+            "label_added",
+            serde_json::json!({ "label_id": id, "name": name }),
+        )
+        .await?;
+    }
+    for (id, name) in before.iter().filter(|(id, _)| !after_ids.contains(id)) {
+        record_activity(
+            db,
+            task_id,
+            user_id,
+            "label_removed",
+            serde_json::json!({ "label_id": id, "name": name }),
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 pub fn priority_label(priority: tasks::TaskPriority) -> &'static str {
@@ -68,14 +160,10 @@ pub async fn extract_mentions<C: ConnectionTrait>(
         return Ok(vec![]);
     }
 
-    // Fetch project members to enforce project boundary
-    let member_ids: std::collections::HashSet<Uuid> = project_members::Entity::find()
-        .filter(project_members::Column::ProjectId.eq(project_id))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|m| m.user_id)
-        .collect();
+    // プロジェクト境界の外にいる人はメンションしても通知しない。
+    // メンバー未指定のプロジェクトはテナントメンバー全員が対象になる（#568）
+    let member_ids: std::collections::HashSet<Uuid> =
+        crate::access::project_accessible_user_ids(db, project_id).await?;
 
     let tenant_owner_id: Option<Uuid> =
         if let Some(proj) = projects::Entity::find_by_id(project_id).one(db).await? {

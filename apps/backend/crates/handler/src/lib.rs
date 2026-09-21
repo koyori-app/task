@@ -6,13 +6,14 @@ use std::sync::Arc;
 use apalis_postgres::PgPool;
 use common::cache::redis::RedisConnection;
 use common::settings::Settings;
-use github_integration::oauth::OAuthSettings;
 use job::{
-    AlreadyRegisteredEmailStorage, GithubWebhookStorage, PasswordResetEmailStorage,
-    VerificationEmailStorage,
+    AlreadyRegisteredEmailStorage, GithubIssueSyncStorage, GithubWebhookStorage,
+    PasswordResetEmailStorage, ReviewSummaryStorage, VerificationEmailStorage,
 };
 use sea_orm::DatabaseConnection;
-use service::{drive::DriveConfig, smtp::SmtpClient, storage::StorageBackend};
+use service::{
+    drive::DriveConfig, oauth::OAuthSettings, smtp::SmtpClient, storage::StorageBackend,
+};
 use webauthn_rs::prelude::Webauthn;
 
 // 旧 crate::error / crate::settings パス互換のための再公開。
@@ -34,8 +35,10 @@ pub struct AppState {
     pub smtp_client: SmtpClient,
     pub verification_email_storage: Arc<VerificationEmailStorage>,
     pub github_webhook_storage: Arc<GithubWebhookStorage>,
+    pub github_issue_sync_storage: Arc<GithubIssueSyncStorage>,
     pub password_reset_email_storage: Arc<PasswordResetEmailStorage>,
     pub already_registered_email_storage: Arc<AlreadyRegisteredEmailStorage>,
+    pub review_summary_storage: Arc<ReviewSummaryStorage>,
     pub storage: Arc<dyn StorageBackend>,
     pub drive_config: DriveConfig,
     pub oauth_settings: OAuthSettings,

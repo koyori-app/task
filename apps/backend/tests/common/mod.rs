@@ -18,20 +18,25 @@ use axum::{
 };
 use axum_session::{SameSite, SessionConfig, SessionLayer, SessionMode, SessionStore};
 use axum_session_redispool::SessionRedisPool;
-use entity::{github_integrations, oauth_connections, projects, tenants, users};
+use entity::{
+    github_integrations, oauth_connections, personal_tokens, projects,
+    scopes::{Scope, ScopeList},
+    tenant_members, tenants, users,
+};
 
 use backend::{
     AppState,
     jobs::{
-        setup_already_registered_email_storage, setup_github_webhook_storage,
-        setup_password_reset_email_storage, setup_pool, setup_verification_email_storage,
+        setup_already_registered_email_storage, setup_github_issue_sync_storage,
+        setup_github_webhook_storage, setup_password_reset_email_storage, setup_pool,
+        setup_review_summary_storage, setup_verification_email_storage,
     },
     routes, settings,
     utils::{
         auth::create_password_hash,
         drive::DriveConfig,
         http::create_http_client,
-        oauth::config::{OAuthSettings, ProviderConfig},
+        oauth::{OAuthSettings, ProviderConfig},
         smtp::SmtpClient,
         storage::setup_storage,
         totp::build_totp,
@@ -206,6 +211,8 @@ pub fn load_github_test_env() {
         std::env::set_var("GITHUB_APP_ID", "1");
         std::env::set_var("GITHUB_APP_WEBHOOK_SECRET", "webhook-secret");
         std::env::set_var("GITHUB_APP_NAME", "task-app");
+        std::env::set_var("GITHUB_APP_CLIENT_ID", "Iv1.testclientid");
+        std::env::set_var("GITHUB_APP_CLIENT_SECRET", "test-client-secret");
         std::env::set_var(
             "GITHUB_TOKEN_ENCRYPTION_KEY",
             "01234567890123456789012345678901",
@@ -458,6 +465,7 @@ pub struct TestApp {
     router: Router,
 }
 
+#[derive(Clone)]
 pub struct TestUser {
     pub id: Uuid,
     pub email: String,
@@ -519,9 +527,15 @@ impl TestApp {
         let github_webhook_storage = setup_github_webhook_storage(&pg_pool, &settings)
             .await
             .expect("github webhook storage");
+        let github_issue_sync_storage = setup_github_issue_sync_storage(&pg_pool, &settings)
+            .await
+            .expect("github issue sync storage");
         let password_reset_email_storage = setup_password_reset_email_storage(&pg_pool, &settings)
             .await
             .expect("password reset email storage");
+        let review_summary_storage = setup_review_summary_storage(&pg_pool, &settings)
+            .await
+            .expect("setup review summary storage");
         let already_registered_email_storage =
             setup_already_registered_email_storage(&pg_pool, &settings)
                 .await
@@ -543,12 +557,9 @@ impl TestApp {
         let addr: SocketAddr = listener.local_addr().expect("local addr");
         let base_url = format!("http://{addr}");
 
-        let mut encryption_key = [0u8; 32];
-        encryption_key.copy_from_slice(&TEST_OAUTH_ENCRYPTION_KEY.as_bytes()[..32]);
-
         let oauth_settings = OAuthSettings {
             app_base_url: base_url.clone(),
-            encryption_key,
+            encryption_key: TEST_OAUTH_ENCRYPTION_KEY.to_string(),
             default_redirect_path: "/dashboard".to_string(),
             github: None,
             gitlab: None,
@@ -568,8 +579,10 @@ impl TestApp {
             smtp_client,
             verification_email_storage,
             github_webhook_storage,
+            github_issue_sync_storage,
             password_reset_email_storage,
             already_registered_email_storage,
+            review_summary_storage,
             storage,
             drive_config: DriveConfig::from_env(),
             oauth_settings,
@@ -705,6 +718,7 @@ impl TestApp {
             name: Set(format!("GitHub Test {suffix}")),
             description: Set(String::new()),
             icon_url: Set(String::new()),
+            icon_emoji: Set(None),
             owner_id: Set(owner_id),
             drive_quota_bytes: Set(None),
             require_2fa: Set(false),
@@ -734,6 +748,26 @@ impl TestApp {
             tenant_id,
             project_id,
         }
+    }
+
+    /// PAT を DB へ直に挿し、平文トークンを返す（発行 API を経ない）。
+    /// 発行 API そのものを試すテストは `POST /v1/personal_tokens` を叩くこと。
+    pub async fn insert_pat(
+        &self,
+        user_id: Uuid,
+        tenant_id: Uuid,
+        scopes: Vec<Scope>,
+        allowed_project_ids: Option<Vec<Uuid>>,
+    ) -> String {
+        insert_personal_token_for_test(
+            &self.state.db,
+            user_id,
+            tenant_id,
+            &self.state.settings.personal_token_secret,
+            scopes,
+            allowed_project_ids,
+        )
+        .await
     }
 
     pub fn reset_session_client(&mut self) {
@@ -1133,34 +1167,57 @@ pub fn current_totp_code(secret: &str, issuer: &str, email: &str) -> String {
     totp.generate_current().expect("code")
 }
 
+/// PAT を DB へ直に挿し、平文トークンを返す（発行 API を経ない）。
+///
+/// scopes と `allowed_project_ids` は呼び出し側が決める。scopes を `Vec<Scope>` で受けるのは、
+/// 生 SQL に JSON リテラルを書くと綴り違いが実行時の 403 にしかならぬため。
+/// `TestApp` を持っているなら `TestApp::insert_pat` の包み越しに呼ぶ方が短い。
 pub async fn insert_personal_token_for_test(
     db: &DatabaseConnection,
     user_id: Uuid,
     tenant_id: Uuid,
     secret: &str,
+    scopes: Vec<Scope>,
+    allowed_project_ids: Option<Vec<Uuid>>,
 ) -> String {
     use backend::utils::auth::generate_personal_token;
-    use sea_orm::Statement;
 
     let (token, token_hash) = generate_personal_token(secret).expect("generate pat");
-    let id = Uuid::new_v4();
-    let last_four = token[token.len().saturating_sub(4)..].to_string();
-    let stmt = Statement::from_sql_and_values(
-        db.get_database_backend(),
-        r#"INSERT INTO personal_tokens
-            (id, name, token_hash, token_last_four, user_id, tenant_id, revoked, scopes)
-            VALUES ($1, $2, $3, $4, $5, $6, false, '["admin:tenant"]'::json)"#,
-        vec![
-            id.into(),
-            "integration-test".into(),
-            token_hash.into(),
-            last_four.into(),
-            user_id.into(),
-            tenant_id.into(),
-        ],
-    );
-    db.execute_raw(stmt).await.expect("insert legacy pat");
+    personal_tokens::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        name: Set("integration-test".into()),
+        token_hash: Set(token_hash),
+        token_last_four: Set(token[token.len().saturating_sub(4)..].to_string()),
+        expires_at: Set(None),
+        last_used_at: Set(None),
+        revoked: Set(false),
+        user_id: Set(user_id),
+        tenant_id: Set(tenant_id),
+        scopes: Set(ScopeList(scopes)),
+        allowed_project_ids: Set(allowed_project_ids.map(|ids| serde_json::json!(ids))),
+    }
+    .insert(db)
+    .await
+    .expect("insert pat");
     token
+}
+
+/// アドバイザリロックを握る（`service::drive::lock_tenant_drive` と同じ鍵で押さえる用）。
+pub async fn execute_advisory_lock<C: sea_orm::ConnectionTrait>(conn: &C, key: i64) {
+    common::db::execute_bound(conn, "SELECT pg_advisory_xact_lock(?)", vec![key.into()])
+        .await
+        .expect("advisory lock");
+}
+
+/// テストの前提を作るための生 SQL。`?` ではなく `$N` を使う（common::db のヘルパー経由）。
+pub async fn execute_sql<C: sea_orm::ConnectionTrait>(
+    conn: &C,
+    sql: &str,
+    values: Vec<sea_orm::Value>,
+) {
+    common::db::execute_bound(conn, sql, values)
+        .await
+        .expect("execute sql");
 }
 
 pub async fn insert_tenant(db: &DatabaseConnection, owner_id: Uuid) -> Uuid {
@@ -1171,6 +1228,7 @@ pub async fn insert_tenant(db: &DatabaseConnection, owner_id: Uuid) -> Uuid {
         name: Set("Test Tenant".into()),
         description: Set(String::new()),
         icon_url: Set(String::new()),
+        icon_emoji: Set(None),
         owner_id: Set(owner_id),
         drive_quota_bytes: Set(None),
         require_2fa: Set(false),
@@ -1179,4 +1237,45 @@ pub async fn insert_tenant(db: &DatabaseConnection, owner_id: Uuid) -> Uuid {
     .await
     .expect("insert tenant");
     id
+}
+
+/// #568: プロジェクトメンバーはテナントメンバーの絞り込みなので、
+/// テストが `project_members` へ直接 INSERT する場合もテナントメンバーを先に用意する。
+/// 既に居る場合・テナントオーナーの場合は何もしない。
+pub async fn ensure_tenant_member_for_project(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+    user_id: Uuid,
+) {
+    let project = projects::Entity::find_by_id(project_id)
+        .one(db)
+        .await
+        .expect("find project")
+        .expect("project exists");
+    let tenant = tenants::Entity::find_by_id(project.tenant_id)
+        .one(db)
+        .await
+        .expect("find tenant")
+        .expect("tenant exists");
+    if tenant.owner_id == user_id {
+        return;
+    }
+    let existing = tenant_members::Entity::find()
+        .filter(tenant_members::Column::TenantId.eq(project.tenant_id))
+        .filter(tenant_members::Column::UserId.eq(user_id))
+        .one(db)
+        .await
+        .expect("find tenant member");
+    if existing.is_some() {
+        return;
+    }
+    tenant_members::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        tenant_id: Set(project.tenant_id),
+        user_id: Set(user_id),
+        role: Set(entity::tenant_members::TenantRole::Member),
+    }
+    .insert(db)
+    .await
+    .expect("insert tenant member");
 }

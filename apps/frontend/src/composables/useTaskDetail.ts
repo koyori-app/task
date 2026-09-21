@@ -8,14 +8,35 @@ import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { fetchClient, apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
 import { clampProgressPct, localDateInputToIso, taskListHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
+import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
+import { TASK_RELATIONS_PATH } from '@/composables/useTaskSubtasks';
 
-const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
+export const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
+const LIST_LABELS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/labels' as const;
 
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type UpdateTaskRequest = components['schemas']['UpdateTaskRequest'];
-type MutatingField = EditableField | 'status_id';
+export type MutatingField = EditableField | 'status_id' | 'labels' | 'priority';
+
+/**
+ * コードポイント順の文字列比較。
+ * JS の `<` / `>` は UTF-16 コードユニット順で、サーバ（Rust の `String::cmp` =
+ * コードポイント順）と非 BMP 文字（絵文字など）の並びがずれるため、
+ * サロゲートペアを 1 文字として比較して両者を一致させる。
+ */
+function compareStrings(left: string, right: string) {
+  const l = Array.from(left);
+  const r = Array.from(right);
+  const len = Math.min(l.length, r.length);
+  for (let i = 0; i < len; i++) {
+    const a = l[i].codePointAt(0)!;
+    const b = r[i].codePointAt(0)!;
+    if (a !== b) return a < b ? -1 : 1;
+  }
+  return l.length - r.length;
+}
 
 export interface UseTaskDetailParams {
   /** ルートの tenant セグメント（表示ID）。テナント UUID 解決に使う */
@@ -29,6 +50,13 @@ export interface UseTaskDetailParams {
    * 分割ビューのペインでは「ペインを閉じる」を渡す。
    */
   onAfterDelete?: (listHref: string) => void;
+  /**
+   * フィールド保存がサーバへ確定した後に呼ばれる (mutateAsync 成功時)。
+   * フルページ詳細はこれを description の保存に使い、+data.ts (サーバの
+   * renderDescription) を再実行して描画済み HTML を取り直す —— クライアントで
+   * KFM を描画しないための取り直し導線。
+   */
+  onAfterFieldSaved?: (field: MutatingField) => void;
 }
 
 /**
@@ -58,6 +86,8 @@ export function useTaskDetail(params: UseTaskDetailParams) {
   } = useResolvedProjectId(tenantId, projectKey);
 
   const statusError = ref<string | null>(null);
+  const priorityError = ref<string | null>(null);
+  const labelsError = ref<string | null>(null);
   const deleteError = ref<string | null>(null);
   const fieldErrors = ref<Partial<Record<EditableField, string>>>({});
   const selectedStatusId = ref('');
@@ -120,6 +150,23 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     enabled: computed(() => !!tenantId.value && !!projectId.value),
   });
 
+  const labelsQuery = useQuery({
+    queryKey: computed(() => [
+      'get',
+      LIST_LABELS_PATH,
+      { params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } } },
+    ]),
+    queryFn: async ({ signal }) => {
+      const { data, error } = await fetchClient.GET(LIST_LABELS_PATH, {
+        params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } },
+        signal,
+      });
+      if (error) throw error;
+      return data;
+    },
+    enabled: computed(() => !!tenantId.value && !!projectId.value),
+  });
+
   watch(
     () => taskQuery.data.value?.status_id,
     (statusId) => {
@@ -146,13 +193,39 @@ export function useTaskDetail(params: UseTaskDetailParams) {
   });
 
   const statusUpdating = computed(() => pendingFieldRevisions.value.status_id !== undefined);
+  const priorityUpdating = computed(() => pendingFieldRevisions.value.priority !== undefined);
+  const labelsUpdating = computed(() => pendingFieldRevisions.value.labels !== undefined);
 
   const updateTaskMutation = apiClient.useMutation('put', GET_TASK_PATH);
 
   const listHref = computed(() => taskListHref(tenantDisplayId.value, projectKey.value));
 
-  /** 通常一覧と検索結果の両方を古い内容のまま残さないための invalidate。 */
-  function invalidateTaskListCaches() {
+  /**
+   * 更新後に古い内容のまま残るキャッシュを取り直す。
+   *
+   * 通常一覧と検索結果のほか、履歴も落とす。backend は更新のたびに
+   * `task_activities` を積むので、ここで取り直さないとアクティビティ欄だけが
+   * 古いまま残る（画面上は更新できているので気づきにくい）。
+   */
+  function invalidateAfterTaskMutation() {
+    return Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['get', LIST_TASKS_PATH] }),
+      queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),
+      queryClient.invalidateQueries({ queryKey: ['get', ACTIVITIES_PATH] }),
+      queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] }),
+    ]);
+  }
+
+  /**
+   * 削除後。履歴はタスクごと消えるので取り直さない。
+   *
+   * `invalidateQueries` は表示中のクエリの再取得を待つため、ここで履歴を混ぜると
+   * 「消したタスクの履歴を取り終わるまで一覧へ戻れない」ことになる（遷移が遅れる）。
+   */
+  function invalidateAfterTaskDelete() {
+    // 親側で開いているサブタスク一覧も更新する。ただし削除対象自身の relations query も
+    // active なため、これを待つと消したタスクの再取得が終わるまで一覧へ戻れない。
+    void queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] });
     return Promise.all([
       queryClient.invalidateQueries({ queryKey: ['get', LIST_TASKS_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),
@@ -163,7 +236,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     onSuccess: async () => {
       deleteError.value = null;
       queryClient.removeQueries({ queryKey: taskQueryKey.value, exact: true });
-      await invalidateTaskListCaches();
+      await invalidateAfterTaskDelete();
       onAfterDelete(listHref.value);
     },
     onError: () => {
@@ -185,6 +258,14 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       statusError.value = 'ステータスの更新に失敗しました';
       const currentStatusId = taskQuery.data.value?.status_id;
       if (currentStatusId) selectedStatusId.value = currentStatusId;
+      return;
+    }
+    if (field === 'priority') {
+      priorityError.value = '優先度の更新に失敗しました';
+      return;
+    }
+    if (field === 'labels') {
+      labelsError.value = 'ラベルの更新に失敗しました';
       return;
     }
     fieldErrors.value = {
@@ -220,6 +301,10 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     if (field === 'status_id') {
       statusError.value = null;
       if (data.status_id) selectedStatusId.value = data.status_id;
+    } else if (field === 'priority') {
+      priorityError.value = null;
+    } else if (field === 'labels') {
+      labelsError.value = null;
     } else {
       fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
     }
@@ -236,6 +321,8 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     optimisticTask.value = { ...optimisticTask.value, ...optimistic };
     pendingFieldRevisions.value = { ...pendingFieldRevisions.value, [field]: revision };
     if (field === 'status_id') statusError.value = null;
+    else if (field === 'priority') priorityError.value = null;
+    else if (field === 'labels') labelsError.value = null;
     else fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
 
     // mutate() のコールバックは observer の unmount（分割ビューのペイン切替）で
@@ -255,9 +342,18 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       })
       .then((data: TaskDetail) => {
         applyMutationSuccess(field, revision, data, queryKey);
-        void invalidateTaskListCaches();
+        void invalidateAfterTaskMutation();
+        params.onAfterFieldSaved?.(field);
       })
-      .catch(() => rollbackOptimistic(field, revision));
+      .catch(() => {
+        rollbackOptimistic(field, revision);
+        // ラベルは task.labels 全量を送るため、削除済みラベルが混ざると 400 になる。
+        // タスクとラベル一覧を再取得して古いキャッシュを解消し、再操作できる状態に戻す
+        if (field === 'labels') {
+          void queryClient.invalidateQueries({ queryKey });
+          void queryClient.invalidateQueries({ queryKey: ['get', LIST_LABELS_PATH] });
+        }
+      });
   }
 
   function onStatusChange(nextStatusId: string) {
@@ -266,6 +362,12 @@ export function useTaskDetail(params: UseTaskDetailParams) {
 
     selectedStatusId.value = nextStatusId;
     mutateTask({ status_id: nextStatusId }, { status_id: nextStatusId }, 'status_id');
+  }
+
+  function onPriorityChange(nextPriority: TaskDetail['priority']) {
+    const current = taskQuery.data.value;
+    if (!current || nextPriority === current.priority) return;
+    mutateTask({ priority: nextPriority }, { priority: nextPriority }, 'priority');
   }
 
   function onSaveTitle(value: string) {
@@ -325,6 +427,31 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     mutateTask({ hard_deadline: iso }, { hard_deadline: iso }, 'hard_deadline');
   }
 
+  function onSaveLabels(labelIds: string[]) {
+    const current = taskQuery.data.value;
+    if (!current) return;
+    const currentIds = current.labels.map((label) => label.id).sort();
+    const nextIds = [...labelIds].sort();
+    if (currentIds.length === nextIds.length && currentIds.every((id, i) => id === nextIds[i])) {
+      return;
+    }
+    // 楽観値の出所は送信集合と揃える。projectLabels は task.labels より古いことがあるため、
+    // 一覧だけを見ると既に付いているラベルが楽観描画から落ちて一瞬消えて見える。
+    // 一覧を優先しつつ（名前の変更は一覧側が新しい）、欠けている分は task.labels で補う
+    const known = new Map(current.labels.map((label) => [label.id, label]));
+    for (const label of labelsQuery.data.value ?? []) {
+      known.set(label.id, label);
+    }
+    // サーバレスポンスと同じ名前順（同名時は ID 順）に揃える
+    const chosen = labelIds
+      .map((id) => known.get(id))
+      .filter((label) => label !== undefined)
+      .sort(
+        (left, right) => compareStrings(left.name, right.name) || compareStrings(left.id, right.id),
+      );
+    mutateTask({ label_ids: labelIds }, { labels: chosen }, 'labels');
+  }
+
   function confirmDelete() {
     if (!tenantId.value || !projectId.value || !taskId.value) return;
     deleteError.value = null;
@@ -369,9 +496,17 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     // Hub バインド用
     displayTask,
     statuses: computed(() => statusesQuery.data.value ?? []),
+    projectLabels: computed(() => labelsQuery.data.value ?? []),
+    projectLabelsLoading: computed(() => labelsQuery.isLoading.value),
+    projectLabelsError: computed(() => labelsQuery.isError.value),
     selectedStatusId,
     statusUpdating,
     statusError,
+    priorityUpdating,
+    priorityError,
+    onPriorityChange,
+    labelsUpdating,
+    labelsError,
     fieldUpdating,
     fieldErrors,
     isLoading,
@@ -384,6 +519,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     onSaveProgressPct,
     onSaveSoftDeadline,
     onSaveHardDeadline,
+    onSaveLabels,
     // 削除
     deleteError,
     deletePending: computed(() => deleteTaskMutation.isPending.value),

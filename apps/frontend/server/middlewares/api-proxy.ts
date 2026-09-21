@@ -2,12 +2,14 @@ import arkenv from 'arkenv';
 import dotenv from 'dotenv';
 import { Elysia } from 'elysia';
 
+// API_BASE の検証と既定値は ../api-base (単一ソース) に寄せてある。
+import { API_BASE } from '../api-base';
+
 // The production SSR entry runs independently of Vite, so load runtime values
 // before arkenv validates process.env. Existing process variables still win.
 dotenv.config({ quiet: true });
 
 const env = arkenv({
-  API_BASE: "string.url = 'http://localhost:3400'",
   UPLOAD_MAX_SIZE_MB: 'number > 0 = 100',
 });
 
@@ -36,7 +38,7 @@ class BodyTooLargeError extends Error {
 function buildBackendUrl(request: Request): string {
   const url = new URL(request.url);
   const backendPath = url.pathname.replace(/^\/api/, '') + url.search;
-  return `${env.API_BASE}${backendPath}`;
+  return `${API_BASE}${backendPath}`;
 }
 
 function copyHeaders(source: Headers, skipHopByHop = true): Headers {
@@ -127,6 +129,13 @@ async function proxyToBackend(request: Request): Promise<Response> {
       method: request.method,
       headers: copyHeaders(request.headers),
       body,
+      // 3xx は追わずにブラウザへ返す。既定の 'follow' だと、この fetch が
+      // サーバー側でリダイレクト先を取得してその結果を 200 として返すため、
+      // ブラウザには Location が届かず URL も変わらない。GitHub App の
+      // インストール callback は選択トークンを Location のフラグメント
+      // （`#github_select=...`）で渡すので、追われるとトークンが失われて
+      // リポジトリ選択に進めなくなる（本番で発生）。
+      redirect: 'manual',
       // @ts-expect-error Node/Bun fetch requires duplex when streaming a request body
       duplex: hasBody ? 'half' : undefined,
     });

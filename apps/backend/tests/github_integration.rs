@@ -1,10 +1,9 @@
 //! GitHub App Wave 0 統合テスト（署名・OAuth state・リポジトリ選定）。
 
 use backend::handlers::github::verify_webhook_signature;
-use backend::utils::github_api::{
-    InstallationRepository, RepositoryOwner, select_primary_repository,
-};
-use backend::utils::github_oauth_state::GithubOAuthStatePayload;
+use backend::utils::github::install_state::GithubOAuthStatePayload;
+use backend::utils::github::repositories::select_primary_repository;
+use forge_core::Repository;
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::prelude::Uuid;
 use sha2::Sha256;
@@ -50,21 +49,17 @@ fn test_oauth_state_without_installation_defaults_none() {
 }
 
 #[test]
-fn test_primary_repository_selection_prefers_account_owner() {
-    let repos = vec![
-        InstallationRepository {
-            full_name: "other/app".into(),
-            owner: RepositoryOwner {
-                login: "other".into(),
-            },
-        },
-        InstallationRepository {
-            full_name: "acme/backend".into(),
-            owner: RepositoryOwner {
-                login: "acme".into(),
-            },
-        },
+fn test_primary_repository_selection_auto_selects_only_single_repo() {
+    let single = vec![Repository::new("acme", "backend")];
+    assert_eq!(
+        select_primary_repository(&single).unwrap().to_string(),
+        "acme/backend"
+    );
+
+    // 複数見えるときは自動選択せず、ユーザー選択に回す（#594）。
+    let multiple = vec![
+        Repository::new("acme", "backend"),
+        Repository::new("acme", "frontend"),
     ];
-    let chosen = select_primary_repository(&repos, "acme").unwrap();
-    assert_eq!(chosen.full_name, "acme/backend");
+    assert!(select_primary_repository(&multiple).is_none());
 }

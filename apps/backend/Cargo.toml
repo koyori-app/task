@@ -1,9 +1,15 @@
 [workspace]
-members = ["crates/entity", "crates/common", "crates/github-integration", "crates/payload", "crates/service", "crates/job", "crates/handler"]
+members = ["crates/entity", "crates/common", "crates/payload", "crates/service", "crates/job", "crates/handler", "crates/cli"]
 exclude = ["migration"]
 
 [workspace.dependencies]
 anyhow = "1.0.102"
+# OAuth / Git ホスティング連携の土台。別リポジトリへ切り出して他プロジェクトと共有する。
+auth-core = { git = "https://github.com/koyori-app/auth-core.git", rev = "5d527dcf7e833e2980212560992d8f49efcbdda5" }
+auth-core-github = { git = "https://github.com/koyori-app/auth-core.git", rev = "5d527dcf7e833e2980212560992d8f49efcbdda5" }
+auth-core-gitlab = { git = "https://github.com/koyori-app/auth-core.git", rev = "5d527dcf7e833e2980212560992d8f49efcbdda5" }
+forge-core = { git = "https://github.com/koyori-app/auth-core.git", rev = "5d527dcf7e833e2980212560992d8f49efcbdda5" }
+forge-github = { git = "https://github.com/koyori-app/auth-core.git", rev = "5d527dcf7e833e2980212560992d8f49efcbdda5" }
 axum = { version = "0.8.8", features = ["macros"] }
 config = "0.15.22"
 dotenvy = "0.15"
@@ -54,6 +60,7 @@ utoipa-scalar = { version = "0.3.0", features = ["axum"] }
 
 [dev-dependencies]
 dotenvy = { workspace = true }
+forge-core = { workspace = true }
 hex = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 cookie = "0.18"
@@ -63,7 +70,7 @@ redis = { workspace = true }
 redis_pool = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["cookies", "json", "rustls", "multipart"] }
 serde = { workspace = true }
-serial_test = "3"
+serial_test = { version = "3", features = ["file_locks"] }
 sha2 = "0.11"
 tower = { version = "0.5.2", features = ["util"] }
 url = { workspace = true }

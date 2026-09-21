@@ -32,13 +32,22 @@
 | `/forgot-password` | パスワードリセット申請 |
 | `/reset-password` | パスワードリセット実行 |
 
+### アカウント設定（テナント外）
+
+個人アカウントの設定。テナントに紐づかないため `/{tenant}` の外に置く。
+
+| URL | 説明 |
+|-----|------|
+| `/settings/profile` | プロフィール編集（[仕様](../features/account-settings.md)） |
+| `/settings/tokens` | パーソナルアクセストークンの発行・取り消し（[仕様](../features/account-settings.md)） |
+
 ### テナントスコープ
 
 | URL | 説明 |
 |-----|------|
 | `/{tenant}` | テナントホーム（プロジェクト一覧 or ダッシュボード） |
 | `/{tenant}/settings` | テナント設定 |
-| `/{tenant}/members` | テナントメンバー管理 |
+| `/{tenant}/settings/members` | テナントメンバー管理 |
 | `/{tenant}/drive` | ドライブ（ファイルブラウザ ルート） |
 | `/{tenant}/drive/{folder_id}` | ドライブ フォルダ |
 | `/{tenant}/projects` | プロジェクト一覧 |
@@ -56,6 +65,7 @@
 | `/{tenant}/projects/{key}/labels` | ラベル管理 |
 | `/{tenant}/projects/{key}/members` | プロジェクトメンバー |
 | `/{tenant}/projects/{key}/settings` | プロジェクト設定 |
+| `/{tenant}/projects/{key}/reviews` | レビュー指摘（[仕様](../features/review-findings.md)）。`?pr=618` で PR を指定 |
 
 ### 管理者（`is_admin = true` のユーザーのみ）
 
@@ -79,11 +89,16 @@ apps/frontend/src/pages/
 ├── forgot-password/+Page.vue            # /forgot-password
 ├── reset-password/+Page.vue             # /reset-password
 │
+├── settings/
+│   ├── profile/+Page.vue                # /settings/profile
+│   └── tokens/+Page.vue                 # /settings/tokens
+│
 ├── @tenant/
 │   ├── +Page.vue                        # /{tenant}
 │   ├── +Layout.vue                      # テナントレイアウト（共通サイドバー）
-│   ├── settings/+Page.vue               # /{tenant}/settings
-│   ├── members/+Page.vue                # /{tenant}/members
+│   ├── settings/
+│   │   ├── +Page.vue                    # /{tenant}/settings
+│   │   └── members/+Page.vue            # /{tenant}/settings/members
 │   ├── drive/
 │   │   ├── +Page.vue                    # /{tenant}/drive
 │   │   └── @folderId/+Page.vue          # /{tenant}/drive/{folder_id}（Vike: camelCase）
@@ -98,7 +113,8 @@ apps/frontend/src/pages/
 │           ├── milestones/+Page.vue     # /{tenant}/projects/{key}/milestones
 │           ├── labels/+Page.vue         # /{tenant}/projects/{key}/labels
 │           ├── members/+Page.vue        # /{tenant}/projects/{key}/members
-│           └── settings/+Page.vue       # /{tenant}/projects/{key}/settings
+│           ├── settings/+Page.vue       # /{tenant}/projects/{key}/settings
+│           └── reviews/+Page.vue        # /{tenant}/projects/{key}/reviews
 │
 └── admin/
     ├── +Page.vue                        # /admin
@@ -134,9 +150,11 @@ apps/frontend/src/pages/
 | `/signup` | `signup/+Page.vue` |
 | `/forgot-password` | `forgot-password/+Page.vue` |
 | `/reset-password` | `reset-password/+Page.vue` |
+| `/settings/profile` | `settings/profile/+Page.vue` |
+| `/settings/tokens` | `settings/tokens/+Page.vue` |
 | `/{tenant}` | `@tenant/+Page.vue` |
 | `/{tenant}/settings` | `@tenant/settings/+Page.vue` |
-| `/{tenant}/members` | `@tenant/members/+Page.vue` |
+| `/{tenant}/settings/members` | `@tenant/settings/members/+Page.vue` |
 | `/{tenant}/drive` | `@tenant/drive/+Page.vue` |
 | `/{tenant}/drive/{folder_id}` | `@tenant/drive/@folderId/+Page.vue` |
 | `/{tenant}/projects` | `@tenant/projects/+Page.vue` |
@@ -147,6 +165,7 @@ apps/frontend/src/pages/
 | `/{tenant}/projects/{key}/labels` | `@tenant/projects/@projectKey/labels/+Page.vue` |
 | `/{tenant}/projects/{key}/members` | `@tenant/projects/@projectKey/members/+Page.vue` |
 | `/{tenant}/projects/{key}/settings` | `@tenant/projects/@projectKey/settings/+Page.vue` |
+| `/{tenant}/projects/{key}/reviews` | `@tenant/projects/@projectKey/reviews/+Page.vue` |
 | `/admin` | `admin/+Page.vue` |
 | `/admin/users` | `admin/users/+Page.vue` |
 | `/admin/tenants` | `admin/tenants/+Page.vue` |

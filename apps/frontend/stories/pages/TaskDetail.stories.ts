@@ -1,10 +1,15 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { expect, fn, userEvent, within } from 'storybook/test';
+import { expect, fn, screen, userEvent, within } from 'storybook/test';
 import { provide } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import TaskDetailPage from '@/pages/@tenant/projects/@projectKey/tasks/@taskId/+Page.vue';
+import { KFM_STORY_INPUTS } from '@/lib/kfm-story-fixtures/inputs';
+import kfmDescriptionHtml from '@/lib/kfm-story-fixtures/rendered/task-detail-description.html?raw';
 
 const PAGE_CONTEXT_KEY = 'vike-vue:usePageContext';
+// vike-vue の useData は inject('vike-vue:useData') の素通し。+data.ts の戻り値と
+// 同形のオブジェクトを provide すると +Page.vue の SSR データ枝 (KFM 表示) が通る。
+const DATA_KEY = 'vike-vue:useData';
 
 const mockContext = {
   urlPathname: '/tenant-123/projects/ENG/tasks/ENG-1',
@@ -72,6 +77,7 @@ const sampleStatuses = [
     position: 0,
     is_default: true,
     is_done_state: false,
+    is_default_done: false,
     project_id: 'proj-eng',
     created_at: '2026-01-01T00:00:00Z',
   },
@@ -82,6 +88,7 @@ const sampleStatuses = [
     position: 1,
     is_default: false,
     is_done_state: false,
+    is_default_done: false,
     project_id: 'proj-eng',
     created_at: '2026-01-01T00:00:00Z',
   },
@@ -92,6 +99,7 @@ const sampleStatuses = [
     position: 2,
     is_default: false,
     is_done_state: true,
+    is_default_done: true,
     project_id: 'proj-eng',
     created_at: '2026-01-01T00:00:00Z',
   },
@@ -105,6 +113,7 @@ const sampleTaskDetail = {
   priority: 'High' as const,
   status_id: 's-progress',
   project_id: 'proj-eng',
+  parent_task_id: null as string | null,
   soft_deadline: '2026-07-02T00:00:00Z' as string | null,
   hard_deadline: null as string | null,
   is_archived: false,
@@ -116,8 +125,73 @@ const sampleTaskDetail = {
     { role: 'assignee', user: mockUsers.alpha },
     { role: 'assignee', user: mockUsers.beta },
   ],
+  labels: [
+    {
+      id: 'label-bug',
+      name: 'bug',
+      description: '',
+      color: '#e11d48',
+      icon_url: null,
+      project_id: 'proj-eng',
+    },
+  ],
   custom_field_values: [],
 };
+
+const sampleSubtask = {
+  ...sampleTaskDetail,
+  id: 'task-2',
+  seq_id: 2,
+  title: 'PKCE の検証を追加する',
+  description: null,
+  parent_task_id: sampleTaskDetail.id,
+  assignees: [],
+  labels: [],
+  custom_field_values: [],
+};
+
+const sampleLabels = [
+  ...sampleTaskDetail.labels,
+  {
+    id: 'label-feature',
+    name: 'feature',
+    description: '',
+    color: '#3b82f6',
+    icon_url: null,
+    project_id: 'proj-eng',
+  },
+];
+
+type MockComment = {
+  id: string;
+  body: string | null;
+  is_deleted: boolean;
+  created_at: string;
+  updated_at: string;
+  user: { id: string; name: string };
+  replies: Omit<MockComment, 'replies'>[];
+};
+
+const sampleComments: MockComment[] = [
+  {
+    id: 'comment-1',
+    body: '最初のコメントです。\n改行も保たれます。',
+    is_deleted: false,
+    created_at: '2026-06-10T00:00:00Z',
+    updated_at: '2026-06-10T00:00:00Z',
+    user: { id: mockUsers.alpha.id, name: mockUsers.alpha.username },
+    replies: [
+      {
+        id: 'comment-1-reply-1',
+        body: 'スレッドへの返信です。',
+        is_deleted: false,
+        created_at: '2026-06-11T00:00:00Z',
+        updated_at: '2026-06-11T00:00:00Z',
+        user: { id: mockUsers.beta.id, name: mockUsers.beta.username },
+      },
+    ],
+  },
+];
 
 type MockOptions = {
   task?: typeof sampleTaskDetail | null;
@@ -129,6 +203,11 @@ type MockOptions = {
   hang?: boolean;
   onPut?: (body: unknown) => void;
   onDelete?: () => void;
+  comments?: MockComment[];
+  /** コメント一覧 GET だけを 500 で落とす（ページ本体は生かす） */
+  rejectCommentsList?: boolean;
+  /** コメント投稿 POST を { message } 付きで拒否する */
+  rejectCommentPost?: { status: number; message: string };
 };
 
 function applyPutBody(
@@ -150,16 +229,40 @@ function applyPutBody(
   if (typeof body.title === 'string') next.title = body.title;
   if (typeof body.status_id === 'string') next.status_id = body.status_id;
 
+  if (Array.isArray(body.label_ids)) {
+    next.labels = sampleLabels.filter((label) => (body.label_ids as string[]).includes(label.id));
+  }
+
   return next;
 }
 
 let mutableTaskDetail = { ...sampleTaskDetail };
+let mutableComments: MockComment[] = [];
 
 function createMockFetch(overrides: MockOptions = {}) {
   mutableTaskDetail = { ...(overrides.task ?? sampleTaskDetail) };
+  mutableComments = (overrides.comments ?? []).map((thread) => ({
+    ...thread,
+    replies: thread.replies.map((reply) => ({ ...reply })),
+  }));
   const original = globalThis.fetch;
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
     const url = typeof req === 'string' ? req : req.url;
+    // ログイン中ユーザーは alpha。コメントの編集ボタンの出し分け（投稿者本人のみ）が
+    // ストーリーでも実挙動どおりになる
+    if (url.includes('/v1/auth/me')) {
+      return jsonResponse({
+        id: mockUsers.alpha.id,
+        username: mockUsers.alpha.username,
+        email: 'alpha@example.com',
+        email_verified: true,
+        avatar_url: null,
+        bio: null,
+        is_admin: false,
+        is_suspended: false,
+        totp_enabled: false,
+      });
+    }
     if (isListTenantsUrl(url)) {
       if (overrides.rejectTenantsList) {
         return jsonResponse({ message: 'server error' }, 500);
@@ -170,16 +273,96 @@ function createMockFetch(overrides: MockOptions = {}) {
     if (overrides.hang) return new Promise(() => {});
 
     const method = typeof req === 'string' ? 'GET' : req.method;
-    if (
-      url.includes('/v1/tenants/') &&
-      url.includes('/projects') &&
-      !url.includes('/tasks') &&
-      !url.includes('/statuses')
-    ) {
-      return jsonResponse(sampleProjects);
-    }
     if (url.includes('/statuses')) {
       return jsonResponse(sampleStatuses);
+    }
+    if (url.includes('/labels')) {
+      return jsonResponse(sampleLabels);
+    }
+    // 担当者候補はメンバー一覧とは別の口（管理者でなくても読める）
+    if (url.includes('/assignable-users')) {
+      return jsonResponse([mockUsers.alpha, mockUsers.beta]);
+    }
+    if (url.includes('/activities')) {
+      return jsonResponse({ activities: [], total: 0 });
+    }
+    if (method === 'GET' && url.includes('/relations')) {
+      return jsonResponse({
+        parent: mutableTaskDetail.parent_task_id ? sampleTaskDetail : null,
+        subtasks: mutableTaskDetail.id === sampleTaskDetail.id ? [sampleSubtask] : [],
+        blocks: [],
+        blocked_by: [],
+      });
+    }
+    // /tasks/{id}/comments は /tasks/ の分岐より先に受ける
+    if (url.includes('/comments')) {
+      if (method === 'GET') {
+        if (overrides.rejectCommentsList) {
+          return jsonResponse({ message: 'server error' }, 500);
+        }
+        return jsonResponse({ comments: mutableComments });
+      }
+      if (method === 'POST') {
+        if (overrides.rejectCommentPost) {
+          return jsonResponse(
+            { message: overrides.rejectCommentPost.message },
+            overrides.rejectCommentPost.status,
+          );
+        }
+        const body = (await req.json()) as { body: string; parent_comment_id?: string | null };
+        const posted = {
+          id: `comment-new-${mutableComments.length + 1}`,
+          body: body.body,
+          is_deleted: false,
+          created_at: '2026-06-15T00:00:00Z',
+          updated_at: '2026-06-15T00:00:00Z',
+          user: { id: mockUsers.alpha.id, name: mockUsers.alpha.username },
+        };
+        if (body.parent_comment_id) {
+          const parent = mutableComments.find((thread) => thread.id === body.parent_comment_id);
+          parent?.replies.push(posted);
+        } else {
+          mutableComments.push({ ...posted, replies: [] });
+        }
+        return jsonResponse(
+          {
+            id: posted.id,
+            task_id: mutableTaskDetail.id,
+            user_id: posted.user.id,
+            body: posted.body,
+            parent_comment_id: body.parent_comment_id ?? null,
+            created_at: posted.created_at,
+            updated_at: posted.updated_at,
+          },
+          201,
+        );
+      }
+      if (method === 'PUT' || method === 'DELETE') {
+        const cid = new URL(url, 'http://localhost').pathname.split('/').pop()!;
+        for (const thread of mutableComments) {
+          for (const comment of [thread, ...thread.replies]) {
+            if (comment.id !== cid) continue;
+            if (method === 'PUT') {
+              const body = (await req.json()) as { body: string };
+              comment.body = body.body;
+              comment.updated_at = '2026-06-16T00:00:00Z';
+              return jsonResponse({
+                id: comment.id,
+                task_id: mutableTaskDetail.id,
+                user_id: comment.user.id,
+                body: comment.body,
+                parent_comment_id: comment.id === thread.id ? null : thread.id,
+                created_at: comment.created_at,
+                updated_at: comment.updated_at,
+              });
+            }
+            comment.is_deleted = true;
+            comment.body = null;
+            return new Response(null, { status: 204 });
+          }
+        }
+        return jsonResponse({ message: 'not-found' }, 404);
+      }
     }
     if (method === 'PUT' && url.includes('/tasks/')) {
       if (overrides.rejectPut) {
@@ -204,6 +387,14 @@ function createMockFetch(overrides: MockOptions = {}) {
       }
       return jsonResponse(overrides.task ?? mutableTaskDetail);
     }
+    // tasks 一覧はこのストーリーでは未使用。projects の分岐に吸われないようここで受ける
+    if (url.includes('/tasks')) {
+      return jsonResponse({});
+    }
+    // 残ったプロジェクト系だけを最後に受ける
+    if (url.includes('/v1/tenants/') && url.includes('/projects')) {
+      return jsonResponse(sampleProjects);
+    }
     return jsonResponse({});
   });
   return () => {
@@ -217,6 +408,7 @@ function mockFetch() {
 
 function storyDecorator(
   context: { urlPathname: string; routeParams: Record<string, string> } = mockContext,
+  pageData?: { descriptionHtml: string | null; descriptionSource: string | null },
 ) {
   return () => ({
     setup() {
@@ -228,6 +420,7 @@ function storyDecorator(
       });
       provide(VUE_QUERY_CLIENT, queryClient);
       provide(PAGE_CONTEXT_KEY, context);
+      if (pageData) provide(DATA_KEY, pageData);
     },
     template: '<story />',
   });
@@ -273,9 +466,64 @@ export const Default: Story = {
     await expect(
       canvas.findByText('OIDC フローとセッション管理を実装する。'),
     ).resolves.toBeInTheDocument();
-    // 担当者はアバター（頭文字）のみ表示し、名前テキストは出さない（詳細では hideNames）
-    await expect(canvas.findByText('田')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('PKCE の検証を追加する')).resolves.toBeInTheDocument();
+    // 担当者はアバター（頭文字）のみ表示し、名前テキストは出さない。
+    // 頭文字は avatarInitials の既定どおり 2 文字（田中太郎 → 田中）
+    await expect(canvas.findByText('田中')).resolves.toBeInTheDocument();
     await expect(canvas.queryByText('田中太郎')).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(await canvas.findByRole('button', { name: 'サブタスクを追加' }));
+    const input = await canvas.findByRole('textbox', { name: 'サブタスク名' });
+    await user.type(input, 'リダイレクト検証{Enter}');
+    await expect(input).toHaveValue('');
+  },
+};
+
+export const Subtask: Story = {
+  name: '子タスク詳細では孫の作成UIを出さない',
+  beforeEach: () => createMockFetch({ task: sampleSubtask }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.findByRole('heading', { name: sampleSubtask.title }),
+    ).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByRole('button', { name: /親タスク.*OAuth 対応を実装する/ }),
+    ).resolves.toBeInTheDocument();
+    await expect(
+      canvas.queryByRole('button', { name: 'サブタスクを追加' }),
+    ).not.toBeInTheDocument();
+    await expect(canvas.queryByRole('textbox', { name: 'サブタスク名' })).not.toBeInTheDocument();
+  },
+};
+
+// KFM 表示 story の入力対。本番では +data.ts (サーバ) の renderDescription 出力だが、
+// story は同期描画のため事前生成 fixture (kfm-story-fixtures) を使う。入力は
+// inputs.ts の単一ソース、HTML は rendered/task-detail-description.html で、
+// kfm-story-fixtures.test.ts の drift 検査が「renderDescription の現在出力と一致」を
+// CI で強制する (手書き HTML だと実出力とズレても気づけない)。
+// descriptionSource は task.description と厳密一致させる (照合が成立する条件)。
+const KFM_DESCRIPTION = KFM_STORY_INPUTS['task-detail-description'];
+const KFM_DESCRIPTION_HTML = kfmDescriptionHtml;
+
+export const DescriptionKfmRendered: Story = {
+  name: '説明 KFM 描画（useData 接続）',
+  decorators: [
+    storyDecorator(mockContext, {
+      descriptionHtml: KFM_DESCRIPTION_HTML,
+      descriptionSource: KFM_DESCRIPTION,
+    }),
+  ],
+  beforeEach: () =>
+    createMockFetch({ task: { ...sampleTaskDetail, description: KFM_DESCRIPTION } }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // 照合成立 (descriptionSource === task.description) → KFM 枝が v-html 描画される
+    const strong = await canvas.findByText('強調');
+    expect(strong.tagName).toBe('STRONG');
+    // プレーン枝 (生テキストのマーカー記法そのまま) が出ていない
+    expect(canvas.queryByText(KFM_DESCRIPTION)).toBeNull();
   },
 };
 
@@ -322,9 +570,11 @@ export const StatusChange: Story = {
       canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).resolves.toBeInTheDocument();
 
-    const select = await canvas.findByRole('combobox', { name: 'ステータス' });
-    await user.selectOptions(select, 's-done');
-    await expect(select).toHaveValue('s-done');
+    // ステータスはモックに合わせて枠付きピル + メニューにした（素の select ではない）
+    const trigger = await canvas.findByRole('combobox', { name: 'ステータス' });
+    await user.click(trigger);
+    await user.click(await screen.findByRole('menuitemcheckbox', { name: /Done/ }));
+    await expect(trigger).toHaveTextContent('Done');
   },
 };
 
@@ -338,11 +588,13 @@ export const StatusChangeFailure500: Story = {
       canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).resolves.toBeInTheDocument();
 
-    const select = await canvas.findByRole('combobox', { name: 'ステータス' });
-    await expect(select).toHaveValue('s-progress');
-    await user.selectOptions(select, 's-done');
+    const trigger = await canvas.findByRole('combobox', { name: 'ステータス' });
+    await expect(trigger).toHaveTextContent('In Progress');
+    await user.click(trigger);
+    await user.click(await screen.findByRole('menuitemcheckbox', { name: /Done/ }));
     await expect(canvas.findByText('ステータスの更新に失敗しました')).resolves.toBeInTheDocument();
-    await expect(select).toHaveValue('s-progress');
+    // 失敗したら元の表示へ戻る
+    await expect(trigger).toHaveTextContent('In Progress');
   },
 };
 
@@ -356,11 +608,13 @@ export const StatusChangeFailure413: Story = {
       canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).resolves.toBeInTheDocument();
 
-    const select = await canvas.findByRole('combobox', { name: 'ステータス' });
-    await expect(select).toHaveValue('s-progress');
-    await user.selectOptions(select, 's-done');
+    const trigger = await canvas.findByRole('combobox', { name: 'ステータス' });
+    await expect(trigger).toHaveTextContent('In Progress');
+    await user.click(trigger);
+    await user.click(await screen.findByRole('menuitemcheckbox', { name: /Done/ }));
     await expect(canvas.findByText('ステータスの更新に失敗しました')).resolves.toBeInTheDocument();
-    await expect(select).toHaveValue('s-progress');
+    // 失敗したら元の表示へ戻る
+    await expect(trigger).toHaveTextContent('In Progress');
   },
 };
 
@@ -413,14 +667,146 @@ export const DescriptionEdit: Story = {
     ).resolves.toBeInTheDocument();
 
     await user.click(canvas.getByText('OIDC フローとセッション管理を実装する。'));
-    const textarea = await canvas.findByRole('textbox', { name: '説明' });
-    await user.clear(textarea);
-    await user.type(textarea, '更新後の説明');
+    // 編集器は CodeMirror (contenteditable)。form 要素ではないので user.clear は使えず、
+    // 全選択して打ち直す。role=textbox / 名前「説明」は contentAttributes 経由で付く
+    const editor = await canvas.findByRole('textbox', { name: '説明' });
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await expect(editor.textContent).toBe('OIDC フローとセッション管理を実装する。');
+    await user.click(editor);
+    // user.type は既定で対象をクリックし直して選択を潰すため、全選択のあとは
+    // keyboard で直接打つ
+    await user.keyboard('{Control>}a{/Control}');
+    await user.keyboard('更新後の説明');
     await user.tab();
 
     await expect(canvas.findByText('更新後の説明')).resolves.toBeInTheDocument();
     const puts = (DescriptionEdit as { puts?: unknown[] }).puts ?? [];
     await expect(puts).toContainEqual({ description: '更新後の説明' });
+  },
+};
+
+export const DescriptionEditorMarkdown: Story = {
+  name: '説明編集（markdown の着色）',
+  beforeEach: () => createMockFetch(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByText('OIDC フローとセッション管理を実装する。'),
+    ).resolves.toBeInTheDocument();
+
+    await user.click(canvas.getByText('OIDC フローとセッション管理を実装する。'));
+    const editor = await canvas.findByRole('textbox', { name: '説明' });
+    await user.click(editor);
+    await user.keyboard('{Control>}a{/Control}');
+    await user.keyboard('# 見出し{Enter}**強調** と `コード`');
+
+    // 見出しと強調が地の文と違う描かれ方になる (= markdown として解釈されている)。
+    // 実値ではなく相対比較にして、テーマの色替えで壊れないようにする
+    const heading = editor.querySelector('.cm-line:first-child span');
+    await expect(heading).not.toBeNull();
+    await expect(getComputedStyle(heading as Element).fontWeight).toBe('600');
+    // 行の折り返しが有効 (長い 1 行が器を押し広げない)
+    await expect(editor.scrollWidth).toBeLessThanOrEqual(editor.clientWidth + 1);
+  },
+};
+
+export const DescriptionEditorTab: Story = {
+  name: '説明編集（Tab はリスト内でだけ字下げ）',
+  beforeEach: () => createMockFetch(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByText('OIDC フローとセッション管理を実装する。'),
+    ).resolves.toBeInTheDocument();
+
+    await user.click(canvas.getByText('OIDC フローとセッション管理を実装する。'));
+    const editor = await canvas.findByRole('textbox', { name: '説明' });
+    await user.click(editor);
+    await user.keyboard('{Control>}a{/Control}');
+
+    // リスト項目の中では字下げになる (入れ子リストが打てないと markdown が書けない)。
+    // Enter でリスト記号は自動で継がれるので、2 行目は本文だけ打つ
+    await user.keyboard('- 親{Enter}子');
+    await user.keyboard('{Tab}');
+    await expect(editor).toHaveFocus();
+    await expect(editor.textContent).toContain('  - 子');
+
+    // 地の文では字下げにせず、既定どおりフォーカスを次へ渡す
+    // (常に奪うと blur で確定する inline 編集から出られなくなる)
+    await user.keyboard('{Control>}a{/Control}');
+    await user.keyboard('ただの本文');
+    await user.keyboard('{Tab}');
+    await expect(editor).not.toHaveFocus();
+  },
+};
+
+export const DescriptionEditorSubmitShortcut: Story = {
+  name: '説明編集（Mod-Enter で確定）',
+  beforeEach: () => {
+    const puts: unknown[] = [];
+    const restore = createMockFetch({
+      onPut: (body) => puts.push(body),
+    });
+    (DescriptionEditorSubmitShortcut as { puts?: unknown[] }).puts = puts;
+    return restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByText('OIDC フローとセッション管理を実装する。'),
+    ).resolves.toBeInTheDocument();
+
+    await user.click(canvas.getByText('OIDC フローとセッション管理を実装する。'));
+    const editor = await canvas.findByRole('textbox', { name: '説明' });
+    await user.click(editor);
+    await user.keyboard('{Control>}a{/Control}');
+    // リストの中は Tab が字下げに使われる = Tab では抜けられない文脈。
+    // そこからキーボードだけで確定して抜けられることを示す
+    await user.keyboard('- 一覧の項目');
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    // 編集器が閉じて本文が確定する (SSR 済み HTML が無い story なので素のまま出る)
+    await expect(canvas.findByText('- 一覧の項目')).resolves.toBeInTheDocument();
+    const puts = (DescriptionEditorSubmitShortcut as { puts?: unknown[] }).puts ?? [];
+    await expect(puts).toContainEqual({ description: '- 一覧の項目' });
+  },
+};
+
+export const DescriptionEditEscape: Story = {
+  name: '説明編集の取り消し（Escape）',
+  beforeEach: () => {
+    const puts: unknown[] = [];
+    const restore = createMockFetch({
+      onPut: (body) => puts.push(body),
+    });
+    (DescriptionEditEscape as { puts?: unknown[] }).puts = puts;
+    return restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByText('OIDC フローとセッション管理を実装する。'),
+    ).resolves.toBeInTheDocument();
+
+    await user.click(canvas.getByText('OIDC フローとセッション管理を実装する。'));
+    const editor = await canvas.findByRole('textbox', { name: '説明' });
+    await user.click(editor);
+    await user.keyboard('{Control>}a{/Control}');
+    await user.keyboard('捨てられるはずの下書き');
+    await user.keyboard('{Escape}');
+
+    // 編集器が閉じ、元の本文が戻る
+    await expect(
+      canvas.findByText('OIDC フローとセッション管理を実装する。'),
+    ).resolves.toBeInTheDocument();
+    // 取り消しなので保存は 1 度も飛ばない。編集器の破棄で blur → 確定へ落ちると
+    // 下書き (や空文字) が保存されてしまうため、そこをここで塞ぐ
+    const puts = (DescriptionEditEscape as { puts?: unknown[] }).puts ?? [];
+    await expect(puts).toEqual([]);
   },
 };
 
@@ -444,9 +830,7 @@ export const DescriptionClear: Story = {
     await user.click(canvas.getByText('OIDC フローとセッション管理を実装する。'));
     await user.click(await canvas.findByRole('button', { name: 'クリア' }));
 
-    await expect(
-      canvas.findByText('説明はありません（クリックして追加）'),
-    ).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('説明を追加')).resolves.toBeInTheDocument();
     const puts = (DescriptionClear as { puts?: unknown[] }).puts ?? [];
     await expect(puts).toContainEqual({ clear_description: true });
   },
@@ -517,17 +901,19 @@ export const SoftDeadlineClear: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const user = userEvent.setup();
-    await expect(canvas.findByText('ソフト期限')).resolves.toBeInTheDocument();
+    // 参照デザインではソフト期限とハード期限が「日付」行に並ぶので、
+    // 行の見出しではなく操作そのもの（aria-label）を掴む
+    const trigger = await canvas.findByRole('button', { name: 'ソフト期限を編集' });
+    await user.click(trigger);
 
-    const row = canvas.getByText('ソフト期限').parentElement;
-    expect(row).toBeTruthy();
-    const section = within(row!);
-    await user.click(section.getByRole('button'));
-    const input = await section.findByLabelText('ソフト期限');
+    const input = await canvas.findByLabelText('ソフト期限');
     await user.clear(input);
     await user.tab();
 
-    await expect(section.findByText('未設定（クリックして設定）')).resolves.toBeInTheDocument();
+    // 未設定のソフト期限は「期限」のプレースホルダに戻る
+    await expect(
+      canvas.findByRole('button', { name: 'ソフト期限を編集' }),
+    ).resolves.toHaveTextContent('期限');
     const puts = (SoftDeadlineClear as { puts?: unknown[] }).puts ?? [];
     await expect(puts).toContainEqual({ clear_soft_deadline: true });
   },
@@ -566,6 +952,9 @@ export const DeleteConfirmAndNavigate: Story = {
         const spaNavigateSpy = fn();
         provide(VUE_QUERY_CLIENT, queryClient);
         provide(PAGE_CONTEXT_KEY, mockContext);
+        // KFM の SSR データは無し。プレーンテキスト表示へ倒れる枝を撮る
+        // （KFM 表示そのものは pageData を渡す上の decorator 側で守る）。
+        provide(DATA_KEY, { descriptionHtml: null, descriptionSource: null });
         provide('navigateAfterDelete', (href: string) => {
           spaNavigateSpy(href);
         });
@@ -680,5 +1069,77 @@ export const DeleteFailure: Story = {
       within(dialog).findByText('タスクの削除に失敗しました'),
     ).resolves.toBeInTheDocument();
     await expect(canvas.getByRole('heading', { name: 'OAuth 対応を実装する' })).toBeInTheDocument();
+  },
+};
+
+export const Comments: Story = {
+  name: 'コメント表示',
+  beforeEach: () => createMockFetch({ comments: sampleComments }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    // 素テキスト表示: 改行を保ったまま本文が出る（v-html なし）
+    await expect(
+      canvas.findByText(/最初のコメントです。\s*改行も保たれます。/),
+    ).resolves.toBeInTheDocument();
+
+    // 一覧では返信を展開せず件数だけ出す。返信は押してスレッドへ入ってから読む
+    await expect(canvas.queryByText('スレッドへの返信です。')).not.toBeInTheDocument();
+    await user.click(await canvas.findByRole('button', { name: '1件の返信' }));
+
+    await expect(canvas.findByText('スレッドへの返信です。')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('佐藤花子')).resolves.toBeInTheDocument();
+  },
+};
+
+export const CommentPost: Story = {
+  name: 'コメント投稿',
+  beforeEach: () => createMockFetch({ comments: sampleComments }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const textarea = await canvas.findByRole('textbox', { name: 'コメントを入力' });
+    await user.type(textarea, '新しく投稿するコメント');
+    await user.click(canvas.getByRole('button', { name: 'コメントする' }));
+
+    // invalidate → 一覧再取得で投稿済みコメントが並ぶ
+    await expect(canvas.findByText('新しく投稿するコメント')).resolves.toBeInTheDocument();
+    await expect(textarea).toHaveValue('');
+  },
+};
+
+export const CommentPostRejected: Story = {
+  name: 'コメント投稿拒否（403）',
+  beforeEach: () =>
+    createMockFetch({
+      comments: sampleComments,
+      rejectCommentPost: { status: 403, message: 'forbidden' },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const textarea = await canvas.findByRole('textbox', { name: 'コメントを入力' });
+    await user.type(textarea, '拒否されるコメント');
+    await user.click(canvas.getByRole('button', { name: 'コメントする' }));
+
+    // 拒否理由（サーバの message）を拒まれた通りに表示し、下書きは残す
+    await expect(
+      canvas.findByText('コメントを投稿できませんでした（forbidden）'),
+    ).resolves.toBeInTheDocument();
+    await expect(textarea).toHaveValue('拒否されるコメント');
+  },
+};
+
+export const CommentsListError: Story = {
+  name: 'コメント一覧エラー（ページ本体は生きる）',
+  beforeEach: () => createMockFetch({ rejectCommentsList: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // コメント節の中だけで倒れ、タスク詳細本体は表示され続ける
+    await expect(canvas.findByText('コメントを読み込めませんでした')).resolves.toBeInTheDocument();
+    await expect(canvas.getByRole('heading', { name: 'OAuth 対応を実装する' })).toBeInTheDocument();
+    // 一覧が読めなくても書く導線（投稿フォーム）と再試行は残る
+    await expect(canvas.getByRole('textbox', { name: 'コメントを入力' })).toBeInTheDocument();
+    await expect(canvas.getByRole('button', { name: '再試行' })).toBeInTheDocument();
   },
 };

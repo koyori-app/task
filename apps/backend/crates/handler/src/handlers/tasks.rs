@@ -5,22 +5,28 @@ use axum::{
 };
 use axum_valid::Valid;
 use chrono::Utc;
-use sea_orm::sea_query::{Expr, LockType};
+use sea_orm::sea_query::{
+    CaseStatement, Expr, ExprTrait, Func, LockType, NullOrdering, SimpleExpr,
+};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait, EntityTrait,
-    IsolationLevel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
-    prelude::Uuid,
+    ActiveEnum, ActiveModelTrait,
+    ActiveValue::Set,
+    ColumnTrait, Condition, ConnectionTrait, EntityTrait, IsolationLevel, Iterable, JoinType,
+    Order, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, QueryTrait, RelationTrait,
+    TransactionTrait,
+    prelude::{DateTimeWithTimeZone, Uuid},
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::AppState;
-use crate::auth_helpers::{is_tenant_owner, require_member_or_owner};
+use crate::auth_helpers::{is_tenant_owner, require_project_access};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
+use common::cursor::{decode_cursor, encode_cursor};
 use entity::{
-    labels, milestones, project_statuses, project_task_counters, sprints, task_assignees,
-    task_labels, task_relations, tasks,
+    labels, milestones, project_statuses, sprints, task_assignees, task_labels, task_relations,
+    tasks, users,
 };
 use payload::tasks::*;
 use service::custom_fields::{
@@ -28,7 +34,9 @@ use service::custom_fields::{
 };
 use service::db::is_postgres_unique_violation;
 use service::notifications::{notify_assigned, notify_status_changed};
-use service::task_activities::{priority_label, record_activity, status_name};
+use service::task_activities::{
+    priority_label, record_activity, record_label_diff, status_name, task_label_entries,
+};
 use service::task_responses::{build_task_response, build_task_responses};
 
 // ─── Task lookup (UUID or KEY-N) ─────────────────────────────────────────
@@ -166,32 +174,6 @@ async fn record_task_field_activities<C: ConnectionTrait>(
     Ok(())
 }
 
-// ─── Seq ID counter ──────────────────────────────────────────────────────
-
-async fn next_seq_id(db: &sea_orm::DatabaseTransaction, project_id: Uuid) -> Result<i32, AppError> {
-    let existing = project_task_counters::Entity::find_by_id(project_id)
-        .lock(LockType::Update)
-        .one(db)
-        .await?;
-    Ok(match existing {
-        Some(c) => {
-            let new_seq = c.last_seq + 1;
-            let mut active: project_task_counters::ActiveModel = c.into();
-            active.last_seq = Set(new_seq);
-            active.update(db).await?.last_seq
-        }
-        None => {
-            project_task_counters::ActiveModel {
-                project_id: Set(project_id),
-                last_seq: Set(1),
-            }
-            .insert(db)
-            .await?
-            .last_seq
-        }
-    })
-}
-
 // ─── BFS cycle detection ─────────────────────────────────────────────────
 
 async fn would_create_cycle<C: ConnectionTrait>(
@@ -295,6 +277,299 @@ fn parse_task_priority(value: &str) -> Result<tasks::TaskPriority, AppError> {
     }
 }
 
+/// 一覧のカーソル。並び順の第一キーを持ち、`sort` を跨いだ使い回しを弾くために
+/// どの並びで作られたかも一緒に運ぶ。`id` は全変種で `DESC` のタイブレーカー。
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "sort")]
+enum TaskCursor {
+    #[serde(rename = "created_at_desc")]
+    CreatedAtDesc {
+        created_at: chrono::DateTime<chrono::Utc>,
+        id: Uuid,
+    },
+    #[serde(rename = "title_asc")]
+    TitleAsc { title: String, id: Uuid },
+    #[serde(rename = "title_desc")]
+    TitleDesc { title: String, id: Uuid },
+    #[serde(rename = "assignee_asc")]
+    AssigneeAsc { assignee: Option<String>, id: Uuid },
+    #[serde(rename = "assignee_desc")]
+    AssigneeDesc { assignee: Option<String>, id: Uuid },
+    #[serde(rename = "priority_asc")]
+    PriorityAsc { priority_rank: i32, id: Uuid },
+    #[serde(rename = "priority_desc")]
+    PriorityDesc { priority_rank: i32, id: Uuid },
+    #[serde(rename = "deadline_asc")]
+    DeadlineAsc {
+        soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
+        id: Uuid,
+    },
+    #[serde(rename = "deadline_desc")]
+    DeadlineDesc {
+        soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
+        id: Uuid,
+    },
+}
+
+/// 一覧の並び。`sort` の文字列を 1 度だけ解釈し、順序とカーソルの形を 1 か所に揃える。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TaskSort {
+    CreatedAtDesc,
+    TitleAsc,
+    TitleDesc,
+    AssigneeAsc,
+    AssigneeDesc,
+    PriorityAsc,
+    PriorityDesc,
+    DeadlineAsc,
+    DeadlineDesc,
+}
+
+const ASSIGNEE_SORT_KEY_SQL: &str = "(SELECT MIN(LOWER(users.username)) FROM task_assignees JOIN users ON users.id = task_assignees.user_id WHERE task_assignees.task_id = tasks.id)";
+
+fn priority_sort_key() -> SimpleExpr {
+    let mut key = CaseStatement::new();
+    for priority in tasks::TaskPriority::iter() {
+        key = key.case(
+            Expr::cust("tasks.priority::text").eq(priority.to_value()),
+            priority_rank(priority),
+        );
+    }
+    key.into()
+}
+
+fn assignee_sort_key() -> SimpleExpr {
+    Expr::cust(ASSIGNEE_SORT_KEY_SQL)
+}
+
+async fn assignee_sort_cursor_key<C: ConnectionTrait>(
+    db: &C,
+    task_id: Uuid,
+) -> Result<Option<String>, AppError> {
+    let value = task_assignees::Entity::find()
+        .filter(task_assignees::Column::TaskId.eq(task_id))
+        .join(JoinType::InnerJoin, task_assignees::Relation::Users.def())
+        .select_only()
+        .column_as(
+            Expr::expr(Func::min(Func::lower(Expr::col(users::Column::Username)))),
+            "assignee",
+        )
+        .into_tuple::<Option<String>>()
+        .one(db)
+        .await?;
+    Ok(value.flatten())
+}
+
+fn priority_rank(priority: tasks::TaskPriority) -> i32 {
+    match priority {
+        tasks::TaskPriority::CriticalFire => 0,
+        tasks::TaskPriority::Critical => 1,
+        tasks::TaskPriority::High => 2,
+        tasks::TaskPriority::Medium => 3,
+        tasks::TaskPriority::Low => 4,
+        tasks::TaskPriority::Trivial => 5,
+    }
+}
+
+impl TaskSort {
+    /// 知らない値は既定（作成日の新しい順）に倒す。既存の挙動を変えない
+    fn parse(raw: Option<&str>) -> Self {
+        match raw.unwrap_or("created_at_desc") {
+            "title_asc" => Self::TitleAsc,
+            "title_desc" => Self::TitleDesc,
+            "assignee_asc" => Self::AssigneeAsc,
+            "assignee_desc" => Self::AssigneeDesc,
+            "priority_asc" => Self::PriorityAsc,
+            "priority_desc" => Self::PriorityDesc,
+            "deadline_asc" => Self::DeadlineAsc,
+            "deadline_desc" => Self::DeadlineDesc,
+            _ => Self::CreatedAtDesc,
+        }
+    }
+
+    async fn cursor_of<C: ConnectionTrait>(
+        self,
+        db: &C,
+        task: &TaskResponse,
+    ) -> Result<String, AppError> {
+        Ok(encode_cursor(&match self {
+            Self::CreatedAtDesc => TaskCursor::CreatedAtDesc {
+                created_at: task.created_at,
+                id: task.id,
+            },
+            Self::TitleAsc => TaskCursor::TitleAsc {
+                title: task.title.clone(),
+                id: task.id,
+            },
+            Self::TitleDesc => TaskCursor::TitleDesc {
+                title: task.title.clone(),
+                id: task.id,
+            },
+            Self::AssigneeAsc => TaskCursor::AssigneeAsc {
+                assignee: assignee_sort_cursor_key(db, task.id).await?,
+                id: task.id,
+            },
+            Self::AssigneeDesc => TaskCursor::AssigneeDesc {
+                assignee: assignee_sort_cursor_key(db, task.id).await?,
+                id: task.id,
+            },
+            Self::PriorityAsc => TaskCursor::PriorityAsc {
+                priority_rank: priority_rank(task.priority),
+                id: task.id,
+            },
+            Self::PriorityDesc => TaskCursor::PriorityDesc {
+                priority_rank: priority_rank(task.priority),
+                id: task.id,
+            },
+            Self::DeadlineAsc => TaskCursor::DeadlineAsc {
+                soft_deadline: task.soft_deadline,
+                id: task.id,
+            },
+            Self::DeadlineDesc => TaskCursor::DeadlineDesc {
+                soft_deadline: task.soft_deadline,
+                id: task.id,
+            },
+        }))
+    }
+
+    /// 「このカーソルより後ろ」の条件。`ORDER BY` と同じ形にしないと行が飛ぶ。
+    ///
+    /// 並びを変えるとキーの意味が変わるので、別の並びで作られたカーソルは 400 で断る
+    /// （黙って先頭へ戻すと、並び替えのたびに一覧が巻き戻る）。
+    fn keyset_after(self, cursor: TaskCursor) -> Result<Condition, AppError> {
+        Ok(match (self, cursor) {
+            (Self::CreatedAtDesc, TaskCursor::CreatedAtDesc { created_at, id }) => {
+                let at: DateTimeWithTimeZone = created_at.into();
+                Condition::any().add(tasks::Column::CreatedAt.lt(at)).add(
+                    Condition::all()
+                        .add(tasks::Column::CreatedAt.eq(at))
+                        .add(tasks::Column::Id.lt(id)),
+                )
+            }
+            (Self::TitleAsc, TaskCursor::TitleAsc { title, id }) => Condition::any()
+                .add(tasks::Column::Title.gt(title.clone()))
+                .add(
+                    Condition::all()
+                        .add(tasks::Column::Title.eq(title))
+                        .add(tasks::Column::Id.lt(id)),
+                ),
+            (Self::TitleDesc, TaskCursor::TitleDesc { title, id }) => Condition::any()
+                .add(tasks::Column::Title.lt(title.clone()))
+                .add(
+                    Condition::all()
+                        .add(tasks::Column::Title.eq(title))
+                        .add(tasks::Column::Id.lt(id)),
+                ),
+            (Self::AssigneeAsc, TaskCursor::AssigneeAsc { assignee, id }) => {
+                nullable_text_keyset_after(assignee_sort_key, assignee, id, Order::Asc)
+            }
+            (Self::AssigneeDesc, TaskCursor::AssigneeDesc { assignee, id }) => {
+                nullable_text_keyset_after(assignee_sort_key, assignee, id, Order::Desc)
+            }
+            (Self::PriorityAsc, TaskCursor::PriorityAsc { priority_rank, id }) => Condition::any()
+                .add(priority_sort_key().gt(priority_rank))
+                .add(
+                    Condition::all()
+                        .add(priority_sort_key().eq(priority_rank))
+                        .add(tasks::Column::Id.lt(id)),
+                ),
+            (Self::PriorityDesc, TaskCursor::PriorityDesc { priority_rank, id }) => {
+                Condition::any()
+                    .add(priority_sort_key().lt(priority_rank))
+                    .add(
+                        Condition::all()
+                            .add(priority_sort_key().eq(priority_rank))
+                            .add(tasks::Column::Id.lt(id)),
+                    )
+            }
+            (
+                Self::DeadlineAsc,
+                TaskCursor::DeadlineAsc {
+                    soft_deadline: Some(deadline),
+                    id,
+                },
+            ) => {
+                let at: DateTimeWithTimeZone = deadline.into();
+                nullable_datetime_keyset_after(Some(at), id, Order::Asc)
+            }
+            (
+                Self::DeadlineAsc,
+                TaskCursor::DeadlineAsc {
+                    soft_deadline: None,
+                    id,
+                },
+            ) => nullable_datetime_keyset_after(None, id, Order::Asc),
+            (
+                Self::DeadlineDesc,
+                TaskCursor::DeadlineDesc {
+                    soft_deadline: Some(deadline),
+                    id,
+                },
+            ) => {
+                let at: DateTimeWithTimeZone = deadline.into();
+                nullable_datetime_keyset_after(Some(at), id, Order::Desc)
+            }
+            (
+                Self::DeadlineDesc,
+                TaskCursor::DeadlineDesc {
+                    soft_deadline: None,
+                    id,
+                },
+            ) => nullable_datetime_keyset_after(None, id, Order::Desc),
+            _ => return Err(AppError::BadRequest),
+        })
+    }
+}
+
+fn nullable_text_keyset_after(
+    key: fn() -> SimpleExpr,
+    value: Option<String>,
+    id: Uuid,
+    order: Order,
+) -> Condition {
+    match value {
+        Some(value) => Condition::any()
+            .add(match order {
+                Order::Asc => key().gt(value.clone()),
+                Order::Desc => key().lt(value.clone()),
+                _ => unreachable!("only ascending and descending task sorts are supported"),
+            })
+            .add(key().is_null())
+            .add(
+                Condition::all()
+                    .add(key().eq(value))
+                    .add(tasks::Column::Id.lt(id)),
+            ),
+        None => Condition::all()
+            .add(key().is_null())
+            .add(tasks::Column::Id.lt(id)),
+    }
+}
+
+fn nullable_datetime_keyset_after(
+    value: Option<DateTimeWithTimeZone>,
+    id: Uuid,
+    order: Order,
+) -> Condition {
+    match value {
+        Some(value) => Condition::any()
+            .add(match order {
+                Order::Asc => tasks::Column::SoftDeadline.gt(value),
+                Order::Desc => tasks::Column::SoftDeadline.lt(value),
+                _ => unreachable!("only ascending and descending task sorts are supported"),
+            })
+            .add(tasks::Column::SoftDeadline.is_null())
+            .add(
+                Condition::all()
+                    .add(tasks::Column::SoftDeadline.eq(value))
+                    .add(tasks::Column::Id.lt(id)),
+            ),
+        None => Condition::all()
+            .add(tasks::Column::SoftDeadline.is_null())
+            .add(tasks::Column::Id.lt(id)),
+    }
+}
+
 async fn build_task_detail_response(
     state: &AppState,
     project_id: Uuid,
@@ -334,7 +609,6 @@ pub async fn list_tasks(
     auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
     let mut query = tasks::Entity::find()
         .filter(tasks::Column::ProjectId.eq(project_id))
@@ -363,19 +637,87 @@ pub async fn list_tasks(
             vec![sea_orm::Value::from(uid)],
         ));
     }
+    if let Some(lid) = q.label_id {
+        query = query.filter(Expr::cust_with_values(
+            "EXISTS (SELECT 1 FROM task_labels WHERE task_labels.task_id = tasks.id AND task_labels.label_id = $1)",
+            vec![sea_orm::Value::from(lid)],
+        ));
+    }
 
-    query = match q.sort.as_deref().unwrap_or("created_at_desc") {
-        "priority_asc" => query.order_by_asc(tasks::Column::Priority),
-        "deadline_asc" => query.order_by_asc(tasks::Column::SoftDeadline),
-        _ => query.order_by_desc(tasks::Column::CreatedAt),
-    };
+    if q.root_only {
+        // ページング前の同じ絞り込み条件を満たす親だけを存在扱いにする。
+        // 親が条件外で子だけが条件内なら、その子をルートとして返す。
+        let visible_parent_ids = query
+            .clone()
+            .select_only()
+            .column(tasks::Column::Id)
+            .into_query();
+        query = query.filter(
+            Condition::any()
+                .add(tasks::Column::ParentTaskId.is_null())
+                .add(tasks::Column::ParentTaskId.not_in_subquery(visible_parent_ids)),
+        );
+    }
 
-    let limit = std::cmp::min(q.limit, 200);
+    let sort = TaskSort::parse(q.sort.as_deref());
+    let limit = q.limit.clamp(1, 200);
     let total = query.clone().count(&state.db).await?;
-    let tasks_page = query.offset(q.offset).limit(limit).all(&state.db).await?;
+
+    // カーソルは並びのキーを持ち回るので、`offset` と混ぜると起点が二重になる。
+    // 黙って片方を捨てると呼び出し側の間違いが表に出ないので弾く
+    if q.cursor.is_some() && q.offset != 0 {
+        return Err(AppError::BadRequest);
+    }
+    if let Some(raw) = &q.cursor {
+        query = query.filter(sort.keyset_after(decode_cursor(raw)?)?);
+    }
+
+    query = match sort {
+        TaskSort::CreatedAtDesc => query.order_by_desc(tasks::Column::CreatedAt),
+        TaskSort::TitleAsc => query.order_by_asc(tasks::Column::Title),
+        TaskSort::TitleDesc => query.order_by_desc(tasks::Column::Title),
+        TaskSort::AssigneeAsc => {
+            query.order_by_with_nulls(assignee_sort_key(), Order::Asc, NullOrdering::Last)
+        }
+        TaskSort::AssigneeDesc => {
+            query.order_by_with_nulls(assignee_sort_key(), Order::Desc, NullOrdering::Last)
+        }
+        TaskSort::PriorityAsc => query.order_by(priority_sort_key(), Order::Asc),
+        TaskSort::PriorityDesc => query.order_by(priority_sort_key(), Order::Desc),
+        TaskSort::DeadlineAsc => {
+            query.order_by_with_nulls(tasks::Column::SoftDeadline, Order::Asc, NullOrdering::Last)
+        }
+        TaskSort::DeadlineDesc => {
+            query.order_by_with_nulls(tasks::Column::SoftDeadline, Order::Desc, NullOrdering::Last)
+        }
+    };
+    // 同じ値を持つ行の順序は Postgres 上で未定義。タイブレーカーが無いと、同じデータでも
+    // ページ境界に同値の行があるだけで重複・欠落が出る。カーソルの不等式もこの並びと
+    // 同じ形にする（priority / deadline は同値がもっと多い）
+    query = query.order_by_desc(tasks::Column::Id);
+
+    // 「まだ残っているか」は総数との比較ではなく 1 件多く引いて確かめる。
+    // 総数は取得中に動くので、比較では終わらない「もっと見る」が残る
+    let mut rows = query
+        .offset(q.offset)
+        .limit(limit + 1)
+        .all(&state.db)
+        .await?;
+    let has_more = rows.len() > limit as usize;
+    rows.truncate(limit as usize);
+    let tasks = build_task_responses(&state.db, rows).await?;
+    let next_cursor = if has_more {
+        match tasks.last() {
+            Some(task) => Some(sort.cursor_of(&state.db, task).await?),
+            None => None,
+        }
+    } else {
+        None
+    };
     Ok(Json(TaskListResponse {
-        tasks: build_task_responses(&state.db, tasks_page).await?,
+        tasks,
         total,
+        next_cursor,
     }))
 }
 
@@ -404,7 +746,6 @@ pub async fn create_task(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
 
     if let (Some(s), Some(h)) = (payload.soft_deadline, payload.hard_deadline)
         && s >= h
@@ -447,7 +788,7 @@ pub async fn create_task(
         }
     }
 
-    let seq_id = next_seq_id(&txn, project_id).await?;
+    let seq_id = service::tasks::next_seq_id(&txn, project_id).await?;
 
     let model = tasks::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -475,7 +816,7 @@ pub async fn create_task(
     .await?;
 
     for a in &payload.assignees {
-        require_member_or_owner(&state, tenant_id, project_id, a.user_id).await?;
+        require_project_access(&txn, tenant_id, project_id, a.user_id).await?;
         task_assignees::ActiveModel {
             id: Set(Uuid::new_v4()),
             task_id: Set(model.id),
@@ -563,7 +904,6 @@ pub async fn get_task(
     auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     Ok(Json(
         build_task_detail_response(&state, project_id, task).await?,
@@ -596,12 +936,8 @@ pub async fn update_task(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
-    let task_snapshot = task.clone();
     let task_id = task.id;
-    let existing_soft = task.soft_deadline.map(|dt| dt.with_timezone(&Utc));
-    let existing_hard = task.hard_deadline.map(|dt| dt.with_timezone(&Utc));
     let parent_changes = payload.clear_parent_task_id || payload.parent_task_id.is_some();
     let txn = if parent_changes {
         state
@@ -611,6 +947,41 @@ pub async fn update_task(
     } else {
         state.db.begin().await?
     };
+
+    // スプリント完了・一括割り当てと同じく、スプリント → タスクの順にロックする。
+    if !payload.clear_sprint_id
+        && let Some(sprint_id) = payload.sprint_id
+    {
+        let sprint = sprints::Entity::find_by_id(sprint_id)
+            .filter(sprints::Column::ProjectId.eq(project_id))
+            .lock(LockType::Update)
+            .one(&txn)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if sprint.status == sprints::SprintStatus::Completed {
+            return Err(AppError::Conflict);
+        }
+    }
+
+    // 本体・ラベル・担当者のスナップショットを同じロックの下で取得する。
+    let task = tasks::Entity::find_by_id(task_id)
+        .filter(tasks::Column::ProjectId.eq(project_id))
+        .filter(tasks::Column::DeletedAt.is_null())
+        .lock(LockType::Update)
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let task_snapshot = task.clone();
+    let existing_soft = task.soft_deadline.map(|dt| dt.with_timezone(&Utc));
+    let existing_hard = task.hard_deadline.map(|dt| dt.with_timezone(&Utc));
+    if let Some(ref assignees) = payload.assignees {
+        for assignee in assignees {
+            if assignee.role.is_empty() {
+                return Err(AppError::BadRequest);
+            }
+            require_project_access(&txn, tenant_id, project_id, assignee.user_id).await?;
+        }
+    }
 
     let mut active: tasks::ActiveModel = task.into();
     if let Some(ref v) = payload.title {
@@ -666,15 +1037,6 @@ pub async fn update_task(
     if payload.clear_sprint_id {
         active.sprint_id = Set(None);
     } else if let Some(v) = payload.sprint_id {
-        let sprint = sprints::Entity::find_by_id(v)
-            .filter(sprints::Column::ProjectId.eq(project_id))
-            .lock(LockType::Update)
-            .one(&txn)
-            .await?
-            .ok_or(AppError::NotFound)?;
-        if sprint.status == sprints::SprintStatus::Completed {
-            return Err(AppError::Conflict);
-        }
         active.sprint_id = Set(Some(v));
     }
     if payload.clear_soft_deadline {
@@ -718,6 +1080,53 @@ pub async fn update_task(
     }
     active.updated_at = Set(chrono::Utc::now().into());
 
+    if payload.label_ids.is_some()
+        || !payload.add_label_ids.is_empty()
+        || !payload.remove_label_ids.is_empty()
+    {
+        let before_labels = task_label_entries(&txn, task_id).await?;
+        let mut unique = payload
+            .label_ids
+            .clone()
+            .unwrap_or_else(|| before_labels.iter().map(|(id, _)| *id).collect());
+        unique.extend(&payload.add_label_ids);
+        unique.sort();
+        unique.dedup();
+        // 除去が最後。同じ ID を追加・除去した場合は除去を優先する。
+        unique.retain(|id| !payload.remove_label_ids.contains(id));
+        if !unique.is_empty() {
+            let in_project = labels::Entity::find()
+                .filter(labels::Column::Id.is_in(unique.clone()))
+                .filter(labels::Column::ProjectId.eq(project_id))
+                .all(&txn)
+                .await?;
+            if in_project.len() != unique.len() {
+                return Err(AppError::BadRequest);
+            }
+        }
+        task_labels::Entity::delete_many()
+            .filter(task_labels::Column::TaskId.eq(task_id))
+            .exec(&txn)
+            .await?;
+        for lid in unique {
+            task_labels::ActiveModel {
+                task_id: Set(task_id),
+                label_id: Set(lid),
+            }
+            .insert(&txn)
+            .await?;
+        }
+        let after_labels = task_label_entries(&txn, task_id).await?;
+        record_label_diff(
+            &txn,
+            task_id,
+            Some(auth.user_id),
+            &before_labels,
+            &after_labels,
+        )
+        .await?;
+    }
+
     if parent_changes {
         let fresh = tasks::Entity::find_by_id(task_id)
             .filter(tasks::Column::ProjectId.eq(project_id))
@@ -743,43 +1152,84 @@ pub async fn update_task(
                 .ok_or(AppError::NotFound)?;
             active.parent_task_id = Set(Some(new_parent_id));
         }
-
-        let updated = active.update(&txn).await?;
-        record_task_field_activities(
-            &txn,
-            task_id,
-            auth.user_id,
-            project_id,
-            &task_snapshot,
-            &payload,
-        )
-        .await?;
-        if let Some(ref values) = payload.custom_field_values {
-            upsert_task_custom_field_values(&txn, project_id, task_id, values).await?;
-        }
-        txn.commit().await?;
-        Ok(Json(
-            build_task_detail_response(&state, project_id, updated).await?,
-        ))
-    } else {
-        let updated = active.update(&txn).await?;
-        record_task_field_activities(
-            &txn,
-            task_id,
-            auth.user_id,
-            project_id,
-            &task_snapshot,
-            &payload,
-        )
-        .await?;
-        if let Some(ref values) = payload.custom_field_values {
-            upsert_task_custom_field_values(&txn, project_id, task_id, values).await?;
-        }
-        txn.commit().await?;
-        Ok(Json(
-            build_task_detail_response(&state, project_id, updated).await?,
-        ))
     }
+    let updated = active.update(&txn).await?;
+    if let Some(ref desired) = payload.assignees {
+        let current = task_assignees::Entity::find()
+            .filter(task_assignees::Column::TaskId.eq(task_id))
+            .all(&txn)
+            .await?;
+        let mut seen = HashSet::new();
+        for assignee in desired {
+            if !seen.insert(assignee.user_id)
+                || current.iter().any(|old| old.user_id == assignee.user_id)
+            {
+                continue;
+            }
+            task_assignees::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                task_id: Set(task_id),
+                user_id: Set(assignee.user_id),
+                role: Set(assignee.role.clone()),
+                assigned_at: Set(chrono::Utc::now().into()),
+            }
+            .insert(&txn)
+            .await?;
+            record_activity(
+                &txn,
+                task_id,
+                Some(auth.user_id),
+                "assignee_added",
+                serde_json::json!({ "user_id": assignee.user_id, "role": assignee.role }),
+            )
+            .await?;
+            notify_assigned(
+                &txn,
+                project_id,
+                task_id,
+                assignee.user_id,
+                auth.user_id,
+                &assignee.role,
+            )
+            .await?;
+        }
+        for assignee in current {
+            if !seen.contains(&assignee.user_id) {
+                task_assignees::Entity::delete_by_id(assignee.id)
+                    .exec(&txn)
+                    .await?;
+                record_activity(
+                    &txn,
+                    task_id,
+                    Some(auth.user_id),
+                    "assignee_removed",
+                    serde_json::json!({ "user_id": assignee.user_id }),
+                )
+                .await?;
+            }
+        }
+    }
+
+    record_task_field_activities(
+        &txn,
+        task_id,
+        auth.user_id,
+        project_id,
+        &task_snapshot,
+        &payload,
+    )
+    .await?;
+    if let Some(ref values) = payload.custom_field_values {
+        upsert_task_custom_field_values(&txn, project_id, task_id, values).await?;
+    }
+    let linked = service::github::sync::mark_pending_push(&txn, task_id).await?;
+    txn.commit().await?;
+    if linked {
+        crate::handlers::github::enqueue_issue_push(&state, task_id).await;
+    }
+    Ok(Json(
+        build_task_detail_response(&state, project_id, updated).await?,
+    ))
 }
 
 #[axum::debug_handler]
@@ -806,7 +1256,6 @@ pub async fn delete_task(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     if task.created_by != auth.user_id
         && !is_tenant_owner(&state.db, tenant_id, auth.user_id).await?
@@ -843,7 +1292,6 @@ pub async fn archive_task(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let task_id = task.id;
     let txn = state.db.begin().await?;
@@ -887,7 +1335,6 @@ pub async fn unarchive_task(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let task_id = task.id;
     let txn = state.db.begin().await?;
@@ -933,7 +1380,6 @@ pub async fn list_assignees(
     auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let assignees = task_assignees::Entity::find()
         .filter(task_assignees::Column::TaskId.eq(task.id))
@@ -968,9 +1414,8 @@ pub async fn add_assignee(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
-    require_member_or_owner(&state, tenant_id, project_id, payload.user_id).await?;
+    require_project_access(&state.db, tenant_id, project_id, payload.user_id).await?;
     let duplicate = task_assignees::Entity::find()
         .filter(task_assignees::Column::TaskId.eq(task.id))
         .filter(task_assignees::Column::UserId.eq(payload.user_id))
@@ -1041,7 +1486,6 @@ pub async fn update_assignee(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let assignee = task_assignees::Entity::find()
         .filter(task_assignees::Column::TaskId.eq(task.id))
@@ -1079,7 +1523,6 @@ pub async fn remove_assignee(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let assignee = task_assignees::Entity::find()
         .filter(task_assignees::Column::TaskId.eq(task.id))
@@ -1129,12 +1572,23 @@ pub async fn list_relations(
     auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+
+    let parent = if let Some(parent_id) = task.parent_task_id {
+        tasks::Entity::find_by_id(parent_id)
+            .filter(tasks::Column::ProjectId.eq(project_id))
+            .filter(tasks::Column::DeletedAt.is_null())
+            .one(&state.db)
+            .await?
+    } else {
+        None
+    };
 
     let subtasks = tasks::Entity::find()
         .filter(tasks::Column::ParentTaskId.eq(task.id))
         .filter(tasks::Column::DeletedAt.is_null())
+        .order_by_asc(tasks::Column::CreatedAt)
+        .order_by_asc(tasks::Column::Id)
         .all(&state.db)
         .await?;
 
@@ -1205,6 +1659,10 @@ pub async fn list_relations(
         .collect();
 
     Ok(Json(TaskRelationsResponse {
+        parent: match parent {
+            Some(parent) => Some(build_task_response(&state.db, parent).await?),
+            None => None,
+        },
         subtasks: build_task_responses(&state.db, subtasks).await?,
         blocks,
         blocked_by,
@@ -1237,7 +1695,6 @@ pub async fn add_relation(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     resolve_task(
         &state,
@@ -1327,7 +1784,6 @@ pub async fn remove_relation(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_member_or_owner(&state, tenant_id, project_id, auth.user_id).await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     let rel = task_relations::Entity::find_by_id(relation_id)
         .one(&state.db)

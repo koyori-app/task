@@ -11,7 +11,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(crate::handlers::auth::verify_email))
         .routes(routes!(crate::handlers::auth::resend_verification_email))
         .routes(routes!(crate::handlers::auth::logout))
-        .routes(routes!(crate::handlers::auth::me))
+        .routes(routes!(
+            crate::handlers::auth::me,
+            crate::handlers::auth::update_me
+        ))
+        .routes(routes!(crate::handlers::oauth::list_providers))
         .routes(routes!(crate::handlers::oauth::oauth_start))
         .routes(routes!(crate::handlers::oauth::oauth_callback))
         .routes(routes!(crate::handlers::oauth::list_connections))

@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { navigate } from 'vike/client/router';
-
 import { taskDetailHref } from '@/lib/task-display';
 
 const props = defineProps<{
@@ -8,32 +6,40 @@ const props = defineProps<{
   projectKey: string;
   seqId: number;
   title: string;
-  /** true のとき、素の左クリックはフルページ遷移でなく select emit（分割ビューでの inline 選択）にする */
-  inlineSelect?: boolean;
 }>();
 
 const emit = defineEmits<{
   select: [seqId: number];
 }>();
 
-function navigateToTask(event: MouseEvent) {
+/**
+ * 素の左クリックは呼び出し側に委ね、修飾キー付きは `href`（フルページ）に任せる。
+ *
+ * 「分割ビューに出すか詳細ページへ送るか」をここで決めない。その判定は画面幅に
+ * 依存し、**描画時ではなくクリック時**に読む必要があるため呼び出し側に置く
+ * （`select` を受けた側が決める）。真偽値の prop として受け取ると、描画時の値が
+ * 固まって古いままになる。
+ */
+function onPlainClick(event: MouseEvent) {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
     return;
   event.preventDefault();
-  if (props.inlineSelect) {
-    emit('select', props.seqId);
-    return;
-  }
-  void navigate(taskDetailHref(props.tenantDisplayId, props.projectKey, props.seqId));
+  emit('select', props.seqId);
 }
 </script>
 
 <template>
   <a
     :href="taskDetailHref(tenantDisplayId, projectKey, seqId)"
-    class="truncate text-sm text-primary hover:underline after:absolute after:inset-0 after:content-['']"
-    @click="navigateToTask"
+    class="truncate text-sm text-primary hover:underline"
+    @click="onPlainClick"
   >
+    <!--
+      以前はここで `after:absolute after:inset-0` を敷き、当たり判定を行全体へ広げていた。
+      `<tr>` は WebKit で絶対配置の包含ブロックにならないため、判定が行を飛び越えて
+      テーブル全体へ広がり、「どこをタップしても一番下の行が開く」状態になっていた。
+      行全体の当たり判定は一覧側（TableRow の click）が持つ。
+    -->
     {{ title }}
   </a>
 </template>

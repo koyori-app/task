@@ -8,12 +8,16 @@ on:
       - 'apps/frontend/**'
       - 'e2e/**'
       - '.github/workflows/e2e.yml'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
   pull_request:
     paths:
       - 'apps/backend/**'
       - 'apps/frontend/**'
       - 'e2e/**'
       - '.github/workflows/e2e.yml'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -52,18 +56,18 @@ jobs:
           --health-retries 5
 
     env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_GHA_ENABLED: 'true'
       CARGO_INCREMENTAL: '0'
 
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      # toolchain は rust-toolchain.toml に一本化する。
+      # 引数なしの install が「アクティブな toolchain」= rust-toolchain.toml を読む。
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        run: rustup toolchain install
 
       - name: Install mold
         run: sudo apt-get install -y mold
@@ -71,15 +75,15 @@ jobs:
       - name: Install postgresql-client
         run: sudo apt-get install -y postgresql-client
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
-
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: |
             apps/backend -> target
             apps/backend/migration -> target
+          # キャッシュは main だけが書く。PR ごとに保存すると 10 GB の上限で main の分が追い出され、
+          # 全ジョブがコールドビルドになる（PR は main の分を読む）
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build backend
         run: cargo build --release --bin backend
@@ -91,9 +95,6 @@ jobs:
         run: cargo build --release --bin migration
         working-directory: apps/backend/migration
 
-      - name: sccache stats (post-build)
-        run: sccache --show-stats
-
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -103,7 +104,7 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           package_json_file: apps/frontend/package.json
 
@@ -116,7 +117,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.pnpm-cache.outputs.store }}
-          key: pnpm-store-e2e-${{ runner.os }}-${{ hashFiles('apps/frontend/pnpm-lock.yaml', 'e2e/pnpm-lock.yaml') }}
+          key: pnpm-store-e2e-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'e2e/pnpm-lock.yaml') }}
           restore-keys: |
             pnpm-store-e2e-${{ runner.os }}-
 

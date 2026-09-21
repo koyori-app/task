@@ -4,6 +4,31 @@ use axum::http::StatusCode;
 use common::TestApp;
 use uuid::Uuid;
 
+#[tokio::test]
+async fn updated_tenant_emoji_is_returned_in_the_tenant_list() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user_default().await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let response = app
+        .put_json_with_session(
+            &format!("/v1/tenants/{}", tp.tenant_id),
+            serde_json::json!({ "icon_emoji": "🦊" }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = app.get_with_session("/v1/tenants").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let tenants: Vec<serde_json::Value> = response.json().await.unwrap();
+    let tenant = tenants
+        .iter()
+        .find(|tenant| tenant["id"] == tp.tenant_id.to_string())
+        .unwrap();
+    assert_eq!(tenant["icon_emoji"], "🦊");
+    assert_eq!(tenant["membership"], "Owner");
+}
+
 /// `POST /v1/tenants` が `display_id` 重複で 409 Conflict を返すこと。
 ///
 /// この回帰テストは #336 で OpenAPI に 409 を宣言する前提となる

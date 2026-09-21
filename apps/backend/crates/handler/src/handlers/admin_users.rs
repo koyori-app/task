@@ -13,7 +13,7 @@ use axum::{
 use axum_valid::Valid;
 use chrono::Utc;
 use common::db::{column_exists, execute_bound, table_exists};
-use entity::{personal_tokens, project_members, tasks, users};
+use entity::{personal_tokens, tasks, tenant_members, users};
 use payload::admin_users::*;
 use payload::users::UserResponse;
 use sea_orm::prelude::Uuid;
@@ -137,9 +137,16 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
         .await?;
     }
 
-    if table_exists(db, "project_members").await? {
-        project_members::Entity::delete_many()
-            .filter(project_members::Column::UserId.eq(user_id))
+    // テナントから外す（`tenant_members::remove_member`）のと同じ形にする。
+    // `project_members` の行は消さない。消すと、その人しか指定されていなかったプロジェクトが
+    // メンバー 0 件になり、テナント全体に開放されてしまう（#568）。
+    // 残った行は project-only の客分の名指しに当たるが、この削除は PAT を revoke し
+    // users の行を墓標化するため、削除済み利用者がそこから入ることはない
+    // （客分の定めは apps/backend/docs/tenant-project-authz.md の「所属の 3 層」）。
+    // users の行は墓標として残す方式なので、FK の ON DELETE CASCADE は発火しない
+    if table_exists(db, "tenant_members").await? {
+        tenant_members::Entity::delete_many()
+            .filter(tenant_members::Column::UserId.eq(user_id))
             .exec(db)
             .await?;
     }
@@ -539,6 +546,8 @@ pub async fn reset_2fa(
 #[utoipa::path(
     delete,
     path = "/{id}/passkeys/{passkey_id}",
+    // passkeys::delete_passkey と関数名が同じなため operationId を明示して重複を避ける
+    operation_id = "delete_admin_user_passkey",
     tag = "Admin Users",
     summary = "パスキー強制削除",
     responses(

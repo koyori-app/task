@@ -1,8 +1,10 @@
 //! Apalis バックグラウンドジョブ
 
 pub mod already_registered_email;
+pub mod github_issue_sync;
 pub mod github_webhook;
 pub mod password_reset_email;
+pub mod review_summary;
 pub mod verification_email;
 
 use std::sync::Arc;
@@ -12,8 +14,10 @@ use apalis_postgres::PgPool;
 use common::settings::Settings;
 
 pub use already_registered_email::{AlreadyRegisteredEmailJob, AlreadyRegisteredEmailStorage};
+pub use github_issue_sync::{GithubIssueSyncJob, GithubIssueSyncStorage};
 pub use github_webhook::{GithubWebhookJob, GithubWebhookStorage};
 pub use password_reset_email::{PasswordResetEmailJob, PasswordResetEmailStorage};
+pub use review_summary::{ReviewSummaryJob, ReviewSummaryStorage};
 pub use verification_email::{
     MAX_RETRIES, QUEUE_NAME, VerificationEmailJob, VerificationEmailStorage,
 };
@@ -24,8 +28,17 @@ pub use verification_email::{
 #[derive(Clone)]
 pub struct JobState {
     pub settings: Settings,
+    pub db: sea_orm::DatabaseConnection,
     pub redis_client: common::cache::redis::RedisConnection,
     pub smtp_client: service::smtp::SmtpClient,
+    pub http_client: reqwest::Client,
+    /// 要約更新ジョブが、自分の番でなかったときに積み直すために持つ。
+    /// ワーカーへ `AppState` を渡すと job → handler の循環になるので、
+    /// 必要な依存はここに足す
+    pub review_summary_storage: Arc<review_summary::ReviewSummaryStorage>,
+    /// 切り詰められた push の続きのジョブを、投入の鍵（受信記録）と同じトランザクションで
+    /// 積むために持つ。storage 経由では別接続になり、鍵とジョブが一緒に確定しない。
+    pub pg_pool: PgPool,
 }
 
 pub async fn setup_pool(database_url: &str) -> Result<PgPool, anyhow::Error> {
@@ -44,6 +57,20 @@ pub async fn setup_github_webhook_storage(
     settings: &Settings,
 ) -> Result<Arc<GithubWebhookStorage>, anyhow::Error> {
     github_webhook::setup(pool, settings).await
+}
+
+pub async fn setup_github_issue_sync_storage(
+    pool: &PgPool,
+    settings: &Settings,
+) -> Result<Arc<GithubIssueSyncStorage>, anyhow::Error> {
+    github_issue_sync::setup(pool, settings).await
+}
+
+pub async fn setup_review_summary_storage(
+    pool: &PgPool,
+    settings: &Settings,
+) -> Result<Arc<ReviewSummaryStorage>, anyhow::Error> {
+    review_summary::setup(pool, settings).await
 }
 
 pub async fn setup_password_reset_email_storage(

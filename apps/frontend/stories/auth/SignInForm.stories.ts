@@ -15,6 +15,10 @@ const meta = {
     },
   },
   decorators: [
+    // Shown bare, this padded story has no width context; production SignIn.vue wraps the
+    // card in `w-full max-w-sm md:max-w-4xl`. Without it, Storybook's embed-sizing autosize
+    // (`#storybook-root > * { width: fit-content }`) lets the card stretch to full width.
+    // Re-supply the md width (56rem = max-w-4xl) so the story renders as the production card.
     () => ({
       setup() {
         const queryClient = new QueryClient({
@@ -25,7 +29,7 @@ const meta = {
         });
         provide(VUE_QUERY_CLIENT, queryClient);
       },
-      template: '<story />',
+      template: '<div style="width: 56rem; max-width: 100%; margin-inline: auto;"><story /></div>',
     }),
   ],
 } satisfies Meta<typeof SignInForm>;

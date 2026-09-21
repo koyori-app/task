@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { useQueryClient } from '@tanstack/vue-query';
+import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhGithubLogo } from '@phosphor-icons/vue';
-import { computed, ref } from 'vue';
+import { OpenApiVueQueryError } from '@koyori-app/openapi-vue-query';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
@@ -12,10 +14,26 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { apiClient, fetchClient } from '@/lib/api-vue-query';
+import {
+  forgetSelectToken as discardSelectToken,
+  keepSelectToken,
+  stashSelectTokenFromUrl,
+  takeSelectToken,
+} from '@/lib/github-select-token';
 
 const GITHUB_INTEGRATION_PATH =
   '/v1/tenants/{tenant_id}/projects/{project_id}/github/integration' as const;
 const GITHUB_INSTALL_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/github/install' as const;
+const GITHUB_REPOSITORIES_PATH =
+  '/v1/tenants/{tenant_id}/projects/{project_id}/github/repositories' as const;
+const GITHUB_CONNECT_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/github/connect' as const;
+const GITHUB_IMPORT_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/github/import' as const;
+const GITHUB_INSTALLATIONS_PATH =
+  '/v1/tenants/{tenant_id}/projects/{project_id}/github/installations' as const;
+const GITHUB_REUSE_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/github/reuse' as const;
+
+/** 取り込み開始が成功したあと、再度押せるようになるまでの待ち時間（ミリ秒） */
+const IMPORT_COOLDOWN_MS = 60_000;
 
 const props = defineProps<{
   tenantId: string;
@@ -23,18 +41,80 @@ const props = defineProps<{
 }>();
 
 const queryClient = useQueryClient();
+
+const CALLBACK_ERRORS: Record<string, string> = {
+  no_repositories:
+    'インストールにリポジトリが 1 件も含まれていません。GitHub 側でリポジトリを追加してから、もう一度お試しください。',
+  installation_rejected:
+    'このインストールでは連携できませんでした。GitHub の設定から一度アンインストールしてから、もう一度お試しください。',
+  // 消えている相手にアンインストールは促せないので、installation_rejected とは分ける
+  installation_gone:
+    'このインストールは GitHub 側で削除されています。「別の GitHub アカウント・組織を追加」から、もう一度連携してください。',
+  installation_forbidden:
+    'このインストールはあなたのアカウントからは操作できません。ご自身がアクセスできるアカウントまたは Organization に、もう一度インストールしてください。',
+  installation_authorization_required:
+    'GitHub App の設定でユーザー認可が有効になっていないため、連携できませんでした。管理者に設定の確認を依頼してください。',
+  github_unavailable: 'GitHub と通信できませんでした。時間をおいて、もう一度お試しください。',
+};
+
+// callback が付けた値は、読んだらすぐ URL から落とす（下の clearCallbackQuery）。
+// 選択トークンはフラグメントで渡ってくる（クエリだと frontend / CDN のアクセスログと
+// Referer に残るため）。フラグメントはハイドレーションの history 書き換えで消えるので、
+// 読み取りと退避は `@/lib/github-select-token` に寄せてある。
+const selectToken = ref<string | null>(null);
+const repositories = ref<{ owner: string; name: string }[]>([]);
+const repositoryFilter = ref('');
+const callbackError = ref<string | null>(null);
+const selectError = ref<string | null>(null);
+const selectPending = ref(false);
 const isDisconnectOpen = ref(false);
 const disconnectError = ref<string | null>(null);
 const installError = ref<string | null>(null);
 const installPending = ref(false);
+/** 同じテナントで利用中の GitHub アカウント・組織（null は「連携する」を押す前） */
+const candidates = ref<{ source_integration_id: string; account_login: string }[] | null>(null);
+const candidatesPending = ref(false);
+const candidatesError = ref<string | null>(null);
+/** 再利用を開始している候補（二重押し防止と表示用） */
+const reusePendingId = ref<string | null>(null);
+/** 接続の確定中。一覧の取得中（`selectPending`）とは別に持つ */
+const connectPending = ref(false);
+/**
+ * 選択 UI の更新が走っている間は、候補の選び直しと確定を互いに止める。
+ * 同時に始められると、先に終わった方の後片付け（確定後の `forgetSelectToken` など）が
+ * もう一方の選択状態を消してしまう。
+ */
+const selectionBusy = computed(
+  () => selectPending.value || connectPending.value || reusePendingId.value !== null,
+);
+const addAccessError = ref<string | null>(null);
+const importError = ref<string | null>(null);
+const importStarted = ref(false);
+const importCoolingDown = ref(false);
+let importCooldownTimer: ReturnType<typeof setTimeout> | null = null;
 
-const integrationQuery = apiClient.useQuery('get', GITHUB_INTEGRATION_PATH, {
-  params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
-});
+// options は computed にして props に追従させる。素のオブジェクトだと setup 時の値で
+// 固定され、プロジェクトを切り替えたときに連携状態だけが前のプロジェクトのまま残る
+const integrationQuery = useQuery(
+  computed(() =>
+    apiClient.queryOptions('get', GITHUB_INTEGRATION_PATH, {
+      params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
+    }),
+  ),
+);
 
 const disconnectMutation = apiClient.useMutation('delete', GITHUB_INTEGRATION_PATH);
+const importMutation = apiClient.useMutation('post', GITHUB_IMPORT_PATH);
 
 const integration = computed(() => integrationQuery.data.value);
+
+const importDisabled = computed(() => importMutation.isPending.value || importCoolingDown.value);
+
+const importLabel = computed(() => {
+  if (importMutation.isPending.value) return '開始中…';
+  if (importCoolingDown.value) return '取り込み中…';
+  return 'Issue を取り込む';
+});
 
 const repoFullName = computed(() => {
   const data = integration.value;
@@ -52,6 +132,165 @@ const connectedAtLabel = computed(() => {
   });
 });
 
+/** 選択トークン自体が無効になったことを示すステータスか（それ以外は一時障害扱い） */
+function isSelectTokenDead(status: number) {
+  return status === 400 || status === 403;
+}
+
+/** callback が付けたエラー理由を URL から落とす（リロードでエラーが蘇らない）。
+ * 選択トークンのフラグメントは stashSelectTokenFromUrl が落とす。 */
+function clearCallbackQuery() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has('github_error')) return;
+  url.searchParams.delete('github_error');
+  window.history.replaceState(window.history.state, '', url);
+}
+
+/**
+ * 一覧取得の世代。再読み込みや候補の選び直しで次の取得が始まったら、前の応答は捨てる
+ * （古いトークンの期限切れ応答が遅れて届き、新しいトークンと一覧を消さないように）。
+ */
+let repositoriesRequest = 0;
+
+/** 選択トークンが切れていたら選択 UI を畳んで未連携表示に戻す */
+async function loadRepositories() {
+  const token = selectToken.value;
+  if (!token) return;
+  const request = ++repositoriesRequest;
+  selectError.value = null;
+  selectPending.value = true;
+  try {
+    // トークンはクエリではなくヘッダーに載せる。クエリだと backend とその手前の
+    // プロキシのアクセスログに残り、フラグメントで渡した手当てが台無しになる。
+    const { data, error, response } = await fetchClient.GET(GITHUB_REPOSITORIES_PATH, {
+      params: {
+        path: { tenant_id: props.tenantId, project_id: props.projectId },
+        header: { 'X-Github-Select-Token': token },
+      },
+    });
+    if (request !== repositoriesRequest) return;
+    if (error || !data) {
+      // 4xx はトークンが無効（期限切れ・使用済み）。それ以外は一時障害なので
+      // トークンを捨てず、再試行させる。
+      // トークンが無効なのは 400 / 403 のときだけ。401（セッション切れ）や
+      // 5xx でトークンを捨てると、まだ使えるのにやり直しになる。
+      if (isSelectTokenDead(response.status)) {
+        forgetSelectToken();
+        // 再利用の途中なら候補が出ているので、そこから同じものを選び直せば再開できる
+        selectError.value = candidates.value
+          ? '選択の有効期限が切れました。もう一度アカウント・組織を選んでください。'
+          : '選択の有効期限が切れました。もう一度「連携する」を押してください。';
+        return;
+      }
+      throw new Error('repositories-unavailable');
+    }
+    repositories.value = data.repositories;
+  } catch {
+    if (request === repositoriesRequest) selectError.value = 'リポジトリ一覧を取得できませんでした';
+  } finally {
+    if (request === repositoriesRequest) selectPending.value = false;
+  }
+}
+
+function forgetSelectToken() {
+  selectToken.value = null;
+  repositories.value = [];
+  repositoryFilter.value = '';
+  discardSelectToken(props.projectId);
+}
+
+onMounted(() => {
+  const search = new URLSearchParams(window.location.search);
+  // 通常は client entry が退避済み。ここでも呼ぶのは、entry を通らずに
+  // このセクションだけが立ち上がる経路（テスト・将来のマウント順の変更）の保険。
+  stashSelectTokenFromUrl();
+  selectToken.value = takeSelectToken(props.projectId);
+  callbackError.value = CALLBACK_ERRORS[search.get('github_error') ?? ''] ?? null;
+  clearCallbackQuery();
+  void loadRepositories();
+});
+
+/** 数百リポジトリの org でも目的のものへ辿り着けるよう、owner/name の部分一致で絞る。 */
+const filteredRepositories = computed(() => {
+  const keyword = repositoryFilter.value.trim().toLowerCase();
+  if (!keyword) return repositories.value;
+  return repositories.value.filter((repo) =>
+    `${repo.owner}/${repo.name}`.toLowerCase().includes(keyword),
+  );
+});
+
+async function connectRepository(owner: string, name: string) {
+  const token = selectToken.value;
+  if (!token) return;
+  selectError.value = null;
+  connectPending.value = true;
+  try {
+    const { error, response } = await fetchClient.POST(GITHUB_CONNECT_PATH, {
+      params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
+      body: { select_token: token, repo_owner: owner, repo_name: name },
+    });
+    if (error) {
+      if (isSelectTokenDead(response.status)) {
+        // トークン切れか、その間にリポジトリが外れたか。一覧を取り直せばどちらか分かる
+        // （トークンが死んでいれば loadRepositories が期限切れとして畳む）。
+        await loadRepositories();
+        if (selectToken.value) {
+          selectError.value = 'このリポジトリは選べませんでした。別のものを選んでください。';
+        }
+        return;
+      }
+      throw new Error('connect-failed');
+    }
+    forgetSelectToken();
+    candidates.value = null;
+    candidatesError.value = null;
+    addAccessError.value = null;
+    await queryClient.invalidateQueries({ queryKey: ['get', GITHUB_INTEGRATION_PATH] });
+  } catch {
+    selectError.value = 'リポジトリを連携できませんでした';
+  } finally {
+    connectPending.value = false;
+  }
+}
+
+function clearImportCooldown() {
+  if (importCooldownTimer !== null) {
+    clearTimeout(importCooldownTimer);
+    importCooldownTimer = null;
+  }
+  importCoolingDown.value = false;
+}
+
+// 202 は「ジョブを積んだ」だけなので、連打すると同じ全 Issue クロールが
+// その回数だけ積まれる。成功後は一定時間ボタンを塞ぐ
+function startImportCooldown() {
+  clearImportCooldown();
+  importCoolingDown.value = true;
+  importCooldownTimer = setTimeout(() => {
+    importCooldownTimer = null;
+    importCoolingDown.value = false;
+  }, IMPORT_COOLDOWN_MS);
+}
+
+function isImportConflict(error: unknown): boolean {
+  return error instanceof OpenApiVueQueryError && error.response?.status === 409;
+}
+
+onBeforeUnmount(clearImportCooldown);
+
+function resetImportState() {
+  importStarted.value = false;
+  importError.value = null;
+  clearImportCooldown();
+}
+
+// 解除は別タブ・別ユーザーからも起きるので、自分の解除操作ではなく連携状態の変化で捨てる。
+// 表示を隠すだけだと、再連携で connected が true に戻った瞬間に前回の結果表示が戻る
+watch(
+  () => (integration.value?.connected ? repoFullName.value : null),
+  () => resetImportState(),
+);
+
 async function startInstall() {
   installError.value = null;
   installPending.value = true;
@@ -65,6 +304,102 @@ async function startInstall() {
   } catch {
     installError.value = 'GitHub のインストール URL を取得できませんでした';
     installPending.value = false;
+  }
+}
+
+/**
+ * 「連携する」: まず同じテナントで利用中のアカウント・組織を出す。
+ * 既にインストール済みの Organization で GitHub へ進むと、GitHub の管理画面から
+ * callback に戻らず連携を完了できないことがあるため、再利用は Task 内で完結させる。
+ * 取得に失敗しても GitHub へは自動で転送しない。
+ */
+async function loadCandidates() {
+  candidatesError.value = null;
+  candidatesPending.value = true;
+  try {
+    const { data, error } = await fetchClient.GET(GITHUB_INSTALLATIONS_PATH, {
+      params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
+    });
+    if (error || !data) throw new Error('installations-unavailable');
+    candidates.value = data.installations;
+  } catch {
+    candidatesError.value = '利用中の GitHub アカウント・組織を取得できませんでした';
+  } finally {
+    candidatesPending.value = false;
+  }
+}
+
+async function reuseInstallation(sourceIntegrationId: string) {
+  candidatesError.value = null;
+  selectError.value = null;
+  reusePendingId.value = sourceIntegrationId;
+  try {
+    const { data, error, response } = await fetchClient.POST(GITHUB_REUSE_PATH, {
+      params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
+      body: { source_integration_id: sourceIntegrationId },
+    });
+    if (error || !data) {
+      if (response.status === 404) {
+        // 選んでいる間に再利用元の連携が解除された
+        await loadCandidates();
+        candidatesError.value ??=
+          'このアカウント・組織は使えなくなりました。候補を読み込み直したので、もう一度選んでください。';
+        return;
+      }
+      if (response.status === 410) {
+        candidatesError.value =
+          'このアカウント・組織では GitHub App が削除されています。「別の GitHub アカウント・組織を追加」から連携してください。';
+        return;
+      }
+      throw new Error('reuse-failed');
+    }
+    keepSelectToken(props.projectId, data.select_token);
+    selectToken.value = data.select_token;
+    repositories.value = [];
+    repositoryFilter.value = '';
+    await loadRepositories();
+  } catch {
+    candidatesError.value = 'このアカウント・組織を選べませんでした。もう一度お試しください。';
+  } finally {
+    reusePendingId.value = null;
+  }
+}
+
+/**
+ * 目的のリポジトリが無いとき、GitHub 側でアクセス対象を足してもらう。
+ * 戻りの callback には頼らず、この画面の「再読み込み」で続けられるよう別タブで開く。
+ */
+async function openGithubAccessSettings() {
+  addAccessError.value = null;
+  // URL の取得を待ってから開くとポップアップブロックに掛かるので、先に空のタブを開いておく
+  const tab = window.open('', '_blank');
+  if (tab) tab.opener = null;
+  try {
+    const { data, error } = await fetchClient.GET(GITHUB_INSTALL_PATH, {
+      params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
+    });
+    if (error || !data || !tab) throw new Error('install-url-unavailable');
+    tab.location.href = data.url;
+  } catch {
+    tab?.close();
+    addAccessError.value = 'GitHub の設定画面を開けませんでした';
+  }
+}
+
+async function startImport() {
+  importError.value = null;
+  importStarted.value = false;
+  try {
+    await importMutation.mutateAsync({
+      params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
+    });
+    // 取り込みはジョブなので、完了は待たずに開始だけを伝える
+    importStarted.value = true;
+    startImportCooldown();
+  } catch (error) {
+    importError.value = isImportConflict(error)
+      ? 'Issue の取り込みは既に実行中です'
+      : 'Issue の取り込みを開始できませんでした';
   }
 }
 
@@ -125,28 +460,195 @@ async function confirmDisconnect() {
             <template v-else>コミットや Pull Request をタスクに紐付けます。</template>
           </p>
         </div>
-        <Button
-          v-if="integration?.connected"
-          type="button"
-          variant="outline"
-          size="sm"
-          class="shrink-0"
-          @click="onDisconnectOpenChange(true)"
-        >
-          連携を解除
-        </Button>
+        <div v-if="integration?.connected" class="flex shrink-0 gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            :disabled="importDisabled"
+            @click="startImport"
+          >
+            {{ importLabel }}
+          </Button>
+          <Button type="button" variant="outline" size="sm" @click="onDisconnectOpenChange(true)">
+            連携を解除
+          </Button>
+        </div>
         <Button
           v-else
           type="button"
           size="sm"
           class="shrink-0"
+          :disabled="candidatesPending"
+          @click="loadCandidates"
+        >
+          {{ candidatesPending ? '読み込み中…' : '連携する' }}
+        </Button>
+      </div>
+      <p v-if="callbackError" role="alert" class="text-sm text-destructive">{{ callbackError }}</p>
+
+      <!-- 同じテナントで利用中のアカウント・組織を選ばせる。無ければ新しくインストールする -->
+      <div
+        v-if="!integration?.connected && (candidates || candidatesError)"
+        class="rounded-[10px] border p-4"
+      >
+        <p class="text-sm font-medium">GitHub アカウント・組織を選択</p>
+        <p class="mt-0.5 text-xs text-muted-foreground">
+          このテナントの他のプロジェクトで連携中のアカウント・組織を使えます。
+        </p>
+        <p v-if="candidates && !candidates.length" class="mt-3 text-sm text-muted-foreground">
+          利用中の GitHub アカウント・組織はありません。
+        </p>
+        <ul v-else-if="candidates" class="mt-3 flex flex-col gap-1.5">
+          <li
+            v-for="candidate in candidates"
+            :key="candidate.source_integration_id"
+            class="flex items-center gap-3 rounded-md border p-2.5"
+          >
+            <span class="min-w-0 flex-1 truncate font-mono text-sm">{{
+              candidate.account_login
+            }}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              class="shrink-0"
+              :disabled="selectionBusy"
+              @click="reuseInstallation(candidate.source_integration_id)"
+            >
+              {{ reusePendingId === candidate.source_integration_id ? '確認中…' : 'これを使う' }}
+            </Button>
+          </li>
+        </ul>
+        <div v-if="candidatesError" class="mt-3 flex items-center gap-3">
+          <p role="alert" class="text-sm text-destructive">{{ candidatesError }}</p>
+          <Button
+            v-if="!candidates"
+            type="button"
+            variant="outline"
+            size="sm"
+            :disabled="candidatesPending"
+            @click="loadCandidates"
+          >
+            再試行
+          </Button>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          class="mt-3"
           :disabled="installPending"
           @click="startInstall"
         >
-          {{ installPending ? '接続中…' : '連携する' }}
+          {{ installPending ? '接続中…' : '別の GitHub アカウント・組織を追加' }}
         </Button>
+        <p v-if="installError" role="alert" class="mt-3 text-sm text-destructive">
+          {{ installError }}
+        </p>
       </div>
-      <p v-if="installError" role="alert" class="text-sm text-destructive">{{ installError }}</p>
+
+      <!-- インストールに複数リポジトリが含まれるとき、連携先を 1 件選ばせる -->
+      <div v-if="selectToken || selectError" class="rounded-[10px] border p-4">
+        <p class="text-sm font-medium">連携するリポジトリを選択</p>
+        <p class="mt-0.5 text-xs text-muted-foreground">
+          このインストールから 1 つのリポジトリをプロジェクトに紐付けます。
+        </p>
+        <p
+          v-if="selectToken && !selectError && !repositories.length"
+          :role="selectPending ? 'status' : 'alert'"
+          class="mt-3 text-sm text-muted-foreground"
+        >
+          {{ selectPending ? 'リポジトリを読み込み中…' : '選択できるリポジトリがありません' }}
+        </p>
+        <template v-else-if="repositories.length">
+          <!-- 数百リポジトリの org では全件を並べても選べないので、手元で絞り込む -->
+          <Input
+            v-model="repositoryFilter"
+            class="mt-3"
+            type="search"
+            aria-label="リポジトリを絞り込む"
+            placeholder="owner/name で絞り込む"
+          />
+          <p
+            v-if="!filteredRepositories.length"
+            role="status"
+            class="mt-3 text-sm text-muted-foreground"
+          >
+            「{{ repositoryFilter }}」に一致するリポジトリはありません
+          </p>
+          <ul v-else class="mt-3 flex max-h-72 flex-col gap-1.5 overflow-y-auto">
+            <li
+              v-for="repo in filteredRepositories"
+              :key="`${repo.owner}/${repo.name}`"
+              class="flex items-center gap-3 rounded-md border p-2.5"
+            >
+              <span class="min-w-0 flex-1 truncate font-mono text-sm"
+                >{{ repo.owner }}/{{ repo.name }}</span
+              >
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                class="shrink-0"
+                :disabled="selectionBusy"
+                @click="connectRepository(repo.owner, repo.name)"
+              >
+                選択
+              </Button>
+            </li>
+          </ul>
+        </template>
+        <div v-if="selectError" class="mt-3 flex items-center gap-3">
+          <p role="alert" class="text-sm text-destructive">{{ selectError }}</p>
+          <Button
+            v-if="selectToken && !repositories.length"
+            type="button"
+            variant="outline"
+            size="sm"
+            :disabled="selectionBusy"
+            @click="loadRepositories"
+          >
+            再試行
+          </Button>
+        </div>
+        <!-- 目的のリポジトリが無いとき。GitHub 側の保存後に callback は来ないので、ここで取り直す -->
+        <div v-if="selectToken" class="mt-3 flex flex-col gap-2">
+          <p class="text-xs text-muted-foreground">
+            目的のリポジトリが無いときは、GitHub
+            で対象のアカウント・組織の「Configure」を開いてリポジトリを追加・保存し、「再読み込み」を押してください。
+          </p>
+          <div class="flex gap-2">
+            <Button type="button" variant="outline" size="sm" @click="openGithubAccessSettings">
+              GitHub でアクセス対象を追加
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              :disabled="selectionBusy"
+              @click="loadRepositories"
+            >
+              再読み込み
+            </Button>
+          </div>
+          <p v-if="addAccessError" role="alert" class="text-sm text-destructive">
+            {{ addAccessError }}
+          </p>
+        </div>
+      </div>
+
+      <!-- 連携解除後に取り込みの結果表示が残らないよう、連携中だけ出す -->
+      <p
+        v-if="integration?.connected && importStarted"
+        role="status"
+        class="text-sm text-muted-foreground"
+      >
+        Issue の取り込みを開始しました。タスクに反映されるまで少し時間がかかります。
+      </p>
+      <p v-if="integration?.connected && importError" role="alert" class="text-sm text-destructive">
+        {{ importError }}
+      </p>
     </div>
 
     <Dialog v-if="isDisconnectOpen" :open="true" @update:open="onDisconnectOpenChange">

@@ -18,6 +18,7 @@ pub struct Model {
     pub uploader_id: Uuid,
     pub folder_id: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
     #[sea_orm(
         belongs_to,
         from = "folder_id",

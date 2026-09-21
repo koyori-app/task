@@ -57,7 +57,7 @@ fn default_search_limit() -> u64 {
     20
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, ToSchema, serde::Deserialize)]
 pub struct SearchTaskHit {
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
@@ -67,13 +67,13 @@ pub struct SearchTaskHit {
     pub score: f32,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, ToSchema, serde::Deserialize)]
 pub struct SearchTasksResponse {
     pub tasks: Vec<SearchTaskHit>,
     pub total: u64,
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, Serialize, ToSchema)]
 pub struct BulkUpdateFields {
     #[schema(value_type = Option<String>, format = "uuid")]
     pub status_id: Option<Uuid>,
@@ -81,26 +81,29 @@ pub struct BulkUpdateFields {
     pub assignee_id: Option<Uuid>,
     /// 既存ラベルに追加する ID 一覧（上書きではない）。
     pub add_label_ids: Option<Vec<Uuid>>,
+    /// 既存ラベルから外す ID 一覧。未付与・プロジェクト外の ID は単に無視される。
+    /// add_label_ids と同じ ID を含む場合は 400
+    pub remove_label_ids: Option<Vec<Uuid>>,
     #[schema(value_type = Option<String>, format = "uuid")]
     pub sprint_id: Option<Uuid>,
     #[serde(default)]
     pub clear_sprint_id: bool,
 }
 
-#[derive(Validate, Deserialize, ToSchema)]
+#[derive(Validate, Deserialize, Serialize, ToSchema)]
 pub struct BulkUpdateRequest {
     #[validate(length(min = 1))]
     pub task_ids: Vec<Uuid>,
     pub update: BulkUpdateFields,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct BulkUpdateResponse {
     pub updated: u32,
     pub failed: Vec<BulkFailure>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct BulkFailure {
     #[schema(value_type = String, format = "uuid")]
     pub task_id: Uuid,
