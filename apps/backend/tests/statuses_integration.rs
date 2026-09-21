@@ -377,6 +377,33 @@ async fn creating_a_default_done_status_moves_the_mark_from_the_previous_one() {
 }
 
 #[tokio::test]
+async fn updating_a_done_status_moves_the_default_done_mark_from_the_previous_one() {
+    let (app, tp, first_done_id, _default_id, _old_task_id, _next_task_id) = setup().await;
+    let second_done_id = create_status(&app, &tp, "No Planning", false, true).await;
+
+    assert_eq!(
+        update_status(
+            &app,
+            &tp,
+            second_done_id,
+            serde_json::json!({ "is_default_done": true }),
+        )
+        .await,
+        StatusCode::OK
+    );
+
+    assert_default_done(&app, &tp, second_done_id).await;
+    // 印が移っただけで、元の完了ステータスは完了のまま。
+    let first_done = project_statuses::Entity::find_by_id(first_done_id)
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(first_done.is_done_state);
+    assert!(!first_done.is_default_done);
+}
+
+#[tokio::test]
 async fn default_done_cannot_be_given_to_a_status_that_is_not_done() {
     let (app, tp, _old_done_id, default_id, _old_task_id, _next_task_id) = setup().await;
 
