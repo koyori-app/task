@@ -56,7 +56,7 @@ const form = useForm({
       emit('update:open', false);
       form.reset();
       displayIdEdited.value = false;
-      window.location.assign(`/${tenant.display_id}/my-tasks`);
+      window.location.assign(`/${tenant.display_id}`);
     } catch (error) {
       submitError.value = error instanceof Error ? error.message : 'テナントを作成できませんでした';
     }

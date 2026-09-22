@@ -19493,6 +19493,147 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/users/me/dashboard": {
+      "get": {
+        "tags": ["My Tasks"],
+        "summary": "ホームのタスク・進捗・最近の更新",
+        "operationId": "get_dashboard",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "description": "today / week (Monday–Sunday) / overdue / all. Only unfinished tasks are listed.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "timezone",
+            "in": "query",
+            "description": "IANA timezone used for today's date and completion history. Defaults to UTC.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ダッシュボード",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/users/me/personal-project": {
       "get": {
         "tags": ["My Tasks"],
@@ -21181,6 +21322,134 @@
           },
           "value": {
             "type": ["string", "null"]
+          }
+        }
+      },
+      "DashboardActivity": {
+        "type": "object",
+        "required": ["activity", "task_title", "task_seq_id", "project_key", "project_name"],
+        "properties": {
+          "activity": {
+            "$ref": "#/components/schemas/ActivityItem"
+          },
+          "project_key": {
+            "type": "string"
+          },
+          "project_name": {
+            "type": "string"
+          },
+          "task_seq_id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "task_title": {
+            "type": "string"
+          }
+        }
+      },
+      "DashboardCounts": {
+        "type": "object",
+        "required": ["today", "week", "overdue", "open", "completed_week"],
+        "properties": {
+          "completed_week": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "open": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "overdue": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "today": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "week": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "DashboardDay": {
+        "type": "object",
+        "required": ["date", "count"],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "date": {
+            "type": "string"
+          }
+        }
+      },
+      "DashboardProject": {
+        "type": "object",
+        "required": ["project", "total", "completed"],
+        "properties": {
+          "completed": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "project": {
+            "$ref": "#/components/schemas/ProjectResponse"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "DashboardResponse": {
+        "type": "object",
+        "required": ["counts", "days", "tasks", "total", "projects", "activities"],
+        "properties": {
+          "activities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardActivity"
+            }
+          },
+          "counts": {
+            "$ref": "#/components/schemas/DashboardCounts"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardDay"
+            }
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardProject"
+            }
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardTask"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "DashboardTask": {
+        "type": "object",
+        "required": ["task", "done_status_id"],
+        "properties": {
+          "done_status_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "task": {
+            "$ref": "#/components/schemas/MyTaskItem"
           }
         }
       },

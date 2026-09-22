@@ -6,7 +6,7 @@ import { createPinia } from 'pinia';
 import Layout from '../+Layout.vue';
 import TaskPage from '../@tenant/projects/@projectKey/tasks/@taskId/+Page.vue';
 import ProjectPage from '../@tenant/projects/@projectKey/tasks/+Page.vue';
-import HomePage from '../@tenant/my-tasks/+Page.vue';
+import HomePage from '../@tenant/+Page.vue';
 
 vi.mock('@/components/header/AppHeader.vue', () => ({
   default: { template: '<div />' },
@@ -87,6 +87,17 @@ beforeEach(() => {
         ['/v1/tenants', [tenant]],
         [`/v1/tenants/${tenant.id}/projects`, [project]],
         [`/v1/tenants/${tenant.id}/users/me/tasks`, { tasks: [], total: 0 }],
+        [
+          `/v1/tenants/${tenant.id}/users/me/dashboard`,
+          {
+            counts: { today: 0, week: 0, overdue: 0, open: 0, completed_week: 0 },
+            days: [],
+            tasks: [],
+            total: 0,
+            projects: [],
+            activities: [],
+          },
+        ],
         [`${projectBase}/tasks`, { tasks: [child], total: 1, next_cursor: null }],
         [`${projectBase}/statuses`, [status]],
         [`${projectBase}/labels`, []],
@@ -121,7 +132,7 @@ beforeEach(() => {
 
 function mountPage(pathname: string) {
   const segments = pathname.split('/').filter(Boolean);
-  const isHome = segments[1] === 'my-tasks';
+  const isHome = segments.length === 1;
   const taskId = segments[4];
   const Page: Component = isHome ? HomePage : taskId ? TaskPage : ProjectPage;
   return mount(Layout, {
@@ -152,7 +163,7 @@ function mountPage(pathname: string) {
 
 describe('パンくずから実際のページへ', () => {
   it.each([
-    ['ホーム', '/acme/my-tasks', 'My Tasks'],
+    ['ホーム', '/acme', 'おかえりなさい、guestさん'],
     [project.name, '/acme/projects/ENG/tasks', 'project'],
     [parent.title, '/acme/projects/ENG/tasks/ENG-2', parent.title],
   ])('%s のリンク先のページを Guest のAPI応答で表示できる', async (name, href, expected) => {
