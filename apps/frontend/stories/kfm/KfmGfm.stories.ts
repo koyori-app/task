@@ -7,6 +7,7 @@ import nestedListsHtml from '@/lib/kfm-story-fixtures/rendered/gfm-nested-lists.
 import strikeAutolinkHtml from '@/lib/kfm-story-fixtures/rendered/gfm-strike-autolink.html?raw';
 import tableAlignmentHtml from '@/lib/kfm-story-fixtures/rendered/gfm-table-alignment.html?raw';
 import tableOverflowHtml from '@/lib/kfm-story-fixtures/rendered/gfm-table-overflow.html?raw';
+import headingsHtml from '@/lib/kfm-story-fixtures/rendered/gfm-headings.html?raw';
 import taskListHtml from '@/lib/kfm-story-fixtures/rendered/gfm-task-list.html?raw';
 // CSS サイドカー: レンダラは CSS を import しない契約のため、消費側 (= story) が明示 import。
 // GFM CSS は .kfm-content 子孫限定ゆえ、器にも同じクラスを付けて初めて当たる
@@ -53,7 +54,7 @@ export const TableAlignment: Story = {
     docs: {
       description: {
         story:
-          '壊れたら: th/td の align 属性が剥がれる (sanitize / remark-rehype の変化) と 3 列の文字寄せが全て左に揃い、絵が変わる (play で computed textAlign を固定)。なお表の罫線 (セル border) は未実装で、線の無い絵が現状の仕様。',
+          '壊れたら: th/td の align 属性が剥がれる (sanitize / remark-rehype の変化) と 3 列の文字寄せが全て左に揃い、絵が変わる (play で computed textAlign を固定)。罫線・セル余白・ヘッダー行の地は remark-gfm/style.css のサイドカーが与える——線の無い絵に戻ったらサイドカーの表ルールの剥がれ。',
       },
     },
   },
@@ -82,7 +83,7 @@ export const TableOverflow: Story = {
     docs: {
       description: {
         story:
-          '壊れたら: 幅広の表が狭い親をどうはみ出すか (潰れ方・突き抜け方) が変わったら、テーブルレイアウトか消費側 overflow 方針の変化 (play で幅制限の実効と表/親の幅関係を固定)。なお表の罫線 (セル border) は未実装で、線の無い絵が現状の仕様。',
+          '壊れたら: 幅広の表は表の側だけが横に流れ (style.css の display:block ＋ overflow-x:auto)、親を押し広げない。親からはみ出す絵に変わったらサイドカーの表ルールか消費側 overflow 方針の変化 (play で幅関係と横スクロールの成立を固定)。',
       },
     },
   },
@@ -93,12 +94,15 @@ export const TableOverflow: Story = {
     await expect(table).not.toBeNull();
     // 幅制限の実効 (Tailwind max-w-md = 28rem)。utility が当たらなければ「狭い親」の前提が崩れる
     await expect(container ? getComputedStyle(container).maxWidth : '').toBe('448px');
-    // 表は親の幅制限に収まる (auto layout が列を圧縮する潰れ方の絵)。
-    // はみ出す絵に変わったらテーブルレイアウトか overflow 方針の変化
+    // 表は親の幅制限に収まり (max-width:100%)、あふれる中身は表自身の
+    // 横スクロールへ逃げる。はみ出す絵に変わったらサイドカーの表ルールの変化
     const containerWidth = container?.getBoundingClientRect().width ?? 0;
     const tableWidth = table?.getBoundingClientRect().width ?? 0;
     await expect(containerWidth).toBeGreaterThan(0);
     await expect(tableWidth).toBeLessThanOrEqual(containerWidth);
+    // 横スクロールが表の側に成立しておる (ページ側へ押し広げていない) こと
+    await expect(table ? getComputedStyle(table).overflowX : '').toBe('auto');
+    await expect((table?.scrollWidth ?? 0) > (table?.clientWidth ?? 0)).toBe(true);
   },
 };
 
@@ -268,6 +272,44 @@ export const DeepQuote: Story = {
       await expect(style.borderLeftWidth).toBe('4px');
       await expect(style.borderLeftStyle).toBe('solid');
     }
+  },
+};
+
+export const Headings: Story = {
+  name: '見出しと段落・区切り線',
+  args: { html: headingsHtml },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          '壊れたら: h1〜h6 の大きさの段差・h1/h2 の下線・段落と区切り線の縦余白が消え、見出しが地の文に溶けて節の境が読めなくなる (style.css の見出し/段落/区切り線ルールの剥がれ)。play で h2 が地の文より大きいことを固定する。',
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    // 段差の実効を computed で見る。ルールが剥がれると preflight が
+    // 全見出しを地の文と同じ大きさへ潰す (それがこの story の生まれた欠け)
+    const h2 = canvasElement.querySelector('h2');
+    const p = canvasElement.querySelector('p');
+    await expect(h2).not.toBeNull();
+    await expect(p).not.toBeNull();
+    const h2Size = h2 ? Number.parseFloat(getComputedStyle(h2).fontSize) : 0;
+    const pSize = p ? Number.parseFloat(getComputedStyle(p).fontSize) : 0;
+    await expect(h2Size).toBeGreaterThan(pSize);
+  },
+};
+
+export const HeadingsDark: Story = {
+  name: '見出しと段落・区切り線（ダークテーマ）',
+  render: kfmDarkRender,
+  args: { html: headingsHtml },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          '壊れたら: ダーク地で h1/h2 の下線・h6 の淡色が沈む (テーマトークン --border / --muted-foreground の反転に乗る前提が崩れた)。',
+      },
+    },
   },
 };
 
