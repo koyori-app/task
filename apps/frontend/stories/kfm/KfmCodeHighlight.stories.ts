@@ -160,9 +160,13 @@ export const LongLine: Story = {
   },
   play: async ({ canvasElement }) => {
     await expectHighlighted(canvasElement);
+    const container = canvasElement.querySelector('.max-w-md');
     const pre = canvasElement.querySelector('pre');
+    await expect(container).not.toBeNull();
     await expect(pre).not.toBeNull();
     if (!(pre instanceof HTMLElement)) throw new Error('LongLine story に pre が無い');
+    // 幅制限の実効 (Tailwind max-w-md = 28rem)。utility が当たらなければ「狭い親」の前提が崩れる
+    await expect(container ? getComputedStyle(container).maxWidth : '').toBe('448px');
     // Story 名や説明だけでなく、狭い器に対する実寸で横溢れを主張する。
     await expect(pre.scrollWidth).toBeGreaterThan(pre.clientWidth);
   },

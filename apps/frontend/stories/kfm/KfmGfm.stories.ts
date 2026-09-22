@@ -136,6 +136,8 @@ export const TableOverflowLatin: Story = {
     const table = canvasElement.querySelector('table');
     await expect(container).not.toBeNull();
     await expect(table).not.toBeNull();
+    // 幅制限の実効 (Tailwind max-w-md = 28rem)。utility が当たらなければ「狭い親」の前提が崩れる
+    await expect(container ? getComputedStyle(container).maxWidth : '').toBe('448px');
     const containerWidth = container?.getBoundingClientRect().width ?? 0;
     const tableWidth = table?.getBoundingClientRect().width ?? 0;
     await expect(tableWidth).toBeLessThanOrEqual(containerWidth);
