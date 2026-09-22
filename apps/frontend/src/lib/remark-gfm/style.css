@@ -78,6 +78,99 @@
   text-decoration: line-through;
 }
 
+/*
+ * 見出し。Tailwind preflight は h1-h6 を地の文と同じ大きさ・太さに潰すため、
+ * 節の切れ目が読めない。GitHub の markdown 見出しの段 (2 / 1.5 / 1.25 / 1 /
+ * 0.875 / 0.85em) に倣う。repo に活字の段のトークンは無い (tailwind.css の
+ * @theme は色のみ・実測) ため、大きさは em (器の文字に相対)、余白は隣の
+ * ルールと同じ rem で書く。h1・h2 の下線と h6 の淡色はテーマトークン
+ * (--border / --muted-foreground) に寄せ、.dark はトークンの反転に任せる。
+ */
+.kfm-content h1,
+.kfm-content h2,
+.kfm-content h3,
+.kfm-content h4,
+.kfm-content h5,
+.kfm-content h6 {
+  margin: 1.5rem 0 0.5rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.kfm-content h1 {
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+  font-size: 2em;
+}
+
+.kfm-content h2 {
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+  font-size: 1.5em;
+}
+
+.kfm-content h3 {
+  font-size: 1.25em;
+}
+
+.kfm-content h4 {
+  font-size: 1em;
+}
+
+.kfm-content h5 {
+  font-size: 0.875em;
+}
+
+.kfm-content h6 {
+  color: var(--muted-foreground);
+  font-size: 0.85em;
+}
+
+/* 段落。preflight が margin を消すため、隣 (ul/ol/blockquote) と同じ縦余白を与える */
+.kfm-content p {
+  margin: 0.5rem 0;
+}
+
+/* 区切り線。preflight は 1px の線を残すが margin を消すため、文に接する */
+.kfm-content hr {
+  margin: 1.5rem 0;
+  border-top: 1px solid var(--border);
+}
+
+/*
+ * GFM の表。Tailwind preflight は枠線もセル余白も与えないため、
+ * GitHub の markdown 表を目安に最小限を与える。
+ * 値の出所: セル余白は kfm-code の帯 (0.375rem 0.75rem)、外余白は
+ * kfm-code の器 (0.5rem 0 1rem) に揃える。構造色はテーマトークン
+ * (--border / --muted) に寄せる — トークン自体が .dark で反転するため
+ * ここに .dark ブリッジは要らない (rehype-kfm-code と同じ前例)。
+ *
+ * display: block ＋ width: max-content ＋ max-width: 100% ＋ overflow-x: auto
+ * は GitHub の markdown 表と同じ手。横長の表は表の側だけが横に流れ、
+ * ページ全体を横スクロールさせない (kfm-story-fixtures の
+ * gfm-table-overflow が題材)。
+ */
+.kfm-content table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 0.5rem 0 1rem;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.kfm-content th,
+.kfm-content td {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--border);
+}
+
+/* ヘッダー行の区別: 薄い地と太字 (GitHub 同様、地はトークンで .dark に追従) */
+.kfm-content th {
+  font-weight: 600;
+  background: var(--muted);
+}
+
 .dark .kfm-content a {
   color: #4493f8;
 }
