@@ -26,6 +26,7 @@ entity → common → payload → service → job → handler → backend(bin)
 | `handler` | axum ハンドラー / extractors / routes / openapi / middlewares / `AppState` |
 | `backend` | `main` / `server` / `export_openapi` の glue のみ |
 | `cli` | CLI（`task`）。payload / entity / common を読むだけで、逆向きに参照されない |
+| `workspace-hack` | cargo-hakari が生成する feature 固定クレート。**手で編集しない**。依存を変えたら `cargo hakari generate` で再生成（CI の backend-fmt で `--diff` 検査。未インストールなら `cargo install cargo-hakari --locked`） |
 
 - 新しい DTO は payload、ロジックは service へ。ハンドラー間で共有したい処理も service に降ろす
 - **CLI が読むレスポンス DTO には `Deserialize` を、送るリクエスト DTO には `Serialize` を付ける。**

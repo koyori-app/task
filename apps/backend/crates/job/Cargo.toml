@@ -19,3 +19,4 @@ serde_json = { workspace = true }
 sqlx = { version = "0.8", default-features = false, features = ["postgres"] }
 tracing = { workspace = true }
 uuid = { version = "1", features = ["serde"] }
+workspace-hack = { version = "0.1", path = "../workspace-hack" }

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/entity", "crates/common", "crates/payload", "crates/service", "crates/job", "crates/handler", "crates/cli"]
+members = ["crates/entity", "crates/common", "crates/payload", "crates/service", "crates/job", "crates/handler", "crates/cli", "crates/workspace-hack"]
 exclude = ["migration"]
 
 [workspace.dependencies]
@@ -57,6 +57,7 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 utoipa-axum = "0.2.0"
 utoipa-scalar = { version = "0.3.0", features = ["axum"] }
+workspace-hack = { version = "0.1", path = "crates/workspace-hack" }
 
 [dev-dependencies]
 dotenvy = { workspace = true }

@@ -1010,6 +1010,7 @@ dependencies = [
  "webauthn-authenticator-rs",
  "webauthn-rs",
  "wiremock",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -1477,6 +1478,7 @@ dependencies = [
  "url",
  "utoipa",
  "validator",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2060,6 +2062,7 @@ dependencies = [
  "serde",
  "serde_json",
  "utoipa",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2557,6 +2560,7 @@ dependencies = [
  "uuid",
  "validator",
  "webauthn-rs",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -3221,6 +3225,7 @@ dependencies = [
  "sqlx 0.8.6",
  "tracing",
  "uuid",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4219,6 +4224,7 @@ dependencies = [
  "serde_json",
  "utoipa",
  "validator",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5826,6 +5832,7 @@ dependencies = [
  "utoipa",
  "uuid",
  "webauthn-rs",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -6545,6 +6552,7 @@ dependencies = [
  "uuid",
  "validator",
  "wiremock",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -8002,6 +8010,73 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
+]
+
+[[package]]
+name = "workspace-hack"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "bitflags 2.13.0",
+ "crossbeam-utils",
+ "crypto-common 0.1.7",
+ "crypto-common 0.2.2",
+ "darling 0.20.11",
+ "darling_core 0.20.11",
+ "deranged",
+ "digest 0.10.7",
+ "digest 0.11.3",
+ "displaydoc",
+ "either",
+ "form_urlencoded",
+ "futures-channel",
+ "futures-sink",
+ "futures-util",
+ "getrandom 0.2.17",
+ "hashbrown 0.14.5",
+ "hmac 0.12.1",
+ "hyper",
+ "hyper-util",
+ "idna",
+ "indexmap 2.14.0",
+ "log",
+ "memchr",
+ "mime_guess",
+ "num-traits",
+ "rand 0.10.2",
+ "rand 0.8.6",
+ "regex-automata",
+ "regex-syntax",
+ "reqwest 0.13.5",
+ "ring",
+ "rustls",
+ "sea-orm",
+ "sea-orm-macros",
+ "sea-query",
+ "serde",
+ "serde_core",
+ "sha2 0.10.9",
+ "sha2 0.11.0",
+ "slab",
+ "smallvec",
+ "socket2 0.6.4",
+ "sqlx-core 0.8.6",
+ "sqlx-postgres 0.8.6",
+ "subtle",
+ "syn 3.0.3",
+ "sync_wrapper",
+ "thiserror 2.0.20",
+ "time",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tower",
+ "tracing-core",
+ "typenum",
+ "url",
+ "uuid",
+ "zerocopy",
 ]
 
 [[package]]
