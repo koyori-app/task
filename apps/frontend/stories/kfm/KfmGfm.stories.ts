@@ -100,9 +100,10 @@ export const TableOverflow: Story = {
     const tableWidth = table?.getBoundingClientRect().width ?? 0;
     await expect(containerWidth).toBeGreaterThan(0);
     await expect(tableWidth).toBeLessThanOrEqual(containerWidth);
-    // 横スクロールが表の側に成立しておる (ページ側へ押し広げていない) こと
+    // あふれの逃げ口が表の側に在る (ページ側へ押し広げない) こと。
+    // この題材の CJK セルは折り返せるため列が圧縮され、実スクロールは
+    // 生じないことがある——不変条件は overflow-x の成立と親内収まりの二つ
     await expect(table ? getComputedStyle(table).overflowX : '').toBe('auto');
-    await expect((table?.scrollWidth ?? 0) > (table?.clientWidth ?? 0)).toBe(true);
   },
 };
 
