@@ -9,12 +9,18 @@ on:
   pull_request:
     paths:
       - 'apps/backend/crates/cli/**'
+      - 'apps/backend/crates/common/**'
+      - 'apps/backend/crates/entity/**'
+      - 'apps/backend/crates/payload/**'
       - 'rust-toolchain.toml'
       - '.github/workflows/cli-test.yml'
   push:
     branches: [main]
     paths:
       - 'apps/backend/crates/cli/**'
+      - 'apps/backend/crates/common/**'
+      - 'apps/backend/crates/entity/**'
+      - 'apps/backend/crates/payload/**'
       - 'rust-toolchain.toml'
       - '.github/workflows/cli-test.yml'
 
