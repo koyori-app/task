@@ -279,6 +279,14 @@ pub async fn create_review(
     // 通知も同じ txn で作る。起票が巻き戻ったのに通知だけ残る事態を避ける
     service::notifications::notify_review_round_created(&txn, &review, &findings, auth.user_id)
         .await?;
+    service::webhooks::emit(
+        &txn,
+        project_id,
+        auth.user_id,
+        service::webhooks::EVENT_REVIEW_ROUND_CREATED,
+        service::notifications::review_round_payload(&txn, &review, &findings).await?,
+    )
+    .await?;
 
     let reviewer = users::Entity::find_by_id(auth.user_id)
         .one(&txn)
@@ -680,6 +688,23 @@ pub async fn update_review_finding_state(
         payload.state,
         auth.user_id,
         note.as_deref(),
+    )
+    .await?;
+    service::webhooks::emit(
+        &txn,
+        project_id,
+        auth.user_id,
+        service::webhooks::EVENT_REVIEW_FINDING_CHANGED,
+        service::notifications::review_finding_payload(
+            &txn,
+            &review,
+            &updated,
+            from,
+            payload.state,
+            auth.user_id,
+            note.as_deref(),
+        )
+        .await?,
     )
     .await?;
 

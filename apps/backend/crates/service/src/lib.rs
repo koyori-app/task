@@ -34,6 +34,7 @@ pub mod timezone;
 pub mod totp;
 pub mod verification_email_delivery;
 pub mod webauthn;
+pub mod webhooks;
 
 pub use common::db;
 pub use common::system_settings;
