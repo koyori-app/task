@@ -191,6 +191,72 @@ pub async fn next_round<C: ConnectionTrait>(
     Ok(last.unwrap_or(0) + 1)
 }
 
+/// その PR のレビューに直接関わっている利用者（通知の宛先の芯）。
+///
+/// 同じ PR の全ラウンドから集める: ラウンドの作成者、指摘を修正したと宣言した人、
+/// そして解決できた PR の作者。ラウンドをまたぐのは、R1 の指摘を直した人が R2 の
+/// 起票を知らないまま放置されるのを避けるため。
+///
+/// PR に紐づくタスクの担当者は `forge_pull_requests`（TASK-220）が入ってから足す。
+pub async fn review_participants<C: ConnectionTrait>(
+    db: &C,
+    review: &reviews::Model,
+) -> Result<std::collections::HashSet<Uuid>, sea_orm::DbErr> {
+    let repo = RepoRef::of_round(review);
+    let rounds = scoped_rounds(review.project_id, &repo, review.pr_number)
+        .all(db)
+        .await?;
+
+    let mut ids: std::collections::HashSet<Uuid> =
+        rounds.iter().map(|round| round.reviewer_id).collect();
+
+    let fixers: Vec<Uuid> = review_findings::Entity::find()
+        .filter(review_findings::Column::ReviewId.is_in(rounds.iter().map(|round| round.id)))
+        .filter(review_findings::Column::FixedBy.is_not_null())
+        .select_only()
+        .column(review_findings::Column::FixedBy)
+        .into_tuple()
+        .all(db)
+        .await?;
+    ids.extend(fixers);
+
+    // PR の作者はホストの API 由来なので通知の根拠にしてよい（`forge::identity` の doc）。
+    // 要約ジョブが後から埋めるので、R1 の起票時点ではまだ空のことがある
+    if let Some(login) = rounds.iter().find_map(|round| round.pr_author.as_deref())
+        && let Some(user_id) =
+            crate::forge::identity::user_id_for_login(db, "github", login).await?
+    {
+        ids.insert(user_id);
+    }
+
+    Ok(ids)
+}
+
+/// PR 作者がまだ埋まっていないラウンド。要約ジョブが作者を控えるときの通知対象を、
+/// 控える前に確定するために使う。
+pub async fn rounds_without_pr_author<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    repo: &RepoRef,
+    pr_number: i32,
+) -> Result<Vec<reviews::Model>, sea_orm::DbErr> {
+    scoped_rounds(project_id, repo, pr_number)
+        .filter(reviews::Column::PrAuthor.is_null())
+        .all(db)
+        .await
+}
+
+/// ラウンドに属する指摘。
+pub async fn round_findings<C: ConnectionTrait>(
+    db: &C,
+    review_id: Uuid,
+) -> Result<Vec<review_findings::Model>, sea_orm::DbErr> {
+    review_findings::Entity::find()
+        .filter(review_findings::Column::ReviewId.eq(review_id))
+        .all(db)
+        .await
+}
+
 /// 状態遷移そのものが許されるか（誰が行うかは [`requires_reviewer_side`] で見る）。
 ///
 /// `verified` は終端。誤りだったと分かった場合は新しいラウンドで指摘を出し直す。

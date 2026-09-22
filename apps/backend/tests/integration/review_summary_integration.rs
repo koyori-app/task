@@ -433,6 +433,111 @@ async fn consecutive_transitions_coalesce_into_one_summary_update() {
     app.cleanup_user(reviewer.id).await;
 }
 
+/// PR の作者は、要約ジョブが `pr_author` を埋めたときに 1 度だけ通知を受ける。
+///
+/// 起票時点では作者が分からない（このジョブが GitHub から取ってくる）ので、
+/// `create_review` の宛先には入らない。ジョブを何度走らせても増えないことも固定する。
+#[serial_test::serial]
+#[tokio::test]
+async fn the_pull_request_author_is_notified_once() {
+    let mock_server = MockServer::start().await;
+    // SAFETY: serial アトリビュートにより他テストとの並列実行を防いでいる。
+    unsafe {
+        std::env::set_var("GITHUB_API_BASE_URL", mock_server.uri());
+    }
+    let mut app = TestApp::new_with_github().await;
+    let reviewer = app.insert_user_default().await;
+    let author = app.insert_user_default().await;
+    let tp = app.insert_tenant_project(reviewer.id).await;
+    seed_statuses(&app, tp.project_id).await;
+    link_integration(&app, tp.project_id, reviewer.id).await;
+    common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, author.id).await;
+
+    // モックの PR 作者（`yupix`）を Task の利用者に結ぶ接続
+    let now = chrono::Utc::now();
+    entity::oauth_connections::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        user_id: Set(author.id),
+        provider: Set("github".into()),
+        provider_user_id: Set(format!("gh-{}", author.id)),
+        provider_email: Set(None),
+        instance_url: Set(None),
+        access_token_enc: Set(None),
+        refresh_token_enc: Set(None),
+        token_expires_at: Set(None),
+        created_at: Set(now.into()),
+        updated_at: Set(now.into()),
+        provider_login: Set(Some("yupix".into())),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert oauth connection");
+
+    let marker = service::github::pr_comments::summary_marker(tp.project_id);
+    mount_mocks(&mock_server, false, &marker).await;
+
+    app.reset_session_client();
+    app.login_session_no_content(&reviewer.email, &reviewer.password)
+        .await;
+    let res = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/reviews",
+                tp.tenant_id, tp.project_id
+            ),
+            serde_json::json!({
+                "pr_number": PR_NUMBER,
+                "head_sha": REVIEWED_HEAD,
+                "summary": "総評",
+                "findings": [{ "severity": "high", "title": "認可漏れ", "body": "本文" }],
+            }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    assert_eq!(
+        author_notifications(&app, author.id).await,
+        0,
+        "起票の時点では作者が分からない"
+    );
+
+    for _ in 0..2 {
+        job::review_summary::process(
+            job::ReviewSummaryJob {
+                project_id: tp.project_id,
+                pr_number: PR_NUMBER,
+                repo_owner: REPO_OWNER.into(),
+                repo_name: REPO_NAME.into(),
+            },
+            apalis::prelude::Data::new(job_state(&app)),
+        )
+        .await
+        .expect("post review summary");
+    }
+
+    assert_eq!(
+        author_notifications(&app, author.id).await,
+        1,
+        "作者への起票通知は 1 件だけ（pr_author が NULL から埋まるのは 1 回きり）"
+    );
+
+    app.cleanup_user(author.id).await;
+    app.cleanup_user(reviewer.id).await;
+}
+
+/// その利用者に届いたラウンド起票の通知の件数。
+async fn author_notifications(app: &TestApp, user_id: Uuid) -> u64 {
+    use sea_orm::PaginatorTrait;
+    entity::notifications::Entity::find()
+        .filter(entity::notifications::Column::UserId.eq(user_id))
+        .filter(
+            entity::notifications::Column::NotificationType
+                .eq(::common::notifications::TYPE_REVIEW_ROUND_CREATED),
+        )
+        .count(&app.state.db)
+        .await
+        .expect("count notifications")
+}
+
 /// 担い手が消えても詰まらないよう、印とロックは TTL 付きで、
 /// ロックの解放は取得時のトークンと一致するときだけ効く（仕様 §7）。
 #[tokio::test]

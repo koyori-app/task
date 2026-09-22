@@ -5,4 +5,5 @@
 
 pub mod commits;
 pub mod events;
+pub mod identity;
 pub mod task_refs;
