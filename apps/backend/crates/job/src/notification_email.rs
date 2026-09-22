@@ -21,6 +21,7 @@ use tokio::sync::watch;
 use tracing::{info, warn};
 
 use entity::{notifications, projects, tasks, tenants, users};
+use uuid::Uuid;
 
 use crate::JobState;
 
@@ -28,32 +29,49 @@ use crate::JobState;
 pub const MAX_ATTEMPTS: i16 = 5;
 /// 掃き出しの間隔
 pub const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
-/// 1 周で拾う件数。トランザクションを長く持たないための上限
+/// 1 周で拾う件数
 const BATCH_SIZE: u64 = 50;
 
-/// 送信待ちを拾って送る。送信できた件数を返す。
-///
-/// `FOR UPDATE SKIP LOCKED` で取るので、複数インスタンスで走らせても同じ行を
-/// 二重に送らない。1 行の失敗は他の行を止めない（試行回数だけ進めて次へ）。
-pub async fn send_pending_once(state: &JobState) -> Result<usize, anyhow::Error> {
-    let txn = state.db.begin().await?;
-    let pending = notifications::Entity::find()
+/// まだ送信対象の行（未送信・待ち・試行回数に余りがある）。
+fn pending() -> sea_orm::Select<notifications::Entity> {
+    notifications::Entity::find()
         .filter(notifications::Column::EmailQueuedAt.is_not_null())
         .filter(notifications::Column::EmailedAt.is_null())
         .filter(notifications::Column::EmailAttempts.lt(MAX_ATTEMPTS))
+}
+
+/// 送信待ちを拾って送る。送信できた件数を返す。
+///
+/// 対象の id をロック無しで最大 [`BATCH_SIZE`] 件取り、1 行ごとに短いトランザクションで
+/// `FOR UPDATE SKIP LOCKED` を取り直して送り、その行の更新を commit する。1 通ごとに
+/// 確定するので、後の行の失敗で送信済みの印が消えて再送されることはない。他インスタンスが
+/// 掴んでいる行・その間に送られた行は取れないので飛ばす。
+pub async fn send_pending_once(state: &JobState) -> Result<usize, anyhow::Error> {
+    let ids: Vec<Uuid> = pending()
+        .select_only()
+        .column(notifications::Column::Id)
         .order_by_asc(notifications::Column::CreatedAt)
         .limit(BATCH_SIZE)
-        .lock_with_behavior(LockType::Update, LockBehavior::SkipLocked)
-        .all(&txn)
+        .into_tuple()
+        .all(&state.db)
         .await?;
 
     let mut sent = 0usize;
-    for notification in pending {
+    for id in ids {
+        let txn = state.db.begin().await?;
+        let Some(notification) = pending()
+            .filter(notifications::Column::Id.eq(id))
+            .lock_with_behavior(LockType::Update, LockBehavior::SkipLocked)
+            .one(&txn)
+            .await?
+        else {
+            continue;
+        };
         if send_one(&txn, state, &notification).await? {
             sent += 1;
         }
+        txn.commit().await?;
     }
-    txn.commit().await?;
     Ok(sent)
 }
 
