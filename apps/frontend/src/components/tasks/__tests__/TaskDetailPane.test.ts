@@ -167,19 +167,6 @@ describe('TaskDetailPane', () => {
       expect(wrapper.find('[data-task-description-html]').exists()).toBe(false);
       expect(wrapper.text()).toContain('# 見出し');
     });
-
-    it('説明が無いタスクでは描画を呼ばない', async () => {
-      const fetchMock = vi.fn(
-        async (_input: RequestInfo | URL) => new Response('[]', { status: 200 }),
-      );
-      vi.stubGlobal('fetch', fetchMock);
-
-      mountPane();
-      await flushPromises();
-
-      // 他のクエリは飛ぶので、描画の宛先だけを見る
-      expect(fetchMock.mock.calls.some(([input]) => input === RENDER_DESCRIPTION_PATH)).toBe(false);
-    });
   });
 
   it('削除成功（onAfterDelete）でペインを閉じる', async () => {

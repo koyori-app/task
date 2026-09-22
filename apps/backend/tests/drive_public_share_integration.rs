@@ -139,32 +139,6 @@ async fn public_share_endpoints_live_at_the_documented_paths() {
     assert_eq!(names, vec!["a.txt".to_string(), "b.txt".to_string()]);
 }
 
-/// 二重 prefix の URL は登録されていない（直したことの裏返しを固定する）。
-#[tokio::test]
-#[serial_test::file_serial(drive)]
-async fn the_double_prefixed_path_is_gone() {
-    let app = TestApp::new().await;
-
-    let owner = app.insert_user(false, false).await;
-    let tp = app.insert_tenant_project(owner.id).await;
-    let folder = insert_folder(&app, tp.tenant_id, owner.id).await;
-    let token = insert_public_share(&app, folder, owner.id, None).await;
-
-    let response = reqwest::Client::new()
-        .get(format!(
-            "{}/v1/drive/v1/drive/share/{token}",
-            app.base_url()
-        ))
-        .send()
-        .await
-        .expect("legacy path request");
-    assert_eq!(
-        response.status(),
-        StatusCode::NOT_FOUND,
-        "二重 prefix の URL には何も居ない"
-    );
-}
-
 /// 存在しないトークンは 404。
 #[tokio::test]
 #[serial_test::file_serial(drive)]

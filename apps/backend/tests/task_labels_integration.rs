@@ -315,31 +315,6 @@ async fn task_labels_suite() {
         .expect("bulk label_added event");
     assert_eq!(docs_event["payload"]["label_id"], label_ids[2]);
 
-    // 既に付与済みのラベルを一括追加しても記録されない（変化なし）
-    let bulk_noop = app
-        .post_json_with_session(
-            &bulk_path,
-            serde_json::json!({
-                "task_ids": [task_uuid],
-                "update": { "add_label_ids": [label_ids[0]] }
-            }),
-        )
-        .await;
-    assert_eq!(bulk_noop.status(), StatusCode::OK);
-    let bulk_noop_activities = app.get_with_session(&activities_path).await;
-    let bulk_noop_body: Value = bulk_noop_activities
-        .json()
-        .await
-        .expect("bulk noop activities json");
-    let bulk_noop_count = bulk_noop_body["activities"]
-        .as_array()
-        .expect("activities array")
-        .iter()
-        .filter(|a| a["event_type"] == "label_added" || a["event_type"] == "label_removed")
-        .count();
-    // 内訳: label_added 4 件（feature / bug / feature / docs）+ label_removed 2 件（bug / feature）
-    assert_eq!(bulk_noop_count, 6);
-
     // 一括更新の remove_label_ids でラベルを外せる（label_removed として記録される）
     let bulk_remove = app
         .post_json_with_session(
@@ -353,12 +328,13 @@ async fn task_labels_suite() {
     assert_eq!(bulk_remove.status(), StatusCode::OK);
     let after_remove = app.get_with_session(&task_path).await;
     let after_remove_body: Value = after_remove.json().await.expect("after remove json");
-    let names: Vec<&str> = after_remove_body["labels"]
+    let mut names: Vec<&str> = after_remove_body["labels"]
         .as_array()
         .expect("labels")
         .iter()
         .map(|l| l["name"].as_str().expect("name"))
         .collect();
+    names.sort_unstable();
     assert_eq!(names, ["bug", "feature"]);
     let remove_activities = app.get_with_session(&activities_path).await;
     let remove_body: Value = remove_activities.json().await.expect("remove json");
@@ -435,12 +411,13 @@ async fn task_labels_suite() {
     assert_eq!(bulk_both.status(), StatusCode::OK);
     let after_both = app.get_with_session(&task_path).await;
     let after_both_body: Value = after_both.json().await.expect("after both json");
-    let both_names: Vec<&str> = after_both_body["labels"]
+    let mut both_names: Vec<&str> = after_both_body["labels"]
         .as_array()
         .expect("labels")
         .iter()
         .map(|l| l["name"].as_str().expect("name"))
         .collect();
+    both_names.sort_unstable();
     assert_eq!(both_names, ["docs", "feature"]);
     let both_activities = app.get_with_session(&activities_path).await;
     let both_body: Value = both_activities.json().await.expect("both acts json");

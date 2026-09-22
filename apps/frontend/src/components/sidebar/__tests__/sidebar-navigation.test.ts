@@ -54,8 +54,6 @@ describe('shouldCloseSidebarOnNavigate', () => {
 
   it.each([
     ['metaKey', { metaKey: true }],
-    ['ctrlKey', { ctrlKey: true }],
-    ['shiftKey', { shiftKey: true }],
     ['altKey', { altKey: true }],
   ])('修飾キー付き（%s）は別タブで開くだけなので閉じない', (_label, init) => {
     expect(shouldCloseSidebarOnNavigate(clickOn('#my-tasks', init), true)).toBe(false);

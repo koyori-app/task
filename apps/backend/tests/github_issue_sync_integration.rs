@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use backend::utils::github::sync::{
     apply_issue_event, import_project, mark_pending_push, push_task,
 };
-use common::{TestApp, TestTenantProject};
+use common::{TestApp, TestTenantProject, unique_installation_id};
 use entity::{github_integrations, github_issue_links, project_statuses, task_activities, tasks};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait,
@@ -43,10 +43,6 @@ async fn queued_import_jobs(app: &TestApp, project_id: Uuid) -> i64 {
         .expect("count import jobs")
         .expect("count row");
     row.try_get::<i64>("", "count").expect("count column")
-}
-
-fn unique_installation_id() -> i64 {
-    400_000_000_000_i64 + (Uuid::new_v4().as_u128() % 900_000_000_000) as i64
 }
 
 fn issue_json(

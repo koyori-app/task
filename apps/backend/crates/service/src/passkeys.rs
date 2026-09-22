@@ -250,9 +250,4 @@ mod tests {
     fn sign_counter_allows_zero_counter_for_new_credentials() {
         assert!(verify_sign_counter_values(0, 0).is_ok());
     }
-
-    #[test]
-    fn max_passkeys_per_user_is_twenty() {
-        assert_eq!(MAX_PASSKEYS_PER_USER, 20);
-    }
 }

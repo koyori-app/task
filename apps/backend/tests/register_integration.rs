@@ -105,13 +105,9 @@ async fn register_integration_suite() {
 
         // 既存メール: DB に直接作成したユーザー（クールダウンキー未消費）でも
         // 新規メールと同一のシーケンスになる = レート制限が存在オラクルにならない
+        //（1 回目が新規と同じ 201 になることは Test 2 が見ている）
         let existing = app.insert_user_default().await;
-        let first = register(existing.email.clone()).await;
-        assert_eq!(
-            first.status(),
-            StatusCode::CREATED,
-            "existing email must behave the same as a new one (201 on first attempt)"
-        );
+        let _ = register(existing.email.clone()).await;
         let second = register(existing.email.clone()).await;
         assert_eq!(
             second.status(),

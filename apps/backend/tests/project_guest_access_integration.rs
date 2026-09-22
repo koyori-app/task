@@ -177,6 +177,7 @@ async fn session_guest_passes_only_named_project_and_is_marked_in_list() {
     let projects_path = format!("/v1/tenants/{}/projects", s.tenant_id);
     let own_path = format!("{projects_path}/{}", s.own_project_id);
     let other_path = format!("{projects_path}/{}", s.other_project_id);
+    let my_tasks_path = format!("/v1/tenants/{}/users/me/tasks", s.tenant_id);
 
     app.reset_session_client();
     app.login_session(&s.guest.email, &s.guest.password).await;
@@ -212,6 +213,12 @@ async fn session_guest_passes_only_named_project_and_is_marked_in_list() {
         vec![s.own_project_id],
         "客分の一覧は明示 member の project だけ（公開 project は含めぬ）"
     );
+    // テナント選択後の着地（My Tasks）も己の分に絞って開く
+    assert_eq!(
+        app.get_with_session(&my_tasks_path).await.status(),
+        StatusCode::OK,
+        "テナント選択後の着地（My Tasks）が客分に開く"
+    );
     // ④ テナント一覧に Guest の印付きで出る（修正前は出ない — 赤）
     assert_eq!(
         membership_of(app.get_with_session("/v1/tenants").await, s.tenant_id).await,
@@ -241,6 +248,28 @@ async fn session_guest_passes_only_named_project_and_is_marked_in_list() {
         membership_of(app.get_with_session("/v1/tenants").await, s.tenant_id).await,
         None,
         "無関係な利用者の一覧にこのテナントは出ない"
+    );
+
+    // ⑥ tenant member の一覧は従来の規則のまま（公開 project は見え、
+    //    絞り込み project は指定された人だけ）
+    app.reset_session_client();
+    app.login_session(&s.owner.email, &s.owner.password).await;
+    let added = app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/members", s.tenant_id),
+            serde_json::json!({ "user_id": s.stranger.id, "role": "Member" }),
+        )
+        .await;
+    assert_eq!(added.status(), StatusCode::CREATED);
+    app.reset_session_client();
+    app.login_session(&s.stranger.email, &s.stranger.password)
+        .await;
+    let res = app.get_with_session(&projects_path).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        project_ids(res.json().await.expect("projects json")),
+        vec![s.other_project_id],
+        "member の一覧は従来規則のまま（公開 project は見え、絞り込み project は指定者だけ）"
     );
 
     app.cleanup_user(s.guest.id).await;
@@ -373,6 +402,7 @@ async fn pat_guest_passes_only_named_project_and_is_marked_in_list() {
     let projects_path = format!("/v1/tenants/{}/projects", s.tenant_id);
     let own_path = format!("{projects_path}/{}", s.own_project_id);
     let other_path = format!("{projects_path}/{}", s.other_project_id);
+    let my_tasks_path = format!("/v1/tenants/{}/users/me/tasks", s.tenant_id);
 
     // ① 名指しされた自分のプロジェクトは通る（修正前は 403 — 赤）
     assert_eq!(
@@ -404,6 +434,13 @@ async fn pat_guest_passes_only_named_project_and_is_marked_in_list() {
         vec![s.own_project_id],
         "客分の PAT の一覧も明示 member の project だけ"
     );
+    assert_eq!(
+        app.get_with_bearer(&my_tasks_path, &guest_pat)
+            .await
+            .status(),
+        StatusCode::OK,
+        "PAT でも My Tasks が開く"
+    );
     // ④ テナント一覧に Guest の印付きで出る（修正前は出ない — 赤）
     assert_eq!(
         membership_of(
@@ -424,105 +461,6 @@ async fn pat_guest_passes_only_named_project_and_is_marked_in_list() {
         .await,
         Some("Owner".to_string()),
         "オーナーの PAT は membership=Owner の印付きで出る"
-    );
-
-    app.cleanup_user(s.guest.id).await;
-    app.cleanup_user(s.stranger.id).await;
-    app.cleanup_user(s.owner.id).await;
-}
-
-/// UI 経路の模擬: 客分が ①テナント一覧で己のテナントを得て ②プロジェクト一覧で
-/// 己の project だけを得て ③その id で個別 API へ 200、着地の My Tasks も開ける。
-/// tenant member の一覧は従来の規則のまま（公開 project は見え、
-/// 絞り込み project は指定された人だけ）。セッションと PAT の両方。
-#[tokio::test]
-async fn ui_path_guest_reaches_own_project_and_member_list_stays_as_before() {
-    let mut app = TestApp::new().await;
-    let s = setup_guest(&mut app).await;
-
-    // stranger をテナントメンバーへ追加して member の対照にする
-    app.reset_session_client();
-    app.login_session(&s.owner.email, &s.owner.password).await;
-    let added = app
-        .post_json_with_session(
-            &format!("/v1/tenants/{}/members", s.tenant_id),
-            serde_json::json!({ "user_id": s.stranger.id, "role": "Member" }),
-        )
-        .await;
-    assert_eq!(added.status(), StatusCode::CREATED);
-
-    let projects_path = format!("/v1/tenants/{}/projects", s.tenant_id);
-    let my_tasks_path = format!("/v1/tenants/{}/users/me/tasks", s.tenant_id);
-
-    // --- セッション
-    app.reset_session_client();
-    app.login_session(&s.guest.email, &s.guest.password).await;
-    assert_eq!(
-        membership_of(app.get_with_session("/v1/tenants").await, s.tenant_id).await,
-        Some("Guest".to_string()),
-        "① 客分はテナント一覧で己のテナントを得る"
-    );
-    let res = app.get_with_session(&projects_path).await;
-    assert_eq!(res.status(), StatusCode::OK, "② プロジェクト一覧が開く");
-    assert_eq!(
-        project_ids(res.json().await.expect("projects json")),
-        vec![s.own_project_id],
-        "② 己の project だけが返る（他の project・公開 project は含めぬ）"
-    );
-    assert_eq!(
-        app.get_with_session(&format!("{projects_path}/{}", s.own_project_id))
-            .await
-            .status(),
-        StatusCode::OK,
-        "③ 一覧で得た project の個別 API へ 200"
-    );
-    assert_eq!(
-        app.get_with_session(&my_tasks_path).await.status(),
-        StatusCode::OK,
-        "テナント選択後の着地（My Tasks）が客分に開く"
-    );
-
-    // --- PAT でも同じ
-    let guest_pat = app
-        .insert_pat(
-            s.guest.id,
-            s.tenant_id,
-            vec![Scope::AdminTenant, Scope::ReadProject, Scope::ReadTask],
-            None,
-        )
-        .await;
-    let res = app.get_with_bearer(&projects_path, &guest_pat).await;
-    assert_eq!(res.status(), StatusCode::OK, "② PAT でも一覧が開く");
-    assert_eq!(
-        project_ids(res.json().await.expect("projects json")),
-        vec![s.own_project_id],
-        "② PAT でも己の分だけ"
-    );
-    assert_eq!(
-        app.get_with_bearer(&format!("{projects_path}/{}", s.own_project_id), &guest_pat)
-            .await
-            .status(),
-        StatusCode::OK,
-        "③ PAT でも個別 API へ 200"
-    );
-    assert_eq!(
-        app.get_with_bearer(&my_tasks_path, &guest_pat)
-            .await
-            .status(),
-        StatusCode::OK,
-        "PAT でも My Tasks が開く"
-    );
-
-    // --- tenant member は従来の規則のまま
-    app.reset_session_client();
-    app.login_session(&s.stranger.email, &s.stranger.password)
-        .await;
-    let res = app.get_with_session(&projects_path).await;
-    assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(
-        project_ids(res.json().await.expect("projects json")),
-        vec![s.other_project_id],
-        "member の一覧は従来規則のまま（公開 project は見え、絞り込み project は指定者だけ）"
     );
 
     app.cleanup_user(s.guest.id).await;

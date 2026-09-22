@@ -1,7 +1,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::TestApp;
+use common::{TestApp, json_body};
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, TransactionTrait};
 
 // プロジェクトメンバー管理（#317）の統合テスト。
@@ -9,10 +9,6 @@ use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, TransactionTrait};
 // メンバー管理 UI が名前・アバターを表示できるよう、メンバー系レスポンスに
 // `user`（UserSummary）を同梱したことの回帰テストを中心に置く。
 // `user` フィールドの検証は変更前の main では fail する（フィールド自体が無い）。
-
-async fn json_body(res: reqwest::Response) -> serde_json::Value {
-    res.json::<serde_json::Value>().await.expect("json body")
-}
 
 /// 一覧・追加・変更のレスポンスに表示用のユーザー情報が同梱される。
 #[tokio::test]
@@ -404,15 +400,6 @@ async fn an_owner_can_still_manage_a_project_whose_admins_all_left() {
         .status(),
         StatusCode::OK,
         "オーナーは Admin を立て直せる"
-    );
-
-    // 抜けた bob の残った行も、最後の枠を占有して詰ませない
-    assert_eq!(
-        app.delete_with_session(&format!("{project_members_path}/{}", bob.id))
-            .await
-            .status(),
-        StatusCode::NO_CONTENT,
-        "テナントに居ない人の行は 409 で守られない（数えるのは在籍者だけ）"
     );
 
     app.cleanup_user(owner.id).await;

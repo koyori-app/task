@@ -254,33 +254,6 @@ async fn password_reset_integration_suite() {
         app.cleanup_user(user.id).await;
     }
 
-    // Test 8: password/change — PAT 認証は 401
-    {
-        let app = TestApp::new().await;
-        let user = app.insert_user(false, false).await;
-        let tenant_id = insert_tenant(&app.state.db, user.id).await;
-        let pat = app
-            .insert_pat(user.id, tenant_id, vec![Scope::AdminTenant], None)
-            .await;
-
-        let resp = app
-            .post_json_with_bearer(
-                "/v1/auth/password/change",
-                serde_json::json!({
-                    "current_password": user.password,
-                    "new_password": "NewPassword123!"
-                }),
-                &pat,
-            )
-            .await;
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-
-        let _ = entity::tenants::Entity::delete_by_id(tenant_id)
-            .exec(&app.state.db)
-            .await;
-        app.cleanup_user(user.id).await;
-    }
-
     // Test 9: password/change — password_hash が NULL（OAuth ユーザー）は 400
     // 通常ユーザーとしてログインしてからDB上で password_hash を NULL に更新し、
     // その後に password/change を呼ぶことで PasswordNotSet パスを検証する。

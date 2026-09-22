@@ -43,12 +43,6 @@ describe('NavMain – leaf items (no sub-items)', () => {
     expect(hrefs).toContain('/tenant/projects/proj/tasks');
   });
 
-  it('renders item titles', () => {
-    const wrapper = mountNavMain(leafItems);
-    expect(wrapper.text()).toContain('Labels');
-    expect(wrapper.text()).toContain('Tasks');
-  });
-
   it('active leaf item has data-active attribute set to true', () => {
     const wrapper = mountNavMain(leafItems);
     // SidebarMenuButtonChild renders with data-active on the element (via reka-ui Primitive as-child → merged onto <a>)
@@ -66,21 +60,12 @@ describe('NavMain – leaf items (no sub-items)', () => {
 });
 
 describe('NavMain – collapsible items (with sub-items)', () => {
-  it('renders the parent item title', () => {
+  it('renders the parent and sub-item links when collapsible is open (isActive: true)', () => {
     const wrapper = mountNavMain(treeItems);
-    expect(wrapper.text()).toContain('Settings');
-  });
-
-  it('renders sub-item links when collapsible is open (isActive: true)', () => {
-    const wrapper = mountNavMain(treeItems);
-    const links = wrapper.findAll('a');
-    const hrefs = links.map((l) => l.attributes('href'));
+    const hrefs = wrapper.findAll('a').map((l) => l.attributes('href'));
     expect(hrefs).toContain('/settings/general');
     expect(hrefs).toContain('/settings/team');
-  });
-
-  it('renders sub-item titles when collapsible is open (isActive: true)', () => {
-    const wrapper = mountNavMain(treeItems);
+    expect(wrapper.text()).toContain('Settings');
     expect(wrapper.text()).toContain('General');
     expect(wrapper.text()).toContain('Team');
   });

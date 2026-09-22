@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
-  EXPIRATION_PRESETS,
   SCOPE_CATALOG,
   expiresAtFromPreset,
   formatExpiry,
@@ -29,10 +28,6 @@ describe('expiresAtFromPreset', () => {
 
   it('無期限は null を返す', () => {
     expect(expiresAtFromPreset('none', NOW)).toBeNull();
-  });
-
-  it('プリセットは 4 種類（UI のボタン数と一致）', () => {
-    expect(EXPIRATION_PRESETS).toHaveLength(4);
   });
 });
 

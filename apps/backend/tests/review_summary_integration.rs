@@ -1,7 +1,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::TestApp;
+use common::{TestApp, unique_installation_id};
 use entity::{github_integrations, project_statuses};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
@@ -25,11 +25,6 @@ const REPO_KEY: &str = "acme/backend";
 const BOT_LOGIN: &str = "task-app[bot]";
 /// ラウンドが見た commit。PR メタの head と揃えると「鮮度あり」になる
 const REVIEWED_HEAD: &str = "60cdd7795f94fa4e4148ce996c2efb4c363e3f5e";
-
-fn unique_installation_id() -> i64 {
-    // 同じ DB を共有する他テストと衝突しない範囲で散らす
-    (Uuid::new_v4().as_u128() % 1_000_000) as i64 + 8_000_000
-}
 
 async fn mount_mocks(server: &MockServer, existing_comment: bool, marker: &str) {
     Mock::given(method("POST"))
@@ -234,15 +229,11 @@ async fn review_summary_comment_is_created_once_and_then_edited() {
     .await
     .expect("post review summary");
 
-    // 既存コメントが無いので新規投稿。マーカーとマージ可否が本文に出る
+    // 既存コメントが無いので新規投稿。本文の中身は service::reviews のユニットが見る
     let posted = bodies_of(&mock_server, wiremock::http::Method::POST).await;
     let posted: Vec<&serde_json::Value> =
         posted.iter().filter(|b| b.get("body").is_some()).collect();
     assert_eq!(posted.len(), 1, "要約コメントは 1 本だけ作る");
-    let body = posted[0]["body"].as_str().expect("comment body");
-    assert!(body.starts_with(&marker), "マーカーが行頭にある: {body}");
-    assert!(body.contains("マージ不可"), "High が未解決: {body}");
-    assert!(body.contains("| High | Open | 1 |"), "件数表が出る: {body}");
 
     // PR メタ（タイトル・作者）がラウンドにキャッシュされる
     let rounds = app
@@ -314,10 +305,6 @@ async fn an_existing_summary_comment_is_updated_in_place() {
 
     let patched = bodies_of(&mock_server, wiremock::http::Method::PATCH).await;
     assert_eq!(patched.len(), 1, "同じコメントを 1 回だけ編集する");
-    let body = patched[0]["body"].as_str().expect("comment body");
-    assert!(body.starts_with(&marker));
-    assert!(body.contains("マージ可"), "指摘なしならマージ可: {body}");
-    assert!(body.contains("指摘はありません。"));
 
     app.cleanup_user(reviewer.id).await;
 }

@@ -7,37 +7,10 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::TestApp;
-use entity::{drive_files, drive_folders, project_members, projects};
+use common::{TestApp, insert_extra_project};
+use entity::{drive_files, drive_folders, project_members};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, TransactionTrait};
 use uuid::Uuid;
-
-/// プロジェクトフォルダ配下の境界を守れているかを見る。
-///
-/// 直したのは 4 つ:
-/// - 子フォルダを作っても `project_id` を継承せず、中のファイルが一般ファイル扱いになる
-/// - フォルダ移動で移動元・移動先の ACL を見ず、配下の `project_id` も揃えない
-/// - ファイル移動で移動先の ACL を見ない
-/// - 自動生成のプロジェクトルートフォルダを直接削除・移動できる
-async fn insert_extra_project(app: &TestApp, tenant_id: Uuid) -> Uuid {
-    let project_id = Uuid::new_v4();
-    let suffix = &project_id.to_string()[..8];
-    projects::ActiveModel {
-        id: Set(project_id),
-        name: Set("second-project".into()),
-        description: Set(String::new()),
-        tenant_id: Set(tenant_id),
-        icon_emoji: Set(None),
-        icon_url: Set(None),
-        key: Set(format!("Q{}", suffix.to_uppercase())),
-        is_personal: Set(false),
-        personal_owner_id: Set(None),
-    }
-    .insert(&app.state.db)
-    .await
-    .expect("insert project");
-    project_id
-}
 
 /// プロジェクト作成時に自動生成されるのと同じ形（`project_id` 付き・親なし）のルートフォルダ。
 async fn insert_project_root_folder(
@@ -230,118 +203,88 @@ async fn creating_a_child_under_a_foreign_project_folder_is_forbidden() {
     assert_eq!(created.status(), StatusCode::CREATED);
 }
 
-/// フォルダの作成と移動はテナント単位で直列化する。
+/// フォルダの作成と削除はテナント単位で直列化する。
 ///
-/// 移動をトランザクションへ入れるだけでは足りない。ACL と親の `project_id` を読んでから
-/// 書くまでの間に別のリクエストが割り込めるので、一般フォルダをプロジェクト配下へ
-/// 移動している最中にそのフォルダへ子を作ると、子は移動前の `project_id = NULL` を
-/// 継承したまま残り、直したはずの ACL 漏れが再発する。
+/// 作成: 移動をトランザクションへ入れるだけでは足りない。ACL と親の `project_id` を
+/// 読んでから書くまでの間に別のリクエストが割り込めるので、一般フォルダをプロジェクト
+/// 配下へ移動している最中にそのフォルダへ子を作ると、子は移動前の `project_id = NULL`
+/// を継承したまま残り、直したはずの ACL 漏れが再発する。
 ///
-/// ここではテスト側が同じ鍵でロックを握り、握っているあいだ作成が進まないこと・
-/// 離した後に親の値を継承して完了することを見る。
-#[tokio::test]
-#[serial_test::file_serial(drive)]
-async fn creating_a_folder_waits_for_the_tenant_drive_lock() {
-    let mut app = TestApp::new().await;
-
-    let owner = app.insert_user(false, false).await;
-    let tp = app.insert_tenant_project(owner.id).await;
-    let root = insert_project_root_folder(&app, tp.tenant_id, tp.project_id, owner.id).await;
-
-    app.reset_session_client();
-    app.login_session_no_content(&owner.email, &owner.password)
-        .await;
-
-    // 同じ鍵をテスト側のトランザクションで握る
-    let blocker = app.state.db.begin().await.expect("begin blocker");
-    common::execute_advisory_lock(
-        &blocker,
-        service::drive::tenant_drive_lock_key(tp.tenant_id),
-    )
-    .await;
-
-    let url = folders_url(&app, tp.tenant_id);
-    let client = app.client().clone();
-    let pending = tokio::spawn(async move {
-        client
-            .post(url)
-            .json(&serde_json::json!({ "name": "child", "parent_id": root }))
-            .send()
-            .await
-            .expect("create folder")
-    });
-
-    // 握っているあいだは進まない（ロックが無いと即座に 201 が返る）
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    assert!(
-        !pending.is_finished(),
-        "テナントの Drive ロックを待たずに作成が通っている"
-    );
-
-    blocker.rollback().await.expect("release blocker");
-
-    let response = tokio::time::timeout(std::time::Duration::from_secs(10), pending)
-        .await
-        .expect("ロック解放後に完了する")
-        .expect("join");
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let body: serde_json::Value = response.json().await.expect("json");
-    assert_eq!(
-        body["project_id"].as_str().map(str::to_string),
-        Some(tp.project_id.to_string()),
-        "ロック取得後に読んだ親の project_id を継承する"
-    );
-}
-
-/// フォルダの削除もテナント単位で直列化する。
+/// 削除: 子の有無を読んでから消すまでの間に子を作られると、`parent_id` の
+/// ON DELETE SET NULL でその子が `parent_id = NULL` かつ `project_id = Some` のまま
+/// ドライブ直下へ出る。これは自動生成のプロジェクトルートと同じ形なので、以後は更新も
+/// 削除も 409 で拒まれ、API から片付けられなくなる（`drive_files` と違い、この表には
+/// 受け止める CHECK が無い）。
 ///
-/// 子の有無を読んでから消すまでの間に子を作られると、`parent_id` の ON DELETE SET NULL で
-/// その子が `parent_id = NULL` かつ `project_id = Some` のままドライブ直下へ出る。これは
-/// 自動生成のプロジェクトルートと同じ形なので、以後は更新も削除も 409 で拒まれ、API から
-/// 片付けられなくなる（`drive_files` と違い、この表には受け止める CHECK が無い）。
-///
-/// ここではテスト側が同じ鍵でロックを握り、握っているあいだ削除が進まないこと・
+/// ここではテスト側が同じ鍵でロックを握り、握っているあいだ処理が進まないこと・
 /// 離した後に完了することを見る。
 #[tokio::test]
 #[serial_test::file_serial(drive)]
-async fn deleting_a_folder_waits_for_the_tenant_drive_lock() {
-    let mut app = TestApp::new().await;
+async fn creating_and_deleting_a_folder_wait_for_the_tenant_drive_lock() {
+    for deleting in [false, true] {
+        let mut app = TestApp::new().await;
 
-    let owner = app.insert_user(false, false).await;
-    let tp = app.insert_tenant_project(owner.id).await;
-    let plain = insert_plain_folder(&app, tp.tenant_id, owner.id).await;
+        let owner = app.insert_user(false, false).await;
+        let tp = app.insert_tenant_project(owner.id).await;
+        let root = insert_project_root_folder(&app, tp.tenant_id, tp.project_id, owner.id).await;
+        let plain = insert_plain_folder(&app, tp.tenant_id, owner.id).await;
 
-    app.reset_session_client();
-    app.login_session_no_content(&owner.email, &owner.password)
+        app.reset_session_client();
+        app.login_session_no_content(&owner.email, &owner.password)
+            .await;
+
+        // 同じ鍵をテスト側のトランザクションで握る
+        let blocker = app.state.db.begin().await.expect("begin blocker");
+        common::execute_advisory_lock(
+            &blocker,
+            service::drive::tenant_drive_lock_key(tp.tenant_id),
+        )
         .await;
 
-    // 同じ鍵をテスト側のトランザクションで握る
-    let blocker = app.state.db.begin().await.expect("begin blocker");
-    common::execute_advisory_lock(
-        &blocker,
-        service::drive::tenant_drive_lock_key(tp.tenant_id),
-    )
-    .await;
+        let url = folders_url(&app, tp.tenant_id);
+        let client = app.client().clone();
+        let pending = tokio::spawn(async move {
+            if deleting {
+                client
+                    .delete(format!("{url}/{plain}"))
+                    .send()
+                    .await
+                    .expect("delete folder")
+            } else {
+                client
+                    .post(url)
+                    .json(&serde_json::json!({ "name": "child", "parent_id": root }))
+                    .send()
+                    .await
+                    .expect("create folder")
+            }
+        });
 
-    let url = format!("{}/{plain}", folders_url(&app, tp.tenant_id));
-    let client = app.client().clone();
-    let pending =
-        tokio::spawn(async move { client.delete(url).send().await.expect("delete folder") });
+        // 握っているあいだは進まない（ロックが無いと即座に応答が返る）
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(
+            !pending.is_finished(),
+            "テナントの Drive ロックを待たずに通っている（deleting={deleting}）"
+        );
 
-    // 握っているあいだは進まない（ロックが無いと即座に 204 が返る）
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    assert!(
-        !pending.is_finished(),
-        "テナントの Drive ロックを待たずに削除が通っている"
-    );
+        blocker.rollback().await.expect("release blocker");
 
-    blocker.rollback().await.expect("release blocker");
-
-    let response = tokio::time::timeout(std::time::Duration::from_secs(10), pending)
-        .await
-        .expect("ロック解放後に完了する")
-        .expect("join");
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let response = tokio::time::timeout(std::time::Duration::from_secs(10), pending)
+            .await
+            .expect("ロック解放後に完了する")
+            .expect("join");
+        if deleting {
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        } else {
+            assert_eq!(response.status(), StatusCode::CREATED);
+            let body: serde_json::Value = response.json().await.expect("json");
+            assert_eq!(
+                body["project_id"].as_str().map(str::to_string),
+                Some(tp.project_id.to_string()),
+                "ロック取得後に読んだ親の project_id を継承する"
+            );
+        }
+    }
 }
 
 /// フォルダ移動で配下のフォルダ・ファイルの `project_id` が揃う。

@@ -1279,3 +1279,70 @@ pub async fn ensure_tenant_member_for_project(
     .await
     .expect("insert tenant member");
 }
+
+/// 応答の本文を JSON として読む。
+pub async fn json_body(res: Response) -> serde_json::Value {
+    res.json::<serde_json::Value>().await.expect("json body")
+}
+
+/// テナントに 2 つめのプロジェクトを直接作る（プロジェクト境界の検証用）。
+pub async fn insert_extra_project(app: &TestApp, tenant_id: Uuid) -> Uuid {
+    let project_id = Uuid::new_v4();
+    let suffix = &project_id.to_string()[..8];
+    projects::ActiveModel {
+        id: Set(project_id),
+        name: Set("second-project".into()),
+        description: Set(String::new()),
+        tenant_id: Set(tenant_id),
+        icon_emoji: Set(None),
+        icon_url: Set(None),
+        key: Set(format!("Q{}", suffix.to_uppercase())),
+        is_personal: Set(false),
+        personal_owner_id: Set(None),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert extra project");
+    project_id
+}
+
+/// GitHub のインストール ID。同じ DB を共有する他テストと衝突しない範囲で散らす
+/// （github_http が振る舞いを切り替える基準値 1_500_000_000_000 より下に収める）。
+pub fn unique_installation_id() -> i64 {
+    300_000_000_000_i64 + (Uuid::new_v4().as_u128() % 900_000_000_000) as i64
+}
+
+/// プロジェクトにステータスを 1 件作る（`Todo` を既定、完了状態は後ろに置く）。
+pub async fn create_status(
+    app: &TestApp,
+    tp: &TestTenantProject,
+    name: &str,
+    is_done: bool,
+) -> Uuid {
+    let response = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/statuses",
+                tp.tenant_id, tp.project_id
+            ),
+            serde_json::json!({
+                "name": name,
+                "color": "#336699",
+                "position": if is_done { 2 } else { 1 },
+                "is_default": name == "Todo",
+                "is_done_state": is_done,
+            }),
+        )
+        .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::CREATED,
+        "create status {name}"
+    );
+    let body: serde_json::Value = response.json().await.expect("status json");
+    body["id"]
+        .as_str()
+        .expect("status id")
+        .parse()
+        .expect("uuid")
+}

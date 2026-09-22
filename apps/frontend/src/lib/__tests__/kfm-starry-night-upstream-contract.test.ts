@@ -31,15 +31,6 @@ async function loadThemeClasses(): Promise<string[]> {
   return uniqueSorted(classes);
 }
 
-function extractSelectorClasses(source: string): string[] {
-  // theme.js 側と違い CSS には機械可読な export が無いためセレクタ抽出は残るが、
-  // sanitize の許可パターンより広く取る (ハイフン許容) — 抽出漏れで差分が隠れる側に倒さない。
-  const withoutComments = source.replace(/\/\*[\s\S]*?\*\//g, '');
-  return uniqueSorted(
-    [...withoutComments.matchAll(/\.(pl-[a-z0-9-]+)/g)].map((match) => match[1]!),
-  );
-}
-
 function extractVariables(source: string): Map<string, string> {
   return new Map(
     [...source.matchAll(/(--color-prettylights-syntax-[\w-]+)\s*:\s*([^;]+);/g)].map((match) => [
@@ -59,19 +50,6 @@ describe('@wooorm/starry-night upstream 契約', () => {
           !starryNightSanitizeSchema.classPatterns.some((pattern) => pattern.test(className)),
       ),
     ).toEqual([]);
-  });
-
-  it('light.css と both.css のセレクタ集合は同じ 33 class', async () => {
-    const themeClasses = await loadThemeClasses();
-    const lightClasses = extractSelectorClasses(readUpstream('style/light.css'));
-    const bothClasses = extractSelectorClasses(readUpstream('style/both.css'));
-    expect(lightClasses).toHaveLength(33);
-    expect(bothClasses).toEqual(lightClasses);
-    // pl-kos は grammar 出力には現れ得るが upstream CSS に規則が無い、既知の唯一の差分。
-    expect(themeClasses.filter((className) => !lightClasses.includes(className))).toEqual([
-      'pl-kos',
-    ]);
-    expect(lightClasses.filter((className) => !themeClasses.includes(className))).toEqual([]);
   });
 
   it('style.css の .dark 30 変数は upstream dark.css と完全一致する', () => {

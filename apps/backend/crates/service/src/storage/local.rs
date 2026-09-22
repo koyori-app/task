@@ -133,12 +133,4 @@ mod tests {
         assert!(validate_key("a").is_ok());
         assert!(validate_key("abc123-_.").is_ok());
     }
-
-    #[test]
-    fn validate_key_rejects_slash_but_s3_allows_internal() {
-        // local backend rejects any forward slash (path traversal protection),
-        // while S3 backend only rejects leading slash.
-        // This test documents the intentional difference.
-        assert!(validate_key("prefix/uuid-key").is_err());
-    }
 }

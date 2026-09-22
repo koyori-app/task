@@ -1,7 +1,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::TestApp;
+use common::{TestApp, json_body};
 use uuid::Uuid;
 
 // 担当者候補（`GET /projects/{id}/assignable-users`）の統合テスト。
@@ -11,10 +11,6 @@ use uuid::Uuid;
 // タスクを編集できる人が候補だけ 403 になって担当者を触れなくなる。
 // 返す集合も違う: メンバーを 1 人も指定していない共有プロジェクトはテナント全体へ
 // 開放されるため、`project_members` の行だけを返すと候補が空になる。
-
-async fn json_body(res: reqwest::Response) -> serde_json::Value {
-    res.json::<serde_json::Value>().await.expect("json body")
-}
 
 /// 発行 API で PAT を作り、平文トークンを返す（スコープの検査を実経路で通す）。
 async fn issue_token(app: &TestApp, tenant_id: Uuid, name: &str, scopes: &[&str]) -> String {
@@ -110,6 +106,15 @@ async fn assignable_users_covers_tenant_when_project_has_no_members() {
         members.status(),
         StatusCode::FORBIDDEN,
         "メンバー一覧の認可は緩めない"
+    );
+
+    // 対照: テナントに入れない利用者は候補を読めない
+    app.reset_session_client();
+    app.login_session(&outsider.email, &outsider.password).await;
+    assert_eq!(
+        app.get_with_session(&assignable_path).await.status(),
+        StatusCode::FORBIDDEN,
+        "テナント外の利用者は候補を読めない"
     );
 }
 
@@ -282,14 +287,6 @@ async fn assignable_users_resolves_one_name_for_read_only_tokens() {
         "一致しなければ空で返す"
     );
 
-    // 対照: 名前を指定しない列挙は read:task では読めないまま
-    let listed = app.get_with_bearer(&assignable_path, &read_only).await;
-    assert_eq!(
-        listed.status(),
-        StatusCode::FORBIDDEN,
-        "候補の列挙は緩めない"
-    );
-
     // 対照: 書き込みだけの PAT からも名前で引ける（過剰拒否になっていないこと）
     let writable = issue_token(&app, tp.tenant_id, "writable", &["write:task"]).await;
     let as_writer = app
@@ -299,27 +296,6 @@ async fn assignable_users_resolves_one_name_for_read_only_tokens() {
         )
         .await;
     assert_eq!(as_writer.status(), StatusCode::OK);
-}
-
-/// テナントに入れない利用者は候補を読めない。
-#[tokio::test]
-async fn assignable_users_rejects_outsiders() {
-    let mut app = TestApp::new().await;
-
-    let owner = app.insert_user(false, false).await;
-    let outsider = app.insert_user(false, false).await;
-    let tp = app.insert_tenant_project(owner.id).await;
-
-    let assignable_path = format!(
-        "/v1/tenants/{}/projects/{}/assignable-users",
-        tp.tenant_id, tp.project_id
-    );
-
-    app.reset_session_client();
-    app.login_session(&outsider.email, &outsider.password).await;
-
-    let res = app.get_with_session(&assignable_path).await;
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
 /// 候補として返した利用者は、実際に担当者として割り当てられる

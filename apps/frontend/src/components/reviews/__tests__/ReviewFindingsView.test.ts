@@ -237,7 +237,8 @@ describe('ReviewFindingsView', () => {
     expect(wrapper.get('[data-testid="finding-list"]').text()).toContain('Fixed');
   });
 
-  it('自分で fixed を宣言した指摘は確認ボタンを押せない', async () => {
+  it('findingActions の disabledReason を持つ操作は disabled にして理由を出す', async () => {
+    // 判定そのものは lib の findingActions 側で見る。ここは画面への配線だけ。
     // 確認と差し戻しはレビュー側だけに出るので、閲覧者をラウンドの作成者にしておく
     stubFetch({
       findings: [finding({ state: 'fixed', fixed_by: VIEWER_ID })],
@@ -263,94 +264,13 @@ describe('ReviewFindingsView', () => {
     expect(bodyButton('確認した')?.disabled).toBe(false);
   });
 
-  it('レビュー側でない人に確認・差し戻しのボタンを出さない（サーバーも 403 で拒否する）', async () => {
-    // ラウンドを 1 本も出していない＝修正だけを行う利用者。この画面の主要な利用者で、
-    // 同僚が宣言した fixed に確認ボタンを出すと押した瞬間に 403 になる
-    stubFetch({
-      findings: [finding({ state: 'fixed', fixed_by: OTHER_ID })],
-      roundReviewerId: OTHER_ID,
-    });
-    mountView();
-    await flushPromises();
-
-    expect(bodyButton('確認した')).toBeUndefined();
-    expect(bodyButton('レビューに戻す')).toBeUndefined();
-  });
-
-  it('High には繰り延べのボタンを出さない（サーバーも 409 で拒否する）', async () => {
-    stubFetch({ findings: [finding({ severity: 'high' })] });
-    mountView();
-    await flushPromises();
-
-    expect(bodyButton('繰り延べる')).toBeUndefined();
-    // 他の操作は出る（繰り延べだけを落としている）
-    expect(bodyButton('修正した')?.disabled).toBe(false);
-  });
-
-  it('Low には繰り延べのボタンを出す', async () => {
+  it('findingActions の返り値がそのまま操作ボタンとして出る', async () => {
     stubFetch({ findings: [finding({ severity: 'low' })] });
     mountView();
     await flushPromises();
 
-    expect(bodyButton('繰り延べる')?.disabled).toBe(false);
-  });
-
-  it('他人が出した指摘には取り下げのボタンを出さない（サーバーも 403 で拒否する）', async () => {
-    stubFetch({ findings: [finding({ severity: 'low' })] });
-    mountView();
-    await flushPromises();
-
-    expect(bodyButton('指摘を取り下げる')).toBeUndefined();
-    // 修正の宣言と繰り延べは出る（取り下げだけを落としている）
     expect(bodyButton('修正した')?.disabled).toBe(false);
     expect(bodyButton('繰り延べる')?.disabled).toBe(false);
-  });
-
-  it('自分が出した指摘には取り下げのボタンを出す', async () => {
-    stubFetch({ findings: [finding({ severity: 'low' })], roundReviewerId: VIEWER_ID });
-    mountView();
-    await flushPromises();
-
-    expect(bodyButton('指摘を取り下げる')?.disabled).toBe(false);
-  });
-
-  it('作成者が居なくなった指摘は、オーナーが取り下げを代行できる', async () => {
-    // 除名・退会で取り下げる主体が消えると、直していないものを verified と
-    // 記録するしかなくなる。その例外を画面からも使えるようにする（仕様 §3）
-    stubFetch({
-      findings: [finding({ severity: 'low' })],
-      roundReviewerId: OTHER_ID,
-      roundReviewerLeft: true,
-    });
-    mountView({ tenantOwnerId: VIEWER_ID });
-    await flushPromises();
-
-    expect(bodyButton('指摘を取り下げる')?.disabled).toBe(false);
-  });
-
-  it('作成者が在籍していればオーナーでも代行させない（サーバーも 403 で拒否する）', async () => {
-    stubFetch({
-      findings: [finding({ severity: 'low' })],
-      roundReviewerId: OTHER_ID,
-      roundReviewerLeft: false,
-    });
-    mountView({ tenantOwnerId: VIEWER_ID });
-    await flushPromises();
-
-    expect(bodyButton('指摘を取り下げる')).toBeUndefined();
-  });
-
-  it('オーナーでなければ、作成者が居なくなっても代行させない', async () => {
-    stubFetch({
-      findings: [finding({ severity: 'low' })],
-      roundReviewerId: OTHER_ID,
-      roundReviewerLeft: true,
-    });
-    // tenantOwnerId を渡さない＝オーナーが分からない状態。出さない側に倒す
-    mountView();
-    await flushPromises();
-
-    expect(bodyButton('指摘を取り下げる')).toBeUndefined();
   });
 
   it('一覧バッジは件数だけを出し、可否を断定しない', async () => {
@@ -368,55 +288,15 @@ describe('ReviewFindingsView', () => {
     expect(blocked.text()).toContain('1 件が未解決');
   });
 
-  it('未レビューの PR は「マージ可」と言わない', async () => {
-    stubFetch({ findings: [], rounds: 0 });
-    const wrapper = mountView();
-    await flushPromises();
-
-    const gate = wrapper.get('[data-testid="merge-gate"]').text();
-    expect(gate).toContain('未レビュー');
-    // パネルだけでなく画面全体で見る。一覧バッジが可否を断定すると、
-    // パネルが降格させた横で緑の「マージ可」が出る矛盾になる
-    expect(wrapper.text()).not.toContain('マージ可');
-  });
-
-  it('レビュー済みならレビューした commit を出す（鮮度を目で確かめられる）', async () => {
+  it('mergeVerdict の title / detail が merge-gate に出る', async () => {
+    // 不可の分岐（未レビュー・連携なし・鮮度）は lib の mergeVerdict 側で見る。
     stubFetch({ findings: [] });
     const wrapper = mountView();
     await flushPromises();
 
-    expect(wrapper.text()).toContain('マージ可');
-    expect(wrapper.text()).toContain(REVIEWED_HEAD.slice(0, 7));
-  });
-
-  it('連携が無ければ「マージ可」を出さない', async () => {
-    stubFetch({ findings: [], repository: null });
-    const wrapper = mountView();
-    await flushPromises();
-
     const gate = wrapper.get('[data-testid="merge-gate"]').text();
-    expect(gate).toContain('リポジトリ未確定');
-    expect(wrapper.text()).not.toContain('マージ可');
-  });
-
-  it('レビュー後にコミットが積まれていれば「マージ可」を出さない', async () => {
-    stubFetch({ findings: [], cachedHeadSha: 'ffffffffffffffffffffffffffffffffffffffff' });
-    const wrapper = mountView();
-    await flushPromises();
-
-    const gate = wrapper.get('[data-testid="merge-gate"]').text();
-    expect(gate).toContain('レビューが古い');
-    expect(wrapper.text()).not.toContain('マージ可');
-  });
-
-  it('現在の HEAD を確かめられていなければ「マージ可」を出さない', async () => {
-    stubFetch({ findings: [], cachedHeadSha: null });
-    const wrapper = mountView();
-    await flushPromises();
-
-    const gate = wrapper.get('[data-testid="merge-gate"]').text();
-    expect(gate).toContain('鮮度不明');
-    expect(wrapper.text()).not.toContain('マージ可');
+    expect(gate).toContain('マージ可');
+    expect(gate).toContain(REVIEWED_HEAD.slice(0, 7));
   });
 
   it('オーナー代行での棄却は件数を出す', async () => {
@@ -425,16 +305,6 @@ describe('ReviewFindingsView', () => {
     await flushPromises();
 
     expect(wrapper.get('[data-testid="merge-gate"]').text()).toContain('オーナー代行での棄却 2 件');
-  });
-
-  it('verified の指摘には操作ボタンを出さない（終端）', async () => {
-    stubFetch({ findings: [finding({ state: 'verified' })] });
-    mountView();
-    await flushPromises();
-
-    for (const label of ['修正した', '確認した', '繰り延べる', '再オープン']) {
-      expect(bodyButton(label), label).toBeUndefined();
-    }
   });
 
   it('サーバーが理由を返した 409 はその文言を出す', async () => {

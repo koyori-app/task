@@ -233,32 +233,7 @@ describe('LabelsSection', () => {
     expect(createMutateAsync).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('名前は 1〜100 文字で入力してください');
 
-    // 100 文字ちょうどは成功する
-    await input('label-name').setValue('a'.repeat(100));
-    await formEl().trigger('submit');
-    await flushPromises();
-    expect(createMutateAsync).toHaveBeenCalledTimes(1);
-    expect(createMutateAsync.mock.calls[0][0].body.name).toBe('a'.repeat(100));
-  });
-
-  it('絵文字はコードポイント単位で数える（100 個は送信可・101 個は不可、backend の chars() と一致）', async () => {
-    // '😀' は UTF-16 で 2 単位・コードポイントで 1。String.length なら 100 個で 200 と数え
-    // 誤って弾くが、Array.from では 100 と数え backend（chars().count()）と一致する
-    createMutateAsync.mockResolvedValue({ ...bugLabel, name: '😀'.repeat(100) });
-    mountView();
-    await flushPromises();
-
-    clickBodyButton('新しいラベル');
-    await flushPromises();
-
-    // 絵文字 101 個は送信されない
-    await input('label-name').setValue('😀'.repeat(101));
-    await formEl().trigger('submit');
-    await flushPromises();
-    expect(createMutateAsync).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('名前は 1〜100 文字で入力してください');
-
-    // 絵文字 100 個は送信できる（UTF-16 では 200 単位だが弾かれない）
+    // 100 文字ちょうどは成功する（絵文字 = UTF-16 では 200 単位でも通す）
     await input('label-name').setValue('😀'.repeat(100));
     await formEl().trigger('submit');
     await flushPromises();

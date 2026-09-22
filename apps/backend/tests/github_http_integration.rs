@@ -2,7 +2,7 @@ mod common;
 
 use axum::http::StatusCode;
 use backend::utils::github::install_state::{self as github_oauth_state, GithubOAuthStatePayload};
-use common::{TestApp, TestTenantProject};
+use common::{TestApp, TestTenantProject, unique_installation_id};
 use entity::{github_integrations, projects, scopes::Scope, tenants};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
@@ -209,10 +209,6 @@ fn installation_id_from_url(url: &url::Url) -> i64 {
     url.path_segments()
         .and_then(|mut segments| segments.find_map(|segment| segment.parse::<i64>().ok()))
         .unwrap_or(0)
-}
-
-fn unique_installation_id() -> i64 {
-    300_000_000_000_i64 + (Uuid::new_v4().as_u128() % 900_000_000_000) as i64
 }
 
 fn unique_multi_repo_installation_id() -> i64 {
@@ -479,17 +475,7 @@ async fn github_http_integration_suite() {
     let mut app = TestApp::new_with_github().await;
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-    // 1. GET /install — GitHub インストール URL を JSON で返す
-    {
-        let user = app.insert_user(false, false).await;
-        let tp = app.insert_tenant_project(user.id).await;
-        app.login_session(&user.email, &user.password).await;
-
-        let _ = get_install_state(&app, &tp).await;
-
-        app.cleanup_user(user.id).await;
-        app.reset_session_client();
-    }
+    // 1. GET /install — URL と state の形は get_install_state が見ている
 
     // 2. GET /callback 正常系 — /install の state を /callback に渡して DB に integration 作成
     {

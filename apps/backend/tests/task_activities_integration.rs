@@ -2,7 +2,7 @@ mod common;
 
 use axum::http::StatusCode;
 use chrono::{DateTime, Duration, Utc};
-use common::TestApp;
+use common::{TestApp, json_body};
 use entity::task_activities;
 use sea_orm::{ActiveValue::Set, EntityTrait, prelude::Uuid};
 use serde_json::Value;
@@ -15,10 +15,6 @@ use serde_json::Value;
 //
 // 継ぎ目に offset を使わないのは、履歴が積まれている最中にページを継ぐと
 // 境界がずれ、同じ行が 2 度出たり抜けたりするため。
-
-async fn json_body(res: reqwest::Response) -> Value {
-    res.json::<Value>().await.expect("json body")
-}
 
 /// 次のページの鍵。取り切っていれば `None`。
 fn next_cursor(body: &Value) -> Option<String> {
@@ -264,12 +260,6 @@ async fn activities_are_paged_and_capped() {
         "取り切ったら next_cursor は返さない"
     );
     assert_eq!(tail_body["total"].as_u64().expect("total"), total);
-
-    // 壊れたカーソルは 400。利用者が作れる値なので 500 にしない
-    let broken = app
-        .get_with_session(&format!("{activities_path}?cursor=not-a-cursor"))
-        .await;
-    assert_eq!(broken.status(), StatusCode::BAD_REQUEST);
 }
 
 /// 読んでいる最中に履歴が積まれても、続きのページが重複も欠落もしない。

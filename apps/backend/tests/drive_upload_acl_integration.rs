@@ -7,32 +7,11 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::TestApp;
-use entity::{drive_folders, project_members, projects};
+use common::{TestApp, insert_extra_project};
+use entity::{drive_folders, project_members};
 use reqwest::multipart::{Form, Part};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 use uuid::Uuid;
-
-/// 同一テナント内に 2 つ目のプロジェクトを差し込む（insert_tenant_project は 1 つだけ作る）。
-async fn insert_extra_project(app: &TestApp, tenant_id: Uuid) -> Uuid {
-    let project_id = Uuid::new_v4();
-    let suffix = &project_id.to_string()[..8];
-    projects::ActiveModel {
-        id: Set(project_id),
-        name: Set("second-project".into()),
-        description: Set(String::new()),
-        tenant_id: Set(tenant_id),
-        icon_emoji: Set(None),
-        icon_url: Set(None),
-        key: Set(format!("Q{}", suffix.to_uppercase())),
-        is_personal: Set(false),
-        personal_owner_id: Set(None),
-    }
-    .insert(&app.state.db)
-    .await
-    .expect("insert second project");
-    project_id
-}
 
 async fn insert_project_folder(
     app: &TestApp,

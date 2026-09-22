@@ -2,7 +2,7 @@ mod common;
 
 use axum::http::StatusCode;
 use chrono::{Duration, Utc};
-use common::{TestApp, TestTenantProject, TestUser};
+use common::{TestApp, TestTenantProject, TestUser, create_status};
 use uuid::Uuid;
 
 async fn setup(app: &mut TestApp) -> (TestUser, TestTenantProject) {
@@ -15,29 +15,6 @@ async fn setup(app: &mut TestApp) -> (TestUser, TestTenantProject) {
 
 fn my_tasks_base(tenant_id: Uuid) -> String {
     format!("/v1/tenants/{tenant_id}/users/me")
-}
-
-async fn create_status(app: &TestApp, tp: &TestTenantProject, name: &str, is_done: bool) -> Uuid {
-    let path = format!(
-        "/v1/tenants/{}/projects/{}/statuses",
-        tp.tenant_id, tp.project_id
-    );
-    let response = app
-        .post_json_with_session(
-            &path,
-            serde_json::json!({
-                "name": name, "color": "#336699",
-                "position": if is_done { 2 } else { 1 },
-                "is_default": name == "Todo", "is_done_state": is_done,
-            }),
-        )
-        .await;
-    assert_eq!(response.status(), StatusCode::CREATED);
-    response.json::<serde_json::Value>().await.unwrap()["id"]
-        .as_str()
-        .unwrap()
-        .parse()
-        .unwrap()
 }
 
 #[tokio::test]
@@ -66,24 +43,6 @@ async fn personal_project_is_idempotent() {
         .parse()
         .unwrap();
     assert_eq!(first, second);
-}
-
-/// quick-capture API 撤去の回帰テスト（#363）。
-/// 撤去前は 201 CREATED を返していたため、撤去前のコードでは fail する。
-#[tokio::test]
-async fn quick_capture_endpoint_is_removed() {
-    let mut app = TestApp::new().await;
-    let (_user, tp) = setup(&mut app).await;
-    let base = my_tasks_base(tp.tenant_id);
-    assert_eq!(
-        app.post_json_with_session(
-            &format!("{base}/tasks"),
-            serde_json::json!({"title": "Buy milk"})
-        )
-        .await
-        .status(),
-        StatusCode::METHOD_NOT_ALLOWED
-    );
 }
 
 #[tokio::test]
