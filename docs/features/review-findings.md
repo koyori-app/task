@@ -307,6 +307,25 @@ task review list   --project TASK --pr 618 --repo org/app --host-url https://for
 task review rounds --project TASK --pull-request-id 00000000-0000-0000-0000-000000000000
 ```
 
+レビューの通知（ラウンドの起票・指摘の状態遷移）は `task notifications` で読む。
+`--json` を付けなければ 1 件 1 行（`{未読|既読}\t{日時}\t{種別}\t{対象}\t{要約}`）で、
+レビューの通知の対象は `PR #618 @ owner/name R2` の形になる。
+
+```bash
+task notifications list --unread --limit 20
+task notifications read <notification-id>
+task notifications read-all
+
+# プロジェクトごとの受け取り設定（フラグ無しは現在値の表示）
+task notifications settings --project TASK
+task notifications settings --project TASK --in-app review_round_created,review_finding_changed
+task notifications settings --project TASK --email ""      # メールは受け取らない
+```
+
+種別の綴りは送信前に検証し、未知の値は終了コード 2 で弾く。読み取りは `read:task`、
+既読化と設定の更新は `write:task` のスコープで通る（PAT の視界は
+`apps/backend/docs/personal-access-tokens-authz.md`）。
+
 投入 JSON と絞り込みの値は**送信前に CLI 側でも検証する**。綴り違い
 （`severity: "critical"`、`--state closed`）や必須項目の欠落は、どの指摘の
 どの項目かを添えて終了コード 2 で弾く。サーバー側の検証に任せきりにすると、

@@ -46,6 +46,16 @@ fn render_human(value: &Value, out: &mut Vec<String>) {
                 }
                 return;
             }
+            if let Some(Value::Array(notifications)) = map.get("notifications") {
+                for notification in notifications {
+                    render_human(notification, out);
+                }
+                return;
+            }
+            if map.contains_key("notification_type") && map.contains_key("created_at") {
+                out.push(format_notification(map));
+                return;
+            }
             if map.contains_key("seq_key") && map.contains_key("title") {
                 // `seq_key` が null の行もあるので、その場合は id へ落とす
                 let key = map
@@ -66,6 +76,88 @@ fn render_human(value: &Value, out: &mut Vec<String>) {
             out.push(serde_json::to_string_pretty(value).unwrap_or_default());
         }
         other => out.push(as_text(Some(other))),
+    }
+}
+
+/// 通知 1 件を 1 行にする: `{未読|既読}\t{日時}\t{種別}\t{対象}\t{要約}`。
+///
+/// 対象と要約は種別ごとに形が違う（タスクの通知はタスク、レビューの通知は PR）。
+/// 畳めない種別は payload をそのまま見せて、内容を落とさない。
+fn format_notification(map: &serde_json::Map<String, Value>) -> String {
+    let read = match map.get("read_at") {
+        None | Some(Value::Null) => "未読",
+        Some(_) => "既読",
+    };
+    let kind = as_text(map.get("notification_type"));
+    let payload = map.get("payload").and_then(Value::as_object);
+    format!(
+        "{read}\t{}\t{kind}\t{}\t{}",
+        as_text(map.get("created_at")),
+        notification_target(map, payload),
+        notification_summary(&kind, payload),
+    )
+}
+
+/// 何についての通知か。タスクの通知はタスク、レビューの通知は PR を指す。
+fn notification_target(
+    map: &serde_json::Map<String, Value>,
+    payload: Option<&serde_json::Map<String, Value>>,
+) -> String {
+    if let Some(task) = map.get("task").and_then(Value::as_object) {
+        return format!(
+            "#{} {}",
+            as_text(task.get("seq_id")),
+            as_text(task.get("title"))
+        );
+    }
+    let Some(payload) = payload else {
+        return String::new();
+    };
+    let pr = match payload.get("pr_number") {
+        None | Some(Value::Null) => return String::new(),
+        Some(pr) => as_text(Some(pr)),
+    };
+    let mut target = format!("PR #{pr}");
+    let repo = as_text(payload.get("repo"));
+    if !repo.is_empty() {
+        target.push_str(&format!(" @ {repo}"));
+    }
+    let round = as_text(payload.get("round"));
+    if !round.is_empty() {
+        target.push_str(&format!(" R{round}"));
+    }
+    target
+}
+
+fn notification_summary(kind: &str, payload: Option<&serde_json::Map<String, Value>>) -> String {
+    let Some(payload) = payload else {
+        return String::new();
+    };
+    match kind {
+        "review_round_created" => {
+            let counts = payload.get("counts").and_then(Value::as_object);
+            let count = |severity: &str| match counts {
+                Some(counts) => as_text(counts.get(severity)),
+                None => "0".into(),
+            };
+            format!(
+                "{} high={} medium={} low={} nit={}",
+                as_text(payload.get("reviewer")),
+                count("high"),
+                count("medium"),
+                count("low"),
+                count("nit"),
+            )
+        }
+        "review_finding_changed" => format!(
+            "{} {}→{}",
+            as_text(payload.get("title")),
+            as_text(payload.get("from")),
+            as_text(payload.get("to")),
+        ),
+        "assigned" => as_text(payload.get("assigned_by")),
+        // 畳み方を決めていない種別は、payload をそのまま 1 行で出す
+        _ => serde_json::to_string(payload).unwrap_or_default(),
     }
 }
 
@@ -145,6 +237,72 @@ mod tests {
             human(listing).starts_with('{'),
             "オブジェクトは JSON のまま出る"
         );
+    }
+
+    /// 通知の一覧は 1 件 1 行に畳む。タスクの通知は `#{seq_id} {title}` を指す。
+    #[test]
+    fn folds_a_task_notification_into_one_line() {
+        let listing = json!({
+            "unread_count": 1,
+            "notifications": [{
+                "id": "n-1",
+                "notification_type": "assigned",
+                "project_id": "p-1",
+                "task": { "id": "t-1", "seq_id": 42, "title": "OAuth 対応" },
+                "payload": { "assigned_by": "yupix", "role": "primary" },
+                "read_at": null,
+                "created_at": "2026-05-27T10:00:00Z",
+            }],
+        });
+        assert_eq!(
+            human(listing),
+            "未読\t2026-05-27T10:00:00Z\tassigned\t#42 OAuth 対応\tyupix"
+        );
+    }
+
+    /// レビューの通知はタスクに紐づかないので、対象は payload の PR から組む。
+    #[test]
+    fn folds_a_review_notification_into_the_pull_request_it_is_about() {
+        let listing = json!({
+            "unread_count": 0,
+            "notifications": [{
+                "id": "n-2",
+                "notification_type": "review_round_created",
+                "project_id": "p-1",
+                "task": null,
+                "payload": {
+                    "repo": "koyori-app/task",
+                    "pr_number": 618,
+                    "round": 2,
+                    "reviewer": "yupix",
+                    "counts": { "high": 1, "medium": 2, "low": 0, "nit": 0 },
+                },
+                "read_at": "2026-05-27T11:00:00Z",
+                "created_at": "2026-05-27T10:00:00Z",
+            }],
+        });
+        assert_eq!(
+            human(listing),
+            "既読\t2026-05-27T10:00:00Z\treview_round_created\tPR #618 @ koyori-app/task R2\tyupix high=1 medium=2 low=0 nit=0"
+        );
+    }
+
+    /// 畳み方を決めていない種別でも、payload を落とさず 1 行に収める。
+    #[test]
+    fn keeps_the_payload_of_a_notification_type_without_a_summary() {
+        let line = human(json!({
+            "notification_type": "pr_merged",
+            "task": null,
+            "payload": { "pr_number": null, "merged_by": "yupix" },
+            "read_at": null,
+            "created_at": "2026-05-27T10:00:00Z",
+        }));
+        // payload の項目の並びは serde_json の持ち方次第なので、行の形と中身だけ見る
+        assert!(
+            line.starts_with("未読\t2026-05-27T10:00:00Z\tpr_merged\t\t{"),
+            "{line}"
+        );
+        assert!(line.contains("\"merged_by\":\"yupix\""), "{line}");
     }
 
     #[test]

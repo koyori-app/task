@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use crate::AppState;
 use crate::auth_helpers::visible_project_ids;
 use crate::error::AppError;
-use crate::extractors::AuthUser;
+use crate::extractors::{AuthMethod, AuthUser};
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
 use entity::{
@@ -77,16 +77,69 @@ async fn accessible_project_ids(
         .collect())
 }
 
+/// 通知の視界。list / read / read-all / unread_count はすべてこれ 1 つで絞る。
+struct NotificationScope {
+    /// 見てよい通知の `project_id`。
+    project_ids: HashSet<Uuid>,
+    /// `project_id IS NULL` の通知（レビュー通知にプロジェクトを持たせる前の行）を見せるか。
+    /// どのプロジェクトのものか判別できないので、束縛の無いセッションにだけ見せる。
+    include_unscoped: bool,
+}
+
+/// 認証方式ごとの通知の視界を出す。
+///
+/// セッションは本人が入れるプロジェクトすべて。PAT は「PAT のテナントのプロジェクト
+/// ∩ `allowed_project_ids`」まで絞る（バインドは所属の証明ではないので、所属判定
+/// 込みの `accessible_project_ids` との積を取る）。
+async fn visible_project_ids_for(
+    db: &sea_orm::DatabaseConnection,
+    auth: &AuthUser,
+) -> Result<NotificationScope, AppError> {
+    let mut project_ids = accessible_project_ids(db, auth.user_id).await?;
+    let AuthMethod::PersonalToken {
+        tenant_id,
+        allowed_project_ids,
+        ..
+    } = &auth.method
+    else {
+        return Ok(NotificationScope {
+            project_ids,
+            include_unscoped: true,
+        });
+    };
+
+    let tenant_project_ids: HashSet<Uuid> = projects::Entity::find()
+        .filter(projects::Column::TenantId.eq(*tenant_id))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    project_ids.retain(|id| {
+        tenant_project_ids.contains(id)
+            && allowed_project_ids
+                .as_ref()
+                .is_none_or(|allowed| allowed.contains(id))
+    });
+    Ok(NotificationScope {
+        project_ids,
+        include_unscoped: false,
+    })
+}
+
 /// 通知クエリにアクセス制御条件を追加するヘルパー。
 ///
 /// 判定はプロジェクト単位。タスクに紐づかない通知（レビューは PR 単位で起きる）も
-/// 同じ規則で絞れる。`project_id IS NULL` の通知は常に許可。
-fn accessible_notification_condition(project_ids: &HashSet<Uuid>) -> Condition {
-    Condition::any()
-        .add(notifications::Column::ProjectId.is_null())
-        .add(
-            notifications::Column::ProjectId.is_in(project_ids.iter().copied().collect::<Vec<_>>()),
-        )
+/// 同じ規則で絞れる。
+fn accessible_notification_condition(scope: &NotificationScope) -> Condition {
+    let mut condition = Condition::any().add(
+        notifications::Column::ProjectId
+            .is_in(scope.project_ids.iter().copied().collect::<Vec<_>>()),
+    );
+    if scope.include_unscoped {
+        condition = condition.add(notifications::Column::ProjectId.is_null());
+    }
+    condition
 }
 
 #[utoipa::path(get, path = "/{id}/watchers", tag = "Tasks", responses((status = 200, body = WatcherListResponse), CrudErrors))]
@@ -173,14 +226,14 @@ pub async fn list_notifications(
     auth: AuthUser,
     Query(q): Query<ListNotificationsQuery>,
 ) -> Result<Json<NotificationListResponse>, AppError> {
-    auth.require_session()?;
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
 
-    let accessible_proj_ids = accessible_project_ids(&state.db, auth.user_id).await?;
+    let scope = visible_project_ids_for(&state.db, &auth).await?;
 
     let unread_count: u64 = notifications::Entity::find()
         .filter(notifications::Column::UserId.eq(auth.user_id))
         .filter(notifications::Column::ReadAt.is_null())
-        .filter(accessible_notification_condition(&accessible_proj_ids))
+        .filter(accessible_notification_condition(&scope))
         .count(&state.db)
         .await?;
 
@@ -192,7 +245,7 @@ pub async fn list_notifications(
         query = query.filter(notifications::Column::ReadAt.is_null());
     }
     // DBクエリレベルでアクセス可能な通知のみ取得する（ページング後に絞り込むと件数が減る）
-    query = query.filter(accessible_notification_condition(&accessible_proj_ids));
+    query = query.filter(accessible_notification_condition(&scope));
     let rows = query
         .order_by(
             Expr::cust("CASE WHEN read_at IS NULL THEN 0 ELSE 1 END"),
@@ -250,7 +303,7 @@ pub async fn mark_notification_read(
     auth: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<NotificationItem>, AppError> {
-    auth.require_session()?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
 
     let notification = notifications::Entity::find_by_id(id)
         .filter(notifications::Column::UserId.eq(auth.user_id))
@@ -258,12 +311,13 @@ pub async fn mark_notification_read(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // プロジェクトに紐づく通知は、そのプロジェクトに入れるかを確認する
-    if let Some(project_id) = notification.project_id
-        && !accessible_project_ids(&state.db, auth.user_id)
-            .await?
-            .contains(&project_id)
-    {
+    // 既読にできるのは一覧に出る通知だけ。視界の判定は一覧と同じものを使う
+    let scope = visible_project_ids_for(&state.db, &auth).await?;
+    let visible = match notification.project_id {
+        Some(project_id) => scope.project_ids.contains(&project_id),
+        None => scope.include_unscoped,
+    };
+    if !visible {
         return Err(AppError::NotFound);
     }
 
@@ -303,9 +357,9 @@ pub async fn mark_all_notifications_read(
     State(state): State<AppState>,
     auth: AuthUser,
 ) -> Result<StatusCode, AppError> {
-    auth.require_session()?;
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
 
-    let accessible_proj_ids = accessible_project_ids(&state.db, auth.user_id).await?;
+    let scope = visible_project_ids_for(&state.db, &auth).await?;
 
     let mut update = notifications::Entity::update_many()
         .col_expr(
@@ -314,7 +368,7 @@ pub async fn mark_all_notifications_read(
         )
         .filter(notifications::Column::UserId.eq(auth.user_id))
         .filter(notifications::Column::ReadAt.is_null());
-    update = update.filter(accessible_notification_condition(&accessible_proj_ids));
+    update = update.filter(accessible_notification_condition(&scope));
     update.exec(&state.db).await?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -1007,6 +1007,16 @@ impl TestApp {
             .expect("delete request")
     }
 
+    /// 本文を取らない更新を PAT で叩く（全件既読・1 件既読）。
+    pub async fn patch_with_bearer(&self, path: &str, token: &str) -> Response {
+        self.client
+            .patch(format!("{}{path}", self.base_url))
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("bearer request")
+    }
+
     pub async fn get_with_bearer(&self, path: &str, token: &str) -> Response {
         self.client
             .get(format!("{}{path}", self.base_url))

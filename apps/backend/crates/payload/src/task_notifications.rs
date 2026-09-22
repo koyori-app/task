@@ -28,7 +28,9 @@ pub struct WatcherListResponse {
     pub watchers: Vec<WatcherUser>,
 }
 
-#[derive(Serialize, ToSchema)]
+// 通知の応答 DTO は CLI（`task notifications`）が読むので `Deserialize` を付ける。
+// 設定更新は CLI が送るので `Serialize` も要る（CLAUDE.md の DTO 規則）。
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct NotificationTaskSummary {
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
@@ -36,7 +38,7 @@ pub struct NotificationTaskSummary {
     pub title: String,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct NotificationItem {
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
@@ -54,7 +56,7 @@ pub struct NotificationItem {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct NotificationListResponse {
     pub unread_count: u64,
     pub notifications: Vec<NotificationItem>,
@@ -67,13 +69,13 @@ pub struct ListNotificationsQuery {
     pub offset: Option<u64>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct NotificationSettingsResponse {
     pub email_events: Vec<String>,
     pub in_app_events: Vec<String>,
 }
 
-#[derive(Validate, Deserialize, ToSchema)]
+#[derive(Validate, Serialize, Deserialize, ToSchema)]
 pub struct UpdateNotificationSettingsRequest {
     #[validate(custom(function = "validate_known_event_types"))]
     pub email_events: Vec<String>,
