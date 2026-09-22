@@ -55,6 +55,7 @@ async fn auth_whoami_reads_the_current_personal_token() {
             "name": "review-bot",
             "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             "username": "yupix",
+            "tenant_id": TENANT,
             "scopes": ["read:task"],
             "allowed_project_ids": [PROJECT_ID],
             "expires_at": "2026-12-31T00:00:00Z",
