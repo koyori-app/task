@@ -36,7 +36,7 @@ use backend::{
         drive::DriveConfig,
         http::create_http_client,
         oauth::{OAuthSettings, ProviderConfig},
-        smtp::SmtpClient,
+        smtp::{SentMail, SmtpClient},
         storage::setup_storage,
         totp::build_totp,
         webauthn::build_webauthn,
@@ -460,6 +460,7 @@ pub struct TestApp {
     pub state: AppState,
     pub base_url: String,
     pub mock: MockOAuthHandle,
+    sent_mails: Arc<Mutex<Vec<SentMail>>>,
     client: Client,
     router: Router,
 }
@@ -508,14 +509,8 @@ impl TestApp {
             .expect("connect database");
         ensure_schema(&db).await;
 
-        let smtp_client = SmtpClient::new(
-            &settings.smtp_host,
-            settings.smtp_port,
-            &settings.smtp_username,
-            &settings.smtp_password,
-            &settings.smtp_from,
-        )
-        .expect("smtp client");
+        // 実 SMTP へは繋がない。送信済みメールは `sent_mails()` で読む
+        let (smtp_client, sent_mails) = SmtpClient::capture();
         let redis_client = RedisConnection::new(&settings.redis_url);
         redis_client.ping().await.expect("redis ping");
 
@@ -618,9 +613,15 @@ impl TestApp {
             state,
             base_url,
             mock,
+            sent_mails,
             client,
             router,
         }
+    }
+
+    /// これまでに送信されたメール（古い順）。
+    pub fn sent_mails(&self) -> Vec<SentMail> {
+        self.sent_mails.lock().expect("sent mails lock").clone()
     }
 
     pub async fn request(&self, req: Request<Body>) -> TestResponse {

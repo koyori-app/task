@@ -16,6 +16,9 @@ pub struct Model {
     pub payload: Json,
     pub read_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
+    pub email_queued_at: Option<DateTimeWithTimeZone>,
+    pub emailed_at: Option<DateTimeWithTimeZone>,
+    pub email_attempts: i16,
     #[sea_orm(
         belongs_to,
         from = "task_id",

@@ -62,8 +62,26 @@ async fn in_app_enabled<C: ConnectionTrait>(
     Ok(events.iter().any(|e| e == event_type))
 }
 
+/// メール通知が有効か。設定行が無ければ無効（`email_events` の既定は空）。
+async fn email_enabled<C: ConnectionTrait>(
+    db: &C,
+    user_id: Uuid,
+    project_id: Uuid,
+    event_type: &str,
+) -> Result<bool, AppError> {
+    Ok(notification_settings::Entity::find()
+        .filter(notification_settings::Column::UserId.eq(user_id))
+        .filter(notification_settings::Column::ProjectId.eq(project_id))
+        .one(db)
+        .await?
+        .is_some_and(|s| s.email_events.iter().any(|e| e == event_type)))
+}
+
 /// `project_id` は通知の可視性の判定に使う（読み取り API が「入れないプロジェクトの
 /// 通知」を落とす）。タスクに紐づかないレビュー通知も判定できるよう、`task_id` とは別に持つ。
+///
+/// `email_events` に入っている種別なら `email_queued_at` を立てる。通知の行そのものが
+/// メールの outbox で、`job::notification_email` の掃き出しループが拾って送る。
 pub async fn create_notification<C: ConnectionTrait>(
     db: &C,
     user_id: Uuid,
@@ -72,6 +90,13 @@ pub async fn create_notification<C: ConnectionTrait>(
     notification_type: &str,
     payload: Json,
 ) -> Result<(), AppError> {
+    let now = chrono::Utc::now();
+    let email_queued_at = match project_id {
+        Some(project_id) if email_enabled(db, user_id, project_id, notification_type).await? => {
+            Some(now.into())
+        }
+        _ => None,
+    };
     notifications::ActiveModel {
         id: Set(Uuid::new_v4()),
         user_id: Set(user_id),
@@ -80,7 +105,10 @@ pub async fn create_notification<C: ConnectionTrait>(
         notification_type: Set(notification_type.to_string()),
         payload: Set(payload),
         read_at: Set(None),
-        created_at: Set(chrono::Utc::now().into()),
+        created_at: Set(now.into()),
+        email_queued_at: Set(email_queued_at),
+        emailed_at: Set(None),
+        email_attempts: Set(0),
     }
     .insert(db)
     .await?;

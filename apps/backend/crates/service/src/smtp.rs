@@ -3,16 +3,33 @@
 use lettre::Tokio1Executor;
 use lettre::message::{Mailbox, Message, MultiPart, SinglePart};
 use lettre::{AsyncSmtpTransport, AsyncTransport, transport::smtp::authentication::Credentials};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::timeout;
 
 /// SMTP送信タイムアウト（秒）
 const SMTP_SEND_TIMEOUT_SECS: u64 = 30;
 
+/// 送信済みメールの控え（[`SmtpClient::capture`] のときだけ溜まる）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SentMail {
+    pub to: String,
+    pub subject: String,
+    pub text: String,
+    pub html: Option<String>,
+}
+
+#[derive(Clone)]
+enum Transport {
+    Smtp(Box<AsyncSmtpTransport<Tokio1Executor>>),
+    /// テスト用。SMTP へ繋がずに控えだけ残す
+    Capture(Arc<Mutex<Vec<SentMail>>>),
+}
+
 /// SMTPクライアントの構造体
 #[derive(Clone)]
 pub struct SmtpClient {
-    mailer: AsyncSmtpTransport<Tokio1Executor>,
+    transport: Transport,
     smtp_from: String,
 }
 
@@ -56,9 +73,21 @@ impl SmtpClient {
             .build();
 
         Ok(SmtpClient {
-            mailer,
+            transport: Transport::Smtp(Box::new(mailer)),
             smtp_from: smtp_from.to_string(),
         })
+    }
+
+    /// 送信せずに控えを溜めるクライアント（統合テスト用）。
+    pub fn capture() -> (Self, Arc<Mutex<Vec<SentMail>>>) {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        (
+            SmtpClient {
+                transport: Transport::Capture(sent.clone()),
+                smtp_from: "noreply@example.com".to_string(),
+            },
+            sent,
+        )
     }
 
     /// メールを送信する関数
@@ -94,6 +123,21 @@ impl SmtpClient {
         body_text: &str,
         body_html: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let mailer = match &self.transport {
+            Transport::Capture(sent) => {
+                sent.lock()
+                    .map_err(|e| format!("capture smtp lock poisoned: {e}"))?
+                    .push(SentMail {
+                        to: to.to_string(),
+                        subject: subject.to_string(),
+                        text: body_text.to_string(),
+                        html: body_html.map(str::to_string),
+                    });
+                return Ok(());
+            }
+            Transport::Smtp(mailer) => mailer,
+        };
+
         let builder = Message::builder()
             .from(self.smtp_from.parse::<Mailbox>()?)
             .to(to.parse::<Mailbox>()?)
@@ -111,7 +155,7 @@ impl SmtpClient {
         // 送信処理にタイムアウトを30秒に設定
         timeout(
             Duration::from_secs(SMTP_SEND_TIMEOUT_SECS),
-            self.mailer.send(email),
+            mailer.send(email),
         )
         .await
         .map_err(|_| "SMTP send timeout")??;
