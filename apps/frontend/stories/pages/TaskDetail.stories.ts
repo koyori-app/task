@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { expect, fn, screen, userEvent, within } from 'storybook/test';
+import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test';
 import { provide } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import TaskDetailPage from '@/pages/@tenant/projects/@projectKey/tasks/@taskId/+Page.vue';
@@ -1100,11 +1100,20 @@ export const CommentPost: Story = {
     const user = userEvent.setup();
     const textarea = await canvas.findByRole('textbox', { name: 'コメントを入力' });
     await user.type(textarea, '新しく投稿するコメント');
-    await user.click(canvas.getByRole('button', { name: 'コメントする' }));
+    await user.click(await canvas.findByRole('button', { name: 'コメントする' }));
 
-    // invalidate → 一覧再取得で投稿済みコメントが並ぶ
-    await expect(canvas.findByText('新しく投稿するコメント')).resolves.toBeInTheDocument();
+    // submitComment は POST → invalidate/refetch 完了後に true。submitDraft はその後に下書きを消す。
+    // canvas 全体の findByText だと入力欄の文字に先に当たり、再取得を待たず assert してしまう。
     await expect(textarea).toHaveValue('');
+
+    const commentList = await waitFor(() => {
+      const list = canvasElement.querySelector('[data-task-comments] ul');
+      if (!list) throw new Error('comment list not ready');
+      return list as HTMLElement;
+    });
+    await expect(
+      within(commentList).findByText('新しく投稿するコメント'),
+    ).resolves.toBeInTheDocument();
   },
 };
 
