@@ -28,7 +28,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: valkey/valkey:9.1
+    image: valkey/valkey:9.2
     volumes:
       - valkeydata:/data
     healthcheck:
