@@ -25,6 +25,14 @@ export const KFM_STORY_INPUTS = {
     '| 長めのセル内容 | 中央 | 2,400 |',
   ].join('\n'),
 
+  // 英字だけの横溢れ試料。CJK と違い語の中で折れないため min-content が
+  // 語の幅で止まり、表は縮めず横に流れる——字の種で絵が分かれることの対照
+  'gfm-table-overflow-latin': [
+    '| Column1 | Column2 | Column3 | Column4 | Column5 | Column6 | Column7 | Column8 |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| LongCellContentNumberOne | LongCellContentNumberTwo | LongCellContentNumberThree | LongCellContentNumberFour | LongCellContentNumberFive | LongCellContentNumberSix | LongCellContentNumberSeven | LongCellContentNumberEight |',
+  ].join('\n'),
+
   'gfm-table-overflow': [
     '| 列1 | 列2 | 列3 | 列4 | 列5 | 列6 | 列7 | 列8 |',
     '| --- | --- | --- | --- | --- | --- | --- | --- |',

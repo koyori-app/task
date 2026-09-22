@@ -7,6 +7,7 @@ import nestedListsHtml from '@/lib/kfm-story-fixtures/rendered/gfm-nested-lists.
 import strikeAutolinkHtml from '@/lib/kfm-story-fixtures/rendered/gfm-strike-autolink.html?raw';
 import tableAlignmentHtml from '@/lib/kfm-story-fixtures/rendered/gfm-table-alignment.html?raw';
 import tableOverflowHtml from '@/lib/kfm-story-fixtures/rendered/gfm-table-overflow.html?raw';
+import tableOverflowLatinHtml from '@/lib/kfm-story-fixtures/rendered/gfm-table-overflow-latin.html?raw';
 import headingsHtml from '@/lib/kfm-story-fixtures/rendered/gfm-headings.html?raw';
 import taskListHtml from '@/lib/kfm-story-fixtures/rendered/gfm-task-list.html?raw';
 // CSS サイドカー: レンダラは CSS を import しない契約のため、消費側 (= story) が明示 import。
@@ -83,15 +84,17 @@ export const TableOverflow: Story = {
     docs: {
       description: {
         story:
-          '壊れたら: 幅広の表は表の側だけが横に流れ (style.css の display:block ＋ overflow-x:auto)、親を押し広げない。親からはみ出す絵に変わったらサイドカーの表ルールか消費側 overflow 方針の変化 (play で幅関係と横スクロールの成立を固定)。',
+          '壊れたら: 幅広の表は表の側だけが横に流れ (style.css の display:block ＋ overflow-x:auto ＋ th/td の min-width)、親を押し広げない。列が読めない幅 (一字ずつの縦落ち) に潰れる・あふれが横に流れなくなる・親からはみ出す——いずれもサイドカーの表ルールの変化 (play で列幅の下限と実スクロールの成立まで固定)。',
       },
     },
   },
   play: async ({ canvasElement }) => {
     const container = canvasElement.querySelector('.max-w-md');
     const table = canvasElement.querySelector('table');
+    const cell = canvasElement.querySelector('tbody td');
     await expect(container).not.toBeNull();
     await expect(table).not.toBeNull();
+    await expect(cell).not.toBeNull();
     // 幅制限の実効 (Tailwind max-w-md = 28rem)。utility が当たらなければ「狭い親」の前提が崩れる
     await expect(container ? getComputedStyle(container).maxWidth : '').toBe('448px');
     // 表は親の幅制限に収まり (max-width:100%)、あふれる中身は表自身の
@@ -100,10 +103,45 @@ export const TableOverflow: Story = {
     const tableWidth = table?.getBoundingClientRect().width ?? 0;
     await expect(containerWidth).toBeGreaterThan(0);
     await expect(tableWidth).toBeLessThanOrEqual(containerWidth);
-    // あふれの逃げ口が表の側に在る (ページ側へ押し広げない) こと。
-    // この題材の CJK セルは折り返せるため列が圧縮され、実スクロールは
-    // 生じないことがある——不変条件は overflow-x の成立と親内収まりの二つ
     await expect(table ? getComputedStyle(table).overflowX : '').toBe('auto');
+    // 「横溢れ」が絵として成り立っていること。overflow-x が auto でも、
+    // CJK セルは字間で折れるため列が一字幅まで潰れて「流れない」壊れ方が
+    // できる (実際に起きた退行)。中身は縮めず、表の側が現に横へ流れる
+    await expect(table ? table.scrollWidth : 0).toBeGreaterThan(table ? table.clientWidth : 0);
+    // 列が読める幅で止まっていること (th/td の min-width: 6em = 96px)。
+    // 一字ずつの縦落ちでは一列がおよそ 56px (padding 込み) まで潰れる
+    const cellWidth = cell?.getBoundingClientRect().width ?? 0;
+    await expect(cellWidth).toBeGreaterThanOrEqual(96);
+  },
+};
+
+export const TableOverflowLatin: Story = {
+  name: '表（横溢れ・英字）',
+  args: { html: tableOverflowLatinHtml },
+  // CJK の題材と同じ狭い親。字の種による絵の分かれを対照として固定する
+  render: (args: KfmStoryArgs) => ({
+    setup: () => ({ args }),
+    template: `<div class="max-w-md"><div class="${KFM_CONTENT_CLASS}" v-html="args.html" /></div>`,
+  }),
+  parameters: {
+    docs: {
+      description: {
+        story:
+          '壊れたら: 英字の表は語の中で折れないため、min-width 以前から横に流れるのが正しい絵。流れなくなったら width:max-content か overflow-x の剥がれ。CJK の題材 (表（横溢れ）) と対で、字の種によらず「表の側が流れる」ことを固定する。',
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const container = canvasElement.querySelector('.max-w-md');
+    const table = canvasElement.querySelector('table');
+    await expect(container).not.toBeNull();
+    await expect(table).not.toBeNull();
+    const containerWidth = container?.getBoundingClientRect().width ?? 0;
+    const tableWidth = table?.getBoundingClientRect().width ?? 0;
+    await expect(tableWidth).toBeLessThanOrEqual(containerWidth);
+    await expect(table ? getComputedStyle(table).overflowX : '').toBe('auto');
+    // 語内で折れない英字は列を潰せず、表は必ず横に流れる
+    await expect(table ? table.scrollWidth : 0).toBeGreaterThan(table ? table.clientWidth : 0);
   },
 };
 
