@@ -166,13 +166,6 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .data(review_summary_worker_state)
         .build(review_summary::process);
 
-    let retention_worker =
-        WorkerBuilder::new(format!("{}-worker", notification_retention::WORKER_NAME))
-            .backend(notification_retention::stream())
-            .enable_tracing()
-            .data(job_state.clone())
-            .build(notification_retention::process);
-
     let job_state_for_sweeper = job_state.clone();
     let issue_sync_worker_storage = state.github_issue_sync_storage.as_ref().clone();
     let issue_sync_worker = WorkerBuilder::new(format!("{GITHUB_ISSUE_SYNC_QUEUE}-worker"))
@@ -191,13 +184,6 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let review_summary_shutdown = shutdown_rx.clone();
-    let retention_shutdown = shutdown_rx.clone();
-    let retention_worker_handle = tokio::spawn(async move {
-        retention_worker
-            .run_until(wait_for_shutdown(retention_shutdown))
-            .await
-    });
-
     let review_summary_worker_handle = tokio::spawn(async move {
         review_summary_worker
             .run_until(wait_for_shutdown(review_summary_shutdown))
@@ -238,6 +224,12 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     // 通知メールの掃き出し。通知の行が outbox なので、ジョブの投入ではなく
     // 定期的に「メール待ち」の行を拾って送る（job::notification_email）。
     tokio::spawn(notification_email::run_sweeper(
+        job_state_for_sweeper.clone(),
+        shutdown_rx.clone(),
+    ));
+
+    // 保持期間を過ぎた通知の掃除（job::notification_retention）。1 日 1 回、起動直後にも走る
+    tokio::spawn(notification_retention::run_sweeper(
         job_state_for_sweeper.clone(),
         shutdown_rx.clone(),
     ));
@@ -347,12 +339,6 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         Ok(Ok(())) => info!("review summary worker stopped"),
         Ok(Err(e)) => warn!("review summary worker error: {e}"),
         Err(e) => warn!("review summary worker join error: {e}"),
-    }
-
-    match retention_worker_handle.await {
-        Ok(Ok(())) => info!("notification retention worker stopped"),
-        Ok(Err(e)) => warn!("notification retention worker error: {e}"),
-        Err(e) => warn!("notification retention worker join error: {e}"),
     }
 
     Ok(())
