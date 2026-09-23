@@ -1,3 +1,6 @@
+import type { Component } from 'vue';
+import { PhBracketsCurly, PhDiscordLogo, PhWebhooksLogo } from '@phosphor-icons/vue';
+
 /** 購読できるイベント（backend `service::webhooks::EVENTS` と同じ集合。仕様 §3 の実装済み） */
 export const WEBHOOK_EVENTS = [
   { value: 'task.created', label: 'タスクの作成' },
@@ -6,9 +9,10 @@ export const WEBHOOK_EVENTS = [
   { value: 'review.finding_changed', label: 'レビュー指摘の状態変更' },
 ] as const;
 
+/** 送信先の形式。外部サービス向けは連携セクションと同じくロゴで示す */
 export const WEBHOOK_FORMATS = [
-  { value: 'json', label: 'JSON' },
-  { value: 'discord', label: 'Discord' },
+  { value: 'json', label: 'JSON', icon: PhBracketsCurly },
+  { value: 'discord', label: 'Discord', icon: PhDiscordLogo },
 ] as const;
 
 export type WebhookFormat = (typeof WEBHOOK_FORMATS)[number]['value'];
@@ -19,6 +23,11 @@ export function webhookEventLabel(event: string): string {
 
 export function webhookFormatLabel(format: string): string {
   return WEBHOOK_FORMATS.find((f) => f.value === format)?.label ?? format;
+}
+
+/** 形式のロゴ。未知の形式は汎用の Webhook アイコン */
+export function webhookFormatIcon(format: string): Component {
+  return WEBHOOK_FORMATS.find((f) => f.value === format)?.icon ?? PhWebhooksLogo;
 }
 
 /**
