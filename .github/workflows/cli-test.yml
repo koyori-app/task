@@ -1,20 +1,30 @@
 name: CLI Unit Test
 
-# CLI は apps/backend の Cargo ワークスペースのメンバーなので、fmt / clippy / 型検査は
-# backend-fmt / backend-clippy / backend-test（いずれも --workspace）が見る。
-# ここは CLI だけを変えたときに、Postgres も Redis も起こさず速く回すための入口。
-# backend-test も同じ paths で走るが、あちらは DB 込みで重い。
+# CLI を含むワークスペースの整形は backend-fmt（--all）、
+# lint / 型検査は backend-clippy（--workspace --all-targets）が見る。
+# backend-test の nextest は既定の backend package だけを選び、CLI の試験は含まない。
+# ここは CLI と共有 crate、依存定義の変更で、Postgres も Redis も起こさず CLI の試験を回す入口。
 
 on:
   pull_request:
     paths:
       - 'apps/backend/crates/cli/**'
+      - 'apps/backend/crates/common/**'
+      - 'apps/backend/crates/entity/**'
+      - 'apps/backend/crates/payload/**'
+      - 'apps/backend/Cargo.toml'
+      - 'apps/backend/Cargo.lock'
       - 'rust-toolchain.toml'
       - '.github/workflows/cli-test.yml'
   push:
     branches: [main]
     paths:
       - 'apps/backend/crates/cli/**'
+      - 'apps/backend/crates/common/**'
+      - 'apps/backend/crates/entity/**'
+      - 'apps/backend/crates/payload/**'
+      - 'apps/backend/Cargo.toml'
+      - 'apps/backend/Cargo.lock'
       - 'rust-toolchain.toml'
       - '.github/workflows/cli-test.yml'
 
