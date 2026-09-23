@@ -163,6 +163,14 @@
 .kfm-content td {
   padding: 0.375rem 0.75rem;
   border: 1px solid var(--border);
+  /*
+   * 列の下限幅。CJK はどの字間でも折り返せるため min-content が一字幅まで
+   * 縮み、max-width:100% の締めの下で 8 列の表が一字ずつの縦落ちになる
+   * (英字は語内で折れず min-content が語幅で止まるため起きない)。
+   * 下限を置けば列は読める幅で止まり、収まらない分は表側の
+   * overflow-x:auto へ流れる——story 名 (横溢れ) の絵が CJK でも成り立つ。
+   */
+  min-width: 6em;
 }
 
 /* ヘッダー行の区別: 薄い地と太字 (GitHub 同様、地はトークンで .dark に追従) */
