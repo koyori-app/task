@@ -1020,11 +1020,17 @@ fn ids(page: &Value) -> Vec<String> {
         .collect()
 }
 
-/// `path` から `key=next_cursor` で最後まで読み、(id 列, 各ページの件数) を返す
-async fn read_pages(app: &TestApp, path: &str, key: &str) -> (Vec<String>, Vec<usize>) {
+/// `path` から `key=start` で読み始め、以後 `key=next_cursor` で最後まで読む。
+/// (id 列, 各ページの件数) を返す
+async fn read_pages(
+    app: &TestApp,
+    path: &str,
+    key: &str,
+    start: Option<&str>,
+) -> (Vec<String>, Vec<usize>) {
     let mut got = Vec::new();
     let mut sizes = Vec::new();
-    let mut next: Option<String> = None;
+    let mut next: Option<String> = start.map(String::from);
     loop {
         let url = match &next {
             Some(c) => format!("{path}&{key}={c}"),
@@ -1070,7 +1076,8 @@ async fn notifications_cursor_pages_after_and_kind() {
     let expected_ids: Vec<String> = expected.iter().map(|(_, id, _)| id.to_string()).collect();
 
     // cursor で欠落・重複なく最後まで読める
-    let (got, sizes) = read_pages(&app, "/v1/users/me/notifications?limit=50", "cursor").await;
+    let (got, sizes) =
+        read_pages(&app, "/v1/users/me/notifications?limit=50", "cursor", None).await;
     assert_eq!(sizes, vec![50, 50, 20]);
     assert_eq!(got, expected_ids);
 
@@ -1097,8 +1104,9 @@ async fn notifications_cursor_pages_after_and_kind() {
     let anchor = first["notifications"][29]["cursor"].as_str().unwrap();
     let (newer, sizes) = read_pages(
         &app,
-        &format!("/v1/users/me/notifications?limit=10&after={anchor}"),
+        "/v1/users/me/notifications?limit=10",
         "after",
+        Some(anchor),
     )
     .await;
     assert_eq!(sizes, vec![10, 10, 9]);
@@ -1153,7 +1161,8 @@ async fn notifications_cursor_pages_after_and_kind() {
         .status(),
         StatusCode::OK
     );
-    let (after_read, _) = read_pages(&app, "/v1/users/me/notifications?limit=50", "cursor").await;
+    let (after_read, _) =
+        read_pages(&app, "/v1/users/me/notifications?limit=50", "cursor", None).await;
     assert_eq!(after_read, expected_ids);
     let unread = common::json_body(
         app.get_with_session("/v1/users/me/notifications?unread=true&limit=100")
