@@ -12,6 +12,7 @@ mod m20260911010000_oauth_provider_login;
 mod m20260922000000_notifications_project_id;
 mod m20260922010000_notifications_email_outbox;
 mod m20260922020000_webhooks;
+mod m20260924000000_notifications_cursor_index;
 
 pub struct Migrator;
 
@@ -31,6 +32,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260922000000_notifications_project_id::Migration),
             Box::new(m20260922010000_notifications_email_outbox::Migration),
             Box::new(m20260922020000_webhooks::Migration),
+            Box::new(m20260924000000_notifications_cursor_index::Migration),
         ]
     }
 }

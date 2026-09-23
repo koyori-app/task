@@ -33,7 +33,7 @@ use job::{
     },
     github_issue_sync::{self, QUEUE_NAME as GITHUB_ISSUE_SYNC_QUEUE},
     github_webhook::{self, QUEUE_NAME as GITHUB_WEBHOOK_QUEUE},
-    notification_email,
+    notification_email, notification_retention,
     password_reset_email::{
         self, MAX_RETRIES as PW_RESET_MAX_RETRIES, QUEUE_NAME as PW_RESET_QUEUE,
     },
@@ -166,6 +166,13 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .data(review_summary_worker_state)
         .build(review_summary::process);
 
+    let retention_worker =
+        WorkerBuilder::new(format!("{}-worker", notification_retention::WORKER_NAME))
+            .backend(notification_retention::stream())
+            .enable_tracing()
+            .data(job_state.clone())
+            .build(notification_retention::process);
+
     let job_state_for_sweeper = job_state.clone();
     let issue_sync_worker_storage = state.github_issue_sync_storage.as_ref().clone();
     let issue_sync_worker = WorkerBuilder::new(format!("{GITHUB_ISSUE_SYNC_QUEUE}-worker"))
@@ -184,6 +191,13 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let review_summary_shutdown = shutdown_rx.clone();
+    let retention_shutdown = shutdown_rx.clone();
+    let retention_worker_handle = tokio::spawn(async move {
+        retention_worker
+            .run_until(wait_for_shutdown(retention_shutdown))
+            .await
+    });
+
     let review_summary_worker_handle = tokio::spawn(async move {
         review_summary_worker
             .run_until(wait_for_shutdown(review_summary_shutdown))
@@ -333,6 +347,12 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         Ok(Ok(())) => info!("review summary worker stopped"),
         Ok(Err(e)) => warn!("review summary worker error: {e}"),
         Err(e) => warn!("review summary worker join error: {e}"),
+    }
+
+    match retention_worker_handle.await {
+        Ok(Ok(())) => info!("notification retention worker stopped"),
+        Ok(Err(e)) => warn!("notification retention worker error: {e}"),
+        Err(e) => warn!("notification retention worker join error: {e}"),
     }
 
     Ok(())

@@ -392,3 +392,43 @@ async fn notification_settings_accept_the_review_event_types() {
         .await;
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
 }
+
+/// 繰り延べの通知は遷移先の `deferred_task_id` を持つ。他の遷移には付けない。
+#[tokio::test]
+async fn deferral_notification_carries_the_deferred_task() {
+    let mut fx = setup().await;
+    let (reviewer, developer) = (fx.reviewer.clone(), fx.developer.clone());
+
+    fx.login(&reviewer).await;
+    let finding_id = submit_round(&fx, 640, "low", "命名").await;
+
+    fx.login(&developer).await;
+    transition(&fx, &finding_id, "deferred").await;
+    let deferred_task_id = entity::review_findings::Entity::find_by_id(
+        finding_id.parse::<Uuid>().expect("finding uuid"),
+    )
+    .one(&fx.app.state.db)
+    .await
+    .expect("finding")
+    .expect("finding exists")
+    .deferred_task_id
+    .expect("deferred task");
+
+    let items = notifications(&mut fx, &reviewer).await;
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["payload"]["to"], "deferred");
+    assert_eq!(
+        items[0]["payload"]["deferred_task_id"],
+        deferred_task_id.to_string()
+    );
+    assert_eq!(items[0]["project"]["id"], fx.project_id.to_string());
+    assert_eq!(items[0]["project"]["tenant_id"], fx.tenant_id.to_string());
+
+    // 対照: deferred → open（取り消し）の通知には付けない
+    fx.login(&developer).await;
+    transition(&fx, &finding_id, "open").await;
+    let items = notifications(&mut fx, &reviewer).await;
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["payload"]["to"], "open");
+    assert!(items[0]["payload"].get("deferred_task_id").is_none());
+}
