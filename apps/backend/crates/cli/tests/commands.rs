@@ -5,7 +5,7 @@ mod common;
 use common::*;
 use serde_json::json;
 use wiremock::matchers::{body_json, body_partial_json, method, path, query_param};
-use wiremock::{Mock, ResponseTemplate};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const TODO_STATUS: &str = "33333333-3333-4333-8333-333333333333";
 const DONE_STATUS: &str = "66666666-6666-4666-8666-666666666666";
@@ -65,6 +65,40 @@ async fn auth_whoami_reads_the_current_personal_token() {
         .await;
 
     assert_eq!(harness.run(&["task", "auth", "whoami"]).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn auth_whoami_works_without_tenant_id() {
+    let server = MockServer::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let store = task_cli::config::ConfigStore::from_home(home.path());
+    store
+        .save(&task_cli::config::TaskConfig {
+            api_url: Some(server.uri()),
+            token: Some("token-1".into()),
+            tenant_id: None,
+        })
+        .unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/v1/personal_tokens/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "77777777-7777-4777-8777-777777777777",
+            "name": "review-bot",
+            "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "username": "yupix",
+            "tenant_id": TENANT,
+            "scopes": ["read:task"],
+            "allowed_project_ids": [PROJECT_ID],
+            "expires_at": "2026-12-31T00:00:00Z",
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let context = task_cli::Context::new(store, |_| None);
+    let cli = parse(&["task", "auth", "whoami"]);
+    assert_eq!(task_cli::run(cli, &context).await.unwrap(), 0);
 }
 
 #[tokio::test]
