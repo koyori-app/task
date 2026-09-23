@@ -310,6 +310,14 @@ pub async fn create_review(
 
     let finding_ids: Vec<Uuid> = findings.iter().map(|f| f.id).collect();
     let mut transitions = load_transitions(&state.db, &finding_ids).await?;
+    let mut actions = service::reviews::available_actions(
+        &state.db,
+        tenant_id,
+        std::slice::from_ref(&review),
+        &findings,
+        auth.user_id,
+    )
+    .await?;
     let pr_number = review.pr_number;
     let round = review.round;
     let count = findings.len() as u64;
@@ -321,7 +329,8 @@ pub async fn create_review(
             .into_iter()
             .map(|finding| {
                 let history = transitions.remove(&finding.id).unwrap_or_default();
-                FindingResponse::from_parts(finding, pr_number, round, history)
+                let available = actions.remove(&finding.id).unwrap_or_default();
+                FindingResponse::from_parts(finding, pr_number, round, history, available)
             })
             .collect(),
     };
@@ -430,6 +439,13 @@ pub async fn get_review_summary(
             .await?;
     let (cached_pr_head_sha, pr_head_checked_at) =
         service::reviews::cached_pr_head(&state.db, project_id, &repo, query.pr).await?;
+    let gate = service::reviews::review_gate(
+        repo.is_linked(),
+        rounds,
+        blocking,
+        cached_pr_head_sha.as_deref(),
+        latest_head_sha.as_deref(),
+    );
 
     Ok(Json(ReviewSummaryResponse {
         pr_number: query.pr,
@@ -453,6 +469,7 @@ pub async fn get_review_summary(
         // レビューが 1 件も無い PR を「可」にしない。件数だけで見ると未レビューの PR が
         // 0 件として通り、マージ前ゲートとして最も危ない誤りになる（仕様 §5）
         mergeable: rounds > 0 && blocking == 0,
+        gate,
     }))
 }
 
@@ -527,6 +544,14 @@ pub async fn get_review(
 
     let finding_ids: Vec<Uuid> = findings.iter().map(|f| f.id).collect();
     let mut transitions = load_transitions(&state.db, &finding_ids).await?;
+    let mut actions = service::reviews::available_actions(
+        &state.db,
+        tenant_id,
+        std::slice::from_ref(&review),
+        &findings,
+        auth.user_id,
+    )
+    .await?;
     let pr_number = review.pr_number;
     let round = review.round;
     let count = findings.len() as u64;
@@ -541,7 +566,8 @@ pub async fn get_review(
             .into_iter()
             .map(|finding| {
                 let history = transitions.remove(&finding.id).unwrap_or_default();
-                FindingResponse::from_parts(finding, pr_number, round, history)
+                let available = actions.remove(&finding.id).unwrap_or_default();
+                FindingResponse::from_parts(finding, pr_number, round, history, available)
             })
             .collect(),
     }))
@@ -609,6 +635,9 @@ pub async fn list_review_findings(
 
     let finding_ids: Vec<Uuid> = findings.iter().map(|f| f.id).collect();
     let mut transitions = load_transitions(&state.db, &finding_ids).await?;
+    let mut actions =
+        service::reviews::available_actions(&state.db, tenant_id, &rounds, &findings, auth.user_id)
+            .await?;
 
     Ok(Json(
         findings
@@ -619,7 +648,8 @@ pub async fn list_review_findings(
                     .copied()
                     .unwrap_or((query.pr, 0));
                 let history = transitions.remove(&finding.id).unwrap_or_default();
-                FindingResponse::from_parts(finding, pr_number, round, history)
+                let available = actions.remove(&finding.id).unwrap_or_default();
+                FindingResponse::from_parts(finding, pr_number, round, history, available)
             })
             .collect(),
     ))
@@ -726,11 +756,22 @@ pub async fn update_review_finding_state(
         .await?
         .remove(&updated.id)
         .unwrap_or_default();
+    let available = service::reviews::available_actions(
+        &state.db,
+        tenant_id,
+        std::slice::from_ref(&review),
+        std::slice::from_ref(&updated),
+        auth.user_id,
+    )
+    .await?
+    .remove(&updated.id)
+    .unwrap_or_default();
 
     Ok(Json(FindingResponse::from_parts(
         updated,
         review.pr_number,
         review.round,
         transitions,
+        available,
     )))
 }

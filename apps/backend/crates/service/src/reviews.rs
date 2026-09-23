@@ -14,7 +14,7 @@ use entity::{
     github_integrations, project_statuses, projects, review_findings, reviews, tasks,
     tenant_members, tenants,
 };
-use payload::reviews::ReviewedPullRequest;
+use payload::reviews::{ReviewGate, ReviewedPullRequest};
 
 /// 繰り延べで自動起票するタスクのタイトル接頭辞。
 const DEFERRED_TASK_PREFIX: &str = "[レビュー指摘]";
@@ -411,6 +411,43 @@ pub async fn ensure_transition_allowed<C: ConnectionTrait>(
     to: FindingState,
     actor_id: Uuid,
 ) -> Result<(), ReviewError> {
+    // 判定に要る材料だけを引く（要らない遷移では DB を読まない）
+    let from = finding.state;
+    let facts = TransitionFacts {
+        reviewer_side: requires_reviewer_side(from, to)
+            && is_reviewer_side(
+                db,
+                review.project_id,
+                &RepoRef::of_round(review),
+                review.pr_number,
+                review.round,
+                actor_id,
+            )
+            .await?,
+        may_reject_on_behalf: requires_finding_author(from, to)
+            && review.reviewer_id != actor_id
+            && may_reject_on_behalf(db, review, actor_id).await?,
+    };
+    check_transition(finding, review, to, actor_id, facts)
+}
+
+/// 遷移の判定に要る、DB から引いた事実。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TransitionFacts {
+    /// 要求者がそのラウンドのレビュー側か（[`is_reviewer_side`]）
+    pub reviewer_side: bool,
+    /// 要求者が取り下げを代行してよいか（[`may_reject_on_behalf`]）
+    pub may_reject_on_behalf: bool,
+}
+
+/// [`ensure_transition_allowed`] の判定本体。材料は呼び出し側が引いて渡す。
+pub fn check_transition(
+    finding: &review_findings::Model,
+    review: &reviews::Model,
+    to: FindingState,
+    actor_id: Uuid,
+    facts: TransitionFacts,
+) -> Result<(), ReviewError> {
     let from = finding.state;
     if !can_transition(from, to) {
         return Err(ReviewError::InvalidTransition { from, to });
@@ -430,26 +467,92 @@ pub async fn ensure_transition_allowed<C: ConnectionTrait>(
     // （作成者がテナントから居なくなった場合に限りオーナーが代行できる）
     if requires_finding_author(from, to)
         && review.reviewer_id != actor_id
-        && !may_reject_on_behalf(db, review, actor_id).await?
+        && !facts.may_reject_on_behalf
     {
         return Err(ReviewError::FindingAuthorOnly);
     }
 
-    if requires_reviewer_side(from, to)
-        && !is_reviewer_side(
-            db,
-            review.project_id,
-            &RepoRef::of_round(review),
-            review.pr_number,
-            review.round,
-            actor_id,
-        )
-        .await?
-    {
+    if requires_reviewer_side(from, to) && !facts.reviewer_side {
         return Err(ReviewError::ReviewerOnly);
     }
 
     Ok(())
+}
+
+/// 要求者がいま遷移できる先の state を、指摘ごとに返す（`FindingResponse::available_actions`）。
+///
+/// 判定は候補ごとに [`check_transition`] を呼ぶだけで、規則を別に持たない。
+/// 材料（ラウンドの作成者・より新しいラウンドの作成者・作成者の不在・オーナー）は
+/// 一覧ぶんをまとめて引き、指摘の件数に比例して DB を往復しない。
+/// `rounds` は `findings` が属するラウンドを含むこと（同じプロジェクト内）。
+pub async fn available_actions<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+    rounds: &[reviews::Model],
+    findings: &[review_findings::Model],
+    actor_id: Uuid,
+) -> Result<std::collections::HashMap<Uuid, Vec<FindingState>>, sea_orm::DbErr> {
+    use sea_orm::Iterable;
+
+    let mut out = std::collections::HashMap::new();
+    if findings.is_empty() {
+        return Ok(out);
+    }
+    let round_by_id: std::collections::HashMap<Uuid, &reviews::Model> =
+        rounds.iter().map(|r| (r.id, r)).collect();
+
+    // 要求者が作成したラウンドのうち、各 (リポジトリ, PR) で最も新しいもの。
+    // ラウンド R の指摘について「R 以上のラウンドを出した」= レビュー側（is_reviewer_side）
+    let project_ids: Vec<Uuid> = rounds.iter().map(|r| r.project_id).collect();
+    let pr_numbers: Vec<i32> = rounds.iter().map(|r| r.pr_number).collect();
+    let mut own_latest: std::collections::HashMap<(Uuid, String, String, i32), i32> =
+        std::collections::HashMap::new();
+    for own in reviews::Entity::find()
+        .filter(reviews::Column::ProjectId.is_in(project_ids))
+        .filter(reviews::Column::PrNumber.is_in(pr_numbers))
+        .filter(reviews::Column::ReviewerId.eq(actor_id))
+        .all(db)
+        .await?
+    {
+        let key = (own.project_id, own.repo_owner, own.repo_name, own.pr_number);
+        let latest = own_latest.entry(key).or_insert(own.round);
+        *latest = (*latest).max(own.round);
+    }
+
+    // 取り下げの代行（may_reject_on_behalf）: 要求者がオーナーで、作成者がオーナーでなく
+    // テナントの利用者でなくなっている
+    let is_owner = tenants::Entity::find_by_id(tenant_id)
+        .one(db)
+        .await?
+        .is_some_and(|t| t.owner_id == actor_id);
+    let left: std::collections::HashSet<Uuid> = if is_owner {
+        let reviewer_ids: Vec<Uuid> = rounds.iter().map(|r| r.reviewer_id).collect();
+        users_left_tenant(db, tenant_id, &reviewer_ids).await?
+    } else {
+        std::collections::HashSet::new()
+    };
+
+    for finding in findings {
+        let Some(review) = round_by_id.get(&finding.review_id) else {
+            continue;
+        };
+        let facts = TransitionFacts {
+            reviewer_side: own_latest
+                .get(&(
+                    review.project_id,
+                    review.repo_owner.clone(),
+                    review.repo_name.clone(),
+                    review.pr_number,
+                ))
+                .is_some_and(|latest| *latest >= review.round),
+            may_reject_on_behalf: is_owner && left.contains(&review.reviewer_id),
+        };
+        let actions = FindingState::iter()
+            .filter(|to| check_transition(finding, review, *to, actor_id, facts).is_ok())
+            .collect();
+        out.insert(finding.id, actions);
+    }
+    Ok(out)
 }
 
 /// 繰り延べ先タスクが「有効」か——同じプロジェクトにあり、削除されていないか。
@@ -767,6 +870,29 @@ pub fn blocking_count(counts: &[(FindingSeverity, FindingState, u64)]) -> u64 {
         .filter(|(severity, state, _)| severity.blocks_merge() && state.counts_as_unresolved())
         .map(|(_, _, count)| *count)
         .sum()
+}
+
+/// マージ判定の表示区分。上から順に最初に当たったものを返す（仕様 §5）。
+pub fn review_gate(
+    linked: bool,
+    rounds: i32,
+    blocking: u64,
+    cached_pr_head_sha: Option<&str>,
+    latest_head_sha: Option<&str>,
+) -> ReviewGate {
+    if !linked {
+        ReviewGate::Unlinked
+    } else if rounds == 0 {
+        ReviewGate::Unreviewed
+    } else if blocking > 0 {
+        ReviewGate::Blocked
+    } else if cached_pr_head_sha.is_none() {
+        ReviewGate::StaleUnknown
+    } else if cached_pr_head_sha != latest_head_sha {
+        ReviewGate::Outdated
+    } else {
+        ReviewGate::Ready
+    }
 }
 
 /// 最新ラウンドがレビューした commit。ラウンドが無ければ `None`。
@@ -1178,6 +1304,23 @@ pub async fn cache_summary_comment_id<C: ConnectionTrait>(
 mod tests {
     use super::*;
     use FindingState::*;
+
+    /// gate は上から順に最初に当たったもの（仕様 §5）。隣り合う条件が重なる境界を固定する。
+    #[test]
+    fn review_gate_takes_the_first_matching_condition() {
+        let a = Some("a");
+        let b = Some("b");
+        // 連携なしは何より先（ラウンド 0・未解決ありでも unlinked）
+        assert_eq!(review_gate(false, 0, 1, None, None), ReviewGate::Unlinked);
+        assert_eq!(review_gate(false, 2, 1, a, b), ReviewGate::Unlinked);
+        assert_eq!(review_gate(true, 0, 0, None, None), ReviewGate::Unreviewed);
+        // 未解決ありは鮮度より先（blocked かつ outdated は blocked）
+        assert_eq!(review_gate(true, 1, 1, a, b), ReviewGate::Blocked);
+        assert_eq!(review_gate(true, 1, 1, None, a), ReviewGate::Blocked);
+        assert_eq!(review_gate(true, 1, 0, None, a), ReviewGate::StaleUnknown);
+        assert_eq!(review_gate(true, 1, 0, b, a), ReviewGate::Outdated);
+        assert_eq!(review_gate(true, 1, 0, a, a), ReviewGate::Ready);
+    }
 
     /// 遷移表そのものの固定。仕様 §3 の図と 1:1 で対応させる。
     #[test]

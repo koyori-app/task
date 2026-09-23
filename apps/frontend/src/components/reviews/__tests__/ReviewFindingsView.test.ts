@@ -30,6 +30,8 @@ function finding(overrides: Partial<Finding> = {}): Finding {
     created_at: '2026-08-26T00:00:00Z',
     updated_at: '2026-08-26T00:00:00Z',
     transitions: [],
+    // 遷移先は backend が要求者ごとに返す。画面はこれをそのままボタンにする
+    available_actions: ['fixed'],
     ...overrides,
   };
 }
@@ -40,10 +42,8 @@ type MockState = {
   prsStatus?: number;
   patchStatus?: number;
   patchMessage?: string;
-  /** ラウンドを出した人（取り下げを出してよいかの判定に使う） */
-  roundReviewerId?: string;
-  /** ラウンドの作成者がテナントを離脱済みか（オーナー代行の判定に使う） */
-  roundReviewerLeft?: boolean;
+  /** 集計の gate。既定は未解決があれば blocked、無ければ ready */
+  gate?: components['schemas']['ReviewGate'];
   /** これまでのラウンド数（0 = 未レビュー） */
   rounds?: number;
   /** URL 履歴の試験では選び直せる PR を二つ用意する。 */
@@ -115,6 +115,7 @@ function stubFetch(state: MockState) {
         pr_head_checked_at: '2026-08-28T10:00:00Z',
         owner_override_rejections: state.ownerOverrideRejections ?? 0,
         mergeable: rounds > 0 && blocking === 0,
+        gate: state.gate ?? (blocking > 0 ? 'blocked' : 'ready'),
       });
     }
     if (req.method === 'GET' && pathname.endsWith('/reviews')) {
@@ -126,11 +127,11 @@ function stubFetch(state: MockState) {
           round: 1,
           head_sha: '60cdd7795f94',
           reviewer: {
-            id: state.roundReviewerId ?? OTHER_ID,
+            id: OTHER_ID,
             username: 'reviewer',
             avatar_url: null,
           },
-          reviewer_left_tenant: state.roundReviewerLeft ?? false,
+          reviewer_left_tenant: false,
           summary: '総評',
           pr_title: null,
           pr_author: null,
@@ -161,7 +162,6 @@ function stubFetch(state: MockState) {
 
 function mountView(
   extraProps: {
-    tenantOwnerId?: string | null;
     initialUrlState?: ReviewFindingsUrlState;
     initialUrlWarnings?: string[];
   } = {},
@@ -237,40 +237,29 @@ describe('ReviewFindingsView', () => {
     expect(wrapper.get('[data-testid="finding-list"]').text()).toContain('Fixed');
   });
 
-  it('findingActions の disabledReason を持つ操作は disabled にして理由を出す', async () => {
-    // 判定そのものは lib の findingActions 側で見る。ここは画面への配線だけ。
-    // 確認と差し戻しはレビュー側だけに出るので、閲覧者をラウンドの作成者にしておく
+  it('自分が直した指摘には確認が出ず、理由を出す', async () => {
+    // 確認を出さない判定は backend（available_actions）。画面は説明を添えるだけ
     stubFetch({
-      findings: [finding({ state: 'fixed', fixed_by: VIEWER_ID })],
-      roundReviewerId: VIEWER_ID,
+      findings: [finding({ state: 'fixed', fixed_by: VIEWER_ID, available_actions: ['open'] })],
     });
     const wrapper = mountView();
     await flushPromises();
 
-    expect(bodyButton('確認した')?.disabled).toBe(true);
+    expect(bodyButton('確認した')).toBeUndefined();
     expect(wrapper.text()).toContain('修正者と確認者は別の人である必要があります');
-    // 差し戻しは押せる
     expect(bodyButton('レビューに戻す')?.disabled).toBe(false);
   });
 
-  it('別の人が直した指摘はレビュー側なら確認できる', async () => {
+  it('available_actions の遷移先がそのまま操作ボタンとして出る', async () => {
     stubFetch({
-      findings: [finding({ state: 'fixed', fixed_by: OTHER_ID })],
-      roundReviewerId: VIEWER_ID,
+      findings: [finding({ severity: 'low', available_actions: ['fixed', 'deferred'] })],
     });
-    mountView();
-    await flushPromises();
-
-    expect(bodyButton('確認した')?.disabled).toBe(false);
-  });
-
-  it('findingActions の返り値がそのまま操作ボタンとして出る', async () => {
-    stubFetch({ findings: [finding({ severity: 'low' })] });
     mountView();
     await flushPromises();
 
     expect(bodyButton('修正した')?.disabled).toBe(false);
     expect(bodyButton('繰り延べる')?.disabled).toBe(false);
+    expect(bodyButton('指摘を取り下げる')).toBeUndefined();
   });
 
   it('一覧バッジは件数だけを出し、可否を断定しない', async () => {
@@ -309,7 +298,7 @@ describe('ReviewFindingsView', () => {
 
   it('サーバーが理由を返した 409 はその文言を出す', async () => {
     stubFetch({
-      findings: [finding({ severity: 'low' })],
+      findings: [finding({ severity: 'low', available_actions: ['fixed', 'deferred'] })],
       patchStatus: 409,
       patchMessage: 'high の指摘は繰り延べられません（繰り延べは low / nit のみ）',
     });
@@ -324,7 +313,7 @@ describe('ReviewFindingsView', () => {
 
   it('スラグだけの本文は出さず、状態に応じた説明に落とす', async () => {
     stubFetch({
-      findings: [finding({ severity: 'low' })],
+      findings: [finding({ severity: 'low', available_actions: ['fixed', 'deferred'] })],
       patchStatus: 409,
       patchMessage: 'conflict',
     });
@@ -340,8 +329,9 @@ describe('ReviewFindingsView', () => {
 
   it('403 のときは理由を表示する', async () => {
     stubFetch({
-      findings: [finding({ state: 'fixed', fixed_by: OTHER_ID })],
-      roundReviewerId: VIEWER_ID,
+      findings: [
+        finding({ state: 'fixed', fixed_by: OTHER_ID, available_actions: ['open', 'verified'] }),
+      ],
       patchStatus: 403,
     });
     const wrapper = mountView();
