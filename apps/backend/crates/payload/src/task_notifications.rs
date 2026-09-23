@@ -112,6 +112,7 @@ pub struct ListNotificationsQuery {
     /// 未読のみ
     pub unread: Option<bool>,
     /// `task` / `review`
+    #[param(inline)]
     pub kind: Option<NotificationKind>,
     /// 既定 50、上限 100
     pub limit: Option<u64>,

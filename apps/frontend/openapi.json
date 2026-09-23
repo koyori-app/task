@@ -20083,7 +20083,9 @@
             "description": "`task` / `review`",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/NotificationKind"
+              "type": "string",
+              "description": "種別の分類。`review.` 接頭辞の有無で分ける。",
+              "enum": ["task", "review"]
             }
           },
           {
