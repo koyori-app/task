@@ -508,11 +508,10 @@ async fn update_summary(
 
 /// PR の作者へ、その人が知らないまま増えていたラウンドを知らせる。
 ///
-/// ラウンドの起票時点では作者が分からない（この要約ジョブが GitHub から取ってくる）ので、
-/// `create_review` の宛先には入らない。ここで補う。
+/// 初回の起票時点では作者が分からないので、この要約ジョブが GitHub から取得して補う。
 ///
 /// 冪等: 宛先は「`pr_author` が NULL だったラウンド」だけで、その列が NULL から
-/// 埋まるのはラウンドごとに 1 回きり。ジョブを何度走らせても同じ通知は作られない。
+/// 埋まるのはラウンドごとに 1 回きり。起票時に通知済みの場合も通知側で重複を除く。
 async fn notify_pr_author<C: ConnectionTrait>(
     db: &C,
     meta: &service::github::pr_comments::PullRequestMeta,

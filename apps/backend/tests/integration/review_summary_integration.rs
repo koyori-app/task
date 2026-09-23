@@ -520,6 +520,42 @@ async fn the_pull_request_author_is_notified_once() {
         "作者への起票通知は 1 件だけ（pr_author が NULL から埋まるのは 1 回きり）"
     );
 
+    // R1 から作者を解決できる R2 は起票時に通知される。要約ジョブで重複させない。
+    let res = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/reviews",
+                tp.tenant_id, tp.project_id
+            ),
+            serde_json::json!({
+                "pr_number": PR_NUMBER,
+                "head_sha": REVIEWED_HEAD,
+                "summary": "再確認",
+                "findings": [],
+            }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    assert_eq!(author_notifications(&app, author.id).await, 2);
+    for _ in 0..2 {
+        job::review_summary::process(
+            job::ReviewSummaryJob {
+                project_id: tp.project_id,
+                pr_number: PR_NUMBER,
+                repo_owner: REPO_OWNER.into(),
+                repo_name: REPO_NAME.into(),
+            },
+            apalis::prelude::Data::new(job_state(&app)),
+        )
+        .await
+        .expect("post second round summary");
+        assert_eq!(
+            author_notifications(&app, author.id).await,
+            2,
+            "起票と要約ジョブを通しても、各ラウンドの作者通知は 1 件だけ"
+        );
+    }
+
     app.cleanup_user(author.id).await;
     app.cleanup_user(reviewer.id).await;
 }

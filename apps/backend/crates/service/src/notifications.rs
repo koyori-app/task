@@ -1,5 +1,5 @@
 use sea_orm::entity::prelude::Json;
-use sea_orm::sea_query::OnConflict;
+use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
     prelude::Uuid,
@@ -410,6 +410,20 @@ pub async fn notify_review_round_created_to<C: ConnectionTrait>(
         .await?
         .contains(&user_id)
         || !in_app_enabled(db, user_id, review.project_id, TYPE_REVIEW_ROUND_CREATED).await?
+    {
+        return Ok(());
+    }
+    // 過去ラウンドから作者が解決できた場合や購読者の場合は、起票時に通知済み。
+    if notifications::Entity::find()
+        .filter(notifications::Column::UserId.eq(user_id))
+        .filter(notifications::Column::NotificationType.eq(TYPE_REVIEW_ROUND_CREATED))
+        .filter(Expr::cust_with_values(
+            "payload ->> 'review_id' = $1",
+            [review.id.to_string()],
+        ))
+        .one(db)
+        .await?
+        .is_some()
     {
         return Ok(());
     }
