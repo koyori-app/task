@@ -12,7 +12,7 @@ pub async fn run(command: AuthCommand, context: &Context, output: OutputOptions)
     let store = context.store();
     match command {
         AuthCommand::Whoami => {
-            let api = context.connect()?;
+            let api = context.connect_token_only()?;
             let token: PersonalTokenIdentityResponse =
                 api.get(&["v1", "personal_tokens", "me"], &[]).await?;
             print(&token, output);

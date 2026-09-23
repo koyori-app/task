@@ -14,7 +14,7 @@ pub mod text_input;
 
 use api::ApiClient;
 use cli::{Cli, Command};
-use config::{ConfigStore, RuntimeConfig, resolve_runtime_with};
+use config::{ConfigStore, RuntimeConfig, resolve_runtime_with, resolve_token_runtime_with};
 use error::Result;
 use output::OutputOptions;
 
@@ -55,6 +55,11 @@ impl Context {
     /// 呼ぶのは各コマンドが実際に送る直前にする。
     pub(crate) fn connect(&self) -> Result<ApiClient> {
         ApiClient::new(self.runtime()?)
+    }
+
+    /// `auth whoami` 用。tenant_id を要さず鍵だけで `personal_tokens/me` を叩く。
+    pub(crate) fn connect_token_only(&self) -> Result<ApiClient> {
+        ApiClient::new(resolve_token_runtime_with(&self.store, |key| (self.env)(key))?)
     }
 }
 
