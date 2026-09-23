@@ -1,13 +1,13 @@
 use sea_orm::entity::prelude::Json;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    prelude::Uuid,
+    ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, prelude::Uuid,
 };
 use std::collections::HashSet;
 
 use crate::error::AppError;
 use entity::{notification_settings, notifications, projects, task_watchers, tenants, users};
+pub use payload::task_notifications::NotificationTarget;
 
 // 定数本体は common へ移動（DTO からも参照するため）。既存の参照パス互換用に再公開。
 pub use common::notifications::{
@@ -57,23 +57,48 @@ async fn in_app_enabled<C: ConnectionTrait>(
     Ok(events.iter().any(|e| e == event_type))
 }
 
+/// 保存する通知 1 件。
+pub struct NewNotification<'a> {
+    pub user_id: Uuid,
+    pub project_id: Uuid,
+    /// task 系の種別だけが持つ
+    pub task_id: Option<Uuid>,
+    pub notification_type: &'a str,
+    /// 表示用の非機密データ。文言や finding の title は載せない
+    pub payload: Json,
+    pub target: NotificationTarget,
+    /// 冪等化キー。同じ (user_id, dedupe_key) の 2 件目は作らない
+    pub dedupe_key: Option<String>,
+}
+
 pub async fn create_notification<C: ConnectionTrait>(
     db: &C,
-    user_id: Uuid,
-    task_id: Option<Uuid>,
-    notification_type: &str,
-    payload: Json,
+    n: NewNotification<'_>,
 ) -> Result<(), AppError> {
-    notifications::ActiveModel {
+    let target = serde_json::to_value(&n.target).map_err(anyhow::Error::from)?;
+    // dedupe_key が NULL の行は UNIQUE に当たらない（NULL 同士は重複扱いされない）ので、
+    // 常に ON CONFLICT を付けてよい
+    notifications::Entity::insert(notifications::ActiveModel {
         id: Set(Uuid::new_v4()),
-        user_id: Set(user_id),
-        task_id: Set(task_id),
-        notification_type: Set(notification_type.to_string()),
-        payload: Set(payload),
+        user_id: Set(n.user_id),
+        task_id: Set(n.task_id),
+        notification_type: Set(n.notification_type.to_string()),
+        payload: Set(n.payload),
         read_at: Set(None),
         created_at: Set(chrono::Utc::now().into()),
-    }
-    .insert(db)
+        project_id: Set(n.project_id),
+        target: Set(target),
+        dedupe_key: Set(n.dedupe_key),
+    })
+    .on_conflict(
+        OnConflict::columns([
+            notifications::Column::UserId,
+            notifications::Column::DedupeKey,
+        ])
+        .do_nothing()
+        .to_owned(),
+    )
+    .exec_without_returning(db)
     .await?;
     Ok(())
 }
@@ -89,7 +114,41 @@ async fn notify_user_if_enabled<C: ConnectionTrait>(
     if !in_app_enabled(db, user_id, project_id, notification_type).await? {
         return Ok(());
     }
-    create_notification(db, user_id, Some(task_id), notification_type, payload).await
+    create_notification(
+        db,
+        task_notification(user_id, project_id, task_id, notification_type, payload),
+    )
+    .await
+}
+
+fn task_notification(
+    user_id: Uuid,
+    project_id: Uuid,
+    task_id: Uuid,
+    notification_type: &str,
+    payload: Json,
+) -> NewNotification<'_> {
+    NewNotification {
+        user_id,
+        project_id,
+        task_id: Some(task_id),
+        notification_type,
+        payload,
+        target: NotificationTarget::Task { task_id },
+        dedupe_key: None,
+    }
+}
+
+/// `before` より古い通知を消す（Retention）。消した件数を返す。
+pub async fn delete_older_than<C: ConnectionTrait>(
+    db: &C,
+    before: chrono::DateTime<chrono::Utc>,
+) -> Result<u64, AppError> {
+    let res = notifications::Entity::delete_many()
+        .filter(notifications::Column::CreatedAt.lt(before))
+        .exec(db)
+        .await?;
+    Ok(res.rows_affected)
 }
 
 pub async fn notify_assigned<C: ConnectionTrait>(
@@ -199,8 +258,17 @@ pub async fn notify_mentioned<C: ConnectionTrait>(
         // メンション = 関心あり → notify_assigned と同様にウォッチャーへ自動追加
         ensure_watcher(db, task_id, *user_id).await?;
         if in_app_enabled(db, *user_id, project_id, TYPE_MENTIONED).await? {
-            create_notification(db, *user_id, Some(task_id), TYPE_MENTIONED, payload.clone())
-                .await?;
+            create_notification(
+                db,
+                task_notification(
+                    *user_id,
+                    project_id,
+                    task_id,
+                    TYPE_MENTIONED,
+                    payload.clone(),
+                ),
+            )
+            .await?;
             notified.push(*user_id);
         }
     }

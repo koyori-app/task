@@ -20067,6 +20067,55 @@
       "get": {
         "tags": ["Notifications"],
         "operationId": "list_notifications",
+        "parameters": [
+          {
+            "name": "unread",
+            "in": "query",
+            "description": "未読のみ",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "`task` / `review`",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/NotificationKind"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "既定 50、上限 100",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "このカーソルより古い行（通常のページ送り）。前のページの `next_cursor` を渡す",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "このカーソルより新しい行（catch-up）。最後に受け取った行の `cursor`、\nまたは前の `after` 呼び出しの `next_cursor` を渡す。`cursor` と同時指定は 400",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -22164,11 +22213,23 @@
       },
       "NotificationItem": {
         "type": "object",
-        "required": ["id", "notification_type", "payload", "created_at"],
+        "required": [
+          "id",
+          "notification_type",
+          "project",
+          "payload",
+          "target",
+          "cursor",
+          "created_at"
+        ],
         "properties": {
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "この行を指すカーソル。catch-up では最後に受け取った（最新の）行のこの値を\n控えておき、次回 `after` に渡す"
           },
           "id": {
             "type": "string",
@@ -22178,9 +22239,15 @@
             "type": "string"
           },
           "payload": {},
+          "project": {
+            "$ref": "#/components/schemas/NotificationProjectSummary"
+          },
           "read_at": {
             "type": ["string", "null"],
             "format": "date-time"
+          },
+          "target": {
+            "$ref": "#/components/schemas/NotificationTarget"
           },
           "task": {
             "oneOf": [
@@ -22196,8 +22263,12 @@
       },
       "NotificationListResponse": {
         "type": "object",
-        "required": ["unread_count", "notifications"],
+        "required": ["unread_count", "next_cursor", "notifications"],
         "properties": {
+          "next_cursor": {
+            "type": ["string", "null"],
+            "description": "続きを引く鍵。`null` なら取り切っている。\n\n- `cursor` 指定時・無指定時: ページ内の最も古い行。次の `cursor` に渡す\n- `after` 指定時: ページ内の最も新しい行。次の `after` に渡す"
+          },
           "notifications": {
             "type": "array",
             "items": {
@@ -22207,7 +22278,26 @@
           "unread_count": {
             "type": "integer",
             "format": "int64",
+            "description": "未読の総数。`unread` / `kind` / `cursor` / `after` の指定に関係なく、\n見える通知全体で数える",
             "minimum": 0
+          }
+        }
+      },
+      "NotificationProjectSummary": {
+        "type": "object",
+        "description": "通知が属するプロジェクト。遷移先の URL を組み立てるのに使う。",
+        "required": ["tenant_id", "id", "key"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "key": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -22228,6 +22318,25 @@
             }
           }
         }
+      },
+      "NotificationTarget": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["task_id", "type"],
+            "properties": {
+              "task_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["task"]
+              }
+            }
+          }
+        ],
+        "description": "通知の遷移先。`type` で種類を見分ける。\n\nテナント・プロジェクトは通知行の `project` で返すので、ここには重複して持たない。"
       },
       "NotificationTaskSummary": {
         "type": "object",

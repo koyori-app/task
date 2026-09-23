@@ -73,6 +73,10 @@ pub struct Settings {
     ))]
     #[serde(default = "default_already_registered_email_worker_concurrency")]
     pub already_registered_email_worker_concurrency: usize,
+    /// 通知の保持日数。これより古い通知は日次ジョブが消す
+    #[validate(range(min = 1, message = "notification_retention_days must be >= 1"))]
+    #[serde(default = "default_notification_retention_days")]
+    pub notification_retention_days: i64,
     /// PAT の HMAC-SHA256 署名に使う秘密鍵。起動時に必須。32バイト以上（256ビット）が必要。
     #[validate(length(
         min = 32,
@@ -137,6 +141,10 @@ fn default_github_webhook_worker_concurrency() -> usize {
 
 fn default_already_registered_email_worker_concurrency() -> usize {
     1
+}
+
+fn default_notification_retention_days() -> i64 {
+    90
 }
 
 fn default_allow_origin() -> String {
@@ -270,6 +278,7 @@ mod tests {
             password_reset_worker_concurrency: 1,
             github_webhook_worker_concurrency: 1,
             already_registered_email_worker_concurrency: 1,
+            notification_retention_days: 90,
             personal_token_secret: "a".repeat(32),
             recovery_code_secret: "c".repeat(32),
             totp_encryption_key: "b".repeat(32),

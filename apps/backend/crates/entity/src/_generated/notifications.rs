@@ -8,6 +8,7 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(unique_key = "notifications_user_id_dedupe_key_key")]
     pub user_id: Uuid,
     pub task_id: Option<Uuid>,
     pub notification_type: String,
@@ -15,6 +16,11 @@ pub struct Model {
     pub payload: Json,
     pub read_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
+    pub project_id: Uuid,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub target: Json,
+    #[sea_orm(unique_key = "notifications_user_id_dedupe_key_key")]
+    pub dedupe_key: Option<String>,
     #[sea_orm(
         belongs_to,
         from = "task_id",

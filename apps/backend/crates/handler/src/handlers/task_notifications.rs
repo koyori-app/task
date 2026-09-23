@@ -4,12 +4,15 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
+use chrono::DateTime;
 use chrono::Utc;
+use sea_orm::prelude::DateTimeWithTimeZone;
 use sea_orm::sea_query::{Expr, Order};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, PaginatorTrait,
     QueryFilter, QueryOrder, QuerySelect, prelude::Uuid,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 use crate::AppState;
@@ -18,6 +21,7 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
+use common::cursor::{decode_cursor, encode_cursor};
 use entity::{
     notification_settings, notifications, projects, task_watchers, tasks, tenant_members, tenants,
     users,
@@ -75,32 +79,6 @@ async fn accessible_project_ids(
         .into_iter()
         .chain(owner_project_ids)
         .collect())
-}
-
-/// アクセス可能なプロジェクトに属するタスクID一覧を返す。
-/// プロジェクトがない場合は空Vecを返す。
-async fn accessible_task_ids(
-    db: &sea_orm::DatabaseConnection,
-    project_ids: &HashSet<Uuid>,
-) -> Result<Vec<Uuid>, AppError> {
-    if project_ids.is_empty() {
-        return Ok(vec![]);
-    }
-    Ok(tasks::Entity::find()
-        .select_only()
-        .column(tasks::Column::Id)
-        .filter(tasks::Column::ProjectId.is_in(project_ids.iter().cloned().collect::<Vec<_>>()))
-        .into_tuple::<Uuid>()
-        .all(db)
-        .await?)
-}
-
-/// 通知クエリにアクセス制御条件を追加するヘルパー。
-/// task_id IS NULL（タスクに紐付かない通知）は常に許可。
-fn accessible_notification_condition(task_ids: Vec<Uuid>) -> Condition {
-    Condition::any()
-        .add(notifications::Column::TaskId.is_null())
-        .add(notifications::Column::TaskId.is_in(task_ids))
 }
 
 #[utoipa::path(get, path = "/{id}/watchers", tag = "Tasks", responses((status = 200, body = WatcherListResponse), CrudErrors))]
@@ -180,7 +158,108 @@ pub async fn stop_watch(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(get, path = "/me/notifications", tag = "Notifications", responses((status = 200, body = NotificationListResponse), CrudErrors))]
+/// 通知一覧のカーソル。並び順（`created_at, id`）のキーをそのまま持つ。
+#[derive(Serialize, Deserialize)]
+struct NotificationCursor {
+    created_at: DateTime<Utc>,
+    id: Uuid,
+}
+
+fn row_cursor(row: &notifications::Model) -> String {
+    encode_cursor(&NotificationCursor {
+        created_at: row.created_at.with_timezone(&Utc),
+        id: row.id,
+    })
+}
+
+/// 受信者本人の、アクセス可能なプロジェクトの通知だけに絞る。
+/// 権限を失ったプロジェクトの通知は行ごと出さない（一覧・未読数・既読化で共用）。
+fn visible_notifications(user_id: Uuid, project_ids: &HashSet<Uuid>) -> Condition {
+    Condition::all()
+        .add(notifications::Column::UserId.eq(user_id))
+        .add(notifications::Column::ProjectId.is_in(project_ids.iter().copied()))
+}
+
+/// 通知行をレスポンスへ。タスク・プロジェクトの要約は呼び出し側で引いておく。
+fn notification_item(
+    row: notifications::Model,
+    projects_map: &HashMap<Uuid, projects::Model>,
+    tasks_map: &HashMap<Uuid, tasks::Model>,
+) -> Result<Option<NotificationItem>, AppError> {
+    // 絞り込み後にプロジェクトが消えた行は出さない
+    let Some(project) = projects_map.get(&row.project_id) else {
+        return Ok(None);
+    };
+    let task = row.task_id.and_then(|tid| {
+        tasks_map.get(&tid).map(|t| NotificationTaskSummary {
+            id: t.id,
+            seq_id: t.seq_id,
+            title: t.title.clone(),
+        })
+    });
+    let target = serde_json::from_value(row.target.clone()).map_err(anyhow::Error::from)?;
+    Ok(Some(NotificationItem {
+        id: row.id,
+        notification_type: row.notification_type.clone(),
+        project: NotificationProjectSummary {
+            tenant_id: project.tenant_id,
+            id: project.id,
+            key: project.key.clone(),
+        },
+        task,
+        cursor: row_cursor(&row),
+        payload: row.payload,
+        target,
+        read_at: row.read_at.map(|dt| dt.with_timezone(&Utc)),
+        created_at: row.created_at.with_timezone(&Utc),
+    }))
+}
+
+/// 通知行に対応するプロジェクトとタスクを引いてレスポンスへ変換する。
+async fn notification_items(
+    db: &sea_orm::DatabaseConnection,
+    rows: Vec<notifications::Model>,
+) -> Result<Vec<NotificationItem>, AppError> {
+    let project_ids: HashSet<Uuid> = rows.iter().map(|n| n.project_id).collect();
+    let projects_map: HashMap<Uuid, projects::Model> = if project_ids.is_empty() {
+        HashMap::new()
+    } else {
+        projects::Entity::find()
+            .filter(projects::Column::Id.is_in(project_ids))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|p| (p.id, p))
+            .collect()
+    };
+    let task_ids: Vec<Uuid> = rows.iter().filter_map(|n| n.task_id).collect();
+    let tasks_map: HashMap<Uuid, tasks::Model> = if task_ids.is_empty() {
+        HashMap::new()
+    } else {
+        tasks::Entity::find()
+            .filter(tasks::Column::Id.is_in(task_ids))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|t| (t.id, t))
+            .collect()
+    };
+    let mut items = Vec::with_capacity(rows.len());
+    for row in rows {
+        if let Some(item) = notification_item(row, &projects_map, &tasks_map)? {
+            items.push(item);
+        }
+    }
+    Ok(items)
+}
+
+#[utoipa::path(
+    get,
+    path = "/me/notifications",
+    tag = "Notifications",
+    params(ListNotificationsQuery),
+    responses((status = 200, body = NotificationListResponse), CrudErrors)
+)]
 #[axum::debug_handler]
 pub async fn list_notifications(
     State(state): State<AppState>,
@@ -188,72 +267,87 @@ pub async fn list_notifications(
     Query(q): Query<ListNotificationsQuery>,
 ) -> Result<Json<NotificationListResponse>, AppError> {
     auth.require_session()?;
+    if q.cursor.is_some() && q.after.is_some() {
+        return Err(AppError::BadRequestDetail(
+            "cursor and after cannot be used together".into(),
+        ));
+    }
 
     let accessible_proj_ids = accessible_project_ids(&state.db, auth.user_id).await?;
-    let task_ids = accessible_task_ids(&state.db, &accessible_proj_ids).await?;
+    let visible = visible_notifications(auth.user_id, &accessible_proj_ids);
 
     let unread_count: u64 = notifications::Entity::find()
-        .filter(notifications::Column::UserId.eq(auth.user_id))
+        .filter(visible.clone())
         .filter(notifications::Column::ReadAt.is_null())
-        .filter(accessible_notification_condition(task_ids.clone()))
         .count(&state.db)
         .await?;
 
-    let limit = q.limit.unwrap_or(50).min(100);
-    let offset = q.offset.unwrap_or(0);
-    let mut query =
-        notifications::Entity::find().filter(notifications::Column::UserId.eq(auth.user_id));
+    let limit = q
+        .limit
+        .unwrap_or(DEFAULT_NOTIFICATIONS_LIMIT)
+        .clamp(1, MAX_NOTIFICATIONS_LIMIT);
+    // DBクエリレベルでアクセス可能な通知のみ取得する（ページング後に絞り込むと件数が減る）
+    let mut query = notifications::Entity::find().filter(visible);
     if q.unread == Some(true) {
         query = query.filter(notifications::Column::ReadAt.is_null());
     }
-    // DBクエリレベルでアクセス可能な通知のみ取得する（ページング後に絞り込むと件数が減る）
-    query = query.filter(accessible_notification_condition(task_ids.clone()));
-    let rows = query
-        .order_by(
-            Expr::cust("CASE WHEN read_at IS NULL THEN 0 ELSE 1 END"),
-            Order::Asc,
-        )
-        .order_by_desc(notifications::Column::CreatedAt)
-        .limit(limit)
-        .offset(offset)
+    match q.kind {
+        Some(NotificationKind::Review) => {
+            query = query.filter(notifications::Column::NotificationType.starts_with("review."));
+        }
+        Some(NotificationKind::Task) => {
+            query = query.filter(notifications::Column::NotificationType.not_like("review.%"));
+        }
+        None => {}
+    }
+
+    // カーソルの不等式は並びと同じ (created_at, id) の組で比べる。同時刻の行の順序は
+    // Postgres 上で未定義なので、id のタイブレーカーが無いと境界で重複・欠落が出る
+    let newer = q.after.is_some();
+    if let Some(raw) = q.after.as_deref().or(q.cursor.as_deref()) {
+        let c: NotificationCursor = decode_cursor(raw)?;
+        let at: DateTimeWithTimeZone = c.created_at.into();
+        let (created, tie) = if newer {
+            (
+                notifications::Column::CreatedAt.gt(at),
+                notifications::Column::Id.gt(c.id),
+            )
+        } else {
+            (
+                notifications::Column::CreatedAt.lt(at),
+                notifications::Column::Id.lt(c.id),
+            )
+        };
+        query = query.filter(
+            Condition::any().add(created).add(
+                Condition::all()
+                    .add(notifications::Column::CreatedAt.eq(at))
+                    .add(tie),
+            ),
+        );
+    }
+    // after は古い順。新しい側から切ると after との間の行を引く手段が無くなる
+    let order = if newer { Order::Asc } else { Order::Desc };
+
+    // 「まだ残っているか」は 1 件多く引いて確かめる
+    let mut rows = query
+        .order_by(notifications::Column::CreatedAt, order.clone())
+        .order_by(notifications::Column::Id, order)
+        .limit(limit + 1)
         .all(&state.db)
         .await?;
-
-    let notification_task_ids: Vec<Uuid> = rows.iter().filter_map(|n| n.task_id).collect();
-    let tasks_map: HashMap<Uuid, tasks::Model> = if notification_task_ids.is_empty() {
-        HashMap::new()
+    let has_more = rows.len() > limit as usize;
+    rows.truncate(limit as usize);
+    let next_cursor = if has_more {
+        rows.last().map(row_cursor)
     } else {
-        tasks::Entity::find()
-            .filter(tasks::Column::Id.is_in(notification_task_ids))
-            .all(&state.db)
-            .await?
-            .into_iter()
-            .map(|t| (t.id, t))
-            .collect()
+        None
     };
 
     Ok(Json(NotificationListResponse {
         unread_count,
-        notifications: rows
-            .into_iter()
-            .map(|row| {
-                let task = row.task_id.and_then(|tid| {
-                    tasks_map.get(&tid).map(|t| NotificationTaskSummary {
-                        id: t.id,
-                        seq_id: t.seq_id,
-                        title: t.title.clone(),
-                    })
-                });
-                NotificationItem {
-                    id: row.id,
-                    notification_type: row.notification_type,
-                    task,
-                    payload: row.payload.clone(),
-                    read_at: row.read_at.map(|dt| dt.with_timezone(&Utc)),
-                    created_at: row.created_at.with_timezone(&Utc),
-                }
-            })
-            .collect(),
+        next_cursor,
+        notifications: notification_items(&state.db, rows).await?,
     }))
 }
 
@@ -266,22 +360,12 @@ pub async fn mark_notification_read(
 ) -> Result<Json<NotificationItem>, AppError> {
     auth.require_session()?;
 
+    let accessible_proj_ids = accessible_project_ids(&state.db, auth.user_id).await?;
     let notification = notifications::Entity::find_by_id(id)
-        .filter(notifications::Column::UserId.eq(auth.user_id))
+        .filter(visible_notifications(auth.user_id, &accessible_proj_ids))
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
-
-    // task に紐づく通知はアクセス可能なプロジェクトか確認
-    if let Some(tid) = notification.task_id {
-        let proj_ids = accessible_project_ids(&state.db, auth.user_id).await?;
-        let task = tasks::Entity::find_by_id(tid).one(&state.db).await?;
-        if let Some(t) = task
-            && !proj_ids.contains(&t.project_id)
-        {
-            return Err(AppError::NotFound);
-        }
-    }
 
     let row = if notification.read_at.is_some() {
         notification
@@ -290,26 +374,11 @@ pub async fn mark_notification_read(
         active.read_at = Set(Some(chrono::Utc::now().into()));
         active.update(&state.db).await?
     };
-    let task = if let Some(tid) = row.task_id {
-        tasks::Entity::find_by_id(tid)
-            .one(&state.db)
-            .await?
-            .map(|t| NotificationTaskSummary {
-                id: t.id,
-                seq_id: t.seq_id,
-                title: t.title,
-            })
-    } else {
-        None
-    };
-    Ok(Json(NotificationItem {
-        id: row.id,
-        notification_type: row.notification_type,
-        task,
-        payload: row.payload.clone(),
-        read_at: row.read_at.map(|dt| dt.with_timezone(&Utc)),
-        created_at: row.created_at.with_timezone(&Utc),
-    }))
+    notification_items(&state.db, vec![row])
+        .await?
+        .pop()
+        .map(Json)
+        .ok_or(AppError::NotFound)
 }
 
 #[utoipa::path(patch, path = "/me/notifications/read-all", tag = "Notifications", responses((status = 204), CrudErrors))]
@@ -321,17 +390,15 @@ pub async fn mark_all_notifications_read(
     auth.require_session()?;
 
     let accessible_proj_ids = accessible_project_ids(&state.db, auth.user_id).await?;
-    let task_ids = accessible_task_ids(&state.db, &accessible_proj_ids).await?;
-
-    let mut update = notifications::Entity::update_many()
+    notifications::Entity::update_many()
         .col_expr(
             notifications::Column::ReadAt,
             Expr::value(chrono::Utc::now()),
         )
-        .filter(notifications::Column::UserId.eq(auth.user_id))
-        .filter(notifications::Column::ReadAt.is_null());
-    update = update.filter(accessible_notification_condition(task_ids));
-    update.exec(&state.db).await?;
+        .filter(visible_notifications(auth.user_id, &accessible_proj_ids))
+        .filter(notifications::Column::ReadAt.is_null())
+        .exec(&state.db)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
