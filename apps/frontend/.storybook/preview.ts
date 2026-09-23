@@ -21,6 +21,12 @@ const preview: Preview = {
     };
   },
   parameters: {
+    // Docs は 1 ファイルの全 story を同じ iframe に描く。story ごとに globalThis.fetch を
+    // 差し替えるモックは最後に描いた story のものが全 story に効き、エラー系が最後の
+    // ファイルでは Default まで失敗表示になる。story ごとに iframe を分けて隔離する
+    docs: {
+      story: { inline: false, iframeHeight: 480 },
+    },
     controls: {
       matchers: {
         color: /(background|color)$/i,
