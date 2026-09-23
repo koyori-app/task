@@ -20,4 +20,7 @@ sqlx = { version = "0.8", default-features = false, features = ["postgres"] }
 tokio = { version = "1.52.1", features = ["macros", "sync", "time"] }
 tracing = { workspace = true }
 uuid = { version = "1", features = ["serde"] }
+# rc.9 は apalis-core rc.10 を要求し、上の apalis（rc.9）と揃わないので固定する
+apalis-cron = "=1.0.0-rc.8"
+cron = "0.16"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
