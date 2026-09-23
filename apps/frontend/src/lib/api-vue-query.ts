@@ -146,6 +146,21 @@ export function useRevokePersonalTokenMutation() {
   return apiClient.useMutation('delete', '/v1/personal_tokens/{id}');
 }
 
+export const devicesQueryOptions = () =>
+  apiClient.queryOptions('get', '/v1/users/me/devices', undefined, { retry: false });
+
+export function useDevicesQuery() {
+  return apiClient.useQuery('get', '/v1/users/me/devices', undefined, { retry: false });
+}
+
+export function useRevokeDeviceMutation() {
+  return apiClient.useMutation('delete', '/v1/users/me/devices/{id}');
+}
+
+export function useCreateDesktopAuthCodeMutation() {
+  return apiClient.useMutation('post', '/v1/desktop/auth/codes');
+}
+
 export function useTenantsQuery() {
   return apiClient.useQuery('get', '/v1/tenants', undefined, {
     staleTime: AUTH_ME_STALE_TIME_MS,

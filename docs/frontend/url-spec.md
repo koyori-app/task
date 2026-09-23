@@ -31,6 +31,7 @@
 | `/signup` | 新規登録 |
 | `/forgot-password` | パスワードリセット申請 |
 | `/reset-password` | パスワードリセット実行 |
+| `/desktop/authorize` | Koyori Desktop の承認（[仕様](../features/account-settings.md)）。未ログインならサインイン後に戻る |
 
 ### アカウント設定（テナント外）
 
@@ -39,6 +40,7 @@
 | URL | 説明 |
 |-----|------|
 | `/settings/profile` | プロフィール編集（[仕様](../features/account-settings.md)） |
+| `/settings/security` | 認証方法と Koyori Desktop の端末（[仕様](../features/account-settings.md)） |
 | `/settings/tokens` | パーソナルアクセストークンの発行・取り消し（[仕様](../features/account-settings.md)） |
 
 ### テナントスコープ

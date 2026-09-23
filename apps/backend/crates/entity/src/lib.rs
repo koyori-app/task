@@ -1,5 +1,6 @@
 pub mod _generated;
 pub mod audit_logs;
+pub mod device_tokens;
 pub mod drive_files;
 pub mod drive_folder_shares;
 pub mod drive_folders;

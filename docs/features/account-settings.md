@@ -309,6 +309,24 @@ OAuth の認可フローと解除規則は [OAuth ログイン](/features/auth-o
 （画面が数えた後に別のタブで増減されうるため）。先取りの数え方（`countAuthMethods`）は
 backend と揃えてパスキーも数えるので、この画面は件数を見る目的で `GET /v1/auth/passkeys` も呼ぶ。
 
+### Koyori Desktop の端末
+
+認証方法の下に、承認した Koyori Desktop（Device Token）の一覧と失効を出す
+（`apps/frontend/src/components/settings/DevicesSection.vue`）。Device Token の規則は
+[Bearer 認証・認可の「Desktop 認証」](../../apps/backend/docs/personal-access-tokens-authz.md) を正とする。
+
+- **一覧**: `GET /v1/users/me/devices`。失効済み・期限切れを除いた端末を新しい順に返す。
+  各行に端末名、末尾 4 文字だけの伏せ字、有効期限、最終使用を出す
+- **失効**: 確認ダイアログを経て `DELETE /v1/users/me/devices/{id}`。`revoked_at` を立てるだけで
+  行は残り、一覧からは消える。その端末は次の要求から 401 になる
+
+承認そのものは `/desktop/authorize`（`apps/frontend/src/pages/desktop/authorize/+Page.vue`）で行う。
+Desktop が開いたクエリ（`port` / `code_challenge` / `state` / `name`）を `lib/desktop-authorize.ts` で
+検証し（`port` は 1024〜65535 の整数のみ）、承認で `POST /v1/desktop/auth/codes` を呼んで
+`http://127.0.0.1:{port}/callback?code=&state=` へ遷移する。未ログインなら戻り先を
+`lib/one-time-notice.ts` の印に置いてサインインへ送り、パスワードでのサインイン後にこの画面へ戻す
+（認証ガードに任せるとクエリが落ちる）。OAuth でのサインインは戻らないので、Desktop からやり直す。
+
 ### `UserResponse.has_password`
 
 パスワードの有無で表示を切り替えるために `GET /v1/auth/me`（`UserResponse`）へ

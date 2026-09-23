@@ -24,6 +24,7 @@ use chrono::Utc;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use crate::error::{ServerError, internal_server_error};
+use entity::device_tokens;
 use entity::personal_tokens::{self, Entity as PersonalTokenEntity};
 use sea_orm::DatabaseConnection;
 
@@ -384,13 +385,26 @@ pub fn generate_email_verification_token() -> String {
 // --- Personal token helpers ---
 type HmacSha256 = Hmac<Sha256>;
 
-/// `pat_<base64url>` 形式のトークンと、DBに保存するHMACハッシュを返す。
-pub fn generate_personal_token(secret: &str) -> Result<(String, String), AuthError> {
+/// Device Token の接頭辞。Bearer の値がこれで始まれば PAT ではなく Device Token として引く。
+pub const DEVICE_TOKEN_PREFIX: &str = "kdt_";
+
+/// `<prefix><base64url>` 形式のトークンと、DBに保存するHMACハッシュを返す。
+fn generate_prefixed_token(prefix: &str, secret: &str) -> Result<(String, String), AuthError> {
     let mut buf = [0u8; 32];
     OsRng.fill_bytes(&mut buf);
-    let token = format!("pat_{}", URL_SAFE_NO_PAD.encode(buf));
+    let token = format!("{prefix}{}", URL_SAFE_NO_PAD.encode(buf));
     let token_hash = create_personal_token_hash(&token, secret)?;
     Ok((token, token_hash))
+}
+
+/// `pat_<base64url>` 形式のトークンと、DBに保存するHMACハッシュを返す。
+pub fn generate_personal_token(secret: &str) -> Result<(String, String), AuthError> {
+    generate_prefixed_token("pat_", secret)
+}
+
+/// `kdt_<base64url>` 形式の Device Token と、DBに保存するHMACハッシュを返す（PAT と同じハッシュ）。
+pub fn generate_device_token(secret: &str) -> Result<(String, String), AuthError> {
+    generate_prefixed_token(DEVICE_TOKEN_PREFIX, secret)
 }
 
 /// サーバー側で保持するトークンのハッシュを作る。
@@ -427,6 +441,28 @@ pub async fn authenticate_personal_token(
     if let Some(expires) = &token.expires_at
         && expires < &Utc::now().fixed_offset()
     {
+        return Err(AuthError::Unauthorized);
+    }
+
+    Ok(token)
+}
+
+/// Bearer の Device Token を検証し、有効なレコードを返す。
+/// `users.sessions_revoked_at` との比較は利用者を引く側（extractor）で行う。
+pub async fn authenticate_device_token(
+    db: &DatabaseConnection,
+    secret: &str,
+    token_plaintext: &str,
+) -> Result<device_tokens::Model, AuthError> {
+    let token_hash = create_personal_token_hash(token_plaintext, secret)?;
+
+    let token = device_tokens::Entity::find()
+        .filter(device_tokens::Column::TokenHash.eq(token_hash))
+        .one(db)
+        .await?
+        .ok_or(AuthError::Unauthorized)?;
+
+    if token.revoked_at.is_some() || token.expires_at < Utc::now().fixed_offset() {
         return Err(AuthError::Unauthorized);
     }
 
