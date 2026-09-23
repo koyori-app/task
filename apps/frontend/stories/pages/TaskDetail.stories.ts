@@ -476,7 +476,8 @@ export const Default: Story = {
     await user.click(await canvas.findByRole('button', { name: 'サブタスクを追加' }));
     const input = await canvas.findByRole('textbox', { name: 'サブタスク名' });
     await user.type(input, 'リダイレクト検証{Enter}');
-    await expect(input).toHaveValue('');
+    // 入力欄が空になるのは POST（モック）の完了後。即時に見ると先に走って落ちる
+    await waitFor(() => expect(input).toHaveValue(''));
   },
 };
 
@@ -1046,7 +1047,8 @@ export const DeleteCancel: Story = {
     const dialog = await canvas.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: 'キャンセル' }));
 
-    await expect(canvas.queryByRole('dialog')).toBeNull();
+    // ダイアログは閉じるアニメーションの後に消える
+    await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull());
     await expect(canvas.getByRole('heading', { name: 'OAuth 対応を実装する' })).toBeInTheDocument();
   },
 };
