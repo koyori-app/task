@@ -4053,6 +4053,174 @@
         }
       }
     },
+    "/v1/desktop/auth/codes": {
+      "post": {
+        "tags": ["Desktop"],
+        "summary": "Desktop 用の認可コードを発行",
+        "description": "Web の承認画面から呼ぶ。セッション専用（Bearer・2FA 途中のセッションは 403）。コードは 5 分・一度きり。",
+        "operationId": "create_desktop_auth_code",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopAuthCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "認可コード",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopAuthCodeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/desktop/auth/token": {
+      "post": {
+        "tags": ["Desktop"],
+        "summary": "認可コードを Device Token に交換",
+        "description": "未認証で呼ぶ（code が資格）。code の不一致・期限切れ・再利用・code_verifier の不一致はすべて 401 で、code は消費済みになる。平文トークンはこの応答でのみ返す。",
+        "operationId": "exchange_desktop_auth_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopAuthTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "発行した Device Token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopAuthTokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認可コードが無効・期限切れ・使用済み、または code_verifier が一致しません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "試行が多すぎます。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/drive/files/{id}/content": {
       "get": {
         "tags": ["Drive Files"],
@@ -20639,6 +20807,180 @@
         }
       }
     },
+    "/v1/users/me/devices": {
+      "get": {
+        "tags": ["Desktop"],
+        "summary": "自分の端末（Device Token）の一覧",
+        "description": "失効済み・期限切れを除く。セッションと Device Token で呼べる。",
+        "operationId": "list_devices",
+        "responses": {
+          "200": {
+            "description": "端末の一覧（新しい順）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceToken"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/users/me/devices/{id}": {
+      "delete": {
+        "tags": ["Desktop"],
+        "summary": "端末を失効",
+        "description": "revoked_at を立てる（行は残す）。要求に使っている Device Token 自身も失効できる（ログアウト）。他人の端末は 404。",
+        "operationId": "revoke_device",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "端末の識別子",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "失効しました"
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/users/me/notification-settings/{project_id}": {
       "get": {
         "tags": ["Notifications"],
@@ -22297,6 +22639,92 @@
           },
           "task": {
             "$ref": "#/components/schemas/MyTaskItem"
+          }
+        }
+      },
+      "DesktopAuthCodeRequest": {
+        "type": "object",
+        "description": "Desktop に渡す認可コードの発行要求（Web の承認画面から送る）。",
+        "required": ["code_challenge", "name"],
+        "properties": {
+          "code_challenge": {
+            "type": "string",
+            "description": "S256 の code_challenge（base64url、43〜128 文字）"
+          },
+          "name": {
+            "type": "string",
+            "description": "端末名（クライアントの申告。表示用）"
+          }
+        }
+      },
+      "DesktopAuthCodeResponse": {
+        "type": "object",
+        "required": ["code"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "認可コード（5 分・一度きり）"
+          }
+        }
+      },
+      "DesktopAuthTokenRequest": {
+        "type": "object",
+        "description": "認可コードと code_verifier を Device Token に交換する要求（Desktop から送る）。",
+        "required": ["code", "code_verifier"],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "code_verifier": {
+            "type": "string",
+            "description": "RFC 7636 の code_verifier（43〜128 文字）"
+          }
+        }
+      },
+      "DesktopAuthTokenResponse": {
+        "type": "object",
+        "description": "発行した Device Token（平文はこの応答でのみ返す）。",
+        "required": ["token", "expires_at", "device_id"],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "DeviceToken": {
+        "type": "object",
+        "description": "端末（Device Token）のメタデータ。平文・ハッシュは含まない。",
+        "required": ["id", "name", "token_last_four", "expires_at", "last_used_at", "created_at"],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_used_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "token_last_four": {
+            "type": "string"
           }
         }
       },
@@ -25515,6 +25943,10 @@
     {
       "name": "Notifications",
       "description": "in-app 通知・ウォッチャー・通知設定"
+    },
+    {
+      "name": "Desktop",
+      "description": "Koyori Desktop の認証（Device Token）・端末管理"
     }
   ]
 }

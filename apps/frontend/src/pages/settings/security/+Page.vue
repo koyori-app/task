@@ -2,6 +2,7 @@
 import { usePageContext } from 'vike-vue/usePageContext';
 import AccountSettingsNav from '@/components/settings/AccountSettingsNav.vue';
 import AuthMethodsSection from '@/components/settings/AuthMethodsSection.vue';
+import DevicesSection from '@/components/settings/DevicesSection.vue';
 import { useMeQuery } from '@/lib/api-vue-query';
 
 const pageContext = usePageContext();
@@ -23,11 +24,12 @@ const meQuery = useMeQuery();
       <section class="flex min-w-0 flex-1 flex-col gap-6">
         <div class="flex flex-col gap-1">
           <h2 class="text-lg font-semibold">セキュリティ</h2>
-          <p class="text-muted-foreground text-sm">サインイン方法を管理します。</p>
+          <p class="text-muted-foreground text-sm">サインイン方法と端末を管理します。</p>
         </div>
 
         <!-- 親レイアウトが /me の成功後だけページを描画する。 -->
         <AuthMethodsSection :user="meQuery.data.value!" />
+        <DevicesSection />
       </section>
     </div>
   </div>

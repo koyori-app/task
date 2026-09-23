@@ -24,6 +24,8 @@ pub struct Model {
     #[sea_orm(has_many)]
     pub audit_logs: HasMany<super::audit_logs::Entity>,
     #[sea_orm(has_many)]
+    pub device_tokens: HasMany<super::device_tokens::Entity>,
+    #[sea_orm(has_many)]
     pub drive_files: HasMany<super::drive_files::Entity>,
     #[sea_orm(has_many)]
     pub drive_folders: HasMany<super::drive_folders::Entity>,

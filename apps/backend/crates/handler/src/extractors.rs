@@ -19,7 +19,9 @@ use crate::auth_helpers::{
     project_is_open_or_member,
 };
 use crate::{AppState, error::AppError};
-use service::auth::{AuthError, authenticate_personal_token};
+use service::auth::{
+    AuthError, DEVICE_TOKEN_PREFIX, authenticate_device_token, authenticate_personal_token,
+};
 
 type Session = axum_session::Session<SessionRedisPool>;
 
@@ -75,9 +77,14 @@ pub enum AuthMethod {
         scopes: entity::scopes::ScopeList,
         expires_at: Option<DateTimeWithTimeZone>,
     },
+    /// Koyori Desktop の Bearer。スコープ・テナント束縛はセッションと同等で、
+    /// セッション専用の口（`require_session`）だけは通さない。
+    DeviceToken {
+        token_id: Uuid,
+    },
 }
 
-/// 認証済みユーザー（セッションまたは PAT）
+/// 認証済みユーザー（セッション・PAT・Device Token）
 pub struct AuthUser {
     pub user_id: Uuid,
     pub username: String,
@@ -89,14 +96,25 @@ impl AuthUser {
     pub fn require_session(&self) -> Result<(), AppError> {
         match self.method {
             AuthMethod::Session => Ok(()),
+            AuthMethod::PersonalToken { .. } | AuthMethod::DeviceToken { .. } => {
+                Err(AppError::Forbidden)
+            }
+        }
+    }
+
+    /// 端末管理（`/v1/users/me/devices`）向け。セッションと Device Token を通し、
+    /// テナントに束縛された PAT は通さない（通知 API はスコープと視界の絞り込みで守る）。
+    pub fn require_session_or_device_token(&self) -> Result<(), AppError> {
+        match self.method {
+            AuthMethod::Session | AuthMethod::DeviceToken { .. } => Ok(()),
             AuthMethod::PersonalToken { .. } => Err(AppError::Forbidden),
         }
     }
 
-    /// 操作スコープチェック。セッションは常に通過。
+    /// 操作スコープチェック。セッションと Device Token は常に通過。
     pub fn require_scope(&self, scope: Scope) -> Result<(), AppError> {
         match &self.method {
-            AuthMethod::Session => Ok(()),
+            AuthMethod::Session | AuthMethod::DeviceToken { .. } => Ok(()),
             AuthMethod::PersonalToken { scopes, .. } => {
                 if scopes.has_scope(scope) {
                     Ok(())
@@ -312,7 +330,11 @@ impl FromRequestParts<AppState> for AuthUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        if let Some(token) = bearer_token_from_parts(parts) {
+        if let Some(token) = bearer_token_from_parts(parts)
+            && token.starts_with(DEVICE_TOKEN_PREFIX)
+        {
+            device_token_user(state, &token).await
+        } else if let Some(token) = bearer_token_from_parts(parts) {
             let record = authenticate_personal_token(
                 &state.db,
                 &state.settings.personal_token_secret,
@@ -363,6 +385,32 @@ impl FromRequestParts<AppState> for AuthUser {
             })
         }
     }
+}
+
+async fn device_token_user(state: &AppState, token: &str) -> Result<AuthUser, AuthError> {
+    let record =
+        authenticate_device_token(&state.db, &state.settings.personal_token_secret, token).await?;
+    let user = users::Entity::find_by_id(record.user_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AuthError::Unauthorized)?;
+    if user.is_suspended {
+        return Err(AuthError::Suspended);
+    }
+    // パスワード変更などで全セッションを落としたら、それより前に発行した端末も落とす
+    if let Some(revoked_at) = user.sessions_revoked_at
+        && record.created_at < revoked_at
+    {
+        return Err(AuthError::Unauthorized);
+    }
+    service::desktop_auth::record_device_token_use(&state.db, &record).await?;
+    Ok(AuthUser {
+        user_id: user.id,
+        username: user.username,
+        method: AuthMethod::DeviceToken {
+            token_id: record.id,
+        },
+    })
 }
 
 /// 半認証セッション専用（`POST /v1/auth/2fa/verify`）

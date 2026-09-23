@@ -9,6 +9,7 @@ mod admin_users_integration;
 mod auth_2fa_integration;
 mod custom_fields_integration;
 mod dashboard_integration;
+mod desktop_auth_integration;
 mod drive_file_content_integration;
 mod drive_folder_boundary_integration;
 mod drive_project_id_backfill_integration;
