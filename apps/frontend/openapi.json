@@ -22915,9 +22915,17 @@
           "state",
           "created_at",
           "updated_at",
-          "transitions"
+          "transitions",
+          "available_actions"
         ],
         "properties": {
+          "available_actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FindingState"
+            },
+            "description": "要求者がいま遷移できる先の状態（`PATCH … {state}` にそのまま渡せる値）\n\n遷移規則・役割規則（仕様 §3）は backend だけが持つ。クライアントはこれを見て\n操作を出し、規則を写さない。"
+          },
           "body": {
             "type": "string"
           },
@@ -24150,6 +24158,11 @@
         ],
         "description": "ラウンドと、そのラウンドで出した指摘。"
       },
+      "ReviewGate": {
+        "type": "string",
+        "description": "PR のマージ判定の表示区分（仕様 §5）。\n\n判定は `service::reviews::review_gate`。`mergeable` と違い、鮮度（レビュー後に\nコミットが積まれたか）まで見る片道降格の結果。",
+        "enum": ["unlinked", "unreviewed", "blocked", "stale_unknown", "outdated", "ready"]
+      },
       "ReviewResponse": {
         "type": "object",
         "required": [
@@ -24223,7 +24236,8 @@
           "counts",
           "blocking",
           "owner_override_rejections",
-          "mergeable"
+          "mergeable",
+          "gate"
         ],
         "properties": {
           "blocking": {
@@ -24242,6 +24256,10 @@
               "$ref": "#/components/schemas/SeverityStateCount"
             },
             "description": "重大度 × 状態の件数"
+          },
+          "gate": {
+            "$ref": "#/components/schemas/ReviewGate",
+            "description": "表示用の判定（上から順に最初に当たったもの）。クライアントは再計算しない\n\n権威のゲートは引き続き CLI の `--head` 照合と branch protection。"
           },
           "latest_head_sha": {
             "type": ["string", "null"],

@@ -209,11 +209,11 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
 |---|---|
 | `POST /v1/tenants/{t}/projects/{p}/reviews` | ラウンド + 指摘の**一括作成**（1 リクエスト）。成功後に GitHub 要約更新をジョブ投入 |
 | `GET  /v1/tenants/{t}/projects/{p}/reviews?pr=618` | ラウンドの一覧（指摘の件数つき） |
-| `GET  /v1/tenants/{t}/projects/{p}/reviews/{id}` | ラウンドの詳細（指摘含む） |
+| `GET  /v1/tenants/{t}/projects/{p}/reviews/{id}` | ラウンドの詳細（指摘含む。各指摘に `available_actions`） |
 | `GET  /v1/tenants/{t}/projects/{p}/reviews/pull-requests` | レビューのある PR の一覧（ラウンド数・未解決数・塞いでいる件数）。**可否は返さない**——可否には鮮度と連携の有無も要り（§8 の 6 値）、この一覧はその材料を持たない。画面の PR 一覧が使う |
-| `GET  /v1/tenants/{t}/projects/{p}/reviews/summary?pr=618` | PR 単位の集計: 重大度 × 状態の件数、ラウンド数、最新ラウンドの `head_sha`、集計対象のリポジトリ、オーナー代行での棄却件数、「マージ可否」 |
-| `GET  /v1/tenants/{t}/projects/{p}/review-findings?pr=618&state=&severity=` | PR の指摘一覧（状態・重大度で絞り込み）。CLI の `review list` と UI の一覧が使う |
-| `PATCH /v1/tenants/{t}/projects/{p}/review-findings/{id}` | 状態遷移（`state` と任意のコメント） |
+| `GET  /v1/tenants/{t}/projects/{p}/reviews/summary?pr=618` | PR 単位の集計: 重大度 × 状態の件数、ラウンド数、最新ラウンドの `head_sha`、集計対象のリポジトリ、オーナー代行での棄却件数、「マージ可否」、表示用の判定 `gate` |
+| `GET  /v1/tenants/{t}/projects/{p}/review-findings?pr=618&state=&severity=` | PR の指摘一覧（状態・重大度で絞り込み。各指摘に `available_actions`）。CLI の `review list` と UI の一覧が使う |
+| `PATCH /v1/tenants/{t}/projects/{p}/review-findings/{id}` | 状態遷移（`state` と任意のコメント）。応答の指摘にも遷移後の `available_actions` |
 
 上表の PR 単位の読み取り（ラウンド一覧・集計・指摘一覧）は共通して `pr` と、任意の
 `repo=owner/name`、`host`、`host_url`、`pull_request_id` を受ける。`pull_request_id` を
@@ -260,6 +260,28 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
   するので（§1）、UI だけ素通しにするとゲートの半分が無いのと同じになる
 - 集計は**オーナー代行で棄却された件数**も返す。代行の条件（作成者の不在）はオーナー自身が
   作れるので（§2）、マージ可否を読むその場所に痕跡を出す
+- 指摘のレスポンス（ラウンド詳細・指摘一覧・起票・遷移の応答）は **`available_actions`**
+  ——要求者がいま遷移できる**遷移先の state** の一覧——を返す。`PATCH … {state}` にそのまま
+  渡せる値で、動詞ではない。判定は候補の state ごとに `service::reviews::check_transition`
+  （`ensure_transition_allowed` の判定本体）を呼ぶだけで、§3 の規則を別の表に写さない。
+  判定の材料（ラウンドの作成者・より新しいラウンドの作成者・作成者の不在・オーナー）は
+  一覧ぶんをまとめて引き、指摘の件数に比例して DB を往復しない。クライアント（Web・Desktop）は
+  これだけを見て操作を出し、規則を持たない
+- 集計は表示用の判定 **`gate`** を返す（`service::reviews::review_gate`）。上から順に最初に
+  当たったもの:
+
+  | `gate` | 条件 |
+  |---|---|
+  | `unlinked` | 集計対象のリポジトリが確定しない（連携なし） |
+  | `unreviewed` | ラウンドが 0 件 |
+  | `blocked` | open / fixed の High・Medium がある |
+  | `stale_unknown` | `cached_pr_head_sha` が無い |
+  | `outdated` | `cached_pr_head_sha` ≠ `latest_head_sha` |
+  | `ready` | 上のいずれでもない（`pr_head_checked_at` を併記する） |
+
+  §8 の 6 値と同じ規則。既存の欄（件数・SHA・確認時刻・代行棄却数・`mergeable`）は残す。
+  画面と Desktop はこの値を表示に使い、判定を再計算しない。権威のゲートは引き続き
+  CLI の `--head` 照合と branch protection
 
 ---
 
@@ -498,15 +520,15 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
 - **PR 単位の指摘一覧**: 重大度・状態・ラウンドでフィルタ。各指摘は title / file:line / 本文 /
   遷移履歴を持つ
 - **状態遷移の操作**: fixed / verified / deferred / rejected に加えて、**戻り遷移**
-  （fixed → open の差し戻し / deferred → open / rejected → open）。役割制約あり
-  （自分の修正を自分で verified にできない。High / Medium には deferred を出さない。
-  rejected は指摘を出した本人にだけ出す。ただし**作成者がテナントの利用者でなくなった
-  ラウンド**（`reviewer_left_tenant`）では、テナントオーナーにも出す（§3 の代行）。
-  fixed → verified / open は**レビュー側**——その指摘のラウンド以降のラウンドを出した人に
-  だけ出す）。§3 の表と 1:1 で対応させる
+  （fixed → open の差し戻し / deferred → open / rejected → open）。出すボタンは指摘の
+  `available_actions`（§5）そのもの。役割制約（自分の修正を自分で verified にできない、
+  High / Medium には deferred を出さない、rejected は指摘を出した本人とオーナー代行だけ、
+  fixed → verified / open はレビュー側だけ）はすべて backend が判定済み。自分が fixed を
+  宣言した指摘には、確認が出ない理由の説明だけを添える
 - **マージ可否の即答**: **リポジトリ未確定 / 未レビュー / マージ不可（残数つき）/
-  レビューが古い / 鮮度不明 / マージ可** の 6 つを出し分ける（§5 と同じ規則 +
-  キャッシュ済みの現在 head との比較）。判定は**片道降格**——「可」以外へ落とす方向にだけ
+  レビューが古い / 鮮度不明 / マージ可** の 6 つを、集計の `gate`（§5）で出し分ける
+  （それぞれ `unlinked` / `unreviewed` / `blocked` / `outdated` / `stale_unknown` / `ready`）。
+  画面は判定を再計算しない。判定は**片道降格**——「可」以外へ落とす方向にだけ
   使い、「可」を保証には使わない
   - 「リポジトリ未確定」: GitHub 連携が無い。ゲートとして扱ってよい表示ではない——
     連携を外すと集計の視界が空になり、空のラウンド 1 本で「可」を作れるため。
@@ -526,12 +548,11 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
 - **プロジェクト横断の集計**: 溜まっている deferred（Low/Nit）の件数と一覧 — **未実装**
   （プロジェクト単位の一覧のみ。テナント横断のエンドポイントが要る）
 
-遷移規則（どの操作を出すか・押せるか）は `lib/review-findings.ts` に置き、backend の
-`service::reviews` と同じ表を持つ。押しても 409 / 403 になるボタンを出さないためで、
-**片方だけ変えると「押せるのに失敗する」ボタンができる**ので両方直すこと。
-`canTransition` / `canDefer` / `requiresFindingAuthor` / `requiresReviewerSide` は
-**4 つとも `findingActions` から使う**。定義しただけで呼び忘れると、その規則ぶんだけ
-「押すと 403」のボタンが戻る。
+遷移規則（どの操作を出すか）は画面に持たない。`lib/review-findings.ts` の
+`findingActions` は `available_actions` にラベルを付けるだけ、`mergeVerdict` は `gate` に
+見出しと説明を付けるだけにする。以前は backend と同じ表を画面にも持ち、片方だけ変えると
+「押せるのに失敗する」ボタンができた。Desktop が 3 つ目の写しを持たないよう、
+規則は backend の 1 か所に寄せた。
 
 ページは `<ReviewFindingsView :key="projectId">` で作り直す。vike-vue はクライアント遷移で
 同じ `+Page.vue` に解決される URL 間ではコンポーネントを patch するため、これが無いと
@@ -748,3 +769,7 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
   プロジェクト全員へ全ラウンドが流れる）。PR の作者への起票通知は要約ジョブが担う——
   起票時点では作者が分からず、`reviews.pr_author` を埋めるのがこのジョブだから。
   通知の可視性は `notifications.project_id` で判定する（レビュー通知はタスクに紐づかない）
+- 2026-09-24: 指摘に `available_actions`、集計に `gate` を足し、画面の遷移表・可否判定の写しを
+  消した。Koyori Desktop が 3 つ目の写しを持つと、規則を変えるたびに 3 か所を揃える必要が
+  出るため。判定は `ensure_transition_allowed` の本体（`check_transition`）を候補ごとに呼ぶだけで、
+  材料は一覧ぶんまとめて引く

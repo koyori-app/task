@@ -151,6 +151,11 @@ pub struct FindingResponse {
     #[schema(value_type = String, format = "date-time")]
     pub updated_at: DateTime<Utc>,
     pub transitions: Vec<FindingTransitionResponse>,
+    /// 要求者がいま遷移できる先の状態（`PATCH … {state}` にそのまま渡せる値）
+    ///
+    /// 遷移規則・役割規則（仕様 §3）は backend だけが持つ。クライアントはこれを見て
+    /// 操作を出し、規則を写さない。
+    pub available_actions: Vec<FindingState>,
 }
 
 impl FindingResponse {
@@ -159,6 +164,7 @@ impl FindingResponse {
         pr_number: i32,
         round: i32,
         transitions: Vec<FindingTransitionResponse>,
+        available_actions: Vec<FindingState>,
     ) -> Self {
         Self {
             id: model.id,
@@ -176,6 +182,7 @@ impl FindingResponse {
             created_at: model.created_at.with_timezone(&Utc),
             updated_at: model.updated_at.with_timezone(&Utc),
             transitions,
+            available_actions,
         }
     }
 }
@@ -248,6 +255,31 @@ pub struct ReviewSummaryResponse {
     ///
     /// レビューが 1 件も無い PR を「可」にしない（未レビューと「指摘なし」は違う）。
     pub mergeable: bool,
+    /// 表示用の判定（上から順に最初に当たったもの）。クライアントは再計算しない
+    ///
+    /// 権威のゲートは引き続き CLI の `--head` 照合と branch protection。
+    pub gate: ReviewGate,
+}
+
+/// PR のマージ判定の表示区分（仕様 §5）。
+///
+/// 判定は `service::reviews::review_gate`。`mergeable` と違い、鮮度（レビュー後に
+/// コミットが積まれたか）まで見る片道降格の結果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewGate {
+    /// 集計対象のリポジトリが確定しない（GitHub 連携なし）
+    Unlinked,
+    /// ラウンドが 0 件
+    Unreviewed,
+    /// open / fixed の High・Medium がある
+    Blocked,
+    /// 現在の HEAD を確認できていない（`cached_pr_head_sha` が無い）
+    StaleUnknown,
+    /// レビュー後にコミットが積まれている（`cached_pr_head_sha` ≠ `latest_head_sha`）
+    Outdated,
+    /// 上のいずれでもない。`pr_head_checked_at` 時点の判定
+    Ready,
 }
 
 /// レビューのある PR の一覧行。画面の PR 一覧が使う。

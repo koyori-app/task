@@ -1,6 +1,8 @@
 use crate::common::TestApp;
 use axum::http::StatusCode;
-use entity::{github_integrations, project_statuses, review_findings, tasks, tenant_members};
+use entity::{
+    github_integrations, project_statuses, review_findings, reviews, tasks, tenant_members,
+};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, prelude::Uuid,
 };
@@ -1454,6 +1456,213 @@ async fn a_round_requires_a_full_commit_sha() {
         )
         .await;
     assert_eq!(res.status(), StatusCode::CREATED);
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 指摘一覧の `available_actions` を id で引く。
+async fn actions_in_list(fx: &Fixture, pr: i32, finding_id: &str) -> serde_json::Value {
+    let list = json(
+        fx.app
+            .get_with_session(&format!("{}?pr={pr}", fx.findings_path()))
+            .await,
+    )
+    .await;
+    list.as_array()
+        .expect("findings")
+        .iter()
+        .find(|f| f["id"] == finding_id)
+        .unwrap_or_else(|| panic!("finding {finding_id} in {list}"))["available_actions"]
+        .clone()
+}
+
+/// ラウンド詳細の `available_actions`（1 件目の指摘）。
+async fn actions_in_detail(fx: &Fixture, review_id: &str) -> serde_json::Value {
+    let detail = json(
+        fx.app
+            .get_with_session(&format!("{}/{review_id}", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    detail["findings"][0]["available_actions"].clone()
+}
+
+/// `available_actions` は要求者ごとに、仕様 §3 の役割規則どおりの遷移先だけを返す。
+/// 一覧・ラウンド詳細・遷移の応答で同じ値になる。
+#[tokio::test]
+async fn available_actions_follow_the_role_rules() {
+    let mut fx = setup().await;
+    let actions = |values: &[&str]| serde_json::json!(values);
+
+    // レビュワーが Low と High を出す
+    fx.login(&fx.reviewer.clone()).await;
+    let (low_review, low) = submit_round(&fx, 801, "low", "Low の指摘").await;
+    let (_, high) = submit_round(&fx, 802, "high", "High の指摘").await;
+
+    // 指摘の作者: 修正・繰り延べ・取り下げ。High には繰り延べが出ない
+    assert_eq!(
+        actions_in_list(&fx, 801, &low).await,
+        actions(&["fixed", "deferred", "rejected"])
+    );
+    assert_eq!(
+        actions_in_detail(&fx, &low_review).await,
+        actions(&["fixed", "deferred", "rejected"]),
+        "ラウンド詳細も同じ値"
+    );
+    assert_eq!(
+        actions_in_list(&fx, 802, &high).await,
+        actions(&["fixed", "rejected"])
+    );
+
+    // 作者でない修正者には取り下げが出ない
+    fx.login(&fx.developer.clone()).await;
+    assert_eq!(
+        actions_in_list(&fx, 801, &low).await,
+        actions(&["fixed", "deferred"])
+    );
+    assert_eq!(actions_in_list(&fx, 802, &high).await, actions(&["fixed"]));
+
+    // 修正者が fixed を宣言する。修正者はレビュー側でないので確認も差し戻しも出ない
+    let res = transition(&fx, &low, "fixed").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        json(res).await["available_actions"],
+        actions(&[]),
+        "遷移の応答も要求者の値"
+    );
+    // レビュー側には確認と差し戻し
+    fx.login(&fx.reviewer.clone()).await;
+    assert_eq!(
+        actions_in_list(&fx, 801, &low).await,
+        actions(&["open", "verified"])
+    );
+
+    // fixed を宣言した本人には、レビュー側でも verified が出ない
+    assert_eq!(
+        transition(&fx, &high, "fixed").await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(actions_in_list(&fx, 802, &high).await, actions(&["open"]));
+
+    // verified は終端で空
+    assert_eq!(
+        transition(&fx, &low, "verified").await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(actions_in_list(&fx, 801, &low).await, actions(&[]));
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 作者がテナントから居なくなったときだけ、オーナーに取り下げが出る。
+#[tokio::test]
+async fn available_actions_offer_the_owner_rejection_for_a_departed_reviewer() {
+    let mut fx = setup().await;
+    fx.login(&fx.developer.clone()).await;
+    let (_, finding) = submit_round(&fx, 803, "low", "作者が去る指摘").await;
+
+    fx.login(&fx.reviewer.clone()).await;
+    assert_eq!(
+        actions_in_list(&fx, 803, &finding).await,
+        serde_json::json!(["fixed", "deferred"]),
+        "作者が在籍していればオーナーでも出ない"
+    );
+
+    tenant_members::Entity::delete_many()
+        .filter(tenant_members::Column::TenantId.eq(fx.tenant_id))
+        .filter(tenant_members::Column::UserId.eq(fx.developer.id))
+        .exec(&fx.app.state.db)
+        .await
+        .expect("remove tenant member");
+
+    assert_eq!(
+        actions_in_list(&fx, 803, &finding).await,
+        serde_json::json!(["fixed", "deferred", "rejected"])
+    );
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+async fn gate(fx: &Fixture, pr: i32) -> serde_json::Value {
+    json(
+        fx.app
+            .get_with_session(&format!("{}/summary?pr={pr}", fx.reviews_path()))
+            .await,
+    )
+    .await["gate"]
+        .clone()
+}
+
+/// 最新ラウンドの `pr_head_sha`（要約ジョブが GitHub から読んだ現在の head）を書き換える。
+async fn set_cached_head(fx: &Fixture, review_id: &str, sha: &str) {
+    let mut active: reviews::ActiveModel =
+        reviews::Entity::find_by_id(review_id.parse::<Uuid>().expect("uuid"))
+            .one(&fx.app.state.db)
+            .await
+            .expect("select")
+            .expect("review")
+            .into();
+    active.pr_head_sha = Set(Some(sha.into()));
+    active.pr_head_checked_at = Set(Some(chrono::Utc::now().into()));
+    active.update(&fx.app.state.db).await.expect("update head");
+}
+
+/// `gate` の 6 値と、条件が重なったときの優先順位（仕様 §5）。
+#[tokio::test]
+async fn summary_gate_takes_the_first_matching_condition() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    let reviewed = "60cdd7795f94fa4e4148ce996c2efb4c363e3f5e";
+    let pushed = "0000000000000000000000000000000000000001";
+
+    // 連携なし: 未解決の High があっても unlinked が先
+    let (unlinked_review, _) = submit_round(&fx, 804, "high", "連携前").await;
+    set_cached_head(&fx, &unlinked_review, pushed).await;
+    assert_eq!(gate(&fx, 804).await, "unlinked");
+
+    link_repo(&fx, "acme", "gate").await;
+    assert_eq!(gate(&fx, 805).await, "unreviewed");
+
+    // 未解決の High があれば、レビュー後にコミットが積まれていても blocked が先
+    let (blocked_review, _) = submit_round(&fx, 805, "high", "未解決").await;
+    assert_eq!(gate(&fx, 805).await, "blocked");
+    set_cached_head(&fx, &blocked_review, pushed).await;
+    assert_eq!(gate(&fx, 805).await, "blocked");
+
+    // 未解決が無い PR: 鮮度で決まる
+    let res = fx
+        .app
+        .post_json_with_session(
+            &fx.reviews_path(),
+            serde_json::json!({
+                "pr_number": 806,
+                "head_sha": reviewed,
+                "summary": "指摘なし",
+                "findings": [],
+            }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let clean_review = json(res).await["id"].as_str().expect("id").to_string();
+    assert_eq!(gate(&fx, 806).await, "stale_unknown");
+    set_cached_head(&fx, &clean_review, pushed).await;
+    assert_eq!(gate(&fx, 806).await, "outdated");
+    set_cached_head(&fx, &clean_review, reviewed).await;
+    let summary = json(
+        fx.app
+            .get_with_session(&format!("{}/summary?pr=806", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    assert_eq!(summary["gate"], "ready");
+    assert!(
+        !summary["pr_head_checked_at"].is_null(),
+        "確認時刻を併記する"
+    );
+    assert_eq!(summary["mergeable"], true, "既存フィールドは残す");
 
     fx.app.cleanup_user(fx.reviewer.id).await;
     fx.app.cleanup_user(fx.developer.id).await;

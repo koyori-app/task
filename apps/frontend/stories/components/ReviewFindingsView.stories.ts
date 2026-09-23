@@ -22,6 +22,8 @@ type StoryFinding = {
   line: number | null;
   round: number;
   fixed_by: string | null;
+  /** 閲覧者がいま遷移できる先（backend の available_actions） */
+  available_actions: ('open' | 'fixed' | 'verified' | 'deferred' | 'rejected')[];
 };
 
 const sampleFindings: StoryFinding[] = [
@@ -35,6 +37,8 @@ const sampleFindings: StoryFinding[] = [
     line: 142,
     round: 2,
     fixed_by: null,
+    // 閲覧者が出した R2 の指摘。High なので繰り延べは無い
+    available_actions: ['fixed', 'rejected'],
   },
   {
     id: 'f-117',
@@ -45,8 +49,9 @@ const sampleFindings: StoryFinding[] = [
     file: 'src/pages/tasks/SplitView.vue',
     line: 204,
     round: 2,
-    // 閲覧者自身が直した指摘。自分では確認できない
+    // 閲覧者自身が直した指摘。自分では確認できない（backend が verified を返さない）
     fixed_by: VIEWER_ID,
+    available_actions: ['open'],
   },
   {
     id: 'f-116',
@@ -58,6 +63,7 @@ const sampleFindings: StoryFinding[] = [
     line: null,
     round: 1,
     fixed_by: null,
+    available_actions: ['open'],
   },
 ];
 
@@ -83,6 +89,7 @@ function toResponse(finding: StoryFinding) {
     state: finding.state,
     deferred_task_id: finding.state === 'deferred' ? 'task-1' : null,
     fixed_by: finding.fixed_by,
+    available_actions: finding.available_actions,
     created_at: '2026-08-25T10:12:00Z',
     updated_at: '2026-08-25T14:03:00Z',
     transitions: [
@@ -137,9 +144,8 @@ function mockFetch(overrides: { empty?: boolean } = {}) {
           counts: findings.map((f) => ({ severity: f.severity, state: f.state, count: 1 })),
           blocking: blocking(),
           mergeable: blocking() === 0,
-          // repository が無いと mergeVerdict は「リポジトリ未確定」へ降格する。
-          // 集計の視界が連携先で決まる以上、それが最初の判定になるので、
-          // 件数や鮮度の見え方を確かめたいストーリーでは必ず埋める
+          gate: blocking() === 0 ? 'ready' : 'blocked',
+          // gate は backend の判定。材料の欄もそれと矛盾しない値にしておく
           repository: 'koyori-app/task',
           owner_override_rejections: 0,
           // レビューした commit と現在の HEAD。揃えて「鮮度は満たしている」状態にし、
@@ -159,9 +165,7 @@ function mockFetch(overrides: { empty?: boolean } = {}) {
             // API は 40 桁の小文字 16 進しか受け付けない。短縮 SHA をモックに置くと、
             // 実データでは起きない見え方（表示側の slice 前提など）を通してしまう
             head_sha: round === 2 ? LATEST_HEAD_SHA : '77bd214c8e0198a7b6c5d4e3f2a1b0c9d8e7f6a5',
-            // 最新ラウンドは閲覧者が出したことにする。確認（verified）と差し戻しは
-            // レビュー側にしか出ないので、reviewer を全部他人にすると
-            // 「自分の修正は自分で確認できない」を見せる前にボタンが消える
+            // 最新ラウンドは閲覧者が出したことにする（available_actions と揃える）
             reviewer:
               round === 2
                 ? { id: VIEWER_ID, username: 'viewer', avatar_url: null }
@@ -279,8 +283,8 @@ export const SelfVerificationBlocked: Story = {
     const canvas = within(canvasElement);
     await canvas.findByText('幅リサイズのイベントリスナが解除されない');
 
-    // 閲覧者自身が fixed を宣言した指摘なので、確認ボタンは押せない
-    await expect(canvas.getByRole('button', { name: '確認した' })).toBeDisabled();
+    // 閲覧者自身が fixed を宣言した指摘なので、確認ボタンは出ない
+    await expect(canvas.queryByRole('button', { name: '確認した' })).toBeNull();
     await expect(
       canvas.getByText('修正者と確認者は別の人である必要があります'),
     ).toBeInTheDocument();

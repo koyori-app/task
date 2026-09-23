@@ -154,6 +154,8 @@ pub fn summary_json(
         "owner_override_rejections": 0,
         "repository": repository,
         "mergeable": mergeable,
+        // CLI は gate を見ない（権威のゲートは --head 照合）。形だけ合わせる
+        "gate": "stale_unknown",
     })
 }
 
@@ -174,6 +176,7 @@ pub fn finding_json() -> serde_json::Value {
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-01T00:00:00Z",
         "transitions": [],
+        "available_actions": ["fixed"],
     })
 }
 

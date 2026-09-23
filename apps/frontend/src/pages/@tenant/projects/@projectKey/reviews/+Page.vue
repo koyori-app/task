@@ -38,7 +38,6 @@ const requestUrl = computed(() => {
 
 const {
   tenantId,
-  tenantOwnerId,
   isTenantNotFound,
   isResolving: isTenantResolving,
   isError: isTenantResolveError,
@@ -92,7 +91,6 @@ const isNotFound = computed(() => isTenantNotFound.value || isProjectNotFound.va
       :project-id="projectId"
       :project-key="projectKey"
       :viewer-id="meQuery.data.value.id"
-      :tenant-owner-id="tenantOwnerId"
       :initial-url-state="initialUrl.state"
       :initial-url-warnings="initialUrl.warnings"
       :request-url="requestUrl"
