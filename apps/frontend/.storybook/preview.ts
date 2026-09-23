@@ -1,5 +1,10 @@
 import type { Preview } from '@storybook/vue3-vite';
+import { configure } from 'storybook/test';
 import '@/assets/css/tailwind.css';
+
+// VRT は story を並列に描画するので、既定の 1 秒では findBy* / waitFor が
+// 負荷で間に合わず落ちることがある（play の書き方は正しいのに赤になる）
+configure({ asyncUtilTimeout: 5000 });
 
 // Date.now は意図的に凍結していない(経過時間は performance.now を使う)
 const MOCKED_NOW = '2026-07-15T12:00:00+09:00';
