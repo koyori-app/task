@@ -48,6 +48,7 @@ impl Fixture {
         assert_eq!(res.status(), StatusCode::CREATED);
         let body: serde_json::Value = res.json().await.expect("json");
         assert_eq!(body["secret"], SECRET, "作成時だけ secret を平文で返す");
+        assert_eq!(body["url"], url, "作成者には完全な URL を返す");
         body["id"].as_str().expect("id").parse().expect("uuid")
     }
 
@@ -98,7 +99,11 @@ fn job_state(app: &TestApp) -> job::JobState {
 /// オーナー（テナントオーナー）と Member ロールのプロジェクトメンバーがいるプロジェクト。
 /// オーナーでログインした状態で返す。
 async fn setup() -> Fixture {
-    let mut app = TestApp::new().await;
+    setup_with_loopback(true).await
+}
+
+async fn setup_with_loopback(allow: bool) -> Fixture {
+    let mut app = TestApp::new_with_webhook_loopback(allow).await;
     let owner = app.insert_user_default().await;
     let member = app.insert_user_default().await;
     app.login_session_no_content(&owner.email, &owner.password)
@@ -184,6 +189,7 @@ async fn crud_and_authorization() {
         "一覧に secret を出さない"
     );
     assert!(listed[0].get("secret_enc").is_none());
+    assert_eq!(listed[0]["url"], "https://203.0.113.10/hook");
 
     fx.login(&owner).await;
     let updated = fx
@@ -226,6 +232,133 @@ async fn crud_and_authorization() {
             .expect("load")
             .is_none()
     );
+}
+
+#[tokio::test]
+async fn discord_url_is_only_returned_to_admin_operations() {
+    let mut fx = setup().await;
+    let (owner, member) = (fx.owner.clone(), fx.member.clone());
+    let url = "https://203.0.113.10/api/webhooks/123/discord-token?secret=token";
+    let id = fx.create_webhook(url, &["task.created"], "discord").await;
+
+    fx.login(&member).await;
+    let listed = fx.app.get_with_session(&fx.webhooks_path()).await;
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed: serde_json::Value = listed.json().await.expect("json");
+    assert_eq!(listed[0]["url"], "[redacted]");
+    assert!(!listed.to_string().contains("discord-token"));
+    let denied = fx
+        .app
+        .put_json_with_session(
+            &format!("{}/{id}", fx.webhooks_path()),
+            serde_json::json!({}),
+        )
+        .await;
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+
+    fx.login(&owner).await;
+    let updated = fx
+        .app
+        .put_json_with_session(
+            &format!("{}/{id}", fx.webhooks_path()),
+            serde_json::json!({}),
+        )
+        .await;
+    assert_eq!(updated.status(), StatusCode::OK);
+    assert_eq!(
+        updated.json::<serde_json::Value>().await.expect("json")["url"],
+        url
+    );
+    assert_eq!(fx.webhook(id).await.url, url, "保存する送信先は伏せない");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn loopback_is_rejected_on_create_update_and_delivery_by_default() {
+    let fx = setup_with_loopback(false).await;
+    let id = fx
+        .create_webhook("https://203.0.113.10/hook", &["task.created"], "json")
+        .await;
+    for url in [
+        "http://127.0.0.1/hook",
+        "https://127.0.0.2/hook",
+        "https://127.1/hook",
+        "https://2130706433/hook",
+        "http://localhost/hook",
+        "https://localhost./hook",
+        "https://[::1]/hook",
+        "https://[::ffff:127.0.0.1]/hook",
+    ] {
+        let created = fx
+            .app
+            .post_json_with_session(
+                &fx.webhooks_path(),
+                serde_json::json!({"url": url, "secret": SECRET, "events": ["task.created"]}),
+            )
+            .await;
+        assert_eq!(created.status(), StatusCode::BAD_REQUEST, "create: {url}");
+        let updated = fx
+            .app
+            .put_json_with_session(
+                &format!("{}/{id}", fx.webhooks_path()),
+                serde_json::json!({"url": url}),
+            )
+            .await;
+        assert_eq!(updated.status(), StatusCode::BAD_REQUEST, "update: {url}");
+    }
+
+    // 以前の設定で保存した loopback の送信先も、送信直前に拒否する。
+    let server = mock_server(200).await;
+    let mut active: webhooks::ActiveModel = fx.webhook(id).await.into();
+    active.url = Set(server.uri());
+    active
+        .update(&fx.app.state.db)
+        .await
+        .expect("store old destination");
+    fx.create_task("送信しないタスク").await;
+    assert_eq!(
+        job::webhook_delivery::send_pending_once(&job_state(&fx.app))
+            .await
+            .expect("sweep"),
+        0
+    );
+    assert!(
+        server
+            .received_requests()
+            .await
+            .expect("requests")
+            .is_empty()
+    );
+    let deliveries = fx.deliveries(id).await;
+    assert_eq!(deliveries[0].attempt, 1);
+    assert!(
+        deliveries[0]
+            .last_error
+            .as_deref()
+            .expect("error")
+            .contains("loopback")
+    );
+}
+
+#[tokio::test]
+async fn delivery_connection_errors_do_not_expose_discord_urls() {
+    let fx = setup().await;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let address = listener.local_addr().expect("address");
+    drop(listener);
+    let url = format!("http://{address}/api/webhooks/123/discord-token");
+    let id = fx.create_webhook(&url, &["task.created"], "discord").await;
+    fx.create_task("接続に失敗するタスク").await;
+    assert_eq!(
+        job::webhook_delivery::send_pending_once(&job_state(&fx.app))
+            .await
+            .expect("sweep"),
+        0
+    );
+    let deliveries = fx.deliveries(id).await;
+    let error = deliveries[0].last_error.as_deref().expect("error");
+    assert!(error.starts_with("send:"), "{error}");
+    assert!(!error.contains("discord-token"), "{error}");
+    assert!(!error.contains(&url), "{error}");
 }
 
 /// private / http の送信先と、短い secret は 400。

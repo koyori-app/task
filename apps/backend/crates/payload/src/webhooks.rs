@@ -12,6 +12,7 @@ pub struct WebhookResponse {
     pub id: Uuid,
     #[schema(value_type = String, format = "uuid")]
     pub project_id: Uuid,
+    /// Discord の URL は一覧では `[redacted]`。作成・更新の応答は完全な URL を返す。
     pub url: String,
     pub events: Vec<String>,
     /// `json` | `discord`
@@ -30,13 +31,28 @@ impl From<webhooks::Model> for WebhookResponse {
         Self {
             id: model.id,
             project_id: model.project_id,
-            url: model.url,
+            url: if model.format == "discord" {
+                "[redacted]".into()
+            } else {
+                model.url
+            },
             events: model.events,
             format: model.format,
             is_active: model.is_active,
             failure_streak: model.failure_streak,
             created_by: model.created_by,
             created_at: model.created_at,
+        }
+    }
+}
+
+impl WebhookResponse {
+    /// `admin:project` とプロジェクト管理権限を確認済みの応答でのみ使う。
+    pub fn for_admin(model: webhooks::Model) -> Self {
+        let url = model.url.clone();
+        Self {
+            url,
+            ..model.into()
         }
     }
 }
@@ -51,7 +67,7 @@ pub struct CreateWebhookResponse {
 
 #[derive(Debug, Serialize, Deserialize, Validate, ToSchema)]
 pub struct CreateWebhookRequest {
-    /// 送信先。https 必須。private / localhost 宛ては 400
+    /// 送信先。https 必須。private / loopback 宛ては 400（loopback は開発設定時のみ許可）
     #[validate(length(min = 1, max = 2048))]
     pub url: String,
     /// 署名用のシークレット（16 文字以上）

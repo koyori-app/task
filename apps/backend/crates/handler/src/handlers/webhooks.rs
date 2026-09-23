@@ -118,7 +118,7 @@ pub async fn create_webhook(
 ) -> Result<(StatusCode, Json<CreateWebhookResponse>), AppError> {
     ensure_admin_access(&state, &auth, tenant_id, project_id).await?;
     let format = payload.format.unwrap_or_else(|| FORMAT_JSON.to_string());
-    validate_url(&payload.url)?;
+    validate_url(&state.settings, &payload.url)?;
     validate_secret(&payload.secret)?;
     validate_events(&payload.events)?;
     validate_format(&format)?;
@@ -140,7 +140,7 @@ pub async fn create_webhook(
     Ok((
         StatusCode::CREATED,
         Json(CreateWebhookResponse {
-            webhook: model.into(),
+            webhook: WebhookResponse::for_admin(model),
             secret: payload.secret,
         }),
     ))
@@ -175,7 +175,7 @@ pub async fn update_webhook(
 
     let mut active: webhooks::ActiveModel = webhook.into();
     if let Some(url) = payload.url {
-        validate_url(&url)?;
+        validate_url(&state.settings, &url)?;
         active.url = Set(url);
     }
     if let Some(secret) = payload.secret {
@@ -197,7 +197,9 @@ pub async fn update_webhook(
             active.failure_streak = Set(0);
         }
     }
-    Ok(Json(active.update(&state.db).await?.into()))
+    Ok(Json(WebhookResponse::for_admin(
+        active.update(&state.db).await?,
+    )))
 }
 
 #[axum::debug_handler]

@@ -42,10 +42,40 @@ pub const MAX_ATTEMPTS: i16 = 5;
 /// 打ち止めになった配信がこれだけ続いたら Webhook を止める（仕様 §5）
 pub const MAX_FAILURE_STREAK: i16 = 5;
 
-/// 送信先 URL の検証（SSRF 対策）。https 必須（http は localhost のみ）、
+/// 送信先 URL の検証（SSRF 対策）。https 必須（開発設定時のみ localhost の http を許可）、
 /// private / link-local / メタデータ宛てと、それらへ解決される名前を拒否する。
 /// 作成・更新時と送信直前の両方で呼ぶ（DNS の向き先は後から変えられる）。
-pub fn validate_url(url: &str) -> Result<(), AppError> {
+pub fn validate_url(settings: &Settings, url: &str) -> Result<(), AppError> {
+    if !settings.webhook_allow_loopback {
+        let parsed = url::Url::parse(url)
+            .map_err(|e| AppError::BadRequestDetail(format!("url が不正です: {e}")))?;
+        let loopback = match parsed.host() {
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => std::net::IpAddr::V6(ip).to_canonical().is_loopback(),
+            Some(url::Host::Domain("localhost")) => true,
+            Some(url::Host::Domain(_)) => {
+                // localhost 以外の名前でも loopback に解決されるものは拒否する。
+                let resolve = || parsed.socket_addrs(|| None);
+                let addresses = if tokio::runtime::Handle::try_current().is_ok() {
+                    tokio::task::block_in_place(resolve)
+                } else {
+                    resolve()
+                }
+                .map_err(|e| {
+                    AppError::BadRequestDetail(format!("url の名前解決に失敗しました: {e}"))
+                })?;
+                addresses
+                    .iter()
+                    .any(|addr| addr.ip().to_canonical().is_loopback())
+            }
+            None => false,
+        };
+        if loopback {
+            return Err(AppError::BadRequestDetail(
+                "loopback は送信先に使えません".into(),
+            ));
+        }
+    }
     auth_core::url_guard::validate_instance_url(url)
         .map_err(|e| AppError::BadRequestDetail(format!("url を送信先に使えません: {e}")))
 }

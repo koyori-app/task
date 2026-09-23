@@ -164,7 +164,7 @@ async fn send(
     delivery: &webhook_deliveries::Model,
 ) -> Result<u16, String> {
     // DNS の向き先は登録後に変えられるので、送る直前にも確かめる
-    validate_url(&webhook.url).map_err(|e| e.to_string())?;
+    validate_url(&state.settings, &webhook.url).map_err(|e| e.to_string())?;
 
     let mut request = CLIENT
         .post(&webhook.url)
@@ -188,7 +188,7 @@ async fn send(
         .body(body)
         .send()
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| format!("send: {}", e.without_url()))?;
     Ok(response.status().as_u16())
 }
 

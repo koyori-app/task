@@ -22048,7 +22048,7 @@
           },
           "url": {
             "type": "string",
-            "description": "送信先。https 必須。private / localhost 宛ては 400"
+            "description": "送信先。https 必須。private / loopback 宛ては 400（loopback は開発設定時のみ許可）"
           }
         }
       },
@@ -25344,7 +25344,8 @@
             "format": "uuid"
           },
           "url": {
-            "type": "string"
+            "type": "string",
+            "description": "Discord の URL は一覧では `[redacted]`。作成・更新の応答は完全な URL を返す。"
           }
         }
       }
