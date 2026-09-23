@@ -16,6 +16,7 @@ import WebhookFormDialog from '@/components/projects/WebhookFormDialog.vue';
 import {
   webhookErrorMessage,
   webhookEventLabel,
+  webhookFormatIcon,
   webhookFormatLabel,
 } from '@/components/projects/webhook-events';
 import { apiClient } from '@/lib/api-vue-query';
@@ -226,8 +227,12 @@ async function confirmDelete() {
           <span class="min-w-0 flex-1 truncate font-mono text-sm" :title="webhook.url">
             {{ webhook.url }}
           </span>
-          <span class="shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium">
-            {{ webhookFormatLabel(webhook.format) }}
+          <span
+            class="inline-flex shrink-0 items-center rounded-full border p-1 text-muted-foreground"
+            :title="webhookFormatLabel(webhook.format)"
+          >
+            <component :is="webhookFormatIcon(webhook.format)" class="size-4" aria-hidden="true" />
+            <span class="sr-only">{{ webhookFormatLabel(webhook.format) }}</span>
           </span>
         </div>
 

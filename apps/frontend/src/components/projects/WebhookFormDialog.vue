@@ -249,7 +249,10 @@ function onOpenChange(open: boolean) {
                       :key="format.value"
                       :value="format.value"
                     >
-                      {{ format.label }}
+                      <span class="inline-flex items-center gap-2">
+                        <component :is="format.icon" class="size-4" aria-hidden="true" />
+                        {{ format.label }}
+                      </span>
                     </SelectItem>
                   </SelectContent>
                 </Select>
