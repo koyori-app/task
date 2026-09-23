@@ -206,7 +206,7 @@ async fn unsubscribed_event_is_not_queued() {
         .put_json_with_session(
             &fx.settings_path(),
             serde_json::json!({
-                "email_events": ["status_changed"],
+                "email_events": ["review_round_any"],
                 "in_app_events": ["assigned"],
             }),
         )
@@ -236,6 +236,15 @@ async fn unsubscribed_event_is_not_queued() {
 /// レビュー通知もメールになる（件名に PR 番号が入る）。
 #[tokio::test]
 async fn review_round_email_carries_pr_number() {
+    assert_review_round_email("review_round_created").await;
+}
+
+#[tokio::test]
+async fn review_round_subscription_also_enables_email() {
+    assert_review_round_email("review_round_any").await;
+}
+
+async fn assert_review_round_email(email_event: &str) {
     let mut fx = setup().await;
     let (owner, member) = (fx.owner.clone(), fx.member.clone());
 
@@ -246,7 +255,7 @@ async fn review_round_email_carries_pr_number() {
         .put_json_with_session(
             &fx.settings_path(),
             serde_json::json!({
-                "email_events": ["review_round_created"],
+                "email_events": [email_event],
                 "in_app_events": ["review_round_any"],
             }),
         )

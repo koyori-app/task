@@ -74,7 +74,12 @@ async fn email_enabled<C: ConnectionTrait>(
         .filter(notification_settings::Column::ProjectId.eq(project_id))
         .one(db)
         .await?
-        .is_some_and(|s| s.email_events.iter().any(|e| e == event_type)))
+        .is_some_and(|s| {
+            s.email_events.iter().any(|e| {
+                e == event_type
+                    || (event_type == TYPE_REVIEW_ROUND_CREATED && e == TYPE_REVIEW_ROUND_ANY)
+            })
+        }))
 }
 
 /// `project_id` は通知の可視性の判定に使う（読み取り API が「入れないプロジェクトの
