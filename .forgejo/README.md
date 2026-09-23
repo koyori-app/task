@@ -13,7 +13,7 @@ Forgejo は `.forgejo/workflows` があればそちらだけを読み、`.github
 |---|---|
 | `workflows/backend.yml` | `cargo fmt --check` / `clippy -D warnings` / `cargo test`（実 Postgres・Valkey）/ `openapi.json` の差分 |
 | `workflows/frontend.yml` | `fmt:check` / `lint` / `vue-tsc --noEmit` / `test:unit` / `build` |
-| `workflows/cli.yml` | 型検査（本体・契約テスト）/ 生成型の差分 / `pnpm test` |
+| `workflows/cli.yml` | `cargo test -p task-cli`（GitHub の `cli-test.yml` と同じ発火条件・同じ試験対象） |
 
 ## runner に必要なもの
 
