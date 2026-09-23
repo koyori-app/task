@@ -59,7 +59,9 @@ impl Context {
 
     /// `auth whoami` 用。tenant_id を要さず鍵だけで `personal_tokens/me` を叩く。
     pub(crate) fn connect_token_only(&self) -> Result<ApiClient> {
-        ApiClient::new(resolve_token_runtime_with(&self.store, |key| (self.env)(key))?)
+        ApiClient::new(resolve_token_runtime_with(&self.store, |key| {
+            (self.env)(key)
+        })?)
     }
 }
 
