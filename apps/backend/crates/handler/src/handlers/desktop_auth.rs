@@ -18,7 +18,7 @@ use crate::AppState;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::{CrudErrors, DesktopAuthTokenErrors, SessionAuthErrors};
-use entity::device_tokens;
+use entity::{device_tokens, users};
 use payload::desktop_auth::*;
 use service::auth::AuthError;
 use service::desktop_auth::{self, PendingCode};
@@ -48,6 +48,7 @@ pub async fn create_desktop_auth_code(
             user_id: auth.user_id,
             code_challenge: payload.code_challenge,
             name: payload.name,
+            issued_at_ms: Utc::now().timestamp_millis(),
         },
     )
     .await?;
@@ -92,12 +93,27 @@ pub async fn exchange_desktop_auth_token(
     if desktop_auth::s256_challenge(&payload.code_verifier) != pending.code_challenge {
         return Err(AuthError::Unauthorized);
     }
+    let authorized_at = chrono::DateTime::from_timestamp_millis(pending.issued_at_ms)
+        .filter(|_| pending.issued_at_ms > 0)
+        .ok_or(AuthError::Unauthorized)?;
+    let user = users::Entity::find_by_id(pending.user_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AuthError::Unauthorized)?;
+    if user.is_suspended
+        || user
+            .sessions_revoked_at
+            .is_some_and(|revoked_at| revoked_at.timestamp_millis() >= pending.issued_at_ms)
+    {
+        return Err(AuthError::Unauthorized);
+    }
 
     let (token, model) = desktop_auth::create_device_token(
         &state.db,
         &state.settings.personal_token_secret,
         pending.user_id,
         pending.name,
+        authorized_at,
     )
     .await?;
     Ok((

@@ -468,6 +468,115 @@ async fn sessions_revoked_at_invalidates_older_device_tokens() {
 }
 
 #[tokio::test]
+async fn sessions_revoked_at_also_invalidates_unexchanged_codes() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    for offset_ms in [0, 1] {
+        app.reset_session_client();
+        app.login_session_no_content(&user.email, &user.password)
+            .await;
+        let code = issue_code(&app, VERIFIER).await;
+        let issued_at_ms = {
+            let mut conn = app.state.redis_client.conn.acquire().await.unwrap();
+            let raw: String = redis::cmd("GET")
+                .arg(code_key(&code))
+                .query_async(&mut conn)
+                .await
+                .unwrap();
+            serde_json::from_str::<serde_json::Value>(&raw).unwrap()["issued_at_ms"]
+                .as_i64()
+                .unwrap()
+        };
+        let mut active: users::ActiveModel = users::Entity::find_by_id(user.id)
+            .one(&app.state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .into();
+        active.sessions_revoked_at = Set(Some(
+            chrono::DateTime::from_timestamp_millis(issued_at_ms + offset_ms)
+                .unwrap()
+                .into(),
+        ));
+        active.update(&app.state.db).await.unwrap();
+        assert_eq!(
+            exchange(&app, &code, VERIFIER).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            exchange(&app, &code, VERIFIER).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    // 交換時の利用者検査を通過した直後に全失効した場合も、承認時刻で失効させる。
+    let (token, _) = service::desktop_auth::create_device_token(
+        &app.state.db,
+        &app.state.settings.personal_token_secret,
+        user.id,
+        "in-flight exchange".into(),
+        Utc::now() - chrono::Duration::hours(1),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        get_bearer(&app, "/v1/users/me/notifications", &token).await,
+        StatusCode::UNAUTHORIZED
+    );
+    app.cleanup_user(user.id).await;
+}
+
+#[tokio::test]
+async fn suspension_rejects_and_consumes_unexchanged_codes() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+    let code = issue_code(&app, VERIFIER).await;
+    let mut active: users::ActiveModel = users::Entity::find_by_id(user.id)
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
+    active.is_suspended = Set(true);
+    let row = active.update(&app.state.db).await.unwrap();
+    assert_eq!(
+        exchange(&app, &code, VERIFIER).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let mut active: users::ActiveModel = row.into();
+    active.is_suspended = Set(false);
+    active.update(&app.state.db).await.unwrap();
+    assert_eq!(
+        exchange(&app, &code, VERIFIER).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    app.cleanup_user(user.id).await;
+}
+
+#[tokio::test]
+async fn codes_without_an_authorization_timestamp_are_rejected() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+    let code = issue_code(&app, VERIFIER).await;
+    {
+        let mut conn = app.state.redis_client.conn.acquire().await.unwrap();
+        let _: () = redis::cmd("SET").arg(code_key(&code))
+            .arg(serde_json::json!({
+                "user_id": user.id, "code_challenge": s256_challenge(VERIFIER), "name": "legacy",
+            }).to_string()).arg("EX").arg(60)
+            .query_async(&mut conn).await.unwrap();
+    }
+    assert_eq!(
+        exchange(&app, &code, VERIFIER).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    app.cleanup_user(user.id).await;
+}
+
+#[tokio::test]
 async fn other_users_device_is_404() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user_default().await;

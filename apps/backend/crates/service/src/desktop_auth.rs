@@ -32,6 +32,9 @@ pub struct PendingCode {
     pub user_id: Uuid,
     pub code_challenge: String,
     pub name: String,
+    /// 古い形式の未交換コードは 0 として扱い、交換時に拒否する。
+    #[serde(default)]
+    pub issued_at_ms: i64,
 }
 
 /// 認可コードの Redis キー。
@@ -124,6 +127,7 @@ pub async fn create_device_token(
     secret: &str,
     user_id: Uuid,
     name: String,
+    authorized_at: chrono::DateTime<Utc>,
 ) -> Result<(String, device_tokens::Model), anyhow::Error> {
     let (token, token_hash) = crate::auth::generate_device_token(secret)
         .map_err(|e| anyhow::anyhow!("generate device token: {e}"))?;
@@ -137,7 +141,8 @@ pub async fn create_device_token(
         expires_at: Set((now + Duration::days(DEVICE_TOKEN_TTL_DAYS)).into()),
         last_used_at: Set(None),
         revoked_at: Set(None),
-        created_at: Set(now.into()),
+        // 交換中に全失効が走っても、承認時刻より後の失効をすり抜けない。
+        created_at: Set(authorized_at.into()),
     }
     .insert(db)
     .await?;

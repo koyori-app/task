@@ -261,15 +261,17 @@ Desktop                                   Browser / Web              Backend
 
 | 項目 | 規則 |
 |------|------|
-| code | 32 バイト乱数。Redis（`desktop_auth:code:{code}`）に TTL 5 分で `{user_id, code_challenge, name}` を置く。**GETDEL で一度きり** |
+| code | 32 バイト乱数。Redis（`desktop_auth:code:{code}`）に TTL 5 分で `{user_id, code_challenge, name, issued_at_ms}` を置く。**GETDEL で一度きり** |
 | PKCE | S256 のみ。`code_challenge` は base64url の 43〜128 文字。`BASE64URL(SHA256(code_verifier))` が一致しなければ 401 で、code は GETDEL 済みなので二度と使えない |
 | 発行の口 | セッション専用。2FA 途中のセッション・PAT・Device Token は 403 |
-| 交換の口 | 未認証（code が資格）。不一致・期限切れ・再利用はすべて同じ 401 |
+| 交換の口 | 未認証（code が資格）。不一致・期限切れ・再利用・発行時刻を持たない旧コード・停止中の利用者はすべて 401。`sessions_revoked_at` がコード発行時刻以降なら未交換でも拒否する |
 | レート制限 | 交換の口に接続元（`X-Forwarded-For` → `X-Real-IP`）ごと 10 回/分。超えたら 429。ヘッダは偽装できるので多重の守りの 1 枚（code は 256 bit で総当たりは成立しない） |
 | redirect | loopback（`http://127.0.0.1:{port}/callback`）のみ。Web の承認画面は `port` を 1024〜65535 の整数に限る。Custom URI Scheme は使わない（Linux で登録が要り、Windows でレジストリ書き込みが要り、他アプリに奪われ得る） |
 | ログ | code / code_verifier / token を出さない（リクエストログはパスのみ） |
 
 長寿命の資格情報を URL に載せない（URL に出るのは短寿命の code だけ）。
+Device Token の `created_at` はコードの承認時刻を引き継ぐ。交換処理中に全失効が走った場合も、
+Bearer 認証でその失効を検出する。有効期限は交換時点から90日。
 
 ### エンドポイント
 
