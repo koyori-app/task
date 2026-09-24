@@ -40,6 +40,20 @@ fn pending() -> sea_orm::Select<notifications::Entity> {
         .filter(notifications::Column::EmailAttempts.lt(MAX_ATTEMPTS))
 }
 
+/// 再試行待ちも pending のまま残し、期限の来た行だけ送信する。
+fn due() -> sea_orm::Select<notifications::Entity> {
+    pending().filter(notifications::Column::EmailQueuedAt.lte(chrono::Utc::now()))
+}
+
+fn retry_delay(attempt: i16) -> chrono::Duration {
+    chrono::Duration::seconds(match attempt {
+        1 => 30,
+        2 => 5 * 60,
+        3 => 30 * 60,
+        _ => 2 * 60 * 60,
+    })
+}
+
 /// 送信待ちを拾って送る。送信できた件数を返す。
 ///
 /// 対象の id をロック無しで最大 [`BATCH_SIZE`] 件取り、1 行ごとに短いトランザクションで
@@ -47,7 +61,7 @@ fn pending() -> sea_orm::Select<notifications::Entity> {
 /// 確定するので、後の行の失敗で送信済みの印が消えて再送されることはない。他インスタンスが
 /// 掴んでいる行・その間に送られた行は取れないので飛ばす。
 pub async fn send_pending_once(state: &JobState) -> Result<usize, anyhow::Error> {
-    let ids: Vec<Uuid> = pending()
+    let ids: Vec<Uuid> = due()
         .select_only()
         .column(notifications::Column::Id)
         .order_by_asc(notifications::Column::CreatedAt)
@@ -59,7 +73,7 @@ pub async fn send_pending_once(state: &JobState) -> Result<usize, anyhow::Error>
     let mut sent = 0usize;
     for id in ids {
         let txn = state.db.begin().await?;
-        let Some(notification) = pending()
+        let Some(notification) = due()
             .filter(notifications::Column::Id.eq(id))
             .lock_with_behavior(LockType::Update, LockBehavior::SkipLocked)
             .one(&txn)
@@ -157,6 +171,10 @@ async fn send_one<C: ConnectionTrait>(
         Err(error) => {
             let attempts = notification.email_attempts + 1;
             active.email_attempts = Set(attempts);
+            if attempts < MAX_ATTEMPTS {
+                active.email_queued_at =
+                    Set(Some((chrono::Utc::now() + retry_delay(attempts)).into()));
+            }
             active.update(db).await?;
             if attempts >= MAX_ATTEMPTS {
                 warn!(notification_id = %notification.id, attempts, %error, "notification email gave up");

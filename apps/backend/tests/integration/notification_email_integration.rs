@@ -356,3 +356,120 @@ async fn unverified_user_is_dropped_from_the_queue() {
     );
     assert!(after[0].emailed_at.is_none());
 }
+
+/// 一時障害では再試行時刻を待ち、連続掃き出しだけで打ち止めにならない。
+#[tokio::test]
+async fn smtp_failures_wait_for_backoff_and_can_recover() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    use tokio::io::AsyncWriteExt;
+
+    let mut fx = setup().await;
+    let (owner, member) = (fx.owner.clone(), fx.member.clone());
+    fx.login(&member).await;
+    let response = fx
+        .app
+        .put_json_with_session(
+            &fx.settings_path(),
+            serde_json::json!({"email_events": ["assigned"], "in_app_events": ["assigned"]}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    fx.login(&owner).await;
+    assign_task(&fx, "SMTP recovery").await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let _ = stream
+                .write_all(b"421 Service temporarily unavailable\r\n")
+                .await;
+        }
+    });
+    let mut state = job_state(&fx.app);
+    let unavailable =
+        service::smtp::SmtpClient::new("127.0.0.1", port, "test", "test", "sender@example.com")
+            .unwrap();
+    state.smtp_client = unavailable.clone();
+
+    for (index, delay) in [30, 300, 1800, 7200].into_iter().enumerate() {
+        let before = chrono::Utc::now();
+        assert_eq!(
+            job::notification_email::send_pending_once(&state)
+                .await
+                .unwrap(),
+            0
+        );
+        let notification = fx.notifications_of(member.id).await.remove(0);
+        assert_eq!(notification.email_attempts, (index + 1) as i16);
+        let next = notification.email_queued_at.unwrap();
+        assert!(next >= before + chrono::Duration::seconds(delay));
+        assert!(next <= chrono::Utc::now() + chrono::Duration::seconds(delay));
+        assert!(notification.emailed_at.is_none());
+        for _ in 0..6 {
+            assert_eq!(
+                job::notification_email::send_pending_once(&state)
+                    .await
+                    .unwrap(),
+                0
+            );
+        }
+        assert_eq!(
+            fx.notifications_of(member.id).await[0].email_attempts,
+            notification.email_attempts
+        );
+        let mut active: entity::notifications::ActiveModel = notification.into();
+        active.email_queued_at = Set(Some(
+            (chrono::Utc::now() - chrono::Duration::seconds(1)).into(),
+        ));
+        active.update(&state.db).await.unwrap();
+    }
+    // 5 回目の前に SMTP が回復すれば、待っていたメールを一度だけ送れる。
+    state.smtp_client = fx.app.state.smtp_client.clone();
+    assert_eq!(
+        job::notification_email::send_pending_once(&state)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        job::notification_email::send_pending_once(&state)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(fx.app.sent_mails().len(), 1);
+    assert!(fx.notifications_of(member.id).await[0].emailed_at.is_some());
+
+    // 障害が続く場合も、間隔を空けた 5 回で打ち止めになり、それ以上は送らない。
+    assign_task(&fx, "SMTP exhausted").await;
+    state.smtp_client = unavailable;
+    for attempt in 1..=5 {
+        assert_eq!(
+            job::notification_email::send_pending_once(&state)
+                .await
+                .unwrap(),
+            0
+        );
+        let notification = fx
+            .notifications_of(member.id)
+            .await
+            .into_iter()
+            .find(|n| n.emailed_at.is_none())
+            .unwrap();
+        assert_eq!(notification.email_attempts, attempt);
+        let mut active: entity::notifications::ActiveModel = notification.into();
+        active.email_queued_at = Set(Some(
+            (chrono::Utc::now() - chrono::Duration::seconds(1)).into(),
+        ));
+        active.update(&state.db).await.unwrap();
+    }
+    state.smtp_client = fx.app.state.smtp_client.clone();
+    assert_eq!(
+        job::notification_email::send_pending_once(&state)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(fx.app.sent_mails().len(), 1);
+    server.abort();
+}
