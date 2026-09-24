@@ -25,3 +25,11 @@ platforms = [
 
 # Write out exact versions rather than a semver range. (Defaults to false.)
 # exact-versions = true
+
+# sentry の既定 feature（transport の native-tls）を共有の feature 集合へ持ち上げない。
+# 持ち上げると workspace-hack 経由で CLI にも reqwest/native-tls → openssl-sys が入り、
+# musl 向けの CLI ビルドが壊れる（CLI は rustls だけで足りる）。
+[traversal-excludes]
+third-party = [
+    { name = "sentry" },
+]
