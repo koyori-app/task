@@ -1038,7 +1038,7 @@ async fn read_pages(
         };
         let res = app.get_with_session(&url).await;
         assert_eq!(res.status(), StatusCode::OK, "{url}");
-        let body = common::json_body(res).await;
+        let body = crate::common::json_body(res).await;
         let page = ids(&body);
         sizes.push(page.len());
         got.extend(page);
@@ -1082,10 +1082,11 @@ async fn notifications_cursor_pages_after_and_kind() {
     assert_eq!(got, expected_ids);
 
     // limit: 既定 50、上限 100 を越える指定は 100 に切る
-    let first = common::json_body(app.get_with_session("/v1/users/me/notifications").await).await;
+    let first =
+        crate::common::json_body(app.get_with_session("/v1/users/me/notifications").await).await;
     assert_eq!(ids(&first).len(), 50);
     assert_eq!(first["unread_count"].as_u64(), Some(120));
-    let capped = common::json_body(
+    let capped = crate::common::json_body(
         app.get_with_session("/v1/users/me/notifications?limit=101")
             .await,
     )
@@ -1115,7 +1116,7 @@ async fn notifications_cursor_pages_after_and_kind() {
     assert_eq!(newer, want);
     // 最新行より新しいものは無い
     let newest = first["notifications"][0]["cursor"].as_str().unwrap();
-    let none = common::json_body(
+    let none = crate::common::json_body(
         app.get_with_session(&format!("/v1/users/me/notifications?after={newest}"))
             .await,
     )
@@ -1124,7 +1125,7 @@ async fn notifications_cursor_pages_after_and_kind() {
     assert!(none["next_cursor"].is_null());
 
     // kind: review_ 接頭辞で分ける
-    let review = common::json_body(
+    let review = crate::common::json_body(
         app.get_with_session("/v1/users/me/notifications?kind=review&limit=100")
             .await,
     )
@@ -1136,7 +1137,7 @@ async fn notifications_cursor_pages_after_and_kind() {
         .collect();
     assert_eq!(want_review.len(), 30);
     assert_eq!(ids(&review), want_review);
-    let task = common::json_body(
+    let task = crate::common::json_body(
         app.get_with_session("/v1/users/me/notifications?kind=task&limit=100")
             .await,
     )
@@ -1164,7 +1165,7 @@ async fn notifications_cursor_pages_after_and_kind() {
     let (after_read, _) =
         read_pages(&app, "/v1/users/me/notifications?limit=50", "cursor", None).await;
     assert_eq!(after_read, expected_ids);
-    let unread = common::json_body(
+    let unread = crate::common::json_body(
         app.get_with_session("/v1/users/me/notifications?unread=true&limit=100")
             .await,
     )
