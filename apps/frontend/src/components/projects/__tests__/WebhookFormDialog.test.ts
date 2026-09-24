@@ -173,4 +173,22 @@ describe('WebhookFormDialog', () => {
     });
     expect(wrapper.emitted('close')).toHaveLength(1);
   });
+
+  it('一覧で伏せられた Discord の URL は欄に出さず、空欄のまま保存すると url を送らない', async () => {
+    const discord: WebhookResponse = { ...existing, url: '[redacted]', format: 'discord' };
+    updateMutateAsync.mockResolvedValue(discord);
+    const wrapper = mountDialog(discord);
+    await flushPromises();
+
+    expect((input('webhook-url').element as HTMLInputElement).value).toBe('');
+    checkEvent('レビュー指摘の状態変更');
+    await flushPromises();
+    await submit();
+
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_UUID, project_id: PROJECT_UUID, id: discord.id } },
+      body: { events: ['task.created', 'review.finding_changed'] },
+    });
+    expect(wrapper.emitted('close')).toHaveLength(1);
+  });
 });
