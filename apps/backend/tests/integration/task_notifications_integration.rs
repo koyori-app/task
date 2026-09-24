@@ -573,7 +573,7 @@ async fn insert_notification(
 /// (テナント A の 2 プロジェクト, テナント B のプロジェクト, プロジェクト無しの通知)。
 struct PatFixture {
     app: TestApp,
-    user: common::TestUser,
+    user: crate::common::TestUser,
     tenant_a: uuid::Uuid,
     project_a1: uuid::Uuid,
     project_a2: uuid::Uuid,
@@ -587,7 +587,7 @@ async fn pat_fixture() -> PatFixture {
     let app = TestApp::new().await;
     let user = app.insert_user_default().await;
     let a = app.insert_tenant_project(user.id).await;
-    let project_a2 = common::insert_extra_project(&app, a.tenant_id).await;
+    let project_a2 = crate::common::insert_extra_project(&app, a.tenant_id).await;
     let b = app.insert_tenant_project(user.id).await;
 
     let notification_a1 =
