@@ -397,9 +397,9 @@ async fn device_token_user(state: &AppState, token: &str) -> Result<AuthUser, Au
     if user.is_suspended {
         return Err(AuthError::Suspended);
     }
-    // パスワード変更などで全セッションを落としたら、それより前に発行した端末も落とす
+    // 交換中に全失効された場合も、コードの承認時刻を基準に端末を落とす。
     if let Some(revoked_at) = user.sessions_revoked_at
-        && record.created_at < revoked_at
+        && record.created_at <= revoked_at
     {
         return Err(AuthError::Unauthorized);
     }
