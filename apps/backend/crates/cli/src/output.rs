@@ -79,7 +79,7 @@ fn render_human(value: &Value, out: &mut Vec<String>) {
     }
 }
 
-/// 通知 1 件を 1 行にする: `{未読|既読}\t{日時}\t{種別}\t{対象}\t{要約}`。
+/// 通知 1 件を 1 行にする: `{ID}\t{未読|既読}\t{日時}\t{種別}\t{対象}\t{要約}`。
 ///
 /// 対象と要約は種別ごとに形が違う（タスクの通知はタスク、レビューの通知は PR）。
 /// 畳めない種別は payload をそのまま見せて、内容を落とさない。
@@ -91,7 +91,8 @@ fn format_notification(map: &serde_json::Map<String, Value>) -> String {
     let kind = as_text(map.get("notification_type"));
     let payload = map.get("payload").and_then(Value::as_object);
     format!(
-        "{read}\t{}\t{kind}\t{}\t{}",
+        "{}\t{read}\t{}\t{kind}\t{}\t{}",
+        as_text(map.get("id")),
         as_text(map.get("created_at")),
         notification_target(map, payload),
         notification_summary(&kind, payload),
@@ -245,7 +246,7 @@ mod tests {
         let listing = json!({
             "unread_count": 1,
             "notifications": [{
-                "id": "n-1",
+                "id": "ca4c4e72-189d-456c-844d-b62eaa978ec5",
                 "notification_type": "assigned",
                 "project_id": "p-1",
                 "task": { "id": "t-1", "seq_id": 42, "title": "OAuth 対応" },
@@ -256,7 +257,7 @@ mod tests {
         });
         assert_eq!(
             human(listing),
-            "未読\t2026-05-27T10:00:00Z\tassigned\t#42 OAuth 対応\tyupix"
+            "ca4c4e72-189d-456c-844d-b62eaa978ec5\t未読\t2026-05-27T10:00:00Z\tassigned\t#42 OAuth 対応\tyupix"
         );
     }
 
@@ -283,7 +284,7 @@ mod tests {
         });
         assert_eq!(
             human(listing),
-            "既読\t2026-05-27T10:00:00Z\treview_round_created\tPR #618 @ koyori-app/task R2\tyupix high=1 medium=2 low=0 nit=0"
+            "n-2\t既読\t2026-05-27T10:00:00Z\treview_round_created\tPR #618 @ koyori-app/task R2\tyupix high=1 medium=2 low=0 nit=0"
         );
     }
 
@@ -291,6 +292,7 @@ mod tests {
     #[test]
     fn keeps_the_payload_of_a_notification_type_without_a_summary() {
         let line = human(json!({
+            "id": "n-3",
             "notification_type": "pr_merged",
             "task": null,
             "payload": { "pr_number": null, "merged_by": "yupix" },
@@ -299,7 +301,7 @@ mod tests {
         }));
         // payload の項目の並びは serde_json の持ち方次第なので、行の形と中身だけ見る
         assert!(
-            line.starts_with("未読\t2026-05-27T10:00:00Z\tpr_merged\t\t{"),
+            line.starts_with("n-3\t未読\t2026-05-27T10:00:00Z\tpr_merged\t\t{"),
             "{line}"
         );
         assert!(line.contains("\"merged_by\":\"yupix\""), "{line}");

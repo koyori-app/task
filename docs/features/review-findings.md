@@ -308,7 +308,8 @@ task review rounds --project TASK --pull-request-id 00000000-0000-0000-0000-0000
 ```
 
 レビューの通知（ラウンドの起票・指摘の状態遷移）は `task notifications` で読む。
-`--json` を付けなければ 1 件 1 行（`{未読|既読}\t{日時}\t{種別}\t{対象}\t{要約}`）で、
+`--json` を付けなければ 1 件 1 行（`{ID}\t{未読|既読}\t{日時}\t{種別}\t{対象}\t{要約}`）で、
+先頭の完全な ID を `task notifications read` に渡せる。
 レビューの通知の対象は `PR #618 @ owner/name R2` の形になる。
 
 ```bash
@@ -322,8 +323,9 @@ task notifications settings --project TASK --in-app review_round_created,review_
 task notifications settings --project TASK --email ""      # メールは受け取らない
 ```
 
-種別の綴りは送信前に検証し、未知の値は終了コード 2 で弾く。読み取りは `read:task`、
-既読化と設定の更新は `write:task` のスコープで通る（PAT の視界は
+種別の綴りは送信前に検証し、未知の値は終了コード 2 で弾く。タスク通知の読み取り・既読化は
+`read:task` / `write:task`、レビュー通知は `read:review` / `write:review` を使う。
+通知設定の読み取り・更新は `read:task` / `write:task` のスコープで通る（PAT の視界は
 `apps/backend/docs/personal-access-tokens-authz.md`）。
 
 投入 JSON と絞り込みの値は**送信前に CLI 側でも検証する**。綴り違い

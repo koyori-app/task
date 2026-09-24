@@ -232,13 +232,17 @@ path から束縛を突き合わせられないぶん、**結果の側をトー�
 
 | メソッド | パス | 必要スコープ | PAT のときの範囲 |
 |---------|------|-------------|-----------------|
-| `GET` | `/v1/users/me/notifications` | `read:task` | PAT のテナントのプロジェクト ∩ `allowed_project_ids`（一覧・`unread_count` の双方） |
-| `PATCH` | `/v1/users/me/notifications/{id}/read` | `write:task` | 同上。範囲外の通知は 404 |
-| `PATCH` | `/v1/users/me/notifications/read-all` | `write:task` | 同上の範囲だけ既読にする |
+| `GET` | `/v1/users/me/notifications` | 種別に応じて `read:task` / `read:review` | PAT のテナントのプロジェクト ∩ `allowed_project_ids` ∩ 読める種別（一覧・`unread_count` の双方） |
+| `PATCH` | `/v1/users/me/notifications/{id}/read` | 種別に応じて `write:task` / `write:review` | 同じプロジェクト範囲で書き込める種別。範囲外は 404 |
+| `PATCH` | `/v1/users/me/notifications/read-all` | 種別に応じて `write:task` / `write:review` | 同上の範囲だけ既読にする |
 | `GET` | `/v1/users/me/notification-settings/{project_id}` | `read:task` | `ensure_tenant_access`（プロジェクトの束縛を突き合わせる） |
 | `PUT` | `/v1/users/me/notification-settings/{project_id}` | `write:task` | 同上 |
 
 絞り込みは所属判定（セッションと同じ経路）との積で、バインドが所属を広げることはない。
+`review_round_created` / `review_finding_changed` はレビューのスコープを必要とする。
+その他の既知の通知はタスクのスコープを使い、未知の種別は PAT に公開しない。
+各操作でタスク・レビューのどちらの必要スコープもなければ 403。
+書き込みスコープによる読み取り権限の包含と、管理スコープの包含も適用する。
 `project_id` を持たない古い通知は、どのプロジェクトのものか判別できないのでセッション専用。
 
 ## DB アクセス回数
