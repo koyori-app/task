@@ -47,3 +47,14 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
         working-directory: apps/backend
+
+      # workspace-hack（cargo-hakari の生成物）が依存変更に追従しているか検査する。
+      # ずれていたら `cargo hakari generate` / `cargo hakari manage-deps` を実行してコミットする。
+      - name: Install cargo-hakari
+        uses: taiki-e/install-action@9114bf4d891761788c546334fd37538eae1bf8b3 # v2.87.16
+        with:
+          tool: cargo-hakari@0.9.39
+
+      - name: Check workspace-hack is up to date
+        run: cargo hakari generate --diff && cargo hakari manage-deps --dry-run
+        working-directory: apps/backend
