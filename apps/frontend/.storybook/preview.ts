@@ -2,8 +2,8 @@ import type { Preview } from '@storybook/vue3-vite';
 import { configure } from 'storybook/test';
 import '@/assets/css/tailwind.css';
 
-// VRT は story を並列に描画するので、既定の 1 秒では findBy* / waitFor が
-// 負荷で間に合わず落ちることがある（play の書き方は正しいのに赤になる）
+// VRT 全体の並列描画による負荷に備え、全 story の findBy* / waitFor に適用する。
+// 既定の 1 秒では、個々の story が正常でも応答が間に合わないことがある。
 configure({ asyncUtilTimeout: 5000 });
 
 // Date.now は意図的に凍結していない(経過時間は performance.now を使う)
@@ -26,12 +26,6 @@ const preview: Preview = {
     };
   },
   parameters: {
-    // Docs は 1 ファイルの全 story を同じ iframe に描く。story ごとに globalThis.fetch を
-    // 差し替えるモックは最後に描いた story のものが全 story に効き、エラー系が最後の
-    // ファイルでは Default まで失敗表示になる。story ごとに iframe を分けて隔離する
-    docs: {
-      story: { inline: false, iframeHeight: 480 },
-    },
     controls: {
       matchers: {
         color: /(background|color)$/i,
