@@ -152,6 +152,8 @@ const meta = {
   parameters: {
     layout: 'padded',
     docs: {
+      // fetch モックが他の story に漏れないよう、このファイルの Docs だけ iframe を分ける。
+      story: { inline: false, iframeHeight: 480 },
       description: {
         component:
           'プロジェクト設定の Webhook セクション。一覧＋作成（secret を一度だけ表示）・編集・有効/無効・削除＋配信履歴と再送。fetch モックで検証。',
