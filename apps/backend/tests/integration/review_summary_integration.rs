@@ -452,7 +452,7 @@ async fn the_pull_request_author_is_notified_once() {
     let tp = app.insert_tenant_project(reviewer.id).await;
     seed_statuses(&app, tp.project_id).await;
     link_integration(&app, tp.project_id, reviewer.id).await;
-    common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, author.id).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, author.id).await;
 
     // モックの PR 作者（`yupix`）を Task の利用者に結ぶ接続
     let now = chrono::Utc::now();
