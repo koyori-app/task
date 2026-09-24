@@ -51,3 +51,26 @@ mod tenant_members_integration;
 mod tenants_integration;
 mod time_tracking_integration;
 mod webauthn_integration;
+
+#[test]
+fn every_integration_file_is_declared() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/integration");
+    let declared = include_str!("main.rs");
+    let mut missing = Vec::new();
+    for entry in std::fs::read_dir(dir).expect("read integration tests") {
+        let path = entry.expect("read integration test entry").path();
+        if !path.is_file() || path.extension().is_none_or(|ext| ext != "rs") {
+            continue;
+        }
+        let name = path.file_stem().unwrap().to_str().expect("UTF-8 test name");
+        if name != "main"
+            && !declared
+                .lines()
+                .any(|line| line.trim() == format!("mod {name};"))
+        {
+            missing.push(name.to_owned());
+        }
+    }
+    missing.sort();
+    assert!(missing.is_empty(), "main.rs に mod 宣言が無い: {missing:?}");
+}
