@@ -40,6 +40,8 @@ const WEBHOOKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/webhooks' a
 const WEBHOOK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/webhooks/{id}' as const;
 
 const SECRET_MIN_LENGTH = 16;
+/** 一覧 API が Discord の URL の代わりに返す値（URL 自体が投稿の認証情報になるため伏せる） */
+const REDACTED_URL = '[redacted]';
 
 /**
  * Webhook の作成・編集ダイアログ。`webhook` が null なら作成、あれば編集。
@@ -60,6 +62,8 @@ const submitError = ref<string | null>(null);
 const createdSecret = ref<string | null>(null);
 const copied = ref(false);
 const copyError = ref<string | null>(null);
+/** 伏せられた URL は欄に出さず、secret と同じく空欄を「変更しない」とする */
+const urlHidden = props.webhook?.url === REDACTED_URL;
 
 function isUrl(value: string) {
   try {
@@ -73,7 +77,7 @@ function isUrl(value: string) {
 // secret の長さは backend（chars().count()）と同じくコードポイントで数える。
 // 編集時の空欄は「変更しない」
 const schema = type({
-  url: type('string').narrow(isUrl),
+  url: type('string').narrow((url) => (urlHidden && url.trim() === '') || isUrl(url)),
   secret: type('string').narrow(
     (secret) =>
       (props.webhook !== null && secret === '') || codePointLength(secret) >= SECRET_MIN_LENGTH,
@@ -89,7 +93,7 @@ const isPending = computed(() => createMutation.isPending.value || updateMutatio
 
 const form = useForm({
   defaultValues: {
-    url: props.webhook?.url ?? '',
+    url: urlHidden ? '' : (props.webhook?.url ?? ''),
     secret: '',
     format: (props.webhook?.format ?? 'json') as WebhookFormat,
     events: [...(props.webhook?.events ?? [])],
@@ -103,7 +107,7 @@ const form = useForm({
         const original = props.webhook;
         // 変えたフィールドだけ送る（PUT は指定したものだけ更新する）
         const body: UpdateWebhookRequest = {};
-        if (url !== original.url) body.url = url;
+        if (urlHidden ? url !== '' : url !== original.url) body.url = url;
         if (value.secret !== '') body.secret = value.secret;
         if (value.format !== original.format) body.format = value.format;
         const sameEvents =
@@ -199,11 +203,15 @@ function onOpenChange(open: boolean) {
                   id="webhook-url"
                   type="url"
                   class="font-mono"
-                  placeholder="https://example.com/webhook"
+                  :placeholder="urlHidden ? '空欄なら変更しません' : 'https://example.com/webhook'"
                   :model-value="field.state.value"
                   @blur="field.handleBlur"
                   @update:model-value="(v) => field.handleChange(String(v))"
                 />
+                <FieldDescription v-if="urlHidden"
+                  >Discord の URL
+                  は投稿の鍵になるため表示しません。変えるときだけ入力してください</FieldDescription
+                >
                 <FieldError v-if="field.state.meta.errors.length"
                   >URL の形式で入力してください</FieldError
                 >
