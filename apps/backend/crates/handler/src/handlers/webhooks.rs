@@ -118,7 +118,7 @@ pub async fn create_webhook(
 ) -> Result<(StatusCode, Json<CreateWebhookResponse>), AppError> {
     ensure_admin_access(&state, &auth, tenant_id, project_id).await?;
     let format = payload.format.unwrap_or_else(|| FORMAT_JSON.to_string());
-    validate_url(&state.settings, &payload.url)?;
+    validate_url(&state.settings, &payload.url).await?;
     validate_secret(&payload.secret)?;
     validate_events(&payload.events)?;
     validate_format(&format)?;
@@ -175,7 +175,7 @@ pub async fn update_webhook(
 
     let mut active: webhooks::ActiveModel = webhook.into();
     if let Some(url) = payload.url {
-        validate_url(&state.settings, &url)?;
+        validate_url(&state.settings, &url).await?;
         active.url = Set(url);
     }
     if let Some(secret) = payload.secret {

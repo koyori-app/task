@@ -4,7 +4,7 @@
 //! `next_attempt_at <= now()` の行を拾って送る。積むのは `service::webhooks::emit`。
 //! 形は `job::notification_email` と同じ（1 行ごとに短いトランザクションで確定する）。
 
-use std::sync::LazyLock;
+use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use sea_orm::{
@@ -20,7 +20,7 @@ use uuid::Uuid;
 use entity::{webhook_deliveries, webhooks};
 use service::webhooks::{
     FORMAT_DISCORD, MAX_ATTEMPTS, MAX_FAILURE_STREAK, backoff, decrypt_secret, discord_message,
-    sign, validate_url,
+    resolve_url, sign,
 };
 
 use crate::JobState;
@@ -36,18 +36,21 @@ const RETENTION: chrono::Duration = chrono::Duration::days(90);
 /// 古い履歴の掃除の間隔
 const PURGE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
-/// 送信用のクライアント。リダイレクトは追わない（検証済みの URL から private な宛先へ
-/// 302 で飛ばされると SSRF の検証をすり抜ける）。共有の `http_client` は追う設定なので分ける。
-static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+/// 検証済みの IP に接続を固定する。リダイレクトやプロキシによる別の宛先への接続も防ぐ。
+fn delivery_client(
+    url: &reqwest::Url,
+    addresses: &[SocketAddr],
+) -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder()
         .user_agent("koyori-webhook")
+        .no_proxy()
+        .resolve_to_addrs(url.host_str().expect("validated host"), addresses)
         .redirect(reqwest::redirect::Policy::none())
         .timeout(SEND_TIMEOUT)
         // 送信先はまちまちで間隔も空くので、接続を持ち越さない
         .pool_max_idle_per_host(0)
         .build()
-        .expect("build webhook http client")
-});
+}
 
 fn due() -> sea_orm::Select<webhook_deliveries::Entity> {
     webhook_deliveries::Entity::find()
@@ -164,10 +167,14 @@ async fn send(
     delivery: &webhook_deliveries::Model,
 ) -> Result<u16, String> {
     // DNS の向き先は登録後に変えられるので、送る直前にも確かめる
-    validate_url(&state.settings, &webhook.url).map_err(|e| e.to_string())?;
+    let (url, addresses) = resolve_url(&state.settings, &webhook.url)
+        .await
+        .map_err(|e| e.to_string())?;
+    let client = delivery_client(&url, &addresses)
+        .map_err(|e| format!("build client: {}", e.without_url()))?;
 
-    let mut request = CLIENT
-        .post(&webhook.url)
+    let mut request = client
+        .post(url)
         .header("Content-Type", "application/json")
         .header("X-Task-Event", &delivery.event)
         .header("X-Task-Delivery", delivery.id.to_string());
@@ -226,5 +233,42 @@ pub async fn run_sweeper(state: JobState, mut shutdown: watch::Receiver<bool>) {
             }
             _ = shutdown.changed() => break,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn delivery_uses_pinned_address_and_preserves_host_without_following_redirects() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // .invalid は DNS では解決できない。接続先の固定を外すと送信が失敗する。
+        let url: reqwest::Url = format!("http://webhook.invalid:{}/hook", addr.port())
+            .parse()
+            .unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let mut chunk = [0; 1024];
+                let count = stream.read(&mut chunk).await.unwrap();
+                assert_ne!(count, 0);
+                request.extend_from_slice(&chunk[..count]);
+            }
+            stream.write_all(b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/private\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        let response = delivery_client(&url, &[addr])
+            .unwrap()
+            .post(url)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 302);
+        let request = server.await.unwrap().to_ascii_lowercase();
+        assert!(request.contains(&format!("host: webhook.invalid:{}\r\n", addr.port())));
     }
 }

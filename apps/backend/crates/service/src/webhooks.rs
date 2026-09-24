@@ -3,6 +3,7 @@
 //! イベントの発火点は [`emit`] で `webhook_deliveries` に 1 行ずつ積むだけ（outbox）。
 //! 送信は `job::webhook_delivery` の掃き出しループが行う。
 
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use hmac::{Hmac, KeyInit, Mac};
@@ -45,39 +46,101 @@ pub const MAX_FAILURE_STREAK: i16 = 5;
 /// 送信先 URL の検証（SSRF 対策）。https 必須（開発設定時のみ localhost の http を許可）、
 /// private / link-local / メタデータ宛てと、それらへ解決される名前を拒否する。
 /// 作成・更新時と送信直前の両方で呼ぶ（DNS の向き先は後から変えられる）。
-pub fn validate_url(settings: &Settings, url: &str) -> Result<(), AppError> {
-    if !settings.webhook_allow_loopback {
-        let parsed = url::Url::parse(url)
-            .map_err(|e| AppError::BadRequestDetail(format!("url が不正です: {e}")))?;
-        let loopback = match parsed.host() {
-            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-            Some(url::Host::Ipv6(ip)) => std::net::IpAddr::V6(ip).to_canonical().is_loopback(),
-            Some(url::Host::Domain("localhost")) => true,
-            Some(url::Host::Domain(_)) => {
-                // localhost 以外の名前でも loopback に解決されるものは拒否する。
-                let resolve = || parsed.socket_addrs(|| None);
-                let addresses = if tokio::runtime::Handle::try_current().is_ok() {
-                    tokio::task::block_in_place(resolve)
-                } else {
-                    resolve()
-                }
-                .map_err(|e| {
-                    AppError::BadRequestDetail(format!("url の名前解決に失敗しました: {e}"))
-                })?;
-                addresses
-                    .iter()
-                    .any(|addr| addr.ip().to_canonical().is_loopback())
+pub async fn validate_url(settings: &Settings, raw: &str) -> Result<(), AppError> {
+    resolve_url(settings, raw).await.map(|_| ())
+}
+
+/// 一度だけ名前解決し、検証した接続先を返す。送信側はこのアドレスへ接続を固定する。
+pub async fn resolve_url(
+    settings: &Settings,
+    raw: &str,
+) -> Result<(url::Url, Vec<SocketAddr>), AppError> {
+    let parsed = url::Url::parse(raw)
+        .map_err(|e| AppError::BadRequestDetail(format!("url が不正です: {e}")))?;
+    if !matches!(parsed.scheme(), "https" | "http") {
+        return Err(AppError::BadRequestDetail("url は https が必要です".into()));
+    }
+    let host = parsed
+        .host()
+        .ok_or_else(|| AppError::BadRequestDetail("url にホストが必要です".into()))?;
+    let localhost = match host {
+        url::Host::Ipv4(ip) => ip.is_loopback(),
+        url::Host::Ipv6(ip) => IpAddr::V6(ip).to_canonical().is_loopback(),
+        url::Host::Domain(name) => name == "localhost",
+    };
+    if localhost && !settings.webhook_allow_loopback {
+        return Err(AppError::BadRequestDetail(
+            "loopback は送信先に使えません".into(),
+        ));
+    }
+    if parsed.scheme() == "http" && !localhost {
+        return Err(AppError::BadRequestDetail("url は https が必要です".into()));
+    }
+    let port = parsed.port_or_known_default().expect("http(s) port");
+    let addresses = match host {
+        url::Host::Ipv4(ip) => vec![SocketAddr::new(ip.into(), port)],
+        url::Host::Ipv6(ip) => vec![SocketAddr::new(ip.into(), port)],
+        url::Host::Domain(name) => tokio::time::timeout(
+            Duration::from_secs(10),
+            tokio::net::lookup_host((name, port)),
+        )
+        .await
+        .map_err(|_| AppError::BadRequestDetail("url の名前解決がタイムアウトしました".into()))?
+        .map_err(|e| AppError::BadRequestDetail(format!("url の名前解決に失敗しました: {e}")))?
+        .collect(),
+    };
+    validate_addresses(settings.webhook_allow_loopback, &addresses)?;
+    if parsed.scheme() == "http"
+        && addresses
+            .iter()
+            .any(|addr| !addr.ip().to_canonical().is_loopback())
+    {
+        return Err(AppError::BadRequestDetail(
+            "http は loopback のみ使用できます".into(),
+        ));
+    }
+    Ok((parsed, addresses))
+}
+
+fn validate_addresses(allow_loopback: bool, addresses: &[SocketAddr]) -> Result<(), AppError> {
+    if addresses.is_empty() {
+        return Err(AppError::BadRequestDetail(
+            "url の接続先がありません".into(),
+        ));
+    }
+    for addr in addresses {
+        let ip = addr.ip().to_canonical();
+        if ip.is_loopback() {
+            if allow_loopback {
+                continue;
             }
-            None => false,
-        };
-        if loopback {
             return Err(AppError::BadRequestDetail(
                 "loopback は送信先に使えません".into(),
             ));
         }
+        let restricted = match ip {
+            IpAddr::V4(ip) => {
+                ip.is_private()
+                    || ip.is_link_local()
+                    || ip.is_unspecified()
+                    || ip.is_broadcast()
+                    || ip.is_multicast()
+                    || ip.octets()[0] == 0
+            }
+            IpAddr::V6(ip) => {
+                ip.is_unspecified()
+                    || ip.is_unique_local()
+                    || ip.is_unicast_link_local()
+                    || ip.is_multicast()
+            }
+        };
+        if restricted {
+            return Err(AppError::BadRequestDetail(
+                "private / link-local IP は送信先に使えません".into(),
+            ));
+        }
     }
-    auth_core::url_guard::validate_instance_url(url)
-        .map_err(|e| AppError::BadRequestDetail(format!("url を送信先に使えません: {e}")))
+    Ok(())
 }
 
 pub fn validate_events(events: &[String]) -> Result<(), AppError> {
@@ -299,6 +362,34 @@ pub fn discord_message(event: &str, payload: &Json) -> Json {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_resolved_address_must_be_allowed() {
+        let public: SocketAddr = "93.184.216.34:443".parse().unwrap();
+        assert!(validate_addresses(false, &[public]).is_ok());
+        assert!(validate_addresses(false, &[]).is_err());
+        for blocked in [
+            "10.0.0.1:443",
+            "169.254.169.254:443",
+            "0.0.0.0:443",
+            "[::ffff:10.0.0.1]:443",
+            "[::ffff:169.254.169.254]:443",
+            "[fc00::1]:443",
+            "[fe80::1]:443",
+            "[::]:443",
+        ] {
+            let blocked = blocked.parse().unwrap();
+            for addresses in [[public, blocked], [blocked, public]] {
+                assert!(validate_addresses(false, &addresses).is_err());
+                assert!(validate_addresses(true, &addresses).is_err());
+            }
+        }
+        for loopback in ["127.0.0.1:443", "[::1]:443", "[::ffff:127.0.0.1]:443"] {
+            let addresses = [public, loopback.parse().unwrap()];
+            assert!(validate_addresses(false, &addresses).is_err());
+            assert!(validate_addresses(true, &addresses).is_ok());
+        }
+    }
 
     #[test]
     fn backoff_follows_spec() {
