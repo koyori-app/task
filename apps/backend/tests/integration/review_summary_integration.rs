@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use entity::{github_integrations, project_statuses};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    prelude::Uuid,
+    TransactionTrait, prelude::Uuid,
 };
 use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -437,6 +437,7 @@ async fn consecutive_transitions_coalesce_into_one_summary_update() {
 ///
 /// 起票時点では作者が分からない（このジョブが GitHub から取ってくる）ので、
 /// `create_review` の宛先には入らない。ジョブを何度走らせても増えないことも固定する。
+/// 起票トランザクションとジョブが重なっても、確定したラウンドを取りこぼさない。
 #[serial_test::serial]
 #[tokio::test]
 async fn the_pull_request_author_is_notified_once() {
@@ -500,27 +501,99 @@ async fn the_pull_request_author_is_notified_once() {
         "起票の時点では作者が分からない"
     );
 
-    for _ in 0..2 {
-        job::review_summary::process(
-            job::ReviewSummaryJob {
-                project_id: tp.project_id,
-                pr_number: PR_NUMBER,
-                repo_owner: REPO_OWNER.into(),
-                repo_name: REPO_NAME.into(),
-            },
-            apalis::prelude::Data::new(job_state(&app)),
-        )
+    // 起票と同じロックを保持し、ジョブが待機してから R2 を確定する。
+    let txn = app.state.db.begin().await.unwrap();
+    let repo = service::reviews::current_repo(&txn, tp.project_id)
         .await
-        .expect("post review summary");
-    }
-
+        .unwrap();
+    let round = service::reviews::next_round(&txn, tp.project_id, &repo, PR_NUMBER)
+        .await
+        .unwrap();
+    assert_eq!(round, 2);
+    let pid = txn
+        .query_one_raw(sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT pg_backend_pid() AS pid",
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<i32>("", "pid")
+        .unwrap();
+    let job = job::ReviewSummaryJob {
+        project_id: tp.project_id,
+        pr_number: PR_NUMBER,
+        repo_owner: REPO_OWNER.into(),
+        repo_name: REPO_NAME.into(),
+    };
+    let state = job_state(&app);
+    let processing = tokio::spawn(async move {
+        job::review_summary::process(job, apalis::prelude::Data::new(state)).await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let blocked = app.state.db.query_one_raw(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Postgres,
+                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))) AS blocked",
+                [pid.into()],
+            )).await.unwrap().unwrap().try_get::<bool>("", "blocked").unwrap();
+            if blocked { break; }
+            assert!(!processing.is_finished(), "ジョブは起票の確定を待つ必要がある");
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }).await.expect("summary job waits for round creation");
+    let first = entity::reviews::Entity::find()
+        .filter(entity::reviews::Column::ProjectId.eq(tp.project_id))
+        .one(&txn)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut concurrent: entity::reviews::ActiveModel = first.into();
+    concurrent.id = Set(Uuid::new_v4());
+    concurrent.round = Set(round);
+    concurrent.summary = Set("並行起票".into());
+    let concurrent = concurrent.insert(&txn).await.unwrap();
+    service::notifications::notify_review_round_created(&txn, &concurrent, &[], reviewer.id)
+        .await
+        .unwrap();
+    txn.commit().await.unwrap();
+    processing.await.unwrap().expect("post review summary");
+    let mut notified_rounds: Vec<i64> = entity::notifications::Entity::find()
+        .filter(entity::notifications::Column::UserId.eq(author.id))
+        .filter(
+            entity::notifications::Column::NotificationType
+                .eq(::common::notifications::TYPE_REVIEW_ROUND_CREATED),
+        )
+        .all(&app.state.db)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|notification| notification.payload["round"].as_i64().unwrap())
+        .collect();
+    notified_rounds.sort();
+    assert_eq!(
+        notified_rounds,
+        vec![1, 2],
+        "並行起票したラウンドも最初のジョブで通知する"
+    );
+    job::review_summary::process(
+        job::ReviewSummaryJob {
+            project_id: tp.project_id,
+            pr_number: PR_NUMBER,
+            repo_owner: REPO_OWNER.into(),
+            repo_name: REPO_NAME.into(),
+        },
+        apalis::prelude::Data::new(job_state(&app)),
+    )
+    .await
+    .expect("repeat review summary");
     assert_eq!(
         author_notifications(&app, author.id).await,
-        1,
-        "作者への起票通知は 1 件だけ（pr_author が NULL から埋まるのは 1 回きり）"
+        2,
+        "再実行しても各ラウンドの作者通知は 1 件だけ"
     );
 
-    // R1 から作者を解決できる R2 は起票時に通知される。要約ジョブで重複させない。
+    // 作者を解決できる R3 は起票時に通知される。要約ジョブで重複させない。
     let res = app
         .post_json_with_session(
             &format!(
@@ -536,7 +609,7 @@ async fn the_pull_request_author_is_notified_once() {
         )
         .await;
     assert_eq!(res.status(), StatusCode::CREATED);
-    assert_eq!(author_notifications(&app, author.id).await, 2);
+    assert_eq!(author_notifications(&app, author.id).await, 3);
     for _ in 0..2 {
         job::review_summary::process(
             job::ReviewSummaryJob {
@@ -548,10 +621,10 @@ async fn the_pull_request_author_is_notified_once() {
             apalis::prelude::Data::new(job_state(&app)),
         )
         .await
-        .expect("post second round summary");
+        .expect("post third round summary");
         assert_eq!(
             author_notifications(&app, author.id).await,
-            2,
+            3,
             "起票と要約ジョブを通しても、各ラウンドの作者通知は 1 件だけ"
         );
     }

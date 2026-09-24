@@ -19,7 +19,7 @@ use apalis::prelude::{
     BackoffConfig, BoxDynError, Data, IntervalStrategy, StrategyBuilder, Task, TaskSink,
 };
 use apalis_postgres::{Config, JsonCodec, PgPool, PostgresStorage};
-use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
+use sea_orm::{ConnectionTrait, EntityTrait, QuerySelect, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -394,6 +394,12 @@ async fn update_summary(
         Ok(meta) => {
             let head = meta.head.as_ref().map(|h| h.sha.clone());
             let txn = state.db.begin().await?;
+            // 起票時の next_round と同じ行を先にロックし、対象取得と更新の間の
+            // ラウンド追加を防ぐ（作者だけ埋まり、通知されないラウンドを作らない）。
+            entity::projects::Entity::find_by_id(job.project_id)
+                .lock(sea_orm::sea_query::LockType::Update)
+                .one(&txn)
+                .await?;
             // 作者を控えるのと通知を 1 つの txn にまとめる。控えた後に落ちると、
             // 次の実行では「作者が NULL のラウンド」が無くなって通知だけ抜ける
             let unnotified = service::reviews::rounds_without_pr_author(
