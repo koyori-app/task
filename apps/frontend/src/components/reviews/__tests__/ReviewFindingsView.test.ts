@@ -567,7 +567,9 @@ describe('ReviewFindingsView', () => {
 
   it('PR 番号の部分一致で一覧を絞り、空にすると全件へ戻る', async () => {
     stubFetch({ findings: [finding()], prNumbers: manyPrNumbers });
-    const wrapper = mountView({ initialUrlState: { pr: 618, round: null, severity: null, state: null, finding: null } });
+    const wrapper = mountView({
+      initialUrlState: { pr: 618, round: null, severity: null, state: null, finding: null },
+    });
     await flushPromises();
 
     expect(prNavButtons()).toHaveLength(6);
