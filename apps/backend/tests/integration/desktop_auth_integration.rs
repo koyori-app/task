@@ -690,9 +690,10 @@ async fn device_token_sees_the_same_notifications_as_the_session() {
         "セッションと同じ件数"
     );
 
-    // 対照: テナント A に束縛した PAT は A の 1 件だけ（絞り込みが効く経路との違い）
+    // 対照: テナント A に束縛した PAT は A の 1 件だけ（絞り込みが効く経路との違い）。
+    // PAT は種別に合うスコープの通知しか見えないので、レビュー通知には read:review を持たせる
     let pat = app
-        .insert_pat(user.id, a.tenant_id, vec![Scope::ReadTask], None)
+        .insert_pat(user.id, a.tenant_id, vec![Scope::ReadReview], None)
         .await;
     assert_eq!(
         unread_count(
