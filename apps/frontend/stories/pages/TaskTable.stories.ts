@@ -1010,6 +1010,95 @@ export const Sorting: Story = {
   },
 };
 
+export const RowSelection: Story = {
+  name: '行選択（Select all で全行選択）',
+  beforeEach: mockFetch,
+  parameters: {
+    docs: {
+      description: {
+        story:
+          '壊れたら: header の Select all を押しても選択件数の行が動かない' +
+          '（getIsAllPageRowsSelected / getFilteredSelectedRowModel の配線切れ）。' +
+          '押した先の状態（n / total 件選択と各行の checkbox）まで見る。',
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
+
+    // 押す前: 描画された行数はフィクスチャの全件、選択は 0
+    const rowCount = canvasElement.querySelectorAll('tbody tr').length;
+    await expect(rowCount).toBe(sampleTasks.total);
+    await expect(
+      canvas.findByText(new RegExp(`0 / ${sampleTasks.total} 件選択`)),
+    ).resolves.toBeInTheDocument();
+
+    // header の Select all を押す（toggleAllPageRowsSelected →
+    // getIsAllPageRowsSelected / getFilteredSelectedRowModel を踏む）。
+    // ariaLabel は accessible name に出ておらず findByRole では引けぬ
+    // （既存の RowAccessibility も querySelector で取っておる）ため、
+    // thead の checkbox を構造で取る。
+    const selectAll = canvasElement.querySelector('thead [role="checkbox"]');
+    if (!(selectAll instanceof HTMLElement)) {
+      throw new Error('Select all checkbox not found');
+    }
+    await user.click(selectAll);
+
+    // 押した先: 選択件数の行が行数と一致し、header と各行の checkbox が選択状態
+    await expect(
+      canvas.findByText(new RegExp(`${rowCount} / ${sampleTasks.total} 件選択`)),
+    ).resolves.toBeInTheDocument();
+    await expect(selectAll).toHaveAttribute('aria-checked', 'true');
+    const rowBoxes = [...canvasElement.querySelectorAll('tbody [role="checkbox"]')];
+    await expect(rowBoxes).toHaveLength(rowCount);
+    for (const box of rowBoxes) {
+      await expect(box).toHaveAttribute('aria-checked', 'true');
+    }
+  },
+};
+
+export const ColumnVisibility: Story = {
+  name: '列の表示切り替え（優先度を外す）',
+  beforeEach: mockFetch,
+  parameters: {
+    docs: {
+      description: {
+        story:
+          '壊れたら: 列ドロップダウンで外した列のヘッダが残る' +
+          '（getCanHide / toggleVisibility / getVisibleCells の配線切れ）。' +
+          '外せない select 列が一覧に出ないことも見る。',
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    // 押す前: 優先度のヘッダが出ている
+    await expect(canvas.findByRole('button', { name: '優先度' })).resolves.toBeInTheDocument();
+
+    // 列のドロップダウンを開く
+    await user.click(await canvas.findByRole('button', { name: '列' }));
+    const menu = within(document.body);
+    // getCanHide: enableHiding: false の select 列は外せる列の一覧に出ない
+    const priorityItem = await menu.findByRole('menuitemcheckbox', { name: 'priority' });
+    await expect(menu.queryByRole('menuitemcheckbox', { name: 'select' })).not.toBeInTheDocument();
+    // getIsVisible: 外す前は表示中
+    await expect(priorityItem).toHaveAttribute('aria-checked', 'true');
+
+    // toggleVisibility(false): 一列を外す
+    await user.click(priorityItem);
+
+    // 押した先: その列のヘッダが現に消える（getVisibleCells の帰結）。
+    // 他の列（タイトル）は残る——過剰に消えていないことの対照
+    await waitFor(() =>
+      expect(canvas.queryByRole('button', { name: '優先度' })).not.toBeInTheDocument(),
+    );
+    await expect(canvas.findByRole('button', { name: /タイトル/ })).resolves.toBeInTheDocument();
+  },
+};
+
 export const ProjectSwitch: Story = {
   name: 'プロジェクト切替で旧タスク非表示',
   decorators: [storyDecoratorReactive()],
