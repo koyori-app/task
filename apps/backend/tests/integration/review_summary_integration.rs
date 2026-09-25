@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use entity::{github_integrations, project_statuses};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    prelude::Uuid,
+    TransactionTrait, prelude::Uuid,
 };
 use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -431,6 +431,220 @@ async fn consecutive_transitions_coalesce_into_one_summary_update() {
     );
 
     app.cleanup_user(reviewer.id).await;
+}
+
+/// PR の作者は、要約ジョブが `pr_author` を埋めたときに 1 度だけ通知を受ける。
+///
+/// 起票時点では作者が分からない（このジョブが GitHub から取ってくる）ので、
+/// `create_review` の宛先には入らない。ジョブを何度走らせても増えないことも固定する。
+/// 起票トランザクションとジョブが重なっても、確定したラウンドを取りこぼさない。
+#[serial_test::serial]
+#[tokio::test]
+async fn the_pull_request_author_is_notified_once() {
+    let mock_server = MockServer::start().await;
+    // SAFETY: serial アトリビュートにより他テストとの並列実行を防いでいる。
+    unsafe {
+        std::env::set_var("GITHUB_API_BASE_URL", mock_server.uri());
+    }
+    let mut app = TestApp::new_with_github().await;
+    let reviewer = app.insert_user_default().await;
+    let author = app.insert_user_default().await;
+    let tp = app.insert_tenant_project(reviewer.id).await;
+    seed_statuses(&app, tp.project_id).await;
+    link_integration(&app, tp.project_id, reviewer.id).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, author.id).await;
+
+    // モックの PR 作者（`yupix`）を Task の利用者に結ぶ接続
+    let now = chrono::Utc::now();
+    entity::oauth_connections::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        user_id: Set(author.id),
+        provider: Set("github".into()),
+        provider_user_id: Set(format!("gh-{}", author.id)),
+        provider_email: Set(None),
+        instance_url: Set(None),
+        access_token_enc: Set(None),
+        refresh_token_enc: Set(None),
+        token_expires_at: Set(None),
+        created_at: Set(now.into()),
+        updated_at: Set(now.into()),
+        provider_login: Set(Some("yupix".into())),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert oauth connection");
+
+    let marker = service::github::pr_comments::summary_marker(tp.project_id);
+    mount_mocks(&mock_server, false, &marker).await;
+
+    app.reset_session_client();
+    app.login_session_no_content(&reviewer.email, &reviewer.password)
+        .await;
+    let res = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/reviews",
+                tp.tenant_id, tp.project_id
+            ),
+            serde_json::json!({
+                "pr_number": PR_NUMBER,
+                "head_sha": REVIEWED_HEAD,
+                "summary": "総評",
+                "findings": [{ "severity": "high", "title": "認可漏れ", "body": "本文" }],
+            }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    assert_eq!(
+        author_notifications(&app, author.id).await,
+        0,
+        "起票の時点では作者が分からない"
+    );
+
+    // 起票と同じロックを保持し、ジョブが待機してから R2 を確定する。
+    let txn = app.state.db.begin().await.unwrap();
+    let repo = service::reviews::current_repo(&txn, tp.project_id)
+        .await
+        .unwrap();
+    let round = service::reviews::next_round(&txn, tp.project_id, &repo, PR_NUMBER)
+        .await
+        .unwrap();
+    assert_eq!(round, 2);
+    let pid = txn
+        .query_one_raw(sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT pg_backend_pid() AS pid",
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<i32>("", "pid")
+        .unwrap();
+    let job = job::ReviewSummaryJob {
+        project_id: tp.project_id,
+        pr_number: PR_NUMBER,
+        repo_owner: REPO_OWNER.into(),
+        repo_name: REPO_NAME.into(),
+    };
+    let state = job_state(&app);
+    let processing = tokio::spawn(async move {
+        job::review_summary::process(job, apalis::prelude::Data::new(state)).await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let blocked = app.state.db.query_one_raw(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Postgres,
+                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))) AS blocked",
+                [pid.into()],
+            )).await.unwrap().unwrap().try_get::<bool>("", "blocked").unwrap();
+            if blocked { break; }
+            assert!(!processing.is_finished(), "ジョブは起票の確定を待つ必要がある");
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }).await.expect("summary job waits for round creation");
+    let first = entity::reviews::Entity::find()
+        .filter(entity::reviews::Column::ProjectId.eq(tp.project_id))
+        .one(&txn)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut concurrent: entity::reviews::ActiveModel = first.into();
+    concurrent.id = Set(Uuid::new_v4());
+    concurrent.round = Set(round);
+    concurrent.summary = Set("並行起票".into());
+    let concurrent = concurrent.insert(&txn).await.unwrap();
+    service::notifications::notify_review_round_created(&txn, &concurrent, &[], reviewer.id)
+        .await
+        .unwrap();
+    txn.commit().await.unwrap();
+    processing.await.unwrap().expect("post review summary");
+    let mut notified_rounds: Vec<i64> = entity::notifications::Entity::find()
+        .filter(entity::notifications::Column::UserId.eq(author.id))
+        .filter(
+            entity::notifications::Column::NotificationType
+                .eq(::common::notifications::TYPE_REVIEW_ROUND_CREATED),
+        )
+        .all(&app.state.db)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|notification| notification.payload["round"].as_i64().unwrap())
+        .collect();
+    notified_rounds.sort();
+    assert_eq!(
+        notified_rounds,
+        vec![1, 2],
+        "並行起票したラウンドも最初のジョブで通知する"
+    );
+    job::review_summary::process(
+        job::ReviewSummaryJob {
+            project_id: tp.project_id,
+            pr_number: PR_NUMBER,
+            repo_owner: REPO_OWNER.into(),
+            repo_name: REPO_NAME.into(),
+        },
+        apalis::prelude::Data::new(job_state(&app)),
+    )
+    .await
+    .expect("repeat review summary");
+    assert_eq!(
+        author_notifications(&app, author.id).await,
+        2,
+        "再実行しても各ラウンドの作者通知は 1 件だけ"
+    );
+
+    // 作者を解決できる R3 は起票時に通知される。要約ジョブで重複させない。
+    let res = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/reviews",
+                tp.tenant_id, tp.project_id
+            ),
+            serde_json::json!({
+                "pr_number": PR_NUMBER,
+                "head_sha": REVIEWED_HEAD,
+                "summary": "再確認",
+                "findings": [],
+            }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    assert_eq!(author_notifications(&app, author.id).await, 3);
+    for _ in 0..2 {
+        job::review_summary::process(
+            job::ReviewSummaryJob {
+                project_id: tp.project_id,
+                pr_number: PR_NUMBER,
+                repo_owner: REPO_OWNER.into(),
+                repo_name: REPO_NAME.into(),
+            },
+            apalis::prelude::Data::new(job_state(&app)),
+        )
+        .await
+        .expect("post third round summary");
+        assert_eq!(
+            author_notifications(&app, author.id).await,
+            3,
+            "起票と要約ジョブを通しても、各ラウンドの作者通知は 1 件だけ"
+        );
+    }
+
+    app.cleanup_user(author.id).await;
+    app.cleanup_user(reviewer.id).await;
+}
+
+/// その利用者に届いたラウンド起票の通知の件数。
+async fn author_notifications(app: &TestApp, user_id: Uuid) -> u64 {
+    use sea_orm::PaginatorTrait;
+    entity::notifications::Entity::find()
+        .filter(entity::notifications::Column::UserId.eq(user_id))
+        .filter(
+            entity::notifications::Column::NotificationType
+                .eq(::common::notifications::TYPE_REVIEW_ROUND_CREATED),
+        )
+        .count(&app.state.db)
+        .await
+        .expect("count notifications")
 }
 
 /// 担い手が消えても詰まらないよう、印とロックは TTL 付きで、

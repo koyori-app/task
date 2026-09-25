@@ -22178,6 +22178,11 @@
             "type": "string"
           },
           "payload": {},
+          "project_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "通知が属するプロジェクト。タスクに紐づかない通知（レビュー等）でも入る"
+          },
           "read_at": {
             "type": ["string", "null"],
             "format": "date-time"

@@ -77,30 +77,16 @@ async fn accessible_project_ids(
         .collect())
 }
 
-/// アクセス可能なプロジェクトに属するタスクID一覧を返す。
-/// プロジェクトがない場合は空Vecを返す。
-async fn accessible_task_ids(
-    db: &sea_orm::DatabaseConnection,
-    project_ids: &HashSet<Uuid>,
-) -> Result<Vec<Uuid>, AppError> {
-    if project_ids.is_empty() {
-        return Ok(vec![]);
-    }
-    Ok(tasks::Entity::find()
-        .select_only()
-        .column(tasks::Column::Id)
-        .filter(tasks::Column::ProjectId.is_in(project_ids.iter().cloned().collect::<Vec<_>>()))
-        .into_tuple::<Uuid>()
-        .all(db)
-        .await?)
-}
-
 /// 通知クエリにアクセス制御条件を追加するヘルパー。
-/// task_id IS NULL（タスクに紐付かない通知）は常に許可。
-fn accessible_notification_condition(task_ids: Vec<Uuid>) -> Condition {
+///
+/// 判定はプロジェクト単位。タスクに紐づかない通知（レビューは PR 単位で起きる）も
+/// 同じ規則で絞れる。`project_id IS NULL` の通知は常に許可。
+fn accessible_notification_condition(project_ids: &HashSet<Uuid>) -> Condition {
     Condition::any()
-        .add(notifications::Column::TaskId.is_null())
-        .add(notifications::Column::TaskId.is_in(task_ids))
+        .add(notifications::Column::ProjectId.is_null())
+        .add(
+            notifications::Column::ProjectId.is_in(project_ids.iter().copied().collect::<Vec<_>>()),
+        )
 }
 
 #[utoipa::path(get, path = "/{id}/watchers", tag = "Tasks", responses((status = 200, body = WatcherListResponse), CrudErrors))]
@@ -190,12 +176,11 @@ pub async fn list_notifications(
     auth.require_session()?;
 
     let accessible_proj_ids = accessible_project_ids(&state.db, auth.user_id).await?;
-    let task_ids = accessible_task_ids(&state.db, &accessible_proj_ids).await?;
 
     let unread_count: u64 = notifications::Entity::find()
         .filter(notifications::Column::UserId.eq(auth.user_id))
         .filter(notifications::Column::ReadAt.is_null())
-        .filter(accessible_notification_condition(task_ids.clone()))
+        .filter(accessible_notification_condition(&accessible_proj_ids))
         .count(&state.db)
         .await?;
 
@@ -207,7 +192,7 @@ pub async fn list_notifications(
         query = query.filter(notifications::Column::ReadAt.is_null());
     }
     // DBクエリレベルでアクセス可能な通知のみ取得する（ページング後に絞り込むと件数が減る）
-    query = query.filter(accessible_notification_condition(task_ids.clone()));
+    query = query.filter(accessible_notification_condition(&accessible_proj_ids));
     let rows = query
         .order_by(
             Expr::cust("CASE WHEN read_at IS NULL THEN 0 ELSE 1 END"),
@@ -247,6 +232,7 @@ pub async fn list_notifications(
                 NotificationItem {
                     id: row.id,
                     notification_type: row.notification_type,
+                    project_id: row.project_id,
                     task,
                     payload: row.payload.clone(),
                     read_at: row.read_at.map(|dt| dt.with_timezone(&Utc)),
@@ -272,15 +258,13 @@ pub async fn mark_notification_read(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // task に紐づく通知はアクセス可能なプロジェクトか確認
-    if let Some(tid) = notification.task_id {
-        let proj_ids = accessible_project_ids(&state.db, auth.user_id).await?;
-        let task = tasks::Entity::find_by_id(tid).one(&state.db).await?;
-        if let Some(t) = task
-            && !proj_ids.contains(&t.project_id)
-        {
-            return Err(AppError::NotFound);
-        }
+    // プロジェクトに紐づく通知は、そのプロジェクトに入れるかを確認する
+    if let Some(project_id) = notification.project_id
+        && !accessible_project_ids(&state.db, auth.user_id)
+            .await?
+            .contains(&project_id)
+    {
+        return Err(AppError::NotFound);
     }
 
     let row = if notification.read_at.is_some() {
@@ -305,6 +289,7 @@ pub async fn mark_notification_read(
     Ok(Json(NotificationItem {
         id: row.id,
         notification_type: row.notification_type,
+        project_id: row.project_id,
         task,
         payload: row.payload.clone(),
         read_at: row.read_at.map(|dt| dt.with_timezone(&Utc)),
@@ -321,7 +306,6 @@ pub async fn mark_all_notifications_read(
     auth.require_session()?;
 
     let accessible_proj_ids = accessible_project_ids(&state.db, auth.user_id).await?;
-    let task_ids = accessible_task_ids(&state.db, &accessible_proj_ids).await?;
 
     let mut update = notifications::Entity::update_many()
         .col_expr(
@@ -330,7 +314,7 @@ pub async fn mark_all_notifications_read(
         )
         .filter(notifications::Column::UserId.eq(auth.user_id))
         .filter(notifications::Column::ReadAt.is_null());
-    update = update.filter(accessible_notification_condition(task_ids));
+    update = update.filter(accessible_notification_condition(&accessible_proj_ids));
     update.exec(&state.db).await?;
     Ok(StatusCode::NO_CONTENT)
 }

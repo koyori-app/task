@@ -276,6 +276,10 @@ pub async fn create_review(
         findings.push(finding);
     }
 
+    // 通知も同じ txn で作る。起票が巻き戻ったのに通知だけ残る事態を避ける
+    service::notifications::notify_review_round_created(&txn, &review, &findings, auth.user_id)
+        .await?;
+
     let reviewer = users::Entity::find_by_id(auth.user_id)
         .one(&txn)
         .await?
@@ -654,6 +658,10 @@ pub async fn update_review_finding_state(
     // 他プロジェクトの指摘 ID を渡されても存在を漏らさない
     let review = find_review(&txn, project_id, finding.review_id).await?;
 
+    // 遷移の前後を通知に載せるので、apply_transition へ渡す前に控える
+    let from = finding.state;
+    let note = payload.note.clone();
+
     let updated = service::reviews::apply_transition(
         &txn,
         finding,
@@ -661,6 +669,17 @@ pub async fn update_review_finding_state(
         payload.state,
         auth.user_id,
         payload.note,
+    )
+    .await?;
+
+    service::notifications::notify_review_finding_changed(
+        &txn,
+        &review,
+        &updated,
+        from,
+        payload.state,
+        auth.user_id,
+        note.as_deref(),
     )
     .await?;
 

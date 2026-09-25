@@ -19,7 +19,7 @@ use apalis::prelude::{
     BackoffConfig, BoxDynError, Data, IntervalStrategy, StrategyBuilder, Task, TaskSink,
 };
 use apalis_postgres::{Config, JsonCodec, PgPool, PostgresStorage};
-use sea_orm::EntityTrait;
+use sea_orm::{ConnectionTrait, EntityTrait, QuerySelect, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -393,8 +393,24 @@ async fn update_summary(
     {
         Ok(meta) => {
             let head = meta.head.as_ref().map(|h| h.sha.clone());
+            let txn = state.db.begin().await?;
+            // 起票時の next_round と同じ行を先にロックし、対象取得と更新の間の
+            // ラウンド追加を防ぐ（作者だけ埋まり、通知されないラウンドを作らない）。
+            entity::projects::Entity::find_by_id(job.project_id)
+                .lock(sea_orm::sea_query::LockType::Update)
+                .one(&txn)
+                .await?;
+            // 作者を控えるのと通知を 1 つの txn にまとめる。控えた後に落ちると、
+            // 次の実行では「作者が NULL のラウンド」が無くなって通知だけ抜ける
+            let unnotified = service::reviews::rounds_without_pr_author(
+                &txn,
+                job.project_id,
+                repo,
+                job.pr_number,
+            )
+            .await?;
             service::reviews::cache_pr_meta(
-                &state.db,
+                &txn,
                 job.project_id,
                 repo,
                 job.pr_number,
@@ -403,6 +419,8 @@ async fn update_summary(
                 head.as_deref(),
             )
             .await?;
+            notify_pr_author(&txn, &meta, unnotified).await?;
+            txn.commit().await?;
             head
         }
         Err(e) => {
@@ -491,6 +509,36 @@ async fn update_summary(
         comment_id,
         "review summary comment updated"
     );
+    Ok(())
+}
+
+/// PR の作者へ、その人が知らないまま増えていたラウンドを知らせる。
+///
+/// 初回の起票時点では作者が分からないので、この要約ジョブが GitHub から取得して補う。
+///
+/// 冪等: 宛先は「`pr_author` が NULL だったラウンド」だけで、その列が NULL から
+/// 埋まるのはラウンドごとに 1 回きり。起票時に通知済みの場合も通知側で重複を除く。
+async fn notify_pr_author<C: ConnectionTrait>(
+    db: &C,
+    meta: &service::github::pr_comments::PullRequestMeta,
+    rounds: Vec<entity::reviews::Model>,
+) -> Result<(), BoxDynError> {
+    let Some(login) = meta.user.as_ref().map(|u| u.login.as_str()) else {
+        return Ok(());
+    };
+    let Some(author_id) = service::forge::identity::user_id_for_login(db, "github", login).await?
+    else {
+        return Ok(());
+    };
+    for round in rounds {
+        // 自分で出したラウンドは自分に知らせない
+        if round.reviewer_id == author_id {
+            continue;
+        }
+        let findings = service::reviews::round_findings(db, round.id).await?;
+        service::notifications::notify_review_round_created_to(db, &round, &findings, author_id)
+            .await?;
+    }
     Ok(())
 }
 

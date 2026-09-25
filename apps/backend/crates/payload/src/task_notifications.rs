@@ -41,6 +41,9 @@ pub struct NotificationItem {
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
     pub notification_type: String,
+    /// 通知が属するプロジェクト。タスクに紐づかない通知（レビュー等）でも入る
+    #[schema(nullable, value_type = Option<String>, format = "uuid")]
+    pub project_id: Option<Uuid>,
     #[schema(nullable)]
     pub task: Option<NotificationTaskSummary>,
     #[schema(value_type = serde_json::Value)]
