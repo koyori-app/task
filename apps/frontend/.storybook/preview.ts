@@ -1,5 +1,10 @@
 import type { Preview } from '@storybook/vue3-vite';
+import { configure } from 'storybook/test';
 import '@/assets/css/tailwind.css';
+
+// VRT 全体の並列描画による負荷に備え、全 story の findBy* / waitFor に適用する。
+// 既定の 1 秒では、個々の story が正常でも応答が間に合わないことがある。
+configure({ asyncUtilTimeout: 5000 });
 
 // Date.now は意図的に凍結していない(経過時間は performance.now を使う)
 const MOCKED_NOW = '2026-07-15T12:00:00+09:00';
