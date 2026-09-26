@@ -16,7 +16,7 @@ use sea_orm::{
 
 use crate::AppState;
 use crate::error::AppError;
-use crate::extractors::AuthUser;
+use crate::extractors::{AuthMethod, AuthUser};
 use crate::openapi::{CrudErrors, DesktopAuthTokenErrors, SessionAuthErrors};
 use entity::{device_tokens, users};
 use payload::desktop_auth::*;
@@ -160,7 +160,7 @@ pub async fn list_devices(
     path = "/me/devices/{id}",
     tag = "Desktop",
     summary = "端末を失効",
-    description = "revoked_at を立てる（行は残す）。要求に使っている Device Token 自身も失効できる（ログアウト）。他人の端末は 404。",
+    description = "revoked_at を立てる（行は残す）。Device Token からは自身のみ失効できる（ログアウト）。セッションからは自分の他の端末も失効できる。他人の端末は 404。",
     params(("id" = Uuid, Path, description = "端末の識別子")),
     responses(
         (status = 204, description = "失効しました"),
@@ -178,6 +178,11 @@ pub async fn revoke_device(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    if let AuthMethod::DeviceToken { token_id } = &auth.method
+        && *token_id != id
+    {
+        return Err(AppError::Forbidden);
+    }
     if row.revoked_at.is_none() {
         let mut active: device_tokens::ActiveModel = row.into();
         active.revoked_at = Set(Some(Utc::now().into()));

@@ -20888,7 +20888,7 @@
       "delete": {
         "tags": ["Desktop"],
         "summary": "端末を失効",
-        "description": "revoked_at を立てる（行は残す）。要求に使っている Device Token 自身も失効できる（ログアウト）。他人の端末は 404。",
+        "description": "revoked_at を立てる（行は残す）。Device Token からは自身のみ失効できる（ログアウト）。セッションからは自分の他の端末も失効できる。他人の端末は 404。",
         "operationId": "revoke_device",
         "parameters": [
           {

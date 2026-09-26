@@ -331,7 +331,7 @@ async fn bearer_cannot_issue_code() {
     app.cleanup_user(user.id).await;
 }
 
-/// セッション専用の口（PAT 管理・テナント作成）は Device Token では通らない。
+/// セッション専用の口（PAT 管理・テナント作成と削除・プロジェクト削除）は Device Token では通らない。
 /// 同じ利用者のセッションなら通る（対照）。
 #[tokio::test]
 async fn device_token_cannot_use_session_only_endpoints() {
@@ -369,6 +369,41 @@ async fn device_token_cannot_use_session_only_endpoints() {
         .await;
     assert_eq!(res.status(), StatusCode::CREATED);
 
+    let tp = app.insert_tenant_project(user.id).await;
+    let tenant_path = format!("/v1/tenants/{}", tp.tenant_id);
+    let project_path = format!("{tenant_path}/projects/{}", tp.project_id);
+    let update = client
+        .put(format!("{}{tenant_path}", app.base_url()))
+        .bearer_auth(&device)
+        .json(&serde_json::json!({"name": "changed"}))
+        .send()
+        .await
+        .expect("update tenant");
+    assert_eq!(update.status(), StatusCode::FORBIDDEN);
+    for path in [&project_path, &tenant_path] {
+        let denied = client
+            .delete(format!("{}{path}", app.base_url()))
+            .bearer_auth(&device)
+            .send()
+            .await
+            .expect("delete with device token");
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN, "{path}");
+    }
+    assert_eq!(
+        app.put_json_with_session(&tenant_path, serde_json::json!({"name": "changed"}))
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        app.delete_with_session(&project_path).await.status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        app.delete_with_session(&tenant_path).await.status(),
+        StatusCode::NO_CONTENT
+    );
+
     app.cleanup_user(user.id).await;
 }
 
@@ -389,6 +424,22 @@ async fn revoked_device_token_is_401() {
         .expect("devices");
     assert_eq!(devices.len(), 2);
     assert!(devices.iter().all(|d| d.get("token").is_none()));
+
+    let denied = reqwest::Client::new()
+        .delete(format!(
+            "{}/v1/users/me/devices/{by_web_id}",
+            app.base_url()
+        ))
+        .bearer_auth(&by_self)
+        .send()
+        .await
+        .expect("revoke another device");
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        get_bearer(&app, "/v1/users/me/notifications", &by_web).await,
+        StatusCode::OK,
+        "拒否された別端末は有効なまま"
+    );
 
     let res = app
         .delete_with_session(&format!("/v1/users/me/devices/{by_web_id}"))

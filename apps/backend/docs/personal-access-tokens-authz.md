@@ -236,7 +236,7 @@ PAT は 1 テナント束縛で、上の「テナント非紐づけ PAT は採�
 | 失効 | `revoked_at` を立てる（行は残す）。失効後は 401 |
 | 全端末の失効 | `users.sessions_revoked_at` より前に発行（`created_at`）したものは 401。パスワード変更で全端末が落ちる |
 | 凍結 | 凍結された利用者は 403（`account-suspended`）。PAT と同じ |
-| 権限 | スコープ・テナント束縛はセッションと同等。`require_session` の口（PAT 管理・テナント作成・GitHub 連携の管理・2FA・認可コードの発行）は 403 |
+| 権限 | スコープ・テナント束縛はセッションと同等。`require_session` の口（PAT 管理・テナント作成・更新・削除、プロジェクト削除、GitHub 連携の管理・2FA・認可コードの発行）は 403 |
 | 通知 | `/v1/users/me/notifications` 系は `require_scope`（Device Token は常に通過）+ 視界の絞り込み（`visible_project_ids_for`）。Device Token の視界はセッションと同じ（本人が入れるプロジェクトすべて、`project_id` を持たない古い通知も含む）で、PAT のテナント絞り込みは掛けない（[通知](#v1usersme通知)） |
 | 端末管理 | `/v1/users/me/devices` 系はセッションと Device Token だけ（`require_session_or_device_token`）。PAT は 403 |
 | `/v1/auth/me` | セッション専用のまま（Bearer は 401）。Desktop は通知一覧と端末一覧で足りる |
@@ -280,7 +280,7 @@ Bearer 認証でその失効を検出する。有効期限は交換時点から9
 | `POST` | `/v1/desktop/auth/codes` | セッション | `{code_challenge, name}`（name は 1〜100 文字）→ 201 `{code}` |
 | `POST` | `/v1/desktop/auth/token` | なし | `{code, code_verifier}` → 201 `{token, expires_at, device_id}`。平文はこの応答でのみ返す |
 | `GET` | `/v1/users/me/devices` | セッション / Device Token | 自分の有効な端末（失効済み・期限切れを除く）を新しい順に返す |
-| `DELETE` | `/v1/users/me/devices/{id}` | セッション / Device Token | `revoked_at` を立てる。自分自身の token も可（= ログアウト）。他人の端末は 404 |
+| `DELETE` | `/v1/users/me/devices/{id}` | セッション / Device Token | `revoked_at` を立てる。Device Token は自身のみ（= ログアウト）、セッションは自分の他の端末も失効可。他人の端末は 404 |
 
 CSRF: Bearer 付きの要求は Origin 検査の対象外（Device Token も同じ）。発行の口はセッション Cookie で呼ぶので、
 従来どおり Origin 検査を通る。
