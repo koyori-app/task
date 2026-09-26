@@ -40,7 +40,7 @@ const WEBHOOKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/webhooks' a
 const WEBHOOK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/webhooks/{id}' as const;
 
 const SECRET_MIN_LENGTH = 16;
-/** 一覧 API が Discord の URL の代わりに返す値（URL 自体が投稿の認証情報になるため伏せる） */
+/** 一覧 API が送信先 URL の代わりに返す値 */
 const REDACTED_URL = '[redacted]';
 
 /**
@@ -127,8 +127,8 @@ const form = useForm({
           params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
           body: { url, secret: value.secret, events: value.events, format: value.format },
         });
-        await queryClient.invalidateQueries({ queryKey: ['get', WEBHOOKS_PATH] });
         createdSecret.value = created.secret;
+        await queryClient.invalidateQueries({ queryKey: ['get', WEBHOOKS_PATH] });
       }
     } catch (e) {
       submitError.value = webhookErrorMessage(e, 'Webhook を保存できませんでした');
@@ -209,8 +209,8 @@ function onOpenChange(open: boolean) {
                   @update:model-value="(v) => field.handleChange(String(v))"
                 />
                 <FieldDescription v-if="urlHidden"
-                  >Discord の URL
-                  は投稿の鍵になるため表示しません。変えるときだけ入力してください</FieldDescription
+                  >送信先の URL
+                  は認証情報を含みうるため表示しません。変えるときだけ入力してください</FieldDescription
                 >
                 <FieldError v-if="field.state.meta.errors.length"
                   >URL の形式で入力してください</FieldError

@@ -138,6 +138,32 @@ describe('WebhookFormDialog', () => {
     expect(document.body.querySelector('form')).toBeNull();
   });
 
+  it('一覧の再取得が終わる前に作成時の secret を表示する', async () => {
+    let finishRefresh!: () => void;
+    const refresh = new Promise<void>((resolve) => {
+      finishRefresh = resolve;
+    });
+    const invalidate = vi
+      .spyOn(QueryClient.prototype, 'invalidateQueries')
+      .mockReturnValue(refresh);
+    createMutateAsync.mockResolvedValue({ ...existing, secret: 'returned-secret-0123456789' });
+    mountDialog();
+    await flushPromises();
+
+    await input('webhook-url').setValue('https://example.com/hook');
+    await input('webhook-secret').setValue('a'.repeat(16));
+    checkEvent('タスクの作成');
+    await flushPromises();
+    await submit();
+
+    expect(invalidate).toHaveBeenCalled();
+    expect(document.body.querySelector('[data-testid="created-secret"]')?.textContent).toBe(
+      'returned-secret-0123456789',
+    );
+    finishRefresh();
+    invalidate.mockRestore();
+  });
+
   it('API の 400 は message をそのまま表示する', async () => {
     createMutateAsync.mockRejectedValue({
       response: { status: 400 },
@@ -174,21 +200,24 @@ describe('WebhookFormDialog', () => {
     expect(wrapper.emitted('close')).toHaveLength(1);
   });
 
-  it('一覧で伏せられた Discord の URL は欄に出さず、空欄のまま保存すると url を送らない', async () => {
-    const discord: WebhookResponse = { ...existing, url: '[redacted]', format: 'discord' };
-    updateMutateAsync.mockResolvedValue(discord);
-    const wrapper = mountDialog(discord);
-    await flushPromises();
+  it.each(['json', 'discord'] as const)(
+    '一覧で伏せられた %s URL は空欄のまま保存できる',
+    async (format) => {
+      const webhook: WebhookResponse = { ...existing, url: '[redacted]', format };
+      updateMutateAsync.mockResolvedValue(webhook);
+      const wrapper = mountDialog(webhook);
+      await flushPromises();
 
-    expect((input('webhook-url').element as HTMLInputElement).value).toBe('');
-    checkEvent('レビュー指摘の状態変更');
-    await flushPromises();
-    await submit();
+      expect((input('webhook-url').element as HTMLInputElement).value).toBe('');
+      checkEvent('レビュー指摘の状態変更');
+      await flushPromises();
+      await submit();
 
-    expect(updateMutateAsync).toHaveBeenCalledWith({
-      params: { path: { tenant_id: TENANT_UUID, project_id: PROJECT_UUID, id: discord.id } },
-      body: { events: ['task.created', 'review.finding_changed'] },
-    });
-    expect(wrapper.emitted('close')).toHaveLength(1);
-  });
+      expect(updateMutateAsync).toHaveBeenCalledWith({
+        params: { path: { tenant_id: TENANT_UUID, project_id: PROJECT_UUID, id: webhook.id } },
+        body: { events: ['task.created', 'review.finding_changed'] },
+      });
+      expect(wrapper.emitted('close')).toHaveLength(1);
+    },
+  );
 });
