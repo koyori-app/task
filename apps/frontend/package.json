@@ -113,5 +113,5 @@
     "vitest": "4.1.11",
     "vue-tsc": "3.3.11"
   },
-  "packageManager": "pnpm@11.27.1"
+  "packageManager": "pnpm@12.6.0"
 }
