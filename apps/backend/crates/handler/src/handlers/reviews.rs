@@ -310,14 +310,18 @@ pub async fn create_review(
 
     let finding_ids: Vec<Uuid> = findings.iter().map(|f| f.id).collect();
     let mut transitions = load_transitions(&state.db, &finding_ids).await?;
-    let mut actions = service::reviews::available_actions(
-        &state.db,
-        tenant_id,
-        std::slice::from_ref(&review),
-        &findings,
-        auth.user_id,
-    )
-    .await?;
+    let mut actions = if auth.require_scope(Scope::WriteReview).is_ok() {
+        service::reviews::available_actions(
+            &state.db,
+            tenant_id,
+            std::slice::from_ref(&review),
+            &findings,
+            auth.user_id,
+        )
+        .await?
+    } else {
+        HashMap::new()
+    };
     let pr_number = review.pr_number;
     let round = review.round;
     let count = findings.len() as u64;
@@ -635,9 +639,12 @@ pub async fn list_review_findings(
 
     let finding_ids: Vec<Uuid> = findings.iter().map(|f| f.id).collect();
     let mut transitions = load_transitions(&state.db, &finding_ids).await?;
-    let mut actions =
+    let mut actions = if auth.require_scope(Scope::WriteReview).is_ok() {
         service::reviews::available_actions(&state.db, tenant_id, &rounds, &findings, auth.user_id)
-            .await?;
+            .await?
+    } else {
+        HashMap::new()
+    };
 
     Ok(Json(
         findings

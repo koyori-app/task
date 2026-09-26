@@ -1,5 +1,6 @@
 use crate::common::TestApp;
 use axum::http::StatusCode;
+use entity::scopes::Scope;
 use entity::{
     github_integrations, project_statuses, review_findings, reviews, tasks, tenant_members,
 };
@@ -1551,6 +1552,57 @@ async fn available_actions_follow_the_role_rules() {
         StatusCode::OK
     );
     assert_eq!(actions_in_list(&fx, 801, &low).await, actions(&[]));
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+#[tokio::test]
+async fn available_actions_require_write_review_scope() {
+    let fx = setup().await;
+    let (review_id, finding_id) = submit_round(&fx, 804, "low", "読み取り専用の指摘").await;
+    let read_only = fx
+        .app
+        .insert_pat(fx.reviewer.id, fx.tenant_id, vec![Scope::ReadReview], None)
+        .await;
+    let list = json(
+        fx.app
+            .get_with_bearer(&format!("{}?pr=804", fx.findings_path()), &read_only)
+            .await,
+    )
+    .await;
+    assert_eq!(list[0]["available_actions"], serde_json::json!([]));
+    let detail = json(
+        fx.app
+            .get_with_bearer(&format!("{}/{review_id}", fx.reviews_path()), &read_only)
+            .await,
+    )
+    .await;
+    assert_eq!(
+        detail["findings"][0]["available_actions"],
+        serde_json::json!([])
+    );
+
+    let writer = fx
+        .app
+        .insert_pat(
+            fx.reviewer.id,
+            fx.tenant_id,
+            vec![Scope::ReadReview, Scope::WriteReview],
+            None,
+        )
+        .await;
+    let list = json(
+        fx.app
+            .get_with_bearer(&format!("{}?pr=804", fx.findings_path()), &writer)
+            .await,
+    )
+    .await;
+    assert_eq!(list[0]["id"], finding_id);
+    assert_eq!(
+        list[0]["available_actions"],
+        serde_json::json!(["fixed", "deferred", "rejected"])
+    );
 
     fx.app.cleanup_user(fx.reviewer.id).await;
     fx.app.cleanup_user(fx.developer.id).await;

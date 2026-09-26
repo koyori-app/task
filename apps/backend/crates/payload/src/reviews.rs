@@ -151,7 +151,8 @@ pub struct FindingResponse {
     #[schema(value_type = String, format = "date-time")]
     pub updated_at: DateTime<Utc>,
     pub transitions: Vec<FindingTransitionResponse>,
-    /// 要求者がいま遷移できる先の状態（`PATCH … {state}` にそのまま渡せる値）
+    /// 要求者がいま遷移できる先の状態（`PATCH … {state}` にそのまま渡せる値）。
+    /// `write:review` が無い場合は空。
     ///
     /// 遷移規則・役割規則（仕様 §3）は backend だけが持つ。クライアントはこれを見て
     /// 操作を出し、規則を写さない。

@@ -22924,7 +22924,7 @@
             "items": {
               "$ref": "#/components/schemas/FindingState"
             },
-            "description": "要求者がいま遷移できる先の状態（`PATCH … {state}` にそのまま渡せる値）\n\n遷移規則・役割規則（仕様 §3）は backend だけが持つ。クライアントはこれを見て\n操作を出し、規則を写さない。"
+            "description": "要求者がいま遷移できる先の状態（`PATCH … {state}` にそのまま渡せる値）。\n`write:review` が無い場合は空。\n\n遷移規則・役割規則（仕様 §3）は backend だけが持つ。クライアントはこれを見て\n操作を出し、規則を写さない。"
           },
           "body": {
             "type": "string"

@@ -262,7 +262,8 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
   作れるので（§2）、マージ可否を読むその場所に痕跡を出す
 - 指摘のレスポンス（ラウンド詳細・指摘一覧・起票・遷移の応答）は **`available_actions`**
   ——要求者がいま遷移できる**遷移先の state** の一覧——を返す。`PATCH … {state}` にそのまま
-  渡せる値で、動詞ではない。判定は候補の state ごとに `service::reviews::check_transition`
+  渡せる値で、動詞ではない。`write:review` が無い要求者には空配列を返す。
+  判定は候補の state ごとに `service::reviews::check_transition`
   （`ensure_transition_allowed` の判定本体）を呼ぶだけで、§3 の規則を別の表に写さない。
   判定の材料（ラウンドの作成者・より新しいラウンドの作成者・作成者の不在・オーナー）は
   一覧ぶんをまとめて引き、指摘の件数に比例して DB を往復しない。クライアント（Web・Desktop）は
