@@ -253,8 +253,8 @@ importers:
         specifier: 0.7.2
         version: 0.7.2(@devframes/json-render@0.9.18(@devframes/hub@0.8.2(devframe@0.8.2(@modelcontextprotocol/server@2.0.0)(cac@7.0.0)(srvx@0.12.8)))(devframe@0.8.2(@modelcontextprotocol/server@2.0.0)(cac@7.0.0)(srvx@0.12.8)))(@voidzero-dev/vite-plus-core@0.3.3)(crossws@0.4.12(srvx@0.12.8))(srvx@0.12.8)
       '@vitejs/plugin-vue':
-        specifier: 6.0.8
-        version: 6.0.8(@voidzero-dev/vite-plus-core@0.3.3)(vue@3.5.42(typescript@6.0.3))
+        specifier: 6.0.9
+        version: 6.0.9(@voidzero-dev/vite-plus-core@0.3.3)(vue@3.5.42(typescript@6.0.3))
       '@vitest/browser-playwright':
         specifier: 4.1.11
         version: 4.1.11(@voidzero-dev/vite-plus-core@0.3.3)(playwright@1.63.0)(vitest@4.1.11)
@@ -3448,8 +3448,8 @@ packages:
       '@vitejs/devtools-vitest':
         optional: true
 
-  '@vitejs/plugin-vue@6.0.8':
-    resolution: {integrity: sha512-0ZjgOg7oO6farnNGup7yvoM/YXZV84OZxHAwtflItNa/6zzQyVb5LNxyea3FEKEX2XlagIKzrlH7wwxkKgtiew==}
+  '@vitejs/plugin-vue@6.0.9':
+    resolution: {integrity: sha512-rD/MORlhaZMlXWW0rEn4FB4wMinWC0z/D7Ye160S5+Rs1mC8ZDAdcDp4SjKfUhG5t8q1ktcPVw4xuTkPRlzrSA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       vite: ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0
@@ -10547,7 +10547,7 @@ snapshots:
       - ocache
       - srvx
 
-  '@vitejs/plugin-vue@6.0.8(@voidzero-dev/vite-plus-core@0.3.3)(vue@3.5.42(typescript@6.0.3))':
+  '@vitejs/plugin-vue@6.0.9(@voidzero-dev/vite-plus-core@0.3.3)(vue@3.5.42(typescript@6.0.3))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
       vite: '@voidzero-dev/vite-plus-core@0.3.3(@types/node@24.13.6)(@vitejs/devtools@0.7.2)(esbuild@0.28.2)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0)'
