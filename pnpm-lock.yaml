@@ -7,8 +7,8 @@ settings:
 catalogs:
   default:
     '@codemirror/commands':
-      specifier: 6.11.0
-      version: 6.11.0
+      specifier: 6.11.1
+      version: 6.11.1
     '@codemirror/lang-markdown':
       specifier: 6.5.2
       version: 6.5.2
@@ -16,11 +16,11 @@ catalogs:
       specifier: 6.12.4
       version: 6.12.4
     '@codemirror/state':
-      specifier: 6.7.2
-      version: 6.7.2
+      specifier: 6.7.6
+      version: 6.7.6
     '@codemirror/view':
-      specifier: 6.43.10
-      version: 6.43.10
+      specifier: 6.43.13
+      version: 6.43.13
     '@lezer/highlight':
       specifier: 1.2.3
       version: 1.2.3
@@ -49,7 +49,7 @@ importers:
     dependencies:
       '@codemirror/commands':
         specifier: 'catalog:'
-        version: 6.11.0
+        version: 6.11.1
       '@codemirror/lang-markdown':
         specifier: 'catalog:'
         version: 6.5.2
@@ -58,10 +58,10 @@ importers:
         version: 6.12.4
       '@codemirror/state':
         specifier: 'catalog:'
-        version: 6.7.2
+        version: 6.7.6
       '@codemirror/view':
         specifier: 'catalog:'
-        version: 6.43.10
+        version: 6.43.13
       '@elysiajs/static':
         specifier: 1.4.10
         version: 1.4.10(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))
@@ -625,8 +625,8 @@ packages:
   '@codemirror/autocomplete@6.20.3':
     resolution: {integrity: sha512-tlosUqb+3BbxCxZdu4tKeRghPFC+QM7q4X5YhKV2eCmPG+1r2F3f4AaSz5sCrFqUtX4Jh20VFTKecl16MgiV9g==}
 
-  '@codemirror/commands@6.11.0':
-    resolution: {integrity: sha512-/K4Rl5BN0OtTiPWmJCdqODu38XnDMsDxKY5rgrPnCkutPTJf2wVbkoixLfealF5Kwse/s8P8M5jAiURiwSwnFA==}
+  '@codemirror/commands@6.11.1':
+    resolution: {integrity: sha512-O/4hG3SC1YwcmQ0d2UVNDs+AsaNWd1iHVxbTeEBuqH+6bExAiPK3iS/BvpY6rZGURALv4ZD3sIgcCmRvw3ehBg==}
 
   '@codemirror/lang-css@6.3.1':
     resolution: {integrity: sha512-kr5fwBGiGtmz6l0LSJIbno9QrifNMUusivHbnA1H6Dmqy4HZFte3UAICix1VuKo0lMPKQr2rqB+0BkKi/S3Ejg==}
@@ -649,8 +649,14 @@ packages:
   '@codemirror/state@6.7.2':
     resolution: {integrity: sha512-U3RiPX62Wl/Gx4ftQ7UxLlloSfsFTQqKa+7vFBYteZGCzkp6oBqcsD7iSwniWRGobCAmDcwZSY+Six3+3ztdfg==}
 
+  '@codemirror/state@6.7.6':
+    resolution: {integrity: sha512-kAz+AncRtKuIknedxT1bq4XwXv4UowhbkHU1myPrtVb/jZtImWuV5BXzv5vK6i3kYACsdiZiQKFQQ5Mq7elW8w==}
+
   '@codemirror/view@6.43.10':
     resolution: {integrity: sha512-vVWLvd4fKWYN/pMcwUrg6dWeublxmSz+V+52ZjW3h64IVN9cRUYLk5Km4JDT9vifxAFfDtNOIFxKYENthcolJQ==}
+
+  '@codemirror/view@6.43.13':
+    resolution: {integrity: sha512-sihaFrUzAsYBQsL9J2t69y8nfMQGwcYmggAZsk+kjPbjYZMyuf2hU8tUNTZ+P+isb6XRr8JE22TZlJxBoVdH1A==}
 
   '@corvu/utils@0.4.2':
     resolution: {integrity: sha512-Ox2kYyxy7NoXdKWdHeDEjZxClwzO4SKM8plAaVwmAJPxHMqA0rLOoAsa+hBDwRLpctf+ZRnAd/ykguuJidnaTA==}
@@ -5065,19 +5071,6 @@ packages:
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
-  h3@2.0.1-rc.31:
-    resolution: {integrity: sha512-AG7qZzF99a0BSYoXT3evJgIhwSIUKow7R+hwkLRZS06WJ9nbSb7QXUDgs1ByBjp6svTvl++N/GKA7I9YPz9cQQ==}
-    engines: {node: '>=20.11.1'}
-    hasBin: true
-    peerDependencies:
-      crossws: ^0.4.12
-      ocache: '>=0.3.0'
-    peerDependenciesMeta:
-      crossws:
-        optional: true
-      ocache:
-        optional: true
-
   h3@2.0.1-rc.32:
     resolution: {integrity: sha512-Epg1E85L8yIKd9UeAQAVdm6QVrnHbppMsQ641EjpNi4c0IlAg+PJlwp4Xw03Z1loRXPQaH9k64gJT5qDELqm+g==}
     engines: {node: '>=20.11.1'}
@@ -6851,11 +6844,6 @@ packages:
     engines: {node: '>=20.16.0'}
     hasBin: true
 
-  srvx@1.0.4:
-    resolution: {integrity: sha512-eZmYaxUfZSo7/8m8UdsHRJNmTLSCTPPom9d7a60vMmuVeZvwhbvflRR+00/CxTCjMOFa5+H8tgBeNDVZ+w7AAQ==}
-    engines: {node: '>=20.16.0'}
-    hasBin: true
-
   srvx@1.0.5:
     resolution: {integrity: sha512-KvSKRpgPG/oaq3cyT614OQ2bAa7DynuGamivCZeoZzIUULOdbQz6wUtnnVuC4+DCx2Zglzo8v5gBYmWIWYhDxA==}
     engines: {node: '>=20.16.0'}
@@ -7655,9 +7643,6 @@ packages:
   zigpty@0.2.1:
     resolution: {integrity: sha512-MR9JqJx2wf5f4wz8zpx050AlqrmWeIW+1h0SO5iEyhG3HFRjY5luC3szS2ux2EGuPjE5OU9ZAuiCBeMWBTrqZw==}
 
-  zod@4.6.2:
-    resolution: {integrity: sha512-lh5RCAGFa1Cm2hjtNwLQhSs/AsqdWnTQaBER9fEwN/88pSh7KOtJavtBx/0VlkN/uFd61SwYmljLMDAsHlvzBQ==}
-
   zod@4.6.5:
     resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
 
@@ -8059,11 +8044,11 @@ snapshots:
   '@codemirror/autocomplete@6.20.3':
     dependencies:
       '@codemirror/language': 6.12.4
-      '@codemirror/state': 6.7.2
-      '@codemirror/view': 6.43.10
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
       '@lezer/common': 1.5.2
 
-  '@codemirror/commands@6.11.0':
+  '@codemirror/commands@6.11.1':
     dependencies:
       '@codemirror/language': 6.12.4
       '@codemirror/state': 6.7.2
@@ -8074,7 +8059,7 @@ snapshots:
     dependencies:
       '@codemirror/autocomplete': 6.20.3
       '@codemirror/language': 6.12.4
-      '@codemirror/state': 6.7.2
+      '@codemirror/state': 6.7.6
       '@lezer/common': 1.5.2
       '@lezer/css': 1.3.6
 
@@ -8084,8 +8069,8 @@ snapshots:
       '@codemirror/lang-css': 6.3.1
       '@codemirror/lang-javascript': 6.2.5
       '@codemirror/language': 6.12.4
-      '@codemirror/state': 6.7.2
-      '@codemirror/view': 6.43.10
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
       '@lezer/common': 1.5.2
       '@lezer/css': 1.3.6
       '@lezer/html': 1.3.13
@@ -8095,8 +8080,8 @@ snapshots:
       '@codemirror/autocomplete': 6.20.3
       '@codemirror/language': 6.12.4
       '@codemirror/lint': 6.9.7
-      '@codemirror/state': 6.7.2
-      '@codemirror/view': 6.43.10
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
       '@lezer/common': 1.5.2
       '@lezer/javascript': 1.5.4
 
@@ -8105,15 +8090,15 @@ snapshots:
       '@codemirror/autocomplete': 6.20.3
       '@codemirror/lang-html': 6.4.12
       '@codemirror/language': 6.12.4
-      '@codemirror/state': 6.7.2
-      '@codemirror/view': 6.43.10
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
       '@lezer/common': 1.5.2
       '@lezer/markdown': 1.7.2
 
   '@codemirror/language@6.12.4':
     dependencies:
-      '@codemirror/state': 6.7.2
-      '@codemirror/view': 6.43.10
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
       '@lezer/common': 1.5.2
       '@lezer/highlight': 1.2.3
       '@lezer/lr': 1.4.10
@@ -8121,15 +8106,26 @@ snapshots:
 
   '@codemirror/lint@6.9.7':
     dependencies:
-      '@codemirror/state': 6.7.2
-      '@codemirror/view': 6.43.10
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
       crelt: 1.0.7
 
   '@codemirror/state@6.7.2':
     dependencies:
       '@marijn/find-cluster-break': 1.0.4
 
+  '@codemirror/state@6.7.6':
+    dependencies:
+      '@marijn/find-cluster-break': 1.0.4
+
   '@codemirror/view@6.43.10':
+    dependencies:
+      '@codemirror/state': 6.7.2
+      crelt: 1.0.7
+      style-mod: 4.1.3
+      w3c-keyname: 2.2.8
+
+  '@codemirror/view@6.43.13':
     dependencies:
       '@codemirror/state': 6.7.2
       crelt: 1.0.7
@@ -8188,7 +8184,7 @@ snapshots:
       '@standard-schema/spec': 1.1.0
       destr: 2.0.5
       devframe: 0.8.2(@modelcontextprotocol/client@2.1.0)(@modelcontextprotocol/server@2.1.0)(cac@7.0.0)(srvx@0.12.8)
-      nostics: 1.2.0
+      nostics: 1.3.0
       pathe: 2.0.3
       perfect-debounce: 2.1.0
       tinyexec: 1.3.1
@@ -8215,10 +8211,10 @@ snapshots:
 
   '@devframes/json-render@0.8.2(@devframes/hub@0.8.2(devframe@0.8.2(@modelcontextprotocol/client@2.1.0)(@modelcontextprotocol/server@2.1.0)(cac@7.0.0)(srvx@0.12.8)))(devframe@0.8.2(@modelcontextprotocol/client@2.1.0)(@modelcontextprotocol/server@2.1.0)(cac@7.0.0)(srvx@0.12.8))':
     dependencies:
-      '@json-render/core': 0.19.0(zod@4.6.2)
+      '@json-render/core': 0.19.0(zod@4.6.5)
       devframe: 0.8.2(@modelcontextprotocol/client@2.1.0)(@modelcontextprotocol/server@2.1.0)(cac@7.0.0)(srvx@0.12.8)
-      nostics: 1.2.0
-      zod: 4.6.2
+      nostics: 1.3.0
+      zod: 4.6.5
     optionalDependencies:
       '@devframes/hub': 0.8.2(devframe@0.8.2(@modelcontextprotocol/client@2.1.0)(@modelcontextprotocol/server@2.1.0)(cac@7.0.0)(srvx@0.12.8))
 
@@ -8782,9 +8778,9 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
-  '@json-render/core@0.19.0(zod@4.6.2)':
+  '@json-render/core@0.19.0(zod@4.6.5)':
     dependencies:
-      zod: 4.6.2
+      zod: 4.6.5
 
   '@json-render/core@0.21.0(zod@4.6.5)':
     dependencies:
@@ -8876,16 +8872,16 @@ snapshots:
       eventsource-parser: 3.1.1
       jose: 6.2.12
       pkce-challenge: 5.0.1
-      zod: 4.6.2
+      zod: 4.6.5
 
   '@modelcontextprotocol/core@2.1.0':
     dependencies:
-      zod: 4.6.2
+      zod: 4.6.5
 
   '@modelcontextprotocol/server@2.1.0':
     dependencies:
       '@modelcontextprotocol/core': 2.1.0
-      zod: 4.6.2
+      zod: 4.6.5
 
   '@napi-rs/wasm-runtime@1.2.4(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)':
     dependencies:
@@ -10567,7 +10563,7 @@ snapshots:
       devframe: 0.8.2(@modelcontextprotocol/client@2.1.0)(@modelcontextprotocol/server@2.1.0)(cac@7.0.0)(srvx@0.12.8)
       local-pkg: 1.2.1
       mlly: 1.8.2
-      nostics: 1.2.0
+      nostics: 1.3.0
       nypm: 0.6.10
       vite: '@voidzero-dev/vite-plus-core@0.3.3(@types/node@24.13.6)(@vitejs/devtools@0.7.6)(esbuild@0.28.2)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0)'
     transitivePeerDependencies:
@@ -11747,9 +11743,9 @@ snapshots:
       birpc: 4.2.0
       crossws: 0.4.12(srvx@0.12.8)
       destr: 2.0.5
-      h3: 2.0.1-rc.31(crossws@0.4.12(srvx@0.12.8))
+      h3: 2.0.1-rc.32(crossws@0.4.12(srvx@0.12.8))
       mrmime: 2.0.1
-      nostics: 1.2.0
+      nostics: 1.3.0
       pathe: 2.0.3
       ufo: 1.6.4
     optionalDependencies:
@@ -12170,13 +12166,6 @@ snapshots:
   gopd@1.2.0: {}
 
   graceful-fs@4.2.11: {}
-
-  h3@2.0.1-rc.31(crossws@0.4.12(srvx@0.12.8)):
-    dependencies:
-      rou3: 0.9.2
-      srvx: 1.0.4
-    optionalDependencies:
-      crossws: 0.4.12(srvx@0.12.8)
 
   h3@2.0.1-rc.32(crossws@0.4.12(srvx@0.12.8)):
     dependencies:
@@ -14498,8 +14487,6 @@ snapshots:
 
   srvx@0.12.8: {}
 
-  srvx@1.0.4: {}
-
   srvx@1.0.5: {}
 
   stack-utils@2.0.6:
@@ -15410,8 +15397,6 @@ snapshots:
       '@yuku-parser/binding-win32-x64': 0.9.5
 
   zigpty@0.2.1: {}
-
-  zod@4.6.2: {}
 
   zod@4.6.5: {}
 
