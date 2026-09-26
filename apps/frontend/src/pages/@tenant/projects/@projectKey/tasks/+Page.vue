@@ -4,16 +4,23 @@ import type { LucideIcon } from '@lucide/vue';
 import type {
   ColumnDef,
   ColumnFiltersState,
+  ColumnVisibilityState,
   PaginationState,
   SortingState,
-  VisibilityState,
 } from '@tanstack/vue-table';
 import {
   FlexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getSortedRowModel,
-  useVueTable,
+  columnFilteringFeature,
+  columnVisibilityFeature,
+  createFilteredRowModel,
+  createSortedRowModel,
+  filterFns,
+  rowPaginationFeature,
+  rowSelectionFeature,
+  rowSortingFeature,
+  sortFns,
+  tableFeatures,
+  useTable,
 } from '@tanstack/vue-table';
 import { PhCaretDown, PhCaretUp, PhCaretUpDown, PhRows, PhTable } from '@phosphor-icons/vue';
 import { computed, h, onUnmounted, ref, watch, type Component } from 'vue';
@@ -545,8 +552,26 @@ const PRIORITY_ORDER: Record<ApiPriority, number> = {
   Trivial: 5,
 };
 
+// ---- テーブル機能（v9） ----
+// v9 は使う機能を features として先に束ね、その型が Column / ColumnDef /
+// Table の第一型引数になる（機能ごとに state・options・API が型に乗る造り）。
+// row model の工場（sorted/filtered）と、列が名前で引く sort/filter 関数の
+// 登録もこの束が運ぶ。coreRowModel は組み込みの既定があるため書かない。
+const features = tableFeatures({
+  columnFilteringFeature,
+  columnVisibilityFeature,
+  rowPaginationFeature,
+  rowSelectionFeature,
+  rowSortingFeature,
+  filteredRowModel: createFilteredRowModel(),
+  sortedRowModel: createSortedRowModel(),
+  filterFns,
+  sortFns,
+});
+type TaskTableFeatures = typeof features;
+
 /** ソート可能な列ヘッダー: 矢印アイコン付きボタンを返す */
-function sortableHeader(column: Column<TaskRow>, label: string) {
+function sortableHeader(column: Column<TaskTableFeatures, TaskRow>, label: string) {
   const sorted = column.getIsSorted();
   const icon =
     sorted === 'asc'
@@ -591,7 +616,7 @@ function onTaskCreated(task: CreatedTask) {
 }
 
 // ---- テーブル列定義 ----
-const columns: ColumnDef<TaskRow>[] = [
+const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
   {
     id: 'select',
     header: ({ table }) =>
@@ -664,7 +689,7 @@ const columns: ColumnDef<TaskRow>[] = [
   {
     id: 'priority',
     accessorFn: (row) => row.priority,
-    sortingFn: (a, b) => PRIORITY_ORDER[a.original.priority] - PRIORITY_ORDER[b.original.priority],
+    sortFn: (a, b) => PRIORITY_ORDER[a.original.priority] - PRIORITY_ORDER[b.original.priority],
     header: ({ column }) => sortableHeader(column, '優先度'),
     cell: ({ row }) => {
       const pc = PRIORITY_CONFIG[row.original.priority];
@@ -750,7 +775,7 @@ function onListSortingChange(next: TaskListSortingState) {
   sorting.value = next;
 }
 const columnFilters = ref<ColumnFiltersState>([]);
-const columnVisibility = ref<VisibilityState>({});
+const columnVisibility = ref<ColumnVisibilityState>({});
 const rowSelection = ref({});
 
 // ---- URL 同期 ----
@@ -767,15 +792,13 @@ useTaskListUrlSync({
   isPagerActive: usesTaskList,
 });
 
-const table = useVueTable({
+const table = useTable({
+  features,
   get data() {
     return taskRows.value;
   },
   columns,
-  getRowId: (row) => row.id,
-  getCoreRowModel: getCoreRowModel(),
-  getSortedRowModel: getSortedRowModel(),
-  getFilteredRowModel: getFilteredRowModel(),
+  getRowId: (row: TaskRow) => row.id,
   manualPagination: true,
   get rowCount() {
     return taskTotal.value;
