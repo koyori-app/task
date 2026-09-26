@@ -357,6 +357,59 @@ async fn unverified_user_is_dropped_from_the_queue() {
     assert!(after[0].emailed_at.is_none());
 }
 
+/// 通知を作った後にテナントから外れた利用者へは送らず、待ち行列からも落とす。
+/// 一覧 API で見えなくなった通知の内容をメールで届けない。
+#[tokio::test]
+async fn user_who_lost_access_is_dropped_from_the_queue() {
+    let mut fx = setup().await;
+    let (owner, member) = (fx.owner.clone(), fx.member.clone());
+
+    fx.login(&member).await;
+    let res = fx
+        .app
+        .put_json_with_session(
+            &fx.settings_path(),
+            serde_json::json!({
+                "email_events": ["assigned"],
+                "in_app_events": ["assigned"],
+            }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+
+    fx.login(&owner).await;
+    assign_task(&fx, "外れた宛先").await;
+    assert!(
+        fx.notifications_of(member.id).await[0]
+            .email_queued_at
+            .is_some(),
+        "作成時点では送信待ち"
+    );
+
+    entity::tenant_members::Entity::delete_many()
+        .filter(entity::tenant_members::Column::TenantId.eq(fx.tenant_id))
+        .filter(entity::tenant_members::Column::UserId.eq(member.id))
+        .exec(&fx.app.state.db)
+        .await
+        .expect("remove member from tenant");
+
+    let state = job_state(&fx.app);
+    assert_eq!(
+        job::notification_email::send_pending_once(&state)
+            .await
+            .expect("sweep"),
+        0
+    );
+    assert!(
+        fx.app.sent_mails().is_empty(),
+        "権限を失った利用者へは送らない"
+    );
+
+    let after = fx.notifications_of(member.id).await;
+    assert!(after[0].email_queued_at.is_none(), "待ち行列から落とす");
+    assert!(after[0].emailed_at.is_none());
+}
+
 /// 一時障害では再試行時刻を待ち、連続掃き出しだけで打ち止めにならない。
 #[tokio::test]
 async fn smtp_failures_wait_for_backoff_and_can_recover() {
@@ -443,7 +496,7 @@ async fn smtp_failures_wait_for_backoff_and_can_recover() {
     // 障害が続く場合も、間隔を空けた 5 回で打ち止めになり、それ以上は送らない。
     assign_task(&fx, "SMTP exhausted").await;
     state.smtp_client = unavailable;
-    for attempt in 1..=5 {
+    for attempt in 1..=job::notification_email::MAX_ATTEMPTS {
         assert_eq!(
             job::notification_email::send_pending_once(&state)
                 .await
@@ -457,6 +510,13 @@ async fn smtp_failures_wait_for_backoff_and_can_recover() {
             .find(|n| n.emailed_at.is_none())
             .unwrap();
         assert_eq!(notification.email_attempts, attempt);
+        if attempt == job::notification_email::MAX_ATTEMPTS {
+            assert!(
+                notification.email_queued_at.is_none(),
+                "打ち止めた行は待ち行列（送信待ちの部分インデックス）から落とす"
+            );
+            break;
+        }
         let mut active: entity::notifications::ActiveModel = notification.into();
         active.email_queued_at = Set(Some(
             (chrono::Utc::now() - chrono::Duration::seconds(1)).into(),

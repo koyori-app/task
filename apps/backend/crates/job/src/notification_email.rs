@@ -89,8 +89,8 @@ pub async fn send_pending_once(state: &JobState) -> Result<usize, anyhow::Error>
     Ok(sent)
 }
 
-/// 送信対象から外す（`email_queued_at` を戻す）。メール未認証の利用者や、
-/// 宛先を組み立てられない通知は何度拾っても送れないので待ち行列から落とす。
+/// 送信対象から外す（`email_queued_at` を戻す）。メール未認証の利用者、プロジェクトに
+/// 入れなくなった利用者、宛先を組み立てられない通知は送れないので待ち行列から落とす。
 async fn abandon<C: ConnectionTrait>(
     db: &C,
     notification: &notifications::Model,
@@ -136,6 +136,15 @@ async fn send_one<C: ConnectionTrait>(
         abandon(db, notification, "project not found").await?;
         return Ok(false);
     };
+    // 通知を作った後にテナントやプロジェクトから外れていたら送らない。
+    // 一覧 API で見えなくなった通知の内容をメールで届けないため、作成時と同じ判定を今の DB で行う
+    if !service::notifications::notifiable_user_ids(db, project_id)
+        .await?
+        .contains(&user.id)
+    {
+        abandon(db, notification, "user can no longer access the project").await?;
+        return Ok(false);
+    }
     let Some(tenant) = tenants::Entity::find_by_id(project.tenant_id)
         .one(db)
         .await?
@@ -171,10 +180,9 @@ async fn send_one<C: ConnectionTrait>(
         Err(error) => {
             let attempts = notification.email_attempts + 1;
             active.email_attempts = Set(attempts);
-            if attempts < MAX_ATTEMPTS {
-                active.email_queued_at =
-                    Set(Some((chrono::Utc::now() + retry_delay(attempts)).into()));
-            }
+            // 打ち止めたら待ち行列から落とす（NULL = 送らない。送信待ちの部分インデックスにも残さない）
+            active.email_queued_at = Set((attempts < MAX_ATTEMPTS)
+                .then(|| (chrono::Utc::now() + retry_delay(attempts)).into()));
             active.update(db).await?;
             if attempts >= MAX_ATTEMPTS {
                 warn!(notification_id = %notification.id, attempts, %error, "notification email gave up");

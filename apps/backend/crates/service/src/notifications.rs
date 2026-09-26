@@ -175,7 +175,7 @@ pub async fn notify_assigned<C: ConnectionTrait>(
 /// プロジェクトに入れないユーザーには通知しない。メンバー未指定のプロジェクトは
 /// テナントメンバー全員が宛先になる（#568）。テナントオーナーは `project_members` に
 /// 入っていなくても受け取る。
-async fn notifiable_user_ids<C: ConnectionTrait>(
+pub async fn notifiable_user_ids<C: ConnectionTrait>(
     db: &C,
     project_id: Uuid,
 ) -> Result<HashSet<Uuid>, AppError> {
