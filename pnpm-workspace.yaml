@@ -3,6 +3,7 @@ packages:
   - packages/*
 # 既定 (true) と同値だが明示で置く。既定は pnpm の版で動きうるし、
 # この file は allowBuilds を一つひとつ書き出す流儀ゆえ、意図は行で示す。
+engineStrict: true
 sharedWorkspaceLockfile: true
 allowBuilds:
   '@nestjs/core': true
