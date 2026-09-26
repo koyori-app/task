@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { PhCheckCircle, PhPlus, PhWarningCircle } from '@phosphor-icons/vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -85,6 +86,13 @@ const summaryQuery = useReviewSummaryQuery(props.tenantId, props.projectId, sele
 const updateState = useUpdateFindingStateMutation();
 
 const pullRequests = computed(() => prsQuery.data.value ?? []);
+/** PR 一覧の番号絞り（部分一致）。選択中 PR とは別——サイドバーの見える行だけを絞る。 */
+const prNumberFilter = ref('');
+const filteredPullRequests = computed(() => {
+  const query = prNumberFilter.value.trim();
+  if (query === '') return pullRequests.value;
+  return pullRequests.value.filter((pr) => String(pr.pr_number).includes(query));
+});
 const rounds = computed(() => roundsQuery.data.value ?? []);
 
 function currentUrlState(): ReviewFindingsUrlState {
@@ -408,11 +416,30 @@ async function onRoundCreated() {
           class="flex w-full shrink-0 flex-col gap-1 md:w-[280px]"
           aria-label="レビューのある PR"
         >
+          <div v-if="pullRequests.length > 0" class="mb-2">
+            <label for="filter-pr-number" class="mb-1.5 block text-xs font-medium">PR 番号</label>
+            <Input
+              id="filter-pr-number"
+              v-model="prNumberFilter"
+              inputmode="numeric"
+              autocomplete="off"
+              placeholder="部分一致"
+              class="font-mono text-sm"
+              data-testid="filter-pr-number"
+            />
+          </div>
           <p v-if="pullRequests.length === 0" class="text-muted-foreground text-sm">
             レビューはまだありません。
           </p>
+          <p
+            v-else-if="prNumberFilter.trim() !== '' && filteredPullRequests.length === 0"
+            class="text-muted-foreground text-sm"
+            data-testid="no-pr-match"
+          >
+            該当する PR がありません。
+          </p>
           <button
-            v-for="pr in pullRequests"
+            v-for="pr in filteredPullRequests"
             :key="pr.pr_number"
             type="button"
             class="flex flex-col gap-1 rounded-md border px-3 py-2 text-left text-sm"

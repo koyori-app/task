@@ -558,4 +558,35 @@ describe('ReviewFindingsView', () => {
 
     expect(wrapper.get('[data-testid="missing-round"]').text()).toContain('Round 99');
   });
+
+  const manyPrNumbers = [770, 776, 777, 778, 779, 618];
+
+  function prNavButtons() {
+    return [...document.body.querySelectorAll('nav[aria-label="レビューのある PR"] button')];
+  }
+
+  it('PR 番号の部分一致で一覧を絞り、空にすると全件へ戻る', async () => {
+    stubFetch({ findings: [finding()], prNumbers: manyPrNumbers });
+    const wrapper = mountView({
+      initialUrlState: { pr: 618, round: null, severity: null, state: null, finding: null },
+    });
+    await flushPromises();
+
+    expect(prNavButtons()).toHaveLength(6);
+
+    const input = wrapper.get('[data-testid="filter-pr-number"]');
+    await input.setValue('77');
+    await flushPromises();
+    expect(prNavButtons()).toHaveLength(5);
+    expect(prNavButtons().every((b) => b.textContent?.includes('#77'))).toBe(true);
+
+    await input.setValue('99999');
+    await flushPromises();
+    expect(prNavButtons()).toHaveLength(0);
+    expect(wrapper.get('[data-testid="no-pr-match"]').text()).toContain('該当する PR');
+
+    await input.setValue('');
+    await flushPromises();
+    expect(prNavButtons()).toHaveLength(6);
+  });
 });
