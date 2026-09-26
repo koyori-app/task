@@ -1124,7 +1124,7 @@ async fn notifications_cursor_pages_after_and_kind() {
     assert!(ids(&none).is_empty());
     assert!(none["next_cursor"].is_null());
 
-    // kind: review_ 接頭辞で分ける
+    // kind: 既知のレビュー通知種別で分ける
     let review = crate::common::json_body(
         app.get_with_session("/v1/users/me/notifications?kind=review&limit=100")
             .await,

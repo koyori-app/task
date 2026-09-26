@@ -10,7 +10,7 @@ use common::notifications::{
     TYPE_REVIEW_FINDING_CHANGED, TYPE_REVIEW_ROUND_CREATED, TYPE_STATUS_CHANGED,
 };
 use sea_orm::prelude::DateTimeWithTimeZone;
-use sea_orm::sea_query::{Expr, LikeExpr, Order};
+use sea_orm::sea_query::{Expr, Order};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, PaginatorTrait,
     QueryFilter, QueryOrder, QuerySelect, prelude::Uuid,
@@ -374,14 +374,16 @@ pub async fn list_notifications(
     if q.unread == Some(true) {
         query = query.filter(notifications::Column::ReadAt.is_null());
     }
-    // `_` は LIKE の 1 文字ワイルドカードなので逃がす
-    let review_prefix = LikeExpr::new(r"review\_%").escape('\\');
     match q.kind {
         Some(NotificationKind::Review) => {
-            query = query.filter(notifications::Column::NotificationType.like(review_prefix));
+            query = query.filter(
+                notifications::Column::NotificationType.is_in(PAT_REVIEW_NOTIFICATION_TYPES),
+            );
         }
         Some(NotificationKind::Task) => {
-            query = query.filter(notifications::Column::NotificationType.not_like(review_prefix));
+            query = query.filter(
+                notifications::Column::NotificationType.is_not_in(PAT_REVIEW_NOTIFICATION_TYPES),
+            );
         }
         None => {}
     }
