@@ -12,7 +12,7 @@ pub struct WebhookResponse {
     pub id: Uuid,
     #[schema(value_type = String, format = "uuid")]
     pub project_id: Uuid,
-    /// Discord の URL は一覧では `[redacted]`。作成・更新の応答は完全な URL を返す。
+    /// 一覧では `[redacted]`。作成・更新の応答は完全な URL を返す。
     pub url: String,
     pub events: Vec<String>,
     /// `json` | `discord`
@@ -31,11 +31,7 @@ impl From<webhooks::Model> for WebhookResponse {
         Self {
             id: model.id,
             project_id: model.project_id,
-            url: if model.format == "discord" {
-                "[redacted]".into()
-            } else {
-                model.url
-            },
+            url: "[redacted]".into(),
             events: model.events,
             format: model.format,
             is_active: model.is_active,

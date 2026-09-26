@@ -120,18 +120,23 @@ fn validate_addresses(allow_loopback: bool, addresses: &[SocketAddr]) -> Result<
         }
         let restricted = match ip {
             IpAddr::V4(ip) => {
+                let octets = ip.octets();
                 ip.is_private()
                     || ip.is_link_local()
                     || ip.is_unspecified()
                     || ip.is_broadcast()
                     || ip.is_multicast()
-                    || ip.octets()[0] == 0
+                    || octets[0] == 0
+                    || (octets[0] == 100 && (64..128).contains(&octets[1]))
+                    || octets[0] >= 240
             }
             IpAddr::V6(ip) => {
                 ip.is_unspecified()
                     || ip.is_unique_local()
                     || ip.is_unicast_link_local()
                     || ip.is_multicast()
+                    || ip.segments()[..6] == [0x64, 0xff9b, 0, 0, 0, 0]
+                    || (ip.segments()[0] & 0xffc0) == 0xfec0
             }
         };
         if restricted {
@@ -367,15 +372,23 @@ mod tests {
     fn every_resolved_address_must_be_allowed() {
         let public: SocketAddr = "93.184.216.34:443".parse().unwrap();
         assert!(validate_addresses(false, &[public]).is_ok());
+        for allowed in ["100.63.255.255:443", "100.128.0.0:443"] {
+            assert!(validate_addresses(false, &[allowed.parse().unwrap()]).is_ok());
+        }
         assert!(validate_addresses(false, &[]).is_err());
         for blocked in [
             "10.0.0.1:443",
             "169.254.169.254:443",
+            "100.64.0.1:443",
+            "100.127.255.254:443",
+            "240.0.0.1:443",
             "0.0.0.0:443",
             "[::ffff:10.0.0.1]:443",
             "[::ffff:169.254.169.254]:443",
             "[fc00::1]:443",
             "[fe80::1]:443",
+            "[64:ff9b::10.0.0.1]:443",
+            "[fec0::1]:443",
             "[::]:443",
         ] {
             let blocked = blocked.parse().unwrap();

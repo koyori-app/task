@@ -1,6 +1,6 @@
 //! 外部向け Webhook の管理 API（docs/features/tasks/10.webhooks.md §6）。
 //!
-//! 読み取りは `read:project`、変更は `admin:project` + プロジェクト Admin（またはテナントオーナー）。
+//! 一覧は `read:project`、配信履歴と変更は `admin:project` + プロジェクト Admin（またはテナントオーナー）。
 //! 有効 / 無効の切り替えは専用の口を作らず、PUT の `is_active` で行う。
 
 use axum::{
@@ -256,7 +256,7 @@ pub async fn list_webhook_deliveries(
     Path((tenant_id, project_id, id)): Path<(Uuid, Uuid, Uuid)>,
     Valid(Query(query)): Valid<Query<DeliveryListQuery>>,
 ) -> Result<Json<Vec<WebhookDeliveryResponse>>, AppError> {
-    ensure_read_access(&state, &auth, tenant_id, project_id).await?;
+    ensure_admin_access(&state, &auth, tenant_id, project_id).await?;
     let webhook = find_webhook(&state, project_id, id).await?;
     let rows = webhook_deliveries::Entity::find()
         .filter(webhook_deliveries::Column::WebhookId.eq(webhook.id))

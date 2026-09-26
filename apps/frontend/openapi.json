@@ -25345,7 +25345,7 @@
           },
           "url": {
             "type": "string",
-            "description": "Discord の URL は一覧では `[redacted]`。作成・更新の応答は完全な URL を返す。"
+            "description": "一覧では `[redacted]`。作成・更新の応答は完全な URL を返す。"
           }
         }
       }

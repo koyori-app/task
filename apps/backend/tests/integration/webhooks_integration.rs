@@ -1,5 +1,6 @@
 use crate::common::TestApp;
 use axum::http::StatusCode;
+use entity::scopes::Scope;
 use entity::{webhook_deliveries, webhooks};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
@@ -156,14 +157,13 @@ async fn mock_server(status: u16) -> MockServer {
     server
 }
 
-/// 変更は Admin / オーナーだけ（Member は 403）、読み取りは Member も可。secret は一覧に出ない。
+/// 変更は Admin / オーナーだけ（Member は 403）、一覧は Member も可。secret と URL は一覧に出ない。
 #[tokio::test]
 async fn crud_and_authorization() {
     let mut fx = setup().await;
     let (owner, member) = (fx.owner.clone(), fx.member.clone());
-    let id = fx
-        .create_webhook("https://203.0.113.10/hook", &["task.created"], "json")
-        .await;
+    let url = "https://203.0.113.10/hook?token=json-token";
+    let id = fx.create_webhook(url, &["task.created"], "json").await;
 
     fx.login(&member).await;
     let denied = fx
@@ -189,7 +189,8 @@ async fn crud_and_authorization() {
         "一覧に secret を出さない"
     );
     assert!(listed[0].get("secret_enc").is_none());
-    assert_eq!(listed[0]["url"], "https://203.0.113.10/hook");
+    assert_eq!(listed[0]["url"], "[redacted]");
+    assert!(!listed.to_string().contains("json-token"));
 
     fx.login(&owner).await;
     let updated = fx
@@ -206,6 +207,7 @@ async fn crud_and_authorization() {
         serde_json::json!(["task.created", "comment.created"])
     );
     assert_eq!(updated["format"], "discord");
+    assert_eq!(updated["url"], url, "管理者の更新応答は完全な URL を返す");
 
     let bad_event = fx
         .app
@@ -648,7 +650,7 @@ async fn discord_format_sends_content_and_embeds_without_signature() {
     assert_eq!(body["embeds"][0]["title"], "task.created");
 }
 
-/// 再送は同じ payload で新しい配信を作り、元の行は変えない。Member は再送できない。
+/// 再送は同じ payload で新しい配信を作り、元の行は変えない。Member は履歴も再送も読めない。
 #[tokio::test]
 async fn redeliver_creates_new_delivery() {
     let mut fx = setup().await;
@@ -678,7 +680,30 @@ async fn redeliver_creates_new_delivery() {
         .app
         .get_with_session(&format!("{}/{id}/deliveries", fx.webhooks_path()))
         .await;
-    assert_eq!(history.status(), StatusCode::OK, "Member も履歴は読める");
+    assert_eq!(history.status(), StatusCode::FORBIDDEN);
+
+    let read_only = fx
+        .app
+        .insert_pat(owner.id, fx.tenant_id, vec![Scope::ReadProject], None)
+        .await;
+    let history_path = format!("{}/{id}/deliveries", fx.webhooks_path());
+    assert_eq!(
+        fx.app
+            .get_with_bearer(&history_path, &read_only)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN,
+        "read:project だけの PAT は payload を読めない"
+    );
+    let admin = fx
+        .app
+        .insert_pat(owner.id, fx.tenant_id, vec![Scope::AdminProject], None)
+        .await;
+    assert_eq!(
+        fx.app.get_with_bearer(&history_path, &admin).await.status(),
+        StatusCode::OK,
+        "管理者の PAT は履歴を読める"
+    );
 
     fx.login(&owner).await;
     let res = fx
