@@ -79,5 +79,8 @@ pub async fn run(cli: Cli, context: &Context) -> Result<i32> {
         Command::My { command } => commands::my::run(context, command, output).await,
         Command::Sprints { command } => commands::sprints::run(context, command, output).await,
         Command::Review { command } => commands::reviews::run(context, command, output).await,
+        Command::Notifications { command } => {
+            commands::notifications::run(context, command, output).await
+        }
     }
 }

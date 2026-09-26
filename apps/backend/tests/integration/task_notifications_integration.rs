@@ -1,5 +1,6 @@
 use crate::common::TestApp;
 use axum::http::StatusCode;
+use entity::scopes::Scope;
 use serde_json::Value;
 
 #[tokio::test]
@@ -533,4 +534,429 @@ async fn mention_notifies_tenant_owner_non_member() {
         "tenant owner should receive mention notification even if not a project member, got: {:?}",
         types
     );
+}
+
+// ---------------------------------------------------------------------------
+// PAT からの通知 API（TASK-225）。CLI は PAT で叩くので、視界を
+// 「PAT のテナントのプロジェクト ∩ allowed_project_ids」に絞れているかを固定する。
+// 規則は docs/features/tasks/5.notifications.md §4。
+// ---------------------------------------------------------------------------
+
+/// 通知を 1 件直に挿す（どの経路で作られたかは視界の判定に関係しない）。
+async fn insert_notification(
+    app: &TestApp,
+    user_id: uuid::Uuid,
+    project_id: Option<uuid::Uuid>,
+    notification_type: &str,
+) -> uuid::Uuid {
+    use sea_orm::ActiveModelTrait;
+    use sea_orm::ActiveValue::Set;
+
+    let id = uuid::Uuid::new_v4();
+    entity::notifications::ActiveModel {
+        id: Set(id),
+        user_id: Set(user_id),
+        task_id: Set(None),
+        project_id: Set(project_id),
+        notification_type: Set(notification_type.into()),
+        payload: Set(serde_json::json!({ "pr_number": 618, "round": 1 })),
+        read_at: Set(None),
+        created_at: Set(chrono::Utc::now().into()),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert notification");
+    id
+}
+
+/// 2 つのテナントにまたがる通知を持つ利用者。戻り値は
+/// (テナント A の 2 プロジェクト, テナント B のプロジェクト, プロジェクト無しの通知)。
+struct PatFixture {
+    app: TestApp,
+    user: crate::common::TestUser,
+    tenant_a: uuid::Uuid,
+    project_a1: uuid::Uuid,
+    project_a2: uuid::Uuid,
+    project_b: uuid::Uuid,
+    notification_a1: uuid::Uuid,
+    notification_a2: uuid::Uuid,
+    notification_b: uuid::Uuid,
+}
+
+async fn pat_fixture() -> PatFixture {
+    let app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    let a = app.insert_tenant_project(user.id).await;
+    let project_a2 = crate::common::insert_extra_project(&app, a.tenant_id).await;
+    let b = app.insert_tenant_project(user.id).await;
+
+    let notification_a1 =
+        insert_notification(&app, user.id, Some(a.project_id), "review_round_created").await;
+    let notification_a2 =
+        insert_notification(&app, user.id, Some(project_a2), "review_round_created").await;
+    let notification_b =
+        insert_notification(&app, user.id, Some(b.project_id), "review_round_created").await;
+    // project_id を持たせる前に作られた行。どのプロジェクトのものか分からないので PAT には見せない
+    insert_notification(&app, user.id, None, "review_round_created").await;
+
+    PatFixture {
+        app,
+        user,
+        tenant_a: a.tenant_id,
+        project_a1: a.project_id,
+        project_a2,
+        project_b: b.project_id,
+        notification_a1,
+        notification_a2,
+        notification_b,
+    }
+}
+
+async fn list_with_bearer(app: &TestApp, token: &str) -> Value {
+    let res = app
+        .get_with_bearer("/v1/users/me/notifications", token)
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    res.json::<Value>().await.expect("json")
+}
+
+fn project_ids_of(body: &Value) -> Vec<String> {
+    body["notifications"]
+        .as_array()
+        .expect("notifications")
+        .iter()
+        .map(|n| n["project_id"].as_str().unwrap_or("null").to_string())
+        .collect()
+}
+
+/// PAT の視界はバインド先テナントのプロジェクトまで。`allowed_project_ids` があれば
+/// さらにその中だけ。`project_id` の無い行はセッションにだけ見せる。
+#[tokio::test]
+async fn pat_sees_only_the_notifications_of_its_tenant_and_projects() {
+    let mut fx = pat_fixture().await;
+
+    // 対照: セッションは 4 件すべて見える（過剰に絞っていないこと）
+    fx.app
+        .login_session_no_content(&fx.user.email, &fx.user.password)
+        .await;
+    let session = fx.app.get_with_session("/v1/users/me/notifications").await;
+    assert_eq!(session.status(), StatusCode::OK);
+    let session_body: Value = session.json().await.expect("json");
+    assert_eq!(session_body["unread_count"].as_u64(), Some(4));
+
+    // テナント A にバインドした PAT: A の 2 件だけ（B と project_id 無しは数にも入らない）
+    let tenant_token = fx
+        .app
+        .insert_pat(fx.user.id, fx.tenant_a, vec![Scope::ReadReview], None)
+        .await;
+    let body = list_with_bearer(&fx.app, &tenant_token).await;
+    assert_eq!(body["unread_count"].as_u64(), Some(2));
+    let mut seen = project_ids_of(&body);
+    seen.sort();
+    let mut expected = vec![fx.project_a1.to_string(), fx.project_a2.to_string()];
+    expected.sort();
+    assert_eq!(seen, expected);
+
+    // プロジェクトを絞った PAT: 絞った 1 件だけ
+    let project_token = fx
+        .app
+        .insert_pat(
+            fx.user.id,
+            fx.tenant_a,
+            vec![Scope::ReadReview],
+            Some(vec![fx.project_a1]),
+        )
+        .await;
+    let body = list_with_bearer(&fx.app, &project_token).await;
+    assert_eq!(body["unread_count"].as_u64(), Some(1));
+    assert_eq!(project_ids_of(&body), vec![fx.project_a1.to_string()]);
+
+    // スコープの無い PAT は読めない
+    let no_scope = fx
+        .app
+        .insert_pat(fx.user.id, fx.tenant_a, vec![Scope::ReadDrive], None)
+        .await;
+    assert_eq!(
+        fx.app
+            .get_with_bearer("/v1/users/me/notifications", &no_scope)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+}
+
+/// レビュー通知の既読化は `write:review`。プロジェクトの視界は読み取りと揃える。
+#[tokio::test]
+async fn pat_marks_read_only_inside_its_own_view() {
+    let mut fx = pat_fixture().await;
+
+    let read_only = fx
+        .app
+        .insert_pat(fx.user.id, fx.tenant_a, vec![Scope::ReadReview], None)
+        .await;
+    assert_eq!(
+        fx.app
+            .patch_with_bearer("/v1/users/me/notifications/read-all", &read_only)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN,
+        "読み取りスコープだけでは既読にできない"
+    );
+
+    let write = fx
+        .app
+        .insert_pat(fx.user.id, fx.tenant_a, vec![Scope::WriteReview], None)
+        .await;
+
+    // 視界の外（別テナント）の通知は 1 件既読でも見つからない
+    assert_eq!(
+        fx.app
+            .patch_with_bearer(
+                &format!("/v1/users/me/notifications/{}/read", fx.notification_b),
+                &write,
+            )
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    // 視界の中は既読にできる
+    assert_eq!(
+        fx.app
+            .patch_with_bearer(
+                &format!("/v1/users/me/notifications/{}/read", fx.notification_a1),
+                &write,
+            )
+            .await
+            .status(),
+        StatusCode::OK
+    );
+
+    // 全件既読が消すのはバインド先テナントのぶんだけ
+    assert_eq!(
+        fx.app
+            .patch_with_bearer("/v1/users/me/notifications/read-all", &write)
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        list_with_bearer(&fx.app, &write).await["unread_count"].as_u64(),
+        Some(0)
+    );
+
+    // 別テナントの通知と project_id 無しの行は未読のまま（セッションで確かめる）
+    fx.app
+        .login_session_no_content(&fx.user.email, &fx.user.password)
+        .await;
+    let session: Value = fx
+        .app
+        .get_with_session("/v1/users/me/notifications")
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(session["unread_count"].as_u64(), Some(2));
+    let unread: Vec<&str> = session["notifications"]
+        .as_array()
+        .expect("notifications")
+        .iter()
+        .filter(|n| n["read_at"].is_null())
+        .map(|n| n["project_id"].as_str().unwrap_or("null"))
+        .collect();
+    assert!(
+        unread.contains(&fx.project_b.to_string().as_str()),
+        "{unread:?}"
+    );
+    assert!(unread.contains(&"null"), "{unread:?}");
+}
+
+/// 一覧・未読数・個別/一括既読でタスクとレビューのスコープを混同しない。
+#[tokio::test]
+async fn pat_separates_task_and_review_notification_permissions() {
+    let mut fx = pat_fixture().await;
+    let mut task_ids = Vec::new();
+    for kind in [
+        "assigned",
+        "mentioned",
+        "status_changed",
+        "comment_added",
+        "deadline_soon",
+        "pr_merged",
+    ] {
+        task_ids.push(insert_notification(&fx.app, fx.user.id, Some(fx.project_a1), kind).await);
+    }
+    let changed = insert_notification(
+        &fx.app,
+        fx.user.id,
+        Some(fx.project_a1),
+        "review_finding_changed",
+    )
+    .await;
+    let unknown =
+        insert_notification(&fx.app, fx.user.id, Some(fx.project_a1), "future_event").await;
+    let review_ids = vec![
+        fx.notification_a1.to_string(),
+        fx.notification_a2.to_string(),
+        changed.to_string(),
+    ];
+    let reviews = fx
+        .app
+        .insert_pat(fx.user.id, fx.tenant_a, vec![Scope::ReadReview], None)
+        .await;
+    let task_ids: Vec<String> = task_ids.iter().map(ToString::to_string).collect();
+    let all_ids: Vec<String> = task_ids.iter().chain(&review_ids).cloned().collect();
+
+    for (scopes, mut expected) in [
+        (vec![Scope::ReadTask], task_ids.clone()),
+        (vec![Scope::ReadReview], review_ids.clone()),
+        (vec![Scope::WriteTask], task_ids.clone()),
+        (vec![Scope::WriteReview], review_ids.clone()),
+        (vec![Scope::ReadTask, Scope::ReadReview], all_ids.clone()),
+        (vec![Scope::AdminProject], all_ids.clone()),
+        (vec![Scope::AdminTenant], all_ids.clone()),
+    ] {
+        let token = fx
+            .app
+            .insert_pat(fx.user.id, fx.tenant_a, scopes, None)
+            .await;
+        let body = list_with_bearer(&fx.app, &token).await;
+        assert_eq!(body["unread_count"].as_u64(), Some(expected.len() as u64));
+        let mut actual: Vec<String> = body["notifications"]
+            .as_array()
+            .expect("notifications")
+            .iter()
+            .map(|row| row["id"].as_str().expect("id").to_string())
+            .collect();
+        actual.sort();
+        expected.sort();
+        assert_eq!(actual, expected);
+    }
+
+    let tasks = fx
+        .app
+        .insert_pat(fx.user.id, fx.tenant_a, vec![Scope::WriteTask], None)
+        .await;
+    let page = fx
+        .app
+        .get_with_bearer("/v1/users/me/notifications?limit=2&offset=4", &tasks)
+        .await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let page: Value = page.json().await.expect("json");
+    assert_eq!(page["unread_count"], 6);
+    assert_eq!(
+        page["notifications"]
+            .as_array()
+            .expect("notifications")
+            .len(),
+        2
+    );
+    assert!(page["notifications"].as_array().unwrap().iter().all(|row| {
+        task_ids
+            .iter()
+            .any(|id| row["id"].as_str() == Some(id.as_str()))
+    }));
+
+    // 個別既読のレスポンスからも、権限のない種別の payload を読めない。
+    for id in [fx.notification_a1, changed, unknown] {
+        let path = format!("/v1/users/me/notifications/{id}/read");
+        assert_eq!(
+            fx.app.patch_with_bearer(&path, &tasks).await.status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+    let read_only = fx
+        .app
+        .insert_pat(
+            fx.user.id,
+            fx.tenant_a,
+            vec![Scope::ReadTask, Scope::ReadReview],
+            None,
+        )
+        .await;
+    for path in [
+        format!("/v1/users/me/notifications/{}/read", task_ids[0]),
+        "/v1/users/me/notifications/read-all".into(),
+    ] {
+        assert_eq!(
+            fx.app.patch_with_bearer(&path, &read_only).await.status(),
+            StatusCode::FORBIDDEN
+        );
+    }
+    assert_eq!(
+        fx.app
+            .patch_with_bearer(
+                &format!("/v1/users/me/notifications/{}/read", task_ids[0]),
+                &tasks
+            )
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        fx.app
+            .patch_with_bearer("/v1/users/me/notifications/read-all", &tasks)
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(list_with_bearer(&fx.app, &tasks).await["unread_count"], 0);
+    assert_eq!(list_with_bearer(&fx.app, &reviews).await["unread_count"], 3);
+
+    // タスクの読み取り権限とレビューの書き込み権限を持っていても、タスクは既読にできない。
+    let mixed = fx
+        .app
+        .insert_pat(
+            fx.user.id,
+            fx.tenant_a,
+            vec![Scope::ReadTask, Scope::WriteReview],
+            None,
+        )
+        .await;
+    let body = list_with_bearer(&fx.app, &mixed).await;
+    assert_eq!(body["notifications"].as_array().unwrap().len(), 9);
+    assert_eq!(body["unread_count"], 3);
+    let new_task = insert_notification(&fx.app, fx.user.id, Some(fx.project_a1), "assigned").await;
+    assert_eq!(
+        fx.app
+            .patch_with_bearer(
+                &format!("/v1/users/me/notifications/{new_task}/read"),
+                &mixed
+            )
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        fx.app
+            .patch_with_bearer(
+                &format!("/v1/users/me/notifications/{changed}/read"),
+                &mixed
+            )
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        fx.app
+            .patch_with_bearer("/v1/users/me/notifications/read-all", &mixed)
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(list_with_bearer(&fx.app, &reviews).await["unread_count"], 0);
+    assert_eq!(list_with_bearer(&fx.app, &tasks).await["unread_count"], 1);
+
+    fx.app
+        .login_session_no_content(&fx.user.email, &fx.user.password)
+        .await;
+    let session: Value = fx
+        .app
+        .get_with_session("/v1/users/me/notifications")
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(session["notifications"].as_array().unwrap().len(), 13);
+    // 別テナント・プロジェクト無し・未知の種別・タスクの新着は未読のまま。
+    assert_eq!(session["unread_count"], 4);
 }

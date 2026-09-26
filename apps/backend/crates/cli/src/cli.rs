@@ -67,6 +67,11 @@ pub enum Command {
         #[command(subcommand)]
         command: ReviewCommand,
     },
+    /// Notification commands
+    Notifications {
+        #[command(subcommand)]
+        command: NotificationsCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -395,6 +400,38 @@ pub enum SprintsCommand {
         /// Project key or UUID
         #[arg(long)]
         project: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum NotificationsCommand {
+    /// List my notifications (unread first, newest first)
+    List {
+        /// Only unread notifications
+        #[arg(long)]
+        unread: bool,
+        /// Notifications to fetch (1-100)
+        #[arg(long, default_value_t = 50)]
+        limit: u64,
+    },
+    /// Mark one notification as read
+    Read {
+        /// Notification UUID
+        id: String,
+    },
+    /// Mark every visible notification as read
+    ReadAll,
+    /// Show or update the notification settings of a project
+    Settings {
+        /// Project key or UUID (a key also needs read:project to look up)
+        #[arg(long)]
+        project: String,
+        /// In-app event types, comma separated (replaces the current list)
+        #[arg(long = "in-app", value_name = "types")]
+        in_app: Option<String>,
+        /// Email event types, comma separated (replaces the current list)
+        #[arg(long, value_name = "types")]
+        email: Option<String>,
     },
 }
 
