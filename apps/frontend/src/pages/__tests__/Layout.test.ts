@@ -40,7 +40,14 @@ afterEach(() => {
 
 // サインイン前に開くページは認証ガードを通さず、そのまま中身を描画する。
 // ここから漏れると /signin へリダイレクトされ、メール確認・パスワード再設定が完了できない。
-const PRE_AUTH_PATHS = ['/signin', '/signup', '/auth/reset-password', '/verify-email'];
+// /desktop/authorize は未ログインなら自分でサインインへ送る（戻り先を覚えるため）。
+const PRE_AUTH_PATHS = [
+  '/signin',
+  '/signup',
+  '/auth/reset-password',
+  '/verify-email',
+  '/desktop/authorize',
+];
 
 function mountLayout(urlPathname: string) {
   const queryClient = new QueryClient({

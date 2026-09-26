@@ -84,7 +84,7 @@ pub async fn list_tenants(
     // （apps/backend/docs/tenant-project-authz.md）。
     auth.require_scope(Scope::AdminTenant)?;
     let items = match &auth.method {
-        AuthMethod::Session => {
+        AuthMethod::Session | AuthMethod::DeviceToken { .. } => {
             // tenant_id → 自分の role。membership の判定と member_role の欄の両方に使う。
             let joined_roles: HashMap<Uuid, TenantRole> = tenant_members::Entity::find()
                 .filter(tenant_members::Column::UserId.eq(auth.user_id))

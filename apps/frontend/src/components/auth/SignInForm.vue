@@ -13,6 +13,7 @@ import PasswordInput from '@/components/auth/PasswordInput.vue';
 import { Input } from '@/components/ui/input';
 import { meQueryOptions, useLoginMutation, useLogoutMutation } from '@/lib/api-vue-query';
 import { arkMessage } from '@/lib/auth-validation';
+import { DESKTOP_AUTHORIZE_RETURN, desktopAuthorizeReturnPath } from '@/lib/desktop-authorize';
 import { consumeNotice, PASSWORD_CHANGED_NOTICE } from '@/lib/one-time-notice';
 
 /**
@@ -69,7 +70,10 @@ const form = useForm({
       }
 
       await queryClient.invalidateQueries({ queryKey: meQueryOptions().queryKey });
-      window.location.assign('/');
+      // Desktop の承認画面から来たならそこへ戻す
+      window.location.assign(
+        desktopAuthorizeReturnPath(consumeNotice(DESKTOP_AUTHORIZE_RETURN)) ?? '/',
+      );
     } catch (e) {
       // 403 はメール未認証以外（CSRF 拒否・凍結など）でも返るため、
       // ステータスだけでなくエラーボディの message で判定する

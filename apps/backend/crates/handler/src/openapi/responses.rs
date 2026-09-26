@@ -103,6 +103,26 @@ pub enum PersonalTokenAuthErrors {
     Internal(#[to_schema] ServerError),
 }
 
+/// Device Token 交換（`POST /v1/desktop/auth/token`）のエラー。
+#[derive(IntoResponses)]
+pub enum DesktopAuthTokenErrors {
+    #[response(
+        status = 401,
+        description = "認可コードが無効・期限切れ・使用済み、または code_verifier が一致しません"
+    )]
+    Unauthorized(#[to_schema] ServerError),
+    #[response(
+        status = 429,
+        description = "試行が多すぎます。時間をおいて再度お試しください"
+    )]
+    TooManyRequests(#[to_schema] ServerError),
+    #[response(
+        status = 500,
+        description = "サーバー側で問題が発生しました。時間をおいて再度お試しください"
+    )]
+    Internal(#[to_schema] ServerError),
+}
+
 #[derive(IntoResponses)]
 #[response(
     status = 500,

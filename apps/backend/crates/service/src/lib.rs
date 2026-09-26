@@ -8,6 +8,7 @@ pub mod already_registered_email_delivery;
 pub mod auth;
 pub mod bootstrap_admin;
 pub mod custom_fields;
+pub mod desktop_auth;
 pub mod drive;
 pub mod email;
 pub mod email_verification;

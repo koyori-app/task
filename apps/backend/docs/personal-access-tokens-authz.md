@@ -1,6 +1,6 @@
 # パーソナルアクセストークン（PAT）認可
 
-**関連コード**: `src/entities/personal_tokens.rs`, `src/entities/scopes.rs`, `src/extractors.rs`, `src/utils/auth.rs`
+**関連コード**: `crates/entity/src/personal_tokens.rs`, `crates/entity/src/device_tokens.rs`, `crates/entity/src/scopes.rs`, `crates/handler/src/extractors.rs`, `crates/service/src/auth.rs`, `crates/service/src/desktop_auth.rs`, `crates/handler/src/handlers/desktop_auth.rs`
 
 ## 概要
 
@@ -8,6 +8,7 @@ PAT による API 認証と、テナント・プロジェクトを横断しな�
 
 - **セッション（Cookie）**: 全操作スコープ相当。テナント切り替えは UI から可能。
 - **PAT（Bearer）**: 作成時に固定した **1 テナント** と **任意のプロジェクト一覧** の範囲内でのみ有効。操作は `scopes` で制限。
+- **Device Token（Bearer）**: Koyori Desktop 用。権限はセッション相当で、セッション専用の口だけは通さない（[Desktop 認証](#desktop-認証device-token)）。
 
 認可は **操作スコープ（何ができるか）** と **リソース束縛（どこでできるか）** の 2 層で行う。
 
@@ -17,6 +18,7 @@ PAT による API 認証と、テナント・プロジェクトを横断しな�
 |----------|-------------|--------------|
 | セッション | `require_scope` は常に通過 | 所属しているテナント（オーナー or テナントメンバー）。テナントに居なくても、明示 ACE のあるプロジェクトの中は客分として通る |
 | PAT | DB の `scopes` を検証 | 作成時の `tenant_id` のみ。プロジェクトは任意指定 |
+| Device Token | `require_scope` は常に通過 | セッションと同じ（束縛なし。所属判定は `has_tenant_access`） |
 
 **バインドは所属の証明ではない。** PAT の `tenant_id` は「どのテナントを触れるか」の上限であって、
 その利用者がいまテナントに所属していることを意味しない。
@@ -31,7 +33,7 @@ PAT による API 認証と、テナント・プロジェクトを横断しな�
 | テナント | 作成時に **1 件必須**（`tenant_id`）。他テナントの API は 403 |
 | プロジェクト | **任意指定**（`allowed_project_ids`）。未指定（`NULL`）= 当該テナント内の全プロジェクト |
 | 複数テナント PAT | 採用しない |
-| テナント非紐づけ PAT | 採用しない（`/me` 等アカウント API はセッション専用） |
+| テナント非紐づけ PAT | 採用しない（`/v1/auth/me` 等アカウント API は PAT では通らない。テナント横断が要る Desktop は別種別の Device Token を使う） |
 | テナント作成 | **セッション専用**（PAT はテナントにバインドされているため新規作成不可） |
 | PAT 管理 API（一覧・作成・失効） | **セッション専用**（PAT では不可）。一覧は自分の `revoked = false` のトークンだけを返す |
 
@@ -162,6 +164,7 @@ pub enum AuthMethod {
         allowed_project_ids: Option<Vec<Uuid>>,
         scopes: ScopeList,
     },
+    DeviceToken { token_id: Uuid },
 }
 
 pub struct AuthUser {
@@ -172,9 +175,10 @@ pub struct AuthUser {
 
 ### 認証フロー（`FromRequestParts`）
 
-1. `Authorization: Bearer <token>` があれば PAT 認証
-2. なければ Cookie セッションから `user_id` 取得
-3. どちらもなければ **401**
+1. `Authorization: Bearer kdt_…` なら Device Token 認証（[Desktop 認証](#desktop-認証device-token)）
+2. それ以外の `Authorization: Bearer <token>` は PAT 認証
+3. Bearer がなければ Cookie セッションから `user_id` 取得
+4. どれもなければ **401**
 
 PAT 認証（`authenticate_personal_token` in `utils/auth.rs`）:
 
@@ -201,11 +205,13 @@ let tenant = auth.ensure_tenant_owner(&state, tenant_id).await?;
 
 ### 認可ヘルパー
 
-| メソッド | セッション | PAT |
-|----------|-----------|-----|
-| `require_scope` | 常に OK | `scopes` を検証。不足なら 403 |
-| `ensure_tenant_access` | 所属判定（`has_tenant_access`） | `token.tenant_id == path.tenant_id` + `allowed_project_ids` の突き合わせ（メモリ）の**あと**、セッションと同じ所属判定 |
-| `ensure_tenant_owner` | `owner_id` チェック（1 SELECT） | `token.tenant_id` 一致 + プロジェクト制限なし + `owner_id` チェック |
+| メソッド | セッション | PAT | Device Token |
+|----------|-----------|-----|-----|
+| `require_scope` | 常に OK | `scopes` を検証。不足なら 403 | 常に OK |
+| `ensure_tenant_access` | 所属判定（`has_tenant_access`） | `token.tenant_id == path.tenant_id` + `allowed_project_ids` の突き合わせ（メモリ）の**あと**、セッションと同じ所属判定 | セッションと同じ |
+| `ensure_tenant_owner` | `owner_id` チェック（1 SELECT） | `token.tenant_id` 一致 + プロジェクト制限なし + `owner_id` チェック | セッションと同じ |
+| `require_session` | OK | 403 | 403 |
+| `require_session_or_device_token` | OK | 403 | OK |
 
 ### HTTP ステータス
 
@@ -213,6 +219,71 @@ let tenant = auth.ensure_tenant_owner(&state, tenant_id).await?;
 |------|-----------|
 | 未認証・無効 PAT・失効・期限切れ | 401 |
 | 認証済みだがスコープ / テナント / プロジェクト不一致 | 403 |
+
+## Desktop 認証（Device Token）
+
+Koyori Desktop はテナント横断の通知一覧（`/v1/users/me/notifications`）を読む必要があるが、
+PAT は 1 テナント束縛で、上の「テナント非紐づけ PAT は採用しない」を覆したくない。
+そこで PAT とは別種別の **Device Token** を足し、権限をセッション相当にする。
+
+### 規則
+
+| 項目 | 規則 |
+|------|------|
+| 形式 | `kdt_<32 バイト乱数の base64url>`。接頭辞で PAT（`pat_`）と判別する |
+| 保存 | `device_tokens`。平文は持たず、PAT と同じ HMAC-SHA256（`PERSONAL_TOKEN_SECRET`）の hash を `token_hash`（UNIQUE）で引く |
+| 有効期限 | 発行から 90 日（`expires_at`）。期限切れは 401 で、Desktop はブラウザ承認をやり直す |
+| 失効 | `revoked_at` を立てる（行は残す）。失効後は 401 |
+| 全端末の失効 | `users.sessions_revoked_at` より前に発行（`created_at`）したものは 401。パスワード変更で全端末が落ちる |
+| 凍結 | 凍結された利用者は 403（`account-suspended`）。PAT と同じ |
+| 権限 | スコープ・テナント束縛はセッションと同等。`require_session` の口（PAT 管理・テナント作成・GitHub 連携の管理・2FA・認可コードの発行）は 403 |
+| 通知 | `/v1/users/me/notifications` 系は `require_scope`（Device Token は常に通過）+ 視界の絞り込み（`visible_project_ids_for`）。Device Token の視界はセッションと同じ（本人が入れるプロジェクトすべて、`project_id` を持たない古い通知も含む）で、PAT のテナント絞り込みは掛けない（[通知](#v1usersme通知)） |
+| 端末管理 | `/v1/users/me/devices` 系はセッションと Device Token だけ（`require_session_or_device_token`）。PAT は 403 |
+| `/v1/auth/me` | セッション専用のまま（Bearer は 401）。Desktop は通知一覧と端末一覧で足りる |
+| `last_used_at` | 認証成功時に更新する。Desktop は 30 秒ごとにポーリングするので、前回から 5 分以上空いたときだけ書く |
+
+### フロー（Authorization Code + PKCE、loopback）
+
+```text
+Desktop                                   Browser / Web              Backend
+  │ 127.0.0.1:{port} で待ち受け
+  │ code_verifier / code_challenge / state を生成
+  ├─ 開く ─→ {web}/desktop/authorize?port=&code_challenge=&state=&name=
+  │                                          │ 未ログインならログイン後に戻る
+  │                                          │ 「Koyori Desktop を承認」画面
+  │                                          ├─ POST /v1/desktop/auth/codes ──→ セッション必須
+  │                                          │←──── {code}
+  │←─ redirect http://127.0.0.1:{port}/callback?code=&state= ─┤
+  │ state を検証
+  ├─ POST /v1/desktop/auth/token {code, code_verifier} ────────────────────→
+  │←─────────────────────── {token, expires_at, device_id} ────────────────┤
+```
+
+| 項目 | 規則 |
+|------|------|
+| code | 32 バイト乱数。Redis（`desktop_auth:code:{code}`）に TTL 5 分で `{user_id, code_challenge, name, issued_at_ms}` を置く。**GETDEL で一度きり** |
+| PKCE | S256 のみ。`code_challenge` は base64url の 43〜128 文字。`BASE64URL(SHA256(code_verifier))` が一致しなければ 401 で、code は GETDEL 済みなので二度と使えない |
+| 発行の口 | セッション専用。2FA 途中のセッション・PAT・Device Token は 403 |
+| 交換の口 | 未認証（code が資格）。不一致・期限切れ・再利用・発行時刻を持たない旧コード・停止中の利用者はすべて 401。`sessions_revoked_at` がコード発行時刻以降なら未交換でも拒否する |
+| レート制限 | 交換の口に接続元（`X-Forwarded-For` → `X-Real-IP`）ごと 10 回/分。超えたら 429。ヘッダは偽装できるので多重の守りの 1 枚（code は 256 bit で総当たりは成立しない） |
+| redirect | loopback（`http://127.0.0.1:{port}/callback`）のみ。Web の承認画面は `port` を 1024〜65535 の整数に限る。Custom URI Scheme は使わない（Linux で登録が要り、Windows でレジストリ書き込みが要り、他アプリに奪われ得る） |
+| ログ | code / code_verifier / token を出さない（リクエストログはパスのみ） |
+
+長寿命の資格情報を URL に載せない（URL に出るのは短寿命の code だけ）。
+Device Token の `created_at` はコードの承認時刻を引き継ぐ。交換処理中に全失効が走った場合も、
+Bearer 認証でその失効を検出する。有効期限は交換時点から90日。
+
+### エンドポイント
+
+| メソッド | パス | 認証 | 内容 |
+|---|---|---|---|
+| `POST` | `/v1/desktop/auth/codes` | セッション | `{code_challenge, name}`（name は 1〜100 文字）→ 201 `{code}` |
+| `POST` | `/v1/desktop/auth/token` | なし | `{code, code_verifier}` → 201 `{token, expires_at, device_id}`。平文はこの応答でのみ返す |
+| `GET` | `/v1/users/me/devices` | セッション / Device Token | 自分の有効な端末（失効済み・期限切れを除く）を新しい順に返す |
+| `DELETE` | `/v1/users/me/devices/{id}` | セッション / Device Token | `revoked_at` を立てる。自分自身の token も可（= ログアウト）。他人の端末は 404 |
+
+CSRF: Bearer 付きの要求は Origin 検査の対象外（Device Token も同じ）。発行の口はセッション Cookie で呼ぶので、
+従来どおり Origin 検査を通る。
 
 ## API パス規約
 
@@ -243,7 +314,8 @@ path から束縛を突き合わせられないぶん、**結果の側をトー�
 その他の既知の通知はタスクのスコープを使い、未知の種別は PAT に公開しない。
 各操作でタスク・レビューのどちらの必要スコープもなければ 403。
 書き込みスコープによる読み取り権限の包含と、管理スコープの包含も適用する。
-`project_id` を持たない古い通知は、どのプロジェクトのものか判別できないのでセッション専用。
+`project_id` を持たない古い通知は、どのプロジェクトのものか判別できないのでセッションと
+Device Token にだけ見せる（Device Token はテナントに束縛しないので、視界はセッションと同じ）。
 
 ### `/v1/tenants/{tenant_id}/projects/{project_id}/webhooks`（外部向け Webhook）
 
@@ -282,6 +354,9 @@ PAT に `admin:project` を付けても、発行者が Member なら 403。
 - `allowed_project_ids` 外の project → 403、`NULL` ならテナント内任意 project → OK
 - 失効 / 期限切れ / ハッシュ不一致 → 401
 - PAT 作成: 他人の `tenant_id` → 403
+- Device Token: 発行 → 交換 → Bearer で通知一覧が 200。code の再利用・verifier 不一致・TTL 超過は 401。
+  2FA 途中のセッション・PAT・Device Token での発行は 403。PAT 管理・テナント作成は 403。
+  失効後・`sessions_revoked_at` 更新後・期限切れは 401。他人の端末の失効は 404。交換の口は上限を越えると 429
 
 ## 採用しない方針
 

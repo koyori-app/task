@@ -13,3 +13,7 @@ pub static COLOR_REGEX: LazyLock<Regex> =
 /// 原因が投入時の書き方にあることを画面から辿れない。書き込む側で弾く。
 pub static COMMIT_SHA_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[0-9a-f]{40}$").unwrap());
+
+/// PKCE の `code_challenge`（RFC 7636 の S256。base64url の 43〜128 文字）。
+pub static PKCE_CHALLENGE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_-]{43,128}$").unwrap());
