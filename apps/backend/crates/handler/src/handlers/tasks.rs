@@ -873,6 +873,29 @@ pub async fn create_task(
         serde_json::json!({}),
     )
     .await?;
+    service::webhooks::emit(
+        &txn,
+        project_id,
+        auth.user_id,
+        service::webhooks::EVENT_TASK_CREATED,
+        serde_json::json!({
+            "task": {
+                "id": model.id,
+                "seq_id": model.seq_id,
+                "title": &model.title,
+                "priority": model.priority.to_value(),
+                "status": &status.name,
+                "assignees": payload
+                    .assignees
+                    .iter()
+                    .map(|a| serde_json::json!({ "user_id": a.user_id, "role": a.role }))
+                    .collect::<Vec<_>>(),
+                "hard_deadline": model.hard_deadline,
+                "created_by": model.created_by,
+            },
+        }),
+    )
+    .await?;
     txn.commit().await?;
     Ok((
         StatusCode::CREATED,

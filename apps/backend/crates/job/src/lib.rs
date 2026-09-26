@@ -7,6 +7,7 @@ pub mod notification_email;
 pub mod password_reset_email;
 pub mod review_summary;
 pub mod verification_email;
+pub mod webhook_delivery;
 
 use std::sync::Arc;
 

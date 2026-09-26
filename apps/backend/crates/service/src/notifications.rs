@@ -361,6 +361,16 @@ async fn round_subscribers<C: ConnectionTrait>(
         .collect())
 }
 
+/// ラウンド起票の payload。in-app 通知と Webhook（`review.round_created`）で共有する。
+pub async fn review_round_payload<C: ConnectionTrait>(
+    db: &C,
+    review: &reviews::Model,
+    findings: &[review_findings::Model],
+) -> Result<Json, AppError> {
+    let reviewer = username(db, review.reviewer_id).await?;
+    Ok(round_created_payload(review, findings, &reviewer))
+}
+
 fn round_created_payload(
     review: &reviews::Model,
     findings: &[review_findings::Model],
@@ -405,7 +415,7 @@ pub async fn notify_review_round_created<C: ConnectionTrait>(
     let participants = crate::reviews::review_participants(db, review).await?;
     let subscribers = round_subscribers(db, review.project_id).await?;
     let notifiable = notifiable_user_ids(db, review.project_id).await?;
-    let payload = round_created_payload(review, findings, &username(db, review.reviewer_id).await?);
+    let payload = review_round_payload(db, review, findings).await?;
 
     for user_id in participants.union(&subscribers).copied() {
         if user_id == actor_id || !notifiable.contains(&user_id) {
@@ -460,7 +470,7 @@ pub async fn notify_review_round_created_to<C: ConnectionTrait>(
     {
         return Ok(());
     }
-    let payload = round_created_payload(review, findings, &username(db, review.reviewer_id).await?);
+    let payload = review_round_payload(db, review, findings).await?;
     create_notification(
         db,
         user_id,
@@ -486,20 +496,7 @@ pub async fn notify_review_finding_changed<C: ConnectionTrait>(
     note: Option<&str>,
 ) -> Result<(), AppError> {
     let notifiable = notifiable_user_ids(db, review.project_id).await?;
-    let payload: Json = serde_json::json!({
-        "project_id": review.project_id,
-        "review_id": review.id,
-        "finding_id": finding.id,
-        "repo": repo_label(review),
-        "pr_number": review.pr_number,
-        "round": review.round,
-        "title": finding.title,
-        "severity": finding.severity.as_str(),
-        "from": from.as_str(),
-        "to": to.as_str(),
-        "actor": username(db, actor_id).await?,
-        "note": note,
-    });
+    let payload = review_finding_payload(db, review, finding, from, to, actor_id, note).await?;
 
     for user_id in crate::reviews::review_participants(db, review).await? {
         if user_id == actor_id || !notifiable.contains(&user_id) {
@@ -519,4 +516,30 @@ pub async fn notify_review_finding_changed<C: ConnectionTrait>(
         .await?;
     }
     Ok(())
+}
+
+/// 指摘の状態遷移の payload。in-app 通知と Webhook（`review.finding_changed`）で共有する。
+pub async fn review_finding_payload<C: ConnectionTrait>(
+    db: &C,
+    review: &reviews::Model,
+    finding: &review_findings::Model,
+    from: FindingState,
+    to: FindingState,
+    actor_id: Uuid,
+    note: Option<&str>,
+) -> Result<Json, AppError> {
+    Ok(serde_json::json!({
+        "project_id": review.project_id,
+        "review_id": review.id,
+        "finding_id": finding.id,
+        "repo": repo_label(review),
+        "pr_number": review.pr_number,
+        "round": review.round,
+        "title": finding.title,
+        "severity": finding.severity.as_str(),
+        "from": from.as_str(),
+        "to": to.as_str(),
+        "actor": username(db, actor_id).await?,
+        "note": note,
+    }))
 }

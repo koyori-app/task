@@ -41,6 +41,7 @@ use job::{
         self, MAX_RETRIES as REVIEW_SUMMARY_MAX_RETRIES, QUEUE_NAME as REVIEW_SUMMARY_QUEUE,
     },
     verification_email::{self, MAX_RETRIES, QUEUE_NAME},
+    webhook_delivery,
 };
 
 pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
@@ -223,6 +224,13 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     // 通知メールの掃き出し。通知の行が outbox なので、ジョブの投入ではなく
     // 定期的に「メール待ち」の行を拾って送る（job::notification_email）。
     tokio::spawn(notification_email::run_sweeper(
+        job_state_for_sweeper.clone(),
+        shutdown_rx.clone(),
+    ));
+
+    // Webhook の配信。配信の行が outbox なので、同じく定期的に期限の来た行を拾って送る
+    // （job::webhook_delivery）。90 日より古い履歴の掃除もこのループが行う。
+    tokio::spawn(webhook_delivery::run_sweeper(
         job_state_for_sweeper,
         shutdown_rx.clone(),
     ));

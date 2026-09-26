@@ -245,6 +245,21 @@ path から束縛を突き合わせられないぶん、**結果の側をトー�
 書き込みスコープによる読み取り権限の包含と、管理スコープの包含も適用する。
 `project_id` を持たない古い通知は、どのプロジェクトのものか判別できないのでセッション専用。
 
+### `/v1/tenants/{tenant_id}/projects/{project_id}/webhooks`（外部向け Webhook）
+
+読み取りは `read:project`、変更は `admin:project`。変更はスコープに加えて、利用者本人が
+そのプロジェクトの Admin かテナントオーナーであること（`require_project_admin`）が要る。
+PAT に `admin:project` を付けても、発行者が Member なら 403。
+
+| メソッド | パス | 必要スコープ |
+|---------|------|-------------|
+| `GET` | `/webhooks` | `read:project` |
+| `POST` | `/webhooks` | `admin:project` + プロジェクト Admin |
+| `PUT` | `/webhooks/{id}` | `admin:project` + プロジェクト Admin |
+| `DELETE` | `/webhooks/{id}` | `admin:project` + プロジェクト Admin |
+| `GET` | `/webhooks/{id}/deliveries` | `read:project` |
+| `POST` | `/webhooks/{id}/deliveries/{did}/redeliver` | `admin:project` + プロジェクト Admin |
+
 ## DB アクセス回数
 
 | 認証 | 認可まわりの DB（目安） |
