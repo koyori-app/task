@@ -982,6 +982,8 @@ mod tests {
             owner_override_rejections: 0,
             repository: repository.map(str::to_string),
             mergeable,
+            // CLI は gate を見ない（権威のゲートは gate_failure）。形だけ合わせる
+            gate: payload::reviews::ReviewGate::StaleUnknown,
         }
     }
 
@@ -1095,6 +1097,7 @@ mod tests {
             created_at: Utc.timestamp_opt(0, 0).unwrap(),
             updated_at: Utc.timestamp_opt(0, 0).unwrap(),
             transitions: vec![],
+            available_actions: vec![],
         }
     }
 
