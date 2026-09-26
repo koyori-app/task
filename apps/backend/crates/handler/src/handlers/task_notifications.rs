@@ -6,8 +6,8 @@ use axum::{
 use axum_valid::Valid;
 use chrono::Utc;
 use common::notifications::{
-    TYPE_ASSIGNED, TYPE_COMMENT_ADDED, TYPE_MENTIONED, TYPE_REVIEW_FINDING_CHANGED,
-    TYPE_REVIEW_ROUND_CREATED, TYPE_STATUS_CHANGED,
+    TYPE_ASSIGNED, TYPE_COMMENT_ADDED, TYPE_DEADLINE_SOON, TYPE_MENTIONED, TYPE_PR_MERGED,
+    TYPE_REVIEW_FINDING_CHANGED, TYPE_REVIEW_ROUND_CREATED, TYPE_STATUS_CHANGED,
 };
 use sea_orm::sea_query::{Expr, Order};
 use sea_orm::{
@@ -93,6 +93,19 @@ struct NotificationScope {
     notification_types: Option<Vec<&'static str>>,
 }
 
+/// PAT に `read:task` / `write:task` で見せる通知種別。
+const PAT_TASK_NOTIFICATION_TYPES: [&str; 6] = [
+    TYPE_ASSIGNED,
+    TYPE_MENTIONED,
+    TYPE_STATUS_CHANGED,
+    TYPE_COMMENT_ADDED,
+    TYPE_DEADLINE_SOON,
+    TYPE_PR_MERGED,
+];
+/// PAT に `read:review` / `write:review` で見せる通知種別。
+const PAT_REVIEW_NOTIFICATION_TYPES: [&str; 2] =
+    [TYPE_REVIEW_ROUND_CREATED, TYPE_REVIEW_FINDING_CHANGED];
+
 /// 認証方式ごとの通知の視界を出す。
 ///
 /// セッションは本人が入れるプロジェクトすべて。PAT は「PAT のテナントのプロジェクト
@@ -138,17 +151,10 @@ async fn notification_scope_for(
     });
     let mut notification_types = Vec::new();
     if allow_tasks {
-        notification_types.extend([
-            TYPE_ASSIGNED,
-            TYPE_MENTIONED,
-            TYPE_STATUS_CHANGED,
-            TYPE_COMMENT_ADDED,
-            "deadline_soon",
-            "pr_merged",
-        ]);
+        notification_types.extend(PAT_TASK_NOTIFICATION_TYPES);
     }
     if allow_reviews {
-        notification_types.extend([TYPE_REVIEW_ROUND_CREATED, TYPE_REVIEW_FINDING_CHANGED]);
+        notification_types.extend(PAT_REVIEW_NOTIFICATION_TYPES);
     }
     Ok(NotificationScope {
         project_ids,
@@ -469,4 +475,29 @@ pub async fn update_notification_settings(
         email_events: model.email_events,
         in_app_events: model.in_app_events,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use common::notifications::{KNOWN_EVENT_TYPES, TYPE_REVIEW_ROUND_ANY};
+
+    /// 種別を common に足したのに PAT の一覧へ書き足し忘れると、CLI は設定値として
+    /// 受け付けるのに PAT の一覧には出ない。購読の印（`review_round_any`）は通知行を
+    /// 作らないので除く。
+    #[test]
+    fn pat_notification_types_cover_every_known_event_type() {
+        let mut pat: Vec<&str> = PAT_TASK_NOTIFICATION_TYPES
+            .into_iter()
+            .chain(PAT_REVIEW_NOTIFICATION_TYPES)
+            .collect();
+        pat.sort_unstable();
+        let mut known: Vec<&str> = KNOWN_EVENT_TYPES
+            .iter()
+            .copied()
+            .filter(|t| *t != TYPE_REVIEW_ROUND_ANY)
+            .collect();
+        known.sort_unstable();
+        assert_eq!(pat, known);
+    }
 }
