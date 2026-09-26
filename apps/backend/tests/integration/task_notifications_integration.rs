@@ -562,6 +562,9 @@ async fn insert_notification(
         payload: Set(serde_json::json!({ "pr_number": 618, "round": 1 })),
         read_at: Set(None),
         created_at: Set(chrono::Utc::now().into()),
+        email_queued_at: Set(None),
+        emailed_at: Set(None),
+        email_attempts: Set(0),
     }
     .insert(&app.state.db)
     .await

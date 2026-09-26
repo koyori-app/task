@@ -10,6 +10,7 @@ mod m20260907000000_default_done_status;
 mod m20260911000000_forge_commit_links;
 mod m20260911010000_oauth_provider_login;
 mod m20260922000000_notifications_project_id;
+mod m20260922010000_notifications_email_outbox;
 
 pub struct Migrator;
 
@@ -27,6 +28,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260911000000_forge_commit_links::Migration),
             Box::new(m20260911010000_oauth_provider_login::Migration),
             Box::new(m20260922000000_notifications_project_id::Migration),
+            Box::new(m20260922010000_notifications_email_outbox::Migration),
         ]
     }
 }

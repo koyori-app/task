@@ -17,6 +17,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 # apalis-postgres と同じ版。webhook の受信記録とジョブ投入を 1 トランザクションにまとめるのに使う
 sqlx = { version = "0.8", default-features = false, features = ["postgres"] }
+tokio = { version = "1.52.1", features = ["macros", "sync", "time"] }
 tracing = { workspace = true }
 uuid = { version = "1", features = ["serde"] }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

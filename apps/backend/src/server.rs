@@ -33,6 +33,7 @@ use job::{
     },
     github_issue_sync::{self, QUEUE_NAME as GITHUB_ISSUE_SYNC_QUEUE},
     github_webhook::{self, QUEUE_NAME as GITHUB_WEBHOOK_QUEUE},
+    notification_email,
     password_reset_email::{
         self, MAX_RETRIES as PW_RESET_MAX_RETRIES, QUEUE_NAME as PW_RESET_QUEUE,
     },
@@ -164,6 +165,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .data(review_summary_worker_state)
         .build(review_summary::process);
 
+    let job_state_for_sweeper = job_state.clone();
     let issue_sync_worker_storage = state.github_issue_sync_storage.as_ref().clone();
     let issue_sync_worker = WorkerBuilder::new(format!("{GITHUB_ISSUE_SYNC_QUEUE}-worker"))
         .backend(issue_sync_worker_storage)
@@ -217,6 +219,13 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+
+    // 通知メールの掃き出し。通知の行が outbox なので、ジョブの投入ではなく
+    // 定期的に「メール待ち」の行を拾って送る（job::notification_email）。
+    tokio::spawn(notification_email::run_sweeper(
+        job_state_for_sweeper,
+        shutdown_rx.clone(),
+    ));
 
     let pw_reset_shutdown = shutdown_rx.clone();
     let email_worker_handle = tokio::spawn(async move {

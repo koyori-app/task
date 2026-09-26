@@ -20,6 +20,7 @@ mod github_http_integration;
 mod github_integration;
 mod github_issue_sync_integration;
 mod my_tasks_integration;
+mod notification_email_integration;
 mod oauth_integration;
 mod password_reset_integration;
 mod pat_revoke_all_integration;
