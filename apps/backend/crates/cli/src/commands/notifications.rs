@@ -13,7 +13,7 @@ use crate::Context;
 use crate::cli::NotificationsCommand;
 use crate::error::{CliError, Result};
 use crate::output::{OutputOptions, print};
-use crate::resolve::resolve_project;
+use crate::resolve::{is_uuid, resolve_project};
 
 pub async fn run(
     context: &Context,
@@ -54,7 +54,13 @@ pub async fn run(
             let in_app = parse_event_types(in_app.as_deref(), "--in-app")?;
             let email = parse_event_types(email.as_deref(), "--email")?;
             let api = &context.connect()?;
-            let project_id = resolve_project(api, &project).await?.id.to_string();
+            // UUID はプロジェクト API（`read:project`）を経ずにそのまま渡す。
+            // 設定 API は `read:task` / `write:task` だけで通るので、キーを引くときだけ余計に要る
+            let project_id = if is_uuid(&project) {
+                project
+            } else {
+                resolve_project(api, &project).await?.id.to_string()
+            };
             let path = [
                 "v1",
                 "users",

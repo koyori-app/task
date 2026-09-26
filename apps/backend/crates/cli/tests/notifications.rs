@@ -175,6 +175,38 @@ async fn settings_keeps_the_side_that_was_not_given() {
     assert_eq!(code, 0);
 }
 
+/// UUID 指定はプロジェクト API（`read:project`）を呼ばない。設定 API の
+/// `read:task` だけを持つ PAT が、手前のプロジェクト解決で 403 にならないように。
+#[tokio::test]
+async fn settings_with_a_uuid_skips_the_project_lookup() {
+    let harness = harness().await;
+    Mock::given(method("GET"))
+        .and(path(settings_path()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "email_events": [],
+            "in_app_events": ["assigned"],
+        })))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+
+    let code = harness
+        .run(&["task", "notifications", "settings", "--project", PROJECT_ID])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+
+    let project_calls = harness
+        .server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|request| request.url.path().starts_with("/v1/tenants/"))
+        .count();
+    assert_eq!(project_calls, 0, "プロジェクト API を経由しない");
+}
+
 /// フラグ無しは読み取りだけ。設定を書き換えない。
 #[tokio::test]
 async fn settings_without_flags_only_reads() {

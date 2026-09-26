@@ -423,7 +423,7 @@ pub enum NotificationsCommand {
     ReadAll,
     /// Show or update the notification settings of a project
     Settings {
-        /// Project key or UUID
+        /// Project key or UUID (a key also needs read:project to look up)
         #[arg(long)]
         project: String,
         /// In-app event types, comma separated (replaces the current list)
