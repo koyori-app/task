@@ -83,12 +83,15 @@ pub async fn send_pending_once(state: &JobState) -> Result<usize, anyhow::Error>
         else {
             continue;
         };
-        // 同じ Webhook の送信結果を直列化し、停止判定を最新の状態から行う。
-        let webhook = webhooks::Entity::find_by_id(delivery.webhook_id)
-            .lock(LockType::Update)
+        // 同じ Webhook の送信結果を直列化する。削除側が親行を掴んでいたら
+        // 子行を解放して次回に回し、親→子の CASCADE とロック順を競合させない。
+        let Some(webhook) = webhooks::Entity::find_by_id(delivery.webhook_id)
+            .lock_with_behavior(LockType::Update, LockBehavior::SkipLocked)
             .one(&txn)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("webhook {} not found", delivery.webhook_id))?;
+        else {
+            continue;
+        };
 
         let mut active: webhook_deliveries::ActiveModel = delivery.clone().into();
         if !webhook.is_active {

@@ -7,7 +7,7 @@ use entity::scopes::Scope;
 use entity::{webhook_deliveries, webhooks};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    prelude::Uuid,
+    QuerySelect, TransactionTrait, prelude::Uuid, sea_query::LockType,
 };
 use tokio::sync::Notify;
 use wiremock::matchers::{header, method};
@@ -749,6 +749,39 @@ async fn concurrent_success_and_fifth_failure_keep_webhook_active() {
     let webhook = fx.webhook(id).await;
     assert!(webhook.is_active, "成功後の 1 回の打ち止めでは停止しない");
     assert_eq!(webhook.failure_streak, 1);
+}
+
+#[tokio::test]
+async fn webhook_delete_releases_pending_delivery_without_deadlock() {
+    let fx = setup().await;
+    let id = fx
+        .create_webhook("https://203.0.113.10/hook", &["task.created"], "json")
+        .await;
+    fx.create_task("削除中の配信").await;
+
+    let txn = fx.app.state.db.begin().await.expect("begin delete");
+    webhooks::Entity::find_by_id(id)
+        .lock(LockType::Update)
+        .one(&txn)
+        .await
+        .expect("lock webhook")
+        .expect("webhook exists");
+    // DELETE が親行を掴んだ後、ワーカーが子行を拾う順を再現する。
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        job::webhook_delivery::send_pending_once(&job_state(&fx.app)),
+    )
+    .await
+    .expect("worker must skip locked webhook")
+    .expect("sweep");
+    assert_eq!(fx.deliveries(id).await[0].attempt, 0);
+
+    webhooks::Entity::delete_by_id(id)
+        .exec(&txn)
+        .await
+        .expect("delete webhook and pending delivery");
+    txn.commit().await.expect("commit delete");
+    assert!(fx.deliveries(id).await.is_empty());
 }
 
 #[tokio::test]
