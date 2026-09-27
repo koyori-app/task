@@ -143,10 +143,18 @@ pub async fn list_devices(
     auth: AuthUser,
 ) -> Result<Json<Vec<DeviceToken>>, AppError> {
     auth.require_session_or_device_token()?;
-    let rows = device_tokens::Entity::find()
+    let user = users::Entity::find_by_id(auth.user_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let mut query = device_tokens::Entity::find()
         .filter(device_tokens::Column::UserId.eq(auth.user_id))
         .filter(device_tokens::Column::RevokedAt.is_null())
-        .filter(device_tokens::Column::ExpiresAt.gt(Utc::now()))
+        .filter(device_tokens::Column::ExpiresAt.gt(Utc::now()));
+    if let Some(revoked_at) = user.sessions_revoked_at {
+        query = query.filter(device_tokens::Column::CreatedAt.gt(revoked_at));
+    }
+    let rows = query
         .order_by_desc(device_tokens::Column::CreatedAt)
         .order_by_desc(device_tokens::Column::Id)
         .all(&state.db)

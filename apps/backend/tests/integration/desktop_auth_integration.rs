@@ -507,13 +507,20 @@ async fn sessions_revoked_at_invalidates_older_device_tokens() {
         get_bearer(&app, "/v1/users/me/notifications", &old).await,
         StatusCode::UNAUTHORIZED
     );
-
-    let (new, _) = login_and_get_device_token(&mut app, &user).await;
+    let (new, new_id) = login_and_get_device_token(&mut app, &user).await;
     assert_eq!(
         get_bearer(&app, "/v1/users/me/notifications", &new).await,
         StatusCode::OK,
         "失効時刻より後に発行した端末は通る"
     );
+    let listed: Vec<serde_json::Value> = app
+        .get_with_bearer("/v1/users/me/devices", &new)
+        .await
+        .json()
+        .await
+        .expect("devices");
+    assert_eq!(listed.len(), 1, "有効な端末だけを返す");
+    assert_eq!(listed[0]["id"], new_id.to_string());
 
     app.cleanup_user(user.id).await;
 }
