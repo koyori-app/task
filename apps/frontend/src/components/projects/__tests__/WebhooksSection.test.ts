@@ -16,6 +16,8 @@ const { mutateAsync, queryState } = vi.hoisted(() => ({
     isPending: false,
     isError: false,
     error: null as unknown,
+    deliveriesIsError: false,
+    deliveriesError: null as unknown,
   },
 }));
 
@@ -30,7 +32,8 @@ vi.mock('@tanstack/vue-query', async (importOriginal) => {
         ? {
             data: { value: queryState.deliveries },
             isPending: { value: false },
-            isError: { value: false },
+            isError: { value: queryState.deliveriesIsError },
+            error: { value: queryState.deliveriesError },
           }
         : {
             data: { value: queryState.webhooks },
@@ -145,6 +148,8 @@ describe('WebhooksSection', () => {
     queryState.isPending = false;
     queryState.isError = false;
     queryState.error = null;
+    queryState.deliveriesIsError = false;
+    queryState.deliveriesError = null;
     document.body.innerHTML = '';
   });
 
@@ -279,5 +284,20 @@ describe('WebhooksSection', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/webhooks/{id}/deliveries'],
     });
+  });
+
+  it('配信履歴の 403 は管理者権限が必要だと表示する', async () => {
+    queryState.webhooks = [activeHook];
+    queryState.deliveriesIsError = true;
+    queryState.deliveriesError = { response: { status: 403 } };
+    mountView();
+    await flushPromises();
+
+    clickButton('配信履歴', row(activeHook.url));
+    await flushPromises();
+
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain(
+      'この操作にはプロジェクトの管理者権限が必要です',
+    );
   });
 });

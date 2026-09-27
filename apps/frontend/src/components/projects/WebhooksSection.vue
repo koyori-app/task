@@ -83,6 +83,11 @@ const deliveriesQuery = useQuery(
   })),
 );
 const deliveries = computed<WebhookDeliveryResponse[]>(() => deliveriesQuery.data.value ?? []);
+const deliveriesError = computed(() =>
+  deliveriesQuery.isError.value
+    ? webhookErrorMessage(deliveriesQuery.error.value, '配信履歴を読み込めませんでした')
+    : null,
+);
 
 const updateMutation = apiClient.useMutation('put', WEBHOOK_PATH);
 const deleteMutation = apiClient.useMutation('delete', WEBHOOK_PATH);
@@ -296,12 +301,8 @@ async function confirmDelete() {
         <!-- 配信履歴 -->
         <div v-if="expandedId === webhook.id" class="mt-3 rounded-md border bg-muted/30 p-3">
           <Skeleton v-if="deliveriesQuery.isPending.value" class="h-10 w-full" />
-          <p
-            v-else-if="deliveriesQuery.isError.value"
-            role="alert"
-            class="text-sm text-destructive"
-          >
-            配信履歴を読み込めませんでした
+          <p v-else-if="deliveriesError" role="alert" class="text-sm text-destructive">
+            {{ deliveriesError }}
           </p>
           <p v-else-if="deliveries.length === 0" class="text-sm text-muted-foreground">
             配信履歴はまだありません
