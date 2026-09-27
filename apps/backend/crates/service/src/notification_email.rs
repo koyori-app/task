@@ -37,24 +37,22 @@ fn truncate(value: &str) -> String {
 }
 
 /// payload の文字列フィールド。無ければ空文字（本題は出す）。
-fn field<'a>(notification: &'a notifications::Model, key: &str) -> &'a str {
-    notification
-        .payload
+fn field<'a>(payload: &'a serde_json::Value, key: &str) -> &'a str {
+    payload
         .get(key)
         .and_then(serde_json::Value::as_str)
         .unwrap_or("")
 }
 
-fn number(notification: &notifications::Model, key: &str) -> i64 {
-    notification
-        .payload
+fn number(payload: &serde_json::Value, key: &str) -> i64 {
+    payload
         .get(key)
         .and_then(serde_json::Value::as_i64)
         .unwrap_or(0)
 }
 
-fn severity_counts(notification: &notifications::Model) -> String {
-    let counts = notification.payload.get("counts");
+fn severity_counts(payload: &serde_json::Value) -> String {
+    let counts = payload.get("counts");
     let count = |key: &str| {
         counts
             .and_then(|c| c.get(key))
@@ -96,7 +94,7 @@ fn link(
             "{base}/{}/projects/{}/reviews?pr={}",
             tenant.display_id,
             project.key,
-            number(notification, "pr_number")
+            number(&notification.payload, "pr_number")
         )),
         _ => task.map(|task| {
             format!(
@@ -109,82 +107,82 @@ fn link(
 
 /// 件名と本文 1 行目。未知の種別は種別名と payload をそのまま出す
 /// （送らないより、何が起きたかを伝える方がよい）。
-fn subject_and_line(
-    notification: &notifications::Model,
+///
+/// Webhook の Discord 整形（`service::webhooks::discord_message`）もレビュー系の要約に使う。
+pub fn subject_and_line(
+    notification_type: &str,
+    payload: &serde_json::Value,
     task: Option<&tasks::Model>,
 ) -> (String, String) {
     let label = task_label(task);
-    match notification.notification_type.as_str() {
+    match notification_type {
         TYPE_ASSIGNED => (
             format!("[Koyori] {label} の担当になりました"),
             format!(
                 "{} があなたを {label} の担当（{}）に追加しました。",
-                field(notification, "assigned_by"),
-                field(notification, "role")
+                field(payload, "assigned_by"),
+                field(payload, "role")
             ),
         ),
         TYPE_MENTIONED => (
             format!("[Koyori] {label} でメンションされました"),
             format!(
                 "{} が {label} のコメントであなたにメンションしました。",
-                field(notification, "author")
+                field(payload, "author")
             ),
         ),
         TYPE_COMMENT_ADDED => (
             format!("[Koyori] {label} にコメントが追加されました"),
             format!(
                 "{} が {label} にコメントしました。",
-                field(notification, "author")
+                field(payload, "author")
             ),
         ),
         TYPE_STATUS_CHANGED => (
             format!(
                 "[Koyori] {label} のステータスが {} → {}",
-                field(notification, "from"),
-                field(notification, "to")
+                field(payload, "from"),
+                field(payload, "to")
             ),
             format!(
                 "{} が {label} のステータスを {} から {} へ変更しました。",
-                field(notification, "changed_by"),
-                field(notification, "from"),
-                field(notification, "to")
+                field(payload, "changed_by"),
+                field(payload, "from"),
+                field(payload, "to")
             ),
         ),
         TYPE_REVIEW_ROUND_CREATED => (
             format!(
                 "[Koyori] PR #{} のレビュー R{}（{}）",
-                number(notification, "pr_number"),
-                number(notification, "round"),
-                severity_counts(notification)
+                number(payload, "pr_number"),
+                number(payload, "round"),
+                severity_counts(payload)
             ),
             format!(
                 "{} が PR #{} のレビュー R{} を起票しました。\n{}",
-                field(notification, "reviewer"),
-                number(notification, "pr_number"),
-                number(notification, "round"),
-                field(notification, "summary_excerpt")
+                field(payload, "reviewer"),
+                number(payload, "pr_number"),
+                number(payload, "round"),
+                field(payload, "summary_excerpt")
             ),
         ),
         TYPE_REVIEW_FINDING_CHANGED => (
             format!(
                 "[Koyori] 指摘「{}」が {} → {}",
-                truncate(field(notification, "title")),
-                field(notification, "from"),
-                field(notification, "to")
+                truncate(field(payload, "title")),
+                field(payload, "from"),
+                field(payload, "to")
             ),
             format!(
                 "{} が PR #{} の指摘「{}」を {} から {} へ変更しました。",
-                field(notification, "actor"),
-                number(notification, "pr_number"),
-                truncate(field(notification, "title")),
-                field(notification, "from"),
-                field(notification, "to")
+                field(payload, "actor"),
+                number(payload, "pr_number"),
+                truncate(field(payload, "title")),
+                field(payload, "from"),
+                field(payload, "to")
             ),
         ),
-        other => (
-            format!("[Koyori] {other}"),
-            format!("{other}: {}", notification.payload),
-        ),
+        other => (format!("[Koyori] {other}"), format!("{other}: {payload}")),
     }
 }
 
@@ -195,7 +193,8 @@ pub fn render(
     tenant: &tenants::Model,
     app_url: &str,
 ) -> Mail {
-    let (subject, line) = subject_and_line(notification, task);
+    let (subject, line) =
+        subject_and_line(&notification.notification_type, &notification.payload, task);
     let url = link(notification, task, project, tenant, app_url);
 
     let text = match &url {

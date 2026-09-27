@@ -483,10 +483,15 @@ pub struct Enabled2fa {
 
 impl TestApp {
     pub async fn new() -> Self {
+        Self::new_with_webhook_loopback(false).await
+    }
+
+    pub async fn new_with_webhook_loopback(allow: bool) -> Self {
         init_tracing();
         ensure_test_env();
         let mut settings = settings::load_settings().expect("load settings from .env");
         settings.email_verification_app_url = "http://localhost:3000".to_string();
+        settings.webhook_allow_loopback = allow;
         Self::build(settings).await
     }
 

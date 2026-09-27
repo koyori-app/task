@@ -12,6 +12,7 @@ pub mod personal_tokens;
 pub mod reviews;
 pub mod tenants;
 pub mod users;
+pub mod webhooks;
 
 pub fn create_routes() -> OpenApiRouter<AppState> {
     // ドライブはユーザーがアップロードしたファイルをそのまま配信するため、

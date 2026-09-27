@@ -33,3 +33,4 @@ pub mod tenant_members;
 pub mod tenants;
 pub mod time_tracking;
 pub mod users;
+pub mod webhooks;

@@ -53,6 +53,7 @@ mod tenant_members_integration;
 mod tenants_integration;
 mod time_tracking_integration;
 mod webauthn_integration;
+mod webhooks_integration;
 
 #[test]
 fn every_integration_file_is_declared() {

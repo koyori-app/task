@@ -237,6 +237,21 @@ pub async fn create_comment(
         &actually_mentioned,
     )
     .await?;
+    let author = users::Entity::find_by_id(auth.user_id)
+        .one(&txn)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("comment author {} has no user row", auth.user_id))?;
+    service::webhooks::emit(
+        &txn,
+        project_id,
+        auth.user_id,
+        service::webhooks::EVENT_COMMENT_CREATED,
+        serde_json::json!({
+            "task": { "id": task.id, "seq_id": task.seq_id, "title": &task.title },
+            "comment": { "id": comment.id, "author": author.username, "body": &comment.body },
+        }),
+    )
+    .await?;
     txn.commit().await?;
 
     Ok((StatusCode::CREATED, Json(comment.into())))
