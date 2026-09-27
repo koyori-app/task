@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use crate::common::TestApp;
 use axum::http::StatusCode;
 use entity::scopes::Scope;
@@ -6,7 +9,8 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
     prelude::Uuid,
 };
-use wiremock::matchers::method;
+use tokio::sync::Notify;
+use wiremock::matchers::{header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // 外部向け Webhook（TASK-227）の統合テスト。仕様は docs/features/tasks/10.webhooks.md。
@@ -157,7 +161,7 @@ async fn mock_server(status: u16) -> MockServer {
     server
 }
 
-/// 変更は Admin / オーナーだけ（Member は 403）、一覧は Member も可。secret と URL は一覧に出ない。
+/// 変更は Admin / オーナーだけ（Member は 403）。一覧の URL は管理者だけに返す。
 #[tokio::test]
 async fn crud_and_authorization() {
     let mut fx = setup().await;
@@ -193,6 +197,34 @@ async fn crud_and_authorization() {
     assert!(!listed.to_string().contains("json-token"));
 
     fx.login(&owner).await;
+    let listed = fx.app.get_with_session(&fx.webhooks_path()).await;
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed: serde_json::Value = listed.json().await.expect("json");
+    assert_eq!(listed[0]["url"], url, "管理者は一覧で送信先を識別できる");
+    assert!(listed[0].get("secret").is_none());
+    let read_only = fx
+        .app
+        .insert_pat(owner.id, fx.tenant_id, vec![Scope::ReadProject], None)
+        .await;
+    let listed = fx
+        .app
+        .get_with_bearer(&fx.webhooks_path(), &read_only)
+        .await;
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed: serde_json::Value = listed.json().await.expect("json");
+    assert_eq!(
+        listed[0]["url"], "[redacted]",
+        "管理者本人でも読み取り専用 PAT には伏せる"
+    );
+    let admin = fx
+        .app
+        .insert_pat(owner.id, fx.tenant_id, vec![Scope::AdminProject], None)
+        .await;
+    let listed = fx.app.get_with_bearer(&fx.webhooks_path(), &admin).await;
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed: serde_json::Value = listed.json().await.expect("json");
+    assert_eq!(listed[0]["url"], url);
+
     let updated = fx
         .app
         .put_json_with_session(
@@ -237,7 +269,7 @@ async fn crud_and_authorization() {
 }
 
 #[tokio::test]
-async fn discord_url_is_only_returned_to_admin_operations() {
+async fn discord_url_is_only_returned_to_admins() {
     let mut fx = setup().await;
     let (owner, member) = (fx.owner.clone(), fx.member.clone());
     let url = "https://203.0.113.10/api/webhooks/123/discord-token?secret=token";
@@ -249,6 +281,20 @@ async fn discord_url_is_only_returned_to_admin_operations() {
     let listed: serde_json::Value = listed.json().await.expect("json");
     assert_eq!(listed[0]["url"], "[redacted]");
     assert!(!listed.to_string().contains("discord-token"));
+    let member_admin_scope = fx
+        .app
+        .insert_pat(member.id, fx.tenant_id, vec![Scope::AdminProject], None)
+        .await;
+    let listed = fx
+        .app
+        .get_with_bearer(&fx.webhooks_path(), &member_admin_scope)
+        .await;
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed: serde_json::Value = listed.json().await.expect("json");
+    assert_eq!(
+        listed[0]["url"], "[redacted]",
+        "スコープだけでは完全な URL を見せない"
+    );
     let denied = fx
         .app
         .put_json_with_session(
@@ -259,6 +305,10 @@ async fn discord_url_is_only_returned_to_admin_operations() {
     assert_eq!(denied.status(), StatusCode::FORBIDDEN);
 
     fx.login(&owner).await;
+    let listed = fx.app.get_with_session(&fx.webhooks_path()).await;
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed: serde_json::Value = listed.json().await.expect("json");
+    assert_eq!(listed[0]["url"], url);
     let updated = fx
         .app
         .put_json_with_session(
@@ -620,6 +670,129 @@ async fn five_exhausted_deliveries_deactivate_webhook() {
     let webhook = fx.webhook(id).await;
     assert!(webhook.is_active);
     assert_eq!(webhook.failure_streak, 0);
+}
+
+#[tokio::test]
+async fn concurrent_success_and_fifth_failure_keep_webhook_active() {
+    let fx = setup().await;
+    let server = MockServer::start().await;
+    let id = fx
+        .create_webhook(&server.uri(), &["task.created"], "json")
+        .await;
+    fx.create_task("成功").await;
+    fx.create_task("失敗").await;
+    let deliveries = fx.deliveries(id).await;
+    let (success, failure) = (&deliveries[0], &deliveries[1]);
+    for (delivery, offset) in [(success, 2), (failure, 1)] {
+        let mut active: webhook_deliveries::ActiveModel = delivery.clone().into();
+        active.next_attempt_at = Set(Some(
+            (chrono::Utc::now() - chrono::Duration::seconds(offset)).into(),
+        ));
+        if delivery.id == failure.id {
+            active.attempt = Set(4);
+        }
+        active
+            .update(&fx.app.state.db)
+            .await
+            .expect("prepare delivery");
+    }
+    let mut active: webhooks::ActiveModel = fx.webhook(id).await.into();
+    active.failure_streak = Set(4);
+    active
+        .update(&fx.app.state.db)
+        .await
+        .expect("prepare streak");
+
+    let ready = Arc::new(Notify::new());
+    let signal = ready.clone();
+    Mock::given(method("POST"))
+        .and(header("x-task-delivery", success.id.to_string()))
+        .respond_with(move |_: &wiremock::Request| {
+            signal.notify_one();
+            ResponseTemplate::new(200).set_delay(Duration::from_millis(500))
+        })
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(header("x-task-delivery", failure.id.to_string()))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+
+    let first_state = job_state(&fx.app);
+    let first =
+        tokio::spawn(async move { job::webhook_delivery::send_pending_once(&first_state).await });
+    tokio::time::timeout(Duration::from_secs(5), ready.notified())
+        .await
+        .expect("first delivery started");
+    let second_state = job_state(&fx.app);
+    let second =
+        tokio::spawn(async move { job::webhook_delivery::send_pending_once(&second_state).await });
+    first.await.expect("first worker").expect("first sweep");
+    second.await.expect("second worker").expect("second sweep");
+
+    let rows = fx.deliveries(id).await;
+    assert!(
+        rows.iter()
+            .find(|row| row.id == success.id)
+            .unwrap()
+            .delivered_at
+            .is_some()
+    );
+    assert_eq!(
+        rows.iter()
+            .find(|row| row.id == failure.id)
+            .unwrap()
+            .attempt,
+        5
+    );
+    let webhook = fx.webhook(id).await;
+    assert!(webhook.is_active, "成功後の 1 回の打ち止めでは停止しない");
+    assert_eq!(webhook.failure_streak, 1);
+}
+
+#[tokio::test]
+async fn purge_keeps_old_pending_deliveries() {
+    let fx = setup().await;
+    let id = fx
+        .create_webhook("https://203.0.113.10/hook", &["task.created"], "json")
+        .await;
+    for n in 0..3 {
+        fx.create_task(&format!("古い配信 {n}")).await;
+    }
+    let rows = fx.deliveries(id).await;
+    let old = chrono::Utc::now() - chrono::Duration::days(91);
+    for (index, row) in rows.iter().enumerate() {
+        let mut active: webhook_deliveries::ActiveModel = row.clone().into();
+        active.created_at = Set(old.into());
+        active.next_attempt_at = Set(match index {
+            0 => Some(old.into()),
+            1 => Some((chrono::Utc::now() + chrono::Duration::days(1)).into()),
+            _ => None,
+        });
+        active.update(&fx.app.state.db).await.expect("age delivery");
+    }
+    // 1 回の掃き出し上限 50 件を越えて送信待ちが残った場合を再現する。
+    for _ in 0..49 {
+        let mut active: webhook_deliveries::ActiveModel = rows[2].clone().into();
+        active.id = Set(Uuid::new_v4());
+        active.created_at = Set(old.into());
+        active.next_attempt_at = Set(None);
+        active
+            .insert(&fx.app.state.db)
+            .await
+            .expect("add old history");
+    }
+
+    assert_eq!(
+        job::webhook_delivery::purge_old(&job_state(&fx.app))
+            .await
+            .expect("purge"),
+        50
+    );
+    let remaining = fx.deliveries(id).await;
+    assert_eq!(remaining.len(), 2);
+    assert!(remaining.iter().all(|row| row.next_attempt_at.is_some()));
 }
 
 /// discord 形式は content / embeds を送り、署名ヘッダを付けない。

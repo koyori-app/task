@@ -12,7 +12,7 @@ pub struct WebhookResponse {
     pub id: Uuid,
     #[schema(value_type = String, format = "uuid")]
     pub project_id: Uuid,
-    /// 一覧では `[redacted]`。作成・更新の応答は完全な URL を返す。
+    /// 一覧では管理者に完全な URL、それ以外には `[redacted]` を返す。
     pub url: String,
     pub events: Vec<String>,
     /// `json` | `discord`

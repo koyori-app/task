@@ -257,7 +257,7 @@ PAT に `admin:project` を付けても、発行者が Member なら 403。
 | `POST` | `/webhooks` | `admin:project` + プロジェクト Admin |
 | `PUT` | `/webhooks/{id}` | `admin:project` + プロジェクト Admin |
 | `DELETE` | `/webhooks/{id}` | `admin:project` + プロジェクト Admin |
-| `GET` | `/webhooks/{id}/deliveries` | `read:project` |
+| `GET` | `/webhooks/{id}/deliveries` | `admin:project` + プロジェクト Admin |
 | `POST` | `/webhooks/{id}/deliveries/{did}/redeliver` | `admin:project` + プロジェクト Admin |
 
 ## DB アクセス回数

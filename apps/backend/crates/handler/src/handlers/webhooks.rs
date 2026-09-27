@@ -85,12 +85,31 @@ pub async fn list_webhooks(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Vec<WebhookResponse>>, AppError> {
     ensure_read_access(&state, &auth, tenant_id, project_id).await?;
+    let is_admin = if auth.require_scope(Scope::AdminProject).is_ok() {
+        match require_project_admin(&state, tenant_id, project_id, auth.user_id).await {
+            Ok(()) => true,
+            Err(AppError::Forbidden) => false,
+            Err(error) => return Err(error),
+        }
+    } else {
+        false
+    };
     let rows = webhooks::Entity::find()
         .filter(webhooks::Column::ProjectId.eq(project_id))
         .order_by_asc(webhooks::Column::CreatedAt)
         .all(&state.db)
         .await?;
-    Ok(Json(rows.into_iter().map(Into::into).collect()))
+    Ok(Json(
+        rows.into_iter()
+            .map(|row| {
+                if is_admin {
+                    WebhookResponse::for_admin(row)
+                } else {
+                    row.into()
+                }
+            })
+            .collect(),
+    ))
 }
 
 #[axum::debug_handler]

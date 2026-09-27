@@ -83,7 +83,9 @@ pub async fn send_pending_once(state: &JobState) -> Result<usize, anyhow::Error>
         else {
             continue;
         };
+        // 同じ Webhook の送信結果を直列化し、停止判定を最新の状態から行う。
         let webhook = webhooks::Entity::find_by_id(delivery.webhook_id)
+            .lock(LockType::Update)
             .one(&txn)
             .await?
             .ok_or_else(|| anyhow::anyhow!("webhook {} not found", delivery.webhook_id))?;
@@ -203,6 +205,7 @@ async fn send(
 pub async fn purge_old(state: &JobState) -> Result<u64, anyhow::Error> {
     let result = webhook_deliveries::Entity::delete_many()
         .filter(webhook_deliveries::Column::CreatedAt.lt(chrono::Utc::now() - RETENTION))
+        .filter(webhook_deliveries::Column::NextAttemptAt.is_null())
         .exec(&state.db)
         .await?;
     Ok(result.rows_affected)
