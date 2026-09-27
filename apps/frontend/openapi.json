@@ -20838,7 +20838,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "description": "種別の分類。`review_` 接頭辞の有無で分ける。",
+              "description": "種別の分類。既知のレビュー通知種別に含まれるかで分ける。",
               "enum": ["task", "review"]
             }
           },

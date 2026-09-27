@@ -85,7 +85,7 @@ pub struct NotificationListResponse {
     pub notifications: Vec<NotificationItem>,
 }
 
-/// 種別の分類。`review_` 接頭辞の有無で分ける。
+/// 種別の分類。既知のレビュー通知種別に含まれるかで分ける。
 #[derive(Serialize, Deserialize, ToSchema, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum NotificationKind {
