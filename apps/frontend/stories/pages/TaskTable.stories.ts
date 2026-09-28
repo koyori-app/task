@@ -911,6 +911,11 @@ export const ListViewDndSpike: Story = {
     );
 
     // In Progress の「OAuth 対応を実装する」を In Review の群へ運ぶ。
+    //
+    // @formkit/drag-and-drop は mouse には native HTML5 drag を使う
+    // （node に draggable=true を付ける）。userEvent.pointer の座標列や
+    // playwright の dragTo では発火せぬことを実測済みゆえ、
+    // DragEvent の列を dataTransfer 込みで直に撃つ。
     const rows = [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')];
     const source = rows.find((row) => row.textContent?.includes('OAuth 対応を実装する'));
     if (!source) throw new Error('source row not found');
@@ -920,17 +925,14 @@ export const ListViewDndSpike: Story = {
       ?.querySelector<HTMLElement>('[data-dnd-status-id]');
     if (!target) throw new Error('target container not found');
 
-    // @formkit/drag-and-drop は native DnD API でなく pointer events の
-    // synthetic drag ゆえ、userEvent.pointer の座標列で撃てるかがこの story の問い。
-    const user = userEvent.setup();
-    const from = source.getBoundingClientRect();
-    const to = target.getBoundingClientRect();
-    await user.pointer([
-      { keys: '[MouseLeft>]', target: source, coords: { x: from.x + 12, y: from.y + 12 } },
-      { coords: { x: from.x + 12, y: from.y + 40 } },
-      { coords: { x: to.x + 24, y: to.y + 24 }, target },
-      { keys: '[/MouseLeft]' },
-    ]);
+    const dataTransfer = new DataTransfer();
+    const fire = (el: HTMLElement, type: string) =>
+      el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer }));
+    fire(source, 'dragstart');
+    fire(target, 'dragenter');
+    fire(target, 'dragover');
+    fire(target, 'drop');
+    fire(source, 'dragend');
 
     await waitFor(() => expect(target.textContent).toContain('OAuth 対応を実装する'));
   },
