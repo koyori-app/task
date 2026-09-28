@@ -6,6 +6,7 @@ use crate::AppState;
 
 pub mod admin;
 pub mod auth;
+pub mod desktop;
 pub mod drive;
 pub mod github;
 pub mod personal_tokens;
@@ -23,6 +24,7 @@ pub fn create_routes() -> OpenApiRouter<AppState> {
             OpenApiRouter::new()
                 .nest("/admin", crate::routes::admin::routes())
                 .nest("/auth", crate::routes::auth::routes())
+                .nest("/desktop", crate::routes::desktop::routes())
                 .nest("/personal_tokens", crate::routes::personal_tokens::routes())
                 .nest("/users", crate::routes::users::routes())
                 .nest("/tenants", crate::routes::tenants::routes())

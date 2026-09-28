@@ -84,7 +84,7 @@ pub async fn list_tenants(
     // （apps/backend/docs/tenant-project-authz.md）。
     auth.require_scope(Scope::AdminTenant)?;
     let items = match &auth.method {
-        AuthMethod::Session => {
+        AuthMethod::Session | AuthMethod::DeviceToken { .. } => {
             // tenant_id → 自分の role。membership の判定と member_role の欄の両方に使う。
             let joined_roles: HashMap<Uuid, TenantRole> = tenant_members::Entity::find()
                 .filter(tenant_members::Column::UserId.eq(auth.user_id))
@@ -220,6 +220,7 @@ pub async fn update_tenant(
     // テナント設定の変更はオーナー専用操作。
     // ensure_tenant_access ではなく ensure_tenant_owner を使い、
     // プロジェクトメンバーによる誤操作を防ぐ。
+    auth.require_session()?;
     auth.require_scope(Scope::AdminTenant)?;
     let tenant = auth.ensure_tenant_owner(&state, id).await?;
 
@@ -260,6 +261,7 @@ pub async fn delete_tenant(
     // テナント削除はオーナー専用操作。
     // ensure_tenant_access ではなく ensure_tenant_owner を使い、
     // プロジェクトメンバーによる削除を防ぐ。
+    auth.require_session()?;
     auth.require_scope(Scope::AdminTenant)?;
     auth.ensure_tenant_owner(&state, id).await?;
     tenants::Entity::delete_by_id(id).exec(&state.db).await?;

@@ -6,6 +6,7 @@ export type ReviewFinding = components['schemas']['FindingResponse'];
 export type Review = components['schemas']['ReviewResponse'];
 export type ReviewedPullRequest = components['schemas']['ReviewedPullRequest'];
 export type ReviewSummary = components['schemas']['ReviewSummaryResponse'];
+export type ReviewGate = components['schemas']['ReviewGate'];
 
 export const SEVERITIES: FindingSeverity[] = ['high', 'medium', 'low', 'nit'];
 export const STATES: FindingState[] = ['open', 'fixed', 'verified', 'deferred', 'rejected'];
@@ -25,91 +26,24 @@ export const STATE_LABELS: Record<FindingState, string> = {
   rejected: 'Rejected',
 };
 
-/** マージ前に解消が必要な重大度（backend の `FindingSeverity::blocks_merge` と対）。 */
-export function blocksMerge(severity: FindingSeverity): boolean {
-  return severity === 'high' || severity === 'medium';
-}
-
-/**
- * 繰り延べ（deferred）を許す重大度（backend の `FindingSeverity::can_defer` と対）。
- *
- * 繰り延べはマージ可否の集計から外れるので、マージ前必須の重大度には許さない。
- * サーバーも 409 で拒否する。
- */
-export function canDefer(severity: FindingSeverity): boolean {
-  return !blocksMerge(severity);
-}
-
-/** マージ判定で「未解決」と数える状態（backend の `counts_as_unresolved` と対）。 */
+/** マージ判定で「未解決」と数える状態（backend の `counts_as_unresolved` と対）。一覧の並びに使う。 */
 export function countsAsUnresolved(state: FindingState): boolean {
   return state === 'open' || state === 'fixed';
-}
-
-/**
- * 遷移そのものが許されるか。backend の `service::reviews::can_transition` と同じ表。
- *
- * 画面側で先に弾くのは、押しても 409 になるだけのボタンを出さないため。
- * ずれると「押せるのに失敗する」ボタンができるので、変えるときは両方直す。
- */
-export function canTransition(from: FindingState, to: FindingState): boolean {
-  const table: Record<FindingState, FindingState[]> = {
-    open: ['fixed', 'deferred', 'rejected'],
-    fixed: ['verified', 'open'],
-    // verified は終端。誤りだったと分かったら新しいラウンドで出し直す
-    verified: [],
-    deferred: ['open'],
-    rejected: ['open'],
-  };
-  return table[from].includes(to);
-}
-
-/** レビュー側だけが行える遷移か（backend の `requires_reviewer_side` と対）。 */
-export function requiresReviewerSide(from: FindingState, to: FindingState): boolean {
-  return from === 'fixed' && (to === 'verified' || to === 'open');
-}
-
-/**
- * 指摘を出したラウンドの作成者だけが行える遷移か
- * （backend の `requires_finding_author` と対）。
- *
- * 取り下げだけレビュー側より狭い。ラウンドは指摘ゼロでも作れるので、後から出した
- * ラウンドの作成者にまで認めると、空のラウンドを 1 本作るだけで他人の High を
- * 棄却でき、マージ基準を 1 人で迂回できてしまう。
- */
-export function requiresFindingAuthor(from: FindingState, to: FindingState): boolean {
-  return (from === 'open' && to === 'rejected') || (from === 'rejected' && to === 'open');
 }
 
 export type FindingAction = {
   to: FindingState;
   label: string;
-  /** 押せない理由。null なら押せる */
-  disabledReason: string | null;
 };
 
 /**
- * 指摘の現在の状態から、画面に出す操作を導く。
+ * 指摘に出す操作。遷移先は backend が要求者ごとに返す `available_actions` だけを使う。
  *
- * `viewerId` が `fixed` を宣言した本人なら verified は押せない
- * （自分の修正を自分で確認済みにはできない）。
+ * 遷移規則と役割規則（誰が確認・差し戻し・取り下げをできるか、High / Medium は
+ * 繰り延べられない、自分の修正は自分で確認できない）は backend だけが持つ。
+ * 画面に写すと片方だけ直したときに「押せるのに失敗する」ボタンができる。
  */
-export function findingActions(
-  finding: ReviewFinding,
-  viewerId: string,
-  /** その指摘を出したラウンドの作成者。分からなければ取り下げを出さない */
-  findingAuthorId?: string | null,
-  /**
-   * 閲覧者がこの指摘のレビュー側か（その指摘のラウンド以降のラウンドを出しているか）。
-   * ラウンド一覧が引けないうちは false 側に倒し、レビュー側限定の操作を出さない
-   */
-  isReviewerSide = false,
-  /**
-   * 閲覧者がテナントオーナーとして取り下げを代行できるか——指摘を出したラウンドの
-   * 作成者がテナントの利用者でなくなっている場合だけ（backend の
-   * `may_reject_on_behalf` と対。仕様 §3）。判定材料が揃わないうちは false に倒す
-   */
-  mayRejectOnBehalf = false,
-): FindingAction[] {
+export function findingActions(finding: ReviewFinding): FindingAction[] {
   const labels: Partial<Record<FindingState, string>> = {
     fixed: '修正した',
     verified: '確認した',
@@ -117,111 +51,78 @@ export function findingActions(
     rejected: '指摘を取り下げる',
     open: finding.state === 'fixed' ? 'レビューに戻す' : '再オープン',
   };
-
-  return STATES.filter(
-    (to) =>
-      canTransition(finding.state, to) &&
-      // High / Medium は繰り延べられない（押しても 409 になるボタンを出さない）
-      (to !== 'deferred' || canDefer(finding.severity)) &&
-      // 取り下げは指摘を出した本人だけ（押しても 403 になるボタンを出さない）。
-      // 例外は「作成者が不在の指摘へのオーナー代行」（仕様 §3）
-      (!requiresFindingAuthor(finding.state, to) ||
-        viewerId === findingAuthorId ||
-        mayRejectOnBehalf) &&
-      // 確認と差し戻しはレビュー側だけ（同上。修正だけを行う人には出さない）
-      (!requiresReviewerSide(finding.state, to) || isReviewerSide),
-  ).map((to) => {
-    const selfVerification = to === 'verified' && finding.fixed_by === viewerId;
-    return {
-      to,
-      label: labels[to] ?? STATE_LABELS[to],
-      disabledReason: selfVerification ? '自分の修正は自分で確認できません' : null,
-    };
-  });
+  return finding.available_actions.map((to) => ({ to, label: labels[to] ?? STATE_LABELS[to] }));
 }
 
 /**
- * マージ可否の見出しと説明。
+ * マージ可否の見出しと説明。判定は backend の `gate` をそのまま使い、再計算しない。
  *
- * 「レビューが 1 件も無い」と「レビュー済みで指摘なし」は別物なので出し分ける
- * （backend も未レビューの PR を mergeable にしない）。レビューした commit は
- * 出しておく——手元の HEAD と見比べれば、レビュー後に積まれたコミットに気づける。
+ * 「レビューが 1 件も無い」と「レビュー済みで指摘なし」は別物なので出し分ける。
+ * レビューした commit は出しておく——手元の HEAD と見比べれば、レビュー後に
+ * 積まれたコミットに気づける。
  */
-export type MergeVerdictKind =
-  | 'unlinked'
-  | 'unreviewed'
-  | 'blocked'
-  | 'stale'
-  | 'unknown-freshness'
-  | 'mergeable';
-
-/** 「可」を出してよいのは `mergeable` だけ。ほかはすべてゲートとして通さない。 */
 export function mergeVerdict(summary: ReviewSummary): {
-  kind: MergeVerdictKind;
+  kind: ReviewGate;
   title: string;
   detail: string;
 } {
-  // 連携が無いと集計の視界が空になり、空のラウンド 1 本で「可」を作れてしまう。
-  // CLI だけで塞いでも、人間の主経路である画面が素通しなら意味がない（仕様 §8）
-  if (!summary.repository) {
-    return {
-      kind: 'unlinked',
-      title: 'リポジトリ未確定',
-      detail:
-        'GitHub 連携が無いため、どのリポジトリの PR を見た集計か決まりません。マージの判断には使えません',
-    };
-  }
-  if (summary.rounds === 0) {
-    return {
-      kind: 'unreviewed',
-      title: '未レビュー',
-      detail: 'まだレビューされていません。レビューを 1 ラウンド出してください',
-    };
-  }
   const reviewed = summary.latest_head_sha
     ? `最新ラウンドは ${summary.latest_head_sha.slice(0, 7)} を見ています`
     : '';
-  if (!summary.mergeable) {
-    return {
-      kind: 'blocked',
-      title: `マージ不可（${summary.blocking} 件）`,
-      detail: ['High / Medium が未解決です。Low / Nit は繰り延べできます', reviewed]
-        .filter(Boolean)
-        .join(' · '),
-    };
+  const join = (...parts: string[]) => parts.filter(Boolean).join(' · ');
+  const kind = summary.gate;
+  switch (kind) {
+    case 'unlinked':
+      return {
+        kind,
+        title: 'リポジトリ未確定',
+        detail:
+          'GitHub 連携が無いため、どのリポジトリの PR を見た集計か決まりません。マージの判断には使えません',
+      };
+    case 'unreviewed':
+      return {
+        kind,
+        title: '未レビュー',
+        detail: 'まだレビューされていません。レビューを 1 ラウンド出してください',
+      };
+    case 'blocked':
+      return {
+        kind,
+        title: `マージ不可（${summary.blocking} 件）`,
+        detail: join('High / Medium が未解決です。Low / Nit は繰り延べできます', reviewed),
+      };
+    case 'stale_unknown':
+      return {
+        kind,
+        title: '鮮度不明',
+        detail: join(
+          'High / Medium の未解決はありませんが、現在の HEAD を確認できていません',
+          reviewed,
+        ),
+      };
+    case 'outdated':
+      return {
+        kind,
+        title: 'レビューが古い',
+        detail: join(
+          `レビュー後にコミットが積まれています（現在 ${(summary.cached_pr_head_sha ?? '').slice(0, 7)}）`,
+          reviewed,
+        ),
+      };
+    case 'ready':
+      return {
+        kind,
+        title: 'マージ可',
+        // キャッシュは push では更新されないので、いつ時点の確認かを必ず添える
+        detail: join(
+          'High / Medium の未解決はありません',
+          reviewed,
+          summary.pr_head_checked_at
+            ? `GitHub 確認: ${new Date(summary.pr_head_checked_at).toLocaleString('ja-JP')} 時点`
+            : '',
+        ),
+      };
   }
-  // ここから先は未解決ゼロ。レビュー後にコミットが積まれていないかを見る。
-  // 判定は片道降格——「可」以外へ落とすのにだけ使い、「可」の保証には使わない
-  if (!summary.cached_pr_head_sha) {
-    return {
-      kind: 'unknown-freshness',
-      title: '鮮度不明',
-      detail: ['High / Medium の未解決はありませんが、現在の HEAD を確認できていません', reviewed]
-        .filter(Boolean)
-        .join(' · '),
-    };
-  }
-  if (summary.cached_pr_head_sha !== summary.latest_head_sha) {
-    return {
-      kind: 'stale',
-      title: 'レビューが古い',
-      detail: [
-        `レビュー後にコミットが積まれています（現在 ${summary.cached_pr_head_sha.slice(0, 7)}）`,
-        reviewed,
-      ]
-        .filter(Boolean)
-        .join(' · '),
-    };
-  }
-  // キャッシュは push では更新されないので、いつ時点の確認かを必ず添える
-  const checkedAt = summary.pr_head_checked_at
-    ? `GitHub 確認: ${new Date(summary.pr_head_checked_at).toLocaleString('ja-JP')} 時点`
-    : '';
-  return {
-    kind: 'mergeable',
-    title: 'マージ可',
-    detail: ['High / Medium の未解決はありません', reviewed, checkedAt].filter(Boolean).join(' · '),
-  };
 }
 
 /** 指摘の位置（`file:line`）。位置情報が無ければ null。 */

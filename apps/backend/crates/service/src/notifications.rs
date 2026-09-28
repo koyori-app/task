@@ -528,7 +528,7 @@ pub async fn review_finding_payload<C: ConnectionTrait>(
     actor_id: Uuid,
     note: Option<&str>,
 ) -> Result<Json, AppError> {
-    Ok(serde_json::json!({
+    let mut payload = serde_json::json!({
         "project_id": review.project_id,
         "review_id": review.id,
         "finding_id": finding.id,
@@ -541,5 +541,13 @@ pub async fn review_finding_payload<C: ConnectionTrait>(
         "to": to.as_str(),
         "actor": username(db, actor_id).await?,
         "note": note,
-    }))
+    });
+    // 繰り延べ先タスクへ遷移できるよう、起票・再オープン直後の値を載せる
+    // （`finding` は遷移後の行）
+    if to == FindingState::Deferred
+        && let Some(task_id) = finding.deferred_task_id
+    {
+        payload["deferred_task_id"] = serde_json::json!(task_id);
+    }
+    Ok(payload)
 }

@@ -21,7 +21,9 @@ const pageContext = usePageContext();
 const breadcrumbs = useBreadcrumbs(() => pageContext);
 // サインイン前に開くページ。認証ガードを外さないと /signin へ飛ばされる
 const isAuthPage = computed(() =>
-  ['/signin', '/signup', '/auth/reset-password', '/verify-email'].includes(pageContext.urlPathname),
+  ['/signin', '/signup', '/auth/reset-password', '/verify-email', '/desktop/authorize'].includes(
+    pageContext.urlPathname,
+  ),
 );
 
 const { meQuery, logout } = useAuthSession({
