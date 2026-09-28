@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, shallowRef, watch, type Ref } from 'vue';
+import { dragAndDrop } from '@formkit/drag-and-drop/vue';
+import { emitTransferAsStatusChange } from '@/components/tasks/task-grouped-dnd';
 import { PhCaretDown, PhPlus } from '@phosphor-icons/vue';
 import { CornerDownLeft } from '@lucide/vue';
 import { PhCalendarPlus, PhFlag, PhTag } from '@phosphor-icons/vue';
@@ -71,6 +73,45 @@ const emit = defineEmits<{
   'toggle:label': [task: TaskResponse, labelId: string, checked: boolean];
   'update:sorting': [sorting: TaskListSortingState];
 }>();
+
+// ---- spike: 群のあいだの DnD（@formkit/drag-and-drop） ----
+// 正本は親（query cache）である。lib には群ごとの鏡写しを渡し、
+// 群をまたいだ transfer だけを update:status として親へ流す。
+// 群の中の並べ替えは保存先（タスクの順序欄が API に無い）ゆえ扱わぬ——
+// 見た目は動くが、正本が変われば props から引き直されて戻る。
+const dndValues = new Map<string, Ref<TaskResponse[]>>();
+const dndRegistered = new Set<string>();
+
+function dndTasksOf(group: TaskGroup): TaskResponse[] {
+  return dndValues.get(group.status.id)?.value ?? group.tasks;
+}
+
+function registerDndGroup(statusId: string, el: unknown) {
+  if (!(el instanceof HTMLElement) || dndRegistered.has(statusId)) return;
+  dndRegistered.add(statusId);
+  const values = shallowRef<TaskResponse[]>([
+    ...(props.groups.find((g) => g.status.id === statusId)?.tasks ?? []),
+  ]);
+  dndValues.set(statusId, values);
+  dragAndDrop<TaskResponse>({
+    parent: shallowRef(el),
+    values,
+    group: 'task-grouped-list',
+    draggable: (child) => child.hasAttribute('data-dnd-task'),
+    onTransfer: (data) =>
+      emitTransferAsStatusChange(data, (task, statusId) => emit('update:status', task, statusId)),
+  });
+}
+
+watch(
+  () => props.groups,
+  (groups) => {
+    for (const g of groups) {
+      const mirror = dndValues.get(g.status.id);
+      if (mirror) mirror.value = [...g.tasks];
+    }
+  },
+);
 
 // 折りたたみは画面内の一時状態。URL には載せない（共有したい情報ではない）
 const collapsed = ref<Record<string, boolean>>({});
@@ -268,61 +309,67 @@ async function commitAdding(statusId: string) {
               </Button>
             </div>
 
-            <template v-for="task in group.tasks" :key="task.id">
-              <TaskGroupedRow
-                :task="task"
-                :statuses="statuses"
-                :project-labels="projectLabels"
-                :members="members"
-                :pending-field="pending[task.id]"
-                :error="errors[task.id]"
-                :comment-pending="!!commentPendingTaskIds?.[task.id]"
-                :selected="selectedTaskId === task.id"
-                :expanded="!!expandedTaskIds[task.id]"
-                @select="selectTask(task.id)"
-                @toggle:subtasks="toggleSubtasks(task)"
-                @open="emit('open', task)"
-                @update:status="(statusId) => emit('update:status', task, statusId)"
-                @update:priority="(priority) => emit('update:priority', task, priority)"
-                @update:soft-deadline="(iso) => emit('update:softDeadline', task, iso)"
-                @toggle:assignee="
-                  (userId, checked) => emit('toggle:assignee', task, userId, checked)
-                "
-                @toggle:label="(labelId, checked) => emit('toggle:label', task, labelId, checked)"
-                :members-state="membersState"
-                :on-comment="(body: string) => onComment(task, body)"
-              />
-              <TaskSubtaskBranch
-                v-if="expandedTaskIds[task.id]"
-                :parent-task="task"
-                :filters="{
-                  status_id: group.status.id,
-                  label_id: labelId ?? undefined,
-                  is_archived: false,
-                }"
-                :tenant-id="tenantId"
-                :project-id="projectId"
-                :statuses="statuses"
-                :project-labels="projectLabels"
-                :members="members"
-                :members-state="membersState"
-                :pending="pending"
-                :errors="errors"
-                :comment-pending-task-ids="commentPendingTaskIds"
-                :on-comment="onComment"
-                @collapse="expandedTaskIds = { ...expandedTaskIds, [task.id]: false }"
-                @open="emit('open', $event)"
-                @update:status="(child, statusId) => emit('update:status', child, statusId)"
-                @update:priority="(child, priority) => emit('update:priority', child, priority)"
-                @update:soft-deadline="(child, iso) => emit('update:softDeadline', child, iso)"
-                @toggle:assignee="
-                  (child, userId, checked) => emit('toggle:assignee', child, userId, checked)
-                "
-                @toggle:label="
-                  (child, labelId, checked) => emit('toggle:label', child, labelId, checked)
-                "
-              />
-            </template>
+            <div
+              :ref="(el) => registerDndGroup(group.status.id, el)"
+              :data-dnd-status-id="group.status.id"
+            >
+              <template v-for="task in dndTasksOf(group)" :key="task.id">
+                <TaskGroupedRow
+                  data-dnd-task
+                  :task="task"
+                  :statuses="statuses"
+                  :project-labels="projectLabels"
+                  :members="members"
+                  :pending-field="pending[task.id]"
+                  :error="errors[task.id]"
+                  :comment-pending="!!commentPendingTaskIds?.[task.id]"
+                  :selected="selectedTaskId === task.id"
+                  :expanded="!!expandedTaskIds[task.id]"
+                  @select="selectTask(task.id)"
+                  @toggle:subtasks="toggleSubtasks(task)"
+                  @open="emit('open', task)"
+                  @update:status="(statusId) => emit('update:status', task, statusId)"
+                  @update:priority="(priority) => emit('update:priority', task, priority)"
+                  @update:soft-deadline="(iso) => emit('update:softDeadline', task, iso)"
+                  @toggle:assignee="
+                    (userId, checked) => emit('toggle:assignee', task, userId, checked)
+                  "
+                  @toggle:label="(labelId, checked) => emit('toggle:label', task, labelId, checked)"
+                  :members-state="membersState"
+                  :on-comment="(body: string) => onComment(task, body)"
+                />
+                <TaskSubtaskBranch
+                  v-if="expandedTaskIds[task.id]"
+                  :parent-task="task"
+                  :filters="{
+                    status_id: group.status.id,
+                    label_id: labelId ?? undefined,
+                    is_archived: false,
+                  }"
+                  :tenant-id="tenantId"
+                  :project-id="projectId"
+                  :statuses="statuses"
+                  :project-labels="projectLabels"
+                  :members="members"
+                  :members-state="membersState"
+                  :pending="pending"
+                  :errors="errors"
+                  :comment-pending-task-ids="commentPendingTaskIds"
+                  :on-comment="onComment"
+                  @collapse="expandedTaskIds = { ...expandedTaskIds, [task.id]: false }"
+                  @open="emit('open', $event)"
+                  @update:status="(child, statusId) => emit('update:status', child, statusId)"
+                  @update:priority="(child, priority) => emit('update:priority', child, priority)"
+                  @update:soft-deadline="(child, iso) => emit('update:softDeadline', child, iso)"
+                  @toggle:assignee="
+                    (child, userId, checked) => emit('toggle:assignee', child, userId, checked)
+                  "
+                  @toggle:label="
+                    (child, labelId, checked) => emit('toggle:label', child, labelId, checked)
+                  "
+                />
+              </template>
+            </div>
 
             <!-- 任意の並びでは API 順の末尾へ続きが増えるので、ボタンも下に置く -->
             <div v-if="!group.oldestFirst && group.hasMore" class="px-2 py-1">

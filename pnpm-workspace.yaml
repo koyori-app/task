@@ -20,6 +20,7 @@ catalog:
   '@codemirror/language': 6.12.4
   '@codemirror/state': 6.7.2
   '@codemirror/view': 6.43.10
+  '@formkit/drag-and-drop': 0.6.1
   '@lezer/highlight': 1.2.3
   remark-breaks: 4.0.0
   vite: npm:@voidzero-dev/vite-plus-core@0.3.3
