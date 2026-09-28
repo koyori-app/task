@@ -896,6 +896,46 @@ export const ListView: Story = {
   },
 };
 
+export const ListViewDndSpike: Story = {
+  name: 'List 表示の DnD（spike）',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByRole('tab', { name: 'List' })).resolves.toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await waitFor(() =>
+      expect(canvasElement.querySelectorAll('[data-dnd-task]').length).toBeGreaterThan(0),
+    );
+
+    // In Progress の「OAuth 対応を実装する」を In Review の群へ運ぶ。
+    const rows = [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')];
+    const source = rows.find((row) => row.textContent?.includes('OAuth 対応を実装する'));
+    if (!source) throw new Error('source row not found');
+    const reviewToggle = await canvas.findByRole('button', { name: 'In Review を折りたたむ' });
+    const target = reviewToggle
+      .closest('section')
+      ?.querySelector<HTMLElement>('[data-dnd-status-id]');
+    if (!target) throw new Error('target container not found');
+
+    // @formkit/drag-and-drop は native DnD API でなく pointer events の
+    // synthetic drag ゆえ、userEvent.pointer の座標列で撃てるかがこの story の問い。
+    const user = userEvent.setup();
+    const from = source.getBoundingClientRect();
+    const to = target.getBoundingClientRect();
+    await user.pointer([
+      { keys: '[MouseLeft>]', target: source, coords: { x: from.x + 12, y: from.y + 12 } },
+      { coords: { x: from.x + 12, y: from.y + 40 } },
+      { coords: { x: to.x + 24, y: to.y + 24 }, target },
+      { keys: '[/MouseLeft]' },
+    ]);
+
+    await waitFor(() => expect(target.textContent).toContain('OAuth 対応を実装する'));
+  },
+};
+
 export const ListViewSubtasks: Story = {
   name: 'List 表示のサブタスク展開',
   decorators: [storyDecorator(listContext)],
