@@ -896,6 +896,119 @@ export const ListView: Story = {
   },
 };
 
+export const ListViewDnd: Story = {
+  name: 'List 表示の DnD',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByRole('tab', { name: 'List' })).resolves.toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await waitFor(() =>
+      expect(
+        [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')].some((row) =>
+          row.textContent?.includes('OAuth 対応を実装する'),
+        ),
+      ).toBe(true),
+    );
+
+    // @formkit/drag-and-drop は mouse には native HTML5 drag を使う
+    // （node に draggable=true を付ける）。userEvent.pointer の座標列や
+    // playwright の dragTo では発火せぬことを実測済みゆえ、
+    // DragEvent の列を dataTransfer 込みで直に撃つ。
+    const fireDrag = (steps: Array<[HTMLElement, string]>) => {
+      const dataTransfer = new DataTransfer();
+      for (const [el, type] of steps) {
+        // sort・transfer の判定は event の座標を見る。的の中心を撃つ。
+        const rect = el.getBoundingClientRect();
+        el.dispatchEvent(
+          new DragEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer,
+            clientX: rect.x + rect.width / 2,
+            clientY: rect.y + rect.height / 2,
+          }),
+        );
+      }
+    };
+    const rowsOf = (container: HTMLElement) => [
+      ...container.querySelectorAll<HTMLElement>('[data-dnd-task]'),
+    ];
+
+    // 受け入れ 3（TASK-239）: 群の中の drag では順序が変わらぬ。
+    // 移動の前に、二行在る In Progress の中で試す（mock の再取得と競らぬ順）。
+    const progressToggle = await canvas.findByRole('button', { name: 'In Progress を折りたたむ' });
+    const progress = progressToggle
+      .closest('section')
+      ?.querySelector<HTMLElement>('[data-dnd-status-id]');
+    if (!progress) throw new Error('progress container not found');
+    await waitFor(() => expect(rowsOf(progress).length).toBeGreaterThan(1));
+    const before = rowsOf(progress).map((row) => row.textContent?.slice(0, 24));
+    const inRows = rowsOf(progress);
+    const dragged = inRows[inRows.length - 1]!;
+    const over = inRows[0]!;
+    // 生の sort は「中点を跨ぐ dragover の列」で初めて起きる（実測）。
+    // 弱い列では sortable の壊れを検出できぬゆえ、跨ぎの二連で撃つ。
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const dt = new DataTransfer();
+    const fireAt = (el: HTMLElement, type: string, yRatio: number) => {
+      const rect = el.getBoundingClientRect();
+      el.dispatchEvent(
+        new DragEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer: dt,
+          clientX: rect.x + 20,
+          clientY: rect.y + rect.height * yRatio,
+        }),
+      );
+    };
+    fireAt(dragged, 'dragstart', 0.5);
+    await sleep(30);
+    fireAt(over, 'dragover', 0.75);
+    await sleep(30);
+    fireAt(over, 'dragover', 0.2);
+    await sleep(30);
+    fireAt(over, 'drop', 0.2);
+    fireAt(dragged, 'dragend', 0.2);
+    await sleep(400);
+    await expect(rowsOf(progress).map((row) => row.textContent?.slice(0, 24))).toEqual(before);
+
+    // 群をまたぐ移動: In Progress の「OAuth 対応を実装する」を In Review へ。
+    const source = [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')].find((row) =>
+      row.textContent?.includes('OAuth 対応を実装する'),
+    );
+    if (!source) throw new Error('source row not found');
+    const reviewToggle = await canvas.findByRole('button', { name: 'In Review を折りたたむ' });
+    const target = reviewToggle
+      .closest('section')
+      ?.querySelector<HTMLElement>('[data-dnd-status-id]');
+    if (!target) throw new Error('target container not found');
+
+    fireDrag([
+      [source, 'dragstart'],
+      [target, 'dragenter'],
+      [target, 'dragover'],
+      [target, 'drop'],
+      [source, 'dragend'],
+    ]);
+    await waitFor(() => expect(target.textContent).toContain('OAuth 対応を実装する'));
+
+    // 受け入れ 1・2（TASK-239）: 移動は既存の PUT tasks/{id} { status_id } で保存される。
+    // 行は lib が DOM の上で動かすゆえ、上の検めだけでは保存の配線が切れても緑になる。
+    const findPut = () =>
+      (globalThis.fetch as unknown as { mock: { calls: [Request | string][] } }).mock.calls
+        .map(([req]) => req)
+        .filter((req): req is Request => typeof req !== 'string')
+        .find((req) => req.method === 'PUT' && new URL(req.url).pathname.endsWith('/tasks/task-1'));
+    await waitFor(() => expect(findPut()).toBeTruthy());
+    await expect(findPut()!.clone().json()).resolves.toEqual({ status_id: 's-review' });
+  },
+};
+
 export const ListViewSubtasks: Story = {
   name: 'List 表示のサブタスク展開',
   decorators: [storyDecorator(listContext)],
