@@ -27,6 +27,7 @@
     "@codemirror/state": "catalog:",
     "@codemirror/view": "catalog:",
     "@elysiajs/static": "1.4.10",
+    "@formkit/drag-and-drop": "catalog:",
     "@koyori-app/openapi-vue-query": "0.1.4",
     "@lezer/highlight": "catalog:",
     "@lucide/vue": "1.48.0",
