@@ -906,9 +906,10 @@ export const ListViewDndSpike: Story = {
       'aria-selected',
       'true',
     );
-    await waitFor(() =>
-      expect(canvasElement.querySelectorAll('[data-dnd-task]').length).toBeGreaterThan(0),
-    );
+    await waitFor(() => {
+      const loaded = [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')];
+      expect(loaded.some((row) => row.textContent?.includes('OAuth 対応を実装する'))).toBe(true);
+    });
 
     // In Progress の「OAuth 対応を実装する」を In Review の群へ運ぶ。
     //
