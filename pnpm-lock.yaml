@@ -235,8 +235,8 @@ importers:
         specifier: 0.8.5
         version: 0.8.5(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(@voidzero-dev/vite-plus-core@0.3.3)
       '@tanstack/vue-devtools':
-        specifier: 0.2.26
-        version: 0.2.26(csstype@3.2.3)(solid-js@1.9.15)
+        specifier: 0.2.27
+        version: 0.2.27(csstype@3.2.3)(solid-js@1.9.15)
       '@tanstack/vue-query-devtools':
         specifier: 6.2.4
         version: 6.2.4(@tanstack/vue-query@5.103.2(vue@3.5.43(typescript@6.0.3)))(csstype@3.2.3)(vue@3.5.43(typescript@6.0.3))
@@ -2905,8 +2905,8 @@ packages:
     peerDependencies:
       vite: ^6.0.0 || ^7.0.0 || ^8.0.0
 
-  '@tanstack/devtools@0.14.2':
-    resolution: {integrity: sha512-8FVVmDU+x3iEwrl5rtbIhud8gwp9eSXPlhs36SCV59yAtXmheFFvLqLAUXpfIU79sZVBg3LLTy2VlTIXaWbaBw==}
+  '@tanstack/devtools@0.15.0':
+    resolution: {integrity: sha512-KyS7Qi82Eq9yG8C+uae3ikAPb+D5rfzVhvOOjXVAHZ/64s6TWJlDWpREw1FrHIYZaI7paErpsExSSKlF5BKA/A==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
@@ -2939,8 +2939,8 @@ packages:
   '@tanstack/virtual-core@3.17.10':
     resolution: {integrity: sha512-eMorKWIi2nekElu+8DgSMJR4iR+sTDeh+W8VjKiMH79yUfEDJ3W9aL/96/wwbxNjyV6EfN39HKszSxjd90zAqQ==}
 
-  '@tanstack/vue-devtools@0.2.26':
-    resolution: {integrity: sha512-H4F10MzyKhvkVIBs19xyb651FOMyS+Iylf8+hhTsFw5YO1Dx69LUcQO+P8KXbLV6Eg5Miydfs67hQDUgpg3XXg==}
+  '@tanstack/vue-devtools@0.2.27':
+    resolution: {integrity: sha512-8/wIuSCmF+BTeVEl8qo4NGyMfRsJB//oW4tC7eDpmEPbsNuN2cxk3F29hlwZ19lfVhEm+ccUEK67u62Z6r9hTw==}
     engines: {node: '>=18'}
 
   '@tanstack/vue-form@1.33.5':
@@ -9969,7 +9969,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@tanstack/devtools@0.14.2(csstype@3.2.3)(solid-js@1.9.15)':
+  '@tanstack/devtools@0.15.0(csstype@3.2.3)(solid-js@1.9.15)':
     dependencies:
       '@neodrag/core': 3.0.0-next.11
       '@neodrag/solid': 3.0.0-next.11(@neodrag/core@3.0.0-next.11)(solid-js@1.9.15)
@@ -10025,9 +10025,9 @@ snapshots:
 
   '@tanstack/virtual-core@3.17.10': {}
 
-  '@tanstack/vue-devtools@0.2.26(csstype@3.2.3)(solid-js@1.9.15)':
+  '@tanstack/vue-devtools@0.2.27(csstype@3.2.3)(solid-js@1.9.15)':
     dependencies:
-      '@tanstack/devtools': 0.14.2(csstype@3.2.3)(solid-js@1.9.15)
+      '@tanstack/devtools': 0.15.0(csstype@3.2.3)(solid-js@1.9.15)
     transitivePeerDependencies:
       - bufferutil
       - csstype
