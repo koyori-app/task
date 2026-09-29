@@ -21,11 +21,11 @@
     "verify": "vue-tsc --noEmit && vp lint && vp fmt --check"
   },
   "dependencies": {
-    "@codemirror/commands": "catalog:",
-    "@codemirror/lang-markdown": "catalog:",
-    "@codemirror/language": "catalog:",
-    "@codemirror/state": "catalog:",
-    "@codemirror/view": "catalog:",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/lang-markdown": "6.5.2",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.13",
     "@elysiajs/static": "1.4.10",
     "@koyori-app/openapi-vue-query": "0.1.4",
     "@lezer/highlight": "catalog:",
