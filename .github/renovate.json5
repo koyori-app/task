@@ -71,6 +71,17 @@
       // all into one PR to avoid a version-skew split (see #248 / #293).
       "matchPackagePatterns": ["^@voidzero-dev/", "^@vitest/"],
       "groupName": "vite-plus"
+    },
+    {
+      // mermaid は 11.16.1 で凍結する。
+      // 何のために止めたか: mermaid 11.17.0 で C4 の renderer が unified へ
+      // 移り、C4 図の見た目が変わる（上流 issue #7849）。11.17.2 の描画も
+      // 12.0.0 と同一であり、上げれば同じ退行を踏む。
+      // 何が起きたら解くか: C4 以外の図種の改善が、C4 の見た目の退行を
+      // 上回ったとき。解くにはこの rule を消せば renovate は再び上げ始める。
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["mermaid"],
+      "enabled": false
     }
   ]
 }
