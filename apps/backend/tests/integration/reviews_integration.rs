@@ -1560,25 +1560,28 @@ async fn available_actions_follow_the_role_rules() {
     // 指摘の作者: 修正・繰り延べ・取り下げ。High には繰り延べが出ない
     assert_eq!(
         actions_in_list(&fx, 801, &low).await,
-        actions(&["fixed", "deferred", "rejected"])
+        actions(&["fixing", "fixed", "deferred", "rejected"])
     );
     assert_eq!(
         actions_in_detail(&fx, &low_review).await,
-        actions(&["fixed", "deferred", "rejected"]),
+        actions(&["fixing", "fixed", "deferred", "rejected"]),
         "ラウンド詳細も同じ値"
     );
     assert_eq!(
         actions_in_list(&fx, 802, &high).await,
-        actions(&["fixed", "rejected"])
+        actions(&["fixing", "fixed", "rejected"])
     );
 
     // 作者でない修正者には取り下げが出ない
     fx.login(&fx.developer.clone()).await;
     assert_eq!(
         actions_in_list(&fx, 801, &low).await,
-        actions(&["fixed", "deferred"])
+        actions(&["fixing", "fixed", "deferred"])
     );
-    assert_eq!(actions_in_list(&fx, 802, &high).await, actions(&["fixed"]));
+    assert_eq!(
+        actions_in_list(&fx, 802, &high).await,
+        actions(&["fixing", "fixed"])
+    );
 
     // 修正者が fixed を宣言する。修正者はレビュー側でないので確認も差し戻しも出ない
     let res = transition(&fx, &low, "fixed").await;
@@ -1657,7 +1660,7 @@ async fn available_actions_require_write_review_scope() {
     assert_eq!(list[0]["id"], finding_id);
     assert_eq!(
         list[0]["available_actions"],
-        serde_json::json!(["fixed", "deferred", "rejected"])
+        serde_json::json!(["fixing", "fixed", "deferred", "rejected"])
     );
 
     fx.app.cleanup_user(fx.reviewer.id).await;
@@ -1674,7 +1677,7 @@ async fn available_actions_offer_the_owner_rejection_for_a_departed_reviewer() {
     fx.login(&fx.reviewer.clone()).await;
     assert_eq!(
         actions_in_list(&fx, 803, &finding).await,
-        serde_json::json!(["fixed", "deferred"]),
+        serde_json::json!(["fixing", "fixed", "deferred"]),
         "作者が在籍していればオーナーでも出ない"
     );
 
@@ -1687,7 +1690,7 @@ async fn available_actions_offer_the_owner_rejection_for_a_departed_reviewer() {
 
     assert_eq!(
         actions_in_list(&fx, 803, &finding).await,
-        serde_json::json!(["fixed", "deferred", "rejected"])
+        serde_json::json!(["fixing", "fixed", "deferred", "rejected"])
     );
 
     fx.app.cleanup_user(fx.reviewer.id).await;

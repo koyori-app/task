@@ -1141,7 +1141,7 @@ mod tests {
         );
         assert_eq!(
             join(&FindingState::iter().collect::<Vec<_>>()),
-            "open, fixed, verified, deferred, rejected"
+            "open, fixing, fixed, verified, deferred, rejected"
         );
     }
 }
