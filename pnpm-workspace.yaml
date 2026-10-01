@@ -15,11 +15,6 @@ allowBuilds:
   unrs-resolver: true
   vue-demi: true
 catalog:
-  '@codemirror/commands': 6.11.0
-  '@codemirror/lang-markdown': 6.5.2
-  '@codemirror/language': 6.12.4
-  '@codemirror/state': 6.7.2
-  '@codemirror/view': 6.43.10
   '@formkit/drag-and-drop': 0.6.1
   '@lezer/highlight': 1.2.3
   remark-breaks: 4.0.0
