@@ -244,6 +244,62 @@ async fn round_is_created_and_findings_run_through_the_happy_path() {
     fx.app.cleanup_user(fx.developer.id).await;
 }
 
+/// 修正側は fixing（修正中）を宣言・取り消しでき、そこから fixed へ進める。
+/// fixing はマージ判定では未解決のまま数え、確認を飛ばして verified にはできない。
+#[tokio::test]
+async fn the_fixer_can_mark_a_finding_as_fixing() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    let (_, finding_id) = submit_round(&fx, 719, "high", "入力の検証が無い").await;
+
+    // レビュー側でない修正者でも着手を宣言できる
+    fx.login(&fx.developer.clone()).await;
+    let res = transition(&fx, &finding_id, "fixing").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = json(res).await;
+    assert_eq!(body["state"], "fixing");
+    assert!(body["fixed_by"].is_null(), "着手は修正の宣言ではない");
+    assert_eq!(
+        body["available_actions"],
+        serde_json::json!(["open", "fixed"])
+    );
+
+    let summary = json(
+        fx.app
+            .get_with_session(&format!("{}/summary?pr=719", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    assert_eq!(summary["blocking"], 1, "fixing は未解決として数える");
+
+    // 着手の取り消しと再着手
+    assert_eq!(
+        transition(&fx, &finding_id, "open").await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        transition(&fx, &finding_id, "fixing").await.status(),
+        StatusCode::OK
+    );
+
+    // 確認を飛ばして verified にはできない（レビュー側でも）
+    fx.login(&fx.reviewer.clone()).await;
+    assert_eq!(
+        transition(&fx, &finding_id, "verified").await.status(),
+        StatusCode::CONFLICT
+    );
+
+    fx.login(&fx.developer.clone()).await;
+    let res = transition(&fx, &finding_id, "fixed").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = json(res).await;
+    assert_eq!(body["state"], "fixed");
+    assert_eq!(body["fixed_by"], fx.developer.id.to_string());
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
 /// 自分で fixed を宣言した人は、自分でその指摘を verified にできない。
 /// 別のレビュワーなら通る（過剰拒否でないことの対照）。
 #[tokio::test]
@@ -373,7 +429,7 @@ async fn invalid_transitions_are_rejected() {
     );
 
     // verified は終端。どこへも戻せない
-    for state in ["open", "fixed", "deferred", "rejected"] {
+    for state in ["open", "fixing", "fixed", "deferred", "rejected"] {
         assert_eq!(
             transition(&fx, &finding_id, state).await.status(),
             StatusCode::CONFLICT,

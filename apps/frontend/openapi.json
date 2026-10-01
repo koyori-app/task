@@ -22995,7 +22995,7 @@
       "FindingState": {
         "type": "string",
         "description": "指摘の状態。\n\n遷移規則は `service::reviews::can_transition` を正とする。`Verified` は終端で、\n誤りだったと分かった場合は新しいラウンドで指摘を出し直す。",
-        "enum": ["open", "fixed", "verified", "deferred", "rejected"]
+        "enum": ["open", "fixing", "fixed", "verified", "deferred", "rejected"]
       },
       "FindingTransitionResponse": {
         "type": "object",
