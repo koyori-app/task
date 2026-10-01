@@ -95,9 +95,11 @@ function createSubtask(title: string) {
     </div>
 
     <template v-else>
+      <!-- 枝の最後の行（入れ子で追加行が無いとき）は、枝の終わりと線が重なるので落とす -->
       <TaskGroupedRow
         v-for="subtask in subtasks.subtasks.value"
         :key="subtask.id"
+        class="last:border-b-0"
         :task="subtask"
         :statuses="statuses"
         :project-labels="projectLabels"

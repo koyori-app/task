@@ -917,6 +917,24 @@ export const ListView: Story = {
   },
 };
 
+export const ListViewRowBorders: Story = {
+  name: 'List 表示の行の線',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    // 行を DnD の container で包んだとき、行の根の last:border-b-0 が群の最後の行に
+    // 効き、その下の線が消えた。どの群の最後の行も、ほかの行と同じく下に線を持つ。
+    const rows = () => [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')];
+    await waitFor(() => expect(rows().length).toBe(6));
+    const widths = rows().map(
+      (row) => `${row.textContent?.trim().slice(0, 8)}: ${getComputedStyle(row).borderBottomWidth}`,
+    );
+    await expect(widths).toEqual(
+      rows().map((row) => `${row.textContent?.trim().slice(0, 8)}: 1px`),
+    );
+  },
+};
+
 export const ListViewDnd: Story = {
   name: 'List 表示の DnD',
   decorators: [storyDecorator(listContext)],

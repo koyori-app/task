@@ -170,10 +170,13 @@ function selectFromKeyboard(event: KeyboardEvent) {
 </script>
 
 <template>
-  <div
-    class="group border-b border-border/60 last:border-b-0"
-    :data-state="selected ? 'selected' : undefined"
-  >
+  <div class="group border-b border-border/60" :data-state="selected ? 'selected' : undefined">
+    <!--
+      最後の行の線を落とすかは、行を並べる側が決める（TaskSubtaskBranch が
+      last:border-b-0 を渡す）。ここに置くと、親の形で :last-child が変わったとき
+      一覧の群の最後の行まで線が消える（DnD の container で包んだときに起きた）。
+      註を根の外に置くと本番でフラグメント根になり、渡した class が落ちなくなる。
+    -->
     <div
       :class="[
         TASK_ROW_GRID,
