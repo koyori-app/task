@@ -106,7 +106,11 @@ function registerDndGroup(statusId: string, el: unknown) {
     sortable: false,
     draggable: (child) => child.hasAttribute('data-dnd-task'),
     onTransfer: (data) =>
-      emitTransferAsStatusChange(data, (task, statusId) => void moveStatus(task, statusId)),
+      emitTransferAsStatusChange(data, (task, statusId) => {
+        // 成否は親が表示する（行の下のエラー）。ここで reject を握らないと、
+        // lib の handler から出た Promise は誰にも待たれず unhandled rejection になる。
+        moveStatus(task, statusId).catch(() => {});
+      }),
   });
 }
 
@@ -123,13 +127,26 @@ function registerDndGroup(statusId: string, el: unknown) {
  * props に届くのを待つため。
  */
 let movesInFlight = 0;
+/** 飛行中の移動が関わる群（移した元と先）。status id → 関わっている移動の数 */
+const groupsInFlight = new Map<string, number>();
+
+function countGroupsInFlight(statusIds: string[], delta: 1 | -1) {
+  for (const id of statusIds) {
+    const next = (groupsInFlight.get(id) ?? 0) + delta;
+    if (next > 0) groupsInFlight.set(id, next);
+    else groupsInFlight.delete(id);
+  }
+}
 
 async function moveStatus(task: TaskResponse, statusId: string) {
+  const touched = [task.status_id, statusId];
   movesInFlight += 1;
+  countGroupsInFlight(touched, 1);
   try {
     await props.onMoveStatus(task, statusId);
   } finally {
     movesInFlight -= 1;
+    countGroupsInFlight(touched, -1);
     if (movesInFlight === 0) {
       await nextTick();
       if (movesInFlight === 0) syncDndValues(props.groups);
@@ -144,7 +161,17 @@ function syncDndValues(groups: TaskGroup[]) {
   }
 }
 
-watch(() => props.groups, syncDndValues);
+// 飛行中の移動が関わる群は引き直さない。保存中に届いた一覧（別の群の取得や
+// 再取得）は保存前の姿なので、引き直すと移した行が元の群へ戻り、確定後にまた動く。
+// 関わらない群は今までどおり引き直す——止めると、保存のあいだ届いた群が空のまま残る。
+// 取りこぼしは無い。最後の移動が確定したとき、moveStatus がその時点の
+// props.groups で全部の群を引き直す。
+watch(
+  () => props.groups,
+  (groups) => {
+    syncDndValues(groups.filter((g) => !groupsInFlight.has(g.status.id)));
+  },
+);
 
 // 折りたたみは画面内の一時状態。URL には載せない（共有したい情報ではない）
 const collapsed = ref<Record<string, boolean>>({});
