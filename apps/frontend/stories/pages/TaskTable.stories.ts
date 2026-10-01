@@ -425,6 +425,9 @@ function createMockFetch(
     statusListDelayMs?: Record<string, number>;
   } = {},
 ) {
+  // module の変数なので、前の story が保存中のまま終わると false が残る。
+  // mock を作るたびに「保存は済んでいる」へ戻し、次の story の前提を誤って満たさない。
+  taskUpdateSettled = true;
   const original = globalThis.fetch;
   const savedStatusIds = new Map<string, string>();
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
