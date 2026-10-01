@@ -32,13 +32,25 @@ const input = ref<HTMLInputElement | null>(null);
 const uploading = ref(false);
 const removingId = ref<string | null>(null);
 const errorMessage = ref<string | null>(null);
-const pendingFile = ref<{
+type PendingFile = {
   id: string;
   name: string;
   tenantId: string;
   projectId: string;
   taskId: string;
-} | null>(null);
+};
+// アップロード済みで紐付けに失敗したファイル。別のタスクへ切り替えても捨てない。
+// 元のタスクへ戻れば、捕まえた ID で紐付けを再試行できる
+const pendingFiles = ref<PendingFile[]>([]);
+const pendingForTask = computed(
+  () =>
+    pendingFiles.value.find(
+      (file) =>
+        file.tenantId === props.tenantId &&
+        file.projectId === props.projectId &&
+        file.taskId === props.taskId,
+    ) ?? null,
+);
 const previewDialog = ref<HTMLDialogElement | null>(null);
 const previewFile = ref<Attachment | null>(null);
 const previewMode = ref<PreviewMode | null>(null);
@@ -162,12 +174,11 @@ watch(
   () => [props.tenantId, props.projectId, props.taskId],
   () => {
     errorMessage.value = null;
-    pendingFile.value = null;
     closePreview();
   },
 );
 
-async function attach(file: NonNullable<typeof pendingFile.value>) {
+async function attach(file: PendingFile) {
   const path = { tenant_id: file.tenantId, project_id: file.projectId, id: file.taskId };
   const { error } = await fetchClient.POST(ATTACHMENTS_PATH, {
     params: { path },
@@ -187,7 +198,7 @@ async function attach(file: NonNullable<typeof pendingFile.value>) {
       { tenantId: file.tenantId, projectId: file.projectId, taskId: file.taskId },
     ],
   });
-  pendingFile.value = null;
+  pendingFiles.value = pendingFiles.value.filter((pending) => pending.id !== file.id);
 }
 
 async function onFileSelected(event: Event) {
@@ -199,7 +210,7 @@ async function onFileSelected(event: Event) {
     !props.projectId ||
     !props.taskId ||
     uploading.value ||
-    pendingFile.value
+    pendingForTask.value
   )
     return;
   if (file.size === 0) {
@@ -238,7 +249,7 @@ async function onFileSelected(event: Event) {
     }
 
     const saved = { id: uploaded.data.id, name: file.name, tenantId, projectId, taskId };
-    pendingFile.value = saved;
+    pendingFiles.value = [...pendingFiles.value, saved];
     await attach(saved);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'ファイルを添付できませんでした';
@@ -248,11 +259,11 @@ async function onFileSelected(event: Event) {
 }
 
 async function retryAttach() {
-  if (!pendingFile.value || uploading.value) return;
+  if (!pendingForTask.value || uploading.value) return;
   uploading.value = true;
   errorMessage.value = null;
   try {
-    await attach(pendingFile.value);
+    await attach(pendingForTask.value);
   } catch {
     errorMessage.value = 'ファイルをタスクに紐付けできませんでした';
   } finally {
@@ -300,7 +311,7 @@ async function removeAttachment(attachmentId: string) {
         type="button"
         variant="outline"
         size="sm"
-        :disabled="uploading || !!pendingFile"
+        :disabled="uploading || !!pendingForTask"
         @click="input?.click()"
       >
         <Paperclip class="mr-1 size-4" aria-hidden="true" />
@@ -316,8 +327,8 @@ async function removeAttachment(attachmentId: string) {
     </div>
 
     <p v-if="errorMessage" role="alert" class="text-sm text-destructive">{{ errorMessage }}</p>
-    <div v-if="pendingFile" class="flex items-center gap-2 text-sm">
-      <span>{{ pendingFile.name }} はアップロード済みです</span>
+    <div v-if="pendingForTask" class="flex items-center gap-2 text-sm">
+      <span>{{ pendingForTask.name }} はアップロード済みです</span>
       <Button type="button" variant="outline" size="sm" :disabled="uploading" @click="retryAttach"
         >紐付けを再試行</Button
       >

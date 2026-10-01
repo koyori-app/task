@@ -268,4 +268,125 @@ describe('TaskAttachments', () => {
     expect(linkAttempts).toBe(2);
     expect(wrapper.get('a').attributes('href')).toBe('/api/v1/drive/files/file-1/content');
   });
+
+  it('keeps an unlinked upload for its own task across task switches', async () => {
+    let linkAttempts = 0;
+    vi.stubGlobal('fetch', async (request: Request) => {
+      const url = new URL(request.url);
+      if (request.method === 'GET' && url.pathname.endsWith('/attachments')) {
+        return Response.json({ attachments: [] });
+      }
+      if (request.method === 'GET' && url.pathname.endsWith('/drive/folders')) {
+        return Response.json([{ id: 'project-folder', project_id: 'project-1', parent_id: null }]);
+      }
+      if (request.method === 'POST' && url.pathname.endsWith('/drive/files')) {
+        return Response.json({ id: 'file-1' }, { status: 201 });
+      }
+      if (request.method === 'POST' && url.pathname.endsWith('/attachments')) {
+        linkAttempts++;
+        return Response.json({ message: 'forbidden' }, { status: 403 });
+      }
+      return Response.json({ message: 'not found' }, { status: 404 });
+    });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = mount(TaskAttachments, {
+      props: { tenantId: 'tenant-1', projectId: 'project-1', taskId: 'TASK-1' },
+      global: { plugins: [[VueQueryPlugin, { queryClient }]] },
+    });
+    await flushPromises();
+    const fileInput = wrapper.get('input[type="file"]');
+    Object.defineProperty(fileInput.element, 'files', {
+      configurable: true,
+      value: [new File(['hello'], 'memo.txt', { type: 'text/plain' })],
+    });
+    await fileInput.trigger('change');
+    await flushPromises();
+    expect(wrapper.text()).toContain('memo.txt はアップロード済みです');
+
+    // 別のタスクでは出さず、添付も塞がない
+    await wrapper.setProps({ taskId: 'TASK-2' });
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('はアップロード済みです');
+    expect(
+      wrapper
+        .findAll('button')
+        .find((button) => button.text() === 'ファイルを添付')!
+        .attributes('disabled'),
+    ).toBeUndefined();
+
+    // 元のタスクへ戻れば、元のタスクへの紐付けを再試行できる
+    await wrapper.setProps({ taskId: 'TASK-1' });
+    await flushPromises();
+    expect(wrapper.text()).toContain('memo.txt はアップロード済みです');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '紐付けを再試行')!
+      .trigger('click');
+    await flushPromises();
+    expect(linkAttempts).toBe(2);
+  });
+
+  it('shows who may detach when the API rejects with 403', async () => {
+    vi.stubGlobal('fetch', async (request: Request) => {
+      if (request.method === 'GET' && request.url.endsWith('/attachments')) {
+        return Response.json({
+          attachments: [
+            {
+              id: 'attachment-1',
+              drive_file_id: 'file-1',
+              name: 'memo.txt',
+              mime_type: 'text/plain',
+              size: 5,
+              url: '/v1/drive/files/file-1/content',
+              created_at: '2026-10-01T00:00:00Z',
+            },
+          ],
+        });
+      }
+      if (request.method === 'DELETE') {
+        return Response.json({ message: 'forbidden' }, { status: 403 });
+      }
+      return Response.json({ message: 'not found' }, { status: 404 });
+    });
+
+    const wrapper = mount(TaskAttachments, {
+      props: { tenantId: 'tenant-1', projectId: 'project-1', taskId: 'TASK-1' },
+      global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
+    });
+    await flushPromises();
+    await wrapper.get('button[aria-label="memo.txt の添付を解除"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('作成者またはテナントオーナーのみ');
+    expect(wrapper.text()).toContain('memo.txt');
+  });
+
+  it('keeps the list retryable when loading attachments fails', async () => {
+    let listRequests = 0;
+    vi.stubGlobal('fetch', async (request: Request) => {
+      if (request.method === 'GET' && request.url.endsWith('/attachments')) {
+        listRequests++;
+        if (listRequests === 1) return Response.json({ message: 'down' }, { status: 500 });
+        return Response.json({ attachments: [] });
+      }
+      return Response.json({ message: 'not found' }, { status: 404 });
+    });
+
+    const wrapper = mount(TaskAttachments, {
+      props: { tenantId: 'tenant-1', projectId: 'project-1', taskId: 'TASK-1' },
+      global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
+    });
+    await flushPromises();
+    expect(wrapper.text()).toContain('添付ファイルを読み込めませんでした');
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '再試行')!
+      .trigger('click');
+    await flushPromises();
+
+    expect(listRequests).toBe(2);
+    expect(wrapper.text()).toContain('添付ファイルはありません');
+  });
 });
