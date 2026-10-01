@@ -1476,7 +1476,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tracing",
  "url",
- "utoipa",
+ "utoipa 6.0.0",
  "validator",
  "workspace-hack",
 ]
@@ -2061,7 +2061,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "utoipa",
+ "utoipa 6.0.0",
  "workspace-hack",
 ]
 
@@ -2555,7 +2555,7 @@ dependencies = [
  "tower-http 0.7.1",
  "tracing",
  "urlencoding",
- "utoipa",
+ "utoipa 6.0.0",
  "utoipa-axum",
  "uuid",
  "validator",
@@ -4223,7 +4223,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "utoipa",
+ "utoipa 6.0.0",
  "validator",
  "workspace-hack",
 ]
@@ -4486,7 +4486,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -5787,7 +5787,7 @@ dependencies = [
  "tracing",
  "url",
  "urlencoding",
- "utoipa",
+ "utoipa 6.0.0",
  "uuid",
  "webauthn-rs",
  "workspace-hack",
@@ -7190,7 +7190,19 @@ dependencies = [
  "indexmap 2.14.2",
  "serde",
  "serde_json",
- "utoipa-gen",
+ "utoipa-gen 5.5.0",
+]
+
+[[package]]
+name = "utoipa"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8765fe27aeff71012a3f90fa474cf1df863a7d0dd81ed25de4e63fff2544994f"
+dependencies = [
+ "indexmap 2.14.2",
+ "serde",
+ "serde_json",
+ "utoipa-gen 6.0.1",
 ]
 
 [[package]]
@@ -7203,7 +7215,7 @@ dependencies = [
  "paste",
  "tower-layer",
  "tower-service",
- "utoipa",
+ "utoipa 5.5.0",
 ]
 
 [[package]]
@@ -7215,6 +7227,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "utoipa-gen"
+version = "6.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d935f1c83fdf8b88f09bbe050d0cea78ea4afee6d7b0317403228c1200b2c8ab"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
  "uuid",
 ]
 
@@ -7227,7 +7250,7 @@ dependencies = [
  "axum",
  "serde",
  "serde_json",
- "utoipa",
+ "utoipa 5.5.0",
 ]
 
 [[package]]
@@ -7628,7 +7651,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
