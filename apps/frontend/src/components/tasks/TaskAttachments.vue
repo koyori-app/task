@@ -29,27 +29,28 @@ const props = defineProps<{
 
 const queryClient = useQueryClient();
 const input = ref<HTMLInputElement | null>(null);
-const uploading = ref(false);
 const removingId = ref<string | null>(null);
-const errorMessage = ref<string | null>(null);
-type PendingFile = {
-  id: string;
-  name: string;
-  tenantId: string;
-  projectId: string;
-  taskId: string;
-};
+type TaskRef = { tenantId: string; projectId: string; taskId: string };
+type PendingFile = TaskRef & { id: string; name: string };
+const taskKey = (task: TaskRef) => `${task.tenantId}/${task.projectId}/${task.taskId}`;
+const currentKey = computed(() => `${props.tenantId}/${props.projectId}/${props.taskId}`);
+// アップロード中・失敗・紐付け待ちは、始めたタスクのものとして持つ。
+// 分割表示でタスクを切り替えても、別のタスクの進行や失敗を今のタスクの欄に出さない
+const uploadingKeys = ref(new Set<string>());
+const uploading = computed(() => uploadingKeys.value.has(currentKey.value));
+const error = ref<{ key: string; message: string } | null>(null);
+const errorMessage = computed(() =>
+  error.value?.key === currentKey.value ? error.value.message : null,
+);
+function setError(key: string, message: string | null) {
+  if (message !== null) error.value = { key, message };
+  else if (error.value?.key === key) error.value = null;
+}
 // アップロード済みで紐付けに失敗したファイル。別のタスクへ切り替えても捨てない。
 // 元のタスクへ戻れば、捕まえた ID で紐付けを再試行できる
 const pendingFiles = ref<PendingFile[]>([]);
 const pendingForTask = computed(
-  () =>
-    pendingFiles.value.find(
-      (file) =>
-        file.tenantId === props.tenantId &&
-        file.projectId === props.projectId &&
-        file.taskId === props.taskId,
-    ) ?? null,
+  () => pendingFiles.value.find((file) => taskKey(file) === currentKey.value) ?? null,
 );
 const previewDialog = ref<HTMLDialogElement | null>(null);
 const previewFile = ref<Attachment | null>(null);
@@ -170,13 +171,7 @@ const attachmentsQuery = useQuery({
   retry: false,
 });
 
-watch(
-  () => [props.tenantId, props.projectId, props.taskId],
-  () => {
-    errorMessage.value = null;
-    closePreview();
-  },
-);
+watch(currentKey, closePreview);
 
 async function attach(file: PendingFile) {
   const path = { tenant_id: file.tenantId, project_id: file.projectId, id: file.taskId };
@@ -213,23 +208,22 @@ async function onFileSelected(event: Event) {
     pendingForTask.value
   )
     return;
+  const target = { tenantId: props.tenantId, projectId: props.projectId, taskId: props.taskId };
+  const key = taskKey(target);
   if (file.size === 0) {
-    errorMessage.value = '空のファイルは添付できません';
+    setError(key, '空のファイルは添付できません');
     return;
   }
 
-  const tenantId = props.tenantId;
-  const projectId = props.projectId;
-  const taskId = props.taskId;
-  uploading.value = true;
-  errorMessage.value = null;
+  uploadingKeys.value.add(key);
+  setError(key, null);
   try {
     const folders = await fetchClient.GET(FOLDERS_PATH, {
-      params: { path: { tenant_id: tenantId } },
+      params: { path: { tenant_id: target.tenantId } },
     });
     if (folders.error) throw new Error('保存先を読み込めませんでした');
     const projectFolder = folders.data.find(
-      (folder) => folder.project_id === projectId && folder.parent_id == null,
+      (folder) => folder.project_id === target.projectId && folder.parent_id == null,
     );
     if (!projectFolder) throw new Error('プロジェクトの保存先が見つかりません');
 
@@ -237,7 +231,7 @@ async function onFileSelected(event: Event) {
     form.append('folder_id', projectFolder.id);
     form.append('file', file);
     const uploaded = await fetchClient.POST(FILES_PATH, {
-      params: { path: { tenant_id: tenantId } },
+      params: { path: { tenant_id: target.tenantId } },
       body: form,
     });
     if (uploaded.error) {
@@ -248,33 +242,36 @@ async function onFileSelected(event: Event) {
       );
     }
 
-    const saved = { id: uploaded.data.id, name: file.name, tenantId, projectId, taskId };
+    const saved = { ...target, id: uploaded.data.id, name: file.name };
     pendingFiles.value = [...pendingFiles.value, saved];
     await attach(saved);
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'ファイルを添付できませんでした';
+    setError(key, error instanceof Error ? error.message : 'ファイルを添付できませんでした');
   } finally {
-    uploading.value = false;
+    uploadingKeys.value.delete(key);
   }
 }
 
 async function retryAttach() {
-  if (!pendingForTask.value || uploading.value) return;
-  uploading.value = true;
-  errorMessage.value = null;
+  const file = pendingForTask.value;
+  if (!file || uploading.value) return;
+  const key = taskKey(file);
+  uploadingKeys.value.add(key);
+  setError(key, null);
   try {
-    await attach(pendingForTask.value);
+    await attach(file);
   } catch {
-    errorMessage.value = 'ファイルをタスクに紐付けできませんでした';
+    setError(key, 'ファイルをタスクに紐付けできませんでした');
   } finally {
-    uploading.value = false;
+    uploadingKeys.value.delete(key);
   }
 }
 
 async function removeAttachment(attachmentId: string) {
   if (!props.tenantId || !props.projectId || removingId.value) return;
   removingId.value = attachmentId;
-  errorMessage.value = null;
+  const owner = currentKey.value;
+  setError(owner, null);
   const key = queryKey.value;
   try {
     const { error, response } = await fetchClient.DELETE(ATTACHMENT_PATH, {
@@ -296,7 +293,7 @@ async function removeAttachment(attachmentId: string) {
     }
     await queryClient.invalidateQueries({ queryKey: key });
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '添付を解除できませんでした';
+    setError(owner, error instanceof Error ? error.message : '添付を解除できませんでした');
   } finally {
     removingId.value = null;
   }

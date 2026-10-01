@@ -270,7 +270,7 @@ describe('TaskAttachments', () => {
   });
 
   it('keeps an unlinked upload for its own task across task switches', async () => {
-    let linkAttempts = 0;
+    const linkPaths: string[] = [];
     vi.stubGlobal('fetch', async (request: Request) => {
       const url = new URL(request.url);
       if (request.method === 'GET' && url.pathname.endsWith('/attachments')) {
@@ -283,7 +283,7 @@ describe('TaskAttachments', () => {
         return Response.json({ id: 'file-1' }, { status: 201 });
       }
       if (request.method === 'POST' && url.pathname.endsWith('/attachments')) {
-        linkAttempts++;
+        linkPaths.push(url.pathname);
         return Response.json({ message: 'forbidden' }, { status: 403 });
       }
       return Response.json({ message: 'not found' }, { status: 404 });
@@ -324,7 +324,62 @@ describe('TaskAttachments', () => {
       .find((button) => button.text() === '紐付けを再試行')!
       .trigger('click');
     await flushPromises();
-    expect(linkAttempts).toBe(2);
+    // 戻ってからの再試行も、props ではなく捕まえた ID で元のタスクへ紐付ける
+    expect(linkPaths).toEqual([
+      '/api/v1/tenants/tenant-1/projects/project-1/tasks/TASK-1/attachments',
+      '/api/v1/tenants/tenant-1/projects/project-1/tasks/TASK-1/attachments',
+    ]);
+  });
+
+  it('keeps upload progress and failures on the task that started them', async () => {
+    let failUpload!: () => void;
+    vi.stubGlobal('fetch', async (request: Request) => {
+      const url = new URL(request.url);
+      if (request.method === 'GET' && url.pathname.endsWith('/attachments')) {
+        return Response.json({ attachments: [] });
+      }
+      if (request.method === 'GET' && url.pathname.endsWith('/drive/folders')) {
+        return Response.json([{ id: 'project-folder', project_id: 'project-1', parent_id: null }]);
+      }
+      if (request.method === 'POST' && url.pathname.endsWith('/drive/files')) {
+        await new Promise<void>((resolve) => {
+          failUpload = resolve;
+        });
+        return Response.json({ message: 'down' }, { status: 500 });
+      }
+      return Response.json({ message: 'not found' }, { status: 404 });
+    });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = mount(TaskAttachments, {
+      props: { tenantId: 'tenant-1', projectId: 'project-1', taskId: 'TASK-1' },
+      global: { plugins: [[VueQueryPlugin, { queryClient }]] },
+    });
+    await flushPromises();
+    const fileInput = wrapper.get('input[type="file"]');
+    Object.defineProperty(fileInput.element, 'files', {
+      configurable: true,
+      value: [new File(['hello'], 'memo.txt', { type: 'text/plain' })],
+    });
+    await fileInput.trigger('change');
+    await flushPromises();
+    expect(wrapper.text()).toContain('アップロード中…');
+
+    // TASK-1 のアップロード中に TASK-2 へ切り替えると、TASK-2 では添付できる
+    await wrapper.setProps({ taskId: 'TASK-2' });
+    await flushPromises();
+    const attachButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'ファイルを添付');
+    expect(attachButton?.attributes('disabled')).toBeUndefined();
+
+    // TASK-1 の失敗は TASK-2 の欄に出さず、TASK-1 へ戻ったときに出す
+    failUpload();
+    await flushPromises();
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    await wrapper.setProps({ taskId: 'TASK-1' });
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toContain('アップロードできませんでした');
   });
 
   it('shows who may detach when the API rejects with 403', async () => {
