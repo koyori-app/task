@@ -77,6 +77,7 @@ describe('TaskGroupedList の SSR', () => {
           sorting: [],
           onComment: async () => true,
           onCreate: async () => true,
+          onMoveStatus: async () => undefined,
         }),
     });
     const html = await renderToString(app);

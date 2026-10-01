@@ -114,6 +114,7 @@ describe('TaskGroupedList の DnD の配線', () => {
         sorting: [],
         onComment: vi.fn(async () => true),
         onCreate: vi.fn(async () => true),
+        onMoveStatus: vi.fn(async () => undefined),
       },
       attachTo: document.body,
     });

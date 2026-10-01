@@ -58,6 +58,11 @@ const props = defineProps<{
   createErrors?: Record<string, string | undefined>;
   /** 行からのコメント追加。成功したときだけ下書きを捨てるので成否を返してもらう */
   onComment: (task: TaskResponse, body: string) => Promise<boolean>;
+  /**
+   * DnD で群をまたいだときのステータス変更。保存が確定する（成否を問わない）まで待ち、
+   * そのあと表示を正本から引き直すので、確定を待てる Promise を返してもらう
+   */
+  onMoveStatus: (task: TaskResponse, statusId: string) => Promise<unknown>;
   /** タスクの作成。同上 */
   onCreate: (input: CreateTaskInput) => Promise<boolean>;
   sorting: TaskListSortingState;
@@ -74,11 +79,10 @@ const emit = defineEmits<{
   'update:sorting': [sorting: TaskListSortingState];
 }>();
 
-// ---- spike: 群のあいだの DnD（@formkit/drag-and-drop） ----
+// ---- 群のあいだの DnD（@formkit/drag-and-drop） ----
 // 正本は親（query cache）である。lib には群ごとの鏡写しを渡し、
-// 群をまたいだ transfer だけを update:status として親へ流す。
-// 群の中の並べ替えは保存先（タスクの順序欄が API に無い）ゆえ扱わぬ——
-// 見た目は動くが、正本が変われば props から引き直されて戻る。
+// 群をまたいだ transfer だけを onMoveStatus として親へ流す。
+// 群の中の並べ替えは保存先（タスクの順序欄が API に無い）ゆえ扱わぬ。
 const dndValues = new Map<string, Ref<TaskResponse[]>>();
 const dndRegistered = new Set<string>();
 
@@ -102,19 +106,45 @@ function registerDndGroup(statusId: string, el: unknown) {
     sortable: false,
     draggable: (child) => child.hasAttribute('data-dnd-task'),
     onTransfer: (data) =>
-      emitTransferAsStatusChange(data, (task, statusId) => emit('update:status', task, statusId)),
+      emitTransferAsStatusChange(data, (task, statusId) => void moveStatus(task, statusId)),
   });
 }
 
-watch(
-  () => props.groups,
-  (groups) => {
-    for (const g of groups) {
-      const mirror = dndValues.get(g.status.id);
-      if (mirror) mirror.value = [...g.tasks];
+/**
+ * lib は transfer の時点で DOM と鏡写しを先に動かしている。保存が失敗しても
+ * 正本（props）は変わらないので下の watch は走らず、動いた行が残ってしまう。
+ * そこで確定を待ってから、成否を問わず鏡写しを正本から引き直す。成功なら
+ * 再取得の済んだ姿に、失敗なら元の姿になる。
+ *
+ * 引き直すのは、飛行中の移動がすべて確定したときだけにする。lib は 1 回の
+ * ドラッグで transfer を 2 回出すことがあり（実測）、2 回目は親が送信中として
+ * 何もせず即座に返す。その時点で引き直すと、再取得の前の姿へ一度戻ってから
+ * 動き直す（二重に動く）。nextTick を挟むのも同じ理由で、再取得の結果が
+ * props に届くのを待つため。
+ */
+let movesInFlight = 0;
+
+async function moveStatus(task: TaskResponse, statusId: string) {
+  movesInFlight += 1;
+  try {
+    await props.onMoveStatus(task, statusId);
+  } finally {
+    movesInFlight -= 1;
+    if (movesInFlight === 0) {
+      await nextTick();
+      if (movesInFlight === 0) syncDndValues(props.groups);
     }
-  },
-);
+  }
+}
+
+function syncDndValues(groups: TaskGroup[]) {
+  for (const g of groups) {
+    const mirror = dndValues.get(g.status.id);
+    if (mirror) mirror.value = [...g.tasks];
+  }
+}
+
+watch(() => props.groups, syncDndValues);
 
 // 折りたたみは画面内の一時状態。URL には載せない（共有したい情報ではない）
 const collapsed = ref<Record<string, boolean>>({});

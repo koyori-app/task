@@ -412,9 +412,14 @@ function createMockFetch(
     rejectLabels?: boolean;
     hang?: boolean;
     comments?: unknown[];
+    /** PUT tasks/{id} で送られた status_id を覚え、以後の一覧に反映する（実 API と同じく） */
+    persistTaskStatus?: boolean;
+    /** PUT tasks/{id} を失敗させる。reject は 500、network は fetch 自体の失敗 */
+    taskUpdate?: 'reject' | 'network';
   } = {},
 ) {
   const original = globalThis.fetch;
+  const savedStatusIds = new Map<string, string>();
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
     const url = typeof req === 'string' ? req : req.url;
     const method = typeof req === 'string' ? 'GET' : req.method;
@@ -478,6 +483,20 @@ function createMockFetch(
         blocked_by: [],
       });
     }
+    const updateMatch =
+      method === 'PUT'
+        ? new URL(url, 'http://localhost').pathname.match(/\/tasks\/([^/]+)$/)
+        : null;
+    if (updateMatch && overrides.taskUpdate === 'network') {
+      throw new TypeError('Failed to fetch');
+    }
+    if (updateMatch && overrides.taskUpdate === 'reject') {
+      return jsonResponse({ message: 'server error' }, 500);
+    }
+    if (updateMatch && overrides.persistTaskStatus && typeof req !== 'string') {
+      const body = (await req.clone().json()) as { status_id?: string };
+      if (body.status_id) savedStatusIds.set(updateMatch[1]!, body.status_id);
+    }
     // List 表示はステータスごとに問い合わせる。件数（total）もその絞り込みで返す
     const query = new URL(url, 'http://localhost').searchParams;
     const statusFilter = query.get('status_id');
@@ -494,9 +513,11 @@ function createMockFetch(
       return jsonResponse({ tasks: children, total: children.length, next_cursor: null });
     }
     if (statusFilter && url.includes('/tasks')) {
-      const all = (overrides.tasks ?? sampleTasks).tasks as Array<
-        SortableStoryTask & { status_id: string; labels: Array<{ id: string }> }
-      >;
+      const all = (
+        (overrides.tasks ?? sampleTasks).tasks as Array<
+          SortableStoryTask & { id: string; status_id: string; labels: Array<{ id: string }> }
+        >
+      ).map((task) => ({ ...task, status_id: savedStatusIds.get(task.id) ?? task.status_id }));
       const filtered = all.filter(
         (task) =>
           task.status_id === statusFilter &&
@@ -899,7 +920,7 @@ export const ListView: Story = {
 export const ListViewDnd: Story = {
   name: 'List 表示の DnD',
   decorators: [storyDecorator(listContext)],
-  beforeEach: mockFetch,
+  beforeEach: () => createMockFetch({ persistTaskStatus: true }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByRole('tab', { name: 'List' })).resolves.toHaveAttribute(
@@ -987,6 +1008,9 @@ export const ListViewDnd: Story = {
       .closest('section')
       ?.querySelector<HTMLElement>('[data-dnd-status-id]');
     if (!target) throw new Error('target container not found');
+    // 保存の確定後に表示を正本から引き直す。成功のときに一度元の群へ戻ってから
+    // 動き直す（二重に動く）と見苦しいので、元の群へ戻ったことが一度でもあれば記録する。
+    const bounce = watchRowReturn(progress, 'OAuth 対応を実装する');
 
     fireDrag([
       [source, 'dragstart'],
@@ -999,13 +1023,135 @@ export const ListViewDnd: Story = {
 
     // 受け入れ 1・2（TASK-239）: 移動は既存の PUT tasks/{id} { status_id } で保存される。
     // 行は lib が DOM の上で動かすゆえ、上の検めだけでは保存の配線が切れても緑になる。
-    const findPut = () =>
-      (globalThis.fetch as unknown as { mock: { calls: [Request | string][] } }).mock.calls
-        .map(([req]) => req)
-        .filter((req): req is Request => typeof req !== 'string')
-        .find((req) => req.method === 'PUT' && new URL(req.url).pathname.endsWith('/tasks/task-1'));
+    const findPut = () => findTaskPut(globalThis.fetch, 'task-1');
     await waitFor(() => expect(findPut()).toBeTruthy());
     await expect(findPut()!.clone().json()).resolves.toEqual({ status_id: 's-review' });
+
+    // 確定と再取得が済んでも、行は移った先に留まり、元の群へ戻らない。
+    await sleep(800);
+    await expect(target.textContent).toContain('OAuth 対応を実装する');
+    await expect(bounce.stop()).toBe(false);
+  },
+};
+
+/** fetch mock に届いた PUT tasks/{id} を探す。 */
+function findTaskPut(fetchMock: typeof globalThis.fetch, taskId: string) {
+  return (fetchMock as unknown as { mock: { calls: [Request | string][] } }).mock.calls
+    .map(([req]) => req)
+    .filter((req): req is Request => typeof req !== 'string')
+    .find((req) => req.method === 'PUT' && new URL(req.url).pathname.endsWith(`/tasks/${taskId}`));
+}
+
+/** `container` に `title` の行が（いったん消えたあと）戻ってきたかを見張る。 */
+function watchRowReturn(container: HTMLElement, title: string) {
+  let left = false;
+  let returned = false;
+  const has = () =>
+    [...container.querySelectorAll<HTMLElement>('[data-dnd-task]')].some((row) =>
+      row.textContent?.includes(title),
+    );
+  const observer = new MutationObserver(() => {
+    if (!has()) left = true;
+    else if (left) returned = true;
+  });
+  observer.observe(container, { childList: true, subtree: true });
+  return {
+    stop() {
+      observer.disconnect();
+      return returned;
+    },
+  };
+}
+
+/**
+ * In Progress の「OAuth 対応を実装する」を In Review へ DnD で移す。
+ * mouse 経路は native HTML5 drag ゆえ DragEvent を dataTransfer 込みで直に撃つ（上の story と同じ）。
+ */
+async function dragOauthToReview(canvasElement: HTMLElement) {
+  const canvas = within(canvasElement);
+  await waitFor(() =>
+    expect(
+      [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')].some((row) =>
+        row.textContent?.includes('OAuth 対応を実装する'),
+      ),
+    ).toBe(true),
+  );
+  const containerOf = async (name: string) => {
+    const toggle = await canvas.findByRole('button', { name: `${name} を折りたたむ` });
+    const container = toggle.closest('section')?.querySelector<HTMLElement>('[data-dnd-status-id]');
+    if (!container) throw new Error(`${name} container not found`);
+    return container;
+  };
+  const progress = await containerOf('In Progress');
+  const review = await containerOf('In Review');
+  // 群ごとの取得が揃うまで待つ。後から届いた群の取得は鏡写しを正本から引き直すので、
+  // 揃う前に撃つと、失敗とは無関係に行が戻って見えてしまう（直す前の木で実測）。
+  const rowCount = (el: HTMLElement) => el.querySelectorAll('[data-dnd-task]').length;
+  const backlog = await containerOf('Backlog');
+  const done = await containerOf('Done');
+  await waitFor(() =>
+    expect([backlog, progress, review, done].map(rowCount)).toEqual([2, 2, 1, 1]),
+  );
+  const row = [...progress.querySelectorAll<HTMLElement>('[data-dnd-task]')].find((el) =>
+    el.textContent?.includes('OAuth 対応を実装する'),
+  );
+  if (!row) throw new Error('source row not found');
+
+  const dataTransfer = new DataTransfer();
+  for (const [el, type] of [
+    [row, 'dragstart'],
+    [review, 'dragenter'],
+    [review, 'dragover'],
+    [review, 'drop'],
+    [row, 'dragend'],
+  ] as const) {
+    const rect = el.getBoundingClientRect();
+    el.dispatchEvent(
+      new DragEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer,
+        clientX: rect.x + rect.width / 2,
+        clientY: rect.y + rect.height / 2,
+      }),
+    );
+  }
+  return { progress, review };
+}
+
+/** PUT が失敗したとき、DnD で動いた行が元の群へ戻ることを確かめる。 */
+async function expectFailedMoveIsRolledBack(canvasElement: HTMLElement) {
+  const { progress, review } = await dragOauthToReview(canvasElement);
+  // lib が先に DOM を動かすので、まず移った先に見える。
+  await waitFor(() => expect(review.textContent).toContain('OAuth 対応を実装する'));
+  await waitFor(() => expect(findTaskPut(globalThis.fetch, 'task-1')).toBeTruthy());
+
+  // 保存が失敗したので、正本（元の群）の姿へ戻る。
+  await waitFor(() => expect(progress.textContent).toContain('OAuth 対応を実装する'));
+  await expect(review.textContent).not.toContain('OAuth 対応を実装する');
+  // 戻ったあとで、もう一度動き直さない。
+  const bounce = watchRowReturn(review, 'OAuth 対応を実装する');
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  await expect(review.textContent).not.toContain('OAuth 対応を実装する');
+  await expect(progress.textContent).toContain('OAuth 対応を実装する');
+  bounce.stop();
+}
+
+export const ListViewDndRejectedUpdate: Story = {
+  name: 'List 表示の DnD（API が保存を拒んだら戻す）',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: () => createMockFetch({ taskUpdate: 'reject' }),
+  play: async ({ canvasElement }) => {
+    await expectFailedMoveIsRolledBack(canvasElement);
+  },
+};
+
+export const ListViewDndNetworkFailure: Story = {
+  name: 'List 表示の DnD（通信に失敗したら戻す）',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: () => createMockFetch({ taskUpdate: 'network' }),
+  play: async ({ canvasElement }) => {
+    await expectFailedMoveIsRolledBack(canvasElement);
   },
 };
 
