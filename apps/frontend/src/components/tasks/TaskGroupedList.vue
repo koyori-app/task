@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, shallowRef, watch, type Ref } from 'vue';
+import { dragAndDrop } from '@formkit/drag-and-drop/vue';
+import { emitTransferAsStatusChange } from '@/components/tasks/task-grouped-dnd';
 import { PhCaretDown, PhPlus } from '@phosphor-icons/vue';
 import { CornerDownLeft } from '@lucide/vue';
 import { PhCalendarPlus, PhFlag, PhTag } from '@phosphor-icons/vue';
@@ -56,6 +58,11 @@ const props = defineProps<{
   createErrors?: Record<string, string | undefined>;
   /** 行からのコメント追加。成功したときだけ下書きを捨てるので成否を返してもらう */
   onComment: (task: TaskResponse, body: string) => Promise<boolean>;
+  /**
+   * DnD で群をまたいだときのステータス変更。保存が確定する（成否を問わない）まで待ち、
+   * そのあと表示を正本から引き直すので、確定を待てる Promise を返してもらう
+   */
+  onMoveStatus: (task: TaskResponse, statusId: string) => Promise<unknown>;
   /** タスクの作成。同上 */
   onCreate: (input: CreateTaskInput) => Promise<boolean>;
   sorting: TaskListSortingState;
@@ -71,6 +78,73 @@ const emit = defineEmits<{
   'toggle:label': [task: TaskResponse, labelId: string, checked: boolean];
   'update:sorting': [sorting: TaskListSortingState];
 }>();
+
+// ---- 群のあいだの DnD（@formkit/drag-and-drop） ----
+// 正本は親（query cache）である。lib には群ごとの鏡写しを渡し、
+// 群をまたいだ transfer だけを onMoveStatus として親へ流す。
+// 群の中の並べ替えは保存先（タスクの順序欄が API に無い）ゆえ扱わぬ。
+const dndValues = new Map<string, Ref<TaskResponse[]>>();
+const dndRegistered = new Set<string>();
+
+function dndTasksOf(group: TaskGroup): TaskResponse[] {
+  return dndValues.get(group.status.id)?.value ?? group.tasks;
+}
+
+function registerDndGroup(statusId: string, el: unknown) {
+  if (!(el instanceof HTMLElement) || dndRegistered.has(statusId)) return;
+  dndRegistered.add(statusId);
+  const values = shallowRef<TaskResponse[]>([
+    ...(props.groups.find((g) => g.status.id === statusId)?.tasks ?? []),
+  ]);
+  dndValues.set(statusId, values);
+  dragAndDrop<TaskResponse>({
+    parent: shallowRef(el),
+    values,
+    group: 'task-grouped-list',
+    // 群の中の並べ替えは扱わぬ（タスクの手動順序を持つ欄が API に無い）。
+    // 見た目だけ動いて戻るのも紛らわしいゆえ、lib 段で止める。
+    sortable: false,
+    draggable: (child) => child.hasAttribute('data-dnd-task'),
+    onTransfer: (data) =>
+      emitTransferAsStatusChange(data, (task, statusId) => void moveStatus(task, statusId)),
+  });
+}
+
+/**
+ * lib は transfer の時点で DOM と鏡写しを先に動かしている。保存が失敗しても
+ * 正本（props）は変わらないので下の watch は走らず、動いた行が残ってしまう。
+ * そこで確定を待ってから、成否を問わず鏡写しを正本から引き直す。成功なら
+ * 再取得の済んだ姿に、失敗なら元の姿になる。
+ *
+ * 引き直すのは、飛行中の移動がすべて確定したときだけにする。lib は 1 回の
+ * ドラッグで transfer を 2 回出すことがあり（実測）、2 回目は親が送信中として
+ * 何もせず即座に返す。その時点で引き直すと、再取得の前の姿へ一度戻ってから
+ * 動き直す（二重に動く）。nextTick を挟むのも同じ理由で、再取得の結果が
+ * props に届くのを待つため。
+ */
+let movesInFlight = 0;
+
+async function moveStatus(task: TaskResponse, statusId: string) {
+  movesInFlight += 1;
+  try {
+    await props.onMoveStatus(task, statusId);
+  } finally {
+    movesInFlight -= 1;
+    if (movesInFlight === 0) {
+      await nextTick();
+      if (movesInFlight === 0) syncDndValues(props.groups);
+    }
+  }
+}
+
+function syncDndValues(groups: TaskGroup[]) {
+  for (const g of groups) {
+    const mirror = dndValues.get(g.status.id);
+    if (mirror) mirror.value = [...g.tasks];
+  }
+}
+
+watch(() => props.groups, syncDndValues);
 
 // 折りたたみは画面内の一時状態。URL には載せない（共有したい情報ではない）
 const collapsed = ref<Record<string, boolean>>({});
@@ -268,61 +342,67 @@ async function commitAdding(statusId: string) {
               </Button>
             </div>
 
-            <template v-for="task in group.tasks" :key="task.id">
-              <TaskGroupedRow
-                :task="task"
-                :statuses="statuses"
-                :project-labels="projectLabels"
-                :members="members"
-                :pending-field="pending[task.id]"
-                :error="errors[task.id]"
-                :comment-pending="!!commentPendingTaskIds?.[task.id]"
-                :selected="selectedTaskId === task.id"
-                :expanded="!!expandedTaskIds[task.id]"
-                @select="selectTask(task.id)"
-                @toggle:subtasks="toggleSubtasks(task)"
-                @open="emit('open', task)"
-                @update:status="(statusId) => emit('update:status', task, statusId)"
-                @update:priority="(priority) => emit('update:priority', task, priority)"
-                @update:soft-deadline="(iso) => emit('update:softDeadline', task, iso)"
-                @toggle:assignee="
-                  (userId, checked) => emit('toggle:assignee', task, userId, checked)
-                "
-                @toggle:label="(labelId, checked) => emit('toggle:label', task, labelId, checked)"
-                :members-state="membersState"
-                :on-comment="(body: string) => onComment(task, body)"
-              />
-              <TaskSubtaskBranch
-                v-if="expandedTaskIds[task.id]"
-                :parent-task="task"
-                :filters="{
-                  status_id: group.status.id,
-                  label_id: labelId ?? undefined,
-                  is_archived: false,
-                }"
-                :tenant-id="tenantId"
-                :project-id="projectId"
-                :statuses="statuses"
-                :project-labels="projectLabels"
-                :members="members"
-                :members-state="membersState"
-                :pending="pending"
-                :errors="errors"
-                :comment-pending-task-ids="commentPendingTaskIds"
-                :on-comment="onComment"
-                @collapse="expandedTaskIds = { ...expandedTaskIds, [task.id]: false }"
-                @open="emit('open', $event)"
-                @update:status="(child, statusId) => emit('update:status', child, statusId)"
-                @update:priority="(child, priority) => emit('update:priority', child, priority)"
-                @update:soft-deadline="(child, iso) => emit('update:softDeadline', child, iso)"
-                @toggle:assignee="
-                  (child, userId, checked) => emit('toggle:assignee', child, userId, checked)
-                "
-                @toggle:label="
-                  (child, labelId, checked) => emit('toggle:label', child, labelId, checked)
-                "
-              />
-            </template>
+            <div
+              :ref="(el) => registerDndGroup(group.status.id, el)"
+              :data-dnd-status-id="group.status.id"
+            >
+              <template v-for="task in dndTasksOf(group)" :key="task.id">
+                <TaskGroupedRow
+                  data-dnd-task
+                  :task="task"
+                  :statuses="statuses"
+                  :project-labels="projectLabels"
+                  :members="members"
+                  :pending-field="pending[task.id]"
+                  :error="errors[task.id]"
+                  :comment-pending="!!commentPendingTaskIds?.[task.id]"
+                  :selected="selectedTaskId === task.id"
+                  :expanded="!!expandedTaskIds[task.id]"
+                  @select="selectTask(task.id)"
+                  @toggle:subtasks="toggleSubtasks(task)"
+                  @open="emit('open', task)"
+                  @update:status="(statusId) => emit('update:status', task, statusId)"
+                  @update:priority="(priority) => emit('update:priority', task, priority)"
+                  @update:soft-deadline="(iso) => emit('update:softDeadline', task, iso)"
+                  @toggle:assignee="
+                    (userId, checked) => emit('toggle:assignee', task, userId, checked)
+                  "
+                  @toggle:label="(labelId, checked) => emit('toggle:label', task, labelId, checked)"
+                  :members-state="membersState"
+                  :on-comment="(body: string) => onComment(task, body)"
+                />
+                <TaskSubtaskBranch
+                  v-if="expandedTaskIds[task.id]"
+                  :parent-task="task"
+                  :filters="{
+                    status_id: group.status.id,
+                    label_id: labelId ?? undefined,
+                    is_archived: false,
+                  }"
+                  :tenant-id="tenantId"
+                  :project-id="projectId"
+                  :statuses="statuses"
+                  :project-labels="projectLabels"
+                  :members="members"
+                  :members-state="membersState"
+                  :pending="pending"
+                  :errors="errors"
+                  :comment-pending-task-ids="commentPendingTaskIds"
+                  :on-comment="onComment"
+                  @collapse="expandedTaskIds = { ...expandedTaskIds, [task.id]: false }"
+                  @open="emit('open', $event)"
+                  @update:status="(child, statusId) => emit('update:status', child, statusId)"
+                  @update:priority="(child, priority) => emit('update:priority', child, priority)"
+                  @update:soft-deadline="(child, iso) => emit('update:softDeadline', child, iso)"
+                  @toggle:assignee="
+                    (child, userId, checked) => emit('toggle:assignee', child, userId, checked)
+                  "
+                  @toggle:label="
+                    (child, labelId, checked) => emit('toggle:label', child, labelId, checked)
+                  "
+                />
+              </template>
+            </div>
 
             <!-- 任意の並びでは API 順の末尾へ続きが増えるので、ボタンも下に置く -->
             <div v-if="!group.oldestFirst && group.hasMore" class="px-2 py-1">

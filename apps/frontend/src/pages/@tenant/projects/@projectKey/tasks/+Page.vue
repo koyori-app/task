@@ -1141,6 +1141,7 @@ const table = useTable({
               :on-comment="(task, body) => rowMutations.addComment(task.id, body)"
               :creating-status-ids="rowMutations.creatingStatusIds.value"
               :on-create="rowMutations.createTask"
+              :on-move-status="(task, statusId) => rowMutations.setStatus(task, statusId)"
             />
 
             <!-- 通常一覧テーブル -->
