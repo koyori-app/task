@@ -5316,9 +5316,9 @@ dependencies = [
 
 [[package]]
 name = "sea-query"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d190cfb3bcceb8a8d7d04dee5a0c77f60c7627979cdcb47fdcb8934f009badf"
+checksum = "546040c653a705e60ec65ecd3191a809603734bebbc225775916dea9ae409b31"
 dependencies = [
  "chrono",
  "ordered-float",
@@ -5943,7 +5943,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
