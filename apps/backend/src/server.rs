@@ -40,6 +40,9 @@ use job::{
     review_summary::{
         self, MAX_RETRIES as REVIEW_SUMMARY_MAX_RETRIES, QUEUE_NAME as REVIEW_SUMMARY_QUEUE,
     },
+    tenant_invitation_email::{
+        self, MAX_RETRIES as TENANT_INVITATION_MAX_RETRIES, QUEUE_NAME as TENANT_INVITATION_QUEUE,
+    },
     verification_email::{self, MAX_RETRIES, QUEUE_NAME},
     webhook_delivery,
 };
@@ -143,6 +146,13 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
             .concurrency(already_registered_email::worker_concurrency(settings))
             .data(already_registered_worker_state)
             .build(already_registered_email::process);
+
+    let tenant_invitation_worker = WorkerBuilder::new(format!("{TENANT_INVITATION_QUEUE}-worker"))
+        .backend(state.tenant_invitation_email_storage.as_ref().clone())
+        .retry(RetryPolicy::retries(TENANT_INVITATION_MAX_RETRIES))
+        .enable_tracing()
+        .data(job_state.clone())
+        .build(tenant_invitation_email::process);
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let worker_shutdown = shutdown_rx.clone();
@@ -260,6 +270,13 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
             .await
     });
 
+    let tenant_invitation_shutdown = shutdown_rx.clone();
+    let tenant_invitation_worker_handle = tokio::spawn(async move {
+        tenant_invitation_worker
+            .run_until(wait_for_shutdown(tenant_invitation_shutdown))
+            .await
+    });
+
     let api = router
         .merge(Scalar::with_url("/scalar", openapi.clone()))
         .with_state(state.clone())
@@ -321,6 +338,11 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         Ok(Ok(())) => info!("already registered email worker stopped"),
         Ok(Err(e)) => warn!("already registered email worker error: {e}"),
         Err(e) => warn!("already registered email worker join error: {e}"),
+    }
+    match tenant_invitation_worker_handle.await {
+        Ok(Ok(())) => info!("tenant invitation email worker stopped"),
+        Ok(Err(e)) => warn!("tenant invitation email worker error: {e}"),
+        Err(e) => warn!("tenant invitation email worker join error: {e}"),
     }
 
     match github_worker_handle.await {

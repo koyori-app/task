@@ -39,6 +39,7 @@ pub mod task_relations;
 pub mod task_timers;
 pub mod task_watchers;
 pub mod tasks;
+pub mod tenant_invitations;
 pub mod tenant_members;
 pub mod tenants;
 pub mod time_logs;
