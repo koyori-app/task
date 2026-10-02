@@ -377,6 +377,17 @@ describe('TaskAttachments', () => {
     failUpload();
     await flushPromises();
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+
+    // TASK-2 でも失敗させても、TASK-1 の失敗は押し出されない
+    const otherInput = wrapper.get('input[type="file"]');
+    Object.defineProperty(otherInput.element, 'files', {
+      configurable: true,
+      value: [new File([], 'empty.txt')],
+    });
+    await otherInput.trigger('change');
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toContain('空のファイルは添付できません');
+
     await wrapper.setProps({ taskId: 'TASK-1' });
     await flushPromises();
     expect(wrapper.get('[role="alert"]').text()).toContain('アップロードできませんでした');

@@ -38,13 +38,11 @@ const currentKey = computed(() => `${props.tenantId}/${props.projectId}/${props.
 // 分割表示でタスクを切り替えても、別のタスクの進行や失敗を今のタスクの欄に出さない
 const uploadingKeys = ref(new Set<string>());
 const uploading = computed(() => uploadingKeys.value.has(currentKey.value));
-const error = ref<{ key: string; message: string } | null>(null);
-const errorMessage = computed(() =>
-  error.value?.key === currentKey.value ? error.value.message : null,
-);
+const errors = ref(new Map<string, string>());
+const errorMessage = computed(() => errors.value.get(currentKey.value) ?? null);
 function setError(key: string, message: string | null) {
-  if (message !== null) error.value = { key, message };
-  else if (error.value?.key === key) error.value = null;
+  if (message !== null) errors.value.set(key, message);
+  else errors.value.delete(key);
 }
 // アップロード済みで紐付けに失敗したファイル。別のタスクへ切り替えても捨てない。
 // 元のタスクへ戻れば、捕まえた ID で紐付けを再試行できる
