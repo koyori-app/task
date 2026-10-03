@@ -4,22 +4,40 @@ import { defineComponent } from 'vue';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { membersData, meData, updateMutateAsync, deleteMutateAsync } = vi.hoisted(() => ({
+const {
+  membersData,
+  invitationsData,
+  meData,
+  updateMutateAsync,
+  deleteMutateAsync,
+  inviteMutateAsync,
+  resendMutateAsync,
+  revokeMutateAsync,
+} = vi.hoisted(() => ({
   membersData: { value: [] as unknown[] },
+  invitationsData: { value: [] as unknown[] },
   meData: { value: null as unknown },
   updateMutateAsync: vi.fn(),
   deleteMutateAsync: vi.fn(),
+  inviteMutateAsync: vi.fn(),
+  resendMutateAsync: vi.fn(),
+  revokeMutateAsync: vi.fn(),
 }));
 
 vi.mock('@/lib/api-vue-query', () => ({
   apiClient: {
-    useQuery: () => ({
-      data: membersData,
+    useQuery: (_method: string, path: string) => ({
+      data: path.endsWith('/invitations') ? invitationsData : membersData,
       isPending: { value: false },
       isError: { value: false },
     }),
-    useMutation: (method: string) => ({
-      mutateAsync: method === 'delete' ? deleteMutateAsync : updateMutateAsync,
+    useMutation: (method: string, path: string) => ({
+      mutateAsync: path.includes('/invitations')
+        ? ({ post: path.endsWith('/resend') ? resendMutateAsync : inviteMutateAsync }[method] ??
+          revokeMutateAsync)
+        : method === 'delete'
+          ? deleteMutateAsync
+          : updateMutateAsync,
       isPending: { value: false },
     }),
   },
@@ -55,13 +73,13 @@ const ButtonStub = defineComponent({
 let wrapper: VueWrapper;
 
 /** 操作するのは Admin 本人。オーナーは別人なので、自分の行にも除名ボタンの条件が効く。 */
-function mountMembers() {
+function mountMembers(asUserId = ADMIN_ID) {
   membersData.value = [
     member(OWNER_ID, 'owner', 'Admin'),
     member(ADMIN_ID, 'admin', 'Admin'),
     member(MEMBER_ID, 'member', 'Member'),
   ];
-  meData.value = { id: ADMIN_ID, username: 'admin', avatar_url: null };
+  meData.value = { id: asUserId, username: 'me', avatar_url: null };
   wrapper = mount(TenantSettingsMembers, {
     props: { tenant: { id: TENANT_ID, name: 'Alpha', owner_id: OWNER_ID } },
     global: {
@@ -86,8 +104,12 @@ function mountMembers() {
 
 describe('TenantSettingsMembers', () => {
   beforeEach(() => {
+    invitationsData.value = [];
     updateMutateAsync.mockReset().mockResolvedValue(undefined);
     deleteMutateAsync.mockReset().mockResolvedValue(undefined);
+    inviteMutateAsync.mockReset().mockResolvedValue(undefined);
+    resendMutateAsync.mockReset().mockResolvedValue(undefined);
+    revokeMutateAsync.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -131,5 +153,82 @@ describe('TenantSettingsMembers', () => {
     finish();
     await flushPromises();
     expect(deleteMutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('メールアドレスとロールで招待を送り、入力を空にする', async () => {
+    const wrapper = mountMembers();
+
+    const submit = wrapper.get('form button[type="submit"]');
+    expect(submit.attributes('disabled'), '形の崩れたアドレスでは送れない').toBeDefined();
+
+    await wrapper.get('input[type="email"]').setValue(' new@example.com ');
+    expect(submit.attributes('disabled')).toBeUndefined();
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+
+    expect(inviteMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_ID } },
+      body: { email: 'new@example.com', role: 'Member' },
+    });
+    expect(wrapper.get('[role="status"]').text()).toContain('new@example.com に招待を送りました');
+    expect((wrapper.get('input[type="email"]').element as HTMLInputElement).value).toBe('');
+  });
+
+  it('既にメンバーのアドレスは理由を出し、入力を残す', async () => {
+    inviteMutateAsync.mockRejectedValue({ response: { status: 409 } });
+    const wrapper = mountMembers();
+
+    await wrapper.get('input[type="email"]').setValue('member@example.com');
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('既にメンバーです');
+    expect((wrapper.get('input[type="email"]').element as HTMLInputElement).value).toBe(
+      'member@example.com',
+    );
+  });
+
+  it('保留中の招待を期限つきで並べ、再送と取り消しを対応する口へ送る', async () => {
+    invitationsData.value = [
+      {
+        id: 'inv-live',
+        tenant_id: TENANT_ID,
+        email: 'live@example.com',
+        role: 'Member',
+        expires_at: '2999-01-01T00:00:00Z',
+        created_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'inv-expired',
+        tenant_id: TENANT_ID,
+        email: 'expired@example.com',
+        role: 'Viewer',
+        expires_at: '2000-01-01T00:00:00Z',
+        created_at: '2000-01-01T00:00:00Z',
+      },
+    ];
+    const wrapper = mountMembers();
+
+    const rows = wrapper.findAll('li').filter((li) => li.text().includes('@example.com'));
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.text()).not.toContain('期限切れ');
+    expect(rows[1]!.text()).toContain('期限切れ');
+
+    await wrapper.get('button[aria-label="expired@example.comへ招待を送り直す"]').trigger('click');
+    await flushPromises();
+    expect(resendMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_ID, invitation_id: 'inv-expired' } },
+    });
+
+    await wrapper.get('button[aria-label="live@example.comへの招待を取り消す"]').trigger('click');
+    await flushPromises();
+    expect(revokeMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_ID, invitation_id: 'inv-live' } },
+    });
+  });
+
+  it('管理者でなければ招待の欄を出さない', () => {
+    const wrapper = mountMembers(MEMBER_ID);
+    expect(wrapper.find('input[type="email"]').exists()).toBe(false);
   });
 });

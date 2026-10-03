@@ -7,6 +7,7 @@ pub mod notification_email;
 pub mod notification_retention;
 pub mod password_reset_email;
 pub mod review_summary;
+pub mod tenant_invitation_email;
 pub mod verification_email;
 pub mod webhook_delivery;
 
@@ -21,6 +22,7 @@ pub use github_issue_sync::{GithubIssueSyncJob, GithubIssueSyncStorage};
 pub use github_webhook::{GithubWebhookJob, GithubWebhookStorage};
 pub use password_reset_email::{PasswordResetEmailJob, PasswordResetEmailStorage};
 pub use review_summary::{ReviewSummaryJob, ReviewSummaryStorage};
+pub use tenant_invitation_email::{TenantInvitationEmailJob, TenantInvitationEmailStorage};
 pub use verification_email::{
     MAX_RETRIES, QUEUE_NAME, VerificationEmailJob, VerificationEmailStorage,
 };
@@ -88,4 +90,11 @@ pub async fn setup_already_registered_email_storage(
     settings: &Settings,
 ) -> Result<Arc<AlreadyRegisteredEmailStorage>, anyhow::Error> {
     already_registered_email::setup(pool, settings).await
+}
+
+pub async fn setup_tenant_invitation_email_storage(
+    pool: &PgPool,
+    settings: &Settings,
+) -> Result<Arc<TenantInvitationEmailStorage>, anyhow::Error> {
+    tenant_invitation_email::setup(pool, settings).await
 }
