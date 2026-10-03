@@ -8004,7 +8004,6 @@ dependencies = [
  "mime_guess",
  "num-traits",
  "rand 0.10.3",
- "rand 0.8.6",
  "regex-automata",
  "regex-syntax",
  "reqwest 0.13.5",
