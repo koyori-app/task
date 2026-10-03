@@ -104,6 +104,7 @@ beforeEach(() => {
         [`${projectBase}/assignable-users`, []],
         ...[parent, child].flatMap((task): [string, unknown][] => [
           [`${projectBase}/tasks/ENG-${task.seq_id}`, task],
+          [`${projectBase}/tasks/ENG-${task.seq_id}/attachments`, { attachments: [] }],
           [
             `${projectBase}/tasks/ENG-${task.seq_id}/relations`,
             {
