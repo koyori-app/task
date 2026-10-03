@@ -922,8 +922,9 @@ export const ListViewRowBorders: Story = {
   decorators: [storyDecorator(listContext)],
   beforeEach: mockFetch,
   play: async ({ canvasElement }) => {
-    // 行を DnD の container で包んだとき、行の根の last:border-b-0 が群の最後の行に
-    // 効き、その下の線が消えた。どの群の最後の行も、ほかの行と同じく下に線を持つ。
+    // 行を DnD の container で包んだとき、群の最後の行がその container の :last-child
+    // になり、行の根の last:border-b-0 の対象になって下の線が消えた。どの群の最後の
+    // 行も、ほかの行と同じく下に線を持つ。
     const rows = () => [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')];
     await waitFor(() => expect(rows().length).toBe(6));
     const widths = rows().map(
