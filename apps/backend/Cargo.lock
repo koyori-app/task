@@ -8020,7 +8020,7 @@ dependencies = [
  "slab",
  "smallvec",
  "socket2 0.6.5",
- "sqlx-core 0.8.6",
+ "sqlx-core 0.9.0",
  "sqlx-postgres 0.8.6",
  "subtle",
  "syn 3.0.6",
