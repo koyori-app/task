@@ -400,6 +400,9 @@ function sortStoryTasks(tasks: SortableStoryTask[], sort: string | null) {
   });
 }
 
+/** `taskUpdateDelayMs` を付けた PUT tasks/{id} の応答が返ったか（story が保存中かを知るため） */
+let taskUpdateSettled = true;
+
 function createMockFetch(
   overrides: {
     projects?: typeof sampleProjects;
@@ -416,8 +419,15 @@ function createMockFetch(
     persistTaskStatus?: boolean;
     /** PUT tasks/{id} を失敗させる。reject は 500、network は fetch 自体の失敗 */
     taskUpdate?: 'reject' | 'network';
+    /** PUT tasks/{id} の応答を遅らせる（保存中に別の取得を返させるため） */
+    taskUpdateDelayMs?: number;
+    /** ステータスごとの一覧の応答を遅らせる（status id → ms） */
+    statusListDelayMs?: Record<string, number>;
   } = {},
 ) {
+  // module の変数なので、前の story が保存中のまま終わると false が残る。
+  // mock を作るたびに「保存は済んでいる」へ戻し、次の story の前提を誤って満たさない。
+  taskUpdateSettled = true;
   const original = globalThis.fetch;
   const savedStatusIds = new Map<string, string>();
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
@@ -487,6 +497,11 @@ function createMockFetch(
       method === 'PUT'
         ? new URL(url, 'http://localhost').pathname.match(/\/tasks\/([^/]+)$/)
         : null;
+    if (updateMatch && overrides.taskUpdateDelayMs) {
+      taskUpdateSettled = false;
+      await new Promise((resolve) => setTimeout(resolve, overrides.taskUpdateDelayMs));
+      taskUpdateSettled = true;
+    }
     if (updateMatch && overrides.taskUpdate === 'network') {
       throw new TypeError('Failed to fetch');
     }
@@ -513,6 +528,8 @@ function createMockFetch(
       return jsonResponse({ tasks: children, total: children.length, next_cursor: null });
     }
     if (statusFilter && url.includes('/tasks')) {
+      const listDelay = overrides.statusListDelayMs?.[statusFilter];
+      if (listDelay) await new Promise((resolve) => setTimeout(resolve, listDelay));
       const all = (
         (overrides.tasks ?? sampleTasks).tasks as Array<
           SortableStoryTask & { id: string; status_id: string; labels: Array<{ id: string }> }
@@ -1067,7 +1084,10 @@ function watchRowReturn(container: HTMLElement, title: string) {
  * In Progress の「OAuth 対応を実装する」を In Review へ DnD で移す。
  * mouse 経路は native HTML5 drag ゆえ DragEvent を dataTransfer 込みで直に撃つ（上の story と同じ）。
  */
-async function dragOauthToReview(canvasElement: HTMLElement) {
+async function dragOauthToReview(
+  canvasElement: HTMLElement,
+  { waitForAllGroups = true }: { waitForAllGroups?: boolean } = {},
+) {
   const canvas = within(canvasElement);
   await waitFor(() =>
     expect(
@@ -1089,9 +1109,11 @@ async function dragOauthToReview(canvasElement: HTMLElement) {
   const rowCount = (el: HTMLElement) => el.querySelectorAll('[data-dnd-task]').length;
   const backlog = await containerOf('Backlog');
   const done = await containerOf('Done');
-  await waitFor(() =>
-    expect([backlog, progress, review, done].map(rowCount)).toEqual([2, 2, 1, 1]),
-  );
+  if (waitForAllGroups) {
+    await waitFor(() =>
+      expect([backlog, progress, review, done].map(rowCount)).toEqual([2, 2, 1, 1]),
+    );
+  }
   const row = [...progress.querySelectorAll<HTMLElement>('[data-dnd-task]')].find((el) =>
     el.textContent?.includes('OAuth 対応を実装する'),
   );
@@ -1116,7 +1138,7 @@ async function dragOauthToReview(canvasElement: HTMLElement) {
       }),
     );
   }
-  return { progress, review };
+  return { progress, review, done };
 }
 
 /** PUT が失敗したとき、DnD で動いた行が元の群へ戻ることを確かめる。 */
@@ -1152,6 +1174,53 @@ export const ListViewDndNetworkFailure: Story = {
   beforeEach: () => createMockFetch({ taskUpdate: 'network' }),
   play: async ({ canvasElement }) => {
     await expectFailedMoveIsRolledBack(canvasElement);
+  },
+};
+
+/** `container` から `title` の行が一度でも消えたかを見張る。 */
+function watchRowLeave(container: HTMLElement, title: string) {
+  let left = false;
+  const observer = new MutationObserver(() => {
+    const present = [...container.querySelectorAll<HTMLElement>('[data-dnd-task]')].some((row) =>
+      row.textContent?.includes(title),
+    );
+    if (!present) left = true;
+  });
+  observer.observe(container, { childList: true, subtree: true });
+  return {
+    stop() {
+      observer.disconnect();
+      return left;
+    },
+  };
+}
+
+export const ListViewDndRefetchDuringSave: Story = {
+  name: 'List 表示の DnD（保存中に一覧の取得が届いても行は動かない）',
+  decorators: [storyDecorator(listContext)],
+  // PUT を 2 秒止め、そのあいだに Done の一覧（0.8 秒遅らせる）が届く形を作る。
+  beforeEach: () =>
+    createMockFetch({
+      persistTaskStatus: true,
+      taskUpdateDelayMs: 2000,
+      statusListDelayMs: { 's-done': 800 },
+    }),
+  play: async ({ canvasElement }) => {
+    // 群の取得が揃うのを待たずに撃つ（揃う前の取得を保存中に届かせる）。
+    const { review, done } = await dragOauthToReview(canvasElement, { waitForAllGroups: false });
+    await waitFor(() => expect(review.textContent).toContain('OAuth 対応を実装する'));
+
+    // 条件が揃っているか: 撃った時点で Done はまだ空で、保存が済む前に Done が届く。
+    await expect(done.querySelectorAll('[data-dnd-task]').length).toBe(0);
+    const left = watchRowLeave(review, 'OAuth 対応を実装する');
+    await waitFor(() => expect(done.querySelectorAll('[data-dnd-task]').length).toBe(1));
+    await expect(taskUpdateSettled, 'Done が届いた時点で保存はまだ済んでいない').toBe(false);
+
+    // 保存が済み、再取得が終わるまで、移した行は移った先から一度も消えない。
+    await waitFor(() => expect(taskUpdateSettled).toBe(true), { timeout: 5000 });
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await expect(review.textContent).toContain('OAuth 対応を実装する');
+    await expect(left.stop(), '移した行が保存中に移った先から消えた').toBe(false);
   },
 };
 
