@@ -112,7 +112,7 @@ PR 内で採番し、「どのラウンド（R1, R2, …）で出た指摘か」
 | `title` | 1 行の要約 |
 | `body` | 詳細（markdown。再現条件・根拠を書く） |
 | `file` / `line` | 位置情報（任意。インラインコメントの代替はこのテキスト情報で足りる） |
-| `state` | `open` / `fixed` / `verified` / `deferred` / `rejected` |
+| `state` | `open` / `fixing` / `fixed` / `verified` / `deferred` / `rejected` |
 | `deferred_task_id` | 繰り延べ時に自動起票した通常タスクへのリンク（任意） |
 
 ### 状態遷移
@@ -121,6 +121,7 @@ PR 内で採番し、「どのラウンド（R1, R2, …）で出た指摘か」
 open ──→ fixed ──→ verified        （修正宣言 → レビュー側の確認）
   ↑        │
   │        └─→ open                （差し戻し: 再確認で未修正と判断。レビュー側のみ）
+  ├─⇄ fixing ──→ fixed             （修正中: 着手の宣言とその取り消し。fixed へ進める）
   ├─⇄ deferred                     （Low/Nit のみ繰り延べ可。同プロジェクトに通常タスクを自動起票しリンク。
   │                                  open へ戻すとき自動起票タスクはシステムが自動クローズ）
   └─⇄ rejected                     （指摘自体が誤り。遷移・再オープンとも、その指摘を出した
@@ -128,6 +129,11 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
 ```
 
 - `fixed` へは `write:review` を持つ誰でも遷移できる（修正側の宣言）
+- `fixing`（修正中）は修正側が着手を知らせるための状態。`open → fixing`・`fixing → open`
+  （着手の取り消し）・`fixing → fixed` は `write:review` を持つ誰でも可。着手を経ずに
+  `open → fixed` としてもよい。`fixing` から `verified` / `deferred` / `rejected` へは
+  直接進めない（`fixed` か `open` を経る）。マージ可否の集計では `open` / `fixed` と同じく
+  **未解決**に数える（着手しただけでは何も直っていない）。`fixed_by` は記録しない
 - `verified` への遷移と `fixed → open` の差し戻しは**レビュー側だけ**: その指摘を含む
   ラウンドの作成者、または同じ PR のより新しいラウンドの作成者。**`fixed` を宣言した
   本人は不可**（自分の修正を自分で検証済みにできない）。`fixed → open` の差し戻しが
@@ -147,7 +153,7 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
   指摘の取り下げは出した本人の判断に閉じる。他人の指摘が誤りだと思ったら、
   自分のラウンドで反論を出すか、修正側として `fixed` を宣言する
 - **`deferred` へ遷移できるのは `low` / `nit` の指摘だけ**。`high` / `medium` の繰り延べは
-  拒否する（409）。マージ可否は集計側（§5）が open / fixed の High・Medium を数えて出すので、
+  拒否する（409）。マージ可否は集計側（§5）が open / fixing / fixed の High・Medium を数えて出すので、
   繰り延べを重大度で縛らないと、High を 1 回 `deferred` にするだけで §2 のマージ基準を
   迂回できてしまう。マージ可否の集計から外れる遷移（`deferred` / `rejected` / `verified`）は、
   どれも「修正する側が 1 人で通せない」ことを揃えて満たす
@@ -241,7 +247,7 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
   `repo` / `host` / `host_url` は対象行との一致を検証し、不一致なら 400 とする。repo + pr だけの
   指定は同じプロジェクト内の候補が 1 件のときだけ許可する。複数候補は 409 とし、host または
   `pull_request_id` の再指定を要求する。候補が無い場合も現在の連携先へ暗黙にフォールバックしない
-- **マージ可否は「ラウンドが 1 件以上ある」かつ「open / fixed の High・Medium が 0」**。
+- **マージ可否は「ラウンドが 1 件以上ある」かつ「open / fixing / fixed の High・Medium が 0」**。
   件数だけで判定すると、**一度もレビューされていない PR が 0 件として「可」で通る**。
   これはマージ前ゲートとして最も危ない誤りなので、レビューの不在と「指摘なし」を
   区別する
@@ -275,7 +281,7 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
   |---|---|
   | `unlinked` | 集計対象のリポジトリが確定しない（連携なし） |
   | `unreviewed` | ラウンドが 0 件 |
-  | `blocked` | open / fixed の High・Medium がある |
+  | `blocked` | open / fixing / fixed の High・Medium がある |
   | `stale_unknown` | `cached_pr_head_sha` が無い |
   | `outdated` | `cached_pr_head_sha` ≠ `latest_head_sha` |
   | `ready` | 上のいずれでもない（`pr_head_checked_at` を併記する） |
@@ -370,7 +376,7 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
 
 | 終了する条件 | 理由 |
 |---|---|
-| High / Medium が open か fixed で残っている | §2 のマージ基準 |
+| High / Medium が open・fixing・fixed のいずれかで残っている | §2 のマージ基準 |
 | ラウンドが 1 件も無い | レビューされていない。「指摘なし」とは違う |
 | 最新ラウンドの `head_sha` が照合対象の HEAD と違う | レビュー後にコミットが積まれている |
 | 照合する HEAD が決まらない | 判断できないので通さない（`--no-head-check` で明示的に外せる） |
@@ -520,8 +526,8 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
   短縮 SHA を貼るのは人間のほうが起こりやすく、サーバーの 400 では何桁必要か伝わらない）
 - **PR 単位の指摘一覧**: 重大度・状態・ラウンドでフィルタ。各指摘は title / file:line / 本文 /
   遷移履歴を持つ
-- **状態遷移の操作**: fixed / verified / deferred / rejected に加えて、**戻り遷移**
-  （fixed → open の差し戻し / deferred → open / rejected → open）。出すボタンは指摘の
+- **状態遷移の操作**: fixing / fixed / verified / deferred / rejected に加えて、**戻り遷移**
+  （fixed → open の差し戻し / fixing → open の着手の取り消し / deferred → open / rejected → open）。出すボタンは指摘の
   `available_actions`（§5）そのもの。役割制約（自分の修正を自分で verified にできない、
   High / Medium には deferred を出さない、rejected は指摘を出した本人とオーナー代行だけ、
   fixed → verified / open はレビュー側だけ）はすべて backend が判定済み。自分が fixed を
@@ -774,3 +780,6 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
   消した。Koyori Desktop が 3 つ目の写しを持つと、規則を変えるたびに 3 か所を揃える必要が
   出るため。判定は `ensure_transition_allowed` の本体（`check_transition`）を候補ごとに呼ぶだけで、
   材料は一覧ぶんまとめて引く
+- 2026-10-01: 状態に `fixing`（修正中）を足した（TASK-240）。修正側が着手を知らせる手段が
+  無く、同じ指摘に複数人が手を付けうるため。マージ可否の集計では未解決に数え、遷移は
+  `open ⇄ fixing → fixed` を修正側に開くだけにした（集計から外れる遷移を増やさない）
