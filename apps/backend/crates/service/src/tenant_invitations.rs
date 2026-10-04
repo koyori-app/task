@@ -5,6 +5,8 @@
 //! 配信済みのリンクを壊さない。再送・再招待で世代を上げたときだけ前のリンクが通らなくなる。
 //! 平文のトークンは DB にも apalis.jobs にも残らない。
 
+use std::sync::LazyLock;
+
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{Duration, Utc};
@@ -26,6 +28,19 @@ pub const TTL_DAYS: i64 = 7;
 pub const SEND_COOLDOWN_SECS: u64 = 60;
 
 const KEY_COOLDOWN: &str = "tenant_invite:rl:";
+
+/// 値が自分の取った枠のときだけ消す。枠が期限切れになった後に別のリクエストが取り直した枠を、
+/// 遅れて失敗した前のリクエストが消さないようにする。
+static RELEASE_SLOT_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
+    redis::Script::new(
+        r#"
+        if redis.call('GET', KEYS[1]) == ARGV[1] then
+            return redis.call('DEL', KEYS[1])
+        end
+        return 0
+        "#,
+    )
+});
 
 pub fn expires_at_from_now() -> DateTimeWithTimeZone {
     (Utc::now() + Duration::days(TTL_DAYS)).into()
@@ -92,12 +107,14 @@ pub fn send_slot_key(tenant_id: Uuid, email: &str) -> String {
     format!("{KEY_COOLDOWN}{tenant_id}:{email}")
 }
 
-/// 宛先ごとの送信の枠を取る。取れなければ `false`（間隔を空けずに送ろうとした）。
+/// 宛先ごとの送信の枠を取り、返すときに使う持ち主の印を返す。
+/// 取れなければ `None`（間隔を空けずに送ろうとした）。
 pub async fn try_acquire_send_slot(
     redis: &RedisConnection,
     tenant_id: Uuid,
     email: &str,
-) -> Result<bool, anyhow::Error> {
+) -> Result<Option<String>, anyhow::Error> {
+    let owner = Uuid::new_v4().to_string();
     let mut conn = redis
         .conn
         .acquire()
@@ -105,33 +122,36 @@ pub async fn try_acquire_send_slot(
         .map_err(|e| anyhow::anyhow!("redis acquire failed: {e}"))?;
     let set_ok: Option<String> = redis::cmd("SET")
         .arg(send_slot_key(tenant_id, email))
-        .arg("1")
+        .arg(&owner)
         .arg("NX")
         .arg("EX")
         .arg(SEND_COOLDOWN_SECS)
         .query_async(&mut conn)
         .await
         .map_err(|e| anyhow::anyhow!("redis SET NX invitation cooldown: {e}"))?;
-    Ok(set_ok.is_some())
+    Ok(set_ok.map(|_| owner))
 }
 
 /// 取った送信の枠を返す。招待の更新やジョブの投入に失敗して、メールを送らずに終わったときに使う
-/// （返さないと、直後のやり直しが 429 になる）。
+/// （返さないと、直後のやり直しが 429 になる）。`owner` は [`try_acquire_send_slot`] が返した印で、
+/// 枠がもう別のリクエストのものになっていれば何もしない。
 pub async fn release_send_slot(
     redis: &RedisConnection,
     tenant_id: Uuid,
     email: &str,
+    owner: &str,
 ) -> Result<(), anyhow::Error> {
     let mut conn = redis
         .conn
         .acquire()
         .await
         .map_err(|e| anyhow::anyhow!("redis acquire failed: {e}"))?;
-    let _: i64 = redis::cmd("DEL")
-        .arg(send_slot_key(tenant_id, email))
-        .query_async(&mut conn)
+    RELEASE_SLOT_SCRIPT
+        .key(send_slot_key(tenant_id, email))
+        .arg(owner)
+        .invoke_async::<i64>(&mut conn)
         .await
-        .map_err(|e| anyhow::anyhow!("redis DEL invitation cooldown: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("redis release invitation cooldown: {e}"))?;
     Ok(())
 }
 

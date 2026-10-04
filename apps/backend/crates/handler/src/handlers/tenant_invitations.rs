@@ -65,12 +65,15 @@ async fn is_member_email(state: &AppState, tenant_id: Uuid, email: &str) -> Resu
         .is_some())
 }
 
-async fn acquire_send_slot(state: &AppState, tenant_id: Uuid, email: &str) -> Result<(), AppError> {
-    if try_acquire_send_slot(&state.redis_client, tenant_id, email).await? {
-        Ok(())
-    } else {
-        Err(AppError::TooManyRequests)
-    }
+/// 送信の枠を取り、返すときに使う持ち主の印を返す。
+async fn acquire_send_slot(
+    state: &AppState,
+    tenant_id: Uuid,
+    email: &str,
+) -> Result<String, AppError> {
+    try_acquire_send_slot(&state.redis_client, tenant_id, email)
+        .await?
+        .ok_or(AppError::TooManyRequests)
 }
 
 /// 送信の枠を取ったあとの書き込み（招待の更新とジョブの投入）が失敗したら、枠を返して
@@ -80,12 +83,13 @@ async fn release_on_error<T>(
     state: &AppState,
     tenant_id: Uuid,
     email: &str,
+    slot: &str,
     result: Result<T, anyhow::Error>,
 ) -> Result<T, AppError> {
     match result {
         Ok(value) => Ok(value),
         Err(error) => {
-            release_send_slot(&state.redis_client, tenant_id, email).await?;
+            release_send_slot(&state.redis_client, tenant_id, email, slot).await?;
             Err(error.into())
         }
     }
@@ -157,7 +161,7 @@ pub async fn create_invitation(
     if is_member_email(&state, tenant_id, &email).await? {
         return Err(AppError::ConflictDetail("already-member".into()));
     }
-    acquire_send_slot(&state, tenant_id, &email).await?;
+    let slot = acquire_send_slot(&state, tenant_id, &email).await?;
 
     // 二重招待は (tenant_id, email) の UNIQUE で同じ行を作り直す。世代が上がるので、
     // 前のメールのリンクはここで通らなくなる
@@ -169,7 +173,7 @@ pub async fn create_invitation(
         auth.user_id,
     )
     .await;
-    let invitation_id = release_on_error(&state, tenant_id, &email, issued).await?;
+    let invitation_id = release_on_error(&state, tenant_id, &email, &slot, issued).await?;
     let invitation = load_invitation(&state, invitation_id).await?;
     Ok((StatusCode::CREATED, Json(invitation.into())))
 }
@@ -210,13 +214,13 @@ pub async fn resend_invitation(
 ) -> Result<Json<TenantInvitationResponse>, AppError> {
     require_invitation_admin(&state, &auth, tenant_id).await?;
     let invitation = find_invitation(&state, tenant_id, invitation_id).await?;
-    acquire_send_slot(&state, tenant_id, &invitation.email).await?;
+    let slot = acquire_send_slot(&state, tenant_id, &invitation.email).await?;
 
     let resent =
         tenant_invitation_email::resend_and_enqueue(&state.pg_pool, tenant_id, invitation_id).await;
-    if !release_on_error(&state, tenant_id, &invitation.email, resent).await? {
+    if !release_on_error(&state, tenant_id, &invitation.email, &slot, resent).await? {
         // 確かめた後に取り消された
-        release_send_slot(&state.redis_client, tenant_id, &invitation.email).await?;
+        release_send_slot(&state.redis_client, tenant_id, &invitation.email, &slot).await?;
         return Err(AppError::NotFound);
     }
     let invitation = load_invitation(&state, invitation_id).await?;

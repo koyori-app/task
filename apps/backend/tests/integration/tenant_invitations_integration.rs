@@ -6,7 +6,7 @@ use entity::{tenant_invitations, users};
 use job::tenant_invitation_email::{TenantInvitationEmailJob, process};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use serde_json::{Value, json};
-use service::tenant_invitations::send_slot_key;
+use service::tenant_invitations::{release_send_slot, send_slot_key, try_acquire_send_slot};
 use uuid::Uuid;
 
 // テナントへのメール招待（TASK-184）の統合テスト。
@@ -459,5 +459,49 @@ async fn invitations_are_admin_only_and_scoped_to_the_tenant() {
             .await
             .status(),
         StatusCode::FORBIDDEN
+    );
+}
+
+/// 送信の枠は取った本人の印でしか返せない。期限切れの後に別のリクエストが取り直した枠を、
+/// 遅れて失敗した前のリクエストが消すと、さらに別の送信を間隔内に通してしまう。
+#[tokio::test]
+async fn releasing_a_send_slot_does_not_free_someone_elses_slot() {
+    let app = TestApp::new().await;
+    let redis = &app.state.redis_client;
+    let tenant_id = Uuid::new_v4();
+    let email = unique_email();
+
+    let first = try_acquire_send_slot(redis, tenant_id, &email)
+        .await
+        .expect("acquire")
+        .expect("first slot");
+    // 枠が期限切れになり、次のリクエストが取り直した状態を作る
+    clear_send_slot(&app, tenant_id, &email).await;
+    let second = try_acquire_send_slot(redis, tenant_id, &email)
+        .await
+        .expect("acquire")
+        .expect("second slot");
+
+    // 前のリクエストが遅れて失敗し、自分の枠を返そうとしても次の枠は残る
+    release_send_slot(redis, tenant_id, &email, &first)
+        .await
+        .expect("release stale slot");
+    assert!(
+        try_acquire_send_slot(redis, tenant_id, &email)
+            .await
+            .expect("acquire")
+            .is_none(),
+        "次のリクエストの枠が残っている間は取れない"
+    );
+
+    // 対照: 持ち主の印なら返せる
+    release_send_slot(redis, tenant_id, &email, &second)
+        .await
+        .expect("release own slot");
+    assert!(
+        try_acquire_send_slot(redis, tenant_id, &email)
+            .await
+            .expect("acquire")
+            .is_some()
     );
 }
