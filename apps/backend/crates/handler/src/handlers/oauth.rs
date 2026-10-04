@@ -522,6 +522,7 @@ pub async fn list_connections(
             provider: row.provider,
             provider_email: row.provider_email,
             instance_url: row.instance_url,
+            provider_login: row.provider_login,
             connected_at: row.created_at.to_rfc3339(),
         })
         .collect();

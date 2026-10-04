@@ -58,6 +58,21 @@ async fn oauth_start_callback_flow_issues_session() {
         .expect("uuid parse");
     assert_eq!(app.count_connections_for_user(user_id).await, 1);
 
+    // 連携一覧はホスト上のユーザー名を小文字で返す（レビュー画面の「自分の PR」判定に使う）
+    let connections: serde_json::Value = app
+        .client()
+        .get(format!("{}/v1/auth/oauth/connections", app.base_url()))
+        .send()
+        .await
+        .expect("connections request")
+        .json()
+        .await
+        .expect("connections json");
+    assert_eq!(
+        connections["connections"][0]["provider_login"].as_str(),
+        Some(format!("oauth_user_{unique}").to_lowercase().as_str())
+    );
+
     app.cleanup_user(user_id).await;
 }
 
