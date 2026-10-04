@@ -13,8 +13,7 @@ pub struct Model {
     #[sea_orm(unique_key = "tenant_invitations_tenant_id_email_key")]
     pub email: String,
     pub role: super::super::tenant_members::TenantRole,
-    #[sea_orm(unique)]
-    pub token_hash: Option<String>,
+    pub generation: i32,
     pub invited_by: Uuid,
     pub expires_at: DateTimeWithTimeZone,
     pub created_at: DateTimeWithTimeZone,

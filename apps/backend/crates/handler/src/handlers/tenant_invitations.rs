@@ -9,9 +9,7 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
-use chrono::Utc;
 use sea_orm::prelude::Uuid;
-use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
     TransactionTrait,
@@ -23,13 +21,13 @@ use crate::extractors::{AuthUser, CurrentUser};
 use crate::handlers::tenant_members::require_tenant_admin;
 use crate::openapi::CrudErrors;
 use entity::{scopes::Scope, tenant_invitations, tenant_members, tenants, users};
-use job::{TenantInvitationEmailJob, tenant_invitation_email};
+use job::tenant_invitation_email;
 use payload::tenant_invitations::*;
 use payload::tenant_members::TenantMemberResponse;
 use service::db::is_postgres_unique_violation;
 use service::email::normalize_email;
 use service::tenant_invitations::{
-    expires_at_from_now, find_by_token, is_expired, try_acquire_send_slot,
+    find_by_token, is_expired, release_send_slot, try_acquire_send_slot,
 };
 
 /// 発行・一覧・取り消し・再送に共通する前段。テナントが無ければ 404、管理者でなければ 403。
@@ -75,14 +73,33 @@ async fn acquire_send_slot(state: &AppState, tenant_id: Uuid, email: &str) -> Re
     }
 }
 
-/// 送信ジョブを積む。積めなかったら 500 にする。招待の行は残るので、画面の再送でやり直せる。
-async fn enqueue_email(state: &AppState, invitation_id: Uuid) -> Result<(), AppError> {
-    tenant_invitation_email::enqueue(
-        state.tenant_invitation_email_storage.as_ref(),
-        TenantInvitationEmailJob::new(invitation_id),
-    )
-    .await?;
-    Ok(())
+/// 送信の枠を取ったあとの書き込み（招待の更新とジョブの投入）が失敗したら、枠を返して
+/// 失敗をそのまま伝える。招待の更新とジョブの投入は 1 トランザクションなので、前のリンクも
+/// 生きたまま残る。枠を返さないと、直後のやり直しが 429 になる。
+async fn release_on_error<T>(
+    state: &AppState,
+    tenant_id: Uuid,
+    email: &str,
+    result: Result<T, anyhow::Error>,
+) -> Result<T, AppError> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            release_send_slot(&state.redis_client, tenant_id, email).await?;
+            Err(error.into())
+        }
+    }
+}
+
+async fn load_invitation(
+    state: &AppState,
+    invitation_id: Uuid,
+) -> Result<tenant_invitations::Model, AppError> {
+    // 書き込みを確定した直後に読むので、無ければ（間で取り消された）404
+    tenant_invitations::Entity::find_by_id(invitation_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)
 }
 
 #[axum::debug_handler]
@@ -142,36 +159,18 @@ pub async fn create_invitation(
     }
     acquire_send_slot(&state, tenant_id, &email).await?;
 
-    // 二重招待は (tenant_id, email) の UNIQUE で同じ行を作り直す。token_hash を消すので、
-    // 前のメールのリンクはこの時点で使えなくなる
-    let invitation = tenant_invitations::Entity::insert(tenant_invitations::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        tenant_id: Set(tenant_id),
-        email: Set(email),
-        role: Set(payload.role),
-        token_hash: Set(None),
-        invited_by: Set(auth.user_id),
-        expires_at: Set(expires_at_from_now()),
-        created_at: Set(Utc::now().into()),
-    })
-    .on_conflict(
-        OnConflict::columns([
-            tenant_invitations::Column::TenantId,
-            tenant_invitations::Column::Email,
-        ])
-        .update_columns([
-            tenant_invitations::Column::Role,
-            tenant_invitations::Column::TokenHash,
-            tenant_invitations::Column::InvitedBy,
-            tenant_invitations::Column::ExpiresAt,
-            tenant_invitations::Column::CreatedAt,
-        ])
-        .to_owned(),
+    // 二重招待は (tenant_id, email) の UNIQUE で同じ行を作り直す。世代が上がるので、
+    // 前のメールのリンクはここで通らなくなる
+    let issued = tenant_invitation_email::issue_and_enqueue(
+        &state.pg_pool,
+        tenant_id,
+        &email,
+        &payload.role,
+        auth.user_id,
     )
-    .exec_with_returning(&state.db)
-    .await?;
-
-    enqueue_email(&state, invitation.id).await?;
+    .await;
+    let invitation_id = release_on_error(&state, tenant_id, &email, issued).await?;
+    let invitation = load_invitation(&state, invitation_id).await?;
     Ok((StatusCode::CREATED, Json(invitation.into())))
 }
 
@@ -213,12 +212,14 @@ pub async fn resend_invitation(
     let invitation = find_invitation(&state, tenant_id, invitation_id).await?;
     acquire_send_slot(&state, tenant_id, &invitation.email).await?;
 
-    let mut active: tenant_invitations::ActiveModel = invitation.into();
-    active.token_hash = Set(None);
-    active.expires_at = Set(expires_at_from_now());
-    let invitation = active.update(&state.db).await?;
-
-    enqueue_email(&state, invitation.id).await?;
+    let resent =
+        tenant_invitation_email::resend_and_enqueue(&state.pg_pool, tenant_id, invitation_id).await;
+    if !release_on_error(&state, tenant_id, &invitation.email, resent).await? {
+        // 確かめた後に取り消された
+        release_send_slot(&state.redis_client, tenant_id, &invitation.email).await?;
+        return Err(AppError::NotFound);
+    }
+    let invitation = load_invitation(&state, invitation_id).await?;
     Ok(Json(invitation.into()))
 }
 
@@ -348,7 +349,7 @@ pub async fn accept_invitation(
     // 間に取り消し・発行し直しが入った場合も消せないので 404 になる
     let consumed = tenant_invitations::Entity::delete_many()
         .filter(tenant_invitations::Column::Id.eq(invitation.id))
-        .filter(tenant_invitations::Column::TokenHash.eq(invitation.token_hash.clone()))
+        .filter(tenant_invitations::Column::Generation.eq(invitation.generation))
         .exec(&txn)
         .await?;
     if consumed.rows_affected == 0 {

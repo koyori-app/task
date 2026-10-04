@@ -137,15 +137,20 @@ NTFS では「継承を無効にする」が明示の操作である。
 | `tenant_id` | `UUID` NOT NULL | `tenants(id)` ON DELETE CASCADE |
 | `email` | `VARCHAR` NOT NULL | 宛先（`normalize_email` 済み） |
 | `role` | `VARCHAR` NOT NULL | 承諾したときに付く `TenantRole` |
-| `token_hash` | `VARCHAR` UNIQUE | トークンの HMAC（PAT と同じ方式）。送信ジョブが発行するまで NULL |
+| `generation` | `INTEGER` NOT NULL | 世代。再送・再招待で 1 つ上げ、前のリンクを通らなくする |
 | `invited_by` | `UUID` NOT NULL | `users(id)` ON DELETE CASCADE |
 | `expires_at` | `TIMESTAMPTZ` NOT NULL | 発行・再送から 7 日 |
 | `created_at` | `TIMESTAMPTZ` NOT NULL | |
 
 `UNIQUE (tenant_id, email)`。承諾・取り消しで行を消すので、行があること = 保留中。
 
-- **トークン**: 平文はメールにだけ載せる。送信ジョブ（`job::tenant_invitation_email`、ペイロードは招待の id だけ）が
-  処理時に発行し、ハッシュだけを保存する。発行し直すと前のリンクは使えなくなる
+- **トークン**: 保存しない。招待 id と世代からサーバーの鍵で導く（`{招待 id}.{HMAC}`。
+  `service::tenant_invitations::invitation_token`）。平文は DB にも apalis.jobs にも残らない
+- **送信ジョブ**（`job::tenant_invitation_email`）: ペイロードは招待の id と世代だけ。同じ世代なら何度作っても
+  同じリンクになるので、SMTP の応答だけが失敗して再試行されても、先に届いたメールのリンクは使える。
+  処理時に招待の世代と違えば（後から再送・再招待された）送らないので、古いメールが新しいリンクを追い越さない
+- **発行・再送とジョブの投入は 1 トランザクション**（`issue_and_enqueue` / `resend_and_enqueue`）。
+  投入に失敗したら世代も戻り、前のリンクは生きたまま残る。取った送信の枠（下記）も返す
 - **二重招待**: 同じアドレスへの招待は同じ行を作り直す（ロール・期限・招待者を更新し、前のリンクを無効にする）
 - **既にメンバー**: オーナーを含め、そのアドレスの利用者がテナントに居れば 409（`already-member`）
 - **送信の間隔**: 同じテナント・同じアドレスへは 60 秒に 1 通（発行と再送で共通。超えると 429）

@@ -52,14 +52,32 @@ async fn invite_ok(app: &TestApp, tenant_id: Uuid, email: &str, role: &str) -> U
     Uuid::parse_str(body["id"].as_str().expect("invitation id")).expect("uuid")
 }
 
-/// 送信ジョブを 1 回走らせ、届いたメールのリンクからトークンを取り出す。
-async fn send_and_take_token(app: &TestApp, invitation_id: Uuid, email: &str) -> String {
+async fn current_generation(app: &TestApp, invitation_id: Uuid) -> i32 {
+    tenant_invitations::Entity::find_by_id(invitation_id)
+        .one(&app.state.db)
+        .await
+        .expect("find invitation")
+        .expect("invitation exists")
+        .generation
+}
+
+async fn run_job(app: &TestApp, invitation_id: Uuid, generation: i32) {
     process(
-        TenantInvitationEmailJob::new(invitation_id),
+        TenantInvitationEmailJob::new(invitation_id, generation),
         Data::new(job_state(app)),
     )
     .await
     .expect("invitation email job");
+}
+
+/// 今の世代の送信ジョブを 1 回走らせ、届いたメールのリンクからトークンを取り出す。
+async fn send_and_take_token(app: &TestApp, invitation_id: Uuid, email: &str) -> String {
+    run_job(
+        app,
+        invitation_id,
+        current_generation(app, invitation_id).await,
+    )
+    .await;
     let mail = app
         .sent_mails()
         .into_iter()
@@ -221,12 +239,8 @@ async fn expired_revoked_and_reissued_tokens_are_rejected() {
 
     // 期限切れのまま送信ジョブが回ってもメールは出ない
     let mails_before = app.sent_mails().len();
-    process(
-        TenantInvitationEmailJob::new(invitation_id),
-        Data::new(job_state(&app)),
-    )
-    .await
-    .expect("job skips expired invitation");
+    let old_generation = current_generation(&app, invitation_id).await;
+    run_job(&app, invitation_id, old_generation).await;
     assert_eq!(app.sent_mails().len(), mails_before);
 
     // 再送で期限が延び、前のリンクは使えなくなる
@@ -239,7 +253,12 @@ async fn expired_revoked_and_reissued_tokens_are_rejected() {
         )
         .await;
     assert_eq!(resent.status(), StatusCode::OK);
+    // 再送の前に積まれた古い世代のジョブは、後から回ってきても送らない
+    // （新しい世代のジョブが送る。到着順が逆転して新しいリンクを古いメールが追い越さない）
+    run_job(&app, invitation_id, old_generation).await;
+    assert_eq!(app.sent_mails().len(), mails_before);
     let new_token = send_and_take_token(&app, invitation_id, &email).await;
+    assert_ne!(new_token, old_token);
     login(&mut app, &invitee).await;
     assert_eq!(
         accept(&app, &old_token).await.status(),
@@ -259,6 +278,30 @@ async fn expired_revoked_and_reissued_tokens_are_rejected() {
     assert_eq!(
         accept(&app, &new_token).await.status(),
         StatusCode::NOT_FOUND
+    );
+}
+
+/// SMTP がメールを受けた後に応答だけ失敗すると、apalis は同じジョブをやり直す。
+/// やり直しで送るリンクは同じなので、先に届いたメールのリンクも使える。
+#[tokio::test]
+async fn retrying_the_job_sends_the_same_link() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let email = unique_email();
+
+    login(&mut app, &owner).await;
+    let invitation_id = invite_ok(&app, tp.tenant_id, &email, "Member").await;
+    let delivered = send_and_take_token(&app, invitation_id, &email).await;
+    let retried = send_and_take_token(&app, invitation_id, &email).await;
+    assert_eq!(delivered, retried, "同じ世代の再試行は同じリンクを送る");
+
+    let invitee = register_as(&app, &email).await;
+    login(&mut app, &invitee).await;
+    assert_eq!(
+        accept(&app, &delivered).await.status(),
+        StatusCode::CREATED,
+        "先に届いたメールのリンクで承諾できる"
     );
 }
 

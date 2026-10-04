@@ -1,14 +1,18 @@
 //! テナントへのメール招待（apps/backend/docs/tenant-project-authz.md の「招待」）。
 //!
-//! 平文のトークンはメールにだけ載せる。DB にはハッシュ（PAT と同じ HMAC）だけを置き、
-//! 発行は送信ジョブの処理時に行う（apalis.jobs のペイロードに平文で残さないため）。
-//! 発行し直すと前のリンクは使えなくなる。
+//! トークンは保存しない。招待 id と世代（`generation`）からサーバーの鍵で導く
+//! （`{招待 id}.{HMAC}`）。同じ世代なら何度作っても同じ値なので、送信ジョブの再試行が
+//! 配信済みのリンクを壊さない。再送・再招待で世代を上げたときだけ前のリンクが通らなくなる。
+//! 平文のトークンは DB にも apalis.jobs にも残らない。
 
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{Duration, Utc};
-use sea_orm::prelude::{DateTimeWithTimeZone, Expr, Uuid};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use hmac::{Hmac, KeyInit, Mac};
+use sea_orm::prelude::{DateTimeWithTimeZone, Uuid};
+use sea_orm::{ConnectionTrait, EntityTrait};
+use sha2::Sha256;
 
-use crate::auth::{create_personal_token_hash, generate_email_verification_token};
 use crate::notification_email::escape;
 use crate::settings::Settings;
 use crate::smtp::SmtpClient;
@@ -31,43 +35,57 @@ pub fn is_expired(invitation: &tenant_invitations::Model) -> bool {
     invitation.expires_at <= Utc::now()
 }
 
-fn hash_token(token: &str, secret: &str) -> Result<String, anyhow::Error> {
-    create_personal_token_hash(token, secret).map_err(|e| anyhow::anyhow!("hash invitation: {e}"))
+fn token_mac(id: Uuid, generation: i32, secret: &str) -> Result<Hmac<Sha256>, anyhow::Error> {
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
+        .map_err(|e| anyhow::anyhow!("invitation hmac init: {e}"))?;
+    // 他の用途の HMAC（PAT のハッシュなど）と同じ鍵を使うので、用途の前置きで分ける
+    mac.update(format!("tenant-invitation:{id}:{generation}").as_bytes());
+    Ok(mac)
 }
 
-/// 新しいトークンを発行し、ハッシュだけを保存して平文を返す。
-/// 招待が無い（承諾・取り消し済み）か期限切れなら `None`（送らない）。
-pub async fn issue_token<C: ConnectionTrait>(
-    db: &C,
-    invitation_id: Uuid,
+/// 招待リンクのトークン（`{招待 id}.{HMAC}`）。
+pub fn invitation_token(id: Uuid, generation: i32, secret: &str) -> Result<String, anyhow::Error> {
+    let tag = token_mac(id, generation, secret)?.finalize().into_bytes();
+    Ok(format!("{id}.{}", URL_SAFE_NO_PAD.encode(tag)))
+}
+
+/// トークンがこの招待の今の世代のものか（定数時間で比べる）。形が崩れていれば false。
+pub fn token_matches(
+    invitation: &tenant_invitations::Model,
+    token: &str,
     secret: &str,
-) -> Result<Option<(tenant_invitations::Model, String)>, anyhow::Error> {
-    let token = generate_email_verification_token();
-    let updated = tenant_invitations::Entity::update_many()
-        .col_expr(
-            tenant_invitations::Column::TokenHash,
-            Expr::value(hash_token(&token, secret)?),
-        )
-        .filter(tenant_invitations::Column::Id.eq(invitation_id))
-        .filter(tenant_invitations::Column::ExpiresAt.gt(Utc::now()))
-        .exec_with_returning(db)
-        .await?;
-    Ok(updated
-        .into_iter()
-        .next()
-        .map(|invitation| (invitation, token)))
+) -> Result<bool, anyhow::Error> {
+    let Some((id, tag)) = token.split_once('.') else {
+        return Ok(false);
+    };
+    if id != invitation.id.to_string() {
+        return Ok(false);
+    }
+    let Ok(tag) = URL_SAFE_NO_PAD.decode(tag) else {
+        return Ok(false);
+    };
+    Ok(token_mac(invitation.id, invitation.generation, secret)?
+        .verify_slice(&tag)
+        .is_ok())
 }
 
 /// トークンに対応する招待。期限切れも返す（呼び出し側で 410 と 404 を分けるため）。
+/// 世代が古い（再送・再招待の前のリンク）・取り消し・承諾済みなら `None`。
 pub async fn find_by_token<C: ConnectionTrait>(
     db: &C,
     token: &str,
     secret: &str,
 ) -> Result<Option<tenant_invitations::Model>, anyhow::Error> {
-    Ok(tenant_invitations::Entity::find()
-        .filter(tenant_invitations::Column::TokenHash.eq(hash_token(token, secret)?))
-        .one(db)
-        .await?)
+    let Some(id) = token
+        .split_once('.')
+        .and_then(|(id, _)| Uuid::parse_str(id).ok())
+    else {
+        return Ok(None);
+    };
+    let Some(invitation) = tenant_invitations::Entity::find_by_id(id).one(db).await? else {
+        return Ok(None);
+    };
+    Ok(token_matches(&invitation, token, secret)?.then_some(invitation))
 }
 
 pub fn send_slot_key(tenant_id: Uuid, email: &str) -> String {
@@ -95,6 +113,26 @@ pub async fn try_acquire_send_slot(
         .await
         .map_err(|e| anyhow::anyhow!("redis SET NX invitation cooldown: {e}"))?;
     Ok(set_ok.is_some())
+}
+
+/// 取った送信の枠を返す。招待の更新やジョブの投入に失敗して、メールを送らずに終わったときに使う
+/// （返さないと、直後のやり直しが 429 になる）。
+pub async fn release_send_slot(
+    redis: &RedisConnection,
+    tenant_id: Uuid,
+    email: &str,
+) -> Result<(), anyhow::Error> {
+    let mut conn = redis
+        .conn
+        .acquire()
+        .await
+        .map_err(|e| anyhow::anyhow!("redis acquire failed: {e}"))?;
+    let _: i64 = redis::cmd("DEL")
+        .arg(send_slot_key(tenant_id, email))
+        .query_async(&mut conn)
+        .await
+        .map_err(|e| anyhow::anyhow!("redis DEL invitation cooldown: {e}"))?;
+    Ok(())
 }
 
 pub fn build_accept_url(settings: &Settings, token: &str) -> String {
@@ -143,4 +181,55 @@ pub async fn send_invitation_email(
     smtp.send_email(mail.to, &subject, &text, Some(&html))
         .await
         .map_err(|e| anyhow::anyhow!("send tenant invitation email: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn invitation(generation: i32) -> tenant_invitations::Model {
+        tenant_invitations::Model {
+            id: Uuid::new_v4(),
+            tenant_id: Uuid::new_v4(),
+            email: "a@example.com".into(),
+            role: TenantRole::Member,
+            generation,
+            invited_by: Uuid::new_v4(),
+            expires_at: expires_at_from_now(),
+            created_at: Utc::now().into(),
+        }
+    }
+
+    const SECRET: &str = "0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn same_generation_yields_the_same_token() {
+        let inv = invitation(3);
+        let a = invitation_token(inv.id, inv.generation, SECRET).unwrap();
+        let b = invitation_token(inv.id, inv.generation, SECRET).unwrap();
+        assert_eq!(a, b, "再試行で同じリンクを送る");
+        assert!(token_matches(&inv, &a, SECRET).unwrap());
+    }
+
+    #[test]
+    fn other_generation_id_or_secret_does_not_match() {
+        let inv = invitation(3);
+        let old = invitation_token(inv.id, 2, SECRET).unwrap();
+        assert!(
+            !token_matches(&inv, &old, SECRET).unwrap(),
+            "前の世代のリンクは通らない"
+        );
+        let other = invitation_token(Uuid::new_v4(), 3, SECRET).unwrap();
+        assert!(!token_matches(&inv, &other, SECRET).unwrap());
+        let forged = invitation_token(inv.id, 3, "another-secret-another-secret-xx").unwrap();
+        assert!(!token_matches(&inv, &forged, SECRET).unwrap());
+        for broken in [
+            "",
+            "no-dot",
+            &format!("{}.", inv.id),
+            &format!("{}.!!!", inv.id),
+        ] {
+            assert!(!token_matches(&inv, broken, SECRET).unwrap(), "{broken}");
+        }
+    }
 }
