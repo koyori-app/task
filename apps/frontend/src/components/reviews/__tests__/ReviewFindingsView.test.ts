@@ -4,7 +4,10 @@ import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import ReviewFindingsView from '../ReviewFindingsView.vue';
 import { Select } from '@/components/ui/select';
 import type { components } from '@/generated/api';
-import type { ReviewFindingsUrlState } from '@/lib/review-findings-url-state';
+import {
+  DEFAULT_REVIEW_FINDINGS_URL_STATE,
+  type ReviewFindingsUrlState,
+} from '@/lib/review-findings-url-state';
 
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
 const PROJECT_ID = '00000000-0000-4000-8000-000000000010';
@@ -53,6 +56,10 @@ type MockState = {
   /** 要約ジョブが確かめた現在の head。null で「鮮度不明」を作る */
   cachedHeadSha?: string | null;
   ownerOverrideRejections?: number;
+  /** 閲覧者の連携 GitHub のユーザー名。null・未指定で未連携 */
+  githubLogin?: string | null;
+  /** PR ごとの作成者。未指定は yupix */
+  authors?: Record<number, string>;
 };
 
 const REVIEWED_HEAD = '60cdd7795f94fa4e4148ce996c2efb4c363e3f5e';
@@ -82,13 +89,26 @@ function stubFetch(state: MockState) {
           pr_number: prNumber,
           rounds: state.rounds ?? 1,
           pr_title: `feat: PR ${prNumber}`,
-          pr_author: 'yupix',
+          pr_author: state.authors?.[prNumber] ?? 'yupix',
           unresolved: state.findings.filter((f) => f.state === 'open' || f.state === 'fixed')
             .length,
           blocking,
           last_reviewed_at: '2026-08-26T00:00:00Z',
         })),
       );
+    }
+    if (req.method === 'GET' && pathname.endsWith('/v1/auth/oauth/connections')) {
+      return jsonResponse({
+        connections: state.githubLogin
+          ? [
+              {
+                provider: 'github',
+                provider_login: state.githubLogin,
+                connected_at: '2026-08-01T00:00:00Z',
+              },
+            ]
+          : [],
+      });
     }
     if (req.method === 'GET' && pathname.endsWith('/reviews/summary')) {
       const blocking =
@@ -182,6 +202,8 @@ function mountView(
         severity: null,
         state: null,
         finding: null,
+        mine: false,
+        page: null,
       },
       ...extraProps,
     },
@@ -378,6 +400,8 @@ describe('ReviewFindingsView', () => {
         severity: 'high',
         state: 'open',
         finding: 'f-1',
+        mine: false,
+        page: null,
       },
     });
     await flushPromises();
@@ -400,6 +424,8 @@ describe('ReviewFindingsView', () => {
         severity: null,
         state: null,
         finding: 'missing-finding',
+        mine: false,
+        page: null,
       },
     });
     await flushPromises();
@@ -429,6 +455,8 @@ describe('ReviewFindingsView', () => {
         severity: null,
         state: null,
         finding: null,
+        mine: false,
+        page: null,
       },
     });
     await flushPromises();
@@ -468,6 +496,8 @@ describe('ReviewFindingsView', () => {
         severity: null,
         state: null,
         finding: null,
+        mine: false,
+        page: null,
       },
     });
     await flushPromises();
@@ -484,12 +514,28 @@ describe('ReviewFindingsView', () => {
     // 変わる。popstate は飛ばないため、props 経路の復元が無いと setup 時の状態で凍る
     stubFetch({ findings: [finding()], prNumbers: [617, 618] });
     const wrapper = mountView({
-      initialUrlState: { pr: 617, round: null, severity: null, state: null, finding: null },
+      initialUrlState: {
+        pr: 617,
+        round: null,
+        severity: null,
+        state: null,
+        finding: null,
+        mine: false,
+        page: null,
+      },
     });
     await flushPromises();
 
     await wrapper.setProps({
-      initialUrlState: { pr: 618, round: null, severity: null, state: null, finding: null },
+      initialUrlState: {
+        pr: 618,
+        round: null,
+        severity: null,
+        state: null,
+        finding: null,
+        mine: false,
+        page: null,
+      },
     });
     await flushPromises();
 
@@ -505,7 +551,15 @@ describe('ReviewFindingsView', () => {
     window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=618&finding=f-1');
     stubFetch({ findings: [finding()] });
     const wrapper = mountView({
-      initialUrlState: { pr: 618, round: null, severity: null, state: null, finding: 'f-1' },
+      initialUrlState: {
+        pr: 618,
+        round: null,
+        severity: null,
+        state: null,
+        finding: 'f-1',
+        mine: false,
+        page: null,
+      },
     });
     await flushPromises();
     expect(scrollSpy).toHaveBeenCalledTimes(1);
@@ -525,7 +579,15 @@ describe('ReviewFindingsView', () => {
   it('PR を選び直して URL から不正値が消えたら、警告の帯も片付く', async () => {
     stubFetch({ findings: [finding()], prNumbers: [617, 618] });
     const wrapper = mountView({
-      initialUrlState: { pr: 617, round: null, severity: null, state: null, finding: null },
+      initialUrlState: {
+        pr: 617,
+        round: null,
+        severity: null,
+        state: null,
+        finding: null,
+        mine: false,
+        page: null,
+      },
       initialUrlWarnings: ['URL の重大度「urgent」は知らない値のため無視しました。'],
     });
     await flushPromises();
@@ -542,7 +604,15 @@ describe('ReviewFindingsView', () => {
   it('存在しない Round を指す URL には理由を表示する（pr・finding と同じ扱い）', async () => {
     stubFetch({ findings: [finding()] });
     const wrapper = mountView({
-      initialUrlState: { pr: 618, round: 99, severity: null, state: null, finding: null },
+      initialUrlState: {
+        pr: 618,
+        round: 99,
+        severity: null,
+        state: null,
+        finding: null,
+        mine: false,
+        page: null,
+      },
     });
     await flushPromises();
 
@@ -552,19 +622,29 @@ describe('ReviewFindingsView', () => {
   const manyPrNumbers = [770, 776, 777, 778, 779, 618];
 
   function prNavButtons() {
-    return [...document.body.querySelectorAll('nav[aria-label="レビューのある PR"] button')];
+    return [...document.body.querySelectorAll('nav[aria-label="レビューのある PR"] button')].filter(
+      (b) => /#\d+/.test(b.textContent ?? ''),
+    );
   }
 
   it('PR 番号の部分一致で一覧を絞り、空にすると全件へ戻る', async () => {
     stubFetch({ findings: [finding()], prNumbers: manyPrNumbers });
     const wrapper = mountView({
-      initialUrlState: { pr: 618, round: null, severity: null, state: null, finding: null },
+      initialUrlState: {
+        pr: 618,
+        round: null,
+        severity: null,
+        state: null,
+        finding: null,
+        mine: false,
+        page: null,
+      },
     });
     await flushPromises();
 
     expect(prNavButtons()).toHaveLength(6);
 
-    const input = wrapper.get('[data-testid="filter-pr-number"]');
+    const input = wrapper.get('[data-testid="filter-pr"]');
     await input.setValue('77');
     await flushPromises();
     expect(prNavButtons()).toHaveLength(5);
@@ -573,10 +653,139 @@ describe('ReviewFindingsView', () => {
     await input.setValue('99999');
     await flushPromises();
     expect(prNavButtons()).toHaveLength(0);
-    expect(wrapper.get('[data-testid="no-pr-match"]').text()).toContain('該当する PR');
+    expect(wrapper.get('[data-testid="no-pr-match"]').text()).toContain(
+      '「99999」に一致する PR はありません',
+    );
 
     await input.setValue('');
     await flushPromises();
     expect(prNavButtons()).toHaveLength(6);
+  });
+
+  it('タイトルでも探せる', async () => {
+    stubFetch({ findings: [finding()], prNumbers: manyPrNumbers });
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="filter-pr"]').setValue('PR 779');
+    await flushPromises();
+    expect(prNavButtons().map((b) => b.textContent)).toEqual([expect.stringContaining('#779')]);
+  });
+});
+
+describe('ReviewFindingsView の PR 一覧（自分の PR・ページ）', () => {
+  /** 11 件 = 10 件の 1 ページ目と、1 件の 2 ページ目 */
+  const elevenPrs = [711, 710, 709, 708, 707, 706, 705, 704, 703, 702, 701];
+
+  function prRows() {
+    return [...document.body.querySelectorAll('nav[aria-label="レビューのある PR"] button')].filter(
+      (b) => /#\d+/.test(b.textContent ?? ''),
+    );
+  }
+
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('10 件ちょうどならページャーを出さない', async () => {
+    stubFetch({ findings: [finding()], prNumbers: elevenPrs.slice(0, 10) });
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(prRows()).toHaveLength(10);
+    expect(wrapper.find('[data-testid="pr-pager"]').exists()).toBe(false);
+  });
+
+  it('11 件目から次のページに分かれ、ページを URL に保つ', async () => {
+    stubFetch({ findings: [finding()], prNumbers: elevenPrs });
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(prRows()).toHaveLength(10);
+    const pager = wrapper.get('[data-testid="pr-pager"]');
+    expect(pager.text()).toContain('1–10 件目');
+    expect(pager.text()).toContain('全 11 件 · 1 / 2 ページ');
+
+    await wrapper.get('[data-testid="pr-pager-next"]').trigger('click');
+    await flushPromises();
+    expect(prRows().map((b) => b.textContent)).toEqual([expect.stringContaining('#701')]);
+    expect(new URL(window.location.href).searchParams.get('page')).toBe('2');
+
+    await wrapper.get('[data-testid="pr-pager-prev"]').trigger('click');
+    await flushPromises();
+    expect(prRows()).toHaveLength(10);
+    expect(new URL(window.location.href).searchParams.has('page')).toBe(false);
+  });
+
+  it('URL にページが無ければ、表示中の PR が載っているページを開く', async () => {
+    stubFetch({ findings: [finding()], prNumbers: elevenPrs });
+    const wrapper = mountView({
+      initialUrlState: { ...DEFAULT_REVIEW_FINDINGS_URL_STATE, pr: 701 },
+    });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="pr-pager"]').text()).toContain('2 / 2 ページ');
+    expect(prRows().map((b) => b.textContent)).toEqual([expect.stringContaining('#701')]);
+  });
+
+  it('範囲外のページは最後のページに寄せ、理由を出す', async () => {
+    stubFetch({ findings: [finding()], prNumbers: elevenPrs });
+    const wrapper = mountView({
+      initialUrlState: { ...DEFAULT_REVIEW_FINDINGS_URL_STATE, pr: 711, page: 5 },
+    });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="url-warning"]').text()).toContain(
+      'URL のページ 5 はありません（全 2 ページ）',
+    );
+    expect(wrapper.get('[data-testid="pr-pager"]').text()).toContain('2 / 2 ページ');
+    // 表示中の PR は 1 ページ目にあるので、そこへ戻る案内を出す
+    expect(wrapper.get('[data-testid="pr-rail-note"]').text()).toContain(
+      '表示中の #711 は 1 ページ目にあります',
+    );
+  });
+
+  it('自分が作成した PR だけに絞り、URL に mine=1 を載せてページを 1 に戻す', async () => {
+    stubFetch({
+      findings: [finding()],
+      prNumbers: elevenPrs,
+      githubLogin: 'yupix',
+      authors: { '711': 'other', '710': 'Other', '709': 'other' },
+    });
+    const wrapper = mountView({
+      initialUrlState: { ...DEFAULT_REVIEW_FINDINGS_URL_STATE, pr: 708, page: 2 },
+    });
+    await flushPromises();
+
+    const toggle = wrapper.get('[data-testid="mine-only"]');
+    expect(toggle.attributes('disabled')).toBeUndefined();
+    expect(wrapper.text()).toContain('GitHub @yupix で判定 · 8 件');
+
+    await toggle.setValue(true);
+    await flushPromises();
+
+    expect(prRows()).toHaveLength(8);
+    expect(prRows().some((b) => b.textContent?.includes('#711'))).toBe(false);
+    expect(wrapper.find('[data-testid="pr-pager"]').exists()).toBe(false);
+    const url = new URL(window.location.href);
+    expect(url.searchParams.get('mine')).toBe('1');
+    expect(url.searchParams.has('page')).toBe(false);
+  });
+
+  it('GitHub と未連携ならスイッチを無効にし、URL の mine=1 は理由を出して外す', async () => {
+    stubFetch({ findings: [finding()], prNumbers: [618] });
+    window.history.replaceState(null, '', '/?pr=618&mine=1');
+    const wrapper = mountView({
+      initialUrlState: { ...DEFAULT_REVIEW_FINDINGS_URL_STATE, pr: 618, mine: true },
+    });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="mine-only"]').attributes('disabled')).toBeDefined();
+    expect(wrapper.text()).toContain('GitHub と連携すると使えます');
+    expect(wrapper.get('[data-testid="url-warning"]').text()).toContain(
+      'GitHub と連携していないため',
+    );
+    expect(prRows()).toHaveLength(1);
+    expect(new URL(window.location.href).searchParams.has('mine')).toBe(false);
   });
 });

@@ -507,7 +507,7 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
 
 | 項目 | 値 |
 |---|---|
-| URL | `/{tenant}/projects/{key}/reviews`（`?pr=618` で PR を指定。要約コメントのリンク先） |
+| URL | `/{tenant}/projects/{key}/reviews`（`?pr=618` で PR を指定。要約コメントのリンク先。PR 一覧の状態は `?mine=1`（自分が作成した PR だけ）と `?page=N`（既定の `page=1` は載せない）） |
 | ページファイル | `apps/frontend/src/pages/@tenant/projects/@projectKey/reviews/+Page.vue` |
 | 本体 | `components/reviews/ReviewFindingsView.vue` と `ReviewRoundComposer.vue` |
 
@@ -518,6 +518,13 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
   確定までサーバーには何も作られない。指摘ゼロでの確定（指摘なしの記録）も可。
   head SHA は **40 桁の小文字 16 進かを送信前に見る**（CLI と同じ。`git log --oneline` の
   短縮 SHA を貼るのは人間のほうが起こりやすく、サーバーの 400 では何桁必要か伝わらない）
+- **PR 一覧**: 番号・タイトルの部分一致で探せる。「自分が作成した PR だけ」に絞れる——
+  PR の作成者（`pr_author`）は GitHub のユーザー名なので、閲覧者の連携 GitHub アカウントの
+  ユーザー名（`GET /v1/auth/oauth/connections` の `provider_login`）と大文字小文字を区別せず
+  照合する。未連携ならスイッチは無効で、URL の `mine=1` は理由を出して無視する。
+  10 件ごとにページを分け、`page` が無ければ表示中の PR が載っているページを開く。
+  範囲外の `page` は最後のページに寄せて理由を出す。絞り込みとページ分割は画面側で行う
+  （API は全件を集計して返す。サーバーで切っても集計の仕事は減らない）
 - **PR 単位の指摘一覧**: 重大度・状態・ラウンドでフィルタ。各指摘は title / file:line / 本文 /
   遷移履歴を持つ
 - **状態遷移の操作**: fixed / verified / deferred / rejected に加えて、**戻り遷移**
@@ -774,3 +781,6 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
   消した。Koyori Desktop が 3 つ目の写しを持つと、規則を変えるたびに 3 か所を揃える必要が
   出るため。判定は `ensure_transition_allowed` の本体（`check_transition`）を候補ごとに呼ぶだけで、
   材料は一覧ぶんまとめて引く
+- 2026-10-04: PR 一覧に「自分が作成した PR だけ」とページ送り（10 件）を足し、`mine` / `page` を
+  URL に保つ。自分の PR は連携 GitHub のユーザー名で判定する（アプリのユーザー名とは一致すると
+  限らない）。そのために連携一覧 API が `provider_login` を返すようにした（TASK-243）

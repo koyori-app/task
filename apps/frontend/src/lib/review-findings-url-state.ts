@@ -6,6 +6,10 @@ export type ReviewFindingsUrlState = {
   severity: FindingSeverity | null;
   state: FindingState | null;
   finding: string | null;
+  /** PR 一覧を自分が作成した PR だけに絞るか（`mine=1`）。 */
+  mine: boolean;
+  /** PR 一覧のページ（1 始まり）。null は「表示中の PR が載っているページ」。 */
+  page: number | null;
 };
 
 export type ParsedReviewFindingsUrlState = {
@@ -19,6 +23,8 @@ export const DEFAULT_REVIEW_FINDINGS_URL_STATE: ReviewFindingsUrlState = {
   severity: null,
   state: null,
   finding: null,
+  mine: false,
+  page: null,
 };
 
 type SearchSource = URLSearchParams | Record<string, string | undefined> | undefined;
@@ -64,6 +70,15 @@ function findingId(raw: string | undefined, warnings: string[]): string | null {
   return null;
 }
 
+function mineFlag(raw: string | undefined, warnings: string[]): boolean {
+  if (raw === undefined) return false;
+  if (raw === '1') return true;
+  warnings.push(
+    `URL の「自分の PR だけ」の値「${displayValue(raw)}」は知らない値のため無視しました。`,
+  );
+  return false;
+}
+
 /** SSR と browser の双方で同じ規則を使い、表示状態を URL から復元する。 */
 export function parseReviewFindingsUrlState(search: SearchSource): ParsedReviewFindingsUrlState {
   const warnings: string[] = [];
@@ -74,6 +89,8 @@ export function parseReviewFindingsUrlState(search: SearchSource): ParsedReviewF
       severity: knownValue(read(search, 'severity'), '重大度', SEVERITIES, warnings),
       state: knownValue(read(search, 'state'), '状態', STATES, warnings),
       finding: findingId(read(search, 'finding'), warnings),
+      mine: mineFlag(read(search, 'mine'), warnings),
+      page: positiveInteger(read(search, 'page'), 'ページ', warnings),
     },
     warnings,
   };
@@ -82,7 +99,7 @@ export function parseReviewFindingsUrlState(search: SearchSource): ParsedReviewF
 /** この画面が所有する query だけを書き換え、既定値は URL へ載せない。 */
 export function applyReviewFindingsUrlState(url: URL, state: ReviewFindingsUrlState): URL {
   const next = new URL(url.href);
-  for (const key of ['pr', 'round', 'severity', 'state', 'finding']) {
+  for (const key of ['pr', 'round', 'severity', 'state', 'finding', 'mine', 'page']) {
     next.searchParams.delete(key);
   }
   if (state.pr !== null) next.searchParams.set('pr', String(state.pr));
@@ -90,6 +107,8 @@ export function applyReviewFindingsUrlState(url: URL, state: ReviewFindingsUrlSt
   if (state.severity !== null) next.searchParams.set('severity', state.severity);
   if (state.state !== null) next.searchParams.set('state', state.state);
   if (state.finding !== null) next.searchParams.set('finding', state.finding);
+  if (state.mine) next.searchParams.set('mine', '1');
+  if (state.page !== null && state.page > 1) next.searchParams.set('page', String(state.page));
   return next;
 }
 
