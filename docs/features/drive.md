@@ -475,11 +475,12 @@ GET /v1/drive/files/{id}/content?token={share_token}
 |---------|------|
 | `read:project` | プロジェクトの読み取り |
 | `write:project` | プロジェクトの作成・更新・削除 |
-| `admin:project` | project 層の全スコープを包含（tenant 層は含まない。層の表は apps/backend/docs/personal-access-tokens-authz.md） |
-| `admin:tenant` | テナント管理全般（他スコープを暗黙的に包含） |
+| `write:tenant` | テナントの設定変更（`read:tenant` を包含） |
+| `api` | すべての `read:*` / `write:*` を包含 |
+| `read_api` | すべての `read:*` を包含 |
 
-`admin:project` は `read:drive` / `write:drive` を包含するが、`admin:tenant` を要求するクォータ設定は含まない。
-`admin:tenant` は全スコープを包含する。いずれもスコープ要件を満たすだけであり、テナント所属・プロジェクト権限・オーナー限定の判定は別に行う。
+`read_api` は `read:drive` を、`api` は `read:drive` / `write:drive` と、クォータ設定に要る `write:tenant` を包含する（含意の規則は apps/backend/docs/personal-access-tokens-authz.md）。
+いずれもスコープ要件を満たすだけであり、テナント所属・プロジェクト権限・オーナー限定の判定は別に行う。
 
 ### 7.2 Drive 用スコープ
 
@@ -501,7 +502,7 @@ GET /v1/drive/files/{id}/content?token={share_token}
 | `GET` | `/v1/drive/files/{id}/content` | `read:drive` | 共有トークン利用時はスコープ不要 |
 | `GET` | `/v1/drive/files/{id}/content?token=` | スコープ不要 | 公開リンクトークンで代替 |
 | `GET` | `/v1/tenants/{tenant_id}/drive/usage` | `read:drive` | |
-| `PATCH` | `/v1/tenants/{tenant_id}/drive/quota` | `admin:tenant` | テナントオーナー限定 |
+| `PATCH` | `/v1/tenants/{tenant_id}/drive/quota` | `write:tenant` | テナントオーナー限定 |
 | `GET` | `/v1/tenants/{tenant_id}/drive/folders` | `read:drive` | |
 | `POST` | `/v1/tenants/{tenant_id}/drive/folders` | `write:drive` | |
 | `PATCH` | `/v1/tenants/{tenant_id}/drive/folders/{folder_id}` | `write:drive` | |
@@ -888,7 +889,7 @@ LOCAL_UPLOAD_DIR=./uploads
 | フォルダ共有 | ユーザー指定共有 + 公開リンク共有の 2 種類。配下サブフォルダ・ファイルに再帰継承 | 2026-05-26 |
 | 共有権限 | 現行は `viewer`（閲覧のみ）だけを実装。`editor` は将来対応 | 2026-09-03 |
 | 公開リンクトークン | 32 文字 URL-safe ランダム。有効期限設定可（NULL = 無期限）| 2026-05-26 |
-| PAT スコープ | `read:drive`（閲覧）・`write:drive`（書き込み）を新設。`write:drive` は `read:drive` を包含。`admin:tenant` は全 Drive 操作を包含 | 2026-05-26 |
+| PAT スコープ | `read:drive`（閲覧）・`write:drive`（書き込み）を新設。`write:drive` は `read:drive` を包含。`admin:tenant` は全 Drive 操作を包含（2026-10-04 に `admin:tenant` を廃止し、`api` が包含する形へ。クォータ設定は `write:tenant`） | 2026-05-26 |
 | ストリーミング | `StorageBackend` trait は `BoxStream` を使用する。S3 の全量バッファは既知の修正対象 | 2026-09-03 |
 | URL 管理 | `drive_files.url` カラム廃止。全ファイルを `/v1/drive/files/{id}/content` で統一配信 | 2026-05-26 |
 | 不変条件保護 | `project_id IS NULL OR folder_id IS NOT NULL` を DB CHECK 制約 + アプリバリデーション両方で強制 | 2026-05-26 |

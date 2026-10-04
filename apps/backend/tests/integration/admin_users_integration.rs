@@ -29,7 +29,7 @@ async fn admin_users_integration_suite() {
         app.reset_session_client();
         app.login_session(&user.email, &user.password).await;
         let pat = app
-            .insert_pat(user.id, tenant_id, vec![Scope::AdminTenant], None)
+            .insert_pat(user.id, tenant_id, vec![Scope::Api], None)
             .await;
 
         let active = users::Entity::find_by_id(user.id)
@@ -147,7 +147,7 @@ async fn admin_users_integration_suite() {
         app.login_session(&target.email, &target.password).await;
         let target_session_client = app.session_client();
         let pat = app
-            .insert_pat(target.id, tenant_id, vec![Scope::AdminTenant], None)
+            .insert_pat(target.id, tenant_id, vec![Scope::Api], None)
             .await;
 
         let admin = app.insert_user(true, false).await;

@@ -24347,12 +24347,14 @@
       "Scope": {
         "type": "string",
         "enum": [
+          "api",
+          "read_api",
+          "read:tenant",
+          "write:tenant",
           "read:project",
           "write:project",
           "read:drive",
           "write:drive",
-          "admin:tenant",
-          "admin:project",
           "read:task",
           "write:task",
           "read:milestone",
