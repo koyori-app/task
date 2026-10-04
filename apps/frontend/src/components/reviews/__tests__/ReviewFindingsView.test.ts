@@ -797,7 +797,8 @@ describe('ReviewFindingsView の PR 一覧（自分の PR・ページ）', () =>
     expect(wrapper.find('[data-testid="pr-pager"]').exists()).toBe(false);
     const url = new URL(window.location.href);
     expect(url.searchParams.get('mine')).toBe('1');
-    expect(url.searchParams.has('page')).toBe(false);
+    // 絞り込みを変えたら 1 ページ目へ戻し、それを明示して残す
+    expect(url.searchParams.get('page')).toBe('1');
   });
 
   it('GitHub と未連携ならスイッチを無効にし、URL の mine=1 は理由を出して外す', async () => {
