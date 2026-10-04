@@ -6,6 +6,7 @@ import { Select } from '@/components/ui/select';
 import type { components } from '@/generated/api';
 import {
   DEFAULT_REVIEW_FINDINGS_URL_STATE,
+  parseReviewFindingsUrlState,
   type ReviewFindingsUrlState,
 } from '@/lib/review-findings-url-state';
 
@@ -58,6 +59,8 @@ type MockState = {
   ownerOverrideRejections?: number;
   /** 閲覧者の連携 GitHub のユーザー名。null・未指定で未連携 */
   githubLogin?: string | null;
+  /** GitHub と連携しているがユーザー名が分からない（名前を控える前からある連携） */
+  githubLinkedWithoutLogin?: boolean;
   /** PR ごとの作成者。未指定は yupix */
   authors?: Record<number, string>;
 };
@@ -107,7 +110,9 @@ function stubFetch(state: MockState) {
                 connected_at: '2026-08-01T00:00:00Z',
               },
             ]
-          : [],
+          : state.githubLinkedWithoutLogin
+            ? [{ provider: 'github', connected_at: '2026-08-01T00:00:00Z' }]
+            : [],
       });
     }
     if (req.method === 'GET' && pathname.endsWith('/reviews/summary')) {
@@ -714,7 +719,30 @@ describe('ReviewFindingsView の PR 一覧（自分の PR・ページ）', () =>
     await wrapper.get('[data-testid="pr-pager-prev"]').trigger('click');
     await flushPromises();
     expect(prRows()).toHaveLength(10);
-    expect(new URL(window.location.href).searchParams.has('page')).toBe(false);
+    expect(new URL(window.location.href).searchParams.get('page')).toBe('1');
+  });
+
+  it('2 ページ目の PR を選んだまま 1 ページ目に戻した URL は、再表示しても 1 ページ目を開く', async () => {
+    stubFetch({ findings: [finding()], prNumbers: elevenPrs });
+    const wrapper = mountView({
+      initialUrlState: { ...DEFAULT_REVIEW_FINDINGS_URL_STATE, pr: 701 },
+    });
+    await flushPromises();
+    expect(wrapper.get('[data-testid="pr-pager"]').text()).toContain('2 / 2 ページ');
+
+    await wrapper.get('[data-testid="pr-pager-prev"]').trigger('click');
+    await flushPromises();
+    wrapper.unmount();
+
+    // 再読込: いまの URL だけから状態を組み直す（+Page と同じ経路）
+    const reloaded = parseReviewFindingsUrlState(new URL(window.location.href).searchParams);
+    expect(reloaded.state).toMatchObject({ pr: 701, page: 1 });
+    const again = mountView({ initialUrlState: reloaded.state });
+    await flushPromises();
+    expect(again.get('[data-testid="pr-pager"]').text()).toContain('1 / 2 ページ');
+    expect(again.get('[data-testid="pr-rail-note"]').text()).toContain(
+      '表示中の #701 は 2 ページ目にあります',
+    );
   });
 
   it('URL にページが無ければ、表示中の PR が載っているページを開く', async () => {
@@ -787,5 +815,21 @@ describe('ReviewFindingsView の PR 一覧（自分の PR・ページ）', () =>
     );
     expect(prRows()).toHaveLength(1);
     expect(new URL(window.location.href).searchParams.has('mine')).toBe(false);
+  });
+
+  it('GitHub 連携はあるのにユーザー名が分からなければ、未連携と言わず再連携を案内する', async () => {
+    stubFetch({ findings: [finding()], prNumbers: [618], githubLinkedWithoutLogin: true });
+    window.history.replaceState(null, '', '/?pr=618&mine=1');
+    const wrapper = mountView({
+      initialUrlState: { ...DEFAULT_REVIEW_FINDINGS_URL_STATE, pr: 618, mine: true },
+    });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="mine-only"]').attributes('disabled')).toBeDefined();
+    expect(wrapper.text()).toContain('GitHub を連携し直すと使えます');
+    expect(wrapper.text()).not.toContain('GitHub と連携すると使えます');
+    expect(wrapper.get('[data-testid="url-warning"]').text()).toContain(
+      'GitHub のユーザー名を確認できないため',
+    );
   });
 });

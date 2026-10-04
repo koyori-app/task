@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ReviewedPullRequest } from '@/lib/review-findings';
 import {
   filterPullRequests,
+  hasGithubConnection,
   pageCount,
   pageOfPullRequest,
   viewerGithubLogin,
@@ -51,6 +52,16 @@ describe('review PR rail', () => {
       ]),
     ).toBe('mio');
     expect(viewerGithubLogin([{ provider: 'github', connected_at: '' }])).toBeNull();
+  });
+
+  it('ユーザー名が分からない GitHub 連携も、連携ありとして見分ける', () => {
+    expect(hasGithubConnection([{ provider: 'github', connected_at: '' }])).toBe(true);
+    expect(
+      hasGithubConnection([
+        { provider: 'github', instance_url: 'https://ghe.example', connected_at: '' },
+        { provider: 'gitlab', provider_login: 'gl', connected_at: '' },
+      ]),
+    ).toBe(false);
   });
 
   it('10 件で 1 ページ。11 件目から 2 ページ目になる', () => {

@@ -507,7 +507,7 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
 
 | 項目 | 値 |
 |---|---|
-| URL | `/{tenant}/projects/{key}/reviews`（`?pr=618` で PR を指定。要約コメントのリンク先。PR 一覧の状態は `?mine=1`（自分が作成した PR だけ）と `?page=N`（既定の `page=1` は載せない）） |
+| URL | `/{tenant}/projects/{key}/reviews`（`?pr=618` で PR を指定。要約コメントのリンク先。PR 一覧の状態は `?mine=1`（自分が作成した PR だけ）と `?page=N`（ページを操作していなければ載せない。`page` が無いときは表示中の PR が載るページを開くので、明示した 1 ページ目は `page=1` として残す）） |
 | ページファイル | `apps/frontend/src/pages/@tenant/projects/@projectKey/reviews/+Page.vue` |
 | 本体 | `components/reviews/ReviewFindingsView.vue` と `ReviewRoundComposer.vue` |
 
@@ -522,6 +522,9 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
   PR の作成者（`pr_author`）は GitHub のユーザー名なので、閲覧者の連携 GitHub アカウントの
   ユーザー名（`GET /v1/auth/oauth/connections` の `provider_login`）と大文字小文字を区別せず
   照合する。未連携ならスイッチは無効で、URL の `mine=1` は理由を出して無視する。
+  ログイン名を控える前（`m20260911010000_oauth_provider_login`）からある連携は `provider_login` が空なので、
+  連携一覧 API が保存済みのアクセストークンでプロバイダーに問い合わせて補完する。トークンの期限切れ・失効で
+  補完できなければ、スイッチは無効のまま「GitHub を連携し直すと使えます」と案内する（未連携とは言わない）。
   10 件ごとにページを分け、`page` が無ければ表示中の PR が載っているページを開く。
   範囲外の `page` は最後のページに寄せて理由を出す。絞り込みとページ分割は画面側で行う
   （API は全件を集計して返す。サーバーで切っても集計の仕事は減らない）

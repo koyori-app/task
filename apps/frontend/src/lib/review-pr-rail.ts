@@ -18,6 +18,15 @@ export function viewerGithubLogin(connections: readonly OAuthConnectionItem[]): 
   return github?.provider_login ?? null;
 }
 
+/**
+ * GitHub（クラウド版）と連携しているか。ユーザー名が分からない連携も含む——
+ * 名前を控える前からある連携で、保存済みのトークンでも補完できなかったもの。
+ * その場合は未連携と言わず、再連携を案内する。
+ */
+export function hasGithubConnection(connections: readonly OAuthConnectionItem[]): boolean {
+  return connections.some((c) => c.provider === 'github' && !c.instance_url);
+}
+
 export function isMyPullRequest(pr: ReviewedPullRequest, login: string | null): boolean {
   return !!login && !!pr.pr_author && pr.pr_author.toLowerCase() === login.toLowerCase();
 }

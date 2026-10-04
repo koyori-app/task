@@ -8,7 +8,7 @@ export type ReviewFindingsUrlState = {
   finding: string | null;
   /** PR 一覧を自分が作成した PR だけに絞るか（`mine=1`）。 */
   mine: boolean;
-  /** PR 一覧のページ（1 始まり）。null は「表示中の PR が載っているページ」。 */
+  /** PR 一覧のページ（1 始まり）。null は「表示中の PR が載っているページ」で、URL に載せない。 */
   page: number | null;
 };
 
@@ -108,7 +108,9 @@ export function applyReviewFindingsUrlState(url: URL, state: ReviewFindingsUrlSt
   if (state.state !== null) next.searchParams.set('state', state.state);
   if (state.finding !== null) next.searchParams.set('finding', state.finding);
   if (state.mine) next.searchParams.set('mine', '1');
-  if (state.page !== null && state.page > 1) next.searchParams.set('page', String(state.page));
+  // 1 ページ目も明示されたなら残す。page が無い URL は「表示中の PR が載るページ」を指すため、
+  // 省くと 2 ページ目の PR を選んだまま 1 ページ目に戻した状態を再表示で復元できない
+  if (state.page !== null) next.searchParams.set('page', String(state.page));
   return next;
 }
 

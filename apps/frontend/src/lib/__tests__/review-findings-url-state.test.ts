@@ -122,12 +122,17 @@ describe('review findings URL state', () => {
     });
 
     const base = new URL('https://app.example.com/acme/projects/APP/reviews?mine=1&page=4');
+    const unset = applyReviewFindingsUrlState(base, DEFAULT_REVIEW_FINDINGS_URL_STATE);
+    expect(unset.searchParams.has('mine')).toBe(false);
+    expect(unset.searchParams.has('page')).toBe(false);
+
+    // 明示した 1 ページ目は残す（page が無い URL は「表示中の PR のページ」を指すため）
     const first = applyReviewFindingsUrlState(base, {
       ...DEFAULT_REVIEW_FINDINGS_URL_STATE,
       page: 1,
     });
-    expect(first.searchParams.has('mine')).toBe(false);
-    expect(first.searchParams.has('page')).toBe(false);
+    expect(first.searchParams.get('page')).toBe('1');
+    expect(parseReviewFindingsUrlState(first.searchParams).state.page).toBe(1);
 
     const second = applyReviewFindingsUrlState(base, {
       ...DEFAULT_REVIEW_FINDINGS_URL_STATE,

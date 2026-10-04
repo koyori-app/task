@@ -20,7 +20,7 @@ use crate::error::{ServerError, internal_server_error};
 use crate::extractors::{AuthUser, CurrentUser, OptionalAuthUser};
 use crate::openapi::OAuthErrors;
 use auth_core::client::{TokenResponse, exchange_code};
-use auth_core::crypto::encrypt_token;
+use auth_core::crypto::{decrypt_token, encrypt_token};
 use auth_core::pkce::{generate_pkce_pair, generate_state};
 use auth_core::provider::{ProviderUserInfo, build_authorize_url};
 use auth_core::state::{
@@ -511,10 +511,13 @@ pub async fn list_connections(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> Result<Json<OAuthConnectionsResponse>, OAuthError> {
-    let rows = oauth_connections::Entity::find()
+    let mut rows = oauth_connections::Entity::find()
         .filter(oauth_connections::Column::UserId.eq(user.id))
         .all(&state.db)
         .await?;
+    for row in &mut rows {
+        backfill_provider_login(&state, row).await?;
+    }
 
     let connections = rows
         .into_iter()
@@ -866,6 +869,68 @@ async fn release_provider_login(
         update = update.filter(oauth_connections::Column::Id.ne(keep));
     }
     update.exec(db).await?;
+    Ok(())
+}
+
+/// ログイン名を控える前（`m20260911010000_oauth_provider_login`）からある接続は
+/// `provider_login` が空のまま残る。保存済みのアクセストークンでプロバイダーに問い合わせて補完する。
+///
+/// トークンの期限切れ・失効・通信の失敗では補完できないので、空のまま返して一覧は止めない
+/// （画面は再連携を案内する）。DB の失敗は伝播する。
+/// ponytail: 補完できない接続は一覧を開くたびに問い合わせ直す。件数が問題になったら試した時刻を控える
+async fn backfill_provider_login(
+    state: &AppState,
+    row: &mut oauth_connections::Model,
+) -> Result<(), OAuthError> {
+    if row.provider_login.is_some() || row.token_expires_at.is_some_and(|at| at <= Utc::now()) {
+        return Ok(());
+    }
+    let Some(access_token_enc) = row.access_token_enc.as_deref() else {
+        return Ok(());
+    };
+    // 汎用 OIDC の接続（`oidc:{issuer}`）など、slug から引けないものは対象外
+    let Ok(provider) = resolve_provider(
+        &row.provider,
+        &state.oauth_settings,
+        row.instance_url.as_deref(),
+    ) else {
+        return Ok(());
+    };
+    let info = async {
+        let access_token = decrypt_token(&state.oauth_settings.encryption_key, access_token_enc)?;
+        let endpoints = provider.endpoints(&state.http_client).await?;
+        provider
+            .fetch_user_info(&state.http_client, &endpoints, &access_token)
+            .await
+    }
+    .await;
+    let login = match info {
+        Ok(info) => provider_login(&info),
+        Err(error) => {
+            warn!(connection_id = %row.id, provider = %row.provider, error = %error, "could not backfill provider login");
+            None
+        }
+    };
+    let Some(login) = login else {
+        return Ok(());
+    };
+    release_provider_login(
+        &state.db,
+        &row.provider,
+        row.instance_url.as_deref(),
+        &login,
+        Some(row.id),
+    )
+    .await?;
+    oauth_connections::Entity::update_many()
+        .col_expr(
+            oauth_connections::Column::ProviderLogin,
+            sea_orm::sea_query::Expr::value(Some(login.clone())),
+        )
+        .filter(oauth_connections::Column::Id.eq(row.id))
+        .exec(&state.db)
+        .await?;
+    row.provider_login = Some(login);
     Ok(())
 }
 

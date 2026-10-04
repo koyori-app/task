@@ -56,6 +56,7 @@ import {
 import {
   PR_PAGE_SIZE,
   filterPullRequests,
+  hasGithubConnection,
   isMyPullRequest,
   pageCount,
   pageOfPullRequest,
@@ -114,6 +115,12 @@ const connectionsQuery = useOAuthConnectionsQuery();
 const githubLogin = computed(() =>
   viewerGithubLogin(connectionsQuery.data.value?.connections ?? []),
 );
+/** 連携はあるのにユーザー名が分からない（再連携で直る）。 */
+const githubNeedsRelink = computed(
+  () =>
+    githubLogin.value === null &&
+    hasGithubConnection(connectionsQuery.data.value?.connections ?? []),
+);
 /** 選択中 PR とは別——サイドバーの見える行だけを絞る。 */
 const prQuery = ref('');
 const railReady = computed(() => prsQuery.isSuccess.value && !connectionsQuery.isPending.value);
@@ -152,7 +159,11 @@ function checkUrlRailState() {
   urlRailCheckPending = false;
   let changed = false;
   if (mineOnly.value && githubLogin.value === null) {
-    urlWarnings.value.push('GitHub と連携していないため、URL の「自分の PR だけ」は無視しました。');
+    urlWarnings.value.push(
+      githubNeedsRelink.value
+        ? 'GitHub のユーザー名を確認できないため、URL の「自分の PR だけ」は無視しました。'
+        : 'GitHub と連携していないため、URL の「自分の PR だけ」は無視しました。',
+    );
     mineOnly.value = false;
     changed = true;
   }
@@ -521,6 +532,10 @@ async function onRoundCreated() {
                 <span id="mine-only-help" class="text-muted-foreground text-xs">
                   <template v-if="githubLogin">
                     GitHub @{{ githubLogin }} で判定 · {{ myPullRequestCount }} 件
+                  </template>
+                  <template v-else-if="githubNeedsRelink">
+                    GitHub のユーザー名を確認できませんでした。アカウント設定で GitHub
+                    を連携し直すと使えます。
                   </template>
                   <template v-else>
                     GitHub と連携すると使えます。PR の作成者を GitHub
