@@ -4614,7 +4614,7 @@
             }
           },
           "404": {
-            "description": "招待が無い（取り消し・承諾済み・発行し直し）",
+            "description": "招待が無い（取り消し・承諾済み・発行し直し・招待者が Admin でなくなった）",
             "content": {
               "application/json": {
                 "schema": {
@@ -4684,7 +4684,7 @@
             }
           },
           "404": {
-            "description": "招待が無い（取り消し・承諾済み・発行し直し）",
+            "description": "招待が無い（取り消し・承諾済み・発行し直し・招待者が Admin でなくなった）",
             "content": {
               "application/json": {
                 "schema": {

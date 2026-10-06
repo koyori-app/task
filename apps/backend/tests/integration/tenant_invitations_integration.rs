@@ -6,7 +6,10 @@ use entity::{tenant_invitations, users};
 use job::tenant_invitation_email::{TenantInvitationEmailJob, process};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use serde_json::{Value, json};
-use service::tenant_invitations::{release_send_slot, send_slot_key, try_acquire_send_slot};
+use service::tenant_invitations::{
+    DAILY_SEND_LIMIT, HOURLY_SEND_LIMIT, release_send_slot, send_slot_key, try_acquire_send_slot,
+    try_consume_send_quota,
+};
 use uuid::Uuid;
 
 // テナントへのメール招待（TASK-184）の統合テスト。
@@ -504,4 +507,164 @@ async fn releasing_a_send_slot_does_not_free_someone_elses_slot() {
             .expect("acquire")
             .is_some()
     );
+}
+
+/// テナントは誰でも作れるので、宛先を変えながら送り続けられないよう、テナントごと・招待者ごとに
+/// 窓付きの上限を置く。どちらかに届けば、別の宛先でも 429。
+#[tokio::test]
+async fn send_quota_is_counted_per_tenant_and_per_inviter() {
+    let mut app = TestApp::new().await;
+    let redis = app.state.redis_client.clone();
+    const { assert!(HOURLY_SEND_LIMIT < DAILY_SEND_LIMIT) };
+
+    let (tenant, inviter) = (Uuid::new_v4(), Uuid::new_v4());
+    for _ in 0..HOURLY_SEND_LIMIT {
+        assert!(
+            try_consume_send_quota(&redis, tenant, inviter)
+                .await
+                .expect("quota")
+        );
+    }
+    assert!(
+        !try_consume_send_quota(&redis, tenant, inviter)
+            .await
+            .expect("quota"),
+        "1 時間の上限を越えたら止める"
+    );
+    assert!(
+        !try_consume_send_quota(&redis, Uuid::new_v4(), inviter)
+            .await
+            .expect("quota"),
+        "招待者の上限はテナントを変えても効く"
+    );
+    assert!(
+        !try_consume_send_quota(&redis, tenant, Uuid::new_v4())
+            .await
+            .expect("quota"),
+        "テナントの上限は招待者を変えても効く"
+    );
+    assert!(
+        try_consume_send_quota(&redis, Uuid::new_v4(), Uuid::new_v4())
+            .await
+            .expect("quota"),
+        "対照: 別のテナント・別の招待者なら通る"
+    );
+
+    // API でも、テナントの上限に届いていれば別の宛先への招待が 429 になる
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    for _ in 0..HOURLY_SEND_LIMIT {
+        assert!(
+            try_consume_send_quota(&redis, tp.tenant_id, Uuid::new_v4())
+                .await
+                .expect("quota")
+        );
+    }
+    login(&mut app, &owner).await;
+    let email = unique_email();
+    assert_eq!(
+        invite(&app, tp.tenant_id, &email, "Member").await.status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    let listed: Value = app
+        .get_with_session(&invitations_path(tp.tenant_id))
+        .await
+        .json()
+        .await
+        .expect("list json");
+    assert_eq!(listed, json!([]), "上限で断った招待は作らない");
+    // 上限で断ったときは宛先ごとの枠を返している（取れれば、まだ誰も持っていない）
+    assert!(
+        try_acquire_send_slot(&redis, tp.tenant_id, &email)
+            .await
+            .expect("acquire")
+            .is_some()
+    );
+}
+
+/// 件名は固定にする。テナント名は誰でも好きに付けられるので、件名に出すとサービスの送信元から
+/// 偽の文面を送れてしまう。
+#[tokio::test]
+async fn invitation_mail_subject_does_not_carry_the_tenant_name() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let email = unique_email();
+
+    login(&mut app, &owner).await;
+    let invitation_id = invite_ok(&app, tp.tenant_id, &email, "Member").await;
+    send_and_take_token(&app, invitation_id, &email).await;
+    let tenant = entity::tenants::Entity::find_by_id(tp.tenant_id)
+        .one(&app.state.db)
+        .await
+        .expect("find tenant")
+        .expect("tenant exists");
+    let mail = app
+        .sent_mails()
+        .into_iter()
+        .rev()
+        .find(|m| m.to == email)
+        .expect("invitation mail");
+    assert_eq!(mail.subject, "テナントへの招待が届きました");
+    assert!(!mail.subject.contains(&tenant.name));
+    assert!(mail.text.contains(&tenant.name), "本文にはテナント名を出す");
+}
+
+async fn set_tenant_role(app: &TestApp, tenant_id: Uuid, user_id: Uuid, role: &str) {
+    let res = app
+        .put_json_with_session(
+            &format!("/v1/tenants/{tenant_id}/members/{user_id}"),
+            json!({ "role": role }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+/// 招待者が Admin を外されたら、その人が出した保留中の招待では入れない。
+#[tokio::test]
+async fn invitations_from_a_demoted_admin_can_no_longer_be_accepted() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let admin = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let members_path = format!("/v1/tenants/{}/members", tp.tenant_id);
+    let email = unique_email();
+
+    login(&mut app, &owner).await;
+    let added = app
+        .post_json_with_session(
+            &members_path,
+            json!({ "user_id": admin.id, "role": "Admin" }),
+        )
+        .await;
+    assert_eq!(added.status(), StatusCode::CREATED);
+
+    // Admin が（外される前に）自分の別アドレスを Admin として招待しておく
+    login(&mut app, &admin).await;
+    let invitation_id = invite_ok(&app, tp.tenant_id, &email, "Admin").await;
+    let token = send_and_take_token(&app, invitation_id, &email).await;
+
+    login(&mut app, &owner).await;
+    set_tenant_role(&app, tp.tenant_id, admin.id, "Member").await;
+
+    let invitee = register_as(&app, &email).await;
+    app.reset_session_client();
+    assert_eq!(
+        app.post_json("/v1/invitations/preview", json!({ "token": token }))
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    login(&mut app, &invitee).await;
+    assert_eq!(
+        accept(&app, &token).await.status(),
+        StatusCode::NOT_FOUND,
+        "降格された招待者の招待では入れない"
+    );
+
+    // 対照: Admin に戻せば同じ招待で入れる（404 の出所は招待者の確かめだけ）
+    login(&mut app, &owner).await;
+    set_tenant_role(&app, tp.tenant_id, admin.id, "Admin").await;
+    login(&mut app, &invitee).await;
+    assert_eq!(accept(&app, &token).await.status(), StatusCode::CREATED);
 }

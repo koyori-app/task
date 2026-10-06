@@ -26,8 +26,36 @@ use entity::tenant_members::TenantRole;
 pub const TTL_DAYS: i64 = 7;
 /// 同じ宛先への送信の間隔（秒）。再送ボタンの連打で受け手にメールが積もらないようにする。
 pub const SEND_COOLDOWN_SECS: u64 = 60;
+/// テナントごと・招待者ごとの送信の上限（1 時間 / 1 日）。テナントは誰でも作れるので、
+/// 宛先を変えながら送り続けてサービスの送信ドメインの評判を落とせないようにする。
+pub const HOURLY_SEND_LIMIT: u32 = 50;
+pub const DAILY_SEND_LIMIT: u32 = 200;
 
 const KEY_COOLDOWN: &str = "tenant_invite:rl:";
+const KEY_QUOTA: &str = "tenant_invite:quota:";
+
+/// 窓ごとの数を 4 つ（テナント / 招待者 × 時 / 日）まとめて見て、どれも上限に届いていなければ
+/// すべて 1 つ進める。1 つでも届いていれば何も進めずに 0 を返す。
+/// KEYS: テナント時・テナント日・招待者時・招待者日。ARGV: 時の上限・日の上限・時の TTL・日の TTL
+static CONSUME_QUOTA_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
+    redis::Script::new(
+        r#"
+        local limits = { tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[1]), tonumber(ARGV[2]) }
+        local ttls = { ARGV[3], ARGV[4], ARGV[3], ARGV[4] }
+        for i = 1, 4 do
+            if tonumber(redis.call('GET', KEYS[i]) or '0') >= limits[i] then
+                return 0
+            end
+        end
+        for i = 1, 4 do
+            if redis.call('INCR', KEYS[i]) == 1 then
+                redis.call('EXPIRE', KEYS[i], ttls[i])
+            end
+        end
+        return 1
+        "#,
+    )
+});
 
 /// 値が自分の取った枠のときだけ消す。枠が期限切れになった後に別のリクエストが取り直した枠を、
 /// 遅れて失敗した前のリクエストが消さないようにする。
@@ -155,6 +183,37 @@ pub async fn release_send_slot(
     Ok(())
 }
 
+/// テナントごと・招待者ごとの送信の上限を 1 通ぶん使う。上限に届いていれば `false`。
+/// 窓は時刻で区切る固定窓（毎時・毎日 UTC で切り替わる）。
+pub async fn try_consume_send_quota(
+    redis: &RedisConnection,
+    tenant_id: Uuid,
+    inviter_id: Uuid,
+) -> Result<bool, anyhow::Error> {
+    const HOUR: i64 = 60 * 60;
+    const DAY: i64 = 24 * HOUR;
+    let now = Utc::now().timestamp();
+    let (hour, day) = (now / HOUR, now / DAY);
+    let mut conn = redis
+        .conn
+        .acquire()
+        .await
+        .map_err(|e| anyhow::anyhow!("redis acquire failed: {e}"))?;
+    let consumed: i64 = CONSUME_QUOTA_SCRIPT
+        .key(format!("{KEY_QUOTA}t:{tenant_id}:h:{hour}"))
+        .key(format!("{KEY_QUOTA}t:{tenant_id}:d:{day}"))
+        .key(format!("{KEY_QUOTA}u:{inviter_id}:h:{hour}"))
+        .key(format!("{KEY_QUOTA}u:{inviter_id}:d:{day}"))
+        .arg(HOURLY_SEND_LIMIT)
+        .arg(DAILY_SEND_LIMIT)
+        .arg(HOUR)
+        .arg(DAY)
+        .invoke_async(&mut conn)
+        .await
+        .map_err(|e| anyhow::anyhow!("redis consume invitation quota: {e}"))?;
+    Ok(consumed == 1)
+}
+
 pub fn build_accept_url(settings: &Settings, token: &str) -> String {
     format!(
         "{}/invitations/accept?token={}",
@@ -178,7 +237,9 @@ pub async fn send_invitation_email(
 ) -> Result<(), anyhow::Error> {
     let url = build_accept_url(settings, mail.token);
     let role = format!("{:?}", mail.role);
-    let subject = format!("{} への招待", mail.tenant_name);
+    // 件名は固定にする。テナント名は誰でも好きに付けられるので、件名に出すと
+    // 偽の請求などの文面をサービスの送信元から送れてしまう（本文ではエスケープして出す）
+    let subject = "テナントへの招待が届きました";
     let text = format!(
         "{inviter} さんがあなたを {tenant} に {role} として招待しました。\n\
          以下のリンクから参加してください（有効期限は {TTL_DAYS} 日です）。\n\n{url}\n\n\
@@ -198,7 +259,7 @@ pub async fn send_invitation_email(
         url = escape(&url),
         to = escape(mail.to),
     );
-    smtp.send_email(mail.to, &subject, &text, Some(&html))
+    smtp.send_email(mail.to, subject, &text, Some(&html))
         .await
         .map_err(|e| anyhow::anyhow!("send tenant invitation email: {e}"))
 }

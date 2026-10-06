@@ -11,8 +11,8 @@ use axum::{
 use axum_valid::Valid;
 use sea_orm::prelude::Uuid;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
+    QueryOrder, TransactionTrait,
 };
 
 use crate::AppState;
@@ -20,6 +20,7 @@ use crate::error::{AppError, ServerError};
 use crate::extractors::{AuthUser, CurrentUser};
 use crate::handlers::tenant_members::require_tenant_admin;
 use crate::openapi::CrudErrors;
+use entity::tenant_members::TenantRole;
 use entity::{scopes::Scope, tenant_invitations, tenant_members, tenants, users};
 use job::tenant_invitation_email;
 use payload::tenant_invitations::*;
@@ -27,7 +28,7 @@ use payload::tenant_members::TenantMemberResponse;
 use service::db::is_postgres_unique_violation;
 use service::email::normalize_email;
 use service::tenant_invitations::{
-    find_by_token, is_expired, release_send_slot, try_acquire_send_slot,
+    find_by_token, is_expired, release_send_slot, try_acquire_send_slot, try_consume_send_quota,
 };
 
 /// 発行・一覧・取り消し・再送に共通する前段。テナントが無ければ 404、管理者でなければ 403。
@@ -65,15 +66,22 @@ async fn is_member_email(state: &AppState, tenant_id: Uuid, email: &str) -> Resu
         .is_some())
 }
 
-/// 送信の枠を取り、返すときに使う持ち主の印を返す。
+/// 宛先ごとの送信の枠を取り、テナントごと・招待者ごとの上限を 1 通ぶん使う。
+/// 返すときに使う宛先の枠の持ち主の印を返す。どちらかに届いていれば 429。
 async fn acquire_send_slot(
     state: &AppState,
     tenant_id: Uuid,
+    inviter_id: Uuid,
     email: &str,
 ) -> Result<String, AppError> {
-    try_acquire_send_slot(&state.redis_client, tenant_id, email)
+    let slot = try_acquire_send_slot(&state.redis_client, tenant_id, email)
         .await?
-        .ok_or(AppError::TooManyRequests)
+        .ok_or(AppError::TooManyRequests)?;
+    if !try_consume_send_quota(&state.redis_client, tenant_id, inviter_id).await? {
+        release_send_slot(&state.redis_client, tenant_id, email, &slot).await?;
+        return Err(AppError::TooManyRequests);
+    }
+    Ok(slot)
 }
 
 /// 送信の枠を取ったあとの書き込み（招待の更新とジョブの投入）が失敗したら、枠を返して
@@ -161,7 +169,7 @@ pub async fn create_invitation(
     if is_member_email(&state, tenant_id, &email).await? {
         return Err(AppError::ConflictDetail("already-member".into()));
     }
-    let slot = acquire_send_slot(&state, tenant_id, &email).await?;
+    let slot = acquire_send_slot(&state, tenant_id, auth.user_id, &email).await?;
 
     // 二重招待は (tenant_id, email) の UNIQUE で同じ行を作り直す。世代が上がるので、
     // 前のメールのリンクはここで通らなくなる
@@ -214,7 +222,7 @@ pub async fn resend_invitation(
 ) -> Result<Json<TenantInvitationResponse>, AppError> {
     require_invitation_admin(&state, &auth, tenant_id).await?;
     let invitation = find_invitation(&state, tenant_id, invitation_id).await?;
-    let slot = acquire_send_slot(&state, tenant_id, &invitation.email).await?;
+    let slot = acquire_send_slot(&state, tenant_id, auth.user_id, &invitation.email).await?;
 
     let resent =
         tenant_invitation_email::resend_and_enqueue(&state.pg_pool, tenant_id, invitation_id).await;
@@ -259,8 +267,33 @@ pub async fn delete_invitation(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// トークンから保留中の招待を引く。無ければ 404（取り消し・承諾済み・発行し直しを含む）、
-/// 期限切れなら 410。
+/// 招待者が今もテナントのオーナーか `Admin` か。
+///
+/// 発行時は `require_invitation_admin` で確かめるが、降格・除名は保留中の招待に手を付けない。
+/// 承諾の側で確かめないと、外される前に出しておいた招待で（自分の別アドレスを `Admin` として
+/// 招待しておけば）外された後に戻れてしまう。
+async fn inviter_still_admin<C: ConnectionTrait>(
+    db: &C,
+    invitation: &tenant_invitations::Model,
+) -> Result<bool, AppError> {
+    let tenant = tenants::Entity::find_by_id(invitation.tenant_id)
+        .one(db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if tenant.owner_id == invitation.invited_by {
+        return Ok(true);
+    }
+    Ok(tenant_members::Entity::find()
+        .filter(tenant_members::Column::TenantId.eq(invitation.tenant_id))
+        .filter(tenant_members::Column::UserId.eq(invitation.invited_by))
+        .filter(tenant_members::Column::Role.eq(TenantRole::Admin))
+        .one(db)
+        .await?
+        .is_some())
+}
+
+/// トークンから保留中の招待を引く。無ければ 404（取り消し・承諾済み・発行し直し・招待者が
+/// `Admin` でなくなったものを含む）、期限切れなら 410。
 async fn pending_by_token(
     state: &AppState,
     token: &str,
@@ -270,6 +303,9 @@ async fn pending_by_token(
         .ok_or(AppError::NotFound)?;
     if is_expired(&invitation) {
         return Err(AppError::Gone);
+    }
+    if !inviter_still_admin(&state.db, &invitation).await? {
+        return Err(AppError::NotFound);
     }
     Ok(invitation)
 }
@@ -284,7 +320,7 @@ async fn pending_by_token(
     request_body = InvitationTokenRequest,
     responses(
         (status = 200, description = "招待の中身", body = InvitationPreviewResponse),
-        (status = 404, description = "招待が無い（取り消し・承諾済み・発行し直し）", body = ServerError),
+        (status = 404, description = "招待が無い（取り消し・承諾済み・発行し直し・招待者が Admin でなくなった）", body = ServerError),
         (status = 410, description = "招待の期限が切れている", body = ServerError),
         (status = 500, description = "サーバー側で問題が発生しました", body = ServerError),
     )
@@ -325,7 +361,7 @@ pub async fn preview_invitation(
         (status = 201, description = "加わったメンバー", body = TenantMemberResponse),
         (status = 401, description = "ログインが必要です", body = ServerError),
         (status = 403, description = "招待先とログイン中のアドレスが違う（invitation-email-mismatch）", body = ServerError),
-        (status = 404, description = "招待が無い（取り消し・承諾済み・発行し直し）", body = ServerError),
+        (status = 404, description = "招待が無い（取り消し・承諾済み・発行し直し・招待者が Admin でなくなった）", body = ServerError),
         (status = 409, description = "既にテナントのメンバー（already-member）", body = ServerError),
         (status = 410, description = "招待の期限が切れている", body = ServerError),
         (status = 500, description = "サーバー側で問題が発生しました", body = ServerError),
@@ -349,6 +385,10 @@ pub async fn accept_invitation(
     }
 
     let txn = state.db.begin().await?;
+    // 確かめた後に招待者が外されていないか、書き込みと同じトランザクションで見直す
+    if !inviter_still_admin(&txn, &invitation).await? {
+        return Err(AppError::NotFound);
+    }
     // 同じトークンでの承諾が並んだとき、招待を消せた 1 つだけを通す。
     // 間に取り消し・発行し直しが入った場合も消せないので 404 になる
     let consumed = tenant_invitations::Entity::delete_many()
