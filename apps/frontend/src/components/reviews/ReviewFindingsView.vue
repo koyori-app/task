@@ -123,7 +123,10 @@ const githubNeedsRelink = computed(
 );
 /** 選択中 PR とは別——サイドバーの見える行だけを絞る。 */
 const prQuery = ref('');
-const railReady = computed(() => prsQuery.isSuccess.value && !connectionsQuery.isPending.value);
+// PR 一覧は連携一覧を待たずに出す（連携一覧は外部への問い合わせで遅れることがある）。
+// 連携一覧が要るのは「自分の PR」の判定だけで、その間スイッチは使えない
+const railReady = computed(() => prsQuery.isSuccess.value);
+const connectionsFailed = computed(() => connectionsQuery.isError.value);
 const railList = computed(() =>
   filterPullRequests(pullRequests.value, prQuery.value, mineOnly.value ? githubLogin.value : null),
 );
@@ -153,12 +156,19 @@ const railNote = computed<{ kind: 'hidden' } | { kind: 'elsewhere'; page: number
  * URL から来た `mine` と `page` は、一覧と連携の状態が揃ってから確かめる
  * （未連携の `mine=1` と範囲外の `page` は、無視・最後のページに寄せて理由を出す）。
  */
+const urlRailCheckReady = computed(() => railReady.value && !connectionsQuery.isPending.value);
 let urlRailCheckPending = true;
 function checkUrlRailState() {
-  if (!urlRailCheckPending || !railReady.value) return;
+  if (!urlRailCheckPending || !urlRailCheckReady.value) return;
   urlRailCheckPending = false;
   let changed = false;
-  if (mineOnly.value && githubLogin.value === null) {
+  if (mineOnly.value && githubLogin.value === null && connectionsFailed.value) {
+    // 連携していないとは限らない（一時的な失敗）。共有された mine=1 は URL に残し、
+    // 開き直せば効くようにする
+    urlWarnings.value.push(
+      '連携状態を取得できなかったため、URL の「自分の PR だけ」を適用できませんでした。',
+    );
+  } else if (mineOnly.value && githubLogin.value === null) {
     urlWarnings.value.push(
       githubNeedsRelink.value
         ? 'GitHub のユーザー名を確認できないため、URL の「自分の PR だけ」は無視しました。'
@@ -176,7 +186,7 @@ function checkUrlRailState() {
   }
   if (changed) writeUrl('replace');
 }
-watch(railReady, checkUrlRailState, { immediate: true });
+watch(urlRailCheckReady, checkUrlRailState, { immediate: true });
 const rounds = computed(() => roundsQuery.data.value ?? []);
 
 function currentUrlState(): ReviewFindingsUrlState {
@@ -532,6 +542,12 @@ async function onRoundCreated() {
                 <span id="mine-only-help" class="text-muted-foreground text-xs">
                   <template v-if="githubLogin">
                     GitHub @{{ githubLogin }} で判定 · {{ myPullRequestCount }} 件
+                  </template>
+                  <template v-else-if="connectionsQuery.isPending.value">
+                    連携状態を確認しています…
+                  </template>
+                  <template v-else-if="connectionsFailed">
+                    連携状態を取得できなかったため使えません。時間をおいて開き直してください。
                   </template>
                   <template v-else-if="githubNeedsRelink">
                     GitHub のユーザー名を確認できませんでした。アカウント設定で GitHub

@@ -61,6 +61,10 @@ type MockState = {
   githubLogin?: string | null;
   /** GitHub と連携しているがユーザー名が分からない（名前を控える前からある連携） */
   githubLinkedWithoutLogin?: boolean;
+  /** 連携一覧の応答を失敗させる */
+  connectionsStatus?: number;
+  /** 連携一覧の応答を返さない（外部への問い合わせで遅れている） */
+  hangConnections?: boolean;
   /** PR ごとの作成者。未指定は yupix */
   authors?: Record<number, string>;
 };
@@ -101,6 +105,9 @@ function stubFetch(state: MockState) {
       );
     }
     if (req.method === 'GET' && pathname.endsWith('/v1/auth/oauth/connections')) {
+      if (state.hangConnections) return new Promise<Response>(() => {});
+      if (state.connectionsStatus)
+        return jsonResponse({ message: 'error' }, state.connectionsStatus);
       return jsonResponse({
         connections: state.githubLogin
           ? [
@@ -832,5 +839,32 @@ describe('ReviewFindingsView の PR 一覧（自分の PR・ページ）', () =>
     expect(wrapper.get('[data-testid="url-warning"]').text()).toContain(
       'GitHub のユーザー名を確認できないため',
     );
+  });
+
+  it('連携一覧が届かなくても PR 一覧は先に出し、スイッチだけ待たせる', async () => {
+    stubFetch({ findings: [finding()], prNumbers: elevenPrs, hangConnections: true });
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(prRows()).toHaveLength(10);
+    expect(wrapper.get('[data-testid="mine-only"]').attributes('disabled')).toBeDefined();
+    expect(wrapper.text()).toContain('連携状態を確認しています');
+  });
+
+  it('連携一覧の取得に失敗しても未連携とは言わず、URL の mine=1 も消さない', async () => {
+    stubFetch({ findings: [finding()], prNumbers: [618], connectionsStatus: 503 });
+    window.history.replaceState(null, '', '/?pr=618&mine=1');
+    const wrapper = mountView({
+      initialUrlState: { ...DEFAULT_REVIEW_FINDINGS_URL_STATE, pr: 618, mine: true },
+    });
+    await flushPromises();
+
+    expect(prRows()).toHaveLength(1);
+    expect(wrapper.text()).not.toContain('GitHub と連携すると使えます');
+    expect(wrapper.text()).toContain('連携状態を取得できなかったため使えません');
+    expect(wrapper.get('[data-testid="url-warning"]').text()).toContain(
+      '連携状態を取得できなかったため',
+    );
+    expect(new URL(window.location.href).searchParams.get('mine')).toBe('1');
   });
 });

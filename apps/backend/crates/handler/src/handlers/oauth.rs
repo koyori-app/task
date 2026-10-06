@@ -511,13 +511,16 @@ pub async fn list_connections(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> Result<Json<OAuthConnectionsResponse>, OAuthError> {
-    let mut rows = oauth_connections::Entity::find()
+    let rows = oauth_connections::Entity::find()
         .filter(oauth_connections::Column::UserId.eq(user.id))
         .all(&state.db)
         .await?;
-    for row in &mut rows {
-        backfill_provider_login(&state, row).await?;
-    }
+    // 接続ごとの問い合わせは並べる（1 件が遅くても他を待たせない）
+    let rows = futures::future::try_join_all(
+        rows.into_iter()
+            .map(|row| backfill_provider_login(&state, row)),
+    )
+    .await?;
 
     let connections = rows
         .into_iter()
@@ -876,17 +879,18 @@ async fn release_provider_login(
 /// `provider_login` が空のまま残る。保存済みのアクセストークンでプロバイダーに問い合わせて補完する。
 ///
 /// トークンの期限切れ・失効・通信の失敗では補完できないので、空のまま返して一覧は止めない
-/// （画面は再連携を案内する）。DB の失敗は伝播する。
+/// （画面は再連携を案内する）。届かないホストで一覧が待たされないよう、問い合わせは
+/// [`BACKFILL_TIMEOUT`] で打ち切る。DB の失敗は伝播する。
 /// ponytail: 補完できない接続は一覧を開くたびに問い合わせ直す。件数が問題になったら試した時刻を控える
 async fn backfill_provider_login(
     state: &AppState,
-    row: &mut oauth_connections::Model,
-) -> Result<(), OAuthError> {
+    mut row: oauth_connections::Model,
+) -> Result<oauth_connections::Model, OAuthError> {
     if row.provider_login.is_some() || row.token_expires_at.is_some_and(|at| at <= Utc::now()) {
-        return Ok(());
+        return Ok(row);
     }
-    let Some(access_token_enc) = row.access_token_enc.as_deref() else {
-        return Ok(());
+    let Some(access_token_enc) = row.access_token_enc.clone() else {
+        return Ok(row);
     };
     // 汎用 OIDC の接続（`oidc:{issuer}`）など、slug から引けないものは対象外
     let Ok(provider) = resolve_provider(
@@ -894,25 +898,29 @@ async fn backfill_provider_login(
         &state.oauth_settings,
         row.instance_url.as_deref(),
     ) else {
-        return Ok(());
+        return Ok(row);
     };
-    let info = async {
-        let access_token = decrypt_token(&state.oauth_settings.encryption_key, access_token_enc)?;
+    let info = tokio::time::timeout(BACKFILL_TIMEOUT, async {
+        let access_token = decrypt_token(&state.oauth_settings.encryption_key, &access_token_enc)?;
         let endpoints = provider.endpoints(&state.http_client).await?;
         provider
             .fetch_user_info(&state.http_client, &endpoints, &access_token)
             .await
-    }
+    })
     .await;
     let login = match info {
-        Ok(info) => provider_login(&info),
-        Err(error) => {
+        Ok(Ok(info)) => provider_login(&info),
+        Ok(Err(error)) => {
             warn!(connection_id = %row.id, provider = %row.provider, error = %error, "could not backfill provider login");
+            None
+        }
+        Err(_) => {
+            warn!(connection_id = %row.id, provider = %row.provider, "provider login backfill timed out");
             None
         }
     };
     let Some(login) = login else {
-        return Ok(());
+        return Ok(row);
     };
     release_provider_login(
         &state.db,
@@ -931,8 +939,11 @@ async fn backfill_provider_login(
         .exec(&state.db)
         .await?;
     row.provider_login = Some(login);
-    Ok(())
+    Ok(row)
 }
+
+/// 補完の問い合わせ 1 件にかける上限。
+const BACKFILL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 async fn update_connection_tokens(
     state: &AppState,
