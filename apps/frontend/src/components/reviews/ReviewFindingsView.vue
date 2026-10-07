@@ -130,6 +130,11 @@ const connectionsFailed = computed(() => connectionsQuery.isError.value);
 const railList = computed(() =>
   filterPullRequests(pullRequests.value, prQuery.value, mineOnly.value ? githubLogin.value : null),
 );
+/**
+ * 実際に作成者で絞っているか。連携一覧の待機中・取得失敗の間は `mineOnly`（URL の mine=1）が
+ * 立っていても絞れていないので、「自分が作成した PR は〜」の文言や解除ボタンはこちらで出し分ける。
+ */
+const mineApplied = computed(() => mineOnly.value && githubLogin.value !== null);
 const myPullRequestCount = computed(
   () => pullRequests.value.filter((pr) => isMyPullRequest(pr, githubLogin.value)).length,
 );
@@ -531,7 +536,7 @@ async function onRoundCreated() {
                 type="checkbox"
                 role="switch"
                 class="accent-primary mt-0.5 size-4 shrink-0"
-                :checked="mineOnly && githubLogin !== null"
+                :checked="mineApplied"
                 :disabled="githubLogin === null"
                 aria-describedby="mine-only-help"
                 data-testid="mine-only"
@@ -571,15 +576,15 @@ async function onRoundCreated() {
             class="text-muted-foreground flex flex-col items-start gap-2 text-sm"
             data-testid="no-pr-match"
           >
-            <p v-if="mineOnly && prQuery.trim() === ''">
+            <p v-if="mineApplied && prQuery.trim() === ''">
               あなた（GitHub @{{ githubLogin }}）が作成した PR
               で、レビューのあるものはまだありません。
             </p>
             <p v-else>
-              「{{ prQuery.trim() }}」に一致する{{ mineOnly ? '、自分が作成した' : '' }} PR
+              「{{ prQuery.trim() }}」に一致する{{ mineApplied ? '、自分が作成した' : '' }} PR
               はありません。
             </p>
-            <Button v-if="mineOnly" variant="outline" size="sm" @click="setMineOnly(false)">
+            <Button v-if="mineApplied" variant="outline" size="sm" @click="setMineOnly(false)">
               {{ prQuery.trim() === '' ? 'すべての PR を表示' : 'すべての PR から探す' }}
             </Button>
           </div>

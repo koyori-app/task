@@ -867,4 +867,19 @@ describe('ReviewFindingsView の PR 一覧（自分の PR・ページ）', () =>
     );
     expect(new URL(window.location.href).searchParams.get('mine')).toBe('1');
   });
+
+  it('連携一覧が取れず作成者で絞れていないときは、一致なしを「自分が作成した PR」と言わない', async () => {
+    stubFetch({ findings: [finding()], prNumbers: [618], connectionsStatus: 503 });
+    const wrapper = mountView({
+      initialUrlState: { ...DEFAULT_REVIEW_FINDINGS_URL_STATE, pr: 618, mine: true },
+    });
+    await flushPromises();
+
+    await wrapper.get('[data-testid="filter-pr"]').setValue('99999');
+    await flushPromises();
+    const empty = wrapper.get('[data-testid="no-pr-match"]');
+    expect(empty.text()).toContain('「99999」に一致する PR はありません');
+    expect(empty.text()).not.toContain('自分が作成した');
+    expect(empty.find('button').exists()).toBe(false);
+  });
 });
