@@ -310,7 +310,8 @@ export const PullRequestRail: Story = {
     const canvas = within(canvasElement);
     const pager = await canvas.findByTestId('pr-pager');
     await expect(pager).toHaveTextContent('全 12 件 · 1 / 2 ページ');
-    await expect(canvas.getByText('GitHub @shadcn で判定 · 7 件')).toBeInTheDocument();
+    // 連携一覧は PR 一覧より後に届くので、待ってから見る
+    await expect(canvas.findByText('GitHub @shadcn で判定 · 7 件')).resolves.toBeInTheDocument();
 
     // 自分の PR（#412 と作成者 shadcn の 6 件）だけにすると 1 ページに収まる
     await userEvent.click(canvas.getByRole('switch', { name: /自分が作成した PR だけ/ }));
