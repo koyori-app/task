@@ -11,8 +11,8 @@ use axum::{
 use axum_valid::Valid;
 use sea_orm::prelude::Uuid;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    TransactionTrait,
 };
 
 use crate::AppState;
@@ -20,7 +20,6 @@ use crate::error::{AppError, ServerError};
 use crate::extractors::{AuthUser, CurrentUser};
 use crate::handlers::tenant_members::require_tenant_admin;
 use crate::openapi::CrudErrors;
-use entity::tenant_members::TenantRole;
 use entity::{scopes::Scope, tenant_invitations, tenant_members, tenants, users};
 use job::tenant_invitation_email;
 use payload::tenant_invitations::*;
@@ -28,7 +27,8 @@ use payload::tenant_members::TenantMemberResponse;
 use service::db::is_postgres_unique_violation;
 use service::email::normalize_email;
 use service::tenant_invitations::{
-    find_by_token, is_expired, release_send_slot, try_acquire_send_slot, try_consume_send_quota,
+    find_by_token, inviter_still_admin, is_expired, release_send_slot, try_acquire_send_slot,
+    try_consume_send_quota,
 };
 
 /// 発行・一覧・取り消し・再送に共通する前段。テナントが無ければ 404、管理者でなければ 403。
@@ -224,8 +224,15 @@ pub async fn resend_invitation(
     let invitation = find_invitation(&state, tenant_id, invitation_id).await?;
     let slot = acquire_send_slot(&state, tenant_id, auth.user_id, &invitation.email).await?;
 
-    let resent =
-        tenant_invitation_email::resend_and_enqueue(&state.pg_pool, tenant_id, invitation_id).await;
+    // 再送した人を招待者にする。元の招待者が外されていても、再送した人は今
+    // require_invitation_admin を通っているので招待者として正当
+    let resent = tenant_invitation_email::resend_and_enqueue(
+        &state.pg_pool,
+        tenant_id,
+        invitation_id,
+        auth.user_id,
+    )
+    .await;
     if !release_on_error(&state, tenant_id, &invitation.email, &slot, resent).await? {
         // 確かめた後に取り消された
         release_send_slot(&state.redis_client, tenant_id, &invitation.email, &slot).await?;
@@ -265,31 +272,6 @@ pub async fn delete_invitation(
         return Err(AppError::NotFound);
     }
     Ok(StatusCode::NO_CONTENT)
-}
-
-/// 招待者が今もテナントのオーナーか `Admin` か。
-///
-/// 発行時は `require_invitation_admin` で確かめるが、降格・除名は保留中の招待に手を付けない。
-/// 承諾の側で確かめないと、外される前に出しておいた招待で（自分の別アドレスを `Admin` として
-/// 招待しておけば）外された後に戻れてしまう。
-async fn inviter_still_admin<C: ConnectionTrait>(
-    db: &C,
-    invitation: &tenant_invitations::Model,
-) -> Result<bool, AppError> {
-    let tenant = tenants::Entity::find_by_id(invitation.tenant_id)
-        .one(db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if tenant.owner_id == invitation.invited_by {
-        return Ok(true);
-    }
-    Ok(tenant_members::Entity::find()
-        .filter(tenant_members::Column::TenantId.eq(invitation.tenant_id))
-        .filter(tenant_members::Column::UserId.eq(invitation.invited_by))
-        .filter(tenant_members::Column::Role.eq(TenantRole::Admin))
-        .one(db)
-        .await?
-        .is_some())
 }
 
 /// トークンから保留中の招待を引く。無ければ 404（取り消し・承諾済み・発行し直し・招待者が

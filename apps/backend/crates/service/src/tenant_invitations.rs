@@ -12,15 +12,15 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{Duration, Utc};
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::prelude::{DateTimeWithTimeZone, Uuid};
-use sea_orm::{ConnectionTrait, EntityTrait};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use sha2::Sha256;
 
 use crate::notification_email::escape;
 use crate::settings::Settings;
 use crate::smtp::SmtpClient;
 use common::cache::redis::RedisConnection;
-use entity::tenant_invitations;
 use entity::tenant_members::TenantRole;
+use entity::{tenant_invitations, tenant_members, tenants};
 
 /// 招待の有効期限（日）。再送で発行し直すと、そこからまた数える。
 pub const TTL_DAYS: i64 = 7;
@@ -110,6 +110,33 @@ pub fn token_matches(
     Ok(token_mac(invitation.id, invitation.generation, secret)?
         .verify_slice(&tag)
         .is_ok())
+}
+
+/// 招待者が今もテナントのオーナーか `Admin` か。
+///
+/// 発行時は `require_invitation_admin` で確かめるが、降格・除名は保留中の招待に手を付けない。
+/// 承諾・プレビュー・送信の側で確かめないと、外される前に出しておいた招待で（自分の別アドレスを
+/// `Admin` として招待しておけば）外された後に戻れてしまう。テナントが無ければ `false`。
+pub async fn inviter_still_admin<C: ConnectionTrait>(
+    db: &C,
+    invitation: &tenant_invitations::Model,
+) -> Result<bool, sea_orm::DbErr> {
+    let Some(tenant) = tenants::Entity::find_by_id(invitation.tenant_id)
+        .one(db)
+        .await?
+    else {
+        return Ok(false);
+    };
+    if tenant.owner_id == invitation.invited_by {
+        return Ok(true);
+    }
+    Ok(tenant_members::Entity::find()
+        .filter(tenant_members::Column::TenantId.eq(invitation.tenant_id))
+        .filter(tenant_members::Column::UserId.eq(invitation.invited_by))
+        .filter(tenant_members::Column::Role.eq(TenantRole::Admin))
+        .one(db)
+        .await?
+        .is_some())
 }
 
 /// トークンに対応する招待。期限切れも返す（呼び出し側で 410 と 404 を分けるため）。

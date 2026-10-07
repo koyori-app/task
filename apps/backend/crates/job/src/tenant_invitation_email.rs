@@ -123,23 +123,27 @@ pub async fn issue_and_enqueue(
 }
 
 /// 招待を送り直す。期限を今から延ばして世代を上げ（前のリンクは通らなくなる）、送信ジョブを
-/// 同じトランザクションで積む。招待がそのテナントに無ければ `false`。
+/// 同じトランザクションで積む。招待者は送り直した人に替える（元の招待者が外されていても、
+/// 送り直した招待が使えるように）。招待がそのテナントに無ければ `false`。
 pub async fn resend_and_enqueue(
     pool: &PgPool,
     tenant_id: Uuid,
     invitation_id: Uuid,
+    resent_by: Uuid,
 ) -> Result<bool, anyhow::Error> {
     let mut tx = pool.begin().await?;
     let generation: Option<(i32,)> = sqlx::query_as(
         "UPDATE tenant_invitations
          SET generation = generation + 1,
-             expires_at = now() + make_interval(days => $3)
+             expires_at = now() + make_interval(days => $3),
+             invited_by = $4::uuid
          WHERE id = $1::uuid AND tenant_id = $2::uuid
          RETURNING generation",
     )
     .bind(invitation_id.to_string())
     .bind(tenant_id.to_string())
     .bind(tenant_invitations_ttl_days())
+    .bind(resent_by.to_string())
     .fetch_optional(&mut *tx)
     .await?;
     let Some((generation,)) = generation else {
@@ -172,6 +176,14 @@ pub async fn process(
         );
         return Ok(());
     };
+    // 招待者が外されていれば、承諾もプレビューも 404 になるリンクなので外へ出さない
+    if !tenant_invitations::inviter_still_admin(&state.db, &invitation).await? {
+        info!(
+            invitation_id = %job.invitation_id,
+            "skip tenant invitation email: inviter is no longer an admin"
+        );
+        return Ok(());
+    }
     // 同じ世代なら何度作っても同じ値。再試行で配信済みのリンクを壊さない
     let token = tenant_invitations::invitation_token(
         invitation.id,

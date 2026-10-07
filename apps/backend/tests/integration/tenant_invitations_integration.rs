@@ -668,3 +668,60 @@ async fn invitations_from_a_demoted_admin_can_no_longer_be_accepted() {
     login(&mut app, &invitee).await;
     assert_eq!(accept(&app, &token).await.status(), StatusCode::CREATED);
 }
+
+/// 外された招待者の招待は、送信ジョブが回ってもメールを出さない（使えないリンクを外へ出さない）。
+/// 残った Admin（ここではオーナー）が再送すると招待者が替わり、届いたリンクで入れる。
+#[tokio::test]
+async fn resending_a_demoted_admins_invitation_makes_it_usable_again() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let admin = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let email = unique_email();
+
+    login(&mut app, &owner).await;
+    let added = app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/members", tp.tenant_id),
+            json!({ "user_id": admin.id, "role": "Admin" }),
+        )
+        .await;
+    assert_eq!(added.status(), StatusCode::CREATED);
+
+    login(&mut app, &admin).await;
+    let invitation_id = invite_ok(&app, tp.tenant_id, &email, "Member").await;
+
+    login(&mut app, &owner).await;
+    set_tenant_role(&app, tp.tenant_id, admin.id, "Member").await;
+
+    let mails_before = app.sent_mails().len();
+    run_job(
+        &app,
+        invitation_id,
+        current_generation(&app, invitation_id).await,
+    )
+    .await;
+    assert_eq!(
+        app.sent_mails().len(),
+        mails_before,
+        "外された招待者の招待にはメールを送らない"
+    );
+
+    clear_send_slot(&app, tp.tenant_id, &email).await;
+    let resent = app
+        .post_json_with_session(
+            &format!("{}/{invitation_id}/resend", invitations_path(tp.tenant_id)),
+            json!({}),
+        )
+        .await;
+    assert_eq!(resent.status(), StatusCode::OK);
+    let token = send_and_take_token(&app, invitation_id, &email).await;
+
+    let invitee = register_as(&app, &email).await;
+    login(&mut app, &invitee).await;
+    assert_eq!(
+        accept(&app, &token).await.status(),
+        StatusCode::CREATED,
+        "再送した人が招待者になるので、届いたリンクで入れる"
+    );
+}
