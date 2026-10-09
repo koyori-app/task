@@ -690,6 +690,7 @@ export const TitleEdit: Story = {
     ).resolves.toBeInTheDocument();
     const puts = (TitleEdit as { puts?: unknown[] }).puts ?? [];
     await expect(puts).toContainEqual({ title: '新しいタイトル' });
+    await expect(canvas.findByText('保存しました')).resolves.toBeInTheDocument();
   },
 };
 
@@ -726,6 +727,7 @@ export const DescriptionEdit: Story = {
     await expect(canvas.findByText('更新後の説明')).resolves.toBeInTheDocument();
     const puts = (DescriptionEdit as { puts?: unknown[] }).puts ?? [];
     await expect(puts).toContainEqual({ description: '更新後の説明' });
+    await expect(canvas.findByText('保存しました')).resolves.toBeInTheDocument();
   },
 };
 

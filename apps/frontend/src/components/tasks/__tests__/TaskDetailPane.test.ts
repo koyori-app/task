@@ -47,6 +47,7 @@ vi.mock('@/composables/useTaskDetail', () => ({
       labelsError: ref(null),
       fieldUpdating: computed(() => ({})),
       fieldErrors: ref({}),
+      savedField: ref(null),
       isLoading: computed(() => false),
       isNotFound: computed(() => false),
       isError: computed(() => false),
