@@ -144,8 +144,10 @@ PAT を使う CLI は `GET /v1/personal_tokens/me` で、使用中の鍵と持�
 
 この endpoint は PAT 専用であり、Bearer がない要求と、認証済みの session Cookie の要求には 401 を返す。
 ただし `AuthUser` の拒否はそのまま外へ出るため、凍結された利用者の PAT には 403（`account-suspended`）、2FA が途中の session Cookie には 403（`forbidden`）が返る。
-`GET /v1/auth/me` と `PATCH /v1/auth/me` は session 専用のまま保つ。
-既存の session endpoint に認証方式の条件分岐を戻すと、session extractor が Bearer を必ず拒む境界が再び曖昧になるため、二つの認証方式を同じ `me` endpoint へ通さない。
+`GET /v1/auth/me` と `PATCH /v1/auth/me` は PAT に開かない（PAT の識別はこの endpoint で行う）。
+`PATCH` は session 専用の `CurrentUser` のまま保つ。session extractor に認証方式の条件分岐を戻すと、Bearer を必ず拒む境界が再び曖昧になるため。
+`GET` だけは Desktop のアカウント表示のため `AuthUser` + `require_session_or_device_token` で Device Token を通す（PAT は 403）。
+`CurrentUser` は変えず、`AuthUser` は Bearer があれば Cookie へフォールバックしないので、この境界は保たれる。
 
 この endpoint は scope を要求しない。
 scope は鍵が実行できる操作を制限するための値であり、鍵自身の識別を拒むための値ではない。
@@ -239,7 +241,7 @@ PAT は 1 テナント束縛で、上の「テナント非紐づけ PAT は採�
 | 権限 | スコープ・テナント束縛はセッションと同等。`require_session` の口（PAT 管理・テナント作成・更新・削除、プロジェクト削除、GitHub 連携の管理・2FA・認可コードの発行）は 403 |
 | 通知 | `/v1/users/me/notifications` 系は `require_scope`（Device Token は常に通過）+ 視界の絞り込み（`visible_project_ids_for`）。Device Token の視界はセッションと同じ（本人が入れるプロジェクトすべて、`project_id` を持たない古い通知も含む）で、PAT のテナント絞り込みは掛けない（[通知](#v1usersme通知)） |
 | 端末管理 | `/v1/users/me/devices` 系はセッションと Device Token だけ（`require_session_or_device_token`）。PAT は 403 |
-| `/v1/auth/me` | セッション専用のまま（Bearer は 401）。Desktop は通知一覧と端末一覧で足りる |
+| `/v1/auth/me` | `GET` はセッションと Device Token（`require_session_or_device_token`）。PAT は 403。Desktop のアカウント表示に使う。`PATCH` はセッション専用のまま（Bearer は 401） |
 | `last_used_at` | 認証成功時に更新する。Desktop は 30 秒ごとにポーリングするので、前回から 5 分以上空いたときだけ書く |
 
 ### フロー（Authorization Code + PKCE、loopback）
@@ -294,7 +296,7 @@ GET /v1/tenants/{tenant_id}/projects/{project_id}/...
 ```
 
 path の ID と PAT の `tenant_id` / `allowed_project_ids` を突き合わせる。  
-アカウント API（例: `GET /v1/auth/me`）は PAT 非対応（セッションのみ）。
+アカウント API（例: `GET /v1/auth/me`）は PAT 非対応（セッションのみ。`GET /v1/auth/me` は Device Token も通す）。
 
 ### `/v1/users/me/...`（通知）
 
@@ -356,6 +358,7 @@ PAT に `admin:project` を付けても、発行者が Member なら 403。
 - PAT 作成: 他人の `tenant_id` → 403
 - Device Token: 発行 → 交換 → Bearer で通知一覧が 200。code の再利用・verifier 不一致・TTL 超過は 401。
   2FA 途中のセッション・PAT・Device Token での発行は 403。PAT 管理・テナント作成は 403。
+  `GET /v1/auth/me` は Device Token で 200、PAT で 403。`PATCH /v1/auth/me` は Device Token で 401。
   失効後・`sessions_revoked_at` 更新後・期限切れは 401。他人の端末の失効は 404。交換の口は上限を越えると 429
 
 ## 採用しない方針

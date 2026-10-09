@@ -17,7 +17,7 @@ async fn current_user_endpoint_rejects_bearer_header() {
         .await;
 
     // 対照: Bearer なしのセッションなら取得できる。
-    let allowed = app.get_with_session("/v1/auth/me").await;
+    let allowed = app.get_with_session("/v1/auth/passkeys").await;
     assert_eq!(
         allowed.status(),
         StatusCode::OK,
@@ -27,11 +27,11 @@ async fn current_user_endpoint_rejects_bearer_header() {
     // 同じセッション Cookie に Bearer を足すと拒否される。
     let rejected = app
         .client()
-        .get(format!("{}/v1/auth/me", app.base_url()))
+        .get(format!("{}/v1/auth/passkeys", app.base_url()))
         .header(reqwest::header::AUTHORIZATION, "Bearer not-a-real-token")
         .send()
         .await
-        .expect("me request with bearer");
+        .expect("passkeys request with bearer");
     assert_eq!(
         rejected.status(),
         StatusCode::UNAUTHORIZED,

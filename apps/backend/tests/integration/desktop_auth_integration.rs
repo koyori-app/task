@@ -332,6 +332,45 @@ async fn bearer_cannot_issue_code() {
 }
 
 /// セッション専用の口（PAT 管理・テナント作成と削除・プロジェクト削除）は Device Token では通らない。
+/// Desktop のアカウント表示: Device Token で自分のプロフィールを読める（401 だと Desktop は
+/// トークン失効とみなしてログアウトする）。PAT は 403、更新はセッション専用のまま。
+#[tokio::test]
+async fn device_token_can_read_own_profile_but_not_edit_it() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    let tenant_id = insert_tenant(&app.state.db, user.id).await;
+    let (device, _) = login_and_get_device_token(&mut app, &user).await;
+
+    let res = app.get_with_bearer("/v1/auth/me", &device).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value = res.json().await.expect("me body");
+    assert_eq!(body["id"], user.id.to_string());
+    assert_eq!(body["email"], user.email);
+
+    assert_eq!(
+        app.get_with_session("/v1/auth/me").await.status(),
+        StatusCode::OK
+    );
+    let pat = app
+        .insert_pat(user.id, tenant_id, vec![Scope::ReadReview], None)
+        .await;
+    assert_eq!(
+        get_bearer(&app, "/v1/auth/me", &pat).await,
+        StatusCode::FORBIDDEN
+    );
+
+    let res = reqwest::Client::new()
+        .patch(format!("{}/v1/auth/me", app.base_url()))
+        .bearer_auth(&device)
+        .json(&serde_json::json!({ "bio": "desk" }))
+        .send()
+        .await
+        .expect("update me with device token");
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    app.cleanup_user(user.id).await;
+}
+
 /// 同じ利用者のセッションなら通る（対照）。
 #[tokio::test]
 async fn device_token_cannot_use_session_only_endpoints() {
