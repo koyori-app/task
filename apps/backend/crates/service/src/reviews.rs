@@ -265,6 +265,8 @@ pub fn can_transition(from: FindingState, to: FindingState) -> bool {
     match (from, to) {
         // 修正の宣言と、その確認
         (Open, Fixed) | (Fixed, Verified) => true,
+        // 修正への着手と、その取り消し（着手を経ずに fixed を宣言してもよい）
+        (Open, Fixing) | (Fixing, Open) | (Fixing, Fixed) => true,
         // 繰り延べと取り消し（繰り延べられる重大度は [`FindingSeverity::can_defer`] で見る）
         (Open, Deferred) | (Deferred, Open) => true,
         // 指摘自体の棄却と再オープン
@@ -1175,6 +1177,7 @@ pub fn render_summary_comment(
         ] {
             for state in [
                 FindingState::Open,
+                FindingState::Fixing,
                 FindingState::Fixed,
                 FindingState::Verified,
                 FindingState::Deferred,
@@ -1328,6 +1331,9 @@ mod tests {
         let allowed = [
             (Open, Fixed),
             (Fixed, Verified),
+            (Open, Fixing),
+            (Fixing, Open),
+            (Fixing, Fixed),
             (Fixed, Open),
             (Open, Deferred),
             (Deferred, Open),
@@ -1339,7 +1345,7 @@ mod tests {
         }
 
         // verified は終端。誤りは新しいラウンドで出し直す
-        for to in [Open, Fixed, Deferred, Rejected] {
+        for to in [Open, Fixing, Fixed, Deferred, Rejected] {
             assert!(
                 !can_transition(Verified, to),
                 "verified -> {to:?} は許されない"
@@ -1349,8 +1355,12 @@ mod tests {
         assert!(!can_transition(Open, Verified));
         // 繰り延べたものを直接 fixed にはできない（一度 open へ戻す）
         assert!(!can_transition(Deferred, Fixed));
+        // 着手中のものは確認・繰り延べ・棄却へ直接進めない（fixed か open を経る）
+        for to in [Verified, Deferred, Rejected] {
+            assert!(!can_transition(Fixing, to), "fixing -> {to:?} は許されない");
+        }
         // 同じ状態への遷移は不可（履歴だけが増えるのを防ぐ）
-        for state in [Open, Fixed, Verified, Deferred, Rejected] {
+        for state in [Open, Fixing, Fixed, Verified, Deferred, Rejected] {
             assert!(!can_transition(state, state), "{state:?} -> 自分自身");
         }
     }
@@ -1437,7 +1447,14 @@ mod tests {
         assert!(!requires_finding_author(Fixed, Verified));
         assert!(!requires_finding_author(Fixed, Open));
         // 修正側が行える遷移は、どちらの制約にも載らない
-        for (from, to) in [(Open, Fixed), (Open, Deferred), (Deferred, Open)] {
+        for (from, to) in [
+            (Open, Fixed),
+            (Open, Fixing),
+            (Fixing, Open),
+            (Fixing, Fixed),
+            (Open, Deferred),
+            (Deferred, Open),
+        ] {
             assert!(!requires_finding_author(from, to));
             assert!(!requires_reviewer_side(from, to));
         }
@@ -1578,6 +1595,8 @@ mod tests {
         let counts = vec![
             (FindingSeverity::High, Open, 1),
             (FindingSeverity::Medium, Fixed, 2),
+            // 着手しただけでは解消していない
+            (FindingSeverity::High, Fixing, 17),
             // 確認済み・繰り延べ・棄却はマージを塞がない
             (FindingSeverity::High, Verified, 5),
             (FindingSeverity::Medium, Rejected, 7),
@@ -1585,6 +1604,6 @@ mod tests {
             (FindingSeverity::Low, Open, 11),
             (FindingSeverity::Nit, Fixed, 13),
         ];
-        assert_eq!(blocking_count(&counts), 3);
+        assert_eq!(blocking_count(&counts), 20);
     }
 }
