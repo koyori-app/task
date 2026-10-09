@@ -7,6 +7,9 @@
 //! 失敗はベストエフォート: 投稿・編集に失敗しても API 側の起票・遷移は
 //! 巻き戻さない。GitHub 連携の無いプロジェクトでは何もしない。
 //!
+//! マージ可（[`service::reviews::SummarySnapshot::merge_ready`]）になったら、
+//! レビューした commit で PR を Approve する。これもベストエフォート。
+//!
 //! 同一 (project, pr) の更新要求は 1 本に合流させる（`service::github::review_summary_queue`）。
 //! 遷移のたびに積むと同じコメントへ連続して書き込み、GitHub の
 //! secondary rate limit に当たるため。実行区間も同じ単位でロックして直列化する
@@ -382,7 +385,7 @@ async fn update_summary(
     // 表示用の PR メタは取れたときだけ更新する。取れなくても要約は出す
     // （PR 番号だけで用は足りるので、ここで止めると本題を落とす）。
     // 同じ応答に現在の head が入っているので、鮮度の照合にも使う（仕様 §7）
-    let current_head_sha = match service::github::pr_comments::fetch_pull_request(
+    let (current_head_sha, pr_is_open) = match service::github::pr_comments::fetch_pull_request(
         &state.http_client,
         &token,
         &integration.repo_owner,
@@ -421,13 +424,13 @@ async fn update_summary(
             .await?;
             notify_pr_author(&txn, &meta, unnotified).await?;
             txn.commit().await?;
-            head
+            (head, meta.state.as_deref() == Some("open"))
         }
         Err(e) => {
             // 取れなければ鮮度を確かめられない。本文は「鮮度不明」になり、
             // マージ可は出さない（仕様 §7）
             tracing::warn!(error = %e, pr = job.pr_number, "fetch pull request meta failed");
-            None
+            (None, false)
         }
     };
 
@@ -509,6 +512,38 @@ async fn update_summary(
         comment_id,
         "review summary comment updated"
     );
+
+    // merge_ready は現在の head とレビューした commit の一致まで見ている
+    if let (true, true, Some(commit_sha)) = (
+        snapshot.merge_ready(),
+        pr_is_open,
+        snapshot.latest_head_sha.as_deref(),
+    ) {
+        // 失敗してもジョブは失敗にしない。コメントは更新済みで、再試行は同じ 403 などを
+        // 連打するだけ。取りこぼしは次の遷移・ラウンドで拾い直す
+        match service::github::pr_comments::approve_pull_request(
+            &state.http_client,
+            &token,
+            &service::github::pr_comments::ApproveTarget {
+                owner: &integration.repo_owner,
+                repo: &integration.repo_name,
+                number: job.pr_number,
+                commit_sha,
+                bot_login: &bot_login,
+            },
+        )
+        .await
+        {
+            Ok(true) => {
+                tracing::info!(project_id = %job.project_id, pr = job.pr_number, commit_sha, "pull request approved");
+            }
+            Ok(false) => {}
+            // 403 なら App に Pull requests: write が無いか、インストール側が権限の更新を未承認
+            Err(e) => {
+                tracing::warn!(error = %e, project_id = %job.project_id, pr = job.pr_number, "approve pull request failed");
+            }
+        }
+    }
     Ok(())
 }
 

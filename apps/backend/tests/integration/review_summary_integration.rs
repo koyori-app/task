@@ -5,7 +5,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
     TransactionTrait, prelude::Uuid,
 };
-use wiremock::matchers::{method, path, path_regex};
+use wiremock::matchers::{method, path, path_regex, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // レビュー要約コメント（仕様 §7）の統合テスト。
@@ -41,8 +41,21 @@ async fn mount_mocks(server: &MockServer, existing_comment: bool, marker: &str) 
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "title": "feat: レビュー指摘管理",
             "user": { "login": "yupix" },
-            "head": { "sha": REVIEWED_HEAD }
+            "head": { "sha": REVIEWED_HEAD },
+            "state": "open"
         })))
+        .mount(server)
+        .await;
+
+    // Approve: 既存のレビューは無く、投稿は通る
+    Mock::given(method("GET"))
+        .and(path(reviews_api_path()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(reviews_api_path()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 7 })))
         .mount(server)
         .await;
 
@@ -86,6 +99,22 @@ async fn mount_mocks(server: &MockServer, existing_comment: bool, marker: &str) 
         )
         .mount(server)
         .await;
+}
+
+fn reviews_api_path() -> String {
+    format!("/repos/{REPO_OWNER}/{REPO_NAME}/pulls/{PR_NUMBER}/reviews")
+}
+
+/// PR へ送った Approve の本文を集める。
+async fn approvals(server: &MockServer) -> Vec<serde_json::Value> {
+    server
+        .received_requests()
+        .await
+        .expect("received requests")
+        .iter()
+        .filter(|r| r.method == wiremock::http::Method::POST && r.url.path() == reviews_api_path())
+        .filter_map(|r| serde_json::from_slice::<serde_json::Value>(&r.body).ok())
+        .collect()
 }
 
 /// 指定メソッドで送られたリクエストの本文を集める。
@@ -1115,4 +1144,193 @@ async fn a_job_enqueued_for_another_repository_clears_its_own_pending_flag() {
     );
 
     app.cleanup_user(reviewer.id).await;
+}
+
+// ── Approve（仕様 §7）─────────────────────────────────────────────────────
+
+/// 連携済みプロジェクトに `findings` のラウンドを 1 本起票し、要約ジョブを 1 回回す。
+///
+/// 呼ぶ前に `with_priority(1)` のモックを足せば、`mount_mocks` の既定応答を上書きできる。
+/// Approve の失敗でジョブを失敗にしないことも、ここの `expect` で毎回確かめる。
+async fn review_once_and_run_summary(mock_server: &MockServer, findings: serde_json::Value) {
+    // SAFETY: 呼び出し元のテストは serial で、他テストとの並列実行を防いでいる。
+    unsafe {
+        std::env::set_var("GITHUB_API_BASE_URL", mock_server.uri());
+    }
+    let mut app = TestApp::new_with_github().await;
+    let reviewer = app.insert_user_default().await;
+    let tp = app.insert_tenant_project(reviewer.id).await;
+    seed_statuses(&app, tp.project_id).await;
+    link_integration(&app, tp.project_id, reviewer.id).await;
+    let marker = service::github::pr_comments::summary_marker(tp.project_id);
+    mount_mocks(mock_server, false, &marker).await;
+
+    app.reset_session_client();
+    app.login_session_no_content(&reviewer.email, &reviewer.password)
+        .await;
+    let res = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/reviews",
+                tp.tenant_id, tp.project_id
+            ),
+            serde_json::json!({
+                "pr_number": PR_NUMBER,
+                "head_sha": REVIEWED_HEAD,
+                "summary": "総評",
+                "findings": findings,
+            }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    job::review_summary::process(
+        job::ReviewSummaryJob {
+            project_id: tp.project_id,
+            pr_number: PR_NUMBER,
+            repo_owner: REPO_OWNER.into(),
+            repo_name: REPO_NAME.into(),
+        },
+        apalis::prelude::Data::new(job_state(&app)),
+    )
+    .await
+    .expect("Approve の成否に関係なくジョブは成功する");
+
+    app.cleanup_user(reviewer.id).await;
+}
+
+/// マージ可（High / Medium の未解決なし・レビューした commit が現在の head）なら、
+/// その commit を指定して Approve する。Low の未解決はマージを止めない。
+#[serial_test::serial]
+#[tokio::test]
+async fn a_merge_ready_pull_request_is_approved_at_the_reviewed_commit() {
+    let mock_server = MockServer::start().await;
+    review_once_and_run_summary(
+        &mock_server,
+        serde_json::json!([{ "severity": "low", "title": "命名", "body": "本文" }]),
+    )
+    .await;
+
+    assert_eq!(
+        approvals(&mock_server).await,
+        vec![serde_json::json!({ "event": "APPROVE", "commit_id": REVIEWED_HEAD })],
+        "レビューした commit を 1 回だけ承認する"
+    );
+}
+
+/// High / Medium が未解決なら承認しない（上の対照）。
+#[serial_test::serial]
+#[tokio::test]
+async fn a_pull_request_with_blocking_findings_is_not_approved() {
+    let mock_server = MockServer::start().await;
+    review_once_and_run_summary(
+        &mock_server,
+        serde_json::json!([{ "severity": "medium", "title": "競合", "body": "本文" }]),
+    )
+    .await;
+
+    assert!(approvals(&mock_server).await.is_empty());
+}
+
+/// レビュー後にコミットが積まれた PR と、閉じた PR は承認しない。
+#[serial_test::serial]
+#[tokio::test]
+async fn a_stale_or_closed_pull_request_is_not_approved() {
+    for (case, head, state) in [
+        (
+            "レビュー後に push された",
+            "0000000000000000000000000000000000000000",
+            "open",
+        ),
+        ("閉じた", REVIEWED_HEAD, "closed"),
+    ] {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/repos/{REPO_OWNER}/{REPO_NAME}/pulls/{PR_NUMBER}"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "title": "feat: レビュー指摘管理",
+                "user": { "login": "yupix" },
+                "head": { "sha": head },
+                "state": state
+            })))
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+        review_once_and_run_summary(&mock_server, serde_json::json!([])).await;
+
+        assert!(
+            approvals(&mock_server).await.is_empty(),
+            "{case} PR は承認しない"
+        );
+    }
+}
+
+/// 同じ commit への自分の承認が既にあれば、2 ページ目にあっても承認し直さない。
+/// 1 ページ目は既定のページサイズ（100 件）ちょうどで埋めて、ページ送りを確かめる。
+#[serial_test::serial]
+#[tokio::test]
+async fn an_existing_approval_on_a_later_page_is_not_repeated() {
+    let mock_server = MockServer::start().await;
+    let others: Vec<serde_json::Value> = (0..100)
+        .map(|i| {
+            serde_json::json!({
+                "user": { "login": format!("reviewer-{i}"), "type": "User" },
+                "commit_id": REVIEWED_HEAD,
+                "state": "COMMENTED"
+            })
+        })
+        .collect();
+    Mock::given(method("GET"))
+        .and(path(reviews_api_path()))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(others))
+        .with_priority(1)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(reviews_api_path()))
+        .and(query_param("page", "2"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "user": { "login": BOT_LOGIN, "type": "Bot" },
+                "commit_id": REVIEWED_HEAD,
+                "state": "APPROVED"
+            }])),
+        )
+        .with_priority(1)
+        .mount(&mock_server)
+        .await;
+    review_once_and_run_summary(&mock_server, serde_json::json!([])).await;
+
+    assert!(
+        approvals(&mock_server).await.is_empty(),
+        "承認済みの commit を二重に承認しない"
+    );
+}
+
+/// 承認に失敗しても（App に Pull requests: write が無いなど）ジョブは失敗にせず、
+/// 要約コメントは出す。
+#[serial_test::serial]
+#[tokio::test]
+async fn a_failed_approval_still_posts_the_summary_comment() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(reviews_api_path()))
+        .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+            "message": "Resource not accessible by integration"
+        })))
+        .with_priority(1)
+        .mount(&mock_server)
+        .await;
+    review_once_and_run_summary(&mock_server, serde_json::json!([])).await;
+
+    assert_eq!(approvals(&mock_server).await.len(), 1, "承認は試みている");
+    let comments: Vec<serde_json::Value> = bodies_of(&mock_server, wiremock::http::Method::POST)
+        .await
+        .into_iter()
+        .filter(|b| b.get("body").is_some())
+        .collect();
+    assert_eq!(comments.len(), 1, "要約コメントは出ている");
 }

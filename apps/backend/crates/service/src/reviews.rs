@@ -1074,6 +1074,15 @@ impl SummarySnapshot {
             _ => None,
         }
     }
+
+    /// 要約コメントに「マージ可」と書き、GitHub で PR を Approve する条件（仕様 §7）。
+    ///
+    /// 集計 API と同じ規則（レビューが 1 件も無い PR を可にしない）に加えて、
+    /// レビュー後にコミットが積まれていないことを確かめる。確かめられないときも可にしない。
+    #[must_use]
+    pub fn merge_ready(&self) -> bool {
+        self.blocking == 0 && self.rounds > 0 && self.head_is_fresh() == Some(true)
+    }
 }
 
 /// PR 単位の状態を 1 レスポンスぶん読み出す。
@@ -1132,10 +1141,7 @@ pub fn render_summary_comment(
     let _ = writeln!(out, "## レビュー指摘");
     let _ = writeln!(out);
 
-    // 集計 API と同じ規則（レビューが 1 件も無い PR を「可」にしない）に加えて、
-    // レビュー後にコミットが積まれていないことを確かめる。確かめられないときも
-    // 可を出さない（仕様 §7）
-    if snapshot.blocking == 0 && snapshot.rounds > 0 && snapshot.head_is_fresh() == Some(true) {
+    if snapshot.merge_ready() {
         let _ = writeln!(out, "**マージ可** — High / Medium の未解決はありません。");
     } else if snapshot.blocking == 0 && snapshot.rounds > 0 {
         let _ = match snapshot.head_is_fresh() {
