@@ -539,10 +539,10 @@ async fn removed_member_pat_loses_tenant_read_access() {
 
     // alice のトークンはテナント T にバインドされ、プロジェクト制限は無い
     let alice_pat = app
-        .insert_pat(alice.id, tp.tenant_id, vec![Scope::AdminTenant], None)
+        .insert_pat(alice.id, tp.tenant_id, vec![Scope::Api], None)
         .await;
     let owner_pat = app
-        .insert_pat(owner.id, tp.tenant_id, vec![Scope::AdminTenant], None)
+        .insert_pat(owner.id, tp.tenant_id, vec![Scope::Api], None)
         .await;
 
     // メンバーで居るあいだは読める（過剰に拒否していないこと）

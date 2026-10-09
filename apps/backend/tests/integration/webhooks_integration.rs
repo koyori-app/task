@@ -218,7 +218,7 @@ async fn crud_and_authorization() {
     );
     let admin = fx
         .app
-        .insert_pat(owner.id, fx.tenant_id, vec![Scope::AdminProject], None)
+        .insert_pat(owner.id, fx.tenant_id, vec![Scope::WriteProject], None)
         .await;
     let listed = fx.app.get_with_bearer(&fx.webhooks_path(), &admin).await;
     assert_eq!(listed.status(), StatusCode::OK);
@@ -283,7 +283,7 @@ async fn discord_url_is_only_returned_to_admins() {
     assert!(!listed.to_string().contains("discord-token"));
     let member_admin_scope = fx
         .app
-        .insert_pat(member.id, fx.tenant_id, vec![Scope::AdminProject], None)
+        .insert_pat(member.id, fx.tenant_id, vec![Scope::WriteProject], None)
         .await;
     let listed = fx
         .app
@@ -903,7 +903,7 @@ async fn redeliver_creates_new_delivery() {
     );
     let admin = fx
         .app
-        .insert_pat(owner.id, fx.tenant_id, vec![Scope::AdminProject], None)
+        .insert_pat(owner.id, fx.tenant_id, vec![Scope::WriteProject], None)
         .await;
     assert_eq!(
         fx.app.get_with_bearer(&history_path, &admin).await.status(),

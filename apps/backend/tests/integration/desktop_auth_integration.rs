@@ -312,7 +312,7 @@ async fn bearer_cannot_issue_code() {
     let user = app.insert_user_default().await;
     let tenant_id = insert_tenant(&app.state.db, user.id).await;
     let pat = app
-        .insert_pat(user.id, tenant_id, vec![Scope::AdminTenant], None)
+        .insert_pat(user.id, tenant_id, vec![Scope::Api], None)
         .await;
     let (device, _) = login_and_get_device_token(&mut app, &user).await;
 

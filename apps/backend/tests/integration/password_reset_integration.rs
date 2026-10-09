@@ -93,7 +93,7 @@ async fn password_reset_integration_suite() {
 
         let tenant_id = insert_tenant(&app.state.db, user.id).await;
         let _pat = app
-            .insert_pat(user.id, tenant_id, vec![Scope::AdminTenant], None)
+            .insert_pat(user.id, tenant_id, vec![Scope::Api], None)
             .await;
         let pat_id = personal_tokens::Entity::find()
             .filter(personal_tokens::Column::UserId.eq(user.id))
