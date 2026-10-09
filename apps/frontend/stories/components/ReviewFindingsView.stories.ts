@@ -106,7 +106,18 @@ function toResponse(finding: StoryFinding) {
 }
 
 /** レビュー系 API をインメモリの配列で応答する fetch モック */
-function mockFetch(overrides: { empty?: boolean } = {}) {
+/** 一覧のページ送り用に足す PR（#412 の後に並ぶ 11 件）。作成者は交互に変える */
+const morePullRequests = Array.from({ length: 11 }, (_, i) => ({
+  pr_number: 400 - i,
+  rounds: 1,
+  pr_title: `fix: 一覧の細かな修正 ${i + 1}`,
+  pr_author: i % 2 === 0 ? 'shadcn' : 'rei.tanaka',
+  unresolved: 0,
+  blocking: 0,
+  last_reviewed_at: '2026-08-20T10:00:00Z',
+}));
+
+function mockFetch(overrides: { empty?: boolean; manyPrs?: boolean; github?: boolean } = {}) {
   return () => {
     const original = globalThis.fetch;
     let findings = overrides.empty ? [] : sampleFindings.map((f) => ({ ...f }));
@@ -135,7 +146,21 @@ function mockFetch(overrides: { empty?: boolean } = {}) {
             blocking: blocking(),
             last_reviewed_at: '2026-08-25T10:12:00Z',
           },
+          ...(overrides.manyPrs ? morePullRequests : []),
         ]);
+      }
+      if (method === 'GET' && pathname.endsWith('/v1/auth/oauth/connections')) {
+        return jsonResponse({
+          connections: overrides.github
+            ? [
+                {
+                  provider: 'github',
+                  provider_login: 'shadcn',
+                  connected_at: '2026-08-01T00:00:00Z',
+                },
+              ]
+            : [],
+        });
       }
       if (method === 'GET' && pathname.endsWith('/reviews/summary')) {
         return jsonResponse({
@@ -234,6 +259,8 @@ const meta = {
       severity: null,
       state: null,
       finding: null,
+      mine: false,
+      page: null,
     },
   },
   parameters: {
@@ -273,6 +300,23 @@ export const Empty: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByText('レビューはまだありません。')).resolves.toBeInTheDocument();
+  },
+};
+
+export const PullRequestRail: Story = {
+  name: 'PR 一覧（自分の PR だけ・ページ送り）',
+  beforeEach: mockFetch({ manyPrs: true, github: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const pager = await canvas.findByTestId('pr-pager');
+    await expect(pager).toHaveTextContent('全 12 件 · 1 / 2 ページ');
+    // 連携一覧は PR 一覧より後に届くので、待ってから見る
+    await expect(canvas.findByText('GitHub @shadcn で判定 · 7 件')).resolves.toBeInTheDocument();
+
+    // 自分の PR（#412 と作成者 shadcn の 6 件）だけにすると 1 ページに収まる
+    await userEvent.click(canvas.getByRole('switch', { name: /自分が作成した PR だけ/ }));
+    await waitFor(() => expect(canvas.queryByTestId('pr-pager')).not.toBeInTheDocument());
+    await expect(canvas.queryByText('fix: 一覧の細かな修正 2')).not.toBeInTheDocument();
   },
 };
 

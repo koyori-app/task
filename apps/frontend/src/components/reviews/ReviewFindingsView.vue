@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { useQueryClient } from '@tanstack/vue-query';
-import { PhCheckCircle, PhPlus, PhWarningCircle } from '@phosphor-icons/vue';
+import {
+  PhCaretLeft,
+  PhCaretRight,
+  PhCheckCircle,
+  PhPlus,
+  PhWarningCircle,
+} from '@phosphor-icons/vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,6 +27,7 @@ import {
   useReviewFindingsQuery,
   useReviewRoundsQuery,
   useReviewSummaryQuery,
+  useOAuthConnectionsQuery,
   useReviewedPullRequestsQuery,
   useUpdateFindingStateMutation,
 } from '@/lib/api-vue-query';
@@ -46,6 +53,15 @@ import {
   relativeReviewFindingHref,
   type ReviewFindingsUrlState,
 } from '@/lib/review-findings-url-state';
+import {
+  PR_PAGE_SIZE,
+  filterPullRequests,
+  hasGithubConnection,
+  isMyPullRequest,
+  pageCount,
+  pageOfPullRequest,
+  viewerGithubLogin,
+} from '@/lib/review-pr-rail';
 
 const props = defineProps<{
   tenantId: string;
@@ -73,6 +89,9 @@ const roundFilter = ref<number | null>(initialUrlState.round);
 const severityFilter = ref<FindingSeverity | null>(initialUrlState.severity);
 const stateFilter = ref<FindingState | null>(initialUrlState.state);
 const focusedFindingId = ref<string | null>(initialUrlState.finding);
+const mineOnly = ref(initialUrlState.mine);
+/** null は「表示中の PR が載っているページ」（URL に page が無いとき）。 */
+const prPage = ref<number | null>(initialUrlState.page);
 const urlWarnings = ref([...(props.initialUrlWarnings ?? [])]);
 const isComposerOpen = ref(false);
 const transitionError = ref<string | null>(null);
@@ -84,13 +103,95 @@ const summaryQuery = useReviewSummaryQuery(props.tenantId, props.projectId, sele
 const updateState = useUpdateFindingStateMutation();
 
 const pullRequests = computed(() => prsQuery.data.value ?? []);
-/** PR 一覧の番号絞り（部分一致）。選択中 PR とは別——サイドバーの見える行だけを絞る。 */
-const prNumberFilter = ref('');
-const filteredPullRequests = computed(() => {
-  const query = prNumberFilter.value.trim();
-  if (query === '') return pullRequests.value;
-  return pullRequests.value.filter((pr) => String(pr.pr_number).includes(query));
+
+// --- PR 一覧（検索・自分の PR・ページ） ---
+//
+// API は PR 単位で全件を集計して返すので、絞り込みとページ分割は画面側で行う
+// （サーバーで切っても集計の仕事は減らない）。
+// ponytail: 全件を一度に受ける。PR が数千件になって一覧の転送が重くなったら API にページングを足す
+
+const connectionsQuery = useOAuthConnectionsQuery();
+/** 連携一覧が取れなければ未連携と同じ扱い（スイッチを無効にする）。 */
+const githubLogin = computed(() =>
+  viewerGithubLogin(connectionsQuery.data.value?.connections ?? []),
+);
+/** 連携はあるのにユーザー名が分からない（再連携で直る）。 */
+const githubNeedsRelink = computed(
+  () =>
+    githubLogin.value === null &&
+    hasGithubConnection(connectionsQuery.data.value?.connections ?? []),
+);
+/** 選択中 PR とは別——サイドバーの見える行だけを絞る。 */
+const prQuery = ref('');
+// PR 一覧は連携一覧を待たずに出す（連携一覧は外部への問い合わせで遅れることがある）。
+// 連携一覧が要るのは「自分の PR」の判定だけで、その間スイッチは使えない
+const railReady = computed(() => prsQuery.isSuccess.value);
+const connectionsFailed = computed(() => connectionsQuery.isError.value);
+const railList = computed(() =>
+  filterPullRequests(pullRequests.value, prQuery.value, mineOnly.value ? githubLogin.value : null),
+);
+/**
+ * 実際に作成者で絞っているか。連携一覧の待機中・取得失敗の間は `mineOnly`（URL の mine=1）が
+ * 立っていても絞れていないので、「自分が作成した PR は〜」の文言や解除ボタンはこちらで出し分ける。
+ */
+const mineApplied = computed(() => mineOnly.value && githubLogin.value !== null);
+const myPullRequestCount = computed(
+  () => pullRequests.value.filter((pr) => isMyPullRequest(pr, githubLogin.value)).length,
+);
+const pageTotal = computed(() => pageCount(railList.value.length));
+const currentPage = computed(() =>
+  Math.min(
+    Math.max(1, prPage.value ?? pageOfPullRequest(railList.value, selectedPr.value) ?? 1),
+    pageTotal.value,
+  ),
+);
+const pageStart = computed(() => (currentPage.value - 1) * PR_PAGE_SIZE);
+const pageItems = computed(() =>
+  railList.value.slice(pageStart.value, pageStart.value + PR_PAGE_SIZE),
+);
+/** 表示中の PR が、いまの絞り込み・ページで見えない理由。 */
+const railNote = computed<{ kind: 'hidden' } | { kind: 'elsewhere'; page: number } | null>(() => {
+  if (selectedPr.value === null || selectedPrMissing.value) return null;
+  const page = pageOfPullRequest(railList.value, selectedPr.value);
+  if (page === null) return { kind: 'hidden' };
+  return page === currentPage.value ? null : { kind: 'elsewhere', page };
 });
+
+/**
+ * URL から来た `mine` と `page` は、一覧と連携の状態が揃ってから確かめる
+ * （未連携の `mine=1` と範囲外の `page` は、無視・最後のページに寄せて理由を出す）。
+ */
+const urlRailCheckReady = computed(() => railReady.value && !connectionsQuery.isPending.value);
+let urlRailCheckPending = true;
+function checkUrlRailState() {
+  if (!urlRailCheckPending || !urlRailCheckReady.value) return;
+  urlRailCheckPending = false;
+  let changed = false;
+  if (mineOnly.value && githubLogin.value === null && connectionsFailed.value) {
+    // 連携していないとは限らない（一時的な失敗）。共有された mine=1 は URL に残し、
+    // 開き直せば効くようにする
+    urlWarnings.value.push(
+      '連携状態を取得できなかったため、URL の「自分の PR だけ」を適用できませんでした。',
+    );
+  } else if (mineOnly.value && githubLogin.value === null) {
+    urlWarnings.value.push(
+      githubNeedsRelink.value
+        ? 'GitHub のユーザー名を確認できないため、URL の「自分の PR だけ」は無視しました。'
+        : 'GitHub と連携していないため、URL の「自分の PR だけ」は無視しました。',
+    );
+    mineOnly.value = false;
+    changed = true;
+  }
+  if (prPage.value !== null && prPage.value > pageTotal.value) {
+    urlWarnings.value.push(
+      `URL のページ ${prPage.value} はありません（全 ${pageTotal.value} ページ）。最後のページを表示しています。`,
+    );
+    prPage.value = pageTotal.value;
+    changed = true;
+  }
+  if (changed) writeUrl('replace');
+}
+watch(urlRailCheckReady, checkUrlRailState, { immediate: true });
 const rounds = computed(() => roundsQuery.data.value ?? []);
 
 function currentUrlState(): ReviewFindingsUrlState {
@@ -100,6 +201,8 @@ function currentUrlState(): ReviewFindingsUrlState {
     severity: severityFilter.value,
     state: stateFilter.value,
     finding: focusedFindingId.value,
+    mine: mineOnly.value,
+    page: prPage.value,
   };
 }
 
@@ -116,7 +219,12 @@ function applyUrlState(state: ReviewFindingsUrlState, warnings: readonly string[
   severityFilter.value = state.severity;
   stateFilter.value = state.state;
   focusedFindingId.value = state.finding;
+  mineOnly.value = state.mine;
+  prPage.value = state.page;
+  prQuery.value = '';
   urlWarnings.value = [...warnings];
+  urlRailCheckPending = true;
+  checkUrlRailState();
   isComposerOpen.value = false;
   transitionError.value = null;
 }
@@ -243,6 +351,8 @@ function setStateFilter(value: unknown) {
 }
 
 function selectPr(pr: number) {
+  // 選んだ PR が載っているページを URL に残す（page が無いと、戻ったときにその PR のページへ飛ぶ）
+  prPage.value = currentPage.value;
   selectedPr.value = pr;
   resetFilters();
   focusedFindingId.value = null;
@@ -250,6 +360,24 @@ function selectPr(pr: number) {
   transitionError.value = null;
   clearUrlWarnings();
   writeUrl('push');
+}
+
+function onPrQueryInput() {
+  prPage.value = 1;
+  writeUrl('replace');
+}
+
+function setMineOnly(value: boolean) {
+  mineOnly.value = value;
+  prPage.value = 1;
+  clearUrlWarnings();
+  writeUrl('replace');
+}
+
+function goToPage(page: number) {
+  prPage.value = Math.min(Math.max(1, page), pageTotal.value);
+  clearUrlWarnings();
+  writeUrl('replace');
 }
 
 function findingHref(id: string): string {
@@ -382,66 +510,184 @@ async function onRoundCreated() {
           class="flex w-full shrink-0 flex-col gap-1 md:w-[280px]"
           aria-label="レビューのある PR"
         >
-          <div v-if="pullRequests.length > 0" class="mb-2">
-            <label for="filter-pr-number" class="mb-1.5 block text-xs font-medium">PR 番号</label>
-            <Input
-              id="filter-pr-number"
-              v-model="prNumberFilter"
-              inputmode="numeric"
-              autocomplete="off"
-              placeholder="部分一致"
-              class="font-mono text-sm"
-              data-testid="filter-pr-number"
-            />
-          </div>
+          <h2 class="text-sm font-semibold">レビューのある PR</h2>
+          <template v-if="pullRequests.length > 0">
+            <div>
+              <label for="filter-pr" class="mb-1.5 block text-xs font-medium">
+                番号・タイトルで探す
+              </label>
+              <Input
+                id="filter-pr"
+                v-model="prQuery"
+                type="search"
+                autocomplete="off"
+                placeholder="例: 231、共有リンク"
+                class="text-sm"
+                data-testid="filter-pr"
+                @update:model-value="onPrQueryInput"
+              />
+            </div>
+            <!-- PR の作成者は GitHub のユーザー名なので、連携が無いと見分けられない -->
+            <label
+              class="mb-1 flex items-start gap-2.5 rounded-md border p-2.5"
+              :class="githubLogin ? 'cursor-pointer' : 'opacity-60'"
+            >
+              <input
+                type="checkbox"
+                role="switch"
+                class="accent-primary mt-0.5 size-4 shrink-0"
+                :checked="mineApplied"
+                :disabled="githubLogin === null"
+                aria-describedby="mine-only-help"
+                data-testid="mine-only"
+                @change="setMineOnly(($event.target as HTMLInputElement).checked)"
+              />
+              <span class="flex min-w-0 flex-col">
+                <span class="text-sm font-medium">自分が作成した PR だけ</span>
+                <span id="mine-only-help" class="text-muted-foreground text-xs">
+                  <template v-if="githubLogin">
+                    GitHub @{{ githubLogin }} で判定 · {{ myPullRequestCount }} 件
+                  </template>
+                  <template v-else-if="connectionsQuery.isPending.value">
+                    連携状態を確認しています…
+                  </template>
+                  <template v-else-if="connectionsFailed">
+                    連携状態を取得できなかったため使えません。時間をおいて開き直してください。
+                  </template>
+                  <template v-else-if="githubNeedsRelink">
+                    GitHub のユーザー名を確認できませんでした。アカウント設定で GitHub
+                    を連携し直すと使えます。
+                  </template>
+                  <template v-else>
+                    GitHub と連携すると使えます。PR の作成者を GitHub
+                    のユーザー名で判定するためです。
+                  </template>
+                </span>
+              </span>
+            </label>
+          </template>
+
           <p v-if="pullRequests.length === 0" class="text-muted-foreground text-sm">
             レビューはまだありません。
           </p>
-          <p
-            v-else-if="prNumberFilter.trim() !== '' && filteredPullRequests.length === 0"
-            class="text-muted-foreground text-sm"
+          <p v-else-if="!railReady" class="text-muted-foreground text-sm">読み込み中…</p>
+          <div
+            v-else-if="railList.length === 0"
+            class="text-muted-foreground flex flex-col items-start gap-2 text-sm"
             data-testid="no-pr-match"
           >
-            該当する PR がありません。
-          </p>
-          <button
-            v-for="pr in filteredPullRequests"
-            :key="pr.pr_number"
-            type="button"
-            class="flex flex-col gap-1 rounded-md border px-3 py-2 text-left text-sm"
-            :class="
-              pr.pr_number === selectedPr
-                ? 'bg-accent border-accent-foreground/20'
-                : 'hover:bg-accent/50'
-            "
-            :aria-current="pr.pr_number === selectedPr ? 'true' : undefined"
-            @click="selectPr(pr.pr_number)"
-          >
-            <span class="flex items-center gap-2">
-              <span class="font-mono text-xs">#{{ pr.pr_number }}</span>
-              <!--
-                バッジは件数の事実だけを出す。可否の断定はしない——可否には鮮度と
-                連携の有無も要り（mergeVerdict の片道降格）、この一覧はその材料を
-                持たない。「マージ可」を出すと、右の判定パネルが「リポジトリ未確定」
-                等と言う横で一覧だけ緑になる
-              -->
-              <span
-                class="rounded-full px-2 py-0.5 text-xs"
-                :class="
-                  pr.blocking === 0
-                    ? 'bg-green-600/10 text-green-700 dark:text-green-400'
-                    : 'bg-destructive/10 text-destructive'
-                "
-              >
-                {{ pr.blocking === 0 ? '未解決なし' : `${pr.blocking} 件が未解決` }}
+            <p v-if="mineApplied && prQuery.trim() === ''">
+              あなた（GitHub @{{ githubLogin }}）が作成した PR
+              で、レビューのあるものはまだありません。
+            </p>
+            <p v-else>
+              「{{ prQuery.trim() }}」に一致する{{ mineApplied ? '、自分が作成した' : '' }} PR
+              はありません。
+            </p>
+            <Button v-if="mineApplied" variant="outline" size="sm" @click="setMineOnly(false)">
+              {{ prQuery.trim() === '' ? 'すべての PR を表示' : 'すべての PR から探す' }}
+            </Button>
+          </div>
+
+          <template v-else>
+            <p
+              v-if="railNote"
+              role="status"
+              class="text-muted-foreground text-xs"
+              data-testid="pr-rail-note"
+            >
+              <template v-if="railNote.kind === 'hidden'">
+                表示中の #{{ selectedPr }} はこの絞り込みでは一覧に出ていません。
+              </template>
+              <template v-else>
+                表示中の #{{ selectedPr }} は {{ railNote.page }} ページ目にあります。
+                <button
+                  type="button"
+                  class="text-foreground underline underline-offset-2"
+                  @click="goToPage(railNote.page)"
+                >
+                  そのページへ
+                </button>
+              </template>
+            </p>
+            <button
+              v-for="pr in pageItems"
+              :key="pr.pr_number"
+              type="button"
+              class="flex flex-col gap-1 rounded-md border px-3 py-2 text-left text-sm"
+              :class="
+                pr.pr_number === selectedPr
+                  ? 'bg-accent border-accent-foreground/20'
+                  : 'hover:bg-accent/50'
+              "
+              :aria-current="pr.pr_number === selectedPr ? 'true' : undefined"
+              @click="selectPr(pr.pr_number)"
+            >
+              <span class="flex items-center gap-2">
+                <span class="font-mono text-xs">#{{ pr.pr_number }}</span>
+                <!--
+                  バッジは件数の事実だけを出す。可否の断定はしない——可否には鮮度と
+                  連携の有無も要り（mergeVerdict の片道降格）、この一覧はその材料を
+                  持たない。「マージ可」を出すと、右の判定パネルが「リポジトリ未確定」
+                  等と言う横で一覧だけ緑になる
+                -->
+                <span
+                  class="rounded-full px-2 py-0.5 text-xs"
+                  :class="
+                    pr.blocking === 0
+                      ? 'bg-green-600/10 text-green-700 dark:text-green-400'
+                      : 'bg-destructive/10 text-destructive'
+                  "
+                >
+                  {{ pr.blocking === 0 ? '未解決なし' : `${pr.blocking} 件が未解決` }}
+                </span>
               </span>
-            </span>
-            <span class="truncate font-medium">{{ pr.pr_title ?? `PR #${pr.pr_number}` }}</span>
-            <span class="text-muted-foreground text-xs">
-              <template v-if="pr.pr_author">{{ pr.pr_author }} · </template>R{{ pr.rounds }} ·
-              未解決 {{ pr.unresolved }}
-            </span>
-          </button>
+              <span class="line-clamp-2 font-medium">{{
+                pr.pr_title ?? `PR #${pr.pr_number}`
+              }}</span>
+              <span class="text-muted-foreground truncate text-xs">
+                <template v-if="pr.pr_author">{{ pr.pr_author }} · </template>R{{ pr.rounds }} ·
+                未解決 {{ pr.unresolved }}
+              </span>
+            </button>
+
+            <div
+              v-if="pageTotal > 1"
+              role="navigation"
+              aria-label="PR 一覧のページ"
+              class="mt-1 flex items-center gap-1"
+              data-testid="pr-pager"
+            >
+              <Button
+                variant="ghost"
+                size="sm"
+                :disabled="currentPage <= 1"
+                data-testid="pr-pager-prev"
+                @click="goToPage(currentPage - 1)"
+              >
+                <PhCaretLeft class="size-3.5" />
+                前へ
+              </Button>
+              <p class="flex flex-1 flex-col text-center text-xs" aria-live="polite">
+                <strong class="font-medium">
+                  {{ pageStart + 1 }}–{{ pageStart + pageItems.length }} 件目
+                </strong>
+                <span class="text-muted-foreground">
+                  全 {{ railList.length }} 件 · {{ currentPage }} / {{ pageTotal }} ページ
+                </span>
+              </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                :disabled="currentPage >= pageTotal"
+                data-testid="pr-pager-next"
+                @click="goToPage(currentPage + 1)"
+              >
+                次へ
+                <PhCaretRight class="size-3.5" />
+              </Button>
+            </div>
+          </template>
         </nav>
 
         <!-- 指摘 -->
