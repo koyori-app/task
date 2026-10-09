@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import TaskDetailPane from '@/components/tasks/TaskDetailPane.vue';
+import {
+  shouldKeepOverlayOnEscape,
+  shouldKeepOverlayOnPointerDownOutside,
+} from '@/components/tasks/overlay-dismiss-guard';
 
 /**
  * List 表示のタスク詳細。分割ビューではなくページに重ねて出す。
@@ -21,12 +25,24 @@ const emit = defineEmits<{
   'update:open': [value: boolean];
   'open-task': [task: import('@/generated/api').components['schemas']['TaskResponse']];
 }>();
+
+// 入力途中・IME 変換中・入れ子の <dialog> の間は閉じない（下書きを器ごと消さない）
+function onEscapeKeyDown(event: KeyboardEvent) {
+  if (shouldKeepOverlayOnEscape(event)) event.preventDefault();
+}
+
+// 1 回目は入力欄の blur だけ起こし、2 回目で閉じる
+function onPointerDownOutside(event: Event) {
+  if (shouldKeepOverlayOnPointerDownOutside(document.activeElement)) event.preventDefault();
+}
 </script>
 
 <template>
   <Dialog :open="open" @update:open="(value) => emit('update:open', value)">
     <DialogContent
       class="flex h-[calc(100vh-3rem)] max-w-[70rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[70rem]"
+      @escape-key-down="onEscapeKeyDown"
+      @pointer-down-outside="onPointerDownOutside"
     >
       <!-- Dialog はアクセシブルな名前を要求する。見出しは詳細側が出すので視覚的には隠す -->
       <DialogTitle class="sr-only">タスクの詳細</DialogTitle>
