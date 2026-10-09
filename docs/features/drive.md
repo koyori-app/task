@@ -412,7 +412,7 @@ pub trait StorageBackend: Send + Sync {
 ### 6.2 S3 バックエンド
 
 - クレート: `object_store`（`AmazonS3Builder`）
-- S3 互換エンドポイントに対応（MinIO / Cloudflare R2 / Backblaze B2）
+- S3 互換エンドポイントに対応（MinIO / Cloudflare R2 / Backblaze B2 / Wasabi）
 - バケットは非公開でよい。ファイルはバックエンドからプロキシ配信する
 
 ```env

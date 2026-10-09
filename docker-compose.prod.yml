@@ -102,10 +102,16 @@ services:
       # ログイン後の既定の遷移先（redirect_after を渡さなかったとき）。
       # 既定値は backend が持つので、ここでは他のキーと同じく空を渡す
       OAUTH_DEFAULT_REDIRECT_PATH: ${OAUTH_DEFAULT_REDIRECT_PATH:-}
-      # Drive のアップロード先。オブジェクトストレージに載せ替えるときは
-      # STORAGE_BACKEND=s3 と S3_* を足す（apps/backend/.env.example 参照）
-      STORAGE_BACKEND: local
+      # Drive のアップロード先。S3 互換ストレージ（Wasabi 等）に載せるときは
+      # STORAGE_BACKEND=s3 と S3_* を設定する（例: Wasabi 東京は
+      # S3_ENDPOINT=https://s3.ap-northeast-1.wasabisys.com / S3_REGION=ap-northeast-1）
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       LOCAL_UPLOAD_DIR: /app/uploads
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
     volumes:
       - uploads:/app/uploads
     depends_on:
