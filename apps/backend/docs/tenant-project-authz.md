@@ -241,8 +241,10 @@ Drive にはファイル ID だけで引ける経路がある（`GET /v1/drive/f
 
 ## API と権限
 
-テナント系エンドポイントは PAT に `admin:tenant` スコープを要求する。
-`admin:project`（project 層の wildcard。[personal-access-tokens-authz.md](./personal-access-tokens-authz.md) の層の割り振り表）ではこれらの口は開かない。
+テナント系エンドポイント（テナント一覧・取得・更新・削除、メンバー管理、招待の管理、ドライブ容量の設定）は、
+PAT に読みなら `read:tenant`、変更なら `write:tenant` を要求する（`api` / `read_api` の包含は
+[personal-access-tokens-authz.md](./personal-access-tokens-authz.md) の含意の規則）。
+project 層のスコープ（`read:project` や `write:task` など）ではこれらの口は開かない。
 
 | 操作 | 許可 |
 |---|---|
@@ -253,7 +255,7 @@ Drive にはファイル ID だけで引ける経路がある（`GET /v1/drive/f
 | テナントの更新・削除 | オーナーのみ |
 | メンバー一覧の閲覧 | テナントに入れる人全員（客分は含まない） |
 | メンバーの追加・ロール変更・削除 | オーナー + テナント `Admin` |
-| 招待の発行・一覧・再送・取り消し（`/v1/tenants/{id}/invitations`） | オーナー + テナント `Admin` |
+| 招待の発行・一覧・再送・取り消し（`/v1/tenants/{id}/invitations`） | オーナー + テナント `Admin`。PAT は一覧に `read:tenant`、それ以外に `write:tenant` |
 | 招待の中身を見る（`POST /v1/invitations/preview`） | トークンを持つ人（ログイン不要） |
 | 招待の承諾（`POST /v1/invitations/accept`） | 招待先のアドレスでログインしている本人（セッションのみ） |
 | プロジェクトの作成 | オーナーのみ |

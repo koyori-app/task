@@ -815,8 +815,8 @@ async fn pat_separates_task_and_review_notification_permissions() {
         (vec![Scope::WriteTask], task_ids.clone()),
         (vec![Scope::WriteReview], review_ids.clone()),
         (vec![Scope::ReadTask, Scope::ReadReview], all_ids.clone()),
-        (vec![Scope::AdminProject], all_ids.clone()),
-        (vec![Scope::AdminTenant], all_ids.clone()),
+        (vec![Scope::ReadApi], all_ids.clone()),
+        (vec![Scope::Api], all_ids.clone()),
     ] {
         let token = fx
             .app

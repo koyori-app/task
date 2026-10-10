@@ -170,10 +170,14 @@ function selectFromKeyboard(event: KeyboardEvent) {
 </script>
 
 <template>
-  <div
-    class="group border-b border-border/60 last:border-b-0"
-    :data-state="selected ? 'selected' : undefined"
-  >
+  <div class="group border-b border-border/60" :data-state="selected ? 'selected' : undefined">
+    <!--
+      最後の行の下の線を消すかは、行を並べる側が決める（TaskSubtaskBranch が
+      last:border-b-0 を渡す）。ここに置くと、親の形で :last-child が変わったとき
+      一覧の群の最後の行まで線が消える（DnD の container で包んだときに起きた）。
+      根は単一の要素に保つ。渡された class は根へ付くので、註を根の外へ出して根が
+      複数のノードになると、class がどこへ付くかが Vue の版と build の設定に依る。
+    -->
     <div
       :class="[
         TASK_ROW_GRID,

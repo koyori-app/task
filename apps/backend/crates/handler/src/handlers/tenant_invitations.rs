@@ -32,12 +32,14 @@ use service::tenant_invitations::{
 };
 
 /// 発行・一覧・取り消し・再送に共通する前段。テナントが無ければ 404、管理者でなければ 403。
+/// PAT には一覧なら `read:tenant`、変更なら `write:tenant` を求める。
 async fn require_invitation_admin(
     state: &AppState,
     auth: &AuthUser,
     tenant_id: Uuid,
+    scope: Scope,
 ) -> Result<(), AppError> {
-    auth.require_scope(Scope::AdminTenant)?;
+    auth.require_scope(scope)?;
     auth.ensure_tenant_access(state, tenant_id, None).await?;
     require_tenant_admin(state, tenant_id, auth.user_id).await
 }
@@ -132,7 +134,7 @@ pub async fn list_invitations(
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
 ) -> Result<Json<Vec<TenantInvitationResponse>>, AppError> {
-    require_invitation_admin(&state, &auth, tenant_id).await?;
+    require_invitation_admin(&state, &auth, tenant_id, Scope::ReadTenant).await?;
     let invitations = tenant_invitations::Entity::find()
         .filter(tenant_invitations::Column::TenantId.eq(tenant_id))
         .order_by_desc(tenant_invitations::Column::CreatedAt)
@@ -164,7 +166,7 @@ pub async fn create_invitation(
     Path(tenant_id): Path<Uuid>,
     Valid(Json(payload)): Valid<Json<CreateTenantInvitationRequest>>,
 ) -> Result<(StatusCode, Json<TenantInvitationResponse>), AppError> {
-    require_invitation_admin(&state, &auth, tenant_id).await?;
+    require_invitation_admin(&state, &auth, tenant_id, Scope::WriteTenant).await?;
     let email = normalize_email(&payload.email);
     if is_member_email(&state, tenant_id, &email).await? {
         return Err(AppError::ConflictDetail("already-member".into()));
@@ -220,7 +222,7 @@ pub async fn resend_invitation(
     auth: AuthUser,
     Path((tenant_id, invitation_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<TenantInvitationResponse>, AppError> {
-    require_invitation_admin(&state, &auth, tenant_id).await?;
+    require_invitation_admin(&state, &auth, tenant_id, Scope::WriteTenant).await?;
     let invitation = find_invitation(&state, tenant_id, invitation_id).await?;
     let slot = acquire_send_slot(&state, tenant_id, auth.user_id, &invitation.email).await?;
 
@@ -262,7 +264,7 @@ pub async fn delete_invitation(
     auth: AuthUser,
     Path((tenant_id, invitation_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
-    require_invitation_admin(&state, &auth, tenant_id).await?;
+    require_invitation_admin(&state, &auth, tenant_id, Scope::WriteTenant).await?;
     let deleted = tenant_invitations::Entity::delete_many()
         .filter(tenant_invitations::Column::Id.eq(invitation_id))
         .filter(tenant_invitations::Column::TenantId.eq(tenant_id))

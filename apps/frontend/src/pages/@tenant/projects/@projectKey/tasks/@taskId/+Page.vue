@@ -5,6 +5,7 @@ import { useData } from 'vike-vue/useData';
 import { usePageContext } from 'vike-vue/usePageContext';
 
 import TaskActivityFeed from '@/components/tasks/TaskActivityFeed.vue';
+import TaskAttachments from '@/components/tasks/TaskAttachments.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
@@ -229,6 +230,7 @@ function openRelatedTask(task: TaskResponse) {
     @delete-request="openDeleteDialog"
   >
     <template v-if="displayTask" #main>
+      <TaskAttachments :tenant-id="tenantId" :project-id="projectId" :task-id="taskId" />
       <TaskSubtaskPanel
         :tenant-id="tenantId"
         :project-id="projectId"

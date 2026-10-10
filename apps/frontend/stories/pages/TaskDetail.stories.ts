@@ -208,6 +208,15 @@ type MockOptions = {
   rejectCommentsList?: boolean;
   /** コメント投稿 POST を { message } 付きで拒否する */
   rejectCommentPost?: { status: number; message: string };
+  attachments?: {
+    id: string;
+    drive_file_id: string;
+    name: string;
+    mime_type: string;
+    size: number;
+    url: string;
+    created_at: string;
+  }[];
 };
 
 function applyPutBody(
@@ -293,6 +302,9 @@ function createMockFetch(overrides: MockOptions = {}) {
         blocks: [],
         blocked_by: [],
       });
+    }
+    if (method === 'GET' && url.includes('/attachments')) {
+      return jsonResponse({ attachments: overrides.attachments ?? [] });
     }
     // /tasks/{id}/comments は /tasks/ の分岐より先に受ける
     if (url.includes('/comments')) {
@@ -478,6 +490,37 @@ export const Default: Story = {
     await user.type(input, 'リダイレクト検証{Enter}');
     // 入力欄が空になるのは POST（モック）の完了後。即時に見ると先に走って落ちる
     await waitFor(() => expect(input).toHaveValue(''));
+  },
+};
+
+export const WithAttachments: Story = {
+  name: '添付ファイルあり',
+  beforeEach: () =>
+    createMockFetch({
+      attachments: [
+        {
+          id: 'attachment-1',
+          drive_file_id: 'file-1',
+          name: '仕様書.pdf',
+          mime_type: 'application/pdf',
+          size: 131072,
+          url: '/v1/drive/files/file-1/content',
+          created_at: '2026-10-01T00:00:00Z',
+        },
+        {
+          id: 'attachment-2',
+          drive_file_id: 'file-2',
+          name: '画面案.png',
+          mime_type: 'image/png',
+          size: 46080,
+          url: '/v1/drive/files/file-2/content',
+          created_at: '2026-10-01T00:00:00Z',
+        },
+      ],
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('仕様書.pdf')).resolves.toBeInTheDocument();
   },
 };
 

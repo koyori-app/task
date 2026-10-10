@@ -15,6 +15,7 @@ mod m20260922020000_webhooks;
 mod m20260924000000_notifications_cursor_index;
 mod m20260924010000_device_tokens;
 mod m20261002000000_tenant_invitations;
+mod m20261004000000_pat_scopes_api;
 
 pub struct Migrator;
 
@@ -37,6 +38,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260924000000_notifications_cursor_index::Migration),
             Box::new(m20260924010000_device_tokens::Migration),
             Box::new(m20261002000000_tenant_invitations::Migration),
+            Box::new(m20261004000000_pat_scopes_api::Migration),
         ]
     }
 }
