@@ -8023,7 +8023,6 @@ dependencies = [
  "sea-query",
  "serde",
  "serde_core",
- "sha2 0.10.9",
  "sha2 0.11.0",
  "slab",
  "smallvec",
