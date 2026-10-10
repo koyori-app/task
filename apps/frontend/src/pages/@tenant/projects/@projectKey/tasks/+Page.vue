@@ -66,6 +66,7 @@ import {
   useTaskLabelFilter,
   watchAvailableTaskLabels,
 } from './task-list-label-filter';
+import { popOverlayParent, pushOverlayParent } from './task-list-overlay-stack';
 import { shouldActivateRow, shouldOpenRowInNewTab } from './task-list-row-activate';
 import {
   parseTaskListUrlState,
@@ -134,6 +135,9 @@ const {
 // selectedTaskId は URL/詳細ページと同形の seq key（例: "ENG-42"）を保持する。
 // これにより詳細クエリのキャッシュがフルページ詳細（@taskId）と共有される。
 const selectedTaskId = ref<string | null>(null);
+// オーバーレイの中で子タスクへ移ったときの戻り先（task-list-overlay-stack）。
+// 一覧の行・タスク作成・プロジェクト切替のように外から選択が変わったら捨てる。
+const overlayParentStack = ref<string[]>([]);
 
 // 広い画面でのみ inline 分割を出す。狭い画面は従来どおり詳細ページへ遷移させる。
 const canInline = useMediaQuery('(min-width: 1024px)');
@@ -154,6 +158,7 @@ if (!import.meta.env.SSR) {
 
 // プロジェクト切替時は選択を解除する（別プロジェクトのタスクを指したままにしない）。
 watch(projectKey, () => {
+  overlayParentStack.value = [];
   selectedTaskId.value = null;
 });
 
@@ -171,6 +176,7 @@ function onSelectRow(seqId: number) {
     void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, seqId));
     return;
   }
+  overlayParentStack.value = [];
   selectedTaskId.value = taskSeqKey(projectKey.value, seqId);
 }
 
@@ -488,6 +494,27 @@ onUnmounted(() => {
 function openOverlay(task: TaskResponse) {
   onSelectRow(task.seq_id);
 }
+
+/** オーバーレイの中から別タスクを開く。戻れるように今のタスクを積む */
+function openTaskFromOverlay(task: TaskResponse) {
+  const next = taskSeqKey(projectKey.value, task.seq_id);
+  overlayParentStack.value = pushOverlayParent(
+    overlayParentStack.value,
+    selectedTaskId.value,
+    next,
+  );
+  // オーバーレイが出ている = canInline なので、onSelectRow の詳細ページ送りは要らない
+  selectedTaskId.value = next;
+}
+
+/** Esc・外側クリック・× で閉じる。子から開いていたら親へ 1 段戻る */
+function onOverlayOpenChange(open: boolean) {
+  if (open) return;
+  const { stack, next } = popOverlayParent(overlayParentStack.value);
+  overlayParentStack.value = stack;
+  selectedTaskId.value = next;
+}
+
 watchAvailableTaskLabels(selectedLabelId, fetchedProjectLabels);
 const selectedLabelName = computed(
   () => projectLabels.value.find((label) => label.id === selectedLabelId.value)?.name ?? null,
@@ -609,6 +636,7 @@ function onTaskCreated(task: CreatedTask) {
   isCreateDialogOpen.value = false;
   // 分割ビューが出せる画面では作成タスクを右ペインで開く。狭い画面は詳細ページへ遷移。
   if (canInline.value) {
+    overlayParentStack.value = [];
     selectedTaskId.value = taskSeqKey(projectKey.value, task.seq_id);
     return;
   }
@@ -1260,12 +1288,8 @@ const table = useTable({
       :tenant-display-id="tenantDisplayId"
       :project-key="projectKey"
       :task-id="overlayRenderedTaskSeqKey"
-      @open-task="openOverlay"
-      @update:open="
-        (value) => {
-          if (!value) selectedTaskId = null;
-        }
-      "
+      @open-task="openTaskFromOverlay"
+      @update:open="onOverlayOpenChange"
     />
   </div>
 </template>
