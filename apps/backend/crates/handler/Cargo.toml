@@ -37,7 +37,7 @@ tower-http = { version = "0.7", features = ["cors", "limit", "set-header"] }
 tracing = { workspace = true }
 urlencoding = "2.1"
 utoipa = { workspace = true }
-utoipa-axum = "0.2.0"
+utoipa-axum = "0.3.0"
 uuid = { version = "1", features = ["serde"] }
 validator = { workspace = true }
 webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation", "danger-credential-internals", "conditional-ui"] }
