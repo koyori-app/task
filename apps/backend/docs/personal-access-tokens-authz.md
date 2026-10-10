@@ -65,15 +65,18 @@ Admin の立場に触れておくなら、Admin は既にメンバー管理で�
 ### Layer 1: 操作スコープ
 
 「何ができるか」を `personal_tokens.scopes`（`ScopeList`）で表現する。
+GitLab の PAT と同じく、全部を任せる `api` / 読むだけの `read_api` と、資源ごとの
+`read:<資源>` / `write:<資源>` を並べる。
 
 | スコープ | 意味 |
 |---------|------|
+| `api` | すべての `read:*` / `write:*`（と `read_api`）を満たす |
+| `read_api` | すべての `read:*` を満たす。`write:*` は満たさない |
+| `read:tenant` | テナントとメンバーの参照（テナント一覧・取得、メンバー一覧、明示 ACE の一覧） |
+| `write:tenant` | テナントの更新・削除、メンバーの追加・変更・削除、ドライブ容量の設定（`read:tenant` を含む） |
 | `read:project` | プロジェクトの参照 |
-| `write:project` | プロジェクトの更新（`read:project` を含む） |
-| `admin:project` | project 層の全スコープ（下表参照）を包含する wildcard。tenant 層は満たさない |
-| `admin:tenant` | 当該 PAT の `tenant_id` で行える操作すべて（層に依らない最上位の wildcard） |
-
-`admin:tenant` を持つトークンはすべての `require_scope` チェックを通過する（`ScopeList::has_scope` 参照）。
+| `write:project` | プロジェクトの更新と Webhook の管理（`read:project` を含む） |
+| `read:<資源>` / `write:<資源>` | task / milestone / sprint / review / drive の参照・変更 |
 
 #### 含意の規則
 
@@ -82,50 +85,34 @@ Admin の立場に触れておくなら、Admin は既にメンバー管理で�
 
 | 持っているスコープ | 満たせる要求 |
 |---|---|
-| `admin:tenant` | すべて（層に依らない） |
-| `admin:project` | project 層のスコープすべて |
-| `write:<資源>` | 同じ資源の `read:<資源>`（project を含む 6 対すべて） |
+| `api` | すべて |
+| `read_api` | 動詞が read のスコープすべて（`Scope::verb`） |
+| `write:<資源>` | 同じ資源の `read:<資源>`（tenant と project を含む 7 対すべて） |
 | `read:<資源>` | 自分自身だけ |
 
-catch-all を置かないので、スコープを増やすと含意の規則を決めるまでコンパイルが通らない。
+各スコープの動詞（read / write / wildcard）は `Scope::verb` に網羅 match で置く。
+catch-all を置かないので、スコープを増やすと動詞と含意の規則を決めるまでコンパイルが通らない。
+`api` / `read_api` は動詞を単位に効くので、資源を増やしても既存の鍵が黙って権限を欠くことはない。
 
-#### スコープの層
+スコープ文字列にテナント ID を埋め込まない（例: `read:tenant:uuid` は採用しない）。
+`/me` 等アカウント API はセッション専用のため `read:user` / `write:user` は存在しない。
 
-`admin:project` の効き目を限るために、各スコープを層へ割り振る（`Scope::layer`）。
-スコープを増やしたら必ずどちらかへ割り振る。
-
-| 層 | スコープ |
-|----|---------|
-| project 層 | `read:project` / `write:project` / `read:task` / `write:task` / `read:milestone` / `write:milestone` / `read:sprint` / `write:sprint` / `read:review` / `write:review` / `read:drive` / `write:drive` / `admin:project` |
-| tenant 層 | `admin:tenant` |
-
-この表は各スコープの帰属であって、`admin:tenant` の効き目の範囲ではない。層は
-`admin:project` を限る道具であり、`admin:tenant` を限る道具ではない。層を増やしても
-`admin:tenant` は通る。
-
-**決めたこと**: `admin:tenant` ⊃ `admin:project` とする。現行の `admin:tenant` wildcard は
-「要求されたスコープが何であれ通す」意味論であり、`admin:project` の要求もこれに含まれるため、
-包含しない形にすると wildcard の意味論を曲げることになる。逆向き（`admin:project` が
-`admin:tenant` を満たす）は無い。
-
-**決めたこと**: 層と `admin:tenant` の関係は、実装ではなく記述の側を直して揃えた。
-`admin:tenant` を「tenant 層かつ全層を包含」と定義し直す道もあったが、それは
-「層に依らない」と同義であって層が `admin:tenant` を限る道具にならない点は変わらず、
-既に 5 箇所（この文書の上下、drive.md、review-findings.md、PAT 作成 UI の文言）が
-「層に依らない最上位」で揃っている。実装を動かす利は無い。
-
-**決めたこと**: `write:project` は `read:project` を含意する。他の 5 対（task / drive /
-milestone / sprint / review）は当初からそう扱っており、project だけが対を欠いていた。
-`write:project` を発行できる者は `admin:project` も発行でき、そちらは `read:project` を
-満たすため、非対称は防御になっておらず不整合でしかなかった。
-
-`admin:project` とリソース束縛の組み合わせ: `allowed_project_ids` を指定すれば
-「指定プロジェクトの中だけで project 層の全操作ができる」トークンになる（束縛外は従来どおり 403）。
-project-only の客分（#688）が `admin:project` の PAT を使う場合も、通る範囲は所属判定
+`api` とリソース束縛の組み合わせ: `allowed_project_ids` を指定すれば
+「指定プロジェクトの中だけで全操作ができる」トークンになる（束縛外とテナント全体の口は従来どおり 403）。
+project-only の客分（#688）が `api` の PAT を使う場合も、通る範囲は所属判定
 （明示 ACE のあるプロジェクトの中だけ）で決まり、スコープが所属を広げることはない。
 
-スコープ文字列にテナント ID を埋め込まない（例: `read:tenant:uuid` は採用しない）。  
-`/me` 等アカウント API はセッション専用のため `read:user` / `write:user` は存在しない。
+**決めたこと（TASK-199）**: `admin:tenant` と `admin:project` を廃止し、`api` / `read_api` に置き換えた。
+`admin:project`（project 層の wildcard）は `write:project` と違いが分かりにくく、`admin:tenant` は
+全部を通す以外に意味を持たなかった。動詞で切る `api` / `read_api` なら名前から効き目が読める。
+
+- テナント層の口は `admin:tenant` でしか守られていなかったので、`read:tenant` / `write:tenant` を足して
+  他の資源と同じ形にした。`api` はこれも満たす
+- Webhook の管理（作成・更新・削除・配信履歴・再送）は `write:project` + プロジェクト Admin にした。
+  プロジェクトの設定変更であり、`write:project` と分ける理由が無い
+- 既存トークンはマイグレーション（`m20261004000000_pat_scopes_api`、SQL は `sql/migrate_pat_scopes_api.sql`）で移した。
+  `admin:tenant` → `api`（どちらも全部を満たす）。`admin:project` → project 層の `write:*` 6 個
+  （project / drive / task / milestone / sprint / review）。`api` に移すとテナント層まで広がるので、同じ範囲に展開した
 
 ### Layer 2: リソース束縛
 
@@ -199,7 +186,7 @@ auth.require_scope(Scope::ReadProject)?;
 auth.ensure_tenant_access(&state, tenant_id, Some(project_id)).await?;
 
 // テナントオーナー専用操作
-auth.require_scope(Scope::AdminTenant)?;
+auth.require_scope(Scope::WriteTenant)?;
 let tenant = auth.ensure_tenant_owner(&state, tenant_id).await?;
 ```
 
@@ -313,24 +300,24 @@ path から束縛を突き合わせられないぶん、**結果の側をトー�
 `review_round_created` / `review_finding_changed` はレビューのスコープを必要とする。
 その他の既知の通知はタスクのスコープを使い、未知の種別は PAT に公開しない。
 各操作でタスク・レビューのどちらの必要スコープもなければ 403。
-書き込みスコープによる読み取り権限の包含と、管理スコープの包含も適用する。
+書き込みスコープによる読み取り権限の包含と、`api` / `read_api` の包含も適用する。
 `project_id` を持たない古い通知は、どのプロジェクトのものか判別できないのでセッションと
 Device Token にだけ見せる（Device Token はテナントに束縛しないので、視界はセッションと同じ）。
 
 ### `/v1/tenants/{tenant_id}/projects/{project_id}/webhooks`（外部向け Webhook）
 
-読み取りは `read:project`、変更は `admin:project`。変更はスコープに加えて、利用者本人が
+読み取りは `read:project`、変更は `write:project`。変更はスコープに加えて、利用者本人が
 そのプロジェクトの Admin かテナントオーナーであること（`require_project_admin`）が要る。
-PAT に `admin:project` を付けても、発行者が Member なら 403。
+PAT に `write:project` を付けても、発行者が Member なら 403。
 
 | メソッド | パス | 必要スコープ |
 |---------|------|-------------|
 | `GET` | `/webhooks` | `read:project` |
-| `POST` | `/webhooks` | `admin:project` + プロジェクト Admin |
-| `PUT` | `/webhooks/{id}` | `admin:project` + プロジェクト Admin |
-| `DELETE` | `/webhooks/{id}` | `admin:project` + プロジェクト Admin |
-| `GET` | `/webhooks/{id}/deliveries` | `admin:project` + プロジェクト Admin |
-| `POST` | `/webhooks/{id}/deliveries/{did}/redeliver` | `admin:project` + プロジェクト Admin |
+| `POST` | `/webhooks` | `write:project` + プロジェクト Admin |
+| `PUT` | `/webhooks/{id}` | `write:project` + プロジェクト Admin |
+| `DELETE` | `/webhooks/{id}` | `write:project` + プロジェクト Admin |
+| `GET` | `/webhooks/{id}/deliveries` | `write:project` + プロジェクト Admin |
+| `POST` | `/webhooks/{id}/deliveries/{did}/redeliver` | `write:project` + プロジェクト Admin |
 
 ## DB アクセス回数
 
@@ -346,9 +333,10 @@ PAT に `admin:project` を付けても、発行者が Member なら 403。
 
 ## テスト要件
 
-- `ScopeList::has_scope`: `admin:tenant` は全スコープを通過、不足スコープは 403
-- `ScopeList::has_scope`: `admin:project` は project 層の全スコープを通過し、tenant 層（`admin:tenant`）は通過しない（両向きを固定）
+- `ScopeList::has_scope`: `api` は全スコープを通過、不足スコープは 403
+- `ScopeList::has_scope`: `read_api` は read の全スコープを通過し、write は通過しない（両向きを固定）
 - `ScopeList::has_scope`: `write:<資源>` は同じ資源の `read:<資源>` を通過し、逆向きは通過しない。対はスコープ名から導いて全件を回す（写しを置かない）
+- 移行: 旧 `admin:tenant` は `api` に、旧 `admin:project` は project 層の `write:*` になり、テナント層の口を通らない
 - `require_scope`: Session は常に OK、PAT は不足で 403
 - PAT が別テナントの path を叩く → 403
 - `allowed_project_ids` 外の project → 403、`NULL` ならテナント内任意 project → OK

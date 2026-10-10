@@ -82,7 +82,7 @@ pub async fn list_tenants(
     // 客分に開く tenant-wide の口はプロジェクト一覧・My Tasks（己の分に絞る）だけの
     // ため、クライアントは membership の印で開ける口を見分ける
     // （apps/backend/docs/tenant-project-authz.md）。
-    auth.require_scope(Scope::AdminTenant)?;
+    auth.require_scope(Scope::ReadTenant)?;
     let items = match &auth.method {
         AuthMethod::Session | AuthMethod::DeviceToken { .. } => {
             // tenant_id → 自分の role。membership の判定と member_role の欄の両方に使う。
@@ -189,7 +189,7 @@ pub async fn get_tenant(
 ) -> Result<Json<TenantResponse>, AppError> {
     // テナント情報の取得はメンバーにも許す。ここをオーナー専用にすると
     // 一覧に出るのに開けないテナントができてしまう（設定変更・削除は別途オーナー専用）。
-    auth.require_scope(Scope::AdminTenant)?;
+    auth.require_scope(Scope::ReadTenant)?;
     auth.ensure_tenant_access(&state, id, None).await?;
     let tenant = tenants::Entity::find_by_id(id)
         .one(&state.db)
@@ -221,7 +221,7 @@ pub async fn update_tenant(
     // ensure_tenant_access ではなく ensure_tenant_owner を使い、
     // プロジェクトメンバーによる誤操作を防ぐ。
     auth.require_session()?;
-    auth.require_scope(Scope::AdminTenant)?;
+    auth.require_scope(Scope::WriteTenant)?;
     let tenant = auth.ensure_tenant_owner(&state, id).await?;
 
     let mut active: tenants::ActiveModel = tenant.into();
@@ -262,7 +262,7 @@ pub async fn delete_tenant(
     // ensure_tenant_access ではなく ensure_tenant_owner を使い、
     // プロジェクトメンバーによる削除を防ぐ。
     auth.require_session()?;
-    auth.require_scope(Scope::AdminTenant)?;
+    auth.require_scope(Scope::WriteTenant)?;
     auth.ensure_tenant_owner(&state, id).await?;
     tenants::Entity::delete_by_id(id).exec(&state.db).await?;
     Ok(StatusCode::NO_CONTENT)

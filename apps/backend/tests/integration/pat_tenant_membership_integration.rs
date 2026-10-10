@@ -53,7 +53,7 @@ async fn pat_reports_membership_missing_when_owner_drifts() {
     let tenant_id = insert_tenant(&app.state.db, user.id).await;
 
     let token = app
-        .insert_pat(user.id, tenant_id, vec![Scope::AdminTenant], None)
+        .insert_pat(user.id, tenant_id, vec![Scope::Api], None)
         .await;
     let path = format!("/v1/tenants/{tenant_id}");
 

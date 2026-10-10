@@ -23587,6 +23587,10 @@
           },
           "provider_email": {
             "type": ["string", "null"]
+          },
+          "provider_login": {
+            "type": ["string", "null"],
+            "description": "ホスト上のユーザー名（GitHub / GitLab の login。小文字で控えている）。\nレビュー画面が「自分が作成した PR」を PR の作成者と突き合わせて見分けるのに使う"
           }
         }
       },
@@ -24351,12 +24355,14 @@
       "Scope": {
         "type": "string",
         "enum": [
+          "api",
+          "read_api",
+          "read:tenant",
+          "write:tenant",
           "read:project",
           "write:project",
           "read:drive",
           "write:drive",
-          "admin:tenant",
-          "admin:project",
           "read:task",
           "write:task",
           "read:milestone",

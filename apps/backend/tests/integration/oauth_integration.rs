@@ -58,6 +58,21 @@ async fn oauth_start_callback_flow_issues_session() {
         .expect("uuid parse");
     assert_eq!(app.count_connections_for_user(user_id).await, 1);
 
+    // 連携一覧はホスト上のユーザー名を小文字で返す（レビュー画面の「自分の PR」判定に使う）
+    let connections: serde_json::Value = app
+        .client()
+        .get(format!("{}/v1/auth/oauth/connections", app.base_url()))
+        .send()
+        .await
+        .expect("connections request")
+        .json()
+        .await
+        .expect("connections json");
+    assert_eq!(
+        connections["connections"][0]["provider_login"].as_str(),
+        Some(format!("oauth_user_{unique}").to_lowercase().as_str())
+    );
+
     app.cleanup_user(user_id).await;
 }
 
@@ -622,4 +637,72 @@ async fn oauth_callback_requires_2fa_setup_for_every_membership_form() {
         app.cleanup_user(user_id).await;
         app.cleanup_user(owner.id).await;
     }
+}
+
+async fn list_connections(app: &TestApp) -> serde_json::Value {
+    let res = app
+        .client()
+        .get(format!("{}/v1/auth/oauth/connections", app.base_url()))
+        .send()
+        .await
+        .expect("connections request");
+    assert_eq!(res.status(), StatusCode::OK);
+    res.json().await.expect("connections json")
+}
+
+/// ログイン名を控える前からある接続は、連携一覧を開いたときに保存済みのトークンで補完する。
+/// トークンが使えない接続は空のまま返し、一覧そのものは止めない（画面が再連携を案内する）。
+#[tokio::test]
+async fn connections_backfill_provider_login_from_stored_token() {
+    let mut app = TestApp::new().await;
+    let unique = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+    app.set_mock_user(MockGitLabUser {
+        id: (uuid::Uuid::new_v4().as_u128() % 1_000_000_000 + 3_000_000_000) as i64,
+        username: format!("Backfill_{unique}"),
+        email: Some(format!("backfill-{unique}@example.com")),
+    });
+    let user_id = login_via_oauth(&mut app).await;
+    let expected = format!("backfill_{unique}");
+
+    // provider_login を控える前に連携した状態へ戻す
+    let clear_login = |access_token_enc: Option<String>| {
+        let db = app.state.db.clone();
+        async move {
+            let mut update = oauth_connections::Entity::update_many()
+                .col_expr(
+                    oauth_connections::Column::ProviderLogin,
+                    sea_orm::sea_query::Expr::value(Option::<String>::None),
+                )
+                .filter(oauth_connections::Column::UserId.eq(user_id));
+            if let Some(enc) = access_token_enc {
+                update = update.col_expr(
+                    oauth_connections::Column::AccessTokenEnc,
+                    sea_orm::sea_query::Expr::value(Some(enc)),
+                );
+            }
+            update.exec(&db).await.expect("clear provider login");
+        }
+    };
+    clear_login(None).await;
+    assert_eq!(provider_login_of(&app, user_id).await, None);
+
+    let body = list_connections(&app).await;
+    assert_eq!(
+        body["connections"][0]["provider_login"].as_str(),
+        Some(expected.as_str()),
+        "保存済みのトークンで問い合わせて小文字で補完する"
+    );
+    assert_eq!(
+        provider_login_of(&app, user_id).await.as_deref(),
+        Some(expected.as_str()),
+        "補完した名前は接続に控える"
+    );
+
+    // 復号できないトークン（鍵の入れ替えなど）は補完できない。一覧は 200 のまま空で返す
+    clear_login(Some("not-a-valid-ciphertext".into())).await;
+    let body = list_connections(&app).await;
+    assert!(body["connections"][0]["provider_login"].is_null());
+    assert_eq!(provider_login_of(&app, user_id).await, None);
+
+    app.cleanup_user(user_id).await;
 }

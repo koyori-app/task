@@ -108,9 +108,9 @@ pub async fn list_members(
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
 ) -> Result<Json<Vec<TenantMemberResponse>>, AppError> {
-    auth.require_scope(Scope::AdminTenant)?;
+    auth.require_scope(Scope::ReadTenant)?;
     // 追加・変更・削除と違い、一覧の閲覧はテナントに入れる人なら誰でも許す
-    // （PAT はテナント系エンドポイント共通で AdminTenant スコープを要求する）
+    // （PAT は読み取りなので `read:tenant` を要求する）
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
 
     let tenant = tenants::Entity::find_by_id(tenant_id)
@@ -160,7 +160,7 @@ pub async fn add_member(
     Path(tenant_id): Path<Uuid>,
     Valid(Json(payload)): Valid<Json<AddTenantMemberRequest>>,
 ) -> Result<(StatusCode, Json<TenantMemberResponse>), AppError> {
-    auth.require_scope(Scope::AdminTenant)?;
+    auth.require_scope(Scope::WriteTenant)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     require_tenant_admin(&state, tenant_id, auth.user_id).await?;
 
@@ -213,7 +213,7 @@ pub async fn update_member(
     Path((tenant_id, user_id)): Path<(Uuid, Uuid)>,
     Valid(Json(payload)): Valid<Json<UpdateTenantMemberRequest>>,
 ) -> Result<Json<TenantMemberResponse>, AppError> {
-    auth.require_scope(Scope::AdminTenant)?;
+    auth.require_scope(Scope::WriteTenant)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     require_tenant_admin(&state, tenant_id, auth.user_id).await?;
 
@@ -248,7 +248,7 @@ pub async fn remove_member(
     auth: AuthUser,
     Path((tenant_id, user_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
-    auth.require_scope(Scope::AdminTenant)?;
+    auth.require_scope(Scope::WriteTenant)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     require_tenant_admin(&state, tenant_id, auth.user_id).await?;
 
@@ -304,7 +304,7 @@ pub async fn list_explicit_projects(
     auth: AuthUser,
     Path((tenant_id, user_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ExplicitProjectsResponse>, AppError> {
-    auth.require_scope(Scope::AdminTenant)?;
+    auth.require_scope(Scope::ReadTenant)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     // 除名と同じ相手（オーナーとテナント Admin）にだけ見せる。
     // 対象がテナントに居るかは問わない。除名した後に「まだ何が残っているか」を確かめる用途があるため
