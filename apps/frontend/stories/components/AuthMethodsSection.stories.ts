@@ -43,12 +43,23 @@ const selfHostedConnection: Connection = {
 };
 
 const allProviders = [
-  { provider: 'github', connection_provider: 'github', requires_instance_url: false },
-  { provider: 'google', connection_provider: 'google', requires_instance_url: false },
+  {
+    provider: 'github',
+    connection_provider: 'github',
+    requires_instance_url: false,
+    sign_in: true,
+  },
+  {
+    provider: 'google',
+    connection_provider: 'google',
+    requires_instance_url: false,
+    sign_in: true,
+  },
   {
     provider: 'gitlab_selfhosted',
     connection_provider: 'gitlab_selfhosted',
     requires_instance_url: true,
+    sign_in: true,
   },
 ];
 

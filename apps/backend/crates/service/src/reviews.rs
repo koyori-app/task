@@ -1052,6 +1052,8 @@ pub struct SummarySnapshot {
     pub blocking: u64,
     /// 最新ラウンドがレビューした commit
     pub latest_head_sha: Option<String>,
+    /// 最新ラウンドの作成者。マージ可のとき、この人の名義で PR を Approve する
+    pub latest_reviewer_id: Option<Uuid>,
     /// 投稿時に GitHub から読んだ現在の head（取れなければ `None`）
     pub current_head_sha: Option<String>,
     /// オーナー代行で棄却された件数
@@ -1074,6 +1076,15 @@ impl SummarySnapshot {
             _ => None,
         }
     }
+
+    /// 要約コメントに「マージ可」と書き、GitHub で PR を Approve する条件（仕様 §7）。
+    ///
+    /// 集計 API と同じ規則（レビューが 1 件も無い PR を可にしない）に加えて、
+    /// レビュー後にコミットが積まれていないことを確かめる。確かめられないときも可にしない。
+    #[must_use]
+    pub fn merge_ready(&self) -> bool {
+        self.blocking == 0 && self.rounds > 0 && self.head_is_fresh() == Some(true)
+    }
 }
 
 /// PR 単位の状態を 1 レスポンスぶん読み出す。
@@ -1095,8 +1106,8 @@ pub async fn summary_snapshot<C: ConnectionTrait>(
         .order_by_desc(reviews::Column::Round)
         .one(db)
         .await?;
-    let (latest_summary, latest_head_sha) = latest
-        .map(|r| (r.summary, Some(r.head_sha)))
+    let (latest_summary, latest_head_sha, latest_reviewer_id) = latest
+        .map(|r| (r.summary, Some(r.head_sha), Some(r.reviewer_id)))
         .unwrap_or_default();
 
     Ok(SummarySnapshot {
@@ -1105,6 +1116,7 @@ pub async fn summary_snapshot<C: ConnectionTrait>(
         counts,
         blocking,
         latest_head_sha,
+        latest_reviewer_id,
         current_head_sha,
         owner_override_rejections,
         latest_summary,
@@ -1132,10 +1144,7 @@ pub fn render_summary_comment(
     let _ = writeln!(out, "## レビュー指摘");
     let _ = writeln!(out);
 
-    // 集計 API と同じ規則（レビューが 1 件も無い PR を「可」にしない）に加えて、
-    // レビュー後にコミットが積まれていないことを確かめる。確かめられないときも
-    // 可を出さない（仕様 §7）
-    if snapshot.blocking == 0 && snapshot.rounds > 0 && snapshot.head_is_fresh() == Some(true) {
+    if snapshot.merge_ready() {
         let _ = writeln!(out, "**マージ可** — High / Medium の未解決はありません。");
     } else if snapshot.blocking == 0 && snapshot.rounds > 0 {
         let _ = match snapshot.head_is_fresh() {
@@ -1455,6 +1464,7 @@ mod tests {
             blocking,
             // 既定は「レビューした commit = 現在の head」（鮮度は満たしている）
             latest_head_sha: Some(REVIEWED.into()),
+            latest_reviewer_id: Some(Uuid::nil()),
             current_head_sha: Some(REVIEWED.into()),
             owner_override_rejections: 0,
             latest_summary: "総評".into(),

@@ -23608,7 +23608,7 @@
       },
       "OAuthProviderItem": {
         "type": "object",
-        "required": ["provider", "connection_provider", "requires_instance_url"],
+        "required": ["provider", "connection_provider", "requires_instance_url", "sign_in"],
         "properties": {
           "connection_provider": {
             "type": "string",
@@ -23616,11 +23616,15 @@
           },
           "provider": {
             "type": "string",
-            "description": "プロバイダー slug（github | gitlab | gitlab_selfhosted | google | oidc）"
+            "description": "プロバイダー slug（github | gitlab | gitlab_selfhosted | google | oidc | github_app）"
           },
           "requires_instance_url": {
             "type": "boolean",
             "description": "ログイン開始時に self-hosted インスタンス URL の入力が必要か（gitlab_selfhosted のみ true）"
+          },
+          "sign_in": {
+            "type": "boolean",
+            "description": "サインインに使えるか。`false`（github_app）はログイン中の利用者への連携専用で、\nサインイン画面には出さない"
           }
         }
       },

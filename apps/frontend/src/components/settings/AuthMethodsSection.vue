@@ -133,10 +133,22 @@ watch(
 const providers = computed(() => providersQuery.data.value?.providers ?? []);
 const passkeyCount = computed(() => passkeysQuery.data.value?.passkeys?.length ?? 0);
 
+/** 連携専用（サインインに使えない）プロバイダーの連携識別子。ログイン手段には数えない */
+const linkOnlyConnectionProviders = computed(
+  () =>
+    new Set(
+      providers.value
+        .filter((provider) => !provider.sign_in)
+        .map((provider) => provider.connection_provider),
+    ),
+);
+
 const methodCount = computed(() =>
   countAuthMethods({
     hasPassword: props.user.has_password,
-    connectionCount: connections.value.length,
+    connectionCount: connections.value.filter(
+      (connection) => !linkOnlyConnectionProviders.value.has(connection.provider),
+    ).length,
     passkeyCount: passkeyCount.value,
   }),
 );
@@ -151,6 +163,7 @@ const linkedProviders = computed(() =>
     key: connectionKey(connection),
     connection,
     label: connectionProviderLabel(connection.provider),
+    signIn: !linkOnlyConnectionProviders.value.has(connection.provider),
   })),
 );
 
@@ -363,7 +376,7 @@ async function onPasswordSet() {
               {{ item.connection.instance_url }}
             </p>
             <p
-              v-if="methodCount <= 1"
+              v-if="item.signIn && methodCount <= 1"
               class="text-muted-foreground flex items-center gap-1 text-xs"
             >
               <PhInfo class="size-3.5 shrink-0" />
@@ -385,7 +398,12 @@ async function onPasswordSet() {
           <div class="flex flex-wrap items-center gap-3 rounded-md border p-3">
             <p class="min-w-52 flex-1 text-sm">
               <strong class="font-semibold">{{ item.label }}</strong>
-              の連携を解除しますか？ {{ item.label }} でサインインできなくなります。
+              の連携を解除しますか？
+              {{
+                item.signIn
+                  ? `${item.label} でサインインできなくなります。`
+                  : 'レビューが完了した PR を、あなたの名義で Approve しなくなります。'
+              }}
             </p>
             <Button
               type="button"

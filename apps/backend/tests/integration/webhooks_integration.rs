@@ -98,6 +98,7 @@ fn job_state(app: &TestApp) -> job::JobState {
         http_client: app.state.http_client.clone(),
         review_summary_storage: app.state.review_summary_storage.clone(),
         pg_pool: app.state.pg_pool.clone(),
+        oauth_settings: app.state.oauth_settings.clone(),
     }
 }
 
