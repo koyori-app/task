@@ -12,7 +12,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{Duration, Utc};
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::prelude::{DateTimeWithTimeZone, Uuid};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
 use sha2::Sha256;
 
 use crate::notification_email::escape;
@@ -121,22 +121,46 @@ pub async fn inviter_still_admin<C: ConnectionTrait>(
     db: &C,
     invitation: &tenant_invitations::Model,
 ) -> Result<bool, sea_orm::DbErr> {
-    let Some(tenant) = tenants::Entity::find_by_id(invitation.tenant_id)
-        .one(db)
-        .await?
-    else {
+    check_inviter(db, invitation, false).await
+}
+
+/// [`inviter_still_admin`] を、テナント行と招待者のメンバー行を `FOR SHARE` で押さえてから行う。
+/// 承諾のトランザクション内で使う。確かめた直後の降格・除名・オーナーの付け替えは、承諾が
+/// 確定するまで待たされるので、外された直後の招待者の招待で入ることはない。
+pub async fn lock_and_check_inviter<C: ConnectionTrait>(
+    txn: &C,
+    invitation: &tenant_invitations::Model,
+) -> Result<bool, sea_orm::DbErr> {
+    check_inviter(txn, invitation, true).await
+}
+
+async fn check_inviter<C: ConnectionTrait>(
+    db: &C,
+    invitation: &tenant_invitations::Model,
+    lock: bool,
+) -> Result<bool, sea_orm::DbErr> {
+    let mut tenant = tenants::Entity::find_by_id(invitation.tenant_id);
+    if lock {
+        tenant = tenant.lock_shared();
+    }
+    let Some(tenant) = tenant.one(db).await? else {
         return Ok(false);
     };
     if tenant.owner_id == invitation.invited_by {
         return Ok(true);
     }
-    Ok(tenant_members::Entity::find()
+    // ロールで絞らずに行を引く。Admin の行だけを押さえると、Member の行は押さえず、
+    // 判定と並んだ昇格・降格の扱いが食い違うため
+    let mut member = tenant_members::Entity::find()
         .filter(tenant_members::Column::TenantId.eq(invitation.tenant_id))
-        .filter(tenant_members::Column::UserId.eq(invitation.invited_by))
-        .filter(tenant_members::Column::Role.eq(TenantRole::Admin))
+        .filter(tenant_members::Column::UserId.eq(invitation.invited_by));
+    if lock {
+        member = member.lock_shared();
+    }
+    Ok(member
         .one(db)
         .await?
-        .is_some())
+        .is_some_and(|member| member.role == TenantRole::Admin))
 }
 
 /// トークンに対応する招待。期限切れも返す（呼び出し側で 410 と 404 を分けるため）。

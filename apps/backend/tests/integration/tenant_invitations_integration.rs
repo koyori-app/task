@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use chrono::{Duration, Utc};
 use entity::{tenant_invitations, users};
 use job::tenant_invitation_email::{TenantInvitationEmailJob, process};
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::{Value, json};
 use service::tenant_invitations::{
     DAILY_SEND_LIMIT, HOURLY_SEND_LIMIT, release_send_slot, send_slot_key, try_acquire_send_slot,
@@ -724,4 +724,63 @@ async fn resending_a_demoted_admins_invitation_makes_it_usable_again() {
         StatusCode::CREATED,
         "再送した人が招待者になるので、届いたリンクで入れる"
     );
+}
+
+/// 承諾での招待者の確かめは権限の行を押さえる。確かめた直後の降格は承諾の確定まで待たされ、
+/// 「Admin と読んだ後に外され、それでも Admin として入る」すり抜けが起きない。
+#[tokio::test]
+async fn accepting_holds_the_inviters_role_until_it_commits() {
+    use sea_orm::{ConnectionTrait, TransactionTrait};
+
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let admin = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let email = unique_email();
+
+    login(&mut app, &owner).await;
+    let added = app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/members", tp.tenant_id),
+            json!({ "user_id": admin.id, "role": "Admin" }),
+        )
+        .await;
+    assert_eq!(added.status(), StatusCode::CREATED);
+    login(&mut app, &admin).await;
+    let invitation_id = invite_ok(&app, tp.tenant_id, &email, "Admin").await;
+    let invitation = tenant_invitations::Entity::find_by_id(invitation_id)
+        .one(&app.state.db)
+        .await
+        .expect("find invitation")
+        .expect("invitation exists");
+
+    // 承諾の側: 招待者を確かめ、まだ確定していない
+    let accepting = app.state.db.begin().await.expect("begin accept");
+    assert!(
+        service::tenant_invitations::lock_and_check_inviter(&accepting, &invitation)
+            .await
+            .expect("check inviter")
+    );
+
+    // 並んだ降格は、承諾が確定するまで書けない
+    let demoting = app.state.db.begin().await.expect("begin demote");
+    demoting
+        .execute_unprepared("SET LOCAL lock_timeout = '300ms'")
+        .await
+        .expect("set lock timeout");
+    let blocked = entity::tenant_members::Entity::update_many()
+        .col_expr(
+            entity::tenant_members::Column::Role,
+            sea_orm::sea_query::Expr::value("Member"),
+        )
+        .filter(entity::tenant_members::Column::TenantId.eq(tp.tenant_id))
+        .filter(entity::tenant_members::Column::UserId.eq(admin.id))
+        .exec(&demoting)
+        .await;
+    assert!(blocked.is_err(), "承諾が押さえている間は降格できない");
+    demoting.rollback().await.expect("rollback demote");
+
+    // 承諾が確定すれば降格できる（押さえは確定までに限る）
+    accepting.commit().await.expect("commit accept");
+    set_tenant_role(&app, tp.tenant_id, admin.id, "Member").await;
 }

@@ -27,8 +27,8 @@ use payload::tenant_members::TenantMemberResponse;
 use service::db::is_postgres_unique_violation;
 use service::email::normalize_email;
 use service::tenant_invitations::{
-    find_by_token, inviter_still_admin, is_expired, release_send_slot, try_acquire_send_slot,
-    try_consume_send_quota,
+    find_by_token, inviter_still_admin, is_expired, lock_and_check_inviter, release_send_slot,
+    try_acquire_send_slot, try_consume_send_quota,
 };
 
 /// 発行・一覧・取り消し・再送に共通する前段。テナントが無ければ 404、管理者でなければ 403。
@@ -369,8 +369,9 @@ pub async fn accept_invitation(
     }
 
     let txn = state.db.begin().await?;
-    // 確かめた後に招待者が外されていないか、書き込みと同じトランザクションで見直す
-    if !inviter_still_admin(&txn, &invitation).await? {
+    // 確かめた後に招待者が外されていないか、書き込みと同じトランザクションで見直す。
+    // 権限の行を FOR SHARE で押さえるので、ここから確定までの降格・除名は承諾を待つ
+    if !lock_and_check_inviter(&txn, &invitation).await? {
         return Err(AppError::NotFound);
     }
     // 同じトークンでの承諾が並んだとき、招待を消せた 1 つだけを通す。
