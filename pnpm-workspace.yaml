@@ -17,8 +17,8 @@ allowBuilds:
 catalog:
   '@lezer/highlight': 1.2.5
   remark-breaks: 4.0.0
-  vite: npm:@voidzero-dev/vite-plus-core@0.3.3
-  vite-plus: 0.3.3
+  vite: npm:@voidzero-dev/vite-plus-core@1.1.0
+  vite-plus: 1.1.0
 minimumReleaseAgeExclude:
   - '@koyori-app/openapi-vue-query'
 overrides:
