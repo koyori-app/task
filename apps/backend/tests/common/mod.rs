@@ -28,7 +28,8 @@ use backend::{
     jobs::{
         setup_already_registered_email_storage, setup_github_issue_sync_storage,
         setup_github_webhook_storage, setup_password_reset_email_storage, setup_pool,
-        setup_review_summary_storage, setup_verification_email_storage,
+        setup_review_summary_storage, setup_tenant_invitation_email_storage,
+        setup_verification_email_storage,
     },
     routes, settings,
     utils::{
@@ -539,6 +540,10 @@ impl TestApp {
             setup_already_registered_email_storage(&pg_pool, &settings)
                 .await
                 .expect("already registered email storage");
+        let tenant_invitation_email_storage =
+            setup_tenant_invitation_email_storage(&pg_pool, &settings)
+                .await
+                .expect("tenant invitation email storage");
         let storage = setup_storage().await.expect("storage backend");
         let http_client = create_http_client().expect("http client");
         let webauthn = build_webauthn(&settings).expect("webauthn");
@@ -581,6 +586,7 @@ impl TestApp {
             github_issue_sync_storage,
             password_reset_email_storage,
             already_registered_email_storage,
+            tenant_invitation_email_storage,
             review_summary_storage,
             storage,
             drive_config: DriveConfig::from_env(),

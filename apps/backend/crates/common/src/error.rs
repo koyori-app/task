@@ -42,6 +42,8 @@ pub enum AppError {
     UnprocessableEntity,
     #[error("content too large")]
     ContentTooLarge,
+    #[error("too many requests")]
+    TooManyRequests,
 }
 
 impl From<sea_orm::DbErr> for AppError {
@@ -116,6 +118,13 @@ impl IntoResponse for AppError {
                 StatusCode::PAYLOAD_TOO_LARGE,
                 Json(ServerError {
                     message: "content-too-large".into(),
+                }),
+            )
+                .into_response(),
+            AppError::TooManyRequests => (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(ServerError {
+                    message: "too-many-requests".into(),
                 }),
             )
                 .into_response(),

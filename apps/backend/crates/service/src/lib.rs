@@ -31,6 +31,7 @@ pub mod storage;
 pub mod task_activities;
 pub mod task_responses;
 pub mod tasks;
+pub mod tenant_invitations;
 pub mod timezone;
 pub mod totp;
 pub mod verification_email_delivery;
