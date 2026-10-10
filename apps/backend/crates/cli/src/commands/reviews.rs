@@ -1065,7 +1065,7 @@ mod tests {
         let mut blocked = summary(2, 1, Some("acme/app"), false);
         blocked.counts = vec![SeverityStateCount {
             severity: FindingSeverity::High,
-            state: FindingState::Open,
+            state: FindingState::Open.into(),
             count: 1,
         }];
         let rendered = format_summary(&blocked, Some("1 high/medium finding(s) still unresolved"));
@@ -1091,7 +1091,7 @@ mod tests {
             body: "…".into(),
             file: file.map(str::to_string),
             line,
-            state: FindingState::Open,
+            state: FindingState::Open.into(),
             deferred_task_id: None,
             fixed_by: None,
             created_at: Utc.timestamp_opt(0, 0).unwrap(),
