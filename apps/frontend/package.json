@@ -30,7 +30,7 @@
     "@formkit/drag-and-drop": "0.6.1",
     "@koyori-app/openapi-vue-query": "0.1.4",
     "@lezer/highlight": "catalog:",
-    "@lucide/vue": "1.48.0",
+    "@lucide/vue": "1.54.0",
     "@phosphor-icons/vue": "2.2.1",
     "@sentry/vue": "10.69.0",
     "@tanstack/vue-form": "1.33.5",
