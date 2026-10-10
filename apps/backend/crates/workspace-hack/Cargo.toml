@@ -22,7 +22,7 @@ crossbeam-utils = { version = "0.8" }
 crypto-common-6f8ce4dd05d13bba = { package = "crypto-common", version = "0.2", default-features = false, features = ["getrandom"] }
 crypto-common-c65f7effa3be6d31 = { package = "crypto-common", version = "0.1", default-features = false, features = ["getrandom", "std"] }
 deranged = { version = "0.5", features = ["serde"] }
-digest-93f6ce9d446188ac = { package = "digest", version = "0.10", features = ["mac", "std"] }
+digest-93f6ce9d446188ac = { package = "digest", version = "0.11", features = ["mac", "std"] }
 digest-a6292c17cd707f01 = { package = "digest", version = "0.11", features = ["alloc", "mac", "oid"] }
 either = { version = "1", features = ["serde", "use_std"] }
 form_urlencoded = { version = "1" }
@@ -80,7 +80,7 @@ crypto-common-c65f7effa3be6d31 = { package = "crypto-common", version = "0.1", d
 darling = { version = "0.20" }
 darling_core = { version = "0.20", default-features = false, features = ["suggestions"] }
 deranged = { version = "0.5", features = ["serde"] }
-digest-93f6ce9d446188ac = { package = "digest", version = "0.10", features = ["mac", "std"] }
+digest-93f6ce9d446188ac = { package = "digest", version = "0.11", features = ["mac", "std"] }
 displaydoc = { version = "0.2" }
 either = { version = "1", features = ["serde", "use_std"] }
 form_urlencoded = { version = "1" }
