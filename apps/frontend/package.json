@@ -112,7 +112,7 @@
     "vite-plugin-vue-devtools": "8.2.1",
     "vite-plus": "catalog:",
     "vitest": "4.1.11",
-    "vue-tsc": "3.3.11"
+    "vue-tsc": "3.3.12"
   },
   "packageManager": "pnpm@11.28.5"
 }
