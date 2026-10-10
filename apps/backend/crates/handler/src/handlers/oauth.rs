@@ -33,7 +33,8 @@ use service::db::{is_postgres_unique_violation, with_transaction};
 use service::email::normalize_email;
 use service::login_session::establish_login_session;
 use service::oauth::{
-    OAuthStatePayload, consume_state, get_credentials, resolve_provider, store_state,
+    GITHUB_APP_PROVIDER, OAuthSettings, OAuthStatePayload, consume_state, get_credentials,
+    resolve_provider, store_state,
 };
 use service::passkeys::count_user_passkeys;
 
@@ -216,6 +217,10 @@ pub async fn oauth_start(
     if !settings.is_provider_configured(&provider) {
         return Err(OAuthError::ProviderNotConfigured);
     }
+    // 連携専用のプロバイダーは、ログイン中の利用者にしか結べない（ここで利用者を作らない）
+    if !OAuthSettings::is_sign_in_provider(&provider) && optional_auth.0.is_none() {
+        return Err(OAuthError::Unauthorized);
+    }
 
     let instance_url = match provider.as_str() {
         "gitlab_selfhosted" => Some(
@@ -372,6 +377,10 @@ pub async fn oauth_callback(
     if payload.provider != provider {
         return Err(OAuthError::InvalidState);
     }
+    // 開始時に弾いているが、state を作った後にログアウトされても利用者を作らない
+    if !OAuthSettings::is_sign_in_provider(&provider) && payload.link_user_id.is_none() {
+        return Err(OAuthError::InvalidState);
+    }
 
     if let Some(link_user_id) = payload.link_user_id {
         let session_user_id: Option<Uuid> = session.get("user_id");
@@ -461,12 +470,13 @@ pub async fn oauth_callback(
 }
 
 /// discovery で列挙する OAuth プロバイダー slug と、self-hosted インスタンス URL 入力の要否。
-const OAUTH_PROVIDER_SLUGS: [(&str, bool); 5] = [
+const OAUTH_PROVIDER_SLUGS: [(&str, bool); 6] = [
     ("github", false),
     ("gitlab", false),
     ("gitlab_selfhosted", true),
     ("google", false),
     ("oidc", false),
+    (GITHUB_APP_PROVIDER, false),
 ];
 
 #[axum::debug_handler]
@@ -489,6 +499,7 @@ pub async fn list_providers(State(state): State<AppState>) -> Json<OAuthProvider
                 provider: (*slug).to_string(),
                 connection_provider: settings.db_provider_key(slug)?,
                 requires_instance_url: *requires_instance_url,
+                sign_in: OAuthSettings::is_sign_in_provider(slug),
             })
         })
         .collect();
@@ -581,8 +592,10 @@ pub async fn disconnect_connection(
                 .await?
                 .ok_or(OAuthError::ConnectionNotFound)?;
 
+            // 連携専用のプロバイダーはログイン手段に数えない（それだけ残るとログインできない）
             let connection_count = oauth_connections::Entity::find()
                 .filter(oauth_connections::Column::UserId.eq(auth.user_id))
+                .filter(oauth_connections::Column::Provider.ne(GITHUB_APP_PROVIDER))
                 .count(txn)
                 .await?;
 

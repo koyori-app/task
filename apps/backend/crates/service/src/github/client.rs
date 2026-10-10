@@ -9,6 +9,8 @@ const USER_AGENT: &str = "task-backend";
 
 /// GitHub REST API の既定のベース URL。
 const DEFAULT_API_BASE: &str = "https://api.github.com";
+/// GitHub のユーザー認可（authorize / access_token）の既定のベース URL。
+const DEFAULT_OAUTH_BASE: &str = "https://github.com";
 
 /// GitHub のベース URL を差し替えてよい宛先。
 ///
@@ -58,10 +60,18 @@ pub(super) fn loopback_base_override(var: &str) -> Option<String> {
 /// 既定は `https://api.github.com`。`GITHUB_API_BASE_URL` は**ループバック宛てのときだけ**
 /// 採る（統合テストがモックサーバーを向けるための口で、それ以外の用途は無い）。
 /// ここを素の環境変数で読むと、この URL へ載る installation token が任意のホストへ渡る。
-pub(super) fn api_base() -> String {
+pub(crate) fn api_base() -> String {
     loopback_base_override("GITHUB_API_BASE_URL")
         .map(|base| base.trim_end_matches('/').to_string())
         .unwrap_or_else(|| DEFAULT_API_BASE.to_string())
+}
+
+/// GitHub のユーザー認可のベース URL。差し替えの規則は [`api_base`] と同じ
+/// （`GITHUB_OAUTH_BASE_URL` はループバック宛てのときだけ採る）。
+pub(crate) fn oauth_base() -> String {
+    loopback_base_override("GITHUB_OAUTH_BASE_URL")
+        .map(|base| base.trim_end_matches('/').to_string())
+        .unwrap_or_else(|| DEFAULT_OAUTH_BASE.to_string())
 }
 
 /// 設定から [`GithubApp`] を作る。

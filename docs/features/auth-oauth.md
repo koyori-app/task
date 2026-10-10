@@ -42,7 +42,7 @@ ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
 pub struct Model {
     pub id: Uuid,
     pub user_id: Uuid,
-    pub provider: String,           // "github" | "gitlab" | "google" | "oidc:{issuer}"
+    pub provider: String,           // "github" | "gitlab" | "google" | "oidc:{issuer}" | "github_app"
     pub provider_user_id: String,   // プロバイダー側のユーザー ID
     pub provider_email: Option<String>, // プロバイダーが返したメール（参照用）
     pub provider_login: Option<String>, // プロバイダー上のログイン名（小文字。コミット作者の解決用）
@@ -58,7 +58,7 @@ pub struct Model {
 |--------|-----|------|------|
 | `id` | UUID | PK | |
 | `user_id` | UUID | NOT NULL, FK→users CASCADE | |
-| `provider` | VARCHAR | NOT NULL | `github` / `gitlab` / `gitlab_selfhosted` / `google` / `oidc:{issuer}` |
+| `provider` | VARCHAR | NOT NULL | `github` / `gitlab` / `gitlab_selfhosted` / `google` / `oidc:{issuer}` / `github_app`（PR 承認用の連携。§4） |
 | `provider_user_id` | VARCHAR | NOT NULL | プロバイダー側の不変ユーザー ID |
 | `provider_email` | VARCHAR | NULLABLE | プロバイダーが返したメール（参照用。主キーとして使わない） |
 | `instance_url` | VARCHAR | NULLABLE | GitLab self-hosted のインスタンス URL（例: `https://gitlab.example.com`）。クラウド版は NULL |
@@ -116,6 +116,23 @@ CREATE INDEX idx_oauth_connections_user ON oauth_connections(user_id);
 | GitLab self-hosted | `gitlab_selfhosted` | OAuth 2.0 | ユーザーがインスタンス URL を入力（§4a 参照） |
 | Google | `google` | OIDC | `openid email profile` スコープ |
 | 汎用 OIDC | `oidc:{issuer}` | OIDC Discovery | Okta・Entra ID・Keycloak 等に対応 |
+| GitHub（PR 承認用） | `github_app` | GitHub App のユーザー認可 | **サインインには使わない連携専用**（下記） |
+
+`github_app` は、レビューが完了した PR をレビュワー本人の名義で Approve するための連携
+（[レビュー指摘管理](/features/review-findings) §7）。
+
+- ログイン中の利用者にだけ結べる。開始・コールバックとも `link_user_id` が無ければ拒み、
+  これで利用者を作ったりログインしたりはしない。`list_providers` は `sign_in: false` で返し、
+  サインイン画面（`OAuthButtons.vue`）には出さない
+- 資格情報は App 連携と同じ `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET`。
+  `OAUTH_ENCRYPTION_KEY` が無ければ有効にしない（ここで鍵を必須にすると、ログイン用 OAuth を
+  使っていない環境が起動しなくなる）
+- トークンの権限は「App の権限 ∩ 本人の権限」で、scope は無い。`/user` だけを読む
+  （`/user/emails` は App の Email addresses 権限が要るので読まない）
+- トークンは既定で 8 時間で切れる。使う側（要約ジョブ）が期限の近いトークンを
+  リフレッシュトークンで更新し、回転した新しいトークンを保存し直す
+  （`service::oauth::github_app`）
+- ログイン手段には数えない（連携解除のガード。§7）
 
 プロバイダー設定は環境変数で管理する（テナント単位の設定は本仕様の対象外）:
 
@@ -174,6 +191,10 @@ GitLab.com と異なり、OAuth エンドポイントがインスタンスごと
 ```
 {APP_ORIGIN}/api/v1/auth/oauth/{provider}/callback
 ```
+
+`github_app` を使うなら、GitHub App の設定の Callback URL に
+`{APP_ORIGIN}/api/v1/auth/oauth/github_app/callback` を足す（App の Callback URL は
+複数登録できる。インストール時のユーザー認可の URL は残したまま）。
 
 backend は frontend の SSR サーバ（`/api/*` を転送し、`redirect: 'manual'` で
 バックエンドの 302 をそのまま返す）越しにしか公開されていない。プロバイダーへ渡す
@@ -284,6 +305,8 @@ DELETE /v1/auth/oauth/connections/{provider}
 (oauth_connections が 1 件のみ) AND (password_hash IS NULL)
 → 403: パスワードを設定してから解除してください
 ```
+
+`github_app` の連携は件数に数えない（サインインに使えないので、それだけ残るとログインできない）。
 
 ---
 

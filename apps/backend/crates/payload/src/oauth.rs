@@ -47,13 +47,16 @@ pub struct OAuthConnectionsResponse {
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct OAuthProviderItem {
-    /// プロバイダー slug（github | gitlab | gitlab_selfhosted | google | oidc）
+    /// プロバイダー slug（github | gitlab | gitlab_selfhosted | google | oidc | github_app）
     pub provider: String,
     /// 連携一覧（`/oauth/connections`）でこのプロバイダーを指す識別子。
     /// 汎用 OIDC は現在設定中の issuer を含む `oidc:{issuer}` で、開始用 slug と一致しない
     pub connection_provider: String,
     /// ログイン開始時に self-hosted インスタンス URL の入力が必要か（gitlab_selfhosted のみ true）
     pub requires_instance_url: bool,
+    /// サインインに使えるか。`false`（github_app）はログイン中の利用者への連携専用で、
+    /// サインイン画面には出さない
+    pub sign_in: bool,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

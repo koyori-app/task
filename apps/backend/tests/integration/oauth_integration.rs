@@ -361,6 +361,91 @@ async fn oauth_providers_lists_only_configured() {
         Some("gitlab_selfhosted"),
         "connection_provider must be present for matching against connections"
     );
+    assert_eq!(selfhosted["sign_in"].as_bool(), Some(true));
+
+    // PR 承認用の GitHub 連携は一覧に出るが、サインインには使えない
+    let github_app = providers
+        .iter()
+        .find(|p| p["provider"] == "github_app")
+        .expect("github_app present");
+    assert_eq!(github_app["sign_in"].as_bool(), Some(false));
+}
+
+/// PR 承認用の GitHub 連携は、ログイン中の利用者にしか結べない（これで利用者を作らない）。
+#[tokio::test]
+async fn github_app_link_requires_a_signed_in_user() {
+    let mut app = TestApp::new().await;
+
+    let anonymous = app.get("/v1/auth/oauth/github_app").await;
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+    // 対照: ログイン中なら GitHub の認可画面へ送る
+    let user = app.insert_user_default().await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+    let start = app.get_with_session("/v1/auth/oauth/github_app").await;
+    assert!(is_redirect(start.status()), "status: {}", start.status());
+    let location = start
+        .headers()
+        .get("location")
+        .expect("authorize redirect")
+        .to_str()
+        .expect("authorize url");
+    assert!(
+        location.contains("/login/oauth/authorize"),
+        "unexpected authorize url: {location}"
+    );
+
+    app.cleanup_user(user.id).await;
+}
+
+/// PR 承認用の連携はログイン手段に数えない。それだけ残るとログインできなくなるので、
+/// 最後のログイン用の連携は解除できない（対照: 承認用の連携そのものは解除できる）。
+#[tokio::test]
+async fn a_github_app_link_is_not_counted_as_a_sign_in_method() {
+    let app = TestApp::new().await;
+    let unique = uuid::Uuid::new_v4();
+    app.set_mock_user(MockGitLabUser {
+        id: 400_003,
+        username: format!("approver_{unique}"),
+        email: Some(format!("approver-{unique}@example.com")),
+    });
+    let start = app.oauth_start(false).await;
+    let callback = app.follow_oauth_start(start).await;
+    assert!(is_redirect(callback.status()), "oauth callback redirect");
+    let me: serde_json::Value = app.get_me().await.json().await.expect("me json");
+    let user_id: uuid::Uuid = me["id"].as_str().expect("user id").parse().expect("uuid");
+
+    oauth_connections::ActiveModel {
+        id: Set(uuid::Uuid::new_v4()),
+        user_id: Set(user_id),
+        provider: Set("github_app".into()),
+        provider_user_id: Set("9002".into()),
+        created_at: Set(chrono::Utc::now().into()),
+        updated_at: Set(chrono::Utc::now().into()),
+        ..Default::default()
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert github_app connection");
+
+    let blocked = app
+        .delete_with_session(&format!(
+            "/v1/auth/oauth/connections/gitlab_selfhosted?instance_url={}",
+            urlencoding::encode(app.instance_url())
+        ))
+        .await;
+    assert_eq!(blocked.status(), StatusCode::FORBIDDEN);
+    let body = blocked.text().await.expect("body");
+    assert!(body.contains("oauth-last-auth-method"), "{body}");
+
+    let unlinked = app
+        .delete_with_session("/v1/auth/oauth/connections/github_app")
+        .await;
+    assert_eq!(unlinked.status(), StatusCode::NO_CONTENT);
+    assert_eq!(app.count_connections_for_user(user_id).await, 1);
+
+    app.cleanup_user(user_id).await;
 }
 
 #[tokio::test]

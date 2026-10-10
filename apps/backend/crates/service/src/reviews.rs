@@ -1052,6 +1052,8 @@ pub struct SummarySnapshot {
     pub blocking: u64,
     /// 最新ラウンドがレビューした commit
     pub latest_head_sha: Option<String>,
+    /// 最新ラウンドの作成者。マージ可のとき、この人の名義で PR を Approve する
+    pub latest_reviewer_id: Option<Uuid>,
     /// 投稿時に GitHub から読んだ現在の head（取れなければ `None`）
     pub current_head_sha: Option<String>,
     /// オーナー代行で棄却された件数
@@ -1104,8 +1106,8 @@ pub async fn summary_snapshot<C: ConnectionTrait>(
         .order_by_desc(reviews::Column::Round)
         .one(db)
         .await?;
-    let (latest_summary, latest_head_sha) = latest
-        .map(|r| (r.summary, Some(r.head_sha)))
+    let (latest_summary, latest_head_sha, latest_reviewer_id) = latest
+        .map(|r| (r.summary, Some(r.head_sha), Some(r.reviewer_id)))
         .unwrap_or_default();
 
     Ok(SummarySnapshot {
@@ -1114,6 +1116,7 @@ pub async fn summary_snapshot<C: ConnectionTrait>(
         counts,
         blocking,
         latest_head_sha,
+        latest_reviewer_id,
         current_head_sha,
         owner_override_rejections,
         latest_summary,
@@ -1461,6 +1464,7 @@ mod tests {
             blocking,
             // 既定は「レビューした commit = 現在の head」（鮮度は満たしている）
             latest_head_sha: Some(REVIEWED.into()),
+            latest_reviewer_id: Some(Uuid::nil()),
             current_head_sha: Some(REVIEWED.into()),
             owner_override_rejections: 0,
             latest_summary: "総評".into(),

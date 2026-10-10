@@ -8,7 +8,8 @@
 //! 巻き戻さない。GitHub 連携の無いプロジェクトでは何もしない。
 //!
 //! マージ可（[`service::reviews::SummarySnapshot::merge_ready`]）になったら、
-//! レビューした commit で PR を Approve する。これもベストエフォート。
+//! 最新ラウンドのレビュワー本人の名義（GitHub App のユーザー認可で得たトークン）で、
+//! レビューした commit を Approve する。これもベストエフォート。
 //!
 //! 同一 (project, pr) の更新要求は 1 本に合流させる（`service::github::review_summary_queue`）。
 //! 遷移のたびに積むと同じコメントへ連続して書き込み、GitHub の
@@ -29,6 +30,7 @@ use uuid::Uuid;
 use common::cache::redis::RedisConnection;
 use common::settings::Settings;
 use entity::github_integrations;
+use service::github::pr_comments::ApproveOutcome;
 
 use crate::JobState;
 
@@ -514,37 +516,78 @@ async fn update_summary(
     );
 
     // merge_ready は現在の head とレビューした commit の一致まで見ている
-    if let (true, true, Some(commit_sha)) = (
+    if let (true, true, Some(commit_sha), Some(reviewer_id)) = (
         snapshot.merge_ready(),
         pr_is_open,
         snapshot.latest_head_sha.as_deref(),
+        snapshot.latest_reviewer_id,
     ) {
-        // 失敗してもジョブは失敗にしない。コメントは更新済みで、再試行は同じ 403 などを
-        // 連打するだけ。取りこぼしは次の遷移・ラウンドで拾い直す
-        match service::github::pr_comments::approve_pull_request(
-            &state.http_client,
-            &token,
-            &service::github::pr_comments::ApproveTarget {
-                owner: &integration.repo_owner,
-                repo: &integration.repo_name,
-                number: job.pr_number,
-                commit_sha,
-                bot_login: &bot_login,
-            },
-        )
-        .await
-        {
-            Ok(true) => {
-                tracing::info!(project_id = %job.project_id, pr = job.pr_number, commit_sha, "pull request approved");
-            }
-            Ok(false) => {}
-            // 403 なら App に Pull requests: write が無いか、インストール側が権限の更新を未承認
-            Err(e) => {
-                tracing::warn!(error = %e, project_id = %job.project_id, pr = job.pr_number, "approve pull request failed");
-            }
-        }
+        approve_as_reviewer(job, state, integration, commit_sha, reviewer_id).await;
     }
     Ok(())
+}
+
+/// 最新ラウンドのレビュワー本人の名義で、PR を `commit_sha` に対して Approve する。
+///
+/// 本人の承認なので、GitHub の規則（PR 作者は自分の PR を承認できない・write 権限が要る・
+/// Code Owners）がそのまま効く。bot 名義では task のゲートの写しになり、空のラウンド
+/// 1 本で GitHub 側の承認条件まで満たせてしまう（仕様 §2）ので、連携が無いときも
+/// bot では代わりに承認しない。
+///
+/// 失敗してもジョブは失敗にしない。コメントは更新済みで、再試行は同じ失敗を繰り返す
+/// だけ。取りこぼしは次の遷移・ラウンドで拾い直す。
+async fn approve_as_reviewer(
+    job: &ReviewSummaryJob,
+    state: &JobState,
+    integration: &github_integrations::Model,
+    commit_sha: &str,
+    reviewer_id: Uuid,
+) {
+    let token = match service::oauth::github_app::github_app_user_token(
+        &state.db,
+        &state.http_client,
+        &state.oauth_settings,
+        reviewer_id,
+    )
+    .await
+    {
+        Ok(Some(token)) => token,
+        Ok(None) => {
+            tracing::info!(project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "reviewer has not linked GitHub for approvals; skipping approval");
+            return;
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "load reviewer's GitHub token failed");
+            return;
+        }
+    };
+
+    match service::github::pr_comments::approve_pull_request(
+        &state.http_client,
+        &token.access_token,
+        &service::github::pr_comments::ApproveTarget {
+            owner: &integration.repo_owner,
+            repo: &integration.repo_name,
+            number: job.pr_number,
+            commit_sha,
+            approver_id: token.github_user_id,
+        },
+    )
+    .await
+    {
+        Ok(ApproveOutcome::Approved) => {
+            tracing::info!(project_id = %job.project_id, pr = job.pr_number, commit_sha, %reviewer_id, "pull request approved by reviewer");
+        }
+        Ok(ApproveOutcome::AlreadyApproved) => {}
+        // PR 作者がレビュワーだと GitHub が拒む。仕組みどおりの結果なので warn にしない
+        Ok(ApproveOutcome::Unprocessable(body)) => {
+            tracing::info!(project_id = %job.project_id, pr = job.pr_number, %reviewer_id, body, "GitHub declined the approval");
+        }
+        // 401 は連携が取り消された、403 はリポジトリへの権限が無いか App の権限が足りない
+        Err(e) => {
+            tracing::warn!(error = %e, project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "approve pull request failed");
+        }
+    }
 }
 
 /// PR の作者へ、その人が知らないまま増えていたラウンドを知らせる。

@@ -776,7 +776,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 [[package]]
 name = "auth-core"
 version = "0.1.0"
-source = "git+https://github.com/koyori-app/auth-core.git?rev=5d527dcf7e833e2980212560992d8f49efcbdda5#5d527dcf7e833e2980212560992d8f49efcbdda5"
+source = "git+https://github.com/koyori-app/auth-core.git?rev=5524d3eae26b61a511ac60e771ccab3ca736bf14#5524d3eae26b61a511ac60e771ccab3ca736bf14"
 dependencies = [
  "aes-gcm 0.11.1",
  "anyhow",
@@ -798,7 +798,7 @@ dependencies = [
 [[package]]
 name = "auth-core-github"
 version = "0.1.0"
-source = "git+https://github.com/koyori-app/auth-core.git?rev=5d527dcf7e833e2980212560992d8f49efcbdda5#5d527dcf7e833e2980212560992d8f49efcbdda5"
+source = "git+https://github.com/koyori-app/auth-core.git?rev=5524d3eae26b61a511ac60e771ccab3ca736bf14#5524d3eae26b61a511ac60e771ccab3ca736bf14"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -810,7 +810,7 @@ dependencies = [
 [[package]]
 name = "auth-core-gitlab"
 version = "0.1.0"
-source = "git+https://github.com/koyori-app/auth-core.git?rev=5d527dcf7e833e2980212560992d8f49efcbdda5#5d527dcf7e833e2980212560992d8f49efcbdda5"
+source = "git+https://github.com/koyori-app/auth-core.git?rev=5524d3eae26b61a511ac60e771ccab3ca736bf14#5524d3eae26b61a511ac60e771ccab3ca736bf14"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -972,6 +972,7 @@ version = "0.1.0"
 dependencies = [
  "apalis",
  "apalis-board",
+ "auth-core",
  "axum",
  "axum_session",
  "axum_session_redispool",
@@ -2247,7 +2248,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 [[package]]
 name = "forge-core"
 version = "0.1.0"
-source = "git+https://github.com/koyori-app/auth-core.git?rev=5d527dcf7e833e2980212560992d8f49efcbdda5#5d527dcf7e833e2980212560992d8f49efcbdda5"
+source = "git+https://github.com/koyori-app/auth-core.git?rev=5524d3eae26b61a511ac60e771ccab3ca736bf14#5524d3eae26b61a511ac60e771ccab3ca736bf14"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2256,7 +2257,7 @@ dependencies = [
 [[package]]
 name = "forge-github"
 version = "0.1.0"
-source = "git+https://github.com/koyori-app/auth-core.git?rev=5d527dcf7e833e2980212560992d8f49efcbdda5#5d527dcf7e833e2980212560992d8f49efcbdda5"
+source = "git+https://github.com/koyori-app/auth-core.git?rev=5524d3eae26b61a511ac60e771ccab3ca736bf14#5524d3eae26b61a511ac60e771ccab3ca736bf14"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4576,7 +4577,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -4614,7 +4615,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
  "windows-sys 0.52.0",
 ]
@@ -6521,7 +6522,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
@@ -7637,7 +7638,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -42,6 +42,9 @@ pub struct JobState {
     /// 切り詰められた push の続きのジョブを、投入の鍵（受信記録）と同じトランザクションで
     /// 積むために持つ。storage 経由では別接続になり、鍵とジョブが一緒に確定しない。
     pub pg_pool: PgPool,
+    /// 利用者の連携トークン（`oauth_connections`）を復号・更新するための設定。
+    /// 要約ジョブがレビュワー本人の名義で PR を Approve するのに使う
+    pub oauth_settings: service::oauth::OAuthSettings,
 }
 
 pub async fn setup_pool(database_url: &str) -> Result<PgPool, anyhow::Error> {

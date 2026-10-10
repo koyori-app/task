@@ -2,8 +2,8 @@
 //!
 //! レビュー指摘の一覧・状態は task 側が権威で、GitHub には**マーカー付きの
 //! コメント 1 本**だけを置く。2 回目以降は同じコメントを編集して更新する。
-//! マージ可になったら、レビューした commit を本文なしで Approve する
-//! （インライン投稿はしない。仕様 `docs/features/review-findings.md` §7）。
+//! マージ可になったら、レビュワー本人のトークンで、レビューした commit を本文なしで
+//! Approve する（インライン投稿はしない。仕様 `docs/features/review-findings.md` §7）。
 
 use reqwest::{Client, Method, StatusCode};
 use serde::Deserialize;
@@ -43,6 +43,8 @@ struct IssueComment {
 #[derive(Debug, Clone, Deserialize)]
 struct CommentUser {
     #[serde(default)]
+    id: Option<i64>,
+    #[serde(default)]
     login: Option<String>,
     #[serde(rename = "type", default)]
     kind: Option<String>,
@@ -78,12 +80,13 @@ struct PullRequestReview {
 }
 
 impl PullRequestReview {
-    /// 自分の bot が `commit_sha` に出した承認か。
+    /// `approver_id` の GitHub ユーザーが `commit_sha` に出した承認か。
     ///
     /// 人に取り下げられた（DISMISSED）承認も含める。含めないと、取り下げた直後の
-    /// 遷移で同じ commit を承認し直し、人の判断と争う。
-    fn is_our_approval_of(&self, commit_sha: &str, bot_login: &str) -> bool {
-        self.user.as_ref().is_some_and(|u| u.is_bot(bot_login))
+    /// 遷移で同じ commit を承認し直し、人の判断と争う。login ではなく数値の ID で
+    /// 見るのは、改名しても同じ人と分かるようにするため。
+    fn is_approval_by(&self, commit_sha: &str, approver_id: i64) -> bool {
+        self.user.as_ref().and_then(|u| u.id) == Some(approver_id)
             && self.commit_id.as_deref() == Some(commit_sha)
             && matches!(self.state.as_deref(), Some("APPROVED" | "DISMISSED"))
     }
@@ -276,27 +279,36 @@ pub struct ApproveTarget<'a> {
     pub number: i32,
     /// レビューした commit。承認はこの commit に付ける
     pub commit_sha: &'a str,
-    /// 自分の GitHub App の bot login（`{app-name}[bot]`）
-    pub bot_login: &'a str,
+    /// 承認する人（トークンの持ち主）の GitHub ユーザー ID
+    pub approver_id: i64,
 }
 
-/// PR を `commit_sha` で Approve する。自分の承認（取り下げ済みを含む）が既にあれば何もしない。
+/// [`approve_pull_request`] の結果。
+#[derive(Debug, PartialEq, Eq)]
+pub enum ApproveOutcome {
+    Approved,
+    /// 同じ commit への本人の承認（取り下げ済みを含む）が既にある
+    AlreadyApproved,
+    /// GitHub が受け付けなかった（422）。PR 作者本人は自分の PR を承認できない
+    Unprocessable(String),
+}
+
+/// レビュワー本人のトークン（`token`）で、PR を `commit_sha` に対して Approve する。
+/// 本人の承認（取り下げ済みを含む）が既にあれば何もしない。
 ///
 /// `commit_id` は必ず明示する。省くと GitHub は最新の commit に付けるので、判定と投稿の
 /// 間に push されると、レビューしていない commit を承認してしまう。
-///
-/// 戻り値は新しく承認したときだけ `true`。
 pub async fn approve_pull_request(
     http: &Client,
     token: &str,
     target: &ApproveTarget<'_>,
-) -> Result<bool, anyhow::Error> {
+) -> Result<ApproveOutcome, anyhow::Error> {
     let ApproveTarget {
         owner,
         repo,
         number,
         commit_sha,
-        bot_login,
+        approver_id,
     } = *target;
     let url = format!("{}/repos/{owner}/{repo}/pulls/{number}/reviews", api_base());
 
@@ -313,9 +325,9 @@ pub async fn approve_pull_request(
         let reviews = res.json::<Vec<PullRequestReview>>().await?;
         if reviews
             .iter()
-            .any(|r| r.is_our_approval_of(commit_sha, bot_login))
+            .any(|r| r.is_approval_by(commit_sha, approver_id))
         {
-            return Ok(false);
+            return Ok(ApproveOutcome::AlreadyApproved);
         }
         if (reviews.len() as u32) < PER_PAGE {
             break;
@@ -328,13 +340,18 @@ pub async fn approve_pull_request(
         .send()
         .await?;
     let status = res.status();
+    if status == StatusCode::UNPROCESSABLE_ENTITY {
+        return Ok(ApproveOutcome::Unprocessable(
+            res.text().await.unwrap_or_default(),
+        ));
+    }
     if !status.is_success() {
         let text = res.text().await.unwrap_or_default();
         return Err(anyhow::anyhow!(
             "approve pull request failed: {status}: {text}"
         ));
     }
-    Ok(true)
+    Ok(ApproveOutcome::Approved)
 }
 
 #[cfg(test)]
@@ -366,6 +383,7 @@ mod tests {
             id: 1,
             body: Some("marker".into()),
             user: Some(CommentUser {
+                id: None,
                 login: Some("koyori-task[bot]".into()),
                 kind: Some("Bot".into()),
             }),
@@ -377,6 +395,7 @@ mod tests {
             id: 2,
             body: Some("marker".into()),
             user: Some(CommentUser {
+                id: None,
                 login: Some("koyori-task[bot]".into()),
                 kind: Some("User".into()),
             }),
@@ -388,6 +407,7 @@ mod tests {
             id: 3,
             body: Some("marker".into()),
             user: Some(CommentUser {
+                id: None,
                 login: Some("other[bot]".into()),
                 kind: Some("Bot".into()),
             }),
@@ -403,29 +423,29 @@ mod tests {
         assert!(!unknown.is_written_by("koyori-task[bot]"));
     }
 
-    /// 自分の承認と見なすのは「自分の bot・同じ commit・承認か取り下げ済み」だけ。
+    /// 本人の承認と見なすのは「同じ GitHub ユーザー ID・同じ commit・承認か取り下げ済み」だけ。
     #[test]
-    fn only_our_approval_of_the_same_commit_counts() {
-        let review = |login: &str, kind: &str, commit: &str, state: &str| PullRequestReview {
+    fn only_the_approvers_approval_of_the_same_commit_counts() {
+        let review = |id: i64, commit: &str, state: &str| PullRequestReview {
             user: Some(CommentUser {
-                login: Some(login.into()),
-                kind: Some(kind.into()),
+                id: Some(id),
+                login: Some("someone".into()),
+                kind: Some("User".into()),
             }),
             commit_id: Some(commit.into()),
             state: Some(state.into()),
         };
-        let ours = "koyori-task[bot]";
+        let me = 42;
 
-        assert!(review(ours, "Bot", "abc", "APPROVED").is_our_approval_of("abc", ours));
+        assert!(review(me, "abc", "APPROVED").is_approval_by("abc", me));
         // 人が取り下げた承認も済み扱い（承認し直して争わない）
-        assert!(review(ours, "Bot", "abc", "DISMISSED").is_our_approval_of("abc", ours));
+        assert!(review(me, "abc", "DISMISSED").is_approval_by("abc", me));
 
         // 別の commit への承認（レビュー後に push された）
-        assert!(!review(ours, "Bot", "old", "APPROVED").is_our_approval_of("abc", ours));
+        assert!(!review(me, "old", "APPROVED").is_approval_by("abc", me));
         // 承認ではないレビュー
-        assert!(!review(ours, "Bot", "abc", "COMMENTED").is_our_approval_of("abc", ours));
-        // 同じ login を名乗る人間・別の App
-        assert!(!review(ours, "User", "abc", "APPROVED").is_our_approval_of("abc", ours));
-        assert!(!review("other[bot]", "Bot", "abc", "APPROVED").is_our_approval_of("abc", ours));
+        assert!(!review(me, "abc", "COMMENTED").is_approval_by("abc", me));
+        // 別の人の承認
+        assert!(!review(7, "abc", "APPROVED").is_approval_by("abc", me));
     }
 }
