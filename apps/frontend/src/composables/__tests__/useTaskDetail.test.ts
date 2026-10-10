@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { defineComponent, ref } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
@@ -171,6 +171,10 @@ describe('useTaskDetail のキャッシュ同期', () => {
     baseTask.labels = [];
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('ラベル一覧の取得失敗は projectLabelsError として公開し、詳細全体の isError にはしない', async () => {
     labelsControl.mode = 'error';
     mountHost();
@@ -227,6 +231,44 @@ describe('useTaskDetail のキャッシュ同期', () => {
 
     expect(queryClient.getQueryState(searchQueryKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(listQueryKey)?.isInvalidated).toBe(true);
+  });
+
+  it('保存が確定したら savedField にそのフィールドが入り、2 秒で消える', async () => {
+    // vue-query の notifyManager は setTimeout で通知するので、fake timer 中は
+    // flushPromises だけでなく advanceTimersByTimeAsync でも進める
+    vi.useFakeTimers();
+    mountHost();
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(0);
+
+    detail.onSaveTitle('新しいタイトル');
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(0);
+    // 飛行中はまだ保存していない
+    expect(detail.savedField.value).toBeNull();
+
+    putControl.resolve!({ ...baseTask, title: '新しいタイトル' });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(detail.savedField.value).toBe('title');
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(detail.savedField.value).toBe('title');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(detail.savedField.value).toBeNull();
+  });
+
+  it('保存に失敗したら savedField は立てず、エラーを出す', async () => {
+    mountHost();
+    await flushPromises();
+
+    detail.onSaveTitle('新しいタイトル');
+    await flushPromises();
+    putControl.fail!(500);
+    await flushPromises();
+
+    expect(detail.savedField.value).toBeNull();
+    expect(detail.fieldErrors.value.title).toBe('更新に失敗しました');
   });
 
   it('ラベル更新の楽観値を名前順、同名時は ID 順に並べる', async () => {

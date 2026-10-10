@@ -1,8 +1,8 @@
-import { computed, ref, watch, type MaybeRefOrGetter, toValue } from 'vue';
+import { computed, onScopeDispose, ref, watch, type MaybeRefOrGetter, toValue } from 'vue';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { navigate } from 'vike/client/router';
 
-import type { EditableField } from '@/components/tasks/editable-field';
+import type { EditableField, MutatingField } from '@/components/tasks/editable-field';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { fetchClient, apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
@@ -15,10 +15,11 @@ export const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/task
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const LIST_LABELS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/labels' as const;
+/** 「保存しました」を出しておく時間（ミリ秒） */
+const SAVED_NOTICE_MS = 2000;
 
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type UpdateTaskRequest = components['schemas']['UpdateTaskRequest'];
-export type MutatingField = EditableField | 'status_id' | 'labels' | 'priority';
 
 /**
  * コードポイント順の文字列比較。
@@ -90,6 +91,17 @@ export function useTaskDetail(params: UseTaskDetailParams) {
   const labelsError = ref<string | null>(null);
   const deleteError = ref<string | null>(null);
   const fieldErrors = ref<Partial<Record<EditableField, string>>>({});
+  /** 直近に保存が確定したフィールド。一定時間で消える（Hub が「保存しました」を出す） */
+  const savedField = ref<MutatingField | null>(null);
+  let savedNoticeTimer: ReturnType<typeof setTimeout> | undefined;
+  function showSavedNotice(field: MutatingField) {
+    if (savedNoticeTimer) clearTimeout(savedNoticeTimer);
+    savedField.value = field;
+    savedNoticeTimer = setTimeout(() => (savedField.value = null), SAVED_NOTICE_MS);
+  }
+  onScopeDispose(() => {
+    if (savedNoticeTimer) clearTimeout(savedNoticeTimer);
+  });
   const selectedStatusId = ref('');
   const optimisticTask = ref<Partial<TaskDetail>>({});
   const pendingFieldRevisions = ref<Partial<Record<MutatingField, number>>>({});
@@ -308,6 +320,8 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     } else {
       fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
     }
+    // 古いリビジョンの完了（上の早期 return）では出さない
+    showSavedNotice(field);
   }
 
   function mutateTask(
@@ -324,6 +338,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     else if (field === 'priority') priorityError.value = null;
     else if (field === 'labels') labelsError.value = null;
     else fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
+    if (savedField.value === field) savedField.value = null;
 
     // mutate() のコールバックは observer の unmount（分割ビューのペイン切替）で
     // 破棄されるため、unmount 後も完走する mutateAsync の Promise 側で
@@ -509,6 +524,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     labelsError,
     fieldUpdating,
     fieldErrors,
+    savedField,
     isLoading,
     isNotFound,
     isError,
