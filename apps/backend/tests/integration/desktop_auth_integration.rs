@@ -331,7 +331,6 @@ async fn bearer_cannot_issue_code() {
     app.cleanup_user(user.id).await;
 }
 
-/// セッション専用の口（PAT 管理・テナント作成と削除・プロジェクト削除）は Device Token では通らない。
 /// Desktop のアカウント表示: Device Token で自分のプロフィールを読める（401 だと Desktop は
 /// トークン失効とみなしてログアウトする）。PAT は 403、更新はセッション専用のまま。
 #[tokio::test]
@@ -371,6 +370,7 @@ async fn device_token_can_read_own_profile_but_not_edit_it() {
     app.cleanup_user(user.id).await;
 }
 
+/// セッション専用の口（PAT 管理・テナント作成と削除・プロジェクト削除）は Device Token では通らない。
 /// 同じ利用者のセッションなら通る（対照）。
 #[tokio::test]
 async fn device_token_cannot_use_session_only_endpoints() {
