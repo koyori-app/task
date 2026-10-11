@@ -99,9 +99,13 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     savedField.value = field;
     savedNoticeTimer = setTimeout(() => (savedField.value = null), SAVED_NOTICE_MS);
   }
-  onScopeDispose(() => {
+  function clearSavedNotice() {
     if (savedNoticeTimer) clearTimeout(savedNoticeTimer);
-  });
+    savedField.value = null;
+  }
+  onScopeDispose(clearSavedNotice);
+  // 別のタスクへ移ったら前のタスクの通知を残さない
+  watch(taskId, clearSavedNotice);
   const selectedStatusId = ref('');
   const optimisticTask = ref<Partial<TaskDetail>>({});
   const pendingFieldRevisions = ref<Partial<Record<MutatingField, number>>>({});
@@ -320,8 +324,9 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     } else {
       fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
     }
-    // 古いリビジョンの完了（上の早期 return）では出さない
-    showSavedNotice(field);
+    // 古いリビジョンの完了（上の早期 return）では出さない。
+    // オーバーレイは別のタスクへ移っても同じインスタンスなので、移る前のタスクの保存も出さない
+    if (queryKey === taskQueryKey.value) showSavedNotice(field);
   }
 
   function mutateTask(

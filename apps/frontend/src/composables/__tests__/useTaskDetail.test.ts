@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { defineComponent, ref } from 'vue';
+import { defineComponent, ref, type MaybeRefOrGetter } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import type { paths } from '@/generated/api';
@@ -138,13 +138,13 @@ describe('useTaskDetail のキャッシュ同期', () => {
   let detail: ReturnType<typeof useTaskDetail>;
   let onAfterDelete: ReturnType<typeof vi.fn<(listHref: string) => void>>;
 
-  function mountHost() {
+  function mountHost(taskId: MaybeRefOrGetter<string> = TASK_SEQ_KEY) {
     const Host = defineComponent({
       setup() {
         detail = useTaskDetail({
           tenantDisplayId: 'acme',
           projectKey: 'ENG',
-          taskId: TASK_SEQ_KEY,
+          taskId,
           onAfterDelete,
         });
         return () => null;
@@ -256,6 +256,39 @@ describe('useTaskDetail のキャッシュ同期', () => {
     expect(detail.savedField.value).toBe('title');
     await vi.advanceTimersByTimeAsync(1);
     expect(detail.savedField.value).toBeNull();
+  });
+
+  it('別のタスクへ移ったら、前のタスクの savedField を消す', async () => {
+    const taskId = ref(TASK_SEQ_KEY);
+    mountHost(taskId);
+    await flushPromises();
+
+    detail.onSaveTitle('新しいタイトル');
+    await flushPromises();
+    putControl.resolve!({ ...baseTask, title: '新しいタイトル' });
+    await flushPromises();
+    expect(detail.savedField.value).toBe('title');
+
+    taskId.value = 'ENG-2';
+    await flushPromises();
+    expect(detail.savedField.value).toBeNull();
+  });
+
+  it('移る前に始めた保存が移った後に完了しても、移った先のタスクに savedField を立てない', async () => {
+    const taskId = ref(TASK_SEQ_KEY);
+    mountHost(taskId);
+    await flushPromises();
+
+    detail.onSaveTitle('新しいタイトル');
+    await flushPromises();
+    taskId.value = 'ENG-2';
+    await flushPromises();
+    putControl.resolve!({ ...baseTask, title: '新しいタイトル' });
+    await flushPromises();
+
+    expect(detail.savedField.value).toBeNull();
+    // 保存そのものは移る前のタスクのキャッシュへ反映される
+    expect(queryClient.getQueryData(taskQueryKey)).toMatchObject({ title: '新しいタイトル' });
   });
 
   it('保存に失敗したら savedField は立てず、エラーを出す', async () => {
