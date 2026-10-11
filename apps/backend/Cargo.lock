@@ -348,13 +348,14 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "apalis"
-version = "1.0.0-rc.9"
+version = "1.0.0-rc.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7780d1e7082500a4fdb463b0a6fc1c00e4012cd9b2af101c26fcabbb2f390f2c"
+checksum = "39c5d49dbf3941b9e53111f78852420657ff0e1edc1fbcf9fc490a4e4222035e"
 dependencies = [
  "apalis-core",
  "futures-util",
  "pin-project",
+ "serde",
  "thiserror 2.0.21",
  "tower",
  "tracing",
@@ -411,9 +412,9 @@ dependencies = [
 
 [[package]]
 name = "apalis-core"
-version = "1.0.0-rc.9"
+version = "1.0.0-rc.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "797af42a40f6bc297365f2fed187b74d089c63641f57ce2a5e0f629db560cb47"
+checksum = "758d1411f09d953af0bc0e0170e84ab4b674352e3e2878d8600086502a836dc7"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -421,11 +422,14 @@ dependencies = [
  "futures-timer",
  "futures-util",
  "pin-project",
+ "rand 0.10.3",
  "serde",
  "thiserror 2.0.21",
  "tower-layer",
  "tower-service",
  "tracing",
+ "ulid 3.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -444,7 +448,7 @@ dependencies = [
  "sqlx 0.8.6",
  "thiserror 2.0.21",
  "tokio",
- "ulid",
+ "ulid 1.2.1",
 ]
 
 [[package]]
@@ -2090,7 +2094,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5096,7 +5100,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5155,7 +5159,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6524,7 +6528,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7038,6 +7042,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ulid"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "947dde63b6d514cc5e044edad4e0ca7261afd1099d16c83d942cb2b2f348689c"
+dependencies = [
+ "rand 0.10.3",
+ "serde",
+ "uuid",
+ "web-time",
+]
+
+[[package]]
 name = "uname"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7248,6 +7264,7 @@ dependencies = [
  "getrandom 0.4.2",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 
