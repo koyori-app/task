@@ -208,7 +208,7 @@ CREATE INDEX idx_passkeys_user ON passkeys(user_id);
 | sign_count | 0 以外の場合は厳密チェック。0 は「非対応認証器」として許容 |
 | origin 検証 | `webauthn-rs` が `https://app.example.com` のみ許可 |
 | challenge TTL | Redis で 5 分。使用後即削除 |
-| 最後の手段削除 | `password_hash IS NULL AND oauth_connections = 0 AND passkeys.count = 1` なら 403 |
+| 最後の手段削除 | `password_hash IS NULL AND oauth_connections = 0 AND passkeys.count = 1` なら 403（`github_app` の連携はログインに使えないので数えない） |
 
 ---
 

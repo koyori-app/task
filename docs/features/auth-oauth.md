@@ -312,6 +312,7 @@ DELETE /v1/auth/oauth/connections/{provider}
 ```
 
 `github_app` の連携は件数に数えない（サインインに使えないので、それだけ残るとログインできない）。
+`github_app` 自体の解除はこのガードにかけない（解除してもログイン手段は減らない）。
 
 ---
 

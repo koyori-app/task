@@ -209,8 +209,10 @@ async fn oauth_connection_count<C: ConnectionTrait>(
     // OAuth 接続が削除され、認証手段がゼロになる可能性がある。
     // 完全な保護には OAuth disconnect 側でも is_last_auth_method 相当のガードが必要。
     // → oauth.rs の disconnect_connection に同等の判定を実装する際に合わせて対処すること。
+    // 連携専用のプロバイダー（PR 承認用の GitHub）はログイン手段に数えない
     let rows = oauth_connections::Entity::find()
         .filter(oauth_connections::Column::UserId.eq(user_id))
+        .filter(oauth_connections::Column::Provider.ne(crate::oauth::GITHUB_APP_PROVIDER))
         .lock_exclusive()
         .all(db)
         .await?;

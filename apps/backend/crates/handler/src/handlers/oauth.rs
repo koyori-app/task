@@ -599,18 +599,21 @@ pub async fn disconnect_connection(
                 .await?
                 .ok_or(OAuthError::ConnectionNotFound)?;
 
-            // 連携専用のプロバイダーはログイン手段に数えない（それだけ残るとログインできない）
-            let connection_count = oauth_connections::Entity::find()
-                .filter(oauth_connections::Column::UserId.eq(auth.user_id))
-                .filter(oauth_connections::Column::Provider.ne(GITHUB_APP_PROVIDER))
-                .count(txn)
-                .await?;
+            // 連携専用のプロバイダーはログイン手段に数えない（それだけ残るとログインできない）。
+            // 解除してもログイン手段は減らないので、最後の手段の検査はログイン用の連携だけにかける
+            if connection.provider != GITHUB_APP_PROVIDER {
+                let connection_count = oauth_connections::Entity::find()
+                    .filter(oauth_connections::Column::UserId.eq(auth.user_id))
+                    .filter(oauth_connections::Column::Provider.ne(GITHUB_APP_PROVIDER))
+                    .count(txn)
+                    .await?;
 
-            let passkey_count = count_user_passkeys(txn, auth.user_id)
-                .await
-                .map_err(|e| OAuthError::Internal(e.into()))?;
-            if connection_count <= 1 && user.password_hash.is_none() && passkey_count == 0 {
-                return Err(OAuthError::LastAuthMethod);
+                let passkey_count = count_user_passkeys(txn, auth.user_id)
+                    .await
+                    .map_err(|e| OAuthError::Internal(e.into()))?;
+                if connection_count <= 1 && user.password_hash.is_none() && passkey_count == 0 {
+                    return Err(OAuthError::LastAuthMethod);
+                }
             }
 
             oauth_connections::Entity::delete_by_id(connection.id)
