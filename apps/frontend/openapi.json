@@ -2102,6 +2102,7 @@
       "get": {
         "tags": ["Auth"],
         "summary": "ログイン中ユーザー情報",
+        "description": "セッションと Device Token で呼べる（Desktop のアカウント表示）。PAT は 403。",
         "operationId": "me",
         "responses": {
           "200": {
