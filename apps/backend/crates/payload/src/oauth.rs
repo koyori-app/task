@@ -42,6 +42,9 @@ pub struct OAuthConnectionItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_login: Option<String>,
     pub connected_at: String,
+    /// ログイン手段に数える連携か。PR 承認用の GitHub（`github_app`）は連携専用なので `false`。
+    /// プロバイダー一覧の `sign_in` と違い、その設定が外れた後の連携でも判定できる
+    pub sign_in: bool,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

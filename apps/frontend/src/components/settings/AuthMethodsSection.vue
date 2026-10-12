@@ -133,22 +133,12 @@ watch(
 const providers = computed(() => providersQuery.data.value?.providers ?? []);
 const passkeyCount = computed(() => passkeysQuery.data.value?.passkeys?.length ?? 0);
 
-/** 連携専用（サインインに使えない）プロバイダーの連携識別子。ログイン手段には数えない */
-const linkOnlyConnectionProviders = computed(
-  () =>
-    new Set(
-      providers.value
-        .filter((provider) => !provider.sign_in)
-        .map((provider) => provider.connection_provider),
-    ),
-);
-
 const methodCount = computed(() =>
   countAuthMethods({
     hasPassword: props.user.has_password,
-    connectionCount: connections.value.filter(
-      (connection) => !linkOnlyConnectionProviders.value.has(connection.provider),
-    ).length,
+    // 連携専用（サインインに使えない）連携は数えない。判定は連携ごとに backend が返す
+    // （プロバイダー一覧から引くと、設定が外れたプロバイダーの連携をログイン手段に数える）
+    connectionCount: connections.value.filter((connection) => connection.sign_in).length,
     passkeyCount: passkeyCount.value,
   }),
 );
@@ -163,7 +153,7 @@ const linkedProviders = computed(() =>
     key: connectionKey(connection),
     connection,
     label: connectionProviderLabel(connection.provider),
-    signIn: !linkOnlyConnectionProviders.value.has(connection.provider),
+    signIn: connection.sign_in,
   })),
 );
 

@@ -144,6 +144,7 @@ function connection(overrides: Partial<Connection> = {}): Connection {
     provider_email: 'tester@example.com',
     instance_url: null,
     connected_at: '2026-09-01T10:00:00Z',
+    sign_in: true,
     ...overrides,
   };
 }
@@ -454,7 +455,7 @@ describe('AuthMethodsSection の OAuth 連携', () => {
     stubFetch({
       connections: [
         connection({ provider: 'github' }),
-        connection({ provider: 'github_app', provider_email: null }),
+        connection({ provider: 'github_app', provider_email: null, sign_in: false }),
       ],
       providers: [provider('github'), provider('github_app')],
     });
@@ -463,6 +464,23 @@ describe('AuthMethodsSection の OAuth 連携', () => {
 
     expect(document.body.textContent).toContain('GitHub（PR 承認用）');
     // 注意はログイン用の連携の行にだけ出る（承認用の連携を解除してもサインインは困らない）
+    expect(
+      document.body.textContent?.split('これが最後の認証方法の可能性があります。').length,
+    ).toBe(2);
+  });
+
+  /** 連携専用かは連携ごとの値で決める。プロバイダー一覧から引くと、設定が外れた後に数え直してしまう。 */
+  it('GitHub App の設定が外れても、残った PR 承認用の連携を認証方法に数えない', async () => {
+    stubFetch({
+      connections: [
+        connection({ provider: 'github' }),
+        connection({ provider: 'github_app', provider_email: null, sign_in: false }),
+      ],
+      providers: [provider('github')],
+    });
+    mountSection(false);
+    await flushPromises();
+
     expect(
       document.body.textContent?.split('これが最後の認証方法の可能性があります。').length,
     ).toBe(2);

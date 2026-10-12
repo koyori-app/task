@@ -444,6 +444,25 @@ async fn a_github_app_link_is_not_counted_as_a_sign_in_method() {
     .await
     .expect("insert github_app connection");
 
+    // 連携一覧は連携ごとにログイン手段かを返す（GitHub App の設定の有無に左右されない）
+    let listed: serde_json::Value = app
+        .get_with_session("/v1/auth/oauth/connections")
+        .await
+        .json()
+        .await
+        .expect("connections json");
+    let sign_in_of = |provider: &str| {
+        listed["connections"]
+            .as_array()
+            .expect("connections")
+            .iter()
+            .find(|c| c["provider"] == provider)
+            .unwrap_or_else(|| panic!("{provider} listed"))["sign_in"]
+            .as_bool()
+    };
+    assert_eq!(sign_in_of("gitlab_selfhosted"), Some(true));
+    assert_eq!(sign_in_of("github_app"), Some(false));
+
     let blocked = app
         .delete_with_session(&format!(
             "/v1/auth/oauth/connections/gitlab_selfhosted?instance_url={}",

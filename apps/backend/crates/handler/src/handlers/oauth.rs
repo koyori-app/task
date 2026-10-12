@@ -536,6 +536,7 @@ pub async fn list_connections(
     let connections = rows
         .into_iter()
         .map(|row| OAuthConnectionItem {
+            sign_in: OAuthSettings::is_sign_in_provider(&row.provider),
             provider: row.provider,
             provider_email: row.provider_email,
             instance_url: row.instance_url,

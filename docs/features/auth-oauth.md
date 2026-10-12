@@ -137,7 +137,9 @@ CREATE INDEX idx_oauth_connections_user ON oauth_connections(user_id);
 - トークンは既定で 8 時間で切れる。使う側（要約ジョブ）が期限の近いトークンを
   リフレッシュトークンで更新し、回転した新しいトークンを保存し直す
   （`service::oauth::github_app`）
-- ログイン手段には数えない（連携解除のガード。§7）
+- ログイン手段には数えない（連携解除のガード。§7）。連携一覧（`/oauth/connections`）も
+  連携ごとに `sign_in: false` を返し、設定画面はこれで数える（プロバイダー一覧の `sign_in` で
+  引くと、GitHub App の設定を外した後に残った連携をログイン手段に数えてしまう）
 
 プロバイダー設定は環境変数で管理する（テナント単位の設定は本仕様の対象外）:
 
@@ -334,7 +336,8 @@ DELETE /v1/auth/oauth/connections/{provider}
     {
       "provider": "github",
       "provider_email": "user@example.com",
-      "connected_at": "2026-05-27T10:00:00Z"
+      "connected_at": "2026-05-27T10:00:00Z",
+      "sign_in": true
     }
   ]
 }
