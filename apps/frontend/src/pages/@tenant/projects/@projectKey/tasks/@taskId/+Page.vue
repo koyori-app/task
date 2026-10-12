@@ -63,6 +63,7 @@ const {
   labelsError,
   fieldUpdating,
   fieldErrors,
+  savedField,
   isLoading,
   isNotFound,
   isError,
@@ -210,6 +211,7 @@ function openRelatedTask(task: TaskResponse) {
     :labels-error="labelsError"
     :field-updating="fieldUpdating"
     :field-errors="fieldErrors"
+    :saved-field="savedField"
     :loading="isLoading"
     :not-found="isNotFound"
     :error="isError"

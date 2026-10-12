@@ -278,6 +278,38 @@ describe('TaskDetailHub', () => {
     expect(wrapper.text()).toContain('優先度の更新に失敗しました');
   });
 
+  it('保存が確定したフィールドに「保存しました」を出す', () => {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task,
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+        savedField: 'description',
+      },
+    });
+
+    const notices = wrapper.findAll('[role="status"]');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.text()).toBe('保存しました');
+  });
+
+  it('同じフィールドの失敗があれば「保存しました」は出さず失敗を出す', () => {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task,
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+        savedField: 'description',
+        fieldErrors: { description: '更新に失敗しました' },
+      },
+    });
+
+    expect(wrapper.text()).not.toContain('保存しました');
+    expect(wrapper.text()).toContain('更新に失敗しました');
+  });
+
   it('emits the selected soft deadline through the SET path', async () => {
     const wrapper = mount(TaskDetailHub, {
       props: {
