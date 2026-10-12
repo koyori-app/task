@@ -92,9 +92,9 @@ export function useTaskDetail(params: UseTaskDetailParams) {
   const deleteError = ref<string | null>(null);
   const fieldErrors = ref<Partial<Record<EditableField, string>>>({});
   /** 直近に保存が確定したフィールド。一定時間で消える（Hub が「保存しました」を出す） */
-  const savedField = ref<MutatingField | null>(null);
+  const savedField = ref<EditableField | null>(null);
   let savedNoticeTimer: ReturnType<typeof setTimeout> | undefined;
-  function showSavedNotice(field: MutatingField) {
+  function showSavedNotice(field: EditableField) {
     if (savedNoticeTimer) clearTimeout(savedNoticeTimer);
     savedField.value = field;
     savedNoticeTimer = setTimeout(() => (savedField.value = null), SAVED_NOTICE_MS);
@@ -323,10 +323,11 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       labelsError.value = null;
     } else {
       fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
+      // 通知の欄があるのはインライン編集のフィールドだけ。ステータス等の保存で表示中の通知を消さない。
+      // 古いリビジョンの完了（上の早期 return）では出さない。
+      // オーバーレイは別のタスクへ移っても同じインスタンスなので、移る前のタスクの保存も出さない
+      if (queryKey === taskQueryKey.value) showSavedNotice(field);
     }
-    // 古いリビジョンの完了（上の早期 return）では出さない。
-    // オーバーレイは別のタスクへ移っても同じインスタンスなので、移る前のタスクの保存も出さない
-    if (queryKey === taskQueryKey.value) showSavedNotice(field);
   }
 
   function mutateTask(

@@ -31,7 +31,7 @@ import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import type { components } from '@/generated/api';
 import AvatarGroup from '@/components/AvatarGroup.vue';
-import type { EditableField, MutatingField } from '@/components/tasks/editable-field';
+import type { EditableField } from '@/components/tasks/editable-field';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
 import TaskPropertyRow from '@/components/tasks/TaskPropertyRow.vue';
 import { Button } from '@/components/ui/button';
@@ -91,7 +91,7 @@ const props = defineProps<{
   fieldUpdating?: Partial<Record<EditableField, boolean>>;
   fieldErrors?: Partial<Record<EditableField, string>>;
   /** 直近に保存が確定したフィールド。該当箇所に「保存しました」を出す（失敗表示が優先） */
-  savedField?: MutatingField | null;
+  savedField?: EditableField | null;
   loading?: boolean;
   notFound?: boolean;
   error?: boolean;

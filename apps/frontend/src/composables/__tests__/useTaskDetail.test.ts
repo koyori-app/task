@@ -258,6 +258,24 @@ describe('useTaskDetail のキャッシュ同期', () => {
     expect(detail.savedField.value).toBeNull();
   });
 
+  it('通知の欄が無い優先度の保存では、表示中の savedField を置き換えない', async () => {
+    mountHost();
+    await flushPromises();
+
+    detail.onSaveTitle('新しいタイトル');
+    await flushPromises();
+    putControl.resolve!({ ...baseTask, title: '新しいタイトル' });
+    await flushPromises();
+    expect(detail.savedField.value).toBe('title');
+
+    detail.onPriorityChange('High');
+    await flushPromises();
+    putControl.resolve!({ ...baseTask, title: '新しいタイトル', priority: 'High' });
+    await flushPromises();
+
+    expect(detail.savedField.value).toBe('title');
+  });
+
   it('別のタスクへ移ったら、前のタスクの savedField を消す', async () => {
     const taskId = ref(TASK_SEQ_KEY);
     mountHost(taskId);
