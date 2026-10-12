@@ -41,25 +41,33 @@ describe('review PR rail', () => {
   it('連携一覧からクラウド版 GitHub のユーザー名だけを拾う', () => {
     expect(
       viewerGithubLogin([
-        { provider: 'gitlab', provider_login: 'gl', connected_at: '' },
+        { provider: 'gitlab', provider_login: 'gl', connected_at: '', sign_in: true },
         {
           provider: 'github',
           provider_login: 'ghe',
           instance_url: 'https://ghe.example',
           connected_at: '',
+          sign_in: true,
         },
-        { provider: 'github', provider_login: 'mio', connected_at: '' },
+        { provider: 'github', provider_login: 'mio', connected_at: '', sign_in: true },
       ]),
     ).toBe('mio');
-    expect(viewerGithubLogin([{ provider: 'github', connected_at: '' }])).toBeNull();
+    expect(viewerGithubLogin([{ provider: 'github', connected_at: '', sign_in: true }])).toBeNull();
   });
 
   it('ユーザー名が分からない GitHub 連携も、連携ありとして見分ける', () => {
-    expect(hasGithubConnection([{ provider: 'github', connected_at: '' }])).toBe(true);
+    expect(hasGithubConnection([{ provider: 'github', connected_at: '', sign_in: true }])).toBe(
+      true,
+    );
     expect(
       hasGithubConnection([
-        { provider: 'github', instance_url: 'https://ghe.example', connected_at: '' },
-        { provider: 'gitlab', provider_login: 'gl', connected_at: '' },
+        {
+          provider: 'github',
+          instance_url: 'https://ghe.example',
+          connected_at: '',
+          sign_in: true,
+        },
+        { provider: 'gitlab', provider_login: 'gl', connected_at: '', sign_in: true },
       ]),
     ).toBe(false);
   });

@@ -23575,7 +23575,7 @@
       },
       "OAuthConnectionItem": {
         "type": "object",
-        "required": ["provider", "connected_at"],
+        "required": ["provider", "connected_at", "sign_in"],
         "properties": {
           "connected_at": {
             "type": "string"
@@ -23592,6 +23592,10 @@
           "provider_login": {
             "type": ["string", "null"],
             "description": "ホスト上のユーザー名（GitHub / GitLab の login。小文字で控えている）。\nレビュー画面が「自分が作成した PR」を PR の作成者と突き合わせて見分けるのに使う"
+          },
+          "sign_in": {
+            "type": "boolean",
+            "description": "ログイン手段に数える連携か。PR 承認用の GitHub（`github_app`）は連携専用なので `false`。\nプロバイダー一覧の `sign_in` と違い、その設定が外れた後の連携でも判定できる"
           }
         }
       },
@@ -23609,7 +23613,7 @@
       },
       "OAuthProviderItem": {
         "type": "object",
-        "required": ["provider", "connection_provider", "requires_instance_url"],
+        "required": ["provider", "connection_provider", "requires_instance_url", "sign_in"],
         "properties": {
           "connection_provider": {
             "type": "string",
@@ -23617,11 +23621,15 @@
           },
           "provider": {
             "type": "string",
-            "description": "プロバイダー slug（github | gitlab | gitlab_selfhosted | google | oidc）"
+            "description": "プロバイダー slug（github | gitlab | gitlab_selfhosted | google | oidc | github_app）"
           },
           "requires_instance_url": {
             "type": "boolean",
             "description": "ログイン開始時に self-hosted インスタンス URL の入力が必要か（gitlab_selfhosted のみ true）"
+          },
+          "sign_in": {
+            "type": "boolean",
+            "description": "サインインに使えるか。`false`（github_app）はログイン中の利用者への連携専用で、\nサインイン画面には出さない"
           }
         }
       },

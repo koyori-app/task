@@ -568,6 +568,10 @@ impl TestApp {
             }),
             google: None,
             oidc: None,
+            github_app: Some(ProviderConfig {
+                client_id: TEST_OAUTH_CLIENT_ID.to_string(),
+                client_secret: TEST_OAUTH_CLIENT_SECRET.to_string(),
+            }),
         };
 
         let state = AppState {

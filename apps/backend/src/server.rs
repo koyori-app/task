@@ -110,6 +110,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         http_client: state.http_client.clone(),
         review_summary_storage: state.review_summary_storage.clone(),
         pg_pool: state.pg_pool.clone(),
+        oauth_settings: state.oauth_settings.clone(),
     };
 
     let email_worker_storage = state.verification_email_storage.as_ref().clone();

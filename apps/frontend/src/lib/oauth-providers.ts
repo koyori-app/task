@@ -12,6 +12,8 @@ const PROVIDER_LABELS: Record<string, string> = {
   gitlab_selfhosted: 'GitLab (セルフホスト)',
   google: 'Google',
   oidc: 'OIDC',
+  // サインインには使わず、PR をレビュワー本人の名義で Approve するための連携
+  github_app: 'GitHub（PR 承認用）',
 };
 
 export function providerLabel(provider: string): string {

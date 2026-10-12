@@ -41,9 +41,9 @@ pub const SUMMARY_PENDING_TTL_SECS: u64 = 5 * 60;
 /// 残った場合の保険。
 ///
 /// 短すぎると保持中に期限が切れ、塞いだはずの並行書き込みが戻ってくる。
-/// ジョブ 1 回の GitHub API 往復は最悪ケースで 8 リクエスト（installation token /
-/// PR メタ / コメント探索 5 ページ / 投稿）、HTTP クライアントのタイムアウトは
-/// 1 リクエスト 30 秒なので 4 分。余裕を見て 10 分に置く。
+/// ジョブ 1 回の GitHub API 往復は最悪ケースで 14 リクエスト（installation token /
+/// PR メタ / コメント探索 5 ページ / 投稿 / 承認の探索 5 ページ / 承認）、HTTP クライアントの
+/// タイムアウトは 1 リクエスト 30 秒なので 7 分。余裕を見て 10 分に置く。
 pub const SUMMARY_LOCK_TTL_SECS: u64 = 10 * 60;
 
 const KEY_SUMMARY_PENDING: &str = "github:review_summary:pending:";
