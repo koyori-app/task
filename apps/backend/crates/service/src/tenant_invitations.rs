@@ -20,7 +20,7 @@ use crate::settings::Settings;
 use crate::smtp::SmtpClient;
 use common::cache::redis::RedisConnection;
 use entity::tenant_members::TenantRole;
-use entity::{tenant_invitations, tenant_members, tenants};
+use entity::{tenant_invitations, tenant_members, tenants, users};
 
 /// 招待の有効期限（日）。再送で発行し直すと、そこからまた数える。
 pub const TTL_DAYS: i64 = 7;
@@ -114,6 +114,35 @@ pub fn token_matches(
 
 /// 招待者が今もテナントのオーナーか `Admin` か。
 ///
+/// このアドレスの利用者が既にテナントに居るか（オーナーを含む）。テナントが無ければ `false`。
+/// 発行・再送・承諾のほか、送信ジョブも送る前に確かめる（投入の後にメンバー追加 API で
+/// 入った人へ、承諾が already-member になるリンクを送らない）。
+pub async fn is_member_email<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+    email: &str,
+) -> Result<bool, sea_orm::DbErr> {
+    let Some(user) = users::Entity::find()
+        .filter(users::Column::Email.eq(email))
+        .one(db)
+        .await?
+    else {
+        return Ok(false);
+    };
+    let Some(tenant) = tenants::Entity::find_by_id(tenant_id).one(db).await? else {
+        return Ok(false);
+    };
+    if tenant.owner_id == user.id {
+        return Ok(true);
+    }
+    Ok(tenant_members::Entity::find()
+        .filter(tenant_members::Column::TenantId.eq(tenant_id))
+        .filter(tenant_members::Column::UserId.eq(user.id))
+        .one(db)
+        .await?
+        .is_some())
+}
+
 /// 発行時は `require_invitation_admin` で確かめるが、降格・除名は保留中の招待に手を付けない。
 /// 承諾・プレビュー・送信の側で確かめないと、外される前に出しておいた招待で（自分の別アドレスを
 /// `Admin` として招待しておけば）外された後に戻れてしまう。テナントが無ければ `false`。

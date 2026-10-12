@@ -8211,6 +8211,16 @@
               }
             }
           },
+          "409": {
+            "description": "既にテナントのメンバー（already-member）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
           "429": {
             "description": "同じアドレスへ続けて送ろうとした",
             "content": {

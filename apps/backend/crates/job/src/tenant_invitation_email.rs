@@ -184,6 +184,16 @@ pub async fn process(
         );
         return Ok(());
     }
+    // 投入の後にメンバー追加 API で入っていれば、承諾が already-member になるリンクなので送らない
+    if tenant_invitations::is_member_email(&state.db, invitation.tenant_id, &invitation.email)
+        .await?
+    {
+        info!(
+            invitation_id = %job.invitation_id,
+            "skip tenant invitation email: invitee is already a member"
+        );
+        return Ok(());
+    }
     // 同じ世代なら何度作っても同じ値。再試行で配信済みのリンクを壊さない
     let token = tenant_invitations::invitation_token(
         invitation.id,

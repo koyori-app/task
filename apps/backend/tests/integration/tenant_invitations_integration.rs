@@ -726,6 +726,63 @@ async fn resending_a_demoted_admins_invitation_makes_it_usable_again() {
     );
 }
 
+/// 招待の後にメンバー追加 API で入った人の招待は残るが、承諾は already-member になる。
+/// 積まれていた送信ジョブはメールを出さず、再送も 409 で断る（使えないリンクを送らない）。
+#[tokio::test]
+async fn invitations_to_someone_who_already_joined_are_neither_sent_nor_resent() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let email = unique_email();
+    let other_email = unique_email();
+
+    login(&mut app, &owner).await;
+    let invitation_id = invite_ok(&app, tp.tenant_id, &email, "Member").await;
+    let other_id = invite_ok(&app, tp.tenant_id, &other_email, "Member").await;
+    let invitee = register_as(&app, &email).await;
+    let added = app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/members", tp.tenant_id),
+            json!({ "user_id": invitee.id, "role": "Member" }),
+        )
+        .await;
+    assert_eq!(added.status(), StatusCode::CREATED);
+
+    let mails_before = app.sent_mails().len();
+    run_job(
+        &app,
+        invitation_id,
+        current_generation(&app, invitation_id).await,
+    )
+    .await;
+    assert_eq!(
+        app.sent_mails().len(),
+        mails_before,
+        "既にメンバーの宛先にはメールを送らない"
+    );
+
+    clear_send_slot(&app, tp.tenant_id, &email).await;
+    let resent = app
+        .post_json_with_session(
+            &format!("{}/{invitation_id}/resend", invitations_path(tp.tenant_id)),
+            json!({}),
+        )
+        .await;
+    assert_eq!(resent.status(), StatusCode::CONFLICT);
+    let body = resent.text().await.expect("body");
+    assert!(body.contains("already-member"), "{body}");
+
+    // 対照: まだメンバーでない宛先の招待は再送できる
+    clear_send_slot(&app, tp.tenant_id, &other_email).await;
+    let resent = app
+        .post_json_with_session(
+            &format!("{}/{other_id}/resend", invitations_path(tp.tenant_id)),
+            json!({}),
+        )
+        .await;
+    assert_eq!(resent.status(), StatusCode::OK);
+}
+
 /// 承諾での招待者の確かめは権限の行を押さえる。確かめた直後の降格は承諾の確定まで待たされ、
 /// 「Admin と読んだ後に外され、それでも Admin として入る」すり抜けが起きない。
 #[tokio::test]

@@ -27,8 +27,8 @@ use payload::tenant_members::TenantMemberResponse;
 use service::db::is_postgres_unique_violation;
 use service::email::normalize_email;
 use service::tenant_invitations::{
-    find_by_token, inviter_still_admin, is_expired, lock_and_check_inviter, release_send_slot,
-    try_acquire_send_slot, try_consume_send_quota,
+    find_by_token, inviter_still_admin, is_expired, is_member_email, lock_and_check_inviter,
+    release_send_slot, try_acquire_send_slot, try_consume_send_quota,
 };
 
 /// 発行・一覧・取り消し・再送に共通する前段。テナントが無ければ 404、管理者でなければ 403。
@@ -42,30 +42,6 @@ async fn require_invitation_admin(
     auth.require_scope(scope)?;
     auth.ensure_tenant_access(state, tenant_id, None).await?;
     require_tenant_admin(state, tenant_id, auth.user_id).await
-}
-
-/// このアドレスの利用者が既にテナントに居るか（オーナーを含む）。
-async fn is_member_email(state: &AppState, tenant_id: Uuid, email: &str) -> Result<bool, AppError> {
-    let Some(user) = users::Entity::find()
-        .filter(users::Column::Email.eq(email))
-        .one(&state.db)
-        .await?
-    else {
-        return Ok(false);
-    };
-    let tenant = tenants::Entity::find_by_id(tenant_id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if tenant.owner_id == user.id {
-        return Ok(true);
-    }
-    Ok(tenant_members::Entity::find()
-        .filter(tenant_members::Column::TenantId.eq(tenant_id))
-        .filter(tenant_members::Column::UserId.eq(user.id))
-        .one(&state.db)
-        .await?
-        .is_some())
 }
 
 /// 宛先ごとの送信の枠を取り、テナントごと・招待者ごとの上限を 1 通ぶん使う。
@@ -168,7 +144,7 @@ pub async fn create_invitation(
 ) -> Result<(StatusCode, Json<TenantInvitationResponse>), AppError> {
     require_invitation_admin(&state, &auth, tenant_id, Scope::WriteTenant).await?;
     let email = normalize_email(&payload.email);
-    if is_member_email(&state, tenant_id, &email).await? {
+    if is_member_email(&state.db, tenant_id, &email).await? {
         return Err(AppError::ConflictDetail("already-member".into()));
     }
     let slot = acquire_send_slot(&state, tenant_id, auth.user_id, &email).await?;
@@ -213,6 +189,7 @@ async fn find_invitation(
     ),
     responses(
         (status = 200, description = "送り直した招待", body = TenantInvitationResponse),
+        (status = 409, description = "既にテナントのメンバー（already-member）", body = ServerError),
         (status = 429, description = "同じアドレスへ続けて送ろうとした", body = ServerError),
         CrudErrors,
     )
@@ -224,6 +201,10 @@ pub async fn resend_invitation(
 ) -> Result<Json<TenantInvitationResponse>, AppError> {
     require_invitation_admin(&state, &auth, tenant_id, Scope::WriteTenant).await?;
     let invitation = find_invitation(&state, tenant_id, invitation_id).await?;
+    // 招待の後にメンバー追加 API で入った人の招待は残っている。送っても承諾は already-member になる
+    if is_member_email(&state.db, tenant_id, &invitation.email).await? {
+        return Err(AppError::ConflictDetail("already-member".into()));
+    }
     let slot = acquire_send_slot(&state, tenant_id, auth.user_id, &invitation.email).await?;
 
     // 再送した人を招待者にする。元の招待者が外されていても、再送した人は今
@@ -364,7 +345,7 @@ pub async fn accept_invitation(
             "invitation-email-mismatch".into(),
         ));
     }
-    if is_member_email(&state, invitation.tenant_id, &invitation.email).await? {
+    if is_member_email(&state.db, invitation.tenant_id, &invitation.email).await? {
         return Err(AppError::ConflictDetail("already-member".into()));
     }
 
