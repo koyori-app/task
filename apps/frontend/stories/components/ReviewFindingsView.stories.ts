@@ -15,7 +15,7 @@ const OTHER_ID = '00000000-0000-0000-0000-0000000000bb';
 type StoryFinding = {
   id: string;
   severity: 'high' | 'medium' | 'low' | 'nit';
-  state: 'open' | 'fixed' | 'verified' | 'deferred' | 'rejected';
+  state: 'open' | 'fixing' | 'fixed' | 'verified' | 'deferred' | 'rejected';
   title: string;
   body: string;
   file: string | null;
@@ -23,7 +23,7 @@ type StoryFinding = {
   round: number;
   fixed_by: string | null;
   /** 閲覧者がいま遷移できる先（backend の available_actions） */
-  available_actions: ('open' | 'fixed' | 'verified' | 'deferred' | 'rejected')[];
+  available_actions: ('open' | 'fixing' | 'fixed' | 'verified' | 'deferred' | 'rejected')[];
 };
 
 const sampleFindings: StoryFinding[] = [
