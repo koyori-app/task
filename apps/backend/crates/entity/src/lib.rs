@@ -1,5 +1,6 @@
 pub mod _generated;
 pub mod audit_logs;
+pub mod device_tokens;
 pub mod drive_files;
 pub mod drive_folder_shares;
 pub mod drive_folders;
@@ -43,3 +44,5 @@ pub mod tenants;
 pub mod time_logs;
 pub mod totp_credentials;
 pub mod users;
+pub mod webhook_deliveries;
+pub mod webhooks;

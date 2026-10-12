@@ -71,6 +71,23 @@
       // all into one PR to avoid a version-skew split (see #248 / #293).
       "matchPackagePatterns": ["^@voidzero-dev/", "^@vitest/"],
       "groupName": "vite-plus"
+    },
+    {
+      // @codemirror/ の package は一つの PR で揃えて上げる。
+      // 何のために束ねたか: どの package も @codemirror/state の EditorState や
+      // Extension を受け渡す。版がずれると state が二つ入り、同じ型が別の実体
+      // になって typecheck が落ちる。実行時も instanceof が壊れ、編集器が描け
+      // なくなる（#694）。別々の PR で上げれば、途中の版で必ずずれる。
+      // なぜ前方一致か: どの package も state を引くゆえ、後から足した package
+      // も同じ群れに入る。名指しにすると、足した時の書き足しを忘れて漏れる。
+      // renovate の既定（group:recommended の group:codemirror）も同じく束ねる。
+      // ここに書くのは、束ねる理由を残し、既定が変わっても外れぬためである。
+      // 束ねても、lock の推移の解決に古い state が残ることは防げぬ（#694 で
+      // 起きた）。二重取りが出たら lock を取り直す。
+      // 何が起きたら解くか: 解かぬ。分けた方が細かく見られると思っても分けるな。
+      "matchManagers": ["npm"],
+      "matchPackagePatterns": ["^@codemirror/"],
+      "groupName": "codemirror"
     }
   ]
 }

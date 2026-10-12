@@ -71,6 +71,9 @@ impl std::str::FromStr for FindingSeverity {
 pub enum FindingState {
     #[sea_orm(string_value = "open")]
     Open,
+    /// 修正に着手した（修正側の宣言）。マージ判定では未解決のまま
+    #[sea_orm(string_value = "fixing")]
+    Fixing,
     #[sea_orm(string_value = "fixed")]
     Fixed,
     #[sea_orm(string_value = "verified")]
@@ -86,6 +89,7 @@ impl FindingState {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Open => "open",
+            Self::Fixing => "fixing",
             Self::Fixed => "fixed",
             Self::Verified => "verified",
             Self::Deferred => "deferred",
@@ -95,10 +99,10 @@ impl FindingState {
 
     /// マージ判定で「未解決」と数える状態か。
     ///
-    /// `Fixed` を未解決に数えるのは、修正の宣言だけでは確認が済んでいないため
-    /// （仕様 §5 の集計と同じ規則）。
+    /// `Fixing` / `Fixed` を未解決に数えるのは、着手や修正の宣言だけでは確認が
+    /// 済んでいないため（仕様 §5 の集計と同じ規則）。
     pub fn counts_as_unresolved(self) -> bool {
-        matches!(self, Self::Open | Self::Fixed)
+        matches!(self, Self::Open | Self::Fixing | Self::Fixed)
     }
 }
 
@@ -108,6 +112,7 @@ impl std::str::FromStr for FindingState {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "open" => Ok(Self::Open),
+            "fixing" => Ok(Self::Fixing),
             "fixed" => Ok(Self::Fixed),
             "verified" => Ok(Self::Verified),
             "deferred" => Ok(Self::Deferred),

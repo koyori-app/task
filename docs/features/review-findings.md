@@ -1,6 +1,6 @@
 ---
 title: レビュー指摘管理
-description: PR レビューの指摘を task で追跡し、GitHub には要約コメント 1 本だけを置く仕組みと運用ルール
+description: PR レビューの指摘を task で追跡し、GitHub には要約コメント 1 本と、マージ可でのレビュワー本人の Approve だけを置く仕組みと運用ルール
 icon: lucide:search-check
 ---
 
@@ -42,10 +42,10 @@ GitHub 側には bot の要約コメント 1 本だけを置く形に切り替�
 | ルール | 内容 |
 |---|---|
 | マージ基準 | **High / Medium はマージ前に必須。Low / Nit は繰り延べ可**（deferred → 通常タスク化して後日対応） |
-| インライン禁止 | GitHub の PR へインラインレビューコメントを投稿しない。PR に置くのは bot の**要約コメント 1 本**のみ |
+| インライン禁止 | GitHub の PR へインラインレビューコメントを投稿しない。PR に置くのは bot の**要約コメント 1 本**と、マージ可になったときの**レビュワー本人の Approve**（本文なし。§7）のみ |
 | 権威の所在 | 指摘の一覧・状態の唯一の権威は task。GitHub のスレッド resolved フラグは使わない・見ない |
 | 再レビュー | 依頼ごとに 1 ラウンド。判定は verified（解消）/ 据え置き / 未対応 で、指摘の状態として記録する |
-| ゲートの信頼境界 | **マージ可否はラウンド作成者の誠実性を前提にする**。ラウンドは `write:review` を持つ誰でも、指摘ゼロでも確定できるので、修正した本人が空のラウンドを 1 本出せば「レビュー済み・指摘なし・HEAD 一致」を自力で満たせる。これを task 側では防げない（GitHub の PR 作者と task の利用者を突き合わせる仕組みが無い）。**自己レビューの禁止は GitHub の branch protection（必須レビュワー）で担保し、本ゲートはそこに積む二段目として使う** |
+| ゲートの信頼境界 | **マージ可否はラウンド作成者の誠実性を前提にする**。ラウンドは `write:review` を持つ誰でも、指摘ゼロでも確定できるので、修正した本人が空のラウンドを 1 本出せば「レビュー済み・指摘なし・HEAD 一致」を自力で満たせる。これを task 側では防げない（GitHub の PR 作者と task の利用者を突き合わせる仕組みが無い）。**自己レビューの禁止は GitHub の branch protection（必須レビュワー）で担保し、本ゲートはそこに積む二段目として使う**。マージ可での Approve（§7）は App（bot）名義にしない——bot の承認は必須承認数に数えられうるので、空のラウンド 1 本で GitHub 側の承認条件まで満たせてしまう。レビュワー本人の名義なら、PR 作者は自分の PR を承認できない・write 権限が要る・Code Owners といった GitHub の規則がそのまま効く |
 | オーナーも境界の内側 | **テナントオーナーからはゲートを守らない**。オーナーは連携の解除も除名も行えるので、取り下げの代行条件（作成者の不在。§3）を自分で作れる——除名 → 代行で棄却 → 再招待、で他人の High を単独で消せる。これを条件の絞り込みで防ごうとしても、オーナーの権限そのものが上位にあるので防ぎきれない。**防ぐ代わりに痕跡を残す**: 代行での棄却は件数を集計と要約コメントに常設し（§5 / §7）、誰がいつ代行したかは遷移履歴に残る |
 | 未連携の PR 空間 | 連携の無いプロジェクトで扱ってよい PR は**1 リポジトリ相当まで**。ラウンドの控えが空になり（§3）、PR 番号だけがキーになるため、2 つのリポジトリの PR #10 をどちらもレビューすると同じ PR として続いてしまう |
 
@@ -112,7 +112,7 @@ PR 内で採番し、「どのラウンド（R1, R2, …）で出た指摘か」
 | `title` | 1 行の要約 |
 | `body` | 詳細（markdown。再現条件・根拠を書く） |
 | `file` / `line` | 位置情報（任意。インラインコメントの代替はこのテキスト情報で足りる） |
-| `state` | `open` / `fixed` / `verified` / `deferred` / `rejected` |
+| `state` | `open` / `fixing` / `fixed` / `verified` / `deferred` / `rejected` |
 | `deferred_task_id` | 繰り延べ時に自動起票した通常タスクへのリンク（任意） |
 
 ### 状態遷移
@@ -121,6 +121,7 @@ PR 内で採番し、「どのラウンド（R1, R2, …）で出た指摘か」
 open ──→ fixed ──→ verified        （修正宣言 → レビュー側の確認）
   ↑        │
   │        └─→ open                （差し戻し: 再確認で未修正と判断。レビュー側のみ）
+  ├─⇄ fixing ──→ fixed             （修正中: 着手の宣言とその取り消し。fixed へ進める）
   ├─⇄ deferred                     （Low/Nit のみ繰り延べ可。同プロジェクトに通常タスクを自動起票しリンク。
   │                                  open へ戻すとき自動起票タスクはシステムが自動クローズ）
   └─⇄ rejected                     （指摘自体が誤り。遷移・再オープンとも、その指摘を出した
@@ -128,6 +129,11 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
 ```
 
 - `fixed` へは `write:review` を持つ誰でも遷移できる（修正側の宣言）
+- `fixing`（修正中）は修正側が着手を知らせるための状態。`open → fixing`・`fixing → open`
+  （着手の取り消し）・`fixing → fixed` は `write:review` を持つ誰でも可。着手を経ずに
+  `open → fixed` としてもよい。`fixing` から `verified` / `deferred` / `rejected` へは
+  直接進めない（`fixed` か `open` を経る）。マージ可否の集計では `open` / `fixed` と同じく
+  **未解決**に数える（着手しただけでは何も直っていない）。`fixed_by` は記録しない
 - `verified` への遷移と `fixed → open` の差し戻しは**レビュー側だけ**: その指摘を含む
   ラウンドの作成者、または同じ PR のより新しいラウンドの作成者。**`fixed` を宣言した
   本人は不可**（自分の修正を自分で検証済みにできない）。`fixed → open` の差し戻しが
@@ -147,7 +153,7 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
   指摘の取り下げは出した本人の判断に閉じる。他人の指摘が誤りだと思ったら、
   自分のラウンドで反論を出すか、修正側として `fixed` を宣言する
 - **`deferred` へ遷移できるのは `low` / `nit` の指摘だけ**。`high` / `medium` の繰り延べは
-  拒否する（409）。マージ可否は集計側（§5）が open / fixed の High・Medium を数えて出すので、
+  拒否する（409）。マージ可否は集計側（§5）が open / fixing / fixed の High・Medium を数えて出すので、
   繰り延べを重大度で縛らないと、High を 1 回 `deferred` にするだけで §2 のマージ基準を
   迂回できてしまう。マージ可否の集計から外れる遷移（`deferred` / `rejected` / `verified`）は、
   どれも「修正する側が 1 人で通せない」ことを揃えて満たす
@@ -194,7 +200,7 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
 - ただし**`write:review` は繰り延べ経由で通常タスクの作成・クローズ・再オープンを伴う**
   （§3）。`write:task` を渡さない分離の例外として、この副作用だけは含むと理解する。
   作られるのは指摘に紐づく 1 件だけで、本文も指摘の写しに限られる
-- `admin:tenant` は既存規約どおり全スコープを包含する
+- `api` は全スコープを、`read_api` は `read:review` を含む read の全スコープを包含する
 - リソース束縛は既存の PAT 規則（テナント束縛 + `allowed_project_ids`）にそのまま乗る
 - セッションは既存どおり全スコープ相当。閲覧はプロジェクトに入れる人全員、
   作成・遷移は §3 の役割規則に従う
@@ -209,11 +215,11 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
 |---|---|
 | `POST /v1/tenants/{t}/projects/{p}/reviews` | ラウンド + 指摘の**一括作成**（1 リクエスト）。成功後に GitHub 要約更新をジョブ投入 |
 | `GET  /v1/tenants/{t}/projects/{p}/reviews?pr=618` | ラウンドの一覧（指摘の件数つき） |
-| `GET  /v1/tenants/{t}/projects/{p}/reviews/{id}` | ラウンドの詳細（指摘含む） |
+| `GET  /v1/tenants/{t}/projects/{p}/reviews/{id}` | ラウンドの詳細（指摘含む。各指摘に `available_actions`） |
 | `GET  /v1/tenants/{t}/projects/{p}/reviews/pull-requests` | レビューのある PR の一覧（ラウンド数・未解決数・塞いでいる件数）。**可否は返さない**——可否には鮮度と連携の有無も要り（§8 の 6 値）、この一覧はその材料を持たない。画面の PR 一覧が使う |
-| `GET  /v1/tenants/{t}/projects/{p}/reviews/summary?pr=618` | PR 単位の集計: 重大度 × 状態の件数、ラウンド数、最新ラウンドの `head_sha`、集計対象のリポジトリ、オーナー代行での棄却件数、「マージ可否」 |
-| `GET  /v1/tenants/{t}/projects/{p}/review-findings?pr=618&state=&severity=` | PR の指摘一覧（状態・重大度で絞り込み）。CLI の `review list` と UI の一覧が使う |
-| `PATCH /v1/tenants/{t}/projects/{p}/review-findings/{id}` | 状態遷移（`state` と任意のコメント） |
+| `GET  /v1/tenants/{t}/projects/{p}/reviews/summary?pr=618` | PR 単位の集計: 重大度 × 状態の件数、ラウンド数、最新ラウンドの `head_sha`、集計対象のリポジトリ、オーナー代行での棄却件数、「マージ可否」、表示用の判定 `gate` |
+| `GET  /v1/tenants/{t}/projects/{p}/review-findings?pr=618&state=&severity=` | PR の指摘一覧（状態・重大度で絞り込み。各指摘に `available_actions`）。CLI の `review list` と UI の一覧が使う |
+| `PATCH /v1/tenants/{t}/projects/{p}/review-findings/{id}` | 状態遷移（`state` と任意のコメント）。応答の指摘にも遷移後の `available_actions` |
 
 上表の PR 単位の読み取り（ラウンド一覧・集計・指摘一覧）は共通して `pr` と、任意の
 `repo=owner/name`、`host`、`host_url`、`pull_request_id` を受ける。`pull_request_id` を
@@ -223,6 +229,8 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
 - PR 番号は**1 以上の整数**として検証する。実在確認まではしない（それは要約コメントの
   投稿時に判明する。投稿失敗は起票を巻き戻さない）
 - 状態遷移後も要約更新ジョブを投入する
+- 起票と状態遷移は in-app 通知を作る（起票・遷移と同じトランザクション）。受信者の規則は
+  [通知・ウォッチャー](/features/tasks/notifications) §3.1
 - 絞り込みクエリに未知の値が混ざっていたら 400。黙って無視すると「絞り込みが
   効いていない」ことに気づけない
 - ラウンドの採番はプロジェクト行のロックで直列化する
@@ -239,7 +247,7 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
   `repo` / `host` / `host_url` は対象行との一致を検証し、不一致なら 400 とする。repo + pr だけの
   指定は同じプロジェクト内の候補が 1 件のときだけ許可する。複数候補は 409 とし、host または
   `pull_request_id` の再指定を要求する。候補が無い場合も現在の連携先へ暗黙にフォールバックしない
-- **マージ可否は「ラウンドが 1 件以上ある」かつ「open / fixed の High・Medium が 0」**。
+- **マージ可否は「ラウンドが 1 件以上ある」かつ「open / fixing / fixed の High・Medium が 0」**。
   件数だけで判定すると、**一度もレビューされていない PR が 0 件として「可」で通る**。
   これはマージ前ゲートとして最も危ない誤りなので、レビューの不在と「指摘なし」を
   区別する
@@ -258,6 +266,29 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
   するので（§1）、UI だけ素通しにするとゲートの半分が無いのと同じになる
 - 集計は**オーナー代行で棄却された件数**も返す。代行の条件（作成者の不在）はオーナー自身が
   作れるので（§2）、マージ可否を読むその場所に痕跡を出す
+- 指摘のレスポンス（ラウンド詳細・指摘一覧・起票・遷移の応答）は **`available_actions`**
+  ——要求者がいま遷移できる**遷移先の state** の一覧——を返す。`PATCH … {state}` にそのまま
+  渡せる値で、動詞ではない。`write:review` が無い要求者には空配列を返す。
+  判定は候補の state ごとに `service::reviews::check_transition`
+  （`ensure_transition_allowed` の判定本体）を呼ぶだけで、§3 の規則を別の表に写さない。
+  判定の材料（ラウンドの作成者・より新しいラウンドの作成者・作成者の不在・オーナー）は
+  一覧ぶんをまとめて引き、指摘の件数に比例して DB を往復しない。クライアント（Web・Desktop）は
+  これだけを見て操作を出し、規則を持たない
+- 集計は表示用の判定 **`gate`** を返す（`service::reviews::review_gate`）。上から順に最初に
+  当たったもの:
+
+  | `gate` | 条件 |
+  |---|---|
+  | `unlinked` | 集計対象のリポジトリが確定しない（連携なし） |
+  | `unreviewed` | ラウンドが 0 件 |
+  | `blocked` | open / fixing / fixed の High・Medium がある |
+  | `stale_unknown` | `cached_pr_head_sha` が無い |
+  | `outdated` | `cached_pr_head_sha` ≠ `latest_head_sha` |
+  | `ready` | 上のいずれでもない（`pr_head_checked_at` を併記する） |
+
+  §8 の 6 値と同じ規則。既存の欄（件数・SHA・確認時刻・代行棄却数・`mergeable`）は残す。
+  画面と Desktop はこの値を表示に使い、判定を再計算しない。権威のゲートは引き続き
+  CLI の `--head` 照合と branch protection
 
 ---
 
@@ -305,6 +336,28 @@ task review list   --project TASK --pr 618 --repo org/app --host-url https://for
 task review rounds --project TASK --pull-request-id 00000000-0000-0000-0000-000000000000
 ```
 
+レビューの通知（ラウンドの起票・指摘の状態遷移）は `task notifications` で読む。
+`--json` を付けなければ 1 件 1 行（`{ID}\t{未読|既読}\t{日時}\t{種別}\t{対象}\t{要約}`）で、
+先頭の完全な ID を `task notifications read` に渡せる。
+レビューの通知の対象は `PR #618 @ owner/name R2` の形になる。
+
+```bash
+task notifications list --unread --limit 20
+task notifications read <notification-id>
+task notifications read-all
+
+# プロジェクトごとの受け取り設定（フラグ無しは現在値の表示）
+task notifications settings --project TASK
+task notifications settings --project TASK --in-app review_round_created,review_finding_changed
+task notifications settings --project TASK --email ""      # メールは受け取らない
+```
+
+種別の綴りは送信前に検証し、未知の値は終了コード 2 で弾く。タスク通知の読み取り・既読化は
+`read:task` / `write:task`、レビュー通知は `read:review` / `write:review` を使う。
+通知設定の読み取り・更新は `read:task` / `write:task` のスコープで通る（PAT の視界は
+`apps/backend/docs/personal-access-tokens-authz.md`）。`--project` にキーを渡すと
+UUID を引くためにプロジェクト API を呼ぶので、`read:project` も要る。UUID を渡せば要らない。
+
 投入 JSON と絞り込みの値は**送信前に CLI 側でも検証する**。綴り違い
 （`severity: "critical"`、`--state closed`）や必須項目の欠落は、どの指摘の
 どの項目かを添えて終了コード 2 で弾く。サーバー側の検証に任せきりにすると、
@@ -323,7 +376,7 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
 
 | 終了する条件 | 理由 |
 |---|---|
-| High / Medium が open か fixed で残っている | §2 のマージ基準 |
+| High / Medium が open・fixing・fixed のいずれかで残っている | §2 のマージ基準 |
 | ラウンドが 1 件も無い | レビューされていない。「指摘なし」とは違う |
 | 最新ラウンドの `head_sha` が照合対象の HEAD と違う | レビュー後にコミットが積まれている |
 | 照合する HEAD が決まらない | 判断できないので通さない（`--no-head-check` で明示的に外せる） |
@@ -400,6 +453,28 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
   **PR メタが取れないときもマージ可を出さない**（件数表は出す）。取得した `head.sha` は
   確認時刻とセットでラウンドへキャッシュし（`pr_title` / `pr_author` と同じ流儀）、
   画面が使う（§8）
+- **マージ可になったら、最新ラウンドの作成者（レビュワー）本人の名義で PR を Approve する**
+  （本文なし）。条件は要約コメントが「マージ可」と書く条件と同一
+  （`SummarySnapshot::merge_ready`）で、加えて PR が open であること。最新ラウンドの作成者に
+  するのは、鮮度の照合と同じく「この commit を見た」と宣言した人と承認者を揃えるため
+  - トークンは GitHub App のユーザー認可（連携の provider `github_app`。[OAuth 認証](/features/auth-oauth)）
+    で得たもの。権限は「App の権限 ∩ 本人の権限」で、scope は無い。ログイン用の GitHub 連携
+    （OAuth App、`read:user` / `user:email`）では承認できない
+  - **レビュワーが連携していなければ承認しない**（ログに残すだけ）。bot で代わりに承認すると、
+    「連携しない」だけで §2 の空ラウンドの穴が開く
+  - トークンは既定で 8 時間で切れる。期限が近ければ使う前にリフレッシュトークンで更新し、
+    回転した新しいトークンを保存し直す。更新は連携の行をロックして直列にする（同じ利用者の
+    更新が並ぶと、後の 1 本は先に無効になったリフレッシュトークンを使って失敗する）
+  - 承認は `commit_id` に最新ラウンドの `head_sha` を**明示して**出す——省くと GitHub は最新の
+    commit に付けるので、判定と投稿の間に push されるとレビューしていない commit を承認する
+  - 同じ commit への本人の承認（`APPROVED`、または人に取り下げられた `DISMISSED`）が既にあれば
+    出さない。本人は login ではなく GitHub の数値のユーザー ID で見る（改名に強い）。取り下げ済みを
+    含めるのは、人が取り下げた直後の遷移で承認し直して争わないため。控えは DB に持たず
+    GitHub のレビュー一覧を権威にする
+  - レビュワーが PR 作者なら GitHub が 422 で拒む（仕組みどおり）。失敗（連携の取り消しで 401、
+    リポジトリへの権限が無く 403 など）も含め、要約コメントと同じくベストエフォートでログに
+    残すだけ。承認を取り消す処理は持たない（§9）。push 後に残る古い承認は、branch protection の
+    「Dismiss stale pull request approvals when new commits are pushed」で落とす
 - コメントは**最終更新時刻の時点のスナップショット**。push だけでは更新されない
   （更新の契機は task 側のラウンド作成と状態遷移だけ）。push で追従させるには
   webhook の push イベント処理が要る——受信基盤は既存（issues の取り込みで使用中）
@@ -460,7 +535,7 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
 
 | 項目 | 値 |
 |---|---|
-| URL | `/{tenant}/projects/{key}/reviews`（`?pr=618` で PR を指定。要約コメントのリンク先） |
+| URL | `/{tenant}/projects/{key}/reviews`（`?pr=618` で PR を指定。要約コメントのリンク先。PR 一覧の状態は `?mine=1`（自分が作成した PR だけ）と `?page=N`（ページを操作していなければ載せない。`page` が無いときは表示中の PR が載るページを開くので、明示した 1 ページ目は `page=1` として残す）） |
 | ページファイル | `apps/frontend/src/pages/@tenant/projects/@projectKey/reviews/+Page.vue` |
 | 本体 | `components/reviews/ReviewFindingsView.vue` と `ReviewRoundComposer.vue` |
 
@@ -471,18 +546,30 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
   確定までサーバーには何も作られない。指摘ゼロでの確定（指摘なしの記録）も可。
   head SHA は **40 桁の小文字 16 進かを送信前に見る**（CLI と同じ。`git log --oneline` の
   短縮 SHA を貼るのは人間のほうが起こりやすく、サーバーの 400 では何桁必要か伝わらない）
+- **PR 一覧**: 番号・タイトルの部分一致で探せる。「自分が作成した PR だけ」に絞れる——
+  PR の作成者（`pr_author`）は GitHub のユーザー名なので、閲覧者の連携 GitHub アカウントの
+  ユーザー名（`GET /v1/auth/oauth/connections` の `provider_login`）と大文字小文字を区別せず
+  照合する。未連携ならスイッチは無効で、URL の `mine=1` は理由を出して無視する。
+  ログイン名を控える前（`m20260911010000_oauth_provider_login`）からある連携は `provider_login` が空なので、
+  連携一覧 API が保存済みのアクセストークンでプロバイダーに問い合わせて補完する。トークンの期限切れ・失効で
+  補完できなければ、スイッチは無効のまま「GitHub を連携し直すと使えます」と案内する（未連携とは言わない）。
+  問い合わせは接続ごとに 3 秒で打ち切って並べ、PR 一覧は連携一覧の到着を待たずに出す（待つのはスイッチと
+  URL の `mine` の確かめだけ）。連携一覧の取得自体に失敗したときは未連携と言わず、URL の `mine=1` も消さない
+  10 件ごとにページを分け、`page` が無ければ表示中の PR が載っているページを開く。
+  範囲外の `page` は最後のページに寄せて理由を出す。絞り込みとページ分割は画面側で行う
+  （API は全件を集計して返す。サーバーで切っても集計の仕事は減らない）
 - **PR 単位の指摘一覧**: 重大度・状態・ラウンドでフィルタ。各指摘は title / file:line / 本文 /
   遷移履歴を持つ
-- **状態遷移の操作**: fixed / verified / deferred / rejected に加えて、**戻り遷移**
-  （fixed → open の差し戻し / deferred → open / rejected → open）。役割制約あり
-  （自分の修正を自分で verified にできない。High / Medium には deferred を出さない。
-  rejected は指摘を出した本人にだけ出す。ただし**作成者がテナントの利用者でなくなった
-  ラウンド**（`reviewer_left_tenant`）では、テナントオーナーにも出す（§3 の代行）。
-  fixed → verified / open は**レビュー側**——その指摘のラウンド以降のラウンドを出した人に
-  だけ出す）。§3 の表と 1:1 で対応させる
+- **状態遷移の操作**: fixing / fixed / verified / deferred / rejected に加えて、**戻り遷移**
+  （fixed → open の差し戻し / fixing → open の着手の取り消し / deferred → open / rejected → open）。出すボタンは指摘の
+  `available_actions`（§5）そのもの。役割制約（自分の修正を自分で verified にできない、
+  High / Medium には deferred を出さない、rejected は指摘を出した本人とオーナー代行だけ、
+  fixed → verified / open はレビュー側だけ）はすべて backend が判定済み。自分が fixed を
+  宣言した指摘には、確認が出ない理由の説明だけを添える
 - **マージ可否の即答**: **リポジトリ未確定 / 未レビュー / マージ不可（残数つき）/
-  レビューが古い / 鮮度不明 / マージ可** の 6 つを出し分ける（§5 と同じ規則 +
-  キャッシュ済みの現在 head との比較）。判定は**片道降格**——「可」以外へ落とす方向にだけ
+  レビューが古い / 鮮度不明 / マージ可** の 6 つを、集計の `gate`（§5）で出し分ける
+  （それぞれ `unlinked` / `unreviewed` / `blocked` / `outdated` / `stale_unknown` / `ready`）。
+  画面は判定を再計算しない。判定は**片道降格**——「可」以外へ落とす方向にだけ
   使い、「可」を保証には使わない
   - 「リポジトリ未確定」: GitHub 連携が無い。ゲートとして扱ってよい表示ではない——
     連携を外すと集計の視界が空になり、空のラウンド 1 本で「可」を作れるため。
@@ -502,12 +589,11 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
 - **プロジェクト横断の集計**: 溜まっている deferred（Low/Nit）の件数と一覧 — **未実装**
   （プロジェクト単位の一覧のみ。テナント横断のエンドポイントが要る）
 
-遷移規則（どの操作を出すか・押せるか）は `lib/review-findings.ts` に置き、backend の
-`service::reviews` と同じ表を持つ。押しても 409 / 403 になるボタンを出さないためで、
-**片方だけ変えると「押せるのに失敗する」ボタンができる**ので両方直すこと。
-`canTransition` / `canDefer` / `requiresFindingAuthor` / `requiresReviewerSide` は
-**4 つとも `findingActions` から使う**。定義しただけで呼び忘れると、その規則ぶんだけ
-「押すと 403」のボタンが戻る。
+遷移規則（どの操作を出すか）は画面に持たない。`lib/review-findings.ts` の
+`findingActions` は `available_actions` にラベルを付けるだけ、`mergeVerdict` は `gate` に
+見出しと説明を付けるだけにする。以前は backend と同じ表を画面にも持ち、片方だけ変えると
+「押せるのに失敗する」ボタンができた。Desktop が 3 つ目の写しを持たないよう、
+規則は backend の 1 か所に寄せた。
 
 ページは `<ReviewFindingsView :key="projectId">` で作り直す。vike-vue はクライアント遷移で
 同じ `+Page.vue` に解決される URL 間ではコンポーネントを patch するため、これが無いと
@@ -524,6 +610,8 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
 | deferred のプロジェクト横断ビュー | §8 のとおり画面はプロジェクト単位。テナント横断の集計エンドポイントを足してから |
 | 自己レビューの機械的な禁止 | GitHub の PR 作者と task の利用者を同定する仕組み（利用者への GitHub アカウント紐付け）が要る。本仕様ではゲートの信頼境界として明記するに留め（§2）、禁止は branch protection の必須レビュワーで担保する |
 | リポジトリ改名への追従 | ラウンドの控えは owner / name の文字列で、`github_integrations` も数値の repository id を持たない。GitHub 側でリポジトリや org を改名して再連携すると、**同じリポジトリなのに別リポジトリ扱い**になり、旧ラウンドが一覧・集計の既定の視界から外れる（§5 のリポジトリ絞り込みで読むことはできる）。追従するには id 列の追加と連携フローの改修が要るため、別の変更として扱う |
+| Approve の取り消し | 同じ head に後続ラウンドで High / Medium が出ても、出した承認は残る（push 後の古い承認は branch protection の stale 承認の取り下げに任せる）。取り消すならレビュワー本人の `REQUEST_CHANGES` で上書きするか、承認を dismiss する（保護ブランチでは管理者か許可リストの権限が要る） |
+| 複数レビュワーの承認 | 承認するのは最新ラウンドの作成者だけ。同じ head に複数人がラウンドを出しても、それ以前の作成者は承認しない（必須承認が 2 名以上のリポジトリでは足りない） |
 | ラウンドの取り消し（void） | 誤った PR 番号へ出したラウンドを消す手段は用意しない。ラウンドは「どの head を見た時点の判断か」の記録で、追記不可・削除不可がモデルの根幹。誤投の実害は指摘を `rejected` へ落とせば消え、ラウンドそのものは「そういうレビューがあった」記録として正しい |
 
 ---
@@ -580,6 +668,12 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
 - 要約コメントの鮮度: 投稿時点の PR head が最新ラウンドの `head_sha` と違えば
   「マージ可」と書かれない（対照: 一致すれば可）。PR メタの取得に失敗したときも
   「マージ可」と書かれない（件数表は出る）
+- Approve: マージ可の PR は、レビュワー本人のトークンで、レビューした commit を指定して
+  1 回だけ承認される（対照: High / Medium の未解決・レビュー後の push・閉じた PR では
+  承認しない）。レビュワーが連携していなければ承認しない（bot でも承認しない）。
+  トークンの期限が切れていれば更新してから承認し、回転したトークンを保存し直す。
+  同じ commit への本人の承認が既にあれば、2 ページ目にあっても承認し直さない。
+  承認が通らなくても（422 / 403）要約コメントは出て、ジョブは成功する
 - 要約コメントの持ち主: 同じリポジトリへ 2 つのプロジェクトが連携している PR では、
   それぞれのコメントを自分のマーカーで見分け、互いを上書きしない
 - マーカーの先取り: 第三者が同じマーカーを含むコメントを先に投稿していても、
@@ -718,3 +812,26 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
   鮮度の照合は厳密一致なので、短縮 SHA を受け取るとそのラウンドは永久にマージ可へ届かず、
   しかも「同じ commit に見えるのに再レビューを要求される」形で出て原因を辿れないため
 - 2026-09-02: PR を実体表（`forge_pull_requests`）へ切り出し、`reviews` は FK で参照する方針を [Git ホスティング↔タスク連携](/features/tasks/github-tasks) 側に置いた。レビュー指摘 → PR → タスクと辿るため。実装は同仕様の分割 1 で行う
+- 2026-09-22: ラウンドの起票と指摘の状態遷移を in-app 通知にする。宛先は同じ PR の関係者
+  （ラウンドの作成者・`fixed_by`・PR の作者）で、`review_round_any` を設定に入れた利用者は
+  ラウンドの起票だけを追加で受け取る。購読の既定は OFF（既定にすると、PR を見ていない
+  プロジェクト全員へ全ラウンドが流れる）。PR の作者への起票通知は要約ジョブが担う——
+  起票時点では作者が分からず、`reviews.pr_author` を埋めるのがこのジョブだから。
+  通知の可視性は `notifications.project_id` で判定する（レビュー通知はタスクに紐づかない）
+- 2026-09-24: 指摘に `available_actions`、集計に `gate` を足し、画面の遷移表・可否判定の写しを
+  消した。Koyori Desktop が 3 つ目の写しを持つと、規則を変えるたびに 3 か所を揃える必要が
+  出るため。判定は `ensure_transition_allowed` の本体（`check_transition`）を候補ごとに呼ぶだけで、
+  材料は一覧ぶんまとめて引く
+- 2026-10-01: 状態に `fixing`（修正中）を足した（TASK-240）。修正側が着手を知らせる手段が
+  無く、同じ指摘に複数人が手を付けうるため。マージ可否の集計では未解決に数え、遷移は
+  `open ⇄ fixing → fixed` を修正側に開くだけにした（集計から外れる遷移を増やさない）
+- 2026-10-04: PR 一覧に「自分が作成した PR だけ」とページ送り（10 件）を足し、`mine` / `page` を
+  URL に保つ。自分の PR は連携 GitHub のユーザー名で判定する（アプリのユーザー名とは一致すると
+  限らない）。そのために連携一覧 API が `provider_login` を返すようにした（TASK-243）
+- 2026-10-10: マージ可になったら、最新ラウンドの作成者本人の名義で PR を Approve する。
+  条件は要約コメントの「マージ可」と同じ 1 か所（`merge_ready`）に寄せ、コメントと承認が
+  食い違わないようにした。集計 API の `mergeable` は鮮度を見ないので使わない。App（bot）名義に
+  しないのは、bot の承認が必須承認数に数えられうるため（空のラウンドで GitHub 側の承認まで
+  満たせる。§2）。トークンは GitHub App のユーザー認可で取り、ログイン用の OAuth App の scope は
+  広げない（ログインで全リポジトリへの書き込みを求めることになる）。未連携のときは承認しない。
+  重複の控えは DB 列ではなく GitHub のレビュー一覧（本人の ID・同じ commit）で見る。取り消しは範囲外（§9）

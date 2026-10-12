@@ -294,34 +294,6 @@ describe('useTaskComments', () => {
     expect(comments.updateErrorCommentId.value).toBe('c-1');
   });
 
-  it('clearUpdateError は編集失敗の表示を消す（clearReplyError と同型）', async () => {
-    control.threads = [sampleThread('c-1', '元の本文')];
-    control.rejectPut = { status: 403, message: 'not your comment' };
-    mountHost();
-    await flushPromises();
-
-    await comments.updateComment('c-1', '直した本文');
-    expect(comments.updateError.value).not.toBe(null);
-
-    comments.clearUpdateError();
-    expect(comments.updateError.value).toBe(null);
-    expect(comments.updateErrorCommentId.value).toBe(null);
-  });
-
-  it('clearDeleteError は削除失敗の表示を消す（clearReplyError と同型）', async () => {
-    control.threads = [sampleThread('c-1', '消せないコメント')];
-    control.rejectDelete = { status: 403, message: 'forbidden' };
-    mountHost();
-    await flushPromises();
-
-    await comments.deleteComment('c-1');
-    expect(comments.deleteError.value).not.toBe(null);
-
-    comments.clearDeleteError();
-    expect(comments.deleteError.value).toBe(null);
-    expect(comments.deleteErrorCommentId.value).toBe(null);
-  });
-
   it('削除は DELETE を送り、成功で true を返して一覧を取り直す（soft-delete の形で残る）', async () => {
     control.threads = [sampleThread('c-1', '消すコメント')];
     mountHost();

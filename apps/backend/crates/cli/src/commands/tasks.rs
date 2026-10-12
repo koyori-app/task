@@ -761,6 +761,7 @@ mod tests {
         assert_eq!(json["clear_description"], false);
     }
 
+    /// 未指定のラベルで空配列を送ると、API 側は「全解除」と解釈する。
     #[test]
     fn an_update_touches_only_the_fields_that_were_given() {
         let body = update_body(Some("New"), None, None);
@@ -768,6 +769,9 @@ mod tests {
 
         assert_eq!(json["title"], "New");
         assert!(json["status_id"].is_null());
+        assert!(json["label_ids"].is_null(), "{}", json["label_ids"]);
+        assert!(json["custom_field_values"].is_null());
+        assert!(json["is_archived"].is_null());
         // 解除は明示的な指定でしか起きない
         for key in [
             "clear_description",
@@ -812,16 +816,15 @@ mod tests {
         assert_eq!(offset_for(0, 50).unwrap_err().exit_code, 2);
     }
 
+    /// 総数が 0 でもカーソルが残っていれば続きがある。文言そのものは
+    /// `points_at_the_next_page_only_while_rows_remain` が押さえる。
     #[test]
     fn task_listing_uses_the_cursor_even_when_the_total_disagrees() {
-        let mut tasks = TaskListResponse {
+        let tasks = TaskListResponse {
             tasks: vec![],
-            total: 100,
-            next_cursor: None,
+            total: 0,
+            next_cursor: Some("next".into()),
         };
-        assert_eq!(listing_summary(&tasks, 1), "0 件表示 / 全 100 件");
-        tasks.total = 0;
-        tasks.next_cursor = Some("next".into());
         assert_eq!(
             listing_summary(&tasks, 1),
             "0 件表示 / 全 0 件（--page 2 で続き）"
@@ -904,19 +907,8 @@ mod tests {
         assert!(check_deadline_order(None, None).is_ok());
     }
 
-    /// 未指定のラベルで空配列を送ると、API 側は「全解除」と解釈する。
     #[test]
-    fn leaves_labels_alone_when_none_were_given() {
-        let body = update_body(Some("New"), None, None);
-        let json = serde_json::to_value(&body).unwrap();
-
-        assert!(json["label_ids"].is_null(), "{}", json["label_ids"]);
-        assert!(json["custom_field_values"].is_null());
-        assert!(json["is_archived"].is_null());
-    }
-
-    #[test]
-    fn sends_the_resolved_fields_under_the_keys_the_api_expects() {
+    fn an_update_carries_the_resolved_fields_unchanged() {
         let resolved = ResolvedFields {
             soft_deadline: Some(parse_deadline("--soft-deadline", "2026-09-30").unwrap()),
             hard_deadline: Some(parse_deadline("--hard-deadline", "2026-10-31").unwrap()),
@@ -938,18 +930,16 @@ mod tests {
             label_ids: Some(vec![uuid(1)]),
             is_archived: Some(true),
         });
-        let json = serde_json::to_value(&body).unwrap();
 
-        // 日付だけの指定は日の始まり（parse_deadline の doc を参照）
-        assert_eq!(json["soft_deadline"], "2026-09-30T00:00:00Z");
-        assert_eq!(json["hard_deadline"], "2026-10-31T00:00:00Z");
-        assert_eq!(json["estimated_minutes"], 90);
-        assert_eq!(json["progress_pct"], 40);
-        assert_eq!(json["parent_task_id"], uuid(7).to_string());
-        assert_eq!(json["milestone_id"], uuid(8).to_string());
-        assert_eq!(json["sprint_id"], uuid(9).to_string());
-        assert_eq!(json["label_ids"][0], uuid(1).to_string());
-        assert_eq!(json["is_archived"], true);
+        assert_eq!(body.soft_deadline, resolved.soft_deadline);
+        assert_eq!(body.hard_deadline, resolved.hard_deadline);
+        assert_eq!(body.estimated_minutes, Some(90));
+        assert_eq!(body.progress_pct, Some(40));
+        assert_eq!(body.parent_task_id, Some(uuid(7)));
+        assert_eq!(body.milestone_id, Some(uuid(8)));
+        assert_eq!(body.sprint_id, Some(uuid(9)));
+        assert_eq!(body.label_ids, Some(vec![uuid(1)]));
+        assert_eq!(body.is_archived, Some(true));
     }
 
     #[test]

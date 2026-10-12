@@ -219,6 +219,38 @@ pub fn resolve_runtime_with(
     })
 }
 
+/// `auth whoami` 用。鍵と API の URL だけで `personal_tokens/me` を叩ける。
+pub fn resolve_token_runtime_with(
+    store: &ConfigStore,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<RuntimeConfig> {
+    let file = store.load()?;
+    let api_url = env("TASK_API_URL").or(file.api_url);
+    let token = env("TASK_TOKEN").or(file.token);
+
+    let missing: Vec<&str> = [
+        api_url.is_none().then_some("api_url (TASK_API_URL)"),
+        token.is_none().then_some("token (TASK_TOKEN)"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    if !missing.is_empty() {
+        return Err(CliError::validation(format!(
+            "Missing required configuration: {}. Set env vars or {}.",
+            missing.join(", "),
+            store.path().display(),
+        )));
+    }
+
+    Ok(RuntimeConfig {
+        api_url: api_url.unwrap().trim_end_matches('/').to_string(),
+        token: token.unwrap(),
+        tenant_id: String::new(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,6 +539,29 @@ mod tests {
         ] {
             assert!(err.message.contains(expected), "{}", err.message);
         }
+    }
+
+    #[test]
+    fn resolves_token_runtime_without_tenant_id() {
+        let (_home, store) = store();
+        store
+            .save(&TaskConfig {
+                api_url: Some("https://api.invalid".into()),
+                token: Some("token-1".into()),
+                tenant_id: None,
+            })
+            .unwrap();
+
+        let resolved = resolve_token_runtime_with(&store, |_| None).unwrap();
+
+        assert_eq!(
+            resolved,
+            RuntimeConfig {
+                api_url: "https://api.invalid".into(),
+                token: "token-1".into(),
+                tenant_id: String::new(),
+            }
+        );
     }
 
     #[test]

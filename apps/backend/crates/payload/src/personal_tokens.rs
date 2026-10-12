@@ -57,6 +57,10 @@ pub struct PersonalTokenIdentityResponse {
     #[schema(value_type = String, format = "uuid")]
     pub user_id: Uuid,
     pub username: String,
+    /// この PAT がバインドされたテナント。鍵だけ渡された自動化クライアントが
+    /// 行き先（/v1/tenants/{id}/... の {id}）を自力で知るための欄
+    #[schema(value_type = String, format = "uuid")]
+    pub tenant_id: Uuid,
     pub scopes: ScopeList,
     #[schema(value_type = Vec<String>, format = "uuid", nullable)]
     pub allowed_project_ids: Option<Vec<Uuid>>,

@@ -325,6 +325,7 @@ pub async fn delete_project(
     auth: AuthUser,
     Path((tenant_id, id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
+    auth.require_session()?;
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(id))
         .await?;

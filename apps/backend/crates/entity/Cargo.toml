@@ -8,3 +8,4 @@ sea-orm = { workspace = true, features = ["with-chrono", "postgres-array"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 utoipa = { workspace = true }
+workspace-hack = { version = "0.1", path = "../workspace-hack" }

@@ -10,11 +10,15 @@ pub struct Model {
     pub id: Uuid,
     pub user_id: Uuid,
     pub task_id: Option<Uuid>,
+    pub project_id: Option<Uuid>,
     pub notification_type: String,
     #[sea_orm(column_type = "JsonBinary")]
     pub payload: Json,
     pub read_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
+    pub email_queued_at: Option<DateTimeWithTimeZone>,
+    pub emailed_at: Option<DateTimeWithTimeZone>,
+    pub email_attempts: i16,
     #[sea_orm(
         belongs_to,
         from = "task_id",
@@ -23,6 +27,14 @@ pub struct Model {
         on_delete = "Cascade"
     )]
     pub tasks: HasOne<super::tasks::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "project_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    pub projects: HasOne<super::projects::Entity>,
     #[sea_orm(
         belongs_to,
         from = "user_id",

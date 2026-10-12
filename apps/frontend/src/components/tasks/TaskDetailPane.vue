@@ -3,6 +3,7 @@ import { X } from '@lucide/vue';
 import { computed, ref } from 'vue';
 
 import TaskActivityFeed from '@/components/tasks/TaskActivityFeed.vue';
+import TaskAttachments from '@/components/tasks/TaskAttachments.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
@@ -65,6 +66,7 @@ const {
   labelsError,
   fieldUpdating,
   fieldErrors,
+  savedField,
   isLoading,
   isNotFound,
   isError,
@@ -214,6 +216,7 @@ function onDeleteDialogCancel(event: Event) {
         :labels-error="labelsError"
         :field-updating="fieldUpdating"
         :field-errors="fieldErrors"
+        :saved-field="savedField"
         :description-html="renderedDescription.data.value?.html ?? null"
         :description-source="renderedDescription.data.value?.source ?? null"
         :loading="isLoading"
@@ -236,6 +239,7 @@ function onDeleteDialogCancel(event: Event) {
         @delete-request="openDeleteDialog"
       >
         <template v-if="displayTask" #main>
+          <TaskAttachments :tenant-id="tenantId" :project-id="projectId" :task-id="taskId" />
           <TaskSubtaskPanel
             :tenant-id="tenantId"
             :project-id="projectId"

@@ -43,6 +43,10 @@ pub fn routes() -> OpenApiRouter<AppState> {
                     crate::routes::reviews::finding_routes(),
                 )
                 .nest(
+                    "/{project_id}/webhooks",
+                    crate::routes::webhooks::webhook_routes(),
+                )
+                .nest(
                     "/{project_id}/assignable-users",
                     OpenApiRouter::<AppState>::new().routes(routes!(
                         crate::handlers::project_members::list_assignable_users
@@ -166,6 +170,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
             "/{tenant_id}/users/me",
             OpenApiRouter::<AppState>::new()
                 .routes(routes!(crate::handlers::my_tasks::get_personal_project))
-                .routes(routes!(crate::handlers::my_tasks::list_my_tasks)),
+                .routes(routes!(crate::handlers::my_tasks::list_my_tasks))
+                .routes(routes!(crate::handlers::dashboard::get_dashboard)),
         )
 }

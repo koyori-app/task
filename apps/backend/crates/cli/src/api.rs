@@ -78,8 +78,17 @@ impl ApiClient {
 
     /// 本文を返さない削除。204 を空応答の失敗と取り違えないよう別扱いにする。
     pub async fn delete(&self, segments: &[&str]) -> Result<()> {
+        self.send_no_content(Method::DELETE, segments).await
+    }
+
+    /// 本文を返さない更新（全件既読など）。
+    pub async fn patch_no_content(&self, segments: &[&str]) -> Result<()> {
+        self.send_no_content(Method::PATCH, segments).await
+    }
+
+    async fn send_no_content(&self, method: Method, segments: &[&str]) -> Result<()> {
         let url = self.url(segments, &[])?;
-        let response = self.http.request(Method::DELETE, url).send().await?;
+        let response = self.http.request(method, url).send().await?;
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         if status.is_success() {

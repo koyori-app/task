@@ -13,10 +13,12 @@ export type TokenScope = components['schemas']['Scope'];
  * 画面に並ぶ順序はこの記述順（`Object.entries` は文字列キーの挿入順を保つ）。
  */
 const SCOPE_DESCRIPTIONS: Record<TokenScope, string> = {
+  api: 'すべての読み書き（read:* と write:* をすべて包含）',
+  read_api: 'すべての参照（read:* をすべて包含）',
   'read:task': 'タスクとコメントの参照',
   'write:task': 'タスクの作成・編集・削除',
   'read:project': 'プロジェクトの参照',
-  'write:project': 'プロジェクトの管理',
+  'write:project': 'プロジェクトの管理（Webhook の設定を含む）',
   'read:milestone': 'マイルストーンの参照',
   'write:milestone': 'マイルストーンの管理',
   'read:sprint': 'スプリントの参照',
@@ -25,8 +27,8 @@ const SCOPE_DESCRIPTIONS: Record<TokenScope, string> = {
   'write:review': 'レビュー指摘の投稿・状態変更',
   'read:drive': 'ドライブのファイル参照',
   'write:drive': 'ドライブのファイル管理',
-  'admin:project': 'プロジェクト層のすべての操作（read:*/write:* を包含。テナント管理は含まない）',
-  'admin:tenant': 'テナント内のすべての操作（他のスコープを包含）',
+  'read:tenant': 'テナントとメンバーの参照',
+  'write:tenant': 'テナントの設定・メンバー・ドライブ容量の管理',
 };
 
 /** UI に並べるスコープの一覧。 */

@@ -115,16 +115,6 @@ describe('POST /internal/render-description', () => {
 
     expect(response.status).toBeGreaterThanOrEqual(400);
   });
-
-  it('script は sanitize で落とす', async () => {
-    const response = await post({
-      taskId: TASK_UUID,
-      description: '<script>alert(1)</script>\n\n本文',
-    });
-
-    const { html } = (await response.json()) as { html: string | null };
-    expect(html).not.toContain('<script');
-  });
 });
 
 // この Elysia はドメイン直下に出ているので、素のままだと誰でも

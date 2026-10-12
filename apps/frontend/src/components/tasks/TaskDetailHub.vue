@@ -19,7 +19,6 @@ import {
   Search,
   Settings,
   ListChecks,
-  Paperclip,
   SquarePen,
   Star,
   Tag,
@@ -91,6 +90,8 @@ const props = defineProps<{
   labelsError?: string | null;
   fieldUpdating?: Partial<Record<EditableField, boolean>>;
   fieldErrors?: Partial<Record<EditableField, string>>;
+  /** 直近に保存が確定したフィールド。該当箇所に「保存しました」を出す（失敗表示が優先） */
+  savedField?: EditableField | null;
   loading?: boolean;
   notFound?: boolean;
   error?: boolean;
@@ -331,7 +332,6 @@ function toggleLabel(labelId: string, checked: boolean) {
 const PENDING_ACTIONS = [
   { label: 'フィールドを追加', icon: SquarePen },
   { label: 'チェックリストを作成', icon: ListChecks },
-  { label: 'ファイルを添付', icon: Paperclip },
 ];
 
 function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
@@ -502,6 +502,13 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
               </button>
               <p v-if="fieldError('title')" class="mt-1 text-xs text-destructive">
                 {{ fieldError('title') }}
+              </p>
+              <p
+                v-else-if="savedField === 'title'"
+                role="status"
+                class="mt-1 text-xs text-muted-foreground"
+              >
+                保存しました
               </p>
             </div>
 
@@ -681,6 +688,13 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                     class="mt-1 text-xs text-destructive"
                   >
                     {{ fieldError('soft_deadline') ?? fieldError('hard_deadline') }}
+                  </p>
+                  <p
+                    v-else-if="savedField === 'soft_deadline' || savedField === 'hard_deadline'"
+                    role="status"
+                    class="mt-1 text-xs text-muted-foreground"
+                  >
+                    保存しました
                   </p>
                 </TaskPropertyRow>
 
@@ -906,6 +920,13 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                   <p v-if="fieldError('progress_pct')" class="mt-1 text-xs text-destructive">
                     {{ fieldError('progress_pct') }}
                   </p>
+                  <p
+                    v-else-if="savedField === 'progress_pct'"
+                    role="status"
+                    class="mt-1 text-xs text-muted-foreground"
+                  >
+                    保存しました
+                  </p>
                 </TaskPropertyRow>
               </div>
             </div>
@@ -983,6 +1004,13 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
               </button>
               <p v-if="fieldError('description')" class="mt-2 text-xs text-destructive">
                 {{ fieldError('description') }}
+              </p>
+              <p
+                v-else-if="savedField === 'description'"
+                role="status"
+                class="mt-2 text-xs text-muted-foreground"
+              >
+                保存しました
               </p>
             </div>
 

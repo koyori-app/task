@@ -9,6 +9,12 @@ mod m20260905000000_tenant_icon_emoji;
 mod m20260907000000_default_done_status;
 mod m20260911000000_forge_commit_links;
 mod m20260911010000_oauth_provider_login;
+mod m20260922000000_notifications_project_id;
+mod m20260922010000_notifications_email_outbox;
+mod m20260922020000_webhooks;
+mod m20260924000000_notifications_cursor_index;
+mod m20260924010000_device_tokens;
+mod m20261004000000_pat_scopes_api;
 
 pub struct Migrator;
 
@@ -25,6 +31,12 @@ impl MigratorTrait for Migrator {
             Box::new(m20260907000000_default_done_status::Migration),
             Box::new(m20260911000000_forge_commit_links::Migration),
             Box::new(m20260911010000_oauth_provider_login::Migration),
+            Box::new(m20260922000000_notifications_project_id::Migration),
+            Box::new(m20260922010000_notifications_email_outbox::Migration),
+            Box::new(m20260922020000_webhooks::Migration),
+            Box::new(m20260924000000_notifications_cursor_index::Migration),
+            Box::new(m20260924010000_device_tokens::Migration),
+            Box::new(m20261004000000_pat_scopes_api::Migration),
         ]
     }
 }

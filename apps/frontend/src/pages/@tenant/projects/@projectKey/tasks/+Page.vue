@@ -4,16 +4,23 @@ import type { LucideIcon } from '@lucide/vue';
 import type {
   ColumnDef,
   ColumnFiltersState,
+  ColumnVisibilityState,
   PaginationState,
   SortingState,
-  VisibilityState,
 } from '@tanstack/vue-table';
 import {
   FlexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getSortedRowModel,
-  useVueTable,
+  columnFilteringFeature,
+  columnVisibilityFeature,
+  createFilteredRowModel,
+  createSortedRowModel,
+  filterFns,
+  rowPaginationFeature,
+  rowSelectionFeature,
+  rowSortingFeature,
+  sortFns,
+  tableFeatures,
+  useTable,
 } from '@tanstack/vue-table';
 import { PhCaretDown, PhCaretUp, PhCaretUpDown, PhRows, PhTable } from '@phosphor-icons/vue';
 import { computed, h, onUnmounted, ref, watch, type Component } from 'vue';
@@ -59,6 +66,7 @@ import {
   useTaskLabelFilter,
   watchAvailableTaskLabels,
 } from './task-list-label-filter';
+import { popOverlayParent, pushOverlayParent } from './task-list-overlay-stack';
 import { shouldActivateRow, shouldOpenRowInNewTab } from './task-list-row-activate';
 import {
   parseTaskListUrlState,
@@ -127,6 +135,9 @@ const {
 // selectedTaskId は URL/詳細ページと同形の seq key（例: "ENG-42"）を保持する。
 // これにより詳細クエリのキャッシュがフルページ詳細（@taskId）と共有される。
 const selectedTaskId = ref<string | null>(null);
+// オーバーレイの中で子タスクへ移ったときの戻り先（task-list-overlay-stack）。
+// 一覧の行・タスク作成・プロジェクト切替のように外から選択が変わったら捨てる。
+const overlayParentStack = ref<string[]>([]);
 
 // 広い画面でのみ inline 分割を出す。狭い画面は従来どおり詳細ページへ遷移させる。
 const canInline = useMediaQuery('(min-width: 1024px)');
@@ -147,6 +158,7 @@ if (!import.meta.env.SSR) {
 
 // プロジェクト切替時は選択を解除する（別プロジェクトのタスクを指したままにしない）。
 watch(projectKey, () => {
+  overlayParentStack.value = [];
   selectedTaskId.value = null;
 });
 
@@ -164,6 +176,7 @@ function onSelectRow(seqId: number) {
     void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, seqId));
     return;
   }
+  overlayParentStack.value = [];
   selectedTaskId.value = taskSeqKey(projectKey.value, seqId);
 }
 
@@ -481,6 +494,27 @@ onUnmounted(() => {
 function openOverlay(task: TaskResponse) {
   onSelectRow(task.seq_id);
 }
+
+/** オーバーレイの中から別タスクを開く。戻れるように今のタスクを積む */
+function openTaskFromOverlay(task: TaskResponse) {
+  const next = taskSeqKey(projectKey.value, task.seq_id);
+  overlayParentStack.value = pushOverlayParent(
+    overlayParentStack.value,
+    selectedTaskId.value,
+    next,
+  );
+  // オーバーレイが出ている = canInline なので、onSelectRow の詳細ページ送りは要らない
+  selectedTaskId.value = next;
+}
+
+/** Esc・外側クリック・× で閉じる。子から開いていたら親へ 1 段戻る */
+function onOverlayOpenChange(open: boolean) {
+  if (open) return;
+  const { stack, next } = popOverlayParent(overlayParentStack.value);
+  overlayParentStack.value = stack;
+  selectedTaskId.value = next;
+}
+
 watchAvailableTaskLabels(selectedLabelId, fetchedProjectLabels);
 const selectedLabelName = computed(
   () => projectLabels.value.find((label) => label.id === selectedLabelId.value)?.name ?? null,
@@ -545,8 +579,26 @@ const PRIORITY_ORDER: Record<ApiPriority, number> = {
   Trivial: 5,
 };
 
+// ---- テーブル機能（v9） ----
+// v9 は使う機能を features として先に束ね、その型が Column / ColumnDef /
+// Table の第一型引数になる（機能ごとに state・options・API が型に乗る造り）。
+// row model の工場（sorted/filtered）と、列が名前で引く sort/filter 関数の
+// 登録もこの束が運ぶ。coreRowModel は組み込みの既定があるため書かない。
+const features = tableFeatures({
+  columnFilteringFeature,
+  columnVisibilityFeature,
+  rowPaginationFeature,
+  rowSelectionFeature,
+  rowSortingFeature,
+  filteredRowModel: createFilteredRowModel(),
+  sortedRowModel: createSortedRowModel(),
+  filterFns,
+  sortFns,
+});
+type TaskTableFeatures = typeof features;
+
 /** ソート可能な列ヘッダー: 矢印アイコン付きボタンを返す */
-function sortableHeader(column: Column<TaskRow>, label: string) {
+function sortableHeader(column: Column<TaskTableFeatures, TaskRow>, label: string) {
   const sorted = column.getIsSorted();
   const icon =
     sorted === 'asc'
@@ -584,6 +636,7 @@ function onTaskCreated(task: CreatedTask) {
   isCreateDialogOpen.value = false;
   // 分割ビューが出せる画面では作成タスクを右ペインで開く。狭い画面は詳細ページへ遷移。
   if (canInline.value) {
+    overlayParentStack.value = [];
     selectedTaskId.value = taskSeqKey(projectKey.value, task.seq_id);
     return;
   }
@@ -591,7 +644,7 @@ function onTaskCreated(task: CreatedTask) {
 }
 
 // ---- テーブル列定義 ----
-const columns: ColumnDef<TaskRow>[] = [
+const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
   {
     id: 'select',
     header: ({ table }) =>
@@ -664,7 +717,7 @@ const columns: ColumnDef<TaskRow>[] = [
   {
     id: 'priority',
     accessorFn: (row) => row.priority,
-    sortingFn: (a, b) => PRIORITY_ORDER[a.original.priority] - PRIORITY_ORDER[b.original.priority],
+    sortFn: (a, b) => PRIORITY_ORDER[a.original.priority] - PRIORITY_ORDER[b.original.priority],
     header: ({ column }) => sortableHeader(column, '優先度'),
     cell: ({ row }) => {
       const pc = PRIORITY_CONFIG[row.original.priority];
@@ -750,7 +803,7 @@ function onListSortingChange(next: TaskListSortingState) {
   sorting.value = next;
 }
 const columnFilters = ref<ColumnFiltersState>([]);
-const columnVisibility = ref<VisibilityState>({});
+const columnVisibility = ref<ColumnVisibilityState>({});
 const rowSelection = ref({});
 
 // ---- URL 同期 ----
@@ -767,15 +820,13 @@ useTaskListUrlSync({
   isPagerActive: usesTaskList,
 });
 
-const table = useVueTable({
+const table = useTable({
+  features,
   get data() {
     return taskRows.value;
   },
   columns,
-  getRowId: (row) => row.id,
-  getCoreRowModel: getCoreRowModel(),
-  getSortedRowModel: getSortedRowModel(),
-  getFilteredRowModel: getFilteredRowModel(),
+  getRowId: (row: TaskRow) => row.id,
   manualPagination: true,
   get rowCount() {
     return taskTotal.value;
@@ -1118,6 +1169,7 @@ const table = useVueTable({
               :on-comment="(task, body) => rowMutations.addComment(task.id, body)"
               :creating-status-ids="rowMutations.creatingStatusIds.value"
               :on-create="rowMutations.createTask"
+              :on-move-status="(task, statusId) => rowMutations.setStatus(task, statusId)"
             />
 
             <!-- 通常一覧テーブル -->
@@ -1236,12 +1288,8 @@ const table = useVueTable({
       :tenant-display-id="tenantDisplayId"
       :project-key="projectKey"
       :task-id="overlayRenderedTaskSeqKey"
-      @open-task="openOverlay"
-      @update:open="
-        (value) => {
-          if (!value) selectedTaskId = null;
-        }
-      "
+      @open-task="openTaskFromOverlay"
+      @update:open="onOverlayOpenChange"
     />
   </div>
 </template>

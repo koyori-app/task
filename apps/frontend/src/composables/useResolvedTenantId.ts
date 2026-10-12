@@ -34,9 +34,6 @@ export function useResolvedTenantId(tenantDisplayId: MaybeRefOrGetter<string>) {
     return id ? (id as TenantUuid) : null;
   });
 
-  /** 解決したテナントのオーナー。代行系の表示判定（レビュー画面など）が使う。 */
-  const tenantOwnerId = computed(() => resolvedTenant.value?.owner_id ?? null);
-
   const isTenantNotFound = computed(
     () =>
       !!displayId.value &&
@@ -55,7 +52,6 @@ export function useResolvedTenantId(tenantDisplayId: MaybeRefOrGetter<string>) {
     tenantId,
     /** 解決したテナントそのもの。設定画面は id 以外（名前・説明・アイコン）も要る。 */
     resolvedTenant,
-    tenantOwnerId,
     isTenantNotFound,
     isResolving,
     isError,

@@ -288,16 +288,23 @@ pub async fn resend_verification_email(
     path = "/me",
     tag = "Auth",
     summary = "ログイン中ユーザー情報",
+    description = "セッションと Device Token で呼べる（Desktop のアカウント表示）。PAT は 403。",
     responses(
         (status = 200, description = "現在のアカウント情報", body = UserResponse),
         SessionAuthErrors,
     )
 )]
 pub async fn me(
-    State(_): State<AppState>,
-    user: CurrentUser,
+    State(state): State<AppState>,
+    auth: AuthUser,
 ) -> Result<Json<UserResponse>, AuthError> {
-    Ok(Json(user.0.into()))
+    auth.require_session_or_device_token()
+        .map_err(|_| AuthError::Forbidden)?;
+    let user = users::Entity::find_by_id(auth.user_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AuthError::Unauthorized)?;
+    Ok(Json(user.into()))
 }
 
 #[axum::debug_handler]

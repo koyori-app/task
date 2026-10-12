@@ -96,7 +96,7 @@ describe('CreateTenantDialog', () => {
       },
     });
     expect(wrapper.emitted('update:open')).toContainEqual([false]);
-    expect(assign).toHaveBeenCalledWith('/new-tenant/my-tasks');
+    expect(assign).toHaveBeenCalledWith('/new-tenant');
   });
 
   it('rejects missing and whitespace-only names before submission', async () => {

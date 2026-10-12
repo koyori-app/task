@@ -95,6 +95,7 @@ function mountList(
       sorting: [],
       onComment: vi.fn(async () => true),
       onCreate,
+      onMoveStatus: vi.fn(async () => undefined),
     },
     attachTo: document.body,
   });

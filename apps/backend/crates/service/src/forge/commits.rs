@@ -5,12 +5,9 @@
 //! アクティビティは `dedupe_key` の UNIQUE で 1 回だけ積む。途中で失敗しても
 //! 再試行で同じ状態に収束するので、コミットごとのトランザクションは張らない。
 
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
-    Statement, prelude::Uuid,
-};
+use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait, Statement, prelude::Uuid};
 
-use entity::{oauth_connections, projects, tenants};
+use entity::{projects, tenants};
 
 use super::events::{ForgeCommit, ForgeRepo};
 use super::task_refs;
@@ -43,7 +40,9 @@ pub async fn apply_push(
             continue;
         }
 
-        let author = author_user_id(db, repo, &commit.author_handle).await?;
+        // コミットの作者はメール由来で偽装できるので、ここで得た利用者は表示にだけ使う
+        let author =
+            super::identity::user_id_for_login(db, &repo.host, &commit.author_handle).await?;
         let payload = serde_json::json!({
             "host": repo.host,
             "sha": commit.sha,
@@ -86,36 +85,6 @@ pub async fn apply_push(
         }
     }
     Ok(())
-}
-
-/// 作者を Task ユーザーに解決する。ホスト上のログイン名（小文字）を控えた接続がちょうど 1 件の
-/// ときだけ採る。ログイン名の一意性は保存側の付け替えで保っているので、競合で 2 件あっても決め打ちしない。
-///
-/// `author_handle` はホストがコミットのメールアドレスから解決した値で、署名の無いコミットなら
-/// 偽装できる。ここで得たユーザーは表示にだけ使い、通知や権限の根拠にしない。
-async fn author_user_id(
-    db: &DatabaseConnection,
-    repo: &ForgeRepo,
-    author_handle: &str,
-) -> Result<Option<Uuid>, anyhow::Error> {
-    if author_handle.is_empty() {
-        return Ok(None);
-    }
-    // ponytail: クラウド版（instance_url が NULL）の接続だけを見る。セルフホストの GitLab / Forgejo を足すときは host_url と instance_url を突き合わせる
-    let user_ids: Vec<Uuid> = oauth_connections::Entity::find()
-        .filter(oauth_connections::Column::Provider.eq(repo.host.as_str()))
-        .filter(oauth_connections::Column::InstanceUrl.is_null())
-        .filter(oauth_connections::Column::ProviderLogin.eq(author_handle.to_lowercase()))
-        .select_only()
-        .column(oauth_connections::Column::UserId)
-        .limit(2)
-        .into_tuple()
-        .all(db)
-        .await?;
-    Ok(match user_ids.as_slice() {
-        [user_id] => Some(*user_id),
-        _ => None,
-    })
 }
 
 /// リンク先のプロジェクトに入れる人か。入れない人の名前を、そのプロジェクトの履歴に載せないために見る。

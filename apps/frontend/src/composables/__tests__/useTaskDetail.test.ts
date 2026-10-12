@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { defineComponent, ref } from 'vue';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { defineComponent, ref, type MaybeRefOrGetter } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import type { paths } from '@/generated/api';
@@ -138,13 +138,13 @@ describe('useTaskDetail のキャッシュ同期', () => {
   let detail: ReturnType<typeof useTaskDetail>;
   let onAfterDelete: ReturnType<typeof vi.fn<(listHref: string) => void>>;
 
-  function mountHost() {
+  function mountHost(taskId: MaybeRefOrGetter<string> = TASK_SEQ_KEY) {
     const Host = defineComponent({
       setup() {
         detail = useTaskDetail({
           tenantDisplayId: 'acme',
           projectKey: 'ENG',
-          taskId: TASK_SEQ_KEY,
+          taskId,
           onAfterDelete,
         });
         return () => null;
@@ -169,6 +169,10 @@ describe('useTaskDetail のキャッシュ同期', () => {
     labelsControl.mode = 'success';
     labelsControl.data = [];
     baseTask.labels = [];
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('ラベル一覧の取得失敗は projectLabelsError として公開し、詳細全体の isError にはしない', async () => {
@@ -227,6 +231,95 @@ describe('useTaskDetail のキャッシュ同期', () => {
 
     expect(queryClient.getQueryState(searchQueryKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(listQueryKey)?.isInvalidated).toBe(true);
+  });
+
+  it('保存が確定したら savedField にそのフィールドが入り、2 秒で消える', async () => {
+    // vue-query の notifyManager は setTimeout で通知するので、fake timer 中は
+    // flushPromises だけでなく advanceTimersByTimeAsync でも進める
+    vi.useFakeTimers();
+    mountHost();
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(0);
+
+    detail.onSaveTitle('新しいタイトル');
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(0);
+    // 飛行中はまだ保存していない
+    expect(detail.savedField.value).toBeNull();
+
+    putControl.resolve!({ ...baseTask, title: '新しいタイトル' });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(detail.savedField.value).toBe('title');
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(detail.savedField.value).toBe('title');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(detail.savedField.value).toBeNull();
+  });
+
+  it('通知の欄が無い優先度の保存では、表示中の savedField を置き換えない', async () => {
+    mountHost();
+    await flushPromises();
+
+    detail.onSaveTitle('新しいタイトル');
+    await flushPromises();
+    putControl.resolve!({ ...baseTask, title: '新しいタイトル' });
+    await flushPromises();
+    expect(detail.savedField.value).toBe('title');
+
+    detail.onPriorityChange('High');
+    await flushPromises();
+    putControl.resolve!({ ...baseTask, title: '新しいタイトル', priority: 'High' });
+    await flushPromises();
+
+    expect(detail.savedField.value).toBe('title');
+  });
+
+  it('別のタスクへ移ったら、前のタスクの savedField を消す', async () => {
+    const taskId = ref(TASK_SEQ_KEY);
+    mountHost(taskId);
+    await flushPromises();
+
+    detail.onSaveTitle('新しいタイトル');
+    await flushPromises();
+    putControl.resolve!({ ...baseTask, title: '新しいタイトル' });
+    await flushPromises();
+    expect(detail.savedField.value).toBe('title');
+
+    taskId.value = 'ENG-2';
+    await flushPromises();
+    expect(detail.savedField.value).toBeNull();
+  });
+
+  it('移る前に始めた保存が移った後に完了しても、移った先のタスクに savedField を立てない', async () => {
+    const taskId = ref(TASK_SEQ_KEY);
+    mountHost(taskId);
+    await flushPromises();
+
+    detail.onSaveTitle('新しいタイトル');
+    await flushPromises();
+    taskId.value = 'ENG-2';
+    await flushPromises();
+    putControl.resolve!({ ...baseTask, title: '新しいタイトル' });
+    await flushPromises();
+
+    expect(detail.savedField.value).toBeNull();
+    // 保存そのものは移る前のタスクのキャッシュへ反映される
+    expect(queryClient.getQueryData(taskQueryKey)).toMatchObject({ title: '新しいタイトル' });
+  });
+
+  it('保存に失敗したら savedField は立てず、エラーを出す', async () => {
+    mountHost();
+    await flushPromises();
+
+    detail.onSaveTitle('新しいタイトル');
+    await flushPromises();
+    putControl.fail!(500);
+    await flushPromises();
+
+    expect(detail.savedField.value).toBeNull();
+    expect(detail.fieldErrors.value.title).toBe('更新に失敗しました');
   });
 
   it('ラベル更新の楽観値を名前順、同名時は ID 順に並べる', async () => {

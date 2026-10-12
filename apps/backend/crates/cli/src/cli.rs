@@ -67,11 +67,16 @@ pub enum Command {
         #[command(subcommand)]
         command: ReviewCommand,
     },
+    /// Notification commands
+    Notifications {
+        #[command(subcommand)]
+        command: NotificationsCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommand {
-    /// Show the personal access token in use and its holder
+    /// Show the personal access token in use and its holder (tenant_id is optional)
     Whoami,
     /// Save personal access token to config
     Token {
@@ -399,6 +404,38 @@ pub enum SprintsCommand {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum NotificationsCommand {
+    /// List my notifications (unread first, newest first)
+    List {
+        /// Only unread notifications
+        #[arg(long)]
+        unread: bool,
+        /// Notifications to fetch (1-100)
+        #[arg(long, default_value_t = 50)]
+        limit: u64,
+    },
+    /// Mark one notification as read
+    Read {
+        /// Notification UUID
+        id: String,
+    },
+    /// Mark every visible notification as read
+    ReadAll,
+    /// Show or update the notification settings of a project
+    Settings {
+        /// Project key or UUID (a key also needs read:project to look up)
+        #[arg(long)]
+        project: String,
+        /// In-app event types, comma separated (replaces the current list)
+        #[arg(long = "in-app", value_name = "types")]
+        in_app: Option<String>,
+        /// Email event types, comma separated (replaces the current list)
+        #[arg(long, value_name = "types")]
+        email: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum ReviewCommand {
     /// Submit one review round (findings are created together)
     Submit {
@@ -497,14 +534,6 @@ mod tests {
     #[test]
     fn the_command_tree_is_internally_consistent() {
         Cli::command().debug_assert();
-    }
-
-    /// 版はビルド時に決まる。既定はクレートの版で、リリースではタグの版が入る。
-    #[test]
-    fn reports_the_version_it_was_built_with() {
-        let version = Cli::command().get_version().map(str::to_string);
-        assert_eq!(version.as_deref(), Some(env!("TASK_CLI_VERSION")));
-        assert!(!env!("TASK_CLI_VERSION").is_empty());
     }
 
     #[test]

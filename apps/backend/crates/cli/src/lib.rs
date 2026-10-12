@@ -14,7 +14,7 @@ pub mod text_input;
 
 use api::ApiClient;
 use cli::{Cli, Command};
-use config::{ConfigStore, RuntimeConfig, resolve_runtime_with};
+use config::{ConfigStore, RuntimeConfig, resolve_runtime_with, resolve_token_runtime_with};
 use error::Result;
 use output::OutputOptions;
 
@@ -56,6 +56,13 @@ impl Context {
     pub(crate) fn connect(&self) -> Result<ApiClient> {
         ApiClient::new(self.runtime()?)
     }
+
+    /// `auth whoami` 用。tenant_id を要さず鍵だけで `personal_tokens/me` を叩く。
+    pub(crate) fn connect_token_only(&self) -> Result<ApiClient> {
+        ApiClient::new(resolve_token_runtime_with(&self.store, |key| {
+            (self.env)(key)
+        })?)
+    }
 }
 
 /// プロセスの終了コードを返す。0 以外はゲート不成立か失敗。
@@ -72,5 +79,8 @@ pub async fn run(cli: Cli, context: &Context) -> Result<i32> {
         Command::My { command } => commands::my::run(context, command, output).await,
         Command::Sprints { command } => commands::sprints::run(context, command, output).await,
         Command::Review { command } => commands::reviews::run(context, command, output).await,
+        Command::Notifications { command } => {
+            commands::notifications::run(context, command, output).await
+        }
     }
 }

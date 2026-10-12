@@ -85,7 +85,7 @@ describe('共通パンくず', () => {
     expect(view.wrapper.find('a[aria-current]').exists()).toBe(false);
     const links = view.wrapper.findAll('a').map((link) => link.attributes('href'));
     expect(links).toEqual([
-      '/acme/my-tasks',
+      '/acme',
       '/acme/projects/ENG/tasks',
       ...(hasParent ? ['/acme/projects/ENG/tasks/ENG-2'] : []),
     ]);
@@ -213,10 +213,10 @@ describe('共通パンくず', () => {
     expect(view.wrapper.text()).not.toContain('保存した名前');
   });
 
-  it('Guest のリンクは My Tasks・所属プロジェクト・同じプロジェクトの親だけ', async () => {
+  it('Guest のリンクはホーム・所属プロジェクト・同じプロジェクトの親だけ', async () => {
     const view = setup({ parent: true });
     expect(view.wrapper.findAll('a').map((item) => item.attributes('href'))).toEqual([
-      '/acme/my-tasks',
+      '/acme',
       '/acme/projects/ENG/tasks',
       '/acme/projects/ENG/tasks/ENG-2',
     ]);

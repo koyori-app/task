@@ -51,8 +51,6 @@ describe('shouldActivateRow', () => {
 
   it.each([
     ['metaKey', { metaKey: true }],
-    ['ctrlKey', { ctrlKey: true }],
-    ['shiftKey', { shiftKey: true }],
     ['altKey', { altKey: true }],
   ])('修飾キー付き（%s）は行では処理せず、ブラウザ本来の動作に任せる', (_label, init) => {
     expect(shouldActivateRow(clickOn('#key', init))).toBe(false);

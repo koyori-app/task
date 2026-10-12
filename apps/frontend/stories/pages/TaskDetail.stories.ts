@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { expect, fn, screen, userEvent, within } from 'storybook/test';
+import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test';
 import { provide } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import TaskDetailPage from '@/pages/@tenant/projects/@projectKey/tasks/@taskId/+Page.vue';
@@ -208,6 +208,15 @@ type MockOptions = {
   rejectCommentsList?: boolean;
   /** コメント投稿 POST を { message } 付きで拒否する */
   rejectCommentPost?: { status: number; message: string };
+  attachments?: {
+    id: string;
+    drive_file_id: string;
+    name: string;
+    mime_type: string;
+    size: number;
+    url: string;
+    created_at: string;
+  }[];
 };
 
 function applyPutBody(
@@ -293,6 +302,9 @@ function createMockFetch(overrides: MockOptions = {}) {
         blocks: [],
         blocked_by: [],
       });
+    }
+    if (method === 'GET' && url.includes('/attachments')) {
+      return jsonResponse({ attachments: overrides.attachments ?? [] });
     }
     // /tasks/{id}/comments は /tasks/ の分岐より先に受ける
     if (url.includes('/comments')) {
@@ -476,7 +488,39 @@ export const Default: Story = {
     await user.click(await canvas.findByRole('button', { name: 'サブタスクを追加' }));
     const input = await canvas.findByRole('textbox', { name: 'サブタスク名' });
     await user.type(input, 'リダイレクト検証{Enter}');
-    await expect(input).toHaveValue('');
+    // 入力欄が空になるのは POST（モック）の完了後。即時に見ると先に走って落ちる
+    await waitFor(() => expect(input).toHaveValue(''));
+  },
+};
+
+export const WithAttachments: Story = {
+  name: '添付ファイルあり',
+  beforeEach: () =>
+    createMockFetch({
+      attachments: [
+        {
+          id: 'attachment-1',
+          drive_file_id: 'file-1',
+          name: '仕様書.pdf',
+          mime_type: 'application/pdf',
+          size: 131072,
+          url: '/v1/drive/files/file-1/content',
+          created_at: '2026-10-01T00:00:00Z',
+        },
+        {
+          id: 'attachment-2',
+          drive_file_id: 'file-2',
+          name: '画面案.png',
+          mime_type: 'image/png',
+          size: 46080,
+          url: '/v1/drive/files/file-2/content',
+          created_at: '2026-10-01T00:00:00Z',
+        },
+      ],
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('仕様書.pdf')).resolves.toBeInTheDocument();
   },
 };
 
@@ -646,6 +690,7 @@ export const TitleEdit: Story = {
     ).resolves.toBeInTheDocument();
     const puts = (TitleEdit as { puts?: unknown[] }).puts ?? [];
     await expect(puts).toContainEqual({ title: '新しいタイトル' });
+    await expect(canvas.findByText('保存しました')).resolves.toBeInTheDocument();
   },
 };
 
@@ -682,6 +727,7 @@ export const DescriptionEdit: Story = {
     await expect(canvas.findByText('更新後の説明')).resolves.toBeInTheDocument();
     const puts = (DescriptionEdit as { puts?: unknown[] }).puts ?? [];
     await expect(puts).toContainEqual({ description: '更新後の説明' });
+    await expect(canvas.findByText('保存しました')).resolves.toBeInTheDocument();
   },
 };
 
@@ -1046,7 +1092,8 @@ export const DeleteCancel: Story = {
     const dialog = await canvas.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: 'キャンセル' }));
 
-    await expect(canvas.queryByRole('dialog')).toBeNull();
+    // ダイアログは閉じるアニメーションの後に消える
+    await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull());
     await expect(canvas.getByRole('heading', { name: 'OAuth 対応を実装する' })).toBeInTheDocument();
   },
 };
@@ -1100,11 +1147,21 @@ export const CommentPost: Story = {
     const user = userEvent.setup();
     const textarea = await canvas.findByRole('textbox', { name: 'コメントを入力' });
     await user.type(textarea, '新しく投稿するコメント');
-    await user.click(canvas.getByRole('button', { name: 'コメントする' }));
+    await user.click(await canvas.findByRole('button', { name: 'コメントする' }));
 
-    // invalidate → 一覧再取得で投稿済みコメントが並ぶ
-    await expect(canvas.findByText('新しく投稿するコメント')).resolves.toBeInTheDocument();
-    await expect(textarea).toHaveValue('');
+    // submitComment は POST → invalidate/refetch 完了後に true。submitDraft はその後に下書きを消す。
+    // canvas 全体の findByText だと入力欄の文字に先に当たり、再取得を待たず assert してしまう。
+    // storybook/test の expect 自体は再試行しないため、下書きの消去を waitFor で待つ。
+    await waitFor(() => expect(textarea).toHaveValue(''));
+
+    const commentList = await waitFor(() => {
+      const list = canvasElement.querySelector('[data-task-comments] ul');
+      if (!list) throw new Error('comment list not ready');
+      return list as HTMLElement;
+    });
+    await expect(
+      within(commentList).findByText('新しく投稿するコメント'),
+    ).resolves.toBeInTheDocument();
   },
 };
 

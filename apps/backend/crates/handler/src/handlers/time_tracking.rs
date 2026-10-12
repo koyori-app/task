@@ -444,40 +444,15 @@ mod tests {
     use super::*;
     use chrono::Duration;
 
+    /// 端数は切り上げ、開始直後や未来の開始時刻でも 0 分にはしない。
     #[test]
-    fn elapsed_minutes_from_start_zero_seconds() {
-        assert_eq!(elapsed_minutes_from_start(Utc::now()), 1);
-    }
-
-    #[test]
-    fn elapsed_minutes_from_start_fifty_nine_seconds() {
-        assert_eq!(
-            elapsed_minutes_from_start(Utc::now() - Duration::seconds(59)),
-            1
-        );
-    }
-
-    #[test]
-    fn elapsed_minutes_from_start_sixty_seconds() {
-        assert_eq!(
-            elapsed_minutes_from_start(Utc::now() - Duration::seconds(60)),
-            1
-        );
-    }
-
-    #[test]
-    fn elapsed_minutes_from_start_sixty_one_seconds() {
-        assert_eq!(
-            elapsed_minutes_from_start(Utc::now() - Duration::seconds(61)),
-            2
-        );
-    }
-
-    #[test]
-    fn elapsed_minutes_from_start_future_timestamp() {
-        assert_eq!(
-            elapsed_minutes_from_start(Utc::now() + Duration::seconds(30)),
-            1
-        );
+    fn elapsed_minutes_from_start_rounds_up_and_never_returns_zero() {
+        for (seconds, expected) in [(0, 1), (59, 1), (60, 1), (61, 2), (-30, 1)] {
+            assert_eq!(
+                elapsed_minutes_from_start(Utc::now() - Duration::seconds(seconds)),
+                expected,
+                "{seconds}s"
+            );
+        }
     }
 }

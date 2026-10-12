@@ -128,7 +128,7 @@ describe('NavProjects', () => {
       .findAll('a')
       .find((a) => a.attributes('href') === '/acme/projects/ALPHA/tasks');
     expect(activeChild).toBeTruthy();
-    expect(activeChild!.attributes('data-active')).toBeDefined();
+    expect(activeChild!.attributes('data-active')).toBe('true');
     // カレントプロジェクトの親行が active
     const parentButton = findRowButton(wrapper, 'Team Alpha');
     expect(parentButton!.attributes('data-active')).toBe('true');
@@ -143,13 +143,13 @@ describe('NavProjects', () => {
     const tasksChild = detail
       .findAll('a')
       .find((a) => a.attributes('href') === '/acme/projects/ALPHA/tasks');
-    expect(tasksChild!.attributes('data-active')).toBeDefined();
+    expect(tasksChild!.attributes('data-active')).toBe('true');
     // 接頭辞だけ一致する別パスは active にならない
     const prefix = mountNavProjects({ currentPath: '/acme/projects/ALPHA/tasks-archive' });
     const notActive = prefix
       .findAll('a')
       .find((a) => a.attributes('href') === '/acme/projects/ALPHA/tasks');
-    expect(notActive!.attributes('data-active')).toBeUndefined();
+    expect(notActive!.attributes('data-active')).toBe('false');
   });
 
   it('lists personal projects before shared projects', () => {

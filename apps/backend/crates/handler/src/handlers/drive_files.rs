@@ -879,7 +879,7 @@ pub async fn update_drive_quota(
     Path(tenant_id): Path<Uuid>,
     Json(payload): Json<UpdateQuotaRequest>,
 ) -> Result<Json<DriveUsageResponse>, AppError> {
-    auth.require_scope(Scope::AdminTenant)?;
+    auth.require_scope(Scope::WriteTenant)?;
     let tenant = auth.ensure_tenant_owner(&state, tenant_id).await?;
 
     if let Some(quota_bytes) = payload.quota_bytes {

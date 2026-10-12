@@ -66,6 +66,9 @@ pub struct Settings {
     #[validate(range(min = 1, message = "github_webhook_worker_concurrency must be >= 1"))]
     #[serde(default = "default_github_webhook_worker_concurrency")]
     pub github_webhook_worker_concurrency: usize,
+    /// 開発・テスト用に外部 Webhook の loopback 宛てを許可する（既定は拒否）。
+    #[serde(default)]
+    pub webhook_allow_loopback: bool,
     /// 登録済みメールアドレス通知（#26）Apalis ワーカーの並列度
     #[validate(range(
         min = 1,
@@ -73,6 +76,10 @@ pub struct Settings {
     ))]
     #[serde(default = "default_already_registered_email_worker_concurrency")]
     pub already_registered_email_worker_concurrency: usize,
+    /// 通知の保持日数。これより古い通知は日次ジョブが消す（メール送信待ちは残す）
+    #[validate(range(min = 1, message = "notification_retention_days must be >= 1"))]
+    #[serde(default = "default_notification_retention_days")]
+    pub notification_retention_days: i64,
     /// PAT の HMAC-SHA256 署名に使う秘密鍵。起動時に必須。32バイト以上（256ビット）が必要。
     #[validate(length(
         min = 32,
@@ -137,6 +144,10 @@ fn default_github_webhook_worker_concurrency() -> usize {
 
 fn default_already_registered_email_worker_concurrency() -> usize {
     1
+}
+
+fn default_notification_retention_days() -> i64 {
+    90
 }
 
 fn default_allow_origin() -> String {
@@ -269,7 +280,9 @@ mod tests {
             verification_email_worker_concurrency: 1,
             password_reset_worker_concurrency: 1,
             github_webhook_worker_concurrency: 1,
+            webhook_allow_loopback: false,
             already_registered_email_worker_concurrency: 1,
+            notification_retention_days: 90,
             personal_token_secret: "a".repeat(32),
             recovery_code_secret: "c".repeat(32),
             totp_encryption_key: "b".repeat(32),
@@ -308,13 +321,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_single_slash_after_scheme() {
-        assert!(!check("http:/localhost:3000"));
-        assert!(!check("https:/example.com"));
-    }
-
-    #[test]
-    fn rejects_missing_slashes() {
-        assert!(!check("http:localhost:3000"));
+    fn rejects_urls_without_the_scheme_separator() {
+        for url in [
+            "http:/localhost:3000",
+            "https:/example.com",
+            "http:localhost:3000",
+        ] {
+            assert!(!check(url), "{url}");
+        }
     }
 }

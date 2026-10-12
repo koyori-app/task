@@ -7,6 +7,10 @@
 //! 失敗はベストエフォート: 投稿・編集に失敗しても API 側の起票・遷移は
 //! 巻き戻さない。GitHub 連携の無いプロジェクトでは何もしない。
 //!
+//! マージ可（[`service::reviews::SummarySnapshot::merge_ready`]）になったら、
+//! 最新ラウンドのレビュワー本人の名義（GitHub App のユーザー認可で得たトークン）で、
+//! レビューした commit を Approve する。これもベストエフォート。
+//!
 //! 同一 (project, pr) の更新要求は 1 本に合流させる（`service::github::review_summary_queue`）。
 //! 遷移のたびに積むと同じコメントへ連続して書き込み、GitHub の
 //! secondary rate limit に当たるため。実行区間も同じ単位でロックして直列化する
@@ -19,13 +23,14 @@ use apalis::prelude::{
     BackoffConfig, BoxDynError, Data, IntervalStrategy, StrategyBuilder, Task, TaskSink,
 };
 use apalis_postgres::{Config, JsonCodec, PgPool, PostgresStorage};
-use sea_orm::EntityTrait;
+use sea_orm::{ConnectionTrait, EntityTrait, QuerySelect, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use common::cache::redis::RedisConnection;
 use common::settings::Settings;
 use entity::github_integrations;
+use service::github::pr_comments::ApproveOutcome;
 
 use crate::JobState;
 
@@ -382,7 +387,7 @@ async fn update_summary(
     // 表示用の PR メタは取れたときだけ更新する。取れなくても要約は出す
     // （PR 番号だけで用は足りるので、ここで止めると本題を落とす）。
     // 同じ応答に現在の head が入っているので、鮮度の照合にも使う（仕様 §7）
-    let current_head_sha = match service::github::pr_comments::fetch_pull_request(
+    let (current_head_sha, pr_is_open) = match service::github::pr_comments::fetch_pull_request(
         &state.http_client,
         &token,
         &integration.repo_owner,
@@ -393,8 +398,24 @@ async fn update_summary(
     {
         Ok(meta) => {
             let head = meta.head.as_ref().map(|h| h.sha.clone());
+            let txn = state.db.begin().await?;
+            // 起票時の next_round と同じ行を先にロックし、対象取得と更新の間の
+            // ラウンド追加を防ぐ（作者だけ埋まり、通知されないラウンドを作らない）。
+            entity::projects::Entity::find_by_id(job.project_id)
+                .lock(sea_orm::sea_query::LockType::Update)
+                .one(&txn)
+                .await?;
+            // 作者を控えるのと通知を 1 つの txn にまとめる。控えた後に落ちると、
+            // 次の実行では「作者が NULL のラウンド」が無くなって通知だけ抜ける
+            let unnotified = service::reviews::rounds_without_pr_author(
+                &txn,
+                job.project_id,
+                repo,
+                job.pr_number,
+            )
+            .await?;
             service::reviews::cache_pr_meta(
-                &state.db,
+                &txn,
                 job.project_id,
                 repo,
                 job.pr_number,
@@ -403,13 +424,15 @@ async fn update_summary(
                 head.as_deref(),
             )
             .await?;
-            head
+            notify_pr_author(&txn, &meta, unnotified).await?;
+            txn.commit().await?;
+            (head, meta.state.as_deref() == Some("open"))
         }
         Err(e) => {
             // 取れなければ鮮度を確かめられない。本文は「鮮度不明」になり、
             // マージ可は出さない（仕様 §7）
             tracing::warn!(error = %e, pr = job.pr_number, "fetch pull request meta failed");
-            None
+            (None, false)
         }
     };
 
@@ -491,6 +514,109 @@ async fn update_summary(
         comment_id,
         "review summary comment updated"
     );
+
+    // merge_ready は現在の head とレビューした commit の一致まで見ている
+    if let (true, true, Some(commit_sha), Some(reviewer_id)) = (
+        snapshot.merge_ready(),
+        pr_is_open,
+        snapshot.latest_head_sha.as_deref(),
+        snapshot.latest_reviewer_id,
+    ) {
+        approve_as_reviewer(job, state, integration, commit_sha, reviewer_id).await;
+    }
+    Ok(())
+}
+
+/// 最新ラウンドのレビュワー本人の名義で、PR を `commit_sha` に対して Approve する。
+///
+/// 本人の承認なので、GitHub の規則（PR 作者は自分の PR を承認できない・write 権限が要る・
+/// Code Owners）がそのまま効く。bot 名義では task のゲートの写しになり、空のラウンド
+/// 1 本で GitHub 側の承認条件まで満たせてしまう（仕様 §2）ので、連携が無いときも
+/// bot では代わりに承認しない。
+///
+/// 失敗してもジョブは失敗にしない。コメントは更新済みで、再試行は同じ失敗を繰り返す
+/// だけ。取りこぼしは次の遷移・ラウンドで拾い直す。
+async fn approve_as_reviewer(
+    job: &ReviewSummaryJob,
+    state: &JobState,
+    integration: &github_integrations::Model,
+    commit_sha: &str,
+    reviewer_id: Uuid,
+) {
+    let token = match service::oauth::github_app::github_app_user_token(
+        &state.db,
+        &state.http_client,
+        &state.oauth_settings,
+        reviewer_id,
+    )
+    .await
+    {
+        Ok(Some(token)) => token,
+        Ok(None) => {
+            tracing::info!(project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "reviewer has not linked GitHub for approvals; skipping approval");
+            return;
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "load reviewer's GitHub token failed");
+            return;
+        }
+    };
+
+    match service::github::pr_comments::approve_pull_request(
+        &state.http_client,
+        &token.access_token,
+        &service::github::pr_comments::ApproveTarget {
+            owner: &integration.repo_owner,
+            repo: &integration.repo_name,
+            number: job.pr_number,
+            commit_sha,
+            approver_id: token.github_user_id,
+        },
+    )
+    .await
+    {
+        Ok(ApproveOutcome::Approved) => {
+            tracing::info!(project_id = %job.project_id, pr = job.pr_number, commit_sha, %reviewer_id, "pull request approved by reviewer");
+        }
+        Ok(ApproveOutcome::AlreadyApproved) => {}
+        // PR 作者がレビュワーだと GitHub が拒む。仕組みどおりの結果なので warn にしない
+        Ok(ApproveOutcome::Unprocessable(body)) => {
+            tracing::info!(project_id = %job.project_id, pr = job.pr_number, %reviewer_id, body, "GitHub declined the approval");
+        }
+        // 401 は連携が取り消された、403 はリポジトリへの権限が無いか App の権限が足りない
+        Err(e) => {
+            tracing::warn!(error = %e, project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "approve pull request failed");
+        }
+    }
+}
+
+/// PR の作者へ、その人が知らないまま増えていたラウンドを知らせる。
+///
+/// 初回の起票時点では作者が分からないので、この要約ジョブが GitHub から取得して補う。
+///
+/// 冪等: 宛先は「`pr_author` が NULL だったラウンド」だけで、その列が NULL から
+/// 埋まるのはラウンドごとに 1 回きり。起票時に通知済みの場合も通知側で重複を除く。
+async fn notify_pr_author<C: ConnectionTrait>(
+    db: &C,
+    meta: &service::github::pr_comments::PullRequestMeta,
+    rounds: Vec<entity::reviews::Model>,
+) -> Result<(), BoxDynError> {
+    let Some(login) = meta.user.as_ref().map(|u| u.login.as_str()) else {
+        return Ok(());
+    };
+    let Some(author_id) = service::forge::identity::user_id_for_login(db, "github", login).await?
+    else {
+        return Ok(());
+    };
+    for round in rounds {
+        // 自分で出したラウンドは自分に知らせない
+        if round.reviewer_id == author_id {
+            continue;
+        }
+        let findings = service::reviews::round_findings(db, round.id).await?;
+        service::notifications::notify_review_round_created_to(db, &round, &findings, author_id)
+            .await?;
+    }
     Ok(())
 }
 

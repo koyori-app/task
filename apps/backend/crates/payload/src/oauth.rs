@@ -37,7 +37,14 @@ pub struct OAuthConnectionItem {
     pub provider_email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance_url: Option<String>,
+    /// ホスト上のユーザー名（GitHub / GitLab の login。小文字で控えている）。
+    /// レビュー画面が「自分が作成した PR」を PR の作成者と突き合わせて見分けるのに使う
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_login: Option<String>,
     pub connected_at: String,
+    /// ログイン手段に数える連携か。PR 承認用の GitHub（`github_app`）は連携専用なので `false`。
+    /// プロバイダー一覧の `sign_in` と違い、その設定が外れた後の連携でも判定できる
+    pub sign_in: bool,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -47,13 +54,16 @@ pub struct OAuthConnectionsResponse {
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct OAuthProviderItem {
-    /// プロバイダー slug（github | gitlab | gitlab_selfhosted | google | oidc）
+    /// プロバイダー slug（github | gitlab | gitlab_selfhosted | google | oidc | github_app）
     pub provider: String,
     /// 連携一覧（`/oauth/connections`）でこのプロバイダーを指す識別子。
     /// 汎用 OIDC は現在設定中の issuer を含む `oidc:{issuer}` で、開始用 slug と一致しない
     pub connection_provider: String,
     /// ログイン開始時に self-hosted インスタンス URL の入力が必要か（gitlab_selfhosted のみ true）
     pub requires_instance_url: bool,
+    /// サインインに使えるか。`false`（github_app）はログイン中の利用者への連携専用で、
+    /// サインイン画面には出さない
+    pub sign_in: bool,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

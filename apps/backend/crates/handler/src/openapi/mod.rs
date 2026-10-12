@@ -9,8 +9,8 @@ use utoipa::{PartialSchema, ToSchema};
 
 pub use crate::error::ServerError;
 pub use responses::{
-    CredentialErrors, CrudErrors, DriveFolderErrors, InternalOnlyError, OAuthErrors,
-    PasswordChangeErrors, PasswordResetCompleteErrors, PasswordResetRequestErrors,
+    CredentialErrors, CrudErrors, DesktopAuthTokenErrors, DriveFolderErrors, InternalOnlyError,
+    OAuthErrors, PasswordChangeErrors, PasswordResetCompleteErrors, PasswordResetRequestErrors,
     PasswordResetVerifyErrors, PersonalTokenAuthErrors, PublicShareErrors, RegisterErrors,
     ResendVerificationErrors, SessionAuthErrors, TenantCreateErrors, UnauthorizedErrors,
     VerifyEmailErrors,
@@ -100,6 +100,10 @@ fn register_tags(openapi: &mut OpenApi) {
         TagBuilder::new()
             .name("Notifications")
             .description(Some("in-app 通知・ウォッチャー・通知設定"))
+            .build(),
+        TagBuilder::new()
+            .name("Desktop")
+            .description(Some("Koyori Desktop の認証（Device Token）・端末管理"))
             .build(),
     ]);
 }

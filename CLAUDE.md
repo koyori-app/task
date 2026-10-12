@@ -26,6 +26,7 @@ entity → common → payload → service → job → handler → backend(bin)
 | `handler` | axum ハンドラー / extractors / routes / openapi / middlewares / `AppState` |
 | `backend` | `main` / `server` / `export_openapi` の glue のみ |
 | `cli` | CLI（`task`）。payload / entity / common を読むだけで、逆向きに参照されない |
+| `workspace-hack` | cargo-hakari が生成する feature 固定クレート。**手で編集しない**。依存を変えたら `cargo hakari generate` で再生成（CI の backend-fmt で `--diff` 検査。未インストールなら `cargo install cargo-hakari --locked`） |
 
 - 新しい DTO は payload、ロジックは service へ。ハンドラー間で共有したい処理も service に降ろす
 - **CLI が読むレスポンス DTO には `Deserialize` を、送るリクエスト DTO には `Serialize` を付ける。**
@@ -64,7 +65,8 @@ cargo test --workspace --lib
   ```bash
   cargo test -- --test-threads=1   # CI は cargo nextest run --test-threads=1
   ```
-  - ハーネス（`tests/common/mod.rs` の `ensure_test_env()`）が testcontainers で CI と同一イメージ（`postgres:17` / `valkey/valkey:8.1`）をランダムポートで起動する。手動の `docker run`・`apps/backend/.env` は不要。コンテナは各テストバイナリの終了時にハーネス（atexit）が自動削除する
+  - 統合テストは `tests/integration/` 配下に集約した**単一バイナリ**。新規ファイルはそこへ置き、`main.rs` に `mod` 宣言を足す。参照は `crate::common::`（`mod common;` の宣言は不要）
+  - ハーネス（`tests/common/mod.rs` の `ensure_test_env()`）が testcontainers で CI と同一イメージ（`postgres:17` / `valkey/valkey:8.1`）をランダムポートで起動する。手動の `docker run`・`apps/backend/.env` は不要。コンテナはテストプロセスの終了時にハーネス（atexit）が自動削除する
   - `DATABASE_URL` / `REDIS_URL` が環境か `.env` に設定済みならそれを優先する（CI と同じ経路。CI はこの経路のためワークフロー変更不要）
   - SMTP・シークレット系の env はハーネスが CI と同じテスト用の値で補完する。GitHub App 系も設定不要（`load_github_test_env()` が自前注入）。SMTP は実サーバー不要
 - API 表面を変えたら: `cd apps/frontend && pnpm openapi && node_modules/.bin/vp fmt`
@@ -83,7 +85,6 @@ cargo test --workspace --lib
 - **apalis のジョブペイロードは Postgres（apalis.jobs）に平文で永続化される。** トークン等の機微情報を載せない（Redis のみに保持する）。job クレートの「シリアライズ後キー集合」固定テストが回帰ガード。再送競合は `issued_at` 世代（Unix ミリ秒）を process 時に生成し、`email_verification::store_token` の世代比較（Lua）で後勝ち解決する
 - **部分 UNIQUE インデックス（`CREATE UNIQUE INDEX ... WHERE`）をマイグレーションで足さない。** 起動時とテストハーネスの SeaORM `sync()` が、entity の `unique` / `unique_key` と列の組が一致しない UNIQUE インデックスを `DROP CONSTRAINT` で消そうとして落ち、バックエンドが起動しない（#721 で実発生）。NULL を除外したいだけなら列の UNIQUE 制約で足りる（NULL 同士は重複扱いされない）ので、entity にも `#[sea_orm(unique)]` を付けて揃える。entity の 1 列に付けられる `unique_key` は 1 つだけなので、既存の複合 UNIQUE に入っている列を含む 2 つ目の複合 UNIQUE も表せず、こちらは制約なのでエラーにならず黙って DROP される（`oauth_connections.provider_login` はアプリ側で一意に保っている）
 - **ワーカーに `AppState` を渡さない**（job → handler の循環になる）。必要な依存は `JobState` にフィールドを足す
-- 増分ビルドの計測に `cargo build -p <crate>` を使わない。feature 解決がワークスペース全体と変わり依存を作り直すため、数字が実態と乖離する
 
 ## テスト・PR の流儀
 

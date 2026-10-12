@@ -25,10 +25,42 @@ export const KFM_STORY_INPUTS = {
     '| 長めのセル内容 | 中央 | 2,400 |',
   ].join('\n'),
 
+  // 英字だけの横溢れ試料。CJK と違い語の中で折れないため min-content が
+  // 語の幅で止まり、表は縮めず横に流れる——字の種で絵が分かれることの対照
+  'gfm-table-overflow-latin': [
+    '| Column1 | Column2 | Column3 | Column4 | Column5 | Column6 | Column7 | Column8 |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| LongCellContentNumberOne | LongCellContentNumberTwo | LongCellContentNumberThree | LongCellContentNumberFour | LongCellContentNumberFive | LongCellContentNumberSix | LongCellContentNumberSeven | LongCellContentNumberEight |',
+  ].join('\n'),
+
   'gfm-table-overflow': [
     '| 列1 | 列2 | 列3 | 列4 | 列5 | 列6 | 列7 | 列8 |',
     '| --- | --- | --- | --- | --- | --- | --- | --- |',
     '| 横に長いセルの内容その一 | 横に長いセルの内容その二 | 横に長いセルの内容その三 | 横に長いセルの内容その四 | 横に長いセルの内容その五 | 横に長いセルの内容その六 | 横に長いセルの内容その七 | 横に長いセルの内容その八 |',
+  ].join('\n'),
+
+  'gfm-headings': [
+    '# 見出し一',
+    '',
+    '地の文。節の切れ目が読めることを確かめる段落である。',
+    '',
+    '## 見出し二',
+    '',
+    '段落一。',
+    '',
+    '段落二。段落どうしの間が詰まらぬことも見る。',
+    '',
+    '### 見出し三',
+    '',
+    '#### 見出し四',
+    '',
+    '##### 見出し五',
+    '',
+    '###### 見出し六',
+    '',
+    '---',
+    '',
+    '区切り線の後の地の文。',
   ].join('\n'),
 
   'gfm-task-list': [

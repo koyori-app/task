@@ -2,7 +2,8 @@
 //!
 //! GitHub / GitLab は専用クレートの実装を使う。Google と汎用 OIDC は
 //! `auth_core` の OIDC 機構（discovery + 標準 userinfo）に薄くかぶせるだけなので
-//! ここに置く。
+//! ここに置く。GitHub App のユーザー認可（`github_app`）も、アプリ固有の用途
+//! （PR を本人名義で Approve する）なのでここに置く。
 
 use anyhow::Error;
 use async_trait::async_trait;
@@ -13,8 +14,10 @@ use auth_core::provider::{
 use auth_core_github::GithubProvider;
 use auth_core_gitlab::{GitlabProvider, GitlabSelfHostedProvider};
 use reqwest::Client;
+use serde::Deserialize;
 
-use super::settings::OAuthSettings;
+use super::settings::{GITHUB_APP_PROVIDER, OAuthSettings};
+use crate::github::client::{api_base, oauth_base};
 
 /// GitHub API に送る User-Agent。
 const GITHUB_USER_AGENT: &str = "task-oauth-backend";
@@ -45,6 +48,64 @@ impl OAuthProvider for GoogleProvider {
         access_token: &str,
     ) -> Result<ProviderUserInfo, Error> {
         fetch_oidc_user(http, &endpoints.userinfo_url, access_token).await
+    }
+}
+
+/// GitHub App のユーザー認可。利用者本人の名義で PR を Approve するトークンを取る。
+///
+/// トークンの権限は「App の権限 ∩ 本人の権限」で、scope は無い。ログイン用の
+/// [`GithubProvider`]（OAuth App）と違い `/user/emails` は読まない——App の
+/// 「Email addresses」権限が要り、連携専用なのでメールアドレスも要らない。
+pub struct GithubAppProvider;
+
+#[derive(Deserialize)]
+struct GithubAppUser {
+    id: i64,
+    login: String,
+    #[serde(default)]
+    avatar_url: Option<String>,
+}
+
+#[async_trait]
+impl OAuthProvider for GithubAppProvider {
+    fn slug(&self) -> &str {
+        GITHUB_APP_PROVIDER
+    }
+
+    async fn endpoints(&self, _http: &Client) -> Result<ProviderEndpoints, Error> {
+        let oauth = oauth_base();
+        Ok(ProviderEndpoints {
+            authorize_url: format!("{oauth}/login/oauth/authorize"),
+            token_url: format!("{oauth}/login/oauth/access_token"),
+            userinfo_url: format!("{}/user", api_base()),
+            scopes: vec![],
+            use_oidc_id_token: false,
+        })
+    }
+
+    async fn fetch_user_info(
+        &self,
+        http: &Client,
+        endpoints: &ProviderEndpoints,
+        access_token: &str,
+    ) -> Result<ProviderUserInfo, Error> {
+        let user: GithubAppUser = http
+            .get(&endpoints.userinfo_url)
+            .bearer_auth(access_token)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", GITHUB_USER_AGENT)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        Ok(ProviderUserInfo {
+            provider_user_id: user.id.to_string(),
+            email: None,
+            email_verified: None,
+            username: user.login,
+            avatar_url: user.avatar_url,
+        })
     }
 }
 
@@ -101,6 +162,7 @@ pub fn resolve_provider(
                 .clone();
             Ok(Box::new(OidcProvider { issuer_url }))
         }
+        GITHUB_APP_PROVIDER => Ok(Box::new(GithubAppProvider)),
         other => anyhow::bail!("unsupported oauth provider: {other}"),
     }
 }
@@ -134,6 +196,10 @@ pub fn get_credentials(
                 client_secret: o.client_secret.clone(),
             })
             .ok_or_else(|| anyhow::anyhow!("oidc provider not configured")),
+        GITHUB_APP_PROVIDER => settings
+            .github_app
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("github_app provider not configured")),
         other => anyhow::bail!("unsupported oauth provider: {other}"),
     }
 }
@@ -152,6 +218,7 @@ mod tests {
             gitlab_selfhosted: None,
             google: None,
             oidc: None,
+            github_app: None,
         }
     }
 

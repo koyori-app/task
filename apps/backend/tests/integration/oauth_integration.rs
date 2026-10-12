@@ -1,0 +1,727 @@
+use crate::common::{MockGitLabUser, TestApp, is_redirect};
+use axum::http::StatusCode;
+use entity::{oauth_connections, project_members, projects, tenants, users};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+use url::Url;
+
+#[tokio::test]
+async fn oauth_start_callback_flow_issues_session() {
+    let app = TestApp::new().await;
+    let unique = uuid::Uuid::new_v4();
+    app.set_mock_user(MockGitLabUser {
+        id: 100_001,
+        username: format!("oauth_user_{unique}"),
+        email: Some(format!("oauth-flow-{unique}@example.com")),
+    });
+
+    let start = app.oauth_start(false).await;
+    assert!(is_redirect(start.status()), "oauth start redirect");
+    let authorize_url = start
+        .headers()
+        .get("location")
+        .expect("authorize redirect")
+        .to_str()
+        .expect("authorize url");
+    let parsed = Url::parse(authorize_url).expect("authorize url parse");
+    let state = parsed
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .map(|(_, v)| v.to_string())
+        .expect("state query param");
+    assert!(!state.is_empty(), "oauth state must be generated");
+
+    let callback = app.follow_oauth_start(start).await;
+    assert!(is_redirect(callback.status()), "oauth callback redirect");
+    let frontend = callback
+        .headers()
+        .get("location")
+        .expect("frontend redirect")
+        .to_str()
+        .expect("frontend url");
+    assert!(
+        frontend.starts_with("http://localhost:3000/dashboard"),
+        "unexpected frontend redirect: {frontend}"
+    );
+
+    let me = app.get_me().await;
+    assert_eq!(me.status(), StatusCode::OK);
+    let body: serde_json::Value = me.json().await.expect("me json");
+    assert_eq!(
+        body["email"].as_str(),
+        Some(format!("oauth-flow-{unique}@example.com").as_str())
+    );
+
+    let user_id: uuid::Uuid = body["id"]
+        .as_str()
+        .expect("user id")
+        .parse()
+        .expect("uuid parse");
+    assert_eq!(app.count_connections_for_user(user_id).await, 1);
+
+    // 連携一覧はホスト上のユーザー名を小文字で返す（レビュー画面の「自分の PR」判定に使う）
+    let connections: serde_json::Value = app
+        .client()
+        .get(format!("{}/v1/auth/oauth/connections", app.base_url()))
+        .send()
+        .await
+        .expect("connections request")
+        .json()
+        .await
+        .expect("connections json");
+    assert_eq!(
+        connections["connections"][0]["provider_login"].as_str(),
+        Some(format!("oauth_user_{unique}").to_lowercase().as_str())
+    );
+
+    app.cleanup_user(user_id).await;
+}
+
+/// OAuth でログインし直して、そのユーザー ID を返す（セッションは毎回作り直す）。
+async fn login_via_oauth(app: &mut TestApp) -> uuid::Uuid {
+    app.reset_session_client();
+    let start = app.oauth_start(false).await;
+    let callback = app.follow_oauth_start(start).await;
+    assert!(is_redirect(callback.status()), "oauth callback redirect");
+    let me = app.get_me().await;
+    assert_eq!(me.status(), StatusCode::OK);
+    let body: serde_json::Value = me.json().await.expect("me json");
+    body["id"]
+        .as_str()
+        .expect("user id")
+        .parse()
+        .expect("uuid parse")
+}
+
+async fn provider_login_of(app: &TestApp, user_id: uuid::Uuid) -> Option<String> {
+    oauth_connections::Entity::find()
+        .filter(oauth_connections::Column::UserId.eq(user_id))
+        .one(&app.state.db)
+        .await
+        .expect("query connection")
+        .expect("connection row")
+        .provider_login
+}
+
+/// ログイン名はログインのたびに小文字で接続へ控え、改名で同じ名前が別の人に移ったら
+/// 前の持ち主から外す（コミット作者の解決で 1 人に定まるようにする）。
+#[tokio::test]
+async fn oauth_login_records_provider_login_and_moves_it_on_rename() {
+    let mut app = TestApp::new().await;
+    let unique = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+    let provider_id = |n: u128| (uuid::Uuid::new_v4().as_u128() % 1_000_000_000 + n) as i64;
+    let a_id = provider_id(1_000_000_000);
+    let b_id = provider_id(2_000_000_000);
+    let taken = format!("login_{unique}");
+
+    // 大文字混じりのログイン名も小文字で控える
+    app.set_mock_user(MockGitLabUser {
+        id: a_id,
+        username: taken.to_uppercase(),
+        email: Some(format!("login-a-{unique}@example.com")),
+    });
+    let a = login_via_oauth(&mut app).await;
+    assert_eq!(
+        provider_login_of(&app, a).await.as_deref(),
+        Some(taken.as_str())
+    );
+
+    // A が改名した後、空いた名前を B が取ってログインする。A はまだログインし直していない
+    app.set_mock_user(MockGitLabUser {
+        id: b_id,
+        username: taken.clone(),
+        email: Some(format!("login-b-{unique}@example.com")),
+    });
+    let b = login_via_oauth(&mut app).await;
+    assert_ne!(a, b);
+    assert_eq!(
+        provider_login_of(&app, b).await.as_deref(),
+        Some(taken.as_str())
+    );
+    assert_eq!(
+        provider_login_of(&app, a).await,
+        None,
+        "名前が移ったら前の持ち主から外す"
+    );
+
+    // A が新しい名前でログインし直すと、控えも新しい名前になる（既存接続の更新経路）
+    let renamed = format!("renamed_{unique}");
+    app.set_mock_user(MockGitLabUser {
+        id: a_id,
+        username: renamed.clone(),
+        email: Some(format!("login-a-{unique}@example.com")),
+    });
+    assert_eq!(login_via_oauth(&mut app).await, a);
+    assert_eq!(
+        provider_login_of(&app, a).await.as_deref(),
+        Some(renamed.as_str())
+    );
+    assert_eq!(
+        provider_login_of(&app, b).await.as_deref(),
+        Some(taken.as_str()),
+        "別の名前での再ログインは他人の控えに触らない"
+    );
+
+    app.cleanup_user(a).await;
+    app.cleanup_user(b).await;
+}
+
+#[tokio::test]
+async fn oauth_callback_rejects_state_mismatch() {
+    let app = TestApp::new().await;
+    let start = app.oauth_start(false).await;
+    assert!(is_redirect(start.status()), "oauth start redirect");
+
+    let response = app
+        .get(
+            "/v1/auth/oauth/gitlab_selfhosted/callback?code=mock-auth-code&state=wrong-state-value",
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response.text().await.expect("body");
+    assert!(body.contains("invalid-oauth-state"));
+}
+
+#[tokio::test]
+async fn oauth_disconnect_removes_connection() {
+    let mut app = TestApp::new().await;
+    let unique = uuid::Uuid::new_v4();
+    let user = app.insert_oauth_user(None).await;
+    app.login_session(&user.email, &user.password).await;
+
+    app.set_mock_user(MockGitLabUser {
+        id: 200_001,
+        username: format!("linked_{unique}"),
+        email: Some(format!("linked-{unique}@example.com")),
+    });
+
+    let start = app.oauth_start(true).await;
+    let callback = app.follow_oauth_start(start).await;
+    assert!(is_redirect(callback.status()), "oauth callback redirect");
+
+    assert_eq!(app.count_connections_for_user(user.id).await, 1);
+
+    let disconnect_path = format!(
+        "/v1/auth/oauth/connections/gitlab_selfhosted?instance_url={}",
+        urlencoding::encode(app.instance_url())
+    );
+    let disconnect = app.delete_with_session(&disconnect_path).await;
+    assert_eq!(disconnect.status(), StatusCode::NO_CONTENT);
+    assert_eq!(app.count_connections_for_user(user.id).await, 0);
+
+    app.cleanup_user(user.id).await;
+}
+
+#[tokio::test]
+async fn oauth_disconnect_not_found_for_unlinked_user() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_oauth_user(None).await;
+    app.login_session(&user.email, &user.password).await;
+
+    let disconnect_path = format!(
+        "/v1/auth/oauth/connections/gitlab_selfhosted?instance_url={}",
+        urlencoding::encode(app.instance_url())
+    );
+    let response = app.delete_with_session(&disconnect_path).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = response.text().await.expect("body");
+    assert!(body.contains("oauth-connection-not-found"));
+
+    app.cleanup_user(user.id).await;
+}
+
+#[tokio::test]
+async fn oauth_callback_returns_email_conflict() {
+    let app = TestApp::new().await;
+    let unique = uuid::Uuid::new_v4();
+    let email = format!("conflict-{unique}@example.com");
+    let existing = app.insert_oauth_user(Some(&email)).await;
+
+    app.set_mock_user(MockGitLabUser {
+        id: 300_001,
+        username: format!("conflict_{unique}"),
+        email: Some(email.clone()),
+    });
+
+    let start = app.oauth_start(false).await;
+    let callback = app.follow_oauth_start(start).await;
+    assert_eq!(callback.status(), StatusCode::CONFLICT);
+    let body = callback.text().await.expect("body");
+    assert!(body.contains("oauth-email-conflict"));
+
+    let still_one = users::Entity::find()
+        .filter(users::Column::Email.eq(email))
+        .all(&app.state.db)
+        .await
+        .expect("query users")
+        .len();
+    assert_eq!(still_one, 1);
+
+    let connections = oauth_connections::Entity::find()
+        .filter(oauth_connections::Column::ProviderUserId.eq("300001"))
+        .all(&app.state.db)
+        .await
+        .expect("query connections");
+    assert!(connections.is_empty());
+
+    app.cleanup_user(existing.id).await;
+}
+
+/// OAuth だけで登録した利用者が、設定画面から初回パスワードを設定するまでの一連。
+/// `has_password` の反転、初回設定が一度きりであること、パスワードを持ってからは
+/// 最後の連携も解除できることを続けて確かめる。
+#[tokio::test]
+async fn oauth_only_user_sets_first_password_then_unlinks() {
+    let app = TestApp::new().await;
+    let unique = uuid::Uuid::new_v4();
+    app.set_mock_user(MockGitLabUser {
+        id: 400_002,
+        username: format!("pwless_{unique}"),
+        email: Some(format!("pwless-{unique}@example.com")),
+    });
+
+    let start = app.oauth_start(false).await;
+    let callback = app.follow_oauth_start(start).await;
+    assert!(is_redirect(callback.status()), "oauth callback redirect");
+
+    let me = app.get_me().await;
+    assert_eq!(me.status(), StatusCode::OK);
+    let body: serde_json::Value = me.json().await.expect("me json");
+    let user_id: uuid::Uuid = body["id"]
+        .as_str()
+        .expect("user id")
+        .parse()
+        .expect("uuid parse");
+    assert_eq!(body["has_password"], serde_json::json!(false));
+
+    let disconnect_path = format!(
+        "/v1/auth/oauth/connections/gitlab_selfhosted?instance_url={}",
+        urlencoding::encode(app.instance_url())
+    );
+
+    // パスワードが無いうちは、この連携が最後の認証方法になる
+    let blocked = app.delete_with_session(&disconnect_path).await;
+    assert_eq!(blocked.status(), StatusCode::FORBIDDEN);
+    let body = blocked.text().await.expect("body");
+    assert!(body.contains("oauth-last-auth-method"), "{body}");
+
+    let set = app
+        .post_json_with_session(
+            "/v1/auth/password",
+            serde_json::json!({ "password": "FirstPassword123!" }),
+        )
+        .await;
+    assert_eq!(set.status(), StatusCode::NO_CONTENT);
+
+    let me = app.get_me().await;
+    assert_eq!(me.status(), StatusCode::OK);
+    let body: serde_json::Value = me.json().await.expect("me json");
+    assert_eq!(body["has_password"], serde_json::json!(true));
+
+    // 初回設定は一度きり。既に持っている利用者が呼んだら弾く
+    let again = app
+        .post_json_with_session(
+            "/v1/auth/password",
+            serde_json::json!({ "password": "SecondPassword123!" }),
+        )
+        .await;
+    assert_eq!(again.status(), StatusCode::CONFLICT);
+
+    // パスワードが認証方法として残るので、最後の連携も解除できる
+    let disconnect = app.delete_with_session(&disconnect_path).await;
+    assert_eq!(disconnect.status(), StatusCode::NO_CONTENT);
+    assert_eq!(app.count_connections_for_user(user_id).await, 0);
+
+    app.cleanup_user(user_id).await;
+}
+
+#[tokio::test]
+async fn oauth_providers_lists_only_configured() {
+    let app = TestApp::new().await;
+
+    let response = app.get("/v1/auth/oauth/providers").await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body: serde_json::Value = response.json().await.expect("providers json");
+    let providers = body["providers"].as_array().expect("providers array");
+    let slugs: Vec<&str> = providers
+        .iter()
+        .map(|p| p["provider"].as_str().expect("provider slug"))
+        .collect();
+
+    // テストハーネスは gitlab_selfhosted のみ設定済み → 有効なものだけ返る（出し分けの証明）。
+    assert!(
+        slugs.contains(&"gitlab_selfhosted"),
+        "configured provider must be listed: {slugs:?}"
+    );
+    assert!(
+        !slugs.contains(&"github") && !slugs.contains(&"gitlab") && !slugs.contains(&"google"),
+        "unconfigured providers must not be listed: {slugs:?}"
+    );
+
+    // self-hosted は instance_url 入力が必要というメタが付く。
+    let selfhosted = providers
+        .iter()
+        .find(|p| p["provider"] == "gitlab_selfhosted")
+        .expect("gitlab_selfhosted present");
+    assert_eq!(
+        selfhosted["requires_instance_url"].as_bool(),
+        Some(true),
+        "gitlab_selfhosted must require instance_url"
+    );
+
+    // 連携一覧（/oauth/connections）で同じ連携を指す識別子。OIDC だけ `oidc:{issuer}` になり
+    // 開始用 slug と一致しないため、画面はこの値で突き合わせる。
+    assert_eq!(
+        selfhosted["connection_provider"].as_str(),
+        Some("gitlab_selfhosted"),
+        "connection_provider must be present for matching against connections"
+    );
+    assert_eq!(selfhosted["sign_in"].as_bool(), Some(true));
+
+    // PR 承認用の GitHub 連携は一覧に出るが、サインインには使えない
+    let github_app = providers
+        .iter()
+        .find(|p| p["provider"] == "github_app")
+        .expect("github_app present");
+    assert_eq!(github_app["sign_in"].as_bool(), Some(false));
+}
+
+/// PR 承認用の GitHub 連携は、ログイン中の利用者にしか結べない（これで利用者を作らない）。
+#[tokio::test]
+async fn github_app_link_requires_a_signed_in_user() {
+    let mut app = TestApp::new().await;
+
+    let anonymous = app.get("/v1/auth/oauth/github_app").await;
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+    // 対照: ログイン中なら GitHub の認可画面へ送る
+    let user = app.insert_user_default().await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+    let start = app.get_with_session("/v1/auth/oauth/github_app").await;
+    assert!(is_redirect(start.status()), "status: {}", start.status());
+    let location = start
+        .headers()
+        .get("location")
+        .expect("authorize redirect")
+        .to_str()
+        .expect("authorize url");
+    assert!(
+        location.contains("/login/oauth/authorize"),
+        "unexpected authorize url: {location}"
+    );
+
+    app.cleanup_user(user.id).await;
+}
+
+/// PR 承認用の連携はログイン手段に数えない。それだけ残るとログインできなくなるので、
+/// 最後のログイン用の連携は解除できない（対照: 承認用の連携そのものは解除できる）。
+#[tokio::test]
+async fn a_github_app_link_is_not_counted_as_a_sign_in_method() {
+    let app = TestApp::new().await;
+    let unique = uuid::Uuid::new_v4();
+    app.set_mock_user(MockGitLabUser {
+        id: 400_003,
+        username: format!("approver_{unique}"),
+        email: Some(format!("approver-{unique}@example.com")),
+    });
+    let start = app.oauth_start(false).await;
+    let callback = app.follow_oauth_start(start).await;
+    assert!(is_redirect(callback.status()), "oauth callback redirect");
+    let me: serde_json::Value = app.get_me().await.json().await.expect("me json");
+    let user_id: uuid::Uuid = me["id"].as_str().expect("user id").parse().expect("uuid");
+
+    oauth_connections::ActiveModel {
+        id: Set(uuid::Uuid::new_v4()),
+        user_id: Set(user_id),
+        provider: Set("github_app".into()),
+        provider_user_id: Set("9002".into()),
+        created_at: Set(chrono::Utc::now().into()),
+        updated_at: Set(chrono::Utc::now().into()),
+        ..Default::default()
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert github_app connection");
+
+    // 連携一覧は連携ごとにログイン手段かを返す（GitHub App の設定の有無に左右されない）
+    let listed: serde_json::Value = app
+        .get_with_session("/v1/auth/oauth/connections")
+        .await
+        .json()
+        .await
+        .expect("connections json");
+    let sign_in_of = |provider: &str| {
+        listed["connections"]
+            .as_array()
+            .expect("connections")
+            .iter()
+            .find(|c| c["provider"] == provider)
+            .unwrap_or_else(|| panic!("{provider} listed"))["sign_in"]
+            .as_bool()
+    };
+    assert_eq!(sign_in_of("gitlab_selfhosted"), Some(true));
+    assert_eq!(sign_in_of("github_app"), Some(false));
+
+    let blocked = app
+        .delete_with_session(&format!(
+            "/v1/auth/oauth/connections/gitlab_selfhosted?instance_url={}",
+            urlencoding::encode(app.instance_url())
+        ))
+        .await;
+    assert_eq!(blocked.status(), StatusCode::FORBIDDEN);
+    let body = blocked.text().await.expect("body");
+    assert!(body.contains("oauth-last-auth-method"), "{body}");
+
+    let unlinked = app
+        .delete_with_session("/v1/auth/oauth/connections/github_app")
+        .await;
+    assert_eq!(unlinked.status(), StatusCode::NO_CONTENT);
+    assert_eq!(app.count_connections_for_user(user_id).await, 1);
+
+    app.cleanup_user(user_id).await;
+}
+
+#[tokio::test]
+async fn oauth_provider_error_uses_error_redirect_after() {
+    let app = TestApp::new().await;
+
+    // 成功用 redirect_after=/ とは別に error_redirect_after=/signin を指定して開始する。
+    let start = app
+        .get(&format!(
+            "/v1/auth/oauth/gitlab_selfhosted?instance_url={}&redirect_after=/&error_redirect_after=/signin",
+            urlencoding::encode(app.instance_url())
+        ))
+        .await;
+    assert!(is_redirect(start.status()), "oauth start redirect");
+    let authorize_url = start
+        .headers()
+        .get("location")
+        .expect("authorize redirect")
+        .to_str()
+        .expect("authorize url");
+    let state = Url::parse(authorize_url)
+        .expect("authorize url parse")
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .map(|(_, v)| v.to_string())
+        .expect("state query param");
+
+    // プロバイダーがエラーを返すと、成功用(/)ではなく error_redirect_after(/signin)へ
+    // oauth_error 付きで戻る（OAuth ボタンのあるページでエラーを表示させるため）。
+    let callback = app
+        .get(&format!(
+            "/v1/auth/oauth/gitlab_selfhosted/callback?error=access_denied&state={state}"
+        ))
+        .await;
+    assert!(is_redirect(callback.status()), "callback redirect");
+    let location = callback
+        .headers()
+        .get("location")
+        .expect("callback location")
+        .to_str()
+        .expect("callback location utf8");
+    let parsed = Url::parse(location).expect("callback location parse");
+    assert_eq!(
+        parsed.path(),
+        "/signin",
+        "provider error must return to error_redirect_after, got: {location}"
+    );
+    assert!(
+        parsed
+            .query_pairs()
+            .any(|(k, v)| k == "oauth_error" && v == "authorization_failed"),
+        "missing oauth_error marker: {location}"
+    );
+
+    // state が無ければ開始時の指定を引けないので、既定の戻り先へ oauth_error 付きで返す
+    let no_state = app
+        .get("/v1/auth/oauth/gitlab_selfhosted/callback?error=access_denied")
+        .await;
+    assert!(is_redirect(no_state.status()), "provider error redirect");
+    let location = no_state
+        .headers()
+        .get("location")
+        .expect("redirect location")
+        .to_str()
+        .expect("redirect location utf8");
+    assert!(
+        location.contains("oauth_error=authorization_failed"),
+        "unexpected redirect location: {location}"
+    );
+}
+
+/// テナントの 2FA 強制は、パスワードログインと OAuth ログインで同じ結果にならないといけない。
+/// 判定の実装が 2 つあったころは OAuth 側だけ `project_members` を見ていたため、
+/// プロジェクトに指定されていないテナントメンバー（新しい参加フローで入るとこの形）が
+/// 2FA を設定せずに本認証を通せた。逆に project-only の客分（`tenant_members` の行が無く
+/// `project_members` の明示指定だけで関わる利用者）のテナントは判定に入らなかった。
+#[tokio::test]
+async fn oauth_callback_requires_2fa_setup_for_every_membership_form() {
+    for (provider_user_id, project_only) in [(100_007, false), (100_008, true)] {
+        let app = TestApp::new().await;
+        let unique = uuid::Uuid::new_v4();
+        app.set_mock_user(MockGitLabUser {
+            id: provider_user_id,
+            username: format!("oauth_2fa_{unique}"),
+            email: Some(format!("oauth-2fa-{unique}@example.com")),
+        });
+
+        // 1 回目のコールバックで利用者を作る。まだどのテナントにも属していない
+        let callback = app.follow_oauth_start(app.oauth_start(false).await).await;
+        assert!(is_redirect(callback.status()), "oauth callback redirect");
+        let me: serde_json::Value = app.get_me().await.json().await.expect("me json");
+        let user_id: uuid::Uuid = me["id"].as_str().expect("user id").parse().expect("uuid");
+
+        let owner = app.insert_user_default().await;
+        let tenant_id = uuid::Uuid::new_v4();
+        tenants::ActiveModel {
+            id: Set(tenant_id),
+            display_id: Set(format!("t2fa-{}", &tenant_id.to_string()[..8])),
+            name: Set("Require 2FA Tenant".into()),
+            description: Set(String::new()),
+            icon_url: Set(String::new()),
+            icon_emoji: Set(None),
+            owner_id: Set(owner.id),
+            drive_quota_bytes: Set(None),
+            require_2fa: Set(true),
+        }
+        .insert(&app.state.db)
+        .await
+        .expect("insert tenant");
+
+        if project_only {
+            // require_2fa テナントの project にだけ明示指定された客分にする
+            //（member にして project へ指定した後に除名した残行と同じ形を DB で組む）。
+            // tenant_members には行を作らない
+            let project_id = uuid::Uuid::new_v4();
+            projects::ActiveModel {
+                id: Set(project_id),
+                name: Set("guest-2fa".into()),
+                description: Set(String::new()),
+                tenant_id: Set(tenant_id),
+                icon_emoji: Set(None),
+                icon_url: Set(None),
+                key: Set(format!(
+                    "G{}",
+                    &project_id.simple().to_string()[..8].to_uppercase()
+                )),
+                is_personal: Set(false),
+                personal_owner_id: Set(None),
+            }
+            .insert(&app.state.db)
+            .await
+            .expect("insert project");
+            project_members::ActiveModel {
+                id: Set(uuid::Uuid::new_v4()),
+                project_id: Set(project_id),
+                user_id: Set(user_id),
+                role: Set(project_members::ProjectRole::Member),
+            }
+            .insert(&app.state.db)
+            .await
+            .expect("insert project member");
+        } else {
+            // テナントメンバーとして入れる。プロジェクトには一切指定しない
+            entity::tenant_members::ActiveModel {
+                id: Set(uuid::Uuid::new_v4()),
+                tenant_id: Set(tenant_id),
+                user_id: Set(user_id),
+                role: Set(entity::tenant_members::TenantRole::Member),
+            }
+            .insert(&app.state.db)
+            .await
+            .expect("insert tenant member");
+        }
+
+        // 2 回目のコールバックは 2FA 設定へ飛ばされ、本認証セッションにならない
+        let callback = app.follow_oauth_start(app.oauth_start(false).await).await;
+        assert!(is_redirect(callback.status()), "oauth callback redirect");
+        let location = callback
+            .headers()
+            .get("location")
+            .expect("redirect location")
+            .to_str()
+            .expect("location str");
+        assert!(
+            location.contains("/auth/2fa"),
+            "テナントの 2FA 強制が OAuth 経路でも効くこと（project_only={project_only}）: {location}"
+        );
+        assert_eq!(
+            app.get_me().await.status(),
+            StatusCode::FORBIDDEN,
+            "2FA 未設定のあいだは半認証セッションのままであること"
+        );
+
+        app.cleanup_user(user_id).await;
+        app.cleanup_user(owner.id).await;
+    }
+}
+
+async fn list_connections(app: &TestApp) -> serde_json::Value {
+    let res = app
+        .client()
+        .get(format!("{}/v1/auth/oauth/connections", app.base_url()))
+        .send()
+        .await
+        .expect("connections request");
+    assert_eq!(res.status(), StatusCode::OK);
+    res.json().await.expect("connections json")
+}
+
+/// ログイン名を控える前からある接続は、連携一覧を開いたときに保存済みのトークンで補完する。
+/// トークンが使えない接続は空のまま返し、一覧そのものは止めない（画面が再連携を案内する）。
+#[tokio::test]
+async fn connections_backfill_provider_login_from_stored_token() {
+    let mut app = TestApp::new().await;
+    let unique = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+    app.set_mock_user(MockGitLabUser {
+        id: (uuid::Uuid::new_v4().as_u128() % 1_000_000_000 + 3_000_000_000) as i64,
+        username: format!("Backfill_{unique}"),
+        email: Some(format!("backfill-{unique}@example.com")),
+    });
+    let user_id = login_via_oauth(&mut app).await;
+    let expected = format!("backfill_{unique}");
+
+    // provider_login を控える前に連携した状態へ戻す
+    let clear_login = |access_token_enc: Option<String>| {
+        let db = app.state.db.clone();
+        async move {
+            let mut update = oauth_connections::Entity::update_many()
+                .col_expr(
+                    oauth_connections::Column::ProviderLogin,
+                    sea_orm::sea_query::Expr::value(Option::<String>::None),
+                )
+                .filter(oauth_connections::Column::UserId.eq(user_id));
+            if let Some(enc) = access_token_enc {
+                update = update.col_expr(
+                    oauth_connections::Column::AccessTokenEnc,
+                    sea_orm::sea_query::Expr::value(Some(enc)),
+                );
+            }
+            update.exec(&db).await.expect("clear provider login");
+        }
+    };
+    clear_login(None).await;
+    assert_eq!(provider_login_of(&app, user_id).await, None);
+
+    let body = list_connections(&app).await;
+    assert_eq!(
+        body["connections"][0]["provider_login"].as_str(),
+        Some(expected.as_str()),
+        "保存済みのトークンで問い合わせて小文字で補完する"
+    );
+    assert_eq!(
+        provider_login_of(&app, user_id).await.as_deref(),
+        Some(expected.as_str()),
+        "補完した名前は接続に控える"
+    );
+
+    // 復号できないトークン（鍵の入れ替えなど）は補完できない。一覧は 200 のまま空で返す
+    clear_login(Some("not-a-valid-ciphertext".into())).await;
+    let body = list_connections(&app).await;
+    assert!(body["connections"][0]["provider_login"].is_null());
+    assert_eq!(provider_login_of(&app, user_id).await, None);
+
+    app.cleanup_user(user_id).await;
+}

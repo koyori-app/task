@@ -42,7 +42,7 @@ ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
 pub struct Model {
     pub id: Uuid,
     pub user_id: Uuid,
-    pub provider: String,           // "github" | "gitlab" | "google" | "oidc:{issuer}"
+    pub provider: String,           // "github" | "gitlab" | "google" | "oidc:{issuer}" | "github_app"
     pub provider_user_id: String,   // プロバイダー側のユーザー ID
     pub provider_email: Option<String>, // プロバイダーが返したメール（参照用）
     pub provider_login: Option<String>, // プロバイダー上のログイン名（小文字。コミット作者の解決用）
@@ -58,7 +58,7 @@ pub struct Model {
 |--------|-----|------|------|
 | `id` | UUID | PK | |
 | `user_id` | UUID | NOT NULL, FK→users CASCADE | |
-| `provider` | VARCHAR | NOT NULL | `github` / `gitlab` / `gitlab_selfhosted` / `google` / `oidc:{issuer}` |
+| `provider` | VARCHAR | NOT NULL | `github` / `gitlab` / `gitlab_selfhosted` / `google` / `oidc:{issuer}` / `github_app`（PR 承認用の連携。§4） |
 | `provider_user_id` | VARCHAR | NOT NULL | プロバイダー側の不変ユーザー ID |
 | `provider_email` | VARCHAR | NULLABLE | プロバイダーが返したメール（参照用。主キーとして使わない） |
 | `instance_url` | VARCHAR | NULLABLE | GitLab self-hosted のインスタンス URL（例: `https://gitlab.example.com`）。クラウド版は NULL |
@@ -72,7 +72,12 @@ pub struct Model {
 
 `provider_login` はログイン・連携のたびに `ProviderUserInfo.username` を小文字にして控え直す。
 ログイン名は改名できるので本人の識別には `provider_user_id` を使い、こちらはコミット作者を Task ユーザーに
-解決する用途（[Git ホスティング↔タスク連携](/features/tasks/github-tasks) §2「アクティビティ」）にだけ使う。
+解決する用途（[Git ホスティング↔タスク連携](/features/tasks/github-tasks) §2「アクティビティ」）と、
+レビュー画面の「自分が作成した PR」の判定（[レビュー指摘](/features/review-findings) §8）に使う。
+
+列を足す前からある接続は空のまま残るので、連携一覧（`GET /v1/auth/oauth/connections`）を開いたときに
+保存済みのアクセストークンでプロバイダーに問い合わせて補完する。期限切れ・失効・復号できないトークンでは
+補完できず、空のまま返す（一覧そのものは止めない）。問い合わせは接続ごとに 3 秒で打ち切り、接続どうしは並べて待つ。
 
 改名で同じ名前が別の人に移ることがあるので、控えるときに同じ `provider` / `instance_url` で同じ名前を持つ
 別の接続からは外す。一意性はこの付け替えと、照合側の「ちょうど 1 件のときだけ採る」で保ち、UNIQUE 制約は
@@ -116,6 +121,25 @@ CREATE INDEX idx_oauth_connections_user ON oauth_connections(user_id);
 | GitLab self-hosted | `gitlab_selfhosted` | OAuth 2.0 | ユーザーがインスタンス URL を入力（§4a 参照） |
 | Google | `google` | OIDC | `openid email profile` スコープ |
 | 汎用 OIDC | `oidc:{issuer}` | OIDC Discovery | Okta・Entra ID・Keycloak 等に対応 |
+| GitHub（PR 承認用） | `github_app` | GitHub App のユーザー認可 | **サインインには使わない連携専用**（下記） |
+
+`github_app` は、レビューが完了した PR をレビュワー本人の名義で Approve するための連携
+（[レビュー指摘管理](/features/review-findings) §7）。
+
+- ログイン中の利用者にだけ結べる。開始・コールバックとも `link_user_id` が無ければ拒み、
+  これで利用者を作ったりログインしたりはしない。`list_providers` は `sign_in: false` で返し、
+  サインイン画面（`OAuthButtons.vue`）には出さない
+- 資格情報は App 連携と同じ `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET`。
+  `OAUTH_ENCRYPTION_KEY` が無ければ有効にしない（ここで鍵を必須にすると、ログイン用 OAuth を
+  使っていない環境が起動しなくなる）
+- トークンの権限は「App の権限 ∩ 本人の権限」で、scope は無い。`/user` だけを読む
+  （`/user/emails` は App の Email addresses 権限が要るので読まない）
+- トークンは既定で 8 時間で切れる。使う側（要約ジョブ）が期限の近いトークンを
+  リフレッシュトークンで更新し、回転した新しいトークンを保存し直す
+  （`service::oauth::github_app`）
+- ログイン手段には数えない（連携解除のガード。§7）。連携一覧（`/oauth/connections`）も
+  連携ごとに `sign_in: false` を返し、設定画面はこれで数える（プロバイダー一覧の `sign_in` で
+  引くと、GitHub App の設定を外した後に残った連携をログイン手段に数えてしまう）
 
 プロバイダー設定は環境変数で管理する（テナント単位の設定は本仕様の対象外）:
 
@@ -174,6 +198,10 @@ GitLab.com と異なり、OAuth エンドポイントがインスタンスごと
 ```
 {APP_ORIGIN}/api/v1/auth/oauth/{provider}/callback
 ```
+
+`github_app` を使うなら、GitHub App の設定の Callback URL に
+`{APP_ORIGIN}/api/v1/auth/oauth/github_app/callback` を足す（App の Callback URL は
+複数登録できる。インストール時のユーザー認可の URL は残したまま）。
 
 backend は frontend の SSR サーバ（`/api/*` を転送し、`redirect: 'manual'` で
 バックエンドの 302 をそのまま返す）越しにしか公開されていない。プロバイダーへ渡す
@@ -285,6 +313,9 @@ DELETE /v1/auth/oauth/connections/{provider}
 → 403: パスワードを設定してから解除してください
 ```
 
+`github_app` の連携は件数に数えない（サインインに使えないので、それだけ残るとログインできない）。
+`github_app` 自体の解除はこのガードにかけない（解除してもログイン手段は減らない）。
+
 ---
 
 ## 8. API
@@ -305,7 +336,8 @@ DELETE /v1/auth/oauth/connections/{provider}
     {
       "provider": "github",
       "provider_email": "user@example.com",
-      "connected_at": "2026-05-27T10:00:00Z"
+      "connected_at": "2026-05-27T10:00:00Z",
+      "sign_in": true
     }
   ]
 }

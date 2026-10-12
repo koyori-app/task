@@ -14,7 +14,7 @@ use entity::{
     github_integrations, project_statuses, projects, review_findings, reviews, tasks,
     tenant_members, tenants,
 };
-use payload::reviews::ReviewedPullRequest;
+use payload::reviews::{ReviewGate, ReviewedPullRequest};
 
 /// 繰り延べで自動起票するタスクのタイトル接頭辞。
 const DEFERRED_TASK_PREFIX: &str = "[レビュー指摘]";
@@ -191,6 +191,72 @@ pub async fn next_round<C: ConnectionTrait>(
     Ok(last.unwrap_or(0) + 1)
 }
 
+/// その PR のレビューに直接関わっている利用者（通知の宛先の芯）。
+///
+/// 同じ PR の全ラウンドから集める: ラウンドの作成者、指摘を修正したと宣言した人、
+/// そして解決できた PR の作者。ラウンドをまたぐのは、R1 の指摘を直した人が R2 の
+/// 起票を知らないまま放置されるのを避けるため。
+///
+/// PR に紐づくタスクの担当者は `forge_pull_requests`（TASK-220）が入ってから足す。
+pub async fn review_participants<C: ConnectionTrait>(
+    db: &C,
+    review: &reviews::Model,
+) -> Result<std::collections::HashSet<Uuid>, sea_orm::DbErr> {
+    let repo = RepoRef::of_round(review);
+    let rounds = scoped_rounds(review.project_id, &repo, review.pr_number)
+        .all(db)
+        .await?;
+
+    let mut ids: std::collections::HashSet<Uuid> =
+        rounds.iter().map(|round| round.reviewer_id).collect();
+
+    let fixers: Vec<Uuid> = review_findings::Entity::find()
+        .filter(review_findings::Column::ReviewId.is_in(rounds.iter().map(|round| round.id)))
+        .filter(review_findings::Column::FixedBy.is_not_null())
+        .select_only()
+        .column(review_findings::Column::FixedBy)
+        .into_tuple()
+        .all(db)
+        .await?;
+    ids.extend(fixers);
+
+    // PR の作者はホストの API 由来なので通知の根拠にしてよい（`forge::identity` の doc）。
+    // 要約ジョブが後から埋めるので、R1 の起票時点ではまだ空のことがある
+    if let Some(login) = rounds.iter().find_map(|round| round.pr_author.as_deref())
+        && let Some(user_id) =
+            crate::forge::identity::user_id_for_login(db, "github", login).await?
+    {
+        ids.insert(user_id);
+    }
+
+    Ok(ids)
+}
+
+/// PR 作者がまだ埋まっていないラウンド。要約ジョブが作者を控えるときの通知対象を、
+/// 控える前に確定するために使う。
+pub async fn rounds_without_pr_author<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    repo: &RepoRef,
+    pr_number: i32,
+) -> Result<Vec<reviews::Model>, sea_orm::DbErr> {
+    scoped_rounds(project_id, repo, pr_number)
+        .filter(reviews::Column::PrAuthor.is_null())
+        .all(db)
+        .await
+}
+
+/// ラウンドに属する指摘。
+pub async fn round_findings<C: ConnectionTrait>(
+    db: &C,
+    review_id: Uuid,
+) -> Result<Vec<review_findings::Model>, sea_orm::DbErr> {
+    review_findings::Entity::find()
+        .filter(review_findings::Column::ReviewId.eq(review_id))
+        .all(db)
+        .await
+}
+
 /// 状態遷移そのものが許されるか（誰が行うかは [`requires_reviewer_side`] で見る）。
 ///
 /// `verified` は終端。誤りだったと分かった場合は新しいラウンドで指摘を出し直す。
@@ -199,6 +265,8 @@ pub fn can_transition(from: FindingState, to: FindingState) -> bool {
     match (from, to) {
         // 修正の宣言と、その確認
         (Open, Fixed) | (Fixed, Verified) => true,
+        // 修正への着手と、その取り消し（着手を経ずに fixed を宣言してもよい）
+        (Open, Fixing) | (Fixing, Open) | (Fixing, Fixed) => true,
         // 繰り延べと取り消し（繰り延べられる重大度は [`FindingSeverity::can_defer`] で見る）
         (Open, Deferred) | (Deferred, Open) => true,
         // 指摘自体の棄却と再オープン
@@ -345,6 +413,43 @@ pub async fn ensure_transition_allowed<C: ConnectionTrait>(
     to: FindingState,
     actor_id: Uuid,
 ) -> Result<(), ReviewError> {
+    // 判定に要る材料だけを引く（要らない遷移では DB を読まない）
+    let from = finding.state;
+    let facts = TransitionFacts {
+        reviewer_side: requires_reviewer_side(from, to)
+            && is_reviewer_side(
+                db,
+                review.project_id,
+                &RepoRef::of_round(review),
+                review.pr_number,
+                review.round,
+                actor_id,
+            )
+            .await?,
+        may_reject_on_behalf: requires_finding_author(from, to)
+            && review.reviewer_id != actor_id
+            && may_reject_on_behalf(db, review, actor_id).await?,
+    };
+    check_transition(finding, review, to, actor_id, facts)
+}
+
+/// 遷移の判定に要る、DB から引いた事実。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TransitionFacts {
+    /// 要求者がそのラウンドのレビュー側か（[`is_reviewer_side`]）
+    pub reviewer_side: bool,
+    /// 要求者が取り下げを代行してよいか（[`may_reject_on_behalf`]）
+    pub may_reject_on_behalf: bool,
+}
+
+/// [`ensure_transition_allowed`] の判定本体。材料は呼び出し側が引いて渡す。
+pub fn check_transition(
+    finding: &review_findings::Model,
+    review: &reviews::Model,
+    to: FindingState,
+    actor_id: Uuid,
+    facts: TransitionFacts,
+) -> Result<(), ReviewError> {
     let from = finding.state;
     if !can_transition(from, to) {
         return Err(ReviewError::InvalidTransition { from, to });
@@ -364,26 +469,92 @@ pub async fn ensure_transition_allowed<C: ConnectionTrait>(
     // （作成者がテナントから居なくなった場合に限りオーナーが代行できる）
     if requires_finding_author(from, to)
         && review.reviewer_id != actor_id
-        && !may_reject_on_behalf(db, review, actor_id).await?
+        && !facts.may_reject_on_behalf
     {
         return Err(ReviewError::FindingAuthorOnly);
     }
 
-    if requires_reviewer_side(from, to)
-        && !is_reviewer_side(
-            db,
-            review.project_id,
-            &RepoRef::of_round(review),
-            review.pr_number,
-            review.round,
-            actor_id,
-        )
-        .await?
-    {
+    if requires_reviewer_side(from, to) && !facts.reviewer_side {
         return Err(ReviewError::ReviewerOnly);
     }
 
     Ok(())
+}
+
+/// 要求者がいま遷移できる先の state を、指摘ごとに返す（`FindingResponse::available_actions`）。
+///
+/// 判定は候補ごとに [`check_transition`] を呼ぶだけで、規則を別に持たない。
+/// 材料（ラウンドの作成者・より新しいラウンドの作成者・作成者の不在・オーナー）は
+/// 一覧ぶんをまとめて引き、指摘の件数に比例して DB を往復しない。
+/// `rounds` は `findings` が属するラウンドを含むこと（同じプロジェクト内）。
+pub async fn available_actions<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+    rounds: &[reviews::Model],
+    findings: &[review_findings::Model],
+    actor_id: Uuid,
+) -> Result<std::collections::HashMap<Uuid, Vec<FindingState>>, sea_orm::DbErr> {
+    use sea_orm::Iterable;
+
+    let mut out = std::collections::HashMap::new();
+    if findings.is_empty() {
+        return Ok(out);
+    }
+    let round_by_id: std::collections::HashMap<Uuid, &reviews::Model> =
+        rounds.iter().map(|r| (r.id, r)).collect();
+
+    // 要求者が作成したラウンドのうち、各 (リポジトリ, PR) で最も新しいもの。
+    // ラウンド R の指摘について「R 以上のラウンドを出した」= レビュー側（is_reviewer_side）
+    let project_ids: Vec<Uuid> = rounds.iter().map(|r| r.project_id).collect();
+    let pr_numbers: Vec<i32> = rounds.iter().map(|r| r.pr_number).collect();
+    let mut own_latest: std::collections::HashMap<(Uuid, String, String, i32), i32> =
+        std::collections::HashMap::new();
+    for own in reviews::Entity::find()
+        .filter(reviews::Column::ProjectId.is_in(project_ids))
+        .filter(reviews::Column::PrNumber.is_in(pr_numbers))
+        .filter(reviews::Column::ReviewerId.eq(actor_id))
+        .all(db)
+        .await?
+    {
+        let key = (own.project_id, own.repo_owner, own.repo_name, own.pr_number);
+        let latest = own_latest.entry(key).or_insert(own.round);
+        *latest = (*latest).max(own.round);
+    }
+
+    // 取り下げの代行（may_reject_on_behalf）: 要求者がオーナーで、作成者がオーナーでなく
+    // テナントの利用者でなくなっている
+    let is_owner = tenants::Entity::find_by_id(tenant_id)
+        .one(db)
+        .await?
+        .is_some_and(|t| t.owner_id == actor_id);
+    let left: std::collections::HashSet<Uuid> = if is_owner {
+        let reviewer_ids: Vec<Uuid> = rounds.iter().map(|r| r.reviewer_id).collect();
+        users_left_tenant(db, tenant_id, &reviewer_ids).await?
+    } else {
+        std::collections::HashSet::new()
+    };
+
+    for finding in findings {
+        let Some(review) = round_by_id.get(&finding.review_id) else {
+            continue;
+        };
+        let facts = TransitionFacts {
+            reviewer_side: own_latest
+                .get(&(
+                    review.project_id,
+                    review.repo_owner.clone(),
+                    review.repo_name.clone(),
+                    review.pr_number,
+                ))
+                .is_some_and(|latest| *latest >= review.round),
+            may_reject_on_behalf: is_owner && left.contains(&review.reviewer_id),
+        };
+        let actions = FindingState::iter()
+            .filter(|to| check_transition(finding, review, *to, actor_id, facts).is_ok())
+            .collect();
+        out.insert(finding.id, actions);
+    }
+    Ok(out)
 }
 
 /// 繰り延べ先タスクが「有効」か——同じプロジェクトにあり、削除されていないか。
@@ -703,6 +874,29 @@ pub fn blocking_count(counts: &[(FindingSeverity, FindingState, u64)]) -> u64 {
         .sum()
 }
 
+/// マージ判定の表示区分。上から順に最初に当たったものを返す（仕様 §5）。
+pub fn review_gate(
+    linked: bool,
+    rounds: i32,
+    blocking: u64,
+    cached_pr_head_sha: Option<&str>,
+    latest_head_sha: Option<&str>,
+) -> ReviewGate {
+    if !linked {
+        ReviewGate::Unlinked
+    } else if rounds == 0 {
+        ReviewGate::Unreviewed
+    } else if blocking > 0 {
+        ReviewGate::Blocked
+    } else if cached_pr_head_sha.is_none() {
+        ReviewGate::StaleUnknown
+    } else if cached_pr_head_sha != latest_head_sha {
+        ReviewGate::Outdated
+    } else {
+        ReviewGate::Ready
+    }
+}
+
 /// 最新ラウンドがレビューした commit。ラウンドが無ければ `None`。
 ///
 /// 現在の HEAD と突き合わせるのは呼び出し側（CLI）。読み取り API から GitHub を
@@ -860,6 +1054,8 @@ pub struct SummarySnapshot {
     pub blocking: u64,
     /// 最新ラウンドがレビューした commit
     pub latest_head_sha: Option<String>,
+    /// 最新ラウンドの作成者。マージ可のとき、この人の名義で PR を Approve する
+    pub latest_reviewer_id: Option<Uuid>,
     /// 投稿時に GitHub から読んだ現在の head（取れなければ `None`）
     pub current_head_sha: Option<String>,
     /// オーナー代行で棄却された件数
@@ -882,6 +1078,15 @@ impl SummarySnapshot {
             _ => None,
         }
     }
+
+    /// 要約コメントに「マージ可」と書き、GitHub で PR を Approve する条件（仕様 §7）。
+    ///
+    /// 集計 API と同じ規則（レビューが 1 件も無い PR を可にしない）に加えて、
+    /// レビュー後にコミットが積まれていないことを確かめる。確かめられないときも可にしない。
+    #[must_use]
+    pub fn merge_ready(&self) -> bool {
+        self.blocking == 0 && self.rounds > 0 && self.head_is_fresh() == Some(true)
+    }
 }
 
 /// PR 単位の状態を 1 レスポンスぶん読み出す。
@@ -903,8 +1108,8 @@ pub async fn summary_snapshot<C: ConnectionTrait>(
         .order_by_desc(reviews::Column::Round)
         .one(db)
         .await?;
-    let (latest_summary, latest_head_sha) = latest
-        .map(|r| (r.summary, Some(r.head_sha)))
+    let (latest_summary, latest_head_sha, latest_reviewer_id) = latest
+        .map(|r| (r.summary, Some(r.head_sha), Some(r.reviewer_id)))
         .unwrap_or_default();
 
     Ok(SummarySnapshot {
@@ -913,6 +1118,7 @@ pub async fn summary_snapshot<C: ConnectionTrait>(
         counts,
         blocking,
         latest_head_sha,
+        latest_reviewer_id,
         current_head_sha,
         owner_override_rejections,
         latest_summary,
@@ -940,10 +1146,7 @@ pub fn render_summary_comment(
     let _ = writeln!(out, "## レビュー指摘");
     let _ = writeln!(out);
 
-    // 集計 API と同じ規則（レビューが 1 件も無い PR を「可」にしない）に加えて、
-    // レビュー後にコミットが積まれていないことを確かめる。確かめられないときも
-    // 可を出さない（仕様 §7）
-    if snapshot.blocking == 0 && snapshot.rounds > 0 && snapshot.head_is_fresh() == Some(true) {
+    if snapshot.merge_ready() {
         let _ = writeln!(out, "**マージ可** — High / Medium の未解決はありません。");
     } else if snapshot.blocking == 0 && snapshot.rounds > 0 {
         let _ = match snapshot.head_is_fresh() {
@@ -983,6 +1186,7 @@ pub fn render_summary_comment(
         ] {
             for state in [
                 FindingState::Open,
+                FindingState::Fixing,
                 FindingState::Fixed,
                 FindingState::Verified,
                 FindingState::Deferred,
@@ -1113,12 +1317,32 @@ mod tests {
     use super::*;
     use FindingState::*;
 
+    /// gate は上から順に最初に当たったもの（仕様 §5）。隣り合う条件が重なる境界を固定する。
+    #[test]
+    fn review_gate_takes_the_first_matching_condition() {
+        let a = Some("a");
+        let b = Some("b");
+        // 連携なしは何より先（ラウンド 0・未解決ありでも unlinked）
+        assert_eq!(review_gate(false, 0, 1, None, None), ReviewGate::Unlinked);
+        assert_eq!(review_gate(false, 2, 1, a, b), ReviewGate::Unlinked);
+        assert_eq!(review_gate(true, 0, 0, None, None), ReviewGate::Unreviewed);
+        // 未解決ありは鮮度より先（blocked かつ outdated は blocked）
+        assert_eq!(review_gate(true, 1, 1, a, b), ReviewGate::Blocked);
+        assert_eq!(review_gate(true, 1, 1, None, a), ReviewGate::Blocked);
+        assert_eq!(review_gate(true, 1, 0, None, a), ReviewGate::StaleUnknown);
+        assert_eq!(review_gate(true, 1, 0, b, a), ReviewGate::Outdated);
+        assert_eq!(review_gate(true, 1, 0, a, a), ReviewGate::Ready);
+    }
+
     /// 遷移表そのものの固定。仕様 §3 の図と 1:1 で対応させる。
     #[test]
     fn transition_table_matches_the_spec() {
         let allowed = [
             (Open, Fixed),
             (Fixed, Verified),
+            (Open, Fixing),
+            (Fixing, Open),
+            (Fixing, Fixed),
             (Fixed, Open),
             (Open, Deferred),
             (Deferred, Open),
@@ -1130,7 +1354,7 @@ mod tests {
         }
 
         // verified は終端。誤りは新しいラウンドで出し直す
-        for to in [Open, Fixed, Deferred, Rejected] {
+        for to in [Open, Fixing, Fixed, Deferred, Rejected] {
             assert!(
                 !can_transition(Verified, to),
                 "verified -> {to:?} は許されない"
@@ -1140,8 +1364,12 @@ mod tests {
         assert!(!can_transition(Open, Verified));
         // 繰り延べたものを直接 fixed にはできない（一度 open へ戻す）
         assert!(!can_transition(Deferred, Fixed));
+        // 着手中のものは確認・繰り延べ・棄却へ直接進めない（fixed か open を経る）
+        for to in [Verified, Deferred, Rejected] {
+            assert!(!can_transition(Fixing, to), "fixing -> {to:?} は許されない");
+        }
         // 同じ状態への遷移は不可（履歴だけが増えるのを防ぐ）
-        for state in [Open, Fixed, Verified, Deferred, Rejected] {
+        for state in [Open, Fixing, Fixed, Verified, Deferred, Rejected] {
             assert!(!can_transition(state, state), "{state:?} -> 自分自身");
         }
     }
@@ -1228,7 +1456,14 @@ mod tests {
         assert!(!requires_finding_author(Fixed, Verified));
         assert!(!requires_finding_author(Fixed, Open));
         // 修正側が行える遷移は、どちらの制約にも載らない
-        for (from, to) in [(Open, Fixed), (Open, Deferred), (Deferred, Open)] {
+        for (from, to) in [
+            (Open, Fixed),
+            (Open, Fixing),
+            (Fixing, Open),
+            (Fixing, Fixed),
+            (Open, Deferred),
+            (Deferred, Open),
+        ] {
             assert!(!requires_finding_author(from, to));
             assert!(!requires_reviewer_side(from, to));
         }
@@ -1246,6 +1481,7 @@ mod tests {
             blocking,
             // 既定は「レビューした commit = 現在の head」（鮮度は満たしている）
             latest_head_sha: Some(REVIEWED.into()),
+            latest_reviewer_id: Some(Uuid::nil()),
             current_head_sha: Some(REVIEWED.into()),
             owner_override_rejections: 0,
             latest_summary: "総評".into(),
@@ -1369,6 +1605,8 @@ mod tests {
         let counts = vec![
             (FindingSeverity::High, Open, 1),
             (FindingSeverity::Medium, Fixed, 2),
+            // 着手しただけでは解消していない
+            (FindingSeverity::High, Fixing, 17),
             // 確認済み・繰り延べ・棄却はマージを塞がない
             (FindingSeverity::High, Verified, 5),
             (FindingSeverity::Medium, Rejected, 7),
@@ -1376,6 +1614,6 @@ mod tests {
             (FindingSeverity::Low, Open, 11),
             (FindingSeverity::Nit, Fixed, 13),
         ];
-        assert_eq!(blocking_count(&counts), 3);
+        assert_eq!(blocking_count(&counts), 20);
     }
 }

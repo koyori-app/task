@@ -64,8 +64,9 @@ function mockLayoutFetch() {
     const url = typeof request === 'string' ? request : request.url;
     const pathname = new URL(url, 'http://localhost').pathname;
 
-    if (pathname === '/v1/auth/me') return jsonResponse(authUser);
-    if (pathname === '/v1/tenants') return jsonResponse([acme, globex]);
+    // 実際のパスは baseUrl（/api）付きなので、完全一致ではなく末尾で見る
+    if (pathname.endsWith('/v1/auth/me')) return jsonResponse(authUser);
+    if (pathname.endsWith('/v1/tenants')) return jsonResponse([acme, globex]);
     if (pathname.endsWith(`/tenants/${acme.id}/projects`)) return jsonResponse([]);
     return jsonResponse([]);
   });

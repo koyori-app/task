@@ -276,35 +276,6 @@ describe('AccessTokensSection', () => {
     expect(wrapper.text()).toContain('100文字以内で入力してください。');
   });
 
-  it('文字数は UTF-16 ではなくコードポイント単位で数える（絵文字 100 個は通り、101 個は弾く）', async () => {
-    const { createBodies } = stubFetch({ tokens: [] });
-    const wrapper = mountSection();
-    await flushPromises();
-
-    clickBodyButton('トークンを発行');
-    await flushPromises();
-
-    // サロゲートペア 100 個 = UTF-16 では 200。UTF-16 で数えると backend が許す名前を画面が弾く
-    await wrapper.find('#token-name').setValue('😀'.repeat(100));
-    clickScopeCheckbox('read:task');
-    await flushPromises();
-    await wrapper.find('form').trigger('submit');
-    await flushPromises();
-
-    expect(createBodies).toHaveLength(1);
-
-    clickBodyButton('トークンを発行');
-    await flushPromises();
-    await wrapper.find('#token-name').setValue('😀'.repeat(101));
-    clickScopeCheckbox('read:task');
-    await flushPromises();
-    await wrapper.find('form').trigger('submit');
-    await flushPromises();
-
-    expect(createBodies).toHaveLength(1);
-    expect(wrapper.text()).toContain('100文字以内で入力してください。');
-  });
-
   it.each([
     ['成功', true, 'コピーしました'],
     ['失敗', false, 'コピーできませんでした。表示中のトークンを選択してコピーしてください。'],

@@ -134,6 +134,7 @@ function provider(slug: string, connectionProvider = slug): Provider {
     provider: slug,
     connection_provider: connectionProvider,
     requires_instance_url: slug === 'gitlab_selfhosted',
+    sign_in: slug !== 'github_app',
   };
 }
 
@@ -143,6 +144,7 @@ function connection(overrides: Partial<Connection> = {}): Connection {
     provider_email: 'tester@example.com',
     instance_url: null,
     connected_at: '2026-09-01T10:00:00Z',
+    sign_in: true,
     ...overrides,
   };
 }
@@ -446,6 +448,42 @@ describe('AuthMethodsSection の OAuth 連携', () => {
     // issuer 付きの生の識別子ではなく表示名で出る
     expect(document.body.textContent).toContain('OIDC');
     expect(document.body.textContent).not.toContain('追加できる連携');
+  });
+
+  /** PR 承認用の GitHub 連携はサインインに使えないので、認証方法に数えない。 */
+  it('PR 承認用の連携があっても、ログイン用の連携が 1 つなら注意を出す', async () => {
+    stubFetch({
+      connections: [
+        connection({ provider: 'github' }),
+        connection({ provider: 'github_app', provider_email: null, sign_in: false }),
+      ],
+      providers: [provider('github'), provider('github_app')],
+    });
+    mountSection(false);
+    await flushPromises();
+
+    expect(document.body.textContent).toContain('GitHub（PR 承認用）');
+    // 注意はログイン用の連携の行にだけ出る（承認用の連携を解除してもサインインは困らない）
+    expect(
+      document.body.textContent?.split('これが最後の認証方法の可能性があります。').length,
+    ).toBe(2);
+  });
+
+  /** 連携専用かは連携ごとの値で決める。プロバイダー一覧から引くと、設定が外れた後に数え直してしまう。 */
+  it('GitHub App の設定が外れても、残った PR 承認用の連携を認証方法に数えない', async () => {
+    stubFetch({
+      connections: [
+        connection({ provider: 'github' }),
+        connection({ provider: 'github_app', provider_email: null, sign_in: false }),
+      ],
+      providers: [provider('github')],
+    });
+    mountSection(false);
+    await flushPromises();
+
+    expect(
+      document.body.textContent?.split('これが最後の認証方法の可能性があります。').length,
+    ).toBe(2);
   });
 
   /** パスキーも認証方法。数え落とすと最後でないのに注意が出る。 */

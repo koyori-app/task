@@ -49,9 +49,12 @@ export function useBreadcrumbs(
     }
 
     const tenantSlug = encodeURIComponent(params.tenant ?? '');
-    const home = { name: 'ホーム', href: `/${tenantSlug}/my-tasks` };
+    const home = { name: 'ホーム', href: `/${tenantSlug}` };
     if (descriptor.kind === 'home') {
-      return { segments: breadcrumbSegments([home]), loading: false };
+      return {
+        segments: breadcrumbSegments(current.name === 'ホーム' ? [home] : [home, current]),
+        loading: false,
+      };
     }
     const tenants = cached<Tenant[]>(['get', '/v1/tenants']);
     if (tenants?.status === 'error') return empty;

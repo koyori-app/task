@@ -831,21 +831,17 @@ mod tests {
         }
     }
 
-    /// 1 ラウンドの指摘は 200 件まで。境界そのものは通し、超えた側だけ弾く。
+    /// 1 ラウンドの指摘は 200 件まで。境界ちょうどは
+    /// `accepts_values_that_sit_exactly_on_the_limits` が通す。
     #[test]
     fn rejects_a_round_that_exceeds_the_findings_limit() {
-        let finding = json!({ "severity": "nit", "title": "t", "body": "b" });
-        let round = |count: usize| {
-            json!({
-                "pr": 1,
-                "head_sha": HEAD_SHA,
-                "findings": vec![finding.clone(); count],
-            })
-        };
+        let round = json!({
+            "pr": 1,
+            "head_sha": HEAD_SHA,
+            "findings": vec![json!({ "severity": "nit", "title": "t", "body": "b" }); 201],
+        });
 
-        assert!(parse_submit_payload(&round(200), None).is_ok());
-
-        let err = parse_submit_payload(&round(201), None).unwrap_err();
+        let err = parse_submit_payload(&round, None).unwrap_err();
         assert!(err.message.contains("findings"), "{}", err.message);
         assert_eq!(err.exit_code, 2);
     }
@@ -868,13 +864,13 @@ mod tests {
             "pr": 1,
             "head_sha": HEAD_SHA,
             "summary": "あ".repeat(20000),
-            "findings": [{
+            "findings": vec![json!({
                 "severity": "high",
                 "title": "x".repeat(200),
                 "body": "b",
                 "file": "f".repeat(1000),
                 "line": 1,
-            }],
+            }); 200],
         });
         assert!(parse_submit_payload(&input, None).is_ok());
     }
@@ -986,6 +982,8 @@ mod tests {
             owner_override_rejections: 0,
             repository: repository.map(str::to_string),
             mergeable,
+            // CLI は gate を見ない（権威のゲートは gate_failure）。形だけ合わせる
+            gate: payload::reviews::ReviewGate::StaleUnknown,
         }
     }
 
@@ -1067,7 +1065,7 @@ mod tests {
         let mut blocked = summary(2, 1, Some("acme/app"), false);
         blocked.counts = vec![SeverityStateCount {
             severity: FindingSeverity::High,
-            state: FindingState::Open,
+            state: FindingState::Open.into(),
             count: 1,
         }];
         let rendered = format_summary(&blocked, Some("1 high/medium finding(s) still unresolved"));
@@ -1093,12 +1091,13 @@ mod tests {
             body: "…".into(),
             file: file.map(str::to_string),
             line,
-            state: FindingState::Open,
+            state: FindingState::Open.into(),
             deferred_task_id: None,
             fixed_by: None,
             created_at: Utc.timestamp_opt(0, 0).unwrap(),
             updated_at: Utc.timestamp_opt(0, 0).unwrap(),
             transitions: vec![],
+            available_actions: vec![],
         }
     }
 
@@ -1142,7 +1141,7 @@ mod tests {
         );
         assert_eq!(
             join(&FindingState::iter().collect::<Vec<_>>()),
-            "open, fixed, verified, deferred, rejected"
+            "open, fixing, fixed, verified, deferred, rejected"
         );
     }
 }

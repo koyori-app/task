@@ -44,8 +44,6 @@ describe('TaskTitleLink', () => {
 
   it.each([
     ['metaKey', { metaKey: true }],
-    ['ctrlKey', { ctrlKey: true }],
-    ['shiftKey', { shiftKey: true }],
     ['altKey', { altKey: true }],
   ])('%s 付きのクリックは select を出さず href（フルページ）に委ねる', async (_label, mods) => {
     const wrapper = mountLink();

@@ -27,7 +27,7 @@ function selectTenant(tenant: Tenant) {
   tenantStore.selectTenant(tenant);
   if (tenant.display_id !== tenantSlug.value) {
     // テナントに紐づく状態を残さないためフルページ遷移にする
-    window.location.assign(`/${tenant.display_id}/my-tasks`);
+    window.location.assign(`/${tenant.display_id}`);
   }
 }
 

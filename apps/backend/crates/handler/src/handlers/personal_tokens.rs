@@ -87,10 +87,10 @@ pub async fn get_current_personal_token(
     let AuthMethod::PersonalToken {
         token_id,
         token_name,
+        tenant_id,
         allowed_project_ids,
         scopes,
         expires_at,
-        ..
     } = auth.method
     else {
         return Err(AuthError::Unauthorized);
@@ -101,6 +101,7 @@ pub async fn get_current_personal_token(
         name: token_name,
         user_id: auth.user_id,
         username: auth.username,
+        tenant_id,
         scopes,
         allowed_project_ids,
         expires_at: expires_at.map(|value| value.with_timezone(&chrono::Utc)),
@@ -114,19 +115,27 @@ mod identity_tests {
 
     use super::*;
 
-    fn personal_token_auth(scopes: ScopeList, project_ids: Option<Vec<Uuid>>) -> AuthUser {
+    fn personal_token_auth_in(
+        tenant_id: Uuid,
+        scopes: ScopeList,
+        project_ids: Option<Vec<Uuid>>,
+    ) -> AuthUser {
         AuthUser {
             user_id: Uuid::new_v4(),
             username: "automation".into(),
             method: AuthMethod::PersonalToken {
                 token_id: Uuid::new_v4(),
                 token_name: "review-bot".into(),
-                tenant_id: Uuid::new_v4(),
+                tenant_id,
                 allowed_project_ids: project_ids,
                 scopes,
                 expires_at: Some((Utc::now() + Duration::days(30)).into()),
             },
         }
+    }
+
+    fn personal_token_auth(scopes: ScopeList, project_ids: Option<Vec<Uuid>>) -> AuthUser {
+        personal_token_auth_in(Uuid::new_v4(), scopes, project_ids)
     }
 
     #[tokio::test]
@@ -143,6 +152,19 @@ mod identity_tests {
         assert!(identity.scopes.0.is_empty());
         assert_eq!(identity.allowed_project_ids, Some(projects));
         assert!(identity.expires_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn identity_reports_the_bound_tenant() {
+        let tenant_id = Uuid::new_v4();
+        let auth = personal_token_auth_in(tenant_id, ScopeList(vec![]), None);
+
+        let Json(identity) = get_current_personal_token(auth)
+            .await
+            .expect("PAT identity");
+
+        // 鍵だけ渡された者が行き先を知れるように、バインド先の陣を返す
+        assert_eq!(identity.tenant_id, tenant_id);
     }
 
     #[tokio::test]

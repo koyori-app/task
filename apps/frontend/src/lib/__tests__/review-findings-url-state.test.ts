@@ -30,6 +30,8 @@ describe('review findings URL state', () => {
         severity: 'high',
         state: 'open',
         finding: '4f20d810-3851-4cd0-95b1-bf17bdaf715c',
+        mine: false,
+        page: null,
       },
       warnings: [],
     });
@@ -73,6 +75,8 @@ describe('review findings URL state', () => {
         severity: 'medium',
         state: 'fixed',
         finding: null,
+        mine: false,
+        page: null,
       },
       'finding-2',
     );
@@ -85,7 +89,15 @@ describe('review findings URL state', () => {
   it('relativeReviewFindingHref は SSR と client の base で同じ文字列を返し、画面の外の query を保つ', () => {
     // SSR は requestUrl を仮の origin に載せ、client は window の絶対 URL を使う。
     // 同じ属性が両者で別の文字列になれば hydration が食い違う——一致が契約である
-    const state = { pr: 738, round: null, severity: null, state: null, finding: null } as const;
+    const state = {
+      pr: 738,
+      round: null,
+      severity: null,
+      state: null,
+      finding: null,
+      mine: false,
+      page: null,
+    } as const;
     const ssr = relativeReviewFindingHref(
       new URL('/acme/projects/APP/reviews?pr=738&tab=activity', 'http://ssr.local'),
       state,
@@ -101,5 +113,41 @@ describe('review findings URL state', () => {
     // この画面が持たぬ query (tab=) は落とさない
     expect(ssr).toContain('tab=activity');
     expect(ssr).toContain('finding=f-9');
+  });
+
+  it('PR 一覧の「自分の PR だけ」とページを復元し、既定値は載せない', () => {
+    expect(parseReviewFindingsUrlState({ mine: '1', page: '3' })).toEqual({
+      state: { ...DEFAULT_REVIEW_FINDINGS_URL_STATE, mine: true, page: 3 },
+      warnings: [],
+    });
+
+    const base = new URL('https://app.example.com/acme/projects/APP/reviews?mine=1&page=4');
+    const unset = applyReviewFindingsUrlState(base, DEFAULT_REVIEW_FINDINGS_URL_STATE);
+    expect(unset.searchParams.has('mine')).toBe(false);
+    expect(unset.searchParams.has('page')).toBe(false);
+
+    // 明示した 1 ページ目は残す（page が無い URL は「表示中の PR のページ」を指すため）
+    const first = applyReviewFindingsUrlState(base, {
+      ...DEFAULT_REVIEW_FINDINGS_URL_STATE,
+      page: 1,
+    });
+    expect(first.searchParams.get('page')).toBe('1');
+    expect(parseReviewFindingsUrlState(first.searchParams).state.page).toBe(1);
+
+    const second = applyReviewFindingsUrlState(base, {
+      ...DEFAULT_REVIEW_FINDINGS_URL_STATE,
+      mine: true,
+      page: 2,
+    });
+    expect(second.searchParams.get('mine')).toBe('1');
+    expect(second.searchParams.get('page')).toBe('2');
+  });
+
+  it('「自分の PR だけ」とページの不正値は無視して理由を残す', () => {
+    const parsed = parseReviewFindingsUrlState({ mine: 'yes', page: '0' });
+    expect(parsed.state).toEqual(DEFAULT_REVIEW_FINDINGS_URL_STATE);
+    expect(parsed.warnings).toHaveLength(2);
+    expect(parsed.warnings.join(' ')).toContain('自分の PR だけ');
+    expect(parsed.warnings.join(' ')).toContain('ページ');
   });
 });

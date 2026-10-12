@@ -10,6 +10,7 @@ import {
   PhTextbox,
   PhUsers,
   PhWarning,
+  PhWebhooksLogo,
 } from '@phosphor-icons/vue';
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
@@ -24,6 +25,7 @@ import EmojiIconPicker from '@/components/projects/EmojiIconPicker.vue';
 import IntegrationsSection from '@/components/projects/IntegrationsSection.vue';
 import LabelsSection from '@/components/projects/LabelsSection.vue';
 import MembersSection from '@/components/projects/MembersSection.vue';
+import WebhooksSection from '@/components/projects/WebhooksSection.vue';
 import WorkflowStatusesEditor from '@/components/projects/WorkflowStatusesEditor.vue';
 import { apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
@@ -41,6 +43,7 @@ type SettingsSection =
   | 'labels'
   | 'fields'
   | 'integrations'
+  | 'webhooks'
   | 'danger';
 
 const props = defineProps<{
@@ -73,6 +76,7 @@ const sections: {
   { key: 'labels', label: 'ラベル', icon: PhTag },
   { key: 'fields', label: 'カスタムフィールド', icon: PhTextbox },
   { key: 'integrations', label: '連携', icon: PhPlugsConnected },
+  { key: 'webhooks', label: 'Webhook', icon: PhWebhooksLogo },
   { key: 'danger', label: '削除', icon: PhWarning, danger: true },
 ];
 
@@ -315,6 +319,13 @@ function onDeleted() {
         <!-- 連携 -->
         <IntegrationsSection
           v-else-if="activeSection === 'integrations'"
+          :tenant-id="tenantId"
+          :project-id="project.id"
+        />
+
+        <!-- Webhook -->
+        <WebhooksSection
+          v-else-if="activeSection === 'webhooks'"
           :tenant-id="tenantId"
           :project-id="project.id"
         />

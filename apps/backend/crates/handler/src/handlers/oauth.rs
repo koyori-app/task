@@ -20,7 +20,7 @@ use crate::error::{ServerError, internal_server_error};
 use crate::extractors::{AuthUser, CurrentUser, OptionalAuthUser};
 use crate::openapi::OAuthErrors;
 use auth_core::client::{TokenResponse, exchange_code};
-use auth_core::crypto::encrypt_token;
+use auth_core::crypto::{decrypt_token, encrypt_token};
 use auth_core::pkce::{generate_pkce_pair, generate_state};
 use auth_core::provider::{ProviderUserInfo, build_authorize_url};
 use auth_core::state::{
@@ -33,7 +33,8 @@ use service::db::{is_postgres_unique_violation, with_transaction};
 use service::email::normalize_email;
 use service::login_session::establish_login_session;
 use service::oauth::{
-    OAuthStatePayload, consume_state, get_credentials, resolve_provider, store_state,
+    GITHUB_APP_PROVIDER, OAuthSettings, OAuthStatePayload, consume_state, get_credentials,
+    resolve_provider, store_state,
 };
 use service::passkeys::count_user_passkeys;
 
@@ -216,6 +217,10 @@ pub async fn oauth_start(
     if !settings.is_provider_configured(&provider) {
         return Err(OAuthError::ProviderNotConfigured);
     }
+    // 連携専用のプロバイダーは、ログイン中の利用者にしか結べない（ここで利用者を作らない）
+    if !OAuthSettings::is_sign_in_provider(&provider) && optional_auth.0.is_none() {
+        return Err(OAuthError::Unauthorized);
+    }
 
     let instance_url = match provider.as_str() {
         "gitlab_selfhosted" => Some(
@@ -372,6 +377,10 @@ pub async fn oauth_callback(
     if payload.provider != provider {
         return Err(OAuthError::InvalidState);
     }
+    // 開始時に弾いているが、state を作った後にログアウトされても利用者を作らない
+    if !OAuthSettings::is_sign_in_provider(&provider) && payload.link_user_id.is_none() {
+        return Err(OAuthError::InvalidState);
+    }
 
     if let Some(link_user_id) = payload.link_user_id {
         let session_user_id: Option<Uuid> = session.get("user_id");
@@ -461,12 +470,13 @@ pub async fn oauth_callback(
 }
 
 /// discovery で列挙する OAuth プロバイダー slug と、self-hosted インスタンス URL 入力の要否。
-const OAUTH_PROVIDER_SLUGS: [(&str, bool); 5] = [
+const OAUTH_PROVIDER_SLUGS: [(&str, bool); 6] = [
     ("github", false),
     ("gitlab", false),
     ("gitlab_selfhosted", true),
     ("google", false),
     ("oidc", false),
+    (GITHUB_APP_PROVIDER, false),
 ];
 
 #[axum::debug_handler]
@@ -489,6 +499,7 @@ pub async fn list_providers(State(state): State<AppState>) -> Json<OAuthProvider
                 provider: (*slug).to_string(),
                 connection_provider: settings.db_provider_key(slug)?,
                 requires_instance_url: *requires_instance_url,
+                sign_in: OAuthSettings::is_sign_in_provider(slug),
             })
         })
         .collect();
@@ -515,13 +526,21 @@ pub async fn list_connections(
         .filter(oauth_connections::Column::UserId.eq(user.id))
         .all(&state.db)
         .await?;
+    // 接続ごとの問い合わせは並べる（1 件が遅くても他を待たせない）
+    let rows = futures::future::try_join_all(
+        rows.into_iter()
+            .map(|row| backfill_provider_login(&state, row)),
+    )
+    .await?;
 
     let connections = rows
         .into_iter()
         .map(|row| OAuthConnectionItem {
+            sign_in: OAuthSettings::is_sign_in_provider(&row.provider),
             provider: row.provider,
             provider_email: row.provider_email,
             instance_url: row.instance_url,
+            provider_login: row.provider_login,
             connected_at: row.created_at.to_rfc3339(),
         })
         .collect();
@@ -581,16 +600,21 @@ pub async fn disconnect_connection(
                 .await?
                 .ok_or(OAuthError::ConnectionNotFound)?;
 
-            let connection_count = oauth_connections::Entity::find()
-                .filter(oauth_connections::Column::UserId.eq(auth.user_id))
-                .count(txn)
-                .await?;
+            // 連携専用のプロバイダーはログイン手段に数えない（それだけ残るとログインできない）。
+            // 解除してもログイン手段は減らないので、最後の手段の検査はログイン用の連携だけにかける
+            if connection.provider != GITHUB_APP_PROVIDER {
+                let connection_count = oauth_connections::Entity::find()
+                    .filter(oauth_connections::Column::UserId.eq(auth.user_id))
+                    .filter(oauth_connections::Column::Provider.ne(GITHUB_APP_PROVIDER))
+                    .count(txn)
+                    .await?;
 
-            let passkey_count = count_user_passkeys(txn, auth.user_id)
-                .await
-                .map_err(|e| OAuthError::Internal(e.into()))?;
-            if connection_count <= 1 && user.password_hash.is_none() && passkey_count == 0 {
-                return Err(OAuthError::LastAuthMethod);
+                let passkey_count = count_user_passkeys(txn, auth.user_id)
+                    .await
+                    .map_err(|e| OAuthError::Internal(e.into()))?;
+                if connection_count <= 1 && user.password_hash.is_none() && passkey_count == 0 {
+                    return Err(OAuthError::LastAuthMethod);
+                }
             }
 
             oauth_connections::Entity::delete_by_id(connection.id)
@@ -867,6 +891,76 @@ async fn release_provider_login(
     update.exec(db).await?;
     Ok(())
 }
+
+/// ログイン名を控える前（`m20260911010000_oauth_provider_login`）からある接続は
+/// `provider_login` が空のまま残る。保存済みのアクセストークンでプロバイダーに問い合わせて補完する。
+///
+/// トークンの期限切れ・失効・通信の失敗では補完できないので、空のまま返して一覧は止めない
+/// （画面は再連携を案内する）。届かないホストで一覧が待たされないよう、問い合わせは
+/// [`BACKFILL_TIMEOUT`] で打ち切る。DB の失敗は伝播する。
+/// ponytail: 補完できない接続は一覧を開くたびに問い合わせ直す。件数が問題になったら試した時刻を控える
+async fn backfill_provider_login(
+    state: &AppState,
+    mut row: oauth_connections::Model,
+) -> Result<oauth_connections::Model, OAuthError> {
+    if row.provider_login.is_some() || row.token_expires_at.is_some_and(|at| at <= Utc::now()) {
+        return Ok(row);
+    }
+    let Some(access_token_enc) = row.access_token_enc.clone() else {
+        return Ok(row);
+    };
+    // 汎用 OIDC の接続（`oidc:{issuer}`）など、slug から引けないものは対象外
+    let Ok(provider) = resolve_provider(
+        &row.provider,
+        &state.oauth_settings,
+        row.instance_url.as_deref(),
+    ) else {
+        return Ok(row);
+    };
+    let info = tokio::time::timeout(BACKFILL_TIMEOUT, async {
+        let access_token = decrypt_token(&state.oauth_settings.encryption_key, &access_token_enc)?;
+        let endpoints = provider.endpoints(&state.http_client).await?;
+        provider
+            .fetch_user_info(&state.http_client, &endpoints, &access_token)
+            .await
+    })
+    .await;
+    let login = match info {
+        Ok(Ok(info)) => provider_login(&info),
+        Ok(Err(error)) => {
+            warn!(connection_id = %row.id, provider = %row.provider, error = %error, "could not backfill provider login");
+            None
+        }
+        Err(_) => {
+            warn!(connection_id = %row.id, provider = %row.provider, "provider login backfill timed out");
+            None
+        }
+    };
+    let Some(login) = login else {
+        return Ok(row);
+    };
+    release_provider_login(
+        &state.db,
+        &row.provider,
+        row.instance_url.as_deref(),
+        &login,
+        Some(row.id),
+    )
+    .await?;
+    oauth_connections::Entity::update_many()
+        .col_expr(
+            oauth_connections::Column::ProviderLogin,
+            sea_orm::sea_query::Expr::value(Some(login.clone())),
+        )
+        .filter(oauth_connections::Column::Id.eq(row.id))
+        .exec(&state.db)
+        .await?;
+    row.provider_login = Some(login);
+    Ok(row)
+}
+
+/// 補完の問い合わせ 1 件にかける上限。
+const BACKFILL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 async fn update_connection_tokens(
     state: &AppState,

@@ -1,5 +1,5 @@
 use sea_orm::entity::prelude::Json;
-use sea_orm::sea_query::OnConflict;
+use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
     prelude::Uuid,
@@ -7,11 +7,16 @@ use sea_orm::{
 use std::collections::HashSet;
 
 use crate::error::AppError;
-use entity::{notification_settings, notifications, projects, task_watchers, tenants, users};
+use entity::review_findings::{FindingSeverity, FindingState};
+use entity::{
+    notification_settings, notifications, projects, review_findings, reviews, task_watchers,
+    tenants, users,
+};
 
 // 定数本体は common へ移動（DTO からも参照するため）。既存の参照パス互換用に再公開。
 pub use common::notifications::{
     DEFAULT_IN_APP_EVENTS, KNOWN_EVENT_TYPES, TYPE_ASSIGNED, TYPE_COMMENT_ADDED, TYPE_MENTIONED,
+    TYPE_REVIEW_FINDING_CHANGED, TYPE_REVIEW_ROUND_ANY, TYPE_REVIEW_ROUND_CREATED,
     TYPE_STATUS_CHANGED,
 };
 
@@ -57,21 +62,58 @@ async fn in_app_enabled<C: ConnectionTrait>(
     Ok(events.iter().any(|e| e == event_type))
 }
 
+/// メール通知が有効か。設定行が無ければ無効（`email_events` の既定は空）。
+async fn email_enabled<C: ConnectionTrait>(
+    db: &C,
+    user_id: Uuid,
+    project_id: Uuid,
+    event_type: &str,
+) -> Result<bool, AppError> {
+    Ok(notification_settings::Entity::find()
+        .filter(notification_settings::Column::UserId.eq(user_id))
+        .filter(notification_settings::Column::ProjectId.eq(project_id))
+        .one(db)
+        .await?
+        .is_some_and(|s| {
+            s.email_events.iter().any(|e| {
+                e == event_type
+                    || (event_type == TYPE_REVIEW_ROUND_CREATED && e == TYPE_REVIEW_ROUND_ANY)
+            })
+        }))
+}
+
+/// `project_id` は通知の可視性の判定に使う（読み取り API が「入れないプロジェクトの
+/// 通知」を落とす）。タスクに紐づかないレビュー通知も判定できるよう、`task_id` とは別に持つ。
+///
+/// `email_events` に入っている種別なら `email_queued_at` を立てる。通知の行そのものが
+/// メールの outbox で、`job::notification_email` の掃き出しループが拾って送る。
 pub async fn create_notification<C: ConnectionTrait>(
     db: &C,
     user_id: Uuid,
+    project_id: Option<Uuid>,
     task_id: Option<Uuid>,
     notification_type: &str,
     payload: Json,
 ) -> Result<(), AppError> {
+    let now = chrono::Utc::now();
+    let email_queued_at = match project_id {
+        Some(project_id) if email_enabled(db, user_id, project_id, notification_type).await? => {
+            Some(now.into())
+        }
+        _ => None,
+    };
     notifications::ActiveModel {
         id: Set(Uuid::new_v4()),
         user_id: Set(user_id),
         task_id: Set(task_id),
+        project_id: Set(project_id),
         notification_type: Set(notification_type.to_string()),
         payload: Set(payload),
         read_at: Set(None),
-        created_at: Set(chrono::Utc::now().into()),
+        created_at: Set(now.into()),
+        email_queued_at: Set(email_queued_at),
+        emailed_at: Set(None),
+        email_attempts: Set(0),
     }
     .insert(db)
     .await?;
@@ -89,7 +131,15 @@ async fn notify_user_if_enabled<C: ConnectionTrait>(
     if !in_app_enabled(db, user_id, project_id, notification_type).await? {
         return Ok(());
     }
-    create_notification(db, user_id, Some(task_id), notification_type, payload).await
+    create_notification(
+        db,
+        user_id,
+        Some(project_id),
+        Some(task_id),
+        notification_type,
+        payload,
+    )
+    .await
 }
 
 pub async fn notify_assigned<C: ConnectionTrait>(
@@ -120,6 +170,29 @@ pub async fn notify_assigned<C: ConnectionTrait>(
     .await
 }
 
+/// そのプロジェクトの通知を受け取ってよい利用者。
+///
+/// プロジェクトに入れないユーザーには通知しない。メンバー未指定のプロジェクトは
+/// テナントメンバー全員が宛先になる（#568）。テナントオーナーは `project_members` に
+/// 入っていなくても受け取る。
+pub async fn notifiable_user_ids<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+) -> Result<HashSet<Uuid>, AppError> {
+    let mut ids: HashSet<Uuid> = crate::access::project_accessible_user_ids(db, project_id).await?;
+
+    let tenant_id = projects::Entity::find_by_id(project_id)
+        .one(db)
+        .await?
+        .map(|p| p.tenant_id);
+    if let Some(tenant_id) = tenant_id
+        && let Some(tenant) = tenants::Entity::find_by_id(tenant_id).one(db).await?
+    {
+        ids.insert(tenant.owner_id);
+    }
+    Ok(ids)
+}
+
 pub async fn notify_watchers<C: ConnectionTrait>(
     db: &C,
     project_id: Uuid,
@@ -129,34 +202,14 @@ pub async fn notify_watchers<C: ConnectionTrait>(
     exclude: &[Uuid],
 ) -> Result<(), AppError> {
     let exclude_set: HashSet<Uuid> = exclude.iter().copied().collect();
-
-    // プロジェクトに入れないユーザーには通知しない（テナントオーナーは除外しない）。
-    // メンバー未指定のプロジェクトはテナントメンバー全員が宛先になる（#568）
-    let member_ids: HashSet<Uuid> =
-        crate::access::project_accessible_user_ids(db, project_id).await?;
-
-    // テナントオーナーは project_members に入っていなくてもウォッチャー通知を受け取る
-    let tenant_id = projects::Entity::find_by_id(project_id)
-        .one(db)
-        .await?
-        .map(|p| p.tenant_id);
-    let tenant_owner_id: Option<Uuid> = if let Some(tid) = tenant_id {
-        tenants::Entity::find_by_id(tid)
-            .one(db)
-            .await?
-            .map(|t| t.owner_id)
-    } else {
-        None
-    };
+    let notifiable = notifiable_user_ids(db, project_id).await?;
 
     let watchers = task_watchers::Entity::find()
         .filter(task_watchers::Column::TaskId.eq(task_id))
         .all(db)
         .await?;
     for watcher in watchers {
-        let is_accessible =
-            member_ids.contains(&watcher.user_id) || tenant_owner_id == Some(watcher.user_id);
-        if exclude_set.contains(&watcher.user_id) || !is_accessible {
+        if exclude_set.contains(&watcher.user_id) || !notifiable.contains(&watcher.user_id) {
             continue;
         }
         notify_user_if_enabled(
@@ -199,8 +252,15 @@ pub async fn notify_mentioned<C: ConnectionTrait>(
         // メンション = 関心あり → notify_assigned と同様にウォッチャーへ自動追加
         ensure_watcher(db, task_id, *user_id).await?;
         if in_app_enabled(db, *user_id, project_id, TYPE_MENTIONED).await? {
-            create_notification(db, *user_id, Some(task_id), TYPE_MENTIONED, payload.clone())
-                .await?;
+            create_notification(
+                db,
+                *user_id,
+                Some(project_id),
+                Some(task_id),
+                TYPE_MENTIONED,
+                payload.clone(),
+            )
+            .await?;
             notified.push(*user_id);
         }
     }
@@ -263,4 +323,231 @@ pub async fn notify_status_changed<C: ConnectionTrait>(
         &[actor_id],
     )
     .await
+}
+
+/// 表示名。消えた利用者を参照している通知でも本題（何が起きたか）は出す。
+async fn username<C: ConnectionTrait>(db: &C, user_id: Uuid) -> Result<String, AppError> {
+    Ok(users::Entity::find_by_id(user_id)
+        .one(db)
+        .await?
+        .map(|u| u.username)
+        .unwrap_or_else(|| "unknown".into()))
+}
+
+/// ラウンドが見ていたリポジトリ（`owner/name`）。連携の無いプロジェクトでは空文字。
+fn repo_label(review: &reviews::Model) -> String {
+    if crate::reviews::RepoRef::of_round(review).is_linked() {
+        format!("{}/{}", review.repo_owner, review.repo_name)
+    } else {
+        String::new()
+    }
+}
+
+/// `review_round_any` を明示的に入れている購読者。
+///
+/// 設定で ON にした人なので、`in_app_enabled` は重ねて見ない
+/// （`review_round_any` 自体は通知種別ではなく受信者の印）。
+async fn round_subscribers<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+) -> Result<HashSet<Uuid>, AppError> {
+    Ok(notification_settings::Entity::find()
+        .filter(notification_settings::Column::ProjectId.eq(project_id))
+        .all(db)
+        .await?
+        .into_iter()
+        .filter(|row| row.in_app_events.iter().any(|e| e == TYPE_REVIEW_ROUND_ANY))
+        .map(|row| row.user_id)
+        .collect())
+}
+
+/// ラウンド起票の payload。in-app 通知と Webhook（`review.round_created`）で共有する。
+pub async fn review_round_payload<C: ConnectionTrait>(
+    db: &C,
+    review: &reviews::Model,
+    findings: &[review_findings::Model],
+) -> Result<Json, AppError> {
+    let reviewer = username(db, review.reviewer_id).await?;
+    Ok(round_created_payload(review, findings, &reviewer))
+}
+
+fn round_created_payload(
+    review: &reviews::Model,
+    findings: &[review_findings::Model],
+    reviewer: &str,
+) -> Json {
+    let count = |severity: FindingSeverity| {
+        findings
+            .iter()
+            .filter(|finding| finding.severity == severity)
+            .count()
+    };
+    serde_json::json!({
+        "project_id": review.project_id,
+        "review_id": review.id,
+        "repo": repo_label(review),
+        "pr_number": review.pr_number,
+        "round": review.round,
+        "head_sha": review.head_sha,
+        "reviewer": reviewer,
+        "counts": {
+            "high": count(FindingSeverity::High),
+            "medium": count(FindingSeverity::Medium),
+            "low": count(FindingSeverity::Low),
+            "nit": count(FindingSeverity::Nit),
+        },
+        // 総評は長文になりうる。一覧に出すぶんだけ切る（char 境界で切って壊さない）
+        "summary_excerpt": review.summary.chars().take(200).collect::<String>(),
+    })
+}
+
+/// ラウンドの起票を関係者と購読者へ知らせる。
+///
+/// 宛先は「その PR の関係者（[`crate::reviews::review_participants`]）」と
+/// 「`review_round_any` を入れた購読者」の和。起票した本人と、そのプロジェクトに
+/// 入れない利用者は落とす。
+pub async fn notify_review_round_created<C: ConnectionTrait>(
+    db: &C,
+    review: &reviews::Model,
+    findings: &[review_findings::Model],
+    actor_id: Uuid,
+) -> Result<(), AppError> {
+    let participants = crate::reviews::review_participants(db, review).await?;
+    let subscribers = round_subscribers(db, review.project_id).await?;
+    let notifiable = notifiable_user_ids(db, review.project_id).await?;
+    let payload = review_round_payload(db, review, findings).await?;
+
+    for user_id in participants.union(&subscribers).copied() {
+        if user_id == actor_id || !notifiable.contains(&user_id) {
+            continue;
+        }
+        if !subscribers.contains(&user_id)
+            && !in_app_enabled(db, user_id, review.project_id, TYPE_REVIEW_ROUND_CREATED).await?
+        {
+            continue;
+        }
+        create_notification(
+            db,
+            user_id,
+            Some(review.project_id),
+            None,
+            TYPE_REVIEW_ROUND_CREATED,
+            payload.clone(),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// ラウンドの起票を 1 人へ知らせる。
+///
+/// 要約ジョブが後から PR の作者を解決したとき（起票時点では作者が分からない）に使う。
+/// 購読者は [`notify_review_round_created`] が拾うので、ここでは広げない。
+pub async fn notify_review_round_created_to<C: ConnectionTrait>(
+    db: &C,
+    review: &reviews::Model,
+    findings: &[review_findings::Model],
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    if !notifiable_user_ids(db, review.project_id)
+        .await?
+        .contains(&user_id)
+        || !in_app_enabled(db, user_id, review.project_id, TYPE_REVIEW_ROUND_CREATED).await?
+    {
+        return Ok(());
+    }
+    // 過去ラウンドから作者が解決できた場合や購読者の場合は、起票時に通知済み。
+    if notifications::Entity::find()
+        .filter(notifications::Column::UserId.eq(user_id))
+        .filter(notifications::Column::NotificationType.eq(TYPE_REVIEW_ROUND_CREATED))
+        .filter(Expr::cust_with_values(
+            "payload ->> 'review_id' = $1",
+            [review.id.to_string()],
+        ))
+        .one(db)
+        .await?
+        .is_some()
+    {
+        return Ok(());
+    }
+    let payload = review_round_payload(db, review, findings).await?;
+    create_notification(
+        db,
+        user_id,
+        Some(review.project_id),
+        None,
+        TYPE_REVIEW_ROUND_CREATED,
+        payload,
+    )
+    .await
+}
+
+/// 指摘の状態遷移を関係者へ知らせる。
+///
+/// 購読の印（`review_round_any`）はラウンドの起票にだけ効く。遷移まで配ると、
+/// PR を見ていない人へ指摘 1 件ごとの通知が流れる。
+pub async fn notify_review_finding_changed<C: ConnectionTrait>(
+    db: &C,
+    review: &reviews::Model,
+    finding: &review_findings::Model,
+    from: FindingState,
+    to: FindingState,
+    actor_id: Uuid,
+    note: Option<&str>,
+) -> Result<(), AppError> {
+    let notifiable = notifiable_user_ids(db, review.project_id).await?;
+    let payload = review_finding_payload(db, review, finding, from, to, actor_id, note).await?;
+
+    for user_id in crate::reviews::review_participants(db, review).await? {
+        if user_id == actor_id || !notifiable.contains(&user_id) {
+            continue;
+        }
+        if !in_app_enabled(db, user_id, review.project_id, TYPE_REVIEW_FINDING_CHANGED).await? {
+            continue;
+        }
+        create_notification(
+            db,
+            user_id,
+            Some(review.project_id),
+            None,
+            TYPE_REVIEW_FINDING_CHANGED,
+            payload.clone(),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// 指摘の状態遷移の payload。in-app 通知と Webhook（`review.finding_changed`）で共有する。
+pub async fn review_finding_payload<C: ConnectionTrait>(
+    db: &C,
+    review: &reviews::Model,
+    finding: &review_findings::Model,
+    from: FindingState,
+    to: FindingState,
+    actor_id: Uuid,
+    note: Option<&str>,
+) -> Result<Json, AppError> {
+    let mut payload = serde_json::json!({
+        "project_id": review.project_id,
+        "review_id": review.id,
+        "finding_id": finding.id,
+        "repo": repo_label(review),
+        "pr_number": review.pr_number,
+        "round": review.round,
+        "title": finding.title,
+        "severity": finding.severity.as_str(),
+        "from": from.as_str(),
+        "to": to.as_str(),
+        "actor": username(db, actor_id).await?,
+        "note": note,
+    });
+    // 繰り延べ先タスクへ遷移できるよう、起票・再オープン直後の値を載せる
+    // （`finding` は遷移後の行）
+    if to == FindingState::Deferred
+        && let Some(task_id) = finding.deferred_task_id
+    {
+        payload["deferred_task_id"] = serde_json::json!(task_id);
+    }
+    Ok(payload)
 }

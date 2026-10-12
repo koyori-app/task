@@ -6,12 +6,14 @@ use crate::AppState;
 
 pub mod admin;
 pub mod auth;
+pub mod desktop;
 pub mod drive;
 pub mod github;
 pub mod personal_tokens;
 pub mod reviews;
 pub mod tenants;
 pub mod users;
+pub mod webhooks;
 
 pub fn create_routes() -> OpenApiRouter<AppState> {
     // ドライブはユーザーがアップロードしたファイルをそのまま配信するため、
@@ -22,6 +24,7 @@ pub fn create_routes() -> OpenApiRouter<AppState> {
             OpenApiRouter::new()
                 .nest("/admin", crate::routes::admin::routes())
                 .nest("/auth", crate::routes::auth::routes())
+                .nest("/desktop", crate::routes::desktop::routes())
                 .nest("/personal_tokens", crate::routes::personal_tokens::routes())
                 .nest("/users", crate::routes::users::routes())
                 .nest("/tenants", crate::routes::tenants::routes())

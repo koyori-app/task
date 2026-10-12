@@ -1,7 +1,6 @@
 //! HTTP 統合テスト用の Axum アプリ構築ヘルパー（admin / GitHub App 共通）。
 
-// 各統合テストバイナリごとにコンパイルされるため、一部バイナリで未使用のヘルパーが
-// dead_code 誤検知になるのを抑止する。
+// 一部のテストで未使用のヘルパーが dead_code 誤検知になるのを抑止する。
 #![allow(dead_code)]
 
 use std::net::SocketAddr;
@@ -37,7 +36,7 @@ use backend::{
         drive::DriveConfig,
         http::create_http_client,
         oauth::{OAuthSettings, ProviderConfig},
-        smtp::SmtpClient,
+        smtp::{SentMail, SmtpClient},
         storage::setup_storage,
         totp::build_totp,
         webauthn::build_webauthn,
@@ -461,6 +460,7 @@ pub struct TestApp {
     pub state: AppState,
     pub base_url: String,
     pub mock: MockOAuthHandle,
+    sent_mails: Arc<Mutex<Vec<SentMail>>>,
     client: Client,
     router: Router,
 }
@@ -483,10 +483,15 @@ pub struct Enabled2fa {
 
 impl TestApp {
     pub async fn new() -> Self {
+        Self::new_with_webhook_loopback(false).await
+    }
+
+    pub async fn new_with_webhook_loopback(allow: bool) -> Self {
         init_tracing();
         ensure_test_env();
         let mut settings = settings::load_settings().expect("load settings from .env");
         settings.email_verification_app_url = "http://localhost:3000".to_string();
+        settings.webhook_allow_loopback = allow;
         Self::build(settings).await
     }
 
@@ -509,14 +514,8 @@ impl TestApp {
             .expect("connect database");
         ensure_schema(&db).await;
 
-        let smtp_client = SmtpClient::new(
-            &settings.smtp_host,
-            settings.smtp_port,
-            &settings.smtp_username,
-            &settings.smtp_password,
-            &settings.smtp_from,
-        )
-        .expect("smtp client");
+        // 実 SMTP へは繋がない。送信済みメールは `sent_mails()` で読む
+        let (smtp_client, sent_mails) = SmtpClient::capture();
         let redis_client = RedisConnection::new(&settings.redis_url);
         redis_client.ping().await.expect("redis ping");
 
@@ -569,6 +568,10 @@ impl TestApp {
             }),
             google: None,
             oidc: None,
+            github_app: Some(ProviderConfig {
+                client_id: TEST_OAUTH_CLIENT_ID.to_string(),
+                client_secret: TEST_OAUTH_CLIENT_SECRET.to_string(),
+            }),
         };
 
         let state = AppState {
@@ -619,9 +622,15 @@ impl TestApp {
             state,
             base_url,
             mock,
+            sent_mails,
             client,
             router,
         }
+    }
+
+    /// これまでに送信されたメール（古い順）。
+    pub fn sent_mails(&self) -> Vec<SentMail> {
+        self.sent_mails.lock().expect("sent mails lock").clone()
     }
 
     pub async fn request(&self, req: Request<Body>) -> TestResponse {
@@ -1008,6 +1017,16 @@ impl TestApp {
             .expect("delete request")
     }
 
+    /// 本文を取らない更新を PAT で叩く（全件既読・1 件既読）。
+    pub async fn patch_with_bearer(&self, path: &str, token: &str) -> Response {
+        self.client
+            .patch(format!("{}{path}", self.base_url))
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("bearer request")
+    }
+
     pub async fn get_with_bearer(&self, path: &str, token: &str) -> Response {
         self.client
             .get(format!("{}{path}", self.base_url))
@@ -1278,4 +1297,71 @@ pub async fn ensure_tenant_member_for_project(
     .insert(db)
     .await
     .expect("insert tenant member");
+}
+
+/// 応答の本文を JSON として読む。
+pub async fn json_body(res: Response) -> serde_json::Value {
+    res.json::<serde_json::Value>().await.expect("json body")
+}
+
+/// テナントに 2 つめのプロジェクトを直接作る（プロジェクト境界の検証用）。
+pub async fn insert_extra_project(app: &TestApp, tenant_id: Uuid) -> Uuid {
+    let project_id = Uuid::new_v4();
+    let suffix = &project_id.to_string()[..8];
+    projects::ActiveModel {
+        id: Set(project_id),
+        name: Set("second-project".into()),
+        description: Set(String::new()),
+        tenant_id: Set(tenant_id),
+        icon_emoji: Set(None),
+        icon_url: Set(None),
+        key: Set(format!("Q{}", suffix.to_uppercase())),
+        is_personal: Set(false),
+        personal_owner_id: Set(None),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert extra project");
+    project_id
+}
+
+/// GitHub のインストール ID。同じ DB を共有する他テストと衝突しない範囲で散らす
+/// （github_http が振る舞いを切り替える基準値 1_500_000_000_000 より下に収める）。
+pub fn unique_installation_id() -> i64 {
+    300_000_000_000_i64 + (Uuid::new_v4().as_u128() % 900_000_000_000) as i64
+}
+
+/// プロジェクトにステータスを 1 件作る（`Todo` を既定、完了状態は後ろに置く）。
+pub async fn create_status(
+    app: &TestApp,
+    tp: &TestTenantProject,
+    name: &str,
+    is_done: bool,
+) -> Uuid {
+    let response = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/statuses",
+                tp.tenant_id, tp.project_id
+            ),
+            serde_json::json!({
+                "name": name,
+                "color": "#336699",
+                "position": if is_done { 2 } else { 1 },
+                "is_default": name == "Todo",
+                "is_done_state": is_done,
+            }),
+        )
+        .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::CREATED,
+        "create status {name}"
+    );
+    let body: serde_json::Value = response.json().await.expect("status json");
+    body["id"]
+        .as_str()
+        .expect("status id")
+        .parse()
+        .expect("uuid")
 }

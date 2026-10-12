@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::or_unknown::OrUnknown;
 use crate::users::UserSummary;
 use entity::review_findings::{FindingSeverity, FindingState};
 use entity::{review_finding_transitions, review_findings, reviews};
@@ -139,7 +140,10 @@ pub struct FindingResponse {
     pub file: Option<String>,
     #[schema(nullable)]
     pub line: Option<i32>,
-    pub state: FindingState,
+    // 状態の列挙値は OrUnknown で包む。サーバーが状態を足しても、配布済みの CLI が
+    // 応答を丸ごと読めなくならないように（JSON の形も OpenAPI も変わらない）
+    #[schema(value_type = FindingState)]
+    pub state: OrUnknown<FindingState>,
     /// 繰り延べ時に自動起票した通常タスク
     #[schema(value_type = Option<String>, format = "uuid", nullable)]
     pub deferred_task_id: Option<Uuid>,
@@ -151,6 +155,13 @@ pub struct FindingResponse {
     #[schema(value_type = String, format = "date-time")]
     pub updated_at: DateTime<Utc>,
     pub transitions: Vec<FindingTransitionResponse>,
+    /// 要求者がいま遷移できる先の状態（`PATCH … {state}` にそのまま渡せる値）。
+    /// `write:review` が無い場合は空。
+    ///
+    /// 遷移規則・役割規則（仕様 §3）は backend だけが持つ。クライアントはこれを見て
+    /// 操作を出し、規則を写さない。
+    #[schema(value_type = Vec<FindingState>)]
+    pub available_actions: Vec<OrUnknown<FindingState>>,
 }
 
 impl FindingResponse {
@@ -159,6 +170,7 @@ impl FindingResponse {
         pr_number: i32,
         round: i32,
         transitions: Vec<FindingTransitionResponse>,
+        available_actions: Vec<FindingState>,
     ) -> Self {
         Self {
             id: model.id,
@@ -170,12 +182,13 @@ impl FindingResponse {
             body: model.body,
             file: model.file,
             line: model.line,
-            state: model.state,
+            state: model.state.into(),
             deferred_task_id: model.deferred_task_id,
             fixed_by: model.fixed_by,
             created_at: model.created_at.with_timezone(&Utc),
             updated_at: model.updated_at.with_timezone(&Utc),
             transitions,
+            available_actions: available_actions.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -186,9 +199,10 @@ pub struct FindingTransitionResponse {
     pub id: Uuid,
     pub actor: UserSummary,
     /// 起票（登録）は `null`
-    #[schema(nullable)]
-    pub from_state: Option<FindingState>,
-    pub to_state: FindingState,
+    #[schema(value_type = Option<FindingState>, nullable)]
+    pub from_state: Option<OrUnknown<FindingState>>,
+    #[schema(value_type = FindingState)]
+    pub to_state: OrUnknown<FindingState>,
     #[schema(nullable)]
     pub note: Option<String>,
     #[schema(value_type = String, format = "date-time")]
@@ -203,8 +217,8 @@ impl FindingTransitionResponse {
         Self {
             id: model.id,
             actor: actor.into(),
-            from_state: model.from_state,
-            to_state: model.to_state,
+            from_state: model.from_state.map(Into::into),
+            to_state: model.to_state.into(),
             note: model.note,
             created_at: model.created_at.with_timezone(&Utc),
         }
@@ -248,6 +262,31 @@ pub struct ReviewSummaryResponse {
     ///
     /// レビューが 1 件も無い PR を「可」にしない（未レビューと「指摘なし」は違う）。
     pub mergeable: bool,
+    /// 表示用の判定（上から順に最初に当たったもの）。クライアントは再計算しない
+    ///
+    /// 権威のゲートは引き続き CLI の `--head` 照合と branch protection。
+    pub gate: ReviewGate,
+}
+
+/// PR のマージ判定の表示区分（仕様 §5）。
+///
+/// 判定は `service::reviews::review_gate`。`mergeable` と違い、鮮度（レビュー後に
+/// コミットが積まれたか）まで見る片道降格の結果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewGate {
+    /// 集計対象のリポジトリが確定しない（GitHub 連携なし）
+    Unlinked,
+    /// ラウンドが 0 件
+    Unreviewed,
+    /// open / fixed の High・Medium がある
+    Blocked,
+    /// 現在の HEAD を確認できていない（`cached_pr_head_sha` が無い）
+    StaleUnknown,
+    /// レビュー後にコミットが積まれている（`cached_pr_head_sha` ≠ `latest_head_sha`）
+    Outdated,
+    /// 上のいずれでもない。`pr_head_checked_at` 時点の判定
+    Ready,
 }
 
 /// レビューのある PR の一覧行。画面の PR 一覧が使う。
@@ -277,6 +316,17 @@ pub struct ReviewedPullRequest {
 #[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
 pub struct SeverityStateCount {
     pub severity: FindingSeverity,
-    pub state: FindingState,
+    #[schema(value_type = FindingState)]
+    pub state: OrUnknown<FindingState>,
     pub count: u64,
+}
+
+impl OrUnknown<FindingState> {
+    /// 表示用の綴り。知らない値はサーバーが返したままの文字列。
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Known(state) => state.as_str(),
+            Self::Unknown(raw) => raw,
+        }
+    }
 }
