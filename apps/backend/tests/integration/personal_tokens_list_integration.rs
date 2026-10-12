@@ -39,7 +39,7 @@ async fn lists_only_own_active_tokens() {
     let other_tenant_id = insert_tenant(&app.state.db, other.id).await;
 
     // 他ユーザーのトークン（見えてはいけない）。
-    app.insert_pat(other.id, other_tenant_id, vec![Scope::AdminTenant], None)
+    app.insert_pat(other.id, other_tenant_id, vec![Scope::Api], None)
         .await;
 
     app.reset_session_client();
@@ -124,7 +124,7 @@ async fn rejects_bearer_token_auth() {
     let user = app.insert_user_default().await;
     let tenant_id = insert_tenant(&app.state.db, user.id).await;
     let token = app
-        .insert_pat(user.id, tenant_id, vec![Scope::AdminTenant], None)
+        .insert_pat(user.id, tenant_id, vec![Scope::Api], None)
         .await;
 
     let res = app.get_with_bearer("/v1/personal_tokens", &token).await;

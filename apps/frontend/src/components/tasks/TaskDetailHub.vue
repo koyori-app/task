@@ -19,7 +19,6 @@ import {
   Search,
   Settings,
   ListChecks,
-  Paperclip,
   SquarePen,
   Star,
   Tag,
@@ -331,7 +330,6 @@ function toggleLabel(labelId: string, checked: boolean) {
 const PENDING_ACTIONS = [
   { label: 'フィールドを追加', icon: SquarePen },
   { label: 'チェックリストを作成', icon: ListChecks },
-  { label: 'ファイルを添付', icon: Paperclip },
 ];
 
 function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {

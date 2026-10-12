@@ -1,6 +1,6 @@
 //! 外部向け Webhook の管理 API（docs/features/tasks/10.webhooks.md §6）。
 //!
-//! 一覧は `read:project`、配信履歴と変更は `admin:project` + プロジェクト Admin（またはテナントオーナー）。
+//! 一覧は `read:project`、配信履歴と変更は `write:project` + プロジェクト Admin（またはテナントオーナー）。
 //! 有効 / 無効の切り替えは専用の口を作らず、PUT の `is_active` で行う。
 
 use axum::{
@@ -44,7 +44,7 @@ async fn ensure_admin_access(
     tenant_id: Uuid,
     project_id: Uuid,
 ) -> Result<(), AppError> {
-    auth.require_scope(Scope::AdminProject)?;
+    auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(state, tenant_id, Some(project_id))
         .await?;
     require_project_admin(state, tenant_id, project_id, auth.user_id).await
@@ -85,7 +85,7 @@ pub async fn list_webhooks(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Vec<WebhookResponse>>, AppError> {
     ensure_read_access(&state, &auth, tenant_id, project_id).await?;
-    let is_admin = if auth.require_scope(Scope::AdminProject).is_ok() {
+    let is_admin = if auth.require_scope(Scope::WriteProject).is_ok() {
         match require_project_admin(&state, tenant_id, project_id, auth.user_id).await {
             Ok(()) => true,
             Err(AppError::Forbidden) => false,

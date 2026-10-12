@@ -43,7 +43,7 @@ impl From<webhooks::Model> for WebhookResponse {
 }
 
 impl WebhookResponse {
-    /// `admin:project` とプロジェクト管理権限を確認済みの応答でのみ使う。
+    /// `write:project` とプロジェクト管理権限を確認済みの応答でのみ使う。
     pub fn for_admin(model: webhooks::Model) -> Self {
         let url = model.url.clone();
         Self {

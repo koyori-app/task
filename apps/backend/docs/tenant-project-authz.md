@@ -199,8 +199,10 @@ Drive にはファイル ID だけで引ける経路がある（`GET /v1/drive/f
 
 ## API と権限
 
-テナント系エンドポイントは PAT に `admin:tenant` スコープを要求する。
-`admin:project`（project 層の wildcard。[personal-access-tokens-authz.md](./personal-access-tokens-authz.md) の層の割り振り表）ではこれらの口は開かない。
+テナント系エンドポイント（テナント一覧・取得・更新・削除、メンバー管理、ドライブ容量の設定）は、
+PAT に読みなら `read:tenant`、変更なら `write:tenant` を要求する（`api` / `read_api` の包含は
+[personal-access-tokens-authz.md](./personal-access-tokens-authz.md) の含意の規則）。
+project 層のスコープ（`read:project` や `write:task` など）ではこれらの口は開かない。
 
 | 操作 | 許可 |
 |---|---|

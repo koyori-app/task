@@ -388,12 +388,12 @@ async fn pat_guest_passes_only_named_project_and_is_marked_in_list() {
         .insert_pat(
             s.guest.id,
             s.tenant_id,
-            vec![Scope::AdminTenant, Scope::ReadProject, Scope::ReadTask],
+            vec![Scope::Api, Scope::ReadProject, Scope::ReadTask],
             None,
         )
         .await;
     let owner_pat = app
-        .insert_pat(s.owner.id, s.tenant_id, vec![Scope::AdminTenant], None)
+        .insert_pat(s.owner.id, s.tenant_id, vec![Scope::Api], None)
         .await;
 
     let tenant_path = format!("/v1/tenants/{}", s.tenant_id);

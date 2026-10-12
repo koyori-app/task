@@ -20,7 +20,7 @@ use crate::error::{ServerError, internal_server_error};
 use crate::extractors::{AuthUser, CurrentUser, OptionalAuthUser};
 use crate::openapi::OAuthErrors;
 use auth_core::client::{TokenResponse, exchange_code};
-use auth_core::crypto::encrypt_token;
+use auth_core::crypto::{decrypt_token, encrypt_token};
 use auth_core::pkce::{generate_pkce_pair, generate_state};
 use auth_core::provider::{ProviderUserInfo, build_authorize_url};
 use auth_core::state::{
@@ -515,6 +515,12 @@ pub async fn list_connections(
         .filter(oauth_connections::Column::UserId.eq(user.id))
         .all(&state.db)
         .await?;
+    // 接続ごとの問い合わせは並べる（1 件が遅くても他を待たせない）
+    let rows = futures::future::try_join_all(
+        rows.into_iter()
+            .map(|row| backfill_provider_login(&state, row)),
+    )
+    .await?;
 
     let connections = rows
         .into_iter()
@@ -522,6 +528,7 @@ pub async fn list_connections(
             provider: row.provider,
             provider_email: row.provider_email,
             instance_url: row.instance_url,
+            provider_login: row.provider_login,
             connected_at: row.created_at.to_rfc3339(),
         })
         .collect();
@@ -867,6 +874,76 @@ async fn release_provider_login(
     update.exec(db).await?;
     Ok(())
 }
+
+/// ログイン名を控える前（`m20260911010000_oauth_provider_login`）からある接続は
+/// `provider_login` が空のまま残る。保存済みのアクセストークンでプロバイダーに問い合わせて補完する。
+///
+/// トークンの期限切れ・失効・通信の失敗では補完できないので、空のまま返して一覧は止めない
+/// （画面は再連携を案内する）。届かないホストで一覧が待たされないよう、問い合わせは
+/// [`BACKFILL_TIMEOUT`] で打ち切る。DB の失敗は伝播する。
+/// ponytail: 補完できない接続は一覧を開くたびに問い合わせ直す。件数が問題になったら試した時刻を控える
+async fn backfill_provider_login(
+    state: &AppState,
+    mut row: oauth_connections::Model,
+) -> Result<oauth_connections::Model, OAuthError> {
+    if row.provider_login.is_some() || row.token_expires_at.is_some_and(|at| at <= Utc::now()) {
+        return Ok(row);
+    }
+    let Some(access_token_enc) = row.access_token_enc.clone() else {
+        return Ok(row);
+    };
+    // 汎用 OIDC の接続（`oidc:{issuer}`）など、slug から引けないものは対象外
+    let Ok(provider) = resolve_provider(
+        &row.provider,
+        &state.oauth_settings,
+        row.instance_url.as_deref(),
+    ) else {
+        return Ok(row);
+    };
+    let info = tokio::time::timeout(BACKFILL_TIMEOUT, async {
+        let access_token = decrypt_token(&state.oauth_settings.encryption_key, &access_token_enc)?;
+        let endpoints = provider.endpoints(&state.http_client).await?;
+        provider
+            .fetch_user_info(&state.http_client, &endpoints, &access_token)
+            .await
+    })
+    .await;
+    let login = match info {
+        Ok(Ok(info)) => provider_login(&info),
+        Ok(Err(error)) => {
+            warn!(connection_id = %row.id, provider = %row.provider, error = %error, "could not backfill provider login");
+            None
+        }
+        Err(_) => {
+            warn!(connection_id = %row.id, provider = %row.provider, "provider login backfill timed out");
+            None
+        }
+    };
+    let Some(login) = login else {
+        return Ok(row);
+    };
+    release_provider_login(
+        &state.db,
+        &row.provider,
+        row.instance_url.as_deref(),
+        &login,
+        Some(row.id),
+    )
+    .await?;
+    oauth_connections::Entity::update_many()
+        .col_expr(
+            oauth_connections::Column::ProviderLogin,
+            sea_orm::sea_query::Expr::value(Some(login.clone())),
+        )
+        .filter(oauth_connections::Column::Id.eq(row.id))
+        .exec(&state.db)
+        .await?;
+    row.provider_login = Some(login);
+    Ok(row)
+}
+
+/// 補完の問い合わせ 1 件にかける上限。
+const BACKFILL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 async fn update_connection_tokens(
     state: &AppState,

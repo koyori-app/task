@@ -37,6 +37,10 @@ pub struct OAuthConnectionItem {
     pub provider_email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance_url: Option<String>,
+    /// ホスト上のユーザー名（GitHub / GitLab の login。小文字で控えている）。
+    /// レビュー画面が「自分が作成した PR」を PR の作成者と突き合わせて見分けるのに使う
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_login: Option<String>,
     pub connected_at: String,
 }
 

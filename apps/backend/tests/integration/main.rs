@@ -3,7 +3,6 @@
 #[path = "../common/mod.rs"]
 mod common;
 
-mod admin_project_scope_integration;
 mod admin_tenants_integration;
 mod admin_users_integration;
 mod auth_2fa_integration;
@@ -25,6 +24,7 @@ mod notification_email_integration;
 mod oauth_integration;
 mod password_reset_integration;
 mod pat_revoke_all_integration;
+mod pat_scope_integration;
 mod pat_tenant_membership_integration;
 mod personal_token_identity_integration;
 mod personal_tokens_create_auth_integration;
