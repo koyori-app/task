@@ -15834,6 +15834,16 @@
             }
           },
           {
+            "name": "created_by",
+            "in": "query",
+            "description": "作成者のユーザー ID。指定するとその人が作ったタスクだけを返す",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
             "name": "label_id",
             "in": "query",
             "required": false,
