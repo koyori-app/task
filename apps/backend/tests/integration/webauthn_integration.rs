@@ -5,7 +5,7 @@ use backend::utils::passkeys::{
     MAX_PASSKEYS_PER_USER, count_user_passkeys, insert_passkey_under_user_lock,
 };
 use chrono::Utc;
-use entity::{passkeys, users};
+use entity::{oauth_connections, passkeys, users};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use url::Url;
 use uuid::Uuid;
@@ -146,6 +146,64 @@ async fn webauthn_integration_suite() {
         assert_eq!(delete.status(), StatusCode::FORBIDDEN);
         let body = delete.text().await.expect("body");
         assert!(body.contains("last-auth-method"));
+
+        app.cleanup_user(user.id).await;
+    }
+
+    // PR 承認用の GitHub 連携はログイン手段に数えない: それだけ残る削除は 403、
+    // ログイン用の連携があれば 204（対照）
+    {
+        let mut app = TestApp::new().await;
+        let user = app
+            .insert_passkey_user(true, Some("TestPassword123!"))
+            .await;
+        app.login_session(&user.email, &user.password).await;
+        insert_passkey_under_user_lock(&app.state.db, user.id, dummy_passkey_model(user.id, 1))
+            .await
+            .expect("seed passkey");
+
+        let model = users::Entity::find_by_id(user.id)
+            .one(&app.state.db)
+            .await
+            .expect("load")
+            .expect("user");
+        let mut active: users::ActiveModel = model.into();
+        active.password_hash = Set(None);
+        active.update(&app.state.db).await.expect("clear password");
+
+        let insert_connection = |provider: &str| oauth_connections::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(user.id),
+            provider: Set(provider.into()),
+            provider_user_id: Set(Uuid::new_v4().to_string()),
+            created_at: Set(Utc::now().into()),
+            updated_at: Set(Utc::now().into()),
+            ..Default::default()
+        };
+        insert_connection("github_app")
+            .insert(&app.state.db)
+            .await
+            .expect("insert github_app connection");
+
+        let passkey = passkeys::Entity::find()
+            .filter(passkeys::Column::UserId.eq(user.id))
+            .one(&app.state.db)
+            .await
+            .expect("find")
+            .expect("passkey");
+        let path = format!("/v1/auth/passkeys/{}", passkey.id);
+
+        let blocked = app.delete_with_session(&path).await;
+        assert_eq!(blocked.status(), StatusCode::FORBIDDEN);
+        let body = blocked.text().await.expect("body");
+        assert!(body.contains("last-auth-method"), "{body}");
+
+        insert_connection("github")
+            .insert(&app.state.db)
+            .await
+            .expect("insert github connection");
+        let deleted = app.delete_with_session(&path).await;
+        assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
 
         app.cleanup_user(user.id).await;
     }

@@ -454,7 +454,7 @@ pub async fn get_review_summary(
             .into_iter()
             .map(|(severity, state, count)| SeverityStateCount {
                 severity,
-                state,
+                state: state.into(),
                 count,
             })
             .collect(),

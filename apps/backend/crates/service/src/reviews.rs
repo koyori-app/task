@@ -265,6 +265,8 @@ pub fn can_transition(from: FindingState, to: FindingState) -> bool {
     match (from, to) {
         // 修正の宣言と、その確認
         (Open, Fixed) | (Fixed, Verified) => true,
+        // 修正への着手と、その取り消し（着手を経ずに fixed を宣言してもよい）
+        (Open, Fixing) | (Fixing, Open) | (Fixing, Fixed) => true,
         // 繰り延べと取り消し（繰り延べられる重大度は [`FindingSeverity::can_defer`] で見る）
         (Open, Deferred) | (Deferred, Open) => true,
         // 指摘自体の棄却と再オープン
@@ -1052,6 +1054,8 @@ pub struct SummarySnapshot {
     pub blocking: u64,
     /// 最新ラウンドがレビューした commit
     pub latest_head_sha: Option<String>,
+    /// 最新ラウンドの作成者。マージ可のとき、この人の名義で PR を Approve する
+    pub latest_reviewer_id: Option<Uuid>,
     /// 投稿時に GitHub から読んだ現在の head（取れなければ `None`）
     pub current_head_sha: Option<String>,
     /// オーナー代行で棄却された件数
@@ -1074,6 +1078,15 @@ impl SummarySnapshot {
             _ => None,
         }
     }
+
+    /// 要約コメントに「マージ可」と書き、GitHub で PR を Approve する条件（仕様 §7）。
+    ///
+    /// 集計 API と同じ規則（レビューが 1 件も無い PR を可にしない）に加えて、
+    /// レビュー後にコミットが積まれていないことを確かめる。確かめられないときも可にしない。
+    #[must_use]
+    pub fn merge_ready(&self) -> bool {
+        self.blocking == 0 && self.rounds > 0 && self.head_is_fresh() == Some(true)
+    }
 }
 
 /// PR 単位の状態を 1 レスポンスぶん読み出す。
@@ -1095,8 +1108,8 @@ pub async fn summary_snapshot<C: ConnectionTrait>(
         .order_by_desc(reviews::Column::Round)
         .one(db)
         .await?;
-    let (latest_summary, latest_head_sha) = latest
-        .map(|r| (r.summary, Some(r.head_sha)))
+    let (latest_summary, latest_head_sha, latest_reviewer_id) = latest
+        .map(|r| (r.summary, Some(r.head_sha), Some(r.reviewer_id)))
         .unwrap_or_default();
 
     Ok(SummarySnapshot {
@@ -1105,6 +1118,7 @@ pub async fn summary_snapshot<C: ConnectionTrait>(
         counts,
         blocking,
         latest_head_sha,
+        latest_reviewer_id,
         current_head_sha,
         owner_override_rejections,
         latest_summary,
@@ -1132,10 +1146,7 @@ pub fn render_summary_comment(
     let _ = writeln!(out, "## レビュー指摘");
     let _ = writeln!(out);
 
-    // 集計 API と同じ規則（レビューが 1 件も無い PR を「可」にしない）に加えて、
-    // レビュー後にコミットが積まれていないことを確かめる。確かめられないときも
-    // 可を出さない（仕様 §7）
-    if snapshot.blocking == 0 && snapshot.rounds > 0 && snapshot.head_is_fresh() == Some(true) {
+    if snapshot.merge_ready() {
         let _ = writeln!(out, "**マージ可** — High / Medium の未解決はありません。");
     } else if snapshot.blocking == 0 && snapshot.rounds > 0 {
         let _ = match snapshot.head_is_fresh() {
@@ -1175,6 +1186,7 @@ pub fn render_summary_comment(
         ] {
             for state in [
                 FindingState::Open,
+                FindingState::Fixing,
                 FindingState::Fixed,
                 FindingState::Verified,
                 FindingState::Deferred,
@@ -1328,6 +1340,9 @@ mod tests {
         let allowed = [
             (Open, Fixed),
             (Fixed, Verified),
+            (Open, Fixing),
+            (Fixing, Open),
+            (Fixing, Fixed),
             (Fixed, Open),
             (Open, Deferred),
             (Deferred, Open),
@@ -1339,7 +1354,7 @@ mod tests {
         }
 
         // verified は終端。誤りは新しいラウンドで出し直す
-        for to in [Open, Fixed, Deferred, Rejected] {
+        for to in [Open, Fixing, Fixed, Deferred, Rejected] {
             assert!(
                 !can_transition(Verified, to),
                 "verified -> {to:?} は許されない"
@@ -1349,8 +1364,12 @@ mod tests {
         assert!(!can_transition(Open, Verified));
         // 繰り延べたものを直接 fixed にはできない（一度 open へ戻す）
         assert!(!can_transition(Deferred, Fixed));
+        // 着手中のものは確認・繰り延べ・棄却へ直接進めない（fixed か open を経る）
+        for to in [Verified, Deferred, Rejected] {
+            assert!(!can_transition(Fixing, to), "fixing -> {to:?} は許されない");
+        }
         // 同じ状態への遷移は不可（履歴だけが増えるのを防ぐ）
-        for state in [Open, Fixed, Verified, Deferred, Rejected] {
+        for state in [Open, Fixing, Fixed, Verified, Deferred, Rejected] {
             assert!(!can_transition(state, state), "{state:?} -> 自分自身");
         }
     }
@@ -1437,7 +1456,14 @@ mod tests {
         assert!(!requires_finding_author(Fixed, Verified));
         assert!(!requires_finding_author(Fixed, Open));
         // 修正側が行える遷移は、どちらの制約にも載らない
-        for (from, to) in [(Open, Fixed), (Open, Deferred), (Deferred, Open)] {
+        for (from, to) in [
+            (Open, Fixed),
+            (Open, Fixing),
+            (Fixing, Open),
+            (Fixing, Fixed),
+            (Open, Deferred),
+            (Deferred, Open),
+        ] {
             assert!(!requires_finding_author(from, to));
             assert!(!requires_reviewer_side(from, to));
         }
@@ -1455,6 +1481,7 @@ mod tests {
             blocking,
             // 既定は「レビューした commit = 現在の head」（鮮度は満たしている）
             latest_head_sha: Some(REVIEWED.into()),
+            latest_reviewer_id: Some(Uuid::nil()),
             current_head_sha: Some(REVIEWED.into()),
             owner_override_rejections: 0,
             latest_summary: "総評".into(),
@@ -1578,6 +1605,8 @@ mod tests {
         let counts = vec![
             (FindingSeverity::High, Open, 1),
             (FindingSeverity::Medium, Fixed, 2),
+            // 着手しただけでは解消していない
+            (FindingSeverity::High, Fixing, 17),
             // 確認済み・繰り延べ・棄却はマージを塞がない
             (FindingSeverity::High, Verified, 5),
             (FindingSeverity::Medium, Rejected, 7),
@@ -1585,6 +1614,6 @@ mod tests {
             (FindingSeverity::Low, Open, 11),
             (FindingSeverity::Nit, Fixed, 13),
         ];
-        assert_eq!(blocking_count(&counts), 3);
+        assert_eq!(blocking_count(&counts), 20);
     }
 }

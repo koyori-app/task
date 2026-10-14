@@ -46,10 +46,16 @@ describe('findingActions', () => {
     ]);
   });
 
-  it('open への遷移は fixed からなら差し戻し、それ以外は再オープンと呼ぶ', () => {
+  it('open への遷移は fixed からなら差し戻し、fixing からなら着手の取り消し、それ以外は再オープンと呼ぶ', () => {
     expect(findingActions(finding({ state: 'fixed', available_actions: ['open'] }))[0].label).toBe(
       'レビューに戻す',
     );
+    expect(
+      findingActions(finding({ state: 'fixing', available_actions: ['open', 'fixed'] })),
+    ).toEqual([
+      { to: 'open', label: '着手を取り消す' },
+      { to: 'fixed', label: '修正した' },
+    ]);
     expect(
       findingActions(finding({ state: 'rejected', available_actions: ['open'] }))[0].label,
     ).toBe('再オープン');
@@ -62,7 +68,7 @@ describe('findingActions', () => {
 
 describe('マージ判定の材料', () => {
   it('open と fixed を未解決に数える（fixed は確認が済んでいない）', () => {
-    expect(STATES.filter(countsAsUnresolved)).toEqual(['open', 'fixed']);
+    expect(STATES.filter(countsAsUnresolved)).toEqual(['open', 'fixing', 'fixed']);
   });
 });
 

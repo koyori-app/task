@@ -122,7 +122,7 @@ icon: lucide:user-cog
 
 ### 認可
 
-エクストラクタは `GET /v1/auth/me` と同じ `CurrentUser` を使う。したがって次の拒否をそのまま引き継ぐ。
+エクストラクタはセッション専用の `CurrentUser` を使う（`GET /v1/auth/me` は Desktop の Device Token も通すが、更新は通さない）。したがって次の拒否をそのまま引き継ぐ。
 
 | 状態 | 応答 |
 |---|---|

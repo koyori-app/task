@@ -66,6 +66,7 @@ const {
   labelsError,
   fieldUpdating,
   fieldErrors,
+  savedField,
   isLoading,
   isNotFound,
   isError,
@@ -215,6 +216,7 @@ function onDeleteDialogCancel(event: Event) {
         :labels-error="labelsError"
         :field-updating="fieldUpdating"
         :field-errors="fieldErrors"
+        :saved-field="savedField"
         :description-html="renderedDescription.data.value?.html ?? null"
         :description-source="renderedDescription.data.value?.source ?? null"
         :loading="isLoading"

@@ -136,7 +136,9 @@ const passkeyCount = computed(() => passkeysQuery.data.value?.passkeys?.length ?
 const methodCount = computed(() =>
   countAuthMethods({
     hasPassword: props.user.has_password,
-    connectionCount: connections.value.length,
+    // 連携専用（サインインに使えない）連携は数えない。判定は連携ごとに backend が返す
+    // （プロバイダー一覧から引くと、設定が外れたプロバイダーの連携をログイン手段に数える）
+    connectionCount: connections.value.filter((connection) => connection.sign_in).length,
     passkeyCount: passkeyCount.value,
   }),
 );
@@ -151,6 +153,7 @@ const linkedProviders = computed(() =>
     key: connectionKey(connection),
     connection,
     label: connectionProviderLabel(connection.provider),
+    signIn: connection.sign_in,
   })),
 );
 
@@ -363,7 +366,7 @@ async function onPasswordSet() {
               {{ item.connection.instance_url }}
             </p>
             <p
-              v-if="methodCount <= 1"
+              v-if="item.signIn && methodCount <= 1"
               class="text-muted-foreground flex items-center gap-1 text-xs"
             >
               <PhInfo class="size-3.5 shrink-0" />
@@ -385,7 +388,12 @@ async function onPasswordSet() {
           <div class="flex flex-wrap items-center gap-3 rounded-md border p-3">
             <p class="min-w-52 flex-1 text-sm">
               <strong class="font-semibold">{{ item.label }}</strong>
-              の連携を解除しますか？ {{ item.label }} でサインインできなくなります。
+              の連携を解除しますか？
+              {{
+                item.signIn
+                  ? `${item.label} でサインインできなくなります。`
+                  : 'レビューが完了した PR を、あなたの名義で Approve しなくなります。'
+              }}
             </p>
             <Button
               type="button"

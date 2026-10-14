@@ -755,7 +755,7 @@ checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.8",
 ]
 
 [[package]]
@@ -776,7 +776,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 [[package]]
 name = "auth-core"
 version = "0.1.0"
-source = "git+https://github.com/koyori-app/auth-core.git?rev=5d527dcf7e833e2980212560992d8f49efcbdda5#5d527dcf7e833e2980212560992d8f49efcbdda5"
+source = "git+https://github.com/koyori-app/auth-core.git?rev=5524d3eae26b61a511ac60e771ccab3ca736bf14#5524d3eae26b61a511ac60e771ccab3ca736bf14"
 dependencies = [
  "aes-gcm 0.11.1",
  "anyhow",
@@ -798,7 +798,7 @@ dependencies = [
 [[package]]
 name = "auth-core-github"
 version = "0.1.0"
-source = "git+https://github.com/koyori-app/auth-core.git?rev=5d527dcf7e833e2980212560992d8f49efcbdda5#5d527dcf7e833e2980212560992d8f49efcbdda5"
+source = "git+https://github.com/koyori-app/auth-core.git?rev=5524d3eae26b61a511ac60e771ccab3ca736bf14#5524d3eae26b61a511ac60e771ccab3ca736bf14"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -810,7 +810,7 @@ dependencies = [
 [[package]]
 name = "auth-core-gitlab"
 version = "0.1.0"
-source = "git+https://github.com/koyori-app/auth-core.git?rev=5d527dcf7e833e2980212560992d8f49efcbdda5#5d527dcf7e833e2980212560992d8f49efcbdda5"
+source = "git+https://github.com/koyori-app/auth-core.git?rev=5524d3eae26b61a511ac60e771ccab3ca736bf14#5524d3eae26b61a511ac60e771ccab3ca736bf14"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -972,6 +972,7 @@ version = "0.1.0"
 dependencies = [
  "apalis",
  "apalis-board",
+ "auth-core",
  "axum",
  "axum_session",
  "axum_session_redispool",
@@ -1414,7 +1415,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.8",
 ]
 
 [[package]]
@@ -1971,7 +1972,7 @@ checksum = "c6232dd377dcc64799954cbd3a9bb882e9cdc1308ccd87b1c098f1fb2eaf82a8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.8",
 ]
 
 [[package]]
@@ -2090,7 +2091,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2247,7 +2248,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 [[package]]
 name = "forge-core"
 version = "0.1.0"
-source = "git+https://github.com/koyori-app/auth-core.git?rev=5d527dcf7e833e2980212560992d8f49efcbdda5#5d527dcf7e833e2980212560992d8f49efcbdda5"
+source = "git+https://github.com/koyori-app/auth-core.git?rev=5524d3eae26b61a511ac60e771ccab3ca736bf14#5524d3eae26b61a511ac60e771ccab3ca736bf14"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2256,7 +2257,7 @@ dependencies = [
 [[package]]
 name = "forge-github"
 version = "0.1.0"
-source = "git+https://github.com/koyori-app/auth-core.git?rev=5d527dcf7e833e2980212560992d8f49efcbdda5#5d527dcf7e833e2980212560992d8f49efcbdda5"
+source = "git+https://github.com/koyori-app/auth-core.git?rev=5524d3eae26b61a511ac60e771ccab3ca736bf14#5524d3eae26b61a511ac60e771ccab3ca736bf14"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2375,7 +2376,7 @@ checksum = "9fb9654ba8355388abeb8dcb4fc62f511300867002afc858860463bdd9fe0c44"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.8",
 ]
 
 [[package]]
@@ -5096,7 +5097,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5155,7 +5156,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5610,14 +5611,14 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.8",
 ]
 
 [[package]]
 name = "serde_json"
-version = "1.0.151"
+version = "1.0.152"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
+checksum = "1741ab7a6cc54a03a89b5d563ed60075c277d9e3cfa73ad0c1f23f23974703c6"
 dependencies = [
  "itoa",
  "memchr",
@@ -5921,9 +5922,9 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "smallvec"
-version = "1.16.2"
+version = "1.16.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
+checksum = "5b3dc8af474f516a851ff4bd12db780f948b9250ad37211e4eec0bccea54e01b"
 dependencies = [
  "serde",
 ]
@@ -6457,9 +6458,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.6"
+version = "3.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
+checksum = "01016da373cd8f7ef12624f796309f5c31ba8d646dd08856c02cd741d823c622"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6521,10 +6522,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6604,7 +6605,7 @@ checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.8",
 ]
 
 [[package]]
@@ -6742,9 +6743,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.19"
+version = "0.7.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52"
+checksum = "e464cf451ba96ebfc6f9b6542f17ee8b8956e33f1e40d9690624e59d7a7f8a4b"
 dependencies = [
  "bytes",
  "futures-core",
@@ -8031,7 +8032,7 @@ dependencies = [
  "sqlx-core 0.8.6",
  "sqlx-postgres 0.8.6",
  "subtle",
- "syn 3.0.6",
+ "syn 3.0.8",
  "sync_wrapper",
  "thiserror 2.0.21",
  "time",
@@ -8136,18 +8137,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.59"
+version = "0.8.62"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6df92bf3d9227be3d53173901ddbffac2babc27ae50f397776ffd6dc33f800cb"
+checksum = "86502bf56ac7c77571a32e2647bb2a15894565e981fb2a48d7bde2d91c965a9d"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.59"
+version = "0.8.62"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac4f328cf2f05d084e496c3e9c3f33ed0a183656a16e1fcec4d464d8373aec82"
+checksum = "5457206954b06561e2608c7e19cf58b1926586d999c246eebe4502f7e2039d1a"
 dependencies = [
  "proc-macro2",
  "quote",

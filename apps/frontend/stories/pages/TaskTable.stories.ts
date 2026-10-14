@@ -552,7 +552,10 @@ function createMockFetch(
     // 単体タスク詳細（分割ビューのペインが叩く）: /tasks/{seqKey}
     const detailMatch = url.match(/\/tasks\/([^/?]+)(?:\?|$)/);
     if (detailMatch) {
-      const list = (overrides.tasks ?? sampleTasks).tasks as Array<{ seq_id: number }>;
+      // サブタスクは一覧に出ないが、詳細から開けるので探索対象に入れる
+      const list = [...(overrides.tasks ?? sampleTasks).tasks, sampleSubtask] as Array<{
+        seq_id: number;
+      }>;
       const found = list.find(
         (t) => `${mockContext.routeParams.projectKey}-${t.seq_id}` === detailMatch[1],
       );
@@ -1303,6 +1306,36 @@ export const ListViewDetailOverlay: Story = {
     await expect(
       within(dialog).getByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).toBeInTheDocument();
+  },
+};
+
+export const ListViewOverlaySubtaskBack: Story = {
+  name: 'List 表示の詳細オーバーレイ（サブタスクから Esc で親へ戻る）',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    // 開くタスクが変わるとオーバーレイは作り直されるので、毎回 dialog を引き直す
+    const expectOverlayHeading = (name: string) =>
+      waitFor(() =>
+        expect(
+          within(screen.getByRole('dialog')).getByRole('heading', { name }),
+        ).toBeInTheDocument(),
+      );
+
+    await user.click(await canvas.findByRole('button', { name: 'OAuth 対応を実装する' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(await within(dialog).findByRole('button', { name: /PKCE の検証を追加する/ }));
+    await expectOverlayHeading('PKCE の検証を追加する');
+
+    // 子で Esc → 閉じずに親へ戻る
+    await user.keyboard('{Escape}');
+    await expectOverlayHeading('OAuth 対応を実装する');
+
+    // 親で Esc → 閉じる（退場アニメーションの後に外れる）
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   },
 };
 

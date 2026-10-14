@@ -15,7 +15,13 @@ pub struct OAuthSettings {
     pub gitlab_selfhosted: Option<ProviderConfig>,
     pub google: Option<ProviderConfig>,
     pub oidc: Option<OidcConfig>,
+    /// GitHub App のユーザー認可（PR を利用者本人の名義で Approve するための連携）。
+    /// ログインには使わない（[`OAuthSettings::is_sign_in_provider`]）
+    pub github_app: Option<ProviderConfig>,
 }
+
+/// GitHub App のユーザー認可の provider slug。DB の `provider` も同じ値。
+pub const GITHUB_APP_PROVIDER: &str = "github_app";
 
 #[derive(Clone, Debug)]
 pub struct OidcConfig {
@@ -69,6 +75,15 @@ impl OAuthSettings {
         let encryption_key =
             parse_encryption_key(env_var("OAUTH_ENCRYPTION_KEY").as_deref(), has_providers)?;
 
+        // GitHub App の資格情報は App 連携の設定（GITHUB_APP_*）と共有する。暗号鍵が無ければ
+        // 有効にしない——ここで鍵を必須にすると、ログイン用 OAuth を使っていない既存の環境が
+        // 起動しなくなる
+        let github_app = pair_config(
+            env_var("GITHUB_APP_CLIENT_ID"),
+            env_var("GITHUB_APP_CLIENT_SECRET"),
+        )
+        .filter(|_| !encryption_key.is_empty());
+
         let default_redirect_path =
             env_var("OAUTH_DEFAULT_REDIRECT_PATH").unwrap_or_else(|| "/dashboard".to_string());
 
@@ -81,6 +96,7 @@ impl OAuthSettings {
             gitlab_selfhosted,
             google,
             oidc,
+            github_app,
         })
     }
 
@@ -98,8 +114,15 @@ impl OAuthSettings {
             "gitlab_selfhosted" => self.gitlab_selfhosted.is_some(),
             "google" => self.google.is_some(),
             "oidc" => self.oidc.is_some(),
+            GITHUB_APP_PROVIDER => self.github_app.is_some(),
             _ => false,
         }
+    }
+
+    /// サインインに使えるプロバイダーか。`github_app` は既存の利用者への連携専用で、
+    /// これで新しくログインしたり利用者を作ったりはしない。
+    pub fn is_sign_in_provider(provider_slug: &str) -> bool {
+        provider_slug != GITHUB_APP_PROVIDER
     }
 
     pub fn has_any_provider(&self) -> bool {
@@ -113,7 +136,9 @@ impl OAuthSettings {
     /// DB に保存する provider キー（汎用 OIDC は `oidc:{issuer}`）。
     pub fn db_provider_key(&self, provider_slug: &str) -> Option<String> {
         match provider_slug {
-            "github" | "gitlab" | "gitlab_selfhosted" | "google" => Some(provider_slug.to_string()),
+            "github" | "gitlab" | "gitlab_selfhosted" | "google" | GITHUB_APP_PROVIDER => {
+                Some(provider_slug.to_string())
+            }
             "oidc" => self.oidc.as_ref().map(|c| format!("oidc:{}", c.issuer_url)),
             _ => None,
         }
@@ -185,6 +210,7 @@ mod tests {
             gitlab: None,
             gitlab_selfhosted: None,
             google: None,
+            github_app: None,
             oidc: Some(OidcConfig {
                 issuer_url: "https://idp.example.com".to_string(),
                 client_id: "id".to_string(),

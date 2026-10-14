@@ -9,7 +9,14 @@ export type ReviewSummary = components['schemas']['ReviewSummaryResponse'];
 export type ReviewGate = components['schemas']['ReviewGate'];
 
 export const SEVERITIES: FindingSeverity[] = ['high', 'medium', 'low', 'nit'];
-export const STATES: FindingState[] = ['open', 'fixed', 'verified', 'deferred', 'rejected'];
+export const STATES: FindingState[] = [
+  'open',
+  'fixing',
+  'fixed',
+  'verified',
+  'deferred',
+  'rejected',
+];
 
 export const SEVERITY_LABELS: Record<FindingSeverity, string> = {
   high: 'High',
@@ -20,6 +27,7 @@ export const SEVERITY_LABELS: Record<FindingSeverity, string> = {
 
 export const STATE_LABELS: Record<FindingState, string> = {
   open: 'Open',
+  fixing: 'Fixing',
   fixed: 'Fixed',
   verified: 'Verified',
   deferred: 'Deferred',
@@ -28,7 +36,7 @@ export const STATE_LABELS: Record<FindingState, string> = {
 
 /** マージ判定で「未解決」と数える状態（backend の `counts_as_unresolved` と対）。一覧の並びに使う。 */
 export function countsAsUnresolved(state: FindingState): boolean {
-  return state === 'open' || state === 'fixed';
+  return state === 'open' || state === 'fixing' || state === 'fixed';
 }
 
 export type FindingAction = {
@@ -45,11 +53,17 @@ export type FindingAction = {
  */
 export function findingActions(finding: ReviewFinding): FindingAction[] {
   const labels: Partial<Record<FindingState, string>> = {
+    fixing: '修正に着手する',
     fixed: '修正した',
     verified: '確認した',
     deferred: '繰り延べる',
     rejected: '指摘を取り下げる',
-    open: finding.state === 'fixed' ? 'レビューに戻す' : '再オープン',
+    open:
+      finding.state === 'fixed'
+        ? 'レビューに戻す'
+        : finding.state === 'fixing'
+          ? '着手を取り消す'
+          : '再オープン',
   };
   return finding.available_actions.map((to) => ({ to, label: labels[to] ?? STATE_LABELS[to] }));
 }

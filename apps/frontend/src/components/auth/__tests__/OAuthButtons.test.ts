@@ -3,7 +3,7 @@ import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import OAuthButtons from '../OAuthButtons.vue';
 
-type Provider = { provider: string; requires_instance_url: boolean };
+type Provider = { provider: string; requires_instance_url: boolean; sign_in: boolean };
 
 const jsonResponse = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -49,9 +49,9 @@ afterEach(() => {
 describe('OAuthButtons', () => {
   it('有効なプロバイダーごとにボタンを描画する', async () => {
     stubProviders([
-      { provider: 'github', requires_instance_url: false },
-      { provider: 'gitlab', requires_instance_url: false },
-      { provider: 'gitlab_selfhosted', requires_instance_url: true },
+      { provider: 'github', requires_instance_url: false, sign_in: true },
+      { provider: 'gitlab', requires_instance_url: false, sign_in: true },
+      { provider: 'gitlab_selfhosted', requires_instance_url: true, sign_in: true },
     ]);
     mountButtons();
     await flushPromises();
@@ -59,6 +59,27 @@ describe('OAuthButtons', () => {
     expect(bodyButton('GitHub で続ける')).toBeTruthy();
     expect(bodyButton('GitLab で続ける')).toBeTruthy();
     expect(bodyButton('GitLab (セルフホスト) で続ける')).toBeTruthy();
+  });
+
+  it('サインインに使えない連携専用のプロバイダー（PR 承認用の GitHub）は出さない', async () => {
+    stubProviders([
+      { provider: 'github', requires_instance_url: false, sign_in: true },
+      { provider: 'github_app', requires_instance_url: false, sign_in: false },
+    ]);
+    mountButtons();
+    await flushPromises();
+
+    expect(bodyButton('GitHub で続ける')).toBeTruthy();
+    expect(bodyButton('GitHub（PR 承認用） で続ける')).toBeUndefined();
+    expect(document.body.textContent).not.toContain('PR 承認用');
+  });
+
+  it('連携専用のプロバイダーしか無ければ区切りも描画しない', async () => {
+    stubProviders([{ provider: 'github_app', requires_instance_url: false, sign_in: false }]);
+    mountButtons();
+    await flushPromises();
+
+    expect(document.body.textContent).not.toContain('または');
   });
 
   it('プロバイダーが無ければ区切りもボタンも描画しない', async () => {
@@ -71,7 +92,7 @@ describe('OAuthButtons', () => {
   });
 
   it('gitlab.com ボタンで OAuth 開始 URL へフルページ遷移する', async () => {
-    stubProviders([{ provider: 'gitlab', requires_instance_url: false }]);
+    stubProviders([{ provider: 'gitlab', requires_instance_url: false, sign_in: true }]);
     const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
     mountButtons();
     await flushPromises();
@@ -84,7 +105,7 @@ describe('OAuthButtons', () => {
   });
 
   it('redirect-after prop を遷移 URL に反映する', async () => {
-    stubProviders([{ provider: 'github', requires_instance_url: false }]);
+    stubProviders([{ provider: 'github', requires_instance_url: false, sign_in: true }]);
     const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
     mountButtons({ redirectAfter: '/dashboard' });
     await flushPromises();
@@ -97,7 +118,7 @@ describe('OAuthButtons', () => {
   });
 
   it('error-redirect-after prop を遷移 URL に反映する', async () => {
-    stubProviders([{ provider: 'gitlab', requires_instance_url: false }]);
+    stubProviders([{ provider: 'gitlab', requires_instance_url: false, sign_in: true }]);
     const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
     mountButtons({ errorRedirectAfter: '/signin' });
     await flushPromises();
@@ -110,7 +131,7 @@ describe('OAuthButtons', () => {
   });
 
   it('self-hosted は URL 未入力ではボタンを無効化し遷移しない', async () => {
-    stubProviders([{ provider: 'gitlab_selfhosted', requires_instance_url: true }]);
+    stubProviders([{ provider: 'gitlab_selfhosted', requires_instance_url: true, sign_in: true }]);
     const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
     mountButtons();
     await flushPromises();
@@ -122,7 +143,7 @@ describe('OAuthButtons', () => {
   });
 
   it('self-hosted は instance_url を encode して付与する', async () => {
-    stubProviders([{ provider: 'gitlab_selfhosted', requires_instance_url: true }]);
+    stubProviders([{ provider: 'gitlab_selfhosted', requires_instance_url: true, sign_in: true }]);
     const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
     const wrapper = mountButtons();
     await flushPromises();
