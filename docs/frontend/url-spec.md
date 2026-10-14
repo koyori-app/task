@@ -32,6 +32,7 @@
 | `/forgot-password` | パスワードリセット申請 |
 | `/reset-password` | パスワードリセット実行 |
 | `/desktop/authorize` | Koyori Desktop の承認（[仕様](../features/account-settings.md)）。未ログインならサインイン後に戻る |
+| `/invitations/accept?token=` | テナント招待の承諾（[仕様](../../apps/backend/docs/tenant-project-authz.md)）。未ログインならサインイン後に戻る |
 
 ### アカウント設定（テナント外）
 
@@ -90,6 +91,7 @@ apps/frontend/src/pages/
 ├── signup/+Page.vue                     # /signup
 ├── forgot-password/+Page.vue            # /forgot-password
 ├── reset-password/+Page.vue             # /reset-password
+├── invitations/accept/+Page.vue         # /invitations/accept
 │
 ├── settings/
 │   ├── profile/+Page.vue                # /settings/profile
@@ -152,6 +154,7 @@ apps/frontend/src/pages/
 | `/signup` | `signup/+Page.vue` |
 | `/forgot-password` | `forgot-password/+Page.vue` |
 | `/reset-password` | `reset-password/+Page.vue` |
+| `/invitations/accept` | `invitations/accept/+Page.vue` |
 | `/settings/profile` | `settings/profile/+Page.vue` |
 | `/settings/tokens` | `settings/tokens/+Page.vue` |
 | `/{tenant}` | `@tenant/+Page.vue` |

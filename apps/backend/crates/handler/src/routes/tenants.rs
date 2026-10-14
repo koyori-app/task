@@ -27,6 +27,22 @@ pub fn routes() -> OpenApiRouter<AppState> {
                 )),
         )
         .nest(
+            "/{tenant_id}/invitations",
+            OpenApiRouter::<AppState>::new()
+                .routes(routes!(
+                    crate::handlers::tenant_invitations::list_invitations
+                ))
+                .routes(routes!(
+                    crate::handlers::tenant_invitations::create_invitation
+                ))
+                .routes(routes!(
+                    crate::handlers::tenant_invitations::resend_invitation
+                ))
+                .routes(routes!(
+                    crate::handlers::tenant_invitations::delete_invitation
+                )),
+        )
+        .nest(
             "/{tenant_id}/projects",
             OpenApiRouter::<AppState>::new()
                 .routes(routes!(crate::handlers::projects::list_projects))
@@ -173,4 +189,15 @@ pub fn routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(crate::handlers::my_tasks::list_my_tasks))
                 .routes(routes!(crate::handlers::dashboard::get_dashboard)),
         )
+}
+
+/// 招待の受け手側の口（`/v1/invitations`）。テナントはトークンから決まるので tenant_id を取らない。
+pub fn invitation_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::<AppState>::new()
+        .routes(routes!(
+            crate::handlers::tenant_invitations::preview_invitation
+        ))
+        .routes(routes!(
+            crate::handlers::tenant_invitations::accept_invitation
+        ))
 }

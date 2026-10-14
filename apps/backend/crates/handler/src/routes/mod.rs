@@ -28,6 +28,7 @@ pub fn create_routes() -> OpenApiRouter<AppState> {
                 .nest("/personal_tokens", crate::routes::personal_tokens::routes())
                 .nest("/users", crate::routes::users::routes())
                 .nest("/tenants", crate::routes::tenants::routes())
+                .nest("/invitations", crate::routes::tenants::invitation_routes())
                 .nest("/github", crate::routes::github::public_github_routes())
                 .nest("/drive", crate::routes::drive::public_routes()),
         )
