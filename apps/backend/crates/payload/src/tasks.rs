@@ -183,6 +183,8 @@ pub struct ListTasksQuery {
     pub status_id: Option<Uuid>,
     pub priority: Option<String>,
     pub assignee_id: Option<Uuid>,
+    /// 作成者のユーザー ID。指定するとその人が作ったタスクだけを返す
+    pub created_by: Option<Uuid>,
     pub label_id: Option<Uuid>,
     pub milestone_id: Option<Uuid>,
     pub sprint_id: Option<Uuid>,

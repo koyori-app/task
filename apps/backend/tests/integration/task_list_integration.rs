@@ -968,3 +968,68 @@ async fn root_and_subtask_lists_apply_the_same_filters() {
         assert_eq!(task_ids(&body), vec![excluded_id.to_string()]);
     }
 }
+
+/// `created_by` はその人が作ったタスクだけを返し、他の条件とは AND で効く。
+/// 端末側で絞るとカーソルで読み足す前の分が漏れるので、ページをまたいでも欠落しないことを見る。
+#[tokio::test]
+async fn task_list_filters_by_creator() {
+    let mut app = TestApp::new().await;
+    let (owner, tp) = setup_project(&mut app).await;
+    let status_id = create_status(&app, &tp).await;
+    let base = tasks_base(&tp);
+    let member = app.insert_user_default().await;
+    add_project_member(&app, tp.project_id, member.id).await;
+
+    let mut owner_ids = Vec::new();
+    for title in ["Owner A", "Owner B", "Owner C"] {
+        let task = create_task(&app, &base, status_id, title, None).await;
+        owner_ids.push(task["id"].as_str().unwrap().to_string());
+    }
+    app.login_session_no_content(&member.email, &member.password)
+        .await;
+    let member_task = create_task(&app, &base, status_id, "Member A", None).await;
+    let member_task_id = member_task["id"].as_str().unwrap().to_string();
+    create_task(&app, &base, status_id, "Member B", None).await;
+    // 担当者だけでは絞り切れないよう、作成者の違う 2 件に同じ担当者を付ける。
+    for id in [&owner_ids[0], &member_task_id] {
+        let response = app
+            .post_json_with_session(
+                &format!("{base}/{id}/assignees"),
+                serde_json::json!({ "user_id": owner.id, "role": "assignee" }),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+
+    // 1 件ずつカーソルで読み足しても、作成者のタスクだけが並び順どおりに揃う。
+    let mut seen = Vec::new();
+    let mut cursor = None;
+    loop {
+        let mut url = format!("{base}?created_by={}&sort=title_desc&limit=1", owner.id);
+        if let Some(c) = &cursor {
+            url.push_str(&format!("&cursor={c}"));
+        }
+        let response = app.get_with_session(&url).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(body["total"], 3);
+        seen.extend(task_ids(&body));
+        cursor = next_cursor(&body);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    owner_ids.reverse();
+    assert_eq!(seen, owner_ids);
+
+    // 担当者・ステータスとは AND。担当者は owner、作成者は member のタスクだけが残る。
+    let response = app
+        .get_with_session(&format!(
+            "{base}?created_by={}&assignee_id={}&status_id={status_id}",
+            member.id, owner.id
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(task_ids(&body), vec![member_task_id]);
+}

@@ -631,6 +631,9 @@ pub async fn list_tasks(
     if let Some(pid) = q.parent_task_id {
         query = query.filter(tasks::Column::ParentTaskId.eq(pid));
     }
+    if let Some(uid) = q.created_by {
+        query = query.filter(tasks::Column::CreatedBy.eq(uid));
+    }
     if let Some(uid) = q.assignee_id {
         query = query.filter(Expr::cust_with_values(
             "EXISTS (SELECT 1 FROM task_assignees WHERE task_assignees.task_id = tasks.id AND task_assignees.user_id = $1)",
