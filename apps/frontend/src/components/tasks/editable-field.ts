@@ -2,6 +2,7 @@ export type EditableField =
   | 'title'
   | 'description'
   | 'progress_pct'
+  | 'planned_start_on'
   | 'soft_deadline'
   | 'hard_deadline';
 

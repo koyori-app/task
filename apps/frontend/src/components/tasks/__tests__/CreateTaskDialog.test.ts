@@ -469,6 +469,41 @@ describe('CreateTaskDialog estimate', () => {
     }
     wrapper.unmount();
   });
+
+  function setDate(name: string, value: string) {
+    const input = document.body.querySelector(`input[name="${name}"]`);
+    if (!input) throw new Error(`${name} input not found`);
+    return new DOMWrapper(input as HTMLInputElement).setValue(value);
+  }
+
+  it('開始予定日を planned_start_on として日付文字列のまま送る', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('開始予定付き');
+    await setDate('planned_start_on', '2026-10-19');
+    await setDate('soft_deadline', '2026-10-23');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.planned_start_on).toBe('2026-10-19');
+    wrapper.unmount();
+  });
+
+  it('開始予定日が期限より後なら送らずに警告する', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('逆転');
+    await setDate('planned_start_on', '2026-10-24');
+    await setDate('soft_deadline', '2026-10-23');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('期限より後になっています');
+    wrapper.unmount();
+  });
 });
 
 describe('CreateTaskDialog label selection', () => {

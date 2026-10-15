@@ -96,6 +96,7 @@ const queryClient = useQueryClient();
 const title = ref('');
 const statusId = ref('');
 const description = ref('');
+const plannedStartOn = ref('');
 const softDeadline = ref('');
 const hardDeadline = ref('');
 /** 見積もり（分）。type="number" の v-model は数値でも文字列でも来る */
@@ -104,6 +105,10 @@ const priority = ref<Priority>('Medium');
 const selectedLabelIds = ref<string[]>([]);
 const selectedAssigneeIds = ref<string[]>([]);
 const validationMessage = ref<string | null>(null);
+// 文字列（YYYY-MM-DD）同士の比較で足りる。サーバーは前後関係を検証しない
+const plannedStartAfterSoft = computed(
+  () => !!plannedStartOn.value && !!softDeadline.value && plannedStartOn.value > softDeadline.value,
+);
 const requestError = ref<string | null>(null);
 const successMessage = ref<string | null>(null);
 
@@ -193,6 +198,7 @@ function resetForm() {
   title.value = '';
   statusId.value = defaultStatusId.value;
   description.value = '';
+  plannedStartOn.value = '';
   softDeadline.value = '';
   hardDeadline.value = '';
   estimate.value = '';
@@ -220,6 +226,10 @@ async function submit() {
     validationMessage.value = 'ステータスを選択してください';
     return;
   }
+  if (plannedStartAfterSoft.value) {
+    validationMessage.value = '開始予定日は期限以前の日付にしてください';
+    return;
+  }
   const normalizedEstimate = String(estimate.value).trim();
   const estimatedMinutes = normalizedEstimate ? Number(normalizedEstimate) : undefined;
   if (
@@ -239,6 +249,7 @@ async function submit() {
   };
   const normalizedDescription = description.value.trim();
   if (normalizedDescription) body.description = normalizedDescription;
+  if (plannedStartOn.value) body.planned_start_on = plannedStartOn.value;
   if (softDeadline.value) body.soft_deadline = toIsoDate(softDeadline.value);
   if (hardDeadline.value) body.hard_deadline = toIsoDate(hardDeadline.value);
   if (estimatedMinutes !== undefined) body.estimated_minutes = estimatedMinutes;
@@ -531,6 +542,27 @@ async function submit() {
                   </DropdownMenuCheckboxItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+            </div>
+
+            <div class="space-y-1">
+              <Label for="task-planned-start" :class="fieldLabelClass">開始予定日</Label>
+              <Input
+                id="task-planned-start"
+                v-model="plannedStartOn"
+                name="planned_start_on"
+                type="date"
+                class="bg-background"
+                :max="softDeadline || undefined"
+                :aria-invalid="plannedStartAfterSoft || undefined"
+                :aria-describedby="plannedStartAfterSoft ? 'task-planned-start-warning' : undefined"
+              />
+              <p
+                v-if="plannedStartAfterSoft"
+                id="task-planned-start-warning"
+                class="text-xs text-destructive"
+              >
+                期限より後になっています
+              </p>
             </div>
 
             <div class="space-y-1">

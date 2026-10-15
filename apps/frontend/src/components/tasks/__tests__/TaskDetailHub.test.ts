@@ -328,6 +328,29 @@ describe('TaskDetailHub', () => {
     expect(wrapper.emitted('save:soft_deadline')).toEqual([['2026-08-23']]);
   });
 
+  it('開始予定日は日付文字列のまま送り、期限より後なら送らずに警告する', async () => {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: { ...task, soft_deadline: '2026-08-20T00:00:00.000Z', planned_start_on: null },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+
+    await wrapper.get('button[aria-label="開始予定日を編集"]').trigger('click');
+    const input = wrapper.get('input[aria-label="開始予定日"]');
+    await input.setValue('2026-08-21');
+    await input.trigger('blur');
+    expect(wrapper.emitted('save:planned_start_on')).toBeUndefined();
+    expect(wrapper.text()).toContain('開始予定日が期限より後になっています');
+
+    // 期限ちょうどは通す
+    await input.setValue('2026-08-20');
+    await input.trigger('blur');
+    expect(wrapper.emitted('save:planned_start_on')).toEqual([['2026-08-20']]);
+  });
+
   it('does not save an empty progress value as zero percent', async () => {
     const wrapper = mount(TaskDetailHub, {
       props: {
