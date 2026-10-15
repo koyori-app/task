@@ -5763,10 +5763,39 @@
           {
             "name": "folder_id",
             "in": "query",
+            "description": "省略時はドライブ直下（フォルダ無し）のファイル",
             "required": false,
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "mime_type",
+            "in": "query",
+            "description": "MIME タイプの前方一致。`text/markdown` は完全一致として効き、`text/` は text 全体",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "ファイル名の部分一致（大文字小文字を区別しない）。200 文字まで",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "ファイル一覧の並び順。既定は作成日時の新しい順。",
+              "enum": ["created_at_desc", "name_asc", "updated_at_desc"]
             }
           },
           {
@@ -6478,6 +6507,35 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "そのプロジェクトのフォルダだけ。プロジェクトへのアクセス権が必要（無ければ 403）",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "parent_id",
+            "in": "query",
+            "description": "そのフォルダの直下だけ。省略時は全階層",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "root_only",
+            "in": "query",
+            "description": "`true` でルート（親なし）だけ。`parent_id` との同時指定は 400。\n`project_id` と組み合わせるとプロジェクトのルートフォルダが 1 件返る",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           }
         ],

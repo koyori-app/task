@@ -11,6 +11,19 @@ use sea_orm::{
     TransactionTrait, Value,
 };
 
+/// `LIKE` / `ILIKE` のパターンへ利用者入力を埋めるとき、ワイルドカード（`%` `_`）と
+/// エスケープ文字（`\`）を字義どおりに扱わせる。Postgres の既定のエスケープ文字は `\`。
+pub fn escape_like(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for c in s.chars() {
+        if matches!(c, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// 一意制約違反（重複キーなど）として扱ってよさそうなエラーか。
 pub fn is_postgres_unique_violation(err: &DbErr) -> bool {
     matches!(

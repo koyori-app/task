@@ -775,3 +775,146 @@ async fn deleting_a_file_re_authorizes_after_taking_the_row_lock() {
         "拒否されたのに行が消えている"
     );
 }
+
+/// 一覧の各絞り込みが返すフォルダの id を、並びに依存しない形で取る。
+async fn list_folder_ids(app: &TestApp, tenant_id: Uuid, query: &str) -> Vec<Uuid> {
+    let response = app
+        .client()
+        .get(format!("{}?{query}", folders_url(app, tenant_id)))
+        .send()
+        .await
+        .expect("list folders");
+    assert_eq!(response.status(), StatusCode::OK, "query: {query}");
+    let body: Vec<serde_json::Value> = response.json().await.expect("json");
+    sorted(
+        body.iter()
+            .map(|f| f["id"].as_str().expect("id").parse().expect("uuid"))
+            .collect(),
+    )
+}
+
+async fn create_child_folder(app: &TestApp, tenant_id: Uuid, parent: Uuid, name: &str) -> Uuid {
+    let response = app
+        .client()
+        .post(folders_url(app, tenant_id))
+        .json(&serde_json::json!({ "name": name, "parent_id": parent }))
+        .send()
+        .await
+        .expect("create folder");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body: serde_json::Value = response.json().await.expect("json");
+    body["id"].as_str().expect("id").parse().expect("uuid")
+}
+
+fn sorted(mut ids: Vec<Uuid>) -> Vec<Uuid> {
+    ids.sort();
+    ids
+}
+
+/// `project_id + root_only` でプロジェクトのルートがちょうど 1 件返る。
+/// `parent_id` は直下だけ（孫は含まない）、省略時は従来どおり全階層・全プロジェクト。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn listing_folders_filters_by_project_parent_and_root() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let project_b = insert_extra_project(&app, tp.tenant_id).await;
+    let root_a = insert_project_root_folder(&app, tp.tenant_id, tp.project_id, owner.id).await;
+    let root_b = insert_project_root_folder(&app, tp.tenant_id, project_b, owner.id).await;
+    let plain = insert_plain_folder(&app, tp.tenant_id, owner.id).await;
+
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let child = create_child_folder(&app, tp.tenant_id, root_a, "docs").await;
+    let grandchild = create_child_folder(&app, tp.tenant_id, child, "deep").await;
+
+    assert_eq!(
+        list_folder_ids(
+            &app,
+            tp.tenant_id,
+            &format!("project_id={}&root_only=true", tp.project_id)
+        )
+        .await,
+        vec![root_a],
+        "プロジェクトのルートだけが 1 件返る"
+    );
+    assert_eq!(
+        list_folder_ids(&app, tp.tenant_id, &format!("project_id={}", tp.project_id)).await,
+        sorted(vec![root_a, child, grandchild]),
+        "project_id だけなら配下の全階層"
+    );
+    assert_eq!(
+        list_folder_ids(&app, tp.tenant_id, &format!("parent_id={root_a}")).await,
+        vec![child],
+        "parent_id は直下だけで孫を含まない"
+    );
+    assert_eq!(
+        list_folder_ids(&app, tp.tenant_id, "root_only=true").await,
+        sorted(vec![root_a, root_b, plain]),
+        "root_only だけならテナントの全ルート"
+    );
+    assert_eq!(
+        list_folder_ids(&app, tp.tenant_id, "").await,
+        sorted(vec![root_a, root_b, plain, child, grandchild]),
+        "省略時は従来どおり全件"
+    );
+
+    let both = app
+        .client()
+        .get(format!(
+            "{}?parent_id={root_a}&root_only=true",
+            folders_url(&app, tp.tenant_id)
+        ))
+        .send()
+        .await
+        .expect("list folders");
+    assert_eq!(
+        both.status(),
+        StatusCode::BAD_REQUEST,
+        "parent_id と root_only の同時指定は 400"
+    );
+}
+
+/// `project_id` を指定した一覧は、そのプロジェクトに入れない人には 403。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn listing_folders_of_a_foreign_project_is_forbidden() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let project_b = insert_extra_project(&app, tp.tenant_id).await;
+    let root_b = insert_project_root_folder(&app, tp.tenant_id, project_b, owner.id).await;
+
+    // B をメンバー指定して絞り込み状態にする（#568: 未指定はテナント全体に開放）
+    let member = app.insert_user(false, false).await;
+    add_member(&app, project_b, member.id).await;
+
+    let outsider = app.insert_user(false, false).await;
+    add_member(&app, tp.project_id, outsider.id).await;
+
+    let query = format!("project_id={project_b}&root_only=true");
+
+    app.reset_session_client();
+    app.login_session_no_content(&outsider.email, &outsider.password)
+        .await;
+    let forbidden = app
+        .client()
+        .get(format!("{}?{query}", folders_url(&app, tp.tenant_id)))
+        .send()
+        .await
+        .expect("list folders");
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+    // 対照: B のメンバーはルートを取れる（過剰拒否でない）
+    app.reset_session_client();
+    app.login_session_no_content(&member.email, &member.password)
+        .await;
+    assert_eq!(
+        list_folder_ids(&app, tp.tenant_id, &query).await,
+        vec![root_b]
+    );
+}
