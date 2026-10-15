@@ -245,6 +245,12 @@ async fn ensure_schema(db: &DatabaseConnection) {
             let _ = db
                 .execute_unprepared("DROP INDEX IF EXISTS idx_projects_personal_owner")
                 .await;
+            // 行の残った DB へ sync() が NOT NULL 列を既定値なしで足すと落ちるため、先に足しておく
+            let _ = db
+                .execute_unprepared(
+                    "ALTER TABLE IF EXISTS task_attachments ADD COLUMN IF NOT EXISTS source VARCHAR(16) NOT NULL DEFAULT 'manual'",
+                )
+                .await;
 
             db.get_schema_registry("entity::*")
                 .sync(db)
@@ -332,6 +338,13 @@ ALTER TABLE system_settings
             )
             .await
             .expect("prepare system_settings defaults");
+
+            // 同上。マイグレーション（m20261016010000_task_attachments_source.rs）と同じ既定値
+            db.execute_unprepared(
+                "ALTER TABLE task_attachments ALTER COLUMN source SET DEFAULT 'manual';",
+            )
+            .await
+            .expect("prepare task_attachments defaults");
 
             // search_vector は GENERATED ALWAYS AS の tsvector カラムで entity 定義に無いため
             // sync() が作らない。手動で追加する。
@@ -1417,4 +1430,48 @@ pub async fn create_status(
         .expect("status id")
         .parse()
         .expect("uuid")
+}
+
+/// ログイン済みセッションでファイルをアップロードし、レスポンス JSON を返す。
+pub async fn upload_drive_file(
+    app: &TestApp,
+    tenant_id: Uuid,
+    folder_id: Option<Uuid>,
+    file_name: &str,
+    mime: &str,
+    body: &[u8],
+) -> serde_json::Value {
+    // ハンドラは 'file' より前に 'folder_id' を読む前提。reqwest は挿入順を保持する。
+    let mut form = reqwest::multipart::Form::new();
+    if let Some(folder_id) = folder_id {
+        form = form.text("folder_id", folder_id.to_string());
+    }
+    form = form.part(
+        "file",
+        reqwest::multipart::Part::bytes(body.to_vec())
+            .file_name(file_name.to_string())
+            .mime_str(mime)
+            .expect("mime"),
+    );
+
+    let response = app
+        .client()
+        .post(format!(
+            "{}/v1/tenants/{tenant_id}/drive/files",
+            app.base_url()
+        ))
+        .multipart(form)
+        .send()
+        .await
+        .expect("upload request");
+    assert_eq!(
+        response.status(),
+        StatusCode::CREATED,
+        "アップロードは成功するはず"
+    );
+    response.json().await.expect("upload response json")
+}
+
+pub fn file_id_of(file: &serde_json::Value) -> Uuid {
+    Uuid::parse_str(file["id"].as_str().expect("id is string")).expect("id is uuid")
 }

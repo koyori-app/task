@@ -14,6 +14,7 @@ mod drive_file_content_integration;
 mod drive_folder_boundary_integration;
 mod drive_project_id_backfill_integration;
 mod drive_public_share_integration;
+mod drive_task_links_integration;
 mod drive_upload_acl_integration;
 mod drive_usage_integration;
 mod forge_commit_links_integration;

@@ -6655,6 +6655,120 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/drive/files/{id}/tasks": {
+      "get": {
+        "tags": ["Drive Files"],
+        "summary": "ドライブファイルに結び付いたタスク一覧",
+        "description": "手動の添付と本文から抽出した参照の両方を返す。呼び出し側が入れないプロジェクトのタスクは含めない",
+        "operationId": "list_file_tasks",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ファイルID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "結び付いたタスク",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriveFileTasksResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/drive/folders": {
       "get": {
         "tags": ["Drive Folders"],
@@ -17933,6 +18047,16 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "本文から付いていた添付（`source = body`）を手動へ昇格した",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAttachmentResponse"
+                }
+              }
+            }
+          },
           "201": {
             "description": "添付完了",
             "content": {
@@ -18118,6 +18242,16 @@
                       "example": "internal-error"
                     }
                   }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "本文から抽出した参照（`source = body`）は本文を編集して外す",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
                 }
               }
             }
@@ -23968,6 +24102,46 @@
           }
         }
       },
+      "DriveFileTaskLink": {
+        "type": "object",
+        "description": "ファイルに結び付いたタスク 1 件（`GET .../drive/files/{id}/tasks`）。",
+        "required": ["task_id", "seq_key", "title", "project", "status", "source"],
+        "properties": {
+          "project": {
+            "$ref": "#/components/schemas/MyTaskProjectInfo"
+          },
+          "seq_key": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "description": "結び付きの由来。`manual`（手動添付）または `body`（本文から抽出）",
+            "example": "body"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MyTaskStatusInfo"
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "DriveFileTasksResponse": {
+        "type": "object",
+        "required": ["tasks"],
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DriveFileTaskLink"
+            }
+          }
+        }
+      },
       "DriveFolderResponse": {
         "type": "object",
         "required": ["id", "name", "tenant_id", "created_by", "created_at"],
@@ -26053,7 +26227,16 @@
       },
       "TaskAttachmentResponse": {
         "type": "object",
-        "required": ["id", "drive_file_id", "name", "mime_type", "size", "url", "created_at"],
+        "required": [
+          "id",
+          "drive_file_id",
+          "name",
+          "mime_type",
+          "size",
+          "url",
+          "created_at",
+          "source"
+        ],
         "properties": {
           "created_at": {
             "type": "string",
@@ -26076,6 +26259,11 @@
           "size": {
             "type": "integer",
             "format": "int64"
+          },
+          "source": {
+            "type": "string",
+            "description": "添付の由来。`manual`（手動）または `body`（Drive の Markdown 本文から抽出）",
+            "example": "manual"
           },
           "url": {
             "type": "string"
