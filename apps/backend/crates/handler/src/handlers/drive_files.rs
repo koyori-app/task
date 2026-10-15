@@ -23,13 +23,20 @@ use crate::AppState;
 use crate::error::{AppError, ServerError};
 use crate::extractors::{AuthUser, OptionalAuthUser};
 use crate::openapi::CrudErrors;
-use entity::{drive_files, drive_folder_shares, drive_folders, scopes::Scope, tenants};
+use entity::{
+    drive_files, drive_folder_shares, drive_folders, project_statuses, projects, scopes::Scope,
+    task_attachments, tasks, tenants,
+};
 use payload::drive_files::*;
+use payload::my_tasks::{MyTaskProjectInfo, MyTaskStatusInfo};
+use service::access::visible_project_ids;
 use service::drive::{
     can_access_project, current_storage_type, effective_quota, guess_mime, is_editable_mime,
     is_tenant_owner, lock_tenant_drive, source_mime_override, tenant_used_bytes,
 };
+use service::drive_task_links::{is_markdown, sync_body_links};
 use service::storage::{ByteStream, StorageError};
+use std::collections::{HashMap, HashSet};
 
 const MAX_LIST_LIMIT: u32 = 200;
 
@@ -370,10 +377,14 @@ pub async fn upload_file(
                 let (mut tx, rx) = fmpsc::channel::<Result<Bytes, StorageError>>(8);
                 let byte_stream: ByteStream = Box::pin(rx);
 
-                // 本文の SHA-256 も流しながら計算する。途中で打ち切った場合は None
+                // 本文の SHA-256 も流しながら計算する。途中で打ち切った場合は None。
+                // Markdown は保存後にタスク参照を抜き出すので本文も手元に残す
+                // （上限は upload_max_bytes。本文更新 API も同じ大きさをメモリに載せる）
+                let keep_body = is_markdown(&mime_type);
                 let pump = async move {
                     let mut field = field;
                     let mut hasher = Sha256::new();
+                    let mut body = Vec::new();
                     loop {
                         match field.chunk().await {
                             Ok(Some(bytes)) => {
@@ -390,6 +401,9 @@ pub async fn upload_file(
                                     return None;
                                 }
                                 hasher.update(&bytes);
+                                if keep_body {
+                                    body.extend_from_slice(&bytes);
+                                }
                                 if tx.send(Ok(bytes)).await.is_err() {
                                     return None;
                                 }
@@ -401,13 +415,13 @@ pub async fn upload_file(
                             }
                         }
                     }
-                    Some(hex::encode(hasher.finalize()))
+                    Some((hex::encode(hasher.finalize()), body))
                 };
 
                 let file_id = Uuid::new_v4();
                 let storage_key = file_id.to_string();
 
-                let (upload_result, content_hash) = tokio::join!(
+                let (upload_result, pumped) = tokio::join!(
                     state
                         .storage
                         .upload(&storage_key, byte_stream, 0, &mime_type),
@@ -429,7 +443,7 @@ pub async fn upload_file(
                 }
 
                 upload_result.map_err(storage_to_app_error)?;
-                let Some(content_hash) = content_hash else {
+                let Some((content_hash, body)) = pumped else {
                     // ストレージ側が成功したのに本文を最後まで読めていない（通常は起きない）
                     let _ = state.storage.delete(&storage_key).await;
                     return Err(AppError::Internal(anyhow::anyhow!(
@@ -485,6 +499,8 @@ pub async fn upload_file(
                         content_hash: Set(Some(content_hash)),
                     };
                     let saved = model.insert(&txn).await?;
+                    sync_body_links(&txn, &saved, auth.user_id, &String::from_utf8_lossy(&body))
+                        .await?;
                     txn.commit().await?;
                     Ok(saved)
                 }
@@ -550,6 +566,94 @@ pub async fn get_file(
     let file = load_tenant_file(&state, tenant_id, id).await?;
     authorize_file_access(&state, &file, &auth).await?;
     Ok(Json(file.into()))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    get,
+    path = "/files/{id}/tasks",
+    tag = "Drive Files",
+    summary = "ドライブファイルに結び付いたタスク一覧",
+    description = "手動の添付と本文から抽出した参照の両方を返す。呼び出し側が入れないプロジェクトのタスクは含めない",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("id" = Uuid, Path, description = "ファイルID"),
+    ),
+    responses(
+        (status = 200, description = "結び付いたタスク", body = DriveFileTasksResponse),
+        CrudErrors,
+    )
+)]
+pub async fn list_file_tasks(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<DriveFileTasksResponse>, AppError> {
+    auth.require_scope(Scope::ReadDrive)?;
+    auth.ensure_tenant_access(&state, tenant_id, None).await?;
+    let file = load_tenant_file(&state, tenant_id, id).await?;
+    authorize_file_access(&state, &file, &auth).await?;
+
+    let links: Vec<(String, tasks::Model)> = task_attachments::Entity::find()
+        .filter(task_attachments::Column::DriveFileId.eq(file.id))
+        .order_by_desc(task_attachments::Column::CreatedAt)
+        .find_also_related(tasks::Entity)
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .filter_map(|(link, task)| Some((link.source, task?)))
+        .filter(|(_, task)| task.deleted_at.is_none())
+        .collect();
+
+    let project_ids: HashSet<Uuid> = links.iter().map(|(_, t)| t.project_id).collect();
+    let projects: HashMap<Uuid, projects::Model> = projects::Entity::find()
+        .filter(projects::Column::Id.is_in(project_ids.iter().copied()))
+        .filter(projects::Column::TenantId.eq(tenant_id))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|p| (p.id, p))
+        .collect();
+    let visible: HashSet<Uuid> = if is_tenant_owner(&state.db, tenant_id, auth.user_id).await? {
+        projects.keys().copied().collect()
+    } else {
+        visible_project_ids(&state.db, projects.keys().copied().collect(), auth.user_id).await?
+    };
+    let statuses: HashMap<Uuid, project_statuses::Model> = project_statuses::Entity::find()
+        .filter(project_statuses::Column::Id.is_in(links.iter().map(|(_, t)| t.status_id)))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|s| (s.id, s))
+        .collect();
+
+    let tasks = links
+        .into_iter()
+        .filter(|(_, task)| visible.contains(&task.project_id))
+        .filter_map(|(source, task)| {
+            let project = projects.get(&task.project_id)?;
+            let status = statuses.get(&task.status_id)?;
+            Some(DriveFileTaskLink {
+                task_id: task.id,
+                seq_key: format!("{}-{}", project.key, task.seq_id),
+                title: task.title,
+                project: MyTaskProjectInfo {
+                    id: project.id,
+                    name: project.name.clone(),
+                    key: project.key.clone(),
+                    is_personal: project.is_personal,
+                },
+                status: MyTaskStatusInfo {
+                    id: status.id,
+                    name: status.name.clone(),
+                    color: status.color.clone(),
+                },
+                source,
+            })
+        })
+        .collect();
+
+    Ok(Json(DriveFileTasksResponse { tasks }))
 }
 
 #[axum::debug_handler]
@@ -677,6 +781,8 @@ pub async fn update_file_content(
     }
 
     let bytes = Bytes::from(payload.content.into_bytes());
+    // 参照の抽出用（Bytes の複製は参照カウントだけ）
+    let body = bytes.clone();
     let new_size = bytes.len() as u64;
     let content_hash = hex::encode(Sha256::digest(&bytes));
     if new_size > state.drive_config.upload_max_bytes {
@@ -747,6 +853,7 @@ pub async fn update_file_content(
         active.content_hash = Set(Some(content_hash));
         active.updated_at = Set(Utc::now().into());
         let saved = active.update(&txn).await?;
+        sync_body_links(&txn, &saved, auth.user_id, &String::from_utf8_lossy(&body)).await?;
         txn.commit().await?;
         Ok((saved, old_storage_key))
     }

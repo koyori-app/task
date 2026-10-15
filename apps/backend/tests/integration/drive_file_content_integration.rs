@@ -4,13 +4,12 @@
 // 他のファイルの残骸で落ちる。鍵を共有しないと、その TRUNCATE がこちらの実行中の行を
 // 巻き添えにする（CASCADE は drive_folder_shares と task_attachments にも及ぶ）。
 
-use crate::common::{TestApp, insert_extra_project};
+use crate::common::{TestApp, file_id_of, insert_extra_project, upload_drive_file as upload_file};
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
 use entity::{
     drive_files, drive_folder_shares, drive_folders, project_members, scopes::Scope, tenants,
 };
-use reqwest::multipart::{Form, Part};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use uuid::Uuid;
 
@@ -102,52 +101,8 @@ async fn set_tenant_quota(app: &TestApp, tenant_id: Uuid, quota_bytes: i64) {
         .expect("update tenant quota");
 }
 
-/// ログイン済みセッションでファイルをアップロードし、レスポンス JSON を返す。
-async fn upload_file(
-    app: &TestApp,
-    tenant_id: Uuid,
-    folder_id: Option<Uuid>,
-    file_name: &str,
-    mime: &str,
-    body: &[u8],
-) -> serde_json::Value {
-    // ハンドラは 'file' より前に 'folder_id' を読む前提。reqwest は挿入順を保持する。
-    let mut form = Form::new();
-    if let Some(folder_id) = folder_id {
-        form = form.text("folder_id", folder_id.to_string());
-    }
-    form = form.part(
-        "file",
-        Part::bytes(body.to_vec())
-            .file_name(file_name.to_string())
-            .mime_str(mime)
-            .expect("mime"),
-    );
-
-    let response = app
-        .client()
-        .post(format!(
-            "{}/v1/tenants/{tenant_id}/drive/files",
-            app.base_url()
-        ))
-        .multipart(form)
-        .send()
-        .await
-        .expect("upload request");
-    assert_eq!(
-        response.status(),
-        StatusCode::CREATED,
-        "アップロードは成功するはず"
-    );
-    response.json().await.expect("upload response json")
-}
-
 fn content_path(tenant_id: Uuid, file_id: Uuid) -> String {
     format!("/v1/tenants/{tenant_id}/drive/files/{file_id}/content")
-}
-
-fn file_id_of(file: &serde_json::Value) -> Uuid {
-    Uuid::parse_str(file["id"].as_str().expect("id is string")).expect("id is uuid")
 }
 
 fn timestamp_of(file: &serde_json::Value, field: &str) -> DateTime<Utc> {
