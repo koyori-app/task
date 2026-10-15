@@ -31,6 +31,7 @@ pub fn is_markdown(mime: &str) -> bool {
 /// 保存した本文に合わせて、そのファイルの `body` 行を作り直す。`manual` 行には触れない。
 ///
 /// 結び付けるのは `user_id`（保存した利用者）が入れるプロジェクトのタスクだけ。
+/// プロジェクトファイルはそのプロジェクトのタスクにだけ結ぶ（手動添付と同じ範囲）。
 /// 呼び出し側はファイルの書き込み権限とテナントへの所属を確認済みであること。
 /// Markdown 以外のファイルでは何もしない。
 pub async fn sync_body_links<C: ConnectionTrait>(
@@ -45,7 +46,12 @@ pub async fn sync_body_links<C: ConnectionTrait>(
 
     let mut refs = extract(&strip_code(body));
     refs.truncate(MAX_LINKS_PER_FILE);
-    let resolved = resolve(db, file.tenant_id, &refs).await?;
+    let mut resolved = resolve(db, file.tenant_id, &refs).await?;
+    // 結び付け先は手動添付と同じ範囲。プロジェクトファイルを別プロジェクトのタスクへ結ぶと、
+    // その添付一覧からファイル名が元のプロジェクトに入れない人へ見えてしまう
+    if let Some(file_project) = file.project_id {
+        resolved.retain(|r| r.project_id == file_project);
+    }
 
     let project_ids: HashSet<Uuid> = resolved.iter().map(|r| r.project_id).collect();
     let visible = if is_tenant_owner(db, file.tenant_id, user_id).await? {

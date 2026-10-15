@@ -586,3 +586,65 @@ async fn links_are_capped_at_200_per_file() {
 
     app.cleanup_user(owner.id).await;
 }
+
+/// プロジェクトファイルは同じプロジェクトのタスクにだけ結ぶ（手動添付と同じ範囲）。
+/// 対照: テナント一般ファイルはどのプロジェクトのタスクにも結ぶ。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn project_file_links_only_its_own_project() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let a = project(&app, tp.project_id).await;
+    let b = project(&app, insert_extra_project(&app, tp.tenant_id).await).await;
+    let a_task = insert_task(&app, &a, owner.id, 1).await;
+    let b_task = insert_task(&app, &b, owner.id, 1).await;
+
+    let a_folder = Uuid::new_v4();
+    drive_folders::ActiveModel {
+        id: Set(a_folder),
+        name: Set("a".into()),
+        parent_id: Set(None),
+        tenant_id: Set(tp.tenant_id),
+        project_id: Set(Some(a.id)),
+        created_by: Set(owner.id),
+        created_at: Set(Utc::now().into()),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert folder");
+
+    login(&mut app, &owner).await;
+    let body = format!("{}-1 {}-1", a.key, b.key);
+    let in_a = upload_file(
+        &app,
+        tp.tenant_id,
+        Some(a_folder),
+        "a.md",
+        "text/markdown",
+        body.as_bytes(),
+    )
+    .await;
+    assert_eq!(
+        links(&app, file_id_of(&in_a)).await,
+        HashMap::from([(a_task, "body".into())]),
+        "別プロジェクトのタスクへの参照はリンクにならない"
+    );
+
+    let general = upload_file(
+        &app,
+        tp.tenant_id,
+        None,
+        "general.md",
+        "text/markdown",
+        body.as_bytes(),
+    )
+    .await;
+    assert_eq!(
+        links(&app, file_id_of(&general)).await,
+        HashMap::from([(a_task, "body".into()), (b_task, "body".into())]),
+        "テナント一般ファイルは両方に結ぶ"
+    );
+
+    app.cleanup_user(owner.id).await;
+}
