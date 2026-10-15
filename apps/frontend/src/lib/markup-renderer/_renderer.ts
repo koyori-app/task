@@ -74,6 +74,12 @@ export type RenderOptions = {
    * (細工した脚注 label との id 衝突で scope 分離が破れるため)。
    */
   readonly scope?: string;
+  /**
+   * タスク参照 (KEY-N) の自動リンク化に使うテナント。vfile の data.kfm.taskRef として
+   * プラグインへ渡す (processor をテナントごとに作らないため options にしない)。
+   * href がテナントで変わるのでキャッシュキーにも載る。省略時はリンク化しない。
+   */
+  readonly taskRef?: { readonly tenant: string };
 };
 
 export type RenderDescription = (text: string, options?: RenderOptions) => Promise<string>;
@@ -248,13 +254,22 @@ export function createRenderer(options: CreateRendererOptions): RenderDescriptio
     const clobberPrefix =
       scope === undefined ? DEFAULT_CLOBBER_PREFIX : `${DEFAULT_CLOBBER_PREFIX}${scope}-`;
     // scope '' は上の検証で throw 済みのため、キーの空文字は「scope なし」と一意に対応する
-    const key = buildCacheKey(fingerprint, profile, scope ?? '', contentConfigJson, normalized);
+    // tenant '' はプラグインの検証で落ちてリンク化しないため、キーの空文字は「taskRef なし」と同値
+    const taskRef = renderOptions.taskRef;
+    const key = buildCacheKey(
+      fingerprint,
+      profile,
+      scope ?? '',
+      taskRef?.tenant ?? '',
+      contentConfigJson,
+      normalized,
+    );
     const cached = cache.get(key);
     if (cached !== undefined) return cached;
     const processor = getProcessor(profile, clobberPrefix);
     let rendered: string;
     try {
-      rendered = String(await processor.process(normalized));
+      rendered = String(await processor.process({ value: normalized, data: { kfm: { taskRef } } }));
     } catch (error) {
       // process 失敗は「捨てて再試行」。renderDescription はプロセス全体で共有される
       // singleton のため、失敗した実体を永久保持するとプロセス再起動まで復旧不能になる。

@@ -20,6 +20,7 @@ describe('ReviewFindingBody の SSR', () => {
           h(ReviewFindingBody, {
             body: '`code` と **強調** を含む本文',
             findingId: 'f-1',
+            tenant: 'acme',
           }),
       }),
     );

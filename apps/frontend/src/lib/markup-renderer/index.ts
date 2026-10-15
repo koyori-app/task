@@ -44,6 +44,7 @@ import remarkBreaks from 'remark-breaks';
 import { rehypeKfmCode } from '@/lib/rehype-kfm-code';
 import { remarkGfm } from '@/lib/remark-gfm';
 import { remarkKfmMermaid } from '@/lib/remark-kfm-mermaid';
+import { remarkKfmTaskRef } from '@/lib/remark-kfm-task-ref';
 import { remarkKoyoriAlerts } from '@/lib/remark-koyori-alerts';
 import { kfmSanitizeSchemas } from './_schemas';
 import { resolveContentConfig } from './_config';
@@ -102,7 +103,9 @@ export const renderDescription = createRenderer({
     github: {
       // remarkKfmMermaid は remark 層で code(lang=mermaid) を捕まえて hName を据えるため、
       // rehype 層 (starry-night / 将来の language-* 拡張) は mermaid フェンスを見ない。
-      remarkPlugins: [remarkGfm, remarkKoyoriAlerts, remarkKfmMermaid],
+      // remarkKfmTaskRef は GFM の後ろ (autolink 済みの link の内側を触らない) かつ alerts の
+      // 後ろ (alerts は先頭 text の position で原文照合するため、先に分割すると alert 化しない)。
+      remarkPlugins: [remarkGfm, remarkKoyoriAlerts, remarkKfmMermaid, remarkKfmTaskRef],
       // GitHub 同様のコードブロック着色。rehype 層 (remark-rehype の後段) に挿す。
       // rehypeKfmCode は着色済みの子を行分割して <kfm-code> で包むため、必ず
       // starry-night の後ろ (行分割は着色より後でしか成立しない)。
@@ -112,7 +115,13 @@ export const renderDescription = createRenderer({
     // (空行を挟まぬ単一改行を <br> として出す)。レビュー指摘の本文の消費側が使う。
     // remarkBreaks は mdast の text 内改行を break へ割るだけで、他プラグインと干渉しない。
     comment: {
-      remarkPlugins: [remarkGfm, remarkKoyoriAlerts, remarkKfmMermaid, remarkBreaks],
+      remarkPlugins: [
+        remarkGfm,
+        remarkKoyoriAlerts,
+        remarkKfmMermaid,
+        remarkKfmTaskRef,
+        remarkBreaks,
+      ],
       rehypePlugins: [rehypeStarryNight, rehypeKfmCode],
     },
     // Phase 2 seam: kfm profile はここへ remark / rehype 層を足す (コアは不変)。
