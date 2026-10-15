@@ -10,6 +10,7 @@ pub mod bootstrap_admin;
 pub mod custom_fields;
 pub mod desktop_auth;
 pub mod drive;
+pub mod drive_task_links;
 pub mod email;
 pub mod email_verification;
 pub mod forge;
