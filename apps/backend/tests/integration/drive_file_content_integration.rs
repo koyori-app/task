@@ -7,7 +7,9 @@
 use crate::common::{TestApp, insert_extra_project};
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
-use entity::{drive_folder_shares, drive_folders, project_members, scopes::Scope, tenants};
+use entity::{
+    drive_files, drive_folder_shares, drive_folders, project_members, scopes::Scope, tenants,
+};
 use reqwest::multipart::{Form, Part};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use uuid::Uuid;
@@ -835,6 +837,367 @@ async fn content_delivery_does_not_render_uploaded_html() {
         response.text().await.expect("content body").as_bytes(),
         body,
         "内容は変わらず取得できる"
+    );
+
+    app.cleanup_user(owner.id).await;
+}
+
+// ---- ETag / If-Match / If-None-Match ----
+
+fn sha256_etag(body: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("\"sha256:{}\"", hex::encode(Sha256::digest(body)))
+}
+
+fn etag_of(file: &serde_json::Value) -> String {
+    file["etag"].as_str().expect("etag is string").to_string()
+}
+
+fn header_str(response: &reqwest::Response, name: &str) -> Option<String> {
+    response
+        .headers()
+        .get(name)
+        .map(|v| v.to_str().expect("header is ascii").to_string())
+}
+
+/// `If-Match` 付きで本文を更新する。
+async fn put_content_if_match(
+    app: &TestApp,
+    tenant_id: Uuid,
+    file_id: Uuid,
+    if_match: Option<&str>,
+    body: &str,
+) -> reqwest::Response {
+    let mut request = app
+        .client()
+        .put(format!(
+            "{}{}",
+            app.base_url(),
+            content_path(tenant_id, file_id)
+        ))
+        .json(&serde_json::json!({ "content": body }));
+    if let Some(tag) = if_match {
+        request = request.header("If-Match", tag);
+    }
+    request.send().await.expect("put content request")
+}
+
+/// `If-None-Match` 付きで本文を取得する。
+async fn get_content_if_none_match(
+    app: &TestApp,
+    file_id: Uuid,
+    if_none_match: &str,
+) -> reqwest::Response {
+    app.client()
+        .get(format!(
+            "{}/v1/drive/files/{file_id}/content",
+            app.base_url()
+        ))
+        .header("If-None-Match", if_none_match)
+        .send()
+        .await
+        .expect("get content request")
+}
+
+async fn read_content(app: &TestApp, file_id: Uuid) -> String {
+    let response = app
+        .get_with_session(&format!("/v1/drive/files/{file_id}/content"))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    response.text().await.expect("content body")
+}
+
+/// アップロード直後の `etag` は本文の SHA-256。本文取得の `ETag` ヘッダーも同じ値で、
+/// `Last-Modified` は `updated_at`（秒精度）と一致する。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn upload_etag_is_content_sha256_and_served_on_get() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+
+    let body = b"# hello\n\netag";
+    let uploaded = upload_file(&app, tp.tenant_id, None, "doc.md", "text/markdown", body).await;
+    let file_id = file_id_of(&uploaded);
+    assert_eq!(
+        etag_of(&uploaded),
+        sha256_etag(body),
+        "アップロード直後の etag は本文の SHA-256"
+    );
+
+    let response = app
+        .get_with_session(&format!("/v1/drive/files/{file_id}/content"))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        header_str(&response, "etag").as_deref(),
+        Some(sha256_etag(body).as_str()),
+        "ETag ヘッダーは応答 JSON の etag と同じ値"
+    );
+    let last_modified = header_str(&response, "last-modified").expect("Last-Modified がある");
+    let last_modified = DateTime::parse_from_rfc2822(&last_modified)
+        .expect("Last-Modified は HTTP-date")
+        .with_timezone(&Utc);
+    assert_eq!(
+        last_modified.timestamp(),
+        timestamp_of(&uploaded, "updated_at").timestamp(),
+        "Last-Modified は updated_at と一致する"
+    );
+
+    // メタデータ API にも同じ etag が載る
+    let meta = app
+        .get_with_session(&format!(
+            "/v1/tenants/{}/drive/files/{file_id}",
+            tp.tenant_id
+        ))
+        .await;
+    assert_eq!(meta.status(), StatusCode::OK);
+    let meta: serde_json::Value = meta.json().await.expect("meta json");
+    assert_eq!(etag_of(&meta), sha256_etag(body));
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// `If-None-Match` が一致すれば 304（本文なし・ETag あり）、一致しなければ 200。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn get_content_if_none_match_returns_not_modified() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+
+    let uploaded = upload_file(&app, tp.tenant_id, None, "a.txt", "text/plain", b"cached").await;
+    let file_id = file_id_of(&uploaded);
+    let etag = etag_of(&uploaded);
+
+    for value in [etag.clone(), format!("\"other\", {etag}"), "*".to_string()] {
+        let response = get_content_if_none_match(&app, file_id, &value).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_MODIFIED,
+            "If-None-Match: {value} は 304"
+        );
+        assert_eq!(
+            header_str(&response, "etag").as_deref(),
+            Some(etag.as_str())
+        );
+        assert!(
+            response.bytes().await.expect("body").is_empty(),
+            "304 は本文なし"
+        );
+    }
+
+    // 不一致・弱い ETag は 200 で本文を返す
+    for value in ["\"sha256:stale\"".to_string(), format!("W/{etag}")] {
+        let response = get_content_if_none_match(&app, file_id, &value).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "If-None-Match: {value} は 200"
+        );
+        assert_eq!(response.text().await.expect("body"), "cached");
+    }
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// `If-Match` 一致で更新でき新しい etag が返る。不一致は 412 で本文は変わらない。
+/// `*` は一致扱い、ヘッダー無しは従来どおり無条件に上書きする。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn update_content_if_match_guards_overwrite() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+
+    let uploaded = upload_file(&app, tp.tenant_id, None, "doc.md", "text/markdown", b"v1").await;
+    let file_id = file_id_of(&uploaded);
+    let etag_v1 = etag_of(&uploaded);
+
+    // 一致 → 200、etag は新しい本文の SHA-256
+    let response = put_content_if_match(&app, tp.tenant_id, file_id, Some(&etag_v1), "v2").await;
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "If-Match 一致は更新できる"
+    );
+    let updated: serde_json::Value = response.json().await.expect("json");
+    let etag_v2 = etag_of(&updated);
+    assert_eq!(etag_v2, sha256_etag(b"v2"), "応答の etag は更新後の値");
+    assert_ne!(etag_v2, etag_v1);
+
+    // 古い etag → 412、本文は v2 のまま
+    let response = put_content_if_match(&app, tp.tenant_id, file_id, Some(&etag_v1), "lost").await;
+    assert_eq!(
+        response.status(),
+        StatusCode::PRECONDITION_FAILED,
+        "古い etag は 412"
+    );
+    assert_eq!(
+        read_content(&app, file_id).await,
+        "v2",
+        "412 では本文が変わらない"
+    );
+
+    // 弱い ETag は受けない
+    let response = put_content_if_match(
+        &app,
+        tp.tenant_id,
+        file_id,
+        Some(&format!("W/{etag_v2}")),
+        "weak",
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::PRECONDITION_FAILED);
+    assert_eq!(read_content(&app, file_id).await, "v2");
+
+    // `*` → 200
+    let response = put_content_if_match(&app, tp.tenant_id, file_id, Some("*"), "v3").await;
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "If-Match: * は更新できる"
+    );
+    assert_eq!(read_content(&app, file_id).await, "v3");
+
+    // ヘッダー無し → 無条件に上書き
+    let response = put_content_if_match(&app, tp.tenant_id, file_id, None, "v4").await;
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "If-Match 無しは上書きする"
+    );
+    let updated: serde_json::Value = response.json().await.expect("json");
+    assert_eq!(etag_of(&updated), sha256_etag(b"v4"));
+    assert_eq!(read_content(&app, file_id).await, "v4");
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// 同じ etag を持った 2 つの更新を同時に投げると、片方だけが通り、もう片方は 412。
+/// 比較が行ロックの後なので、後から入った側は先行の更新後の値と比べることになる。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn update_content_if_match_concurrent_one_wins() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+
+    let uploaded = upload_file(
+        &app,
+        tp.tenant_id,
+        None,
+        "race.md",
+        "text/markdown",
+        b"base",
+    )
+    .await;
+    let file_id = file_id_of(&uploaded);
+    let etag = etag_of(&uploaded);
+
+    let (res_a, res_b) = tokio::join!(
+        put_content_if_match(&app, tp.tenant_id, file_id, Some(&etag), "from A"),
+        put_content_if_match(&app, tp.tenant_id, file_id, Some(&etag), "from B"),
+    );
+    let mut statuses = [res_a.status(), res_b.status()];
+    statuses.sort();
+    assert_eq!(
+        statuses,
+        [StatusCode::OK, StatusCode::PRECONDITION_FAILED],
+        "片方が 200、片方が 412"
+    );
+
+    let winner = if res_a.status() == StatusCode::OK {
+        "from A"
+    } else {
+        "from B"
+    };
+    assert_eq!(
+        read_content(&app, file_id).await,
+        winner,
+        "本文は通った側の内容"
+    );
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// `content_hash` を持たない既存行は `"ts:<updated_at ミリ秒>-<size>"` を etag にし、
+/// `If-Match` もその値で効く。更新後はハッシュの etag に切り替わる。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn legacy_row_without_hash_uses_timestamp_etag() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+
+    let uploaded = upload_file(&app, tp.tenant_id, None, "old.txt", "text/plain", b"legacy").await;
+    let file_id = file_id_of(&uploaded);
+
+    // マイグレーション前に作られた行を再現する
+    let model = drive_files::Entity::find_by_id(file_id)
+        .one(&app.state.db)
+        .await
+        .expect("load file")
+        .expect("file exists");
+    let mut active: drive_files::ActiveModel = model.into();
+    active.content_hash = Set(None);
+    let legacy = active.update(&app.state.db).await.expect("drop hash");
+    let expected = format!(
+        "\"ts:{}-{}\"",
+        legacy.updated_at.timestamp_millis(),
+        legacy.size
+    );
+
+    let meta = app
+        .get_with_session(&format!(
+            "/v1/tenants/{}/drive/files/{file_id}",
+            tp.tenant_id
+        ))
+        .await;
+    assert_eq!(meta.status(), StatusCode::OK);
+    let meta: serde_json::Value = meta.json().await.expect("meta json");
+    assert_eq!(etag_of(&meta), expected, "ハッシュが無い行は ts: 形式");
+
+    let response = get_content_if_none_match(&app, file_id, &expected).await;
+    assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+
+    // サイズ違いの ts: は不一致
+    let stale = format!("\"ts:{}-0\"", legacy.updated_at.timestamp_millis());
+    let response = put_content_if_match(&app, tp.tenant_id, file_id, Some(&stale), "x").await;
+    assert_eq!(response.status(), StatusCode::PRECONDITION_FAILED);
+    assert_eq!(read_content(&app, file_id).await, "legacy");
+
+    let response = put_content_if_match(&app, tp.tenant_id, file_id, Some(&expected), "new").await;
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "ts: の etag で更新できる"
+    );
+    let updated: serde_json::Value = response.json().await.expect("json");
+    assert_eq!(
+        etag_of(&updated),
+        sha256_etag(b"new"),
+        "更新後はハッシュの etag になる"
     );
 
     app.cleanup_user(owner.id).await;

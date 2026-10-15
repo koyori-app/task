@@ -42,6 +42,8 @@ pub enum AppError {
     UnprocessableEntity,
     #[error("content too large")]
     ContentTooLarge,
+    #[error("precondition failed")]
+    PreconditionFailed,
     #[error("too many requests")]
     TooManyRequests,
 }
@@ -118,6 +120,13 @@ impl IntoResponse for AppError {
                 StatusCode::PAYLOAD_TOO_LARGE,
                 Json(ServerError {
                     message: "content-too-large".into(),
+                }),
+            )
+                .into_response(),
+            AppError::PreconditionFailed => (
+                StatusCode::PRECONDITION_FAILED,
+                Json(ServerError {
+                    message: "precondition-failed".into(),
                 }),
             )
                 .into_response(),
