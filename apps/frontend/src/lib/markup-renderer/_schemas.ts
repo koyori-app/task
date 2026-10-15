@@ -13,6 +13,7 @@ import { kfmCodeSanitizeSchema } from '@/lib/rehype-kfm-code/schema';
 import { starryNightSanitizeSchema } from '@/lib/rehype-starry-night/schema';
 import { gfmSanitizeSchema } from '@/lib/remark-gfm';
 import { kfmMermaidSanitizeSchema } from '@/lib/remark-kfm-mermaid';
+import { kfmTaskRefSanitizeSchema } from '@/lib/remark-kfm-task-ref';
 import { koyoriAlertsSanitizeSchema } from '@/lib/remark-koyori-alerts';
 import type { SanitizeSchema } from './_sanitize';
 
@@ -23,4 +24,5 @@ export const kfmSanitizeSchemas: readonly SanitizeSchema[] = [
   starryNightSanitizeSchema,
   kfmCodeSanitizeSchema,
   kfmMermaidSanitizeSchema,
+  kfmTaskRefSanitizeSchema,
 ];
