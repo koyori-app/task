@@ -42,6 +42,13 @@ export function activityText(item: ActivityItem): string {
       const to = str('to');
       return to ? `${field}を ${to.slice(0, 10)} に変更しました` : `${field}を外しました`;
     }
+    case 'planned_start_changed': {
+      // 日付だけの値（YYYY-MM-DD）。Date を通すとタイムゾーンで日がずれるので文字列のまま整形する
+      const to = str('to');
+      return to
+        ? `開始予定日を ${to.replaceAll('-', '/')} に変更しました`
+        : '開始予定日を解除しました';
+    }
     case 'assignee_added':
       return '担当者を追加しました';
     case 'assignee_removed':
