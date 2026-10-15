@@ -17,9 +17,16 @@ describe('パンくずのルート台帳', () => {
     ['/acme/projects/ENG/reviews', 'レビュー'],
     ['/acme/projects/ENG/labels', 'ラベル'],
     ['/acme/projects/ENG/tasks/ENG-3', ''],
+    ['/acme/projects/ENG/docs', 'ドキュメント'],
+    ['/acme/projects/ENG/docs/file-1', ''],
   ])('%s はページと実データから段を組む', (pathname, name) => {
     expect(
-      breadcrumbRoute(pathname, { tenant: 'acme', projectKey: 'ENG', taskId: 'ENG-3' })?.name,
+      breadcrumbRoute(pathname, {
+        tenant: 'acme',
+        projectKey: 'ENG',
+        taskId: 'ENG-3',
+        fileId: 'file-1',
+      })?.name,
     ).toBe(name);
   });
 

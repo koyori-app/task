@@ -83,6 +83,8 @@ const props = defineProps<{
   membersLoading?: boolean;
   /** 候補が手元に無いときだけ true にすること（使えるキャッシュがあれば false。labelsError と同じ約束） */
   membersError?: boolean;
+  /** 開いたときのタイトルの初期値（ドキュメントの選択範囲から作るとき等） */
+  initialTitle?: string;
 }>();
 
 const emit = defineEmits<{
@@ -126,6 +128,15 @@ watch(
     if (open && !props.statuses.some((status) => status.id === statusId.value)) {
       statusId.value = defaultStatusId.value;
     }
+  },
+  { immediate: true },
+);
+
+// 開くたびに初期値を入れる。閉じると resetForm が空に戻す
+watch(
+  () => props.open,
+  (open) => {
+    if (open && props.initialTitle) title.value = props.initialTitle;
   },
   { immediate: true },
 );

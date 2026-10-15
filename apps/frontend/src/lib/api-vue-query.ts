@@ -341,6 +341,82 @@ export function usePasswordChangeMutation() {
   return apiClient.useMutation('post', '/v1/auth/password/change');
 }
 
+export const DRIVE_FOLDERS_PATH = '/v1/tenants/{tenant_id}/drive/folders' as const;
+export const DRIVE_FILES_PATH = '/v1/tenants/{tenant_id}/drive/files' as const;
+export const DRIVE_FILE_PATH = '/v1/tenants/{tenant_id}/drive/files/{id}' as const;
+export const DRIVE_FILE_CONTENT_UPDATE_PATH =
+  '/v1/tenants/{tenant_id}/drive/files/{id}/content' as const;
+export const DRIVE_FILE_TASKS_PATH = '/v1/tenants/{tenant_id}/drive/files/{id}/tasks' as const;
+export const DRIVE_FILE_CONTENT_PATH = '/v1/drive/files/{id}/content' as const;
+
+/** ドキュメント一覧の取得件数（API の上限）。 */
+export const DOCUMENT_LIST_LIMIT = 200;
+
+/** プロジェクトのルートフォルダ（ドキュメント置き場）。呼び出し側は先頭 1 件を使う。 */
+export const projectRootFoldersQueryOptions = (
+  tenantId: TenantUuid | null | undefined,
+  projectId: ProjectUuid | null | undefined,
+) =>
+  apiClient.queryOptions('get', DRIVE_FOLDERS_PATH, {
+    params: {
+      path: { tenant_id: tenantId ?? '' },
+      query: { project_id: projectId ?? '', root_only: true },
+    },
+  });
+
+/** ルートフォルダ直下の `.md`（名前順）。`q` はファイル名の部分一致。 */
+export const projectDocumentsQueryOptions = (
+  tenantId: TenantUuid | null | undefined,
+  folderId: string | null | undefined,
+  q: string,
+) =>
+  apiClient.queryOptions('get', DRIVE_FILES_PATH, {
+    params: {
+      path: { tenant_id: tenantId ?? '' },
+      query: {
+        folder_id: folderId ?? '',
+        mime_type: 'text/markdown',
+        sort: 'name_asc',
+        limit: DOCUMENT_LIST_LIMIT,
+        ...(q ? { q } : {}),
+      },
+    },
+  });
+
+export const driveFileQueryOptions = (tenantId: TenantUuid | null | undefined, fileId: string) =>
+  apiClient.queryOptions('get', DRIVE_FILE_PATH, {
+    params: { path: { tenant_id: tenantId ?? '', id: fileId } },
+  });
+
+export const driveFileTasksQueryOptions = (
+  tenantId: TenantUuid | null | undefined,
+  fileId: string,
+) =>
+  apiClient.queryOptions('get', DRIVE_FILE_TASKS_PATH, {
+    params: { path: { tenant_id: tenantId ?? '', id: fileId } },
+  });
+
+/**
+ * ファイル本文（テキスト）。配信は `Last-Modified` 付きで `Cache-Control` が無く、
+ * ブラウザが経験則で古い本文を返しうるので、毎回 `ETag` で確かめさせる（`no-cache`）。
+ */
+export const driveFileContentQueryOptions = (fileId: string) => {
+  const init = { params: { path: { id: fileId } } };
+  return {
+    queryKey: ['get', DRIVE_FILE_CONTENT_PATH, init] as const,
+    queryFn: async ({ signal }: { signal: AbortSignal }): Promise<string> => {
+      const { data, error } = await fetchClient.GET(DRIVE_FILE_CONTENT_PATH, {
+        ...init,
+        parseAs: 'text',
+        cache: 'no-cache',
+        signal,
+      });
+      if (error !== undefined) throw error;
+      return data;
+    },
+  };
+};
+
 export function createTestApiClient(fetchImpl: (input: Request) => Promise<Response>) {
   return createClient<paths>(
     createFetchClient<paths>({

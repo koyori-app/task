@@ -101,8 +101,9 @@ GitHub 完全互換の境界仕様をテストで固定している:
   memoize されており、テナントごとに作るとメモリが漏れるため。tenant が無い、または
   `^[a-z0-9][a-z0-9-]{0,62}$`（大小無視）に合わない場合は何もしない
 - 同じ本文でもテナントで href が変わるため、テナントはキャッシュキーに載る
-- `taskRef` を渡している消費側はタスク詳細ページの説明（`+data.ts`）とレビュー指摘の本文
-  （`ReviewFindingBody.vue`）。どちらも URL の tenant display_id を渡す
+- `taskRef` を渡している消費側はタスク詳細ページの説明（`+data.ts`）、レビュー指摘の本文
+  （`ReviewFindingBody.vue`）、ドキュメント詳細（`docs/@fileId/+data.ts` と内部エンドポイント経由の
+  プレビュー）。いずれも URL の tenant display_id を渡す
 
 ## mermaid 図（remark-kfm-mermaid）
 
@@ -234,6 +235,23 @@ DOMPurify を最終段に置くのは、remark プラグインが emit したも
 - カスタム要素の登録は `src/pages/+client.ts`（client 専用 entry）から行い、関数側にも
   `customElements` 不在ガードを持つ二重防御。main.ts は存在せず、`+onCreateApp.ts` は
   SSR でも走るため使わない
+
+## クライアントからの描画（`POST /internal/render-description`）
+
+選択がクライアント操作の画面（タスク一覧の分割ビュー）や、入力中のプレビュー（ドキュメントの編集）は
+`+data.ts` が追従できないので、Elysia の内部エンドポイント
+（`apps/frontend/server/middlewares/render-description.ts`）へ本文を送って HTML だけを受け取る。
+KFM 一式を client bundle へ載せない（+417.5 KB）ための口で、ログイン済みのセッションだけを通す。
+
+- 受けるのは `{ description, scope, tenant? }`。`scope` は断片ごとの決定的な識別子で、
+  `+data.ts` と同じ組み立てにする（タスク説明は `task-<uuid>`、ドキュメントは `doc-<file_id>`）。
+  `[A-Za-z0-9_-]{1,64}` に合わなければ `400`（スキーマ違反の `422` とは分ける）。`fn` / `fnref`
+  セグメントを含む scope は renderDescription が throw するので `html: null` に倒れる
+- `tenant` は任意で `renderDescription` の `taskRef` に渡す（本文の `KEY-N` がリンクになる）。
+  字種外ならプラグインが何もしない
+- 旧形式の `{ description, taskId }`（`scope = task-<taskId>`）も当面受ける
+- 呼び出し側（`composables/useRenderedDescription.ts` の `renderOnServer`）は `400` / `411` /
+  `413` / `422` を「その入力では通らない」として `html: null` で覚え、`401` と `5xx` は再試行する
 
 ## 利用方法
 
