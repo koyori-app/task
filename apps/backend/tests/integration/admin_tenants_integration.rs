@@ -36,6 +36,7 @@ async fn insert_task(app: &TestApp, project_id: Uuid, created_by: Uuid, title: &
         sprint_id: Set(None),
         soft_deadline: Set(None),
         hard_deadline: Set(None),
+        planned_start_on: Set(None),
         estimated_minutes: Set(None),
         is_archived: Set(false),
         created_by: Set(created_by),

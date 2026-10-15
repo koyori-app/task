@@ -252,6 +252,7 @@ mod tests {
             milestone_id: None,
             soft_deadline: None,
             hard_deadline: None,
+            planned_start_on: None,
             estimated_minutes: None,
             is_archived: false,
             created_by: Uuid::new_v4(),

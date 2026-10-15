@@ -15880,6 +15880,26 @@
             }
           },
           {
+            "name": "planned_start_from",
+            "in": "query",
+            "description": "開始予定日がこの日以降のタスクだけを返す（両端含む、`YYYY-MM-DD`）。\n開始予定日が未設定のタスクは、`planned_start_from` / `planned_start_to` のどちらかを指定すると除外される",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "planned_start_to",
+            "in": "query",
+            "description": "開始予定日がこの日以前のタスクだけを返す（両端含む）。`planned_start_from` より前なら 400",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
             "name": "root_only",
             "in": "query",
             "description": "親が現在の一覧に存在しないタスクだけを返す。\n\n未指定時は従来どおり親子を区別せず返す。List 表示はこれを有効にし、\nサブタスクを親行の配下へ別途描画する。",
@@ -22987,6 +23007,11 @@
             "type": ["string", "null"],
             "format": "uuid"
           },
+          "planned_start_on": {
+            "type": ["string", "null"],
+            "format": "date",
+            "description": "開始予定日（`YYYY-MM-DD`）"
+          },
           "priority": {
             "oneOf": [
               {
@@ -24080,6 +24105,10 @@
           },
           "is_personal": {
             "type": "boolean"
+          },
+          "planned_start_on": {
+            "type": ["string", "null"],
+            "format": "date"
           },
           "priority": {
             "$ref": "#/components/schemas/TaskPriority"
@@ -25623,6 +25652,11 @@
             "type": ["string", "null"],
             "format": "uuid"
           },
+          "planned_start_on": {
+            "type": ["string", "null"],
+            "format": "date",
+            "description": "開始予定日（`YYYY-MM-DD`）。計画用の値で、締切との前後関係は検証しない"
+          },
           "priority": {
             "$ref": "#/components/schemas/TaskPriority"
           },
@@ -26227,6 +26261,9 @@
           "clear_parent_task_id": {
             "type": "boolean"
           },
+          "clear_planned_start_on": {
+            "type": "boolean"
+          },
           "clear_soft_deadline": {
             "type": "boolean"
           },
@@ -26268,6 +26305,10 @@
           "parent_task_id": {
             "type": ["string", "null"],
             "format": "uuid"
+          },
+          "planned_start_on": {
+            "type": ["string", "null"],
+            "format": "date"
           },
           "priority": {
             "oneOf": [
