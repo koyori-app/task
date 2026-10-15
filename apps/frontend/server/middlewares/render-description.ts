@@ -6,6 +6,10 @@
  * クライアントへ載せると +417.5 KB になる（kfm-client-registry テスト参照）ため、
  * `/internal/password-strength` と同じ形でサーバへ本文を送り HTML だけを受け取る。
  *
+ * 受けるのは `{ description, scope, tenant? }`。`scope` は断片ごとの決定的な識別子
+ * （タスク説明は `task-<uuid>`、ドキュメントは `doc-<uuid>`）で、`tenant` は本文中の
+ * `KEY-N` をリンクにするときの tenant display_id。旧形式の `{ description, taskId }` も当面受ける。
+ *
  * 入力は呼び出し側が既に持っている本文なので、この口は権限の境界を動かさない
  * （他人の本文を取得する手段にはならない。描画するのは送られてきた文字列だけ）。
  *
@@ -87,6 +91,9 @@ async function isAuthenticated(cookie: string | null): Promise<boolean> {
   }
 }
 
+/** 脚注 id の接頭辞になる scope の字種と長さ。 */
+const SCOPE_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
 /** この口のパス。`onRequest` は routing より前に走るので、自分の宛先だけを見る。 */
 const PATH = '/internal/render-description';
 
@@ -116,19 +123,23 @@ export const renderDescriptionPlugin = new Elysia()
   })
   .post(
     PATH,
-    async ({ body }) => {
-      const { description, taskId, tenant, mentions } = body;
+    async ({ body, status }) => {
+      const { description, tenant, mentions } = body;
+      // 旧い呼び出し元（taskId だけを送る）も当面受ける。組み立ては +data.ts と同じ
+      const scope = body.scope ?? (body.taskId ? `task-${body.taskId}` : undefined);
+      // scope は脚注 id の接頭辞になる。字種と長さはスキーマではなくここで見て 400 にする
+      // （スキーマ違反は 422 になり、呼び出し側の「入力由来の拒否」と区別が付かない）
+      if (!scope || !SCOPE_RE.test(scope)) return status(400, 'Bad Request');
       if (!description) return { html: null };
 
       try {
-        // scope はタスク UUID で決定的（同一入力 → 同一 HTML）。詳細ページの +data.ts と
-        // 同じ組み立てにして、同じタスクなら両経路で脚注 id が一致するようにする。
-        // UUID しか受けないので、scope の文字集合制約 [A-Za-z0-9_-]+ は常に満たす。
-        // taskRef も詳細ページと同じく、本文中の KEY-N をこのテナントのタスク詳細へのリンクにする。
+        // scope は呼び出し側が決定的な値を送る（task-<uuid> / doc-<uuid>）。同じ断片なら
+        // SSR の +data.ts と両経路で脚注 id が一致する。tenant は KEY-N のリンク先で、
+        // 字種外ならプラグイン側が何もしない（fail-closed）
         return {
           html: await renderDescription(description, {
-            scope: `task-${taskId}`,
-            taskRef: { tenant },
+            scope,
+            ...(tenant ? { taskRef: { tenant } } : {}),
             // 説明文のメンションの印を札にする表（API の `mentions`）。省略なら印は素の文字のまま
             mentions: mentions as MentionTable | undefined,
           }),
@@ -136,6 +147,7 @@ export const renderDescriptionPlugin = new Elysia()
       } catch (error) {
         // 描画失敗で 500 を返すと、呼び出し側は説明以外も含めて壊れたように見える。
         // 説明の KFM 表示は付加価値なので null へ倒し、プレーン表示を選ばせる。
+        // fn / fnref を含む scope も renderDescription が throw するのでここへ来る
         console.error('[render-description] failed', error);
         return { html: null };
       }
@@ -148,10 +160,13 @@ export const renderDescriptionPlugin = new Elysia()
         }
       },
       body: t.Object({
-        taskId: t.String({ format: 'uuid' }),
+        scope: t.Optional(t.String()),
         // URL の tenant display_id。remark-kfm-task-ref の TENANT_RE と同じ字種で縛り、
-        // 合わなければ 422（呼び出し側はプレーン表示へ畳む）
-        tenant: t.String({ pattern: '^[A-Za-z0-9][A-Za-z0-9-]{0,62}$' }),
+        // 合わなければ 422（呼び出し側はプレーン表示へ畳む）。ドキュメントのように KEY-N を
+        // リンクにしない呼び出し元は省略する
+        tenant: t.Optional(t.String({ pattern: '^[A-Za-z0-9][A-Za-z0-9-]{0,62}$' })),
+        /** 旧形式。scope を送らない呼び出し元のために当面残す */
+        taskId: t.Optional(t.String({ format: 'uuid' })),
         // 上限超過は描画へ入れない。スキーマで縛ると本文を読んだ時点で 422 になり、
         // renderDescription まで到達しない（呼び出し側は null へ畳む）
         description: t.String({ maxLength: MAX_DESCRIPTION_LENGTH }),

@@ -66,6 +66,8 @@
 | `/{tenant}/projects/{key}` | プロジェクトホーム（カンバン） |
 | `/{tenant}/projects/{key}/tasks` | タスク一覧（カンバン / リスト / テーブル切替） |
 | `/{tenant}/projects/{key}/tasks/{KEY-N}` | タスク詳細 |
+| `/{tenant}/projects/{key}/docs` | ドキュメント一覧（[仕様](../features/drive.md#95-ドキュメント画面)）。`?q=` でタイトル検索 |
+| `/{tenant}/projects/{key}/docs/{file_id}` | ドキュメント詳細。`{file_id}` は Drive ファイルの UUID。`?edit=1` で編集モード |
 | `/{tenant}/projects/{key}/milestones` | マイルストーン一覧 |
 | `/{tenant}/projects/{key}/labels` | ラベル管理 |
 | `/{tenant}/projects/{key}/members` | プロジェクトメンバー |
@@ -119,6 +121,9 @@ apps/frontend/src/pages/
 │           ├── tasks/
 │           │   ├── +Page.vue            # /{tenant}/projects/{key}/tasks
 │           │   └── @taskId/+Page.vue    # /{tenant}/projects/{key}/tasks/{KEY-N}（Vike: camelCase）
+│           ├── docs/
+│           │   ├── +Page.vue            # /{tenant}/projects/{key}/docs
+│           │   └── @fileId/+Page.vue    # /{tenant}/projects/{key}/docs/{file_id}
 │           ├── milestones/+Page.vue     # /{tenant}/projects/{key}/milestones
 │           ├── labels/+Page.vue         # /{tenant}/projects/{key}/labels
 │           ├── members/+Page.vue        # /{tenant}/projects/{key}/members
