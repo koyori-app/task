@@ -24,6 +24,10 @@ export function taskDetailHref(tenant: string, projectKey: string, seqId: number
   return `/${tenant}/projects/${projectKey}/tasks/${taskSeqKey(projectKey, seqId)}`;
 }
 
+export function userProfileHref(tenant: string, userId: string): string {
+  return `/${tenant}/users/${userId}`;
+}
+
 export function taskListHref(tenant: string, projectKey: string): string {
   return `/${tenant}/projects/${projectKey}/tasks`;
 }
