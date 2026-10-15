@@ -250,7 +250,7 @@ pub async fn list_files(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
-    Query(query): Query<ListFilesQuery>,
+    Valid(Query(query)): Valid<Query<ListFilesQuery>>,
 ) -> Result<Json<ListFilesResponse>, AppError> {
     auth.require_scope(Scope::ReadDrive)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
@@ -269,14 +269,29 @@ pub async fn list_files(
         }
     }
 
-    let mut selector = drive_files::Entity::find()
-        .filter(drive_files::Column::TenantId.eq(tenant_id))
-        .order_by_desc(drive_files::Column::CreatedAt);
+    let mut selector =
+        drive_files::Entity::find().filter(drive_files::Column::TenantId.eq(tenant_id));
 
     selector = match query.folder_id {
         Some(folder_id) => selector.filter(drive_files::Column::FolderId.eq(folder_id)),
         None => selector.filter(drive_files::Column::FolderId.is_null()),
     };
+    if let Some(mime_type) = &query.mime_type {
+        selector = selector.filter(
+            drive_files::Column::MimeType.like(format!("{}%", common::db::escape_like(mime_type))),
+        );
+    }
+    if let Some(q) = &query.q {
+        selector = selector
+            .filter(drive_files::Column::Name.ilike(format!("%{}%", common::db::escape_like(q))));
+    }
+    selector = match query.sort {
+        DriveFileSort::CreatedAtDesc => selector.order_by_desc(drive_files::Column::CreatedAt),
+        DriveFileSort::NameAsc => selector.order_by_asc(drive_files::Column::Name),
+        DriveFileSort::UpdatedAtDesc => selector.order_by_desc(drive_files::Column::UpdatedAt),
+    }
+    // 同値の行でページの境界が揺れないよう、最後に id で順序を固定する
+    .order_by_asc(drive_files::Column::Id);
 
     let total = selector.clone().count(&state.db).await?;
     let files = selector
