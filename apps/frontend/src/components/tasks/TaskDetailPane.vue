@@ -179,6 +179,7 @@ const currentUserId = computed(() => meQuery.data.value?.id ?? null);
  * 取得中・失敗時は html が null のまま = Hub がプレーン表示へ倒す。
  */
 const renderedDescription = useRenderedDescription(
+  () => props.tenantDisplayId,
   () => displayTask.value?.id,
   () => displayTask.value?.description,
 );
