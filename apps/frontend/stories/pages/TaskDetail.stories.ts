@@ -479,10 +479,14 @@ export const Default: Story = {
       canvas.findByText('OIDC フローとセッション管理を実装する。'),
     ).resolves.toBeInTheDocument();
     await expect(canvas.findByText('PKCE の検証を追加する')).resolves.toBeInTheDocument();
-    // 担当者はアバター（頭文字）のみ表示し、名前テキストは出さない。
+    // 担当者はアバター（頭文字）と、その横のプロフィールへの名前リンクで表示する。
     // 頭文字は avatarInitials の既定どおり 2 文字（田中太郎 → 田中）
     await expect(canvas.findByText('田中')).resolves.toBeInTheDocument();
-    await expect(canvas.queryByText('田中太郎')).not.toBeInTheDocument();
+    const assigneeLinks = canvasElement.querySelector<HTMLElement>('[data-assignee-profile-links]');
+    await expect(assigneeLinks).not.toBeNull();
+    await expect(
+      within(assigneeLinks!).getByRole('link', { name: '田中太郎' }),
+    ).toBeInTheDocument();
 
     const user = userEvent.setup();
     await user.click(await canvas.findByRole('button', { name: 'サブタスクを追加' }));
@@ -1135,7 +1139,9 @@ export const Comments: Story = {
     await user.click(await canvas.findByRole('button', { name: '1件の返信' }));
 
     await expect(canvas.findByText('スレッドへの返信です。')).resolves.toBeInTheDocument();
-    await expect(canvas.findByText('佐藤花子')).resolves.toBeInTheDocument();
+    // 佐藤花子は担当者欄の名前リンクにも出るので、コメントの投稿者に絞って確かめる
+    const authorNames = await canvas.findAllByText('佐藤花子');
+    await expect(authorNames.some((el) => el.closest('[data-comment-author]'))).toBe(true);
   },
 };
 

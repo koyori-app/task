@@ -43,6 +43,7 @@ async fn setup_task_fixture(app: &TestApp, owner_id: Uuid) -> TaskFixture {
         milestone_id: Set(None),
         soft_deadline: Set(None),
         hard_deadline: Set(None),
+        planned_start_on: Set(None),
         estimated_minutes: Set(Some(180)),
         is_archived: Set(false),
         completed_at: Set(None),

@@ -34,6 +34,29 @@ pub struct UserSummary {
     pub avatar_url: Option<String>,
 }
 
+/// 他の利用者に見せるプロフィール。`UserResponse` からメール等の本人向け項目を落としたもの
+#[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
+pub struct UserProfileResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    pub username: String,
+    #[schema(nullable)]
+    pub bio: Option<String>,
+    #[schema(nullable)]
+    pub avatar_url: Option<String>,
+}
+
+impl From<entity::users::Model> for UserProfileResponse {
+    fn from(model: entity::users::Model) -> Self {
+        Self {
+            id: model.id,
+            username: model.username,
+            bio: model.bio,
+            avatar_url: model.avatar_url,
+        }
+    }
+}
+
 impl From<entity::users::Model> for UserSummary {
     fn from(model: entity::users::Model) -> Self {
         Self {

@@ -248,6 +248,8 @@ PAT で自分のプロフィールを書き換えられないことは、
 | 統合 | `apps/backend/tests/oauth_integration.rs` | `has_password` の反転、初回パスワード設定が一度きりであること、パスワードを得たあとに最後の連携を解除できること |
 | 単体 | `apps/frontend/src/components/settings/__tests__/AuthMethodsSection.test.ts` | パスワードあり／なしの出し分け、初回設定に現在のパスワード欄を出さないこと、確認不一致で送信しないこと、現在のパスワード不一致の表示、変更後のサインイン画面への遷移、連携一覧と追加候補、self-hosted の URL 未入力での無効化、連携済みでも別インスタンスを開始できること、同一インスタンスを開始しないこと、成功通知が印を根拠にすること（URL だけでは出ないこと）、確認を挟む解除と `instance_url` の付与、最後の認証方法の拒否表示 |
 | 単体 | `apps/frontend/src/lib/__tests__/auth-methods.test.ts` | 認証方法の数え方（パスキー込み）、パスワード入力チェック（8 文字の境界・現在と同値・確認不一致） |
+| 統合 | `apps/backend/tests/integration/user_profile_integration.rs` | 他人のプロフィール（§8）: 返す項目が 4 つだけでメールを含まないこと、オーナー・客分・自分を対象に開けること、テナントに関わらない人と存在しない UUID が同じ 404 になること、テナント外の人と客分の閲覧が 403 になること、PAT の `read:tenant` と `read:task` の対照、未ログイン拒否 |
+| 単体 | `apps/frontend/src/components/tasks/__tests__/TaskComments.test.ts` | `profileHref` を渡したときだけ投稿者がプロフィールへのリンクになること |
 
 拒否を確認するテストには、対照として通るケースも置いている（過剰に拒否していないことの確認）。
 
@@ -393,3 +395,37 @@ Desktop が開いたクエリ（`port` / `code_challenge` / `state` / `name`）�
 
 パスワードの有無で表示を切り替えるために `GET /v1/auth/me`（`UserResponse`）へ
 `has_password: bool` を追加した。ハッシュそのものは返さない。
+
+---
+
+## 8. 他の利用者のプロフィール
+
+テナントのメンバーが、同じテナントに関わる人のプロフィールを見る画面（TASK-257）。
+編集は本人だけが §2 の画面で行う。
+
+| 項目 | 値 |
+|---|---|
+| URL | `/{tenant}/users/{user_id}` |
+| ページ | `apps/frontend/src/pages/@tenant/users/@userId/+Page.vue` |
+| API | `GET /v1/tenants/{tenant_id}/users/{user_id}`（`UserProfileResponse`） |
+| 入口 | タスク詳細の担当者名・コメントの投稿者・テナント設定のメンバー一覧の名前 |
+
+### 返す項目
+
+`id` / `username` / `bio` / `avatar_url` の 4 つだけ。本人が §2 で編集できる 3 項目に id を足したもの。
+メールアドレス・管理者フラグ・凍結フラグ・2FA の有効状態・`has_password` は返さない。
+自分自身を指定しても同じ形で返す（画面は自分のときだけ「プロフィールを編集」を出す）。
+
+### 認可
+
+| 状況 | 結果 |
+|---|---|
+| 閲覧者がテナントのオーナー・テナントメンバーで、対象がそのテナントのオーナー・メンバー・客分 | 200 |
+| 閲覧者がテナントに入れない（客分を含む） | 403 |
+| 対象がそのテナントに関わっていない / 存在しない | 404 |
+| PAT | `read:tenant` を要求する（メンバー一覧と同じ） |
+
+対象がテナントに関わらない場合を 403 にしないのは、`users` がテナント横断の表だからである。
+403 と 404 を分けると、任意の UUID について利用者が実在するかを調べられてしまう。
+判定は [テナント / プロジェクト認可](../../apps/backend/docs/tenant-project-authz.md) の既存関数
+（`is_tenant_owner` / `is_tenant_member` / `explicit_member_project_ids`）だけで行う。

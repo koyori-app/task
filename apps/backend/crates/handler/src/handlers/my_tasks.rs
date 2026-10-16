@@ -237,6 +237,7 @@ pub(crate) fn build_my_task_item(
         priority: task.priority,
         soft_deadline: task.soft_deadline.map(|dt| dt.with_timezone(&Utc)),
         hard_deadline: task.hard_deadline.map(|dt| dt.with_timezone(&Utc)),
+        planned_start_on: task.planned_start_on,
         project: MyTaskProjectInfo {
             id: project.id,
             name: project.name.clone(),
