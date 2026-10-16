@@ -18,6 +18,7 @@ mod m20261002000000_tenant_invitations;
 mod m20261004000000_pat_scopes_api;
 mod m20261016000000_task_planned_start_on;
 mod m20261017000000_forge_pull_requests;
+mod m20261017010000_github_issue_links_state;
 
 pub struct Migrator;
 
@@ -43,6 +44,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261004000000_pat_scopes_api::Migration),
             Box::new(m20261016000000_task_planned_start_on::Migration),
             Box::new(m20261017000000_forge_pull_requests::Migration),
+            Box::new(m20261017010000_github_issue_links_state::Migration),
         ]
     }
 }

@@ -6,5 +6,6 @@
 pub mod commits;
 pub mod events;
 pub mod identity;
+pub mod issue_source;
 pub mod pull_requests;
 pub mod task_refs;

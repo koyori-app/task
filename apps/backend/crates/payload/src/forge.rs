@@ -12,6 +12,8 @@ pub struct TaskForgeResponse {
     pub commits: Vec<TaskForgeCommit>,
     /// ブランチのリンクは未実装（TASK-291）で、常に空
     pub branches: Vec<TaskForgeBranch>,
+    /// 取り込み元の Issue。Issue から取り込んでいない（または連携を解除した）タスクでは null
+    pub issue: Option<TaskForgeIssue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -75,4 +77,23 @@ pub struct TaskForgeBranch {
     pub repo_name: String,
     pub branch: String,
     pub html_url: String,
+}
+
+/// タスクの取り込み元 Issue（`github_issue_links` の 1 行）
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TaskForgeIssue {
+    /// Issue のリンク表は GitHub 専用なので常に `github`
+    pub host: String,
+    pub repo_owner: String,
+    pub repo_name: String,
+    pub number: i32,
+    /// サーバー側で組み立てた Issue の URL
+    pub html_url: String,
+    /// `open` / `closed` / `unknown`（同期で控えていない行）
+    pub state: String,
+    /// 最後に同期（取り込み・書き戻し）した時刻
+    #[schema(value_type = String, format = "date-time")]
+    pub last_synced_at: DateTime<Utc>,
+    /// タスク側の変更が GitHub へまだ反映されていない
+    pub pending_push: bool,
 }
