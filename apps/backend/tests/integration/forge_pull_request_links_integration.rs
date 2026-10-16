@@ -28,7 +28,7 @@ fn repo() -> ForgeRepo {
 }
 
 /// GitHub の pull_request ペイロード（関係するフィールドだけ）
-fn pr_payload(
+pub(crate) fn pr_payload(
     installation_id: i64,
     action: &str,
     number: i32,
@@ -58,7 +58,7 @@ fn pr_payload(
     })
 }
 
-fn merged(mut payload: serde_json::Value, merged_at: &str) -> serde_json::Value {
+pub(crate) fn merged(mut payload: serde_json::Value, merged_at: &str) -> serde_json::Value {
     payload["pull_request"]["merged"] = true.into();
     payload["pull_request"]["merged_at"] = merged_at.into();
     payload
@@ -81,7 +81,7 @@ async fn post_event(app: &TestApp, delivery_id: &str, body: &serde_json::Value) 
 }
 
 /// 配信を受け、積まれたジョブをワーカーと同じ関数で処理する。
-async fn deliver(
+pub(crate) async fn deliver(
     app: &TestApp,
     fx: &Fixture,
     payload: &serde_json::Value,
@@ -109,7 +109,11 @@ async fn links(app: &TestApp, task_id: Uuid) -> Vec<(String, bool)> {
         .collect()
 }
 
-async fn pr_row(app: &TestApp, project_id: Uuid, number: i32) -> forge_pull_requests::Model {
+pub(crate) async fn pr_row(
+    app: &TestApp,
+    project_id: Uuid,
+    number: i32,
+) -> forge_pull_requests::Model {
     forge_pull_requests::Entity::find()
         .filter(forge_pull_requests::Column::ProjectId.eq(project_id))
         .filter(forge_pull_requests::Column::Number.eq(number))
@@ -128,7 +132,7 @@ async fn pr_activities(app: &TestApp, task_id: Uuid) -> Vec<task_activities::Mod
         .expect("query activities")
 }
 
-async fn get_forge(
+pub(crate) async fn get_forge(
     app: &TestApp,
     tenant_id: Uuid,
     project_id: Uuid,

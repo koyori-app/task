@@ -77,6 +77,15 @@ pub async fn get_task_forge(
     // 返すのはこのタスクに結ばれたものだけなので、タスクの閲覧権限で足りる
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
+    // レビューの中身は review 系のスコープで守る（write:review は read:review を包含）
+    let unresolved = service::reviews::blocking_by_task_pull_request(
+        &state.db,
+        task.id,
+        task.project_id,
+        auth.require_scope(entity::scopes::Scope::ReadReview)
+            .is_ok(),
+    )
+    .await?;
     let backend = state.db.get_database_backend();
     let pull_requests = PullRequestRow::find_by_statement(Statement::from_sql_and_values(
         backend,
@@ -111,7 +120,7 @@ pub async fn get_task_forge(
         commits_complete: row.commits_complete,
         sources: row.sources.split(',').map(str::to_owned).collect(),
         closes: row.closes,
-        unresolved: None,
+        unresolved: unresolved.get(&row.id).copied(),
     })
     .collect();
 

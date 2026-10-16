@@ -72,7 +72,7 @@ where
     ))
     .await?;
 
-    let known = forge_pull_requests::Entity::find()
+    let existing = forge_pull_requests::Entity::find()
         .filter(forge_pull_requests::Column::ProjectId.eq(project_id))
         .filter(forge_pull_requests::Column::Host.eq(&repo.host))
         .filter(forge_pull_requests::Column::HostUrl.eq(&repo.host_url))
@@ -80,7 +80,9 @@ where
         .filter(forge_pull_requests::Column::RepoName.eq(&repo.repo_name))
         .filter(forge_pull_requests::Column::Number.eq(number))
         .one(&txn)
-        .await?
+        .await?;
+    let was_merged = existing.as_ref().is_some_and(|row| row.state == "merged");
+    let known = existing
         .and_then(|row| row.host_updated_at)
         .map(|at| at.with_timezone(&Utc));
     let snapshot = match known {
@@ -139,6 +141,8 @@ where
         .ok_or_else(|| anyhow::anyhow!("upsert forge pull request returned no row"))?;
     let pull_request_id: Uuid = row.try_get("", "id")?;
     let state: String = row.try_get("", "state")?;
+    // 自然キーのロック下で見た遷移なので、再送・再試行では二度と真にならない
+    let became_merged = state == "merged" && !was_merged;
 
     // 参照元ごとにスナップショットの集合と一致させる（足りない行を足し、消えた行を消す）。`manual` は触らない
     let mut linked: Vec<ResolvedTaskRef> = Vec::new();
@@ -211,6 +215,11 @@ where
             ),
         )
         .await?;
+    }
+
+    // 宛先にリンク先タスクの担当者が入るので、リンクを揃えてから送る
+    if became_merged {
+        crate::notifications::notify_pull_request_merged(&txn, pull_request_id).await?;
     }
 
     txn.commit().await?;
