@@ -17,6 +17,7 @@ use payload::forge::{TaskForgeCommit, TaskForgePullRequest, TaskForgeResponse};
 #[derive(FromQueryResult)]
 struct PullRequestRow {
     id: Uuid,
+    project_id: Uuid,
     host: String,
     host_url: String,
     repo_owner: String,
@@ -80,7 +81,7 @@ pub async fn get_task_forge(
     let backend = state.db.get_database_backend();
     let pull_requests = PullRequestRow::find_by_statement(Statement::from_sql_and_values(
         backend,
-        "SELECT p.id, p.host, p.host_url, p.repo_owner, p.repo_name, p.number, p.title,
+        "SELECT p.id, p.project_id, p.host, p.host_url, p.repo_owner, p.repo_name, p.number, p.title,
                 p.author_handle, p.state, p.html_url, p.merged_at, p.merge_effects_processed_at,
                 p.commits_complete,
                 string_agg(l.source, ',' ORDER BY l.source) AS sources,
@@ -97,6 +98,7 @@ pub async fn get_task_forge(
     .into_iter()
     .map(|row| TaskForgePullRequest {
         id: row.id,
+        project_id: row.project_id,
         host: row.host,
         host_url: row.host_url,
         repo_owner: row.repo_owner,

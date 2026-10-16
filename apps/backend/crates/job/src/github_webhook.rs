@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use common::settings::Settings;
-use service::forge::events::ForgeEvent;
+use service::forge::events::{ForgeEvent, PrAction};
 use service::forge::pull_requests::PullRequestSnapshot;
 
 use crate::JobState;
@@ -165,7 +165,7 @@ pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(),
         updated_at,
     }) = &job.forge_event
     {
-        // マージ時の副作用（TASK-289）とコミット集合の同期（TASK-291）は未実装。どの action も共通処理だけ行う
+        // コミット集合の同期（TASK-291）は未実装
         let event = PullRequestSnapshot {
             title: title.clone(),
             body: body.clone(),
@@ -182,7 +182,7 @@ pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(),
             job.project_id,
             repo,
             *number,
-            event,
+            event.clone(),
             || async {
                 let github = state
                     .settings
@@ -200,6 +200,16 @@ pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(),
             },
         )
         .await?;
+        // 共通処理とは独立に、古いイベントでも未処理なら一度だけ行う（§5「マージ時副作用の独立処理」）
+        let merge_effects = matches!(action, PrAction::Closed { merged: true })
+            && service::forge::merge_effects::apply_merge_effects(
+                &state.db,
+                job.project_id,
+                repo,
+                *number,
+                &event,
+            )
+            .await?;
         tracing::info!(
             integration_id = %job.integration_id,
             project_id = %job.project_id,
@@ -207,6 +217,7 @@ pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(),
             number,
             action = ?action,
             applied,
+            merge_effects,
             "forge pull request event processed"
         );
         return Ok(());

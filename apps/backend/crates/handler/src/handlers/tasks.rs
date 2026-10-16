@@ -96,7 +96,7 @@ async fn record_task_field_activities<C: ConnectionTrait>(
             serde_json::json!({ "from": from, "to": to }),
         )
         .await?;
-        notify_status_changed(db, project_id, task_id, user_id, &from, &to).await?;
+        notify_status_changed(db, project_id, task_id, Some(user_id), &from, &to).await?;
     }
     if let Some(new_priority) = payload.priority
         && new_priority != before.priority

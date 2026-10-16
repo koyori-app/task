@@ -28,7 +28,7 @@ fn repo() -> ForgeRepo {
 }
 
 /// GitHub の pull_request ペイロード（関係するフィールドだけ）
-fn pr_payload(
+pub(crate) fn pr_payload(
     installation_id: i64,
     action: &str,
     number: i32,
@@ -58,13 +58,13 @@ fn pr_payload(
     })
 }
 
-fn merged(mut payload: serde_json::Value, merged_at: &str) -> serde_json::Value {
+pub(crate) fn merged(mut payload: serde_json::Value, merged_at: &str) -> serde_json::Value {
     payload["pull_request"]["merged"] = true.into();
     payload["pull_request"]["merged_at"] = merged_at.into();
     payload
 }
 
-async fn post_event(app: &TestApp, delivery_id: &str, body: &serde_json::Value) -> u16 {
+pub(crate) async fn post_event(app: &TestApp, delivery_id: &str, body: &serde_json::Value) -> u16 {
     let body = serde_json::to_vec(body).expect("serialize body");
     app.client()
         .post(format!("{}/v1/github/webhook", app.base_url()))
@@ -81,7 +81,7 @@ async fn post_event(app: &TestApp, delivery_id: &str, body: &serde_json::Value) 
 }
 
 /// 配信を受け、積まれたジョブをワーカーと同じ関数で処理する。
-async fn deliver(
+pub(crate) async fn deliver(
     app: &TestApp,
     fx: &Fixture,
     payload: &serde_json::Value,
@@ -97,7 +97,7 @@ async fn deliver(
 }
 
 /// タスクのリンク行（参照元, closes）。参照元の昇順
-async fn links(app: &TestApp, task_id: Uuid) -> Vec<(String, bool)> {
+pub(crate) async fn links(app: &TestApp, task_id: Uuid) -> Vec<(String, bool)> {
     forge_pull_request_links::Entity::find()
         .filter(forge_pull_request_links::Column::TaskId.eq(task_id))
         .order_by_asc(forge_pull_request_links::Column::Source)
@@ -109,7 +109,11 @@ async fn links(app: &TestApp, task_id: Uuid) -> Vec<(String, bool)> {
         .collect()
 }
 
-async fn pr_row(app: &TestApp, project_id: Uuid, number: i32) -> forge_pull_requests::Model {
+pub(crate) async fn pr_row(
+    app: &TestApp,
+    project_id: Uuid,
+    number: i32,
+) -> forge_pull_requests::Model {
     forge_pull_requests::Entity::find()
         .filter(forge_pull_requests::Column::ProjectId.eq(project_id))
         .filter(forge_pull_requests::Column::Number.eq(number))
@@ -278,6 +282,11 @@ async fn pull_request_links_title_and_body_references() {
     let (status, forge) = get_forge(&app, fx.tp.tenant_id, second_project, second, &token).await;
     assert_eq!(status, 200);
     assert_eq!(forge["pull_requests"][0]["number"], 87);
+    assert_eq!(
+        forge["pull_requests"][0]["project_id"],
+        fx.tp.project_id.to_string(),
+        "PR 行の持ち主は webhook を受けたプロジェクト"
+    );
 
     app.cleanup_user(outsider.id).await;
     app.cleanup_user(fx.owner_id).await;
@@ -374,10 +383,10 @@ async fn each_action_creates_the_pull_request_and_its_links() {
             (5, serde_json::json!(["title"]), "merged".to_string()),
         ]
     );
-    // マージ時の副作用（TASK-289）はまだ行わない
+    // `Closes` の無い参照なのでタスクは完了しないが、マージ時の副作用は処理済みになる
     let row = pr_row(&app, fx.tp.project_id, 5).await;
     assert!(row.merged_at.is_some());
-    assert_eq!(row.merge_effects_processed_at, None);
+    assert!(row.merge_effects_processed_at.is_some());
     assert_eq!(pr_activities(&app, task).await.len(), 5, "PR ごとに 1 行");
 
     app.cleanup_user(fx.owner_id).await;
