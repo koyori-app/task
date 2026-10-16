@@ -5,22 +5,44 @@ import {
   GitMerge,
   GitPullRequest,
   GitPullRequestClosed,
+  MoreHorizontal,
+  Plus,
 } from '@lucide/vue';
-import { useQuery } from '@tanstack/vue-query';
-import { computed } from 'vue';
+import { useQuery, useQueryClient } from '@tanstack/vue-query';
+import { computed, ref } from 'vue';
 
+import TaskForgePullRequestLinkDialog from '@/components/tasks/TaskForgePullRequestLinkDialog.vue';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import type { components } from '@/generated/api';
-import { fetchClient } from '@/lib/api-vue-query';
+import { apiClient, fetchClient } from '@/lib/api-vue-query';
 import { httpUrl } from '@/lib/task-activity';
 
 /**
  * タスク詳細の「リポジトリ」セクション。タスクに結ばれた PR とコミットを並べる
  * （docs/features/tasks/9.github-tasks.md §9）。
  *
- * PR をリンクする操作とブランチの表示は後続のタスクで足す。
+ * ブランチの表示は後続のタスクで足す。
  */
 const FORGE_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge' as const;
+const UNLINK_PATH =
+  '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge/pull-requests/{pull_request_id}' as const;
+const GITHUB_INTEGRATION_PATH =
+  '/v1/tenants/{tenant_id}/projects/{project_id}/github/integration' as const;
 
 type PullRequest = components['schemas']['TaskForgePullRequest'];
 
@@ -49,6 +71,59 @@ const forgeQuery = useQuery({
   enabled: computed(() => !!props.tenantId && !!props.projectId && !!props.taskId),
   retry: false,
 });
+
+// プロジェクト設定と同じ口。テナントオーナー以外は読めない（403）ので、そのときはボタンを止めず
+// サーバーの 409 に任せる
+const integrationQuery = useQuery(
+  computed(() => ({
+    ...apiClient.queryOptions('get', GITHUB_INTEGRATION_PATH, {
+      params: { path: { tenant_id: props.tenantId!, project_id: props.projectId! } },
+    }),
+    enabled: !!props.tenantId && !!props.projectId,
+    retry: false,
+  })),
+);
+const notConnected = computed(() => integrationQuery.data.value?.connected === false);
+const repoFullName = computed(() => {
+  const data = integrationQuery.data.value;
+  return data?.repo_owner && data.repo_name ? `${data.repo_owner}/${data.repo_name}` : null;
+});
+const isLinkOpen = ref(false);
+
+const queryClient = useQueryClient();
+const unlinkMutation = apiClient.useMutation('delete', UNLINK_PATH);
+const unlinkTarget = ref<PullRequest | null>(null);
+const unlinkError = ref<string | null>(null);
+
+function onUnlinkOpenChange(open: boolean) {
+  if (!open && unlinkMutation.isPending.value) return;
+  if (!open) unlinkTarget.value = null;
+}
+
+async function confirmUnlink() {
+  const target = unlinkTarget.value;
+  if (!target || !props.tenantId || !props.projectId) return;
+  unlinkError.value = null;
+  try {
+    await unlinkMutation.mutateAsync({
+      params: {
+        path: {
+          tenant_id: props.tenantId,
+          project_id: props.projectId,
+          id: props.taskId,
+          pull_request_id: target.id,
+        },
+      },
+    });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['get', FORGE_PATH] }),
+      queryClient.invalidateQueries({ queryKey: ['get', ACTIVITIES_PATH] }),
+    ]);
+    unlinkTarget.value = null;
+  } catch {
+    unlinkError.value = 'リンクを外せませんでした';
+  }
+}
 
 const pullRequests = computed(() => forgeQuery.data.value?.pull_requests ?? []);
 const commits = computed(() => forgeQuery.data.value?.commits ?? []);
@@ -81,7 +156,23 @@ const SOURCE_LABELS: Record<string, string> = {
 
 <template>
   <section class="space-y-2" aria-label="リポジトリ" data-task-forge-section>
-    <h2 class="text-sm font-semibold">リポジトリ</h2>
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="text-sm font-semibold">リポジトリ</h2>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        :disabled="notConnected"
+        :aria-describedby="notConnected ? 'forge-link-disabled-reason' : undefined"
+        @click="isLinkOpen = true"
+      >
+        <Plus class="size-4" aria-hidden="true" />
+        PR をリンク
+      </Button>
+    </div>
+    <p v-if="notConnected" id="forge-link-disabled-reason" class="text-xs text-muted-foreground">
+      PR をリンクするには、プロジェクト設定でリポジトリを連携してください
+    </p>
 
     <p v-if="forgeQuery.isLoading.value" class="text-sm text-muted-foreground">読み込み中…</p>
     <div
@@ -136,6 +227,29 @@ const SOURCE_LABELS: Record<string, string> = {
             <span v-if="pr.author_handle" class="shrink-0 text-xs text-muted-foreground">
               {{ pr.author_handle }}
             </span>
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  :aria-label="`#${pr.number} の操作`"
+                >
+                  <MoreHorizontal class="size-4" aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  variant="destructive"
+                  @select="
+                    unlinkError = null;
+                    unlinkTarget = pr;
+                  "
+                >
+                  リンクを外す
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </li>
         </ul>
       </div>
@@ -171,5 +285,45 @@ const SOURCE_LABELS: Record<string, string> = {
         </ul>
       </div>
     </template>
+
+    <TaskForgePullRequestLinkDialog
+      v-if="isLinkOpen && tenantId && projectId"
+      :tenant-id="tenantId"
+      :project-id="projectId"
+      :task-id="taskId"
+      :repo-full-name="repoFullName"
+      @close="isLinkOpen = false"
+    />
+    <Dialog v-if="unlinkTarget" :open="true" @update:open="onUnlinkOpenChange">
+      <DialogContent class="max-w-md" :show-close-button="false">
+        <DialogHeader>
+          <DialogTitle>PR のリンクを外しますか？</DialogTitle>
+          <DialogDescription>
+            #{{ unlinkTarget.number }} とこのタスクのリンクをすべて外します。PR
+            のタイトル・本文にタスクの ID が残っていると、次に PR
+            が更新されたときに再びリンクされます。
+          </DialogDescription>
+        </DialogHeader>
+        <p v-if="unlinkError" role="alert" class="text-sm text-destructive">{{ unlinkError }}</p>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            :disabled="unlinkMutation.isPending.value"
+            @click="unlinkTarget = null"
+          >
+            キャンセル
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="unlinkMutation.isPending.value"
+            @click="confirmUnlink"
+          >
+            {{ unlinkMutation.isPending.value ? '外しています…' : 'リンクを外す' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </section>
 </template>
