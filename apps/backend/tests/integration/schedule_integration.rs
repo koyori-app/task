@@ -246,6 +246,45 @@ async fn timezone_moves_the_deadline_date() {
 }
 
 #[tokio::test]
+async fn task_starting_after_its_deadline_spans_deadline_to_start() {
+    let mut app = TestApp::new().await;
+    let (user, tp, todo, _) = setup(&mut app).await;
+    // 開始予定日 10/20・締切 10/10 の逆転したタスクは 10/10〜10/20 として扱う
+    let inverted = task(
+        &app,
+        tp.project_id,
+        todo,
+        user.id,
+        Some(d(20)),
+        Some(at(10)),
+        None,
+    )
+    .await;
+    for day in [10, 15, 20] {
+        let body = get(
+            &app,
+            tp.tenant_id,
+            &format!("from=2026-10-{day}&to=2026-10-{day}"),
+        )
+        .await;
+        assert_eq!(got(&body), set(&[inverted]), "10/{day}");
+    }
+    for day in ["09", "21"] {
+        let body = get(
+            &app,
+            tp.tenant_id,
+            &format!("from=2026-10-{day}&to=2026-10-{day}"),
+        )
+        .await;
+        assert!(ids(&body).is_empty(), "10/{day}");
+    }
+    // 並びも早い方（締切の 10/10）を始点として扱う
+    let later = task(&app, tp.project_id, todo, user.id, Some(d(12)), None, None).await;
+    let body = get(&app, tp.tenant_id, "from=2026-10-01&to=2026-10-31").await;
+    assert_eq!(ids(&body), vec![inverted.to_string(), later.to_string()]);
+}
+
+#[tokio::test]
 async fn rejects_invalid_ranges_and_parameters() {
     let mut app = TestApp::new().await;
     let (_, tp, _, _) = setup(&mut app).await;

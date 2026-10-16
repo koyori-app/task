@@ -32,9 +32,11 @@ const MAX_RANGE_DAYS: i64 = 92;
 const DEFAULT_LIMIT: u64 = 200;
 const MAX_LIMIT: u64 = 500;
 
-// 終点 = Soft 締切 → Hard 締切 → 開始予定日、始点 = 開始予定日 → 終点。$1 はタイムゾーン
-const END_DATE: &str = "COALESCE((COALESCE(tasks.soft_deadline, tasks.hard_deadline) AT TIME ZONE $1)::date, tasks.planned_start_on)";
-const START_DATE: &str = "COALESCE(tasks.planned_start_on, (COALESCE(tasks.soft_deadline, tasks.hard_deadline) AT TIME ZONE $1)::date)";
+// 開始予定日と締切（Soft → Hard）の日付のうち、早い方を始点・遅い方を終点にする。$1 はタイムゾーン。
+// 開始予定日が締切より後のタスクも許されているため、逆転したまま重なり判定すると両端の日から落ちる。
+// LEAST / GREATEST は NULL を無視するので、片方しか無ければ両端ともその日になる
+const END_DATE: &str = "GREATEST(tasks.planned_start_on, (COALESCE(tasks.soft_deadline, tasks.hard_deadline) AT TIME ZONE $1)::date)";
+const START_DATE: &str = "LEAST(tasks.planned_start_on, (COALESCE(tasks.soft_deadline, tasks.hard_deadline) AT TIME ZONE $1)::date)";
 
 #[derive(Serialize, Deserialize)]
 struct ScheduleCursor {
