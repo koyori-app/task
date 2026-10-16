@@ -154,6 +154,12 @@ pub enum TasksCommand {
         /// Filter by parent task (KEY-N or UUID)
         #[arg(long)]
         parent: Option<String>,
+        /// Only tasks planned to start on or after this date (YYYY-MM-DD)
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        planned_start_from: Option<chrono::NaiveDate>,
+        /// Only tasks planned to start on or before this date (YYYY-MM-DD)
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        planned_start_to: Option<chrono::NaiveDate>,
         /// List archived tasks instead of active ones
         #[arg(long)]
         archived: bool,
@@ -283,6 +289,9 @@ pub struct TaskFieldArgs {
     /// Hard deadline (RFC 3339, or YYYY-MM-DD for the start of that day in UTC)
     #[arg(long)]
     pub hard_deadline: Option<String>,
+    /// Planned start date (YYYY-MM-DD)
+    #[arg(long, value_name = "YYYY-MM-DD")]
+    pub planned_start: Option<chrono::NaiveDate>,
     /// Estimate in minutes (1 or more)
     #[arg(long)]
     pub estimate: Option<i32>,
@@ -324,6 +333,9 @@ pub struct TaskClearArgs {
     /// Remove the hard deadline
     #[arg(long, conflicts_with = "hard_deadline")]
     pub clear_hard_deadline: bool,
+    /// Remove the planned start date
+    #[arg(long, conflicts_with = "planned_start")]
+    pub clear_planned_start: bool,
     /// Remove the estimate
     #[arg(long, conflicts_with = "estimate")]
     pub clear_estimate: bool,
@@ -630,6 +642,29 @@ mod tests {
             Cli::try_parse_from(["task", "tasks", "update", "APP-1", "--assignee", "alice"])
                 .is_ok()
         );
+    }
+
+    /// 開始予定日は日付だけを受け、解除と同時には指定できない。
+    #[test]
+    fn parses_a_planned_start_date_and_refuses_it_with_its_clear() {
+        let base = ["task", "tasks", "update", "APP-1"];
+        let parse = |extra: &[&str]| {
+            Cli::try_parse_from(base.iter().chain(extra).copied().collect::<Vec<_>>())
+        };
+        let cli = parse(&["--planned-start", "2026-10-16"]).unwrap();
+        let Command::Tasks { command, .. } = cli.command else {
+            panic!("expected tasks");
+        };
+        let TasksCommand::Update { fields, .. } = *command else {
+            panic!("expected tasks update");
+        };
+        assert_eq!(
+            fields.planned_start,
+            chrono::NaiveDate::from_ymd_opt(2026, 10, 16)
+        );
+        assert!(parse(&["--planned-start", "2026-10-16T00:00:00Z"]).is_err());
+        assert!(parse(&["--planned-start", "2026-10-16", "--clear-planned-start"]).is_err());
+        assert!(parse(&["--clear-planned-start"]).is_ok());
     }
 
     #[test]

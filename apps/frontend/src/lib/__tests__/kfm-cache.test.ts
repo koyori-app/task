@@ -76,21 +76,23 @@ describe('L1 キャッシュ (🔴 full-text キー・ハッシュ禁止)', () =
   });
 });
 
-describe('buildCacheKey (fingerprint / profile / scope / config 分離)', () => {
-  it('fingerprint・profile・scope・config・本文のどれが違ってもキーが変わる', () => {
-    const base = buildCacheKey('fp1', 'github', '', '{"a":1}', '本文');
-    expect(buildCacheKey('fp2', 'github', '', '{"a":1}', '本文')).not.toBe(base);
-    expect(buildCacheKey('fp1', 'kfm', '', '{"a":1}', '本文')).not.toBe(base);
+describe('buildCacheKey (fingerprint / profile / scope / tenant / config 分離)', () => {
+  it('fingerprint・profile・scope・tenant・config・本文のどれが違ってもキーが変わる', () => {
+    const base = buildCacheKey('fp1', 'github', '', '', '{"a":1}', '本文');
+    expect(buildCacheKey('fp2', 'github', '', '', '{"a":1}', '本文')).not.toBe(base);
+    expect(buildCacheKey('fp1', 'kfm', '', '', '{"a":1}', '本文')).not.toBe(base);
     // scope 違いを同一視すると別 scope の脚注 id 付き HTML を返してしまう
-    expect(buildCacheKey('fp1', 'github', 'task-1', '{"a":1}', '本文')).not.toBe(base);
-    expect(buildCacheKey('fp1', 'github', '', '{"a":2}', '本文')).not.toBe(base);
-    expect(buildCacheKey('fp1', 'github', '', '{"a":1}', '別本文')).not.toBe(base);
+    expect(buildCacheKey('fp1', 'github', 'task-1', '', '{"a":1}', '本文')).not.toBe(base);
+    // テナント違いを同一視すると別テナントの href (タスク参照リンク) 付き HTML を返してしまう
+    expect(buildCacheKey('fp1', 'github', '', 'acme', '{"a":1}', '本文')).not.toBe(base);
+    expect(buildCacheKey('fp1', 'github', '', '', '{"a":2}', '本文')).not.toBe(base);
+    expect(buildCacheKey('fp1', 'github', '', '', '{"a":1}', '別本文')).not.toBe(base);
   });
 
   it('前置部と本文の境界が曖昧にならない (区切りを含む値でも衝突しない)', () => {
     // 前置部の値に区切りらしき文字列が入っても、JSON 正規化 + NUL 区切りで一意
-    const tricky = buildCacheKey('fp"] x', 'github', '', '{}', 'text');
-    const straight = buildCacheKey('fp', 'github', '', '{}', '"] x\u0000text');
+    const tricky = buildCacheKey('fp"] x', 'github', '', '', '{}', 'text');
+    const straight = buildCacheKey('fp', 'github', '', '', '{}', '"] x\u0000text');
     expect(tricky).not.toBe(straight);
   });
 });

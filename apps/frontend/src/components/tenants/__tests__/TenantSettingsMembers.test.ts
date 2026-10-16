@@ -81,7 +81,7 @@ function mountMembers(asUserId = ADMIN_ID) {
   ];
   meData.value = { id: asUserId, username: 'me', avatar_url: null };
   wrapper = mount(TenantSettingsMembers, {
-    props: { tenant: { id: TENANT_ID, name: 'Alpha', owner_id: OWNER_ID } },
+    props: { tenant: { id: TENANT_ID, display_id: 'alpha', name: 'Alpha', owner_id: OWNER_ID } },
     global: {
       plugins: [
         createPinia(),

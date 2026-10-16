@@ -19,7 +19,7 @@ import { useMeQuery } from '@/lib/api-vue-query';
 import type { Data } from './+data';
 import { refreshTaskDescription } from './task-description-navigation';
 import type { components } from '@/generated/api';
-import { taskDetailHref } from '@/lib/task-display';
+import { taskDetailHref, userProfileHref } from '@/lib/task-display';
 
 type TaskResponse = components['schemas']['TaskResponse'];
 
@@ -37,6 +37,7 @@ const navigateAfterDelete = inject<(href: string) => void>('navigateAfterDelete'
 });
 
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
+const profileHref = (userId: string) => userProfileHref(tenantDisplayId.value, userId);
 const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
 const taskId = computed(() => String(pageContext.routeParams.taskId ?? ''));
 
@@ -195,6 +196,7 @@ function openRelatedTask(task: TaskResponse) {
 <template>
   <TaskDetailHub
     :task="displayTask"
+    :profile-href="profileHref"
     :description-html="data?.descriptionHtml ?? null"
     :description-source="data?.descriptionSource ?? null"
     :project-key="projectKey"
@@ -286,6 +288,7 @@ function openRelatedTask(task: TaskResponse) {
         :list-error="commentsError"
         :on-retry="refetchComments"
         :current-user-id="currentUserId"
+        :profile-href="profileHref"
         :submit-pending="submitPending"
         :submit-error="submitError"
         :reply-error="replyError"

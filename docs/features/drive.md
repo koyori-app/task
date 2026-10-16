@@ -113,7 +113,7 @@ pub struct Model {
 | `folder_id` | UUID | NULLABLE, FK→drive_folders SET NULL | |
 | `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
 | `updated_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
-| `content_hash` | VARCHAR(64) | NULLABLE | 本文の SHA-256（hex）。アップロードと本文更新で設定し、名前変更・移動では変えない。導入（`m20261016000000_drive_files_content_hash`）より前の行は NULL のまま（backfill しない） |
+| `content_hash` | VARCHAR(64) | NULLABLE | 本文の SHA-256（hex）。アップロードと本文更新で設定し、名前変更・移動では変えない。導入（`m20261016005000_drive_files_content_hash`）より前の行は NULL のまま（backfill しない） |
 
 **CHECK 制約**:
 

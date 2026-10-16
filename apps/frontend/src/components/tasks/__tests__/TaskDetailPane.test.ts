@@ -145,12 +145,13 @@ describe('TaskDetailPane', () => {
       // 記法がそのまま見えていたのが直したい症状
       expect(rendered.text()).not.toContain('# 見出し');
 
-      // 描画元はタスク UUID と本文。scope の組み立てはサーバ側に閉じる。
+      // 描画元はタスク UUID・テナント・本文。scope と taskRef の組み立てはサーバ側に閉じる。
       // ペインはコメント・履歴・担当者も取りに行くので、順番ではなく宛先で拾う
       const call = fetchMock.mock.calls.find(([input]) => input === RENDER_DESCRIPTION_PATH);
       expect(call).toBeTruthy();
       expect(JSON.parse(call![1]!.body as string)).toEqual({
         taskId: 'task-id',
+        tenant: 'acme',
         description: '# 見出し',
       });
     });

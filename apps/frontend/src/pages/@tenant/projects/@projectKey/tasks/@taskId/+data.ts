@@ -108,8 +108,12 @@ export async function data(pageContext: PageContextServer): Promise<Data> {
 
     // scope はタスク UUID で決定的 (同一入力 → 同一 HTML)。URL の seq key (例 "ENG-42")
     // ではなく UUID を使うのは、scope の文字集合制約 [A-Za-z0-9_-]+ を常に満たすため。
+    // taskRef: 本文中の KEY-N を同じテナントのタスク詳細へのリンクにする。
     return {
-      descriptionHtml: await renderDescription(task.description, { scope: `task-${task.id}` }),
+      descriptionHtml: await renderDescription(task.description, {
+        scope: `task-${task.id}`,
+        taskRef: { tenant: tenantDisplayId },
+      }),
       descriptionSource: task.description,
     };
   } catch (error) {

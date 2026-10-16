@@ -116,14 +116,20 @@ export const renderDescriptionPlugin = new Elysia()
   .post(
     PATH,
     async ({ body }) => {
-      const { description, taskId } = body;
+      const { description, taskId, tenant } = body;
       if (!description) return { html: null };
 
       try {
         // scope はタスク UUID で決定的（同一入力 → 同一 HTML）。詳細ページの +data.ts と
         // 同じ組み立てにして、同じタスクなら両経路で脚注 id が一致するようにする。
         // UUID しか受けないので、scope の文字集合制約 [A-Za-z0-9_-]+ は常に満たす。
-        return { html: await renderDescription(description, { scope: `task-${taskId}` }) };
+        // taskRef も詳細ページと同じく、本文中の KEY-N をこのテナントのタスク詳細へのリンクにする。
+        return {
+          html: await renderDescription(description, {
+            scope: `task-${taskId}`,
+            taskRef: { tenant },
+          }),
+        };
       } catch (error) {
         // 描画失敗で 500 を返すと、呼び出し側は説明以外も含めて壊れたように見える。
         // 説明の KFM 表示は付加価値なので null へ倒し、プレーン表示を選ばせる。
@@ -140,6 +146,9 @@ export const renderDescriptionPlugin = new Elysia()
       },
       body: t.Object({
         taskId: t.String({ format: 'uuid' }),
+        // URL の tenant display_id。remark-kfm-task-ref の TENANT_RE と同じ字種で縛り、
+        // 合わなければ 422（呼び出し側はプレーン表示へ畳む）
+        tenant: t.String({ pattern: '^[A-Za-z0-9][A-Za-z0-9-]{0,62}$' }),
         // 上限超過は描画へ入れない。スキーマで縛ると本文を読んだ時点で 422 になり、
         // renderDescription まで到達しない（呼び出し側は null へ畳む）
         description: t.String({ maxLength: MAX_DESCRIPTION_LENGTH }),

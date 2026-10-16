@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -33,6 +33,9 @@ pub struct TaskResponse {
     pub soft_deadline: Option<DateTime<Utc>>,
     #[schema(value_type = Option<String>, format = "date-time", nullable)]
     pub hard_deadline: Option<DateTime<Utc>>,
+    /// 開始予定日（`YYYY-MM-DD`）。計画用の値で、締切との前後関係は検証しない
+    #[schema(value_type = Option<String>, format = "date", nullable)]
+    pub planned_start_on: Option<NaiveDate>,
     #[schema(nullable)]
     pub estimated_minutes: Option<i32>,
     pub is_archived: bool,
@@ -78,6 +81,7 @@ impl TaskResponse {
             sprint_id: model.sprint_id,
             soft_deadline: model.soft_deadline.map(|dt| dt.with_timezone(&Utc)),
             hard_deadline: model.hard_deadline.map(|dt| dt.with_timezone(&Utc)),
+            planned_start_on: model.planned_start_on,
             estimated_minutes: model.estimated_minutes,
             is_archived: model.is_archived,
             created_by,
@@ -117,6 +121,9 @@ pub struct CreateTaskRequest {
     pub soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
     #[schema(value_type = Option<String>, format = "date-time")]
     pub hard_deadline: Option<chrono::DateTime<chrono::Utc>>,
+    /// 開始予定日（`YYYY-MM-DD`）
+    #[schema(value_type = Option<String>, format = "date")]
+    pub planned_start_on: Option<NaiveDate>,
     #[validate(range(min = 1))]
     pub estimated_minutes: Option<i32>,
     #[serde(default)]
@@ -159,6 +166,10 @@ pub struct UpdateTaskRequest {
     pub hard_deadline: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
     pub clear_hard_deadline: bool,
+    #[schema(value_type = Option<String>, format = "date")]
+    pub planned_start_on: Option<NaiveDate>,
+    #[serde(default)]
+    pub clear_planned_start_on: bool,
     #[validate(range(min = 1))]
     pub estimated_minutes: Option<i32>,
     #[serde(default)]
@@ -189,6 +200,15 @@ pub struct ListTasksQuery {
     pub milestone_id: Option<Uuid>,
     pub sprint_id: Option<Uuid>,
     pub parent_task_id: Option<Uuid>,
+    /// 開始予定日がこの日以降のタスクだけを返す（両端含む、`YYYY-MM-DD`）。
+    /// 開始予定日が未設定のタスクは、`planned_start_from` / `planned_start_to` のどちらかを指定すると除外される
+    #[param(value_type = Option<String>, format = "date")]
+    #[schema(value_type = Option<String>, format = "date")]
+    pub planned_start_from: Option<NaiveDate>,
+    /// 開始予定日がこの日以前のタスクだけを返す（両端含む）。`planned_start_from` より前なら 400
+    #[param(value_type = Option<String>, format = "date")]
+    #[schema(value_type = Option<String>, format = "date")]
+    pub planned_start_to: Option<NaiveDate>,
     /// 親が現在の一覧に存在しないタスクだけを返す。
     ///
     /// 未指定時は従来どおり親子を区別せず返す。List 表示はこれを有効にし、
