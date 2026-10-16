@@ -84,7 +84,8 @@ const rows = computed(() =>
             をリンクしました<template v-if="commit.message">「{{ commit.message }}」</template>
           </span>
           <span v-else-if="pullRequest" class="min-w-0 flex-1 break-words">
-            {{ activityActor(item) }}の PR
+            <!-- マージの履歴は作者の操作ではないので主語を出さない -->
+            <template v-if="!pullRequest.merged">{{ activityActor(item) }}の </template>PR
             <a
               v-if="pullRequest.url"
               :href="pullRequest.url"
@@ -94,9 +95,8 @@ const rows = computed(() =>
               >{{ pullRequest.number ? `#${pullRequest.number}` : 'PR' }}</a
             >
             <span v-else>{{ pullRequest.number ? `#${pullRequest.number}` : '' }}</span>
-            をリンクしました<template v-if="pullRequest.title"
-              >「{{ pullRequest.title }}」</template
-            >
+            {{ pullRequest.merged ? 'のマージでタスクを完了しました' : 'をリンクしました'
+            }}<template v-if="pullRequest.title">「{{ pullRequest.title }}」</template>
           </span>
           <span v-else class="min-w-0 flex-1">
             {{ activityActor(item) }}が{{ activityText(item) }}

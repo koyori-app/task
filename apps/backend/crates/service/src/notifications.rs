@@ -301,15 +301,15 @@ pub async fn notify_status_changed<C: ConnectionTrait>(
     db: &C,
     project_id: Uuid,
     task_id: Uuid,
-    actor_id: Uuid,
+    // PR のマージによる自動完了など、操作者のいない変更は None
+    actor_id: Option<Uuid>,
     from: &str,
     to: &str,
 ) -> Result<(), AppError> {
-    let actor_name = users::Entity::find_by_id(actor_id)
-        .one(db)
-        .await?
-        .map(|u| u.username)
-        .unwrap_or_else(|| "unknown".into());
+    let actor_name = match actor_id {
+        Some(actor_id) => username(db, actor_id).await?,
+        None => "システム".into(),
+    };
     notify_watchers(
         db,
         project_id,
@@ -320,7 +320,7 @@ pub async fn notify_status_changed<C: ConnectionTrait>(
             "to": to,
             "changed_by": actor_name,
         }),
-        &[actor_id],
+        actor_id.as_slice(),
     )
     .await
 }

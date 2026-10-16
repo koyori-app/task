@@ -65,6 +65,14 @@ export function activityText(item: ActivityItem): string {
       return 'コメントを削除しました';
     case 'archived':
       return 'タスクをアーカイブしました';
+    case 'forge_merge_effects_acknowledged': {
+      const number = payload.number;
+      const pr =
+        typeof number === 'number' && Number.isInteger(number) && number > 0
+          ? `PR #${number}`
+          : 'PR';
+      return `${pr} の自動完了を未適用のまま確認済みにしました`;
+    }
     default:
       return '操作しました';
   }
@@ -106,11 +114,17 @@ export type PullRequestActivity = {
   title: string;
   /** http(s) 以外は null */
   url: string | null;
+  /** マージでタスクを完了した履歴（`forge_pull_request_merged`）。false はリンクの履歴 */
+  merged: boolean;
 };
 
-/** `forge_pull_request_linked` の表示要素。それ以外の履歴は null。 */
+/** `forge_pull_request_linked` / `forge_pull_request_merged` の表示要素。それ以外の履歴は null。 */
 export function pullRequestActivity(item: ActivityItem): PullRequestActivity | null {
-  if (item.event_type !== 'forge_pull_request_linked') return null;
+  if (
+    item.event_type !== 'forge_pull_request_linked' &&
+    item.event_type !== 'forge_pull_request_merged'
+  )
+    return null;
   const payload = (item.payload ?? {}) as Record<string, unknown>;
   const str = (key: string) => (typeof payload[key] === 'string' ? (payload[key] as string) : '');
   const number = payload.number;
@@ -119,6 +133,7 @@ export function pullRequestActivity(item: ActivityItem): PullRequestActivity | n
     number: typeof number === 'number' && Number.isInteger(number) && number > 0 ? number : null,
     title: str('title'),
     url: httpUrl(str('html_url')),
+    merged: item.event_type === 'forge_pull_request_merged',
   };
 }
 

@@ -9,6 +9,7 @@ import {
 import { useQuery } from '@tanstack/vue-query';
 import { computed } from 'vue';
 
+import TaskForgeMergeEffectsBadge from '@/components/tasks/TaskForgeMergeEffectsBadge.vue';
 import { Button } from '@/components/ui/button';
 import type { components } from '@/generated/api';
 import { fetchClient } from '@/lib/api-vue-query';
@@ -133,6 +134,7 @@ const SOURCE_LABELS: Record<string, string> = {
             >
               {{ SOURCE_LABELS[source] ?? source }}
             </span>
+            <TaskForgeMergeEffectsBadge v-if="tenantId" :tenant-id="tenantId" :pull-request="pr" />
             <span v-if="pr.author_handle" class="shrink-0 text-xs text-muted-foreground">
               {{ pr.author_handle }}
             </span>
