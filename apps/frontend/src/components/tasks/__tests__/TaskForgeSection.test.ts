@@ -50,7 +50,13 @@ async function mountWith(forge: Record<string, unknown>) {
     return Response.json({ message: 'not found' }, { status: 404 });
   });
   const wrapper = mount(TaskForgeSection, {
-    props: { tenantId: 'tenant-1', projectId: 'project-1', taskId: 'TASK-1' },
+    props: {
+      tenantId: 'tenant-1',
+      projectId: 'project-1',
+      taskId: 'TASK-1',
+      tenantDisplayId: 'acme',
+      projectKey: 'TASK',
+    },
     global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
   });
   await flushPromises();
@@ -102,5 +108,19 @@ describe('TaskForgeSection', () => {
     expect(row.get('a').attributes('href')).toBe(commit.html_url);
     expect(row.text()).toContain('fix: トークン期限切れを修正');
     expect(row.text()).toContain('Yupix');
+  });
+
+  it('未解決のレビュー指摘の件数をレビュー画面のその PR へのリンクで出し、null なら出さない', async () => {
+    const wrapper = await mountWith({
+      pull_requests: [
+        { ...pullRequest, id: 'pr-1', number: 87, unresolved: 2 },
+        { ...pullRequest, id: 'pr-2', number: 88, unresolved: 0 },
+        { ...pullRequest, id: 'pr-3', number: 89, unresolved: null },
+      ],
+    });
+    const badges = wrapper.findAll('[data-forge-unresolved]');
+    expect(badges.map((b) => b.text())).toEqual(['2 件が未解決', '未解決なし']);
+    expect(badges[0]!.attributes('href')).toBe('/acme/projects/TASK/reviews?pr=87');
+    expect(badges[1]!.attributes('href')).toBe('/acme/projects/TASK/reviews?pr=88');
   });
 });
