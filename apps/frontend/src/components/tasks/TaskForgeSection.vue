@@ -41,8 +41,6 @@ import { httpUrl } from '@/lib/task-activity';
 const FORGE_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge' as const;
 const UNLINK_PATH =
   '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge/pull-requests/{pull_request_id}' as const;
-const GITHUB_INTEGRATION_PATH =
-  '/v1/tenants/{tenant_id}/projects/{project_id}/github/integration' as const;
 
 type PullRequest = components['schemas']['TaskForgePullRequest'];
 
@@ -72,22 +70,12 @@ const forgeQuery = useQuery({
   retry: false,
 });
 
-// プロジェクト設定と同じ口。テナントオーナー以外は読めない（403）ので、そのときはボタンを止めず
-// サーバーの 409 に任せる
-const integrationQuery = useQuery(
-  computed(() => ({
-    ...apiClient.queryOptions('get', GITHUB_INTEGRATION_PATH, {
-      params: { path: { tenant_id: props.tenantId!, project_id: props.projectId! } },
-    }),
-    enabled: !!props.tenantId && !!props.projectId,
-    retry: false,
-  })),
+// 連携先は forge と一緒に返る。null なら未連携（読み込み前・取得失敗はボタンを止めない）
+const repository = computed(() => forgeQuery.data.value?.repository);
+const notConnected = computed(() => repository.value === null);
+const repoFullName = computed(() =>
+  repository.value ? `${repository.value.repo_owner}/${repository.value.repo_name}` : null,
 );
-const notConnected = computed(() => integrationQuery.data.value?.connected === false);
-const repoFullName = computed(() => {
-  const data = integrationQuery.data.value;
-  return data?.repo_owner && data.repo_name ? `${data.repo_owner}/${data.repo_name}` : null;
-});
 const isLinkOpen = ref(false);
 
 const queryClient = useQueryClient();

@@ -13,6 +13,8 @@ pub struct TaskForgeResponse {
     pub commits: Vec<TaskForgeCommit>,
     /// ブランチのリンクは未実装（TASK-291）で、常に空
     pub branches: Vec<TaskForgeBranch>,
+    /// プロジェクトの現在の連携先。連携していなければ null（手動リンクの可否をこれで決める）
+    pub repository: Option<TaskForgeRepository>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -86,4 +88,13 @@ pub struct LinkTaskPullRequestRequest {
     /// マージしたらこのタスクを完了にする
     #[serde(default)]
     pub closes: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TaskForgeRepository {
+    pub host: String,
+    pub host_url: String,
+    pub repo_owner: String,
+    pub repo_name: String,
+    pub html_url: String,
 }

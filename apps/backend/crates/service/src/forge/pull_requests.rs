@@ -131,7 +131,7 @@ where
     let state: String = row.try_get("", "state")?;
 
     // 参照元ごとにスナップショットの集合と一致させる（足りない行を足し、消えた行を消す）。`manual` は触らない
-    let mut linked: Vec<ResolvedTaskRef> = Vec::new();
+    let mut linked: Vec<(ResolvedTaskRef, &str)> = Vec::new();
     for (source, text) in [
         ("title", &snapshot.title),
         ("body", &snapshot.body),
@@ -163,23 +163,25 @@ where
             ))
             .await?;
         }
-        linked.extend(targets);
+        linked.extend(targets.into_iter().map(|target| (target, source)));
     }
 
-    // 履歴は PR ↔ タスクにつき 1 回。タイトルと本文の両方に書かれていても 1 行
-    linked.sort_by_key(|t| t.task_id);
-    linked.dedup_by_key(|t| t.task_id);
+    // 履歴は PR ↔ タスクにつき 1 回。タイトルと本文の両方に書かれていても 1 行。
+    // 安定ソートなので、残る参照元は title → body → branch の順で最初に見つかったもの
+    linked.sort_by_key(|(t, _)| t.task_id);
+    linked.dedup_by_key(|(t, _)| t.task_id);
     let author =
         super::identity::user_id_for_login(&txn, &repo.host, &snapshot.author_handle).await?;
-    let payload = serde_json::json!({
-        "host": repo.host,
-        "number": number,
-        "title": snapshot.title,
-        "author_handle": snapshot.author_handle,
-        "html_url": snapshot.html_url,
-        "state": state,
-    });
-    for target in linked {
+    for (target, source) in linked {
+        let payload = serde_json::json!({
+            "host": repo.host,
+            "number": number,
+            "title": snapshot.title,
+            "author_handle": snapshot.author_handle,
+            "html_url": snapshot.html_url,
+            "state": state,
+            "source": source,
+        });
         let user_id = match author {
             Some(user_id)
                 if can_view_project(&txn, project.tenant_id, target.project_id, user_id)
@@ -194,7 +196,7 @@ where
             target.task_id,
             user_id,
             PULL_REQUEST_LINKED_EVENT,
-            payload.clone(),
+            payload,
             &format!(
                 "{PULL_REQUEST_LINKED_EVENT}:{pull_request_id}:{}",
                 target.task_id
@@ -294,6 +296,7 @@ pub async fn link_manually(
             "author_handle": row.try_get::<String>("", "author_handle")?,
             "html_url": row.try_get::<String>("", "html_url")?,
             "state": row.try_get::<String>("", "state")?,
+            "source": "manual",
         }),
         &format!("{PULL_REQUEST_LINKED_EVENT}:{pull_request_id}:{task_id}"),
     )

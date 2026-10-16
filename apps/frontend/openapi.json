@@ -26762,6 +26762,27 @@
           }
         }
       },
+      "TaskForgeRepository": {
+        "type": "object",
+        "required": ["host", "host_url", "repo_owner", "repo_name", "html_url"],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "host_url": {
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "repo_name": {
+            "type": "string"
+          },
+          "repo_owner": {
+            "type": "string"
+          }
+        }
+      },
       "TaskForgeResponse": {
         "type": "object",
         "description": "`GET /tasks/{id}/forge`。3 配列は空でも必ず返す",
@@ -26785,6 +26806,17 @@
             "items": {
               "$ref": "#/components/schemas/TaskForgePullRequest"
             }
+          },
+          "repository": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskForgeRepository",
+                "description": "プロジェクトの現在の連携先。連携していなければ null（手動リンクの可否をこれで決める）"
+              }
+            ]
           }
         }
       },

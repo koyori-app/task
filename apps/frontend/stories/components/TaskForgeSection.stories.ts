@@ -38,7 +38,7 @@ let fetchSpy: ReturnType<typeof fn> | null = null;
 /** 受けた POST の本文（Request の本文はモックが読むと再読できないので控える） */
 let postedBodies: unknown[] = [];
 
-/** forge と連携状態をインメモリで返す fetch モック。POST で手動リンクを足し、DELETE で外す */
+/** forge（連携先を含む）をインメモリで返す fetch モック。POST で手動リンクを足し、DELETE で外す */
 function mockFetch(options: { connected?: boolean } = {}) {
   return () => {
     const original = globalThis.fetch;
@@ -48,18 +48,6 @@ function mockFetch(options: { connected?: boolean } = {}) {
       const url = typeof req === 'string' ? req : req.url;
       const method = typeof req === 'string' ? 'GET' : req.method;
       const pathname = new URL(url, 'http://localhost').pathname;
-      if (pathname.endsWith('/github/integration')) {
-        return jsonResponse(
-          options.connected === false
-            ? { connected: false, repo_owner: null, repo_name: null, connected_at: null }
-            : {
-                connected: true,
-                repo_owner: 'acme',
-                repo_name: 'backend',
-                connected_at: '2026-09-01T00:00:00Z',
-              },
-        );
-      }
       if (method === 'POST' && pathname.endsWith('/forge/pull-requests')) {
         const body = await (req as Request).json();
         postedBodies.push(body);
@@ -79,7 +67,21 @@ function mockFetch(options: { connected?: boolean } = {}) {
         return new Response(null, { status: 204 });
       }
       if (pathname.endsWith('/forge')) {
-        return jsonResponse({ pull_requests: pullRequests, commits: [], branches: [] });
+        return jsonResponse({
+          pull_requests: pullRequests,
+          commits: [],
+          branches: [],
+          repository:
+            options.connected === false
+              ? null
+              : {
+                  host: 'github',
+                  host_url: 'https://github.com',
+                  repo_owner: 'acme',
+                  repo_name: 'backend',
+                  html_url: 'https://github.com/acme/backend',
+                },
+        });
       }
       return jsonResponse({ message: 'not found' }, 404);
     });

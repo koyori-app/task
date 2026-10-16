@@ -19,7 +19,8 @@ use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
 use entity::github_integrations;
 use payload::forge::{
-    LinkTaskPullRequestRequest, TaskForgeCommit, TaskForgePullRequest, TaskForgeResponse,
+    LinkTaskPullRequestRequest, TaskForgeCommit, TaskForgePullRequest, TaskForgeRepository,
+    TaskForgeResponse,
 };
 use service::forge::events::ForgeRepo;
 
@@ -117,11 +118,39 @@ pub async fn get_task_forge(
     })
     .collect();
 
+    let repository = project_repository(&state.db, project_id)
+        .await?
+        .map(|repo| TaskForgeRepository {
+            html_url: format!("{}/{}/{}", repo.host_url, repo.repo_owner, repo.repo_name),
+            host: repo.host,
+            host_url: repo.host_url,
+            repo_owner: repo.repo_owner,
+            repo_name: repo.repo_name,
+        });
+
     Ok(Json(TaskForgeResponse {
         pull_requests,
         commits,
         branches: Vec::new(),
+        repository,
     }))
+}
+
+/// プロジェクトの現在の連携先（GitHub だけ）
+async fn project_repository(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+) -> Result<Option<ForgeRepo>, AppError> {
+    Ok(github_integrations::Entity::find()
+        .filter(github_integrations::Column::ProjectId.eq(project_id))
+        .one(db)
+        .await?
+        .map(|integration| ForgeRepo {
+            host: "github".into(),
+            host_url: "https://github.com".into(),
+            repo_owner: integration.repo_owner,
+            repo_name: integration.repo_name,
+        }))
 }
 
 /// タスクに結ばれた PR を参照元ごとの行からまとめる。`only` を渡すとその PR だけ
@@ -201,17 +230,9 @@ pub async fn link_task_pull_request(
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
-    let integration = github_integrations::Entity::find()
-        .filter(github_integrations::Column::ProjectId.eq(project_id))
-        .one(&state.db)
+    let repo = project_repository(&state.db, project_id)
         .await?
         .ok_or_else(|| AppError::ConflictDetail("github-integration-missing".into()))?;
-    let repo = ForgeRepo {
-        host: "github".into(),
-        host_url: "https://github.com".into(),
-        repo_owner: integration.repo_owner,
-        repo_name: integration.repo_name,
-    };
 
     // 取れなくても（App 未設定・404・通信断）リンクは作る。中身は次の webhook で埋まる
     let fetched = match state.settings.require_github_app() {

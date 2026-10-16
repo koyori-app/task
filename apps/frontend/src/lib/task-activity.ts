@@ -108,6 +108,8 @@ export type PullRequestActivity = {
   url: string | null;
   /** リンクを外した履歴（`forge_pull_request_unlinked`）。主語は外した人 */
   unlinked: boolean;
+  /** 手でリンクした履歴（`source = manual`）。主語はリンクした人。`source` の無い旧い行は false */
+  manual: boolean;
 };
 
 /** `forge_pull_request_linked` / `forge_pull_request_unlinked` の表示要素。それ以外の履歴は null。 */
@@ -123,6 +125,7 @@ export function pullRequestActivity(item: ActivityItem): PullRequestActivity | n
     title: str('title'),
     url: httpUrl(str('html_url')),
     unlinked,
+    manual: !unlinked && str('source') === 'manual',
   };
 }
 

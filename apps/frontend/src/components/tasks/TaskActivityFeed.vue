@@ -84,7 +84,8 @@ const rows = computed(() =>
             をリンクしました<template v-if="commit.message">「{{ commit.message }}」</template>
           </span>
           <span v-else-if="pullRequest" class="min-w-0 flex-1 break-words">
-            {{ activityActor(item) }}{{ pullRequest.unlinked ? 'が' : 'の' }} PR
+            {{ activityActor(item)
+            }}{{ pullRequest.unlinked || pullRequest.manual ? 'が' : 'の' }} PR
             <a
               v-if="pullRequest.url"
               :href="pullRequest.url"
@@ -94,7 +95,12 @@ const rows = computed(() =>
               >{{ pullRequest.number ? `#${pullRequest.number}` : 'PR' }}</a
             >
             <span v-else>{{ pullRequest.number ? `#${pullRequest.number}` : '' }}</span>
-            {{ pullRequest.unlinked ? 'のリンクを外しました' : 'をリンクしました'
+            {{
+              pullRequest.unlinked
+                ? 'のリンクを外しました'
+                : pullRequest.manual
+                  ? 'を手動でリンクしました'
+                  : 'をリンクしました'
             }}<template v-if="pullRequest.title">「{{ pullRequest.title }}」</template>
           </span>
           <span v-else class="min-w-0 flex-1">
