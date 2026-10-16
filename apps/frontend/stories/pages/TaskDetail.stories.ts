@@ -217,6 +217,8 @@ type MockOptions = {
     url: string;
     created_at: string;
   }[];
+  /** `GET /tasks/{id}/forge` の応答。省略時は空 */
+  forge?: Record<string, unknown>;
 };
 
 function applyPutBody(
@@ -302,6 +304,9 @@ function createMockFetch(overrides: MockOptions = {}) {
         blocks: [],
         blocked_by: [],
       });
+    }
+    if (method === 'GET' && url.includes('/forge')) {
+      return jsonResponse({ pull_requests: [], commits: [], branches: [], ...overrides.forge });
     }
     if (method === 'GET' && url.includes('/attachments')) {
       return jsonResponse({ attachments: overrides.attachments ?? [] });
@@ -525,6 +530,75 @@ export const WithAttachments: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByText('仕様書.pdf')).resolves.toBeInTheDocument();
+  },
+};
+
+export const WithForge: Story = {
+  name: 'PR とコミットあり',
+  beforeEach: () =>
+    createMockFetch({
+      forge: {
+        pull_requests: [
+          {
+            id: 'pr-1',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            number: 87,
+            title: 'feat: OAuth 対応',
+            author_handle: 'yupix',
+            state: 'merged',
+            html_url: 'https://github.com/acme/backend/pull/87',
+            merged_at: '2026-10-01T00:00:00Z',
+            merge_effects_processed_at: null,
+            commits_complete: false,
+            sources: ['body', 'title'],
+            closes: true,
+            unresolved: null,
+          },
+          {
+            id: 'pr-2',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            number: 91,
+            title: 'fix: エラーハンドリング',
+            author_handle: 'beta',
+            state: 'open',
+            html_url: 'https://github.com/acme/backend/pull/91',
+            merged_at: null,
+            merge_effects_processed_at: null,
+            commits_complete: false,
+            sources: ['title'],
+            closes: false,
+            unresolved: null,
+          },
+        ],
+        commits: [
+          {
+            id: 'commit-1',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            sha: 'a3f92c1e7b81d4000000000000000000000000aa',
+            message: 'fix: トークン期限切れを修正',
+            author_handle: 'yupix',
+            author_name: 'Yupix',
+            committed_at: '2026-10-01T00:00:00Z',
+            html_url: 'https://github.com/acme/backend/commit/a3f92c1',
+          },
+        ],
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.findByText('feat: OAuth 対応', { exact: false }),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('a3f92c1')).resolves.toBeInTheDocument();
   },
 };
 

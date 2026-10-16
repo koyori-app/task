@@ -8,6 +8,7 @@ import TaskActivityFeed from '@/components/tasks/TaskActivityFeed.vue';
 import TaskAttachments from '@/components/tasks/TaskAttachments.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
+import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
 import { Button } from '@/components/ui/button';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
@@ -247,6 +248,7 @@ function openRelatedTask(task: TaskResponse) {
         :project-key="projectKey"
         @open="openRelatedTask"
       />
+      <TaskForgeSection :tenant-id="tenantId" :project-id="projectId" :task-id="taskId" />
     </template>
     <template #header-actions>
       <dialog
