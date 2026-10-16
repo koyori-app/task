@@ -10174,6 +10174,133 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/forge/pull-requests/{pull_request_id}/merge-effects/acknowledge": {
+      "post": {
+        "tags": ["Tasks"],
+        "summary": "マージ時の自動完了を未適用のまま確認済みにする",
+        "description": "タスクは完了させず、`merge_effects_processed_at` と `merge_effects_acknowledged_by` を設定して未適用表示を解消する。",
+        "operationId": "acknowledge_merge_effects",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "pull_request_id",
+            "in": "path",
+            "description": "PR の ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "確認済みにしました"
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "マージ済みでない、または処理済み・確認済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects/{project_id}/github/connect": {
       "post": {
         "tags": ["GitHub"],
@@ -26682,6 +26809,7 @@
         "type": "object",
         "required": [
           "id",
+          "project_id",
           "host",
           "host_url",
           "repo_owner",
@@ -26734,6 +26862,11 @@
           "number": {
             "type": "integer",
             "format": "int32"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "PR 行の持ち主（webhook を受けた連携のプロジェクト）。タスクのプロジェクトとは限らない。\nPR を主語にする口（`/projects/{project_id}/forge/pull-requests/...`）はこちらを使う"
           },
           "repo_name": {
             "type": "string"

@@ -12,6 +12,7 @@ pub mod desktop_auth;
 pub mod drive_files;
 pub mod drive_folders;
 pub mod forge;
+pub mod forge_merge_effects;
 pub mod github;
 pub mod labels;
 pub mod milestones;
