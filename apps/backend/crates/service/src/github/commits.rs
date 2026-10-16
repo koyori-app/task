@@ -99,7 +99,7 @@ fn request(http: &Client, method: Method, url: &str, token: &str) -> reqwest::Re
         .header("User-Agent", USER_AGENT)
 }
 
-async fn get_json<T: serde::de::DeserializeOwned>(
+pub(super) async fn get_json<T: serde::de::DeserializeOwned>(
     http: &Client,
     token: &str,
     url: &str,
