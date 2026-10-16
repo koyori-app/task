@@ -10,7 +10,6 @@ use utoipa::ToSchema;
 pub struct TaskForgeResponse {
     pub pull_requests: Vec<TaskForgePullRequest>,
     pub commits: Vec<TaskForgeCommit>,
-    /// ブランチのリンクは未実装（TASK-291）で、常に空
     pub branches: Vec<TaskForgeBranch>,
 }
 
@@ -74,5 +73,8 @@ pub struct TaskForgeBranch {
     pub repo_owner: String,
     pub repo_name: String,
     pub branch: String,
+    /// ホスト上のブランチの URL。組み立てずにそのまま使う
     pub html_url: String,
+    #[schema(value_type = String, format = "date-time")]
+    pub created_at: DateTime<Utc>,
 }
