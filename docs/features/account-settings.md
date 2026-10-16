@@ -7,7 +7,7 @@ icon: lucide:user-cog
 # アカウント設定・プロフィール編集 仕様書
 
 > ステータス: **Draft** / 作成日: 2026-08-19
-> 依存: `users` テーブル（スキーマ変更なし）
+> 依存: `users` テーブル（アバターのアップロードで `avatar_storage_key` 列を追加）、ストレージバックエンド（[ドライブ](./drive.md) §6）
 
 ---
 
@@ -19,13 +19,13 @@ icon: lucide:user-cog
 本人がユーザー名や自己紹介を直す手段が無かった。本仕様で `PATCH /v1/auth/me` を追加し、
 `/settings/profile` から編集できるようにする。
 
-編集できるのは `users` テーブルに既にある列のうち、本人が持ち主である 3 つに限る。
+編集できるのは `users` の列のうち、本人が持ち主である 3 つに限る。
 
 | 項目 | 列 | 備考 |
 |---|---|---|
 | ユーザー名 | `users.username` | 一意制約は無い（同名を許す）。後述の影響あり |
 | 自己紹介 | `users.bio` | |
-| アバター | `users.avatar_url` | 画像の URL を指定する。ファイルのアップロードは未対応 |
+| アバター | `users.avatar_url` | 画像をアップロードする（`POST /v1/auth/me/avatar`）か、画像の URL を指定する。アップロードした画像のキーは `users.avatar_storage_key` |
 
 メールアドレス・管理者フラグ・凍結フラグ・2FA の有効状態はこの API では変更できない。
 
@@ -73,7 +73,12 @@ icon: lucide:user-cog
 ### フォームの挙動
 
 - 初期値は `GET /v1/auth/me` の結果。
-- アバターは URL 入力欄とプレビュー。**削除**ボタンは入力欄を空にする（この時点では保存しない）。
+- アバターは URL 入力欄とプレビュー。**画像を選ぶ**ボタンで PNG / JPEG / GIF / WebP を選ぶと、
+  その場で `POST /v1/auth/me/avatar` に送る（「変更を保存」は不要）。2 MiB を超える画像は送る前に止める。
+  成功したら応答の `UserResponse` で `/v1/auth/me` のクエリと認証ストアを更新し、URL 欄も新しい URL にする。
+  失敗は 413（サイズ）/ 400（形式）/ それ以外で文言を分けて出す。
+- **削除**ボタンは入力欄を空にする（この時点では保存しない）。保存すると `clear_avatar_url` を送る。
+- 保存済みの値はスキームを問わずプレビューする（`APP_BASE_URL` が http の開発環境で、アップロードした画像を表示するため）。
 - 保存すると `PATCH /v1/auth/me` を送り、成功したら `/v1/auth/me` のクエリを無効化して
   サイドバーの表示名・アバターにも反映する。
 - 入力チェックは送信前（`onSubmit`）と項目からフォーカスが外れたとき（`onBlur`）の両方で走る。
@@ -148,8 +153,64 @@ PAT で自分のプロフィールを書き換えられないことは、
 
 なお `avatar_url` は本人以外の画面でも `<img src>` に載る（担当者一覧の `AvatarGroup.vue` など）。
 指定された URL は閲覧者のブラウザが直接取りに行くため、その URL を用意した側は
-アバターを見た人の IP アドレスと User-Agent を知り得る。URL を指定させる方式に
-内在する性質で、ファイルのアップロードに対応する（§4）まで解消しない。
+アバターを見た人の IP アドレスと User-Agent を知り得る。
+アップロードしたアバターは自サーバーから配信するので IP の問題はない。外部 URL を指定した場合は従来どおり。
+
+アップロードで入る `avatar_url`（`{APP_BASE_URL}/v1/avatars/...`）は、`APP_BASE_URL` が http の開発環境では
+`https://` で始まらない。サーバーが書き込む値なのでこの制限は掛からず、画面側も現在値は検証しない。
+
+### `POST /v1/auth/me/avatar`
+
+ログイン中ユーザーのアバター画像をアップロードし、`avatar_url` を自サーバーの配信 URL に差し替える。
+
+- **認証**: `PATCH /v1/auth/me` と同じ `CurrentUser`（§3「認可」の表がそのまま当てはまる。PAT は 401）
+- **リクエスト**: `multipart/form-data`。フィールド `file` を 1 つ
+- **サイズ**: 画像は 2 MiB（`service::avatar::AVATAR_MAX_BYTES`）まで。超えたら `413`。
+  本文全体の上限（`RequestBodyLimitLayer`）はこのルートだけに掛け、multipart の枠の分だけ 64 KiB 広げてある
+  （上限ちょうどの画像を枠のせいで落とさないため）。本文はメモリに読む
+- **形式**: クライアントの content-type は信用せず、先頭バイトで判定する
+  （`service::avatar::detect_image_format`）。それ以外・空は `400`（`unsupported-avatar-format`）、`file` が無ければ `400`
+
+  | 形式 | 先頭バイト | 拡張子 |
+  |---|---|---|
+  | PNG | `89 50 4E 47` | `png` |
+  | JPEG | `FF D8 FF` | `jpg` |
+  | GIF | `GIF8` | `gif` |
+  | WebP | `RIFF????WEBP` | `webp` |
+
+- **保存**: ドライブと同じストレージバックエンドに `avatar-{uuid v4}.{拡張子}` のキーで置く（`drive_files` の行は作らない）。
+  リサイズ・寸法の検査・EXIF の除去はしない
+- **DB 更新**: トランザクションで `avatar_url = {APP_BASE_URL}/v1/avatars/{key}`、`avatar_storage_key = key` にし、
+  監査ログ `user.profile.update`（`changed_fields: ["avatar_url"]`、`PATCH /v1/auth/me` と同じ形）を残す。
+  DB 更新に失敗したら、置いた画像を消してからエラーを返す
+- **レスポンス**: `200 OK` / `UserResponse`
+
+`avatar_url` の生成に使う `APP_BASE_URL` は OAuth のコールバック URL と同じ設定値で、ブラウザから届く
+バックエンドの公開 URL にする。
+
+### `GET /v1/avatars/{key}`
+
+アップロードしたアバター画像を配信する。
+
+- **認証なし**。`<img src>` から取れる必要があり、Koyori Desktop も同じ URL を使う。キーは UUID v4 で推測できない
+- `key` が `^avatar-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|gif|webp)$` に
+  一致しなければ `404`。DB は引かず、`Content-Type` は拡張子から決める。画像が無ければ `404`
+- ヘッダ: `Content-Type`、`Cache-Control: public, max-age=31536000, immutable`、`Content-Disposition: inline`
+  （`X-Content-Type-Options: nosniff` は全経路共通の層で付く）。差し替えるとキーごと変わるので、
+  同じ URL の中身は変わらない
+
+### アップロードした画像の片付け
+
+使われなくなった画像は、DB の更新をコミットした**後**に消す。消すのに失敗しても応答は成功のままにし、
+`tracing::warn!` で記録する（孤児の画像が残るだけで、利用者から見える状態は正しい）。
+
+| 契機 | 消す画像 |
+|---|---|
+| 再アップロード | 直前の `avatar_storage_key` |
+| `PATCH /v1/auth/me` で `clear_avatar_url: true`、または `avatar_url` を別の URL に変更 | 直前の `avatar_storage_key`（列は `NULL` に戻す） |
+| 管理者によるユーザー削除（`DELETE /v1/admin/users/{id}`） | 対象ユーザーの `avatar_storage_key` |
+
+アバター以外の項目だけを変える `PATCH` では消さない。専用の削除 API は設けない（`clear_avatar_url` で足りる）。
 
 ---
 
@@ -163,7 +224,6 @@ PAT で自分のプロフィールを書き換えられないことは、
 | タイムゾーン | 同上 | 同上。加えて日時表示側の適用箇所を決める必要がある |
 | 言語 | 同上 | 同上。i18n の仕組み自体がまだ無い |
 | メールアドレスの変更 | 変更後の再確認フローが無い（`email_verification` は新規登録用） | 変更要求 → 新アドレスへ確認メール → 確認後に反映、の経路を新設する |
-| アバターのファイルアップロード | アップロード先の API が無い | ドライブ（`drive_files`）に載せるか、専用の保存先を用意するかの判断から |
 | 環境設定 / 通知 / セッション の各画面 | 本仕様の対象外 | 通知は `/v1/users/me/notification-settings/{project_id}` が既にある |
 | 二要素認証・パスキーの管理 | 認証方法（§7）とは別タスク（TASK-188 / TASK-189） | セキュリティ画面にセクションを足す。API は既にある |
 | トークンのプロジェクト絞り込み | アクセストークン画面（§6）の対象外 | API（`project_ids`）は既にある。フォームに選択 UI を足す |
@@ -180,7 +240,9 @@ PAT で自分のプロフィールを書き換えられないことは、
 |---|---|---|
 | 統合 | `apps/backend/tests/profile_update_integration.rs` | 更新と永続化、省略項目を壊さないこと、`clear_avatar_url`、空 PATCH、スキーム拒否、長さ制限、未ログイン拒否、Bearer 拒否 |
 | 統合 | `apps/backend/tests/personal_tokens_list_integration.rs` | 一覧が自分の有効なトークンだけを名前順で返すこと、平文・ハッシュを含まないこと、取り消しで一覧から消えること、空一覧、未ログイン拒否、Bearer 拒否 |
-| 単体 | `apps/frontend/src/components/settings/__tests__/ProfileForm.test.ts` | 空欄が `clear_avatar_url` になること、URL の送信、前後の空白を取り除くこと、不正スキームとユーザー名長を送信前に止めること、失敗時（400 / それ以外）の表示、保存後に編集を再開すると保存済み表示が消えること |
+| 統合 | `apps/backend/tests/integration/avatar_upload_integration.rs` | アップロードで `avatar_url` と `avatar_storage_key` が入ること、認証なしの配信（`Content-Type` / `Cache-Control`）、2 MiB ちょうどは通り超えると 413、画像でない・空のバイト列の 400、再アップロード・`clear_avatar_url`・外部 URL への変更・管理者のユーザー削除で旧画像が 404 になること（アバター以外の更新では残る対照込み）、Bearer 拒否、不正なキー形式・存在しないキーの 404 |
+| 単体 | `apps/backend/crates/service/src/avatar.rs` | 先頭バイトでの形式判定（4 形式・不正・空・途中で切れた RIFF）、配信キーの形式 |
+| 単体 | `apps/frontend/src/components/settings/__tests__/ProfileForm.test.ts` | 空欄が `clear_avatar_url` になること、URL の送信、前後の空白を取り除くこと、不正スキームとユーザー名長を送信前に止めること、失敗時（400 / それ以外）の表示、保存後に編集を再開すると保存済み表示が消えること、画像アップロードの成功で表示・URL 欄・認証ストアが更新されること、その後の保存で `avatar_url` を送り直さないこと、2 MiB 超を送る前に止めること（ちょうどは送る）、413 / 400 / それ以外の表示 |
 | 単体 | `apps/frontend/src/components/settings/__tests__/AccessTokensSection.test.ts` | 一覧表示（伏せ字・スコープ数・期限・最終使用）、発行リクエストの内容（90 日既定・無期限）、名前とスコープの入力チェック、403 の表示、取り消しの確認ダイアログと失敗時の表示、オーナーのテナントが無い場合の無効化 |
 | 単体 | `apps/frontend/src/lib/__tests__/personal-tokens.test.ts` | 有効期限プリセットの計算、伏せ字、期限・最終使用の表示文言（境界値込み） |
 | 統合 | `apps/backend/tests/oauth_integration.rs` | `has_password` の反転、初回パスワード設定が一度きりであること、パスワードを得たあとに最後の連携を解除できること |

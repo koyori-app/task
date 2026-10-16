@@ -83,7 +83,10 @@ impl StorageBackend for LocalStorageBackend {
 
     async fn get_stream(&self, key: &str) -> Result<ByteStream, StorageError> {
         let path = self.resolve_path(key)?;
-        let file = File::open(&path).await?;
+        let file = File::open(&path).await.map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => StorageError::NotFound,
+            _ => StorageError::Io(e),
+        })?;
         let stream = ReaderStream::new(file).map(|res| res.map_err(StorageError::from));
         Ok(Box::pin(stream))
     }

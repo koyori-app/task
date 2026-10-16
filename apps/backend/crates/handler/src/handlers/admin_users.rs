@@ -252,6 +252,7 @@ pub async fn create_user(
         username: Set(payload.username),
         bio: Set(Some(String::new())),
         avatar_url: Set(None),
+        avatar_storage_key: Set(None),
         email: Set(email),
         email_verified: Set(payload.email_verified),
         password_hash: Set(Some(password_hash)),
@@ -416,6 +417,9 @@ pub async fn delete_user(
     }
 
     delete_user_cascade(&state.db, id).await?;
+    if let Some(key) = &user.avatar_storage_key {
+        service::avatar::delete_avatar_object(state.storage.as_ref(), key).await;
+    }
 
     record_audit(
         &state.db,

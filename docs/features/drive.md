@@ -407,6 +407,11 @@ pub trait StorageBackend: Send + Sync {
 }
 ```
 
+`get_stream()` は object が無いとき `StorageError::NotFound` を返す（ローカル・S3 とも）。
+
+> 同じバックエンドにユーザーのアバター画像も置く（キーは `avatar-{uuid}.{ext}`、`drive_files` の行は作らない）。
+> 規則は [アカウント設定](./account-settings.md) の `POST /v1/auth/me/avatar` を正とする。
+
 > **ストリーミング設計の理由**: 100MB ファイルを複数同時に全量バッファすると GByte 単位のメモリを消費しうる。`BoxStream` でチャンクを受け取り、ローカル実装は `BufWriter` へ順に書き込む。S3 実装は既知の長さが 5MiB 以上なら multipart upload を使うが、通常のアップロード API は長さ不明として `0` を渡すため全量バッファになる（§12）。
 
 ### 6.2 S3 バックエンド

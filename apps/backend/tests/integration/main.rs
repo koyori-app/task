@@ -6,6 +6,7 @@ mod common;
 mod admin_tenants_integration;
 mod admin_users_integration;
 mod auth_2fa_integration;
+mod avatar_upload_integration;
 mod custom_fields_integration;
 mod dashboard_integration;
 mod desktop_auth_integration;

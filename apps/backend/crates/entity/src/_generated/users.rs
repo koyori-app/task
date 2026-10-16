@@ -21,6 +21,8 @@ pub struct Model {
     pub is_suspended: bool,
     pub sessions_revoked_at: Option<DateTimeWithTimeZone>,
     pub totp_enabled: bool,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub avatar_storage_key: Option<String>,
     #[sea_orm(has_many)]
     pub audit_logs: HasMany<super::audit_logs::Entity>,
     #[sea_orm(has_many)]
