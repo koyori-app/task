@@ -918,7 +918,11 @@ async function onRoundCreated() {
                 >
                   {{ findingLocation(finding) }}
                 </p>
-                <ReviewFindingBody :body="finding.body" :finding-id="finding.id" />
+                <ReviewFindingBody
+                  :body="finding.body"
+                  :finding-id="finding.id"
+                  :tenant="tenantSlug"
+                />
 
                 <div class="mt-3 flex flex-wrap items-center gap-2">
                   <Button

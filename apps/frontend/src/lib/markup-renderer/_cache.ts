@@ -22,21 +22,27 @@ function utf8ByteLength(value: string): number {
 const KEY_DELIMITER = String.fromCharCode(0);
 
 /**
- * キャッシュキー = pipeline fingerprint ＋ profile ＋ scope ＋ 解決済み content-scope
- * config ＋ 本文。前置部は JSON.stringify で正規化し、NUL 区切りで本文 full-text と
+ * キャッシュキー = pipeline fingerprint ＋ profile ＋ scope ＋ taskRef テナント ＋
+ * 解決済み content-scope config ＋ 本文。前置部は JSON.stringify で正規化し、NUL 区切りで本文 full-text と
  * 連結する (JSON 出力に生の NUL は現れないため、キー全体が一意に定まる)。profile を
  * 含めることで同一本文が profile 違いで混線せず、scope を含めることで脚注 id の
- * clobberPrefix が違う HTML を取り違えず、config を含めることで設定変更時に旧 HTML が
+ * clobberPrefix が違う HTML を取り違えず、テナントを含めることでタスク参照リンクの href が
+ * 違う HTML を別テナントへ返さず、config を含めることで設定変更時に旧 HTML が
  * 自動失効する。config も hash せず全文を埋める (衝突不能側へ倒す)。
  */
 export function buildCacheKey(
   fingerprint: string,
   profile: string,
   scope: string,
+  taskRefTenant: string,
   contentConfig: string,
   text: string,
 ): string {
-  return JSON.stringify([fingerprint, profile, scope, contentConfig]) + KEY_DELIMITER + text;
+  return (
+    JSON.stringify([fingerprint, profile, scope, taskRefTenant, contentConfig]) +
+    KEY_DELIMITER +
+    text
+  );
 }
 
 export function createL1Cache(): LRUCache<string, string> {

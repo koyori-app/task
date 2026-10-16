@@ -20,7 +20,7 @@ beforeAll(async () => {
 
 async function mountAndRender(body: string) {
   const wrapper = mount(ReviewFindingBody, {
-    props: { body, findingId: 'f-1' },
+    props: { body, findingId: 'f-1', tenant: 'acme' },
   });
   // 動的 import → 非同期描画の完了を待つ (完了までは素のテキスト表示)。
   // 初回は KFM 一式の import が挟まるため、既定 1s では足りないことがある
@@ -110,5 +110,12 @@ describe('ReviewFindingBody', () => {
     // 既存の描画 (タスク説明と同じ経路) は target / rel を付けない。
     // 変えるなら markup-renderer 側で全消費側を揃えて変えるべきで、ここでは足さない。
     expect(link.attributes('target')).toBeUndefined();
+  });
+
+  it('KEY-N は渡したテナントのタスク詳細へのリンクになる', async () => {
+    const wrapper = await mountAndRender('TASK-58 の続き。');
+    const link = wrapper.find('a.kfm-task-ref');
+    expect(link.attributes('href')).toBe('/acme/projects/TASK/tasks/TASK-58');
+    expect(link.text()).toBe('TASK-58');
   });
 });

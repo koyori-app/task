@@ -35,6 +35,8 @@ apps/frontend/src/lib/
     index.ts                   remark 変換と sanitize スキーマ
     element.ts                 遅延ロード・SVG 描画・再接続処理
     style.css                  JS 無効/描画失敗時のソース表示フォールバック
+  remark-kfm-task-ref/         タスク参照 KEY-N → タスク詳細へのリンク
+    index.ts                   remark 変換と sanitize スキーマ
   markup-renderer/             KFM コア
     index.ts                   composition root（renderDescription singleton・公開 API）
     _renderer.ts               createRenderer（controlled pipeline・profile memoize）
@@ -59,7 +61,7 @@ composition root が remark 層と sanitize スキーマを注入する。
 
 ```
 入力テキスト → 改行 LF 正規化 → remark-parse → remark-gfm → remark-koyori-alerts
-  → remark-kfm-mermaid → remark-rehype → rehype-scope-footnote-label（scope 付きのみ）
+  → remark-kfm-mermaid → remark-kfm-task-ref → remark-rehype → rehype-scope-footnote-label（scope 付きのみ）
   → rehype-starry-night → rehype-stringify → DOMPurify → HTML 文字列 → <div v-html>
 ```
 
@@ -84,6 +86,24 @@ GitHub 完全互換の境界仕様をテストで固定している:
   blockquote のままにする。不正 type も通常 blockquote へフォールバックする
 - 出力: `div.kfm-alert.kfm-alert--{type}` ＋ `p.kfm-alert__title`。inline style は一切出さない
 - アイコン・配色は `style.css` の名前空間クラスで当てる（消費側で明示 import するサイドカー方式）
+
+## タスク参照の自動リンク（remark-kfm-task-ref）
+
+- マッチは `([A-Z][A-Z0-9]{1,9})-(\d+)`。前が英数字・`_`・`/`・`-`、後が英数字・`_`・`-` なら
+  不一致（`foo/TASK-58`・`TASK-58-foo` は対象外）。全角括弧・句読点は隣にあってよい
+- `text` ノードだけを分割する。`code` / `inlineCode` / `link` / `linkReference` / `definition` /
+  `html` の内側は走査しない。autolink 済みの `link` を触らないよう GFM の後ろ、alerts の
+  原文照合（先頭 text の position）を壊さないよう alerts の後ろに置く
+- 出力は `<a class="kfm-task-ref" href="/{tenant}/projects/{KEY}/tasks/{KEY-N}">`。存在確認は
+  しない（描画時に API を叩かない）
+- テナントは `renderDescription(text, { taskRef: { tenant } })` で渡し、コアが vfile の
+  `data.kfm.taskRef` へ載せる。プラグインの options にしないのは、processor が profile ごとに
+  memoize されており、テナントごとに作るとメモリが漏れるため。tenant が無い、または
+  `^[a-z0-9][a-z0-9-]{0,62}$`（大小無視）に合わない場合は何もしない
+- 同じ本文でもテナントで href が変わるため、テナントはキャッシュキーに載る
+- `taskRef` を渡している消費側はタスク詳細ページの説明（`+data.ts`）、分割ビュー・オーバーレイの
+  説明（`POST /internal/render-description`。body の `tenant` を同じ字種で検め、外れたら 422）、
+  レビュー指摘の本文（`ReviewFindingBody.vue`）。いずれも URL の tenant display_id を渡す
 
 ## mermaid 図（remark-kfm-mermaid）
 
@@ -157,9 +177,10 @@ DOMPurify を最終段に置くのは、remark プラグインが emit したも
 - `renderDescription` はモジュール singleton = プロセス全体（SSR では全リクエスト・全 tenant）で
   共有される。この前提で **L1 のキーは入力本文そのもの（full-text）**。ハッシュ化は禁止
   （32-bit ハッシュは誕生日境界 ≈ 77,000 件で衝突し、別 tenant 本文の HTML を返す漏えいになる）
-- キー前置部 = pipeline fingerprint ＋ profile ＋ scope ＋ 解決済み content-scope config。
-  scope をキーに載せることは安全条件の一部——落とすと `clobberPrefix` の違う HTML を
-  取り違え、別断片の脚注 id が付いた HTML を返す。
+- キー前置部 = pipeline fingerprint ＋ profile ＋ scope ＋ taskRef テナント ＋ 解決済み
+  content-scope config。scope をキーに載せることは安全条件の一部——落とすと `clobberPrefix` の
+  違う HTML を取り違え、別断片の脚注 id が付いた HTML を返す。テナントも同様で、落とすと
+  別テナントの href が付いた HTML を返す。
   fingerprint は plugin 列と sanitize スキーマから導出し、構成変更で旧 HTML が自動失効する
 - fingerprint が観測する非配列 plugin は `plugin.name` のみで、closure に閉じた設定値は見えない。
   factory に options を追加する場合は、設定の直列化とキャッシュキー分離を同じ変更で実装する
@@ -219,9 +240,13 @@ DOMPurify を最終段に置くのは、remark プラグインが emit したも
 
 ```ts
 // +data.ts（サーバ側）— 実体は tasks/@taskId/+data.ts。scope はタスク UUID で決定的。
+// taskRef は URL の tenant（KEY-N の自動リンク先）。
 // HTML は描画元テキストと必ず対で返す（消費側の stale 照合キー）
 import { renderDescription } from '@/lib/markup-renderer';
-const descriptionHtml = await renderDescription(task.description, { scope: `task-${task.id}` });
+const descriptionHtml = await renderDescription(task.description, {
+  scope: `task-${task.id}`,
+  taskRef: { tenant: tenantDisplayId },
+});
 return { descriptionHtml, descriptionSource: task.description };
 
 // 消費側レイアウトで alert / GFM / 着色 CSS を明示 import
@@ -305,6 +330,8 @@ scope 一致は `kfm-gfm-css-contract.test.ts` が強制し、story の器も同
 - `kfm-mermaid.test.ts` — mermaid フェンス変換（remark 層）と custom element（client 層・
   mermaid mock）の契約固定（strict 固定・.dark テーマ切替・SVG 挿入前検査・error フォールバック）
 - `kfm-mermaid-fixtures.test.ts` — mermaid story fixture（rendered/mermaid-*.html）の drift 検査
+- `kfm-task-ref.test.ts` — タスク参照の自動リンク（マッチ境界・除外ノード・tenant 検証・
+  テナント別のキャッシュ分離）
 
 セキュリティ上の要点（inline style 禁止・full-text キー・client ガード）はいずれも
 「その規約を破る変更を入れるとテストが落ちる」形で書かれている。

@@ -68,6 +68,21 @@ describe('TaskComments', () => {
     expect(wrapper.find('script').exists()).toBe(false);
   });
 
+  it('profileHref を渡したときだけ投稿者をプロフィールへのリンクにする', () => {
+    const linked = mountComments({
+      threads: [thread('c-1', '本文')],
+      profileHref: (userId: string) => `/acme/users/${userId}`,
+    });
+    const author = linked.find('[data-comment-author]');
+    expect(author.element.tagName).toBe('A');
+    expect(author.attributes('href')).toBe('/acme/users/user-1');
+    expect(author.text()).toContain('田中太郎');
+
+    const plain = mountComments({ threads: [thread('c-1', '本文')] });
+    expect(plain.find('[data-comment-author]').element.tagName).toBe('SPAN');
+    expect(plain.find('[data-comment-author]').attributes('href')).toBeUndefined();
+  });
+
   it('コメントが無いときは空メッセージを出す', () => {
     const wrapper = mountComments();
     expect(wrapper.text()).toContain('コメントはまだありません');
