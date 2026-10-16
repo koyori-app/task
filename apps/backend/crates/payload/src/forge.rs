@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+use validator::Validate;
 
 /// `GET /tasks/{id}/forge`。3 配列は空でも必ず返す
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -75,4 +76,14 @@ pub struct TaskForgeBranch {
     pub repo_name: String,
     pub branch: String,
     pub html_url: String,
+}
+
+/// `POST /tasks/{id}/forge/pull-requests`。リポジトリはプロジェクトの現在の連携先で決まるので受け取らない
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
+pub struct LinkTaskPullRequestRequest {
+    #[validate(range(min = 1))]
+    pub number: i32,
+    /// マージしたらこのタスクを完了にする
+    #[serde(default)]
+    pub closes: bool,
 }

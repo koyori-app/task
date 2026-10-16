@@ -8,8 +8,8 @@ use std::future::Future;
 
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, Statement,
-    TransactionTrait, prelude::Uuid,
+    ColumnTrait, ConnectionTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
+    QueryFilter, Statement, TransactionTrait, prelude::Uuid,
 };
 
 use entity::{forge_pull_request_links, forge_pull_requests, projects};
@@ -17,9 +17,10 @@ use entity::{forge_pull_request_links, forge_pull_requests, projects};
 use super::commits::can_view_project;
 use super::events::ForgeRepo;
 use super::task_refs::{self, ResolvedTaskRef};
-use crate::task_activities::record_activity_once;
+use crate::task_activities::{record_activity, record_activity_once};
 
 pub const PULL_REQUEST_LINKED_EVENT: &str = "forge_pull_request_linked";
+pub const PULL_REQUEST_UNLINKED_EVENT: &str = "forge_pull_request_unlinked";
 
 /// PR のある時点の状態。webhook のペイロードか、ホストの PR 取得 API の結果から作る。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,18 +60,7 @@ where
     };
 
     let txn = db.begin().await?;
-    // 行の有無にかかわらず自然キーで直列化する。行の id でロックすると、同じ PR を初めて作る
-    // 並行ジョブが別々に比較して、古い方が後から COMMIT できてしまう
-    txn.execute_raw(Statement::from_sql_and_values(
-        txn.get_database_backend(),
-        "SELECT pg_advisory_xact_lock(hashtext($1))",
-        [format!(
-            "forge_pull_request:{project_id}:{}:{}:{}:{}:{number}",
-            repo.host, repo.host_url, repo.repo_owner, repo.repo_name
-        )
-        .into()],
-    ))
-    .await?;
+    lock_pull_request(&txn, project_id, repo, number).await?;
 
     let known = forge_pull_requests::Entity::find()
         .filter(forge_pull_requests::Column::ProjectId.eq(project_id))
@@ -213,6 +203,141 @@ where
         .await?;
     }
 
+    txn.commit().await?;
+    Ok(true)
+}
+
+/// 行の有無にかかわらず自然キーで直列化する。行の id でロックすると、同じ PR を初めて作る
+/// 並行ジョブが別々に比較して、古い方が後から COMMIT できてしまう
+async fn lock_pull_request(
+    txn: &DatabaseTransaction,
+    project_id: Uuid,
+    repo: &ForgeRepo,
+    number: i32,
+) -> Result<(), sea_orm::DbErr> {
+    txn.execute_raw(Statement::from_sql_and_values(
+        txn.get_database_backend(),
+        "SELECT pg_advisory_xact_lock(hashtext($1))",
+        [format!(
+            "forge_pull_request:{project_id}:{}:{}:{}:{}:{number}",
+            repo.host, repo.host_url, repo.repo_owner, repo.repo_name
+        )
+        .into()],
+    ))
+    .await?;
+    Ok(())
+}
+
+/// 手で PR をタスクにリンクする（§8）。PR 行が無ければ `state = unknown` で作り、`source = manual` の行を
+/// UPSERT する。PR 行の中身をホストの現在に合わせるのは呼び出し側（先に `apply_pull_request` を通す）。
+///
+/// 履歴は自動リンクと同じ鍵で PR ↔ タスクにつき 1 回。`user_id` は操作者。PR 行の id を返す。
+#[allow(clippy::too_many_arguments)]
+pub async fn link_manually(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+    repo: &ForgeRepo,
+    number: i32,
+    html_url: &str,
+    task_id: Uuid,
+    closes: bool,
+    user_id: Uuid,
+) -> Result<Uuid, anyhow::Error> {
+    let txn = db.begin().await?;
+    lock_pull_request(&txn, project_id, repo, number).await?;
+    // 既存行は変えない（DO UPDATE は RETURNING で行を返させるためだけ）
+    let row = txn
+        .query_one_raw(Statement::from_sql_and_values(
+            txn.get_database_backend(),
+            "INSERT INTO forge_pull_requests (id, project_id, host, host_url, repo_owner, repo_name,
+                                              number, title, author_handle, state, head_sha, html_url,
+                                              merged_at, host_updated_at, merge_effects_processed_at,
+                                              merge_effects_acknowledged_by, commits_complete,
+                                              created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, '', '', 'unknown', NULL, $8, NULL, NULL, NULL, NULL,
+                     false, now(), now())
+             ON CONFLICT (project_id, host, host_url, repo_owner, repo_name, number)
+                 DO UPDATE SET updated_at = forge_pull_requests.updated_at
+             RETURNING id, title, author_handle, state, html_url",
+            [
+                Uuid::new_v4().into(),
+                project_id.into(),
+                repo.host.clone().into(),
+                repo.host_url.clone().into(),
+                repo.repo_owner.clone().into(),
+                repo.repo_name.clone().into(),
+                number.into(),
+                html_url.into(),
+            ],
+        ))
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("upsert forge pull request returned no row"))?;
+    let pull_request_id: Uuid = row.try_get("", "id")?;
+
+    txn.execute_raw(Statement::from_sql_and_values(
+        txn.get_database_backend(),
+        "INSERT INTO forge_pull_request_links (pull_request_id, task_id, closes, source, created_at)
+         VALUES ($1, $2, $3, 'manual', now())
+         ON CONFLICT (pull_request_id, task_id, source) DO UPDATE SET closes = EXCLUDED.closes",
+        [pull_request_id.into(), task_id.into(), closes.into()],
+    ))
+    .await?;
+    record_activity_once(
+        &txn,
+        task_id,
+        Some(user_id),
+        PULL_REQUEST_LINKED_EVENT,
+        serde_json::json!({
+            "host": repo.host,
+            "number": number,
+            "title": row.try_get::<String>("", "title")?,
+            "author_handle": row.try_get::<String>("", "author_handle")?,
+            "html_url": row.try_get::<String>("", "html_url")?,
+            "state": row.try_get::<String>("", "state")?,
+        }),
+        &format!("{PULL_REQUEST_LINKED_EVENT}:{pull_request_id}:{task_id}"),
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(pull_request_id)
+}
+
+/// PR ↔ タスクのリンクを参照元によらずすべて外す（§8）。PR 行は残す。
+/// 外す行が無ければ `false`。手の操作なので履歴は外すたびに 1 行積む。
+pub async fn unlink(
+    db: &DatabaseConnection,
+    task_id: Uuid,
+    pull_request_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, anyhow::Error> {
+    let txn = db.begin().await?;
+    let Some(pull_request) = forge_pull_requests::Entity::find_by_id(pull_request_id)
+        .one(&txn)
+        .await?
+    else {
+        return Ok(false);
+    };
+    let deleted = forge_pull_request_links::Entity::delete_many()
+        .filter(forge_pull_request_links::Column::PullRequestId.eq(pull_request_id))
+        .filter(forge_pull_request_links::Column::TaskId.eq(task_id))
+        .exec(&txn)
+        .await?;
+    if deleted.rows_affected == 0 {
+        return Ok(false);
+    }
+    record_activity(
+        &txn,
+        task_id,
+        Some(user_id),
+        PULL_REQUEST_UNLINKED_EVENT,
+        serde_json::json!({
+            "host": pull_request.host,
+            "number": pull_request.number,
+            "html_url": pull_request.html_url,
+            "pull_request_id": pull_request_id,
+        }),
+    )
+    .await?;
     txn.commit().await?;
     Ok(true)
 }
