@@ -32,11 +32,11 @@ import type { components } from '@/generated/api';
 import { apiClient, fetchClient } from '@/lib/api-vue-query';
 import { httpUrl } from '@/lib/task-activity';
 
+import TaskForgeBranches from './TaskForgeBranches.vue';
+
 /**
  * タスク詳細の「リポジトリ」セクション。タスクに結ばれた PR とコミットを並べる
  * （docs/features/tasks/9.github-tasks.md §9）。
- *
- * ブランチの表示は後続のタスクで足す。
  */
 const FORGE_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge' as const;
 const UNLINK_PATH =
@@ -115,6 +115,7 @@ async function confirmUnlink() {
 
 const pullRequests = computed(() => forgeQuery.data.value?.pull_requests ?? []);
 const commits = computed(() => forgeQuery.data.value?.commits ?? []);
+const branches = computed(() => forgeQuery.data.value?.branches ?? []);
 // GitLab は Merge Request と呼ぶ
 const pullRequestHeading = computed(() =>
   pullRequests.value.length > 0 && pullRequests.value.every((pr) => pr.host === 'gitlab')
@@ -172,7 +173,10 @@ const SOURCE_LABELS: Record<string, string> = {
         >再試行</Button
       >
     </div>
-    <p v-else-if="!pullRequests.length && !commits.length" class="text-sm text-muted-foreground">
+    <p
+      v-else-if="!pullRequests.length && !commits.length && !branches.length"
+      class="text-sm text-muted-foreground"
+    >
       まだ PR もコミットもありません
     </p>
     <template v-else>
@@ -211,6 +215,9 @@ const SOURCE_LABELS: Record<string, string> = {
               class="shrink-0 rounded border px-1 text-xs text-muted-foreground"
             >
               {{ SOURCE_LABELS[source] ?? source }}
+            </span>
+            <span v-if="!pr.commits_complete" class="shrink-0 text-xs text-muted-foreground">
+              コミット一覧は一部のみ
             </span>
             <span v-if="pr.author_handle" class="shrink-0 text-xs text-muted-foreground">
               {{ pr.author_handle }}
@@ -272,6 +279,14 @@ const SOURCE_LABELS: Record<string, string> = {
           </li>
         </ul>
       </div>
+
+      <TaskForgeBranches
+        v-if="branches.length && tenantId && projectId"
+        :tenant-id="tenantId"
+        :project-id="projectId"
+        :task-id="taskId"
+        :branches="branches"
+      />
     </template>
 
     <TaskForgePullRequestLinkDialog
