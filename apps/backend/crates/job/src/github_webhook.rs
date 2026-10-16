@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use common::settings::Settings;
 use service::forge::events::ForgeEvent;
+use service::forge::pull_requests::PullRequestSnapshot;
 
 use crate::JobState;
 
@@ -146,9 +147,71 @@ fn backfill_schedule_key(job: &GithubWebhookJob, after: &str, page: u32) -> Stri
     )
 }
 
-/// `issues` はタスクへ反映し、正規化済みの `push` はコミットをタスクへリンクする。
-/// それ以外は受信をログに残すのみ。
+/// `issues` はタスクへ反映し、正規化済みの `push` はコミットを、`pull_request` は PR を
+/// タスクへリンクする。それ以外は受信をログに残すのみ。
 pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(), BoxDynError> {
+    if let Some(ForgeEvent::PullRequest {
+        repo,
+        action,
+        number,
+        title,
+        body,
+        author_handle,
+        state: pr_state,
+        merged_at,
+        head_sha,
+        head_branch,
+        html_url,
+        updated_at,
+    }) = &job.forge_event
+    {
+        // マージ時の副作用（TASK-289）とコミット集合の同期（TASK-291）は未実装。どの action も共通処理だけ行う
+        let event = PullRequestSnapshot {
+            title: title.clone(),
+            body: body.clone(),
+            author_handle: author_handle.clone(),
+            state: pr_state.clone(),
+            merged_at: *merged_at,
+            head_sha: head_sha.clone(),
+            head_branch: head_branch.clone(),
+            html_url: html_url.clone(),
+            updated_at: *updated_at,
+        };
+        let applied = service::forge::pull_requests::apply_pull_request(
+            &state.db,
+            job.project_id,
+            repo,
+            *number,
+            event,
+            || async {
+                let github = state
+                    .settings
+                    .require_github_app()
+                    .map_err(|e| anyhow::anyhow!("github app settings are required: {e}"))?;
+                service::github::client::fetch_pull_request(
+                    &state.db,
+                    &state.http_client,
+                    github,
+                    job.project_id,
+                    repo,
+                    *number,
+                )
+                .await
+            },
+        )
+        .await?;
+        tracing::info!(
+            integration_id = %job.integration_id,
+            project_id = %job.project_id,
+            delivery_id = ?job.delivery_id,
+            number,
+            action = ?action,
+            applied,
+            "forge pull request event processed"
+        );
+        return Ok(());
+    }
+
     if let Some(ForgeEvent::Push {
         repo,
         commits,
@@ -356,6 +419,61 @@ mod tests {
                 "message",
                 "sha"
             ]
+        );
+    }
+
+    /// PR のジョブも同じ。本文は公開情報なので運んでよいが、それ以外のホストの語彙は持たない
+    #[test]
+    fn pull_request_payload_contains_no_sensitive_fields() {
+        let job = GithubWebhookJob {
+            integration_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+            event: "pull_request".into(),
+            delivery_id: Some("delivery".into()),
+            payload: serde_json::Value::Null,
+            backfill_page: None,
+            forge_event: Some(ForgeEvent::PullRequest {
+                repo: ForgeRepo {
+                    host: "github".into(),
+                    host_url: "https://github.com".into(),
+                    repo_owner: "acme".into(),
+                    repo_name: "backend".into(),
+                },
+                action: service::forge::events::PrAction::Closed { merged: true },
+                number: 87,
+                title: "feat: TASK-1".into(),
+                body: "Closes TASK-1".into(),
+                author_handle: "yupix".into(),
+                state: "closed".into(),
+                merged_at: Some(chrono::Utc::now()),
+                head_sha: "a3f92c1".into(),
+                head_branch: "feat/TASK-1".into(),
+                html_url: "https://github.com/acme/backend/pull/87".into(),
+                updated_at: chrono::Utc::now(),
+            }),
+        };
+        let value = serde_json::to_value(&job).expect("serialize job");
+        assert_eq!(
+            sorted_keys(&value["forge_event"]),
+            vec![
+                "action",
+                "author_handle",
+                "body",
+                "head_branch",
+                "head_sha",
+                "html_url",
+                "kind",
+                "merged_at",
+                "number",
+                "repo",
+                "state",
+                "title",
+                "updated_at"
+            ]
+        );
+        assert_eq!(
+            value["forge_event"]["action"],
+            serde_json::json!({ "closed": { "merged": true } })
         );
     }
 

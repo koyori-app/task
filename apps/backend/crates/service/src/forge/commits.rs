@@ -91,8 +91,8 @@ pub async fn apply_push(
 ///
 /// 規則は API のアクセス判定（handler の `has_tenant_access`）と同じ: テナントオーナーは常に可、
 /// テナントメンバーは公開規則かメンバー指定、テナントに居ないゲストは明示参加した共有プロジェクトだけ。
-async fn can_view_project(
-    db: &DatabaseConnection,
+pub(super) async fn can_view_project<C: ConnectionTrait>(
+    db: &C,
     tenant_id: Uuid,
     project_id: Uuid,
     user_id: Uuid,
