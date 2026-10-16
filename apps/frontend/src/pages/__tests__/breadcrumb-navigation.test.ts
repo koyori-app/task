@@ -102,11 +102,6 @@ beforeEach(() => {
         [`${projectBase}/statuses`, [status]],
         [`${projectBase}/labels`, []],
         [`${projectBase}/assignable-users`, []],
-        // リポジトリセクションが「PR をリンク」の可否を決めるのに読む
-        [
-          `${projectBase}/github/integration`,
-          { connected: false, repo_owner: null, repo_name: null, connected_at: null },
-        ],
         ...[parent, child].flatMap((task): [string, unknown][] => [
           [`${projectBase}/tasks/ENG-${task.seq_id}`, task],
           [`${projectBase}/tasks/ENG-${task.seq_id}/attachments`, { attachments: [] }],

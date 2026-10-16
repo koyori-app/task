@@ -255,6 +255,7 @@ async fn pull_request_links_title_and_body_references() {
             "author_handle": "yupix",
             "html_url": format!("https://github.com/{REPO_OWNER}/{REPO_NAME}/pull/87"),
             "state": "open",
+            "source": "title",
         })
     );
     assert_eq!(pr_activities(&app, second).await.len(), 1);

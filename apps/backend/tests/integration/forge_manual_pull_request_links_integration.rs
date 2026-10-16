@@ -87,6 +87,23 @@ async fn activities(app: &TestApp, task_id: Uuid, event_type: &str) -> Vec<task_
         .expect("query activities")
 }
 
+async fn forge_repository(
+    app: &TestApp,
+    tenant_id: Uuid,
+    project_id: Uuid,
+    task_id: Uuid,
+    token: &str,
+) -> serde_json::Value {
+    let res = app
+        .get_with_bearer(
+            &format!("/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{task_id}/forge"),
+            token,
+        )
+        .await;
+    assert_eq!(res.status().as_u16(), 200);
+    res.json::<serde_json::Value>().await.expect("json")["repository"].clone()
+}
+
 /// PR 取得 API の応答（関係するフィールドだけ）
 fn api_pull_request(number: i32, title: &str, body: &str, updated_at: &str) -> serde_json::Value {
     serde_json::json!({
@@ -152,6 +169,7 @@ async fn manual_link_and_unlink() {
     let linked = activities(&app, task, PULL_REQUEST_LINKED_EVENT).await;
     assert_eq!(linked.len(), 1);
     assert_eq!(linked[0].user_id, Some(fx.owner_id), "主語は操作者");
+    assert_eq!(linked[0].payload["source"], "manual");
     assert_eq!(
         linked[0].dedupe_key.as_deref(),
         Some(format!("{PULL_REQUEST_LINKED_EVENT}:{pull_request_id}:{task}").as_str())
@@ -412,6 +430,29 @@ async fn manual_link_authorization() {
     .await;
     assert_eq!(status, 409, "連携が無い");
     assert_eq!(error["message"], "github-integration-missing");
+
+    // 連携先はタスクを読めるだけの PAT にも返る（ボタンの可否に使う）。連携が無ければ null
+    assert_eq!(
+        forge_repository(&app, fx.tp.tenant_id, fx.tp.project_id, task, &read_only).await,
+        serde_json::json!({
+            "host": "github",
+            "host_url": "https://github.com",
+            "repo_owner": REPO_OWNER,
+            "repo_name": REPO_NAME,
+            "html_url": format!("https://github.com/{REPO_OWNER}/{REPO_NAME}"),
+        })
+    );
+    assert_eq!(
+        forge_repository(
+            &app,
+            fx.tp.tenant_id,
+            second_project,
+            second_task,
+            &read_only
+        )
+        .await,
+        serde_json::Value::Null
+    );
     let (status, _) = link(
         &app,
         fx.tp.tenant_id,
