@@ -15,6 +15,7 @@ import { useTaskComments } from '@/composables/useTaskComments';
 import { useRenderedDescription } from '@/composables/useRenderedDescription';
 import { useTaskDetail } from '@/composables/useTaskDetail';
 import { useMeQuery } from '@/lib/api-vue-query';
+import { userProfileHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 
 type TaskResponse = components['schemas']['TaskResponse'];
@@ -37,6 +38,8 @@ const props = withDefaults(
   }>(),
   { layout: 'pane', showCloseButton: true },
 );
+
+const profileHref = (userId: string) => userProfileHref(props.tenantDisplayId, userId);
 
 const emit = defineEmits<{
   close: [];
@@ -201,6 +204,7 @@ function onDeleteDialogCancel(event: Event) {
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <TaskDetailHub
         :layout="layout"
+        :profile-href="profileHref"
         :task="displayTask"
         :project-key="projectKey"
         :statuses="statuses"
@@ -260,6 +264,7 @@ function onDeleteDialogCancel(event: Event) {
             :list-error="commentsError"
             :on-retry="refetchComments"
             :current-user-id="currentUserId"
+            :profile-href="profileHref"
             :submit-pending="submitPending"
             :submit-error="submitError"
             :reply-error="replyError"

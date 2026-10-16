@@ -38,6 +38,8 @@ const props = defineProps<{
   onClearUpdateError?: () => void;
   /** 削除確認を開閉するときに前回の失敗表示を消す（返信の onClearReplyError と同型） */
   onClearDeleteError?: () => void;
+  /** 投稿者のプロフィール画面の URL。渡すとアイコンと名前をリンクにする */
+  profileHref?: (userId: string) => string;
 }>();
 
 const editing = ref(false);
@@ -93,18 +95,26 @@ async function confirmDelete() {
 <template>
   <article class="flex flex-col gap-1" data-task-comment :data-comment-id="comment.id">
     <header class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-      <!-- 投稿者のアイコン。avatar_url が無いユーザーは頭文字で描く -->
-      <Avatar class="size-6">
-        <AvatarImage
-          v-if="comment.user.avatar_url"
-          :src="comment.user.avatar_url"
-          :alt="comment.user.name"
-        />
-        <AvatarFallback class="bg-muted text-[10px] text-muted-foreground">
-          {{ avatarInitials(comment.user.name) }}
-        </AvatarFallback>
-      </Avatar>
-      <span class="font-medium text-foreground">{{ comment.user.name }}</span>
+      <component
+        :is="profileHref ? 'a' : 'span'"
+        :href="profileHref?.(comment.user.id)"
+        class="inline-flex items-center gap-2"
+        :class="profileHref && 'hover:underline'"
+        data-comment-author
+      >
+        <!-- 投稿者のアイコン。avatar_url が無いユーザーは頭文字で描く -->
+        <Avatar class="size-6">
+          <AvatarImage
+            v-if="comment.user.avatar_url"
+            :src="comment.user.avatar_url"
+            :alt="comment.user.name"
+          />
+          <AvatarFallback class="bg-muted text-[10px] text-muted-foreground">
+            {{ avatarInitials(comment.user.name) }}
+          </AvatarFallback>
+        </Avatar>
+        <span class="font-medium text-foreground">{{ comment.user.name }}</span>
+      </component>
       <span>{{ formatTaskDate(comment.created_at) }}</span>
       <!-- backend が作成時に created_at と updated_at へ同一の now を入れるため、
            不一致は「編集された」と等価（create_comment の now 一回化とペア） -->
