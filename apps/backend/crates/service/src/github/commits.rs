@@ -1,4 +1,4 @@
-//! 切り詰められた push のコミットを REST で取り直す。
+//! 切り詰められた push のコミットと、PR のコミット一覧を REST で取る。
 //!
 //! `forge-github` は GitHub App のインストール周りを扱うクレートで、コミット API は
 //! 持たない。push のリンクというこのアプリ固有の用途にしか使わないため、`issues.rs` と
@@ -18,6 +18,7 @@ use entity::github_integrations;
 use super::client::api_base;
 use super::sync::installation_token;
 use crate::forge::events::{ForgeCommit, ForgeRepo};
+use crate::forge::pull_request_commits::PullRequestCommitsPage;
 
 const USER_AGENT: &str = "task-backend";
 const API_VERSION: &str = "2022-11-28";
@@ -192,4 +193,45 @@ pub async fn fetch_push_commits_page(
         }
         None => history_page(http, &token, owner, repo, range.after, range.page).await,
     }
+}
+
+/// GitHub の「PR のコミット一覧」が返す最大件数。これを超える PR は全ページ読んでも頭打ちになる。
+///
+/// <https://docs.github.com/en/rest/pulls/pulls#list-commits-on-a-pull-request>
+const PULL_REQUEST_COMMITS_MAX: u32 = 250;
+
+/// PR のコミット一覧を 1 ページ取る（`GET /repos/{owner}/{repo}/pulls/{number}/commits`）。
+///
+/// 終端は返った件数が `per_page` 未満のとき。上限（250 件）に達していたら、
+/// 最後まで読めても集合を確定できないので `host_limit_reached` を立てる。
+pub async fn fetch_pull_request_commits_page(
+    db: &DatabaseConnection,
+    http: &Client,
+    settings: &GithubAppSettings,
+    project_id: Uuid,
+    repo: &ForgeRepo,
+    number: i32,
+    page: u32,
+) -> Result<PullRequestCommitsPage, anyhow::Error> {
+    let integration = github_integrations::Entity::find()
+        .filter(github_integrations::Column::ProjectId.eq(project_id))
+        .one(db)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("project {project_id} has no github integration"))?;
+    let token = installation_token(http, settings, integration.installation_id).await?;
+    let url = format!(
+        "{}/repos/{}/{}/pulls/{number}/commits?per_page={PER_PAGE}&page={page}",
+        api_base(),
+        repo.repo_owner,
+        repo.repo_name
+    );
+    let items: Vec<CommitItem> = get_json(http, &token, &url, "list pull request commits").await?;
+
+    let fetched = items.len() as u32;
+    let read = (page - 1) * PER_PAGE + fetched;
+    Ok(PullRequestCommitsPage {
+        commits: items.into_iter().map(ForgeCommit::from).collect(),
+        next_page: (fetched == PER_PAGE && read < PULL_REQUEST_COMMITS_MAX).then_some(page + 1),
+        host_limit_reached: read >= PULL_REQUEST_COMMITS_MAX,
+    })
 }

@@ -5,7 +5,7 @@
 //! アクティビティは `dedupe_key` の UNIQUE で 1 回だけ積む。途中で失敗しても
 //! 再試行で同じ状態に収束するので、コミットごとのトランザクションは張らない。
 
-use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait, Statement, prelude::Uuid};
+use sea_orm::{ConnectionTrait, EntityTrait, Statement, prelude::Uuid};
 
 use entity::{projects, tenants};
 
@@ -21,8 +21,8 @@ pub const COMMIT_LINKED_EVENT: &str = "forge_commit_linked";
 /// `project_id` は webhook を受けた連携のプロジェクト。`KEY-N` はそのテナント内で解決する。
 /// 作者がホスト上のログイン名で Task ユーザーに結べて、リンク先のプロジェクトに入れる人なら、
 /// 履歴をそのユーザーの操作にする。
-pub async fn apply_push(
-    db: &DatabaseConnection,
+pub async fn apply_push<C: ConnectionTrait>(
+    db: &C,
     project_id: Uuid,
     repo: &ForgeRepo,
     commits: &[ForgeCommit],
@@ -111,8 +111,8 @@ pub(super) async fn can_view_project<C: ConnectionTrait>(
 }
 
 /// 同じリポジトリの同じ SHA は 1 行にまとめ、その行の id を返す。
-async fn upsert_commit(
-    db: &DatabaseConnection,
+pub(super) async fn upsert_commit<C: ConnectionTrait>(
+    db: &C,
     project_id: Uuid,
     repo: &ForgeRepo,
     commit: &ForgeCommit,
