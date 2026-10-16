@@ -203,6 +203,50 @@ pub fn pull_request_event(
     }))
 }
 
+#[derive(Deserialize)]
+struct RefPayload {
+    #[serde(rename = "ref")]
+    ref_name: String,
+    repository: RefRepository,
+}
+
+#[derive(Deserialize)]
+struct RefRepository {
+    name: String,
+    owner: PushOwner,
+    html_url: String,
+}
+
+/// `create` / `delete` イベントのうちブランチのものを正規化する。タグ（`ref_type = tag`）は `None`。
+pub fn branch_event(
+    payload: &serde_json::Value,
+    created: bool,
+) -> Result<Option<ForgeEvent>, serde_json::Error> {
+    // タグのペイロードは形を問わない（解釈できなくても 400 にしない）
+    if payload.get("ref_type").and_then(|t| t.as_str()) != Some("branch") {
+        return Ok(None);
+    }
+    let RefPayload {
+        ref_name: branch,
+        repository,
+    } = RefPayload::deserialize(payload)?;
+    let repo = ForgeRepo {
+        host: HOST.to_string(),
+        host_url: HOST_URL.to_string(),
+        repo_owner: repository.owner.login,
+        repo_name: repository.name,
+    };
+    Ok(Some(if created {
+        ForgeEvent::BranchCreated {
+            html_url: format!("{}/tree/{branch}", repository.html_url),
+            repo,
+            branch,
+        }
+    } else {
+        ForgeEvent::BranchDeleted { repo, branch }
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -487,5 +531,78 @@ mod tests {
             pull_request_event(&serde_json::json!({ "action": "assigned" })).expect("convert"),
             None
         );
+    }
+
+    /// GitHub の create / delete ペイロード（関係するフィールドを残して削ったもの）
+    fn ref_fixture(ref_type: &str) -> serde_json::Value {
+        serde_json::json!({
+            "ref": "feat/TASK-12-foo",
+            "ref_type": ref_type,
+            "master_branch": "main",
+            "description": null,
+            "pusher_type": "user",
+            "repository": {
+                "id": 1,
+                "name": "backend",
+                "full_name": "acme/backend",
+                "html_url": "https://github.com/acme/backend",
+                "owner": { "login": "acme", "id": 10 }
+            },
+            "sender": { "login": "yupix", "id": 20 },
+            "installation": { "id": 30 }
+        })
+    }
+
+    #[test]
+    fn branch_create_and_delete_become_normalized_events() {
+        let repo = ForgeRepo {
+            host: "github".into(),
+            host_url: "https://github.com".into(),
+            repo_owner: "acme".into(),
+            repo_name: "backend".into(),
+        };
+        assert_eq!(
+            branch_event(&ref_fixture("branch"), true).expect("convert"),
+            Some(ForgeEvent::BranchCreated {
+                repo: repo.clone(),
+                branch: "feat/TASK-12-foo".into(),
+                html_url: "https://github.com/acme/backend/tree/feat/TASK-12-foo".into(),
+            })
+        );
+        // delete のペイロードには master_branch / description が無い
+        let mut deleted = ref_fixture("branch");
+        let object = deleted.as_object_mut().unwrap();
+        object.remove("master_branch");
+        object.remove("description");
+        assert_eq!(
+            branch_event(&deleted, false).expect("convert"),
+            Some(ForgeEvent::BranchDeleted {
+                repo,
+                branch: "feat/TASK-12-foo".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn tag_create_and_delete_are_ignored() {
+        assert_eq!(
+            branch_event(&ref_fixture("tag"), true).expect("convert"),
+            None
+        );
+        assert_eq!(
+            branch_event(&ref_fixture("tag"), false).expect("convert"),
+            None
+        );
+        assert_eq!(
+            branch_event(&serde_json::json!({ "ref_type": "tag" }), true).expect("convert"),
+            None
+        );
+    }
+
+    #[test]
+    fn branch_payload_missing_repository_is_rejected() {
+        let mut payload = ref_fixture("branch");
+        payload.as_object_mut().unwrap().remove("repository");
+        assert!(branch_event(&payload, true).is_err());
     }
 }

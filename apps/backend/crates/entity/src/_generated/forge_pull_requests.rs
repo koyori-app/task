@@ -50,6 +50,8 @@ pub struct Model {
         on_delete = "SetNull"
     )]
     pub users: HasOne<super::users::Entity>,
+    #[sea_orm(has_many, via = "forge_pull_request_commits")]
+    pub forge_commits: HasMany<super::forge_commits::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

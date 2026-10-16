@@ -102,6 +102,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::task_comments::delete_comment))
                         .routes(routes!(crate::handlers::task_comments::list_activities))
                         .routes(routes!(crate::handlers::forge::get_task_forge))
+                        .routes(routes!(crate::handlers::forge::delete_task_forge_branch))
                         .routes(routes!(crate::handlers::time_tracking::get_time_summary))
                         .routes(routes!(crate::handlers::time_tracking::list_time_logs))
                         .routes(routes!(crate::handlers::time_tracking::create_time_log))
