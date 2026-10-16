@@ -106,11 +106,16 @@ export type PullRequestActivity = {
   title: string;
   /** http(s) 以外は null */
   url: string | null;
+  /** リンクを外した履歴（`forge_pull_request_unlinked`）。主語は外した人 */
+  unlinked: boolean;
+  /** 手でリンクした履歴（`source = manual`）。主語はリンクした人。`source` の無い旧い行は false */
+  manual: boolean;
 };
 
-/** `forge_pull_request_linked` の表示要素。それ以外の履歴は null。 */
+/** `forge_pull_request_linked` / `forge_pull_request_unlinked` の表示要素。それ以外の履歴は null。 */
 export function pullRequestActivity(item: ActivityItem): PullRequestActivity | null {
-  if (item.event_type !== 'forge_pull_request_linked') return null;
+  const unlinked = item.event_type === 'forge_pull_request_unlinked';
+  if (!unlinked && item.event_type !== 'forge_pull_request_linked') return null;
   const payload = (item.payload ?? {}) as Record<string, unknown>;
   const str = (key: string) => (typeof payload[key] === 'string' ? (payload[key] as string) : '');
   const number = payload.number;
@@ -119,6 +124,8 @@ export function pullRequestActivity(item: ActivityItem): PullRequestActivity | n
     number: typeof number === 'number' && Number.isInteger(number) && number > 0 ? number : null,
     title: str('title'),
     url: httpUrl(str('html_url')),
+    unlinked,
+    manual: !unlinked && str('source') === 'manual',
   };
 }
 

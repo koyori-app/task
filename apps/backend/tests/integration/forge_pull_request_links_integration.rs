@@ -28,7 +28,7 @@ fn repo() -> ForgeRepo {
 }
 
 /// GitHub の pull_request ペイロード（関係するフィールドだけ）
-fn pr_payload(
+pub(crate) fn pr_payload(
     installation_id: i64,
     action: &str,
     number: i32,
@@ -81,7 +81,7 @@ async fn post_event(app: &TestApp, delivery_id: &str, body: &serde_json::Value) 
 }
 
 /// 配信を受け、積まれたジョブをワーカーと同じ関数で処理する。
-async fn deliver(
+pub(crate) async fn deliver(
     app: &TestApp,
     fx: &Fixture,
     payload: &serde_json::Value,
@@ -97,7 +97,7 @@ async fn deliver(
 }
 
 /// タスクのリンク行（参照元, closes）。参照元の昇順
-async fn links(app: &TestApp, task_id: Uuid) -> Vec<(String, bool)> {
+pub(crate) async fn links(app: &TestApp, task_id: Uuid) -> Vec<(String, bool)> {
     forge_pull_request_links::Entity::find()
         .filter(forge_pull_request_links::Column::TaskId.eq(task_id))
         .order_by_asc(forge_pull_request_links::Column::Source)
@@ -255,6 +255,7 @@ async fn pull_request_links_title_and_body_references() {
             "author_handle": "yupix",
             "html_url": format!("https://github.com/{REPO_OWNER}/{REPO_NAME}/pull/87"),
             "state": "open",
+            "source": "title",
         })
     );
     assert_eq!(pr_activities(&app, second).await.len(), 1);

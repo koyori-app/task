@@ -41,6 +41,14 @@ const commit = {
   html_url: 'https://github.com/acme/backend/commit/a3f92c1',
 };
 
+const repository = {
+  host: 'github',
+  host_url: 'https://github.com',
+  repo_owner: 'acme',
+  repo_name: 'backend',
+  html_url: 'https://github.com/acme/backend',
+};
+
 async function mountWith(forge: Record<string, unknown>) {
   vi.stubGlobal('fetch', async (request: Request | string) => {
     const url = typeof request === 'string' ? request : request.url;
@@ -102,5 +110,27 @@ describe('TaskForgeSection', () => {
     expect(row.get('a').attributes('href')).toBe(commit.html_url);
     expect(row.text()).toContain('fix: トークン期限切れを修正');
     expect(row.text()).toContain('Yupix');
+  });
+
+  it('連携が無ければ「PR をリンク」を止めて理由を出す', async () => {
+    const wrapper = await mountWith({ repository: null });
+    const button = wrapper.get('button[aria-describedby="forge-link-disabled-reason"]');
+    expect(button.text()).toContain('PR をリンク');
+    expect(button.attributes('disabled')).toBeDefined();
+    expect(wrapper.text()).toContain('プロジェクト設定でリポジトリを連携してください');
+  });
+
+  it('連携していればボタンを止めない', async () => {
+    const wrapper = await mountWith({ repository });
+    const button = wrapper.findAll('button').find((b) => b.text().includes('PR をリンク'))!;
+    expect(button.attributes('disabled')).toBeUndefined();
+    expect(wrapper.text()).not.toContain('リポジトリを連携してください');
+  });
+
+  it('PR の行に操作メニューを出す', async () => {
+    const wrapper = await mountWith({ pull_requests: [pullRequest], repository });
+    expect(
+      wrapper.get('[data-forge-pull-request]').find('button[aria-label="#87 の操作"]').exists(),
+    ).toBe(true);
   });
 });
