@@ -44,7 +44,8 @@ pub struct TaskForgePullRequest {
     pub sources: Vec<String>,
     /// どれかの参照元がクローズキーワード付きか
     pub closes: bool,
-    /// 未解決のレビュー指摘の件数。レビューとの結線（TASK-264）までは常に null
+    /// マージを塞いでいるレビュー指摘（High / Medium の open / fixing / fixed）の件数。
+    /// レビューの無い PR、タスクと別プロジェクトの PR 行、`read:review` を持たない PAT では null
     pub unresolved: Option<i64>,
 }
 
