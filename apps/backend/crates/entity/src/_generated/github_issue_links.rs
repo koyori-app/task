@@ -19,6 +19,7 @@ pub struct Model {
     pub github_updated_at: DateTimeWithTimeZone,
     pub pending_push: bool,
     pub updated_at: DateTimeWithTimeZone,
+    pub github_state: String,
     #[sea_orm(
         belongs_to,
         from = "project_id",

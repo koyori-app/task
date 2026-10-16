@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/vue-query';
 import { computed } from 'vue';
 
 import { Button } from '@/components/ui/button';
+import TaskIssueSourceRow from '@/components/tasks/TaskIssueSourceRow.vue';
 import type { components } from '@/generated/api';
 import { fetchClient } from '@/lib/api-vue-query';
 import { httpUrl } from '@/lib/task-activity';
@@ -82,6 +83,7 @@ const SOURCE_LABELS: Record<string, string> = {
 <template>
   <section class="space-y-2" aria-label="リポジトリ" data-task-forge-section>
     <h2 class="text-sm font-semibold">リポジトリ</h2>
+    <TaskIssueSourceRow v-if="forgeQuery.data.value?.issue" :issue="forgeQuery.data.value.issue" />
 
     <p v-if="forgeQuery.isLoading.value" class="text-sm text-muted-foreground">読み込み中…</p>
     <div

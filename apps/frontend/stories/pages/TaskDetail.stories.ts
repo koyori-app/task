@@ -602,6 +602,32 @@ export const WithForge: Story = {
   },
 };
 
+export const WithIssueSource: Story = {
+  name: '取り込み元 Issue あり（反映待ち）',
+  beforeEach: () =>
+    createMockFetch({
+      forge: {
+        issue: {
+          host: 'github',
+          repo_owner: 'acme',
+          repo_name: 'backend',
+          number: 42,
+          html_url: 'https://github.com/acme/backend/issues/42',
+          state: 'closed',
+          // 1 日以上前にして、相対時刻ではなく日付で出す（VRT を安定させる）
+          last_synced_at: '2026-10-01T00:00:00Z',
+          pending_push: true,
+        },
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const link = await canvas.findByRole('link', { name: 'acme/backend#42' });
+    await expect(link).toHaveAttribute('href', 'https://github.com/acme/backend/issues/42');
+    await expect(canvas.findByText('GitHub への反映待ち')).resolves.toBeInTheDocument();
+  },
+};
+
 export const Subtask: Story = {
   name: '子タスク詳細では孫の作成UIを出さない',
   beforeEach: () => createMockFetch({ task: sampleSubtask }),

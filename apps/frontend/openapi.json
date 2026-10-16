@@ -25812,6 +25812,53 @@
           }
         }
       },
+      "TaskForgeIssue": {
+        "type": "object",
+        "description": "タスクの取り込み元 Issue（`github_issue_links` の 1 行）",
+        "required": [
+          "host",
+          "repo_owner",
+          "repo_name",
+          "number",
+          "html_url",
+          "state",
+          "last_synced_at",
+          "pending_push"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "Issue のリンク表は GitHub 専用なので常に `github`"
+          },
+          "html_url": {
+            "type": "string",
+            "description": "サーバー側で組み立てた Issue の URL"
+          },
+          "last_synced_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "最後に同期（取り込み・書き戻し）した時刻"
+          },
+          "number": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pending_push": {
+            "type": "boolean",
+            "description": "タスク側の変更が GitHub へまだ反映されていない"
+          },
+          "repo_name": {
+            "type": "string"
+          },
+          "repo_owner": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "description": "`open` / `closed` / `unknown`（同期で控えていない行）"
+          }
+        }
+      },
       "TaskForgePullRequest": {
         "type": "object",
         "required": [
@@ -25913,6 +25960,17 @@
             "items": {
               "$ref": "#/components/schemas/TaskForgeCommit"
             }
+          },
+          "issue": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskForgeIssue",
+                "description": "取り込み元の Issue。Issue から取り込んでいない（または連携を解除した）タスクでは null"
+              }
+            ]
           },
           "pull_requests": {
             "type": "array",
