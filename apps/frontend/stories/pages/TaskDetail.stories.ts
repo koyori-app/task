@@ -555,7 +555,7 @@ export const WithForge: Story = {
             commits_complete: false,
             sources: ['body', 'title'],
             closes: true,
-            unresolved: null,
+            unresolved: 0,
           },
           {
             id: 'pr-2',
@@ -573,7 +573,7 @@ export const WithForge: Story = {
             commits_complete: false,
             sources: ['title'],
             closes: false,
-            unresolved: null,
+            unresolved: 2,
           },
         ],
         commits: [
@@ -599,6 +599,8 @@ export const WithForge: Story = {
       canvas.findByText('feat: OAuth 対応', { exact: false }),
     ).resolves.toBeInTheDocument();
     await expect(canvas.findByText('a3f92c1')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('2 件が未解決')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('未解決なし')).resolves.toBeInTheDocument();
   },
 };
 

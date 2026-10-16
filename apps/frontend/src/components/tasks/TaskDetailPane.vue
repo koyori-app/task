@@ -262,7 +262,13 @@ function onDeleteDialogCancel(event: Event) {
             :project-key="projectKey"
             @open="emit('open-task', $event)"
           />
-          <TaskForgeSection :tenant-id="tenantId" :project-id="projectId" :task-id="taskId" />
+          <TaskForgeSection
+            :tenant-id="tenantId"
+            :project-id="projectId"
+            :task-id="taskId"
+            :tenant-display-id="tenantDisplayId"
+            :project-key="projectKey"
+          />
         </template>
         <template #sidebar>
           <TaskComments

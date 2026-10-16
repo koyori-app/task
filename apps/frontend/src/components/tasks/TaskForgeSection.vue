@@ -1,13 +1,5 @@
 <script setup lang="ts">
-import {
-  CircleDashed,
-  GitCommitHorizontal,
-  GitMerge,
-  GitPullRequest,
-  GitPullRequestClosed,
-  MoreHorizontal,
-  Plus,
-} from '@lucide/vue';
+import { GitCommitHorizontal, MoreHorizontal, Plus } from '@lucide/vue';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { computed, ref } from 'vue';
 
@@ -30,6 +22,7 @@ import {
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import type { components } from '@/generated/api';
 import { apiClient, fetchClient } from '@/lib/api-vue-query';
+import { pullRequestState as prState } from '@/lib/forge-pull-request';
 import { httpUrl } from '@/lib/task-activity';
 
 /**
@@ -48,6 +41,9 @@ const props = defineProps<{
   tenantId: string | null;
   projectId: string | null;
   taskId: string;
+  /** レビュー画面へのリンクに使う（`/{tenant}/projects/{key}/reviews`） */
+  tenantDisplayId: string;
+  projectKey: string;
 }>();
 
 const forgeQuery = useQuery({
@@ -122,16 +118,9 @@ const pullRequestHeading = computed(() =>
     : 'Pull Requests',
 );
 
-const PR_STATES = {
-  open: { icon: GitPullRequest, label: 'Open', class: 'text-green-700 dark:text-green-400' },
-  merged: { icon: GitMerge, label: 'Merged', class: 'text-violet-700 dark:text-violet-400' },
-  closed: { icon: GitPullRequestClosed, label: 'Closed', class: 'text-destructive' },
-} as const;
-// webhook をまだ受けていない PR（CLI のレビューだけで作られた行など）
-const UNKNOWN_STATE = { icon: CircleDashed, label: '状態不明', class: 'text-muted-foreground' };
-
-function prState(pr: PullRequest) {
-  return PR_STATES[pr.state as keyof typeof PR_STATES] ?? UNKNOWN_STATE;
+// 未解決件数は `read:review` が無い・レビューが無い PR では null（表示しない）
+function reviewHref(pr: PullRequest): string {
+  return `/${props.tenantDisplayId}/projects/${props.projectKey}/reviews?pr=${pr.number}`;
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -186,12 +175,12 @@ const SOURCE_LABELS: Record<string, string> = {
             data-forge-pull-request
           >
             <component
-              :is="prState(pr).icon"
+              :is="prState(pr.state).icon"
               class="size-4 shrink-0"
-              :class="prState(pr).class"
+              :class="prState(pr.state).class"
               aria-hidden="true"
             />
-            <span class="sr-only">{{ prState(pr).label }}</span>
+            <span class="sr-only">{{ prState(pr.state).label }}</span>
             <a
               v-if="httpUrl(pr.html_url)"
               :href="httpUrl(pr.html_url)!"
@@ -215,6 +204,14 @@ const SOURCE_LABELS: Record<string, string> = {
             <span v-if="pr.author_handle" class="shrink-0 text-xs text-muted-foreground">
               {{ pr.author_handle }}
             </span>
+            <a
+              v-if="pr.unresolved != null"
+              :href="reviewHref(pr)"
+              class="shrink-0 text-xs underline underline-offset-2"
+              :class="pr.unresolved ? 'text-destructive' : 'text-muted-foreground'"
+              data-forge-unresolved
+              >{{ pr.unresolved ? `${pr.unresolved} 件が未解決` : '未解決なし' }}</a
+            >
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
                 <Button
