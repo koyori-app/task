@@ -22,6 +22,8 @@ const DESCRIPTION = [
   '脚注あり[^1]',
   '',
   '[^1]: 脚注本文',
+  '',
+  '関連: ENG-7',
 ].join('\n');
 
 function jsonResponse(body: unknown, status = 200) {
@@ -76,13 +78,20 @@ afterEach(() => {
 });
 
 describe('task description +data', () => {
-  it('descriptionHtml は renderDescription(text, { scope: task-<uuid> }) の出力そのもの', async () => {
+  it('descriptionHtml は renderDescription(text, { scope: task-<uuid>, taskRef }) の出力そのもの', async () => {
     stubBackend();
     const result = await data(pageContext());
-    const expected = await renderDescription(DESCRIPTION, { scope: `task-${TASK_UUID}` });
+    const expected = await renderDescription(DESCRIPTION, {
+      scope: `task-${TASK_UUID}`,
+      taskRef: { tenant: 'acme' },
+    });
     expect(result.descriptionHtml).toBe(expected);
     // scope が効いている証拠（脚注 id に task-<uuid> が付く）
     expect(result.descriptionHtml).toContain(`user-content-task-${TASK_UUID}-fn-`);
+    // taskRef が効いている証拠（KEY-N が URL のテナントのタスク詳細へのリンクになる）
+    expect(result.descriptionHtml).toContain(
+      '<a href="/acme/projects/ENG/tasks/ENG-7" class="kfm-task-ref">ENG-7</a>',
+    );
   });
 
   it('descriptionSource は renderDescription へ渡した本文そのもの (stale 照合キー)', async () => {

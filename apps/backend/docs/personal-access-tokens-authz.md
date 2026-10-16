@@ -72,7 +72,7 @@ GitLab の PAT と同じく、全部を任せる `api` / 読むだけの `read_a
 |---------|------|
 | `api` | すべての `read:*` / `write:*`（と `read_api`）を満たす |
 | `read_api` | すべての `read:*` を満たす。`write:*` は満たさない |
-| `read:tenant` | テナントとメンバーの参照（テナント一覧・取得、メンバー一覧、明示 ACE の一覧） |
+| `read:tenant` | テナントとメンバーの参照（テナント一覧・取得、メンバー一覧、明示 ACE の一覧、利用者のプロフィール） |
 | `write:tenant` | テナントの更新・削除、メンバーの追加・変更・削除、ドライブ容量の設定（`read:tenant` を含む） |
 | `read:project` | プロジェクトの参照 |
 | `write:project` | プロジェクトの更新と Webhook の管理（`read:project` を含む） |

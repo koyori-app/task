@@ -6,12 +6,13 @@ import { computed, ref } from 'vue';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
+import { userProfileHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 import { useAuthStore } from '@/stores/auth';
 
 type TenantResponse = Pick<
   components['schemas']['TenantListItemResponse'],
-  'id' | 'name' | 'owner_id'
+  'id' | 'display_id' | 'name' | 'owner_id'
 >;
 type TenantMemberResponse = components['schemas']['TenantMemberResponse'];
 type TenantRole = components['schemas']['TenantRole'];
@@ -456,7 +457,12 @@ async function onRemove(member: TenantMemberResponse) {
               </span>
               <span class="min-w-0 flex-1 overflow-hidden leading-snug">
                 <span class="block truncate text-sm font-medium">
-                  {{ member.user.username }}
+                  <a
+                    :href="userProfileHref(tenant.display_id, member.user_id)"
+                    class="hover:underline"
+                  >
+                    {{ member.user.username }}
+                  </a>
                   <span v-if="isSelf(member)" class="text-xs font-normal text-muted-foreground">
                     (あなた)
                   </span>

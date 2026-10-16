@@ -12,6 +12,7 @@ describe('パンくずのルート台帳', () => {
     ['/acme/settings', 'テナント設定'],
     ['/acme/settings/members', 'メンバー'],
     ['/acme/projects/new', 'プロジェクト作成'],
+    ['/acme/users/u-1', 'プロフィール'],
     ['/acme/projects/ENG/tasks', ''],
     ['/acme/projects/ENG/settings', 'プロジェクト設定'],
     ['/acme/projects/ENG/reviews', 'レビュー'],
@@ -19,7 +20,12 @@ describe('パンくずのルート台帳', () => {
     ['/acme/projects/ENG/tasks/ENG-3', ''],
   ])('%s はページと実データから段を組む', (pathname, name) => {
     expect(
-      breadcrumbRoute(pathname, { tenant: 'acme', projectKey: 'ENG', taskId: 'ENG-3' })?.name,
+      breadcrumbRoute(pathname, {
+        tenant: 'acme',
+        projectKey: 'ENG',
+        taskId: 'ENG-3',
+        userId: 'u-1',
+      })?.name,
     ).toBe(name);
   });
 

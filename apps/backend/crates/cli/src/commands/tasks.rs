@@ -42,6 +42,8 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             milestone,
             sprint,
             parent,
+            planned_start_from,
+            planned_start_to,
             archived,
             sort,
             limit,
@@ -93,6 +95,12 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 // 詳細を 1 度引いて ID に直す
                 let id = resolve_parent_task_id(api, &project, reference).await?;
                 query.push(("parent_task_id", id.to_string()));
+            }
+            if let Some(date) = planned_start_from {
+                query.push(("planned_start_from", date.to_string()));
+            }
+            if let Some(date) = planned_start_to {
+                query.push(("planned_start_to", date.to_string()));
             }
 
             let tasks: TaskListResponse = api
@@ -176,6 +184,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 sprint_id: resolved.sprint_id,
                 soft_deadline: resolved.soft_deadline,
                 hard_deadline: resolved.hard_deadline,
+                planned_start_on: resolved.planned_start_on,
                 estimated_minutes: resolved.estimated_minutes,
                 assignees: resolved.assignees.take().unwrap_or_default(),
                 label_ids: resolved.set_label_ids.take().unwrap_or_default(),
@@ -348,6 +357,8 @@ fn update_request(fields: UpdateFields) -> UpdateTaskRequest {
         clear_soft_deadline: clears.clear_soft_deadline,
         hard_deadline: resolved.hard_deadline,
         clear_hard_deadline: clears.clear_hard_deadline,
+        planned_start_on: resolved.planned_start_on,
+        clear_planned_start_on: clears.clear_planned_start,
         estimated_minutes: resolved.estimated_minutes,
         clear_estimated_minutes: clears.clear_estimate,
         is_archived: fields.is_archived,
@@ -364,6 +375,7 @@ fn update_request(fields: UpdateFields) -> UpdateTaskRequest {
 struct ResolvedFields {
     soft_deadline: Option<DateTime<Utc>>,
     hard_deadline: Option<DateTime<Utc>>,
+    planned_start_on: Option<NaiveDate>,
     estimated_minutes: Option<i32>,
     progress_pct: Option<i16>,
     parent_task_id: Option<Uuid>,
@@ -389,6 +401,7 @@ impl TaskClearArgs {
             clear_description: false,
             clear_soft_deadline: false,
             clear_hard_deadline: false,
+            clear_planned_start: false,
             clear_estimate: false,
             clear_parent: false,
             clear_milestone: false,
@@ -430,6 +443,7 @@ async fn resolve_fields(
             .as_deref()
             .map(|raw| parse_deadline("--hard-deadline", raw))
             .transpose()?,
+        planned_start_on: fields.planned_start,
         estimated_minutes: fields.estimate,
         progress_pct: fields.progress,
         ..ResolvedFields::default()
