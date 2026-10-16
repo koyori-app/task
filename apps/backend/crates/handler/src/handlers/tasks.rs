@@ -157,6 +157,27 @@ async fn record_task_field_activities<C: ConnectionTrait>(
             .await?;
         }
     }
+    if payload.clear_planned_start_on || payload.planned_start_on.is_some() {
+        let new_start = if payload.clear_planned_start_on {
+            None
+        } else {
+            payload.planned_start_on.or(before.planned_start_on)
+        };
+        if new_start != before.planned_start_on {
+            // deadline_changed に相乗りすると画面が「期限を変更」と表示するので別の種別にする
+            record_activity(
+                db,
+                task_id,
+                Some(user_id),
+                "planned_start_changed",
+                serde_json::json!({
+                    "from": before.planned_start_on,
+                    "to": new_start,
+                }),
+            )
+            .await?;
+        }
+    }
     if let Some(archived) = payload.is_archived
         && archived != before.is_archived
     {
@@ -634,6 +655,17 @@ pub async fn list_tasks(
     if let Some(uid) = q.created_by {
         query = query.filter(tasks::Column::CreatedBy.eq(uid));
     }
+    if let (Some(from), Some(to)) = (q.planned_start_from, q.planned_start_to)
+        && from > to
+    {
+        return Err(AppError::BadRequest);
+    }
+    if let Some(from) = q.planned_start_from {
+        query = query.filter(tasks::Column::PlannedStartOn.gte(from));
+    }
+    if let Some(to) = q.planned_start_to {
+        query = query.filter(tasks::Column::PlannedStartOn.lte(to));
+    }
     if let Some(uid) = q.assignee_id {
         query = query.filter(Expr::cust_with_values(
             "EXISTS (SELECT 1 FROM task_assignees WHERE task_assignees.task_id = tasks.id AND task_assignees.user_id = $1)",
@@ -807,6 +839,7 @@ pub async fn create_task(
         sprint_id: Set(payload.sprint_id),
         soft_deadline: Set(payload.soft_deadline.map(Into::into)),
         hard_deadline: Set(payload.hard_deadline.map(Into::into)),
+        planned_start_on: Set(payload.planned_start_on),
         estimated_minutes: Set(payload.estimated_minutes),
         is_archived: Set(false),
         created_by: Set(auth.user_id),
@@ -1074,6 +1107,11 @@ pub async fn update_task(
         active.hard_deadline = Set(None);
     } else if let Some(v) = payload.hard_deadline {
         active.hard_deadline = Set(Some(v.into()));
+    }
+    if payload.clear_planned_start_on {
+        active.planned_start_on = Set(None);
+    } else if let Some(v) = payload.planned_start_on {
+        active.planned_start_on = Set(Some(v));
     }
 
     let effective_soft = if payload.clear_soft_deadline {

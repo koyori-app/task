@@ -124,6 +124,7 @@ pub fn task_detail_json() -> serde_json::Value {
         "sprint_id": null,
         "soft_deadline": null,
         "hard_deadline": null,
+        "planned_start_on": null,
         "estimated_minutes": null,
         "is_archived": false,
         "created_by": null,
