@@ -12,6 +12,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { computed, ref } from 'vue';
 
 import TaskForgePullRequestLinkDialog from '@/components/tasks/TaskForgePullRequestLinkDialog.vue';
+import TaskIssueSourceRow from '@/components/tasks/TaskIssueSourceRow.vue';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -161,6 +162,7 @@ const SOURCE_LABELS: Record<string, string> = {
     <p v-if="notConnected" id="forge-link-disabled-reason" class="text-xs text-muted-foreground">
       PR をリンクするには、プロジェクト設定でリポジトリを連携してください
     </p>
+    <TaskIssueSourceRow v-if="forgeQuery.data.value?.issue" :issue="forgeQuery.data.value.issue" />
 
     <p v-if="forgeQuery.isLoading.value" class="text-sm text-muted-foreground">読み込み中…</p>
     <div
