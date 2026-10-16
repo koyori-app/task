@@ -18591,6 +18591,131 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge/branches/{link_id}": {
+      "delete": {
+        "tags": ["Tasks"],
+        "summary": "ブランチのリンクを外す",
+        "operationId": "delete_task_forge_branch",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "タスクID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "link_id",
+            "in": "path",
+            "description": "ブランチのリンクID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "外しました"
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/relations": {
       "get": {
         "tags": ["Tasks"],
@@ -25730,10 +25855,23 @@
       },
       "TaskForgeBranch": {
         "type": "object",
-        "required": ["id", "host", "host_url", "repo_owner", "repo_name", "branch", "html_url"],
+        "required": [
+          "id",
+          "host",
+          "host_url",
+          "repo_owner",
+          "repo_name",
+          "branch",
+          "html_url",
+          "created_at"
+        ],
         "properties": {
           "branch": {
             "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
           },
           "host": {
             "type": "string"
@@ -25742,7 +25880,8 @@
             "type": "string"
           },
           "html_url": {
-            "type": "string"
+            "type": "string",
+            "description": "ホスト上のブランチの URL。組み立てずにそのまま使う"
           },
           "id": {
             "type": "string",
@@ -25905,8 +26044,7 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TaskForgeBranch"
-            },
-            "description": "ブランチのリンクは未実装（TASK-291）で、常に空"
+            }
           },
           "commits": {
             "type": "array",

@@ -41,6 +41,17 @@ const commit = {
   html_url: 'https://github.com/acme/backend/commit/a3f92c1',
 };
 
+const branch = {
+  id: 'branch-1',
+  host: 'github',
+  host_url: 'https://github.com',
+  repo_owner: 'acme',
+  repo_name: 'backend',
+  branch: 'feat/TASK-1-oauth',
+  html_url: 'https://github.com/acme/backend/tree/feat/TASK-1-oauth',
+  created_at: '2026-10-01T00:00:00Z',
+};
+
 async function mountWith(forge: Record<string, unknown>) {
   vi.stubGlobal('fetch', async (request: Request | string) => {
     const url = typeof request === 'string' ? request : request.url;
@@ -102,5 +113,52 @@ describe('TaskForgeSection', () => {
     expect(row.get('a').attributes('href')).toBe(commit.html_url);
     expect(row.text()).toContain('fix: トークン期限切れを修正');
     expect(row.text()).toContain('Yupix');
+  });
+
+  it('コミット一覧を確定できていない PR にだけ「一部のみ」を添える', async () => {
+    const wrapper = await mountWith({
+      pull_requests: [
+        pullRequest,
+        { ...pullRequest, id: 'pr-2', number: 91, commits_complete: true },
+      ],
+    });
+    const rows = wrapper.findAll('[data-forge-pull-request]');
+    expect(rows[0]!.text()).toContain('コミット一覧は一部のみ');
+    expect(rows[1]!.text()).not.toContain('コミット一覧は一部のみ');
+  });
+
+  it('ブランチだけでも空表示にせず、名前とホストのリンクを出す', async () => {
+    const wrapper = await mountWith({ branches: [branch] });
+    expect(wrapper.text()).not.toContain('まだ PR もコミットもありません');
+    expect(wrapper.text()).toContain('Branches');
+    const link = wrapper.get('[data-forge-branch] a');
+    expect(link.text()).toBe('feat/TASK-1-oauth');
+    expect(link.attributes('href')).toBe(branch.html_url);
+  });
+
+  it('解除するとリンクを外す API を呼び、一覧を取り直す', async () => {
+    let branches = [branch];
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (request: Request) => {
+      calls.push(`${request.method} ${new URL(request.url).pathname}`);
+      if (request.method === 'DELETE') {
+        branches = [];
+        return new Response(null, { status: 204 });
+      }
+      return Response.json({ pull_requests: [], commits: [], branches });
+    });
+    const wrapper = mount(TaskForgeSection, {
+      props: { tenantId: 'tenant-1', projectId: 'project-1', taskId: 'TASK-1' },
+      global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
+    });
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="feat/TASK-1-oauth のリンクを外す"]').trigger('click');
+    await flushPromises();
+
+    expect(calls).toContain(
+      'DELETE /api/v1/tenants/tenant-1/projects/project-1/tasks/TASK-1/forge/branches/branch-1',
+    );
+    expect(wrapper.find('[data-forge-branch]').exists()).toBe(false);
   });
 });
