@@ -4245,11 +4245,45 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "description": "手元の ETag（カンマ区切りで複数可、`*` は常に一致）。一致すれば 304 を本文なしで返す",
+            "required": false,
+            "schema": {
+              "type": ["string", "null"]
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "ファイルバイナリ"
+            "description": "ファイルバイナリ",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "本文の ETag（応答 JSON の `etag` と同じ値）"
+              },
+              "Last-Modified": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "updated_at（RFC 7231 形式）"
+              }
+            }
+          },
+          "304": {
+            "description": "If-None-Match が現在の ETag と一致した（本文なし）",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "本文の ETag"
+              }
+            }
           },
           "401": {
             "description": "ログインまたはセッションが必要です",
@@ -6346,6 +6380,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "現在の ETag（`etag` の値をそのまま。カンマ区切りで複数可、`*` は常に一致）。一致しなければ 412。省略時は無条件に上書きする",
+            "required": false,
+            "schema": {
+              "type": ["string", "null"]
+            }
           }
         ],
         "requestBody": {
@@ -6429,6 +6472,16 @@
                       "example": "internal-error"
                     }
                   }
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match が現在の ETag と一致しません（他の更新が先に入っています）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
                 }
               }
             }
@@ -23727,12 +23780,18 @@
           "url",
           "folder_id",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "etag"
         ],
         "properties": {
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "etag": {
+            "type": "string",
+            "description": "本文の ETag（ダブルクォート込み）。`PUT .../content` の `If-Match` にそのまま渡す",
+            "example": "\"sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae\""
           },
           "folder_id": {
             "type": ["string", "null"],

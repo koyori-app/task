@@ -72,6 +72,7 @@ async fn insert_file(
         folder_id: Set(folder_id),
         created_at: Set(now.into()),
         updated_at: Set(now.into()),
+        content_hash: Set(None),
     }
     .insert(&app.state.db)
     .await

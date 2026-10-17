@@ -14,6 +14,30 @@ pub fn content_url(file_id: Uuid) -> String {
     format!("/v1/drive/files/{file_id}/content")
 }
 
+/// ファイル本文の ETag（ダブルクォート込み）。応答の `etag` と `ETag` ヘッダーの両方に使う。
+///
+/// `content_hash` を持たない既存行は `updated_at`（Unix ミリ秒）とサイズで代替する。
+/// 本文更新で `updated_at` が変わるので、`If-Match` の楽観ロックにはこれで足りる。
+pub fn file_etag(model: &drive_files::Model) -> String {
+    match &model.content_hash {
+        Some(hash) => format!("\"sha256:{hash}\""),
+        None => format!(
+            "\"ts:{}-{}\"",
+            model.updated_at.timestamp_millis(),
+            model.size
+        ),
+    }
+}
+
+/// `If-Match` / `If-None-Match` の 1 行が現在の ETag に一致するか。
+///
+/// `*` は常に一致。カンマ区切りの複数指定はどれか 1 つの完全一致で一致とする。
+/// 弱い ETag（`W/"..."`）は完全一致しないので一致しない。
+pub fn etag_matches(header_value: &str, current: &str) -> bool {
+    let value = header_value.trim();
+    value == "*" || value.split(',').any(|tag| tag.trim() == current)
+}
+
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ListFilesQuery {
@@ -43,10 +67,16 @@ pub struct DriveFileResponse {
     pub created_at: DateTime<Utc>,
     #[schema(value_type = String, format = "date-time")]
     pub updated_at: DateTime<Utc>,
+    /// 本文の ETag（ダブルクォート込み）。`PUT .../content` の `If-Match` にそのまま渡す
+    #[schema(
+        example = "\"sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae\""
+    )]
+    pub etag: String,
 }
 
 impl From<drive_files::Model> for DriveFileResponse {
     fn from(model: drive_files::Model) -> Self {
+        let etag = file_etag(&model);
         Self {
             id: model.id,
             name: model.name,
@@ -56,6 +86,7 @@ impl From<drive_files::Model> for DriveFileResponse {
             folder_id: model.folder_id,
             created_at: model.created_at.with_timezone(&Utc),
             updated_at: model.updated_at.with_timezone(&Utc),
+            etag,
         }
     }
 }
@@ -104,4 +135,40 @@ pub struct UpdateQuotaRequest {
 #[into_params(parameter_in = Query)]
 pub struct ContentQuery {
     pub token: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::etag_matches;
+
+    const CURRENT: &str = "\"sha256:abc\"";
+
+    #[test]
+    fn exact_match_only() {
+        assert!(etag_matches("\"sha256:abc\"", CURRENT));
+        assert!(!etag_matches("\"sha256:abd\"", CURRENT));
+        // クォート無しは別の値として扱う
+        assert!(!etag_matches("sha256:abc", CURRENT));
+    }
+
+    #[test]
+    fn wildcard_matches_any() {
+        assert!(etag_matches("*", CURRENT));
+        assert!(etag_matches("  *  ", CURRENT));
+    }
+
+    #[test]
+    fn list_with_whitespace() {
+        assert!(etag_matches("\"x\", \"sha256:abc\"", CURRENT));
+        assert!(etag_matches("\"x\",\"sha256:abc\" ", CURRENT));
+        assert!(etag_matches("  \"sha256:abc\"  ,\"y\"", CURRENT));
+        assert!(!etag_matches("\"x\", \"y\"", CURRENT));
+        assert!(!etag_matches("", CURRENT));
+    }
+
+    #[test]
+    fn weak_etag_is_rejected() {
+        assert!(!etag_matches("W/\"sha256:abc\"", CURRENT));
+        assert!(!etag_matches("\"x\", W/\"sha256:abc\"", CURRENT));
+    }
 }

@@ -17,6 +17,7 @@ mod m20260924010000_device_tokens;
 mod m20261002000000_tenant_invitations;
 mod m20261004000000_pat_scopes_api;
 mod m20261016000000_task_planned_start_on;
+mod m20261016005000_drive_files_content_hash;
 
 pub struct Migrator;
 
@@ -41,6 +42,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261002000000_tenant_invitations::Migration),
             Box::new(m20261004000000_pat_scopes_api::Migration),
             Box::new(m20261016000000_task_planned_start_on::Migration),
+            Box::new(m20261016005000_drive_files_content_hash::Migration),
         ]
     }
 }
