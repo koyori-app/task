@@ -4,7 +4,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use axum::{
     Json,
     body::Body,
-    extract::{Multipart, Path, Query, State},
+    extract::{
+        Path, Query, State,
+        multipart::{Multipart, MultipartError},
+    },
     http::{HeaderMap, HeaderName, StatusCode, header},
     response::Response,
 };
@@ -318,7 +321,7 @@ pub async fn upload_file(
     while let Some(field) = multipart
         .next_field()
         .await
-        .map_err(|e| AppError::Internal(e.into()))?
+        .map_err(multipart_to_app_error)?
     {
         match field.name() {
             Some("file") => {
@@ -370,7 +373,8 @@ pub async fn upload_file(
                 let (mut tx, rx) = fmpsc::channel::<Result<Bytes, StorageError>>(8);
                 let byte_stream: ByteStream = Box::pin(rx);
 
-                // 本文の SHA-256 も流しながら計算する。途中で打ち切った場合は None
+                // 本文の SHA-256 も流しながら計算する。途中で打ち切った場合は Ok(None)、
+                // multipart の読み取りに失敗した場合はそのエラーを返す
                 let pump = async move {
                     let mut field = field;
                     let mut hasher = Sha256::new();
@@ -387,21 +391,22 @@ pub async fn upload_file(
                                             "upload size limit exceeded".into(),
                                         )))
                                         .await;
-                                    return None;
+                                    return Ok(None);
                                 }
                                 hasher.update(&bytes);
                                 if tx.send(Ok(bytes)).await.is_err() {
-                                    return None;
+                                    return Ok(None);
                                 }
                             }
                             Ok(None) => break,
                             Err(e) => {
-                                let _ = tx.send(Err(StorageError::Other(e.to_string()))).await;
-                                return None;
+                                // Display は上位メッセージだけなので、source まで出る Debug で残す
+                                let _ = tx.send(Err(StorageError::Other(format!("{e:?}")))).await;
+                                return Err(e);
                             }
                         }
                     }
-                    Some(hex::encode(hasher.finalize()))
+                    Ok(Some(hex::encode(hasher.finalize())))
                 };
 
                 let file_id = Uuid::new_v4();
@@ -415,6 +420,17 @@ pub async fn upload_file(
                 );
 
                 let actual_size = byte_count.load(Ordering::Relaxed);
+
+                let content_hash = match content_hash {
+                    Ok(hash) => hash,
+                    // 本文の上限超過はストレージ側のエラー（500）より先に 413 で返す
+                    Err(e) if is_body_limit_error(&e) => {
+                        let _ = state.storage.delete(&storage_key).await;
+                        return Err(AppError::ContentTooLarge);
+                    }
+                    // それ以外は従来どおり下のサイズ・ストレージ判定に任せる（空本文の 400 など）
+                    Err(_) => None,
+                };
 
                 // サイズチェックを upload_result より先に行う。
                 // 早期中断時は upload_result がエラーになるが、
@@ -991,6 +1007,28 @@ fn header_matches(headers: &HeaderMap, name: HeaderName, etag: &str) -> Option<b
     let mut values = headers.get_all(name).iter().peekable();
     values.peek()?;
     Some(values.any(|v| v.to_str().is_ok_and(|s| etag_matches(s, etag))))
+}
+
+/// 本文の上限超過は 413。それ以外は従来どおり 500 だが、ログに source まで残す
+fn multipart_to_app_error(err: MultipartError) -> AppError {
+    if is_body_limit_error(&err) {
+        AppError::ContentTooLarge
+    } else {
+        AppError::Internal(err.into())
+    }
+}
+
+/// `MultipartError::status()` は 1 段しか剥がさず、`RequestBodyLimitLayer` 側の上限
+/// （`axum::Error` に二重に包まれる）を 500 と判定するので、source を辿って探す
+fn is_body_limit_error(err: &MultipartError) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = source {
+        if e.is::<http_body_util::LengthLimitError>() {
+            return true;
+        }
+        source = e.source();
+    }
+    false
 }
 
 fn storage_to_app_error(err: StorageError) -> AppError {
