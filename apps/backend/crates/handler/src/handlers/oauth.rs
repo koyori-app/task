@@ -27,7 +27,8 @@ use auth_core::state::{
     build_frontend_oauth_error_redirect, build_frontend_redirect, sanitize_redirect_path,
 };
 use auth_core::url_guard::normalize_instance_url;
-use entity::{oauth_connections, users};
+use entity::{oauth_connections, system_settings, users};
+use job::{VerificationEmailJob, verification_email};
 use service::auth::{AuthError, create_password_hash};
 use service::db::{is_postgres_unique_violation, with_transaction};
 use service::email::normalize_email;
@@ -73,6 +74,10 @@ pub enum OAuthError {
     AccountSuspended,
     #[error("security violation")]
     SecurityViolation,
+    #[error("instance not allowed")]
+    InstanceNotAllowed,
+    #[error("registration disabled")]
+    RegistrationDisabled,
 }
 
 impl From<sea_orm::DbErr> for OAuthError {
@@ -174,6 +179,20 @@ impl IntoResponse for OAuthError {
                 }),
             )
                 .into_response(),
+            OAuthError::InstanceNotAllowed => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError {
+                    message: "oauth-instance-not-allowed".into(),
+                }),
+            )
+                .into_response(),
+            OAuthError::RegistrationDisabled => (
+                StatusCode::FORBIDDEN,
+                Json(ServerError {
+                    message: "registration-disabled".into(),
+                }),
+            )
+                .into_response(),
             OAuthError::SecurityViolation => {
                 warn!("oauth security validation failed");
                 (
@@ -223,15 +242,17 @@ pub async fn oauth_start(
     }
 
     let instance_url = match provider.as_str() {
-        "gitlab_selfhosted" => Some(
-            normalize_instance_url(
-                query
-                    .instance_url
-                    .as_deref()
-                    .ok_or(OAuthError::BadRequest)?,
-            )
-            .map_err(OAuthError::Internal)?,
-        ),
+        "gitlab_selfhosted" => {
+            let raw = query
+                .instance_url
+                .as_deref()
+                .ok_or(OAuthError::BadRequest)?;
+            // 運用者の許可の一覧に在る instance だけを受ける。一覧の形（正規化した URL）で控える
+            let instance = settings
+                .gitlab_selfhosted_instance(raw)
+                .ok_or(OAuthError::InstanceNotAllowed)?;
+            Some(normalize_instance_url(&instance.url).map_err(OAuthError::Internal)?)
+        }
         _ => None,
     };
 
@@ -241,7 +262,8 @@ pub async fn oauth_start(
         .endpoints(&state.http_client)
         .await
         .map_err(OAuthError::Internal)?;
-    let credentials = get_credentials(&provider, settings).map_err(OAuthError::Internal)?;
+    let credentials = get_credentials(&provider, settings, instance_url.as_deref())
+        .map_err(OAuthError::Internal)?;
 
     let pkce = generate_pkce_pair();
     let oauth_state = generate_state();
@@ -390,13 +412,22 @@ pub async fn oauth_callback(
     }
 
     let instance_url = payload.instance_url.as_deref();
+    // 開始の後に許可の一覧から外れた instance とも、トークンの交換をしない（client secret を送らぬ）
+    if provider == "gitlab_selfhosted"
+        && instance_url
+            .and_then(|url| settings.gitlab_selfhosted_instance(url))
+            .is_none()
+    {
+        return Err(OAuthError::InstanceNotAllowed);
+    }
     let provider_impl =
         resolve_provider(&provider, settings, instance_url).map_err(OAuthError::Internal)?;
     let endpoints = provider_impl
         .endpoints(&state.http_client)
         .await
         .map_err(OAuthError::Internal)?;
-    let credentials = get_credentials(&provider, settings).map_err(OAuthError::Internal)?;
+    let credentials =
+        get_credentials(&provider, settings, instance_url).map_err(OAuthError::Internal)?;
     let redirect_uri = settings.callback_url(&provider);
 
     let token = exchange_code(
@@ -720,6 +751,11 @@ async fn resolve_user_and_connection(
         return Ok(link_user_id);
     }
 
+    // 新しい利用者を作るのは、登録が開いておる時だけ（既存の利用者のログインと連携は上で済んでおる）
+    if !user_registration_enabled(&state.db).await? {
+        return Err(OAuthError::RegistrationDisabled);
+    }
+
     if let Some(email) = provider_info.email.as_deref() {
         let normalized = normalize_email(email);
         if users::Entity::find()
@@ -741,6 +777,33 @@ async fn resolve_user_and_connection(
         token,
     )
     .await
+}
+
+/// 管理画面の「新規登録を受け付ける」（`system_settings.user_registration_enabled`）。
+async fn user_registration_enabled(db: &sea_orm::DatabaseConnection) -> Result<bool, OAuthError> {
+    common::system_settings::ensure_system_settings_row(db).await?;
+    let settings = system_settings::Entity::find()
+        .filter(system_settings::Column::Singleton.eq(true))
+        .one(db)
+        .await?
+        .ok_or_else(|| {
+            OAuthError::Internal(anyhow::anyhow!(
+                "system_settings singleton row missing after ensure"
+            ))
+        })?;
+    Ok(settings.user_registration_enabled)
+}
+
+/// provider が知らせる email の確認済みの印を、そのまま採ってよいか。
+///
+/// `gitlab_selfhosted` の instance は運用者の外に在りうるゆえ、その印は採らず、通常の確認
+/// mail で確かめる。他の provider は、その provider 自身（または運用者が設定した OIDC の
+/// issuer）が確かめた印を採る。
+fn provider_email_verified(provider_slug: &str, provider_info: &ProviderUserInfo) -> bool {
+    match provider_slug {
+        "gitlab_selfhosted" => false,
+        _ => provider_info.email_verified.unwrap_or(false),
+    }
 }
 
 async fn find_connection(
@@ -1004,7 +1067,7 @@ async fn update_connection_tokens(
 
 async fn create_oauth_user_and_connection(
     state: &AppState,
-    _provider_slug: &str,
+    provider_slug: &str,
     db_provider: &str,
     instance_url: Option<&str>,
     provider_info: &ProviderUserInfo,
@@ -1029,6 +1092,9 @@ async fn create_oauth_user_and_connection(
     };
     let now = Utc::now();
     let login = provider_login(provider_info);
+    let email_verified = provider_email_verified(provider_slug, provider_info);
+    // 確認 mail を送る先。provider が email を知らせぬ時の仮の宛先には送らない
+    let verify_email_to = (!email_verified && provider_info.email.is_some()).then(|| email.clone());
 
     let user = users::ActiveModel {
         id: Set(user_id),
@@ -1036,7 +1102,7 @@ async fn create_oauth_user_and_connection(
         bio: Set(Some(String::new())),
         avatar_url: Set(provider_info.avatar_url.clone()),
         email: Set(email.clone()),
-        email_verified: Set(provider_info.email_verified.unwrap_or(false)),
+        email_verified: Set(email_verified),
         password_hash: Set(None),
         is_admin: Set(false),
         is_suspended: Set(false),
@@ -1060,7 +1126,7 @@ async fn create_oauth_user_and_connection(
     let provider = db_provider.to_string();
     let instance_url = instance_url.map(str::to_string);
 
-    with_transaction::<Uuid, OAuthError, _>(&state.db, |txn| {
+    let user_id = with_transaction::<Uuid, OAuthError, _>(&state.db, |txn| {
         Box::pin(async move {
             if let Err(e) = users::Entity::insert(user).exec(txn).await {
                 if is_postgres_unique_violation(&e) {
@@ -1087,7 +1153,21 @@ async fn create_oauth_user_and_connection(
             Ok(user_id)
         })
     })
-    .await
+    .await?;
+
+    // 確認済みでない email は、password の登録と同じ確認 mail の流れに載せる。送れずとも
+    // 利用者は作れておるゆえ止めない（再送の口から送り直せる）
+    if let Some(email) = verify_email_to
+        && let Err(e) = verification_email::enqueue(
+            state.verification_email_storage.as_ref(),
+            VerificationEmailJob::new(user_id, email),
+        )
+        .await
+    {
+        warn!(user_id = %user_id, error = ?e, "oauth verification email enqueue failed");
+    }
+
+    Ok(user_id)
 }
 
 async fn derive_unique_username(

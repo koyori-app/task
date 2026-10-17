@@ -148,8 +148,11 @@ OAUTH_GITHUB_CLIENT_ID=...
 OAUTH_GITHUB_CLIENT_SECRET=...
 OAUTH_GITLAB_CLIENT_ID=...
 OAUTH_GITLAB_CLIENT_SECRET=...
+OAUTH_GITLAB_SELFHOSTED_INSTANCE_URLS=https://gitlab.example.com,https://gitlab.example.org
 OAUTH_GITLAB_SELFHOSTED_CLIENT_ID=...
 OAUTH_GITLAB_SELFHOSTED_CLIENT_SECRET=...
+# instance ごとの client（任意。鍵は一覧と同じ URL）
+OAUTH_GITLAB_SELFHOSTED_INSTANCE_CREDENTIALS={"https://gitlab.example.org":{"client_id":"...","client_secret":"..."}}
 OAUTH_GOOGLE_CLIENT_ID=...
 OAUTH_GOOGLE_CLIENT_SECRET=...
 # 汎用 OIDC（複数設定可）
@@ -162,16 +165,26 @@ OAUTH_OIDC_CLIENT_SECRET=...
 
 GitLab.com と異なり、OAuth エンドポイントがインスタンスごとに異なる。
 
+**受け付ける instance は運用者が決める。** `OAUTH_GITLAB_SELFHOSTED_INSTANCE_URLS`（カンマ区切り）に
+並べた instance だけを受け、空・未設定なら `gitlab_selfhosted` は無効になる（プロバイダー一覧にも出ない）。
+一覧と利用者が渡す `instance_url` は、比べる前に同じ形へ揃える（scheme と host を小文字に、既定の
+port と末尾の `/` を落とす。資格情報・query・fragment を含む URL は受けない）。
+
+client の資格情報は既定で `OAUTH_GITLAB_SELFHOSTED_CLIENT_ID` / `_SECRET` を一覧の全ての instance に使い、
+`OAUTH_GITLAB_SELFHOSTED_INSTANCE_CREDENTIALS`（JSON）で instance ごとに上書きできる。資格情報の無い
+instance や、一覧に無い instance の資格情報は設定の誤りとして起動を止める。
+
 ```text
 1. ユーザーがログイン画面で「GitLab self-hosted でログイン」を選択し、
    インスタンス URL（例: https://gitlab.example.com）を入力
 
 2. GET /v1/auth/oauth/gitlab_selfhosted?instance_url={url} をリクエスト
-   → バックエンドが instance_url を Redis の state に紐付けて保存
+   → instance_url が許可の一覧に無ければ 400（oauth-instance-not-allowed）。外へは何も送らない
+   → バックエンドが instance_url（一覧の形）を Redis の state に紐付けて保存
    → 認可 URL: {instance_url}/oauth/authorize?...
 
 3. コールバック: GET /v1/auth/oauth/gitlab_selfhosted/callback
-   → state から instance_url を復元
+   → state から instance_url を復元。許可の一覧に無ければ 400 で、トークン交換をしない
    → トークンエンドポイント: {instance_url}/oauth/token
    → ユーザー情報: {instance_url}/api/v4/user
    → oauth_connections.instance_url に保存
@@ -263,6 +276,9 @@ B) 存在しない かつ provider_email が users.email と一致するユー�
 
 C) 存在しない かつ メール一致なし
    → 新規ユーザーを作成し oauth_connections も INSERT（§6.2 参照）
+     管理画面で新規登録を止めている（system_settings.user_registration_enabled = false）なら
+     403（registration-disabled）で、利用者を作らない。A の既存の利用者のログインと、
+     ログイン済みの利用者への連携は登録の設定によらず通す
 ```
 
 ### 6.1 メール競合（ケース B）
@@ -281,7 +297,7 @@ users::ActiveModel {
     id: Set(Uuid::new_v4()),
     username: Set(derive_username_from_provider(provider_info)),
     email: Set(provider_email),
-    email_verified: Set(provider_info.email_verified.unwrap_or(false)), // プロバイダーの検証フラグを反映
+    email_verified: Set(provider_email_verified(provider_slug, provider_info)), // 下記
     password_hash: Set(None),    // OAuth ユーザーはパスワードなし
     bio: Set(Some(String::new())),
     avatar_url: Set(provider_info.avatar_url),
@@ -289,6 +305,11 @@ users::ActiveModel {
 ```
 
 ユーザー名は `{provider_username}` をベースに、重複時は `{name}_2`, `{name}_3` ... とする。
+
+`email_verified` は、プロバイダー自身が確かめた印を採る（GitHub は `/user/emails` の `verified`、
+gitlab.com は `/api/v4/user` の `confirmed_at`、Google は ID token の `email_verified`、汎用 OIDC は
+運用者が設定した issuer の `email_verified`）。`gitlab_selfhosted` の印は採らず `false` で作り、
+password の登録と同じ確認メールを送る。確認メールのリンクを開けば `email_verified` が `true` になる。
 
 ---
 

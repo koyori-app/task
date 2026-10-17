@@ -79,7 +79,7 @@ pub async fn github_app_user_token(
             .ok_or_else(|| anyhow::anyhow!("github_app token expired and has no refresh token"))?,
     )?;
     let endpoints = GithubAppProvider.endpoints(http).await?;
-    let credentials = get_credentials(GITHUB_APP_PROVIDER, settings)?;
+    let credentials = get_credentials(GITHUB_APP_PROVIDER, settings, None)?;
     let token = refresh_access_token(http, &endpoints, &credentials, &refresh_token).await?;
 
     let mut active: oauth_connections::ActiveModel = connection.into();

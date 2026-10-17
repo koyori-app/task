@@ -4,7 +4,8 @@ use axum_valid::Valid;
 use chrono::Utc;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryFilter,
+    TransactionTrait,
 };
 use tracing::warn;
 
@@ -14,7 +15,7 @@ use crate::openapi::{
     PasswordChangeErrors, PasswordResetCompleteErrors, PasswordResetRequestErrors,
     PasswordResetVerifyErrors,
 };
-use entity::{personal_tokens, users};
+use entity::{oauth_connections, personal_tokens, users};
 use job::{PasswordResetEmailJob, password_reset_email};
 use payload::password_reset::*;
 use service::auth::{AuthError, create_password_hash, verify_password};
@@ -119,6 +120,7 @@ pub async fn password_reset_complete(
         .await?
         .ok_or_else(|| AuthError::Internal(anyhow::anyhow!("user missing for token")))?;
 
+    let email_verified = user.email_verified;
     let mut active: users::ActiveModel = user.into();
     active.password_hash = Set(Some(password_hash));
     active.sessions_revoked_at = Set(Some(Utc::now().into()));
@@ -129,9 +131,21 @@ pub async fn password_reset_complete(
         .filter(personal_tokens::Column::Revoked.eq(false))
         .exec(&txn)
         .await?;
+    // reset の mail を受けた者が、この利用者の持ち主である。出所の確かでない OAuth の連携は外す:
+    // email の確認がまだの利用者の連携は全て、確認済みの利用者でも許可の一覧に無い instance の
+    // gitlab_selfhosted の連携。外した連携は、ログインした後に結び直せる
+    let detached = oauth_connections::Entity::delete_many()
+        .filter(oauth_connections::Column::UserId.eq(user_id))
+        .filter(unconfirmed_connections(&state, email_verified))
+        .exec(&txn)
+        .await?
+        .rows_affected;
     txn.commit()
         .await
         .map_err(|e| AuthError::Internal(e.into()))?;
+    if detached > 0 {
+        tracing::info!(user_id = %user_id, detached, "password reset detached oauth connections");
+    }
 
     // commit 成功後にトークンを消費。Redis 失敗時もパスワードは既に変更済み（許容）。
     let consumed_id = password_reset::consume_token(&state.redis_client, &payload.token)
@@ -148,6 +162,26 @@ pub async fn password_reset_complete(
     Ok(Json(MessageResponse {
         message: "パスワードをリセットしました。再度ログインしてください。".into(),
     }))
+}
+
+/// password reset で外す OAuth の連携の条件。
+fn unconfirmed_connections(state: &AppState, email_verified: bool) -> Condition {
+    if !email_verified {
+        return Condition::all();
+    }
+    let allowed: Vec<String> = state
+        .oauth_settings
+        .gitlab_selfhosted_instances
+        .iter()
+        .map(|instance| instance.url.clone())
+        .collect();
+    Condition::all()
+        .add(oauth_connections::Column::Provider.eq("gitlab_selfhosted"))
+        .add(
+            Condition::any()
+                .add(oauth_connections::Column::InstanceUrl.is_null())
+                .add(oauth_connections::Column::InstanceUrl.is_not_in(allowed)),
+        )
 }
 
 #[utoipa::path(

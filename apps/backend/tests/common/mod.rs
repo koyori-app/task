@@ -36,7 +36,7 @@ use backend::{
         auth::create_password_hash,
         drive::DriveConfig,
         http::create_http_client,
-        oauth::{OAuthSettings, ProviderConfig},
+        oauth::{OAuthSettings, ProviderConfig, parse_gitlab_selfhosted_instances},
         smtp::{SentMail, SmtpClient},
         storage::setup_storage,
         totp::build_totp,
@@ -363,6 +363,23 @@ pub struct MockGitLabUser {
 #[derive(Clone)]
 struct MockOAuthState {
     user: Arc<Mutex<MockGitLabUser>>,
+    hits: Arc<MockOAuthHits>,
+}
+
+/// mock の各口が叩かれた回数。許可していない instance に要求が届かぬことを数えて確かめる。
+#[derive(Debug, Default)]
+pub struct MockOAuthHits {
+    pub authorize: std::sync::atomic::AtomicUsize,
+    pub token: std::sync::atomic::AtomicUsize,
+    pub userinfo: std::sync::atomic::AtomicUsize,
+}
+
+impl MockOAuthHits {
+    /// token と userinfo の口が叩かれた回数の和（client secret を送る口と利用者情報の口）。
+    pub fn backchannel(&self) -> usize {
+        self.token.load(std::sync::atomic::Ordering::SeqCst)
+            + self.userinfo.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -388,13 +405,18 @@ struct GitLabUserResponse {
 
 pub struct MockOAuthHandle {
     pub base_url: String,
+    pub hits: Arc<MockOAuthHits>,
     user: Arc<Mutex<MockGitLabUser>>,
 }
 
 impl MockOAuthHandle {
     pub async fn start(initial_user: MockGitLabUser) -> Self {
         let user = Arc::new(Mutex::new(initial_user));
-        let state = MockOAuthState { user: user.clone() };
+        let hits = Arc::new(MockOAuthHits::default());
+        let state = MockOAuthState {
+            user: user.clone(),
+            hits: hits.clone(),
+        };
 
         let router = Router::new()
             .route("/oauth/authorize", get(authorize))
@@ -414,6 +436,7 @@ impl MockOAuthHandle {
 
         Self {
             base_url: format!("http://{addr}"),
+            hits,
             user,
         }
     }
@@ -423,7 +446,14 @@ impl MockOAuthHandle {
     }
 }
 
-async fn authorize(Query(query): Query<AuthorizeQuery>) -> Redirect {
+async fn authorize(
+    State(state): State<MockOAuthState>,
+    Query(query): Query<AuthorizeQuery>,
+) -> Redirect {
+    state
+        .hits
+        .authorize
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let mut url =
         url::Url::parse(&query.redirect_uri).expect("mock oauth redirect_uri must be valid");
     url.query_pairs_mut()
@@ -432,7 +462,11 @@ async fn authorize(Query(query): Query<AuthorizeQuery>) -> Redirect {
     Redirect::temporary(url.as_str())
 }
 
-async fn token() -> impl IntoResponse {
+async fn token(State(state): State<MockOAuthState>) -> impl IntoResponse {
+    state
+        .hits
+        .token
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     (
         StatusCode::OK,
         Json(TokenResponseBody {
@@ -443,6 +477,10 @@ async fn token() -> impl IntoResponse {
 }
 
 async fn userinfo(State(state): State<MockOAuthState>) -> impl IntoResponse {
+    state
+        .hits
+        .userinfo
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let user = state.user.lock().expect("mock oauth user lock").clone();
     let confirmed_at = user
         .email
@@ -567,10 +605,16 @@ impl TestApp {
             default_redirect_path: "/dashboard".to_string(),
             github: None,
             gitlab: None,
-            gitlab_selfhosted: Some(ProviderConfig {
-                client_id: TEST_OAUTH_CLIENT_ID.to_string(),
-                client_secret: TEST_OAUTH_CLIENT_SECRET.to_string(),
-            }),
+            // 許可の一覧には mock の instance だけを置く（一覧に無い instance の試験は別の mock を立てる）
+            gitlab_selfhosted_instances: parse_gitlab_selfhosted_instances(
+                Some(&mock.base_url),
+                Some(ProviderConfig {
+                    client_id: TEST_OAUTH_CLIENT_ID.to_string(),
+                    client_secret: TEST_OAUTH_CLIENT_SECRET.to_string(),
+                }),
+                None,
+            )
+            .expect("selfhosted allowlist"),
             google: None,
             oidc: None,
             github_app: Some(ProviderConfig {

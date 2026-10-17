@@ -11,5 +11,8 @@ pub mod state;
 
 pub use auth_core::provider::ProviderConfig;
 pub use registry::{get_credentials, resolve_provider};
-pub use settings::{GITHUB_APP_PROVIDER, OAuthSettings, OidcConfig};
+pub use settings::{
+    GITHUB_APP_PROVIDER, GitlabSelfHostedInstance, OAuthSettings, OidcConfig,
+    canonical_instance_url, parse_gitlab_selfhosted_instances,
+};
 pub use state::{OAuthStatePayload, RedisStateStore, consume_state, store_state};
