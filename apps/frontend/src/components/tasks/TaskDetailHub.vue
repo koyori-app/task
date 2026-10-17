@@ -127,6 +127,7 @@ const emit = defineEmits<{
   'save:title': [value: string];
   'save:description': [value: string | null];
   'save:progress_pct': [value: number];
+  'save:planned_start_on': [value: string | null];
   'save:soft_deadline': [value: string | null];
   'save:hard_deadline': [value: string | null];
   'save:label_ids': [value: string[]];
@@ -231,6 +232,9 @@ async function startEditing(field: EditableField) {
     case 'progress_pct':
       draftValue.value = String(props.task.progress_pct);
       break;
+    case 'planned_start_on':
+      draftValue.value = props.task.planned_start_on ?? '';
+      break;
     case 'soft_deadline':
       draftValue.value = isoToLocalDateInput(props.task.soft_deadline);
       break;
@@ -288,6 +292,13 @@ function commitEditing(field: EditableField) {
       if (next !== props.task.progress_pct) emit('save:progress_pct', next);
       break;
     }
+    case 'planned_start_on': {
+      // Soft 期限より後なら送らずに編集を開いたまま警告を見せる（サーバーは検証しない）
+      if (plannedStartAfterSoft.value) return;
+      const next = draftValue.value.trim();
+      if (next !== (props.task.planned_start_on ?? '')) emit('save:planned_start_on', next || null);
+      break;
+    }
     case 'soft_deadline': {
       const current = isoToLocalDateInput(props.task.soft_deadline);
       if (draftValue.value === current) break;
@@ -336,9 +347,16 @@ const PENDING_ACTIONS = [
   { label: 'チェックリストを作成', icon: ListChecks },
 ];
 
-function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
+const plannedStartAfterSoft = computed(() => {
+  if (editingField.value !== 'planned_start_on' || !props.task?.soft_deadline) return false;
+  const draft = draftValue.value.trim();
+  return !!draft && draft > isoToLocalDateInput(props.task.soft_deadline);
+});
+
+function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadline') {
   if (isFieldUpdating(field)) return;
-  if (field === 'soft_deadline') emit('save:soft_deadline', null);
+  if (field === 'planned_start_on') emit('save:planned_start_on', null);
+  else if (field === 'soft_deadline') emit('save:soft_deadline', null);
   else emit('save:hard_deadline', null);
   cancelEditing();
 }
@@ -595,6 +613,50 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                 <!-- 日付は 1 行に 2 つ（参照の Start → Due） -->
                 <TaskPropertyRow label="日付" :icon="CalendarDays">
                   <div class="flex flex-wrap items-center gap-1">
+                    <div v-if="editingField === 'planned_start_on'" class="flex items-center gap-1">
+                      <Input
+                        v-model="draftValue"
+                        ref="editingControlRef"
+                        data-editing="planned_start_on"
+                        type="date"
+                        class="h-7 max-w-40"
+                        :max="
+                          task.soft_deadline ? isoToLocalDateInput(task.soft_deadline) : undefined
+                        "
+                        :disabled="isFieldUpdating('planned_start_on')"
+                        :aria-invalid="plannedStartAfterSoft || undefined"
+                        aria-label="開始予定日"
+                        @keydown="onEditKeydown($event, 'planned_start_on')"
+                        @blur="commitEditing('planned_start_on')"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        class="size-7 shrink-0"
+                        aria-label="開始予定日を消す"
+                        :disabled="isFieldUpdating('planned_start_on')"
+                        @mousedown.prevent
+                        @click="clearDeadline('planned_start_on')"
+                      >
+                        <X class="size-4" aria-hidden="true" />
+                      </Button>
+                    </div>
+                    <button
+                      v-else
+                      type="button"
+                      class="inline-flex h-7 items-center gap-1.5 rounded px-1.5 text-sm hover:bg-muted"
+                      :class="task.planned_start_on ? '' : 'text-muted-foreground'"
+                      aria-label="開始予定日を編集"
+                      :disabled="isFieldUpdating('planned_start_on')"
+                      @click="startEditing('planned_start_on')"
+                    >
+                      <CalendarDays class="size-4" aria-hidden="true" />
+                      {{ task.planned_start_on ?? '開始予定' }}
+                    </button>
+
+                    <ArrowRight class="size-3.5 text-muted-foreground" aria-hidden="true" />
+
                     <div v-if="editingField === 'soft_deadline'" class="flex items-center gap-1">
                       <Input
                         v-model="draftValue"
@@ -686,13 +748,32 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                     </button>
                   </div>
                   <p
-                    v-if="fieldError('soft_deadline') || fieldError('hard_deadline')"
+                    v-if="plannedStartAfterSoft"
                     class="mt-1 text-xs text-destructive"
+                    role="alert"
                   >
-                    {{ fieldError('soft_deadline') ?? fieldError('hard_deadline') }}
+                    開始予定日が期限より後になっています
                   </p>
                   <p
-                    v-else-if="savedField === 'soft_deadline' || savedField === 'hard_deadline'"
+                    v-else-if="
+                      fieldError('planned_start_on') ||
+                      fieldError('soft_deadline') ||
+                      fieldError('hard_deadline')
+                    "
+                    class="mt-1 text-xs text-destructive"
+                  >
+                    {{
+                      fieldError('planned_start_on') ??
+                      fieldError('soft_deadline') ??
+                      fieldError('hard_deadline')
+                    }}
+                  </p>
+                  <p
+                    v-else-if="
+                      savedField === 'planned_start_on' ||
+                      savedField === 'soft_deadline' ||
+                      savedField === 'hard_deadline'
+                    "
                     role="status"
                     class="mt-1 text-xs text-muted-foreground"
                   >

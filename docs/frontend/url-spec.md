@@ -49,6 +49,7 @@
 | URL | 説明 |
 |-----|------|
 | `/{tenant}` | テナントホーム（プロジェクト一覧 or ダッシュボード） |
+| `/{tenant}/calendar` | テナントのタイムライン（[仕様](../features/tasks/11.schedule.md)）。`?from=YYYY-MM-DD`（起点の月曜。省略時は今週）、`?member=` / `?project=`（ID。繰り返し指定可）で絞り込み |
 | `/{tenant}/settings` | テナント設定 |
 | `/{tenant}/settings/members` | テナントメンバー管理 |
 | `/{tenant}/users/{user_id}` | 利用者のプロフィール（閲覧のみ） |
@@ -101,6 +102,7 @@ apps/frontend/src/pages/
 ├── @tenant/
 │   ├── +Page.vue                        # /{tenant}
 │   ├── +Layout.vue                      # テナントレイアウト（共通サイドバー）
+│   ├── calendar/+Page.vue               # /{tenant}/calendar
 │   ├── settings/
 │   │   ├── +Page.vue                    # /{tenant}/settings
 │   │   └── members/+Page.vue            # /{tenant}/settings/members
@@ -161,6 +163,7 @@ apps/frontend/src/pages/
 | `/settings/profile` | `settings/profile/+Page.vue` |
 | `/settings/tokens` | `settings/tokens/+Page.vue` |
 | `/{tenant}` | `@tenant/+Page.vue` |
+| `/{tenant}/calendar` | `@tenant/calendar/+Page.vue` |
 | `/{tenant}/settings` | `@tenant/settings/+Page.vue` |
 | `/{tenant}/settings/members` | `@tenant/settings/members/+Page.vue` |
 | `/{tenant}/users/{user_id}` | `@tenant/users/@userId/+Page.vue` |

@@ -78,6 +78,7 @@ const {
   onSaveTitle,
   onSaveDescription,
   onSaveProgressPct,
+  onSavePlannedStartOn,
   onSaveSoftDeadline,
   onSaveHardDeadline,
   onSaveLabels,
@@ -232,6 +233,7 @@ function onDeleteDialogCancel(event: Event) {
         @save:title="onSaveTitle"
         @save:description="onSaveDescription"
         @save:progress_pct="onSaveProgressPct"
+        @save:planned_start_on="onSavePlannedStartOn"
         @save:soft_deadline="onSaveSoftDeadline"
         @save:hard_deadline="onSaveHardDeadline"
         @save:label_ids="onSaveLabels"

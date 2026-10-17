@@ -59,6 +59,7 @@ export function breadcrumbRoute(pathname: string, params: Record<string, string 
       ? ([
           [tenantBase, { kind: 'home', name: 'ホーム' }],
           [`${tenantBase}/my-tasks`, { kind: 'home', name: 'My Tasks' }],
+          [`${tenantBase}/calendar`, { kind: 'home', name: 'カレンダー' }],
           [`${tenantBase}/settings`, { kind: 'tenant', name: 'テナント設定' }],
           [`${tenantBase}/settings/members`, { kind: 'tenant', name: 'メンバー' }],
           [`${tenantBase}/projects/new`, { kind: 'tenant', name: 'プロジェクト作成' }],

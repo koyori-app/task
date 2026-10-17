@@ -7,7 +7,7 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import { navigate } from 'vike/client/router';
 import { computed, watch } from 'vue';
 
-import { House, ListTodo } from '@lucide/vue';
+import { Calendar, House, ListTodo } from '@lucide/vue';
 import NavMain from '@/components/sidebar/NavMain.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
 import {
@@ -74,6 +74,12 @@ const data = computed(() => ({
       url: myTasksUrl.value,
       icon: ListTodo,
       isActive: pageContext.urlPathname === `/${pageContext.routeParams.tenant}/my-tasks`,
+    },
+    {
+      title: 'カレンダー',
+      url: tenantSlug.value ? `/${tenantSlug.value}/calendar` : '#',
+      icon: Calendar,
+      isActive: pageContext.urlPathname === `/${pageContext.routeParams.tenant}/calendar`,
     },
   ],
 }));
