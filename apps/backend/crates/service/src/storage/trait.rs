@@ -17,6 +17,8 @@ pub enum StorageError {
     SizeMismatch { expected: u64, actual: u64 },
     #[error("invalid storage key")]
     InvalidKey,
+    #[error("object not found")]
+    NotFound,
     #[error("{0}")]
     Other(String),
 }

@@ -695,6 +695,7 @@ impl TestApp {
             username: Set(format!("test_{}", &id.to_string()[..8])),
             bio: Set(Some(String::new())),
             avatar_url: Set(None),
+            avatar_storage_key: Set(None),
             email: Set(email.clone()),
             email_verified: Set(true),
             password_hash: Set(Some(password_hash)),
@@ -1117,6 +1118,7 @@ pub async fn insert_user(db: &DatabaseConnection, is_admin: bool, is_suspended: 
         username: Set(format!("test_{}", &id.to_string()[..8])),
         bio: Set(Some(String::new())),
         avatar_url: Set(None),
+        avatar_storage_key: Set(None),
         email: Set(email.clone()),
         email_verified: Set(true),
         password_hash: Set(Some(password_hash)),
@@ -1155,6 +1157,7 @@ pub async fn insert_passkey_user(
         username: Set(format!("test_{}", &id.to_string()[..8])),
         bio: Set(Some(String::new())),
         avatar_url: Set(None),
+        avatar_storage_key: Set(None),
         email: Set(email.clone()),
         email_verified: Set(email_verified),
         password_hash: Set(if password_hash.is_empty() {

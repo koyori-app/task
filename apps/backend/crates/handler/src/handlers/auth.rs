@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::State,
+    extract::{Multipart, State, multipart::MultipartError},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
@@ -16,7 +16,11 @@ use crate::openapi::{
     CredentialErrors, RegisterErrors, ResendVerificationErrors, SessionAuthErrors,
     UnauthorizedErrors, VerifyEmailErrors,
 };
-use crate::{AppState, error::ServerError, handlers::admin_audit::record_audit};
+use crate::{
+    AppState,
+    error::{AppError, ServerError},
+    handlers::admin_audit::record_audit,
+};
 use entity::{system_settings, users};
 use job::AlreadyRegisteredEmailJob;
 use job::VerificationEmailJob;
@@ -26,10 +30,15 @@ use payload::auth::*;
 use payload::auth_2fa::Login2faResponse;
 use payload::users::{UpdateProfileRequest, UserResponse};
 use service::auth::{AuthError, create_password_hash, dummy_password_hash, verify_password};
+use service::avatar::{
+    AVATAR_MAX_BYTES, avatar_url as avatar_public_url, delete_avatar_object, detect_image_format,
+    new_avatar_key,
+};
 use service::db::{is_postgres_unique_violation, with_transaction};
 use service::email::normalize_email;
 use service::email_verification;
 use service::login_session::establish_login_session;
+use service::storage::StorageError;
 
 #[axum::debug_handler]
 #[utoipa::path(
@@ -136,6 +145,7 @@ pub async fn register(
         username: Set(username),
         bio: Set(Some(String::new())),
         avatar_url: Set(None),
+        avatar_storage_key: Set(None),
         email: Set(email.clone()),
         email_verified: Set(false),
         password_hash: Set(Some(password_hash)),
@@ -366,6 +376,16 @@ pub async fn update_me(
         return Ok(Json(current.into()));
     }
 
+    // 消去・外部 URL への置き換えで使われなくなるアップロード済み画像。コミット後に消す
+    let orphaned_key = if changed_fields.contains(&"avatar_url") {
+        current.avatar_storage_key.clone()
+    } else {
+        None
+    };
+    if orphaned_key.is_some() {
+        active.avatar_storage_key = Set(None);
+    }
+
     // 更新と監査ログを同一トランザクションに載せ、片方だけ残る状態を作らない。
     let updated = with_transaction::<_, AuthError, _>(&state.db, move |txn| {
         Box::pin(async move {
@@ -391,6 +411,121 @@ pub async fn update_me(
         })
     })
     .await?;
+
+    if let Some(key) = orphaned_key {
+        delete_avatar_object(state.storage.as_ref(), &key).await;
+    }
+
+    Ok(Json(updated.into()))
+}
+
+/// multipart の本文上限。`file` 以外の枠（境界・ヘッダ）の分だけ画像上限より広げ、
+/// 画像そのものの 2 MiB 判定はハンドラーで行う。
+pub const AVATAR_BODY_LIMIT: usize = AVATAR_MAX_BYTES + 64 * 1024;
+
+fn multipart_error(err: MultipartError) -> AppError {
+    if err.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        AppError::ContentTooLarge
+    } else {
+        AppError::BadRequest
+    }
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    post,
+    path = "/me/avatar",
+    tag = "Auth",
+    summary = "自分のアバター画像アップロード",
+    description = "multipart の `file` フィールドで PNG / JPEG / GIF / WebP（2 MiB 以下）を送る。\
+                   形式は先頭バイトで判定する。成功すると avatar_url が自サーバーの配信 URL になる。",
+    request_body(content_type = "multipart/form-data"),
+    responses(
+        (status = 200, description = "更新後のアカウント情報", body = UserResponse),
+        (status = 400, description = "file が無いか、対応していない画像形式です", body = ServerError),
+        (status = 413, description = "画像が 2 MiB を超えています", body = ServerError),
+        SessionAuthErrors,
+    )
+)]
+pub async fn upload_avatar(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    headers: HeaderMap,
+    mut multipart: Multipart,
+) -> Result<Json<UserResponse>, AppError> {
+    let mut file = None;
+    while let Some(field) = multipart.next_field().await.map_err(multipart_error)? {
+        if field.name() == Some("file") {
+            file = Some(field.bytes().await.map_err(multipart_error)?);
+            break;
+        }
+    }
+    let bytes = file.ok_or(AppError::BadRequest)?;
+    if bytes.len() > AVATAR_MAX_BYTES {
+        return Err(AppError::ContentTooLarge);
+    }
+    let (ext, mime) = detect_image_format(&bytes)
+        .ok_or_else(|| AppError::BadRequestDetail("unsupported-avatar-format".into()))?;
+
+    let key = new_avatar_key(ext);
+    let len = bytes.len() as u64;
+    state
+        .storage
+        .upload(
+            &key,
+            Box::pin(futures::stream::iter([Ok::<_, StorageError>(bytes)])),
+            len,
+            mime,
+        )
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    let current = user.0;
+    let user_id = current.id;
+    let old_key = current.avatar_storage_key.clone();
+    let mut active: users::ActiveModel = current.into();
+    active.avatar_url = Set(Some(avatar_public_url(
+        &state.oauth_settings.app_base_url,
+        &key,
+    )));
+    active.avatar_storage_key = Set(Some(key.clone()));
+
+    let result = with_transaction::<_, AppError, _>(&state.db, move |txn| {
+        Box::pin(async move {
+            let updated = active.update(txn).await?;
+            // update_me と同じ形にして、監査ログの読み手が経路で分岐しなくて済むようにする
+            record_audit(
+                txn,
+                user_id,
+                "user.profile.update",
+                "user",
+                &user_id.to_string(),
+                None,
+                Some(serde_json::json!({
+                    "changed_fields": ["avatar_url"],
+                    "username": {
+                        "before": updated.username.clone(),
+                        "after": updated.username.clone(),
+                    },
+                })),
+                &headers,
+            )
+            .await?;
+            Ok(updated)
+        })
+    })
+    .await;
+    let updated = match result {
+        Ok(updated) => updated,
+        Err(e) => {
+            delete_avatar_object(state.storage.as_ref(), &key).await;
+            return Err(e);
+        }
+    };
+
+    if let Some(old_key) = old_key {
+        delete_avatar_object(state.storage.as_ref(), &old_key).await;
+    }
 
     Ok(Json(updated.into()))
 }

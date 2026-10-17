@@ -6,6 +6,7 @@ pub use common::{error, settings};
 pub mod access;
 pub mod already_registered_email_delivery;
 pub mod auth;
+pub mod avatar;
 pub mod bootstrap_admin;
 pub mod custom_fields;
 pub mod desktop_auth;

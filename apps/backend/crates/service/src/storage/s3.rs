@@ -204,11 +204,10 @@ impl StorageBackend for S3StorageBackend {
 
     async fn get_stream(&self, key: &str) -> Result<ByteStream, StorageError> {
         let path = to_path(key)?;
-        let result = self
-            .store
-            .get(&path)
-            .await
-            .map_err(|e| StorageError::Other(format!("S3 GetObject failed: {e}")))?;
+        let result = self.store.get(&path).await.map_err(|e| match e {
+            object_store::Error::NotFound { .. } => StorageError::NotFound,
+            e => StorageError::Other(format!("S3 GetObject failed: {e}")),
+        })?;
 
         let stream = result.into_stream().map(|chunk| {
             chunk.map_err(|e| StorageError::Other(format!("S3 GetObject stream failed: {e}")))

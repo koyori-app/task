@@ -5,6 +5,7 @@ pub mod admin_tenants;
 pub mod admin_users;
 pub mod auth;
 pub mod auth_2fa;
+pub mod avatars;
 pub mod custom_fields;
 pub mod dashboard;
 pub mod desktop_auth;
