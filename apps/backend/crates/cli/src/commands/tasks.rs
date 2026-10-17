@@ -292,7 +292,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                     },
                 )
                 .await?;
-            print(&comment, output);
+            print(&comment_for_display(comment), output);
         }
         TasksCommand::Delete { task_ref, project } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
@@ -708,6 +708,13 @@ async fn resolve_task_target(
     Ok((resolve_project(api, &project_key).await?, task_id))
 }
 
+/// 作成したコメントを人に見せる形にする。本文のメンション印（`<@利用者ID>`）は id を含むので、
+/// 利用者の画面の外へ出す口は `@今の名` に戻してから出す（`payload::mentions::to_plain`）。
+fn comment_for_display(mut comment: TaskCommentResponse) -> TaskCommentResponse {
+    comment.body = payload::mentions::to_plain(&comment.body, &comment.mentions);
+    comment
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1008,5 +1015,37 @@ mod tests {
 
     fn uuid(n: u128) -> Uuid {
         Uuid::from_u128(n)
+    }
+
+    #[test]
+    fn comment_output_has_names_instead_of_mention_markers() {
+        use payload::mentions::{MentionStatus, MentionedUser};
+        let alice = Uuid::new_v4();
+        let ghost = Uuid::new_v4();
+        let comment = TaskCommentResponse {
+            id: Uuid::new_v4(),
+            task_id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            body: format!("<@{alice}> と <@{ghost}> へ"),
+            mentions: [(
+                alice,
+                MentionedUser {
+                    status: MentionStatus::Member,
+                    name: Some("alice".into()),
+                    avatar_url: None,
+                },
+            )]
+            .into(),
+            parent_comment_id: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            deleted_at: None,
+        };
+
+        let shown = comment_for_display(comment);
+
+        assert_eq!(shown.body, "@alice と @（不明な利用者） へ");
+        let out = crate::output::render(&shown, crate::output::OutputOptions::new(true));
+        assert!(!out.contains("<@"), "{out}");
     }
 }

@@ -44,7 +44,6 @@ async fn task_notifications_integration_suite() {
         .to_string();
 
     let assignee = app.insert_user(false, false).await;
-    let assignee_username = format!("test_{}", &assignee.id.to_string()[..8]);
 
     crate::common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, assignee.id)
         .await;
@@ -101,7 +100,7 @@ async fn task_notifications_integration_suite() {
     let comment = app
         .post_json_with_session(
             &format!("{task_base}/comments"),
-            serde_json::json!({"body": format!("@{assignee_username} review")}),
+            serde_json::json!({"body": format!("<@{}> review", assignee.id)}),
         )
         .await;
     assert_eq!(comment.status(), StatusCode::CREATED);
@@ -446,7 +445,6 @@ async fn mention_notifies_tenant_owner_non_member() {
     // owner（tenant owner、project member にはしない）
     let owner = app.insert_user(false, false).await;
     let tp = app.insert_tenant_project(owner.id).await;
-    let owner_username = format!("test_{}", &owner.id.to_string()[..8]);
 
     // project member を作成
     let member = app.insert_user(false, false).await;
@@ -497,7 +495,7 @@ async fn mention_notifies_tenant_owner_non_member() {
         .unwrap()
         .to_string();
 
-    // member でログインして @owner_username を含むコメントを投稿
+    // member でログインして owner へのメンション印（<@owner_id>）を含むコメントを投稿
     app.reset_session_client();
     app.login_session_no_content(&member.email, &member.password)
         .await;
@@ -507,7 +505,7 @@ async fn mention_notifies_tenant_owner_non_member() {
                 "/v1/tenants/{}/projects/{}/tasks/{}/comments",
                 tp.tenant_id, tp.project_id, task_id
             ),
-            serde_json::json!({"body": format!("@{} please review", owner_username)}),
+            serde_json::json!({"body": format!("<@{}> please review", owner.id)}),
         )
         .await;
     assert_eq!(comment_resp.status(), StatusCode::CREATED);

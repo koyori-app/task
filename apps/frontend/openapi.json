@@ -23049,12 +23049,22 @@
       },
       "CommentListResponse": {
         "type": "object",
-        "required": ["comments"],
+        "required": ["comments", "mentions"],
         "properties": {
           "comments": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CommentThread"
+            }
+          },
+          "mentions": {
+            "type": "object",
+            "description": "全コメントの本文に出る印の id から引ける表示情報（削除済みのコメントの本文は含めぬ）。",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MentionedUser"
+            },
+            "propertyNames": {
+              "type": "string"
             }
           }
         }
@@ -24503,6 +24513,28 @@
           "password": {
             "type": "string",
             "format": "password"
+          }
+        }
+      },
+      "MentionStatus": {
+        "type": "string",
+        "description": "メンションされた者が、いま画面に出してよい状態か。",
+        "enum": ["member", "outside", "gone"]
+      },
+      "MentionedUser": {
+        "type": "object",
+        "description": "本文のメンションを描くための、id から引ける利用者の表示情報。",
+        "required": ["status"],
+        "properties": {
+          "avatar_url": {
+            "type": ["string", "null"]
+          },
+          "name": {
+            "type": ["string", "null"],
+            "description": "`status` が `member` の時だけ。`@今の名` の「今の名」。"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MentionStatus"
           }
         }
       },
@@ -26055,7 +26087,8 @@
         "required": ["id", "task_id", "user_id", "body", "created_at", "updated_at"],
         "properties": {
           "body": {
-            "type": "string"
+            "type": "string",
+            "description": "本文。メンションは `<@利用者ID>` の印のまま返す（画面が札に描く・編集で開き直すため）。\n利用者の画面の外へ出す時は `mentions` で名に戻す（`payload::mentions::to_plain`）。"
           },
           "created_at": {
             "type": "string",
@@ -26068,6 +26101,16 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "mentions": {
+            "type": "object",
+            "description": "本文の印の id から引ける表示情報（名前・アイコン・退会や対象外かの印）。\n描く時に API を叩き直さずに済むよう、本文と並べて返す。",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MentionedUser"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
           },
           "parent_comment_id": {
             "type": ["string", "null"],

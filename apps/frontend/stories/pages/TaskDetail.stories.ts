@@ -1158,7 +1158,8 @@ export const CommentPost: Story = {
     // submitComment は POST → invalidate/refetch 完了後に true。submitDraft はその後に下書きを消す。
     // canvas 全体の findByText だと入力欄の文字に先に当たり、再取得を待たず assert してしまう。
     // storybook/test の expect 自体は再試行しないため、下書きの消去を waitFor で待つ。
-    await waitFor(() => expect(textarea).toHaveValue(''));
+    // 入力欄は CodeMirror（contenteditable）なので、value ではなく中の文字で見る
+    await waitFor(() => expect(textarea.textContent).not.toContain('新しく投稿するコメント'));
 
     const commentList = await waitFor(() => {
       const list = canvasElement.querySelector('[data-task-comments] ul');
@@ -1189,7 +1190,7 @@ export const CommentPostRejected: Story = {
     await expect(
       canvas.findByText('コメントを投稿できませんでした（forbidden）'),
     ).resolves.toBeInTheDocument();
-    await expect(textarea).toHaveValue('拒否されるコメント');
+    await expect(textarea.textContent).toContain('拒否されるコメント');
   },
 };
 

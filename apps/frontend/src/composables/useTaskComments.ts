@@ -12,6 +12,7 @@ const COMMENT_PATH =
 
 export type CommentThread = components['schemas']['CommentThread'];
 export type CommentReply = components['schemas']['CommentReply'];
+export type MentionedUser = components['schemas']['MentionedUser'];
 
 /**
  * API のエラーボディ（{ message }）をそのまま利用者へ見せるための整形。
@@ -235,6 +236,10 @@ export function useTaskComments(params: UseTaskCommentsParams) {
 
   return {
     threads: computed<CommentThread[]>(() => commentsQuery.data.value?.comments ?? []),
+    /** 本文の `<@利用者ID>` の印から引ける表示情報（名前・アイコン・退会や対象外か） */
+    mentions: computed<Record<string, MentionedUser>>(
+      () => commentsQuery.data.value?.mentions ?? {},
+    ),
     commentsLoading: computed(() => commentsQuery.isLoading.value),
     commentsError: computed(() => commentsQuery.isError.value),
     /** 一覧の再試行。エラー表示の「再試行」導線から呼ぶ */

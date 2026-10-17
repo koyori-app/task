@@ -109,6 +109,7 @@ const {
 // 倒し、タスク詳細本体には影響させない
 const {
   threads,
+  mentions,
   commentsLoading,
   commentsError,
   refetchComments,
@@ -286,6 +287,8 @@ function openRelatedTask(task: TaskResponse) {
     <template #sidebar>
       <TaskComments
         :threads="threads"
+        :mentions="mentions"
+        :mention-candidates="members"
         :loading="commentsLoading"
         :list-error="commentsError"
         :on-retry="refetchComments"

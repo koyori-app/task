@@ -14,6 +14,7 @@ pub mod drive_folder_shares;
 pub mod drive_folders;
 pub mod github;
 pub mod labels;
+pub mod mentions;
 pub mod milestones;
 pub mod my_tasks;
 pub mod nullable;
