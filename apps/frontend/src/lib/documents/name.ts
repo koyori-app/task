@@ -6,6 +6,12 @@ export function documentTitle(fileName: string): string {
   return fileName.replace(/\.md$/i, '');
 }
 
+/** この画面で扱うファイルか: MIME が `text/markdown`（パラメータ付きも可）で、名前が `.md` で終わる。 */
+export function isDocumentFile(file: { name: string; mime_type: string }): boolean {
+  const mime = file.mime_type.split(';')[0]?.trim().toLowerCase();
+  return mime === 'text/markdown' && /\.md$/i.test(file.name);
+}
+
 /** タイトルからファイル名を作る。 */
 export function documentFileName(title: string): string {
   return `${title.trim()}.md`;

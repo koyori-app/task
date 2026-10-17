@@ -33,12 +33,15 @@ type Put = { ifMatch: string | null; body: unknown };
 let putStatus: number;
 let puts: Put[];
 let content: string;
+/** 本文の応答に付く ETag。既定はメタデータと同じ */
+let contentEtag: string;
 
 beforeEach(() => {
   window.history.replaceState(null, '', '/acme/projects/ENG/docs/file-1');
   putStatus = 200;
   puts = [];
   content = '旧い本文';
+  contentEtag = ETAG;
   vi.stubGlobal('fetch', async (input: Request | string, init?: RequestInit) => {
     if (typeof input === 'string') {
       // POST /internal/render-description
@@ -70,7 +73,9 @@ beforeEach(() => {
         ],
       });
     }
-    if (path === '/api/v1/drive/files/file-1/content') return new Response(content);
+    if (path === '/api/v1/drive/files/file-1/content') {
+      return new Response(content, { headers: { ETag: contentEtag } });
+    }
     if (path.endsWith('/drive/files/file-1/content') && input.method === 'PUT') {
       puts.push({ ifMatch: input.headers.get('If-Match'), body: await input.json() });
       if (putStatus !== 200) return Response.json({ message: 'x' }, { status: putStatus });
@@ -132,6 +137,24 @@ describe('DocumentDetail 閲覧', () => {
     expect(wrapper.get('.kfm-content').html()).toContain('<p>旧い本文</p>');
   });
 
+  it('ルート直下でも .md 以外のファイルは見つからない扱い', async () => {
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: Request | string, init?: RequestInit) => {
+      if (
+        typeof input !== 'string' &&
+        new URL(input.url).pathname.endsWith('/drive/files/file-1')
+      ) {
+        return Response.json({ ...meta, name: 'notes.txt', mime_type: 'text/plain' });
+      }
+      return original(input, init);
+    });
+    const wrapper = mountDetail();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('ドキュメントが見つかりません');
+    expect(wrapper.find('button').exists()).toBe(false);
+  });
+
   it('ドキュメント置き場の直下に無いファイルは見つからない扱い', async () => {
     const original = globalThis.fetch;
     vi.stubGlobal('fetch', async (input: Request | string, init?: RequestInit) => {
@@ -161,25 +184,60 @@ describe('DocumentDetail 編集', () => {
     expect(window.location.search).toBe('');
   });
 
-  it('412 なら他の人の更新を知らせ、再読込で最新を取り直しても下書きは残す', async () => {
-    putStatus = 412;
+  it('If-Match は本文の応答の ETag で、メタデータの ETag が新しくても使わない', async () => {
+    // メタデータと本文は別々に取る。その間に他の人が保存するとメタデータの ETag だけが新しくなる
+    contentEtag = '"sha256:body"';
     const wrapper = mountDetail({ editing: true });
     await flushPromises();
-    await editBody(wrapper, '自分の編集');
+    await editBody(wrapper, '新しい本文');
 
     await wrapper.get('form').trigger('submit');
     await flushPromises();
 
-    const alert = wrapper.get('[role="alert"]');
-    expect(alert.text()).toContain('他の人が更新しました。読み込み直してから編集してください');
-    expect(wrapper.find('form').exists()).toBe(true);
+    expect(puts).toEqual([{ ifMatch: '"sha256:body"', body: { content: '新しい本文' } }]);
+  });
 
+  async function submitConflict(wrapper: ReturnType<typeof mountDetail>) {
+    putStatus = 412;
+    await flushPromises();
+    await editBody(wrapper, '自分の編集');
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+
+    const alert = wrapper.get('[role="alert"]');
+    expect(alert.text()).toContain('他の人が更新しました');
+    expect(wrapper.find('form').exists()).toBe(true);
+    // 他の人の保存で本文と ETag が進んでいる
     content = '他の人の本文';
+    contentEtag = '"sha256:theirs"';
+    return alert;
+  }
+
+  it('412 のあと「最新を読み込む」は下書きを捨てて最新の本文から編集し直す', async () => {
+    const wrapper = mountDetail({ editing: true });
+    const alert = await submitConflict(wrapper);
+
     await alert.get('button').trigger('click');
     await flushPromises();
 
     expect(wrapper.text()).not.toContain('他の人が更新しました');
-    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('自分の編集');
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('他の人の本文');
+    expect(puts).toHaveLength(1);
+  });
+
+  it('412 のあと「自分の下書きで上書き」だけが新しい ETag で下書きを送る', async () => {
+    const wrapper = mountDetail({ editing: true });
+    const alert = await submitConflict(wrapper);
+
+    putStatus = 200;
+    await alert.findAll('button')[1]!.trigger('click');
+    await flushPromises();
+
+    expect(puts).toEqual([
+      { ifMatch: ETAG, body: { content: '自分の編集' } },
+      { ifMatch: '"sha256:theirs"', body: { content: '自分の編集' } },
+    ]);
+    expect(wrapper.find('form').exists()).toBe(false);
   });
 
   it.each([
