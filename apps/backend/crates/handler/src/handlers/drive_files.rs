@@ -5,7 +5,7 @@ use axum::{
     Json,
     body::Body,
     extract::{Multipart, Path, Query, State},
-    http::{StatusCode, header},
+    http::{HeaderMap, HeaderName, StatusCode, header},
     response::Response,
 };
 use axum_valid::Valid;
@@ -17,6 +17,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait,
     QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
 };
+use sha2::{Digest, Sha256};
 
 use crate::AppState;
 use crate::error::{AppError, ServerError};
@@ -384,8 +385,10 @@ pub async fn upload_file(
                 let (mut tx, rx) = fmpsc::channel::<Result<Bytes, StorageError>>(8);
                 let byte_stream: ByteStream = Box::pin(rx);
 
+                // 本文の SHA-256 も流しながら計算する。途中で打ち切った場合は None
                 let pump = async move {
                     let mut field = field;
+                    let mut hasher = Sha256::new();
                     loop {
                         match field.chunk().await {
                             Ok(Some(bytes)) => {
@@ -399,25 +402,27 @@ pub async fn upload_file(
                                             "upload size limit exceeded".into(),
                                         )))
                                         .await;
-                                    return;
+                                    return None;
                                 }
+                                hasher.update(&bytes);
                                 if tx.send(Ok(bytes)).await.is_err() {
-                                    return;
+                                    return None;
                                 }
                             }
                             Ok(None) => break,
                             Err(e) => {
                                 let _ = tx.send(Err(StorageError::Other(e.to_string()))).await;
-                                return;
+                                return None;
                             }
                         }
                     }
+                    Some(hex::encode(hasher.finalize()))
                 };
 
                 let file_id = Uuid::new_v4();
                 let storage_key = file_id.to_string();
 
-                let (upload_result, _) = tokio::join!(
+                let (upload_result, content_hash) = tokio::join!(
                     state
                         .storage
                         .upload(&storage_key, byte_stream, 0, &mime_type),
@@ -439,6 +444,13 @@ pub async fn upload_file(
                 }
 
                 upload_result.map_err(storage_to_app_error)?;
+                let Some(content_hash) = content_hash else {
+                    // ストレージ側が成功したのに本文を最後まで読めていない（通常は起きない）
+                    let _ = state.storage.delete(&storage_key).await;
+                    return Err(AppError::Internal(anyhow::anyhow!(
+                        "upload stream ended before the multipart field was fully read"
+                    )));
+                };
                 // テナント行を FOR UPDATE でロックしてクォータ確定チェックと INSERT をアトミックに実行。
                 // 並行アップロードが同時にクォータチェックを通過してしまう競合を防ぐ。
                 let now = Utc::now();
@@ -485,6 +497,7 @@ pub async fn upload_file(
                         folder_id: Set(folder_id),
                         created_at: Set(now.into()),
                         updated_at: Set(now.into()),
+                        content_hash: Set(Some(content_hash)),
                     };
                     let saved = model.insert(&txn).await?;
                     txn.commit().await?;
@@ -632,6 +645,10 @@ pub async fn update_file(
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
         ("id" = Uuid, Path, description = "ファイルID"),
+        (
+            "If-Match" = Option<String>, Header,
+            description = "現在の ETag（`etag` の値をそのまま。カンマ区切りで複数可、`*` は常に一致）。一致しなければ 412。省略時は無条件に上書きする"
+        ),
     ),
     request_body = UpdateFileContentRequest,
     responses(
@@ -639,6 +656,11 @@ pub async fn update_file(
         (
             status = 400,
             description = "テキストとして編集できない MIME タイプです",
+            body = ServerError
+        ),
+        (
+            status = 412,
+            description = "If-Match が現在の ETag と一致しません（他の更新が先に入っています）",
             body = ServerError
         ),
         (
@@ -653,6 +675,7 @@ pub async fn update_file_content(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
     Json(payload): Json<UpdateFileContentRequest>,
 ) -> Result<Json<DriveFileResponse>, AppError> {
     auth.require_scope(Scope::WriteDrive)?;
@@ -670,6 +693,7 @@ pub async fn update_file_content(
 
     let bytes = Bytes::from(payload.content.into_bytes());
     let new_size = bytes.len() as u64;
+    let content_hash = hex::encode(Sha256::digest(&bytes));
     if new_size > state.drive_config.upload_max_bytes {
         return Err(AppError::ContentTooLarge);
     }
@@ -714,6 +738,11 @@ pub async fn update_file_content(
         // 本文とストレージキーを差し替えられる（窓はロック待ちではなくアップロード完走ぶん）。
         // ここで弾いた場合はアップロード済みの新キーが下の Err 枝で消える
         authorize_file_write(&txn, &locked, &auth).await?;
+        // ロック後の値と比べる。ロック前に比べると、同じ ETag を持った並行更新が
+        // 両方とも通って後勝ちになる
+        if header_matches(&headers, header::IF_MATCH, &file_etag(&locked)) == Some(false) {
+            return Err(AppError::PreconditionFailed);
+        }
         let old_storage_key = locked.storage_key.clone();
         let used_now = tenant_used_bytes(&txn, tenant_id).await?;
         // 差し替え後の使用量 = 現在の合計 − ロック時点の旧サイズ + 新サイズ
@@ -730,6 +759,7 @@ pub async fn update_file_content(
         active.size = Set(new_size as i64);
         active.storage_key = Set(new_key_for_update);
         active.storage_type = Set(current_storage_type());
+        active.content_hash = Set(Some(content_hash));
         active.updated_at = Set(Utc::now().into());
         let saved = active.update(&txn).await?;
         txn.commit().await?;
@@ -802,9 +832,25 @@ pub async fn delete_file(
     params(
         ("id" = Uuid, Path, description = "ファイルID"),
         ContentQuery,
+        (
+            "If-None-Match" = Option<String>, Header,
+            description = "手元の ETag（カンマ区切りで複数可、`*` は常に一致）。一致すれば 304 を本文なしで返す"
+        ),
     ),
     responses(
-        (status = 200, description = "ファイルバイナリ"),
+        (
+            status = 200,
+            description = "ファイルバイナリ",
+            headers(
+                ("ETag" = String, description = "本文の ETag（応答 JSON の `etag` と同じ値）"),
+                ("Last-Modified" = String, description = "updated_at（RFC 7231 形式）"),
+            )
+        ),
+        (
+            status = 304,
+            description = "If-None-Match が現在の ETag と一致した（本文なし）",
+            headers(("ETag" = String, description = "本文の ETag"))
+        ),
         CrudErrors,
     )
 )]
@@ -813,6 +859,7 @@ pub async fn get_file_content(
     auth: OptionalAuthUser,
     Path(id): Path<Uuid>,
     Query(query): Query<ContentQuery>,
+    headers: HeaderMap,
 ) -> Result<Response, AppError> {
     let file = drive_files::Entity::find_by_id(id)
         .one(&state.db)
@@ -820,6 +867,23 @@ pub async fn get_file_content(
         .ok_or(AppError::NotFound)?;
 
     can_access_file_content(&state, &file, &auth, query.token.as_deref()).await?;
+
+    let etag = file_etag(&file);
+    let last_modified = file
+        .updated_at
+        .with_timezone(&Utc)
+        .format("%a, %d %b %Y %H:%M:%S GMT")
+        .to_string();
+    let response = Response::builder()
+        .header(header::ETAG, etag.as_str())
+        .header(header::LAST_MODIFIED, last_modified);
+
+    if header_matches(&headers, header::IF_NONE_MATCH, &etag) == Some(true) {
+        return response
+            .status(StatusCode::NOT_MODIFIED)
+            .body(Body::empty())
+            .map_err(|e| AppError::Internal(e.into()));
+    }
 
     let stream = state
         .storage
@@ -832,7 +896,7 @@ pub async fn get_file_content(
     // inline で返すとブラウザが API と同一オリジンで内容を実行してしまうため、常に attachment で配信する。
     let disposition = format!("attachment; filename=\"{}\"", sanitize_filename(&file.name));
 
-    Response::builder()
+    response
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, file.mime_type.as_str())
         .header(header::CONTENT_DISPOSITION, disposition)
@@ -933,6 +997,15 @@ fn sanitize_filename(name: &str) -> String {
             }
         })
         .collect()
+}
+
+/// 条件付きリクエストのヘッダーを評価する。ヘッダーが無ければ `None`、
+/// あれば（複数行ならどれか 1 行が）現在の ETag に一致するか。
+/// UTF-8 として読めない値は一致しない扱い。
+fn header_matches(headers: &HeaderMap, name: HeaderName, etag: &str) -> Option<bool> {
+    let mut values = headers.get_all(name).iter().peekable();
+    values.peek()?;
+    Some(values.any(|v| v.to_str().is_ok_and(|s| etag_matches(s, etag))))
 }
 
 fn storage_to_app_error(err: StorageError) -> AppError {

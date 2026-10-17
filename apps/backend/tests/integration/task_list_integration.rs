@@ -1033,3 +1033,106 @@ async fn task_list_filters_by_creator() {
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(task_ids(&body), vec![member_task_id]);
 }
+
+async fn titles_for(app: &TestApp, url: &str) -> Vec<String> {
+    let response = app.get_with_session(url).await;
+    assert_eq!(response.status(), StatusCode::OK, "{url}");
+    let body: serde_json::Value = response.json().await.unwrap();
+    body["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["title"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// 開始予定日は作成時に保存され、一覧で両端を含む範囲で絞り込める。
+#[tokio::test]
+async fn task_list_filters_by_planned_start_range() {
+    let mut app = TestApp::new().await;
+    let (owner, tp) = setup_project(&mut app).await;
+    let status_id = create_status(&app, &tp).await;
+    let base = tasks_base(&tp);
+
+    let mut task_a = String::new();
+    for (title, planned) in [
+        ("A", Some("2026-10-01")),
+        ("B", Some("2026-10-05")),
+        ("C", Some("2026-10-10")),
+        ("D", None),
+    ] {
+        let response = app
+            .post_json_with_session(
+                &base,
+                serde_json::json!({
+                    "title": title,
+                    "status_id": status_id,
+                    "planned_start_on": planned,
+                }),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::CREATED, "create {title}");
+        let task: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(
+            task["planned_start_on"],
+            serde_json::json!(planned),
+            "{title}"
+        );
+        if title == "A" {
+            task_a = task["id"].as_str().unwrap().to_string();
+        }
+    }
+
+    // 両端を含む。範囲を指定すると開始予定日が未設定のタスクは外れる
+    for (query, expected) in [
+        (
+            "planned_start_from=2026-10-05&planned_start_to=2026-10-10",
+            vec!["B", "C"],
+        ),
+        ("planned_start_from=2026-10-06", vec!["C"]),
+        ("planned_start_to=2026-10-01", vec!["A"]),
+        (
+            "planned_start_from=2026-10-10&planned_start_to=2026-10-10",
+            vec!["C"],
+        ),
+        ("", vec!["A", "B", "C", "D"]),
+    ] {
+        assert_eq!(
+            titles_for(&app, &format!("{base}?sort=title_asc&{query}")).await,
+            expected,
+            "{query}"
+        );
+    }
+
+    // from > to は 400（1 日の逆転でも）
+    let response = app
+        .get_with_session(&format!(
+            "{base}?planned_start_from=2026-10-11&planned_start_to=2026-10-10"
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    // My Tasks にも開始予定日が載る
+    let response = app
+        .post_json_with_session(
+            &format!("{base}/{task_a}/assignees"),
+            serde_json::json!({ "user_id": owner.id, "role": "assignee" }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let response = app
+        .get_with_session(&format!(
+            "/v1/tenants/{}/users/me/tasks?filter=all",
+            tp.tenant_id
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.unwrap();
+    let item = body["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == task_a.as_str())
+        .expect("assigned task in my tasks");
+    assert_eq!(item["planned_start_on"], "2026-10-01");
+}

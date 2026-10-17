@@ -100,6 +100,7 @@ NTFS では「継承を無効にする」が明示の操作である。
 | `GET /v1/tenants/{id}/projects` | api-vue-query の useProjectsQuery（AppSidebar の NavProjects・useResolvedProjectId の projectKey → UUID 解決）、ProjectCreateForm / DeleteProjectDialog / ProjectSettingsView（cache 更新） | **己の明示 member の project に絞って 200** |
 | `GET /v1/tenants/{id}/users/me/tasks` | pages/@tenant/my-tasks（テナント選択直後の着地） | **己の project の分に絞って 200** |
 | `GET /v1/tenants/{id}/members` | ProjectSettingsView の MembersSection | 403 のまま（MembersSection は 403 を「権限なし」表示で受け、画面は壊れない） |
+| `GET /v1/tenants/{id}/users/{user_id}` | pages/@tenant/users/@userId（タスクの担当者・コメント投稿者・メンバー一覧の名前から開く） | 403 のまま（画面は「閲覧できません」と出す） |
 | `GET /v1/tenants/{id}` | 呼び元なし（一覧で足りる） | 403 のまま |
 | `GET /v1/tenants/{id}/users/me/personal-project` | 呼び元なし | 403 のまま |
 | Drive 系（`/v1/tenants/{id}/drive...`） | tenant-wide では呼ばない | 403 のまま |
@@ -257,6 +258,7 @@ project 層のスコープ（`read:project` や `write:task` など）ではこ�
 | My Tasks（`GET /v1/tenants/{id}/users/me/tasks`） | 所属者: 従来どおり。客分: 己の project の分に絞る |
 | テナントの更新・削除 | オーナーのみ |
 | メンバー一覧の閲覧 | テナントに入れる人全員（客分は含まない） |
+| 利用者のプロフィール（`GET /v1/tenants/{id}/users/{user_id}`） | テナントに入れる人全員（客分は含まない）。対象はそのテナントのオーナー・メンバー・客分のいずれかで、それ以外は 404。返すのは id / username / bio / avatar_url だけ。PAT は `read:tenant` |
 | メンバーの追加・ロール変更・削除 | オーナー + テナント `Admin` |
 | 招待の発行・一覧・再送・取り消し（`/v1/tenants/{id}/invitations`） | オーナー + テナント `Admin`。PAT は一覧に `read:tenant`、それ以外に `write:tenant` |
 | 招待の中身を見る（`POST /v1/invitations/preview`） | トークンを持つ人（ログイン不要） |
@@ -331,6 +333,7 @@ ID とは別にユーザー名・アバターを引けるようにするため�
 | 未認証 | 401 |
 | テナントに入れない / プロジェクトに入れない / ロール不足 | 403 |
 | テナントが存在しない / プロジェクトがそのテナントの配下にない | 404 |
+| プロフィールの対象がそのテナントに関わっていない / 存在しない | 404（`users` はテナント横断の表なので、403 にして実在を明かさない） |
 | 同じ利用者を二重に追加した / 既にメンバーの人を招待・承諾した | 409 |
 | 招待の期限が切れている | 410 |
 | 同じアドレスへ 60 秒以内に招待を送ろうとした | 429 |
@@ -349,4 +352,5 @@ ID とは別にユーザー名・アバターを引けるようにするため�
 | テナント `Admin` の権限 | テナントメンバーの管理のみ。プロジェクトの作成はオーナー専用（プロジェクトメンバーの管理は、上の表のとおりオーナー + プロジェクト `Admin`） |
 | フォルダ共有 | テナントから外しても `drive_folder_shares` は失効しない。共有は所属とは独立した明示的な付与として扱っている |
 | 管理 UI | プロジェクトメンバーは frontend 実装済み（#317。プロジェクト設定のメンバー節）。テナントメンバーはテナント設定のメンバーページ（ロール変更・除外・メールでの招待）。CLI は未実装 |
+| 客分からのプロフィール閲覧 | できない（403）。同じプロジェクトの人に絞って開く規則は持っていない |
 | 招待と登録の停止 | 管理者が新規登録を止めている（`user_registration_enabled = false`）と、未登録の受け手は招待を承諾できない |

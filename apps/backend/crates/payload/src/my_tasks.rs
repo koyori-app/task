@@ -45,6 +45,7 @@ pub struct MyTaskStatusInfo {
     pub id: Uuid,
     pub name: String,
     pub color: String,
+    pub is_done_state: bool,
 }
 
 #[derive(Serialize, ToSchema, serde::Deserialize)]
@@ -60,6 +61,8 @@ pub struct MyTaskItem {
     pub soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
     #[schema(value_type = Option<String>, format = "date-time", nullable)]
     pub hard_deadline: Option<chrono::DateTime<chrono::Utc>>,
+    #[schema(value_type = Option<String>, format = "date", nullable)]
+    pub planned_start_on: Option<chrono::NaiveDate>,
     pub project: MyTaskProjectInfo,
     pub is_personal: bool,
 }

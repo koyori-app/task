@@ -15,6 +15,7 @@ forge-core = { workspace = true }
 forge-github = { workspace = true }
 apalis-postgres = { version = "1.0.0-rc.8", default-features = false, features = ["migrate", "tokio-comp", "time"] }
 axum = { workspace = true, features = ["multipart"] }
+axum-extra = { version = "0.12", default-features = false, features = ["query"] }
 axum-valid = "0.25.0"
 axum_session = { version = "0.20.0" }
 axum_session_redispool = { version = "0.11.0" }

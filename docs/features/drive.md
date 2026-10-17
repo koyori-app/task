@@ -8,7 +8,7 @@ icon: lucide:hard-drive
 
 > ステータス: **バックエンド実装済み／フロントエンド未実装（既知の差分あり）**
 > 作成日: 2026-05-26
-> 最終更新: 2026-10-16（フォルダ・ファイル一覧の絞り込みを反映）
+> 最終更新: 2026-10-17（ファイル本文の ETag / If-Match 楽観ロック、フォルダ・ファイル一覧の絞り込みを反映）
 
 ---
 
@@ -95,6 +95,7 @@ pub struct Model {
     pub folder_id: Option<Uuid>,   // FK → drive_folders
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    pub content_hash: Option<String>, // 本文の SHA-256（hex）。ETag に使う
 }
 ```
 
@@ -112,6 +113,7 @@ pub struct Model {
 | `folder_id` | UUID | NULLABLE, FK→drive_folders SET NULL | |
 | `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
 | `updated_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+| `content_hash` | VARCHAR(64) | NULLABLE | 本文の SHA-256（hex）。アップロードと本文更新で設定し、名前変更・移動では変えない。導入（`m20261016005000_drive_files_content_hash`）より前の行は NULL のまま（backfill しない） |
 
 **CHECK 制約**:
 
@@ -462,6 +464,7 @@ GET /v1/drive/files/{id}/content?token={share_token}
 - `Content-Disposition: attachment` を常に設定し、ブラウザ上で同一オリジンのコンテンツとして実行させない
 - API 共通ミドルウェアが `X-Content-Type-Options: nosniff` を全レスポンスに設定し、宣言した `Content-Type` 以外への MIME sniffing を禁止する
 - ストレージバックエンドの `get_stream()` でストリーミング配信（メモリに全展開しない）
+- `ETag` と `Last-Modified` を付け、`If-None-Match` が一致すれば `304`（ストレージは読まない）。詳細は §8.1
 
 ---
 
@@ -594,7 +597,8 @@ pub fn implies(self, other: Scope) -> bool {
       "url": "/v1/drive/files/xxxxxxxx-.../content",
       "folder_id": null,
       "created_at": "2026-05-26T12:00:00Z",
-      "updated_at": "2026-05-26T12:00:00Z"
+      "updated_at": "2026-05-26T12:00:00Z",
+      "etag": "\"sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae\""
     }
   ],
   "total": 42
@@ -635,6 +639,31 @@ OpenAPI だけでは表現できないため、クライアント実装でも明
 対象外は `400 Bad Request`。空文字列は許可する。UTF-8 のバイト数がファイルサイズ上限を
 超える場合、または差し替え後のテナント使用量がクォータを超える場合は `413` を返す。
 新しいストレージキーへ保存してから DB を更新し、成功後に旧キーの削除を試みる。
+
+`If-Match` ヘッダーで楽観ロックできる。値は `DriveFile.etag`（ダブルクォート込み）をそのまま渡す。
+カンマ区切りの複数指定はどれか 1 つの完全一致で通り、`*` は常に一致する。弱い ETag（`W/"..."`）は
+一致しない。一致しなければ `412 Precondition Failed`（`precondition-failed`）を返し、本文は変えない。
+比較はファイル行のロック取得後に行うため、同じ ETag を持った並行更新は片方だけが通り、もう片方は
+`412` になる。ヘッダーを省略した場合は従来どおり無条件に上書きする（後勝ち）。応答の `etag` は更新後の値。
+
+#### `DriveFile.etag`
+
+全ファイル API の応答に載る本文の ETag。値はダブルクォート込みで、`ETag` ヘッダーと同じ文字列。
+
+| 行の状態 | 値 |
+|----------|-----|
+| `content_hash` あり | `"sha256:<content_hash>"`（強い ETag） |
+| `content_hash` なし（導入前の行） | `"ts:<updated_at の Unix ミリ秒>-<size>"` |
+
+本文更新で `updated_at` が変わるので、導入前の行も `If-Match` で楽観ロックできる。本文を一度更新すると
+ハッシュの形式に切り替わる。名前変更・移動では `content_hash` は変わらない（ハッシュ形式の ETag も変わらない）。
+
+#### GET `/v1/drive/files/{id}/content`
+
+本文を返す（`200 OK`）。認可は §6.3 を参照。応答に `ETag`（`DriveFile.etag` と同じ値）と
+`Last-Modified`（`updated_at` を RFC 7231 の HTTP-date で秒精度）を付ける。
+`If-None-Match` が現在の ETag に一致すれば（カンマ区切りの複数指定、`*` も可。弱い ETag は一致しない）
+`304 Not Modified` を本文なしで返し、`304` にも `ETag` を付ける。`If-Modified-Since` は解釈しない。
 
 ### 8.2 フォルダ API
 
@@ -867,7 +896,7 @@ LOCAL_UPLOAD_DIR=./uploads
 | `tests/drive_public_share_integration.rs` | 正規 URL、二重 prefix の排除、不明・期限切れトークン |
 | `tests/drive_folder_boundary_integration.rs` | 作成・移動・削除のプロジェクト境界、配下同期、ルート保護、ロック待ち後の再認可 |
 | `tests/drive_project_id_backfill_integration.rs` | 深い階層・移動済みルート、冪等性、異なるプロジェクトや循環の検出 |
-| `tests/drive_file_content_integration.rs` | 本文更新・配信、空本文、MIME、クォータ、並行更新、認可・共有トークン、配信ヘッダー |
+| `tests/drive_file_content_integration.rs` | 本文更新・配信、空本文、MIME、クォータ、並行更新、認可・共有トークン、配信ヘッダー、ETag・`If-Match` / `If-None-Match` |
 | `tests/drive_upload_acl_integration.rs` / `tests/drive_usage_integration.rs` | プロジェクトへのアップロード認可、複数ファイルの使用量集計 |
 | `crates/handler/src/routes/mod.rs` | OpenAPI 全体の prefix 重複検出 |
 
@@ -920,4 +949,5 @@ LOCAL_UPLOAD_DIR=./uploads
 | 階層と `project_id` の整合 | フォルダの `project_id` は階層のルートから継承し、移動時は配下（フォルダ・ファイル）まで揃える。既に食い違っている行は backfill マイグレーション（`m20260904000000_drive_project_id_backfill`）で直す。起点は `project_id` を持つフォルダ全件（一般フォルダ配下へ移動されたプロジェクトルートも含む）で、そこから `project_id` が NULL の子孫だけへ伝播する。深さでは打ち切らない（打ち切ると残りが NULL のまま成功してしまう）。一般ツリーの配下に残った `project_id` は触らない（階層より厳しい判定になるだけで、NULL へ落とすと非メンバーへ開く） | 2026-09-04 |
 | backfill の中断条件 | 配下に**別プロジェクト**の `project_id` を持つ行（フォルダ・ファイルとも）があるツリー、または親子が循環しているツリーは 1 行も書き換えず、マイグレーションを失敗させる。継承で上書きするとそのプロジェクトのファイルが別プロジェクトのメンバーへ公開され、元のメンバーはアクセスを失う（修正前はプロジェクトルートの移動もできたため、この状態が既存データにありうる）。該当する行を人が直してから流し直す | 2026-09-04 |
 | 階層変更の直列化 | フォルダの作成・移動、ファイルの作成・移動は、テナント単位のアドバイザリロック（`pg_advisory_xact_lock`）で直列化する。ACL と親の `project_id` はロック取得後に同一トランザクションで読み、挿入・移動・子孫の同期まで同じトランザクションで終える。ロックの外で読むと、移動中のフォルダへ子を作ったときに移動前の `project_id` を継承した行が同期の後から挿入され、ACL 漏れが再発する | 2026-09-04 |
+| ファイル本文の楽観ロック | 本文の ETag は SHA-256（`drive_files.content_hash`）から作る強い ETag。ハッシュを持たない既存行は backfill せず、`updated_at`（Unix ミリ秒）とサイズで代替する。比較は文字列の完全一致で、弱い ETag（`W/`）は受けない。期待値は標準の `If-Match` / `If-None-Match` ヘッダーで受け、JSON ボディでの期待値指定は採らない（同期型クライアントが標準の HTTP キャッシュ処理のまま扱えるようにするため）。`If-Match` の比較は行ロック取得後に行い、ヘッダー省略時は従来どおり後勝ち | 2026-10-16 |
 | 一覧の絞り込み | フォルダ一覧に `project_id` / `parent_id` / `root_only`、ファイル一覧に `mime_type` / `q` / `sort` を足した。プロジェクトのルートは `project_id + root_only` で取る（`ProjectResponse` には持たせない） | 2026-10-16 |

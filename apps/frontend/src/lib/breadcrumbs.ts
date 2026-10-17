@@ -47,6 +47,7 @@ export function breadcrumbRoute(pathname: string, params: Record<string, string 
   const tenant = encodeURIComponent(params.tenant ?? '');
   const project = encodeURIComponent(params.projectKey ?? '');
   const task = encodeURIComponent(params.taskId ?? '');
+  const user = encodeURIComponent(params.userId ?? '');
   const tenantBase = `/${tenant}`;
   const projectBase = `${tenantBase}/projects/${project}`;
   const routes = new Map<string, { kind: RouteKind; name: string }>([
@@ -61,6 +62,9 @@ export function breadcrumbRoute(pathname: string, params: Record<string, string 
           [`${tenantBase}/settings`, { kind: 'tenant', name: 'テナント設定' }],
           [`${tenantBase}/settings/members`, { kind: 'tenant', name: 'メンバー' }],
           [`${tenantBase}/projects/new`, { kind: 'tenant', name: 'プロジェクト作成' }],
+          ...(user
+            ? ([[`${tenantBase}/users/${user}`, { kind: 'home', name: 'プロフィール' }]] as const)
+            : []),
         ] as const)
       : []),
     ...(tenant && project

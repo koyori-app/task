@@ -37,6 +37,7 @@ mod register_integration;
 mod review_notifications_integration;
 mod review_summary_integration;
 mod reviews_integration;
+mod schedule_integration;
 mod session_extractors_integration;
 mod sprints_integration;
 mod statuses_integration;
@@ -54,6 +55,7 @@ mod tenant_member_role_integration;
 mod tenant_members_integration;
 mod tenants_integration;
 mod time_tracking_integration;
+mod user_profile_integration;
 mod webauthn_integration;
 mod webhooks_integration;
 

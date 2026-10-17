@@ -28,6 +28,8 @@ const props = defineProps<{
   onRetry?: () => void;
   /** ログイン中ユーザーの ID。編集ボタンの出し分けに使う（TaskCommentItem 参照） */
   currentUserId?: string | null;
+  /** 投稿者のプロフィール画面の URL（TaskCommentItem 参照） */
+  profileHref?: (userId: string) => string;
   /** 投稿（新規・返信共通）の進行中 */
   submitPending?: boolean;
   /** 新規投稿の失敗。新規投稿フォームの直下に出す */
@@ -213,6 +215,7 @@ async function deleteThread(threadId: string) {
             <TaskCommentItem
               :comment="openThread"
               :current-user-id="currentUserId"
+              :profile-href="profileHref"
               :updating="updatingCommentId === openThread.id"
               :deleting="deletingCommentId === openThread.id"
               :update-error="updateErrorCommentId === openThread.id ? updateError : null"
@@ -239,6 +242,7 @@ async function deleteThread(threadId: string) {
             <TaskCommentItem
               :comment="reply"
               :current-user-id="currentUserId"
+              :profile-href="profileHref"
               :updating="updatingCommentId === reply.id"
               :deleting="deletingCommentId === reply.id"
               :update-error="updateErrorCommentId === reply.id ? updateError : null"
@@ -266,6 +270,7 @@ async function deleteThread(threadId: string) {
             <TaskCommentItem
               :comment="thread"
               :current-user-id="currentUserId"
+              :profile-href="profileHref"
               :updating="updatingCommentId === thread.id"
               :deleting="deletingCommentId === thread.id"
               :update-error="updateErrorCommentId === thread.id ? updateError : null"

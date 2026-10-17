@@ -83,6 +83,8 @@ const props = defineProps<{
   assigneeError?: string | null;
   /** 候補の取得状態。取得中・失敗を「候補 0 人」と混ぜない */
   membersState?: { loading?: boolean; error?: boolean; onRetry?: () => void };
+  /** 担当者のプロフィール画面の URL。渡すと担当者名をリンクで並べる */
+  profileHref?: (userId: string) => string;
   projectLabels?: LabelOption[];
   projectLabelsLoading?: boolean;
   projectLabelsError?: boolean;
@@ -845,6 +847,21 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                     hide-names
                     :users="task.assignees.map((assignee) => assignee.user)"
                   />
+                  <!-- ピッカーのトリガーはボタンなので、リンクは中に入れず横に並べる -->
+                  <div
+                    v-if="profileHref && task.assignees.length"
+                    class="mt-1 flex flex-wrap gap-x-2 text-xs"
+                    data-assignee-profile-links
+                  >
+                    <a
+                      v-for="assignee in task.assignees"
+                      :key="assignee.user.id"
+                      :href="profileHref(assignee.user.id)"
+                      class="text-muted-foreground hover:text-foreground hover:underline"
+                    >
+                      {{ assignee.user.username }}
+                    </a>
+                  </div>
                   <p v-if="assigneeError" class="mt-1 text-xs text-destructive">
                     {{ assigneeError }}
                   </p>

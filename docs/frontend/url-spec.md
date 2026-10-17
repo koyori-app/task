@@ -51,6 +51,7 @@
 | `/{tenant}` | テナントホーム（プロジェクト一覧 or ダッシュボード） |
 | `/{tenant}/settings` | テナント設定 |
 | `/{tenant}/settings/members` | テナントメンバー管理 |
+| `/{tenant}/users/{user_id}` | 利用者のプロフィール（閲覧のみ） |
 | `/{tenant}/drive` | ドライブ（ファイルブラウザ ルート） |
 | `/{tenant}/drive/{folder_id}` | ドライブ フォルダ |
 | `/{tenant}/projects` | プロジェクト一覧 |
@@ -103,6 +104,8 @@ apps/frontend/src/pages/
 │   ├── settings/
 │   │   ├── +Page.vue                    # /{tenant}/settings
 │   │   └── members/+Page.vue            # /{tenant}/settings/members
+│   ├── users/
+│   │   └── @userId/+Page.vue            # /{tenant}/users/{user_id}
 │   ├── drive/
 │   │   ├── +Page.vue                    # /{tenant}/drive
 │   │   └── @folderId/+Page.vue          # /{tenant}/drive/{folder_id}（Vike: camelCase）
@@ -160,6 +163,7 @@ apps/frontend/src/pages/
 | `/{tenant}` | `@tenant/+Page.vue` |
 | `/{tenant}/settings` | `@tenant/settings/+Page.vue` |
 | `/{tenant}/settings/members` | `@tenant/settings/members/+Page.vue` |
+| `/{tenant}/users/{user_id}` | `@tenant/users/@userId/+Page.vue` |
 | `/{tenant}/drive` | `@tenant/drive/+Page.vue` |
 | `/{tenant}/drive/{folder_id}` | `@tenant/drive/@folderId/+Page.vue` |
 | `/{tenant}/projects` | `@tenant/projects/+Page.vue` |
