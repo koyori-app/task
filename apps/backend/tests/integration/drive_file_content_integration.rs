@@ -937,6 +937,16 @@ async fn list_files_filters_by_mime_type_prefix() {
         )
         .await;
     }
+    insert_listed_file(
+        &app,
+        tp.tenant_id,
+        folder,
+        owner.id,
+        "extra.md",
+        "text/markdown-extra",
+        base,
+    )
+    .await;
     for i in 0..3 {
         insert_listed_file(
             &app,
@@ -973,7 +983,10 @@ async fn list_files_filters_by_mime_type_prefix() {
         &[("mime_type", "text/markdown")],
     )
     .await;
-    assert_eq!(total, 55, "text/markdown は .md だけ");
+    assert_eq!(
+        total, 56,
+        "text/markdown は前方一致（text/markdown-extra も含む）"
+    );
     assert_eq!(first.len(), 50, "既定の limit で切れる");
     let (_, rest) = list_files_in(
         &app,
@@ -982,18 +995,18 @@ async fn list_files_filters_by_mime_type_prefix() {
         &[("mime_type", "text/markdown"), ("offset", "50")],
     )
     .await;
-    assert_eq!(rest.len(), 5, "残りは次のページに出る");
+    assert_eq!(rest.len(), 6, "残りは次のページに出る");
     assert!(
-        first
-            .iter()
-            .chain(&rest)
-            .all(|f| f["mime_type"] == "text/markdown"),
+        first.iter().chain(&rest).all(|f| f["mime_type"]
+            .as_str()
+            .unwrap()
+            .starts_with("text/markdown")),
         "markdown 以外が混ざらない"
     );
 
     let (text_total, _) =
         list_files_in(&app, tp.tenant_id, folder, &[("mime_type", "text/")]).await;
-    assert_eq!(text_total, 58, "text/ は text 全体");
+    assert_eq!(text_total, 59, "text/ は text 全体");
 
     for wildcard in ["%", "text_", "%markdown"] {
         let (total, _) =
@@ -1002,7 +1015,7 @@ async fn list_files_filters_by_mime_type_prefix() {
     }
 
     let (all, _) = list_files_in(&app, tp.tenant_id, folder, &[]).await;
-    assert_eq!(all, 60, "省略時は従来どおり全件");
+    assert_eq!(all, 61, "省略時は従来どおり全件");
 
     app.cleanup_user(owner.id).await;
 }

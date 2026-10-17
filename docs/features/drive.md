@@ -575,7 +575,7 @@ pub fn implies(self, other: Scope) -> bool {
 | パラメータ | 型 | デフォルト | 説明 |
 |-----------|-----|----------|------|
 | `folder_id` | UUID? | - | フォルダ絞り込み（省略時はルート） |
-| `mime_type` | string? | - | MIME タイプの前方一致。`text/markdown` は完全一致として効き、`text/` のように末尾 `/` なら種別全体 |
+| `mime_type` | string? | - | MIME タイプの前方一致。`text/markdown` は `text/markdown` で始まる MIME（`text/markdown; charset=…` など）にも一致し、`text/` のように末尾 `/` なら種別全体 |
 | `q` | string? | - | ファイル名の部分一致（`ILIKE`、大文字小文字を区別しない）。200 文字を超えると `400` |
 | `sort` | string | `created_at_desc` | `created_at_desc` / `name_asc` / `updated_at_desc`。それ以外は `400`。同順位は `id` 昇順 |
 | `limit` | u32 | 50 | 取得件数（`1..=200` に補正。`0` は 1、200 超は 200） |

@@ -46,7 +46,7 @@ pub const MAX_NAME_QUERY_LEN: u64 = 200;
 pub struct ListFilesQuery {
     /// 省略時はドライブ直下（フォルダ無し）のファイル
     pub folder_id: Option<Uuid>,
-    /// MIME タイプの前方一致。`text/markdown` は完全一致として効き、`text/` は text 全体
+    /// MIME タイプの前方一致。`text/markdown` は `text/markdown` で始まる MIME（`text/markdown; charset=…` など）にも一致し、`text/` は text 全体
     pub mime_type: Option<String>,
     /// ファイル名の部分一致（大文字小文字を区別しない）。200 文字まで
     #[validate(length(max = MAX_NAME_QUERY_LEN))]
