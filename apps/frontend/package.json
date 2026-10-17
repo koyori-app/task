@@ -92,7 +92,7 @@
     "@types/mdast": "4.0.4",
     "@types/node": "24.19.2",
     "@vitejs/devtools": "0.7.6",
-    "@vitejs/plugin-vue": "6.0.9",
+    "@vitejs/plugin-vue": "6.0.10",
     "@vitest/browser-playwright": "4.1.11",
     "@vitest/coverage-v8": "4.1.11",
     "@vue/test-utils": "2.5.1",
