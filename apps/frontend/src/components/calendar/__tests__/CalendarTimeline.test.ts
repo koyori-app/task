@@ -1,0 +1,105 @@
+import { describe, expect, it, vi } from 'vitest';
+import { mount } from '@vue/test-utils';
+
+vi.mock('vike/client/router', () => ({ navigate: vi.fn() }));
+
+import CalendarTimeline from '../CalendarTimeline.vue';
+import type { components } from '@/generated/api';
+
+type ScheduleTask = components['schemas']['ScheduleTask'];
+
+const ALICE = { id: 'u-alice', username: 'alice' };
+const BOB = { id: 'u-bob', username: 'bob' };
+
+function task(overrides: Partial<ScheduleTask>): ScheduleTask {
+  return {
+    id: 't-1',
+    seq_id: 1,
+    seq_key: 'ENG-1',
+    title: 'タスク',
+    project: { id: 'p-1', key: 'ENG', name: 'Engineering', is_personal: false },
+    status: { id: 's-1', name: 'Todo', color: '#888', is_done_state: false },
+    priority: 'Medium',
+    progress_pct: 0,
+    assignees: [{ user_id: ALICE.id, role: 'primary' }],
+    ...overrides,
+  };
+}
+
+function mountTimeline(tasks: ScheduleTask[], members = [ALICE, BOB]) {
+  return mount(CalendarTimeline, {
+    props: {
+      from: '2026-10-12',
+      today: '2026-10-14',
+      timeZone: 'UTC',
+      tenantSlug: 'acme',
+      tasks,
+      members,
+    },
+  });
+}
+
+describe('CalendarTimeline', () => {
+  it('主担当は塗りの帯、サブ担当は枠線だけの帯で同じタスクを両方の行に描く', () => {
+    const wrapper = mountTimeline([
+      task({
+        planned_start_on: '2026-10-13',
+        soft_deadline: '2026-10-15T00:00:00Z',
+        assignees: [
+          { user_id: ALICE.id, role: 'primary' },
+          { user_id: BOB.id, role: 'assignee' },
+        ],
+      }),
+    ]);
+    const alice = wrapper.get(`[data-member-row="${ALICE.id}"] a`);
+    const bob = wrapper.get(`[data-member-row="${BOB.id}"] a`);
+    expect(alice.attributes('data-role')).toBe('primary');
+    expect(alice.classes()).toContain('bg-primary/15');
+    expect(bob.attributes('data-role')).toBe('sub');
+    expect(bob.classes()).toContain('border-dashed');
+    // 火〜木 = 列 1〜3（1 列目はメンバー名なので +2）
+    expect(alice.attributes('style')).toContain('grid-column: 3 / 6');
+    expect(alice.attributes('href')).toBe('/acme/projects/ENG/tasks/ENG-1');
+  });
+
+  it('開始予定日の無いタスクは締切の点で描く', () => {
+    const wrapper = mountTimeline([task({ soft_deadline: '2026-10-20T00:00:00Z' })]);
+    const entry = wrapper.get(`[data-member-row="${ALICE.id}"] a`);
+    expect(entry.attributes('data-shape')).toBe('point');
+    expect(entry.find('.rotate-45').exists()).toBe(true);
+  });
+
+  it('範囲をはみ出す帯は端で切り詰めて矢印を出す', () => {
+    const wrapper = mountTimeline([
+      task({ planned_start_on: '2026-10-01', soft_deadline: '2026-10-13T00:00:00Z' }),
+    ]);
+    const entry = wrapper.get(`[data-member-row="${ALICE.id}"] a`);
+    expect(entry.attributes('style')).toContain('grid-column: 2 / 4');
+    expect(entry.findAll('svg')).toHaveLength(1);
+  });
+
+  it('上限を超えた日に超過の印と読み上げ文言を出す', () => {
+    const wrapper = mountTimeline([
+      task({
+        planned_start_on: '2026-10-14',
+        soft_deadline: '2026-10-14T00:00:00Z',
+        estimated_minutes: 420,
+      }),
+    ]);
+    const load = wrapper.get(`[data-member-row="${ALICE.id}"] [data-load-date="2026-10-14"]`);
+    expect(load.attributes('data-over')).toBe('true');
+    expect(load.attributes('aria-label')).toBe('2026-10-14 の見積 7h（上限 6h を超過）');
+    expect(load.text()).toContain('超過');
+  });
+
+  it('今日の列を aria-current で示す', () => {
+    const wrapper = mountTimeline([]);
+    expect(wrapper.get('[aria-current="date"]').attributes('data-date')).toBe('2026-10-14');
+  });
+
+  it('期間にタスクが無ければ空状態を出し、メンバーの行は出さない', () => {
+    const wrapper = mountTimeline([]);
+    expect(wrapper.find('[data-calendar-empty]').text()).toBe('この期間のタスクはありません');
+    expect(wrapper.find('[data-member-row]').exists()).toBe(false);
+  });
+});

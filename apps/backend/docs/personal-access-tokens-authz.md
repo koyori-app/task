@@ -77,6 +77,7 @@ GitLab の PAT と同じく、全部を任せる `api` / 読むだけの `read_a
 | `read:project` | プロジェクトの参照 |
 | `write:project` | プロジェクトの更新と Webhook の管理（`read:project` を含む） |
 | `read:<資源>` / `write:<資源>` | task / milestone / sprint / review / drive の参照・変更 |
+| `read:task`（補足） | スケジュール `GET /v1/tenants/{tenant_id}/schedule` もこれだけで読める。期間に重なるスプリント・マイルストーンも `read:sprint` / `read:milestone` なしで返す |
 
 #### 含意の規則
 

@@ -38,6 +38,7 @@ mod register_integration;
 mod review_notifications_integration;
 mod review_summary_integration;
 mod reviews_integration;
+mod schedule_integration;
 mod session_extractors_integration;
 mod sprints_integration;
 mod statuses_integration;

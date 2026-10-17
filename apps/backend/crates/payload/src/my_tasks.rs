@@ -45,6 +45,7 @@ pub struct MyTaskStatusInfo {
     pub id: Uuid,
     pub name: String,
     pub color: String,
+    pub is_done_state: bool,
 }
 
 #[derive(Serialize, ToSchema, serde::Deserialize)]

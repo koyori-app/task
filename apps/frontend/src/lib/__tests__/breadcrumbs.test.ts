@@ -9,6 +9,7 @@ describe('パンくずのルート台帳', () => {
     ['/settings/tokens', 'API トークン'],
     ['/acme', 'ホーム'],
     ['/acme/my-tasks', 'My Tasks'],
+    ['/acme/calendar', 'カレンダー'],
     ['/acme/settings', 'テナント設定'],
     ['/acme/settings/members', 'メンバー'],
     ['/acme/projects/new', 'プロジェクト作成'],

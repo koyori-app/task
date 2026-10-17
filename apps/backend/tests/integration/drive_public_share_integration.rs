@@ -50,6 +50,7 @@ async fn insert_file(app: &TestApp, tenant_id: Uuid, folder_id: Uuid, uploader: 
         folder_id: Set(Some(folder_id)),
         created_at: Set(now.into()),
         updated_at: Set(now.into()),
+        content_hash: Set(None),
     }
     .insert(&app.state.db)
     .await

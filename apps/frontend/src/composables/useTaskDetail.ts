@@ -203,6 +203,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       title: pending.title !== undefined,
       description: pending.description !== undefined,
       progress_pct: pending.progress_pct !== undefined,
+      planned_start_on: pending.planned_start_on !== undefined,
       soft_deadline: pending.soft_deadline !== undefined,
       hard_deadline: pending.hard_deadline !== undefined,
     };
@@ -418,6 +419,19 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     mutateTask({ progress_pct: next }, { progress_pct: next }, 'progress_pct');
   }
 
+  /** `YYYY-MM-DD` のまま送る。Date を通すとタイムゾーンで日付がずれる */
+  function onSavePlannedStartOn(value: string | null) {
+    const current = taskQuery.data.value;
+    if (!current) return;
+    if (!value) {
+      if (!current.planned_start_on) return;
+      mutateTask({ clear_planned_start_on: true }, { planned_start_on: null }, 'planned_start_on');
+      return;
+    }
+    if (value === current.planned_start_on) return;
+    mutateTask({ planned_start_on: value }, { planned_start_on: value }, 'planned_start_on');
+  }
+
   function onSaveSoftDeadline(value: string | null) {
     const current = taskQuery.data.value;
     if (!current) return;
@@ -539,6 +553,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     onSaveTitle,
     onSaveDescription,
     onSaveProgressPct,
+    onSavePlannedStartOn,
     onSaveSoftDeadline,
     onSaveHardDeadline,
     onSaveLabels,
