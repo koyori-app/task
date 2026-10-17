@@ -6,7 +6,7 @@ use crate::extractors::AuthUser;
 use crate::openapi::{DriveFolderErrors, PublicShareErrors};
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
 };
 use axum_valid::Valid;
@@ -206,7 +206,10 @@ fn parse_share_permission(permission: &str) -> Result<SharePermission, AppError>
     path = "/",
     tag = "Drive Folders",
     summary = "ドライブフォルダ一覧",
-    params(("tenant_id" = Uuid, Path, description = "テナントID")),
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ListFoldersQuery,
+    ),
     responses(
         (status = 200, description = "フォルダ一覧", body = [DriveFolderResponse]),
         DriveFolderErrors,
@@ -217,13 +220,27 @@ pub async fn list_folders(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
+    Query(query): Query<ListFoldersQuery>,
 ) -> Result<Json<Vec<DriveFolderResponse>>, AppError> {
     auth.require_scope(Scope::ReadDrive)?;
-    auth.ensure_tenant_access(&state, tenant_id, None).await?;
-    let folders = drive_folders::Entity::find()
-        .filter(drive_folders::Column::TenantId.eq(tenant_id))
-        .all(&state.db)
+    if query.root_only && query.parent_id.is_some() {
+        return Err(AppError::BadRequest);
+    }
+    auth.ensure_tenant_access(&state, tenant_id, query.project_id)
         .await?;
+
+    let mut selector =
+        drive_folders::Entity::find().filter(drive_folders::Column::TenantId.eq(tenant_id));
+    if let Some(project_id) = query.project_id {
+        selector = selector.filter(drive_folders::Column::ProjectId.eq(project_id));
+    }
+    if let Some(parent_id) = query.parent_id {
+        selector = selector.filter(drive_folders::Column::ParentId.eq(parent_id));
+    }
+    if query.root_only {
+        selector = selector.filter(drive_folders::Column::ParentId.is_null());
+    }
+    let folders = selector.all(&state.db).await?;
     Ok(Json(folders.into_iter().map(Into::into).collect()))
 }
 
