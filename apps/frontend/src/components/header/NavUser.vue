@@ -4,6 +4,7 @@ import {
   PhBell,
   PhCaretUpDown,
   PhCreditCard,
+  PhDownloadSimple,
   PhSignOut,
   PhSparkle,
 } from '@phosphor-icons/vue';
@@ -20,6 +21,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { computed } from 'vue';
 import { avatarInitials } from '@/lib/initials';
+import { useInstallPrompt } from '@/lib/pwa/install-prompt';
 
 const props = defineProps<{
   user: {
@@ -31,6 +33,9 @@ const props = defineProps<{
 }>();
 
 const initials = computed(() => avatarInitials(props.user.name));
+
+// ブラウザが install を差し出した時だけ出る（iOS の Safari などでは出ない）。
+const { canInstall, promptInstall } = useInstallPrompt();
 </script>
 
 <template>
@@ -85,6 +90,13 @@ const initials = computed(() => avatarInitials(props.user.name));
           Notifications
         </DropdownMenuItem>
       </DropdownMenuGroup>
+      <template v-if="canInstall">
+        <DropdownMenuSeparator />
+        <DropdownMenuItem data-testid="install-app" @click="promptInstall()">
+          <PhDownloadSimple />
+          Install app
+        </DropdownMenuItem>
+      </template>
       <DropdownMenuSeparator />
       <DropdownMenuItem @click="onLogout?.()">
         <PhSignOut />

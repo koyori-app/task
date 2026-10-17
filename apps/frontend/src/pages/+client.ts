@@ -7,6 +7,8 @@
 // DOMPurify) が tree-shake されず client バンドルへ丸ごと載るため。
 import { registerKfmCustomElements } from '@/lib/markup-renderer/_client-registry';
 import { stashSelectTokenFromUrl } from '@/lib/github-select-token';
+import { captureInstallPrompt } from '@/lib/pwa/install-prompt';
+import { registerServiceWorker } from '@/lib/pwa/register-service-worker';
 
 registerKfmCustomElements();
 
@@ -14,3 +16,8 @@ registerKfmCustomElements();
 // URL から落ちるため、それより前に走るこの entry で退避しておく。受け取る連携セクションは
 // テナント / プロジェクトの解決を待ってマウントされるので、自分で読むには間に合わない。
 stashSelectTokenFromUrl();
+
+// PWA（TASK-297）。beforeinstallprompt は読み込みの早いうちに来ることがあるので、
+// hydration より前に受け始める。service worker の登録はこの entry から一度だけ。
+captureInstallPrompt();
+void registerServiceWorker();
