@@ -1,6 +1,7 @@
 //! コミットメッセージ・PR タイトル・ブランチ名からの `KEY-N` 抽出と解決
 //! （docs/features/tasks/9.github-tasks.md §4）。
 
+use std::collections::{HashMap, hash_map::Entry};
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -33,21 +34,37 @@ pub struct TaskRef {
 ///
 /// `SHA256-1` のようなキーでないものも拾うが、[`resolve`] で解決できずに捨てられる。
 pub fn extract(text: &str) -> Vec<TaskRef> {
+    extract_limited(text, usize::MAX)
+}
+
+/// [`extract`] と同じだが、一意な参照が `limit` 件に達した時点で走査を止める。
+///
+/// 上限を抽出の後にかけると、大量の参照を持つ本文で切り詰める前の処理量が
+/// 参照数に比例して膨らむ（Drive の本文は保存トランザクションの中で拾う）。
+pub fn extract_limited(text: &str, limit: usize) -> Vec<TaskRef> {
     let mut refs: Vec<TaskRef> = Vec::new();
+    let mut index: HashMap<(String, i32), usize> = HashMap::new();
     for cap in TASK_REF_RE.captures_iter(text) {
+        if refs.len() >= limit {
+            break;
+        }
         // i32 に収まらない番号のタスクは存在しない
         let Ok(seq_id) = cap[3].parse::<i32>() else {
             continue;
         };
         let key = cap[2].to_ascii_uppercase();
         let closes = cap.get(1).is_some();
-        match refs.iter_mut().find(|r| r.key == key && r.seq_id == seq_id) {
-            Some(existing) => existing.closes |= closes,
-            None => refs.push(TaskRef {
-                key,
-                seq_id,
-                closes,
-            }),
+        match index.entry((key, seq_id)) {
+            Entry::Occupied(entry) => refs[*entry.get()].closes |= closes,
+            Entry::Vacant(entry) => {
+                let key = entry.key().0.clone();
+                entry.insert(refs.len());
+                refs.push(TaskRef {
+                    key,
+                    seq_id,
+                    closes,
+                });
+            }
         }
     }
     refs
@@ -175,6 +192,22 @@ mod tests {
     }
 
     /// キーに見えるだけのものも拾う。解決できなければ捨てるので許容する。
+    #[test]
+    fn extract_limited_stops_at_the_first_unique_refs() {
+        let text: String = (1..=500).map(|i| format!("APP-{i} ")).collect();
+        let refs = extract_limited(&text, 200);
+        assert_eq!(refs.len(), 200);
+        assert_eq!(refs[0], r("APP", 1, false));
+        assert_eq!(refs[199], r("APP", 200, false));
+        assert!(extract_limited(&text, 0).is_empty());
+    }
+
+    #[test]
+    fn extract_limited_does_not_count_duplicates() {
+        let refs = extract_limited("APP-1 app-1 closes APP-1 APP-2 APP-3", 2);
+        assert_eq!(refs, [r("APP", 1, true), r("APP", 2, false)]);
+    }
+
     #[test]
     fn false_positive_is_extracted_and_left_to_resolution() {
         assert_eq!(extract("SHA256-1"), vec![r("SHA256", 1, false)]);

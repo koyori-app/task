@@ -107,6 +107,25 @@ pub struct UpdateFileRequest {
     pub folder_id: Option<Option<Uuid>>,
 }
 
+/// ファイルに結び付いたタスク 1 件（`GET .../drive/files/{id}/tasks`）。
+#[derive(Serialize, ToSchema)]
+pub struct DriveFileTaskLink {
+    #[schema(value_type = String, format = "uuid")]
+    pub task_id: Uuid,
+    pub seq_key: String,
+    pub title: String,
+    pub project: crate::my_tasks::MyTaskProjectInfo,
+    pub status: crate::my_tasks::MyTaskStatusInfo,
+    /// 結び付きの由来。`manual`（手動添付）または `body`（本文から抽出）
+    #[schema(example = "body")]
+    pub source: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct DriveFileTasksResponse {
+    pub tasks: Vec<DriveFileTaskLink>,
+}
+
 /// ドライブファイルの本文差し替えリクエスト。
 ///
 /// 空文字列は「中身を空にする編集」として許可する（アップロードが 0 バイトを
