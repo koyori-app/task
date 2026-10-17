@@ -78,7 +78,7 @@ bitflags = { version = "2", default-features = false, features = ["serde"] }
 crossbeam-utils = { version = "0.8" }
 crypto-common-c65f7effa3be6d31 = { package = "crypto-common", version = "0.1", default-features = false, features = ["getrandom", "std"] }
 darling = { version = "0.20" }
-darling_core = { version = "0.20", default-features = false, features = ["suggestions"] }
+darling_core = { version = "0.24", default-features = false, features = ["suggestions"] }
 deranged = { version = "0.5", features = ["serde"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10", features = ["mac", "std"] }
 displaydoc = { version = "0.2" }
