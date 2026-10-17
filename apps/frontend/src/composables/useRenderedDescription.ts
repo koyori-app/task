@@ -24,17 +24,48 @@ export const RENDER_DESCRIPTION_PATH = '/internal/render-description';
  * その入力では何度試しても成功しない応答。
  *
  * - `411` / `413` — 本文が上限を超えていて、読む前に落とされている
- * - `422` — スキーマ違反（本文長・`taskId`・`tenant` の形式）
+ * - `400` — `scope` の字種・長さが不正
+ * - `422` — スキーマ違反（本文長・`tenant` の形式）
  *
  * これらは結果として覚えてよい（プレーン表示のまま再取得しない）。逆に `401` や
  * `5xx` は backend の一時的な不調で出るので、ここに入れない。成功として覚えると
  * `staleTime: Infinity` でプレーン表示に固定され、この PR が直すはずの
  * 「分割ビューが素の Markdown のまま」へ戻ってしまう。
  */
-const PERMANENT_FAILURE_STATUSES = new Set([411, 413, 422]);
+const PERMANENT_FAILURE_STATUSES = new Set([400, 411, 413, 422]);
 
 /** 一時的な失敗を何回まで試すか。諦めたら呼び出し側がプレーン表示へ倒す。 */
-const TRANSIENT_FAILURE_RETRIES = 2;
+export const TRANSIENT_FAILURE_RETRIES = 2;
+
+/**
+ * 本文をサーバで KFM 描画する。入力由来の拒否は `html: null`、一時的な失敗は throw
+ * （再試行へ載せる）。`scope` は断片ごとに決定的な値、`tenant` は KEY-N のリンク先。
+ */
+export async function renderOnServer(input: {
+  description: string;
+  scope: string;
+  tenant?: string;
+}): Promise<RenderedDescription> {
+  const response = await fetch(RENDER_DESCRIPTION_PATH, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    // 入力由来の拒否は結果として覚える。説明の KFM 表示は付加価値なので、
+    // 呼び出し側はプレーン表示へ倒せる（エラー表示を増やさない）
+    if (PERMANENT_FAILURE_STATUSES.has(response.status)) {
+      return { html: null, source: input.description };
+    }
+    // 401（backend が不調でセッション確認に失敗した）や 5xx は一時的。
+    // ここで html: null を返すと成功として覚えられ、staleTime: Infinity の
+    // ぶんプレーン表示に固定される。投げて再試行へ載せる
+    throw new Error(`render-description failed with ${response.status}`);
+  }
+
+  const data = (await response.json()) as { html?: string | null };
+  return { html: data.html ?? null, source: input.description };
+}
 
 export function renderedDescriptionQueryKey(tenant: string, taskUuid: string, description: string) {
   // 本文そのものをキーに含める。ハッシュにすると衝突時に別タスクの HTML を掴むため、
@@ -68,29 +99,11 @@ export function useRenderedDescription(
           // enabled で絞っているのでここには非 null しか来ないが、型のために畳む
           if (!current) return { html: null, source: '' };
 
-          const response = await fetch(RENDER_DESCRIPTION_PATH, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              taskId: current.uuid,
-              tenant: current.tenant,
-              description: current.text,
-            }),
+          return renderOnServer({
+            description: current.text,
+            scope: `task-${current.uuid}`,
+            tenant: current.tenant,
           });
-          if (!response.ok) {
-            // 入力由来の拒否は結果として覚える。説明の KFM 表示は付加価値なので、
-            // 呼び出し側はプレーン表示へ倒せる（エラー表示を増やさない）
-            if (PERMANENT_FAILURE_STATUSES.has(response.status)) {
-              return { html: null, source: current.text };
-            }
-            // 401（backend が不調でセッション確認に失敗した）や 5xx は一時的。
-            // ここで html: null を返すと成功として覚えられ、staleTime: Infinity の
-            // ぶんプレーン表示に固定される。投げて再試行へ載せる
-            throw new Error(`render-description failed with ${response.status}`);
-          }
-
-          const data = (await response.json()) as { html?: string | null };
-          return { html: data.html ?? null, source: current.text };
         },
         enabled: !!resolved.value,
         // 同じ本文なら結果は変わらない（描画は決定的）。再取得の価値がない。

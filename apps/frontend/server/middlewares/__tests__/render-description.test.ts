@@ -138,6 +138,48 @@ describe('POST /internal/render-description', () => {
     expect(html).toContain('<p>');
   });
 
+  it('scope と tenant を受け、本文の KEY-N をそのテナントのタスク詳細へのリンクにする', async () => {
+    const response = await post({
+      scope: 'doc-00000000-0000-0000-0000-000000000007',
+      tenant: 'acme',
+      description: 'ENG-42 を参照[^1]\n\n[^1]: 注記',
+    });
+
+    expect(response.status).toBe(200);
+    const { html } = (await response.json()) as { html: string | null };
+    expect(html).toContain('href="/acme/projects/ENG/tasks/ENG-42"');
+    expect(html).toContain('user-content-doc-00000000-0000-0000-0000-000000000007-');
+  });
+
+  it('tenant が無ければ KEY-N はリンクにしない', async () => {
+    const response = await post({ scope: 'doc-1', description: 'ENG-42 を参照' });
+
+    const { html } = (await response.json()) as { html: string | null };
+    expect(html).not.toContain('<a');
+  });
+
+  it.each([
+    ['字種外', 'doc 1"><x'],
+    ['空', ''],
+    ['65 文字', 'a'.repeat(65)],
+  ])('不正な scope（%s）は 400', async (_label, scope) => {
+    const response = await post({ scope, description: '本文' });
+
+    expect(response.status).toBe(400);
+  });
+
+  it('64 文字の scope は受ける', async () => {
+    const response = await post({ scope: 'a'.repeat(64), description: '本文' });
+
+    expect(response.status).toBe(200);
+  });
+
+  it('scope も taskId も無ければ 400', async () => {
+    const response = await post({ description: '本文' });
+
+    expect(response.status).toBe(400);
+  });
+
   it('UUID でない taskId は受け付けない（scope の文字集合を壊さない）', async () => {
     const response = await post({ taskId: 'task-1 onerror=x', description: '本文' });
 

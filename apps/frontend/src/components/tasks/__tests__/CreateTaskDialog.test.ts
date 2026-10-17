@@ -102,6 +102,7 @@ type MountOptions = {
   members?: typeof members;
   membersLoading?: boolean;
   membersError?: boolean;
+  initialTitle?: string;
 };
 
 /**
@@ -134,6 +135,7 @@ function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
       members: options.members,
       membersLoading: options.membersLoading,
       membersError: options.membersError,
+      initialTitle: options.initialTitle,
     },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
@@ -901,6 +903,49 @@ describe('CreateTaskDialog assignable-users query states', () => {
     expect(group).not.toBeNull();
     expect(group!.getAttribute('role')).toBe('group');
     expect(document.getElementById('task-assignees-label')?.textContent).toContain('担当者');
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog initialTitle', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('開いたときにタイトルの初期値を入れる', async () => {
+    const wrapper = mountDialog(queryClient, { initialTitle: '選択した文' });
+    await nextTick();
+
+    expect(getTitleInput().value).toBe('選択した文');
+    wrapper.unmount();
+  });
+
+  it('閉じて開き直すと、その時点の初期値を入れ直す', async () => {
+    const wrapper = mountDialog(queryClient, { open: false, initialTitle: '一度目' });
+    await wrapper.setProps({ open: true });
+    await nextTick();
+    getTitleInput().value = '書き換えた';
+    getTitleInput().dispatchEvent(new Event('input'));
+
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ initialTitle: '二度目', open: true });
+    await nextTick();
+
+    expect(getTitleInput().value).toBe('二度目');
+    wrapper.unmount();
+  });
+
+  it('指定しなければ空のまま（既存の呼び出し元）', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    expect(getTitleInput().value).toBe('');
     wrapper.unmount();
   });
 });

@@ -83,17 +83,6 @@ pub async fn search_tasks(
     }
 }
 
-fn escape_like(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 4);
-    for c in s.chars() {
-        if matches!(c, '\\' | '%' | '_') {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out
-}
-
 async fn search_tasks_ilike(
     state: &AppState,
     project_id: Uuid,
@@ -101,7 +90,7 @@ async fn search_tasks_ilike(
     limit: u64,
     offset: u64,
 ) -> Result<Json<SearchTasksResponse>, AppError> {
-    let pattern = format!("%{}%", escape_like(query));
+    let pattern = format!("%{}%", common::db::escape_like(query));
     let base = tasks::Entity::find()
         .filter(tasks::Column::ProjectId.eq(project_id))
         .filter(tasks::Column::DeletedAt.is_null())

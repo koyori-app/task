@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   PhCaretRight,
+  PhFiles,
   PhFolderOpen,
   PhGear,
   PhGitPullRequest,
@@ -68,6 +69,7 @@ function projectChildren(project: ProjectNavItem): ProjectChild[] {
   const base = projectBaseUrl(project);
   const children: ProjectChild[] = [
     { label: 'タスク', href: `${base}/tasks`, icon: PhListChecks },
+    { label: 'ドキュメント', href: `${base}/docs`, icon: PhFiles },
     { label: 'ラベル', href: `${base}/labels`, icon: PhTag },
   ];
   // 個人プロジェクト（個人 Inbox）はシステム管理のため設定を出さない。
