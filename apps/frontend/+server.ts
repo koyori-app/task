@@ -1,5 +1,6 @@
 import type { Server } from 'vike/types';
 import { getApp } from './server/elysia';
+import { pwaStaticHeaders } from './server/pwa';
 
 const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
@@ -18,5 +19,7 @@ export default {
   },
   prod: {
     port,
+    // 静的な物（dist/client）は Elysia より前で配られる。/sw.js の header はここで揃える。
+    middleware: [pwaStaticHeaders],
   },
 } satisfies Server;
