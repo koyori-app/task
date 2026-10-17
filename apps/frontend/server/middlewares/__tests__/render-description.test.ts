@@ -11,6 +11,7 @@ import {
 const app = new Elysia().use(renderDescriptionPlugin);
 
 const TASK_UUID = '00000000-0000-0000-0000-000000000042';
+const TENANT = 'acme';
 
 /**
  * 入口の認証確認（backend の `/v1/auth/me`）を差し替える。
@@ -72,7 +73,11 @@ async function post(
 
 describe('POST /internal/render-description', () => {
   it('markdown を KFM の HTML にして返す', async () => {
-    const response = await post({ taskId: TASK_UUID, description: '# 見出し\n\n- 箇条書き' });
+    const response = await post({
+      taskId: TASK_UUID,
+      tenant: TENANT,
+      description: '# 見出し\n\n- 箇条書き',
+    });
     expect(response.status).toBe(200);
 
     const { html } = (await response.json()) as { html: string | null };
@@ -85,6 +90,7 @@ describe('POST /internal/render-description', () => {
   it('脚注の id はタスク UUID で scope 化する（詳細ページと同じ組み立て）', async () => {
     const response = await post({
       taskId: TASK_UUID,
+      tenant: TENANT,
       description: '本文[^1]\n\n[^1]: 注記',
     });
 
@@ -93,8 +99,29 @@ describe('POST /internal/render-description', () => {
     expect(html).toContain(`user-content-task-${TASK_UUID}-`);
   });
 
+  it('本文中の KEY-N を渡したテナントのタスク詳細へのリンクにする（詳細ページと同じ組み立て）', async () => {
+    const response = await post({
+      taskId: TASK_UUID,
+      tenant: TENANT,
+      description: 'TASK-58 の続き',
+    });
+
+    const { html } = (await response.json()) as { html: string | null };
+    expect(html).toContain('class="kfm-task-ref"');
+    expect(html).toContain('href="/acme/projects/TASK/tasks/TASK-58"');
+  });
+
+  it.each([
+    ['字種外', 'acme/../x'],
+    ['未指定', undefined],
+  ])('テナントが%sなら描画せず 422', async (_label, tenant) => {
+    const response = await post({ taskId: TASK_UUID, tenant, description: 'TASK-58' });
+
+    expect(response.status).toBe(422);
+  });
+
   it('空の本文は描画せず null を返す', async () => {
-    const response = await post({ taskId: TASK_UUID, description: '' });
+    const response = await post({ taskId: TASK_UUID, tenant: TENANT, description: '' });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ html: null });
@@ -103,6 +130,7 @@ describe('POST /internal/render-description', () => {
   it('上限ちょうどの本文は描画する', async () => {
     const response = await post({
       taskId: TASK_UUID,
+      tenant: TENANT,
       description: 'a'.repeat(MAX_DESCRIPTION_LENGTH),
     });
 
@@ -164,7 +192,10 @@ describe('POST /internal/render-description', () => {
 // 呼ぶのはログイン済みの画面だけなので、入口で落とす
 describe('POST /internal/render-description の入口', () => {
   it('Cookie が無ければ描画せず 401', async () => {
-    const response = await post({ taskId: TASK_UUID, description: '# 見出し' }, { cookie: null });
+    const response = await post(
+      { taskId: TASK_UUID, tenant: TENANT, description: '# 見出し' },
+      { cookie: null },
+    );
 
     expect(response.status).toBe(401);
     // backend へ問い合わせるまでもない
@@ -173,7 +204,7 @@ describe('POST /internal/render-description の入口', () => {
 
   it('ログインしていなければ 401', async () => {
     authOk = false;
-    const response = await post({ taskId: TASK_UUID, description: '# 見出し' });
+    const response = await post({ taskId: TASK_UUID, tenant: TENANT, description: '# 見出し' });
 
     expect(response.status).toBe(401);
     expect(authCalls).toHaveLength(1);
@@ -183,15 +214,15 @@ describe('POST /internal/render-description の入口', () => {
   // 未ログインの訪問者にも session Cookie を発行する
   it('Cookie があってもセッションを backend に確かめる', async () => {
     const cookie = freshCookie();
-    await post({ taskId: TASK_UUID, description: '本文' }, { cookie });
+    await post({ taskId: TASK_UUID, tenant: TENANT, description: '本文' }, { cookie });
 
     expect(authCalls).toEqual([cookie]);
   });
 
   it('同じ Cookie の連続呼び出しでは確認を繰り返さない', async () => {
     const cookie = freshCookie();
-    await post({ taskId: TASK_UUID, description: '1 回目' }, { cookie });
-    await post({ taskId: TASK_UUID, description: '2 回目' }, { cookie });
+    await post({ taskId: TASK_UUID, tenant: TENANT, description: '1 回目' }, { cookie });
+    await post({ taskId: TASK_UUID, tenant: TENANT, description: '2 回目' }, { cookie });
 
     expect(authCalls).toHaveLength(1);
   });
@@ -201,14 +232,14 @@ describe('POST /internal/render-description の入口', () => {
       throw new Error('backend down');
     });
 
-    const response = await post({ taskId: TASK_UUID, description: '# 見出し' });
+    const response = await post({ taskId: TASK_UUID, tenant: TENANT, description: '# 見出し' });
 
     expect(response.status).toBe(401);
   });
 
   it('content-length が上限を超えるリクエストは本文を読まずに 413', async () => {
     const response = await post(
-      { taskId: TASK_UUID, description: '本文' },
+      { taskId: TASK_UUID, tenant: TENANT, description: '本文' },
       { contentLength: MAX_REQUEST_BODY_BYTES + 1 },
     );
 
@@ -237,7 +268,7 @@ describe('POST /internal/render-description の入口', () => {
 
   it('上限の範囲内なら content-length では落とさない', async () => {
     const response = await post(
-      { taskId: TASK_UUID, description: '本文' },
+      { taskId: TASK_UUID, tenant: TENANT, description: '本文' },
       { contentLength: MAX_REQUEST_BODY_BYTES },
     );
 
@@ -270,7 +301,7 @@ describe('POST /internal/render-description の入口', () => {
 
   it('content-length が数値でなければ 413', async () => {
     const response = await post(
-      { taskId: TASK_UUID, description: '本文' },
+      { taskId: TASK_UUID, tenant: TENANT, description: '本文' },
       { contentLength: Number.NaN },
     );
 
@@ -281,6 +312,7 @@ describe('POST /internal/render-description の入口', () => {
   it('上限を超える本文は描画に到達しない', async () => {
     const response = await post({
       taskId: TASK_UUID,
+      tenant: TENANT,
       description: 'a'.repeat(MAX_DESCRIPTION_LENGTH + 1),
     });
 

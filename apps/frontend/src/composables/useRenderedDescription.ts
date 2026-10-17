@@ -25,7 +25,7 @@ export const RENDER_DESCRIPTION_PATH = '/internal/render-description';
  *
  * - `411` / `413` — 本文が上限を超えていて、読む前に落とされている
  * - `400` — `scope` の字種・長さが不正
- * - `422` — スキーマ違反（本文長など）
+ * - `422` — スキーマ違反（本文長・`tenant` の形式）
  *
  * これらは結果として覚えてよい（プレーン表示のまま再取得しない）。逆に `401` や
  * `5xx` は backend の一時的な不調で出るので、ここに入れない。成功として覚えると
@@ -67,27 +67,34 @@ export async function renderOnServer(input: {
   return { html: data.html ?? null, source: input.description };
 }
 
-export function renderedDescriptionQueryKey(taskUuid: string, description: string) {
+export function renderedDescriptionQueryKey(tenant: string, taskUuid: string, description: string) {
   // 本文そのものをキーに含める。ハッシュにすると衝突時に別タスクの HTML を掴むため、
   // 照合と同じく厳密（衝突なし）にしておく。説明はタスク単位の短文である前提。
-  return ['render-description', taskUuid, description] as const;
+  // テナントも含める: 同じ本文でも KEY-N のリンク先がテナントで変わる。
+  return ['render-description', tenant, taskUuid, description] as const;
 }
 
 export function useRenderedDescription(
+  tenant: MaybeRefOrGetter<string | null | undefined>,
   taskUuid: MaybeRefOrGetter<string | null | undefined>,
   description: MaybeRefOrGetter<string | null | undefined>,
 ) {
   const resolved = computed(() => {
+    const tenantId = toValue(tenant);
     const uuid = toValue(taskUuid);
     const text = toValue(description);
-    return uuid && text ? { uuid, text } : null;
+    return tenantId && uuid && text ? { tenant: tenantId, uuid, text } : null;
   });
 
   return useQuery(
     computed(() => {
       const current = resolved.value;
       return {
-        queryKey: renderedDescriptionQueryKey(current?.uuid ?? '', current?.text ?? ''),
+        queryKey: renderedDescriptionQueryKey(
+          current?.tenant ?? '',
+          current?.uuid ?? '',
+          current?.text ?? '',
+        ),
         queryFn: async (): Promise<RenderedDescription> => {
           // enabled で絞っているのでここには非 null しか来ないが、型のために畳む
           if (!current) return { html: null, source: '' };
@@ -95,6 +102,7 @@ export function useRenderedDescription(
           return renderOnServer({
             description: current.text,
             scope: `task-${current.uuid}`,
+            tenant: current.tenant,
           });
         },
         enabled: !!resolved.value,

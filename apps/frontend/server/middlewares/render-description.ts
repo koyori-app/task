@@ -158,7 +158,9 @@ export const renderDescriptionPlugin = new Elysia()
       },
       body: t.Object({
         scope: t.Optional(t.String()),
-        tenant: t.Optional(t.String({ maxLength: 64 })),
+        // URL の tenant display_id。remark-kfm-task-ref の TENANT_RE と同じ字種で縛り、
+        // 合わなければ 422（呼び出し側はプレーン表示へ畳む）
+        tenant: t.Optional(t.String({ pattern: '^[A-Za-z0-9][A-Za-z0-9-]{0,62}$' })),
         /** 旧形式。scope を送らない呼び出し元のために当面残す */
         taskId: t.Optional(t.String({ format: 'uuid' })),
         // 上限超過は描画へ入れない。スキーマで縛ると本文を読んだ時点で 422 になり、

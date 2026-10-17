@@ -101,9 +101,10 @@ GitHub 完全互換の境界仕様をテストで固定している:
   memoize されており、テナントごとに作るとメモリが漏れるため。tenant が無い、または
   `^[a-z0-9][a-z0-9-]{0,62}$`（大小無視）に合わない場合は何もしない
 - 同じ本文でもテナントで href が変わるため、テナントはキャッシュキーに載る
-- `taskRef` を渡している消費側はタスク詳細ページの説明（`+data.ts`）、レビュー指摘の本文
-  （`ReviewFindingBody.vue`）、ドキュメント詳細（`docs/@fileId/+data.ts` と内部エンドポイント経由の
-  プレビュー）。いずれも URL の tenant display_id を渡す
+- `taskRef` を渡している消費側はタスク詳細ページの説明（`+data.ts`）、分割ビュー・オーバーレイの
+  説明（`POST /internal/render-description`。body の `tenant` を同じ字種で検め、外れたら 422）、
+  レビュー指摘の本文（`ReviewFindingBody.vue`）、ドキュメント詳細（`docs/@fileId/+data.ts` と
+  内部エンドポイント経由のプレビュー）。いずれも URL の tenant display_id を渡す
 
 ## mermaid 図（remark-kfm-mermaid）
 

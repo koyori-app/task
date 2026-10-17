@@ -12,6 +12,7 @@ describe('パンくずのルート台帳', () => {
     ['/acme/settings', 'テナント設定'],
     ['/acme/settings/members', 'メンバー'],
     ['/acme/projects/new', 'プロジェクト作成'],
+    ['/acme/users/u-1', 'プロフィール'],
     ['/acme/projects/ENG/tasks', ''],
     ['/acme/projects/ENG/settings', 'プロジェクト設定'],
     ['/acme/projects/ENG/reviews', 'レビュー'],
@@ -26,6 +27,7 @@ describe('パンくずのルート台帳', () => {
         projectKey: 'ENG',
         taskId: 'ENG-3',
         fileId: 'file-1',
+        userId: 'u-1',
       })?.name,
     ).toBe(name);
   });

@@ -10,7 +10,7 @@ use sea_orm::{
 };
 
 use crate::AppState;
-use crate::auth_helpers::is_tenant_owner;
+use crate::auth_helpers::{explicit_member_project_ids, is_tenant_member, is_tenant_owner};
 use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::handlers::project_members;
@@ -21,6 +21,7 @@ use entity::{
     users,
 };
 use payload::tenant_members::*;
+use payload::users::UserProfileResponse;
 use service::access::visible_project_ids;
 use service::db::is_postgres_unique_violation;
 
@@ -138,6 +139,46 @@ pub async fn list_members(
     }
 
     Ok(Json(response))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    get,
+    path = "/{tenant_id}/users/{user_id}",
+    tag = "Tenant Members",
+    summary = "利用者のプロフィールを取得",
+    description = "テナントのオーナー・メンバー・客分のプロフィールを返す。メールアドレス等の本人向け項目は含めない。",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("user_id" = Uuid, Path, description = "ユーザーID"),
+    ),
+    responses(
+        (status = 200, description = "プロフィール", body = UserProfileResponse),
+        CrudErrors,
+    )
+)]
+pub async fn get_user_profile(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, user_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<UserProfileResponse>, AppError> {
+    auth.require_scope(Scope::ReadTenant)?;
+    auth.ensure_tenant_access(&state, tenant_id, None).await?;
+
+    // users はテナント横断の表なので、テナントに関わらない人は 403 ではなく 404 にして存在を明かさない
+    let visible = is_tenant_owner(&state.db, tenant_id, user_id).await?
+        || is_tenant_member(&state.db, tenant_id, user_id).await?
+        || !explicit_member_project_ids(&state.db, tenant_id, user_id)
+            .await?
+            .is_empty();
+    if !visible {
+        return Err(AppError::NotFound);
+    }
+    let user = users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(Json(user.into()))
 }
 
 #[axum::debug_handler]

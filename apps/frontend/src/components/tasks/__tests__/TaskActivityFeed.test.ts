@@ -39,6 +39,20 @@ describe('TaskActivityFeed', () => {
     );
   });
 
+  it.each([
+    [{ from: null, to: '2026-10-05' }, '開始予定日を 2026/10/05 に変更しました'],
+    [{ from: '2026-10-05', to: null }, '開始予定日を解除しました'],
+  ])('開始予定日の変更を表示する: %j', (payload, text) => {
+    const wrapper = mount(TaskActivityFeed, {
+      props: {
+        activities: [
+          { ...activity('planned-1', 10), event_type: 'planned_start_changed', payload },
+        ],
+      },
+    });
+    expect(wrapper.text()).toContain(text);
+  });
+
   it.each([null, {}, { repo_owner: 'acme', repo_name: 'backend', issue_number: '42' }])(
     '同期元情報が不完全でも GitHub 同期であることを表示する: %j',
     (payload) => {

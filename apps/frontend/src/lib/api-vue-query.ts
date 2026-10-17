@@ -115,6 +115,42 @@ export function useAssignableUsersQuery(
   );
 }
 
+const USER_PROFILE_PATH = '/v1/tenants/{tenant_id}/users/{user_id}' as const;
+
+/**
+ * テナント内の利用者のプロフィール。見つからなければ `null`。
+ *
+ * テナントに関わらない利用者も 404 で返る（存在を明かさない）。
+ * それ以外の失敗は `status` を付けて投げる（閲覧者が客分なら 403）。
+ */
+export function useUserProfileQuery(
+  tenantId: MaybeRefOrGetter<TenantUuid | null | undefined>,
+  userId: MaybeRefOrGetter<string>,
+) {
+  return useQuery(
+    computed(() => {
+      const tenantUuid = toValue(tenantId);
+      const userUuid = toValue(userId);
+      // 非 null は enabled で担保する（未解決のうちは問い合わせない）
+      const params = { params: { path: { tenant_id: tenantUuid!, user_id: userUuid } } };
+      return {
+        queryKey: ['get', USER_PROFILE_PATH, params],
+        queryFn: async ({ signal }: { signal: AbortSignal }) => {
+          const { data, error, response } = await fetchClient.GET(USER_PROFILE_PATH, {
+            ...params,
+            signal,
+          });
+          if (response.status === 404) return null;
+          if (error) throw Object.assign(new Error(error.message), { status: response.status });
+          return data;
+        },
+        enabled: !!tenantUuid && !!userUuid,
+        retry: false,
+      };
+    }),
+  );
+}
+
 export function useMeQuery(options?: { enabled?: MaybeRefOrGetter<boolean> }) {
   return apiClient.useQuery('get', '/v1/auth/me', undefined, {
     staleTime: AUTH_ME_STALE_TIME_MS,

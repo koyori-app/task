@@ -37,6 +37,7 @@ pub struct Model {
         nullable
     )]
     pub search_vector: Option<String>,
+    pub planned_start_on: Option<Date>,
     #[sea_orm(
         belongs_to,
         from = "milestone_id",

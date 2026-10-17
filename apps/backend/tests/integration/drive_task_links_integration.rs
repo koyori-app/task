@@ -69,6 +69,7 @@ async fn insert_task(app: &TestApp, project: &Project, created_by: Uuid, seq_id:
         sprint_id: Set(None),
         soft_deadline: Set(None),
         hard_deadline: Set(None),
+        planned_start_on: Set(None),
         estimated_minutes: Set(None),
         is_archived: Set(false),
         created_by: Set(created_by),
@@ -430,6 +431,65 @@ async fn only_tasks_visible_to_the_saver_are_linked() {
 }
 
 /// GET /drive/files/{id}/tasks はファイルの閲覧権限を確かめ、入れないプロジェクトのタスクを隠す。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn body_links_to_projects_the_saver_cannot_see_are_kept() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let member = app.insert_user(false, false).await;
+    let outsider = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, member.id).await;
+    let open = project(&app, tp.project_id).await;
+    let closed = project(&app, insert_extra_project(&app, tp.tenant_id).await).await;
+    restrict_to(&app, closed.id, outsider.id).await;
+    let open_task = insert_task(&app, &open, owner.id, 1).await;
+    let open_task2 = insert_task(&app, &open, owner.id, 2).await;
+    let closed_task = insert_task(&app, &closed, owner.id, 1).await;
+
+    // オーナーが両方のプロジェクトのタスクを結ぶ
+    login(&mut app, &owner).await;
+    let body = format!("{}-1 {}-1", open.key, closed.key);
+    let file_id = file_id_of(
+        &upload_file(
+            &app,
+            tp.tenant_id,
+            None,
+            "shared.md",
+            "text/markdown",
+            body.as_bytes(),
+        )
+        .await,
+    );
+    assert_eq!(
+        links(&app, file_id).await,
+        HashMap::from([(open_task, "body".into()), (closed_task, "body".into())])
+    );
+
+    // 閉じたプロジェクトに入れないメンバーが保存しても、その行は残る。
+    // 入れるプロジェクトの行は本文どおりに作り直す
+    login(&mut app, &member).await;
+    let body = format!("{}-2 {}-1", open.key, closed.key);
+    put_content(&app, tp.tenant_id, file_id, &body).await;
+    assert_eq!(
+        links(&app, file_id).await,
+        HashMap::from([(open_task2, "body".into()), (closed_task, "body".into())]),
+        "入れないプロジェクトへの body 行は保存者で消えない"
+    );
+
+    // 対照: オーナーが本文から外せば消える
+    login(&mut app, &owner).await;
+    put_content(&app, tp.tenant_id, file_id, &format!("{}-2", open.key)).await;
+    assert_eq!(
+        links(&app, file_id).await,
+        HashMap::from([(open_task2, "body".into())])
+    );
+
+    for user in [owner, member, outsider] {
+        app.cleanup_user(user.id).await;
+    }
+}
+
 #[tokio::test]
 #[serial_test::file_serial(drive)]
 async fn file_tasks_respects_file_and_project_access() {

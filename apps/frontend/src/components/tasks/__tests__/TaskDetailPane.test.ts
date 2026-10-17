@@ -145,12 +145,13 @@ describe('TaskDetailPane', () => {
       // 記法がそのまま見えていたのが直したい症状
       expect(rendered.text()).not.toContain('# 見出し');
 
-      // 描画元は本文と、詳細ページの +data.ts と同じ組み立ての scope（task-<UUID>）。
+      // 描画元は本文・テナントと、詳細ページの +data.ts と同じ組み立ての scope（task-<UUID>）。
       // ペインはコメント・履歴・担当者も取りに行くので、順番ではなく宛先で拾う
       const call = fetchMock.mock.calls.find(([input]) => input === RENDER_DESCRIPTION_PATH);
       expect(call).toBeTruthy();
       expect(JSON.parse(call![1]!.body as string)).toEqual({
         scope: 'task-task-id',
+        tenant: 'acme',
         description: '# 見出し',
       });
     });
