@@ -36,7 +36,7 @@ function fixture(): components['schemas']['DashboardResponse'] {
           seq_key: 'KOY-1',
           title: 'レイアウトを整える',
           project,
-          status: { id: 'todo', name: 'Todo', color: '#778899' },
+          status: { id: 'todo', name: 'Todo', color: '#778899', is_done_state: false },
           priority: 'High',
           soft_deadline: '2026-09-22T00:00:00Z',
           hard_deadline: null,

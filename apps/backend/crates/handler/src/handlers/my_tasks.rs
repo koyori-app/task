@@ -233,6 +233,7 @@ pub(crate) fn build_my_task_item(
             id: status.id,
             name: status.name.clone(),
             color: status.color.clone(),
+            is_done_state: status.is_done_state,
         },
         priority: task.priority,
         soft_deadline: task.soft_deadline.map(|dt| dt.with_timezone(&Utc)),

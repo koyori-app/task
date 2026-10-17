@@ -98,6 +98,12 @@ fn register_tags(openapi: &mut OpenApi) {
             .description(Some("個人todo管理 — My Tasks ビュー・クイックキャプチャ"))
             .build(),
         TagBuilder::new()
+            .name("Schedule")
+            .description(Some(
+                "期間に重なるタスク・スプリント・マイルストーン（カレンダー・タイムライン）",
+            ))
+            .build(),
+        TagBuilder::new()
             .name("Notifications")
             .description(Some("in-app 通知・ウォッチャー・通知設定"))
             .build(),
