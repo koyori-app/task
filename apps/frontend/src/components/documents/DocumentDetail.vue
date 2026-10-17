@@ -23,7 +23,12 @@ import {
   fetchClient,
   projectRootFoldersQueryOptions,
 } from '@/lib/api-vue-query';
-import { documentFileName, documentTitle, MAX_DOCUMENT_TITLE_LENGTH } from '@/lib/documents/name';
+import {
+  documentFileName,
+  documentTitle,
+  isDocumentFile,
+  MAX_DOCUMENT_TITLE_LENGTH,
+} from '@/lib/documents/name';
 import { selectionTitle } from '@/lib/documents/selection';
 import { formatTaskDate } from '@/lib/task-display';
 // KFM のサイドカー CSS（タスク詳細の TaskDetailHub と同じ組）
@@ -71,7 +76,7 @@ const tasksQuery = useQuery(
 );
 
 const meta = computed(() => metaQuery.data.value ?? null);
-const content = computed(() => contentQuery.data.value ?? null);
+const content = computed(() => contentQuery.data.value?.body ?? null);
 const title = computed(() => (meta.value ? documentTitle(meta.value.name) : ''));
 const linkedTasks = computed(() => tasksQuery.data.value?.tasks ?? []);
 
@@ -81,12 +86,14 @@ const isLoading = computed(
 const isError = computed(
   () => rootQuery.isError.value || metaQuery.isError.value || contentQuery.isError.value,
 );
-// プロジェクトのドキュメント置き場の直下に無いファイルはこの画面では扱わない
+// プロジェクトのドキュメント置き場の直下に無いファイルと、.md 以外のファイルはこの画面では扱わない
+// （一覧は mime_type で絞っているが URL には任意のファイル ID を入れられる。保存で名前が `.md` に変わる）
 const isNotFound = computed(
   () =>
     !!meta.value &&
     rootQuery.isSuccess.value &&
-    meta.value.folder_id !== (rootQuery.data.value?.[0]?.id ?? null),
+    (meta.value.folder_id !== (rootQuery.data.value?.[0]?.id ?? null) ||
+      !isDocumentFile(meta.value)),
 );
 
 // ---- 編集 ----
@@ -94,18 +101,30 @@ const editing = ref(props.initialEditing);
 const draftTitle = ref('');
 const draftBody = ref('');
 const draftReady = ref(false);
+/** 下書きの元にした本文の ETag。`If-Match` はこれを送る（再取得で差し替えない） */
+const draftBaseEtag = ref<string | null>(null);
 const saving = ref(false);
 const saveError = ref<string | null>(null);
 const conflict = ref(false);
 const reloading = ref(false);
 
+function resetDraft() {
+  const current = meta.value;
+  const loaded = contentQuery.data.value;
+  if (!current || !loaded) return;
+  draftTitle.value = documentTitle(current.name);
+  draftBody.value = loaded.body;
+  // 本文と同じ応答の ETag を使う。メタデータと本文は別々に取るので、その間に他の人が
+  // 保存するとメタデータの ETag だけが新しくなり、古い本文の下書きで上書きしてしまう
+  draftBaseEtag.value = loaded.etag ?? current.etag;
+  draftReady.value = true;
+}
+
 watch(
   [editing, meta, content],
   () => {
-    if (!editing.value || draftReady.value || !meta.value || content.value === null) return;
-    draftTitle.value = title.value;
-    draftBody.value = content.value;
-    draftReady.value = true;
+    if (!editing.value || draftReady.value) return;
+    resetDraft();
   },
   { immediate: true },
 );
@@ -165,9 +184,9 @@ async function save() {
     let updated = current;
     if (draftBody.value !== content.value) {
       const body = draftBody.value;
-      // 読み込んだ時点の ETag を渡し、その後に他の人が更新していたら 412 で止める
+      // 下書きの元にした本文の ETag を渡し、その後に他の人が更新していたら 412 で止める
       const { data, error, response } = await fetchClient.PUT(DRIVE_FILE_CONTENT_UPDATE_PATH, {
-        params: { path, header: { 'If-Match': current.etag } },
+        params: { path, header: { 'If-Match': draftBaseEtag.value ?? current.etag } },
         body: { content: body },
       });
       if (response.status === 412) {
@@ -180,7 +199,11 @@ async function save() {
         return;
       }
       updated = data;
-      queryClient.setQueryData(driveFileContentQueryOptions(props.fileId).queryKey, body);
+      draftBaseEtag.value = data.etag;
+      queryClient.setQueryData(driveFileContentQueryOptions(props.fileId).queryKey, {
+        body,
+        etag: data.etag,
+      });
       // 本文の KEY-N から関連タスクが変わる
       void queryClient.invalidateQueries({ queryKey: tasksKey.value });
     }
@@ -204,15 +227,30 @@ async function save() {
   }
 }
 
-/** 412 の後に最新を取り直す。自分の下書きは編集欄に残す */
-async function reload() {
+async function refetchLatest() {
   reloading.value = true;
   try {
     await Promise.all([metaQuery.refetch(), contentQuery.refetch()]);
-    conflict.value = false;
   } finally {
     reloading.value = false;
   }
+}
+
+/** 412 の後に最新を取り直し、下書きを捨てて最新の本文から編集し直す */
+async function reloadLatest() {
+  await refetchLatest();
+  resetDraft();
+  conflict.value = false;
+}
+
+/** 412 の後に、他の人の更新を承知のうえで自分の下書きで上書きする（新しい ETag はこのときだけ使う） */
+async function overwriteWithDraft() {
+  await refetchLatest();
+  const latest = contentQuery.data.value;
+  if (!latest) return;
+  draftBaseEtag.value = latest.etag ?? meta.value?.etag ?? null;
+  conflict.value = false;
+  await save();
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -359,18 +397,28 @@ function taskHref(task: { seq_key: string; project: { key: string } }) {
         role="alert"
         class="flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
       >
-        他の人が更新しました。読み込み直してから編集してください
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          class="ml-auto"
-          :disabled="reloading"
-          @click="reload"
-        >
-          <RefreshCw class="size-4" :class="{ 'animate-spin': reloading }" />
-          再読込
-        </Button>
+        他の人が更新しました。最新を読み込んで下書きを捨てるか、自分の下書きで上書きしてください
+        <span class="ml-auto flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            :disabled="reloading"
+            @click="reloadLatest"
+          >
+            <RefreshCw class="size-4" :class="{ 'animate-spin': reloading }" />
+            最新を読み込む
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            :disabled="reloading"
+            @click="overwriteWithDraft"
+          >
+            自分の下書きで上書き
+          </Button>
+        </span>
       </div>
       <p v-if="saveError" role="alert" class="text-sm text-destructive">{{ saveError }}</p>
 

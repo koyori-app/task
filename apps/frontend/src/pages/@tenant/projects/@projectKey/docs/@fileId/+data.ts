@@ -6,7 +6,7 @@ import type { PageContextServer } from 'vike/types';
 import { API_BASE } from '#/api-base';
 import type { components } from '@/generated/api';
 import { renderDescription } from '@/lib/markup-renderer';
-import { documentTitle } from '@/lib/documents/name';
+import { documentTitle, isDocumentFile } from '@/lib/documents/name';
 
 type TenantResponse = components['schemas']['TenantResponse'];
 type DriveFile = components['schemas']['DriveFileResponse'];
@@ -60,7 +60,9 @@ export async function data(pageContext: PageContextServer): Promise<Data> {
       fetchOk(`${API_BASE}/v1/drive/files/${fileId}/content`, cookie, signal),
     ]);
     const meta = (await metaResponse?.json()) as DriveFile | undefined;
-    const title = meta ? documentTitle(meta.name) : null;
+    // 表示側（DocumentDetail）と同じ条件。ルート直下でも .md 以外はドキュメントとして描画しない
+    if (!meta || !isDocumentFile(meta)) return EMPTY;
+    const title = documentTitle(meta.name);
     const body = contentResponse ? await contentResponse.text() : '';
     if (!body || body.length > MAX_DESCRIPTION_LENGTH) return { ...EMPTY, title };
 

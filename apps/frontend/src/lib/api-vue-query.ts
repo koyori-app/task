@@ -436,19 +436,25 @@ export const driveFileTasksQueryOptions = (
  * ファイル本文（テキスト）。配信は `Last-Modified` 付きで `Cache-Control` が無く、
  * ブラウザが経験則で古い本文を返しうるので、毎回 `ETag` で確かめさせる（`no-cache`）。
  */
+export type DriveFileContent = {
+  body: string;
+  /** 本文と同じ応答の `ETag`。`If-Match` はこれに結び付ける（メタデータの ETag は別取得で食い違いうる） */
+  etag: string | null;
+};
+
 export const driveFileContentQueryOptions = (fileId: string) => {
   const init = { params: { path: { id: fileId } } };
   return {
     queryKey: ['get', DRIVE_FILE_CONTENT_PATH, init] as const,
-    queryFn: async ({ signal }: { signal: AbortSignal }): Promise<string> => {
-      const { data, error } = await fetchClient.GET(DRIVE_FILE_CONTENT_PATH, {
+    queryFn: async ({ signal }: { signal: AbortSignal }): Promise<DriveFileContent> => {
+      const { data, error, response } = await fetchClient.GET(DRIVE_FILE_CONTENT_PATH, {
         ...init,
         parseAs: 'text',
         cache: 'no-cache',
         signal,
       });
       if (error !== undefined) throw error;
-      return data;
+      return { body: data, etag: response.headers.get('ETag') };
     },
   };
 };
