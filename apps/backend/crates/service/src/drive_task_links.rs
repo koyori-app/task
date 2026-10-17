@@ -1,7 +1,7 @@
 //! Drive の Markdown 本文に書かれた `KEY-N` を `task_attachments`（`source = 'body'`）へ
 //! 結び付ける（docs/features/drive.md §8.5）。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use chrono::Utc;
 use sea_orm::sea_query::OnConflict;
@@ -13,8 +13,8 @@ use sea_orm::{
 use crate::access::visible_project_ids;
 use crate::drive::is_tenant_owner;
 use crate::error::AppError;
-use crate::forge::task_refs::{extract, resolve};
-use entity::{drive_files, task_attachments};
+use crate::forge::task_refs::{extract_limited, resolve};
+use entity::{drive_files, task_attachments, tasks};
 
 /// 1 ファイルから結び付ける参照の上限。本文に現れた順で数え、超えた分は捨てる
 pub const MAX_LINKS_PER_FILE: usize = 200;
@@ -31,7 +31,9 @@ pub fn is_markdown(mime: &str) -> bool {
 /// 保存した本文に合わせて、そのファイルの `body` 行を作り直す。`manual` 行には触れない。
 ///
 /// 結び付けるのは `user_id`（保存した利用者）が入れるプロジェクトのタスクだけ。
-/// プロジェクトファイルはそのプロジェクトのタスクにだけ結ぶ（手動添付と同じ範囲）。
+/// 消すのも保存者が入れるプロジェクト（と削除済みタスク）の `body` 行だけで、入れない
+/// プロジェクトへの行は本文を判断できないので残す（保存した人で結び付きが消えたり戻ったり
+/// しないため）。プロジェクトファイルはそのプロジェクトのタスクにだけ結ぶ（手動添付と同じ範囲）。
 /// 呼び出し側はファイルの書き込み権限とテナントへの所属を確認済みであること。
 /// Markdown 以外のファイルでは何もしない。
 pub async fn sync_body_links<C: ConnectionTrait>(
@@ -44,8 +46,7 @@ pub async fn sync_body_links<C: ConnectionTrait>(
         return Ok(());
     }
 
-    let mut refs = extract(&strip_code(body));
-    refs.truncate(MAX_LINKS_PER_FILE);
+    let refs = extract_limited(&strip_code(body), MAX_LINKS_PER_FILE);
     let mut resolved = resolve(db, file.tenant_id, &refs).await?;
     // 結び付け先は手動添付と同じ範囲。プロジェクトファイルを別プロジェクトのタスクへ結ぶと、
     // その添付一覧からファイル名が元のプロジェクトに入れない人へ見えてしまう
@@ -53,7 +54,36 @@ pub async fn sync_body_links<C: ConnectionTrait>(
         resolved.retain(|r| r.project_id == file_project);
     }
 
-    let project_ids: HashSet<Uuid> = resolved.iter().map(|r| r.project_id).collect();
+    // 今ある body 行とそのタスクのプロジェクト（削除済み・消えたタスクは None）
+    let current: Vec<Uuid> = task_attachments::Entity::find()
+        .filter(task_attachments::Column::DriveFileId.eq(file.id))
+        .filter(task_attachments::Column::Source.eq(task_attachments::SOURCE_BODY))
+        .select_only()
+        .column(task_attachments::Column::TaskId)
+        .into_tuple::<Uuid>()
+        .all(db)
+        .await?;
+    let current_projects: HashMap<Uuid, Uuid> = if current.is_empty() {
+        HashMap::new()
+    } else {
+        tasks::Entity::find()
+            .filter(tasks::Column::Id.is_in(current.iter().copied()))
+            .filter(tasks::Column::DeletedAt.is_null())
+            .select_only()
+            .column(tasks::Column::Id)
+            .column(tasks::Column::ProjectId)
+            .into_tuple::<(Uuid, Uuid)>()
+            .all(db)
+            .await?
+            .into_iter()
+            .collect()
+    };
+
+    let project_ids: HashSet<Uuid> = resolved
+        .iter()
+        .map(|r| r.project_id)
+        .chain(current_projects.values().copied())
+        .collect();
     let visible = if is_tenant_owner(db, file.tenant_id, user_id).await? {
         project_ids
     } else {
@@ -65,13 +95,21 @@ pub async fn sync_body_links<C: ConnectionTrait>(
         .map(|r| r.task_id)
         .collect();
 
-    let mut stale = task_attachments::Entity::delete_many()
-        .filter(task_attachments::Column::DriveFileId.eq(file.id))
-        .filter(task_attachments::Column::Source.eq(task_attachments::SOURCE_BODY));
-    if !wanted.is_empty() {
-        stale = stale.filter(task_attachments::Column::TaskId.is_not_in(wanted.iter().copied()));
+    let stale: Vec<Uuid> = current
+        .into_iter()
+        .filter(|task_id| match current_projects.get(task_id) {
+            None => true,
+            Some(project_id) => visible.contains(project_id) && !wanted.contains(task_id),
+        })
+        .collect();
+    if !stale.is_empty() {
+        task_attachments::Entity::delete_many()
+            .filter(task_attachments::Column::DriveFileId.eq(file.id))
+            .filter(task_attachments::Column::Source.eq(task_attachments::SOURCE_BODY))
+            .filter(task_attachments::Column::TaskId.is_in(stale))
+            .exec(db)
+            .await?;
     }
-    stale.exec(db).await?;
 
     let existing: HashSet<Uuid> = task_attachments::Entity::find()
         .filter(task_attachments::Column::DriveFileId.eq(file.id))
@@ -196,7 +234,7 @@ fn closing_run(s: &str, len: usize) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::forge::task_refs::TaskRef;
+    use crate::forge::task_refs::{TaskRef, extract};
 
     fn keys(text: &str) -> Vec<String> {
         extract(&strip_code(text))
