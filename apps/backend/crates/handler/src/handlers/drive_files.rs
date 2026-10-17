@@ -647,6 +647,7 @@ pub async fn list_file_tasks(
                     id: status.id,
                     name: status.name.clone(),
                     color: status.color.clone(),
+                    is_done_state: status.is_done_state,
                 },
                 source,
             })
