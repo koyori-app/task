@@ -19,6 +19,7 @@ mod m20261004000000_pat_scopes_api;
 mod m20261016000000_task_planned_start_on;
 mod m20261016005000_drive_files_content_hash;
 mod m20261016020000_user_avatar_storage_key;
+mod m20261017000000_forge_pull_requests;
 
 pub struct Migrator;
 
@@ -45,6 +46,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261016000000_task_planned_start_on::Migration),
             Box::new(m20261016005000_drive_files_content_hash::Migration),
             Box::new(m20261016020000_user_avatar_storage_key::Migration),
+            Box::new(m20261017000000_forge_pull_requests::Migration),
         ]
     }
 }

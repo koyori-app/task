@@ -106,6 +106,10 @@ beforeEach(() => {
           [`${projectBase}/tasks/ENG-${task.seq_id}`, task],
           [`${projectBase}/tasks/ENG-${task.seq_id}/attachments`, { attachments: [] }],
           [
+            `${projectBase}/tasks/ENG-${task.seq_id}/forge`,
+            { pull_requests: [], commits: [], branches: [] },
+          ],
+          [
             `${projectBase}/tasks/ENG-${task.seq_id}/relations`,
             {
               parent: task.parent_task_id ? parent : null,

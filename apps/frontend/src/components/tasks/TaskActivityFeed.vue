@@ -7,6 +7,7 @@ import {
   activityActor,
   activityText,
   commitActivity,
+  pullRequestActivity,
   relativeTime,
   type ActivityItem,
 } from '@/lib/task-activity';
@@ -36,9 +37,13 @@ const props = defineProps<{
 // 相対時刻は開いたままでも進める（テンプレートで new Date() を作ると止まる）
 const now = useNow();
 
-// コミットの履歴は短縮 SHA をリンクにするので、本文を文字列 1 つで作れない
+// コミット・PR の履歴は SHA / 番号をリンクにするので、本文を文字列 1 つで作れない
 const rows = computed(() =>
-  props.activities.map((item) => ({ item, commit: commitActivity(item) })),
+  props.activities.map((item) => ({
+    item,
+    commit: commitActivity(item),
+    pullRequest: pullRequestActivity(item),
+  })),
 );
 </script>
 
@@ -57,7 +62,7 @@ const rows = computed(() =>
       <ul class="flex flex-col gap-2">
         <!-- 履歴はシステムの記録なので、本文（コメント）より薄い文字色にする -->
         <li
-          v-for="{ item, commit } in rows"
+          v-for="{ item, commit, pullRequest } in rows"
           :key="item.id"
           class="flex items-start gap-2 text-sm text-muted-foreground"
         >
@@ -77,6 +82,21 @@ const rows = computed(() =>
             >
             <span v-else class="font-mono">{{ commit.shortSha }}</span>
             をリンクしました<template v-if="commit.message">「{{ commit.message }}」</template>
+          </span>
+          <span v-else-if="pullRequest" class="min-w-0 flex-1 break-words">
+            {{ activityActor(item) }}の PR
+            <a
+              v-if="pullRequest.url"
+              :href="pullRequest.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="underline underline-offset-2 hover:text-foreground"
+              >{{ pullRequest.number ? `#${pullRequest.number}` : 'PR' }}</a
+            >
+            <span v-else>{{ pullRequest.number ? `#${pullRequest.number}` : '' }}</span>
+            をリンクしました<template v-if="pullRequest.title"
+              >「{{ pullRequest.title }}」</template
+            >
           </span>
           <span v-else class="min-w-0 flex-1">
             {{ activityActor(item) }}が{{ activityText(item) }}

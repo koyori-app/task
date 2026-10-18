@@ -70,6 +70,11 @@ export function activityText(item: ActivityItem): string {
   }
 }
 
+/** http(s) の URL だけを返す（`javascript:` 等をリンクにしない）。 */
+export function httpUrl(url: string): string | null {
+  return /^https?:\/\//i.test(url) ? url : null;
+}
+
 export type CommitActivity = {
   /** ホスト上のアカウント名。無ければ git の author 名 */
   author: string;
@@ -85,22 +90,45 @@ export function commitActivity(item: ActivityItem): CommitActivity | null {
   if (item.event_type !== 'forge_commit_linked') return null;
   const payload = (item.payload ?? {}) as Record<string, unknown>;
   const str = (key: string) => (typeof payload[key] === 'string' ? (payload[key] as string) : '');
-  const url = str('html_url');
   return {
     author: str('author_handle') || str('author_name'),
     shortSha: str('sha').slice(0, 7),
     message: str('message'),
-    url: /^https?:\/\//i.test(url) ? url : null,
+    url: httpUrl(str('html_url')),
+  };
+}
+
+export type PullRequestActivity = {
+  /** ホスト上の PR 作成者 */
+  author: string;
+  /** 番号が読めなければ null */
+  number: number | null;
+  title: string;
+  /** http(s) 以外は null */
+  url: string | null;
+};
+
+/** `forge_pull_request_linked` の表示要素。それ以外の履歴は null。 */
+export function pullRequestActivity(item: ActivityItem): PullRequestActivity | null {
+  if (item.event_type !== 'forge_pull_request_linked') return null;
+  const payload = (item.payload ?? {}) as Record<string, unknown>;
+  const str = (key: string) => (typeof payload[key] === 'string' ? (payload[key] as string) : '');
+  const number = payload.number;
+  return {
+    author: str('author_handle'),
+    number: typeof number === 'number' && Number.isInteger(number) && number > 0 ? number : null,
+    title: str('title'),
+    url: httpUrl(str('html_url')),
   };
 }
 
 /**
- * 履歴の主語。コミットのリンクはシステムが積み、連携済みユーザーに結べないことが多いので、
+ * 履歴の主語。コミット・PR のリンクはシステムが積み、連携済みユーザーに結べないことが多いので、
  * ホスト上の作者名で補う。
  */
 export function activityActor(item: ActivityItem): string {
   if (item.user) return item.user.name;
-  return commitActivity(item)?.author || 'システム';
+  return commitActivity(item)?.author || pullRequestActivity(item)?.author || 'システム';
 }
 
 /** 「1分前」形式。1 日以上は日付にする（履歴は古いものほど絶対時刻の方が読みやすい）。 */
