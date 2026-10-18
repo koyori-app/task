@@ -97,7 +97,7 @@
     "@vitest/browser-playwright": "4.1.11",
     "@vitest/coverage-v8": "4.1.11",
     "@vue/test-utils": "2.5.1",
-    "happy-dom": "20.14.6",
+    "happy-dom": "21.0.3",
     "http-server": "14.1.1",
     "openapi-typescript": "7.13.0",
     "playwright": "1.63.0",
