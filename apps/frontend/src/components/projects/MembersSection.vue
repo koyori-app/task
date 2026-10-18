@@ -2,7 +2,9 @@
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
+import { ChevronDown } from '@lucide/vue';
 import UserAvatar from '@/components/UserAvatar.vue';
+import UserSelector from '@/components/users/UserSelector.vue';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -87,6 +89,15 @@ const isForbidden = computed(
  * `tenantMembersQuery.isError` を見る（失敗を「テナントに人が居ない」という
  * 別の事実にすり替えない）。
  */
+/** UserSelector に渡す形（テナントメンバーの行から利用者を引く）。 */
+const candidateUsers = computed(() =>
+  candidates.value.map((candidate) => ({
+    id: candidate.user_id,
+    username: candidate.user.username,
+    avatar_url: candidate.user.avatar_url ?? null,
+  })),
+);
+
 const candidates = computed(() => {
   const existing = new Set(members.value.map((m) => m.user_id));
   return tenantMembers.value.filter((tm) => !existing.has(tm.user_id));
@@ -249,23 +260,31 @@ async function confirmRemove() {
           <label for="member-candidate" class="mb-1.5 block text-sm font-medium">
             テナントメンバーから追加
           </label>
-          <Select
-            :model-value="selectedUserId ?? undefined"
-            @update:model-value="(v) => (selectedUserId = v == null ? null : String(v))"
+          <UserSelector
+            :users="candidateUsers"
+            :model-value="selectedUserId ? [selectedUserId] : []"
+            :multiple="false"
+            search-label="テナントメンバーを検索"
+            empty-text="追加できるテナントメンバーがいません。"
+            no-match-text="一致するテナントメンバーがいません"
+            @update:model-value="(ids) => (selectedUserId = ids[0] ?? null)"
           >
-            <SelectTrigger id="member-candidate" class="w-full">
-              <SelectValue placeholder="利用者を選択" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="candidate in candidates"
-                :key="candidate.user_id"
-                :value="candidate.user_id"
+            <template #trigger="{ selectedUsers }">
+              <button
+                id="member-candidate"
+                type="button"
+                class="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {{ candidate.user.username }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+                <span
+                  class="min-w-0 flex-1 truncate text-left"
+                  :class="selectedUsers.length ? '' : 'text-muted-foreground'"
+                >
+                  {{ selectedUsers[0]?.username ?? '利用者を選択' }}
+                </span>
+                <ChevronDown class="size-4 shrink-0 opacity-50" aria-hidden="true" />
+              </button>
+            </template>
+          </UserSelector>
         </div>
         <div class="w-[140px]">
           <label for="member-role" class="mb-1.5 block text-sm font-medium">ロール</label>

@@ -11,18 +11,18 @@ const members = [
 ];
 
 /**
- * メニューの中身はトリガーを押さないと描画されないので、
- * DropdownMenuContent を素の div に差し替えて中を読む。
+ * 候補の窓はトリガーを押さないと描画されないので、
+ * Popover の部品を素の div に差し替えて中を読む（中身の UserSelectorList は本物）。
  */
 function mountPicker(props: Record<string, unknown>) {
   return mount(TaskAssigneePicker, {
     props: { members: [], selected: [], ...props },
     global: {
       stubs: {
-        DropdownMenu: { template: '<div><slot /></div>' },
-        DropdownMenuTrigger: { template: '<div><slot /></div>' },
-        DropdownMenuContent: { template: '<div><slot /></div>' },
-        DropdownMenuCheckboxItem: { template: '<div><slot /></div>' },
+        PopoverRoot: { template: '<div><slot /></div>' },
+        PopoverTrigger: { template: '<div><slot /></div>' },
+        PopoverPortal: { template: '<div><slot /></div>' },
+        PopoverContent: { template: '<div><slot /></div>' },
       },
     },
   });

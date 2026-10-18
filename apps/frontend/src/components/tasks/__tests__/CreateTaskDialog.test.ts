@@ -109,6 +109,11 @@ type MountOptions = {
  * 差し替えて直接読む。チェック項目は押すと反転した値を返すボタンにする。
  */
 const dropdownStubs = {
+  // 担当者の窓（UserSelector）は Popover の中。中身の listbox は本物のまま読む
+  PopoverRoot: { template: '<div><slot /></div>' },
+  PopoverTrigger: { template: '<div><slot /></div>' },
+  PopoverPortal: { template: '<div><slot /></div>' },
+  PopoverContent: { template: '<div><slot /></div>' },
   DropdownMenu: { template: '<div><slot /></div>' },
   DropdownMenuTrigger: { template: '<div><slot /></div>' },
   DropdownMenuContent: { template: '<div><slot /></div>' },
@@ -741,7 +746,15 @@ describe('CreateTaskDialog assignee selection', () => {
     document.body.innerHTML = '';
   });
 
-  const memberButton = menuItem;
+  /** 担当者の候補（listbox の option）を名で引く。項の字には頭文字も混じるので id で引く */
+  function memberButton(name: string) {
+    const member = members.find((m) => m.username === name);
+    const item = member
+      ? document.body.querySelector(`[role="option"][data-user-id="${member.id}"]`)
+      : null;
+    if (!item) throw new Error(`member option ${name} not found`);
+    return item as HTMLElement;
+  }
 
   /**
    * 担当者は作成後にしか付けられなかった。作成時に選べると、割り当て済みの状態で
@@ -755,7 +768,7 @@ describe('CreateTaskDialog assignee selection', () => {
     expect(document.getElementById('task-assignees-value')?.textContent).toContain('未割り当て');
     memberButton('yupix').click();
     await nextTick();
-    expect(memberButton('yupix').getAttribute('aria-checked')).toBe('true');
+    expect(memberButton('yupix').getAttribute('aria-selected')).toBe('true');
     // 選んだ人は欄の中にも出る
     expect(document.getElementById('task-assignees-value')?.textContent).toContain('yupix');
 
