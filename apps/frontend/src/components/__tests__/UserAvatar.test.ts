@@ -164,14 +164,46 @@ describe('UserAvatar の大きさ・形・灰色', () => {
     expect(wrapper.attributes('aria-hidden')).toBe('true');
   });
 
-  it('tone で頭文字の色を替える', () => {
-    const muted = mount(UserAvatar, { props: { user: { username: 'a' } } });
-    const inherit = mount(UserAvatar, { props: { user: { username: 'a' }, tone: 'inherit' } });
+  it.each([
+    ['xs', 'text-[8px]'],
+    ['sm', 'text-[9px]'],
+    ['md', 'text-[10px]'],
+    ['lg', 'text-[10px]'],
+    ['xl', 'text-xs'],
+    ['2xl', 'text-base'],
+    ['3xl', 'text-base'],
+  ] as const)('size=%s の頭文字の字の大きさは %s の一つだけ', (size, expected) => {
+    const wrapper = mount(UserAvatar, { props: { user: { username: 'a' }, size } });
+    const sizes = wrapper.classes().filter((c) => c.startsWith('text-'));
 
-    expect(muted.find('[data-slot=avatar-fallback]').classes()).toContain('text-muted-foreground');
-    expect(inherit.find('[data-slot=avatar-fallback]').classes()).toContain('text-inherit');
-    expect(inherit.find('[data-slot=avatar-fallback]').classes()).not.toContain(
-      'text-muted-foreground',
-    );
+    expect(sizes).toEqual([expected]);
+    // 頭文字の側には字の大きさを持たせぬ（画面ごとの上書きを許さぬ）
+    expect(
+      wrapper
+        .find('[data-slot=avatar-fallback]')
+        .classes()
+        .filter((c) => /^text-(\[|xs|sm|base|lg|xl|\dxl)/.test(c)),
+    ).toEqual([]);
+  });
+
+  it('頭文字の色は全ての大きさで bg-muted 上の text-foreground の一組', () => {
+    for (const size of ['xs', 'sm', 'md', 'lg', 'xl', '2xl', '3xl'] as const) {
+      const fallback = mount(UserAvatar, { props: { user: { username: 'a' }, size } }).find(
+        '[data-slot=avatar-fallback]',
+      );
+
+      expect(fallback.classes()).toEqual(expect.arrayContaining(['bg-muted', 'text-foreground']));
+      expect(fallback.classes()).not.toContain('text-muted-foreground');
+    }
+  });
+
+  it('fallbackClass の text-white は既定の字の色に勝つ（色つきの地に載せる所）', () => {
+    const wrapper = mount(UserAvatar, {
+      props: { user: { username: 'a' }, fallbackClass: 'text-white' },
+    });
+    const classes = wrapper.find('[data-slot=avatar-fallback]').classes();
+
+    expect(classes).toContain('text-white');
+    expect(classes).not.toContain('text-foreground');
   });
 });

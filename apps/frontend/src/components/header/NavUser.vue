@@ -44,13 +44,7 @@ const { canInstall, promptInstall } = useInstallPrompt();
         type="button"
         class="flex max-w-45 items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm hover:bg-accent data-[state=open]:bg-accent"
       >
-        <UserAvatar
-          :user="avatarUser"
-          size="md"
-          shape="md"
-          tone="inherit"
-          fallback-class="text-xs"
-        />
+        <UserAvatar :user="avatarUser" size="md" shape="md" />
         <span class="truncate font-medium">{{ user.name }}</span>
         <PhCaretUpDown class="size-4 shrink-0 text-muted-foreground" />
       </button>
@@ -58,13 +52,7 @@ const { canInstall, promptInstall } = useInstallPrompt();
     <DropdownMenuContent class="min-w-56 rounded-lg" side="bottom" align="end" :side-offset="4">
       <DropdownMenuLabel class="p-0 font-normal">
         <div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-          <UserAvatar
-            :user="avatarUser"
-            size="xl"
-            shape="lg"
-            tone="inherit"
-            fallback-class="text-sm"
-          />
+          <UserAvatar :user="avatarUser" size="xl" shape="lg" />
           <div class="grid flex-1 text-left text-sm leading-tight">
             <span class="truncate font-semibold">{{ user.name }}</span>
             <span class="truncate text-xs">{{ user.email }}</span>

@@ -49,7 +49,7 @@ const isForbidden = computed(
 
     <section v-else-if="profile" class="flex flex-col gap-4">
       <header class="flex items-center gap-4">
-        <UserAvatar :user="profile" size="3xl" shape="lg" tone="inherit" />
+        <UserAvatar :user="profile" size="3xl" shape="lg" />
         <div class="flex min-w-0 flex-1 flex-col gap-1">
           <h1 class="truncate text-2xl font-bold">{{ profile.username }}</h1>
           <a
