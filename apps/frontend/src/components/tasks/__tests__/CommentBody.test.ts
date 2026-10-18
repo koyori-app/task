@@ -95,4 +95,14 @@ describe('CommentBody', () => {
     });
     expect(wrapper.get('li').text()).toBe('再描画');
   }, 30_000);
+
+  it('描画の上限（65536 文字）を超える本文は描かず、素の文字で出す', async () => {
+    const body = `# 長い\n${'あ'.repeat(65_536)}`;
+    const wrapper = mount(CommentBody, { props: { body, commentId: 'comment-5' } });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(wrapper.find('.kfm-content').exists()).toBe(false);
+    expect(wrapper.find('h1').exists()).toBe(false);
+    expect(wrapper.get('[data-comment-body]').text().startsWith('# 長い')).toBe(true);
+  });
 });

@@ -27,6 +27,13 @@ const props = defineProps<{
   currentUserId?: string | null;
 }>();
 
+/**
+ * 描画する本文の長さの上限（説明文の +data.ts の MAX_DESCRIPTION_LENGTH と同値。GitHub issue 本文の上限）。
+ * 描画の CPU もキャッシュのメモリも本文長に比例する。backend はコメントの長さを制限せぬので、
+ * 超える本文は描かず素の文字へ倒す（保存は無傷）。
+ */
+const MAX_RENDER_LENGTH = 65_536;
+
 const html = ref<string | null>(null);
 let renderVersion = 0;
 const plainBody = computed(() => toPlainText(props.body, (id) => lookup(props.mentions ?? {}, id)));
@@ -34,6 +41,10 @@ const plainBody = computed(() => toPlainText(props.body, (id) => lookup(props.me
 watchEffect(async () => {
   const version = ++renderVersion;
   const source = props.body;
+  if (source.length > MAX_RENDER_LENGTH) {
+    html.value = null;
+    return;
+  }
   const commentId = props.commentId;
   const mentionsProp = props.mentions;
   const mentions = mentionsProp ?? {};
@@ -57,7 +68,7 @@ watchEffect(async () => {
   <div
     v-if="html !== null"
     :class="KFM_CONTENT_CLASS"
-    class="text-sm leading-relaxed"
+    class="kfm-comment text-sm leading-relaxed"
     data-comment-body
     v-html="html"
   />
@@ -65,3 +76,31 @@ watchEffect(async () => {
     {{ plainBody }}
   </p>
 </template>
+
+<style>
+/*
+ * コメントの見出しの大きさ。KFM の見出しは親の字の大きさの em（h1 は 2em）で、説明文では
+ * 16px を土台に読みやすいが、14px（text-sm）のコメントでは 28px になり、短い返信の中で
+ * 見出しだけが突き出る。コメントの器の中だけ段を詰める（説明文の見た目は変えない）。
+ */
+.kfm-content.kfm-comment h1 {
+  font-size: 1.25em;
+}
+.kfm-content.kfm-comment h2 {
+  font-size: 1.15em;
+}
+.kfm-content.kfm-comment h3 {
+  font-size: 1.05em;
+}
+.kfm-content.kfm-comment h1,
+.kfm-content.kfm-comment h2,
+.kfm-content.kfm-comment h3,
+.kfm-content.kfm-comment h4,
+.kfm-content.kfm-comment h5,
+.kfm-content.kfm-comment h6 {
+  margin-top: 1rem;
+}
+.kfm-content.kfm-comment > :first-child {
+  margin-top: 0;
+}
+</style>

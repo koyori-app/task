@@ -1199,6 +1199,8 @@ export const CommentsKfmRendered: Story = {
       'href',
       'https://example.com/comment',
     );
+    // コメントの見出しは説明文（h1 は 2em）より詰める: 14px の器の 1.25em で 20px を超えぬ
+    await expect(parseFloat(getComputedStyle(heading).fontSize)).toBeLessThanOrEqual(20);
     await expect(body.querySelector('.kfm-mention-self')).not.toBeNull();
     await expect(body.querySelector('.kfm-mention-outside')?.textContent).toBe('@プロジェクト外');
     await expect(body.querySelector('.kfm-mention-gone')?.textContent).toBe('@退会済み');

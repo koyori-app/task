@@ -8,7 +8,6 @@ import {
   markerOf,
   mentionLabel,
   mentionTrigger,
-  splitBody,
   toClipboardHtml,
   toPlainText,
   type MentionTable,
@@ -43,22 +42,6 @@ describe('findMarkers / markerOf', () => {
 
   it('大文字の id は小文字に揃えて返す', () => {
     expect(findMarkers(`<@${A.toUpperCase()}>`)[0].id).toBe(A);
-  });
-});
-
-describe('splitBody', () => {
-  it('地の文と札に分け、既存の素の @username は地の文のまま残す', () => {
-    const segments = splitBody(`@legacy さん ${markerOf(A)} へ`, table);
-    expect(segments).toEqual([
-      { kind: 'text', text: '@legacy さん ' },
-      { kind: 'mention', id: A, user: table[A] },
-      { kind: 'text', text: ' へ' },
-    ]);
-  });
-
-  it('表に無い id の user は undefined（不明な札になる）', () => {
-    const [segment] = splitBody(markerOf(B.replace('2', '3')), table);
-    expect(segment).toMatchObject({ kind: 'mention', user: undefined });
   });
 });
 
