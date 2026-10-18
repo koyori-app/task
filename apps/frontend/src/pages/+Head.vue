@@ -2,11 +2,16 @@
 
 <template>
   <link rel="icon" :href="logoUrl" />
+  <link rel="manifest" :href="MANIFEST_PATH" />
+  <meta name="theme-color" :content="PWA_THEME_COLOR" />
+  <link rel="apple-touch-icon" :href="PWA_ICONS.appleTouch" />
+  <meta name="apple-mobile-web-app-title" content="task" />
 </template>
 
 <script setup lang="ts">
 import '@/assets/css/tailwind.css';
 import logoUrl from '../assets/logo.svg';
+import { MANIFEST_PATH, PWA_ICONS, PWA_THEME_COLOR } from '@/lib/pwa/app-manifest';
 import { useHead } from '@unhead/vue';
 import { usePageContext } from 'vike-vue/usePageContext';
 
