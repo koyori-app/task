@@ -39,7 +39,10 @@
   border: 1px dashed var(--muted-foreground);
 }
 
-/* 頭のアバター。頭文字は data-initials を ::before で描き（字の node にせぬ）、画像はその上に重ねる */
+/* 頭のアバター。UserAvatar の xs（lib/user-avatar.ts の USER_AVATAR_SIZES.xs・USER_AVATAR_INITIALS_CLASS・
+ * USER_AVATAR_INACTIVE_CLASS）の写し: 1rem の丸・8px の頭文字・bg-muted の地に text-foreground の字・
+ * 灰色は opacity 0.6 と grayscale。字の太さは UserAvatar と同じく置かれた所（札）に従う。
+ * 頭文字は data-initials を ::before で描き（字の node にせぬ）、画像はその上に重ねる */
 .kfm-mention-avatar {
   position: relative;
   display: inline-flex;
@@ -52,7 +55,6 @@
   overflow: hidden;
   border-radius: 9999px;
   font-size: 8px;
-  font-weight: 600;
   color: var(--foreground);
   background-color: var(--muted);
 }
@@ -66,7 +68,6 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
 }
 
 .kfm-mention-outside .kfm-mention-avatar,

@@ -19,6 +19,15 @@ export const USER_AVATAR_SIZES = {
  */
 export const USER_AVATAR_INITIALS_CLASS = 'bg-muted text-foreground';
 
+/** 外れた者（退会・プロジェクトの外）のアバターの灰色。画像も頭文字も灰色にして薄くする。 */
+export const USER_AVATAR_INACTIVE_CLASS = 'opacity-60 grayscale';
+
+/*
+ * メンションの札（`remark-kfm-mention/style.css` の `.kfm-mention-avatar`）は v-html と CodeMirror の
+ * widget でも描くので Vue の部品を置けず、上の xs の段・頭文字の組・灰色を CSS で写しておる。
+ * 写しが食い違えば `mention-chip-avatar-contract` の試験と `Tasks/MentionChip` の story が落ちる。
+ */
+
 /**
  * 画像の無いメンバーの一覧で、頭文字の地に使う色（白い字を載せる）。名から色を決め、同じ人はいつも同じ色になる。
  * どれも白に対して 4.5:1 以上であること（試験で縛る）。
