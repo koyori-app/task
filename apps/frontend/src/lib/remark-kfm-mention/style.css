@@ -1,17 +1,76 @@
-/* メンションの札（remark-kfm-mention が emit する span.kfm-mention）。
- * コメントの札（CommentMention.vue）と同じ色: いま入れる者は強調色、外れた者・行の無い者は灰色。
- * 色はアプリのテーマ変数から取り、.dark の切り替えに CSS 側で追従させる。 */
+/* メンションの札（remark-kfm-mention が emit する span.kfm-mention）。説明文の KFM・コメントの札
+ * （CommentMention.vue）・入力欄の札（comment-mention-extensions.ts の widget）が、この一枚を使う。
+ *
+ * 形: 丸い地の札に、頭のアバター（UserAvatar の xs と同じ 1rem の丸）と `@名` を並べる。
+ * 札の高さは字の大きさに比べて決め（1.25em）、行の高さを広げぬよう行の中ほどに置く。
+ * 色はアプリのテーマ変数から取る。新しい色は作らぬ。
+ * - いま入れる者: 強調色の字と、強調色を薄く敷いた地
+ * - 本人へのメンション: 強調色の地に、その上の字の色（反転）
+ * - 外れた者・退会した者・名の引けぬ者: 地の色の上に灰色の字（対比 4.73:1）と破線の縁。
+ *   アバターも灰色にして薄くする（UserAvatar の inactive と同じ）。色の薄さだけで分けぬ */
 .kfm-mention {
-  padding: 0 0.25rem;
-  border-radius: 0.25rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  box-sizing: border-box;
+  height: 1.25em;
+  padding: 0 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  vertical-align: middle;
+  line-height: 1;
+  white-space: nowrap;
   font-weight: 500;
   color: var(--primary);
   background-color: color-mix(in oklab, var(--primary) 12%, transparent);
+}
+
+.kfm-mention-self {
+  font-weight: 600;
+  color: var(--primary-foreground);
+  background-color: var(--primary);
 }
 
 .kfm-mention-outside,
 .kfm-mention-gone,
 .kfm-mention-unknown {
   color: var(--muted-foreground);
+  background-color: var(--background);
+  border: 1px dashed var(--muted-foreground);
+}
+
+/* 頭のアバター。頭文字は data-initials を ::before で描き（字の node にせぬ）、画像はその上に重ねる */
+.kfm-mention-avatar {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  margin-left: -0.375rem;
+  overflow: hidden;
+  border-radius: 9999px;
+  font-size: 8px;
+  font-weight: 600;
+  color: var(--foreground);
   background-color: var(--muted);
+}
+
+.kfm-mention-avatar::before {
+  content: attr(data-initials);
+}
+
+.kfm-mention-avatar > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.kfm-mention-outside .kfm-mention-avatar,
+.kfm-mention-gone .kfm-mention-avatar {
+  opacity: 0.6;
+  filter: grayscale(1);
 }

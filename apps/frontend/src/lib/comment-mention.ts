@@ -56,15 +56,71 @@ export function findMarkers(text: string): MarkerRange[] {
 }
 
 /**
- * 札の字。id は出さない。名が引ける者は、いま入れる者も外れた者（プロジェクトの外・テナントを
- * 抜けたが、そのテナントに属しておった者）も `@名` で出す（灰色にするのは見た目の側）。
- * 名が引けぬ者（別のテナントの利用者・行の無い者）は定型の句。
+ * 札の字。id は出さない。状態を問わず名が引ける者は `@名` で出す（外れた者・退会した者を
+ * 灰色にするのは見た目の側）。名が引けぬ者は状態に応じた定型の句へ倒す。
  */
 export function mentionLabel(user: MentionUser | undefined): string {
   if (!user) return '@（不明な利用者）';
-  if (user.status !== 'gone' && user.name) return `@${user.name}`;
+  if (user.name) return `@${user.name}`;
   if (user.status === 'gone') return '@（退会した利用者）';
   return '@（このプロジェクトの外の利用者）';
+}
+
+/**
+ * 札の見た目の素（コメントの札・説明文の KFM の札・入力欄の札が同じ判じ方を通る）。
+ *
+ * - `state`: 色と縁を決める状態。表に無い id は `unknown`
+ * - `self`: ログイン中の本人へのメンション（`member` の時だけ）
+ * - `avatar`: 名が引ける者だけ持つ（引けぬ者の札は定型の句だけで、アバターを出さぬ）。
+ *   `src` は安全な URL の時だけ（無ければ頭文字の丸）。`inactive` は外れた者・退会した者の灰色
+ */
+export interface MentionChip {
+  state: 'member' | 'outside' | 'gone' | 'unknown';
+  self: boolean;
+  label: string;
+  avatar: { name: string; src: string | null; inactive: boolean } | null;
+}
+
+/** 画像の data URI のうち、script を持ち得ぬ raster の base64 だけ（SVG は採らぬ）。 */
+const RASTER_DATA_URI = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+
+/**
+ * アバターに使ってよい URL か。`http(s):` の絶対 URL・同じ origin の `/` から始まる道・raster の
+ * base64 の data URI だけ（`//` で始まる別の host・`javascript:` 等の scheme・SVG の data URI・
+ * 相対の道は採らぬ）。説明文の札は v-html を通るので、ここで落とした上で DOMPurify にも掛ける。
+ */
+export function safeAvatarUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (RASTER_DATA_URI.test(url)) return url;
+  if (url.startsWith('/') && !url.startsWith('//') && !url.startsWith('/\\')) return url;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
+export function mentionChip(
+  user: MentionUser | undefined,
+  id: string,
+  currentUserId?: string | null,
+): MentionChip {
+  const state = user?.status ?? 'unknown';
+  const name = user?.name ?? null;
+  const label = mentionLabel(user);
+  const self =
+    state === 'member' && !!currentUserId && currentUserId.toLowerCase() === id.toLowerCase();
+  // アバターは札が名で出る時だけ（定型の句の札には出さぬ）。字の判じ（mentionLabel）に従う
+  const named = name !== null && label === `@${name}`;
+  return {
+    state,
+    self,
+    label,
+    avatar: named
+      ? { name, src: safeAvatarUrl(user?.avatar_url), inactive: state !== 'member' }
+      : null,
+  };
 }
 
 /** 表示の分割: 地の文と札。 */
