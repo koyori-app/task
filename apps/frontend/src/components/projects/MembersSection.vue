@@ -2,7 +2,7 @@
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import UserAvatar from '@/components/UserAvatar.vue';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -220,10 +220,6 @@ async function confirmRemove() {
         : 'メンバーを削除できませんでした。';
   }
 }
-
-function initials(username: string) {
-  return username.slice(0, 1).toUpperCase();
-}
 </script>
 
 <template>
@@ -325,16 +321,7 @@ function initials(username: string) {
           :key="member.id"
           class="flex items-center gap-3 border-b px-3.5 py-2.5 last:border-b-0"
         >
-          <Avatar class="size-8">
-            <AvatarImage
-              v-if="member.user.avatar_url"
-              :src="member.user.avatar_url"
-              :alt="member.user.username"
-            />
-            <AvatarFallback class="bg-muted text-xs text-muted-foreground">
-              {{ initials(member.user.username) }}
-            </AvatarFallback>
-          </Avatar>
+          <UserAvatar :user="member.user" size="xl" :initial-length="1" />
           <span class="min-w-0 flex-1 truncate text-sm font-medium">
             {{ member.user.username }}
           </span>

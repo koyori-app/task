@@ -2,7 +2,7 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { useForm } from '@tanstack/vue-form';
 import { computed, ref } from 'vue';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import UserAvatar from '@/components/UserAvatar.vue';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
@@ -10,7 +10,6 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { meQueryOptions, useUpdateProfileMutation } from '@/lib/api-vue-query';
 import { codePointLength } from '@/lib/code-points';
-import { avatarInitials } from '@/lib/initials';
 import { useAuthStore } from '@/stores/auth';
 import type { components } from '@/generated/api';
 
@@ -98,8 +97,6 @@ const form = useForm({
   },
 });
 
-const avatarFallback = computed(() => avatarInitials(props.user.username));
-
 function resetSubmitFeedback() {
   saved.value = false;
   submitError.value = null;
@@ -176,14 +173,15 @@ async function uploadAvatar(event: Event) {
           <Field>
             <FieldLabel :for="field.name">アバター</FieldLabel>
             <div class="flex items-center gap-4">
-              <Avatar class="size-14 rounded-lg">
-                <AvatarImage
-                  v-if="canPreviewAvatar(field.state.value)"
-                  :src="field.state.value.trim()"
-                  :alt="user.username"
-                />
-                <AvatarFallback class="rounded-lg">{{ avatarFallback }}</AvatarFallback>
-              </Avatar>
+              <UserAvatar
+                :user="{
+                  name: user.username,
+                  avatar_url: canPreviewAvatar(field.state.value) ? field.state.value.trim() : null,
+                }"
+                size="2xl"
+                shape="lg"
+                tone="inherit"
+              />
               <div class="flex flex-1 flex-col gap-2">
                 <Input
                   :id="field.name"

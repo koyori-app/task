@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UserAvatar from '@/components/UserAvatar.vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhArrowClockwise, PhEnvelopeSimple, PhPaperPlaneTilt, PhX } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
@@ -130,11 +131,6 @@ function isSelf(member: TenantMemberResponse) {
 
 function roleDescription(role: TenantRole) {
   return ROLES.find((entry) => entry.value === role)?.description ?? '';
-}
-
-/** アバターの頭文字。表示名が無いときはユーザー名の先頭 2 文字を使う。 */
-function initials(member: TenantMemberResponse) {
-  return member.user.username.slice(0, 2).toUpperCase();
 }
 
 /** 頭文字から色を決める。同じ人はいつも同じ色になる。 */
@@ -448,13 +444,15 @@ async function onRemove(member: TenantMemberResponse) {
               :key="member.id"
               class="flex items-center gap-3 border-b px-3.5 py-2.5 last:border-b-0"
             >
-              <span
-                class="flex size-[34px] shrink-0 items-center justify-center rounded-lg text-xs font-semibold text-white"
-                :style="{ background: avatarColor(member) }"
+              <UserAvatar
+                :user="{ name: member.user.username }"
+                shape="lg"
+                tone="inherit"
+                class="size-[34px]"
+                fallback-class="rounded-none text-xs font-semibold text-white"
+                :fallback-style="{ background: avatarColor(member) }"
                 aria-hidden="true"
-              >
-                {{ initials(member) }}
-              </span>
+              />
               <span class="min-w-0 flex-1 overflow-hidden leading-snug">
                 <span class="block truncate text-sm font-medium">
                   <a

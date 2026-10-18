@@ -3,10 +3,9 @@ import { Loader2 } from '@lucide/vue';
 import { computed } from 'vue';
 import { usePageContext } from 'vike-vue/usePageContext';
 
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import UserAvatar from '@/components/UserAvatar.vue';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { useMeQuery, useUserProfileQuery } from '@/lib/api-vue-query';
-import { avatarInitials } from '@/lib/initials';
 
 const pageContext = usePageContext();
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
@@ -50,14 +49,7 @@ const isForbidden = computed(
 
     <section v-else-if="profile" class="flex flex-col gap-4">
       <header class="flex items-center gap-4">
-        <Avatar class="size-16 rounded-lg">
-          <AvatarImage
-            v-if="profile.avatar_url"
-            :src="profile.avatar_url"
-            :alt="profile.username"
-          />
-          <AvatarFallback class="rounded-lg">{{ avatarInitials(profile.username) }}</AvatarFallback>
-        </Avatar>
+        <UserAvatar :user="profile" size="3xl" shape="lg" tone="inherit" />
         <div class="flex min-w-0 flex-1 flex-col gap-1">
           <h1 class="truncate text-2xl font-bold">{{ profile.username }}</h1>
           <a
