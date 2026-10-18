@@ -234,4 +234,48 @@ describe('TaskActivityFeed', () => {
       expect(wrapper.text()).toContain('PR #87 をリンクしました');
     });
   });
+
+  it('手でリンクした PR は操作者を主語にし、source の無い旧い行は従来の文言にする', () => {
+    const manual = {
+      ...activity('pr-manual', 10),
+      event_type: 'forge_pull_request_linked',
+      user: { id: 'user-1', name: 'ゆぴ' },
+      payload: {
+        host: 'github',
+        number: 87,
+        title: 'feat: OAuth',
+        author_handle: 'yupix',
+        html_url: 'https://github.com/acme/backend/pull/87',
+        state: 'open',
+        source: 'manual',
+      },
+    } as ActivityItem;
+    const wrapper = mount(TaskActivityFeed, { props: { activities: [manual] } });
+    expect(wrapper.text()).toContain('ゆぴが PR #87 を手動でリンクしました「feat: OAuth」');
+
+    const legacy = {
+      ...manual,
+      id: 'pr-legacy',
+      payload: { ...(manual.payload as Record<string, unknown>), source: undefined },
+    };
+    const old = mount(TaskActivityFeed, { props: { activities: [legacy as ActivityItem] } });
+    expect(old.text()).toContain('ゆぴの PR #87 をリンクしました');
+  });
+
+  it('PR のリンクを外した履歴は操作者を主語にする', () => {
+    const item = {
+      ...activity('pr-unlink', 10),
+      event_type: 'forge_pull_request_unlinked',
+      user: { id: 'user-1', name: 'ゆぴ' },
+      payload: {
+        host: 'github',
+        number: 87,
+        html_url: 'https://github.com/acme/backend/pull/87',
+        pull_request_id: 'pr-1',
+      },
+    } as ActivityItem;
+    const wrapper = mount(TaskActivityFeed, { props: { activities: [item] } });
+    expect(wrapper.text()).toContain('ゆぴが PR #87 のリンクを外しました');
+    expect(wrapper.get('a').attributes('href')).toBe('https://github.com/acme/backend/pull/87');
+  });
 });
