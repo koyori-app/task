@@ -133,10 +133,14 @@ REVOKE UPDATE, DELETE ON audit_logs FROM app_role;
     → users WHERE is_admin = true の件数を確認
     → 管理者が 1 人以上存在する場合: ブートストラップをスキップ（ログ出力のみ）
     → 管理者が 0 人の場合のみ:
-        → users WHERE email = $email → is_admin = true に UPDATE
+        → users WHERE email = $email を引く
+        → email_verified が false、または gitlab_selfhosted の連携を持つ利用者ならスキップ（警告を出す）
+        → is_admin = true に UPDATE
         → audit_logs に action="user.admin.grant", actor_type="system" を INSERT
           （metadata には user_id のみ記録。メールアドレスは含めない）
 ```
+
+> **昇格の条件**: email が確認済み（`email_verified = true`）で、その確認の出所が確かな利用者だけを昇格する。確かな出所は、password の登録の確認メール・GitHub・gitlab.com・Google・運用者が設定した OIDC。`gitlab_selfhosted` の連携を持つ利用者は、確認の印を運用者の外の instance から受け取ったことがありうるため昇格しない。初期管理者は password で登録して確認メールを通すか、上の provider でログインしてから起動する。
 
 > **安全ガード**: 管理者が既に存在する場合はブートストラップを実行しない。これにより、運用中に環境変数が誤設定されても意図しない権限付与が発生しない。初期構築後は `BOOTSTRAP_ADMIN_EMAIL` を環境変数から削除することを推奨する。
 

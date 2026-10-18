@@ -97,8 +97,16 @@ if let Some(revoked_at) = user.sessions_revoked_at {
    → Redis でトークンを消費（GET+DEL）→ user_id を取得（二重消費防止のため DB 更新前に実行）。無効・期限切れ: 400 Bad Request
    → Argon2id でハッシュを生成
    → DB トランザクション開始 → users.password_hash / sessions_revoked_at を UPDATE
-   → personal_tokens の該当 user_id 行を revoked = true に UPDATE → コミット
+   → personal_tokens の該当 user_id 行を revoked = true に UPDATE
+   → 出所の確かでない oauth_connections を DELETE（下記）→ コミット
    → 200 OK
+
+リセットのメールを受けた者を、この利用者の持ち主とみなす。次の OAuth の連携は外す
+（外した連携は、ログインした後に結び直せる）:
+
+- `email_verified = false` の利用者の連携は全て（確かめておらぬ email で結ばれた連携）
+- `email_verified = true` の利用者でも、許可の一覧（`OAUTH_GITLAB_SELFHOSTED_INSTANCE_URLS`）に無い
+  instance の `gitlab_selfhosted` の連携
 ```
 
 ---
@@ -253,6 +261,7 @@ https://app.example.com/auth/reset-password?token={token}
 | トークン総当たり | 32 バイト = 256 ビットのエントロピー。現実的に総当たり不可 |
 | トークン再利用 | GETDEL で消費済みは即時削除。TTL 30 分で自動失効 |
 | 旧セッションの悪用 | `sessions_revoked_at` で完了後の全セッションを無効化 |
+| 出所の確かでない OAuth の連携 | 完了時に、未確認の email の利用者の連携と、許可の一覧に無い instance の連携を外す |
 | メール爆撃 | `pw_reset:rl:{email}` で 60 秒に 1 回に制限 |
 | OAuth ユーザーへの誤ったパスワード変更 | `password_hash IS NULL` の場合 change エンドポイントは `400` |
 | トークンのログ・キュー漏洩 | リセットトークンは Redis のみ。Apalis payload・構造化ログ・HTTP ログのクエリに載せない（運用: `apps/backend/docs/password-reset-flow.md`） |
