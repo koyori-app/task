@@ -78,7 +78,6 @@ function isSelected(userId: string) {
             :key="user.id"
             :user="user"
             size="md"
-            tone="inherit"
             decorative
             class="-ml-1.5 border border-background first:ml-0"
           />

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
 import { userProfileHref } from '@/lib/task-display';
+import { MEMBER_AVATAR_COLORS } from '@/lib/user-avatar';
 import type { components } from '@/generated/api';
 import { useAuthStore } from '@/stores/auth';
 
@@ -134,10 +135,9 @@ function roleDescription(role: TenantRole) {
 }
 
 /** 頭文字から色を決める。同じ人はいつも同じ色になる。 */
-const AVATAR_COLORS = ['#0f766e', '#7c3aed', '#b45309', '#be123c', '#1d4ed8', '#4d7c0f'];
 function avatarColor(member: TenantMemberResponse) {
   const sum = [...member.user.username].reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  return AVATAR_COLORS[sum % AVATAR_COLORS.length];
+  return MEMBER_AVATAR_COLORS[sum % MEMBER_AVATAR_COLORS.length];
 }
 
 /**
@@ -447,9 +447,8 @@ async function onRemove(member: TenantMemberResponse) {
               <UserAvatar
                 :user="{ name: member.user.username }"
                 shape="lg"
-                tone="inherit"
                 class="size-[34px]"
-                fallback-class="rounded-none text-xs font-semibold text-white"
+                fallback-class="rounded-none font-semibold text-white"
                 :fallback-style="{ background: avatarColor(member) }"
                 aria-hidden="true"
               />

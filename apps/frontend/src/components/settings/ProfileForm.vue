@@ -180,7 +180,6 @@ async function uploadAvatar(event: Event) {
                 }"
                 size="2xl"
                 shape="lg"
-                tone="inherit"
               />
               <div class="flex flex-1 flex-col gap-2">
                 <Input

@@ -4,7 +4,12 @@ import { computed } from 'vue';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { avatarInitials } from '@/lib/initials';
-import { USER_AVATAR_SIZES, type UserAvatarSize, type UserAvatarUser } from '@/lib/user-avatar';
+import {
+  USER_AVATAR_INITIALS_CLASS,
+  USER_AVATAR_SIZES,
+  type UserAvatarSize,
+  type UserAvatarUser,
+} from '@/lib/user-avatar';
 import { cn } from '@/lib/utils';
 
 interface UserAvatarProps {
@@ -22,13 +27,14 @@ interface UserAvatarProps {
    * 隣に同じ名を字で出す時は true。画像の alt を空にして、読み上げが名を二度読まぬようにする。
    */
   decorative?: boolean;
-  /** 頭文字の色。既定は薄い字（`muted`）、置かれた場所の字の色に合わせるなら `inherit` */
-  tone?: 'muted' | 'inherit';
   /** 頭文字に使う字数（コードポイント単位）。既定は 2 */
   initialLength?: number;
   /** 頭文字を名から作らず、この字に替える（+N のチップ等） */
   fallbackText?: string;
-  /** 頭文字の見た目だけを足す（背景色等。大きさの段で決まらぬ所の差し替え用） */
+  /**
+   * 頭文字の見た目だけを足す（地の色・太さ等）。字の大きさと既定の字の色は段で決まるので、ここでは替えぬ。
+   * 地の色を替える時は、その地に対して対比 4.5:1 以上の字の色を併せて付ける。
+   */
   fallbackClass?: HTMLAttributes['class'];
   fallbackStyle?: HTMLAttributes['style'];
   /** アバターの根に足す class（縁取り・重ねる余白等の配置用） */
@@ -40,7 +46,6 @@ const props = withDefaults(defineProps<UserAvatarProps>(), {
   shape: 'full',
   inactive: false,
   decorative: false,
-  tone: 'muted',
   initialLength: 2,
   fallbackText: undefined,
   fallbackClass: undefined,
@@ -64,13 +69,7 @@ const SHAPES = { full: 'rounded-full', md: 'rounded-md', lg: 'rounded-lg' } as c
   >
     <AvatarImage v-if="src" :src="src" :alt="decorative ? '' : name" />
     <AvatarFallback
-      :class="
-        cn(
-          SHAPES[shape],
-          tone === 'muted' ? 'bg-muted text-muted-foreground' : 'text-inherit',
-          fallbackClass,
-        )
-      "
+      :class="cn(SHAPES[shape], USER_AVATAR_INITIALS_CLASS, fallbackClass)"
       :style="fallbackStyle"
     >
       {{ text }}

@@ -16,9 +16,9 @@ const SIZES = Object.keys(USER_AVATAR_SIZES) as UserAvatarSize[];
 const meta = {
   title: 'Components/UserAvatar',
   component: UserAvatar,
-  // 頭文字の色（bg-muted 上の text-muted-foreground）は既存の画面と同じ組で、12px 以下の字では
-  // 対比が 4.34:1 と 4.5:1 に届かぬ。色は変えぬ寄せなので、ここでは落とさず todo に置く
-  parameters: { a11y: { test: 'todo' } },
+  // 頭文字の対比（bg-muted 上の text-foreground）は全ての大きさの段で 4.5:1 以上。
+  // 全体の既定は todo なので、ここは落ちる検査（error）に上げて保つ
+  parameters: { a11y: { test: 'error' } },
   args: { user: { name: 'yupix', avatar_url: null } },
 } satisfies Meta<typeof UserAvatar>;
 
