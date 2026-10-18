@@ -1,18 +1,23 @@
 <script setup lang="ts">
 import { Loader2, Pencil, Trash2 } from '@lucide/vue';
 import { nextTick, ref } from 'vue';
-import type { ComponentPublicInstance } from 'vue';
 
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import CommentBody from '@/components/tasks/CommentBody.vue';
+import CommentEditor from '@/components/tasks/CommentEditor.vue';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { avatarInitials } from '@/lib/initials';
+import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
 import { formatTaskDate } from '@/lib/task-display';
 import type { CommentReply, CommentThread } from '@/composables/useTaskComments';
 
 const props = defineProps<{
   /** スレッド先頭・返信のどちらも同じ形で表示する */
   comment: CommentThread | CommentReply;
+  /** 本文の `<@利用者ID>` の印から引ける表示情報 */
+  mentions?: MentionTable;
+  /** 編集で `@` を打った時に出す候補 */
+  mentionCandidates?: readonly MentionCandidate[];
   /** このコメントの更新リクエストが進行中 */
   updating?: boolean;
   /** このコメントの削除リクエストが進行中 */
@@ -45,7 +50,7 @@ const props = defineProps<{
 const editing = ref(false);
 const editDraft = ref('');
 const confirmingDelete = ref(false);
-const editControlRef = ref<HTMLElement | ComponentPublicInstance | null>(null);
+const editorRef = ref<InstanceType<typeof CommentEditor> | null>(null);
 
 async function startEditing() {
   if (props.updating || props.deleting) return;
@@ -54,10 +59,7 @@ async function startEditing() {
   editing.value = true;
   closeDeleteConfirm();
   await nextTick();
-  const control = editControlRef.value;
-  const element =
-    control instanceof HTMLElement ? control : (control?.$el as HTMLElement | undefined);
-  element?.focus();
+  editorRef.value?.focus();
 }
 
 function cancelEditing() {
@@ -155,12 +157,14 @@ async function confirmDelete() {
     <p v-if="comment.is_deleted" class="text-sm text-muted-foreground italic">削除されたコメント</p>
 
     <div v-else-if="editing" class="flex flex-col gap-2">
-      <Textarea
+      <CommentEditor
         v-model="editDraft"
-        ref="editControlRef"
-        class="min-h-20 text-sm"
+        ref="editorRef"
+        min-height-class="min-h-20"
         :disabled="updating"
         aria-label="コメントを編集"
+        :candidates="mentionCandidates"
+        :mentions="mentions"
       />
       <div class="flex justify-end gap-2">
         <Button
@@ -185,8 +189,15 @@ async function confirmDelete() {
       </div>
     </div>
 
-    <!-- コメント本文は素テキスト表示（whitespace-pre-wrap）。v-html は使わない -->
-    <p v-else class="whitespace-pre-wrap text-sm leading-relaxed">{{ comment.body }}</p>
+    <!-- コメント本文は素テキスト表示（whitespace-pre-wrap）。v-html は使わない。
+         `<@利用者ID>` の印だけを `@今の名` の札に描く -->
+    <CommentBody
+      v-else
+      :body="comment.body ?? ''"
+      :mentions="mentions"
+      :current-user-id="currentUserId"
+      :profile-href="profileHref"
+    />
 
     <div
       v-if="confirmingDelete && !comment.is_deleted && !editing"

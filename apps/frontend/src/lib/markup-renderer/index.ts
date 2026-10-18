@@ -44,6 +44,7 @@ import remarkBreaks from 'remark-breaks';
 import { rehypeKfmCode } from '@/lib/rehype-kfm-code';
 import { remarkGfm } from '@/lib/remark-gfm';
 import { remarkKfmMermaid } from '@/lib/remark-kfm-mermaid';
+import { remarkKfmMention } from '@/lib/remark-kfm-mention';
 import { remarkKfmTaskRef } from '@/lib/remark-kfm-task-ref';
 import { remarkKoyoriAlerts } from '@/lib/remark-koyori-alerts';
 import { kfmSanitizeSchemas } from './_schemas';
@@ -105,7 +106,14 @@ export const renderDescription = createRenderer({
       // rehype 層 (starry-night / 将来の language-* 拡張) は mermaid フェンスを見ない。
       // remarkKfmTaskRef は GFM の後ろ (autolink 済みの link の内側を触らない) かつ alerts の
       // 後ろ (alerts は先頭 text の position で原文照合するため、先に分割すると alert 化しない)。
-      remarkPlugins: [remarkGfm, remarkKoyoriAlerts, remarkKfmMermaid, remarkKfmTaskRef],
+      // remarkKfmMention も同じ位置（印は text ノードの分割で札にする。表が渡されぬ描画では何もしない）。
+      remarkPlugins: [
+        remarkGfm,
+        remarkKoyoriAlerts,
+        remarkKfmMermaid,
+        remarkKfmTaskRef,
+        remarkKfmMention,
+      ],
       // GitHub 同様のコードブロック着色。rehype 層 (remark-rehype の後段) に挿す。
       // rehypeKfmCode は着色済みの子を行分割して <kfm-code> で包むため、必ず
       // starry-night の後ろ (行分割は着色より後でしか成立しない)。
@@ -120,6 +128,7 @@ export const renderDescription = createRenderer({
         remarkKoyoriAlerts,
         remarkKfmMermaid,
         remarkKfmTaskRef,
+        remarkKfmMention,
         remarkBreaks,
       ],
       rehypePlugins: [rehypeStarryNight, rehypeKfmCode],

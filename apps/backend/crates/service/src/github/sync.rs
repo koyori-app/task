@@ -387,6 +387,16 @@ pub async fn push_task(
         return Ok(());
     };
 
+    // 説明文のメンションの印（`<@利用者ID>`）は GitHub では読めぬ id になるので、
+    // 他の外へ出る口と同じく `@今の名` に戻してから書き戻す
+    let mut task = task;
+    if let Some(description) = task.description.take() {
+        task.description = Some(
+            crate::mentions::plain_body(db, task.project_id, &description)
+                .await
+                .map_err(|e| anyhow::anyhow!("resolving mentions for task {task_id}: {e:?}"))?,
+        );
+    }
     let content = SyncedContent::from_task(&task, status.is_done_state);
     let hash = content.hash();
     if link.synced_hash == hash {

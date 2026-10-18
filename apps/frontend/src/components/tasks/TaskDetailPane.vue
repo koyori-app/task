@@ -100,6 +100,7 @@ const {
 // オーバーレイでも本文と同じ画面でやり取りできるようにする
 const {
   threads,
+  mentions,
   commentsLoading,
   commentsError,
   refetchComments,
@@ -183,6 +184,7 @@ const renderedDescription = useRenderedDescription(
   () => props.tenantDisplayId,
   () => displayTask.value?.id,
   () => displayTask.value?.description,
+  () => displayTask.value?.mentions,
 );
 
 function openDeleteDialog() {
@@ -263,6 +265,8 @@ function onDeleteDialogCancel(event: Event) {
         <template #sidebar>
           <TaskComments
             :threads="threads"
+            :mentions="mentions"
+            :mention-candidates="members"
             :loading="commentsLoading"
             :list-error="commentsError"
             :on-retry="refetchComments"

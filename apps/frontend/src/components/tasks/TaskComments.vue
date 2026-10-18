@@ -8,15 +8,20 @@ import {
   Plus,
   SendHorizontal,
 } from '@lucide/vue';
-import { computed, ref, watch } from 'vue';
+import { computed, ref, useTemplateRef, watch } from 'vue';
 
+import CommentEditor from '@/components/tasks/CommentEditor.vue';
 import TaskCommentItem from '@/components/tasks/TaskCommentItem.vue';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import type { CommentThread } from '@/composables/useTaskComments';
+import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
 
 const props = defineProps<{
   threads: CommentThread[];
+  /** 本文の `<@利用者ID>` の印から引ける表示情報（コメント一覧 API の `mentions`） */
+  mentions?: MentionTable;
+  /** `@` で出す候補（担当者候補と同じ集合。通知の境と一致する） */
+  mentionCandidates?: readonly MentionCandidate[];
   /** 一覧の読み込み中 */
   loading?: boolean;
   /**
@@ -75,6 +80,8 @@ const props = defineProps<{
  * 参照どおり、返信は一覧の中に折りたたむのではなく列ごとスレッドへ切り替える。
  * 一覧では返信件数だけを出し、押すとその親と返信だけが並ぶ。
  */
+const composer = useTemplateRef<InstanceType<typeof CommentEditor>>('composer');
+
 const openThreadId = ref<string | null>(null);
 const openThread = computed(() => props.threads.find((thread) => thread.id === openThreadId.value));
 
@@ -215,6 +222,8 @@ async function deleteThread(threadId: string) {
             <TaskCommentItem
               :comment="openThread"
               :current-user-id="currentUserId"
+              :mentions="mentions"
+              :mention-candidates="mentionCandidates"
               :profile-href="profileHref"
               :updating="updatingCommentId === openThread.id"
               :deleting="deletingCommentId === openThread.id"
@@ -242,6 +251,8 @@ async function deleteThread(threadId: string) {
             <TaskCommentItem
               :comment="reply"
               :current-user-id="currentUserId"
+              :mentions="mentions"
+              :mention-candidates="mentionCandidates"
               :profile-href="profileHref"
               :updating="updatingCommentId === reply.id"
               :deleting="deletingCommentId === reply.id"
@@ -270,6 +281,8 @@ async function deleteThread(threadId: string) {
             <TaskCommentItem
               :comment="thread"
               :current-user-id="currentUserId"
+              :mentions="mentions"
+              :mention-candidates="mentionCandidates"
               :profile-href="profileHref"
               :updating="updatingCommentId === thread.id"
               :deleting="deletingCommentId === thread.id"
@@ -321,12 +334,16 @@ async function deleteThread(threadId: string) {
       @submit.prevent="submitDraft"
     >
       <div class="rounded-lg border bg-background focus-within:ring-1 focus-within:ring-ring">
-        <Textarea
+        <CommentEditor
+          ref="composer"
           v-model="newDraft"
-          class="min-h-14 resize-none border-0 bg-transparent text-sm shadow-none focus-visible:ring-0"
+          bare
+          min-height-class="min-h-14"
           :disabled="submitPending"
           :aria-label="openThread ? '返信を入力' : 'コメントを入力'"
           :placeholder="openThread ? '返信を入力…' : 'コメントを入力…'"
+          :candidates="mentionCandidates"
+          :mentions="mentions"
         />
         <div class="flex items-center gap-1 px-2 pb-2">
           <Button
@@ -361,7 +378,8 @@ async function deleteThread(threadId: string) {
             size="icon"
             class="size-7 text-muted-foreground"
             aria-label="メンション"
-            disabled
+            :disabled="submitPending"
+            @click="composer?.openMentionPicker()"
           >
             <AtSign class="size-4" aria-hidden="true" />
           </Button>

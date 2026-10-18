@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import TaskComments from '../TaskComments.vue';
+import { openMentionPickerSpy } from './comment-editor-stub';
 import type { CommentThread } from '@/composables/useTaskComments';
+
+// 実物の入力欄は CodeMirror で happy-dom では起動できない。配線だけを見る代役に替える
+// （札・候補・IME の実物の挙動は stories/components/CommentEditor.stories.ts が実ブラウザで見る）
+vi.mock('@/components/tasks/CommentEditor.vue', async () => ({
+  default: (await import('./comment-editor-stub')).default,
+}));
 
 enableAutoUnmount(afterEach);
 
@@ -548,5 +555,67 @@ describe('TaskComments', () => {
     const items = wrapper.findAll('[data-task-comment]');
     expect(items[0].text()).toContain('コメントを更新できませんでした（forbidden）');
     expect(items[1].text()).not.toContain('コメントを更新できませんでした');
+  });
+});
+
+describe('TaskComments のメンション', () => {
+  const ALICE = '11111111-1111-4111-8111-111111111111';
+
+  it('本文の <@id> を、対応表の名の札に描く（一覧でも返信でも id は出さない）', async () => {
+    const wrapper = mountComments({
+      threads: [
+        thread('c-1', `<@${ALICE}> さん確認を`, {
+          replies: [
+            {
+              id: 'r-1',
+              body: `<@${ALICE}> 返信`,
+              is_deleted: false,
+              created_at: '2026-08-19T01:00:00Z',
+              updated_at: '2026-08-19T01:00:00Z',
+              user,
+            },
+          ],
+        }),
+      ],
+      mentions: { [ALICE]: { status: 'member', name: 'alice' } },
+    });
+    expect(wrapper.get('[data-task-comment] [data-mention]').text()).toBe('@alice');
+    expect(wrapper.text()).not.toContain(ALICE);
+
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '1件の返信')!
+      .trigger('click');
+    const chips = wrapper.findAll('[data-task-comment] [data-mention]');
+    expect(chips).toHaveLength(2);
+    expect(chips.every((c) => c.text() === '@alice')).toBe(true);
+  });
+
+  it('既存の素の @username は札にせず今のまま描く', () => {
+    const wrapper = mountComments({ threads: [thread('c-1', '@alice 旧い形')] });
+    expect(wrapper.find('[data-mention]').exists()).toBe(false);
+    expect(wrapper.get('[data-task-comment] p.whitespace-pre-wrap').text()).toBe('@alice 旧い形');
+  });
+
+  it('メンションのボタンは入力欄の候補を開き、候補を入力欄へ渡す', async () => {
+    const wrapper = mountComments({
+      mentionCandidates: [
+        { id: ALICE, username: 'alice' },
+        { id: 'u-2', username: 'bob' },
+      ],
+    });
+    expect(wrapper.get('textarea[aria-label="コメントを入力"]').attributes('data-candidates')).toBe(
+      '2',
+    );
+    const before = openMentionPickerSpy.calls;
+    const button = wrapper.get('button[aria-label="メンション"]');
+    expect(button.attributes('disabled')).toBeUndefined();
+    await button.trigger('click');
+    expect(openMentionPickerSpy.calls).toBe(before + 1);
+  });
+
+  it('送信中はメンションのボタンも押せない', () => {
+    const wrapper = mountComments({ submitPending: true });
+    expect(wrapper.get('button[aria-label="メンション"]').attributes('disabled')).toBeDefined();
   });
 });

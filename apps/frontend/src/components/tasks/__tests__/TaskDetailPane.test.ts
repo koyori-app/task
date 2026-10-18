@@ -153,6 +153,8 @@ describe('TaskDetailPane', () => {
         taskId: 'task-id',
         tenant: 'acme',
         description: '# 見出し',
+        // 説明文のメンションの表（このタスクには印が無いので空）
+        mentions: {},
       });
     });
 

@@ -575,6 +575,49 @@ describe('TaskDetailHub description KFM 表示', () => {
     expect(wrapper.find('em').exists()).toBe(false);
   });
 
+  it('プレーン表示ではメンションの印を札と同じ字（@今の名）にし、id を出さない', () => {
+    const alice = '11111111-1111-4111-8111-111111111111';
+    const former = '22222222-2222-4222-8222-222222222222';
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: {
+          ...task,
+          description: `見て <@${alice}> と <@${former}> へ`,
+          mentions: {
+            [alice]: { status: 'member', name: 'alice' },
+            // 外れた者でも名前が引ければ名で出る
+            [former]: { status: 'outside', name: 'former' },
+          },
+        },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+
+    const text = wrapper.get('p.whitespace-pre-wrap').text();
+    expect(text).toBe('見て @alice と @former へ');
+    expect(text).not.toContain(alice);
+    expect(text).not.toContain('<@');
+  });
+
+  it('既存の素の @username はそのまま描く（札にも別の字にもしない）', () => {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: {
+          ...task,
+          description: '@alice さん bob@example.com',
+          mentions: {},
+        },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+
+    expect(wrapper.get('p.whitespace-pre-wrap').text()).toBe('@alice さん bob@example.com');
+  });
+
   it('KFM 表示中は鉛筆ボタンから編集へ入り、textarea には生テキストが入る', async () => {
     const wrapper = mount(TaskDetailHub, {
       props: {

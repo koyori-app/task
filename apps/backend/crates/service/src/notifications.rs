@@ -235,15 +235,65 @@ pub async fn notify_mentioned<C: ConnectionTrait>(
     comment_id: Uuid,
     author_id: Uuid,
 ) -> Result<Vec<Uuid>, AppError> {
-    let author_name = users::Entity::find_by_id(author_id)
+    let payload: Json = serde_json::json!({
+        "comment_id": comment_id,
+        "author": author_name(db, author_id).await?,
+    });
+    send_mentions(
+        db,
+        project_id,
+        task_id,
+        mentioned_user_ids,
+        author_id,
+        payload,
+    )
+    .await
+}
+
+/// タスクの説明文のメンション通知。コメントのメンションと同じ種別（`mentioned`）で、
+/// 設定（アプリ内・メール）も共通。コメントを指す `comment_id` の代わりに `source` を持つ
+/// （メールの文言がここで分かれる）。遷移先はタスクの頁。
+pub async fn notify_description_mentioned<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    task_id: Uuid,
+    mentioned_user_ids: &[Uuid],
+    author_id: Uuid,
+) -> Result<Vec<Uuid>, AppError> {
+    let payload: Json = serde_json::json!({
+        "source": PAYLOAD_SOURCE_TASK_DESCRIPTION,
+        "author": author_name(db, author_id).await?,
+    });
+    send_mentions(
+        db,
+        project_id,
+        task_id,
+        mentioned_user_ids,
+        author_id,
+        payload,
+    )
+    .await
+}
+
+/// メンション通知の `payload.source` が説明文のものであることを示す値。
+pub const PAYLOAD_SOURCE_TASK_DESCRIPTION: &str = "task_description";
+
+async fn author_name<C: ConnectionTrait>(db: &C, author_id: Uuid) -> Result<String, AppError> {
+    Ok(users::Entity::find_by_id(author_id)
         .one(db)
         .await?
         .map(|u| u.username)
-        .unwrap_or_else(|| "unknown".into());
-    let payload: Json = serde_json::json!({
-        "comment_id": comment_id,
-        "author": author_name,
-    });
+        .unwrap_or_else(|| "unknown".into()))
+}
+
+async fn send_mentions<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    task_id: Uuid,
+    mentioned_user_ids: &[Uuid],
+    author_id: Uuid,
+    payload: Json,
+) -> Result<Vec<Uuid>, AppError> {
     let mut notified = Vec::new();
     for user_id in mentioned_user_ids {
         if *user_id == author_id {

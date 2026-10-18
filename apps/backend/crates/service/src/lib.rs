@@ -17,6 +17,7 @@ pub mod forge;
 pub mod github;
 pub mod http;
 pub mod login_session;
+pub mod mentions;
 pub mod notification_email;
 pub mod notifications;
 pub mod oauth;

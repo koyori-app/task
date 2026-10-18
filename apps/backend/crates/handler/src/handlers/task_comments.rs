@@ -101,6 +101,17 @@ pub async fn list_comments(
             .collect()
     };
 
+    // 本文のメンション印（`<@利用者ID>`）の名前・アイコン・退会や対象外かを、一度の問い合わせで引く。
+    // 削除済みのコメントの本文は返さぬので、そこに出る印も引かない
+    let mentions = service::mentions::resolve_in_bodies(
+        &state.db,
+        project_id,
+        all.iter()
+            .filter(|c| c.deleted_at.is_none())
+            .map(|c| c.body.as_str()),
+    )
+    .await?;
+
     let mut top_level: Vec<task_comments::Model> = Vec::new();
     let mut replies_by_parent: HashMap<Uuid, Vec<task_comments::Model>> = HashMap::new();
 
@@ -146,7 +157,7 @@ pub async fn list_comments(
         })
         .collect();
 
-    Ok(Json(CommentListResponse { comments }))
+    Ok(Json(CommentListResponse { comments, mentions }))
 }
 
 #[axum::debug_handler]
@@ -241,6 +252,9 @@ pub async fn create_comment(
         .one(&txn)
         .await?
         .ok_or_else(|| anyhow::anyhow!("comment author {} has no user row", auth.user_id))?;
+    // メンション印（`<@利用者ID>`）を `@今の名` に戻してから外（webhook）へ出す。印は id を含むので生では出さぬ
+    let mentions =
+        service::mentions::resolve_in_bodies(&txn, project_id, [comment.body.as_str()]).await?;
     service::webhooks::emit(
         &txn,
         project_id,
@@ -248,13 +262,19 @@ pub async fn create_comment(
         service::webhooks::EVENT_COMMENT_CREATED,
         serde_json::json!({
             "task": { "id": task.id, "seq_id": task.seq_id, "title": &task.title },
-            "comment": { "id": comment.id, "author": author.username, "body": &comment.body },
+            "comment": {
+                "id": comment.id,
+                "author": author.username,
+                "body": payload::mentions::to_plain(&comment.body, &mentions),
+            },
         }),
     )
     .await?;
     txn.commit().await?;
 
-    Ok((StatusCode::CREATED, Json(comment.into())))
+    let mut response: TaskCommentResponse = comment.into();
+    response.mentions = mentions;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 #[axum::debug_handler]
@@ -334,7 +354,11 @@ pub async fn update_comment(
     )
     .await?;
     txn.commit().await?;
-    Ok(Json(updated.into()))
+    let mut response: TaskCommentResponse = updated.into();
+    response.mentions =
+        service::mentions::resolve_in_bodies(&state.db, project_id, [response.body.as_str()])
+            .await?;
+    Ok(Json(response))
 }
 
 #[axum::debug_handler]

@@ -229,3 +229,71 @@ export const ApiFailure: Story = {
     await expect(invalidateQueriesSpy).not.toHaveBeenCalled();
   },
 };
+
+const MENTION_ALICE = '11111111-1111-4111-8111-111111111111';
+const mentionMembers = [
+  { id: MENTION_ALICE, username: 'alice', avatar_url: null },
+  { id: '22222222-2222-4222-8222-222222222222', username: 'bob', avatar_url: null },
+];
+
+/** 説明欄で `@` を打つと候補が出て、選ぶと札（本文は `<@id>`）になり、そのまま作成の本文に載る */
+export const MentionInDescription: Story = {
+  args: { members: mentionMembers },
+  beforeEach() {
+    const mock = mockCreate();
+    return mock.restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await user.type(await canvas.findByLabelText(/タイトル/), 'メンション付き');
+    await user.click(canvas.getByLabelText('説明'));
+    await user.keyboard('お願い @al');
+
+    const popup = await waitFor(() => {
+      const el = canvasElement.ownerDocument.querySelector<HTMLElement>('.cm-tooltip-autocomplete');
+      if (!el) throw new Error('候補がまだ出ていない');
+      return el;
+    });
+    await expect(popup.textContent).toContain('@alice');
+    await expect(popup.textContent).not.toContain('@bob');
+    // 誤って確定せぬよう、候補は表示から少し経つまで確定を受けつけぬ（CodeMirror の既定）
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await user.keyboard('{Enter}');
+
+    // 入力欄の中は札で、id の文字は見えない
+    const chip = await waitFor(() => {
+      const el = canvasElement.ownerDocument.querySelector<HTMLElement>('.cm-mention');
+      if (!el) throw new Error('札がまだ出ていない');
+      return el;
+    });
+    await expect(chip.textContent).toBe('@alice');
+    await expect(canvas.getByLabelText('説明').textContent).not.toContain(MENTION_ALICE);
+
+    const submit = await canvas.findByRole('button', { name: '作成' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    await user.click(submit);
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+    const request = (globalThis.fetch as ReturnType<typeof fn>).mock.calls[0]?.[0] as Request;
+    await expect(request.clone().json()).resolves.toMatchObject({
+      description: `お願い <@${MENTION_ALICE}>`,
+    });
+  },
+};
+
+/** コードの中の `<@id>` は札にしない（表示側の KFM と同じ扱い） */
+export const MentionInsideCodeStaysText: Story = {
+  args: { members: mentionMembers },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await user.click(await canvas.findByLabelText('説明'));
+    await user.keyboard(`\`<@${MENTION_ALICE}>\` と <@${MENTION_ALICE}>`);
+
+    // 地の文の印だけが札になり、コードの中の印は文字のまま
+    await waitFor(() =>
+      expect(canvasElement.ownerDocument.querySelectorAll('.cm-mention')).toHaveLength(1),
+    );
+    await expect(canvas.getByLabelText('説明').textContent).toContain(`<@${MENTION_ALICE}>`);
+  },
+};

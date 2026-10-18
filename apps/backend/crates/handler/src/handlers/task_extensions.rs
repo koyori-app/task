@@ -120,13 +120,27 @@ async fn search_tasks_ilike(
         .all(&state.db)
         .await?;
 
+    // 説明文のメンションの印は id を含むので、一覧の抜粋に出す前に `@今の名` に戻す
+    let mentions = service::mentions::resolve_in_bodies(
+        &state.db,
+        project_id,
+        rows.iter().filter_map(|t| t.description.as_deref()),
+    )
+    .await?;
     let hits = rows
         .into_iter()
         .map(|t| SearchTaskHit {
             id: t.id,
             seq_id: t.seq_id,
             title: t.title.clone(),
-            highlight: highlight_ilike(&t.title, t.description.as_deref(), query),
+            highlight: highlight_ilike(
+                &t.title,
+                t.description
+                    .as_deref()
+                    .map(|d| payload::mentions::to_plain(d, &mentions))
+                    .as_deref(),
+                query,
+            ),
             score: 1.0,
         })
         .collect();
@@ -248,11 +262,25 @@ async fn search_tasks_tsvector(
             ],
         ))
         .await?;
+    let mentions = service::mentions::resolve_in_bodies(
+        &state.db,
+        project_id,
+        rows.iter()
+            .filter_map(|row| row.try_get_by_index::<Option<String>>(3).ok().flatten())
+            .collect::<Vec<_>>()
+            .iter()
+            .map(String::as_str),
+    )
+    .await?;
     let hits = rows
         .into_iter()
         .filter_map(|row| {
             let title: String = row.try_get_by_index(2).ok()?;
-            let description: Option<String> = row.try_get_by_index(3).ok().flatten();
+            let description: Option<String> = row
+                .try_get_by_index::<Option<String>>(3)
+                .ok()
+                .flatten()
+                .map(|d| payload::mentions::to_plain(&d, &mentions));
             let highlight = highlight_ilike(&title, description.as_deref(), query);
             Some(SearchTaskHit {
                 id: row.try_get_by_index(0).ok()?,

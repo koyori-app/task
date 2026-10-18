@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/vue-query';
 import { computed, toValue, type MaybeRefOrGetter } from 'vue';
 
+import type { MentionTable } from '@/lib/comment-mention';
+
 /**
  * 説明本文の KFM 描画結果をサーバ（POST /internal/render-description）から取る。
  *
@@ -36,23 +38,31 @@ const PERMANENT_FAILURE_STATUSES = new Set([411, 413, 422]);
 /** 一時的な失敗を何回まで試すか。諦めたら呼び出し側がプレーン表示へ倒す。 */
 const TRANSIENT_FAILURE_RETRIES = 2;
 
-export function renderedDescriptionQueryKey(tenant: string, taskUuid: string, description: string) {
+export function renderedDescriptionQueryKey(
+  tenant: string,
+  taskUuid: string,
+  description: string,
+  mentions: MentionTable = {},
+) {
   // 本文そのものをキーに含める。ハッシュにすると衝突時に別タスクの HTML を掴むため、
   // 照合と同じく厳密（衝突なし）にしておく。説明はタスク単位の短文である前提。
   // テナントも含める: 同じ本文でも KEY-N のリンク先がテナントで変わる。
-  return ['render-description', tenant, taskUuid, description] as const;
+  // 札の字は表（名前・状態）で変わるので、表もキーに含める（改名・退会で描き直す）
+  return ['render-description', tenant, taskUuid, description, JSON.stringify(mentions)] as const;
 }
 
 export function useRenderedDescription(
   tenant: MaybeRefOrGetter<string | null | undefined>,
   taskUuid: MaybeRefOrGetter<string | null | undefined>,
   description: MaybeRefOrGetter<string | null | undefined>,
+  mentions?: MaybeRefOrGetter<MentionTable | null | undefined>,
 ) {
   const resolved = computed(() => {
     const tenantId = toValue(tenant);
     const uuid = toValue(taskUuid);
     const text = toValue(description);
-    return tenantId && uuid && text ? { tenant: tenantId, uuid, text } : null;
+    const table = (mentions && toValue(mentions)) || {};
+    return tenantId && uuid && text ? { tenant: tenantId, uuid, text, mentions: table } : null;
   });
 
   return useQuery(
@@ -63,6 +73,7 @@ export function useRenderedDescription(
           current?.tenant ?? '',
           current?.uuid ?? '',
           current?.text ?? '',
+          current?.mentions,
         ),
         queryFn: async (): Promise<RenderedDescription> => {
           // enabled で絞っているのでここには非 null しか来ないが、型のために畳む
@@ -75,6 +86,7 @@ export function useRenderedDescription(
               taskId: current.uuid,
               tenant: current.tenant,
               description: current.text,
+              mentions: current.mentions,
             }),
           });
           if (!response.ok) {

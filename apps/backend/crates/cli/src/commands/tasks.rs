@@ -106,6 +106,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let tasks: TaskListResponse = api
                 .get(&borrow(&tasks_path(api, project.id)), &query)
                 .await?;
+            let tasks = tasks_for_display(tasks);
             if output.json {
                 print(&tasks, output);
             } else {
@@ -194,7 +195,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let created: TaskDetailResponse = api
                 .post(&borrow(&tasks_path(api, project.id)), &body)
                 .await?;
-            print(&created, output);
+            print(&task_for_display(created), output);
         }
         TasksCommand::Show { task_ref, project } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
@@ -203,7 +204,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let task: TaskDetailResponse = api
                 .get(&borrow(&task_path(api, project.id, &task_id)), &[])
                 .await?;
-            print(&task, output);
+            print(&task_for_display(task), output);
         }
         TasksCommand::Update {
             task_ref,
@@ -247,7 +248,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let updated: TaskDetailResponse = api
                 .put(&borrow(&task_path(api, project.id, &task_id)), &body)
                 .await?;
-            print(&updated, output);
+            print(&task_for_display(updated), output);
         }
         TasksCommand::Complete { task_ref, project } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
@@ -258,7 +259,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let updated: TaskDetailResponse = api
                 .put(&borrow(&task_path(api, project.id, &task_id)), &body)
                 .await?;
-            print(&updated, output);
+            print(&task_for_display(updated), output);
         }
         TasksCommand::Comment {
             task_ref,
@@ -292,7 +293,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                     },
                 )
                 .await?;
-            print(&comment, output);
+            print(&comment_for_display(comment), output);
         }
         TasksCommand::Delete { task_ref, project } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
@@ -708,6 +709,35 @@ async fn resolve_task_target(
     Ok((resolve_project(api, &project_key).await?, task_id))
 }
 
+/// 作成したコメントを人に見せる形にする。本文のメンション印（`<@利用者ID>`）は id を含むので、
+/// 利用者の画面の外へ出す口は `@今の名` に戻してから出す（`payload::mentions::to_plain`）。
+fn comment_for_display(mut comment: TaskCommentResponse) -> TaskCommentResponse {
+    comment.body = payload::mentions::to_plain(&comment.body, &comment.mentions);
+    comment
+}
+
+/// 作成・取得・更新したタスクを人に見せる形にする。説明文のメンション印は `@今の名` に戻す
+/// （コメントと同じ `payload::mentions::to_plain`）。
+fn task_for_display(mut detail: TaskDetailResponse) -> TaskDetailResponse {
+    detail.task.description = detail
+        .task
+        .description
+        .map(|body| payload::mentions::to_plain(&body, &detail.mentions));
+    detail
+}
+
+/// 一覧は説明文の `mentions` の表を持たぬので、印は id を出さぬ定型の句に落とす。
+fn tasks_for_display(mut list: TaskListResponse) -> TaskListResponse {
+    let none = payload::mentions::MentionMap::new();
+    for task in &mut list.tasks {
+        task.description = task
+            .description
+            .take()
+            .map(|body| payload::mentions::to_plain(&body, &none));
+    }
+    list
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1008,5 +1038,116 @@ mod tests {
 
     fn uuid(n: u128) -> Uuid {
         Uuid::from_u128(n)
+    }
+
+    #[test]
+    fn comment_output_has_names_instead_of_mention_markers() {
+        use payload::mentions::{MentionStatus, MentionedUser};
+        let alice = Uuid::new_v4();
+        let ghost = Uuid::new_v4();
+        let comment = TaskCommentResponse {
+            id: Uuid::new_v4(),
+            task_id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            body: format!("<@{alice}> と <@{ghost}> へ"),
+            mentions: [(
+                alice,
+                MentionedUser {
+                    status: MentionStatus::Member,
+                    name: Some("alice".into()),
+                    avatar_url: None,
+                },
+            )]
+            .into(),
+            parent_comment_id: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            deleted_at: None,
+        };
+
+        let shown = comment_for_display(comment);
+
+        assert_eq!(shown.body, "@alice と @（不明な利用者） へ");
+        let out = crate::output::render(&shown, crate::output::OutputOptions::new(true));
+        assert!(!out.contains("<@"), "{out}");
+    }
+
+    fn task_detail_with(
+        description: &str,
+        mentions: serde_json::Value,
+    ) -> payload::tasks::TaskDetailResponse {
+        serde_json::from_value(json!({
+            "id": "22222222-2222-4222-8222-222222222222",
+            "project_id": "11111111-1111-4111-8111-111111111111",
+            "seq_id": 7,
+            "title": "Golden task",
+            "description": description,
+            "status_id": "33333333-3333-4333-8333-333333333333",
+            "priority": "Medium",
+            "progress_pct": 0,
+            "parent_task_id": null,
+            "milestone_id": null,
+            "sprint_id": null,
+            "soft_deadline": null,
+            "hard_deadline": null,
+            "planned_start_on": null,
+            "estimated_minutes": null,
+            "is_archived": false,
+            "created_by": null,
+            "assignees": [],
+            "labels": [],
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "completed_at": null,
+            "deleted_at": null,
+            "custom_field_values": [],
+            "mentions": mentions,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn task_output_has_names_instead_of_description_mention_markers() {
+        let alice = Uuid::new_v4();
+        let former = Uuid::new_v4();
+        let stranger = Uuid::new_v4();
+        let detail = task_detail_with(
+            &format!("<@{alice}> と <@{former}> と <@{stranger}> へ"),
+            json!({
+                alice.to_string(): { "status": "member", "name": "alice", "avatar_url": null },
+                // 外れた者でも名前が引ければ名で出る。引けぬ者は定型の句
+                former.to_string(): { "status": "outside", "name": "former", "avatar_url": null },
+                stranger.to_string(): { "status": "outside", "name": null, "avatar_url": null },
+            }),
+        );
+
+        let shown = task_for_display(detail);
+
+        assert_eq!(
+            shown.task.description.as_deref(),
+            Some("@alice と @former と @（このプロジェクトの外の利用者） へ")
+        );
+        // 出力に印が残らぬこと（`mentions` の表は id → 名前の対応として残るが、本文には id が出ない）
+        let out = crate::output::render(&shown, crate::output::OutputOptions::new(true));
+        assert!(!out.contains("<@"), "{out}");
+    }
+
+    #[test]
+    fn task_list_output_never_shows_a_description_marker_or_id() {
+        let alice = Uuid::new_v4();
+        let one = task_detail_with(&format!("<@{alice}> 確認"), json!({}));
+        let list = TaskListResponse {
+            tasks: vec![one.task],
+            total: 1,
+            next_cursor: None,
+        };
+
+        let shown = tasks_for_display(list);
+
+        // 一覧は表を持たぬので、名は出さず定型の句に落とす（id は出ない）
+        assert_eq!(
+            shown.tasks[0].description.as_deref(),
+            Some("@（不明な利用者） 確認")
+        );
     }
 }
