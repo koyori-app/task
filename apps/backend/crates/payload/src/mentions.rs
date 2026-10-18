@@ -77,9 +77,10 @@ pub enum MentionStatus {
     /// いまそのプロジェクトに入れる者。名前とアイコンを返す。
     Member,
     /// 利用者は在るが、このプロジェクトに入れぬ者（外れた・テナントを抜けた）。
-    /// **名前は返さぬ**（プロジェクトの外の者の名を、メンションの印を知っただけで引けぬようにする）。
+    /// 名前は、そのテナントに属している・属しておった者（`service::mentions::tenant_footprint_ids`）
+    /// の時だけ返す。印の id を知っただけで、別のテナントの利用者の名を引けぬようにするため。
     Outside,
-    /// 利用者の行が無い者（退会・削除）。
+    /// 利用者の行が無い者（削除。名前は引けぬ）。
     Gone,
 }
 
@@ -87,7 +88,8 @@ pub enum MentionStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct MentionedUser {
     pub status: MentionStatus,
-    /// `status` が `member` の時だけ。`@今の名` の「今の名」。
+    /// `@今の名` の「今の名」。`member` と、そのテナントに属している・属しておった `outside` で返す。
+    /// 別のテナントの利用者・行の無い者は `null`。
     #[schema(nullable)]
     pub name: Option<String>,
     #[schema(nullable)]
@@ -98,8 +100,9 @@ impl MentionedUser {
     /// 本文が利用者の画面の外へ出る時の、`@` から始まる表示。
     pub fn plain_label(&self) -> String {
         match (self.status, &self.name) {
-            (MentionStatus::Member, Some(name)) => format!("@{name}"),
-            (MentionStatus::Member, None) | (MentionStatus::Outside, _) => {
+            // 名が引ける者は、外れた者・退会した者も名で出す（灰色にするのは画面の札の側）
+            (MentionStatus::Member | MentionStatus::Outside, Some(name)) => format!("@{name}"),
+            (MentionStatus::Member | MentionStatus::Outside, None) => {
                 "@（このプロジェクトの外の利用者）".to_string()
             }
             (MentionStatus::Gone, _) => "@（退会した利用者）".to_string(),
@@ -114,7 +117,7 @@ pub type MentionMap = HashMap<Uuid, MentionedUser>;
 const UNKNOWN_LABEL: &str = "@（不明な利用者）";
 
 /// メンション印を `@今の名` に戻した本文。**本文が利用者の画面以外（webhook・CLI）へ出る口は
-/// 全てこれを通す。** 表に無い id・状態が member でない者は、名を伏せた定型の句にする。
+/// 全てこれを通す。** 表に無い id・名が引けぬ者は、名を伏せた定型の句にする。
 pub fn to_plain(body: &str, map: &MentionMap) -> String {
     replace_markers(body, |id| {
         map.get(&id)
@@ -192,18 +195,31 @@ mod tests {
                 id(B),
                 MentionedUser {
                     status: MentionStatus::Outside,
-                    name: Some("secret".into()),
+                    name: Some("former".into()),
                     avatar_url: None,
                 },
             ),
         ]
         .into();
         let plain = to_plain(&body, &map);
+        // 外れた者でも、名が引けておれば名で出る。表に無い id は定型の句
+        assert_eq!(plain, "@alice @former @alice @（不明な利用者）");
+        assert!(!plain.contains("<@") && !plain.contains(A));
+
+        // 名が引けぬ外れた者（別のテナントの利用者）は名を伏せた定型の句
+        let stranger: MentionMap = [(
+            id(B),
+            MentionedUser {
+                status: MentionStatus::Outside,
+                name: None,
+                avatar_url: None,
+            },
+        )]
+        .into();
         assert_eq!(
-            plain,
-            "@alice @（このプロジェクトの外の利用者） @alice @（不明な利用者）"
+            to_plain(&format!("<@{B}>"), &stranger),
+            "@（このプロジェクトの外の利用者）"
         );
-        assert!(!plain.contains("<@") && !plain.contains(A) && !plain.contains("secret"));
     }
 
     #[test]

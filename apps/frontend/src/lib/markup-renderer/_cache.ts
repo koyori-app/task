@@ -23,7 +23,7 @@ const KEY_DELIMITER = String.fromCharCode(0);
 
 /**
  * キャッシュキー = pipeline fingerprint ＋ profile ＋ scope ＋ taskRef テナント ＋
- * 解決済み content-scope config ＋ 本文。前置部は JSON.stringify で正規化し、NUL 区切りで本文 full-text と
+ * 解決済み content-scope config ＋ メンションの表（札の字と状態が表で変わるため）＋ 本文。前置部は JSON.stringify で正規化し、NUL 区切りで本文 full-text と
  * 連結する (JSON 出力に生の NUL は現れないため、キー全体が一意に定まる)。profile を
  * 含めることで同一本文が profile 違いで混線せず、scope を含めることで脚注 id の
  * clobberPrefix が違う HTML を取り違えず、テナントを含めることでタスク参照リンクの href が
@@ -37,9 +37,10 @@ export function buildCacheKey(
   taskRefTenant: string,
   contentConfig: string,
   text: string,
+  mentions = '',
 ): string {
   return (
-    JSON.stringify([fingerprint, profile, scope, taskRefTenant, contentConfig]) +
+    JSON.stringify([fingerprint, profile, scope, taskRefTenant, contentConfig, mentions]) +
     KEY_DELIMITER +
     text
   );

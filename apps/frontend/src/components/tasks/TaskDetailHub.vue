@@ -44,6 +44,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
+import { lookup, toPlainText } from '@/lib/comment-mention';
 import {
   PRIORITY_CONFIG,
   clampProgressPct,
@@ -62,6 +63,7 @@ import '@/lib/remark-koyori-alerts/style.css';
 import '@/lib/rehype-starry-night/style.css';
 import '@/lib/rehype-kfm-code/style.css';
 import '@/lib/remark-kfm-mermaid/style.css';
+import '@/lib/remark-kfm-mention/style.css';
 
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type StatusOption = components['schemas']['ProjectStatusResponse'];
@@ -202,6 +204,17 @@ const nextStatus = computed(() => {
 // 古い HTML の遮断: 描画元 (descriptionSource) がクライアントの最新 task.description と
 // 厳密一致しない descriptionHtml は捨て、プレーンテキスト表示へ倒す。v-html の直前で
 // 照合するのは、消費側の渡し忘れ・渡し間違いでも stale HTML が漏れないようにするため。
+/**
+ * KFM 表示の前（取得中・失敗・保存直後で HTML が古い間）に出すプレーン表示用の説明。
+ * メンションの印（`<@利用者ID>`）は id を含むので、札と同じ字（`@今の名`）に直して出す。
+ */
+const plainDescription = computed(() => {
+  const description = props.task?.description;
+  if (!description) return '';
+  const table = props.task?.mentions ?? {};
+  return toPlainText(description, (id) => lookup(table, id));
+});
+
 const freshDescriptionHtml = computed(() => {
   if (!props.descriptionHtml || !props.task?.description) return null;
   if (props.descriptionSource !== props.task.description) return null;
@@ -1070,6 +1083,8 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 :disabled="isFieldUpdating('description')"
                 aria-label="説明"
                 placeholder="markdown で書けます"
+                :candidates="members ?? []"
+                :mentions="task.mentions"
                 @keydown="onEditKeydown($event, 'description')"
                 @submit="commitEditing('description')"
                 @blur="commitEditing('description')"
@@ -1096,7 +1111,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 @click="startEditing('description')"
               >
                 <p v-if="task.description" class="whitespace-pre-wrap text-sm leading-relaxed">
-                  {{ task.description }}
+                  {{ plainDescription }}
                 </p>
                 <p v-else class="text-sm text-muted-foreground">説明を追加</p>
               </button>

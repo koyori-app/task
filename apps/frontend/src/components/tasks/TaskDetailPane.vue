@@ -184,6 +184,7 @@ const renderedDescription = useRenderedDescription(
   () => props.tenantDisplayId,
   () => displayTask.value?.id,
   () => displayTask.value?.description,
+  () => displayTask.value?.mentions,
 );
 
 function openDeleteDialog() {

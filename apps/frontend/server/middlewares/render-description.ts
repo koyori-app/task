@@ -29,6 +29,7 @@
  */
 import { Elysia, t } from 'elysia';
 
+import type { MentionTable } from '@/lib/comment-mention';
 import { renderDescription } from '@/lib/markup-renderer';
 import { API_BASE } from '../api-base';
 
@@ -116,7 +117,7 @@ export const renderDescriptionPlugin = new Elysia()
   .post(
     PATH,
     async ({ body }) => {
-      const { description, taskId, tenant } = body;
+      const { description, taskId, tenant, mentions } = body;
       if (!description) return { html: null };
 
       try {
@@ -128,6 +129,8 @@ export const renderDescriptionPlugin = new Elysia()
           html: await renderDescription(description, {
             scope: `task-${taskId}`,
             taskRef: { tenant },
+            // 説明文のメンションの印を札にする表（API の `mentions`）。省略なら印は素の文字のまま
+            mentions: mentions as MentionTable | undefined,
           }),
         };
       } catch (error) {
@@ -152,6 +155,18 @@ export const renderDescriptionPlugin = new Elysia()
         // 上限超過は描画へ入れない。スキーマで縛ると本文を読んだ時点で 422 になり、
         // renderDescription まで到達しない（呼び出し側は null へ畳む）
         description: t.String({ maxLength: MAX_DESCRIPTION_LENGTH }),
+        // 説明文の印から札の字を引く表（API の `mentions`）。札は表の名前を text として描くだけで、
+        // 権限の境は動かない（表は呼び出し側が既に API から受け取った物）。件数と名前の長さは有界にする
+        mentions: t.Optional(
+          t.Record(
+            t.String({ format: 'uuid' }),
+            t.Object({
+              status: t.Union([t.Literal('member'), t.Literal('outside'), t.Literal('gone')]),
+              name: t.Optional(t.Union([t.String({ maxLength: 200 }), t.Null()])),
+            }),
+            { maxProperties: 200 },
+          ),
+        ),
       }),
     },
   );

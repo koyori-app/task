@@ -17,6 +17,7 @@ import remarkRehype from 'remark-rehype';
 import type { PluggableList } from 'unified';
 import { unified } from 'unified';
 import { visit } from 'unist-util-visit';
+import type { MentionTable } from '@/lib/comment-mention';
 import { buildCacheKey, createL1Cache } from './_cache';
 import type { SanitizeSchema } from './_sanitize';
 import { createSanitizer } from './_sanitize';
@@ -80,6 +81,12 @@ export type RenderOptions = {
    * href がテナントで変わるのでキャッシュキーにも載る。省略時はリンク化しない。
    */
   readonly taskRef?: { readonly tenant: string };
+  /**
+   * メンションの印（`<@利用者ID>`）を札にする時の表（id → 状態・名前。API の `mentions` と同じ形）。
+   * vfile の data.kfm.mentions としてプラグインへ渡す。札の字と状態が表で変わるのでキャッシュキーにも載る。
+   * 省略時は印を札にしない（素の文字のまま）。渡せば、表に無い id は「不明な利用者」の札になる。
+   */
+  readonly mentions?: MentionTable;
 };
 
 export type RenderDescription = (text: string, options?: RenderOptions) => Promise<string>;
@@ -256,6 +263,17 @@ export function createRenderer(options: CreateRendererOptions): RenderDescriptio
     // scope '' は上の検証で throw 済みのため、キーの空文字は「scope なし」と一意に対応する
     // tenant '' はプラグインの検証で落ちてリンク化しないため、キーの空文字は「taskRef なし」と同値
     const taskRef = renderOptions.taskRef;
+    // 表の有無で描画が変わる（無い: 印は素の文字 / 有る: 札）ので、未指定は '' で空の表 '[]' と分ける。
+    // 並びを id で正規化して、同じ表が別のキーにならぬようにする
+    const mentions = renderOptions.mentions;
+    const mentionsKey =
+      mentions === undefined
+        ? ''
+        : JSON.stringify(
+            Object.entries(mentions)
+              .map(([id, user]) => [id.toLowerCase(), user.status, user.name ?? null])
+              .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+          );
     const key = buildCacheKey(
       fingerprint,
       profile,
@@ -263,13 +281,16 @@ export function createRenderer(options: CreateRendererOptions): RenderDescriptio
       taskRef?.tenant ?? '',
       contentConfigJson,
       normalized,
+      mentionsKey,
     );
     const cached = cache.get(key);
     if (cached !== undefined) return cached;
     const processor = getProcessor(profile, clobberPrefix);
     let rendered: string;
     try {
-      rendered = String(await processor.process({ value: normalized, data: { kfm: { taskRef } } }));
+      rendered = String(
+        await processor.process({ value: normalized, data: { kfm: { taskRef, mentions } } }),
+      );
     } catch (error) {
       // process 失敗は「捨てて再試行」。renderDescription はプロセス全体で共有される
       // singleton のため、失敗した実体を永久保持するとプロセス再起動まで復旧不能になる。

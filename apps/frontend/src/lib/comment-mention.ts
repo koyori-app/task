@@ -8,7 +8,10 @@
 
 /** API が返す、印の id から引ける表示情報（`components['schemas']['MentionedUser']` と同じ形）。 */
 export interface MentionUser {
-  /** member=いま入れる者 / outside=このプロジェクトに入れぬ者（名前は返らぬ）/ gone=退会 */
+  /**
+   * member=いま入れる者 / outside=このプロジェクトに入れぬ者（そのテナントに属しておった者だけ名前が返る）/
+   * gone=利用者の行が無い者
+   */
   status: 'member' | 'outside' | 'gone';
   name?: string | null;
   avatar_url?: string | null;
@@ -52,10 +55,14 @@ export function findMarkers(text: string): MarkerRange[] {
   return out;
 }
 
-/** 表に無い・名の無い者の札の字。id は出さない。 */
+/**
+ * 札の字。id は出さない。名が引ける者は、いま入れる者も外れた者（プロジェクトの外・テナントを
+ * 抜けたが、そのテナントに属しておった者）も `@名` で出す（灰色にするのは見た目の側）。
+ * 名が引けぬ者（別のテナントの利用者・行の無い者）は定型の句。
+ */
 export function mentionLabel(user: MentionUser | undefined): string {
   if (!user) return '@（不明な利用者）';
-  if (user.status === 'member' && user.name) return `@${user.name}`;
+  if (user.status !== 'gone' && user.name) return `@${user.name}`;
   if (user.status === 'gone') return '@（退会した利用者）';
   return '@（このプロジェクトの外の利用者）';
 }

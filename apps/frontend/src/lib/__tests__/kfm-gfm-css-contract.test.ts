@@ -29,6 +29,12 @@ const EMITTED_NAMESPACE_SCOPED_PLUGINS = new Map<
     'rehype-starry-night',
     { selectorToken: /\.pl-[\w-]/, ownVariablePrefix: '--color-prettylights-syntax-' },
   ],
+  // メンションの札は自身が emit する span.kfm-mention と、状態の修飾 class だけを指す
+  // （単一ハイフンの継続は既知の状態名に限り、別クラスとしては拒む）
+  [
+    'remark-kfm-mention',
+    { selectorToken: /\.kfm-mention(?:-(?:member|outside|gone|unknown))?(?![\w-])/ },
+  ],
   // mermaid のサイドカーは自身が emit する kfm-mermaid 要素を直に指すため器を要さない。
   ['remark-kfm-mermaid', { selectorToken: new RegExp(`(?:^|[\\s>])${KFM_MERMAID_TAG}(?![\\w-])`) }],
   [

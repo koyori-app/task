@@ -33,9 +33,12 @@ use service::custom_fields::{
     ensure_required_custom_fields, load_task_custom_field_values, upsert_task_custom_field_values,
 };
 use service::db::is_postgres_unique_violation;
-use service::notifications::{notify_assigned, notify_status_changed};
+use service::notifications::{
+    notify_assigned, notify_description_mentioned, notify_status_changed,
+};
 use service::task_activities::{
-    priority_label, record_activity, record_label_diff, status_name, task_label_entries,
+    extract_mentions, priority_label, record_activity, record_label_diff, status_name,
+    task_label_entries,
 };
 use service::task_responses::{build_task_response, build_task_responses};
 
@@ -597,9 +600,14 @@ async fn build_task_detail_response(
     task: tasks::Model,
 ) -> Result<TaskDetailResponse, AppError> {
     let custom_field_values = load_task_custom_field_values(&state.db, project_id, task.id).await?;
+    // 説明文の印（`<@利用者ID>`）から id → 表示情報を引く（コメントの `mentions` と同じ形）
+    let mentions =
+        service::mentions::resolve_in_bodies(&state.db, project_id, task.description.as_deref())
+            .await?;
     Ok(TaskDetailResponse {
         task: build_task_response(&state.db, task).await?,
         custom_field_values,
+        mentions,
     })
 }
 
@@ -900,6 +908,12 @@ pub async fn create_task(
     }
     upsert_task_custom_field_values(&txn, project_id, model.id, &payload.custom_field_values)
         .await?;
+
+    // 説明文のメンション。宛先の境はコメントと同じ（`service::mentions`）。自分自身は通知しない
+    if let Some(description) = model.description.as_deref() {
+        let mentioned = extract_mentions(&txn, description, project_id).await?;
+        notify_description_mentioned(&txn, project_id, model.id, &mentioned, auth.user_id).await?;
+    }
 
     record_activity(
         &txn,
@@ -1272,6 +1286,22 @@ pub async fn update_task(
                 .await?;
             }
         }
+    }
+
+    // 説明文のメンション。編集では、編集前に無く新しく増えた印の者だけに通知する
+    if !payload.clear_description
+        && let Some(ref description) = payload.description
+    {
+        let old_mentioned = match task_snapshot.description.as_deref() {
+            Some(old) => extract_mentions(&txn, old, project_id).await?,
+            None => vec![],
+        };
+        let added: Vec<Uuid> = extract_mentions(&txn, description, project_id)
+            .await?
+            .into_iter()
+            .filter(|id| !old_mentioned.contains(id))
+            .collect();
+        notify_description_mentioned(&txn, project_id, task_id, &added, auth.user_id).await?;
     }
 
     record_task_field_activities(

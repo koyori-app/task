@@ -24531,7 +24531,7 @@
           },
           "name": {
             "type": ["string", "null"],
-            "description": "`status` が `member` の時だけ。`@今の名` の「今の名」。"
+            "description": "`@今の名` の「今の名」。`member` と、そのテナントに属している・属しておった `outside` で返す。\n別のテナントの利用者・行の無い者は `null`。"
           },
           "status": {
             "$ref": "#/components/schemas/MentionStatus"
@@ -26172,6 +26172,16 @@
                 "type": "array",
                 "items": {
                   "$ref": "#/components/schemas/TaskCustomFieldValueResponse"
+                }
+              },
+              "mentions": {
+                "type": "object",
+                "description": "説明文に出る印（`<@利用者ID>`）の id から引ける表示情報（コメントの `mentions` と同じ形）。",
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/MentionedUser"
+                },
+                "propertyNames": {
+                  "type": "string"
                 }
               }
             }

@@ -6,6 +6,7 @@ use validator::Validate;
 
 use crate::custom_fields::{CustomFieldValueInput, TaskCustomFieldValueResponse};
 use crate::labels::LabelResponse;
+use crate::mentions::{MentionMap, MentionedUser};
 use crate::users::UserSummary;
 use entity::{task_assignees, task_relations, tasks};
 
@@ -255,6 +256,10 @@ pub struct TaskDetailResponse {
     #[serde(flatten)]
     pub task: TaskResponse,
     pub custom_field_values: Vec<TaskCustomFieldValueResponse>,
+    /// 説明文に出る印（`<@利用者ID>`）の id から引ける表示情報（コメントの `mentions` と同じ形）。
+    #[serde(default)]
+    #[schema(value_type = HashMap<String, MentionedUser>)]
+    pub mentions: MentionMap,
 }
 
 #[derive(Validate, Deserialize, ToSchema, serde::Serialize)]

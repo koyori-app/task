@@ -113,6 +113,8 @@ export async function data(pageContext: PageContextServer): Promise<Data> {
       descriptionHtml: await renderDescription(task.description, {
         scope: `task-${task.id}`,
         taskRef: { tenant: tenantDisplayId },
+        // 説明文のメンションの印（`<@利用者ID>`）を札にする表。名前は backend が返す表から取る
+        mentions: task.mentions ?? {},
       }),
       descriptionSource: task.description,
     };

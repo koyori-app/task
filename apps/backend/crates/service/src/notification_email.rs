@@ -124,13 +124,23 @@ pub fn subject_and_line(
                 field(payload, "role")
             ),
         ),
-        TYPE_MENTIONED => (
-            format!("[Koyori] {label} でメンションされました"),
-            format!(
-                "{} が {label} のコメントであなたにメンションしました。",
-                field(payload, "author")
-            ),
-        ),
+        TYPE_MENTIONED => {
+            // 説明文のメンションは `source` を持つ（コメントのメンションは `comment_id`）
+            let place = if payload.get("source").and_then(|v| v.as_str())
+                == Some(crate::notifications::PAYLOAD_SOURCE_TASK_DESCRIPTION)
+            {
+                "の説明文"
+            } else {
+                "のコメント"
+            };
+            (
+                format!("[Koyori] {label} でメンションされました"),
+                format!(
+                    "{} が {label} {place}であなたにメンションしました。",
+                    field(payload, "author")
+                ),
+            )
+        }
         TYPE_COMMENT_ADDED => (
             format!("[Koyori] {label} にコメントが追加されました"),
             format!(

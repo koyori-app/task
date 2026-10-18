@@ -340,6 +340,7 @@ async function submit() {
               v-model="description"
               aria-label="説明"
               placeholder="説明を入力（Markdown で書けます）"
+              :candidates="members ?? []"
               min-height-class="min-h-56"
             />
 
