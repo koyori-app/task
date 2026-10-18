@@ -56,13 +56,12 @@ export function findMarkers(text: string): MarkerRange[] {
 }
 
 /**
- * 札の字。id は出さない。名が引ける者は、いま入れる者も外れた者（プロジェクトの外・テナントを
- * 抜けたが、そのテナントに属しておった者）も `@名` で出す（灰色にするのは見た目の側）。
- * 名が引けぬ者（別のテナントの利用者・行の無い者）は定型の句。
+ * 札の字。id は出さない。状態を問わず名が引ける者は `@名` で出す（外れた者・退会した者を
+ * 灰色にするのは見た目の側）。名が引けぬ者は状態に応じた定型の句へ倒す。
  */
 export function mentionLabel(user: MentionUser | undefined): string {
   if (!user) return '@（不明な利用者）';
-  if (user.status !== 'gone' && user.name) return `@${user.name}`;
+  if (user.name) return `@${user.name}`;
   if (user.status === 'gone') return '@（退会した利用者）';
   return '@（このプロジェクトの外の利用者）';
 }

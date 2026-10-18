@@ -1,35 +1,67 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watchEffect } from 'vue';
 
-import CommentMention from '@/components/tasks/CommentMention.vue';
-import { splitBody, type MentionTable } from '@/lib/comment-mention';
+import type { MentionTable } from '@/lib/comment-mention';
+import { lookup, toPlainText } from '@/lib/comment-mention';
+import { KFM_CONTENT_CLASS } from '@/lib/remark-gfm/content-class';
+import '@/lib/remark-gfm/style.css';
+import '@/lib/remark-koyori-alerts/style.css';
+import '@/lib/rehype-starry-night/style.css';
+import '@/lib/rehype-kfm-code/style.css';
+import '@/lib/remark-kfm-mermaid/style.css';
+import '@/lib/remark-kfm-mention/style.css';
 
 /**
- * コメント本文の表示。`<@利用者ID>` の印だけを `@今の名` の札に描き、他の字は今までどおり素テキスト
- * （`whitespace-pre-wrap`。v-html は使わない）。既存のコメントにある `@username` の文字は印ではないので、
- * 札にせず素の文字のまま描く。
+ * コメント本文の唯一の描画境界。
+ *
+ * `v-html` へ渡すのは説明文と同じ markup-renderer が sanitize した HTML だけにする。
+ * client 取得のコメントなので描画器は必要になった時に動的 import し、描画中・失敗時は
+ * UUID を露出しないプレーンテキストへ倒す。
  */
 const props = defineProps<{
   body: string;
-  /** 印の id から引ける表示情報（API の `mentions`） */
+  /** 脚注 id を同じ画面の別コメントから分離する決定的な scope */
+  commentId: string;
+  /** 印の id から引ける表示情報（コメント一覧 API の `mentions`） */
   mentions?: MentionTable;
   currentUserId?: string | null;
-  profileHref?: (userId: string) => string;
 }>();
 
-const segments = computed(() => splitBody(props.body, props.mentions ?? {}));
+const html = ref<string | null>(null);
+let renderVersion = 0;
+const plainBody = computed(() => toPlainText(props.body, (id) => lookup(props.mentions ?? {}, id)));
+
+watchEffect(async () => {
+  const version = ++renderVersion;
+  const source = props.body;
+  const commentId = props.commentId;
+  const mentionsProp = props.mentions;
+  const mentions = mentionsProp ?? {};
+  const currentUserId = props.currentUserId ?? null;
+  try {
+    const { renderDescription } = await import('@/lib/markup-renderer');
+    const rendered = await renderDescription(source, {
+      scope: `comment-${commentId}`,
+      profile: 'comment',
+      mentions,
+      currentUserId,
+    });
+    if (version === renderVersion) html.value = rendered;
+  } catch {
+    if (version === renderVersion) html.value = null;
+  }
+});
 </script>
 
 <template>
-  <p class="whitespace-pre-wrap text-sm leading-relaxed">
-    <template v-for="(segment, index) in segments" :key="index"
-      ><CommentMention
-        v-if="segment.kind === 'mention'"
-        :user="segment.user"
-        :user-id="segment.id"
-        :current-user-id="currentUserId"
-        :profile-href="profileHref"
-      /><template v-else>{{ segment.text }}</template></template
-    >
+  <div
+    v-if="html !== null"
+    :class="KFM_CONTENT_CLASS"
+    class="text-sm leading-relaxed"
+    data-comment-body
+    v-html="html"
+  />
+  <p v-else class="whitespace-pre-wrap text-sm leading-relaxed" data-comment-body>
+    {{ plainBody }}
   </p>
 </template>

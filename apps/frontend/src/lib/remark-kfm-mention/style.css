@@ -1,5 +1,5 @@
 /* メンションの札（remark-kfm-mention が emit する span.kfm-mention）。
- * コメントの札（CommentMention.vue）と同じ色: いま入れる者は強調色、外れた者・行の無い者は灰色。
+ * いま入れる者は強調色、外れた者・行の無い者は灰色。
  * 色はアプリのテーマ変数から取り、.dark の切り替えに CSS 側で追従させる。 */
 .kfm-mention {
   padding: 0 0.25rem;
@@ -7,6 +7,11 @@
   font-weight: 500;
   color: var(--primary);
   background-color: color-mix(in oklab, var(--primary) 12%, transparent);
+}
+
+.kfm-mention-self {
+  font-weight: 600;
+  background-color: color-mix(in oklab, var(--primary) 25%, transparent);
 }
 
 .kfm-mention-outside,

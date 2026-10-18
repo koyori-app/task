@@ -7,8 +7,8 @@
  * - text ノードだけを分割する。code / inlineCode / link / linkReference / definition / html の
  *   内側は走査しない（コードブロックとインラインコードの中の `<@id>` は札にしない）
  * - 札の字は `mentionLabel`（コメントの札と同じ）。id は HTML に出さない
- * - 状態は class（`kfm-mention-member` / `-outside` / `-gone` / `-unknown`）で運ぶ。見た目は
- *   `style.css`（コメントの札 `CommentMention.vue` と同じ色）
+ * - 状態は class（`kfm-mention-member` / `-outside` / `-gone` / `-unknown`）で運ぶ。ログイン中の
+ *   member と同じ id なら `kfm-mention-self` も付ける。見た目は `style.css` に集約する
  *
  * 表（id → 状態・名前）はプラグインの options ではなく vfile の `data.kfm.mentions` から読む
  * （processor は profile ごとに memoize されるため、`remark-kfm-task-ref` と同じ理由）。
@@ -25,7 +25,10 @@ import { findMarkers, lookup, mentionLabel, type MentionTable } from '@/lib/comm
 const SKIP_TYPES = new Set(['code', 'inlineCode', 'link', 'linkReference', 'definition', 'html']);
 
 /** vfile の data.kfm に載せる描画時コンテキスト（_renderer.ts が process 時に渡す） */
-export type KfmMentionData = { readonly mentions?: MentionTable };
+export type KfmMentionData = {
+  readonly mentions?: MentionTable;
+  readonly currentUserId?: string | null;
+};
 
 /** 札の class。状態は既知の 4 つに限る（表の値をそのまま class にしない） */
 const STATUS_CLASS = {
@@ -39,7 +42,11 @@ function readTable(data: Readonly<Record<string, unknown>>): MentionTable | unde
   return table !== null && typeof table === 'object' ? table : undefined;
 }
 
-function splitText(node: Text, table: MentionTable): PhrasingContent[] | undefined {
+function splitText(
+  node: Text,
+  table: MentionTable,
+  currentUserId?: string | null,
+): PhrasingContent[] | undefined {
   const markers = findMarkers(node.value);
   if (markers.length === 0) return undefined;
   const parts: PhrasingContent[] = [];
@@ -52,10 +59,14 @@ function splitText(node: Text, table: MentionTable): PhrasingContent[] | undefin
       user && Object.hasOwn(STATUS_CLASS, user.status)
         ? STATUS_CLASS[user.status]
         : 'kfm-mention-unknown';
+    const className = ['kfm-mention', statusClass];
+    if (user?.status === 'member' && currentUserId && marker.id === currentUserId.toLowerCase()) {
+      className.push('kfm-mention-self');
+    }
     parts.push({
       // span を出すための入れ物（hName で置き換わる）。意味を持つ mdast ノードではない
       type: 'emphasis',
-      data: { hName: 'span', hProperties: { className: ['kfm-mention', statusClass] } },
+      data: { hName: 'span', hProperties: { className } },
       children: [{ type: 'text', value: mentionLabel(user) }],
     });
     last = marker.to;
@@ -66,12 +77,13 @@ function splitText(node: Text, table: MentionTable): PhrasingContent[] | undefin
 
 export function remarkKfmMention() {
   return (tree: Root, file: { readonly data: Readonly<Record<string, unknown>> }): void => {
+    const data = file.data.kfm as KfmMentionData | undefined;
     const table = readTable(file.data);
     if (table === undefined) return;
     visit(tree, (node, index, parent) => {
       if (SKIP_TYPES.has(node.type)) return SKIP;
       if (node.type !== 'text' || parent === undefined || index === undefined) return;
-      const parts = splitText(node, table);
+      const parts = splitText(node, table, data?.currentUserId);
       if (parts === undefined) return;
       (parent as Parent).children.splice(index, 1, ...parts);
       // 差し込んだ札の内側へ降りない
@@ -88,5 +100,6 @@ export const kfmMentionSanitizeSchema = {
     'kfm-mention-outside',
     'kfm-mention-gone',
     'kfm-mention-unknown',
+    'kfm-mention-self',
   ],
 } as const;

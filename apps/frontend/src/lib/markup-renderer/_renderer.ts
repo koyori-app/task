@@ -87,6 +87,8 @@ export type RenderOptions = {
    * 省略時は印を札にしない（素の文字のまま）。渡せば、表に無い id は「不明な利用者」の札になる。
    */
   readonly mentions?: MentionTable;
+  /** member の札を「ログイン中の本人へのメンション」として強調する時の利用者 ID。 */
+  readonly currentUserId?: string | null;
 };
 
 export type RenderDescription = (text: string, options?: RenderOptions) => Promise<string>;
@@ -263,17 +265,19 @@ export function createRenderer(options: CreateRendererOptions): RenderDescriptio
     // scope '' は上の検証で throw 済みのため、キーの空文字は「scope なし」と一意に対応する
     // tenant '' はプラグインの検証で落ちてリンク化しないため、キーの空文字は「taskRef なし」と同値
     const taskRef = renderOptions.taskRef;
-    // 表の有無で描画が変わる（無い: 印は素の文字 / 有る: 札）ので、未指定は '' で空の表 '[]' と分ける。
-    // 並びを id で正規化して、同じ表が別のキーにならぬようにする
+    // 表の有無で描画が変わる（無い: 印は素の文字 / 有る: 札）ので、未指定は '' で空の表と分ける。
+    // 並びを id で正規化し、本人強調を変える currentUserId も含めて閲覧者間の混線を防ぐ。
     const mentions = renderOptions.mentions;
+    const currentUserId = renderOptions.currentUserId?.toLowerCase() ?? null;
     const mentionsKey =
       mentions === undefined
         ? ''
-        : JSON.stringify(
-            Object.entries(mentions)
+        : JSON.stringify({
+            users: Object.entries(mentions)
               .map(([id, user]) => [id.toLowerCase(), user.status, user.name ?? null])
               .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-          );
+            currentUserId,
+          });
     const key = buildCacheKey(
       fingerprint,
       profile,
@@ -289,7 +293,10 @@ export function createRenderer(options: CreateRendererOptions): RenderDescriptio
     let rendered: string;
     try {
       rendered = String(
-        await processor.process({ value: normalized, data: { kfm: { taskRef, mentions } } }),
+        await processor.process({
+          value: normalized,
+          data: { kfm: { taskRef, mentions, currentUserId } },
+        }),
       );
     } catch (error) {
       // process 失敗は「捨てて再試行」。renderDescription はプロセス全体で共有される

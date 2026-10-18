@@ -42,6 +42,25 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
     expect(html).toBe(`<p>${chip('gone', '@（退会した利用者）')}</p>`);
   });
 
+  it('ログイン中の member への札だけを強調し、キャッシュでも他の閲覧者と混ぜない', async () => {
+    const source = `<@${A}> <@${B}>`;
+    const self = await renderDescription(source, {
+      scope: 'comment-1',
+      profile: 'comment',
+      mentions,
+      currentUserId: A,
+    });
+    const otherViewer = await renderDescription(source, {
+      scope: 'comment-1',
+      profile: 'comment',
+      mentions,
+      currentUserId: B,
+    });
+    expect(self).toContain('kfm-mention-member kfm-mention-self');
+    expect(otherViewer).not.toContain('kfm-mention-member kfm-mention-self');
+    expect(self).not.toBe(otherViewer);
+  });
+
   it('強調・リスト・見出しの内側でも札にする', async () => {
     expect(await render(`**<@${A}>**`)).toBe(`<p><strong>${chip('member', '@alice')}</strong></p>`);
     expect(await render(`- <@${A}>`)).toContain(chip('member', '@alice'));
