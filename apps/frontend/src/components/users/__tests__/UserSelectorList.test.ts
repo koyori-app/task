@@ -37,6 +37,23 @@ describe('UserSelectorList の絞り込み', () => {
     expect(optionNames(wrapper)).toEqual(['sousuke', 'kousuke']);
   });
 
+  it('絞り込むと、渡された順で後ろに居る前方一致の者が、部分一致の者より前に来る', async () => {
+    // 渡す順は部分一致（kousuke）が先、前方一致（sukeroku）が後
+    const wrapper = mountList({
+      users: [
+        { id: 'u3', username: 'kousuke', avatar_url: null },
+        { id: 'u4', username: 'sukeroku', avatar_url: null },
+      ],
+    });
+
+    await wrapper.get('input').setValue('suke');
+
+    expect(wrapper.findAll('[role="option"]').map((o) => o.attributes('data-user-id'))).toEqual([
+      'u4',
+      'u3',
+    ]);
+  });
+
   it('当たらぬ時は「一致する利用者がいません」を出す', async () => {
     const wrapper = mountList();
 

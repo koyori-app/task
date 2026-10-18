@@ -25,6 +25,17 @@ describe('rankUsersByQuery', () => {
     expect(rankUsersByQuery(users, 'kou').map((u) => u.username)).toEqual(['kousuke']);
   });
 
+  it('前方一致の者を、入力の順で先に居る部分一致の者より前に出す', () => {
+    // 入力の順は部分一致（asou）が先、前方一致（sousuke）が後。前方一致を先にする判定が
+    // 無ければ、この順のまま返ってしまう。
+    const reversed = [
+      { id: 'p1', username: 'asou' },
+      { id: 'p2', username: 'sousuke' },
+    ];
+
+    expect(rankUsersByQuery(reversed, 'sou').map((u) => u.username)).toEqual(['sousuke', 'asou']);
+  });
+
   it('大文字・全角・片仮名と平仮名の違いを問わない', () => {
     expect(rankUsersByQuery(users, 'yu').map((u) => u.id)).toEqual(['u2']);
     expect(rankUsersByQuery(users, 'ＹＵ').map((u) => u.id)).toEqual(['u2']);
