@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ChevronLeft, ChevronRight, Flag, TriangleAlert } from '@lucide/vue';
 import { computed } from 'vue';
-import { navigate } from 'vike/client/router';
 
 import type { components } from '@/generated/api';
 import { DAILY_CAPACITY_HOURS, dailyLoadByMember, isOverCapacity } from '@/lib/calendar/load';
@@ -37,6 +36,8 @@ const props = withDefaults(
   }>(),
   { days: 14, sprints: () => [], milestones: () => [], showUnassigned: true },
 );
+
+const emit = defineEmits<{ 'open-task': [task: ScheduleTask] }>();
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -208,8 +209,10 @@ function hrefOf(task: ScheduleTask) {
 function onTaskClick(task: ScheduleTask, event: MouseEvent) {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
     return;
+  // vike は document の click でリンクを横取りし defaultPrevented を見ないので、伝播も止める
   event.preventDefault();
-  void navigate(hrefOf(task));
+  event.stopPropagation();
+  emit('open-task', task);
 }
 
 function cellStyle(col: number, row: string) {
