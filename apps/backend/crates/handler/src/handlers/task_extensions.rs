@@ -73,14 +73,75 @@ pub async fn search_tasks(
 
     let limit = q.limit.min(100);
     let offset = q.offset;
+    let mentions = mention_search_terms(&state, project_id, query).await?;
 
     // pg_bigm は LIKE + gin_bigm_ops で使う拡張であり tsvector 設定名ではない。
     // USE_PG_BIGM=true の場合は ILIKE + gin_bigm_ops index 経路を使う。
     if use_pg_bigm_search() {
-        search_tasks_ilike(&state, project_id, query, limit, offset).await
+        search_tasks_ilike(&state, project_id, query, mentions.as_ref(), limit, offset).await
     } else {
-        search_tasks_tsvector(&state, project_id, query, limit, offset).await
+        search_tasks_tsvector(&state, project_id, query, mentions.as_ref(), limit, offset).await
     }
+}
+
+/// 検索語のうち、`@名` を印のメンションにも当てる形に引いた物。
+///
+/// 説明文のメンションは本文に `<@利用者ID>` の印で入り、名は入らぬ。ゆえに `@名` の語は、
+/// 検索の時に名を利用者 id へ引き（`service::mentions::resolve_names`。名を返す境と同じ）、
+/// その者の印を含む説明文にも当てる。名は検索の時に引くゆえ、改名の後は今の名で当たり、
+/// 前の名では当たらぬ。`@` だけの語と、境の中の誰の名でもない語は、今どおり文字として当てる。
+struct MentionSearch {
+    /// `@名` の語ごとに、その語の文字と、印で当てる利用者 id（境の中に誰もいなければ空）
+    terms: Vec<(String, Vec<Uuid>)>,
+    /// `@名` の語を除いた残りの語（空なら無い）
+    rest: String,
+}
+
+/// `@名` の語（`@` の後に空白までの一続きの字。`@` だけの語は含めない）。
+fn mention_names(query: &str) -> Vec<String> {
+    query
+        .split_whitespace()
+        .filter_map(|word| word.strip_prefix('@'))
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+async fn mention_search_terms(
+    state: &AppState,
+    project_id: Uuid,
+    query: &str,
+) -> Result<Option<MentionSearch>, AppError> {
+    let names = mention_names(query);
+    if names.is_empty() {
+        return Ok(None);
+    }
+    let resolved = service::mentions::resolve_names(&state.db, project_id, &names).await?;
+    if resolved.is_empty() {
+        // 誰の名でもない。今どおり、検索語の文字だけで当てる
+        return Ok(None);
+    }
+    let terms = names
+        .into_iter()
+        .map(|name| {
+            let ids = resolved
+                .get(&name.to_lowercase())
+                .cloned()
+                .unwrap_or_default();
+            (name, ids)
+        })
+        .collect();
+    let rest = query
+        .split_whitespace()
+        .filter(|word| !(word.starts_with('@') && word.len() > 1))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Ok(Some(MentionSearch { terms, rest }))
+}
+
+/// 説明文がその者の印を含むかを LIKE で見る形（id は 16 進と `-` だけで、LIKE の特殊字を含まぬ）。
+fn marker_pattern(id: &Uuid) -> String {
+    format!("%<@{id}>%")
 }
 
 fn escape_like(s: &str) -> String {
@@ -94,21 +155,45 @@ fn escape_like(s: &str) -> String {
     out
 }
 
+fn ilike_text(text: &str) -> sea_orm::sea_query::SimpleExpr {
+    let pattern = format!("%{}%", escape_like(text));
+    Expr::cust_with_values(
+        "(COALESCE(title, '') ILIKE $1 ESCAPE '\\' OR COALESCE(description, '') ILIKE $1 ESCAPE '\\')",
+        [pattern],
+    )
+}
+
 async fn search_tasks_ilike(
     state: &AppState,
     project_id: Uuid,
     query: &str,
+    mentions: Option<&MentionSearch>,
     limit: u64,
     offset: u64,
 ) -> Result<Json<SearchTasksResponse>, AppError> {
-    let pattern = format!("%{}%", escape_like(query));
+    // 今どおりの「検索語の全体を一続きの文字として含む」に、`@名` を印にも当てる形を OR で足す
+    let mut matched = Condition::any().add(ilike_text(query));
+    if let Some(mentions) = mentions {
+        let mut all = Condition::all();
+        for (name, ids) in &mentions.terms {
+            let mut term = Condition::any().add(ilike_text(&format!("@{name}")));
+            for id in ids {
+                term = term.add(Expr::cust_with_values(
+                    "COALESCE(description, '') LIKE $1",
+                    [marker_pattern(id)],
+                ));
+            }
+            all = all.add(term);
+        }
+        if !mentions.rest.is_empty() {
+            all = all.add(ilike_text(&mentions.rest));
+        }
+        matched = matched.add(all);
+    }
     let base = tasks::Entity::find()
         .filter(tasks::Column::ProjectId.eq(project_id))
         .filter(tasks::Column::DeletedAt.is_null())
-        .filter(Expr::cust_with_values(
-            "(COALESCE(title, '') ILIKE $1 ESCAPE '\\' OR COALESCE(description, '') ILIKE $1 ESCAPE '\\')",
-            [pattern.clone()],
-        ));
+        .filter(matched);
 
     let total = base.clone().count(&state.db).await?;
     let rows = base
@@ -121,7 +206,7 @@ async fn search_tasks_ilike(
         .await?;
 
     // 説明文のメンションの印は id を含むので、一覧の抜粋に出す前に `@今の名` に戻す
-    let mentions = service::mentions::resolve_in_bodies(
+    let mention_map = service::mentions::resolve_in_bodies(
         &state.db,
         project_id,
         rows.iter().filter_map(|t| t.description.as_deref()),
@@ -137,7 +222,7 @@ async fn search_tasks_ilike(
                 &t.title,
                 t.description
                     .as_deref()
-                    .map(|d| payload::mentions::to_plain(d, &mentions))
+                    .map(|d| payload::mentions::to_plain(d, &mention_map))
                     .as_deref(),
                 query,
             ),
@@ -195,7 +280,13 @@ fn chars_slice(s: &str, start: usize, end: usize) -> String {
 
 fn highlight_ilike(title: &str, description: Option<&str>, query: &str) -> String {
     let text = format!("{} {}", title, description.unwrap_or_default());
-    if let Some((start_char, end_char)) = find_match_char_range(&text, query) {
+    // 検索語の全体が見つからねば、語ごと（`@名` の語は印を戻した `@今の名` に当たる）に探す
+    let found = find_match_char_range(&text, query).or_else(|| {
+        query
+            .split_whitespace()
+            .find_map(|word| find_match_char_range(&text, word))
+    });
+    if let Some((start_char, end_char)) = found {
         let total_chars = text.chars().count();
         let display_start = start_char.saturating_sub(60);
         let display_end = (end_char + 60).min(total_chars);
@@ -212,57 +303,91 @@ fn highlight_ilike(title: &str, description: Option<&str>, query: &str) -> Strin
     }
 }
 
+/// tsvector の道の WHERE の当て方と、その値（`$1` は project_id、`$2` は検索語の全体）。
+///
+/// 今どおりの「検索語の全体を `plainto_tsquery` で当てる」に、`@名` の語ごとに「その語の文字か、
+/// 境の中のその名の者の印を含む」を AND で束ね、残りの語の当てと合わせた形を OR で足す。
+fn tsvector_match(
+    project_id: Uuid,
+    query: &str,
+    mentions: Option<&MentionSearch>,
+) -> (String, Vec<sea_orm::Value>) {
+    fn placeholder(value: sea_orm::Value, values: &mut Vec<sea_orm::Value>) -> String {
+        values.push(value);
+        format!("${}", values.len())
+    }
+    let mut values: Vec<sea_orm::Value> = vec![project_id.into(), query.into()];
+    let mut matched = "search_vector @@ plainto_tsquery('pg_catalog.simple', $2)".to_string();
+    if let Some(mentions) = mentions {
+        let mut all = Vec::new();
+        for (name, ids) in &mentions.terms {
+            let text = placeholder(format!("@{name}").into(), &mut values);
+            let mut any = vec![format!(
+                "search_vector @@ plainto_tsquery('pg_catalog.simple', {text})"
+            )];
+            for id in ids {
+                let marker = placeholder(marker_pattern(id).into(), &mut values);
+                any.push(format!("COALESCE(description, '') LIKE {marker}"));
+            }
+            all.push(format!("({})", any.join(" OR ")));
+        }
+        if !mentions.rest.is_empty() {
+            let rest = placeholder(mentions.rest.clone().into(), &mut values);
+            all.push(format!(
+                "search_vector @@ plainto_tsquery('pg_catalog.simple', {rest})"
+            ));
+        }
+        matched = format!("({matched} OR ({}))", all.join(" AND "));
+    }
+    (
+        format!("project_id = $1 AND deleted_at IS NULL AND {matched}"),
+        values,
+    )
+}
+
 async fn search_tasks_tsvector(
     state: &AppState,
     project_id: Uuid,
     query: &str,
+    mentions: Option<&MentionSearch>,
     limit: u64,
     offset: u64,
 ) -> Result<Json<SearchTasksResponse>, AppError> {
-    let count_sql = r#"
-        SELECT COUNT(*)::bigint AS cnt
-        FROM tasks
-        WHERE project_id = $1
-          AND deleted_at IS NULL
-          AND search_vector @@ plainto_tsquery('pg_catalog.simple', $2)
-    "#;
+    let (where_clause, values) = tsvector_match(project_id, query, mentions);
+    let count_sql = format!("SELECT COUNT(*)::bigint AS cnt FROM tasks WHERE {where_clause}");
     let count_result = state
         .db
         .query_one_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
             count_sql,
-            [project_id.into(), query.into()],
+            values.clone(),
         ))
         .await?;
     let total: i64 = count_result
         .and_then(|r| r.try_get_by_index(0).ok())
         .unwrap_or(0);
 
-    let search_sql = r#"
-        SELECT id, seq_id, title, description,
-               ts_rank(search_vector, plainto_tsquery('pg_catalog.simple', $2))::real AS score
-        FROM tasks
-        WHERE project_id = $1
-          AND deleted_at IS NULL
-          AND search_vector @@ plainto_tsquery('pg_catalog.simple', $2)
-        -- score は同値が頻発する。並びが一意でないと offset のページ境界で行が重複・欠落する
-        ORDER BY score DESC, id ASC
-        LIMIT $3 OFFSET $4
-    "#;
+    let mut values = values;
+    values.push((limit as i64).into());
+    let limit_at = values.len();
+    values.push((offset as i64).into());
+    let offset_at = values.len();
+    // score は同値が頻発する。並びが一意でないと offset のページ境界で行が重複・欠落する
+    let search_sql = format!(
+        "SELECT id, seq_id, title, description, \
+                ts_rank(search_vector, plainto_tsquery('pg_catalog.simple', $2))::real AS score \
+         FROM tasks WHERE {where_clause} \
+         ORDER BY score DESC, id ASC LIMIT ${limit_at} OFFSET ${offset_at}"
+    );
     let rows = state
         .db
         .query_all_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
             search_sql,
-            [
-                project_id.into(),
-                query.into(),
-                (limit as i64).into(),
-                (offset as i64).into(),
-            ],
+            values,
         ))
         .await?;
-    let mentions = service::mentions::resolve_in_bodies(
+    let mention_map = service::mentions::resolve_in_bodies(
         &state.db,
         project_id,
         rows.iter()
@@ -280,7 +405,7 @@ async fn search_tasks_tsvector(
                 .try_get_by_index::<Option<String>>(3)
                 .ok()
                 .flatten()
-                .map(|d| payload::mentions::to_plain(&d, &mentions));
+                .map(|d| payload::mentions::to_plain(&d, &mention_map));
             let highlight = highlight_ilike(&title, description.as_deref(), query);
             Some(SearchTaskHit {
                 id: row.try_get_by_index(0).ok()?,
@@ -901,4 +1026,46 @@ pub async fn detach_task_file(
         .exec(&state.db)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mention_names_takes_words_after_at_sign() {
+        assert_eq!(
+            mention_names("@alice 仕様 @Bob @ メール@x"),
+            vec!["alice".to_string(), "Bob".to_string()]
+        );
+        assert!(mention_names("@ 仕様").is_empty());
+    }
+
+    #[test]
+    fn tsvector_match_numbers_values_after_query() {
+        let id = Uuid::nil();
+        let mentions = MentionSearch {
+            terms: vec![("alice".into(), vec![id])],
+            rest: "仕様".into(),
+        };
+        let (clause, values) = tsvector_match(Uuid::nil(), "@alice 仕様", Some(&mentions));
+        assert_eq!(values.len(), 5);
+        assert!(clause.contains("plainto_tsquery('pg_catalog.simple', $3)"));
+        assert!(clause.contains("LIKE $4"));
+        assert!(clause.contains("plainto_tsquery('pg_catalog.simple', $5)"));
+        assert_eq!(values[3], sea_orm::Value::from(format!("%<@{id}>%")));
+    }
+
+    #[test]
+    fn tsvector_match_without_mentions_keeps_plain_query() {
+        let (clause, values) = tsvector_match(Uuid::nil(), "仕様", None);
+        assert_eq!(values.len(), 2);
+        assert!(!clause.contains("LIKE"));
+    }
+
+    #[test]
+    fn highlight_falls_back_to_each_word() {
+        let highlight = highlight_ilike("題", Some("@alice さんに頼む"), "@alice 仕様");
+        assert!(highlight.contains("@alice"), "{highlight}");
+    }
 }

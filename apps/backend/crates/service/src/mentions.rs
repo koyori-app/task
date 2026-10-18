@@ -5,11 +5,13 @@
 //! （`task_activities::extract_mentions`）と、描画・webhook・CLI の名前の解決が
 //! **同じ判定を通る**ように、境の集合はここに一つだけ置く。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use payload::mentions::{MentionMap, MentionStatus, MentionedUser, to_plain};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect, QueryTrait, prelude::Uuid,
+    ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect, QueryTrait,
+    prelude::Uuid,
+    sea_query::{Expr, ExprTrait, Func},
 };
 
 use crate::error::AppError;
@@ -197,6 +199,56 @@ pub async fn resolve<C: ConnectionTrait>(
             name: None,
             avatar_url: None,
         });
+    }
+    Ok(map)
+}
+
+/// 名（`@名` の `名`）を、その名で印を描く者の id へ引く。鍵は小文字にした名。
+///
+/// 返すのは、`resolve` が名前を返す者と同じ境の者だけ: いまそのプロジェクトに入れる者と、
+/// そのテナントに属している・属しておった者（`tenant_footprint_ids`）。別のテナントの利用者は、
+/// 名が同じでも返さぬ（名から別のテナントの者を探る道を作らぬ）。名は大小を区別せずに比べ、
+/// 同じ名の者が境の中に複数いれば全員の id を返す（描く札の字が同じゆえ、検索でも見分けぬ）。
+pub async fn resolve_names<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    names: &[String],
+) -> Result<HashMap<String, Vec<Uuid>>, AppError> {
+    let mut wanted: Vec<String> = names.iter().map(|name| name.to_lowercase()).collect();
+    wanted.sort();
+    wanted.dedup();
+    if wanted.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let found = users::Entity::find()
+        .filter(Expr::expr(Func::lower(Expr::col(users::Column::Username))).is_in(wanted))
+        .all(db)
+        .await?;
+    if found.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let audience = mention_audience(db, project_id).await?;
+    let outsiders: Vec<Uuid> = found
+        .iter()
+        .map(|user| user.id)
+        .filter(|id| !audience.contains(id))
+        .collect();
+    let belonged = match projects::Entity::find_by_id(project_id).one(db).await? {
+        Some(project) if !outsiders.is_empty() => {
+            tenant_footprint_ids(db, project.tenant_id, &outsiders).await?
+        }
+        _ => HashSet::new(),
+    };
+    let mut map: HashMap<String, Vec<Uuid>> = HashMap::new();
+    for user in found {
+        if audience.contains(&user.id) || belonged.contains(&user.id) {
+            map.entry(user.username.to_lowercase())
+                .or_default()
+                .push(user.id);
+        }
+    }
+    for ids in map.values_mut() {
+        ids.sort();
     }
     Ok(map)
 }

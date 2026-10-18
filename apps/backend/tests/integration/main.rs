@@ -53,6 +53,7 @@ mod task_extensions_integration;
 mod task_labels_integration;
 mod task_list_integration;
 mod task_notifications_integration;
+mod task_search_mentions_integration;
 mod task_update_concurrency_integration;
 mod tenant_invitations_integration;
 mod tenant_member_role_integration;
