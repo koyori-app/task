@@ -632,14 +632,23 @@ async function onRoundCreated() {
                   等と言う横で一覧だけ緑になる
                 -->
                 <span
-                  class="rounded-full px-2 py-0.5 text-xs"
-                  :class="
-                    pr.blocking === 0
-                      ? 'bg-green-600/10 text-green-700 dark:text-green-400'
-                      : 'bg-destructive/10 text-destructive'
-                  "
+                  v-if="pr.blocking === 0"
+                  class="rounded-full bg-green-600/10 px-2 py-0.5 text-xs text-green-700 dark:text-green-400"
                 >
-                  {{ pr.blocking === 0 ? '未解決なし' : `${pr.blocking} 件が未解決` }}
+                  未解決なし
+                </span>
+                <span
+                  v-else-if="pr.blocking > pr.blocking_fixed"
+                  class="bg-destructive/10 text-destructive rounded-full px-2 py-0.5 text-xs"
+                >
+                  {{ pr.blocking - pr.blocking_fixed }} 件が未解決
+                </span>
+                <!-- High / Medium がすべて fixed。直す側の作業は無く、レビュー側の確認を待つだけ -->
+                <span
+                  v-else
+                  class="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400"
+                >
+                  {{ pr.blocking }} 件が承認待ち
                 </span>
               </span>
               <span class="line-clamp-2 font-medium">{{

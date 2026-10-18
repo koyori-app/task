@@ -1011,6 +1011,7 @@ pub async fn reviewed_pull_requests<C: ConnectionTrait>(
                 pr_author: None,
                 unresolved: 0,
                 blocking: 0,
+                blocking_fixed: 0,
                 last_reviewed_at: round.created_at.with_timezone(&chrono::Utc),
             });
         // ラウンドは round 昇順なので、最後に見たものが最新
@@ -1035,6 +1036,9 @@ pub async fn reviewed_pull_requests<C: ConnectionTrait>(
             entry.unresolved += 1;
             if severity.blocks_merge() {
                 entry.blocking += 1;
+                if state == FindingState::Fixed {
+                    entry.blocking_fixed += 1;
+                }
             }
         }
     }

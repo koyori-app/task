@@ -16,6 +16,7 @@ function pr(prNumber: number, title: string | null, author: string | null): Revi
     pr_author: author,
     unresolved: 0,
     blocking: 0,
+    blocking_fixed: 0,
     last_reviewed_at: '2026-09-01T00:00:00Z',
   };
 }
