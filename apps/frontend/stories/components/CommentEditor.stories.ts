@@ -222,3 +222,123 @@ export const CopyDoesNotLeakIds: Story = {
     await expect(data.getData('text/plain')).not.toContain(ALICE);
   },
 };
+
+/** 二つの入力欄（同じ欄・別の欄への貼り付けを確かめる器）。それぞれの値を下に出す */
+function twoEditors(first: string, second: string) {
+  return (args: Record<string, unknown>) => ({
+    components: { CommentEditor },
+    setup() {
+      const a = ref(first);
+      const b = ref(second);
+      const { modelValue: _ignored, ...rest } = args;
+      return { args: rest, a, b };
+    },
+    template: `
+      <div style="width: 420px">
+        <CommentEditor v-model="a" v-bind="args" aria-label="一つめ" />
+        <CommentEditor v-model="b" v-bind="args" aria-label="二つめ" />
+        <pre data-testid="out-a" style="font-size: 11px; white-space: pre-wrap">{{ a }}</pre>
+        <pre data-testid="out-b" style="font-size: 11px; white-space: pre-wrap">{{ b }}</pre>
+      </div>`,
+  });
+}
+
+function editors(canvasElement: HTMLElement) {
+  return [...canvasElement.querySelectorAll<HTMLElement>('[data-comment-editor-input]')];
+}
+
+function outOf(canvasElement: HTMLElement, id: 'out-a' | 'out-b') {
+  return within(canvasElement).getByTestId(id).textContent ?? '';
+}
+
+function fire(el: HTMLElement, type: 'copy' | 'cut' | 'paste', data: DataTransfer) {
+  el.dispatchEvent(
+    new ClipboardEvent(type, { clipboardData: data, bubbles: true, cancelable: true }),
+  );
+}
+
+export const CopiedChipPastesAsChip: Story = {
+  args: { candidates },
+  render: twoEditors(`<@${ALICE}> 確認 <@${BOB}>`, '先頭 '),
+  play: async ({ canvasElement }) => {
+    await waitFor(() => expect(editors(canvasElement)).toHaveLength(2));
+    await waitFor(() => expect(canvasElement.querySelectorAll('.cm-mention')).toHaveLength(2));
+    const [first, second] = editors(canvasElement);
+
+    await userEvent.click(first);
+    await userEvent.keyboard('{Control>}a{/Control}');
+    const data = new DataTransfer();
+    fire(first, 'copy', data);
+    // 外のアプリへ貼られる字は `@名`。印の文字も id も含まぬ。札の要素は text/html に載る
+    await expect(data.getData('text/plain')).toBe('@alice 確認 @bob');
+    await expect(data.getData('text/plain')).not.toContain('<@');
+    await expect(data.getData('text/html')).toContain(`data-user-id="${ALICE}"`);
+
+    // 同じ欄の末尾へ貼る（全選択の置き換え）→ 札のまま（本文が `<@id>`）
+    fire(first, 'paste', data);
+    await waitFor(() => expect(outOf(canvasElement, 'out-a')).toBe(`<@${ALICE}> 確認 <@${BOB}>`));
+
+    // 別の欄の末尾へ貼る
+    await userEvent.click(second);
+    await userEvent.keyboard('{Control>}{End}{/Control}');
+    fire(second, 'paste', data);
+    await waitFor(() =>
+      expect(outOf(canvasElement, 'out-b')).toBe(`先頭 <@${ALICE}> 確認 <@${BOB}>`),
+    );
+    await expect(canvasElement.querySelectorAll('.cm-mention')).toHaveLength(4);
+  },
+};
+
+export const CutChipPastesAsChip: Story = {
+  args: { candidates },
+  render: twoEditors(`見て <@${ALICE}>`, ''),
+  play: async ({ canvasElement }) => {
+    await waitFor(() => expect(canvasElement.querySelectorAll('.cm-mention')).toHaveLength(1));
+    const [first, second] = editors(canvasElement);
+    await userEvent.click(first);
+    await userEvent.keyboard('{Control>}a{/Control}');
+    const data = new DataTransfer();
+    fire(first, 'cut', data);
+    await expect(data.getData('text/plain')).toBe('見て @alice');
+    await expect(data.getData('text/plain')).not.toContain('<@');
+    await waitFor(() => expect(outOf(canvasElement, 'out-a')).toBe(''));
+
+    await userEvent.click(second);
+    fire(second, 'paste', data);
+    await waitFor(() => expect(outOf(canvasElement, 'out-b')).toBe(`見て <@${ALICE}>`));
+  },
+};
+
+export const PlainOrForeignHtmlPastesAsText: Story = {
+  args: { candidates },
+  render: withValue(''),
+  play: async ({ canvasElement }) => {
+    const editor = await waitFor(async () => {
+      const el = content(canvasElement);
+      await expect(el).toBeTruthy();
+      return el;
+    });
+    await userEvent.click(editor);
+
+    // task の印が無い素の文字は今どおり素の文字（`@alice` は札にならぬ）
+    const plain = new DataTransfer();
+    plain.setData('text/plain', '@alice');
+    fire(editor, 'paste', plain);
+    await waitFor(() => expect(out(canvasElement)).toBe('@alice'));
+    await expect(canvasElement.querySelector('.cm-mention')).toBeNull();
+
+    // 外のアプリの HTML に紛れた id（印の属性が無い／版が知らぬ値／id が壊れておる）は札にしない
+    for (const html of [
+      `<span data-user-id="${ALICE}">@x</span>`,
+      `<span data-task-mention="2" data-user-id="${ALICE}">@x</span>`,
+      `<span data-task-mention="1" data-user-id="not-a-uuid">@x</span>`,
+    ]) {
+      const foreign = new DataTransfer();
+      foreign.setData('text/plain', '[外]');
+      foreign.setData('text/html', html);
+      fire(editor, 'paste', foreign);
+    }
+    await waitFor(() => expect(out(canvasElement)).toBe('@alice[外][外][外]'));
+    await expect(out(canvasElement)).not.toContain(`<@${ALICE}>`);
+  },
+};

@@ -130,3 +130,92 @@ export function filterCandidates(
   }
   return [...prefix, ...partial].slice(0, limit);
 }
+
+/**
+ * クリップボードの形式（仕様: docs/features/tasks/4.collaboration-clipboard.md）。
+ *
+ * コピー・切り取りでは `text/plain` に `@今の名` を、`text/html` に札の要素を載せる。
+ * 札の要素は `<span data-task-mention="1" data-user-id="…">@名</span>`。task の外のアプリは
+ * `text/html` を読めば `@名` の字として貼れ、task の入力欄は印を見つけて `<@id>` に戻す。
+ * 外から来た HTML に紛れた id を札にしてはならぬので、戻すのは版の印が既知の `1` で、
+ * id が印の形（ハイフン付き UUID）の時だけとする。
+ */
+export const CLIPBOARD_MENTION_ATTR = 'data-task-mention';
+export const CLIPBOARD_MENTION_ID_ATTR = 'data-user-id';
+/** 知っておる版。これ以外の値は札として読まず、素の文字に倒す。 */
+export const CLIPBOARD_MENTION_VERSION = '1';
+
+const UUID_EXACT = new RegExp(`^${UUID_PATTERN}$`);
+
+function escapeHtml(text: string): string {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+/** 印を含む文を、札の要素を持つ HTML 断片にする。改行は `<br>`。 */
+export function toClipboardHtml(
+  text: string,
+  resolve: (id: string) => MentionUser | undefined,
+): string {
+  const parts: string[] = [];
+  let last = 0;
+  const chunk = (s: string) => escapeHtml(s).replaceAll('\n', '<br>');
+  for (const marker of findMarkers(text)) {
+    parts.push(chunk(text.slice(last, marker.from)));
+    const label = mentionLabel(resolve(marker.id));
+    parts.push(
+      `<span ${CLIPBOARD_MENTION_ATTR}="${CLIPBOARD_MENTION_VERSION}" ${CLIPBOARD_MENTION_ID_ATTR}="${marker.id}">${escapeHtml(label)}</span>`,
+    );
+    last = marker.to;
+  }
+  parts.push(chunk(text.slice(last)));
+  return `<div>${parts.join('')}</div>`;
+}
+
+/**
+ * `text/html` から、札の要素を `<@id>` に戻した文を取り出す。
+ * 既知の版の札が一つも無ければ `null`（呼び手は素の貼り付けに任せる）。
+ * 札の外の要素は字だけ拾い、`<br>` と段落の境は改行にする。
+ */
+export function fromClipboardHtml(html: string): string | null {
+  if (!html.includes(CLIPBOARD_MENTION_ATTR)) return null;
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  let found = false;
+  let out = '';
+  const BLOCK = new Set(['DIV', 'P', 'LI', 'PRE', 'BLOCKQUOTE']);
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += (node.textContent ?? '').replace(/\r?\n/g, ' ');
+      return;
+    }
+    if (!(node instanceof HTMLElement)) return;
+    if (node.hasAttribute(CLIPBOARD_MENTION_ATTR)) {
+      const id = node.getAttribute(CLIPBOARD_MENTION_ID_ATTR) ?? '';
+      if (
+        node.getAttribute(CLIPBOARD_MENTION_ATTR) === CLIPBOARD_MENTION_VERSION &&
+        UUID_EXACT.test(id)
+      ) {
+        found = true;
+        out += markerOf(id.toLowerCase());
+      } else {
+        out += node.textContent ?? '';
+      }
+      return;
+    }
+    if (node.tagName === 'BR') {
+      out += '\n';
+      return;
+    }
+    if (['SCRIPT', 'STYLE'].includes(node.tagName)) return;
+    const block = BLOCK.has(node.tagName);
+    if (block && out !== '' && !out.endsWith('\n')) out += '\n';
+    node.childNodes.forEach(walk);
+    if (block && !out.endsWith('\n')) out += '\n';
+  };
+  doc.body.childNodes.forEach(walk);
+  if (!found) return null;
+  return out.replace(/\n$/, '');
+}

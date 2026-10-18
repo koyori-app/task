@@ -30,10 +30,12 @@ import { computed, onBeforeUnmount, onMounted, useTemplateRef, watch } from 'vue
 import {
   filterCandidates,
   findMarkers,
+  fromClipboardHtml,
   lookup,
   markerOf,
   mentionLabel,
   mentionTrigger,
+  toClipboardHtml,
   toPlainText,
   type MentionCandidate,
   type MentionTable,
@@ -46,7 +48,8 @@ import {
  * 本文は `<@利用者ID>` の印を含む素テキストで、印は**入力欄の中でも文字としては見せない**:
  * 印を `@今の名` の札（widget）に置き換えて描き、札は一塊として扱う（caret は札の中に入らず、
  * Backspace / Delete は札を丸ごと消す）。送る本文は文書そのものなので、送る時の変換は無い。
- * コピー・切り取りも、印ではなく `@今の名` の字を渡す（id を貼り付け先へ漏らさぬ）。
+ * コピー・切り取りは、`text/plain` に `@今の名`、`text/html` に札の要素（id と版を持つ）を載せ、貼り付けでは
+ * その印が在る時だけ `<@id>` に戻す（形式: docs/features/tasks/4.collaboration-clipboard.md）。
  *
  * `@` を打つと候補（`candidates`。担当者候補と同じ集合）が出る。選ぶと、打った `@検索語` が印に替わる。
  * 手で打った `@name`（候補から選ばなかった物）は素の文字のままで、メンションにはならない。
@@ -233,8 +236,9 @@ function extensions(): Extension[] {
     }),
     EditorView.domEventHandlers({
       // 印をクリップボードへ出さぬ（id を貼り付け先へ漏らさず、札の字 `@名` を渡す）
-      copy: (event, v) => copyAsPlain(event, v, false),
-      cut: (event, v) => copyAsPlain(event, v, true),
+      copy: (event, v) => copyWithMentions(event, v, false),
+      cut: (event, v) => copyWithMentions(event, v, true),
+      paste: (event, v) => pasteWithMentions(event, v),
     }),
     EditorView.updateListener.of((update) => {
       if (!update.docChanged) return;
@@ -245,19 +249,35 @@ function extensions(): Extension[] {
   ];
 }
 
-function copyAsPlain(event: ClipboardEvent, v: EditorView, cut: boolean): boolean {
+function copyWithMentions(event: ClipboardEvent, v: EditorView, cut: boolean): boolean {
   const names = v.state.facet(namesFacet);
   const ranges = v.state.selection.ranges.filter((range) => !range.empty);
   if (ranges.length === 0 || !event.clipboardData) return false;
   const text = ranges.map((range) => v.state.sliceDoc(range.from, range.to)).join('\n');
-  event.clipboardData.setData(
-    'text/plain',
-    toPlainText(text, (id) => lookup(names, id)),
-  );
+  const resolve = (id: string) => lookup(names, id);
+  // text/plain は `@名`（外のアプリへはこの字が貼られる）。text/html には札の要素に id と版を持たせ、
+  // task の入力欄へ貼れば印に戻る（形式: docs/features/tasks/4.collaboration-clipboard.md）
+  event.clipboardData.setData('text/plain', toPlainText(text, resolve));
+  event.clipboardData.setData('text/html', toClipboardHtml(text, resolve));
   event.preventDefault();
   if (cut && !props.disabled) {
     v.dispatch(v.state.replaceSelection(''), { userEvent: 'delete.cut', scrollIntoView: true });
   }
+  return true;
+}
+
+/**
+ * 貼り付け: task の札の印（既知の版・正しい id）を持つ `text/html` なら、`<@id>` の文として入れる。
+ * 印が無い・版が知らぬ・id が不正なら `false` を返し、CodeMirror の既定（`text/plain`）に任せる。
+ */
+function pasteWithMentions(event: ClipboardEvent, v: EditorView): boolean {
+  if (props.disabled || !event.clipboardData) return false;
+  const html = event.clipboardData.getData('text/html');
+  if (!html) return false;
+  const text = fromClipboardHtml(html);
+  if (text === null) return false;
+  event.preventDefault();
+  v.dispatch(v.state.replaceSelection(text), { userEvent: 'input.paste', scrollIntoView: true });
   return true;
 }
 

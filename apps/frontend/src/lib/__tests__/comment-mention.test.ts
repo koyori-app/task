@@ -3,11 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   filterCandidates,
   findMarkers,
+  fromClipboardHtml,
   lookup,
   markerOf,
   mentionLabel,
   mentionTrigger,
   splitBody,
+  toClipboardHtml,
   toPlainText,
   type MentionTable,
 } from '../comment-mention';
@@ -104,5 +106,43 @@ describe('filterCandidates', () => {
   it('検索語が空なら先頭から上限まで', () => {
     expect(filterCandidates(people, '', 2)).toHaveLength(2);
     expect(filterCandidates(people, 'zzz')).toEqual([]);
+  });
+});
+
+describe('クリップボードの札（toClipboardHtml / fromClipboardHtml）', () => {
+  const resolve = (id: string) =>
+    id === A ? { status: 'member' as const, name: 'alice' } : undefined;
+
+  it('書いて読むと元の文に戻る（改行・特殊字も）', () => {
+    const text = `見て <@${A}> & <b>確認</b>\n次の行 <@${B}>`;
+    const html = toClipboardHtml(text, resolve);
+    expect(html).toContain(`data-task-mention="1" data-user-id="${A}">@alice</span>`);
+    expect(html).toContain('&lt;b&gt;');
+    expect(fromClipboardHtml(html)).toBe(text);
+  });
+
+  it('名の引けぬ者の表示字に id を出さない', () => {
+    expect(toClipboardHtml(`<@${B}>`, resolve)).toContain('@（不明な利用者）');
+  });
+
+  it('task の印が無い HTML・知らぬ版・壊れた id は札にしない', () => {
+    expect(fromClipboardHtml('<p>ただの文</p>')).toBeNull();
+    expect(fromClipboardHtml(`<span data-user-id="${A}">@x</span>`)).toBeNull();
+    expect(
+      fromClipboardHtml(`<span data-task-mention="2" data-user-id="${A}">@x</span>`),
+    ).toBeNull();
+    expect(
+      fromClipboardHtml('<span data-task-mention="1" data-user-id="not-a-uuid">@x</span>'),
+    ).toBeNull();
+  });
+
+  it('壊れた札は字だけ拾い、正しい札は戻す', () => {
+    const html = `<div><span data-task-mention="1" data-user-id="zzz">@bad</span> <span data-task-mention="1" data-user-id="${A.toUpperCase()}">@ok</span></div>`;
+    expect(fromClipboardHtml(html)).toBe(`@bad <@${A}>`);
+  });
+
+  it('script・style の中身は読まない', () => {
+    const html = `<style>.x{}</style><script>alert(1)</script><span data-task-mention="1" data-user-id="${A}">@a</span>`;
+    expect(fromClipboardHtml(html)).toBe(`<@${A}>`);
   });
 });
