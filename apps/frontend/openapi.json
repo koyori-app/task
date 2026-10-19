@@ -10178,7 +10178,7 @@
       "post": {
         "tags": ["Tasks"],
         "summary": "マージ時の自動完了を未適用のまま確認済みにする",
-        "description": "タスクは完了させず、`merge_effects_processed_at` と `merge_effects_acknowledged_by` を設定して未適用表示を解消する。",
+        "description": "タスクは完了させず、`merge_effects_processed_at` と `merge_effects_acknowledged_by` を設定して未適用表示を解消する。パスのプロジェクトに加え、PR に今リンクされている全タスクのプロジェクトでタスクを編集できなければ 403。",
         "operationId": "acknowledge_merge_effects",
         "parameters": [
           {

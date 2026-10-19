@@ -4,12 +4,13 @@
 //! どちらも PR 行をロックして `merge_effects_processed_at IS NULL` を確かめてから列を設定するので、
 //! 再送・並行ジョブ・確認済み操作のどの組み合わせでも副作用は一度だけになる。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect, TransactionTrait, prelude::Uuid, sea_query::LockType,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection, DbErr,
+    EntityTrait, JoinType, QueryFilter, QueryOrder, QuerySelect, RelationTrait, TransactionTrait,
+    prelude::Uuid, sea_query::LockType,
 };
 
 use entity::{forge_pull_request_links, forge_pull_requests, project_statuses, projects, tasks};
@@ -161,14 +162,44 @@ pub async fn apply_merge_effects(
     Ok(true)
 }
 
+/// パスのプロジェクトの PR に今リンクされているタスクと、そのプロジェクト（`(task_id, project_id)`）。
+/// 別プロジェクトの PR なら空
+pub async fn linked_tasks<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    pull_request_id: Uuid,
+) -> Result<Vec<(Uuid, Uuid)>, DbErr> {
+    forge_pull_request_links::Entity::find()
+        .join(
+            JoinType::InnerJoin,
+            forge_pull_request_links::Relation::ForgePullRequests.def(),
+        )
+        .join(
+            JoinType::InnerJoin,
+            forge_pull_request_links::Relation::Tasks.def(),
+        )
+        .filter(forge_pull_request_links::Column::PullRequestId.eq(pull_request_id))
+        .filter(forge_pull_requests::Column::ProjectId.eq(project_id))
+        .select_only()
+        .column(forge_pull_request_links::Column::TaskId)
+        .column(tasks::Column::ProjectId)
+        .distinct()
+        .into_tuple()
+        .all(db)
+        .await
+}
+
 /// マージ時の副作用を実行しないまま確認済みにする（§8）。タスクは完了させない。
 ///
 /// パスのプロジェクトの PR でなければ 404、`merged` でないか処理済み・確認済みなら 409。
+/// `authorized_project_ids` は呼び出し側が編集権限を確かめたプロジェクトで、リンク先タスクの
+/// プロジェクトが一つでも含まれなければ 403（確かめた後に別プロジェクトへのリンクが増えた場合も）。
 pub async fn acknowledge_merge_effects(
     db: &DatabaseConnection,
     project_id: Uuid,
     pull_request_id: Uuid,
     user_id: Uuid,
+    authorized_project_ids: &BTreeSet<Uuid>,
 ) -> Result<(), AppError> {
     let txn = db.begin().await?;
     let pull_request = forge_pull_requests::Entity::find_by_id(pull_request_id)
@@ -181,21 +212,20 @@ pub async fn acknowledge_merge_effects(
         return Err(AppError::Conflict);
     }
 
-    let task_ids: Vec<Uuid> = forge_pull_request_links::Entity::find()
-        .filter(forge_pull_request_links::Column::PullRequestId.eq(pull_request_id))
-        .select_only()
-        .column(forge_pull_request_links::Column::TaskId)
-        .distinct()
-        .into_tuple()
-        .all(&txn)
-        .await?;
+    let linked = linked_tasks(&txn, project_id, pull_request_id).await?;
+    if linked
+        .iter()
+        .any(|(_, task_project_id)| !authorized_project_ids.contains(task_project_id))
+    {
+        return Err(AppError::Forbidden);
+    }
     let payload = serde_json::json!({
         "host": pull_request.host,
         "pull_request_id": pull_request_id,
         "number": pull_request.number,
         "html_url": pull_request.html_url,
     });
-    for task_id in task_ids {
+    for (task_id, _) in linked {
         record_activity_once(
             &txn,
             task_id,

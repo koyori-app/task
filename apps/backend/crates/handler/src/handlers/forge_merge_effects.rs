@@ -4,6 +4,8 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
+use std::collections::BTreeSet;
+
 use sea_orm::prelude::Uuid;
 
 use crate::AppState;
@@ -17,7 +19,8 @@ use crate::openapi::CrudErrors;
     path = "/pull-requests/{pull_request_id}/merge-effects/acknowledge",
     tag = "Tasks",
     summary = "マージ時の自動完了を未適用のまま確認済みにする",
-    description = "タスクは完了させず、`merge_effects_processed_at` と `merge_effects_acknowledged_by` を設定して未適用表示を解消する。",
+    description = "タスクは完了させず、`merge_effects_processed_at` と `merge_effects_acknowledged_by` を設定して未適用表示を解消する。\
+                   パスのプロジェクトに加え、PR に今リンクされている全タスクのプロジェクトでタスクを編集できなければ 403。",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
         ("project_id" = Uuid, Path, description = "プロジェクトID"),
@@ -37,11 +40,24 @@ pub async fn acknowledge_merge_effects(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
+    // KEY-N はテナント内で解決するので、リンク先は別プロジェクトのタスクでありうる。確認済みにすると
+    // それらの自動完了が止まり履歴も積まれるので、リンク先の全プロジェクトの編集権限も確かめる
+    let task_project_ids: BTreeSet<Uuid> =
+        service::forge::merge_effects::linked_tasks(&state.db, project_id, pull_request_id)
+            .await?
+            .into_iter()
+            .map(|(_, task_project_id)| task_project_id)
+            .collect();
+    for task_project_id in &task_project_ids {
+        auth.ensure_tenant_access(&state, tenant_id, Some(*task_project_id))
+            .await?;
+    }
     service::forge::merge_effects::acknowledge_merge_effects(
         &state.db,
         project_id,
         pull_request_id,
         auth.user_id,
+        &task_project_ids,
     )
     .await?;
     Ok(StatusCode::OK)

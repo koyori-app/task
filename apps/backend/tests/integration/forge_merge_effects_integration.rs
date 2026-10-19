@@ -6,7 +6,7 @@ use crate::forge_commit_links_integration::{
     Fixture, REPO_NAME, REPO_OWNER, insert_project, insert_status, insert_task, setup,
 };
 use crate::forge_pull_request_links_integration::{deliver, links, merged, pr_payload, pr_row};
-use entity::{project_statuses, scopes::Scope, task_activities, tasks};
+use entity::{project_members, project_statuses, scopes::Scope, task_activities, tasks};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait,
     QueryFilter, Statement,
@@ -585,5 +585,96 @@ async fn acknowledge_merge_effects_without_completing_tasks() {
         None
     );
 
+    app.cleanup_user(fx.owner_id).await;
+}
+
+async fn add_project_member(app: &TestApp, project_id: Uuid, user_id: Uuid) {
+    crate::common::ensure_tenant_member_for_project(&app.state.db, project_id, user_id).await;
+    project_members::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        project_id: Set(project_id),
+        user_id: Set(user_id),
+        role: Set(project_members::ProjectRole::Member),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("add project member");
+}
+
+/// 確認済みにするとリンク先の全タスクの自動完了が止まり、そのタスクに履歴が積まれるので、
+/// パスのプロジェクトに加えてリンク先の全プロジェクトの編集権限が要る（§8 権限）。
+///
+/// - A にだけ入れる利用者は、B のタスクにもリンクした PR を確認済みにできない（403、何も変わらない）
+/// - 対照: 同じ利用者でも A のタスクだけにリンクした PR は 200、A と B の両方に入れるオーナーは 200
+#[tokio::test]
+async fn acknowledge_requires_access_to_every_linked_task_project() {
+    let app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    let key = &fx.key;
+    let a_task = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, 1).await;
+    let b_key = format!("S{}", &key[1..]);
+    let b_project = insert_project(&app, fx.tp.tenant_id, &b_key).await;
+    let b_status = insert_status(&app, b_project).await;
+    let b_task = insert_task(&app, b_project, b_status, fx.owner_id, 1).await;
+    let member = app.insert_user(false, false).await;
+    add_project_member(&app, fx.tp.project_id, member.id).await;
+    // B はオーナーだけを明示メンバーにして閉じる
+    add_project_member(&app, b_project, fx.owner_id).await;
+
+    // 70: A と B のタスクにリンク、71: A のタスクだけにリンク
+    for (number, body) in [
+        (70, format!("Closes {key}-1\nCloses {b_key}-1")),
+        (71, format!("Closes {key}-1")),
+    ] {
+        let edited = edited_after_merge(
+            &fx,
+            number,
+            &body,
+            "2026-10-01T00:10:00Z",
+            "2026-10-01T00:20:00Z",
+        );
+        deliver(&app, &fx, &edited).await.expect("merged snapshot");
+    }
+    let pr70 = pr_row(&app, fx.tp.project_id, 70).await.id;
+    let pr71 = pr_row(&app, fx.tp.project_id, 71).await.id;
+    let member_token = app
+        .insert_pat(member.id, fx.tp.tenant_id, vec![Scope::WriteTask], None)
+        .await;
+    let owner_token = app
+        .insert_pat(fx.owner_id, fx.tp.tenant_id, vec![Scope::WriteTask], None)
+        .await;
+    let (tenant, project) = (fx.tp.tenant_id, fx.tp.project_id);
+
+    assert_eq!(
+        acknowledge(&app, tenant, project, pr70, &member_token).await,
+        403,
+        "B のタスクの自動完了を止められない"
+    );
+    assert_eq!(
+        pr_row(&app, project, 70).await.merge_effects_processed_at,
+        None
+    );
+    for task in [a_task, b_task] {
+        assert!(
+            activities(&app, task, MERGE_EFFECTS_ACKNOWLEDGED_EVENT)
+                .await
+                .is_empty()
+        );
+    }
+
+    assert_eq!(
+        acknowledge(&app, tenant, project, pr71, &member_token).await,
+        200,
+        "入れるプロジェクトのタスクだけなら確認済みにできる"
+    );
+    assert_eq!(
+        acknowledge(&app, tenant, project, pr70, &owner_token).await,
+        200
+    );
+    let acknowledged = activities(&app, b_task, MERGE_EFFECTS_ACKNOWLEDGED_EVENT).await;
+    assert_eq!(acknowledged.len(), 1);
+    assert_eq!(acknowledged[0].user_id, Some(fx.owner_id));
+
+    app.cleanup_user(member.id).await;
     app.cleanup_user(fx.owner_id).await;
 }
