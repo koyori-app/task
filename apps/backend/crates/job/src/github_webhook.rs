@@ -201,15 +201,29 @@ pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(),
         )
         .await?;
         // 共通処理とは独立に、古いイベントでも未処理なら一度だけ行う（§5「マージ時副作用の独立処理」）
-        let merge_effects = matches!(action, PrAction::Closed { merged: true })
-            && service::forge::merge_effects::apply_merge_effects(
+        let merge_effects = if matches!(action, PrAction::Closed { merged: true }) {
+            service::forge::merge_effects::apply_merge_effects(
                 &state.db,
                 job.project_id,
                 repo,
                 *number,
                 &event,
             )
-            .await?;
+            .await?
+        } else {
+            None
+        };
+        // 書き戻しの印は完了と同じトランザクションで立ててあるので、積めなくてもスイープが拾う
+        for task_id in merge_effects.iter().flatten() {
+            if let Err(e) = crate::github_issue_sync::enqueue(
+                &state.github_issue_sync_storage,
+                crate::github_issue_sync::GithubIssueSyncJob::Push { task_id: *task_id },
+            )
+            .await
+            {
+                tracing::warn!(error = %e, %task_id, "enqueue github issue push failed; sweep will retry");
+            }
+        }
         tracing::info!(
             integration_id = %job.integration_id,
             project_id = %job.project_id,
@@ -217,7 +231,7 @@ pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(),
             number,
             action = ?action,
             applied,
-            merge_effects,
+            merge_effects = merge_effects.is_some(),
             "forge pull request event processed"
         );
         return Ok(());

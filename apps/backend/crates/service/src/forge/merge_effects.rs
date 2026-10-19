@@ -26,7 +26,8 @@ pub const PULL_REQUEST_MERGED_EVENT: &str = "forge_pull_request_merged";
 pub const MERGE_EFFECTS_ACKNOWLEDGED_EVENT: &str = "forge_merge_effects_acknowledged";
 
 /// `Closed { merged: true }` のイベントからマージ時の副作用（タスク完了）を一度だけ行う。
-/// 今回処理したら `true`、処理済み・確認済み・PR 行が無いときは `false`。
+/// 今回処理したら `Some`（中身は取り込み元 Issue への書き戻しの印を立てたタスク。
+/// 呼び出し側がコミット後に書き戻しを積む）、処理済み・確認済み・PR 行が無いときは `None`。
 ///
 /// 完了対象は現在のリンク表ではなく、イベントのタイトル・本文・head ブランチ（マージ時点の内容）と、
 /// マージ前に作られて今も残る `manual` 行から決める。共通処理が古いイベントとして読み飛ばした場合も行う。
@@ -36,9 +37,9 @@ pub async fn apply_merge_effects(
     repo: &ForgeRepo,
     number: i32,
     event: &PullRequestSnapshot,
-) -> Result<bool, anyhow::Error> {
+) -> Result<Option<Vec<Uuid>>, anyhow::Error> {
     let Some(project) = projects::Entity::find_by_id(project_id).one(db).await? else {
-        return Ok(false);
+        return Ok(None);
     };
 
     let txn = db.begin().await?;
@@ -53,11 +54,11 @@ pub async fn apply_merge_effects(
         .one(&txn)
         .await?
     else {
-        return Ok(false);
+        return Ok(None);
     };
     // 並行ジョブの片方はロック待ちの後でここに来る。行ロック後に読み直した値で判定する
     if pull_request.merge_effects_processed_at.is_some() {
-        return Ok(false);
+        return Ok(None);
     }
     let pull_request_id = pull_request.id;
 
@@ -90,6 +91,7 @@ pub async fn apply_merge_effects(
         "html_url": event.html_url,
         "state": "merged",
     });
+    let mut pending_push = Vec::new();
     for task_id in closes
         .into_iter()
         .filter_map(|(task_id, closes)| closes.then_some(task_id))
@@ -134,6 +136,11 @@ pub async fn apply_merge_effects(
         active.completed_at = Set(Some(completed_at.unwrap_or_else(|| now.into())));
         active.updated_at = Set(now.into());
         active.update(&txn).await?;
+        // 通常のタスク更新と同じく、取り込み元 Issue への書き戻し要求を同じトランザクションで残す。
+        // コミット後に積めなくても、印が残るのでスイープが拾う
+        if crate::github::sync::mark_pending_push(&txn, task_id).await? {
+            pending_push.push(task_id);
+        }
 
         record_activity_once(
             &txn,
@@ -159,7 +166,7 @@ pub async fn apply_merge_effects(
     active.merge_effects_processed_at = Set(Some(Utc::now().into()));
     active.update(&txn).await?;
     txn.commit().await?;
-    Ok(true)
+    Ok(Some(pending_push))
 }
 
 /// パスのプロジェクトの PR に今リンクされているタスクと、そのプロジェクト（`(task_id, project_id)`）。

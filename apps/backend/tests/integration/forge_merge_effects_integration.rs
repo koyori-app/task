@@ -6,7 +6,9 @@ use crate::forge_commit_links_integration::{
     Fixture, REPO_NAME, REPO_OWNER, insert_project, insert_status, insert_task, setup,
 };
 use crate::forge_pull_request_links_integration::{deliver, links, merged, pr_payload, pr_row};
-use entity::{project_members, project_statuses, scopes::Scope, task_activities, tasks};
+use entity::{
+    github_issue_links, project_members, project_statuses, scopes::Scope, task_activities, tasks,
+};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait,
     QueryFilter, Statement,
@@ -336,7 +338,7 @@ async fn concurrent_merge_effects_run_once() {
     );
     let processed = [first.expect("first"), second.expect("second")];
     assert_eq!(
-        processed.iter().filter(|done| **done).count(),
+        processed.iter().filter(|done| done.is_some()).count(),
         1,
         "片方だけが処理する"
     );
@@ -676,5 +678,106 @@ async fn acknowledge_requires_access_to_every_linked_task_project() {
     assert_eq!(acknowledged[0].user_id, Some(fx.owner_id));
 
     app.cleanup_user(member.id).await;
+    app.cleanup_user(fx.owner_id).await;
+}
+
+async fn insert_issue_link(app: &TestApp, project_id: Uuid, task_id: Uuid, number: i32) {
+    app.state
+        .db
+        .execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "INSERT INTO github_issue_links (id, project_id, integration_id, task_id, github_number,
+                 synced_hash, github_updated_at, pending_push, updated_at)
+             SELECT $1, $2, i.id, $3, $4, 'synced', now(), false, now()
+             FROM github_integrations i WHERE i.project_id = $2",
+            [
+                Uuid::new_v4().into(),
+                project_id.into(),
+                task_id.into(),
+                number.into(),
+            ],
+        ))
+        .await
+        .expect("insert issue link");
+}
+
+async fn pending_push(app: &TestApp, task_id: Uuid) -> bool {
+    github_issue_links::Entity::find()
+        .filter(github_issue_links::Column::TaskId.eq(task_id))
+        .one(&app.state.db)
+        .await
+        .expect("query issue link")
+        .expect("issue link")
+        .pending_push
+}
+
+/// 積まれている書き戻しジョブの件数。ペイロードは JSON なので task_id で絞る
+async fn queued_push_jobs(app: &TestApp, task_id: Uuid) -> i64 {
+    app.state
+        .db
+        .query_one_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT COUNT(*) AS count FROM apalis.jobs \
+             WHERE job_type = $1 AND convert_from(job, 'UTF8') LIKE $2",
+            [
+                job::github_issue_sync::QUEUE_NAME.into(),
+                format!("%{task_id}%").into(),
+            ],
+        ))
+        .await
+        .expect("count jobs")
+        .expect("count row")
+        .try_get("", "count")
+        .expect("count")
+}
+
+/// GitHub Issue から取り込んだタスクをマージで完了にしたら、通常のタスク更新と同じく
+/// 書き戻しの印（`pending_push`）を同じトランザクションで立て、コミット後に書き戻しを積む。
+/// GitHub は `Closes KEY-N` を Issue 番号として読まないので、書き戻さないと Issue が開いたまま残る。
+/// 対照: 参照だけで完了させないタスクには印を立てない
+#[tokio::test]
+async fn merge_completion_pushes_back_to_the_source_issue() {
+    let app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    let key = &fx.key;
+    let (done, _) = insert_done_statuses(&app, fx.tp.project_id).await;
+    let closing = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, 1).await;
+    let mentioned = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, 2).await;
+    insert_issue_link(&app, fx.tp.project_id, closing, 11).await;
+    insert_issue_link(&app, fx.tp.project_id, mentioned, 12).await;
+
+    let body = format!("Closes {key}-1\n{key}-2");
+    let opened = pr_payload(
+        fx.installation_id,
+        "opened",
+        80,
+        "feat",
+        Some(&body),
+        "2026-10-01T00:00:00Z",
+    );
+    deliver(&app, &fx, &opened).await.expect("opened");
+    let closed = merged(
+        pr_payload(
+            fx.installation_id,
+            "closed",
+            80,
+            "feat",
+            Some(&body),
+            "2026-10-01T00:10:00Z",
+        ),
+        "2026-10-01T00:10:00Z",
+    );
+    deliver(&app, &fx, &closed).await.expect("closed merged");
+
+    assert_eq!(task_row(&app, closing).await.status_id, done);
+    assert!(
+        pending_push(&app, closing).await,
+        "完了を取り込み元 Issue へ書き戻す印"
+    );
+    assert_eq!(queued_push_jobs(&app, closing).await, 1);
+    assert_eq!(task_row(&app, mentioned).await.status_id, fx.status_id);
+    assert!(!pending_push(&app, mentioned).await);
+    assert_eq!(queued_push_jobs(&app, mentioned).await, 0);
+
     app.cleanup_user(fx.owner_id).await;
 }
