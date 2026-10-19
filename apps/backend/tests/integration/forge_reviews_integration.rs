@@ -3,6 +3,7 @@
 
 use crate::common::{TestApp, ensure_tenant_member_for_project, json_body};
 use crate::forge_commit_links_integration::{Fixture, insert_task, setup};
+use crate::forge_manual_pull_request_links_integration::{forget_github_mock, github_mock, link};
 use crate::forge_pull_request_links_integration::{deliver, get_forge, merged, pr_payload, pr_row};
 use entity::{notifications, scopes::Scope, task_assignees, task_watchers};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
@@ -281,5 +282,54 @@ async fn unresolved_counts_blocking_findings_only_with_review_scope() {
         assert_eq!(unresolved(&forge, 89), 0);
     }
 
+    app.cleanup_user(fx.owner_id).await;
+}
+
+/// 手動リンクの 201 も `GET /forge` と同じ集計の `unresolved` を返す（`read:review` が無ければ null）。
+#[tokio::test]
+async fn manual_link_response_carries_unresolved() {
+    let _mock_server = github_mock().await;
+    let app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    let task = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, 1).await;
+    let writer = app
+        .insert_pat(fx.owner_id, fx.tp.tenant_id, vec![Scope::WriteReview], None)
+        .await;
+    submit_round(&app, &fx, &writer, 87, &["high", "medium", "low"]).await;
+
+    for (scopes, expected) in [
+        (
+            vec![Scope::ReadTask, Scope::WriteTask],
+            serde_json::Value::Null,
+        ),
+        (
+            vec![Scope::ReadTask, Scope::WriteTask, Scope::ReadReview],
+            serde_json::json!(2),
+        ),
+    ] {
+        let token = app
+            .insert_pat(fx.owner_id, fx.tp.tenant_id, scopes, None)
+            .await;
+        let (status, pr) = link(
+            &app,
+            fx.tp.tenant_id,
+            fx.tp.project_id,
+            task,
+            serde_json::json!({ "number": 87 }),
+            &token,
+        )
+        .await;
+        assert_eq!(status, 201, "{pr}");
+        assert_eq!(pr["unresolved"], expected, "手動リンクの応答");
+        let (status, forge) =
+            get_forge(&app, fx.tp.tenant_id, fx.tp.project_id, task, &token).await;
+        assert_eq!(status, 200);
+        assert_eq!(
+            forge["pull_requests"][0]["unresolved"], expected,
+            "GET の PR 行と同じ値"
+        );
+    }
+
+    forget_github_mock();
     app.cleanup_user(fx.owner_id).await;
 }
