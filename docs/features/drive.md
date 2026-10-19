@@ -507,7 +507,7 @@ GET /v1/drive/files/{id}/content?token={share_token}
 | `PATCH` | `/v1/tenants/{tenant_id}/drive/files/{id}` | `write:drive` | |
 | `PUT` | `/v1/tenants/{tenant_id}/drive/files/{id}/content` | `write:drive` | テキスト本文更新・クォータ検証あり |
 | `DELETE` | `/v1/tenants/{tenant_id}/drive/files/{id}` | `write:drive` | |
-| `GET` | `/v1/tenants/{tenant_id}/drive/files/{id}/tasks` | `read:drive` | 結び付いたタスク一覧（§8.5） |
+| `GET` | `/v1/tenants/{tenant_id}/drive/files/{id}/tasks` | `read:drive` + `read:task` | 結び付いたタスク一覧（§8.5） |
 | `GET` | `/v1/drive/files/{id}/content` | `read:drive` | 共有トークン利用時はスコープ不要 |
 | `GET` | `/v1/drive/files/{id}/content?token=` | スコープ不要 | 公開リンクトークンで代替 |
 | `GET` | `/v1/tenants/{tenant_id}/drive/usage` | `read:drive` | |
@@ -783,7 +783,8 @@ Drive ファイル本体は削除しない。
 
 #### GET `/v1/tenants/{tenant_id}/drive/files/{id}/tasks`
 
-ファイルに結び付いたタスク（`manual` と `body` の両方）を返す。`read:drive` が必要で、ファイルの
+ファイルに結び付いたタスク（`manual` と `body` の両方）を返す。`read:drive` と `read:task` が必要で
+（タスクの題・状態を返すので、タスク側の添付一覧と同じく `read:task` の絞りを越えさせない）、ファイルの
 閲覧権限はメタデータ取得（`GET .../drive/files/{id}`）と同じ判定（閲覧できなければ `403` / `404`）。
 呼び出し側が入れないプロジェクトのタスクと削除済みタスクは含めない。
 

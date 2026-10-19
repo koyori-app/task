@@ -589,7 +589,9 @@ pub async fn list_file_tasks(
     auth: AuthUser,
     Path((tenant_id, id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<DriveFileTasksResponse>, AppError> {
+    // タスクの題・状態を返すので、タスク側の添付一覧（read:task）の絞りも越えさせない
     auth.require_scope(Scope::ReadDrive)?;
+    auth.require_scope(Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     let file = load_tenant_file(&state, tenant_id, id).await?;
     authorize_file_access(&state, &file, &auth).await?;

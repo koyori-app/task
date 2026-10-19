@@ -567,18 +567,30 @@ async fn file_tasks_respects_file_and_project_access() {
         "対照: オーナーは閉じたプロジェクトのファイルも読める"
     );
 
-    // PAT は read:drive が要る
-    let without = app
-        .insert_pat(owner.id, tp.tenant_id, vec![Scope::ReadProject], None)
-        .await;
-    assert_eq!(
-        app.get_with_bearer(&tasks_path(tp.tenant_id, shared), &without)
-            .await
-            .status(),
-        StatusCode::FORBIDDEN
-    );
+    // PAT は read:drive と read:task の両方が要る（タスクの題・状態を返すため）
+    for scopes in [
+        vec![Scope::ReadProject],
+        vec![Scope::ReadDrive],
+        vec![Scope::ReadTask],
+    ] {
+        let token = app
+            .insert_pat(owner.id, tp.tenant_id, scopes.clone(), None)
+            .await;
+        assert_eq!(
+            app.get_with_bearer(&tasks_path(tp.tenant_id, shared), &token)
+                .await
+                .status(),
+            StatusCode::FORBIDDEN,
+            "{scopes:?}"
+        );
+    }
     let with = app
-        .insert_pat(owner.id, tp.tenant_id, vec![Scope::ReadDrive], None)
+        .insert_pat(
+            owner.id,
+            tp.tenant_id,
+            vec![Scope::ReadDrive, Scope::ReadTask],
+            None,
+        )
         .await;
     assert_eq!(
         app.get_with_bearer(&tasks_path(tp.tenant_id, shared), &with)
