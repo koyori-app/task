@@ -31,7 +31,7 @@ const props = withDefaults(
     tenantSlug: string;
     tasks: ScheduleTask[];
     /**
-     * 山（見積/日）を計算するタスク。絞り込み前の全タスクを渡す。
+     * 山（残工数/日）を計算するタスク。絞り込み前の全タスクを渡す。
      * 見えていないプロジェクトの負荷を落とすと超過を見落とすため。省略時は `tasks`
      */
     loadTasks?: ScheduleTask[];
@@ -129,7 +129,11 @@ const rows = computed(() => {
       if (p) add(assignee.user_id, p);
     }
   }
-  const loadByMember = dailyLoadByMember(props.loadTasks ?? props.tasks, props.timeZone);
+  const loadByMember = dailyLoadByMember(
+    props.loadTasks ?? props.tasks,
+    props.timeZone,
+    props.today,
+  );
   const loadsOf = (memberId: string) =>
     dates.value.flatMap((date, col) => {
       const day = loadByMember.get(memberId)?.get(date);
@@ -175,7 +179,7 @@ function loadOverflowStyle(hours: number) {
 }
 
 function loadAria(date: string, hours: number) {
-  const base = `${date} の見積 ${loadLabel(hours)}`;
+  const base = `${date} の残り ${loadLabel(hours)}`;
   return isOverCapacity(hours) ? `${base}（上限 ${DAILY_CAPACITY_HOURS}h を超過）` : base;
 }
 
@@ -370,7 +374,7 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
             :class="columnClass(date)"
             :style="cellStyle(col, '1 / -1')"
           />
-          <!-- 見積/日の山（主担当・開始予定日と Soft 締切あり・未完了のタスクから） -->
+          <!-- 残工数/日の山（計算規則は lib/calendar/load.ts） -->
           <Tooltip v-for="load in row.loads" :key="`load-${load.date}`">
             <TooltipTrigger as-child>
               <div

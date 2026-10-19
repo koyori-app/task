@@ -99,7 +99,7 @@ describe('CalendarTimeline', () => {
     ]);
     const load = wrapper.get(`[data-member-row="${ALICE.id}"] [data-load-date="2026-10-14"]`);
     expect(load.attributes('data-over')).toBe('true');
-    expect(load.attributes('aria-label')).toBe('2026-10-14 の見積 7h（上限 6h を超過）');
+    expect(load.attributes('aria-label')).toBe('2026-10-14 の残り 7h（上限 6h を超過）');
     expect(load.text()).toContain('超過');
     // 上限までの棒と、上限の線を越えた警告色の棒（1h / 6h = 段の 1/6）
     expect(load.get('[data-load-bar]').attributes('style')).toContain('height: 1.5rem');
@@ -164,7 +164,7 @@ describe('CalendarTimeline', () => {
       w
         .get(`[data-member-row="${ALICE.id}"] [data-load-date="2026-10-14"]`)
         .attributes('aria-label');
-    expect(label(filtered)).toBe('2026-10-14 の見積 7h（上限 6h を超過）');
+    expect(label(filtered)).toBe('2026-10-14 の残り 7h（上限 6h を超過）');
     expect(label(filtered)).toBe(label(all));
     // 帯は絞り込み後のタスクだけ
     expect(filtered.findAll(`[data-member-row="${ALICE.id}"] a`)).toHaveLength(1);
