@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { expect, waitFor } from 'storybook/test';
+import { expect, userEvent, waitFor } from 'storybook/test';
 import { ref } from 'vue';
 
 import CommentBody from '@/components/tasks/CommentBody.vue';
@@ -255,5 +255,88 @@ export const AvatarMatchesUserAvatar: Story = {
       await expect(chip.dataset.initials).toBe(fallback.textContent?.trim());
     }
     await expect(getComputedStyle(chipAvatar('chip-inactive')).filter).toContain('grayscale');
+  },
+};
+
+/**
+ * 札のプロフィールへの link（説明文の KFM とコメント）。キーボードで focus でき、focus の輪が見え、Enter で
+ * link の先へ飛ぶこと（story の中では飛ばずに、click で受けた先を記す）。入力欄の札は link にせぬ。
+ */
+export const ProfileLinks: Story = {
+  loaders: [
+    async () => ({
+      description: await renderDescription(`説明 <@${TARO}> と <@${HANAKO}>`, {
+        mentions,
+        mentionTenant: 'acme',
+      }),
+    }),
+  ],
+  render: (_args, { loaded }) => ({
+    components: { CommentBody, CommentEditor },
+    setup: () => {
+      const clicked = ref<string[]>([]);
+      // 飛んだ先を記し、story の iframe は動かさぬ
+      const onClick = (event: MouseEvent) => {
+        const link = (event.target as HTMLElement | null)?.closest('a');
+        if (!link) return;
+        event.preventDefault();
+        clicked.value.push(link.getAttribute('href') ?? '');
+      };
+      return {
+        html: loaded.description,
+        KFM_CONTENT_CLASS,
+        mentions,
+        clicked,
+        onClick,
+        TARO,
+        ME,
+        value: ref(`入力欄 <@${TARO}>`),
+      };
+    },
+    template: `
+      <div style="width: 900px" class="space-y-3 text-sm" @click.capture="onClick">
+        <div data-testid="description" :class="KFM_CONTENT_CLASS" v-html="html" />
+        <div data-testid="comment"><CommentBody comment-id="links" :body="'コメント <@' + TARO + '> と <@' + ME + '>'" :mentions="mentions" :current-user-id="ME" mention-tenant="acme" /></div>
+        <CommentEditor v-model="value" :mentions="mentions" aria-label="コメントを入力" />
+        <pre data-testid="clicked">{{ clicked.join(' ') }}</pre>
+      </div>`,
+  }),
+  play: async ({ canvasElement }) => {
+    const links = await waitFor(
+      async () => {
+        const found = [...canvasElement.querySelectorAll<HTMLAnchorElement>('a.kfm-mention')];
+        // 説明文の taro・コメントの taro と aki（外れた hanako は link にせぬ）
+        await expect(found).toHaveLength(3);
+        return found;
+      },
+      { timeout: 10_000 },
+    );
+    await expect(links.map((a) => a.getAttribute('href'))).toEqual([
+      `/acme/users/${TARO}`,
+      `/acme/users/${TARO}`,
+      `/acme/users/${ME}`,
+    ]);
+    await expect(canvasElement.querySelector('span.kfm-mention-outside')?.textContent).toBe(
+      '@hanako',
+    );
+    // 入力欄の札は link にせぬ
+    await expect(canvasElement.querySelector('.cm-content a')).toBeNull();
+    await expect(canvasElement.querySelector('.cm-content .kfm-mention')).not.toBeNull();
+
+    // キーボードで最初の札へ focus し、輪が見え、Enter で飛ぶ
+    (document.activeElement as HTMLElement | null)?.blur();
+    await userEvent.tab();
+    await expect(document.activeElement).toBe(links[0]);
+    const style = getComputedStyle(links[0]);
+    await expect(style.outlineStyle).toBe('solid');
+    await expect(Number.parseFloat(style.outlineWidth)).toBeGreaterThanOrEqual(2);
+    // 輪の色は地（白）に対して 3:1 以上
+    await expect(contrast(style.outlineColor, '#fff')).toBeGreaterThanOrEqual(3);
+    await userEvent.keyboard('{Enter}');
+    await waitFor(async () =>
+      expect(canvasElement.querySelector('[data-testid="clicked"]')?.textContent).toBe(
+        `/acme/users/${TARO}`,
+      ),
+    );
   },
 };

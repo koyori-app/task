@@ -115,6 +115,8 @@ export async function data(pageContext: PageContextServer): Promise<Data> {
         taskRef: { tenant: tenantDisplayId },
         // 説明文のメンションの印（`<@利用者ID>`）を札にする表。名前は backend が返す表から取る
         mentions: task.mentions ?? {},
+        // いま入れる者の札をプロフィールへの link にする（道は利用者の id とテナントだけで組む）
+        mentionTenant: tenantDisplayId,
       }),
       descriptionSource: task.description,
     };

@@ -90,6 +90,11 @@ export type RenderOptions = {
   readonly mentions?: MentionTable;
   /** member の札を「ログイン中の本人へのメンション」として強調する時の利用者 ID。 */
   readonly currentUserId?: string | null;
+  /**
+   * メンションの札をプロフィールへの link にする時のテナント（表示用 id）。省けば札は link にならない。
+   * `taskRef` とは別に持つ（コメントは KEY-N の link を付けぬまま、札だけを link にするため）。
+   */
+  readonly mentionTenant?: string;
 };
 
 export type RenderDescription = (text: string, options?: RenderOptions) => Promise<string>;
@@ -284,6 +289,8 @@ export function createRenderer(options: CreateRendererOptions): RenderDescriptio
               ])
               .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
             currentUserId,
+            // 札の link の先も表の側の値なので、テナントの違う描画が同じキーにならぬようにする
+            mentionTenant: renderOptions.mentionTenant ?? null,
           });
     const key = buildCacheKey(
       fingerprint,
@@ -302,7 +309,9 @@ export function createRenderer(options: CreateRendererOptions): RenderDescriptio
       rendered = String(
         await processor.process({
           value: normalized,
-          data: { kfm: { taskRef, mentions, currentUserId } },
+          data: {
+            kfm: { taskRef, mentions, currentUserId, mentionTenant: renderOptions.mentionTenant },
+          },
         }),
       );
     } catch (error) {

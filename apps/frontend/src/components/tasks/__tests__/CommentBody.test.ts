@@ -171,4 +171,37 @@ describe('CommentBody', () => {
     expect(wrapper.find('img').exists()).toBe(false);
     expect(wrapper.get('.kfm-mention-avatar').attributes('data-initials')).toBe('BO');
   }, 30_000);
+  it('mentionTenant を渡すと、いま入れる者の札だけをプロフィールへの link にする', async () => {
+    const wrapper = mount(CommentBody, {
+      props: {
+        body: `<@${ME}> <@${OTHER}> <@${OUT}>`,
+        commentId: 'comment-9',
+        mentions: {
+          [ME]: { status: 'member', name: '田中' },
+          [OTHER]: { status: 'member', name: 'bob' },
+          [OUT]: { status: 'outside', name: 'project-out' },
+        },
+        currentUserId: ME,
+        mentionTenant: 'acme',
+      },
+    });
+    await waitForKfm(wrapper);
+    const links = wrapper.findAll('a.kfm-mention');
+    expect(links.map((a) => a.attributes('href'))).toEqual([
+      `/acme/users/${ME}`,
+      `/acme/users/${OTHER}`,
+    ]);
+    expect(links[0].classes()).toContain('kfm-mention-self');
+    // 外れた者の札は link にせぬ
+    expect(wrapper.get('span.kfm-mention-outside').text()).toBe('@project-out');
+  }, 30_000);
+
+  it('mentionTenant を渡さぬコメントの札は link にならない', async () => {
+    const wrapper = mount(CommentBody, {
+      props: { body: `<@${OTHER}>`, commentId: 'comment-10', mentions },
+    });
+    await waitForKfm(wrapper);
+    expect(wrapper.find('a').exists()).toBe(false);
+    expect(wrapper.get('span.kfm-mention').text()).toBe('@bob');
+  }, 30_000);
 });
