@@ -25,6 +25,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 futures = "0.3"
 hex = "0.4"
 hmac = "0.13"
+http-body-util = "0.1"
 rand = "0.10"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form"] }
 sea-orm = { workspace = true, features = ["with-chrono", "postgres-array"] }

@@ -132,7 +132,7 @@ async fn pr_activities(app: &TestApp, task_id: Uuid) -> Vec<task_activities::Mod
         .expect("query activities")
 }
 
-async fn get_forge(
+pub(crate) async fn get_forge(
     app: &TestApp,
     tenant_id: Uuid,
     project_id: Uuid,

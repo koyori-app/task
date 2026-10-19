@@ -9,14 +9,14 @@ use std::collections::HashSet;
 use crate::error::AppError;
 use entity::review_findings::{FindingSeverity, FindingState};
 use entity::{
-    notification_settings, notifications, projects, review_findings, reviews, task_watchers,
-    tenants, users,
+    forge_pull_request_links, forge_pull_requests, notification_settings, notifications, projects,
+    review_findings, reviews, task_assignees, task_watchers, tasks, tenants, users,
 };
 
 // 定数本体は common へ移動（DTO からも参照するため）。既存の参照パス互換用に再公開。
 pub use common::notifications::{
     DEFAULT_IN_APP_EVENTS, KNOWN_EVENT_TYPES, TYPE_ASSIGNED, TYPE_COMMENT_ADDED, TYPE_MENTIONED,
-    TYPE_REVIEW_FINDING_CHANGED, TYPE_REVIEW_ROUND_ANY, TYPE_REVIEW_ROUND_CREATED,
+    TYPE_PR_MERGED, TYPE_REVIEW_FINDING_CHANGED, TYPE_REVIEW_ROUND_ANY, TYPE_REVIEW_ROUND_CREATED,
     TYPE_STATUS_CHANGED,
 };
 
@@ -600,4 +600,105 @@ pub async fn review_finding_payload<C: ConnectionTrait>(
         payload["deferred_task_id"] = serde_json::json!(task_id);
     }
     Ok(payload)
+}
+
+/// PR のマージを関係者へ知らせる（`pr_merged`）。
+///
+/// 宛先はリンク先タスクの担当者・ウォッチャーと、その PR のレビューラウンドの作成者。
+/// 1 人 1 通にまとめ、タスク経由の宛先はそのタスクに結ぶ。呼び出し側（PR イベントの共通処理）は
+/// `state` が初めて `merged` になったトランザクションでだけ呼ぶので、再送・再試行で二重に送らない。
+pub async fn notify_pull_request_merged<C: ConnectionTrait>(
+    db: &C,
+    pull_request_id: Uuid,
+) -> Result<(), AppError> {
+    let Some(pr) = forge_pull_requests::Entity::find_by_id(pull_request_id)
+        .one(db)
+        .await?
+    else {
+        return Ok(());
+    };
+    let payload = serde_json::json!({
+        "number": pr.number,
+        "title": pr.title,
+        "html_url": pr.html_url,
+        "repo_owner": pr.repo_owner,
+        "repo_name": pr.repo_name,
+    });
+
+    // (宛先, 通知のプロジェクト, タスク)。先に並べたものが優先される
+    let mut candidates: Vec<(Uuid, Uuid, Option<Uuid>)> = Vec::new();
+    let task_ids: Vec<Uuid> = forge_pull_request_links::Entity::find()
+        .filter(forge_pull_request_links::Column::PullRequestId.eq(pr.id))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|link| link.task_id)
+        .collect();
+    let linked_tasks = tasks::Entity::find()
+        .filter(tasks::Column::Id.is_in(task_ids))
+        .filter(tasks::Column::DeletedAt.is_null())
+        .all(db)
+        .await?;
+    for task in linked_tasks {
+        let assignees = task_assignees::Entity::find()
+            .filter(task_assignees::Column::TaskId.eq(task.id))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|row| row.user_id);
+        let watchers = task_watchers::Entity::find()
+            .filter(task_watchers::Column::TaskId.eq(task.id))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|row| row.user_id);
+        candidates.extend(
+            assignees
+                .chain(watchers)
+                .map(|user_id| (user_id, task.project_id, Some(task.id))),
+        );
+    }
+    // shortcut: レビューとは自然キーで結ぶ（host は見ない。PR 行は GitHub のみ）。FK 付け替え時に pull_request_id へ
+    let reviewers = reviews::Entity::find()
+        .filter(reviews::Column::ProjectId.eq(pr.project_id))
+        .filter(reviews::Column::RepoOwner.eq(pr.repo_owner.clone()))
+        .filter(reviews::Column::RepoName.eq(pr.repo_name.clone()))
+        .filter(reviews::Column::PrNumber.eq(pr.number))
+        .all(db)
+        .await?;
+    candidates.extend(
+        reviewers
+            .into_iter()
+            .map(|round| (round.reviewer_id, pr.project_id, None)),
+    );
+
+    let mut notifiable_by_project: std::collections::HashMap<Uuid, HashSet<Uuid>> =
+        std::collections::HashMap::new();
+    let mut notified: HashSet<Uuid> = HashSet::new();
+    for (user_id, project_id, task_id) in candidates {
+        if notified.contains(&user_id) {
+            continue;
+        }
+        if let std::collections::hash_map::Entry::Vacant(entry) =
+            notifiable_by_project.entry(project_id)
+        {
+            entry.insert(notifiable_user_ids(db, project_id).await?);
+        }
+        if !notifiable_by_project[&project_id].contains(&user_id)
+            || !in_app_enabled(db, user_id, project_id, TYPE_PR_MERGED).await?
+        {
+            continue;
+        }
+        create_notification(
+            db,
+            user_id,
+            Some(project_id),
+            task_id,
+            TYPE_PR_MERGED,
+            payload.clone(),
+        )
+        .await?;
+        notified.insert(user_id);
+    }
+    Ok(())
 }

@@ -556,7 +556,7 @@ export const WithForge: Story = {
             commits_complete: false,
             sources: ['body', 'title'],
             closes: true,
-            unresolved: null,
+            unresolved: 0,
           },
           {
             id: 'pr-2',
@@ -575,7 +575,7 @@ export const WithForge: Story = {
             commits_complete: false,
             sources: ['title'],
             closes: false,
-            unresolved: null,
+            unresolved: 2,
           },
         ],
         commits: [
@@ -601,6 +601,34 @@ export const WithForge: Story = {
       canvas.findByText('feat: OAuth 対応', { exact: false }),
     ).resolves.toBeInTheDocument();
     await expect(canvas.findByText('a3f92c1')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('2 件が未解決')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('未解決なし')).resolves.toBeInTheDocument();
+  },
+};
+
+export const WithIssueSource: Story = {
+  name: '取り込み元 Issue あり（反映待ち）',
+  beforeEach: () =>
+    createMockFetch({
+      forge: {
+        issue: {
+          host: 'github',
+          repo_owner: 'acme',
+          repo_name: 'backend',
+          number: 42,
+          html_url: 'https://github.com/acme/backend/issues/42',
+          state: 'closed',
+          // 1 日以上前にして、相対時刻ではなく日付で出す（VRT を安定させる）
+          last_synced_at: '2026-10-01T00:00:00Z',
+          pending_push: true,
+        },
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const link = await canvas.findByRole('link', { name: 'acme/backend#42' });
+    await expect(link).toHaveAttribute('href', 'https://github.com/acme/backend/issues/42');
+    await expect(canvas.findByText('GitHub への反映待ち')).resolves.toBeInTheDocument();
   },
 };
 
