@@ -133,6 +133,7 @@ pub async fn get_task_forge(
         commits,
         branches: Vec::new(),
         repository,
+        issue: service::forge::issue_source::find_for_task(&state.db, task.id).await?,
     }))
 }
 
