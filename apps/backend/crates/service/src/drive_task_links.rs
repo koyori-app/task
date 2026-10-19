@@ -192,43 +192,45 @@ fn fence_marker(line: &str) -> Option<(u8, usize)> {
 
 /// 同じ長さのバッククォート列で閉じたコードスパンを空白 1 つに置き換える。
 /// 閉じられていないバッククォートはそのまま残す（CommonMark と同じ）
+///
+/// 列ごとに残りの行から閉じを探すと、長さ違いの閉じない列を並べた行で行の長さの 1.5 乗に
+/// なる（本文の保存はテナントのロックの内側で走る）。列を一度集め、「同じ長さの次の列」を
+/// 後ろから一度なめて引けるようにして、行の長さに対して線形にする
 fn strip_inline_code(line: &str, out: &mut String) {
-    let mut rest = line;
-    while let Some(start) = rest.find('`') {
-        out.push_str(&rest[..start]);
-        let run = &rest[start..];
-        let len = run.len() - run.trim_start_matches('`').len();
-        let after = &run[len..];
-        match closing_run(after, len) {
-            Some(end) => {
-                out.push(' ');
-                rest = &after[end + len..];
-            }
-            None => {
-                out.push_str(&run[..len]);
-                rest = after;
-            }
-        }
-    }
-    out.push_str(rest);
-}
-
-/// ちょうど `len` 個のバッククォート列の開始位置
-fn closing_run(s: &str, len: usize) -> Option<usize> {
-    let bytes = s.as_bytes();
+    let bytes = line.as_bytes();
+    // バッククォート列の (開始位置, 長さ)
+    let mut runs: Vec<(usize, usize)> = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'`' {
             let n = bytes[i..].iter().take_while(|&&b| b == b'`').count();
-            if n == len {
-                return Some(i);
-            }
+            runs.push((i, n));
             i += n;
         } else {
             i += 1;
         }
     }
-    None
+    let mut next_same: Vec<Option<usize>> = vec![None; runs.len()];
+    let mut last_by_len: HashMap<usize, usize> = HashMap::new();
+    for (k, &(_, n)) in runs.iter().enumerate().rev() {
+        next_same[k] = last_by_len.insert(n, k);
+    }
+
+    let mut copied = 0;
+    let mut k = 0;
+    while k < runs.len() {
+        match next_same[k] {
+            Some(close) => {
+                out.push_str(&line[copied..runs[k].0]);
+                out.push(' ');
+                let (start, n) = runs[close];
+                copied = start + n;
+                k = close + 1;
+            }
+            None => k += 1,
+        }
+    }
+    out.push_str(&line[copied..]);
 }
 
 #[cfg(test)]
@@ -279,6 +281,27 @@ mod tests {
         assert_eq!(keys("a ` TASK-1"), ["TASK-1"]);
         // 長さの違う列では閉じない
         assert_eq!(keys("``TASK-1` TASK-2"), ["TASK-1", "TASK-2"]);
+    }
+
+    /// 長さを 1 ずつ増やした閉じない列を 1 行に 4 MiB 並べても線形で終わる。
+    /// 列ごとに残りの行を舐める実装では行の長さの 1.5 乗になり、ここで数十秒かかる
+    #[test]
+    fn unmatched_runs_of_growing_length_stay_linear() {
+        let mut line = String::new();
+        let mut n = 1;
+        while line.len() < 4 << 20 {
+            line.push_str(&"`".repeat(n));
+            line.push('a');
+            n += 1;
+        }
+        let started = std::time::Instant::now();
+        let stripped = strip_code(&line);
+        let elapsed = started.elapsed();
+        assert_eq!(stripped, format!("{line}\n"), "閉じない列はそのまま残す");
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "4 MiB の行に {elapsed:?} かかった"
+        );
     }
 
     #[test]
