@@ -238,13 +238,19 @@ pub fn branch_event(
     };
     Ok(Some(if created {
         ForgeEvent::BranchCreated {
-            html_url: format!("{}/tree/{branch}", repository.html_url),
+            html_url: branch_url(&repository.html_url, &branch),
             repo,
             branch,
         }
     } else {
         ForgeEvent::BranchDeleted { repo, branch }
     }))
+}
+
+/// ブランチの URL。`#` `%` `?` などは ref 名に使えるので、`/` で区切った各要素をエンコードする
+fn branch_url(repository_url: &str, branch: &str) -> String {
+    let path: Vec<_> = branch.split('/').map(urlencoding::encode).collect();
+    format!("{repository_url}/tree/{}", path.join("/"))
 }
 
 #[cfg(test)]
@@ -581,6 +587,29 @@ mod tests {
                 branch: "feat/TASK-12-foo".into(),
             })
         );
+    }
+
+    #[test]
+    fn branch_url_encodes_each_path_segment() {
+        for (branch, url) in [
+            (
+                "feat/TASK-12#qa",
+                "https://github.com/acme/backend/tree/feat/TASK-12%23qa",
+            ),
+            (
+                "feat/100%-done",
+                "https://github.com/acme/backend/tree/feat/100%25-done",
+            ),
+        ] {
+            let mut payload = ref_fixture("branch");
+            payload["ref"] = branch.into();
+            let Some(ForgeEvent::BranchCreated { html_url, .. }) =
+                branch_event(&payload, true).expect("convert")
+            else {
+                panic!("branch event expected");
+            };
+            assert_eq!(html_url, url);
+        }
     }
 
     #[test]
