@@ -1,7 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
-
-vi.mock('vike/client/router', () => ({ navigate: vi.fn() }));
 
 import CalendarTimeline from '../CalendarTimeline.vue';
 import type { components } from '@/generated/api';
@@ -92,9 +90,40 @@ describe('CalendarTimeline', () => {
     expect(load.text()).toContain('超過');
   });
 
+  it('帯の左クリックは遷移させず open-task を emit し、修飾キー付きはブラウザに任せる', async () => {
+    const wrapper = mountTimeline([task({ soft_deadline: '2026-10-20T00:00:00Z' })]);
+    const entry = wrapper.get(`[data-member-row="${ALICE.id}"] a`);
+
+    const plain = new MouseEvent('click', { bubbles: true, cancelable: true });
+    entry.element.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(true);
+    expect(wrapper.emitted('open-task')?.[0]?.[0]).toMatchObject({ seq_key: 'ENG-1' });
+
+    const withMeta = new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true });
+    entry.element.dispatchEvent(withMeta);
+    expect(withMeta.defaultPrevented).toBe(false);
+    expect(wrapper.emitted('open-task')).toHaveLength(1);
+  });
+
   it('今日の列を aria-current で示す', () => {
     const wrapper = mountTimeline([]);
     expect(wrapper.get('[aria-current="date"]').attributes('data-date')).toBe('2026-10-14');
+  });
+
+  it('メンバーの行の見出しに担当者のアバターを出し、画像が無ければ頭文字にする', () => {
+    const wrapper = mountTimeline([task({ soft_deadline: '2026-10-14T00:00:00Z' })]);
+    const avatar = wrapper.get(`[data-member-row="${ALICE.id}"] [data-member-avatar]`);
+    expect(avatar.text()).toBe('A');
+    // 名前が隣にあるので読み上げない
+    expect(avatar.attributes('aria-hidden')).toBe('true');
+    expect(wrapper.get(`[data-member-row="${BOB.id}"] [data-member-avatar]`).text()).toBe('B');
+  });
+
+  it('担当者なしの行は頭文字ではなく人のアイコンを出す', () => {
+    const wrapper = mountTimeline([task({ soft_deadline: '2026-10-14T00:00:00Z', assignees: [] })]);
+    const avatar = wrapper.get('[data-member-row="__unassigned__"] [data-member-avatar]');
+    expect(avatar.text()).toBe('');
+    expect(avatar.find('svg').exists()).toBe(true);
   });
 
   it('期間にタスクが無ければ空状態を出し、メンバーの行は出さない', () => {

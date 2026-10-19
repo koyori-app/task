@@ -5935,10 +5935,39 @@
           {
             "name": "folder_id",
             "in": "query",
+            "description": "省略時はドライブ直下（フォルダ無し）のファイル",
             "required": false,
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "mime_type",
+            "in": "query",
+            "description": "MIME タイプの前方一致。`text/markdown` は `text/markdown` で始まる MIME（`text/markdown; charset=…` など）にも一致し、`text/` は text 全体",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "ファイル名の部分一致（大文字小文字を区別しない）。200 文字まで",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "ファイル一覧の並び順。既定は作成日時の新しい順。",
+              "enum": ["created_at_desc", "name_asc", "updated_at_desc"]
             }
           },
           {
@@ -6669,6 +6698,35 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "そのプロジェクトのフォルダだけ。プロジェクトへのアクセス権が必要（無ければ 403）",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "parent_id",
+            "in": "query",
+            "description": "そのフォルダの直下だけ。省略時は全階層",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "root_only",
+            "in": "query",
+            "description": "`true` でルート（親なし）だけ。`parent_id` との同時指定は 400。\n`project_id` と組み合わせるとプロジェクトのルートフォルダが 1 件返る",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -18660,6 +18718,397 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge": {
+      "get": {
+        "tags": ["Tasks"],
+        "summary": "タスクに結ばれた PR・コミット・ブランチ",
+        "operationId": "get_task_forge",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "タスクID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PR・コミット・ブランチ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskForgeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge/pull-requests": {
+      "post": {
+        "tags": ["Tasks"],
+        "summary": "PR を手動でタスクにリンク",
+        "description": "リポジトリはプロジェクトの現在の GitHub 連携先で決まる。連携が無ければ 409。ホストから PR を取れなくても `state = unknown` で作ってリンクする",
+        "operationId": "link_task_pull_request",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "タスクID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkTaskPullRequestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "リンクした PR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskForgePullRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "プロジェクトが GitHub と連携していない（github-integration-missing）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge/pull-requests/{pull_request_id}": {
+      "delete": {
+        "tags": ["Tasks"],
+        "summary": "PR のリンクを外す",
+        "description": "その PR とタスクのリンクを参照元によらずすべて外す。PR 自体は残る。タイトル・本文に KEY-N が残っていれば、次の PR イベントで自動リンクが戻る",
+        "operationId": "unlink_task_pull_request",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "タスクID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pull_request_id",
+            "in": "path",
+            "description": "PR の ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "外した"
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/relations": {
       "get": {
         "tags": ["Tasks"],
@@ -24473,6 +24922,21 @@
           }
         }
       },
+      "LinkTaskPullRequestRequest": {
+        "type": "object",
+        "description": "`POST /tasks/{id}/forge/pull-requests`。リポジトリはプロジェクトの現在の連携先で決まるので受け取らない",
+        "required": ["number"],
+        "properties": {
+          "closes": {
+            "type": "boolean",
+            "description": "マージしたらこのタスクを完了にする"
+          },
+          "number": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "ListFilesResponse": {
         "type": "object",
         "required": ["files", "total"],
@@ -25591,7 +26055,8 @@
           "unresolved",
           "blocking",
           "blocking_fixed",
-          "last_reviewed_at"
+          "last_reviewed_at",
+          "state"
         ],
         "properties": {
           "blocking": {
@@ -25611,6 +26076,15 @@
             "format": "date-time",
             "description": "最新ラウンドの作成時刻"
           },
+          "merge_effects_processed_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "マージ時の副作用を処理した時刻。`state = merged` で null なら未適用"
+          },
+          "merged_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
           "pr_author": {
             "type": ["string", "null"]
           },
@@ -25621,10 +26095,19 @@
           "pr_title": {
             "type": ["string", "null"]
           },
+          "pull_request_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "自然キー（プロジェクト・リポジトリ・番号）で結んだ PR 行。無ければ null"
+          },
           "rounds": {
             "type": "integer",
             "format": "int32",
             "description": "これまでのラウンド数"
+          },
+          "state": {
+            "type": "string",
+            "description": "ホスト上の PR の状態（`open` / `closed` / `merged` / `unknown`）。\nPR 行（`forge_pull_requests`）が無い、または webhook をまだ受けていなければ `unknown`"
           },
           "unresolved": {
             "type": "integer",
@@ -26200,6 +26683,289 @@
             }
           }
         ]
+      },
+      "TaskForgeBranch": {
+        "type": "object",
+        "required": ["id", "host", "host_url", "repo_owner", "repo_name", "branch", "html_url"],
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "host_url": {
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "repo_name": {
+            "type": "string"
+          },
+          "repo_owner": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskForgeCommit": {
+        "type": "object",
+        "required": [
+          "id",
+          "host",
+          "host_url",
+          "repo_owner",
+          "repo_name",
+          "sha",
+          "message",
+          "author_handle",
+          "author_name",
+          "committed_at",
+          "html_url"
+        ],
+        "properties": {
+          "author_handle": {
+            "type": "string",
+            "description": "ホスト上のアカウント名。解決できなければ空文字列"
+          },
+          "author_name": {
+            "type": "string",
+            "description": "git の author 名"
+          },
+          "committed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "host": {
+            "type": "string"
+          },
+          "host_url": {
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message": {
+            "type": "string",
+            "description": "メッセージの先頭行"
+          },
+          "repo_name": {
+            "type": "string"
+          },
+          "repo_owner": {
+            "type": "string"
+          },
+          "sha": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskForgeIssue": {
+        "type": "object",
+        "description": "タスクの取り込み元 Issue（`github_issue_links` の 1 行）",
+        "required": [
+          "host",
+          "repo_owner",
+          "repo_name",
+          "number",
+          "html_url",
+          "state",
+          "pending_push"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "Issue のリンク表は GitHub 専用なので常に `github`"
+          },
+          "html_url": {
+            "type": "string",
+            "description": "サーバー側で組み立てた Issue の URL"
+          },
+          "last_synced_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "最後に同期（取り込み・webhook の適用・書き戻し）した時刻。同期の時刻を控える前の行では null"
+          },
+          "number": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pending_push": {
+            "type": "boolean",
+            "description": "タスク側の変更が GitHub へまだ反映されていない"
+          },
+          "repo_name": {
+            "type": "string"
+          },
+          "repo_owner": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "description": "`open` / `closed` / `unknown`（同期で控えていない行）"
+          }
+        }
+      },
+      "TaskForgePullRequest": {
+        "type": "object",
+        "required": [
+          "id",
+          "host",
+          "host_url",
+          "repo_owner",
+          "repo_name",
+          "number",
+          "title",
+          "author_handle",
+          "state",
+          "html_url",
+          "commits_complete",
+          "sources",
+          "closes"
+        ],
+        "properties": {
+          "author_handle": {
+            "type": "string"
+          },
+          "closes": {
+            "type": "boolean",
+            "description": "どれかの参照元がクローズキーワード付きか"
+          },
+          "commits_complete": {
+            "type": "boolean",
+            "description": "PR のコミット一覧を読み切れているか"
+          },
+          "host": {
+            "type": "string",
+            "description": "`github` / `gitlab` / `forgejo`"
+          },
+          "host_url": {
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string",
+            "description": "ホスト上の PR の URL。組み立てずにそのまま使う"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "merge_effects_processed_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "マージ時の副作用（タスク完了）を処理した時刻。`state = merged` で NULL なら未適用"
+          },
+          "merged_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "number": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "repo_name": {
+            "type": "string"
+          },
+          "repo_owner": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "このタスクを参照している箇所（`title` / `body` / `branch` / `manual`）。昇順"
+          },
+          "state": {
+            "type": "string",
+            "description": "`open` / `closed` / `merged` / `unknown`"
+          },
+          "title": {
+            "type": "string"
+          },
+          "unresolved": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "マージを塞いでいるレビュー指摘（High / Medium の open / fixing / fixed）の件数。\nレビューの無い PR、タスクと別プロジェクトの PR 行、`read:review` を持たない PAT では null"
+          }
+        }
+      },
+      "TaskForgeRepository": {
+        "type": "object",
+        "required": ["host", "host_url", "repo_owner", "repo_name", "html_url"],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "host_url": {
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "repo_name": {
+            "type": "string"
+          },
+          "repo_owner": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskForgeResponse": {
+        "type": "object",
+        "description": "`GET /tasks/{id}/forge`。3 配列は空でも必ず返す",
+        "required": ["pull_requests", "commits", "branches"],
+        "properties": {
+          "branches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskForgeBranch"
+            },
+            "description": "ブランチのリンクは未実装（TASK-291）で、常に空"
+          },
+          "commits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskForgeCommit"
+            }
+          },
+          "issue": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskForgeIssue",
+                "description": "取り込み元の Issue。Issue から取り込んでいない（または連携を解除した）タスクでは null"
+              }
+            ]
+          },
+          "pull_requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskForgePullRequest"
+            }
+          },
+          "repository": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskForgeRepository",
+                "description": "プロジェクトの現在の連携先。連携していなければ null（手動リンクの可否をこれで決める）"
+              }
+            ]
+          }
+        }
       },
       "TaskListResponse": {
         "type": "object",

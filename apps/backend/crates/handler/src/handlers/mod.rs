@@ -11,6 +11,7 @@ pub mod dashboard;
 pub mod desktop_auth;
 pub mod drive_files;
 pub mod drive_folders;
+pub mod forge;
 pub mod github;
 pub mod labels;
 pub mod milestones;

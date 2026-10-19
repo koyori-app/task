@@ -314,6 +314,17 @@ pub struct ReviewedPullRequest {
     /// 最新ラウンドの作成時刻
     #[schema(value_type = String, format = "date-time")]
     pub last_reviewed_at: DateTime<Utc>,
+    /// ホスト上の PR の状態（`open` / `closed` / `merged` / `unknown`）。
+    /// PR 行（`forge_pull_requests`）が無い、または webhook をまだ受けていなければ `unknown`
+    pub state: String,
+    #[schema(value_type = Option<String>, format = "date-time")]
+    pub merged_at: Option<DateTime<Utc>>,
+    /// マージ時の副作用を処理した時刻。`state = merged` で null なら未適用
+    #[schema(value_type = Option<String>, format = "date-time")]
+    pub merge_effects_processed_at: Option<DateTime<Utc>>,
+    /// 自然キー（プロジェクト・リポジトリ・番号）で結んだ PR 行。無ければ null
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub pull_request_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]

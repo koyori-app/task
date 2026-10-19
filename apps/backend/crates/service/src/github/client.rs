@@ -1,8 +1,13 @@
 //! アプリ設定から GitHub App クライアントを組み立てる。
 
 use common::settings::GithubAppSettings;
+use entity::github_integrations;
 use forge_github::{GithubApp, GithubAppCredentials, GithubAppOAuthCredentials};
 use reqwest::Client;
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, prelude::Uuid};
+
+use crate::forge::events::ForgeRepo;
+use crate::forge::pull_requests::PullRequestSnapshot;
 
 /// GitHub API に送る User-Agent。
 const USER_AGENT: &str = "task-backend";
@@ -102,6 +107,36 @@ pub fn github_app(http: &Client, settings: &GithubAppSettings) -> GithubApp {
         Some(base) => app.with_oauth_base(base),
         None => app,
     }
+}
+
+/// PR の現在のスナップショットを取り直す（`GET /repos/{owner}/{repo}/pulls/{number}`）。
+///
+/// 更新時刻が同じ webhook のどちらが後か決められないときに使う。取れなければエラーを返し、
+/// 呼び出し側（ジョブ）は推測で確定せずに再試行する。
+pub async fn fetch_pull_request(
+    db: &DatabaseConnection,
+    http: &Client,
+    settings: &GithubAppSettings,
+    project_id: Uuid,
+    repo: &ForgeRepo,
+    number: i32,
+) -> Result<PullRequestSnapshot, anyhow::Error> {
+    let integration = github_integrations::Entity::find()
+        .filter(github_integrations::Column::ProjectId.eq(project_id))
+        .one(db)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("project {project_id} has no github integration"))?;
+    let token =
+        super::sync::installation_token(http, settings, integration.installation_id).await?;
+    let url = format!(
+        "{}/repos/{}/{}/pulls/{number}",
+        api_base(),
+        repo.repo_owner,
+        repo.repo_name
+    );
+    let pr: super::webhook_events::GithubPullRequest =
+        super::commits::get_json(http, &token, &url, "get pull request").await?;
+    Ok(pr.into_snapshot())
 }
 
 #[cfg(test)]

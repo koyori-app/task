@@ -67,6 +67,8 @@ type MockState = {
   hangConnections?: boolean;
   /** PR ごとの作成者。未指定は yupix */
   authors?: Record<number, string>;
+  /** PR ごとのホスト上の状態。既定は open */
+  prStates?: Record<number, string>;
 };
 
 const REVIEWED_HEAD = '60cdd7795f94fa4e4148ce996c2efb4c363e3f5e';
@@ -105,6 +107,7 @@ function stubFetch(state: MockState) {
           blocking,
           blocking_fixed: blockingFixed,
           last_reviewed_at: '2026-08-26T00:00:00Z',
+          state: state.prStates?.[prNumber] ?? 'open',
         })),
       );
     }
@@ -544,7 +547,10 @@ describe('ReviewFindingsView', () => {
     });
     await flushPromises();
 
-    wrapper.findAllComponents(Select)[1].vm.$emit('update:modelValue', 'high');
+    wrapper
+      .findAllComponents(Select)
+      .find((select) => select.find('#filter-severity').exists())!
+      .vm.$emit('update:modelValue', 'high');
     await flushPromises();
 
     expect(replaceSpy).toHaveBeenCalledOnce();
@@ -712,6 +718,37 @@ describe('ReviewFindingsView', () => {
     await wrapper.get('[data-testid="filter-pr"]').setValue('PR 779');
     await flushPromises();
     expect(prNavButtons().map((b) => b.textContent)).toEqual([expect.stringContaining('#779')]);
+  });
+
+  it('PR の状態で一覧を絞る', async () => {
+    stubFetch({
+      findings: [finding()],
+      prNumbers: [620, 619, 618],
+      prStates: { '620': 'merged', '619': 'unknown' },
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    wrapper
+      .findAllComponents(Select)
+      .find((select) => select.find('#filter-pr-state').exists())!
+      .vm.$emit('update:modelValue', 'merged');
+    await flushPromises();
+    expect(prNavButtons().map((b) => b.textContent)).toEqual([expect.stringContaining('#620')]);
+  });
+
+  it('PR 行にホスト上の状態をバッジで出し、webhook 未受信は状態不明', async () => {
+    stubFetch({
+      findings: [finding()],
+      prNumbers: [620, 619, 618],
+      prStates: { '620': 'merged', '619': 'unknown' },
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.findAll('[data-testid="pr-state"]').map((b) => b.text())).toEqual([
+      'Merged',
+      '状態不明',
+      'Open',
+    ]);
   });
 });
 

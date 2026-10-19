@@ -12,6 +12,8 @@ export type CalendarUrlState = {
   from: string;
   memberIds: string[];
   projectIds: string[];
+  /** オーバーレイで開いているタスク（seq key。例: "ENG-42"）。タスク一覧の `?selected=` と同じ */
+  selected: string | null;
 };
 
 /** `searchAll` は Vike の `urlParsed.searchAll`（同じキーの複数値を持つ） */
@@ -25,6 +27,7 @@ export function parseCalendarUrlState(
     from: mondayOf(isDateString(rawFrom) ? rawFrom : today),
     memberIds: [...new Set((searchAll?.member ?? []).filter(Boolean))],
     projectIds: [...new Set((searchAll?.project ?? []).filter(Boolean))],
+    selected: searchAll?.selected?.at(-1) || null,
   };
 }
 
@@ -37,6 +40,8 @@ export function applyCalendarUrlState(url: URL, state: CalendarUrlState, today: 
   for (const id of state.memberIds) next.searchParams.append('member', id);
   next.searchParams.delete('project');
   for (const id of state.projectIds) next.searchParams.append('project', id);
+  if (state.selected) next.searchParams.set('selected', state.selected);
+  else next.searchParams.delete('selected');
   return next;
 }
 

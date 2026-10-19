@@ -5,14 +5,14 @@
 
 use sea_orm::sea_query::{Expr, LockType};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect, prelude::Uuid,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult,
+    QueryFilter, QueryOrder, QuerySelect, Statement, prelude::Uuid,
 };
 
 use entity::review_findings::{FindingSeverity, FindingState};
 use entity::{
-    github_integrations, project_statuses, projects, review_findings, reviews, tasks,
-    tenant_members, tenants,
+    forge_pull_requests, github_integrations, project_statuses, projects, review_findings, reviews,
+    tasks, tenant_members, tenants,
 };
 use payload::reviews::{ReviewGate, ReviewedPullRequest};
 
@@ -1013,6 +1013,10 @@ pub async fn reviewed_pull_requests<C: ConnectionTrait>(
                 blocking: 0,
                 blocking_fixed: 0,
                 last_reviewed_at: round.created_at.with_timezone(&chrono::Utc),
+                state: "unknown".into(),
+                merged_at: None,
+                merge_effects_processed_at: None,
+                pull_request_id: None,
             });
         // ラウンドは round 昇順なので、最後に見たものが最新
         entry.rounds = round.round;
@@ -1043,9 +1047,111 @@ pub async fn reviewed_pull_requests<C: ConnectionTrait>(
         }
     }
 
+    // PR 行とは自然キーで結ぶ。shortcut: host を見ていない（PR 行は GitHub のみ）。GitLab 対応時に host も含める
+    let pull_requests = forge_pull_requests::Entity::find()
+        .filter(forge_pull_requests::Column::ProjectId.eq(project_id))
+        .filter(forge_pull_requests::Column::RepoOwner.eq(repo.owner.clone()))
+        .filter(forge_pull_requests::Column::RepoName.eq(repo.name.clone()))
+        .filter(forge_pull_requests::Column::Number.is_in(by_pr.keys().copied()))
+        .all(db)
+        .await?;
+    for row in pull_requests {
+        if let Some(entry) = by_pr.get_mut(&row.number) {
+            entry.state = row.state;
+            entry.merged_at = row.merged_at.map(|at| at.with_timezone(&chrono::Utc));
+            entry.merge_effects_processed_at = row
+                .merge_effects_processed_at
+                .map(|at| at.with_timezone(&chrono::Utc));
+            entry.pull_request_id = Some(row.id);
+        }
+    }
+
     let mut out: Vec<ReviewedPullRequest> = by_pr.into_values().collect();
     // 新しくレビューされた PR を上に
     out.sort_by_key(|pr| std::cmp::Reverse(pr.last_reviewed_at));
+    Ok(out)
+}
+
+/// ラウンドを作る PR の行を `state = unknown` で用意する（docs/features/tasks/9.github-tasks.md §6）。
+///
+/// 既に行があれば触らない。後から届いた webhook が同じ行へ合流する。
+/// 連携の無いプロジェクトのラウンドはリポジトリが決まらないので作らない。
+/// `reviews.pull_request_id` への FK 付け替えは未実施で、レビュー側とは自然キーで結ぶ。
+pub async fn ensure_pull_request_row<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    repo: &RepoRef,
+    pr_number: i32,
+) -> Result<(), sea_orm::DbErr> {
+    if !repo.is_linked() {
+        return Ok(());
+    }
+    db.execute_raw(Statement::from_sql_and_values(
+        db.get_database_backend(),
+        "INSERT INTO forge_pull_requests (id, project_id, host, host_url, repo_owner, repo_name, number,
+                                          title, author_handle, state, html_url, commits_complete,
+                                          created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, '', '', 'unknown', '', false, now(), now())
+         ON CONFLICT (project_id, host, host_url, repo_owner, repo_name, number) DO NOTHING",
+        [
+            Uuid::new_v4().into(),
+            project_id.into(),
+            "github".into(),
+            crate::github::webhook_events::HOST_URL.into(),
+            repo.owner.clone().into(),
+            repo.name.clone().into(),
+            pr_number.into(),
+        ],
+    ))
+    .await?;
+    Ok(())
+}
+
+/// タスクに結ばれた PR 行ごとの、マージを塞いでいる指摘の件数（[`blocking_count`] と同じ集計）。
+///
+/// レビューの無い PR 行は含めない（呼び出し側で null）。`can_read_review` が偽なら空——
+/// task 系のスコープしか無い PAT にレビューの中身を漏らさない。PR 行の `project_id` が
+/// タスクのプロジェクトと違うものも含めない（呼び出し元がそのプロジェクトのレビューを読めるとは限らない）。
+pub async fn blocking_by_task_pull_request<C: ConnectionTrait>(
+    db: &C,
+    task_id: Uuid,
+    project_id: Uuid,
+    can_read_review: bool,
+) -> Result<std::collections::HashMap<Uuid, i64>, sea_orm::DbErr> {
+    #[derive(sea_orm::FromQueryResult)]
+    struct Row {
+        pull_request_id: Uuid,
+        severity: Option<FindingSeverity>,
+        state: Option<FindingState>,
+    }
+
+    let mut out = std::collections::HashMap::new();
+    if !can_read_review {
+        return Ok(out);
+    }
+    // 指摘ゼロのラウンドだけの PR も 0 件として返すため、指摘は外部結合
+    let rows = Row::find_by_statement(Statement::from_sql_and_values(
+        db.get_database_backend(),
+        "SELECT DISTINCT p.id AS pull_request_id, f.id AS finding_id, f.severity, f.state
+         FROM forge_pull_request_links l
+         JOIN forge_pull_requests p ON p.id = l.pull_request_id
+         JOIN reviews r ON r.project_id = p.project_id AND r.repo_owner = p.repo_owner
+                       AND r.repo_name = p.repo_name AND r.pr_number = p.number
+         LEFT JOIN review_findings f ON f.review_id = r.id
+         WHERE l.task_id = $1 AND p.project_id = $2",
+        [task_id.into(), project_id.into()],
+    ))
+    .all(db)
+    .await?;
+    for row in rows {
+        let count = out.entry(row.pull_request_id).or_insert(0);
+        if let (Some(severity), Some(state)) = (row.severity, row.state)
+            && severity.blocks_merge()
+            && state.counts_as_unresolved()
+        {
+            *count += 1;
+        }
+    }
     Ok(out)
 }
 

@@ -11,6 +11,7 @@ describe('parseCalendarUrlState', () => {
       from: '2026-10-12',
       memberIds: [],
       projectIds: [],
+      selected: null,
     });
   });
 
@@ -25,6 +26,11 @@ describe('parseCalendarUrlState', () => {
     expect(state.memberIds).toEqual(['u1', 'u2']);
     expect(state.projectIds).toEqual(['p1']);
   });
+
+  it('selected はオーバーレイで開くタスク。空は開かない', () => {
+    expect(parseCalendarUrlState({ selected: ['ENG-42'] }, TODAY).selected).toBe('ENG-42');
+    expect(parseCalendarUrlState({ selected: [''] }, TODAY).selected).toBeNull();
+  });
 });
 
 describe('shiftFrom', () => {
@@ -38,22 +44,24 @@ describe('applyCalendarUrlState', () => {
   it('今週の from は落とし、それ以外は書く。複数値は繰り返しで持つ', () => {
     const url = applyCalendarUrlState(
       new URL(`${BASE}?from=2026-09-28&keep=1`),
-      { from: '2026-10-12', memberIds: ['u1', 'u2'], projectIds: [] },
+      { from: '2026-10-12', memberIds: ['u1', 'u2'], projectIds: [], selected: 'ENG-42' },
       TODAY,
     );
     expect(url.searchParams.has('from')).toBe(false);
     expect(url.searchParams.getAll('member')).toEqual(['u1', 'u2']);
     expect(url.searchParams.has('project')).toBe(false);
+    expect(url.searchParams.get('selected')).toBe('ENG-42');
     // 扱わないキーは触らない
     expect(url.searchParams.get('keep')).toBe('1');
 
     const next = applyCalendarUrlState(
       url,
-      { from: '2026-10-26', memberIds: [], projectIds: ['p1'] },
+      { from: '2026-10-26', memberIds: [], projectIds: ['p1'], selected: null },
       TODAY,
     );
     expect(next.searchParams.get('from')).toBe('2026-10-26');
     expect(next.searchParams.has('member')).toBe(false);
     expect(next.searchParams.getAll('project')).toEqual(['p1']);
+    expect(next.searchParams.has('selected')).toBe(false);
   });
 });

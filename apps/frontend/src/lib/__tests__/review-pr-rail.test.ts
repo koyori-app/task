@@ -8,8 +8,14 @@ import {
   viewerGithubLogin,
 } from '@/lib/review-pr-rail';
 
-function pr(prNumber: number, title: string | null, author: string | null): ReviewedPullRequest {
+function pr(
+  prNumber: number,
+  title: string | null,
+  author: string | null,
+  state = 'open',
+): ReviewedPullRequest {
   return {
+    state,
     pr_number: prNumber,
     rounds: 1,
     pr_title: title,
@@ -24,9 +30,18 @@ function pr(prNumber: number, title: string | null, author: string | null): Revi
 describe('review PR rail', () => {
   const list = [
     pr(231, 'drive: 共有リンクに有効期限を追加', 'haru'),
-    pr(228, 'tasks: タイマーの多重起動を防ぐ', 'Mio'),
-    pr(9, null, null),
+    pr(228, 'tasks: タイマーの多重起動を防ぐ', 'Mio', 'merged'),
+    pr(9, null, null, 'unknown'),
   ];
+
+  it('PR の状態で絞り、all は絞らない', () => {
+    expect(filterPullRequests(list, '', null, 'merged').map((p) => p.pr_number)).toEqual([228]);
+    expect(filterPullRequests(list, '', null, 'unknown').map((p) => p.pr_number)).toEqual([9]);
+    expect(filterPullRequests(list, '', null, 'closed')).toEqual([]);
+    expect(filterPullRequests(list, '', null, 'all')).toHaveLength(3);
+    // 検索とは AND
+    expect(filterPullRequests(list, '231', null, 'merged')).toEqual([]);
+  });
 
   it('番号・タイトルの部分一致で探し、先頭の # は無視する', () => {
     expect(filterPullRequests(list, '#23', null).map((p) => p.pr_number)).toEqual([231]);
