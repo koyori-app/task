@@ -15,6 +15,7 @@ mod drive_folder_boundary_integration;
 mod drive_project_id_backfill_integration;
 mod drive_public_share_integration;
 mod drive_upload_acl_integration;
+mod drive_upload_body_limit_integration;
 mod drive_usage_integration;
 mod forge_commit_links_integration;
 mod forge_manual_pull_request_links_integration;
