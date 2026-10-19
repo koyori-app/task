@@ -579,17 +579,25 @@ describe('TaskComments のメンション', () => {
       ],
       mentions: { [ALICE]: { status: 'member', name: 'alice' } },
     });
-    expect(wrapper.get('[data-task-comment] [data-mention]').text()).toBe('@alice');
+    await vi.waitFor(
+      () => expect(wrapper.find('[data-task-comment] .kfm-mention').exists()).toBe(true),
+      { timeout: 10_000 },
+    );
+    expect(wrapper.get('[data-task-comment] .kfm-mention').text()).toBe('@alice');
     expect(wrapper.text()).not.toContain(ALICE);
 
     await wrapper
       .findAll('button')
       .find((b) => b.text() === '1件の返信')!
       .trigger('click');
-    const chips = wrapper.findAll('[data-task-comment] [data-mention]');
+    await vi.waitFor(
+      () => expect(wrapper.findAll('[data-task-comment] .kfm-mention')).toHaveLength(2),
+      { timeout: 10_000 },
+    );
+    const chips = wrapper.findAll('[data-task-comment] .kfm-mention');
     expect(chips).toHaveLength(2);
     expect(chips.every((c) => c.text() === '@alice')).toBe(true);
-  });
+  }, 30_000);
 
   it('既存の素の @username は札にせず今のまま描く', () => {
     const wrapper = mountComments({ threads: [thread('c-1', '@alice 旧い形')] });

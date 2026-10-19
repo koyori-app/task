@@ -123,23 +123,6 @@ export function mentionChip(
   };
 }
 
-/** 表示の分割: 地の文と札。 */
-export type BodySegment =
-  | { kind: 'text'; text: string }
-  | { kind: 'mention'; id: string; user: MentionUser | undefined };
-
-export function splitBody(body: string, table: MentionTable): BodySegment[] {
-  const out: BodySegment[] = [];
-  let last = 0;
-  for (const marker of findMarkers(body)) {
-    if (marker.from > last) out.push({ kind: 'text', text: body.slice(last, marker.from) });
-    out.push({ kind: 'mention', id: marker.id, user: lookup(table, marker.id) });
-    last = marker.to;
-  }
-  if (last < body.length) out.push({ kind: 'text', text: body.slice(last) });
-  return out;
-}
-
 /** 表は小文字の id で引く（backend は小文字で返す）。 */
 export function lookup(table: MentionTable, id: string): MentionUser | undefined {
   return table[id] ?? table[id.toLowerCase()];

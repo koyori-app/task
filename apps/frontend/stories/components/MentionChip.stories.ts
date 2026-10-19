@@ -126,17 +126,29 @@ export const Comment: Story = {
     setup: () => ({ BODY, ME, TARO, mentions }),
     template: `
       <div style="width: 1100px" class="space-y-2">
-        <div data-testid="body"><CommentBody :body="BODY" :mentions="mentions" :current-user-id="ME" /></div>
-        <div data-testid="with"><CommentBody :body="'行の高さ <@' + TARO + '> を見る'" :mentions="mentions" /></div>
-        <div data-testid="without"><CommentBody body="行の高さ を見る" :mentions="mentions" /></div>
+        <div data-testid="body"><CommentBody comment-id="chip-body" :body="BODY" :mentions="mentions" :current-user-id="ME" /></div>
+        <div data-testid="with"><CommentBody comment-id="chip-with" :body="'行の高さ <@' + TARO + '> を見る'" :mentions="mentions" /></div>
+        <div data-testid="without"><CommentBody comment-id="chip-without" body="行の高さ を見る" :mentions="mentions" /></div>
       </div>`,
   }),
   play: async ({ canvasElement }) => {
+    // コメントの本文は KFM の描き手で非同期に描かれるので、三つとも描き終えるのを待つ
+    await waitFor(
+      async () => {
+        await expect(canvasElement.querySelectorAll('[data-testid] .kfm-content p')).toHaveLength(
+          3,
+        );
+        await expect(
+          canvasElement.querySelectorAll('[data-testid="body"] .kfm-mention'),
+        ).toHaveLength(5);
+      },
+      { timeout: 10_000 },
+    );
     const pick = (id: string) =>
-      canvasElement.querySelector<HTMLElement>(`[data-testid="${id}"] p`)!;
+      canvasElement.querySelector<HTMLElement>(`[data-testid="${id}"] .kfm-content p`)!;
     await expectChips(pick('body'), { withChip: pick('with'), without: pick('without') });
     // 本人へのメンションは強調（反転の地）
-    const self = pick('body').querySelector<HTMLElement>('[data-mention-self]');
+    const self = pick('body').querySelector<HTMLElement>('.kfm-mention-self');
     await expect(self?.textContent).toBe('@aki');
   },
 };
@@ -201,13 +213,20 @@ export const AvatarMatchesUserAvatar: Story = {
     setup: () => ({ ME, HANAKO, mentions }),
     template: `
       <div class="flex items-center gap-4 text-sm">
-        <div data-testid="chip-active"><CommentBody :body="'<@' + ME + '>'" :mentions="mentions" /></div>
+        <div data-testid="chip-active"><CommentBody comment-id="parity-active" :body="'<@' + ME + '>'" :mentions="mentions" /></div>
         <UserAvatar data-testid="avatar-active" size="xs" :user="{ name: 'aki' }" decorative />
-        <div data-testid="chip-inactive"><CommentBody :body="'<@' + HANAKO + '>'" :mentions="{ [HANAKO]: { status: 'outside', name: 'hanako', avatar_url: null } }" /></div>
+        <div data-testid="chip-inactive"><CommentBody comment-id="parity-inactive" :body="'<@' + HANAKO + '>'" :mentions="{ [HANAKO]: { status: 'outside', name: 'hanako', avatar_url: null } }" /></div>
         <UserAvatar data-testid="avatar-inactive" size="xs" :user="{ name: 'hanako' }" decorative inactive />
       </div>`,
   }),
   play: async ({ canvasElement }) => {
+    await waitFor(
+      async () =>
+        expect(
+          canvasElement.querySelectorAll('[data-testid^="chip-"] .kfm-mention-avatar'),
+        ).toHaveLength(2),
+      { timeout: 10_000 },
+    );
     const chipAvatar = (id: string) =>
       canvasElement.querySelector<HTMLElement>(`[data-testid="${id}"] .kfm-mention-avatar`)!;
     const userAvatar = (id: string) =>

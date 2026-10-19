@@ -127,8 +127,12 @@ describe('rehype-kfm-code (SSR / rehype 層)', () => {
 
   it('markdown 直書きの生 <kfm-code> (属性付き) は不活性化される (フェンス経由のみが正規経路)', async () => {
     const html = await renderDescription('<kfm-code data-lang="ts" onclick="pwn()">hi</kfm-code>');
+    // 要素にならず、属性は効かず、書いた字が見える
+    const doc = new DOMParser().parseFromString(html, 'text/html');
     expect(html).not.toContain('<kfm-code');
-    expect(html).not.toContain('onclick');
+    expect(doc.querySelector('kfm-code')).toBeNull();
+    expect(doc.querySelector('[onclick]')).toBeNull();
+    expect(doc.body.textContent).toBe('<kfm-code data-lang="ts" onclick="pwn()">hi</kfm-code>');
   });
 
   it('SSR/CSR 同一性: 同一入力は独立 renderer 間で同一 HTML、L1 cache 越しも同一', async () => {

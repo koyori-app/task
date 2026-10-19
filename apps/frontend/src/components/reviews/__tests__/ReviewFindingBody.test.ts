@@ -68,10 +68,14 @@ describe('ReviewFindingBody', () => {
       ].join('\n'),
     );
     const html = wrapper.find('div[data-review-finding-body]').element.innerHTML;
-    // 危うい物は残らない
+    // 危うい物は要素・属性・scheme として残らない（生の HTML は字として見える）
     expect(html).not.toContain('<script');
-    expect(html).not.toContain('onerror');
+    expect(html).not.toContain('<img');
+    expect(wrapper.find('script').exists()).toBe(false);
+    expect(wrapper.find('img').exists()).toBe(false);
+    expect(wrapper.find('[onerror]').exists()).toBe(false);
     expect(html).not.toContain('javascript:');
+    expect(wrapper.text()).toContain('<script>alert(1)</script>');
     // 陽性対照: 同じ経路で普通の印は出る (無害化が効きすぎて空になっていない)
     expect(wrapper.find('strong').text()).toBe('重要');
     const hrefs = wrapper.findAll('a').map((a) => a.attributes('href'));

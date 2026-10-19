@@ -63,8 +63,12 @@ describe('remark-kfm-mermaid (SSR / remark 層)', () => {
 
   it('markdown 直書きの生 <kfm-mermaid> (属性付き) は不活性化される (フェンス経由のみが正規経路)', async () => {
     const html = await renderDescription('<kfm-mermaid onclick="pwn()">hi</kfm-mermaid>');
+    // 要素にならず、属性は効かず、書いた字が見える
+    const doc = new DOMParser().parseFromString(html, 'text/html');
     expect(html).not.toContain('<kfm-mermaid');
-    expect(html).not.toContain('onclick');
+    expect(doc.querySelector('kfm-mermaid')).toBeNull();
+    expect(doc.querySelector('[onclick]')).toBeNull();
+    expect(doc.body.textContent).toBe('<kfm-mermaid onclick="pwn()">hi</kfm-mermaid>');
   });
 });
 

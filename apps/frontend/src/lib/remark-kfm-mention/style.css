@@ -1,5 +1,5 @@
-/* メンションの札（remark-kfm-mention が emit する span.kfm-mention）。説明文の KFM・コメントの札
- * （CommentMention.vue）・入力欄の札（comment-mention-extensions.ts の widget）が、この一枚を使う。
+/* メンションの札（remark-kfm-mention が emit する span.kfm-mention）。説明文とコメントの KFM の描き手・
+ * 入力欄の札（comment-mention-extensions.ts の widget）が、この一枚を使う。
  *
  * 形: 丸い地の札に、頭のアバター（UserAvatar の xs と同じ 1rem の丸）と `@名` を並べる。
  * 札の高さは字の大きさに比べて決め（1.25em）、行の高さを広げぬよう行の中ほどに置く。
