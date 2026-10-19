@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 
+import type { components } from '@/generated/api';
+
 import TaskIssueSourceRow from '../TaskIssueSourceRow.vue';
 
-const issue = {
+const issue: components['schemas']['TaskForgeIssue'] = {
   host: 'github',
   repo_owner: 'acme',
   repo_name: 'backend',
@@ -36,6 +38,10 @@ describe('TaskIssueSourceRow', () => {
     ['unknown', '状態不明'],
   ])('状態 %s は %s と出す', (state, label) => {
     expect(mountWith({ state }).text()).toContain(label);
+  });
+
+  it('同期の時刻を控える前の行（last_synced_at が null）では最終同期を出さない', () => {
+    expect(mountWith({ last_synced_at: null }).text()).not.toContain('最終同期');
   });
 
   it('pending_push なら反映待ちを出す', () => {

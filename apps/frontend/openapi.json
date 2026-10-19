@@ -26688,7 +26688,6 @@
           "number",
           "html_url",
           "state",
-          "last_synced_at",
           "pending_push"
         ],
         "properties": {
@@ -26701,9 +26700,9 @@
             "description": "サーバー側で組み立てた Issue の URL"
           },
           "last_synced_at": {
-            "type": "string",
+            "type": ["string", "null"],
             "format": "date-time",
-            "description": "最後に同期（取り込み・書き戻し）した時刻"
+            "description": "最後に同期（取り込み・webhook の適用・書き戻し）した時刻。同期の時刻を控える前の行では null"
           },
           "number": {
             "type": "integer",

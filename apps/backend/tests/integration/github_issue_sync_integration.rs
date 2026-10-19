@@ -902,7 +902,14 @@ async fn github_issue_sync_suite() {
         );
         assert_eq!(issue["state"], "open");
         assert_eq!(issue["pending_push"], false);
-        assert!(issue["last_synced_at"].is_string());
+        let synced_at = |issue: &serde_json::Value| {
+            issue["last_synced_at"]
+                .as_str()
+                .expect("last_synced_at")
+                .parse::<chrono::DateTime<chrono::Utc>>()
+                .expect("rfc3339")
+        };
+        let imported_at = synced_at(&issue);
         assert_eq!(
             get_issue(closed_task.id).await["state"],
             "closed",
@@ -920,7 +927,10 @@ async fn github_issue_sync_suite() {
         )
         .await
         .expect("apply closed event");
-        assert_eq!(get_issue(open_task.id).await["state"], "closed");
+        let issue = get_issue(open_task.id).await;
+        assert_eq!(issue["state"], "closed");
+        let applied_at = synced_at(&issue);
+        assert!(applied_at > imported_at, "webhook の適用で最終同期が進む");
 
         // タスク側で開き直すと反映待ちになり、書き戻した後は open になる
         // （書き戻しの跳ね返りはウォーターマークで捨てられるので、書き戻し側で控える）
@@ -934,6 +944,11 @@ async fn github_issue_sync_suite() {
         let issue = get_issue(task.id).await;
         assert_eq!(issue["pending_push"], true);
         assert_eq!(
+            synced_at(&issue),
+            applied_at,
+            "タスクの編集で反映待ちが立っても、同期していないので最終同期は進まない"
+        );
+        assert_eq!(
             issue["state"], "closed",
             "書き戻すまでは GitHub 側の状態のまま"
         );
@@ -943,6 +958,7 @@ async fn github_issue_sync_suite() {
         let issue = get_issue(task.id).await;
         assert_eq!(issue["pending_push"], false);
         assert_eq!(issue["state"], "open");
+        assert!(synced_at(&issue) > applied_at, "書き戻しで最終同期が進む");
 
         // 連携を解除するとリンクごと消え、取り込んでいないタスクと同じく null
         github_integrations::Entity::delete_by_id(integration.id)

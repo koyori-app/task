@@ -31,7 +31,7 @@ pub async fn find_for_task<C: ConnectionTrait>(
         repo_name: integration.repo_name,
         number: link.github_number,
         state: link.github_state,
-        last_synced_at: link.updated_at.with_timezone(&chrono::Utc),
+        last_synced_at: link.last_synced_at.map(|at| at.with_timezone(&chrono::Utc)),
         pending_push: link.pending_push,
     }))
 }

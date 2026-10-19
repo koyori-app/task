@@ -44,7 +44,8 @@ const now = useNow();
       class="shrink-0 rounded border px-1 text-xs text-amber-700 dark:text-amber-400"
       >GitHub への反映待ち</span
     >
-    <span class="shrink-0 text-xs text-muted-foreground"
+    <!-- 同期の時刻を控える前の行は null。版の時刻で埋めると同期していないのに新しく見える -->
+    <span v-if="issue.last_synced_at" class="shrink-0 text-xs text-muted-foreground"
       >最終同期 {{ relativeTime(issue.last_synced_at, now) }}</span
     >
   </div>

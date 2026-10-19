@@ -155,6 +155,7 @@ pub async fn apply_issue(
             link_active.github_updated_at = Set(issue.updated_at.into());
             // 列追加前に同期した行（unknown）も、ここで埋まる
             link_active.github_state = Set(content.github_state().to_owned());
+            link_active.last_synced_at = Set(Some(chrono::Utc::now().into()));
             // 内容は変わっていなくても版は進める。ここを据え置くと、書き戻し中の
             // push_task が「自分が読んだときのまま」と判断して条件付き更新を通し、
             // ここで進めた github_updated_at を PATCH 時点の時刻へ後退させてしまう。
@@ -196,6 +197,7 @@ pub async fn apply_issue(
         link_active.synced_hash = Set(hash);
         link_active.github_updated_at = Set(issue.updated_at.into());
         link_active.github_state = Set(content.github_state().to_owned());
+        link_active.last_synced_at = Set(Some(chrono::Utc::now().into()));
         link_active.updated_at = Set(chrono::Utc::now().into());
         link_active.update(&txn).await?;
         (task_id, "github_issue_synced")
@@ -240,6 +242,7 @@ pub async fn apply_issue(
             pending_push: Set(false),
             updated_at: Set(now.into()),
             github_state: Set(content.github_state().to_owned()),
+            last_synced_at: Set(Some(now.into())),
         }
         .insert(&txn)
         .await?;
@@ -459,6 +462,11 @@ pub async fn push_task(
         .col_expr(
             github_issue_links::Column::GithubUpdatedAt,
             Expr::value(watermark),
+        )
+        // 版（updated_at）と違い、GitHub と実際に揃えたときだけ進める
+        .col_expr(
+            github_issue_links::Column::LastSyncedAt,
+            Expr::value(chrono::Utc::now()),
         )
         .col_expr(
             github_issue_links::Column::UpdatedAt,

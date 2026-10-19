@@ -113,9 +113,9 @@ pub struct TaskForgeIssue {
     pub html_url: String,
     /// `open` / `closed` / `unknown`（同期で控えていない行）
     pub state: String,
-    /// 最後に同期（取り込み・書き戻し）した時刻
-    #[schema(value_type = String, format = "date-time")]
-    pub last_synced_at: DateTime<Utc>,
+    /// 最後に同期（取り込み・webhook の適用・書き戻し）した時刻。同期の時刻を控える前の行では null
+    #[schema(value_type = Option<String>, format = "date-time")]
+    pub last_synced_at: Option<DateTime<Utc>>,
     /// タスク側の変更が GitHub へまだ反映されていない
     pub pending_push: bool,
 }
