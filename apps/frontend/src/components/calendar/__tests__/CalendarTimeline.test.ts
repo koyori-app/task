@@ -97,6 +97,22 @@ describe('CalendarTimeline', () => {
     expect(wrapper.get('[aria-current="date"]').attributes('data-date')).toBe('2026-10-14');
   });
 
+  it('メンバーの行の見出しに担当者のアバターを出し、画像が無ければ頭文字にする', () => {
+    const wrapper = mountTimeline([task({ soft_deadline: '2026-10-14T00:00:00Z' })]);
+    const avatar = wrapper.get(`[data-member-row="${ALICE.id}"] [data-member-avatar]`);
+    expect(avatar.text()).toBe('A');
+    // 名前が隣にあるので読み上げない
+    expect(avatar.attributes('aria-hidden')).toBe('true');
+    expect(wrapper.get(`[data-member-row="${BOB.id}"] [data-member-avatar]`).text()).toBe('B');
+  });
+
+  it('担当者なしの行は頭文字ではなく人のアイコンを出す', () => {
+    const wrapper = mountTimeline([task({ soft_deadline: '2026-10-14T00:00:00Z', assignees: [] })]);
+    const avatar = wrapper.get('[data-member-row="__unassigned__"] [data-member-avatar]');
+    expect(avatar.text()).toBe('');
+    expect(avatar.find('svg').exists()).toBe(true);
+  });
+
   it('期間にタスクが無ければ空状態を出し、メンバーの行は出さない', () => {
     const wrapper = mountTimeline([]);
     expect(wrapper.find('[data-calendar-empty]').text()).toBe('この期間のタスクはありません');
