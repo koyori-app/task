@@ -99,6 +99,8 @@ const isNotFound = computed(
 // ---- 編集 ----
 const editing = ref(props.initialEditing);
 const draftTitle = ref('');
+/** 下書きの元にしたタイトル。改名はここから変えたときだけ送る（取り直したメタデータと比べると、他の人の改名を戻してしまう） */
+const draftBaseTitle = ref('');
 const draftBody = ref('');
 const draftReady = ref(false);
 /** 下書きの元にした本文の ETag。`If-Match` はこれを送る（再取得で差し替えない） */
@@ -113,6 +115,7 @@ function resetDraft() {
   const loaded = contentQuery.data.value;
   if (!current || !loaded) return;
   draftTitle.value = documentTitle(current.name);
+  draftBaseTitle.value = draftTitle.value;
   draftBody.value = loaded.body;
   // 本文と同じ応答の ETag を使う。メタデータと本文は別々に取るので、その間に他の人が
   // 保存するとメタデータの ETag だけが新しくなり、古い本文の下書きで上書きしてしまう
@@ -133,7 +136,7 @@ const dirty = computed(
   () =>
     editing.value &&
     draftReady.value &&
-    (draftBody.value !== content.value || draftTitle.value.trim() !== title.value),
+    (draftBody.value !== content.value || draftTitle.value.trim() !== draftBaseTitle.value),
 );
 
 function setEditUrl(on: boolean) {
@@ -207,7 +210,7 @@ async function save() {
       // 本文の KEY-N から関連タスクが変わる
       void queryClient.invalidateQueries({ queryKey: tasksKey.value });
     }
-    if (documentFileName(nextTitle) !== current.name) {
+    if (nextTitle !== draftBaseTitle.value) {
       const { data, error } = await fetchClient.PATCH(DRIVE_FILE_PATH, {
         params: { path },
         body: { name: documentFileName(nextTitle) },

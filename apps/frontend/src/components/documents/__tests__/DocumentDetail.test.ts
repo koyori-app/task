@@ -32,6 +32,10 @@ type Put = { ifMatch: string | null; body: unknown };
 
 let putStatus: number;
 let puts: Put[];
+let patches: unknown[];
+/** メタデータの応答のファイル名。他の人の改名を表す */
+let metaName: string;
+let queryClient: QueryClient;
 let content: string;
 /** 本文の応答に付く ETag。既定はメタデータと同じ */
 let contentEtag: string;
@@ -40,6 +44,9 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/acme/projects/ENG/docs/file-1');
   putStatus = 200;
   puts = [];
+  patches = [];
+  metaName = meta.name;
+  queryClient = new QueryClient();
   content = '旧い本文';
   contentEtag = ETAG;
   vi.stubGlobal('fetch', async (input: Request | string, init?: RequestInit) => {
@@ -81,7 +88,11 @@ beforeEach(() => {
       if (putStatus !== 200) return Response.json({ message: 'x' }, { status: putStatus });
       return Response.json({ ...meta, etag: '"sha256:new"' });
     }
-    if (path.endsWith('/drive/files/file-1')) return Response.json(meta);
+    if (path.endsWith('/drive/files/file-1') && input.method === 'PATCH') {
+      patches.push(await input.json());
+      return Response.json({ ...meta, name: metaName });
+    }
+    if (path.endsWith('/drive/files/file-1')) return Response.json({ ...meta, name: metaName });
     return Response.json({ message: 'not found' }, { status: 404 });
   });
 });
@@ -104,7 +115,7 @@ function mountDetail(options: { editing?: boolean } = {}) {
       initialSource: null,
     },
     global: {
-      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]],
+      plugins: [[VueQueryPlugin, { queryClient }]],
       stubs: { CreateTaskDialog: true },
     },
     attachTo: document.body,
@@ -238,6 +249,50 @@ describe('DocumentDetail 編集', () => {
       { ifMatch: '"sha256:theirs"', body: { content: '自分の編集' } },
     ]);
     expect(wrapper.find('form').exists()).toBe(false);
+  });
+
+  it('本文だけを直して上書きしても、他の人が変えたタイトルを下書きの名前へ戻さない', async () => {
+    const wrapper = mountDetail({ editing: true });
+    const alert = await submitConflict(wrapper);
+    // 412 の間に他の人がタイトルも変えた
+    metaName = '改名後.md';
+
+    putStatus = 200;
+    await alert.findAll('button')[1]!.trigger('click');
+    await flushPromises();
+
+    expect(puts).toHaveLength(2);
+    expect(patches).toEqual([]);
+  });
+
+  it('メタデータを取り直して名前が変わっても、タイトルに触れていなければ未保存の変更にしない', async () => {
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    const wrapper = mountDetail({ editing: true });
+    await flushPromises();
+    metaName = '改名後.md';
+    await queryClient.refetchQueries();
+    await flushPromises();
+
+    const cancel = wrapper.findAll('button').find((button) => button.text() === 'キャンセル')!;
+    await cancel.trigger('click');
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(wrapper.find('form').exists()).toBe(false);
+    // 取り直した名前が出ている（取り直しが効いている）
+    expect(wrapper.get('h1').text()).toBe('改名後');
+  });
+
+  it('タイトルを変えたときだけ改名を送る', async () => {
+    const wrapper = mountDetail({ editing: true });
+    await flushPromises();
+    await wrapper.get('input').setValue('新しい仕様');
+
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+
+    expect(puts).toEqual([]);
+    expect(patches).toEqual([{ name: '新しい仕様.md' }]);
   });
 
   it.each([
