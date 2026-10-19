@@ -878,10 +878,14 @@ Drive ファイル本体は削除しない。
 プロジェクトの「ドキュメント」（`/{tenant}/projects/{key}/docs`。URL は
 [url-spec](../frontend/url-spec.md)）は Drive の上に載せた画面で、専用のテーブル・API は持たない。
 
-- 実体はプロジェクトのルートフォルダ直下の `.md` ファイル。ルートフォルダは
-  `GET .../drive/folders?project_id=<uuid>&root_only=true` の先頭 1 件で取り、無ければ空状態を出す
+- 実体はプロジェクトのルートフォルダ直下の `.md` ファイル（MIME が `text/markdown` で名前が `.md` で
+  終わるもの。一覧・詳細・`+data.ts` で同じ条件）。ルートフォルダは
+  `GET .../drive/folders?project_id=<uuid>&root_only=true` の先頭 1 件で取り、無ければ一覧は空状態を出し、
+  詳細はどのファイルも「見つかりません」にする（`folder_id` が NULL の Drive 直下と取り違えない）
 - 一覧は `GET .../drive/files?folder_id=<root>&mime_type=text/markdown&sort=name_asc&limit=200`
-  （`?q=` をそのまま渡す）。表示名はファイル名から `.md` を落としたもの
+  （`?q=` をそのまま渡す）。Drive の改名は MIME を変えないので、名前が `.md` で終わらないものは
+  クライアントで外す。`total` は外す前の数なので、件数の注記は上限で切れたとき（`total` が返った件数より
+  多いとき）だけ出す。表示名はファイル名から `.md` を落としたもの
 - 本文は `GET /v1/drive/files/{id}/content` で取り、KFM で描画する（初回はサーバの `+data.ts`、
   編集中のプレビューと保存後は `POST /internal/render-description`。scope は `doc-<file_id>`、
   本文の `KEY-N` はタスク詳細へのリンクになる）。関連タスクは §8.5 の `GET .../files/{id}/tasks`

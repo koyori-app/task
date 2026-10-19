@@ -86,14 +86,15 @@ const isLoading = computed(
 const isError = computed(
   () => rootQuery.isError.value || metaQuery.isError.value || contentQuery.isError.value,
 );
+const rootId = computed(() => rootQuery.data.value?.[0]?.id ?? null);
 // プロジェクトのドキュメント置き場の直下に無いファイルと、.md 以外のファイルはこの画面では扱わない
-// （一覧は mime_type で絞っているが URL には任意のファイル ID を入れられる。保存で名前が `.md` に変わる）
+// （URL には任意のファイル ID を入れられる。一覧も同じ isDocumentFile で絞る）。置き場が無い
+// プロジェクトでは何も扱わない（folder_id が null の Drive 直下のファイルと取り違えない）
 const isNotFound = computed(
   () =>
     !!meta.value &&
     rootQuery.isSuccess.value &&
-    (meta.value.folder_id !== (rootQuery.data.value?.[0]?.id ?? null) ||
-      !isDocumentFile(meta.value)),
+    (!rootId.value || meta.value.folder_id !== rootId.value || !isDocumentFile(meta.value)),
 );
 
 // ---- 編集 ----

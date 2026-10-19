@@ -9,7 +9,7 @@ import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
 
 enableAutoUnmount(afterEach);
 
-type Reply = { folders: unknown[]; files: { name: string }[] };
+type Reply = { folders: unknown[]; files: { name: string }[]; total?: number };
 
 let reply: Reply;
 let fileRequests: URL[];
@@ -40,7 +40,7 @@ beforeEach(() => {
           etag: '"x"',
           ...file,
         }));
-      return Response.json({ files, total: files.length });
+      return Response.json({ files, total: reply.total ?? files.length });
     }
     return Response.json({ message: 'not found' }, { status: 404 });
   });
@@ -90,6 +90,27 @@ describe('DocumentList', () => {
     expect(params.get('mime_type')).toBe('text/markdown');
     expect(params.get('sort')).toBe('name_asc');
     expect(params.get('limit')).toBe('200');
+  });
+
+  it('Drive で .md 以外へ改名したファイルは並べず、それで件数の注記も出さない', async () => {
+    // 改名は名前だけを変え、MIME は text/markdown のまま
+    reply.files = [{ name: '設計メモ.md' }, { name: 'メモ.txt' }];
+    const wrapper = mountList();
+    await settle();
+
+    expect(wrapper.findAll('li a').map((link) => link.find('span').text())).toEqual(['設計メモ']);
+    expect(wrapper.text()).not.toContain('先頭の');
+  });
+
+  it('API の上限で切れたときだけ件数の注記を出す', async () => {
+    reply.files = [{ name: '設計メモ.md' }, { name: 'メモ.txt' }];
+    reply.total = 250;
+    const wrapper = mountList();
+    await settle();
+
+    expect(wrapper.text()).toContain(
+      'Markdown ファイル 250 件のうち、先頭の 200 件だけを読み込んでいます',
+    );
   });
 
   it('ルートフォルダが無ければ置き場が無い旨を出し、新規作成を押せない', async () => {

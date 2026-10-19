@@ -179,6 +179,24 @@ describe('DocumentDetail 閲覧', () => {
 
     expect(wrapper.text()).toContain('ドキュメントが見つかりません');
   });
+
+  it('ルートフォルダが無いプロジェクトでは Drive 直下の .md も見つからない扱い', async () => {
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: Request | string, init?: RequestInit) => {
+      if (typeof input !== 'string') {
+        const path = new URL(input.url).pathname;
+        if (path.endsWith('/drive/folders')) return Response.json([]);
+        if (path.endsWith('/drive/files/file-1'))
+          return Response.json({ ...meta, folder_id: null });
+      }
+      return original(input, init);
+    });
+    const wrapper = mountDetail({ editing: true });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('ドキュメントが見つかりません');
+    expect(wrapper.find('form').exists()).toBe(false);
+  });
 });
 
 describe('DocumentDetail 編集', () => {

@@ -15,7 +15,7 @@ import {
   projectDocumentsQueryOptions,
   projectRootFoldersQueryOptions,
 } from '@/lib/api-vue-query';
-import { documentTitle } from '@/lib/documents/name';
+import { documentTitle, isDocumentFile } from '@/lib/documents/name';
 import { formatTaskDate } from '@/lib/task-display';
 
 type DriveFile = components['schemas']['DriveFileResponse'];
@@ -50,7 +50,10 @@ const filesQuery = useQuery(
     enabled: !!rootFolderId.value,
   })),
 );
-const files = computed(() => filesQuery.data.value?.files ?? []);
+const listed = computed(() => filesQuery.data.value?.files ?? []);
+// 詳細画面と同じ条件で絞る。Drive の改名は MIME を変えないので、.md 以外へ改名したファイルも返ってくる
+const files = computed(() => listed.value.filter(isDocumentFile));
+/** API が返した Markdown ファイルの総数（.md 以外へ改名したものを含む） */
 const total = computed(() => filesQuery.data.value?.total ?? 0);
 
 const isLoading = computed(
@@ -129,9 +132,9 @@ function onCreated(file: DriveFile) {
           </a>
         </li>
       </ul>
-      <p v-if="total > files.length" class="text-xs text-muted-foreground">
-        先頭の {{ DOCUMENT_LIST_LIMIT }} 件を表示しています（全
-        {{ total }} 件）。検索で絞り込んでください
+      <p v-if="total > listed.length" class="text-xs text-muted-foreground">
+        Markdown ファイル {{ total }} 件のうち、先頭の {{ DOCUMENT_LIST_LIMIT }}
+        件だけを読み込んでいます。検索で絞り込んでください
       </p>
     </template>
 
