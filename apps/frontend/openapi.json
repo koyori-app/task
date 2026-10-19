@@ -26049,7 +26049,7 @@
       "ReviewedPullRequest": {
         "type": "object",
         "description": "レビューのある PR の一覧行。画面の PR 一覧が使う。",
-        "required": ["pr_number", "rounds", "unresolved", "blocking", "last_reviewed_at"],
+        "required": ["pr_number", "rounds", "unresolved", "blocking", "last_reviewed_at", "state"],
         "properties": {
           "blocking": {
             "type": "integer",
@@ -26062,6 +26062,15 @@
             "format": "date-time",
             "description": "最新ラウンドの作成時刻"
           },
+          "merge_effects_processed_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "マージ時の副作用を処理した時刻。`state = merged` で null なら未適用"
+          },
+          "merged_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
           "pr_author": {
             "type": ["string", "null"]
           },
@@ -26072,10 +26081,19 @@
           "pr_title": {
             "type": ["string", "null"]
           },
+          "pull_request_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "自然キー（プロジェクト・リポジトリ・番号）で結んだ PR 行。無ければ null"
+          },
           "rounds": {
             "type": "integer",
             "format": "int32",
             "description": "これまでのラウンド数"
+          },
+          "state": {
+            "type": "string",
+            "description": "ホスト上の PR の状態（`open` / `closed` / `merged` / `unknown`）。\nPR 行（`forge_pull_requests`）が無い、または webhook をまだ受けていなければ `unknown`"
           },
           "unresolved": {
             "type": "integer",
@@ -26862,7 +26880,7 @@
           "unresolved": {
             "type": ["integer", "null"],
             "format": "int64",
-            "description": "未解決のレビュー指摘の件数。レビューとの結線（TASK-264）までは常に null"
+            "description": "マージを塞いでいるレビュー指摘（High / Medium の open / fixing / fixed）の件数。\nレビューの無い PR、タスクと別プロジェクトの PR 行、`read:review` を持たない PAT では null"
           }
         }
       },

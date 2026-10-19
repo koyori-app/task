@@ -19,6 +19,7 @@ mod drive_usage_integration;
 mod forge_commit_links_integration;
 mod forge_manual_pull_request_links_integration;
 mod forge_pull_request_links_integration;
+mod forge_reviews_integration;
 mod github_http_integration;
 mod github_integration;
 mod github_issue_sync_integration;
