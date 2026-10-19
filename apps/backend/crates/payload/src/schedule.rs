@@ -34,6 +34,10 @@ pub struct ScheduleQuery {
     pub user_id: Vec<Uuid>,
     /// 完了ステータスのタスクを含めるか。既定 true
     pub include_done: Option<bool>,
+    /// 締切超過のタスク（Soft 締切・開始予定日・見積があり、期間より前に終わっている未完了のもの）も
+    /// 含めるか。既定 false。
+    /// 山積みで締切超過の残工数を今日に積むために、期間に今日を含むときに使う
+    pub include_overdue: Option<bool>,
     /// 前ページの `next_cursor`
     pub cursor: Option<String>,
     /// タスクの件数。既定 200、上限 500
@@ -75,6 +79,8 @@ pub struct ScheduleTask {
     pub hard_deadline: Option<DateTime<Utc>>,
     #[schema(nullable)]
     pub estimated_minutes: Option<i32>,
+    /// 作業記録（`time_logs`）の合計（分）。担当者以外の記録も含む。記録が無ければ 0
+    pub logged_minutes: i32,
     pub assignees: Vec<ScheduleAssignee>,
     #[schema(value_type = Option<String>, format = "uuid", nullable)]
     pub sprint_id: Option<Uuid>,

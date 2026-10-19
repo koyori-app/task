@@ -21806,6 +21806,15 @@
             }
           },
           {
+            "name": "include_overdue",
+            "in": "query",
+            "description": "締切超過のタスク（Soft 締切・開始予定日・見積があり、期間より前に終わっている未完了のもの）も\n含めるか。既定 false。\n山積みで締切超過の残工数を今日に積むために、期間に今日を含むときに使う",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "description": "前ページの `next_cursor`",
@@ -26175,6 +26184,7 @@
           "status",
           "priority",
           "progress_pct",
+          "logged_minutes",
           "assignees"
         ],
         "properties": {
@@ -26195,6 +26205,11 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "logged_minutes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "作業記録（`time_logs`）の合計（分）。担当者以外の記録も含む。記録が無ければ 0"
           },
           "milestone_id": {
             "type": ["string", "null"],

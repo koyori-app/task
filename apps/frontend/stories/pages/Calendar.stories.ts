@@ -36,6 +36,7 @@ function task(seq: number, overrides: Partial<ScheduleTask>): ScheduleTask {
     status: TODO,
     priority: 'Medium',
     progress_pct: 0,
+    logged_minutes: 0,
     assignees: [],
     ...overrides,
   };
