@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
 use entity::tasks::TaskPriority;
+use payload::forge::{LinkTaskPullRequestRequest, TaskForgePullRequest, TaskForgeResponse};
 use payload::projects::ProjectResponse;
 use payload::task_comments::{CreateCommentRequest, TaskCommentResponse};
 use payload::task_extensions::SearchTasksResponse;
@@ -14,7 +15,7 @@ use uuid::Uuid;
 
 use crate::Context;
 use crate::api::ApiClient;
-use crate::cli::{TaskClearArgs, TaskFieldArgs, TasksCommand};
+use crate::cli::{TaskClearArgs, TaskFieldArgs, TaskPrCommand, TasksCommand};
 use crate::error::{CliError, Result};
 use crate::output::{OutputOptions, print};
 use crate::resolve::{
@@ -307,8 +308,162 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 println!("Deleted {task_id}");
             }
         }
+        TasksCommand::Pr { command } => run_pull_requests(context, command, output).await?,
     }
     Ok(0)
+}
+
+/// タスクと PR の連携（docs/features/tasks/9.github-tasks.md §8）。
+async fn run_pull_requests(
+    context: &Context,
+    command: TaskPrCommand,
+    output: OutputOptions,
+) -> Result<()> {
+    match command {
+        TaskPrCommand::List { task_ref, project } => {
+            let target = check_task_target(&task_ref, project.as_deref())?;
+            let api = &context.connect()?;
+            let (project, task_id) = resolve_task_target(api, target).await?;
+            let forge = task_forge(api, project.id, &task_id).await?;
+            if output.json {
+                print(&forge, output);
+            } else {
+                print_task_forge(&forge);
+            }
+        }
+        TaskPrCommand::Link {
+            task_ref,
+            number,
+            closes,
+            project,
+        } => {
+            let target = check_task_target(&task_ref, project.as_deref())?;
+            let api = &context.connect()?;
+            let (project, task_id) = resolve_task_target(api, target).await?;
+            let mut segments = task_forge_path(api, project.id, &task_id);
+            segments.push("pull-requests".into());
+            let linked: TaskForgePullRequest = api
+                .post(
+                    &borrow(&segments),
+                    &LinkTaskPullRequestRequest { number, closes },
+                )
+                .await?;
+            if output.json {
+                print(&linked, output);
+            } else {
+                println!("{}", format_pull_request(&linked));
+            }
+        }
+        TaskPrCommand::Unlink {
+            task_ref,
+            number,
+            project,
+        } => {
+            let target = check_task_target(&task_ref, project.as_deref())?;
+            let api = &context.connect()?;
+            let (project, task_id) = resolve_task_target(api, target).await?;
+            // API は PR の ID で外すので、一覧から番号で引く
+            let forge = task_forge(api, project.id, &task_id).await?;
+            let pull_request = pick_linked_pull_request(&forge, number, &task_ref)?;
+            let mut segments = task_forge_path(api, project.id, &task_id);
+            segments.extend(["pull-requests".into(), pull_request.id.to_string()]);
+            api.delete(&borrow(&segments)).await?;
+            if output.json {
+                print(&json!({ "unlinked": pull_request.id }), output);
+            } else {
+                println!("Unlinked {}", pull_request_name(pull_request));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn task_forge_path(api: &ApiClient, project_id: Uuid, task_id: &str) -> Vec<String> {
+    let mut segments = task_path(api, project_id, task_id);
+    segments.push("forge".into());
+    segments
+}
+
+async fn task_forge(api: &ApiClient, project_id: Uuid, task_id: &str) -> Result<TaskForgeResponse> {
+    api.get(&borrow(&task_forge_path(api, project_id, task_id)), &[])
+        .await
+}
+
+/// 外す PR を番号で選ぶ。連携先の付け替えや、別プロジェクトのリポジトリの PR が `KEY-N` で
+/// 結ばれることで、同じ番号が複数並びうる。リンクと同じく現在の連携先のものを優先する。
+fn pick_linked_pull_request<'a>(
+    forge: &'a TaskForgeResponse,
+    number: i32,
+    task_ref: &str,
+) -> Result<&'a TaskForgePullRequest> {
+    let matches: Vec<_> = forge
+        .pull_requests
+        .iter()
+        .filter(|pr| pr.number == number)
+        .collect();
+    let in_current: Vec<_> = matches
+        .iter()
+        .copied()
+        .filter(|pr| {
+            forge.repository.as_ref().is_some_and(|repo| {
+                (
+                    &repo.host,
+                    &repo.host_url,
+                    &repo.repo_owner,
+                    &repo.repo_name,
+                ) == (&pr.host, &pr.host_url, &pr.repo_owner, &pr.repo_name)
+            })
+        })
+        .collect();
+    match (matches.as_slice(), in_current.as_slice()) {
+        ([only], _) | (_, [only]) => Ok(only),
+        ([], _) => Err(CliError::not_found(format!(
+            "Pull request #{number} is not linked to {task_ref}"
+        ))),
+        _ => Err(CliError::validation(format!(
+            "Several pull requests #{number} are linked to {task_ref} ({}); unlink it from the web UI",
+            matches
+                .iter()
+                .map(|pr| pull_request_name(pr))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
+fn print_task_forge(forge: &TaskForgeResponse) {
+    match &forge.repository {
+        Some(repo) => println!(
+            "Repository: {}/{} ({})",
+            repo.repo_owner, repo.repo_name, repo.html_url
+        ),
+        None => println!("Repository: none (this project is not connected to GitHub)"),
+    }
+    if forge.pull_requests.is_empty() {
+        println!("No linked pull requests");
+    }
+    for pull_request in &forge.pull_requests {
+        println!("{}", format_pull_request(pull_request));
+    }
+}
+
+/// `{owner}/{name}#{番号}\t{状態}\t{closes|-}\t{リンク元}\t{タイトル}`
+fn format_pull_request(pull_request: &TaskForgePullRequest) -> String {
+    format!(
+        "{}\t{}\t{}\t{}\t{}",
+        pull_request_name(pull_request),
+        pull_request.state,
+        if pull_request.closes { "closes" } else { "-" },
+        pull_request.sources.join(","),
+        pull_request.title,
+    )
+}
+
+fn pull_request_name(pull_request: &TaskForgePullRequest) -> String {
+    format!(
+        "{}/{}#{}",
+        pull_request.repo_owner, pull_request.repo_name, pull_request.number
+    )
 }
 
 /// 状態だけを完了へ動かす更新本文（`tasks complete` と `my complete` が共有する）。
@@ -1148,6 +1303,114 @@ mod tests {
         assert_eq!(
             shown.tasks[0].description.as_deref(),
             Some("@（不明な利用者） 確認")
+        );
+    }
+
+    fn linked_pull_request(id: u128, repo: &str, number: i32) -> serde_json::Value {
+        let (owner, name) = repo.split_once('/').unwrap();
+        json!({
+            "id": uuid(id),
+            "host": "github",
+            "host_url": "https://github.com",
+            "repo_owner": owner,
+            "repo_name": name,
+            "number": number,
+            "title": "t",
+            "author_handle": "",
+            "state": "open",
+            "html_url": format!("https://github.com/{repo}/pull/{number}"),
+            "merged_at": null,
+            "merge_effects_processed_at": null,
+            "commits_complete": false,
+            "sources": ["manual"],
+            "closes": false,
+            "unresolved": null,
+        })
+    }
+
+    fn forge_with(
+        repository: Option<&str>,
+        pull_requests: Vec<serde_json::Value>,
+    ) -> TaskForgeResponse {
+        let repository = repository.map(|repo| {
+            let (owner, name) = repo.split_once('/').unwrap();
+            json!({
+                "host": "github",
+                "host_url": "https://github.com",
+                "repo_owner": owner,
+                "repo_name": name,
+                "html_url": format!("https://github.com/{repo}"),
+            })
+        });
+        serde_json::from_value(json!({
+            "pull_requests": pull_requests,
+            "commits": [],
+            "branches": [],
+            "repository": repository,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn unlink_picks_the_linked_pull_request_with_that_number() {
+        let forge = forge_with(
+            Some("acme/app"),
+            vec![
+                linked_pull_request(1, "acme/app", 87),
+                linked_pull_request(2, "acme/app", 88),
+            ],
+        );
+        assert_eq!(
+            pick_linked_pull_request(&forge, 88, "APP-7").unwrap().id,
+            uuid(2)
+        );
+
+        let err = pick_linked_pull_request(&forge, 99, "APP-7").unwrap_err();
+        assert_eq!(err.exit_code, 5);
+        assert!(
+            err.message.contains("#99 is not linked to APP-7"),
+            "{}",
+            err.message
+        );
+    }
+
+    /// 同じ番号が別リポジトリにもあれば、リンクと同じく現在の連携先を選ぶ。
+    /// 選べなければ黙って片方を外さず、候補を並べて断る。
+    #[test]
+    fn unlink_prefers_the_current_repository_and_refuses_to_guess_otherwise() {
+        let both = || {
+            vec![
+                linked_pull_request(1, "acme/old", 12),
+                linked_pull_request(2, "acme/app", 12),
+            ]
+        };
+        let current = forge_with(Some("acme/app"), both());
+        assert_eq!(
+            pick_linked_pull_request(&current, 12, "APP-7").unwrap().id,
+            uuid(2)
+        );
+
+        for repository in [None, Some("acme/other")] {
+            let err =
+                pick_linked_pull_request(&forge_with(repository, both()), 12, "APP-7").unwrap_err();
+            assert_eq!(err.exit_code, 2, "{repository:?}");
+            assert!(
+                err.message.contains("acme/old#12, acme/app#12"),
+                "{}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn shows_a_linked_pull_request_on_one_line() {
+        let mut pull_request: TaskForgePullRequest =
+            serde_json::from_value(linked_pull_request(1, "acme/app", 87)).unwrap();
+        pull_request.closes = true;
+        pull_request.sources = vec!["body".into(), "manual".into()];
+        assert_eq!(
+            format_pull_request(&pull_request),
+            "acme/app#87\topen\tcloses\tbody,manual\tt"
         );
     }
 }

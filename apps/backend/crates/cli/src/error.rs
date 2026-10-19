@@ -57,6 +57,10 @@ impl CliError {
                 message: "Resource not found".into(),
                 exit_code: 5,
             },
+            // API の語のままだと何を直せばよいか読めない。語は検索できるよう残す
+            409 if extract_api_message(body) == "github-integration-missing" => Self::new(
+                "This project is not connected to a GitHub repository; connect one in the project settings first (github-integration-missing)",
+            ),
             _ => Self {
                 message: json!({
                     "error": "api_error",
@@ -111,6 +115,23 @@ mod tests {
         assert_eq!(
             err.message,
             r#"{"error":"api_error","message":"title is too long","status":422}"#
+        );
+    }
+
+    #[test]
+    fn explains_a_missing_github_integration_and_leaves_other_conflicts_as_they_are() {
+        let err = CliError::http(409, r#"{"message":"github-integration-missing"}"#);
+        assert!(
+            err.message.contains("not connected to a GitHub repository"),
+            "{}",
+            err.message
+        );
+        assert_eq!(err.exit_code, 1);
+
+        let other = CliError::http(409, r#"{"message":"conflict"}"#);
+        assert_eq!(
+            other.message,
+            r#"{"error":"api_error","message":"conflict","status":409}"#
         );
     }
 
