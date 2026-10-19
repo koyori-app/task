@@ -67,7 +67,13 @@ cargo test --workspace --lib
   ```
   - 統合テストは `tests/integration/` 配下に集約した**単一バイナリ**。新規ファイルはそこへ置き、`main.rs` に `mod` 宣言を足す。参照は `crate::common::`（`mod common;` の宣言は不要）
   - ハーネス（`tests/common/mod.rs` の `ensure_test_env()`）が testcontainers で CI と同一イメージ（`postgres:17` / `valkey/valkey:8.1`）をランダムポートで起動する。手動の `docker run`・`apps/backend/.env` は不要。コンテナはテストプロセスの終了時にハーネス（atexit）が自動削除する
-  - `DATABASE_URL` / `REDIS_URL` が環境か `.env` に設定済みならそれを優先する（CI と同じ経路。CI はこの経路のためワークフロー変更不要）
+  - 行き先を自分で渡すときは、試験用と明示した `TEST_DATABASE_URL` / `TEST_REDIS_URL` を使う（CI はこの経路）。docker の無い手元で専用の Postgres / valkey を使う例:
+    ```bash
+    TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:5432/task_test_me \
+    TEST_REDIS_URL=redis://127.0.0.1:6379 cargo test -- --test-threads=1
+    ```
+  - `DATABASE_URL` / `database_url` / `REDIS_URL` / `redis_url` は、環境にあっても `.env` にあっても試験では読まない。開発用の値は試験用でない DB を指すことがあり、しかも `.env` の小文字の名は環境の大文字の名に勝つため。これまで `.env` や `DATABASE_URL` で試験の行き先を渡していた場合は、`TEST_DATABASE_URL` / `TEST_REDIS_URL` に移す
+  - 行き先が loopback（または Unix socket）でなければ、ハーネスは繋ぐ前に止まる。試験専用と分かっている行き先（CI のサービスコンテナなど）だけ `TEST_ALLOW_NON_LOOPBACK=1` で許す
   - SMTP・シークレット系の env はハーネスが CI と同じテスト用の値で補完する。GitHub App 系も設定不要（`load_github_test_env()` が自前注入）。SMTP は実サーバー不要
 - API 表面を変えたら: `cd apps/frontend && pnpm openapi && node_modules/.bin/vp fmt`
   - CLI 側の型生成は不要。CLI は payload の型を直接使うので、追従漏れはコンパイルエラーになる
