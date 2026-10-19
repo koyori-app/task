@@ -1204,7 +1204,9 @@ export const CommentsKfmRendered: Story = {
     await expect(body.querySelector('.kfm-mention-self')).not.toBeNull();
     await expect(body.querySelector('.kfm-mention-outside')?.textContent).toBe('@プロジェクト外');
     await expect(body.querySelector('.kfm-mention-gone')?.textContent).toBe('@退会済み');
+    // 生の HTML は要素にならず、字として見える
     await expect(body.querySelector('script')).toBeNull();
+    await expect(body.textContent).toContain('<script>alert(1)</script>');
     await expect(within(body).getByText('危険なリンク')).not.toHaveAttribute('href');
     await expect(body.innerHTML).not.toContain('javascript:');
   },

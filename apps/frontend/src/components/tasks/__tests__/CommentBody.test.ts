@@ -76,10 +76,12 @@ describe('CommentBody', () => {
 
     expect(wrapper.find('.kfm-mention').exists()).toBe(false);
     expect(wrapper.text()).toContain('@alice へ');
+    // 生 HTML は要素にならず、字として見える
     expect(wrapper.find('script').exists()).toBe(false);
+    expect(wrapper.html()).not.toContain('<script');
+    expect(wrapper.text()).toContain('<script>alert(1)</script>');
     expect(wrapper.get('a').attributes('href')).toBeUndefined();
     expect(wrapper.html()).not.toContain('javascript:');
-    expect(wrapper.html()).not.toContain('alert(1)');
   }, 30_000);
 
   it('編集後に body prop が替わると同じ境界で描き直す', async () => {

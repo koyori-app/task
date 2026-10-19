@@ -4,7 +4,8 @@
  * pipeline: remark-parse → (profile 別 remark 層) → remark-rehype → (profile 別 rehype 層)
  *           → rehype-stringify → DOMPurify (構造専任) → HTML 文字列。
  * - allowDangerousHtml は使わない。mdast の生 html ノードは remark-rehype 既定で黙って
- *   消えるため、プラグインは data.hName / hProperties の型付き emit のみ行う契約。
+ *   消えるため、profile の先頭の remark 層 (remark-kfm-raw-html) が text ノードへ替えて
+ *   字として出す (落とさず escape)。プラグインは data.hName / hProperties の型付き emit のみ行う契約。
  * - コアはプラグインを import しない。profile ごとの remark / rehype 層と sanitize スキーマは
  *   composition root (index.ts) が注入する。
  * - processor は profile ごとに 1 回だけ build して memoize する (N 重初期化回避)。

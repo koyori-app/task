@@ -36,6 +36,7 @@ apps/frontend/src/lib/
     index.ts                   remark 変換と sanitize スキーマ
     element.ts                 遅延ロード・SVG 描画・再接続処理
     style.css                  JS 無効/描画失敗時のソース表示フォールバック
+  remark-kfm-raw-html/         生の HTML を字として出す（html ノード → text ノード）
   remark-kfm-task-ref/         タスク参照 KEY-N → タスク詳細へのリンク
     index.ts                   remark 変換と sanitize スキーマ
   markup-renderer/             KFM コア
@@ -61,13 +62,22 @@ composition root が remark 層と sanitize スキーマを注入する。
 ## パイプライン
 
 ```
-入力テキスト → 改行 LF 正規化 → remark-parse → remark-gfm → remark-koyori-alerts
+入力テキスト → 改行 LF 正規化 → remark-parse → remark-kfm-raw-html → remark-gfm → remark-koyori-alerts
   → remark-kfm-mermaid → remark-kfm-task-ref → remark-rehype → rehype-scope-footnote-label（scope 付きのみ）
   → rehype-starry-night → rehype-stringify → DOMPurify → HTML 文字列 → <div v-html>
 ```
 
-- `allowDangerousHtml` は使わない。mdast の生 `html` ノードは remark-rehype 既定で消える。
+- `allowDangerousHtml` は使わない。生の HTML を HTML として通す経路は無く、通してよい生の tag の
+  一覧（allowlist）も無い（DOMPurify の許可は、プラグインが emit する要素と class だけ）。
   プラグインは `data.hName` / `hProperties` の型付き emit のみ行う。
+- **生の HTML は字として出す**（`remark-kfm-raw-html`）。markdown の構文として読まれた生の HTML
+  （行中の tag・HTML の行で始まる段落・HTML のコメント）は mdast の `html` ノードになり、remark-rehype 既定ではそのまま
+  捨てられて画面から消える（`Vec<String>` の `<String>`、`<b>太字</b>`、`<!-- 注 -->`）。そこで、全 profile の先頭の
+  remark 層が `html` ノードを同じ値の `text` ノードへ替え、出力で escape して**書いたとおりの字で見せる**。
+  行中は `text` に繋ぎ、行の HTML は `text` を一つ持つ段落にする。コードスパン・コードブロックの中は元から
+  字なので変わらない。要素・属性・scheme が増える経路は無い（字は `&lt;` に escape され、DOMPurify の入力にも tag として
+  現れない）。説明文・コメント・レビュー指摘の本文は同じ描き手なので、全て同じ振る舞いになる。
+  試験は `kfm-raw-html.test.ts`（入力ごとの出力・tag と属性が生えぬこと）。
 - processor は profile ごとに 1 回だけ build して memoize する。ただし memoize されるのは
   scope なし（既定 `clobberPrefix`）の経路のみ。scope 付き描画は毎回 build する——scope の
   値空間（comment id 等）は非有界で、singleton に溜めるとメモリが漏れるため

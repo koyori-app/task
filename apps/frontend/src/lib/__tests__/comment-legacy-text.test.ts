@@ -79,20 +79,29 @@ describe('既存の素のコメントを comment profile で描いた時（見�
 });
 
 /**
- * 消毒で落ちる字。山括弧で囲んだ英数字は HTML の tag と読まれ、消毒（説明文と同じ）で tag ごと落ちる。
- * 既存のコメントに `Vec<String>` のような字が在れば `<String>` が画面から消える（本文の保存は無傷）。
+ * 生の HTML として読まれる並び。山括弧で囲んだ英数字は markdown では生の HTML（tag）と読まれるが、
+ * 生の HTML は通さぬ方針ゆえ、落とさず字として出す（escape して書いたとおりに見せる）。
+ * 既存のコメントの `Vec<String>` は `<String>` を含めて画面に出る。
  */
-describe('既存の素のコメントを comment profile で描いた時（字が画面から消える物）', () => {
+describe('既存の素のコメントを comment profile で描いた時（生の HTML は字として出る物）', () => {
   it.each([
-    ['ジェネリクスの <String> が消える', 'Vec<String> を使う', '<p>Vec を使う</p>'],
+    ['ジェネリクスの <String> が字で出る', 'Vec<String> を使う', '<p>Vec&lt;String&gt; を使う</p>'],
     [
-      '行内の HTML tag は tag だけ落ち、中の字は残る',
+      '行内の HTML tag は tag も字で出る（要素にならぬ）',
       '見て <b>太字</b> です',
-      '<p>見て 太字 です</p>',
+      '<p>見て &lt;b&gt;太字&lt;/b&gt; です</p>',
     ],
-    ['<br> は改行にならず落ちる', '一行<br>二行', '<p>一行二行</p>'],
-    ['HTML の行で始まる段落は丸ごと消える', '<p>段落</p>\nつづき', ''],
-    ['HTML のコメントは消え、同じ行の字も消える', '<!-- 隠す --> 見える', ''],
+    ['<br> は改行にならず字で出る', '一行<br>二行', '<p>一行&lt;br&gt;二行</p>'],
+    [
+      'HTML の行で始まる段落は、丸ごと字で出る（改行は <br>）',
+      '<p>段落</p>\nつづき',
+      '<p>&lt;p&gt;段落&lt;/p&gt;<br>つづき</p>',
+    ],
+    [
+      'HTML のコメントも同じ行の字も字で出る',
+      '<!-- 隠す --> 見える',
+      '<p>&lt;!-- 隠す --&gt; 見える</p>',
+    ],
   ])('%s', async (_name, source, expected) => {
     expect(await render(source)).toBe(expected);
   });
@@ -126,10 +135,18 @@ describe('コメントの XSS の守り（説明文と同じ消毒）', () => {
       profile: 'comment',
       mentions: {},
     });
-    expect(html).not.toMatch(/<script|<iframe|<svg|<form|<style/i);
-    expect(html).not.toMatch(/\son[a-z]+\s*=/i);
-    expect(html).not.toMatch(/javascript:|vbscript:|data:text/i);
-    // script の tag は落ちるが中の字は文字として残りうる（実行はされぬ）ので、字の有無は問わぬ
+    // 生の HTML は字として出る（`onerror=` などの字は見える）ので、字の検査ではなく、
+    // 出力を HTML として読み直した要素と属性で見る（ブラウザが v-html で読むのと同じ）
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    expect(doc.querySelector('script, iframe, svg, form, style, object, embed, input')).toBeNull();
+    for (const element of doc.body.querySelectorAll('*')) {
+      for (const name of element.getAttributeNames()) {
+        expect(name).not.toMatch(/^on/i);
+        expect(element.getAttribute(name)).not.toMatch(/^\s*(javascript|vbscript|data):/i);
+      }
+    }
+    // 出力の字列に、生の tag の開きは無い（字は &lt; に escape されておる）
+    expect(html).not.toMatch(/<(script|iframe|svg|form|style)/i);
   });
 
   it('link の target と rel は説明文（github profile）と同じ出力になる', async () => {
