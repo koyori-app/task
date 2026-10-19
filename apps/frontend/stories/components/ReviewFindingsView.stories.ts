@@ -115,6 +115,7 @@ const morePullRequests = Array.from({ length: 11 }, (_, i) => ({
   unresolved: 0,
   blocking: 0,
   last_reviewed_at: '2026-08-20T10:00:00Z',
+  state: (['merged', 'closed', 'unknown'] as const)[i % 3],
 }));
 
 function mockFetch(overrides: { empty?: boolean; manyPrs?: boolean; github?: boolean } = {}) {
@@ -145,6 +146,7 @@ function mockFetch(overrides: { empty?: boolean; manyPrs?: boolean; github?: boo
             unresolved: findings.filter((f) => f.state === 'open' || f.state === 'fixed').length,
             blocking: blocking(),
             last_reviewed_at: '2026-08-25T10:12:00Z',
+            state: 'open',
           },
           ...(overrides.manyPrs ? morePullRequests : []),
         ]);
@@ -317,6 +319,18 @@ export const PullRequestRail: Story = {
     await userEvent.click(canvas.getByRole('switch', { name: /自分が作成した PR だけ/ }));
     await waitFor(() => expect(canvas.queryByTestId('pr-pager')).not.toBeInTheDocument());
     await expect(canvas.queryByText('fix: 一覧の細かな修正 2')).not.toBeInTheDocument();
+  },
+};
+
+export const PullRequestStates: Story = {
+  name: 'PR の状態バッジ',
+  beforeEach: mockFetch({ manyPrs: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const badges = await canvas.findAllByTestId('pr-state');
+    await expect(badges.map((b) => b.textContent?.trim())).toEqual(
+      expect.arrayContaining(['Open', 'Merged', 'Closed', '状態不明']),
+    );
   },
 };
 

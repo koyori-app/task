@@ -9,6 +9,8 @@ import { TASK_RELATIONS_PATH } from '@/composables/useTaskSubtasks';
 const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const TASK_SEARCH_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/search' as const;
+// カレンダー（オーバーレイで詳細を開いたまま裏に残る）の帯も同じタスクを持つ
+const SCHEDULE_PATH = '/v1/tenants/{tenant_id}/schedule' as const;
 const ASSIGNEES_PATH =
   '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/assignees' as const;
 const ASSIGNEE_PATH =
@@ -78,6 +80,7 @@ export function useTaskRowMutations(params: TaskRowMutationsParams) {
       queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] }),
       // 履歴も backend が積むので落とす（詳細のアクティビティ欄が古いまま残る）
       queryClient.invalidateQueries({ queryKey: ['get', ACTIVITIES_PATH] }),
+      queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_PATH] }),
     ]);
   }
 

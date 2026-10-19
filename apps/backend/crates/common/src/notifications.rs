@@ -16,7 +16,7 @@ pub const TYPE_REVIEW_FINDING_CHANGED: &str = "review_finding_changed";
 pub const TYPE_REVIEW_ROUND_ANY: &str = "review_round_any";
 
 /// バリデーションに使用する既知のイベントタイプ一覧。
-/// `pr_merged` / `deadline_soon` はまだハンドラ未実装だが将来の拡張のため登録済み。
+/// `deadline_soon` はまだハンドラ未実装だが将来の拡張のため登録済み。
 pub const KNOWN_EVENT_TYPES: &[&str] = &[
     TYPE_ASSIGNED,
     TYPE_MENTIONED,

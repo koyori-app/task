@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { PhUserPlus } from '@phosphor-icons/vue';
 
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import UserAvatar from '@/components/UserAvatar.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -11,7 +11,6 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { avatarInitials } from '@/lib/initials';
 
 export type PickableMember = { id: string; username: string; avatar_url?: string | null };
 
@@ -74,14 +73,14 @@ function isSelected(userId: string) {
         :aria-label="label"
       >
         <template v-if="selected.length">
-          <Avatar
+          <UserAvatar
             v-for="user in shown"
             :key="user.id"
-            class="-ml-1.5 size-6 border border-background first:ml-0"
-          >
-            <AvatarImage v-if="user.avatar_url" :src="user.avatar_url" alt="" />
-            <AvatarFallback class="text-[10px]">{{ avatarInitials(user.username) }}</AvatarFallback>
-          </Avatar>
+            :user="user"
+            size="md"
+            decorative
+            class="-ml-1.5 border border-background first:ml-0"
+          />
           <span v-if="hiddenCount" class="ml-1 text-xs text-muted-foreground">
             +{{ hiddenCount }}
           </span>
@@ -129,12 +128,7 @@ function isSelected(userId: string) {
         @select="(event: Event) => event.preventDefault()"
         @update:model-value="(value) => emit('toggle', member.id, !!value)"
       >
-        <Avatar class="size-5">
-          <AvatarImage v-if="member.avatar_url" :src="member.avatar_url" alt="" />
-          <AvatarFallback class="bg-muted text-[9px] text-muted-foreground">
-            {{ avatarInitials(member.username) }}
-          </AvatarFallback>
-        </Avatar>
+        <UserAvatar :user="member" size="sm" decorative />
         {{ member.username }}
       </DropdownMenuCheckboxItem>
     </DropdownMenuContent>

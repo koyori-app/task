@@ -9,7 +9,7 @@ import {
   PhSparkle,
 } from '@phosphor-icons/vue';
 
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import UserAvatar from '@/components/UserAvatar.vue';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,7 +20,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { computed } from 'vue';
-import { avatarInitials } from '@/lib/initials';
 import { useInstallPrompt } from '@/lib/pwa/install-prompt';
 
 const props = defineProps<{
@@ -32,7 +31,7 @@ const props = defineProps<{
   onLogout?: () => void | Promise<void>;
 }>();
 
-const initials = computed(() => avatarInitials(props.user.name));
+const avatarUser = computed(() => ({ name: props.user.name, avatar_url: props.user.avatar }));
 
 // ブラウザが install を差し出した時だけ出る（iOS の Safari などでは出ない）。
 const { canInstall, promptInstall } = useInstallPrompt();
@@ -45,10 +44,7 @@ const { canInstall, promptInstall } = useInstallPrompt();
         type="button"
         class="flex max-w-45 items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm hover:bg-accent data-[state=open]:bg-accent"
       >
-        <Avatar class="size-6 rounded-md">
-          <AvatarImage :src="user.avatar" :alt="user.name" />
-          <AvatarFallback class="rounded-md text-xs">{{ initials }}</AvatarFallback>
-        </Avatar>
+        <UserAvatar :user="avatarUser" size="md" shape="md" />
         <span class="truncate font-medium">{{ user.name }}</span>
         <PhCaretUpDown class="size-4 shrink-0 text-muted-foreground" />
       </button>
@@ -56,10 +52,7 @@ const { canInstall, promptInstall } = useInstallPrompt();
     <DropdownMenuContent class="min-w-56 rounded-lg" side="bottom" align="end" :side-offset="4">
       <DropdownMenuLabel class="p-0 font-normal">
         <div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-          <Avatar class="h-8 w-8 rounded-lg">
-            <AvatarImage :src="user.avatar" :alt="user.name" />
-            <AvatarFallback class="rounded-lg">{{ initials }}</AvatarFallback>
-          </Avatar>
+          <UserAvatar :user="avatarUser" size="xl" shape="lg" />
           <div class="grid flex-1 text-left text-sm leading-tight">
             <span class="truncate font-semibold">{{ user.name }}</span>
             <span class="truncate text-xs">{{ user.email }}</span>
