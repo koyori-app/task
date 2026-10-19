@@ -104,6 +104,9 @@ describe('CalendarTimeline', () => {
     // 名前が隣にあるので読み上げない
     expect(avatar.attributes('aria-hidden')).toBe('true');
     expect(wrapper.get(`[data-member-row="${BOB.id}"] [data-member-avatar]`).text()).toBe('B');
+    // 画像が無い行の頭文字は 1 文字、色は UserAvatar の組
+    expect(avatar.classes()).toContain('size-5');
+    expect(avatar.get('[data-slot=avatar-fallback]').classes()).toContain('text-foreground');
   });
 
   it('担当者なしの行は頭文字ではなく人のアイコンを出す', () => {
@@ -111,6 +114,12 @@ describe('CalendarTimeline', () => {
     const avatar = wrapper.get('[data-member-row="__unassigned__"] [data-member-avatar]');
     expect(avatar.text()).toBe('');
     expect(avatar.find('svg').exists()).toBe(true);
+    // 地は bg-muted、字（アイコン）は継ぐ色の text-foreground。薄い text-muted-foreground は使わぬ
+    const fallback = avatar.get('[data-slot=avatar-fallback]');
+    expect(fallback.classes()).toEqual(expect.arrayContaining(['bg-muted', 'text-foreground']));
+    expect(avatar.find('svg').classes()).not.toContain('text-muted-foreground');
+    expect(avatar.attributes('aria-hidden')).toBe('true');
+    expect(avatar.classes()).toContain('size-5');
   });
 
   it('期間にタスクが無ければ空状態を出し、メンバーの行は出さない', () => {
