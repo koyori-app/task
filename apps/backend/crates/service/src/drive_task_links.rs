@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::Utc;
-use sea_orm::sea_query::OnConflict;
+use sea_orm::sea_query::{OnConflict, Query, SimpleExpr};
 use sea_orm::{
     ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect,
     prelude::Uuid,
@@ -34,6 +34,7 @@ pub fn is_markdown(mime: &str) -> bool {
 /// 消すのも保存者が入れるプロジェクト（と削除済みタスク）の `body` 行だけで、入れない
 /// プロジェクトへの行は本文を判断できないので残す（保存した人で結び付きが消えたり戻ったり
 /// しないため）。プロジェクトファイルはそのプロジェクトのタスクにだけ結ぶ（手動添付と同じ範囲）。
+/// プロジェクトファイルから別プロジェクトのタスクへの `body` 行は、保存者に見えなくても消す。
 /// 呼び出し側はファイルの書き込み権限とテナントへの所属を確認済みであること。
 /// Markdown 以外のファイルでは何もしない。
 pub async fn sync_body_links<C: ConnectionTrait>(
@@ -99,7 +100,11 @@ pub async fn sync_body_links<C: ConnectionTrait>(
         .into_iter()
         .filter(|task_id| match current_projects.get(task_id) {
             None => true,
-            Some(project_id) => visible.contains(project_id) && !wanted.contains(task_id),
+            // 別プロジェクトのタスクへの行は、保存者に見えなくても外す（移動前に付いた行など）
+            Some(project_id) => {
+                file.project_id.is_some_and(|p| p != *project_id)
+                    || (visible.contains(project_id) && !wanted.contains(task_id))
+            }
         })
         .collect();
     if !stale.is_empty() {
@@ -147,6 +152,42 @@ pub async fn sync_body_links<C: ConnectionTrait>(
             .to_owned(),
         )
         .exec_without_returning(db)
+        .await?;
+    Ok(())
+}
+
+/// `files`（`drive_files` への条件）に当たるファイルから、プロジェクト `project_id` の外の
+/// タスクへの `body` 行を外す。`manual` 行には触れない。
+///
+/// ファイルをプロジェクトへ移した時に呼ぶ。プロジェクトファイルはそのプロジェクトのタスクに
+/// だけ結ぶので、移動前に付いた行を残すと、移動元のプロジェクトのタスクの添付一覧から
+/// 移動先にしか置かれていないファイルの名前が見え続ける
+pub async fn unlink_body_outside_project<C: ConnectionTrait>(
+    db: &C,
+    files: SimpleExpr,
+    project_id: Uuid,
+) -> Result<(), AppError> {
+    task_attachments::Entity::delete_many()
+        .filter(task_attachments::Column::Source.eq(task_attachments::SOURCE_BODY))
+        .filter(
+            task_attachments::Column::DriveFileId.in_subquery(
+                Query::select()
+                    .column(drive_files::Column::Id)
+                    .from(drive_files::Entity)
+                    .and_where(files)
+                    .to_owned(),
+            ),
+        )
+        .filter(
+            task_attachments::Column::TaskId.not_in_subquery(
+                Query::select()
+                    .column(tasks::Column::Id)
+                    .from(tasks::Entity)
+                    .and_where(tasks::Column::ProjectId.eq(project_id))
+                    .to_owned(),
+            ),
+        )
+        .exec(db)
         .await?;
     Ok(())
 }

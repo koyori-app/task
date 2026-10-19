@@ -34,7 +34,7 @@ use service::drive::{
     can_access_project, current_storage_type, effective_quota, guess_mime, is_editable_mime,
     is_tenant_owner, lock_tenant_drive, source_mime_override, tenant_used_bytes,
 };
-use service::drive_task_links::{is_markdown, sync_body_links};
+use service::drive_task_links::{is_markdown, sync_body_links, unlink_body_outside_project};
 use service::storage::{ByteStream, StorageError};
 use std::collections::{HashMap, HashSet};
 
@@ -722,6 +722,11 @@ pub async fn update_file(
 
     active.updated_at = Set(Utc::now().into());
     let updated = active.update(&txn).await?;
+    // 別プロジェクトから移ってきたファイルの、移動元のタスクへの body 行を外す（§8.5）
+    if let Some(project_id) = updated.project_id {
+        unlink_body_outside_project(&txn, drive_files::Column::Id.eq(updated.id), project_id)
+            .await?;
+    }
     txn.commit().await?;
     Ok(Json(updated.into()))
 }

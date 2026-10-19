@@ -708,3 +708,162 @@ async fn project_file_links_only_its_own_project() {
 
     app.cleanup_user(owner.id).await;
 }
+
+async fn insert_folder(
+    app: &TestApp,
+    tenant_id: Uuid,
+    parent_id: Option<Uuid>,
+    project_id: Option<Uuid>,
+    created_by: Uuid,
+) -> Uuid {
+    drive_folders::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        name: Set("folder".into()),
+        parent_id: Set(parent_id),
+        tenant_id: Set(tenant_id),
+        project_id: Set(project_id),
+        created_by: Set(created_by),
+        created_at: Set(Utc::now().into()),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert folder")
+    .id
+}
+
+/// ファイル・フォルダをプロジェクトへ移すと、移動先の外のタスクへの body 行が外れる。
+/// 対照: 移動先のプロジェクトのタスクへの行は残る。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn moving_into_a_project_drops_body_links_to_other_projects() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let a = project(&app, tp.project_id).await;
+    let b = project(&app, insert_extra_project(&app, tp.tenant_id).await).await;
+    let a_task = insert_task(&app, &a, owner.id, 1).await;
+    let b_task = insert_task(&app, &b, owner.id, 1).await;
+    let b_folder = insert_folder(&app, tp.tenant_id, None, Some(b.id), owner.id).await;
+    let general_folder = insert_folder(&app, tp.tenant_id, None, None, owner.id).await;
+
+    login(&mut app, &owner).await;
+    let body = format!("{}-1 {}-1", a.key, b.key);
+    let both = HashMap::from([(a_task, "body".into()), (b_task, "body".into())]);
+    let loose = file_id_of(
+        &upload_file(
+            &app,
+            tp.tenant_id,
+            None,
+            "loose.md",
+            "text/markdown",
+            body.as_bytes(),
+        )
+        .await,
+    );
+    let nested = file_id_of(
+        &upload_file(
+            &app,
+            tp.tenant_id,
+            Some(general_folder),
+            "nested.md",
+            "text/markdown",
+            body.as_bytes(),
+        )
+        .await,
+    );
+    assert_eq!(links(&app, loose).await, both);
+    assert_eq!(links(&app, nested).await, both);
+
+    let moved = app
+        .patch_json_with_session(
+            &format!("/v1/tenants/{}/drive/files/{loose}", tp.tenant_id),
+            serde_json::json!({ "folder_id": b_folder }),
+        )
+        .await;
+    assert_eq!(moved.status(), StatusCode::OK);
+    assert_eq!(
+        links(&app, loose).await,
+        HashMap::from([(b_task, "body".into())]),
+        "ファイルの移動で移動元のタスクへの body 行が外れる"
+    );
+
+    let moved = app
+        .patch_json_with_session(
+            &format!(
+                "/v1/tenants/{}/drive/folders/{general_folder}",
+                tp.tenant_id
+            ),
+            serde_json::json!({ "parent_id": b_folder }),
+        )
+        .await;
+    assert_eq!(moved.status(), StatusCode::OK);
+    assert_eq!(
+        links(&app, nested).await,
+        HashMap::from([(b_task, "body".into())]),
+        "フォルダの移動で配下のファイルの body 行も外れる"
+    );
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// プロジェクトファイルに別プロジェクトのタスクへの body 行が残っていれば、そのプロジェクトに
+/// 入れない人が本文を保存しても外れる。対照: 同じプロジェクトのタスクは本文どおり結ぶ。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn saving_a_project_file_drops_body_links_outside_its_project() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let member = app.insert_user(false, false).await;
+    let outsider = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, member.id).await;
+    let b = project(&app, tp.project_id).await;
+    let a = project(&app, insert_extra_project(&app, tp.tenant_id).await).await;
+    restrict_to(&app, a.id, outsider.id).await;
+    let a_task = insert_task(&app, &a, owner.id, 1).await;
+    let b_task = insert_task(&app, &b, owner.id, 1).await;
+    let b_folder = insert_folder(&app, tp.tenant_id, None, Some(b.id), owner.id).await;
+
+    login(&mut app, &owner).await;
+    let file_id = file_id_of(
+        &upload_file(
+            &app,
+            tp.tenant_id,
+            Some(b_folder),
+            "b.md",
+            "text/markdown",
+            b"memo",
+        )
+        .await,
+    );
+    // 移動を直す前に付いた行など、プロジェクトの外を指して残った body 行
+    task_attachments::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        task_id: Set(a_task),
+        drive_file_id: Set(file_id),
+        created_by: Set(owner.id),
+        created_at: Set(Utc::now().into()),
+        source: Set(task_attachments::SOURCE_BODY.into()),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert stale body link");
+
+    login(&mut app, &member).await;
+    put_content(
+        &app,
+        tp.tenant_id,
+        file_id,
+        &format!("{}-1 {}-1", a.key, b.key),
+    )
+    .await;
+    assert_eq!(
+        links(&app, file_id).await,
+        HashMap::from([(b_task, "body".into())]),
+        "入れないプロジェクトへの行でも、ファイルのプロジェクトの外なら外れる"
+    );
+
+    for user in [owner, member, outsider] {
+        app.cleanup_user(user.id).await;
+    }
+}
