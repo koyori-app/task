@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
+import { useListLayout } from '@/components/users/__tests__/list-layout';
 
 enableAutoUnmount(afterEach);
+useListLayout();
 
 const members = [
   { id: 'user-1', username: 'yupix', avatar_url: null },
@@ -59,6 +61,8 @@ describe('TaskAssigneePicker の候補の取得状態', () => {
 
   it('候補があれば絞り込める', async () => {
     const wrapper = mountPicker({ members });
+    // 候補の一覧は仮想化しており、描くのは一覧の丈を測った次の tick
+    await flushPromises();
 
     expect(wrapper.text()).toContain('yupix');
     expect(wrapper.text()).toContain('sousuke');

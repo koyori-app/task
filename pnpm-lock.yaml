@@ -9,6 +9,9 @@ catalogs:
     '@lezer/highlight':
       specifier: 1.2.5
       version: 1.2.5
+    '@tanstack/vue-virtual':
+      specifier: 3.13.38
+      version: 3.13.38
     remark-breaks:
       specifier: 4.0.0
       version: 4.0.0
@@ -80,6 +83,9 @@ importers:
       '@tanstack/vue-table':
         specifier: 9.3.1
         version: 9.3.1(vue@3.5.43(typescript@6.0.3))
+      '@tanstack/vue-virtual':
+        specifier: 'catalog:'
+        version: 3.13.38(vue@3.5.43(typescript@6.0.3))
       '@unhead/vue':
         specifier: 3.3.1
         version: 3.3.1(@oxc-project/types@0.153.0)(@vitejs/devtools-kit@0.4.12(@modelcontextprotocol/client@2.1.0)(@modelcontextprotocol/server@2.1.0)(@voidzero-dev/vite-plus-core@0.3.3)(cac@7.0.0)(srvx@1.0.5))(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(lightningcss@1.33.0)(oxc-parser@0.104.0(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3))(rolldown@1.2.13)(vue@3.5.43(typescript@6.0.3))

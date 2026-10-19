@@ -1,17 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { PhCheck } from '@phosphor-icons/vue';
-import {
-  ListboxContent,
-  ListboxFilter,
-  ListboxItem,
-  ListboxItemIndicator,
-  ListboxRoot,
-} from 'reka-ui';
+import { ListboxContent, ListboxFilter, ListboxRoot, ListboxVirtualizer } from 'reka-ui';
 
-import UserAvatar from '@/components/UserAvatar.vue';
 import { Button } from '@/components/ui/button';
 import type { SelectableUser, UserSelectorState } from '@/components/users/types';
+import UserSelectorOption from '@/components/users/UserSelectorOption.vue';
 import { rankUsersByQuery } from '@/lib/user-search';
 
 /**
@@ -22,8 +15,9 @@ import { rankUsersByQuery } from '@/lib/user-search';
  * - IME: 変換中の字では絞り込まず、変換中の Enter では選ばない（reka の ListboxFilter と
  *   ListboxRoot が composition を見ている）
  * - 並びは渡された順のまま。絞り込んだ時だけ前方一致・部分一致の順にする
- * - 描く項は先頭の `maxRendered` 人まで（既定 100）。超えた分は数だけ添え、名での絞り込みを
- *   促す。数百人を一度に描くと、打つ字ごとの描き直しが重くなるため（仮想化の依存は足さぬ）
+ * - 候補は仮想化して全員を並べる（reka の ListboxVirtualizer）。DOM に載るのは見えている項と
+ *   前後の数項だけで、数千人でも打つ字ごとの描き直しは重くならない。上下・Home・End で見えぬ項へ
+ *   移ると一覧が送られ、照らした項は ListboxFilter の aria-activedescendant で伝わる
  */
 const props = withDefaults(
   defineProps<{
@@ -41,8 +35,6 @@ const props = withDefaults(
     emptyText?: string;
     noMatchText?: string;
     autoFocus?: boolean;
-    /** 一度に描く項の上限 */
-    maxRendered?: number;
   }>(),
   {
     multiple: true,
@@ -50,7 +42,6 @@ const props = withDefaults(
     emptyText: '選べる利用者がいません',
     noMatchText: '一致する利用者がいません',
     autoFocus: false,
-    maxRendered: 100,
   },
 );
 
@@ -62,8 +53,10 @@ const emit = defineEmits<{
 
 const query = ref('');
 const visible = computed(() => rankUsersByQuery(props.users, query.value));
-const rendered = computed(() => visible.value.slice(0, props.maxRendered));
-const hiddenCount = computed(() => visible.value.length - rendered.value.length);
+// 仮想化は options と項の value を突き合わせる（選んだ者へ送る時）。value に揃えて id を渡す
+const visibleIds = computed(() => visible.value.map((u) => u.id));
+const userById = computed(() => new Map(props.users.map((u) => [u.id, u])));
+const userOf = (id: string) => userById.value.get(id)!;
 const showList = computed(
   () => !props.state?.loading && !props.state?.error && visible.value.length > 0,
 );
@@ -138,37 +131,15 @@ function onUpdate(value: unknown) {
       :aria-label="searchLabel"
       class="max-h-72 overflow-y-auto p-1"
     >
-      <ListboxItem
-        v-for="user in rendered"
-        :key="user.id"
-        :value="user.id"
-        :data-user-id="user.id"
-        class="relative flex cursor-default items-center gap-2 rounded-sm py-1.5 pr-2 pl-8 text-sm outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground"
+      <!-- reka は項の丈を測らず見積もりで並べる。項の丈は h-8（32px）に固め、見積もりと揃える -->
+      <ListboxVirtualizer
+        v-slot="{ option: id }"
+        :options="visibleIds"
+        :estimate-size="32"
+        :text-content="(id: string) => userOf(id).username.toLowerCase()"
       >
-        <span class="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
-          <ListboxItemIndicator>
-            <PhCheck class="size-4" />
-          </ListboxItemIndicator>
-        </span>
-        <!-- 頭文字の字が項の名に混じらぬよう、アバターは支援技術から隠す -->
-        <span aria-hidden="true" class="flex shrink-0">
-          <UserAvatar :user="user" size="sm" decorative />
-        </span>
-        <span class="min-w-0 truncate">{{ user.username }}</span>
-        <span
-          v-if="user.id === currentUserId"
-          class="ml-auto shrink-0 text-xs text-muted-foreground"
-        >
-          自分
-        </span>
-      </ListboxItem>
+        <UserSelectorOption :user="userOf(id)" :current-user-id="currentUserId" />
+      </ListboxVirtualizer>
     </ListboxContent>
-    <p
-      v-if="showList && hiddenCount"
-      role="status"
-      class="border-t px-2 py-1.5 text-xs text-muted-foreground"
-    >
-      ほか {{ hiddenCount }} 人。名で絞り込めます
-    </p>
   </ListboxRoot>
 </template>

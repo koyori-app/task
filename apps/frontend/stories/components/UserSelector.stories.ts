@@ -5,6 +5,7 @@ import { ref } from 'vue';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
 import type { SelectableUser } from '@/components/users/types';
 import UserSelectorList from '@/components/users/UserSelectorList.vue';
+import { orderUsersForPicker } from '@/lib/user-search';
 
 const NAMES = [
   'yupix',
@@ -116,23 +117,72 @@ export const Default: Story = {
   },
 };
 
-/** 多くの人数（500 人）。描くのは先頭の 100 人までで、残りは数を添えて名での絞り込みを促す。 */
+/**
+ * 多くの人数。候補は仮想化して全員を描く（DOM に載るのは見えている項だけ）。開くまでの時間と
+ * 絞り込みの応えを測り、キーボードの End で末尾の者まで一覧が送られて届くことを見る。
+ * 測った値は console に `MEASURE` として出す（閾値は緩く置き、遅さの退行だけを捕まえる）。
+ */
+async function measureManyUsers(canvasElement: HTMLElement, count: number) {
+  const canvas = within(canvasElement);
+  const body = within(document.body);
+  const user = userEvent.setup();
+  const members = people(count);
+  // 末尾は並べた後の最後の者（名の順。片仮名の名が後ろに来る）
+  const last = orderUsersForPicker(members, [], null).at(-1)!.id;
+  const deepest = `user-${count}`;
+
+  const t0 = performance.now();
+  await user.click(canvas.getByRole('button', { name: '担当者を割り当てる' }));
+  const listbox = await body.findByRole('listbox');
+  await waitFor(() => expect(within(listbox).getAllByRole('option').length).toBeGreaterThan(0));
+  const openMs = performance.now() - t0;
+
+  const input = body.getByRole('textbox', { name: 'メンバーを検索' });
+  const query = `member${String(count).padStart(3, '0')}`;
+  const t1 = performance.now();
+  await user.type(input, query);
+  await waitFor(() =>
+    expect(
+      within(listbox)
+        .getAllByRole('option')
+        .map((o) => o.getAttribute('data-user-id')),
+    ).toEqual([deepest]),
+  );
+  const filterMs = performance.now() - t1;
+
+  await user.clear(input);
+  await expect(
+    within(listbox).queryByRole('option', { name: members.at(-1)!.username }),
+  ).toBeNull();
+  await user.keyboard('{End}');
+  await waitFor(async () => {
+    const highlighted = listbox.querySelector('[data-highlighted]');
+    await expect(highlighted?.getAttribute('data-user-id')).toBe(last);
+    // 末尾の項が一覧の見える範囲に送られておる
+    const box = listbox.getBoundingClientRect();
+    const rect = highlighted!.getBoundingClientRect();
+    await expect(rect.top).toBeGreaterThanOrEqual(box.top - 1);
+    await expect(rect.bottom).toBeLessThanOrEqual(box.bottom + 1);
+    // 支援技術へも、照らしておる項が伝わっておる
+    await expect(input.getAttribute('aria-activedescendant')).toBe(highlighted!.id);
+  });
+  await expect(within(listbox).getAllByRole('option').length).toBeLessThan(60);
+
+  console.log(
+    `MEASURE users=${count} open=${openMs.toFixed(0)}ms filter(${query.length} keys)=${filterMs.toFixed(0)}ms per-key=${(filterMs / query.length).toFixed(1)}ms`,
+  );
+  await expect(openMs).toBeLessThan(3000);
+  await user.keyboard('{Escape}');
+}
+
 export const ManyUsers: Story = {
   render: () => pickerStory(people(500), []),
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    const body = within(document.body);
-    const user = userEvent.setup();
+  play: async ({ canvasElement }) => measureManyUsers(canvasElement, 500),
+};
 
-    await user.click(canvas.getByRole('button', { name: '担当者を割り当てる' }));
-    const listbox = await body.findByRole('listbox');
-    await expect(within(listbox).getAllByRole('option')).toHaveLength(100);
-    await expect(body.getByText('ほか 400 人。名で絞り込めます')).toBeInTheDocument();
-
-    await user.type(body.getByRole('textbox', { name: 'メンバーを検索' }), 'member499');
-    await expect(within(listbox).getAllByRole('option')).toHaveLength(1);
-    await user.keyboard('{Escape}');
-  },
+export const HugeUsers: Story = {
+  render: () => pickerStory(people(5000), []),
+  play: async ({ canvasElement }) => measureManyUsers(canvasElement, 5000),
 };
 
 /** 選んだ者の重ね: 3 人まで重ね、超えた分は +N。名は aria-label で全員分読める。 */

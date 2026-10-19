@@ -46,6 +46,7 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
 }));
 
 import CreateTaskDialog from '../CreateTaskDialog.vue';
+import { useListLayout } from '@/components/users/__tests__/list-layout';
 
 const statuses = [
   {
@@ -726,6 +727,7 @@ describe('CreateTaskDialog labels query states', () => {
 });
 
 describe('CreateTaskDialog assignee selection', () => {
+  useListLayout();
   let queryClient: QueryClient;
 
   beforeEach(() => {
