@@ -3,7 +3,6 @@ import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import MembersSection from '../MembersSection.vue';
 import { Select } from '@/components/ui/select';
-import UserSelector from '@/components/users/UserSelector.vue';
 import type { components } from '@/generated/api';
 
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -187,12 +186,12 @@ describe('MembersSection', () => {
     const wrapper = mountSection();
     await flushPromises();
 
-    // 候補の窓は Popover の中でポインタ操作を再現しづらいため、モデル更新で選択する
+    // reka-ui の Select はポインタ操作を jsdom で再現しづらいため、モデル更新で選択する
     const candidateSelect = wrapper
-      .findAllComponents(UserSelector)
+      .findAllComponents(Select)
       .find((s) => s.find('#member-candidate').exists());
-    if (!candidateSelect) throw new Error('candidate selector not found');
-    candidateSelect.vm.$emit('update:modelValue', [BOB_ID]);
+    if (!candidateSelect) throw new Error('candidate select not found');
+    candidateSelect.vm.$emit('update:modelValue', BOB_ID);
     await flushPromises();
 
     clickBodyButton('追加');
