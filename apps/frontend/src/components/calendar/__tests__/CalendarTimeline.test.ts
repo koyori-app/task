@@ -1,7 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
-
-vi.mock('vike/client/router', () => ({ navigate: vi.fn() }));
 
 import CalendarTimeline from '../CalendarTimeline.vue';
 import type { components } from '@/generated/api';
@@ -90,6 +88,21 @@ describe('CalendarTimeline', () => {
     expect(load.attributes('data-over')).toBe('true');
     expect(load.attributes('aria-label')).toBe('2026-10-14 の見積 7h（上限 6h を超過）');
     expect(load.text()).toContain('超過');
+  });
+
+  it('帯の左クリックは遷移させず open-task を emit し、修飾キー付きはブラウザに任せる', async () => {
+    const wrapper = mountTimeline([task({ soft_deadline: '2026-10-20T00:00:00Z' })]);
+    const entry = wrapper.get(`[data-member-row="${ALICE.id}"] a`);
+
+    const plain = new MouseEvent('click', { bubbles: true, cancelable: true });
+    entry.element.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(true);
+    expect(wrapper.emitted('open-task')?.[0]?.[0]).toMatchObject({ seq_key: 'ENG-1' });
+
+    const withMeta = new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true });
+    entry.element.dispatchEvent(withMeta);
+    expect(withMeta.defaultPrevented).toBe(false);
+    expect(wrapper.emitted('open-task')).toHaveLength(1);
   });
 
   it('今日の列を aria-current で示す', () => {
