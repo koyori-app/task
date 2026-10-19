@@ -687,8 +687,8 @@ async fn insert_issue_link(app: &TestApp, project_id: Uuid, task_id: Uuid, numbe
         .execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             "INSERT INTO github_issue_links (id, project_id, integration_id, task_id, github_number,
-                 synced_hash, github_updated_at, pending_push, updated_at)
-             SELECT $1, $2, i.id, $3, $4, 'synced', now(), false, now()
+                 synced_hash, github_updated_at, pending_push, updated_at, github_state)
+             SELECT $1, $2, i.id, $3, $4, 'synced', now(), false, now(), 'open'
              FROM github_integrations i WHERE i.project_id = $2",
             [
                 Uuid::new_v4().into(),
