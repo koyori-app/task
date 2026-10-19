@@ -17,7 +17,7 @@ use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
-use entity::{forge_branch_links, github_integrations};
+use entity::{forge_branch_links, github_integrations, tasks};
 use payload::forge::{
     LinkTaskPullRequestRequest, TaskForgeBranch, TaskForgeCommit, TaskForgePullRequest,
     TaskForgeRepository, TaskForgeResponse,
@@ -87,7 +87,7 @@ pub async fn get_task_forge(
     // 返すのはこのタスクに結ばれたものだけなので、タスクの閲覧権限で足りる
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
-    let pull_requests = task_pull_requests(&state.db, task.id, None).await?;
+    let pull_requests = task_pull_requests(&state, &auth, &task, None).await?;
 
     let backend = state.db.get_database_backend();
     let commits = CommitRow::find_by_statement(Statement::from_sql_and_values(
@@ -133,6 +133,7 @@ pub async fn get_task_forge(
         commits,
         branches: task_branches(&state, task.id).await?,
         repository,
+        issue: service::forge::issue_source::find_for_task(&state.db, task.id).await?,
     }))
 }
 
@@ -176,10 +177,21 @@ async fn project_repository(
 
 /// タスクに結ばれた PR を参照元ごとの行からまとめる。`only` を渡すとその PR だけ
 async fn task_pull_requests(
-    db: &DatabaseConnection,
-    task_id: Uuid,
+    state: &AppState,
+    auth: &AuthUser,
+    task: &tasks::Model,
     only: Option<Uuid>,
 ) -> Result<Vec<TaskForgePullRequest>, AppError> {
+    let db = &state.db;
+    // レビューの中身は review 系のスコープで守る（write:review は read:review を包含）
+    let unresolved = service::reviews::blocking_by_task_pull_request(
+        db,
+        task.id,
+        task.project_id,
+        auth.require_scope(entity::scopes::Scope::ReadReview)
+            .is_ok(),
+    )
+    .await?;
     Ok(
         PullRequestRow::find_by_statement(Statement::from_sql_and_values(
             db.get_database_backend(),
@@ -193,7 +205,7 @@ async fn task_pull_requests(
          WHERE l.task_id = $1 AND ($2::uuid IS NULL OR p.id = $2)
          GROUP BY p.id
          ORDER BY p.created_at DESC, p.id DESC",
-            [task_id.into(), only.into()],
+            [task.id.into(), only.into()],
         ))
         .all(db)
         .await?
@@ -214,7 +226,7 @@ async fn task_pull_requests(
             commits_complete: row.commits_complete,
             sources: row.sources.split(',').map(str::to_owned).collect(),
             closes: row.closes,
-            unresolved: None,
+            unresolved: unresolved.get(&row.id).copied(),
         })
         .collect(),
     )
@@ -306,7 +318,7 @@ pub async fn link_task_pull_request(
         auth.user_id,
     )
     .await?;
-    let pull_request = task_pull_requests(&state.db, task.id, Some(pull_request_id))
+    let pull_request = task_pull_requests(&state, &auth, &task, Some(pull_request_id))
         .await?
         .pop()
         .ok_or_else(|| anyhow::anyhow!("linked pull request {pull_request_id} is missing"))?;

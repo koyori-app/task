@@ -103,7 +103,13 @@ const meta = {
   title: 'Components/Tasks/TaskForgeSection',
   component: TaskForgeSection,
   tags: ['autodocs'],
-  args: { tenantId: TENANT_UUID, projectId: PROJECT_UUID, taskId: 'TASK-1' },
+  args: {
+    tenantId: TENANT_UUID,
+    projectId: PROJECT_UUID,
+    taskId: 'TASK-1',
+    tenantDisplayId: 'acme',
+    projectKey: 'TASK',
+  },
   parameters: {
     layout: 'padded',
     docs: {

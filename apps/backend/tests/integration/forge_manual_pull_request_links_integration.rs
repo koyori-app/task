@@ -16,7 +16,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// GitHub API のモック。インストールトークンと空のコミット一覧（`Opened` が引く）だけ返し、
 /// PR 取得は各テストで足す（無ければ 404）
-async fn github_mock() -> MockServer {
+pub(crate) async fn github_mock() -> MockServer {
     let mock_server = MockServer::start().await;
     // SAFETY: 統合テストは --test-threads=1 で直列に走る
     unsafe {
@@ -26,7 +26,7 @@ async fn github_mock() -> MockServer {
     mock_server
 }
 
-fn forget_github_mock() {
+pub(crate) fn forget_github_mock() {
     // SAFETY: 統合テストは --test-threads=1 で直列に走る
     unsafe {
         std::env::remove_var("GITHUB_API_BASE_URL");
@@ -37,7 +37,7 @@ fn pulls_url(tenant_id: Uuid, project_id: Uuid, task_id: Uuid) -> String {
     format!("/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{task_id}/forge/pull-requests")
 }
 
-async fn link(
+pub(crate) async fn link(
     app: &TestApp,
     tenant_id: Uuid,
     project_id: Uuid,

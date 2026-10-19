@@ -15,6 +15,8 @@ export const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/task
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const LIST_LABELS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/labels' as const;
+// カレンダー（オーバーレイで詳細を開いたまま裏に残る）の帯も同じタスクを持つ
+const SCHEDULE_PATH = '/v1/tenants/{tenant_id}/schedule' as const;
 /** 「保存しました」を出しておく時間（ミリ秒） */
 const SAVED_NOTICE_MS = 2000;
 
@@ -230,6 +232,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', ACTIVITIES_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] }),
+      queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_PATH] }),
     ]);
   }
 
@@ -243,6 +246,8 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     // 親側で開いているサブタスク一覧も更新する。ただし削除対象自身の relations query も
     // active なため、これを待つと消したタスクの再取得が終わるまで一覧へ戻れない。
     void queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] });
+    // カレンダーの再取得（全件）も待つと戻りが遅れるので待たない
+    void queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_PATH] });
     return Promise.all([
       queryClient.invalidateQueries({ queryKey: ['get', LIST_TASKS_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),

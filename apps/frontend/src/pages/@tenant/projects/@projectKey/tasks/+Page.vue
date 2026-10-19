@@ -35,7 +35,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
-import TaskDetailPane from '@/components/tasks/TaskDetailPane.vue';
+import TaskDetailPane, { type TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -66,7 +66,7 @@ import {
   useTaskLabelFilter,
   watchAvailableTaskLabels,
 } from './task-list-label-filter';
-import { popOverlayParent, pushOverlayParent } from './task-list-overlay-stack';
+import { popOverlayParent, pushOverlayParent } from '@/components/tasks/overlay-parent-stack';
 import { shouldActivateRow, shouldOpenRowInNewTab } from './task-list-row-activate';
 import {
   parseTaskListUrlState,
@@ -135,7 +135,7 @@ const {
 // selectedTaskId は URL/詳細ページと同形の seq key（例: "ENG-42"）を保持する。
 // これにより詳細クエリのキャッシュがフルページ詳細（@taskId）と共有される。
 const selectedTaskId = ref<string | null>(null);
-// オーバーレイの中で子タスクへ移ったときの戻り先（task-list-overlay-stack）。
+// オーバーレイの中で子タスクへ移ったときの戻り先（overlay-parent-stack）。
 // 一覧の行・タスク作成・プロジェクト切替のように外から選択が変わったら捨てる。
 const overlayParentStack = ref<string[]>([]);
 
@@ -497,7 +497,23 @@ function openOverlay(task: TaskResponse) {
 
 /** オーバーレイの中から別タスクを開く。戻れるように今のタスクを積む */
 function openTaskFromOverlay(task: TaskResponse) {
-  const next = taskSeqKey(projectKey.value, task.seq_id);
+  openInOverlay(taskSeqKey(projectKey.value, task.seq_id));
+}
+
+/** オーバーレイの中の説明の KEY-N。子タスクと同じく積んで開く */
+function openTaskRefFromOverlay(ref: TaskRefLink) {
+  // 一覧と ?selected= は 1 プロジェクト分なので、別プロジェクトのタスクは詳細ページへ送る
+  if (ref.projectKey !== projectKey.value) return void navigate(ref.href);
+  openInOverlay(ref.seqKey);
+}
+
+/** 分割ビューの説明の KEY-N。子タスクと同じく右ペインの選択を差し替える */
+function openTaskRefInPane(ref: TaskRefLink) {
+  if (ref.projectKey !== projectKey.value) return void navigate(ref.href);
+  selectedTaskId.value = ref.seqKey;
+}
+
+function openInOverlay(next: string) {
   overlayParentStack.value = pushOverlayParent(
     overlayParentStack.value,
     selectedTaskId.value,
@@ -1275,6 +1291,7 @@ const table = useTable({
             :task-id="selectedTaskId ?? ''"
             @close="closeDetail"
             @open-task="openOverlay"
+            @open-task-ref="openTaskRefInPane"
           />
         </ResizablePanel>
       </template>
@@ -1289,6 +1306,7 @@ const table = useTable({
       :project-key="projectKey"
       :task-id="overlayRenderedTaskSeqKey"
       @open-task="openTaskFromOverlay"
+      @open-task-ref="openTaskRefFromOverlay"
       @update:open="onOverlayOpenChange"
     />
   </div>

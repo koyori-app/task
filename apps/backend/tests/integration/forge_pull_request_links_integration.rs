@@ -89,7 +89,7 @@ pub(crate) fn pr_payload(
     })
 }
 
-fn merged(mut payload: serde_json::Value, merged_at: &str) -> serde_json::Value {
+pub(crate) fn merged(mut payload: serde_json::Value, merged_at: &str) -> serde_json::Value {
     payload["pull_request"]["merged"] = true.into();
     payload["pull_request"]["merged_at"] = merged_at.into();
     payload

@@ -69,7 +69,13 @@ async function mountWith(forge: Record<string, unknown>) {
     return Response.json({ message: 'not found' }, { status: 404 });
   });
   const wrapper = mount(TaskForgeSection, {
-    props: { tenantId: 'tenant-1', projectId: 'project-1', taskId: 'TASK-1' },
+    props: {
+      tenantId: 'tenant-1',
+      projectId: 'project-1',
+      taskId: 'TASK-1',
+      tenantDisplayId: 'acme',
+      projectKey: 'TASK',
+    },
     global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
   });
   await flushPromises();
@@ -178,7 +184,13 @@ describe('TaskForgeSection', () => {
       return Response.json({ pull_requests: [], commits: [], branches });
     });
     const wrapper = mount(TaskForgeSection, {
-      props: { tenantId: 'tenant-1', projectId: 'project-1', taskId: 'TASK-1' },
+      props: {
+        tenantId: 'tenant-1',
+        projectId: 'project-1',
+        taskId: 'TASK-1',
+        tenantDisplayId: 'acme',
+        projectKey: 'TASK',
+      },
       global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
     });
     await flushPromises();
@@ -190,5 +202,19 @@ describe('TaskForgeSection', () => {
       'DELETE /api/v1/tenants/tenant-1/projects/project-1/tasks/TASK-1/forge/branches/branch-1',
     );
     expect(wrapper.find('[data-forge-branch]').exists()).toBe(false);
+  });
+
+  it('未解決のレビュー指摘の件数をレビュー画面のその PR へのリンクで出し、null なら出さない', async () => {
+    const wrapper = await mountWith({
+      pull_requests: [
+        { ...pullRequest, id: 'pr-1', number: 87, unresolved: 2 },
+        { ...pullRequest, id: 'pr-2', number: 88, unresolved: 0 },
+        { ...pullRequest, id: 'pr-3', number: 89, unresolved: null },
+      ],
+    });
+    const badges = wrapper.findAll('[data-forge-unresolved]');
+    expect(badges.map((b) => b.text())).toEqual(['2 件が未解決', '未解決なし']);
+    expect(badges[0]!.attributes('href')).toBe('/acme/projects/TASK/reviews?pr=87');
+    expect(badges[1]!.attributes('href')).toBe('/acme/projects/TASK/reviews?pr=88');
   });
 });
