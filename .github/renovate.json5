@@ -3,7 +3,12 @@
   "extends": ["config:base"],
   "ignorePresets": [":prHourlyLimit2"],
   // "baseBranches": ["develop", "master"],
-  "schedule": ["before 9am on monday"],
+  // 窓は月曜の 5 時から 9 時（JST）とする。
+  // 何のために: before 9am だけでは窓の始まりが無く、月曜の 0 時から効く。
+  // 8 月からの renovate の PR は、9 割が月曜の 0 時台から 2 時台に作られて
+  // おった。深夜に手を動かしておる時に PR と CI が一斉に湧き、作業の CI を
+  // 押し退けておった。人が寝ておる明け方に湧かせ、朝には捌けておるようにする。
+  "schedule": ["after 5am and before 9am on monday"],
   "timezone": "Asia/Tokyo",
   // "dependencyDashboard": false,
   "automerge": false,
