@@ -499,8 +499,16 @@ pub async fn upload_file(
                         content_hash: Set(Some(content_hash)),
                     };
                     let saved = model.insert(&txn).await?;
-                    sync_body_links(&txn, &saved, auth.user_id, &String::from_utf8_lossy(&body))
+                    // 結び付けは task_attachments への書き込み。手動添付と同じく write:task が無ければ触れない
+                    if auth.require_scope(Scope::WriteTask).is_ok() {
+                        sync_body_links(
+                            &txn,
+                            &saved,
+                            auth.user_id,
+                            &String::from_utf8_lossy(&body),
+                        )
                         .await?;
+                    }
                     txn.commit().await?;
                     Ok(saved)
                 }
@@ -861,7 +869,10 @@ pub async fn update_file_content(
         active.content_hash = Set(Some(content_hash));
         active.updated_at = Set(Utc::now().into());
         let saved = active.update(&txn).await?;
-        sync_body_links(&txn, &saved, auth.user_id, &String::from_utf8_lossy(&body)).await?;
+        // アップロードと同じく write:task が無ければ既存の行にも触れない
+        if auth.require_scope(Scope::WriteTask).is_ok() {
+            sync_body_links(&txn, &saved, auth.user_id, &String::from_utf8_lossy(&body)).await?;
+        }
         txn.commit().await?;
         Ok((saved, old_storage_key))
     }
