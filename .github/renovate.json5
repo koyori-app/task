@@ -7,6 +7,24 @@
   "timezone": "Asia/Tokyo",
   // "dependencyDashboard": false,
   "automerge": false,
+  // 枝を焼き直すのは、衝突した時だけにする。
+  // 理由: 既定の auto は、automerge を持つ規則に behind-base-branch を当てる。
+  // main が一つ進むたびに開いている枝が全て焼き直され、CI が積もって捌けなく
+  // なった。この設定を書いた時点で、開いている PR 82 件のうち renovate の PR
+  // が 60 件あり、Actions の待ち行列には run が 302 本並んでいた。
+  // main には枝の保護も ruleset も無く、PR が最新であることを強いていない。
+  // そのため、焼き直さなくても automerge は止まらない。
+  // 二つの更新が互いに試されないまま続けて入りうることは承知している。
+  // そもそも main に保護が無いので、焼き直していても、この隙は閉じていない。
+  // 検めが通った時の main と、実際に入る時の main は今でも別物になりうる。
+  // この変更で広がるのは隙の幅であって、隙が新しく生まれるわけではない。
+  // main への push で backend-test や e2e などが走るので、壊れればそこで分かる。
+  // 分かった時に直す。焼き直しを増やして先回りで防ぐことはしない。
+  "rebaseWhen": "conflicted",
+  // この札を貼った PR だけは、main より遅れるたびに焼き直す。
+  // merge する前に最新の main で試し直したい PR に貼る。
+  // 札を PR から外せば、その PR は他と同じく衝突した時だけ焼き直す。
+  "keepUpdatedLabel": "dependencies/keep-updated",
   "prHourlyLimit": 100,
   "prConcurrentLimit": 100,
   "branchConcurrentLimit": 100,
