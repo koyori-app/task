@@ -314,6 +314,7 @@ function formatRangeDate(date: string) {
       :time-zone="timeZone"
       :tenant-slug="tenantDisplayId"
       :tasks="filtered.tasks"
+      :load-tasks="scheduleQuery.data.value?.tasks"
       :members="filtered.members"
       :sprints="filtered.sprints"
       :milestones="filtered.milestones"

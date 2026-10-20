@@ -34,7 +34,7 @@ describe('weekdaysBetween', () => {
 describe('dailyLoadByMember', () => {
   it('見積を平日数で割って各平日に載せる', () => {
     const load = dailyLoadByMember([task()], 'UTC').get(ME)!;
-    expect([...load.entries()]).toEqual([
+    expect([...load].map(([date, day]) => [date, day.hours])).toEqual([
       ['2026-10-12', 2],
       ['2026-10-13', 2],
       ['2026-10-14', 2],
@@ -55,17 +55,23 @@ describe('dailyLoadByMember', () => {
       ],
       'UTC',
     ).get(ME)!;
-    expect(load.get('2026-10-16')).toBe(4);
-    expect(load.get('2026-10-19')).toBe(4);
+    expect(load.get('2026-10-16')?.hours).toBe(4);
+    expect(load.get('2026-10-19')?.hours).toBe(4);
     expect(load.has('2026-10-17')).toBe(false);
     expect(load.has('2026-10-18')).toBe(false);
   });
 
-  it('同じ日の見積を足し合わせ、上限 6h を超えたら超過', () => {
-    const load = dailyLoadByMember([task(), task({ estimated_minutes: 1500 })], 'UTC').get(ME)!;
+  it('同じ日の見積を足し合わせ、上限 6h を超えたら超過。内訳にタスクごとの時間を残す', () => {
+    const first = task();
+    const second = task({ estimated_minutes: 1500 });
+    const day = dailyLoadByMember([first, second], 'UTC').get(ME)!.get('2026-10-14')!;
     // 2h + 5h = 7h
-    expect(load.get('2026-10-14')).toBe(7);
-    expect(isOverCapacity(load.get('2026-10-14')!)).toBe(true);
+    expect(day.hours).toBe(7);
+    expect(isOverCapacity(day.hours)).toBe(true);
+    expect(day.items).toEqual([
+      { task: first, hours: 2 },
+      { task: second, hours: 5 },
+    ]);
   });
 
   it.each([

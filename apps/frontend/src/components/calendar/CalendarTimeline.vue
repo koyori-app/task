@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Flag, TriangleAlert, UserRound } from '@luci
 import { computed } from 'vue';
 
 import UserAvatar from '@/components/UserAvatar.vue';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { components } from '@/generated/api';
 import { DAILY_CAPACITY_HOURS, dailyLoadByMember, isOverCapacity } from '@/lib/calendar/load';
 import {
@@ -29,6 +30,11 @@ const props = withDefaults(
     timeZone: string;
     tenantSlug: string;
     tasks: ScheduleTask[];
+    /**
+     * 山（見積/日）を計算するタスク。絞り込み前の全タスクを渡す。
+     * 見えていないプロジェクトの負荷を落とすと超過を見落とすため。省略時は `tasks`
+     */
+    loadTasks?: ScheduleTask[];
     members: Member[];
     sprints?: Sprint[];
     milestones?: Milestone[];
@@ -123,11 +129,13 @@ const rows = computed(() => {
       if (p) add(assignee.user_id, p);
     }
   }
-  const loadByMember = dailyLoadByMember(props.tasks, props.timeZone);
+  const loadByMember = dailyLoadByMember(props.loadTasks ?? props.tasks, props.timeZone);
   const loadsOf = (memberId: string) =>
     dates.value.flatMap((date, col) => {
-      const hours = loadByMember.get(memberId)?.get(date) ?? 0;
-      return hours > 0 ? [{ date, col, hours, over: isOverCapacity(hours) }] : [];
+      const day = loadByMember.get(memberId)?.get(date);
+      return day && day.hours > 0
+        ? [{ date, col, hours: day.hours, items: day.items, over: isOverCapacity(day.hours) }]
+        : [];
     });
   const result = props.members.map((member) => ({
     id: member.id,
@@ -151,6 +159,19 @@ const rows = computed(() => {
 
 function loadLabel(hours: number) {
   return `${Math.round(hours * 10) / 10}h`;
+}
+
+/** 上限（6h）の段の高さ（rem）。超過分はその上の余白に最大で半分まで描く */
+const LOAD_STAGE_REM = 1.5;
+const LOAD_OVERFLOW_RATIO = 0.5;
+
+function loadBarStyle(hours: number) {
+  return { height: `${Math.min(hours / DAILY_CAPACITY_HOURS, 1) * LOAD_STAGE_REM}rem` };
+}
+
+function loadOverflowStyle(hours: number) {
+  const ratio = Math.min(hours / DAILY_CAPACITY_HOURS - 1, LOAD_OVERFLOW_RATIO);
+  return { bottom: `${LOAD_STAGE_REM}rem`, height: `${ratio * LOAD_STAGE_REM}rem` };
 }
 
 function loadAria(date: string, hours: number) {
@@ -305,7 +326,7 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
       </div>
 
       <p
-        v-if="!tasks.length"
+        v-if="!tasks.length && !rows.some((row) => row.loads.length)"
         class="px-4 py-12 text-center text-sm text-muted-foreground"
         data-calendar-empty
       >
@@ -320,7 +341,7 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
           class="grid border-b last:border-b-0"
           :style="{
             ...gridStyle,
-            gridTemplateRows: `1rem repeat(${Math.max(row.lanes.length, 1)}, 1.75rem)`,
+            gridTemplateRows: `${LOAD_STAGE_REM * (1 + LOAD_OVERFLOW_RATIO)}rem repeat(${Math.max(row.lanes.length, 1)}, 1.75rem)`,
           }"
           :data-member-row="row.id"
         >
@@ -349,23 +370,58 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
             :class="columnClass(date)"
             :style="cellStyle(col, '1 / -1')"
           />
-          <!-- 見積/日（主担当・開始予定日と Soft 締切あり・未完了のタスクから） -->
-          <div
-            v-for="load in row.loads"
-            :key="`load-${load.date}`"
-            class="relative z-[1] flex items-center justify-end gap-0.5 px-1 text-[10px] leading-none"
-            :class="load.over ? 'font-medium text-destructive' : 'text-muted-foreground'"
-            :style="cellStyle(load.col, '1')"
-            :aria-label="loadAria(load.date, load.hours)"
-            :data-load-date="load.date"
-            :data-over="load.over || undefined"
-            role="note"
-          >
-            <TriangleAlert v-if="load.over" class="size-2.5" aria-hidden="true" />
-            <span aria-hidden="true"
-              >{{ loadLabel(load.hours) }}{{ load.over ? ' 超過' : '' }}</span
-            >
-          </div>
+          <!-- 見積/日の山（主担当・開始予定日と Soft 締切あり・未完了のタスクから） -->
+          <Tooltip v-for="load in row.loads" :key="`load-${load.date}`">
+            <TooltipTrigger as-child>
+              <div
+                class="relative z-[1] mx-0.5 overflow-hidden"
+                :style="cellStyle(load.col, '1')"
+                :aria-label="loadAria(load.date, load.hours)"
+                :data-load-date="load.date"
+                :data-over="load.over || undefined"
+                tabindex="0"
+              >
+                <div
+                  class="absolute inset-x-1 bottom-0 rounded-t-sm"
+                  :class="load.over ? 'bg-destructive/30' : 'bg-primary/30'"
+                  :style="loadBarStyle(load.hours)"
+                  aria-hidden="true"
+                  data-load-bar
+                />
+                <div
+                  v-if="load.over"
+                  class="absolute inset-x-1 bg-destructive/70"
+                  :style="loadOverflowStyle(load.hours)"
+                  aria-hidden="true"
+                  data-load-overflow
+                />
+                <!-- 上限の線 -->
+                <div
+                  class="absolute inset-x-0 border-t border-dashed border-muted-foreground/50"
+                  :style="{ bottom: `${LOAD_STAGE_REM}rem` }"
+                  aria-hidden="true"
+                />
+                <span
+                  class="absolute top-0.5 right-0.5 flex items-center gap-0.5 text-[10px] leading-none"
+                  :class="load.over ? 'font-medium text-destructive' : 'text-muted-foreground'"
+                  aria-hidden="true"
+                >
+                  <TriangleAlert v-if="load.over" class="size-2.5" />
+                  {{ loadLabel(load.hours) }}{{ load.over ? ' 超過' : '' }}
+                </span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" class="max-w-64">
+              <p class="mb-1 font-medium">{{ loadAria(load.date, load.hours) }}</p>
+              <ul data-load-items>
+                <li v-for="item in load.items" :key="item.task.id" class="flex gap-2">
+                  <span class="shrink-0 font-mono">{{ item.task.seq_key }}</span>
+                  <span class="truncate">{{ item.task.title }}</span>
+                  <span class="ml-auto shrink-0">{{ loadLabel(item.hours) }}</span>
+                </li>
+              </ul>
+            </TooltipContent>
+          </Tooltip>
           <template v-for="(lane, laneIndex) in row.lanes" :key="laneIndex">
             <a
               v-for="placed in lane"

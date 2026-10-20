@@ -3,6 +3,7 @@ import { expect, fn, within } from 'storybook/test';
 import { provide } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import CalendarPage from '@/pages/@tenant/calendar/+Page.vue';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import type { components } from '@/generated/api';
 
 type ScheduleTask = components['schemas']['ScheduleTask'];
@@ -198,7 +199,9 @@ const meta = {
         provide(VUE_QUERY_CLIENT, queryClient);
         provide(PAGE_CONTEXT_KEY, mockContext);
       },
-      template: '<story />',
+      // 本番では SidebarProvider が用意している（山の内訳の Tooltip が使う）
+      components: { TooltipProvider },
+      template: '<TooltipProvider :delay-duration="0"><story /></TooltipProvider>',
     }),
   ],
 } satisfies Meta<typeof CalendarPage>;
