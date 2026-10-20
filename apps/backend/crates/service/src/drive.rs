@@ -344,9 +344,18 @@ pub async fn sync_subtree_project_id<C: ConnectionTrait>(
             entity::drive_files::Column::ProjectId,
             sea_orm::sea_query::Expr::value(project_id),
         )
-        .filter(entity::drive_files::Column::FolderId.is_in(folder_ids))
+        .filter(entity::drive_files::Column::FolderId.is_in(folder_ids.clone()))
         .exec(txn)
         .await?;
+
+    if let Some(project_id) = project_id {
+        crate::drive_task_links::unlink_body_outside_project(
+            txn,
+            entity::drive_files::Column::FolderId.is_in(folder_ids),
+            project_id,
+        )
+        .await?;
+    }
 
     Ok(())
 }
