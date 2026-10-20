@@ -20,7 +20,8 @@ import {
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import type { components } from '@/generated/api';
 import { fetchClient } from '@/lib/api-vue-query';
-import { addDays, dateInZone } from '@/lib/calendar/timeline';
+import { dailyLoadByMember } from '@/lib/calendar/load';
+import { addDays, clipSpan, dateInZone, taskSpan } from '@/lib/calendar/timeline';
 import {
   applyCalendarUrlState,
   CALENDAR_DAYS,
@@ -86,6 +87,8 @@ const scheduleQuery = useQuery({
               to: to.value,
               timezone: timeZone,
               limit: SCHEDULE_PAGE_LIMIT,
+              // 締切超過の残工数は今日に積むので、今日が見えている間は期間より前に締切を過ぎたものも取る
+              include_overdue: from.value <= today && today <= to.value,
             },
           },
         },
@@ -116,16 +119,29 @@ const scheduleQuery = useQuery({
   enabled: computed(() => !!tenantId.value),
 });
 
-const memberOptions = computed(() => scheduleQuery.data.value?.members ?? []);
+// include_overdue で取った期間外のタスクは山に積むものだけ残す。帯には出ないので、
+// 残すと帯も山も無いメンバーの行や絞り込み候補が増える
+const schedule = computed(() => {
+  const data = scheduleQuery.data.value;
+  if (!data) return null;
+  const tasks = data.tasks.filter((task) => {
+    const span = taskSpan(task, timeZone);
+    if (span && clipSpan(span, from.value, CALENDAR_DAYS)) return true;
+    return dailyLoadByMember([task], timeZone, today).size > 0;
+  });
+  const assigned = new Set(tasks.flatMap((task) => task.assignees.map((a) => a.user_id)));
+  return { ...data, tasks, members: data.members.filter((member) => assigned.has(member.id)) };
+});
+
+const memberOptions = computed(() => schedule.value?.members ?? []);
 const projectOptions = computed(() => {
   const projects = new Map<string, { id: string; key: string; name: string }>();
-  for (const task of scheduleQuery.data.value?.tasks ?? [])
-    projects.set(task.project.id, task.project);
+  for (const task of schedule.value?.tasks ?? []) projects.set(task.project.id, task.project);
   return [...projects.values()];
 });
 
 const filtered = computed(() => {
-  const data = scheduleQuery.data.value;
+  const data = schedule.value;
   if (!data) return null;
   const byProject = (projectId: string) =>
     !projectIds.value.length || projectIds.value.includes(projectId);
@@ -314,7 +330,7 @@ function formatRangeDate(date: string) {
       :time-zone="timeZone"
       :tenant-slug="tenantDisplayId"
       :tasks="filtered.tasks"
-      :load-tasks="scheduleQuery.data.value?.tasks"
+      :load-tasks="schedule?.tasks"
       :members="filtered.members"
       :sprints="filtered.sprints"
       :milestones="filtered.milestones"
