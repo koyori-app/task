@@ -73,6 +73,38 @@ pub struct SearchTasksResponse {
     pub total: u64,
 }
 
+#[derive(Deserialize, Serialize, ToSchema, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct SimilarTasksQuery {
+    /// 比較するタイトル。trim 後に空、または 255 文字を超えると 400
+    pub title: String,
+    /// 候補から除くタスク（タスク詳細で自分自身を除く）
+    #[serde(default)]
+    pub exclude_task_id: Option<Uuid>,
+    /// 最大件数。20 を超える値は 20 に丸める
+    #[serde(default = "default_similar_limit")]
+    pub limit: u64,
+}
+
+fn default_similar_limit() -> u64 {
+    5
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct SimilarTaskHit {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    pub seq_id: i32,
+    pub title: String,
+    /// trigram 類似度（0〜1）
+    pub score: f32,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct SimilarTasksResponse {
+    pub tasks: Vec<SimilarTaskHit>,
+}
+
 #[derive(Deserialize, Serialize, ToSchema)]
 pub struct BulkUpdateFields {
     #[schema(value_type = Option<String>, format = "uuid")]
