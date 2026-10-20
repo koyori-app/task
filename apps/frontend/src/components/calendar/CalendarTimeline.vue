@@ -356,7 +356,7 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
                 :aria-label="loadAria(load.date, load.hours)"
                 :data-load-date="load.date"
                 :data-over="load.over || undefined"
-                role="note"
+                tabindex="0"
               >
                 <div
                   class="absolute inset-x-1 bottom-0 rounded-t-sm"
