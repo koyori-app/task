@@ -367,7 +367,8 @@ let suppressClick = false;
 
 function onBarPointerDown(placed: Placed<Entry>, event: PointerEvent) {
   suppressClick = false;
-  if (event.button !== 0 || !canMove(placed.item)) return;
+  // タッチの横スワイプはスクロールに使う（タッチではキーボード操作かタスク詳細で変える）
+  if (event.pointerType === 'touch' || event.button !== 0 || !canMove(placed.item)) return;
   // 確定していない移動（キーボードで動かした別の帯を含む）は捨て、元の開始予定日から動かす
   preview.value = null;
   const task = props.tasks.find((t) => t.id === placed.item.task.id);
@@ -623,9 +624,7 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
             :class="[
               placed.item.point ? 'px-1' : 'border px-1.5',
               entryClass(placed.item),
-              canMove(placed.item)
-                ? 'cursor-grab touch-pan-y select-none active:cursor-grabbing'
-                : '',
+              canMove(placed.item) ? 'cursor-grab select-none active:cursor-grabbing' : '',
               preview?.taskId === placed.item.task.id && previewInvalid
                 ? 'ring-2 ring-destructive'
                 : '',

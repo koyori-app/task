@@ -259,6 +259,16 @@ describe('CalendarTimeline', () => {
       });
     });
 
+    it('タッチで横に動かしても帯を動かさず送らない（横スクロールに使う）', async () => {
+      const wrapper = mountTimeline([movable()]);
+      await bar(wrapper).trigger('pointerdown', { clientX: 500, button: 0, pointerType: 'touch' });
+      await bar(wrapper).trigger('pointermove', { clientX: 600, pointerType: 'touch' });
+      await bar(wrapper).trigger('pointerup', { pointerType: 'touch' });
+      await flushPromises();
+      expect(bar(wrapper).attributes('style')).toContain('grid-column: 3 / 6');
+      expect(put).not.toHaveBeenCalled();
+    });
+
     it('キーボードの ← → で 1 日ずつ動かし、Enter で確定、Esc で取り消す', async () => {
       put.mockResolvedValue({ data: {}, error: undefined, response: { status: 200 } });
       const wrapper = mountTimeline([movable()]);
