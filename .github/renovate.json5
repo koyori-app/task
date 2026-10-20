@@ -111,6 +111,20 @@
       "matchManagers": ["npm"],
       "matchPackagePatterns": ["^@codemirror/"],
       "groupName": "codemirror"
+    },
+    {
+      // workspace-hack の Cargo.toml は renovate に上げさせない。
+      // 何のために: この file は cargo hakari generate が生む（設定は
+      // apps/backend/.config/hakari.toml）。中の版は本体の crate の依存から
+      // 決まる。renovate が直に上げると generate の出力と食い違い、CI の
+      // backend-fmt の検め（cargo hakari generate --diff）で必ず落ちる。
+      // hakari が付けた sha2-93f6ce9d446188ac のような名も別の依存と見なされ、
+      // この file だけを触る PR が数十本湧いておった。
+      // 本体の crate を上げる PR はこれまでどおり作られる。workspace-hack が
+      // 追従しておらねば、同じ検めで落ちて知れる。その時は generate を打つ。
+      "matchManagers": ["cargo"],
+      "matchFileNames": ["apps/backend/crates/workspace-hack/Cargo.toml"],
+      "enabled": false
     }
   ]
 }
