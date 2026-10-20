@@ -3,11 +3,11 @@
   "extends": ["config:base"],
   "ignorePresets": [":prHourlyLimit2"],
   // "baseBranches": ["develop", "master"],
-  // 窓は月曜の 5 時から 9 時（JST）とする。
+  // 窓は月曜の 5 時から 9 時（JST）にする。
   // 何のために: before 9am だけでは窓の始まりが無く、月曜の 0 時から効く。
   // 8 月からの renovate の PR は、9 割が月曜の 0 時台から 2 時台に作られて
-  // おった。深夜に手を動かしておる時に PR と CI が一斉に湧き、作業の CI を
-  // 押し退けておった。人が寝ておる明け方に湧かせ、朝には捌けておるようにする。
+  // いた。深夜に手を動かしている時に PR と CI が一斉に湧き、作業の CI を
+  // 押し退けていた。人が寝ている明け方に湧かせ、朝には捌けているようにする。
   "schedule": ["after 5am and before 9am on monday"],
   "timezone": "Asia/Tokyo",
   // "dependencyDashboard": false,
@@ -101,13 +101,13 @@
       // Extension を受け渡す。版がずれると state が二つ入り、同じ型が別の実体
       // になって typecheck が落ちる。実行時も instanceof が壊れ、編集器が描け
       // なくなる（#694）。別々の PR で上げれば、途中の版で必ずずれる。
-      // なぜ前方一致か: どの package も state を引くゆえ、後から足した package
+      // なぜ前方一致か: どの package も state を引くので、後から足した package
       // も同じ群れに入る。名指しにすると、足した時の書き足しを忘れて漏れる。
       // renovate の既定（group:recommended の group:codemirror）も同じく束ねる。
-      // ここに書くのは、束ねる理由を残し、既定が変わっても外れぬためである。
-      // 束ねても、lock の推移の解決に古い state が残ることは防げぬ（#694 で
+      // ここに書くのは、束ねる理由を残し、既定が変わっても外れないようにするため。
+      // 束ねても、lock の推移の解決に古い state が残ることは防げない（#694 で
       // 起きた）。二重取りが出たら lock を取り直す。
-      // 何が起きたら解くか: 解かぬ。分けた方が細かく見られると思っても分けるな。
+      // 何が起きたら解くか: 解かない。分けた方が細かく見られると思っても分けない。
       "matchManagers": ["npm"],
       "matchPackagePatterns": ["^@codemirror/"],
       "groupName": "codemirror"
