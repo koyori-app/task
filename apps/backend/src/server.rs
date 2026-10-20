@@ -112,6 +112,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         smtp_client: state.smtp_client.clone(),
         http_client: state.http_client.clone(),
         review_summary_storage: state.review_summary_storage.clone(),
+        github_issue_sync_storage: state.github_issue_sync_storage.clone(),
         pg_pool: state.pg_pool.clone(),
         oauth_settings: state.oauth_settings.clone(),
     };

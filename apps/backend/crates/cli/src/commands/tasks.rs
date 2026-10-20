@@ -1310,6 +1310,7 @@ mod tests {
         let (owner, name) = repo.split_once('/').unwrap();
         json!({
             "id": uuid(id),
+            "project_id": uuid(100),
             "host": "github",
             "host_url": "https://github.com",
             "repo_owner": owner,

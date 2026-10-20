@@ -3,6 +3,7 @@ import { GitCommitHorizontal, MoreHorizontal, Plus } from '@lucide/vue';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { computed, ref } from 'vue';
 
+import TaskForgeMergeEffectsBadge from '@/components/tasks/TaskForgeMergeEffectsBadge.vue';
 import TaskForgePullRequestLinkDialog from '@/components/tasks/TaskForgePullRequestLinkDialog.vue';
 import TaskIssueSourceRow from '@/components/tasks/TaskIssueSourceRow.vue';
 import { Button } from '@/components/ui/button';
@@ -207,6 +208,7 @@ const SOURCE_LABELS: Record<string, string> = {
             >
               {{ SOURCE_LABELS[source] ?? source }}
             </span>
+            <TaskForgeMergeEffectsBadge v-if="tenantId" :tenant-id="tenantId" :pull-request="pr" />
             <span v-if="!pr.commits_complete" class="shrink-0 text-xs text-muted-foreground">
               コミット一覧は一部のみ
             </span>

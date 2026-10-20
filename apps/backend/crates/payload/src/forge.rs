@@ -22,6 +22,10 @@ pub struct TaskForgeResponse {
 pub struct TaskForgePullRequest {
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
+    /// PR 行の持ち主（webhook を受けた連携のプロジェクト）。タスクのプロジェクトとは限らない。
+    /// PR を主語にする口（`/projects/{project_id}/forge/pull-requests/...`）はこちらを使う
+    #[schema(value_type = String, format = "uuid")]
+    pub project_id: Uuid,
     /// `github` / `gitlab` / `forgejo`
     pub host: String,
     pub host_url: String,

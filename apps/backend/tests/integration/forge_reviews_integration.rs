@@ -160,9 +160,9 @@ async fn merge_notifies_reviewers_and_task_people_once() {
     let listed = reviewed_pull_requests(&app, &fx, &reviewer_token).await;
     assert_eq!(listed[0]["state"], "merged");
     assert_eq!(listed[0]["merged_at"], "2026-10-02T00:00:00Z");
-    assert_eq!(
-        listed[0]["merge_effects_processed_at"],
-        serde_json::Value::Null
+    assert!(
+        listed[0]["merge_effects_processed_at"].is_string(),
+        "Closed {{ merged: true }} でマージ時副作用を処理済みになる"
     );
 
     for user in [reviewer.id, assignee.id, watcher.id] {

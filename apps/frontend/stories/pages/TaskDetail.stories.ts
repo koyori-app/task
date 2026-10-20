@@ -541,6 +541,7 @@ export const WithForge: Story = {
         pull_requests: [
           {
             id: 'pr-1',
+            project_id: 'project-1',
             host: 'github',
             host_url: 'https://github.com',
             repo_owner: 'acme',
@@ -559,6 +560,7 @@ export const WithForge: Story = {
           },
           {
             id: 'pr-2',
+            project_id: 'project-1',
             host: 'github',
             host_url: 'https://github.com',
             repo_owner: 'acme',

@@ -317,6 +317,11 @@ async fn pull_request_links_title_and_body_references() {
     let (status, forge) = get_forge(&app, fx.tp.tenant_id, second_project, second, &token).await;
     assert_eq!(status, 200);
     assert_eq!(forge["pull_requests"][0]["number"], 87);
+    assert_eq!(
+        forge["pull_requests"][0]["project_id"],
+        fx.tp.project_id.to_string(),
+        "PR 行の持ち主は webhook を受けたプロジェクト"
+    );
 
     app.cleanup_user(outsider.id).await;
     // SAFETY: serial アトリビュートにより他テストとの並列実行を防いでいる。
@@ -420,10 +425,10 @@ async fn each_action_creates_the_pull_request_and_its_links() {
             (5, serde_json::json!(["title"]), "merged".to_string()),
         ]
     );
-    // マージ時の副作用（TASK-289）はまだ行わない
+    // `Closes` の無い参照なのでタスクは完了しないが、マージ時の副作用は処理済みになる
     let row = pr_row(&app, fx.tp.project_id, 5).await;
     assert!(row.merged_at.is_some());
-    assert_eq!(row.merge_effects_processed_at, None);
+    assert!(row.merge_effects_processed_at.is_some());
     assert_eq!(pr_activities(&app, task).await.len(), 5, "PR ごとに 1 行");
 
     // SAFETY: serial アトリビュートにより他テストとの並列実行を防いでいる。

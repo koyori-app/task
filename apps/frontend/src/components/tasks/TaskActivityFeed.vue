@@ -84,8 +84,12 @@ const rows = computed(() =>
             をリンクしました<template v-if="commit.message">「{{ commit.message }}」</template>
           </span>
           <span v-else-if="pullRequest" class="min-w-0 flex-1 break-words">
-            {{ activityActor(item)
-            }}{{ pullRequest.unlinked || pullRequest.manual ? 'が' : 'の' }} PR
+            <!-- マージの履歴は作者の操作ではないので主語を出さない。
+                 template 末尾の空白だけのテキストは消えるので、区切りの空白は補間に含める -->
+            <template v-if="!pullRequest.merged"
+              >{{ activityActor(item)
+              }}{{ pullRequest.unlinked || pullRequest.manual ? 'が ' : 'の ' }}</template
+            >PR
             <a
               v-if="pullRequest.url"
               :href="pullRequest.url"
@@ -96,11 +100,13 @@ const rows = computed(() =>
             >
             <span v-else>{{ pullRequest.number ? `#${pullRequest.number}` : '' }}</span>
             {{
-              pullRequest.unlinked
-                ? 'のリンクを外しました'
-                : pullRequest.manual
-                  ? 'を手動でリンクしました'
-                  : 'をリンクしました'
+              pullRequest.merged
+                ? 'のマージでタスクを完了しました'
+                : pullRequest.unlinked
+                  ? 'のリンクを外しました'
+                  : pullRequest.manual
+                    ? 'を手動でリンクしました'
+                    : 'をリンクしました'
             }}<template v-if="pullRequest.title">「{{ pullRequest.title }}」</template>
           </span>
           <span v-else class="min-w-0 flex-1">

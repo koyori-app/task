@@ -233,6 +233,34 @@ describe('TaskActivityFeed', () => {
       expect(wrapper.find('a').exists()).toBe(false);
       expect(wrapper.text()).toContain('PR #87 をリンクしました');
     });
+
+    it('マージによる完了は作者を主語にせず、PR へリンクする', () => {
+      const wrapper = mount(TaskActivityFeed, {
+        props: {
+          activities: [{ ...prItem({ state: 'merged' }), event_type: 'forge_pull_request_merged' }],
+        },
+      });
+      expect(wrapper.text()).toContain(
+        'PR #87 のマージでタスクを完了しました「feat: OAuth 対応 TASK-1」',
+      );
+      expect(wrapper.text()).not.toContain('yupixの');
+      expect(wrapper.get('a').attributes('href')).toBe(payload.html_url);
+    });
+
+    it('確認済みの操作を操作者とともに出す', () => {
+      const wrapper = mount(TaskActivityFeed, {
+        props: {
+          activities: [
+            {
+              ...activity('ack-1', 10),
+              event_type: 'forge_merge_effects_acknowledged',
+              payload: { host: 'github', pull_request_id: 'pr-1', number: 87, html_url: '' },
+            } as ActivityItem,
+          ],
+        },
+      });
+      expect(wrapper.text()).toContain('yupixがPR #87 の自動完了を未適用のまま確認済みにしました');
+    });
   });
 
   it('手でリンクした PR は操作者を主語にし、source の無い旧い行は従来の文言にする', () => {
