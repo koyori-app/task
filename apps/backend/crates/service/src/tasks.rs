@@ -2,7 +2,8 @@
 
 use sea_orm::sea_query::LockType;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait, QuerySelect, prelude::Uuid,
+    ActiveModelTrait, ActiveValue::Set, ConnectionTrait, DbBackend, DbErr, EntityTrait,
+    FromQueryResult, QuerySelect, Statement, prelude::Uuid,
 };
 
 use entity::project_task_counters;
@@ -34,4 +35,46 @@ pub async fn next_seq_id<C: ConnectionTrait>(
             .last_seq
         }
     })
+}
+
+/// 類似タスク候補の 1 件（apps/backend/docs/task-similarity-search.md §5）。
+#[derive(Debug, FromQueryResult)]
+pub struct SimilarTask {
+    pub id: Uuid,
+    pub seq_id: i32,
+    pub title: String,
+    pub score: f32,
+}
+
+/// 同一プロジェクト内で title が `text` に trigram で似ているタスクを類似度の高い順に返す。
+/// `text` は trim 済み・非空であること。
+pub async fn find_similar(
+    db: &impl ConnectionTrait,
+    project_id: Uuid,
+    text: &str,
+    exclude_task_id: Option<Uuid>,
+    limit: u64,
+) -> Result<Vec<SimilarTask>, DbErr> {
+    SimilarTask::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        r#"
+        SELECT id, seq_id, title, similarity(title, $2)::real AS score
+        FROM tasks
+        WHERE project_id = $1
+          AND deleted_at IS NULL
+          AND ($3::uuid IS NULL OR id <> $3)
+          AND title % $2
+        -- score の同値で順序が揺れないよう id で固定（search_tasks と同じ理由）
+        ORDER BY score DESC, id ASC
+        LIMIT $4
+        "#,
+        [
+            project_id.into(),
+            text.into(),
+            exclude_task_id.into(),
+            (limit as i64).into(),
+        ],
+    ))
+    .all(db)
+    .await
 }
