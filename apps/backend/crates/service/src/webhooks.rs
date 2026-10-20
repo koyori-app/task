@@ -296,6 +296,18 @@ fn str_at<'a>(payload: &'a Json, pointer: &str) -> &'a str {
         .unwrap_or("")
 }
 
+/// Discord の embed の見出しと色。イベント名（`review.round_created` など）は
+/// 利用者に意味が通じないので見出しに使わない。色は Discord の標準パレットから選ぶ
+fn discord_style(event: &str) -> (&'static str, u32) {
+    match event {
+        EVENT_TASK_CREATED => ("タスクの作成", 0x2ecc71),
+        EVENT_COMMENT_CREATED => ("コメントの追加", 0x3498db),
+        EVENT_REVIEW_ROUND_CREATED => ("レビューの投稿", 0x9b59b6),
+        EVENT_REVIEW_FINDING_CHANGED => ("レビュー指摘の更新", 0xe67e22),
+        _ => ("Koyori の通知", 0x95a5a6),
+    }
+}
+
 /// Discord の Incoming Webhook に送る本文（`content` + `embeds`）。
 ///
 /// レビュー系の要約は通知メールの件名・本文 1 行目と同じ文言にする。
@@ -353,14 +365,21 @@ pub fn discord_message(event: &str, payload: &Json) -> Json {
             );
         }
     }
+    let (title, color) = discord_style(event);
     // content は 2000 文字、embed の description は 4096 文字が Discord の上限
+    let mut embed = serde_json::json!({
+        "title": title,
+        "color": color,
+        "description": clip(&detail, 4096),
+        "fields": fields,
+    });
+    // Discord は ISO 8601 の timestamp を投稿時刻として出す。無い payload では付けない
+    if let Some(timestamp) = payload.get("timestamp").and_then(Json::as_str) {
+        embed["timestamp"] = timestamp.into();
+    }
     serde_json::json!({
         "content": clip(&summary, 2000),
-        "embeds": [{
-            "title": event,
-            "description": clip(&detail, 4096),
-            "fields": fields,
-        }],
+        "embeds": [embed],
     })
 }
 
@@ -436,7 +455,8 @@ mod tests {
             "[Koyori] PR #618 のレビュー R2（high 1 / medium 0 / low 0 / nit 0）"
         );
         let embed = &message["embeds"][0];
-        assert_eq!(embed["title"], "review.round_created");
+        assert_eq!(embed["title"], "レビューの投稿");
+        assert_eq!(embed["color"], 0x9b59b6);
         assert!(
             embed["description"]
                 .as_str()
@@ -444,6 +464,31 @@ mod tests {
                 .starts_with("alice が")
         );
         assert_eq!(embed["fields"].as_array().unwrap().len(), 2);
+    }
+
+    // 見出しにイベント名が出て、色も全部同じで見分けが付かなかった
+    #[test]
+    fn discord_embed_uses_readable_title_and_distinct_color_per_event() {
+        let mut colors = std::collections::HashSet::new();
+        for event in EVENTS {
+            let embed = &discord_message(event, &serde_json::json!({}))["embeds"][0];
+            let title = embed["title"].as_str().unwrap();
+            assert_ne!(title, *event);
+            assert!(!title.contains('.'), "{event}: {title}");
+            assert!(colors.insert(embed["color"].as_u64().unwrap()), "{event}");
+        }
+    }
+
+    #[test]
+    fn discord_embed_carries_the_event_timestamp() {
+        let payload = serde_json::json!({
+            "timestamp": "2026-10-20T01:23:45Z",
+            "task": {"seq_id": 3, "title": "t"},
+        });
+        let embed = &discord_message(EVENT_TASK_CREATED, &payload)["embeds"][0];
+        assert_eq!(embed["timestamp"], "2026-10-20T01:23:45Z");
+        let without = &discord_message(EVENT_TASK_CREATED, &serde_json::json!({}))["embeds"][0];
+        assert!(without.get("timestamp").is_none());
     }
 
     #[test]
