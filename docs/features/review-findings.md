@@ -216,7 +216,7 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
 | `POST /v1/tenants/{t}/projects/{p}/reviews` | ラウンド + 指摘の**一括作成**（1 リクエスト）。成功後に GitHub 要約更新をジョブ投入 |
 | `GET  /v1/tenants/{t}/projects/{p}/reviews?pr=618` | ラウンドの一覧（指摘の件数つき） |
 | `GET  /v1/tenants/{t}/projects/{p}/reviews/{id}` | ラウンドの詳細（指摘含む。各指摘に `available_actions`） |
-| `GET  /v1/tenants/{t}/projects/{p}/reviews/pull-requests` | レビューのある PR の一覧（ラウンド数・未解決数・塞いでいる件数・ホスト上の PR の状態）。**可否は返さない**——可否には鮮度と連携の有無も要り（§8 の 6 値）、この一覧はその材料を持たない。画面の PR 一覧が使う |
+| `GET  /v1/tenants/{t}/projects/{p}/reviews/pull-requests` | レビューのある PR の一覧（ラウンド数・未解決数 `unresolved`・塞いでいる件数 `blocking`・そのうち fixed の件数 `blocking_fixed`・ホスト上の PR の状態 `state`）。`unresolved` / `blocking` は open / fixing / fixed を数え（`blocking` は High / Medium のみ）、`blocking_fixed` は `blocking` の内数で確認（verified）待ちの分。**可否は返さない**——可否には鮮度と連携の有無も要り（§8 の 6 値）、この一覧はその材料を持たない。画面の PR 一覧が使う |
 | `GET  /v1/tenants/{t}/projects/{p}/reviews/summary?pr=618` | PR 単位の集計: 重大度 × 状態の件数、ラウンド数、最新ラウンドの `head_sha`、集計対象のリポジトリ、オーナー代行での棄却件数、「マージ可否」、表示用の判定 `gate` |
 | `GET  /v1/tenants/{t}/projects/{p}/review-findings?pr=618&state=&severity=` | PR の指摘一覧（状態・重大度で絞り込み。各指摘に `available_actions`）。CLI の `review list` と UI の一覧が使う |
 | `PATCH /v1/tenants/{t}/projects/{p}/review-findings/{id}` | 状態遷移（`state` と任意のコメント）。応答の指摘にも遷移後の `available_actions` |
@@ -567,6 +567,8 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
   10 件ごとにページを分け、`page` が無ければ表示中の PR が載っているページを開く。
   範囲外の `page` は最後のページに寄せて理由を出す。絞り込みとページ分割は画面側で行う
   （API は全件を集計して返す。サーバーで切っても集計の仕事は減らない）
+  各行のバッジは件数の事実だけを出す: `blocking` が 0 なら「未解決なし」、open / fixing が
+  残れば赤の「N 件が未解決」（N は `blocking - blocking_fixed`）、すべて fixed なら「N 件が承認待ち」
 - **PR 単位の指摘一覧**: 重大度・状態・ラウンドでフィルタ。各指摘は title / file:line / 本文 /
   遷移履歴を持つ
 - **状態遷移の操作**: fixing / fixed / verified / deferred / rejected に加えて、**戻り遷移**
@@ -844,3 +846,7 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
   満たせる。§2）。トークンは GitHub App のユーザー認可で取り、ログイン用の OAuth App の scope は
   広げない（ログインで全リポジトリへの書き込みを求めることになる）。未連携のときは承認しない。
   重複の控えは DB 列ではなく GitHub のレビュー一覧（本人の ID・同じ commit）で見る。取り消しは範囲外（§9）
+- 2026-10-18: PR 一覧に `blocking_fixed`（High / Medium かつ fixed の件数）を足し、バッジで
+  すべて fixed の PR を「N 件が承認待ち」として未対応と分けた（TASK-302）。`blocking` /
+  `unresolved` の値と意味はマージ判定と同じ集計のまま変えない。確認待ちだけの PR が修正の要る
+  PR と同じ赤で出ており、iOS は PR ごとに指摘一覧を読み直して fixed を数えていた

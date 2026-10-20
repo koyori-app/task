@@ -93,6 +93,9 @@ function stubFetch(state: MockState) {
             (f.severity === 'high' || f.severity === 'medium') &&
             (f.state === 'open' || f.state === 'fixed'),
         ).length;
+      const blockingFixed = state.findings.filter(
+        (f) => (f.severity === 'high' || f.severity === 'medium') && f.state === 'fixed',
+      ).length;
       return jsonResponse(
         (state.prNumbers ?? [618]).map((prNumber) => ({
           pr_number: prNumber,
@@ -102,6 +105,7 @@ function stubFetch(state: MockState) {
           unresolved: state.findings.filter((f) => f.state === 'open' || f.state === 'fixed')
             .length,
           blocking,
+          blocking_fixed: blockingFixed,
           last_reviewed_at: '2026-08-26T00:00:00Z',
           state: state.prStates?.[prNumber] ?? 'open',
         })),
@@ -312,6 +316,32 @@ describe('ReviewFindingsView', () => {
     const blocked = mountView();
     await flushPromises();
     expect(blocked.text()).toContain('1 件が未解決');
+  });
+
+  it('一覧バッジは fixed を承認待ちとして未解決と分ける', async () => {
+    // High / Medium がすべて fixed なら、赤の「未解決」ではなく承認待ち
+    stubFetch({
+      findings: [
+        finding({ id: 'f-1', state: 'fixed' }),
+        finding({ id: 'f-2', severity: 'medium', state: 'fixed' }),
+      ],
+    });
+    const pending = mountView();
+    await flushPromises();
+    expect(pending.text()).toContain('2 件が承認待ち');
+    expect(pending.text()).not.toContain('件が未解決');
+
+    // open が残れば、件数は fixed を除いた残りの分
+    stubFetch({
+      findings: [
+        finding({ id: 'f-1', state: 'fixed' }),
+        finding({ id: 'f-2', severity: 'medium', state: 'open' }),
+      ],
+    });
+    const mixed = mountView();
+    await flushPromises();
+    expect(mixed.text()).toContain('1 件が未解決');
+    expect(mixed.text()).not.toContain('件が承認待ち');
   });
 
   it('mergeVerdict の title / detail が merge-gate に出る', async () => {
