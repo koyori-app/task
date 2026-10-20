@@ -163,6 +163,10 @@ fn find_match_char_range(text: &str, query: &str) -> Option<(usize, usize)> {
     }
     let text_chars: Vec<char> = text.chars().collect();
     let q_len = query_chars.len();
+    // 近似一致（`<%`）や空白の連続する検索語では、対象より検索語の方が長いことがある
+    if q_len > text_chars.len() {
+        return None;
+    }
     for start in 0..=text_chars.len().saturating_sub(q_len) {
         if text_chars[start..start + q_len]
             .iter()
@@ -890,4 +894,27 @@ pub async fn detach_task_file(
         .exec(&state.db)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_match_char_range_returns_none_when_query_is_longer_than_text() {
+        // 範囲外スライスで panic していた（検索語 8 文字 > 対象 4 文字）
+        assert_eq!(find_match_char_range("a b ", "a      b"), None);
+        assert_eq!(find_match_char_range("", "a"), None);
+    }
+
+    #[test]
+    fn find_match_char_range_matches_by_char_index() {
+        assert_eq!(
+            find_match_char_range("認証ログイン画面", "ログイン"),
+            Some((2, 6))
+        );
+        assert_eq!(find_match_char_range("OAuth", "oauth"), Some((0, 5)));
+        assert_eq!(find_match_char_range("abc", "abc"), Some((0, 3)));
+        assert_eq!(find_match_char_range("abc", "abd"), None);
+    }
 }
