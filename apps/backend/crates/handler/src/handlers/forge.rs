@@ -8,8 +8,8 @@ use axum::{
 use axum_valid::Valid;
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter, Statement,
-    prelude::Uuid,
+    ColumnTrait, DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
+    Statement, prelude::Uuid,
 };
 
 use crate::AppState;
@@ -17,10 +17,10 @@ use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
-use entity::{github_integrations, tasks};
+use entity::{forge_branch_links, github_integrations, tasks};
 use payload::forge::{
-    LinkTaskPullRequestRequest, TaskForgeCommit, TaskForgePullRequest, TaskForgeRepository,
-    TaskForgeResponse,
+    LinkTaskPullRequestRequest, TaskForgeBranch, TaskForgeCommit, TaskForgePullRequest,
+    TaskForgeRepository, TaskForgeResponse,
 };
 use service::forge::events::ForgeRepo;
 
@@ -132,10 +132,31 @@ pub async fn get_task_forge(
     Ok(Json(TaskForgeResponse {
         pull_requests,
         commits,
-        branches: Vec::new(),
+        branches: task_branches(&state, task.id).await?,
         repository,
         issue: service::forge::issue_source::find_for_task(&state.db, task.id).await?,
     }))
+}
+
+async fn task_branches(state: &AppState, task_id: Uuid) -> Result<Vec<TaskForgeBranch>, AppError> {
+    Ok(forge_branch_links::Entity::find()
+        .filter(forge_branch_links::Column::TaskId.eq(task_id))
+        .order_by_desc(forge_branch_links::Column::CreatedAt)
+        .order_by_desc(forge_branch_links::Column::Id)
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|row| TaskForgeBranch {
+            id: row.id,
+            host: row.host,
+            host_url: row.host_url,
+            repo_owner: row.repo_owner,
+            repo_name: row.repo_name,
+            branch: row.branch,
+            html_url: row.html_url,
+            created_at: row.created_at.into(),
+        })
+        .collect())
 }
 
 /// プロジェクトの現在の連携先（GitHub だけ）
@@ -338,6 +359,44 @@ pub async fn unlink_task_pull_request(
     if !service::forge::pull_requests::unlink(&state.db, task.id, pull_request_id, auth.user_id)
         .await?
     {
+        return Err(AppError::NotFound);
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    delete,
+    path = "/{id}/forge/branches/{link_id}",
+    tag = "Tasks",
+    summary = "ブランチのリンクを外す",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        ("id" = String, Path, description = "タスクID"),
+        ("link_id" = Uuid, Path, description = "ブランチのリンクID"),
+    ),
+    responses(
+        (status = 204, description = "外しました"),
+        CrudErrors,
+    )
+)]
+pub async fn delete_task_forge_branch(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id, id, link_id)): Path<(Uuid, Uuid, String, Uuid)>,
+) -> Result<StatusCode, AppError> {
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
+    let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+    // 他タスクの link_id は存在を明かさず 404
+    let deleted = forge_branch_links::Entity::delete_many()
+        .filter(forge_branch_links::Column::Id.eq(link_id))
+        .filter(forge_branch_links::Column::TaskId.eq(task.id))
+        .exec(&state.db)
+        .await?;
+    if deleted.rows_affected == 0 {
         return Err(AppError::NotFound);
     }
     Ok(StatusCode::NO_CONTENT)

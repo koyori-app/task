@@ -18,13 +18,44 @@ use uuid::Uuid;
 use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-fn repo() -> ForgeRepo {
+pub(crate) fn repo() -> ForgeRepo {
     ForgeRepo {
         host: "github".into(),
         host_url: "https://github.com".into(),
         repo_owner: REPO_OWNER.into(),
         repo_name: REPO_NAME.into(),
     }
+}
+
+/// GitHub API のモックへ向ける。PR のコミット一覧は、テストが個別に足さなければ空を返す
+/// （`Opened` / `Synchronize` は必ずコミット一覧を引く）。呼ぶテストは serial にし、
+/// 終わりに `GITHUB_API_BASE_URL` を外す。
+pub(crate) async fn github_mock() -> MockServer {
+    let mock_server = MockServer::start().await;
+    // SAFETY: 呼び出し元のテストは serial アトリビュートで他テストとの並列実行を防いでいる。
+    unsafe {
+        std::env::set_var("GITHUB_API_BASE_URL", mock_server.uri());
+    }
+    mount_github_defaults(&mock_server).await;
+    mock_server
+}
+
+/// installation token と、空のコミット一覧（個別のモックより優先度を下げる）
+pub(crate) async fn mount_github_defaults(mock_server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path_regex(r"^/app/installations/\d+/access_tokens$"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "token": "ghs_test_installation_token",
+            "expires_at": "2030-01-01T00:00:00Z"
+        })))
+        .mount(mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/repos/[^/]+/[^/]+/pulls/\d+/commits$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .with_priority(10)
+        .mount(mock_server)
+        .await;
 }
 
 /// GitHub の pull_request ペイロード（関係するフィールドだけ）
@@ -164,8 +195,11 @@ async fn soft_delete_task(app: &TestApp, task_id: Uuid) {
 /// タイトルと本文の `KEY-N` が、同じテナントの別プロジェクトも含めてタスクへ結ばれる。
 /// 解決できない参照（不明・削除済み・別テナント）は捨て、同じ PR の有効な参照は結ぶ。
 /// 同じタスクがタイトルと本文の両方にあっても表示は 1 件、履歴は 1 行。
+// serial: GITHUB_API_BASE_URL を差し替えるため、他の GitHub テストと並列に走らせない。
+#[serial_test::serial]
 #[tokio::test]
 async fn pull_request_links_title_and_body_references() {
+    let _mock_server = github_mock().await;
     let app = TestApp::new_with_github().await;
     let fx = setup(&app).await;
     let key = &fx.key;
@@ -290,13 +324,20 @@ async fn pull_request_links_title_and_body_references() {
     );
 
     app.cleanup_user(outsider.id).await;
+    // SAFETY: serial アトリビュートにより他テストとの並列実行を防いでいる。
+    unsafe {
+        std::env::remove_var("GITHUB_API_BASE_URL");
+    }
     app.cleanup_user(fx.owner_id).await;
 }
 
 /// タイトルだけ・本文だけ・本文が空（null）の PR がそれぞれ出る。
 /// `Opened` を受けていない PR も、最初の `Synchronize` / `Closed` で行とリンクができる。
+// serial: GITHUB_API_BASE_URL を差し替えるため、他の GitHub テストと並列に走らせない。
+#[serial_test::serial]
 #[tokio::test]
 async fn each_action_creates_the_pull_request_and_its_links() {
+    let _mock_server = github_mock().await;
     let app = TestApp::new_with_github().await;
     let fx = setup(&app).await;
     let key = &fx.key;
@@ -390,13 +431,20 @@ async fn each_action_creates_the_pull_request_and_its_links() {
     assert!(row.merge_effects_processed_at.is_some());
     assert_eq!(pr_activities(&app, task).await.len(), 5, "PR ごとに 1 行");
 
+    // SAFETY: serial アトリビュートにより他テストとの並列実行を防いでいる。
+    unsafe {
+        std::env::remove_var("GITHUB_API_BASE_URL");
+    }
     app.cleanup_user(fx.owner_id).await;
 }
 
 /// `Edited` で本文から消した参照の `body` 行が消える。タイトルに残っていれば表示も残る。
 /// 手動リンク（`manual`）は自動の再構築で消さない。履歴は残す。
+// serial: GITHUB_API_BASE_URL を差し替えるため、他の GitHub テストと並列に走らせない。
+#[serial_test::serial]
 #[tokio::test]
 async fn edited_pull_request_rebuilds_title_and_body_links() {
+    let _mock_server = github_mock().await;
     let app = TestApp::new_with_github().await;
     let fx = setup(&app).await;
     let key = &fx.key;
@@ -455,6 +503,10 @@ async fn edited_pull_request_rebuilds_title_and_body_links() {
     let (_, forge) = get_forge(&app, fx.tp.tenant_id, fx.tp.project_id, removed, &token).await;
     assert_eq!(forge["pull_requests"], serde_json::json!([]));
 
+    // SAFETY: serial アトリビュートにより他テストとの並列実行を防いでいる。
+    unsafe {
+        std::env::remove_var("GITHUB_API_BASE_URL");
+    }
     app.cleanup_user(fx.owner_id).await;
 }
 
@@ -467,20 +519,7 @@ async fn edited_pull_request_rebuilds_title_and_body_links() {
 #[serial_test::serial]
 #[tokio::test]
 async fn pull_request_generations_do_not_roll_back() {
-    let mock_server = MockServer::start().await;
-    // SAFETY: serial アトリビュートにより他テストとの並列実行を防いでいる。
-    unsafe {
-        std::env::set_var("GITHUB_API_BASE_URL", mock_server.uri());
-    }
-    Mock::given(method("POST"))
-        .and(path_regex(r"^/app/installations/\d+/access_tokens$"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-            "token": "ghs_test_installation_token",
-            "expires_at": "2030-01-01T00:00:00Z"
-        })))
-        .mount(&mock_server)
-        .await;
-
+    let mock_server = github_mock().await;
     let app = TestApp::new_with_github().await;
     let fx = setup(&app).await;
     let key = &fx.key;
@@ -624,8 +663,11 @@ async fn pull_request_generations_do_not_roll_back() {
 }
 
 /// タスクの閲覧権限が無い呼び出し元には返さない。対照としてオーナーには返る。
+// serial: GITHUB_API_BASE_URL を差し替えるため、他の GitHub テストと並列に走らせない。
+#[serial_test::serial]
 #[tokio::test]
 async fn task_forge_requires_access_to_the_task() {
+    let _mock_server = github_mock().await;
     let app = TestApp::new_with_github().await;
     let fx = setup(&app).await;
     let task = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, 1).await;
@@ -707,5 +749,9 @@ async fn task_forge_requires_access_to_the_task() {
     assert_eq!(status, 403);
 
     app.cleanup_user(outsider.id).await;
+    // SAFETY: serial アトリビュートにより他テストとの並列実行を防いでいる。
+    unsafe {
+        std::env::remove_var("GITHUB_API_BASE_URL");
+    }
     app.cleanup_user(fx.owner_id).await;
 }

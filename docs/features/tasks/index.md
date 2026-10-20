@@ -27,7 +27,8 @@ icon: lucide:layout-list
 | 9a | **GitHub App 基盤**（インストール・認証情報管理・Webhook 受信インフラ） | [tasks/github-app](/features/tasks/github-app) | なし（PR 1 と並行可） | ✅ 完了 ([#44](https://github.com/TeamBlackCrystal/task/pull/44)) |
 | 9b | **Git ホスティング↔タスク連携**（PR・コミット・ブランチのリンク・自動クローズ・コミットのアクティビティ表示。GitLab / Forgejo を見据えたホスト中立モデル） | [tasks/github-tasks](/features/tasks/github-tasks) | 1, 8, 9a, レビュー指摘 | 未着手（仕様改訂 2026-09-04） |
 | 10 | **Webhook**（外部向けイベント送信。レビューイベント・Discord 形式を含む） | [tasks/webhooks](/features/tasks/webhooks) | 1 | API・配信基盤は実装済み（画面は未着手） |
-| 11 | **スケジュール**（期間に重なるタスク・スプリント・マイルストーンの一括取得） | [tasks/schedule](/features/tasks/schedule) | 1, 3 | API 実装済み（画面は未着手） |
+| 11 | **スケジュール**（期間に重なるタスク・スプリント・マイルストーンの一括取得） | [tasks/schedule](/features/tasks/schedule) | 1, 3 | 実装済み |
+| 12 | **山積み・手動の山崩し**（メンバー・日ごとの残工数の棒・開始予定日のドラッグ） | [tasks/workload](/features/tasks/workload) | 1, 2, 11 | API 実装済み（画面は未着手） |
 | — | **フロントエンド** | 各仕様書末尾の「Phase B」節 | 1〜10 すべて完了後 | 未着手 |
 
 ---

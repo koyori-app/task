@@ -58,6 +58,11 @@ const name = computed(() => props.user.name ?? props.user.username ?? '');
 const src = computed(() => props.user.avatar_url || undefined);
 const text = computed(() => props.fallbackText ?? avatarInitials(name.value, props.initialLength));
 
+/**
+ * 既定の slot は頭文字の代わりに置くもの（担当者なしのアイコン等）。画像があれば画像が先に出る。
+ * 字の色は `USER_AVATAR_INITIALS_CLASS`（text-foreground）を引き継ぐので、アイコンに色を付けぬ限り
+ * 地（bg-muted）に対して対比が足りる。`text-muted-foreground` は 12px 以下の字・図で 4.34:1 しかなく使わぬ。
+ */
 const SHAPES = { full: 'rounded-full', md: 'rounded-md', lg: 'rounded-lg' } as const;
 </script>
 
@@ -72,7 +77,7 @@ const SHAPES = { full: 'rounded-full', md: 'rounded-md', lg: 'rounded-lg' } as c
       :class="cn(SHAPES[shape], USER_AVATAR_INITIALS_CLASS, fallbackClass)"
       :style="fallbackStyle"
     >
-      {{ text }}
+      <slot>{{ text }}</slot>
     </AvatarFallback>
   </Avatar>
 </template>

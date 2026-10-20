@@ -67,6 +67,8 @@ async fn pr_merged_notifications(app: &TestApp, user_id: Uuid) -> Vec<notificati
 /// `pr_merged` はレビュワー・担当者・ウォッチャーに 1 人 1 通だけ届き、再送や後続イベントで増えない。
 #[tokio::test]
 async fn merge_notifies_reviewers_and_task_people_once() {
+    // `Opened` は PR のコミット一覧を引く
+    let _mock_server = github_mock().await;
     let app = TestApp::new_with_github().await;
     let fx = setup(&app).await;
     let key = &fx.key;
@@ -184,6 +186,7 @@ async fn merge_notifies_reviewers_and_task_people_once() {
     );
 
     // テナントごとレビューを消してから（レビュワーの行はレビューに参照されている）
+    forget_github_mock();
     for user in [fx.owner_id, reviewer.id, assignee.id, watcher.id] {
         app.cleanup_user(user).await;
     }
@@ -226,6 +229,8 @@ async fn merge_of_unlinked_pull_request_notifies_reviewers() {
 /// `unresolved` は High / Medium の未解決件数。`read:review` の無い PAT とレビューの無い PR は null。
 #[tokio::test]
 async fn unresolved_counts_blocking_findings_only_with_review_scope() {
+    // `Opened` は PR のコミット一覧を引く
+    let _mock_server = github_mock().await;
     let app = TestApp::new_with_github().await;
     let fx = setup(&app).await;
     let key = &fx.key;
@@ -282,6 +287,7 @@ async fn unresolved_counts_blocking_findings_only_with_review_scope() {
         assert_eq!(unresolved(&forge, 89), 0);
     }
 
+    forget_github_mock();
     app.cleanup_user(fx.owner_id).await;
 }
 

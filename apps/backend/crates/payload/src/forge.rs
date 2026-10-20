@@ -11,7 +11,6 @@ use validator::Validate;
 pub struct TaskForgeResponse {
     pub pull_requests: Vec<TaskForgePullRequest>,
     pub commits: Vec<TaskForgeCommit>,
-    /// ブランチのリンクは未実装（TASK-291）で、常に空
     pub branches: Vec<TaskForgeBranch>,
     /// プロジェクトの現在の連携先。連携していなければ null（手動リンクの可否をこれで決める）
     pub repository: Option<TaskForgeRepository>,
@@ -84,7 +83,10 @@ pub struct TaskForgeBranch {
     pub repo_owner: String,
     pub repo_name: String,
     pub branch: String,
+    /// ホスト上のブランチの URL。組み立てずにそのまま使う
     pub html_url: String,
+    #[schema(value_type = String, format = "date-time")]
+    pub created_at: DateTime<Utc>,
 }
 
 /// `POST /tasks/{id}/forge/pull-requests`。リポジトリはプロジェクトの現在の連携先で決まるので受け取らない

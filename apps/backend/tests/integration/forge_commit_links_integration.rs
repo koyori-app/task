@@ -356,7 +356,7 @@ pub(crate) fn job_state(app: &TestApp) -> job::JobState {
 }
 
 /// List commits API が返すコミット 1 件。
-fn api_commit(sha: &str, message: &str) -> serde_json::Value {
+pub(crate) fn api_commit(sha: &str, message: &str) -> serde_json::Value {
     serde_json::json!({
         "sha": sha,
         "html_url": format!("https://github.com/{REPO_OWNER}/{REPO_NAME}/commit/{sha}"),

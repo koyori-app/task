@@ -632,6 +632,54 @@ export const WithIssueSource: Story = {
   },
 };
 
+export const WithForgeBranches: Story = {
+  name: 'ブランチとコミット一覧が一部のみの PR',
+  beforeEach: () =>
+    createMockFetch({
+      forge: {
+        pull_requests: [
+          {
+            id: 'pr-1',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            number: 87,
+            title: 'feat: OAuth 対応',
+            author_handle: 'yupix',
+            state: 'open',
+            html_url: 'https://github.com/acme/backend/pull/87',
+            merged_at: null,
+            merge_effects_processed_at: null,
+            commits_complete: false,
+            sources: ['branch'],
+            closes: false,
+            unresolved: null,
+          },
+        ],
+        branches: [
+          {
+            id: 'branch-1',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            branch: 'feat/TASK-1-oauth',
+            html_url: 'https://github.com/acme/backend/tree/feat/TASK-1-oauth',
+            created_at: '2026-10-01T00:00:00Z',
+          },
+        ],
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('feat/TASK-1-oauth')).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByText('コミット一覧は一部のみ', { exact: false }),
+    ).resolves.toBeInTheDocument();
+  },
+};
+
 export const Subtask: Story = {
   name: '子タスク詳細では孫の作成UIを出さない',
   beforeEach: () => createMockFetch({ task: sampleSubtask }),

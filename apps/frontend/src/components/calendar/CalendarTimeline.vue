@@ -2,7 +2,7 @@
 import { ChevronLeft, ChevronRight, Flag, TriangleAlert, UserRound } from '@lucide/vue';
 import { computed } from 'vue';
 
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import UserAvatar from '@/components/UserAvatar.vue';
 import type { components } from '@/generated/api';
 import { DAILY_CAPACITY_HOURS, dailyLoadByMember, isOverCapacity } from '@/lib/calendar/load';
 import {
@@ -14,7 +14,6 @@ import {
   taskSpan,
   type ClippedSpan,
 } from '@/lib/calendar/timeline';
-import { avatarInitials } from '@/lib/initials';
 import { taskDetailHref } from '@/lib/task-display';
 
 type ScheduleTask = components['schemas']['ScheduleTask'];
@@ -330,13 +329,17 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
             style="grid-column: 1; grid-row: 1 / -1"
           >
             <!-- 名前が隣にあるので飾り（頭文字まで読み上げると名前と二重になる） -->
-            <Avatar class="size-5 shrink-0" aria-hidden="true" data-member-avatar>
-              <AvatarImage v-if="row.avatarUrl" :src="row.avatarUrl" alt="" />
-              <AvatarFallback class="bg-muted text-[10px] text-muted-foreground">
-                <UserRound v-if="row.id === UNASSIGNED_ID" class="size-3" aria-hidden="true" />
-                <template v-else>{{ avatarInitials(row.name, 1) }}</template>
-              </AvatarFallback>
-            </Avatar>
+            <UserAvatar
+              :user="{ id: row.id, name: row.name, avatar_url: row.avatarUrl }"
+              size="sm"
+              decorative
+              :initial-length="1"
+              class="shrink-0"
+              aria-hidden="true"
+              data-member-avatar
+            >
+              <UserRound v-if="row.id === UNASSIGNED_ID" class="size-3" aria-hidden="true" />
+            </UserAvatar>
             <span class="truncate">{{ row.name }}</span>
           </div>
           <div

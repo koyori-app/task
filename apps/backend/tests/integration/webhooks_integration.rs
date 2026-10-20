@@ -855,7 +855,8 @@ async fn discord_format_sends_content_and_embeds_without_signature() {
             .expect("content")
             .contains("Discord に流す")
     );
-    assert_eq!(body["embeds"][0]["title"], "task.created");
+    assert_eq!(body["embeds"][0]["title"], "タスクの作成");
+    assert_eq!(body["embeds"][0]["color"], 0x2ecc71);
 }
 
 /// 再送は同じ payload で新しい配信を作り、元の行は変えない。Member は履歴も再送も読めない。
