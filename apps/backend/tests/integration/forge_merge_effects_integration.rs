@@ -5,7 +5,10 @@ use crate::common::TestApp;
 use crate::forge_commit_links_integration::{
     Fixture, REPO_NAME, REPO_OWNER, insert_project, insert_status, insert_task, setup,
 };
-use crate::forge_pull_request_links_integration::{deliver, links, merged, pr_payload, pr_row};
+use crate::forge_manual_pull_request_links_integration::{forget_github_mock, github_mock};
+use crate::forge_pull_request_links_integration::{
+    deliver, links, merged, mount_github_defaults, pr_payload, pr_row,
+};
 use entity::{
     github_issue_links, project_members, project_statuses, scopes::Scope, task_activities, tasks,
 };
@@ -19,7 +22,7 @@ use service::forge::merge_effects::{
 };
 use service::forge::pull_requests::PullRequestSnapshot;
 use uuid::Uuid;
-use wiremock::matchers::{method, path, path_regex};
+use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// 完了系ステータスを 2 つ足す。`is_default_done` の方（"Done"）を返し、もう片方は "Closed"。
@@ -141,14 +144,8 @@ async fn merged_pull_request_completes_closing_tasks_once() {
     unsafe {
         std::env::set_var("GITHUB_API_BASE_URL", mock_server.uri());
     }
-    Mock::given(method("POST"))
-        .and(path_regex(r"^/app/installations/\d+/access_tokens$"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-            "token": "ghs_test_installation_token",
-            "expires_at": "2030-01-01T00:00:00Z"
-        })))
-        .mount(&mock_server)
-        .await;
+    // installation token と、`Opened` が引く PR のコミット一覧
+    mount_github_defaults(&mock_server).await;
 
     let app = TestApp::new_with_github().await;
     let fx = setup(&app).await;
@@ -298,6 +295,8 @@ async fn merged_pull_request_completes_closing_tasks_once() {
 /// （並行するジョブ 2 つの代わりに、副作用の処理を同時に 2 本走らせる）
 #[tokio::test]
 async fn concurrent_merge_effects_run_once() {
+    // `Opened` は PR のコミット一覧を引く
+    let _mock_server = github_mock().await;
     let app = TestApp::new_with_github().await;
     let fx = setup(&app).await;
     let key = &fx.key;
@@ -350,6 +349,7 @@ async fn concurrent_merge_effects_run_once() {
         1
     );
 
+    forget_github_mock();
     app.cleanup_user(fx.owner_id).await;
 }
 
@@ -359,6 +359,8 @@ async fn concurrent_merge_effects_run_once() {
 /// 後着した古い `Closed` は表示を巻き戻さず、イベント本文の K-1 だけを完了する。
 #[tokio::test]
 async fn late_merge_event_completes_tasks_from_its_own_body() {
+    // `Opened` は PR のコミット一覧を引く
+    let _mock_server = github_mock().await;
     let app = TestApp::new_with_github().await;
     let fx = setup(&app).await;
     let key = &fx.key;
@@ -424,6 +426,7 @@ async fn late_merge_event_completes_tasks_from_its_own_body() {
         vec![("body".to_string(), true)]
     );
 
+    forget_github_mock();
     app.cleanup_user(fx.owner_id).await;
 }
 
@@ -434,6 +437,8 @@ async fn late_merge_event_completes_tasks_from_its_own_body() {
 /// - リンク先が 0 件の PR でも成功する
 #[tokio::test]
 async fn acknowledge_merge_effects_without_completing_tasks() {
+    // `Opened` は PR のコミット一覧を引く
+    let _mock_server = github_mock().await;
     let app = TestApp::new_with_github().await;
     let fx = setup(&app).await;
     let key = &fx.key;
@@ -587,6 +592,7 @@ async fn acknowledge_merge_effects_without_completing_tasks() {
         None
     );
 
+    forget_github_mock();
     app.cleanup_user(fx.owner_id).await;
 }
 
@@ -737,6 +743,8 @@ async fn queued_push_jobs(app: &TestApp, task_id: Uuid) -> i64 {
 /// 対照: 参照だけで完了させないタスクには印を立てない
 #[tokio::test]
 async fn merge_completion_pushes_back_to_the_source_issue() {
+    // `Opened` は PR のコミット一覧を引く
+    let _mock_server = github_mock().await;
     let app = TestApp::new_with_github().await;
     let fx = setup(&app).await;
     let key = &fx.key;
@@ -779,5 +787,6 @@ async fn merge_completion_pushes_back_to_the_source_issue() {
     assert!(!pending_push(&app, mentioned).await);
     assert_eq!(queued_push_jobs(&app, mentioned).await, 0);
 
+    forget_github_mock();
     app.cleanup_user(fx.owner_id).await;
 }
