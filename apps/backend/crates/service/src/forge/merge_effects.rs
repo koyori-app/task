@@ -62,12 +62,11 @@ pub async fn apply_merge_effects(
     }
     let pull_request_id = pull_request.id;
 
-    // task_id ごとの bool_or(closes)。BTreeMap の順でタスクをロックし、並行処理どうしのデッドロックを避ける
-    let mut closes: BTreeMap<Uuid, bool> = BTreeMap::new();
+    let mut targets = Vec::new();
     for text in [&event.title, &event.body, &event.head_branch] {
         for target in task_refs::resolve(&txn, project.tenant_id, &task_refs::extract(text)).await?
         {
-            *closes.entry(target.task_id).or_default() |= target.closes;
+            targets.push((target.task_id, target.closes));
         }
     }
     // マージ後に足した手動リンクは過去のマージの対象にしない
@@ -79,9 +78,10 @@ pub async fn apply_merge_effects(
             .all(&txn)
             .await?
         {
-            *closes.entry(link.task_id).or_default() |= link.closes;
+            targets.push((link.task_id, link.closes));
         }
     }
+    let closes = closes_by_task(targets);
 
     let payload = serde_json::json!({
         "host": repo.host,
@@ -169,6 +169,16 @@ pub async fn apply_merge_effects(
     Ok(Some(pending_push))
 }
 
+/// 解いた参照と `manual` 行の `(task_id, closes)` を task_id ごとの bool_or(closes) に集める。
+/// BTreeMap の順でタスクをロックし、並行処理どうしのデッドロックを避ける
+fn closes_by_task(targets: impl IntoIterator<Item = (Uuid, bool)>) -> BTreeMap<Uuid, bool> {
+    let mut closes: BTreeMap<Uuid, bool> = BTreeMap::new();
+    for (task_id, target_closes) in targets {
+        *closes.entry(task_id).or_default() |= target_closes;
+    }
+    closes
+}
+
 /// パスのプロジェクトの PR に今リンクされているタスクと、そのプロジェクト（`(task_id, project_id)`）。
 /// 別プロジェクトの PR なら空
 pub async fn linked_tasks<C: ConnectionTrait>(
@@ -250,4 +260,33 @@ pub async fn acknowledge_merge_effects(
     active.update(&txn).await?;
     txn.commit().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closes_wins_over_plain_refs_to_the_same_task() {
+        let task = Uuid::new_v4();
+        assert_eq!(
+            closes_by_task([(task, false), (task, true), (task, false)]),
+            BTreeMap::from([(task, true)])
+        );
+    }
+
+    #[test]
+    fn overlapping_sources_collapse_to_one_entry_per_task() {
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        // タイトル・本文・ブランチ・manual の順に並べた参照
+        let title = [(a, false)];
+        let body = [(a, false), (b, false)];
+        let branch = [(b, false)];
+        let manual = [(b, true)];
+        assert_eq!(
+            closes_by_task(title.into_iter().chain(body).chain(branch).chain(manual)),
+            BTreeMap::from([(a, false), (b, true)])
+        );
+        assert!(closes_by_task([]).is_empty());
+    }
 }
