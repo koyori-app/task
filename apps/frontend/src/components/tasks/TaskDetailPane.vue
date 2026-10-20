@@ -7,6 +7,7 @@ import TaskAttachments from '@/components/tasks/TaskAttachments.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
 import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
+import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
 import { Button } from '@/components/ui/button';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
@@ -15,8 +16,9 @@ import { useTaskActivities } from '@/composables/useTaskActivities';
 import { useTaskComments } from '@/composables/useTaskComments';
 import { useRenderedDescription } from '@/composables/useRenderedDescription';
 import { useTaskDetail } from '@/composables/useTaskDetail';
+import { useSimilarTasks } from '@/composables/useSimilarTasks';
 import { useMeQuery } from '@/lib/api-vue-query';
-import { userProfileHref } from '@/lib/task-display';
+import { taskDetailHref, taskSeqKey, userProfileHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 
 type TaskResponse = components['schemas']['TaskResponse'];
@@ -210,6 +212,22 @@ const renderedDescription = useRenderedDescription(
   () => displayTask.value?.mentions,
 );
 
+const similarQuery = useSimilarTasks({
+  tenantId,
+  projectId,
+  title: () => displayTask.value?.title ?? '',
+  excludeTaskId: () => displayTask.value?.id,
+});
+
+// 候補はペイン内で切り替える（説明の KEY-N と同じ経路）。`open-task` は TaskResponse 全体を要るので使えない
+function openSimilarTask(seqId: number) {
+  emit('open-task-ref', {
+    projectKey: props.projectKey,
+    seqKey: taskSeqKey(props.projectKey, seqId),
+    href: taskDetailHref(props.tenantDisplayId, props.projectKey, seqId),
+  });
+}
+
 function openDeleteDialog() {
   deleteError.value = null;
   deleteDialogRef.value?.showModal();
@@ -283,6 +301,13 @@ function onDeleteDialogCancel(event: Event) {
             :statuses="statuses"
             :project-key="projectKey"
             @open="emit('open-task', $event)"
+          />
+          <SimilarTasksList
+            class="border-t pt-5"
+            :tasks="similarQuery.data.value?.tasks ?? []"
+            :tenant-display-id="tenantDisplayId"
+            :project-key="projectKey"
+            @select="openSimilarTask"
           />
           <TaskForgeSection
             :tenant-id="tenantId"

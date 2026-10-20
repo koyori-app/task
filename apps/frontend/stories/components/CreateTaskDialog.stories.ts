@@ -71,6 +71,13 @@ const createdTask = {
   assignees: [],
 };
 
+/** 作成の POST（似ているタスクの GET と混ざるので method で拾う） */
+function postedRequest() {
+  return (globalThis.fetch as ReturnType<typeof fn>).mock.calls
+    .map(([request]) => request as Request)
+    .find((request) => request.method === 'POST') as Request;
+}
+
 let invalidateQueriesSpy: ReturnType<typeof fn>;
 const createdSpy = fn();
 const openChangeSpy = fn();
@@ -84,6 +91,8 @@ function decorator() {
       invalidateQueriesSpy = fn(queryClient.invalidateQueries.bind(queryClient));
       queryClient.invalidateQueries = invalidateQueriesSpy;
       provide(VUE_QUERY_CLIENT, queryClient);
+      // 似ているタスクのリンクが表示用のテナント ID をルートから読む
+      provide('vike-vue:usePageContext', { routeParams: { tenant: 'acme' } });
     },
     template: '<story />',
   });
@@ -91,12 +100,16 @@ function decorator() {
 
 function mockCreate(status = 201) {
   const originalFetch = globalThis.fetch;
-  const fetchSpy = fn(
-    async () =>
-      new Response(JSON.stringify(status === 201 ? createdTask : { message: 'server error' }), {
-        status,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+  const fetchSpy = fn(async (request: RequestInfo | URL) =>
+    // タイトル入力中に似ているタスク（GET）も問い合わせる。候補は 0 件で返す
+    (request as Request).method === 'GET'
+      ? new Response(JSON.stringify({ tasks: [] }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      : new Response(JSON.stringify(status === 201 ? createdTask : { message: 'server error' }), {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        }),
   );
   globalThis.fetch = fetchSpy;
   return {
@@ -161,7 +174,7 @@ export const Success201: Story = {
     await user.click(submit);
 
     await waitFor(() => expect(invalidateQueriesSpy).toHaveBeenCalled());
-    const request = (globalThis.fetch as ReturnType<typeof fn>).mock.calls[0]?.[0] as Request;
+    const request = postedRequest();
     await expect(request.method).toBe('POST');
     await expect(new URL(request.url).pathname).toBe(
       '/api/v1/tenants/tenant-uuid/projects/project-1/tasks',
@@ -273,8 +286,8 @@ export const MentionInDescription: Story = {
     const submit = await canvas.findByRole('button', { name: '作成' });
     await waitFor(() => expect(submit).toBeEnabled());
     await user.click(submit);
-    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
-    const request = (globalThis.fetch as ReturnType<typeof fn>).mock.calls[0]?.[0] as Request;
+    await waitFor(() => expect(postedRequest()).toBeDefined());
+    const request = postedRequest();
     await expect(request.clone().json()).resolves.toMatchObject({
       description: `お願い <@${MENTION_ALICE}>`,
     });

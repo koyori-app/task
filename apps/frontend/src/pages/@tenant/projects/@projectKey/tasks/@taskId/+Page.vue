@@ -9,6 +9,7 @@ import TaskAttachments from '@/components/tasks/TaskAttachments.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
 import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
+import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
 import { Button } from '@/components/ui/button';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
@@ -16,6 +17,7 @@ import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
 import { useTaskActivities } from '@/composables/useTaskActivities';
 import { useTaskComments } from '@/composables/useTaskComments';
 import { useTaskDetail } from '@/composables/useTaskDetail';
+import { useSimilarTasks } from '@/composables/useSimilarTasks';
 import { useMeQuery } from '@/lib/api-vue-query';
 import type { Data } from './+data';
 import { refreshTaskDescription } from './task-description-navigation';
@@ -194,6 +196,17 @@ function onDeleteDialogCancel(event: Event) {
 function openRelatedTask(task: TaskResponse) {
   void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id));
 }
+
+const similarQuery = useSimilarTasks({
+  tenantId,
+  projectId,
+  title: () => displayTask.value?.title ?? '',
+  excludeTaskId: () => displayTask.value?.id,
+});
+
+function openSimilarTask(seqId: number) {
+  void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, seqId));
+}
 </script>
 
 <template>
@@ -250,6 +263,13 @@ function openRelatedTask(task: TaskResponse) {
         :statuses="statuses"
         :project-key="projectKey"
         @open="openRelatedTask"
+      />
+      <SimilarTasksList
+        class="border-t pt-5"
+        :tasks="similarQuery.data.value?.tasks ?? []"
+        :tenant-display-id="tenantDisplayId"
+        :project-key="projectKey"
+        @select="openSimilarTask"
       />
       <TaskForgeSection
         :tenant-id="tenantId"
