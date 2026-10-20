@@ -21,6 +21,7 @@ async fn mount_project_lookup(harness: &Harness) {
 fn pull_request_json(id: &str, number: i32) -> serde_json::Value {
     json!({
         "id": id,
+        "project_id": PROJECT_ID,
         "host": "github",
         "host_url": "https://github.com",
         "repo_owner": "acme",
