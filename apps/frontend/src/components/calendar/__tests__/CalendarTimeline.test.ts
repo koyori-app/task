@@ -121,6 +121,27 @@ describe('CalendarTimeline', () => {
     expect(overflow.attributes('style')).toContain('height: 0.25rem');
   });
 
+  it('山にキーボードでフォーカスすると内訳を出す', async () => {
+    const wrapper = mountTimeline([
+      task({
+        planned_start_on: '2026-10-14',
+        soft_deadline: '2026-10-14T00:00:00Z',
+        estimated_minutes: 420,
+        title: '設計レビュー',
+      }),
+    ]);
+    const load = wrapper.get(`[data-member-row="${ALICE.id}"] [data-load-date="2026-10-14"]`);
+    expect(load.attributes('tabindex')).toBe('0');
+    await load.trigger('focus');
+    await vi.waitFor(() => {
+      const items = document.body.querySelector('[data-load-items]');
+      expect(items?.textContent).toContain('ENG-1');
+      expect(items?.textContent).toContain('設計レビュー');
+      expect(items?.textContent).toContain('7h');
+    });
+    wrapper.unmount();
+  });
+
   it('上限以内の日は警告色の棒を出さず、高さは上限に対する比率にする', () => {
     const wrapper = mountTimeline([
       task({
