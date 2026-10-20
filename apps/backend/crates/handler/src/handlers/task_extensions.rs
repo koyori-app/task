@@ -163,6 +163,10 @@ fn find_match_char_range(text: &str, query: &str) -> Option<(usize, usize)> {
     }
     let text_chars: Vec<char> = text.chars().collect();
     let q_len = query_chars.len();
+    // 近似一致（`<%`）や空白の連続する検索語では、対象より検索語の方が長いことがある
+    if q_len > text_chars.len() {
+        return None;
+    }
     for start in 0..=text_chars.len().saturating_sub(q_len) {
         if text_chars[start..start + q_len]
             .iter()
@@ -208,36 +212,43 @@ async fn search_tasks_tsvector(
     limit: u64,
     offset: u64,
 ) -> Result<Json<SearchTasksResponse>, AppError> {
-    let count_sql = r#"
-        SELECT COUNT(*)::bigint AS cnt
-        FROM tasks
+    // count と一覧で同じ WHERE を使う（ずれると total が合わない）。
+    // simple 設定の tsvector は日本語を語に切れないので、部分一致は ILIKE、表記ゆれは `<%` が担う
+    const FROM_WHERE: &str = r#"
+        FROM tasks CROSS JOIN plainto_tsquery('pg_catalog.simple', $2) AS tsq
         WHERE project_id = $1
           AND deleted_at IS NULL
-          AND search_vector @@ plainto_tsquery('pg_catalog.simple', $2)
+          AND (search_vector @@ tsq
+               OR title ILIKE $3 ESCAPE '\'
+               OR COALESCE(description, '') ILIKE $3 ESCAPE '\'
+               OR $2 <% title)
     "#;
+    let pattern = format!("%{}%", common::db::escape_like(query));
+    let count_sql = format!("SELECT COUNT(*)::bigint AS cnt {FROM_WHERE}");
     let count_result = state
         .db
         .query_one_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
             count_sql,
-            [project_id.into(), query.into()],
+            [project_id.into(), query.into(), pattern.clone().into()],
         ))
         .await?;
     let total: i64 = count_result
         .and_then(|r| r.try_get_by_index(0).ok())
         .unwrap_or(0);
 
-    let search_sql = r#"
+    // ts_rank（0.1 前後）と word_similarity（0.6〜1.0）は値域が揃わないので、
+    // タイトル一致を第 1 キーにして大小比較を同じ一致種別の中に閉じる。
+    // score は同値が頻発する。並びが一意でないと offset のページ境界で行が重複・欠落する
+    let search_sql = format!(
+        r#"
         SELECT id, seq_id, title, description,
-               ts_rank(search_vector, plainto_tsquery('pg_catalog.simple', $2))::real AS score
-        FROM tasks
-        WHERE project_id = $1
-          AND deleted_at IS NULL
-          AND search_vector @@ plainto_tsquery('pg_catalog.simple', $2)
-        -- score は同値が頻発する。並びが一意でないと offset のページ境界で行が重複・欠落する
-        ORDER BY score DESC, id ASC
-        LIMIT $3 OFFSET $4
-    "#;
+               GREATEST(ts_rank(search_vector, tsq), word_similarity($2, title))::real AS score
+        {FROM_WHERE}
+        ORDER BY (title ILIKE $3 ESCAPE '\' OR $2 <% title) DESC, score DESC, id ASC
+        LIMIT $4 OFFSET $5
+    "#
+    );
     let rows = state
         .db
         .query_all_raw(Statement::from_sql_and_values(
@@ -246,6 +257,7 @@ async fn search_tasks_tsvector(
             [
                 project_id.into(),
                 query.into(),
+                pattern.into(),
                 (limit as i64).into(),
                 (offset as i64).into(),
             ],
@@ -890,4 +902,27 @@ pub async fn detach_task_file(
         .exec(&state.db)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_match_char_range_returns_none_when_query_is_longer_than_text() {
+        // 範囲外スライスで panic していた（検索語 8 文字 > 対象 4 文字）
+        assert_eq!(find_match_char_range("a b ", "a      b"), None);
+        assert_eq!(find_match_char_range("", "a"), None);
+    }
+
+    #[test]
+    fn find_match_char_range_matches_by_char_index() {
+        assert_eq!(
+            find_match_char_range("認証ログイン画面", "ログイン"),
+            Some((2, 6))
+        );
+        assert_eq!(find_match_char_range("OAuth", "oauth"), Some((0, 5)));
+        assert_eq!(find_match_char_range("abc", "abc"), Some((0, 3)));
+        assert_eq!(find_match_char_range("abc", "abd"), None);
+    }
 }

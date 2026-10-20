@@ -431,6 +431,16 @@ CREATE INDEX IF NOT EXISTS idx_tasks_search_vector ON tasks USING GIN(search_vec
             .await
             .expect("prepare search_vector column");
 
+            // pg_trgm の拡張と title の trigram index も migration（m20261020000000）にしか無い
+            db.execute_unprepared(
+                r#"
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS idx_tasks_title_trgm ON tasks USING GIN (title gin_trgm_ops);
+"#,
+            )
+            .await
+            .expect("prepare pg_trgm index");
+
         })
         .await;
 }
