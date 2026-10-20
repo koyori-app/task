@@ -185,6 +185,75 @@ export const HugeUsers: Story = {
   play: async ({ canvasElement }) => measureManyUsers(canvasElement, 5000),
 };
 
+/**
+ * 保存が遅れて反映される呼び手（担当者は一人ずつ POST して再取得し、保存中は選択を止める）。
+ * 選んだ後に `modelValue` が遅れて変わっても、一覧は送った位置のまま動かず、後ろの候補を
+ * 続けて選べる。
+ */
+export const DeferredSave: Story = {
+  render: () => {
+    const members = people(40);
+    return {
+      components: { TaskAssigneePicker },
+      setup() {
+        const selectedIds = ref<string[]>(['user-1']);
+        const saving = ref(false);
+        const onToggle = (id: string, checked: boolean) => {
+          // 保存と再取得を待ってから反映し、その間は選択を止める
+          saving.value = true;
+          setTimeout(() => {
+            selectedIds.value = checked
+              ? [...selectedIds.value, id]
+              : selectedIds.value.filter((x) => x !== id);
+            saving.value = false;
+          }, 80);
+        };
+        const selected = () => members.filter((m) => selectedIds.value.includes(m.id));
+        return { members, selected, saving, onToggle };
+      },
+      template: `<div class="p-4">
+        <TaskAssigneePicker
+          :members="members"
+          :selected="selected()"
+          :disabled="saving"
+          @toggle="onToggle"
+        />
+      </div>`,
+    };
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const body = within(document.body);
+    const user = userEvent.setup();
+
+    await user.click(canvas.getByRole('button', { name: /^担当者: / }));
+    const listbox = await body.findByRole('listbox');
+    await waitFor(() => expect(within(listbox).getAllByRole('option').length).toBeGreaterThan(0));
+
+    // 一覧を下へ送り、見えておる後ろの候補を選ぶ
+    listbox.scrollTop = listbox.scrollHeight;
+    await waitFor(() =>
+      expect(within(listbox).queryByRole('option', { name: /member040/ })).toBeInTheDocument(),
+    );
+    const scrolled = listbox.scrollTop;
+    await expect(scrolled).toBeGreaterThan(0);
+
+    for (const name of ['member040', 'member039']) {
+      const option = () => within(listbox).getByRole('option', { name: new RegExp(name) });
+      // 保存中は選べぬ。保存が終わるのを待ってから選ぶ
+      await waitFor(() => expect(option()).not.toHaveAttribute('data-disabled'));
+      await user.click(option());
+      await waitFor(() => expect(option()).toHaveAttribute('aria-selected', 'true'));
+      // 保存の反映（80ms）と、その後に reka が送るかもしれぬ間を待つ
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await expect(option()).toHaveAttribute('aria-selected', 'true');
+      // 反映の後も、一覧は先頭の選んだ者へ巻き戻らぬ
+      await expect(listbox.scrollTop).toBe(scrolled);
+    }
+    await user.keyboard('{Escape}');
+  },
+};
+
 /** 選んだ者の重ね: 3 人まで重ね、超えた分は +N。名は aria-label で全員分読める。 */
 export const StackedSelection: Story = {
   render: () => pickerStory(people(8), ['user-1', 'user-2', 'user-3', 'user-4', 'user-5']),
