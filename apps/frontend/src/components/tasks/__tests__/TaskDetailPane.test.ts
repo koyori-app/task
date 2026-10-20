@@ -25,6 +25,11 @@ const task: TaskDetail = {
 };
 
 const confirmDelete = vi.fn();
+// 既定は未解決（他のテストで取得を走らせない）。似ているタスクのテストだけ値を入れる
+const resolvedIds = {
+  tenantId: ref<string | undefined>(undefined),
+  projectId: ref<string | undefined>(undefined),
+};
 // useTaskDetail に渡された引数を捕捉し、onAfterDelete などの配線を検証する。
 let capturedParams: {
   tenantDisplayId: () => string;
@@ -37,6 +42,8 @@ vi.mock('@/composables/useTaskDetail', () => ({
   useTaskDetail: vi.fn((params) => {
     capturedParams = params;
     return {
+      tenantId: resolvedIds.tenantId,
+      projectId: resolvedIds.projectId,
       displayTask: computed(() => task),
       statuses: computed(() => []),
       projectLabels: computed(() => []),
@@ -95,6 +102,8 @@ describe('TaskDetailPane', () => {
     confirmDelete.mockReset();
     capturedParams = null;
     task.description = null;
+    resolvedIds.tenantId.value = undefined;
+    resolvedIds.projectId.value = undefined;
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
@@ -239,6 +248,64 @@ describe('TaskDetailPane', () => {
       expect(event.defaultPrevented).toBe(false);
       expect(reachedDocument).toHaveBeenCalled();
       expect(wrapper.emitted('open-task-ref')).toBeUndefined();
+    });
+  });
+
+  describe('似ているタスク', () => {
+    const similarRequests: URL[] = [];
+
+    function mountWithSimilar(tasks: unknown[]) {
+      resolvedIds.tenantId.value = 'tenant-uuid';
+      resolvedIds.projectId.value = 'project-uuid';
+      similarRequests.length = 0;
+      // ペインはコメント・履歴・添付なども取りに行く。似ているタスク以外は 404 で各欄の失敗表示に倒す
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = new URL(input instanceof Request ? input.url : String(input), 'http://x');
+          const similar = url.pathname.endsWith('/tasks/similar');
+          if (similar) similarRequests.push(url);
+          return new Response(JSON.stringify(similar ? { tasks } : { message: 'not-found' }), {
+            status: similar ? 200 : 404,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }),
+      );
+      return mount(TaskDetailPane, {
+        props: { tenantDisplayId: 'acme', projectKey: 'ENG', taskId: 'ENG-42' },
+        global: { plugins: [[VueQueryPlugin, { queryClient }]] },
+        attachTo: document.body,
+      });
+    }
+
+    it('現在のタイトルで自分を除いて問い合わせ、0 件なら欄ごと出さない', async () => {
+      const wrapper = mountWithSimilar([]);
+      await vi.waitFor(() => expect(similarRequests).toHaveLength(1));
+      await flushPromises();
+
+      expect(similarRequests[0]?.searchParams.get('title')).toBe('ペイン用タスク');
+      expect(similarRequests[0]?.searchParams.get('exclude_task_id')).toBe('task-id');
+      expect(wrapper.find('[data-similar-tasks]').exists()).toBe(false);
+    });
+
+    it('候補の左クリックは遷移させず open-task-ref を emit する', async () => {
+      const wrapper = mountWithSimilar([
+        { id: 'task-7', seq_id: 7, title: '似ているペイン用タスク', score: 0.6 },
+      ]);
+      await vi.waitFor(() => expect(wrapper.find('[data-similar-tasks] a').exists()).toBe(true));
+
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+      const reachedDocument = vi.fn();
+      document.addEventListener('click', reachedDocument);
+      wrapper.get('[data-similar-tasks] a').element.dispatchEvent(event);
+      document.removeEventListener('click', reachedDocument);
+
+      expect(event.defaultPrevented).toBe(true);
+      // vike のリンク横取り（document の click）まで届くと詳細ページへ遷移してしまう
+      expect(reachedDocument).not.toHaveBeenCalled();
+      expect(wrapper.emitted('open-task-ref')).toEqual([
+        [{ projectKey: 'ENG', seqKey: 'ENG-7', href: '/acme/projects/ENG/tasks/ENG-7' }],
+      ]);
     });
   });
 
