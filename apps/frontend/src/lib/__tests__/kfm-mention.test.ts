@@ -67,13 +67,14 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
     expect(await render(`# <@${A}>`)).toContain(chip('member', '@alice'));
   });
 
-  it('コードブロックとインラインコードの中の印は札にしない（印の文字のまま）', async () => {
+  it('コードブロックとインラインコードの中の印は札にせず、現在の名前へ戻す', async () => {
     const inline = await render(`\`<@${A}>\``);
-    expect(inline).toBe(`<p><code>&lt;@${A}&gt;</code></p>`);
+    expect(inline).toBe('<p><code>@alice</code></p>');
     expect(inline).not.toContain('kfm-mention');
     const block = await render(`\`\`\`\n<@${A}>\n\`\`\``);
     expect(block).not.toContain('kfm-mention');
-    expect(block).toContain(A);
+    expect(block).toContain('@alice');
+    expect(block).not.toContain(A);
   });
 
   it('リンクの内側・URL の中は札にしない', async () => {

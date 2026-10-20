@@ -4,8 +4,8 @@
  * 規則（kfm-mention テストで固定）:
  * - 印は `<@` + ハイフン付き UUID + `>`（コメントの入力欄・backend の `payload::mentions` と同じ形）。
  *   壊れた印（字数違い・閉じ無し）は素のテキストのまま
- * - text ノードだけを分割する。code / inlineCode / link / linkReference / definition / html の
- *   内側は走査しない（コードブロックとインラインコードの中の `<@id>` は札にしない）
+ * - text ノードは札へ分割する。code / inlineCode の中は札にせず `@今の名` の字へ戻す。
+ *   link / linkReference / definition / html の内側は走査しない
  * - 札の字は `mentionLabel`（コメントの札と同じ）。id は HTML に出さない
  * - 状態は class（`kfm-mention-member` / `-outside` / `-gone` / `-unknown`）で運ぶ。ログイン中の
  *   member と同じ id なら `kfm-mention-self` も付ける。見た目は `style.css` に集約する
@@ -20,9 +20,15 @@
 import type { Parent, PhrasingContent, Root, Text } from 'mdast';
 import { SKIP, visit } from 'unist-util-visit';
 
-import { findMarkers, lookup, mentionLabel, type MentionTable } from '@/lib/comment-mention';
+import {
+  findMarkers,
+  lookup,
+  mentionLabel,
+  toPlainText,
+  type MentionTable,
+} from '@/lib/comment-mention';
 
-const SKIP_TYPES = new Set(['code', 'inlineCode', 'link', 'linkReference', 'definition', 'html']);
+const SKIP_TYPES = new Set(['link', 'linkReference', 'definition', 'html']);
 
 /** vfile の data.kfm に載せる描画時コンテキスト（_renderer.ts が process 時に渡す） */
 export type KfmMentionData = {
@@ -81,6 +87,10 @@ export function remarkKfmMention() {
     const table = readTable(file.data);
     if (table === undefined) return;
     visit(tree, (node, index, parent) => {
+      if (node.type === 'code' || node.type === 'inlineCode') {
+        node.value = toPlainText(node.value, (id) => lookup(table, id));
+        return SKIP;
+      }
       if (SKIP_TYPES.has(node.type)) return SKIP;
       if (node.type !== 'text' || parent === undefined || index === undefined) return;
       const parts = splitText(node, table, data?.currentUserId);
