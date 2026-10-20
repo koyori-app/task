@@ -21,17 +21,17 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// `load_github_test_env` が設定する webhook シークレット
 const WEBHOOK_SECRET: &str = "webhook-secret";
-const REPO_OWNER: &str = "acme";
-const REPO_NAME: &str = "backend";
+pub(crate) const REPO_OWNER: &str = "acme";
+pub(crate) const REPO_NAME: &str = "backend";
 
-fn sign(body: &[u8]) -> String {
+pub(crate) fn sign(body: &[u8]) -> String {
     let mut mac =
         Hmac::<Sha256>::new_from_slice(WEBHOOK_SECRET.as_bytes()).expect("HMAC key of any size");
     mac.update(body);
     format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
 }
 
-fn unique_installation_id() -> i64 {
+pub(crate) fn unique_installation_id() -> i64 {
     500_000_000_000_i64 + (Uuid::new_v4().as_u128() % 400_000_000_000) as i64
 }
 
@@ -43,15 +43,15 @@ fn sha() -> String {
         .collect()
 }
 
-struct Fixture {
-    owner_id: Uuid,
-    tp: TestTenantProject,
-    key: String,
-    status_id: Uuid,
-    installation_id: i64,
+pub(crate) struct Fixture {
+    pub(crate) owner_id: Uuid,
+    pub(crate) tp: TestTenantProject,
+    pub(crate) key: String,
+    pub(crate) status_id: Uuid,
+    pub(crate) installation_id: i64,
 }
 
-async fn setup(app: &TestApp) -> Fixture {
+pub(crate) async fn setup(app: &TestApp) -> Fixture {
     let owner = app.insert_user(false, false).await;
     let tp = app.insert_tenant_project(owner.id).await;
     let key = projects::Entity::find_by_id(tp.project_id)
@@ -73,7 +73,7 @@ async fn setup(app: &TestApp) -> Fixture {
 }
 
 /// プロジェクトを `REPO_OWNER/REPO_NAME` に連携する。
-async fn insert_integration(
+pub(crate) async fn insert_integration(
     app: &TestApp,
     project_id: Uuid,
     installation_id: i64,
@@ -96,7 +96,7 @@ async fn insert_integration(
 }
 
 /// Task ユーザーに GitHub を連携させる（OAuth ログインの代わりに接続行を直に入れる）。
-async fn link_github_login(app: &TestApp, user_id: Uuid, login: &str) {
+pub(crate) async fn link_github_login(app: &TestApp, user_id: Uuid, login: &str) {
     let now = chrono::Utc::now();
     oauth_connections::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -117,7 +117,7 @@ async fn link_github_login(app: &TestApp, user_id: Uuid, login: &str) {
     .expect("insert oauth connection");
 }
 
-async fn insert_status(app: &TestApp, project_id: Uuid) -> Uuid {
+pub(crate) async fn insert_status(app: &TestApp, project_id: Uuid) -> Uuid {
     project_statuses::ActiveModel {
         id: Set(Uuid::new_v4()),
         project_id: Set(project_id),
@@ -136,7 +136,7 @@ async fn insert_status(app: &TestApp, project_id: Uuid) -> Uuid {
 }
 
 /// テナントに 2 つ目のプロジェクトを足す（キーはテナント内で一意）。
-async fn insert_project(app: &TestApp, tenant_id: Uuid, key: &str) -> Uuid {
+pub(crate) async fn insert_project(app: &TestApp, tenant_id: Uuid, key: &str) -> Uuid {
     projects::ActiveModel {
         id: Set(Uuid::new_v4()),
         name: Set("second".into()),
@@ -154,7 +154,7 @@ async fn insert_project(app: &TestApp, tenant_id: Uuid, key: &str) -> Uuid {
     .id
 }
 
-async fn insert_task(
+pub(crate) async fn insert_task(
     app: &TestApp,
     project_id: Uuid,
     status_id: Uuid,
@@ -281,7 +281,7 @@ async fn delivery_rows(app: &TestApp, delivery_id: &str) -> u64 {
 }
 
 /// このプロジェクト宛てに積まれた webhook ジョブ（apalis.jobs.job は JSON の bytea）。
-async fn queued_jobs(app: &TestApp, project_id: Uuid) -> Vec<GithubWebhookJob> {
+pub(crate) async fn queued_jobs(app: &TestApp, project_id: Uuid) -> Vec<GithubWebhookJob> {
     app.state
         .db
         .query_all_raw(Statement::from_sql_and_values(
@@ -341,7 +341,7 @@ async fn commit_activities(app: &TestApp, task_id: Uuid) -> Vec<task_activities:
 /// GitHub が push の `commits` に載せる上限。これに達した push は新しい側が欠けている。
 const COMMITS_CAP: usize = 2048;
 
-fn job_state(app: &TestApp) -> job::JobState {
+pub(crate) fn job_state(app: &TestApp) -> job::JobState {
     job::JobState {
         settings: app.state.settings.clone(),
         db: app.state.db.clone(),
@@ -355,7 +355,7 @@ fn job_state(app: &TestApp) -> job::JobState {
 }
 
 /// List commits API が返すコミット 1 件。
-fn api_commit(sha: &str, message: &str) -> serde_json::Value {
+pub(crate) fn api_commit(sha: &str, message: &str) -> serde_json::Value {
     serde_json::json!({
         "sha": sha,
         "html_url": format!("https://github.com/{REPO_OWNER}/{REPO_NAME}/commit/{sha}"),

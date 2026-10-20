@@ -63,6 +63,7 @@ workspace-hack = { version = "0.1", path = "crates/workspace-hack" }
 auth-core = { workspace = true }
 dotenvy = { workspace = true }
 forge-core = { workspace = true }
+futures = "0.3"
 hex = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 cookie = "0.18"

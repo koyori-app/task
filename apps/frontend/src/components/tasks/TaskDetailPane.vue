@@ -6,6 +6,7 @@ import TaskActivityFeed from '@/components/tasks/TaskActivityFeed.vue';
 import TaskAttachments from '@/components/tasks/TaskAttachments.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
+import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
 import { Button } from '@/components/ui/button';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
@@ -19,6 +20,8 @@ import { userProfileHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 
 type TaskResponse = components['schemas']['TaskResponse'];
+/** 説明の KEY-N リンク（remark-kfm-task-ref）が指すタスク */
+export type TaskRefLink = { projectKey: string; seqKey: string; href: string };
 
 const props = withDefaults(
   defineProps<{
@@ -44,7 +47,27 @@ const profileHref = (userId: string) => userProfileHref(props.tenantDisplayId, u
 const emit = defineEmits<{
   close: [];
   'open-task': [task: TaskResponse];
+  'open-task-ref': [ref: TaskRefLink];
 }>();
+
+/**
+ * 説明の KEY-N（v-html の素のリンク）を、ページ遷移させず器の側で開かせる。
+ * 修飾キー付き・中クリック（新しいタブ）はブラウザの既定に任せる。
+ */
+function onTaskRefClick(event: MouseEvent) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+    return;
+  const href = (event.target as Element | null)?.closest?.('a.kfm-task-ref')?.getAttribute('href');
+  // href は /{tenant}/projects/{KEY}/tasks/{KEY-N}
+  const [, tenant, projects, projectKey, tasks, seqKey] = href?.split('/') ?? [];
+  if (!href || tenant !== props.tenantDisplayId || projects !== 'projects' || tasks !== 'tasks')
+    return;
+  if (!projectKey || !seqKey) return;
+  // vike は document の click でリンクを横取りし defaultPrevented を見ないので、伝播も止める
+  event.preventDefault();
+  event.stopPropagation();
+  emit('open-task-ref', { projectKey, seqKey, href });
+}
 
 const deleteDialogRef = ref<HTMLDialogElement | null>(null);
 
@@ -200,7 +223,7 @@ function onDeleteDialogCancel(event: Event) {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col">
+  <div class="flex h-full min-h-0 flex-col" @click="onTaskRefClick">
     <!--
       横の余白はここで付けない。アクティビティ列の境界線と入力欄の帯を
       器の端まで通すため、余白は本文・列のそれぞれが持つ（TaskDetailHub）。
@@ -260,6 +283,13 @@ function onDeleteDialogCancel(event: Event) {
             :statuses="statuses"
             :project-key="projectKey"
             @open="emit('open-task', $event)"
+          />
+          <TaskForgeSection
+            :tenant-id="tenantId"
+            :project-id="projectId"
+            :task-id="taskId"
+            :tenant-display-id="tenantDisplayId"
+            :project-key="projectKey"
           />
         </template>
         <template #sidebar>

@@ -4,7 +4,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use axum::{
     Json,
     body::Body,
-    extract::{Multipart, Path, Query, State},
+    extract::{
+        Path, Query, State,
+        multipart::{Multipart, MultipartError},
+    },
     http::{HeaderMap, HeaderName, StatusCode, header},
     response::Response,
 };
@@ -250,7 +253,7 @@ pub async fn list_files(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
-    Query(query): Query<ListFilesQuery>,
+    Valid(Query(query)): Valid<Query<ListFilesQuery>>,
 ) -> Result<Json<ListFilesResponse>, AppError> {
     auth.require_scope(Scope::ReadDrive)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
@@ -269,14 +272,29 @@ pub async fn list_files(
         }
     }
 
-    let mut selector = drive_files::Entity::find()
-        .filter(drive_files::Column::TenantId.eq(tenant_id))
-        .order_by_desc(drive_files::Column::CreatedAt);
+    let mut selector =
+        drive_files::Entity::find().filter(drive_files::Column::TenantId.eq(tenant_id));
 
     selector = match query.folder_id {
         Some(folder_id) => selector.filter(drive_files::Column::FolderId.eq(folder_id)),
         None => selector.filter(drive_files::Column::FolderId.is_null()),
     };
+    if let Some(mime_type) = &query.mime_type {
+        selector = selector.filter(
+            drive_files::Column::MimeType.like(format!("{}%", common::db::escape_like(mime_type))),
+        );
+    }
+    if let Some(q) = &query.q {
+        selector = selector
+            .filter(drive_files::Column::Name.ilike(format!("%{}%", common::db::escape_like(q))));
+    }
+    selector = match query.sort {
+        DriveFileSort::CreatedAtDesc => selector.order_by_desc(drive_files::Column::CreatedAt),
+        DriveFileSort::NameAsc => selector.order_by_asc(drive_files::Column::Name),
+        DriveFileSort::UpdatedAtDesc => selector.order_by_desc(drive_files::Column::UpdatedAt),
+    }
+    // 同値の行でページの境界が揺れないよう、最後に id で順序を固定する
+    .order_by_asc(drive_files::Column::Id);
 
     let total = selector.clone().count(&state.db).await?;
     let files = selector
@@ -325,7 +343,7 @@ pub async fn upload_file(
     while let Some(field) = multipart
         .next_field()
         .await
-        .map_err(|e| AppError::Internal(e.into()))?
+        .map_err(multipart_to_app_error)?
     {
         match field.name() {
             Some("file") => {
@@ -377,7 +395,8 @@ pub async fn upload_file(
                 let (mut tx, rx) = fmpsc::channel::<Result<Bytes, StorageError>>(8);
                 let byte_stream: ByteStream = Box::pin(rx);
 
-                // 本文の SHA-256 も流しながら計算する。途中で打ち切った場合は None。
+                // 本文の SHA-256 も流しながら計算する。途中で打ち切った場合は Ok(None)、
+                // multipart の読み取りに失敗した場合はそのエラーを返す。
                 // Markdown は保存後にタスク参照を抜き出すので本文も手元に残す
                 // （上限は upload_max_bytes。本文更新 API も同じ大きさをメモリに載せる）
                 let keep_body = is_markdown(&mime_type);
@@ -398,24 +417,25 @@ pub async fn upload_file(
                                             "upload size limit exceeded".into(),
                                         )))
                                         .await;
-                                    return None;
+                                    return Ok(None);
                                 }
                                 hasher.update(&bytes);
                                 if keep_body {
                                     body.extend_from_slice(&bytes);
                                 }
                                 if tx.send(Ok(bytes)).await.is_err() {
-                                    return None;
+                                    return Ok(None);
                                 }
                             }
                             Ok(None) => break,
                             Err(e) => {
-                                let _ = tx.send(Err(StorageError::Other(e.to_string()))).await;
-                                return None;
+                                // Display は上位メッセージだけなので、source まで出る Debug で残す
+                                let _ = tx.send(Err(StorageError::Other(format!("{e:?}")))).await;
+                                return Err(e);
                             }
                         }
                     }
-                    Some((hex::encode(hasher.finalize()), body))
+                    Ok(Some((hex::encode(hasher.finalize()), body)))
                 };
 
                 let file_id = Uuid::new_v4();
@@ -429,6 +449,17 @@ pub async fn upload_file(
                 );
 
                 let actual_size = byte_count.load(Ordering::Relaxed);
+
+                let pumped = match pumped {
+                    Ok(pumped) => pumped,
+                    // 本文の上限超過はストレージ側のエラー（500）より先に 413 で返す
+                    Err(e) if is_body_limit_error(&e) => {
+                        let _ = state.storage.delete(&storage_key).await;
+                        return Err(AppError::ContentTooLarge);
+                    }
+                    // それ以外は従来どおり下のサイズ・ストレージ判定に任せる（空本文の 400 など）
+                    Err(_) => None,
+                };
 
                 // サイズチェックを upload_result より先に行う。
                 // 早期中断時は upload_result がエラーになるが、
@@ -1117,6 +1148,28 @@ fn header_matches(headers: &HeaderMap, name: HeaderName, etag: &str) -> Option<b
     let mut values = headers.get_all(name).iter().peekable();
     values.peek()?;
     Some(values.any(|v| v.to_str().is_ok_and(|s| etag_matches(s, etag))))
+}
+
+/// 本文の上限超過は 413。それ以外は従来どおり 500 だが、ログに source まで残す
+fn multipart_to_app_error(err: MultipartError) -> AppError {
+    if is_body_limit_error(&err) {
+        AppError::ContentTooLarge
+    } else {
+        AppError::Internal(err.into())
+    }
+}
+
+/// `MultipartError::status()` は 1 段しか剥がさず、`RequestBodyLimitLayer` 側の上限
+/// （`axum::Error` に二重に包まれる）を 500 と判定するので、source を辿って探す
+fn is_body_limit_error(err: &MultipartError) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = source {
+        if e.is::<http_body_util::LengthLimitError>() {
+            return true;
+        }
+        source = e.source();
+    }
+    false
 }
 
 fn storage_to_app_error(err: StorageError) -> AppError {

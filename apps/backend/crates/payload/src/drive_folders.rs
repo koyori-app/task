@@ -3,8 +3,22 @@ use sea_orm::prelude::Uuid;
 
 use entity::drive_folders;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
+
+/// フォルダ一覧の絞り込み。すべて省略するとテナントの全フォルダを返す。
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ListFoldersQuery {
+    /// そのプロジェクトのフォルダだけ。プロジェクトへのアクセス権が必要（無ければ 403）
+    pub project_id: Option<Uuid>,
+    /// そのフォルダの直下だけ。省略時は全階層
+    pub parent_id: Option<Uuid>,
+    /// `true` でルート（親なし）だけ。`parent_id` との同時指定は 400。
+    /// `project_id` と組み合わせるとプロジェクトのルートフォルダが 1 件返る
+    #[serde(default)]
+    pub root_only: bool,
+}
 
 #[derive(Validate, Debug, Deserialize, ToSchema)]
 pub struct CreateFolderRequest {

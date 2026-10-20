@@ -46,4 +46,44 @@ pub enum ForgeEvent {
         /// 古い順。`commits_truncated` のときは新しい側が欠けている
         commits: Vec<ForgeCommit>,
     },
+    /// PR の作成・更新。本文は公開情報なので運んでよい（タスク参照の抽出に使う）
+    PullRequest {
+        repo: ForgeRepo,
+        action: PrAction,
+        number: i32,
+        title: String,
+        body: String,
+        author_handle: String,
+        /// `open` / `closed`（マージ済みかは `merged_at` で表す）
+        state: String,
+        merged_at: Option<DateTime<Utc>>,
+        /// 小文字 16 進
+        head_sha: String,
+        head_branch: String,
+        html_url: String,
+        /// ホスト側で PR が最後に更新された時刻。配送順の逆転を見分ける世代に使う（§5）
+        updated_at: DateTime<Utc>,
+    },
+    /// ブランチの作成。タグは受信口で捨てる
+    BranchCreated {
+        repo: ForgeRepo,
+        branch: String,
+        /// ホスト上のブランチの URL。ホストごとに組み立て規則が違うので受信口で作る
+        html_url: String,
+    },
+    BranchDeleted {
+        repo: ForgeRepo,
+        branch: String,
+    },
+}
+
+/// 処理対象の PR action。それ以外の action は受信口で捨てる。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrAction {
+    Opened,
+    Edited,
+    Synchronize,
+    Reopened,
+    Closed { merged: bool },
 }

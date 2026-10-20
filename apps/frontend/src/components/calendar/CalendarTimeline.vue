@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ChevronLeft, ChevronRight, Flag, TriangleAlert } from '@lucide/vue';
+import { ChevronLeft, ChevronRight, Flag, TriangleAlert, UserRound } from '@lucide/vue';
 import { computed } from 'vue';
-import { navigate } from 'vike/client/router';
 
+import UserAvatar from '@/components/UserAvatar.vue';
 import type { components } from '@/generated/api';
 import { DAILY_CAPACITY_HOURS, dailyLoadByMember, isOverCapacity } from '@/lib/calendar/load';
 import {
@@ -37,6 +37,8 @@ const props = withDefaults(
   }>(),
   { days: 14, sprints: () => [], milestones: () => [], showUnassigned: true },
 );
+
+const emit = defineEmits<{ 'open-task': [task: ScheduleTask] }>();
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -130,12 +132,19 @@ const rows = computed(() => {
   const result = props.members.map((member) => ({
     id: member.id,
     name: member.username,
+    avatarUrl: member.avatar_url ?? null,
     lanes: pack(rowsById.get(member.id) ?? []),
     loads: loadsOf(member.id),
   }));
   const unassigned = rowsById.get(UNASSIGNED_ID);
   if (props.showUnassigned && unassigned) {
-    result.push({ id: UNASSIGNED_ID, name: '担当者なし', lanes: pack(unassigned), loads: [] });
+    result.push({
+      id: UNASSIGNED_ID,
+      name: '担当者なし',
+      avatarUrl: null,
+      lanes: pack(unassigned),
+      loads: [],
+    });
   }
   return result;
 });
@@ -208,8 +217,10 @@ function hrefOf(task: ScheduleTask) {
 function onTaskClick(task: ScheduleTask, event: MouseEvent) {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
     return;
+  // vike は document の click でリンクを横取りし defaultPrevented を見ないので、伝播も止める
   event.preventDefault();
-  void navigate(hrefOf(task));
+  event.stopPropagation();
+  emit('open-task', task);
 }
 
 function cellStyle(col: number, row: string) {
@@ -314,9 +325,21 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
           :data-member-row="row.id"
         >
           <div
-            class="sticky left-0 z-10 flex items-center border-r bg-background px-2 text-sm"
+            class="sticky left-0 z-10 flex items-center gap-1.5 border-r bg-background px-2 text-sm"
             style="grid-column: 1; grid-row: 1 / -1"
           >
+            <!-- 名前が隣にあるので飾り（頭文字まで読み上げると名前と二重になる） -->
+            <UserAvatar
+              :user="{ id: row.id, name: row.name, avatar_url: row.avatarUrl }"
+              size="sm"
+              decorative
+              :initial-length="1"
+              class="shrink-0"
+              aria-hidden="true"
+              data-member-avatar
+            >
+              <UserRound v-if="row.id === UNASSIGNED_ID" class="size-3" aria-hidden="true" />
+            </UserAvatar>
             <span class="truncate">{{ row.name }}</span>
           </div>
           <div
