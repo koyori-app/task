@@ -19,6 +19,7 @@ function task(overrides: Partial<ScheduleTask>): ScheduleTask {
     status: { id: 's-1', name: 'Todo', color: '#888', is_done_state: false },
     priority: 'Medium',
     progress_pct: 0,
+    logged_minutes: 0,
     assignees: [{ user_id: ALICE.id, role: 'primary' }],
     ...overrides,
   };
