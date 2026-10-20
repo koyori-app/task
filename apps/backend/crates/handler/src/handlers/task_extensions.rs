@@ -259,7 +259,12 @@ fn find_match_char_range(text: &str, query: &str) -> Option<(usize, usize)> {
     }
     let text_chars: Vec<char> = text.chars().collect();
     let q_len = query_chars.len();
-    for start in 0..=text_chars.len().saturating_sub(q_len) {
+    // 検索語が本文より長ければ、当たりようが無い。`saturating_sub` は 0 に張り付くだけで、
+    // 範囲を一度回すので、このガードが無いと `text_chars[0..q_len]` が範囲外で panic する。
+    if q_len > text_chars.len() {
+        return None;
+    }
+    for start in 0..=text_chars.len() - q_len {
         if text_chars[start..start + q_len]
             .iter()
             .zip(query_chars.iter())
@@ -1067,5 +1072,32 @@ mod tests {
     fn highlight_falls_back_to_each_word() {
         let highlight = highlight_ilike("題", Some("@alice さんに頼む"), "@alice 仕様");
         assert!(highlight.contains("@alice"), "{highlight}");
+    }
+
+    #[test]
+    fn find_match_char_range_is_none_when_the_query_is_longer_than_the_text() {
+        assert_eq!(find_match_char_range("T @alice", "@alice @alice"), None);
+        assert_eq!(find_match_char_range("", "a"), None);
+        assert_eq!(find_match_char_range("あ", "あい"), None);
+    }
+
+    #[test]
+    fn find_match_char_range_still_finds_a_query_as_long_as_the_text() {
+        assert_eq!(find_match_char_range("@alice", "@ALICE"), Some((0, 6)));
+        assert_eq!(find_match_char_range("T @alice", "@alice"), Some((2, 8)));
+    }
+
+    #[test]
+    fn highlight_does_not_panic_when_the_whole_query_is_longer_than_the_text() {
+        // 説明文が印だけのタスクを `@alice @alice` で探した時。印を戻した表示本文 `T @alice`
+        // は 8 文字で、検索語の全体は 13 文字ある。語ごとの探しへ進めること。
+        let highlight = highlight_ilike("T", Some("@alice"), "@alice @alice");
+        assert!(highlight.contains("<em>@alice</em>"), "{highlight}");
+    }
+
+    #[test]
+    fn highlight_returns_the_plain_text_when_a_long_query_matches_nothing() {
+        let highlight = highlight_ilike("題", Some("説明"), "どこにも無い長い検索語");
+        assert_eq!(highlight, "題 説明");
     }
 }
