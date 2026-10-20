@@ -35,6 +35,8 @@ pub struct Model {
         on_delete = "Cascade"
     )]
     pub projects: HasOne<super::projects::Entity>,
+    #[sea_orm(has_many, via = "forge_pull_request_commits")]
+    pub forge_pull_requests: HasMany<super::forge_pull_requests::Entity>,
     #[sea_orm(has_many, via = "forge_commit_links")]
     pub tasks: HasMany<super::tasks::Entity>,
 }

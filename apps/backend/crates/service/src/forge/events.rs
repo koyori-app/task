@@ -64,6 +64,17 @@ pub enum ForgeEvent {
         /// ホスト側で PR が最後に更新された時刻。配送順の逆転を見分ける世代に使う（§5）
         updated_at: DateTime<Utc>,
     },
+    /// ブランチの作成。タグは受信口で捨てる
+    BranchCreated {
+        repo: ForgeRepo,
+        branch: String,
+        /// ホスト上のブランチの URL。ホストごとに組み立て規則が違うので受信口で作る
+        html_url: String,
+    },
+    BranchDeleted {
+        repo: ForgeRepo,
+        branch: String,
+    },
 }
 
 /// 処理対象の PR action。それ以外の action は受信口で捨てる。

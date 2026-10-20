@@ -220,6 +220,7 @@ pub async fn create_review(
     // これが無いと別リポジトリの同番 PR が同じ PR として続く（仕様 §3）
     let repo = service::reviews::current_repo(&txn, project_id).await?;
     let round = service::reviews::next_round(&txn, project_id, &repo, payload.pr_number).await?;
+    service::reviews::ensure_pull_request_row(&txn, project_id, &repo, payload.pr_number).await?;
     let now = chrono::Utc::now();
 
     let review = reviews::ActiveModel {

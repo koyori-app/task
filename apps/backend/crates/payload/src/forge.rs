@@ -11,10 +11,11 @@ use validator::Validate;
 pub struct TaskForgeResponse {
     pub pull_requests: Vec<TaskForgePullRequest>,
     pub commits: Vec<TaskForgeCommit>,
-    /// ブランチのリンクは未実装（TASK-291）で、常に空
     pub branches: Vec<TaskForgeBranch>,
     /// プロジェクトの現在の連携先。連携していなければ null（手動リンクの可否をこれで決める）
     pub repository: Option<TaskForgeRepository>,
+    /// 取り込み元の Issue。Issue から取り込んでいない（または連携を解除した）タスクでは null
+    pub issue: Option<TaskForgeIssue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -44,7 +45,8 @@ pub struct TaskForgePullRequest {
     pub sources: Vec<String>,
     /// どれかの参照元がクローズキーワード付きか
     pub closes: bool,
-    /// 未解決のレビュー指摘の件数。レビューとの結線（TASK-264）までは常に null
+    /// マージを塞いでいるレビュー指摘（High / Medium の open / fixing / fixed）の件数。
+    /// レビューの無い PR、タスクと別プロジェクトの PR 行、`read:review` を持たない PAT では null
     pub unresolved: Option<i64>,
 }
 
@@ -77,7 +79,10 @@ pub struct TaskForgeBranch {
     pub repo_owner: String,
     pub repo_name: String,
     pub branch: String,
+    /// ホスト上のブランチの URL。組み立てずにそのまま使う
     pub html_url: String,
+    #[schema(value_type = String, format = "date-time")]
+    pub created_at: DateTime<Utc>,
 }
 
 /// `POST /tasks/{id}/forge/pull-requests`。リポジトリはプロジェクトの現在の連携先で決まるので受け取らない
@@ -97,4 +102,23 @@ pub struct TaskForgeRepository {
     pub repo_owner: String,
     pub repo_name: String,
     pub html_url: String,
+}
+
+/// タスクの取り込み元 Issue（`github_issue_links` の 1 行）
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TaskForgeIssue {
+    /// Issue のリンク表は GitHub 専用なので常に `github`
+    pub host: String,
+    pub repo_owner: String,
+    pub repo_name: String,
+    pub number: i32,
+    /// サーバー側で組み立てた Issue の URL
+    pub html_url: String,
+    /// `open` / `closed` / `unknown`（同期で控えていない行）
+    pub state: String,
+    /// 最後に同期（取り込み・webhook の適用・書き戻し）した時刻。同期の時刻を控える前の行では null
+    #[schema(value_type = Option<String>, format = "date-time")]
+    pub last_synced_at: Option<DateTime<Utc>>,
+    /// タスク側の変更が GitHub へまだ反映されていない
+    pub pending_push: bool,
 }

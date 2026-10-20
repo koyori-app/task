@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import TaskDetailPane from '@/components/tasks/TaskDetailPane.vue';
+import TaskDetailPane, { type TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
 import {
   shouldKeepOverlayOnEscape,
   shouldKeepOverlayOnPointerDownOutside,
 } from '@/components/tasks/overlay-dismiss-guard';
 
 /**
- * List 表示のタスク詳細。分割ビューではなくページに重ねて出す。
+ * タスク一覧の List 表示とカレンダーのタスク詳細。分割ビューではなくページに重ねて出す。
  *
  * 中身は分割ビューと同じ {@link TaskDetailPane}（＝ useTaskDetail + TaskDetailHub）で、
  * 器だけを差し替える。タイトルの変更はここでしかできない導線なので、詳細の機能は
@@ -24,6 +24,7 @@ defineProps<{
 const emit = defineEmits<{
   'update:open': [value: boolean];
   'open-task': [task: import('@/generated/api').components['schemas']['TaskResponse']];
+  'open-task-ref': [ref: TaskRefLink];
 }>();
 
 // 入力途中・IME 変換中・入れ子の <dialog> の間は閉じない（下書きを器ごと消さない）
@@ -59,6 +60,7 @@ function onPointerDownOutside(event: Event) {
         :task-id="taskId"
         @close="emit('update:open', false)"
         @open-task="emit('open-task', $event)"
+        @open-task-ref="emit('open-task-ref', $event)"
       />
     </DialogContent>
   </Dialog>

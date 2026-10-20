@@ -67,6 +67,8 @@ type MockState = {
   hangConnections?: boolean;
   /** PR ごとの作成者。未指定は yupix */
   authors?: Record<number, string>;
+  /** PR ごとのホスト上の状態。既定は open */
+  prStates?: Record<number, string>;
 };
 
 const REVIEWED_HEAD = '60cdd7795f94fa4e4148ce996c2efb4c363e3f5e';
@@ -91,6 +93,9 @@ function stubFetch(state: MockState) {
             (f.severity === 'high' || f.severity === 'medium') &&
             (f.state === 'open' || f.state === 'fixed'),
         ).length;
+      const blockingFixed = state.findings.filter(
+        (f) => (f.severity === 'high' || f.severity === 'medium') && f.state === 'fixed',
+      ).length;
       return jsonResponse(
         (state.prNumbers ?? [618]).map((prNumber) => ({
           pr_number: prNumber,
@@ -100,7 +105,9 @@ function stubFetch(state: MockState) {
           unresolved: state.findings.filter((f) => f.state === 'open' || f.state === 'fixed')
             .length,
           blocking,
+          blocking_fixed: blockingFixed,
           last_reviewed_at: '2026-08-26T00:00:00Z',
+          state: state.prStates?.[prNumber] ?? 'open',
         })),
       );
     }
@@ -311,6 +318,32 @@ describe('ReviewFindingsView', () => {
     expect(blocked.text()).toContain('1 件が未解決');
   });
 
+  it('一覧バッジは fixed を承認待ちとして未解決と分ける', async () => {
+    // High / Medium がすべて fixed なら、赤の「未解決」ではなく承認待ち
+    stubFetch({
+      findings: [
+        finding({ id: 'f-1', state: 'fixed' }),
+        finding({ id: 'f-2', severity: 'medium', state: 'fixed' }),
+      ],
+    });
+    const pending = mountView();
+    await flushPromises();
+    expect(pending.text()).toContain('2 件が承認待ち');
+    expect(pending.text()).not.toContain('件が未解決');
+
+    // open が残れば、件数は fixed を除いた残りの分
+    stubFetch({
+      findings: [
+        finding({ id: 'f-1', state: 'fixed' }),
+        finding({ id: 'f-2', severity: 'medium', state: 'open' }),
+      ],
+    });
+    const mixed = mountView();
+    await flushPromises();
+    expect(mixed.text()).toContain('1 件が未解決');
+    expect(mixed.text()).not.toContain('件が承認待ち');
+  });
+
   it('mergeVerdict の title / detail が merge-gate に出る', async () => {
     // 不可の分岐（未レビュー・連携なし・鮮度）は lib の mergeVerdict 側で見る。
     stubFetch({ findings: [] });
@@ -514,7 +547,10 @@ describe('ReviewFindingsView', () => {
     });
     await flushPromises();
 
-    wrapper.findAllComponents(Select)[1].vm.$emit('update:modelValue', 'high');
+    wrapper
+      .findAllComponents(Select)
+      .find((select) => select.find('#filter-severity').exists())!
+      .vm.$emit('update:modelValue', 'high');
     await flushPromises();
 
     expect(replaceSpy).toHaveBeenCalledOnce();
@@ -682,6 +718,37 @@ describe('ReviewFindingsView', () => {
     await wrapper.get('[data-testid="filter-pr"]').setValue('PR 779');
     await flushPromises();
     expect(prNavButtons().map((b) => b.textContent)).toEqual([expect.stringContaining('#779')]);
+  });
+
+  it('PR の状態で一覧を絞る', async () => {
+    stubFetch({
+      findings: [finding()],
+      prNumbers: [620, 619, 618],
+      prStates: { '620': 'merged', '619': 'unknown' },
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    wrapper
+      .findAllComponents(Select)
+      .find((select) => select.find('#filter-pr-state').exists())!
+      .vm.$emit('update:modelValue', 'merged');
+    await flushPromises();
+    expect(prNavButtons().map((b) => b.textContent)).toEqual([expect.stringContaining('#620')]);
+  });
+
+  it('PR 行にホスト上の状態をバッジで出し、webhook 未受信は状態不明', async () => {
+    stubFetch({
+      findings: [finding()],
+      prNumbers: [620, 619, 618],
+      prStates: { '620': 'merged', '619': 'unknown' },
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.findAll('[data-testid="pr-state"]').map((b) => b.text())).toEqual([
+      'Merged',
+      '状態不明',
+      'Open',
+    ]);
   });
 });
 

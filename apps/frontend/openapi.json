@@ -18840,6 +18840,131 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge/branches/{link_id}": {
+      "delete": {
+        "tags": ["Tasks"],
+        "summary": "ブランチのリンクを外す",
+        "operationId": "delete_task_forge_branch",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "タスクID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "link_id",
+            "in": "path",
+            "description": "ブランチのリンクID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "外しました"
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge/pull-requests": {
       "post": {
         "tags": ["Tasks"],
@@ -26058,18 +26183,41 @@
       "ReviewedPullRequest": {
         "type": "object",
         "description": "レビューのある PR の一覧行。画面の PR 一覧が使う。",
-        "required": ["pr_number", "rounds", "unresolved", "blocking", "last_reviewed_at"],
+        "required": [
+          "pr_number",
+          "rounds",
+          "unresolved",
+          "blocking",
+          "blocking_fixed",
+          "last_reviewed_at",
+          "state"
+        ],
         "properties": {
           "blocking": {
             "type": "integer",
             "format": "int64",
-            "description": "マージを塞いでいる件数（High / Medium かつ open / fixed）\n\n**可否の断定はここからは出せない。** 可否には鮮度と連携の有無も要り\n（`ReviewSummary` + `mergeVerdict` の片道降格）、この一覧はその材料を\n持たない。一覧に `mergeable` を置いていた頃、詳細パネルが「リポジトリ\n未確定」と言う横で一覧だけ「マージ可」と出る矛盾が実際に起きた",
+            "description": "マージを塞いでいる件数（High / Medium かつ open / fixing / fixed）\n\n**可否の断定はここからは出せない。** 可否には鮮度と連携の有無も要り\n（`ReviewSummary` + `mergeVerdict` の片道降格）、この一覧はその材料を\n持たない。一覧に `mergeable` を置いていた頃、詳細パネルが「リポジトリ\n未確定」と言う横で一覧だけ「マージ可」と出る矛盾が実際に起きた",
+            "minimum": 0
+          },
+          "blocking_fixed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "`blocking` のうち fixed の件数（`blocking` の内数）。修正済みでレビュー側の\n確認（verified）を待っている分で、`blocking - blocking_fixed` が open / fixing の残り",
             "minimum": 0
           },
           "last_reviewed_at": {
             "type": "string",
             "format": "date-time",
             "description": "最新ラウンドの作成時刻"
+          },
+          "merge_effects_processed_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "マージ時の副作用を処理した時刻。`state = merged` で null なら未適用"
+          },
+          "merged_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
           },
           "pr_author": {
             "type": ["string", "null"]
@@ -26081,15 +26229,24 @@
           "pr_title": {
             "type": ["string", "null"]
           },
+          "pull_request_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "自然キー（プロジェクト・リポジトリ・番号）で結んだ PR 行。無ければ null"
+          },
           "rounds": {
             "type": "integer",
             "format": "int32",
             "description": "これまでのラウンド数"
           },
+          "state": {
+            "type": "string",
+            "description": "ホスト上の PR の状態（`open` / `closed` / `merged` / `unknown`）。\nPR 行（`forge_pull_requests`）が無い、または webhook をまだ受けていなければ `unknown`"
+          },
           "unresolved": {
             "type": "integer",
             "format": "int64",
-            "description": "未解決（open / fixed）の指摘数。重大度は問わない",
+            "description": "未解決（open / fixing / fixed）の指摘数。重大度は問わない",
             "minimum": 0
           }
         }
@@ -26669,10 +26826,23 @@
       },
       "TaskForgeBranch": {
         "type": "object",
-        "required": ["id", "host", "host_url", "repo_owner", "repo_name", "branch", "html_url"],
+        "required": [
+          "id",
+          "host",
+          "host_url",
+          "repo_owner",
+          "repo_name",
+          "branch",
+          "html_url",
+          "created_at"
+        ],
         "properties": {
           "branch": {
             "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
           },
           "host": {
             "type": "string"
@@ -26681,7 +26851,8 @@
             "type": "string"
           },
           "html_url": {
-            "type": "string"
+            "type": "string",
+            "description": "ホスト上のブランチの URL。組み立てずにそのまま使う"
           },
           "id": {
             "type": "string",
@@ -26748,6 +26919,52 @@
           },
           "sha": {
             "type": "string"
+          }
+        }
+      },
+      "TaskForgeIssue": {
+        "type": "object",
+        "description": "タスクの取り込み元 Issue（`github_issue_links` の 1 行）",
+        "required": [
+          "host",
+          "repo_owner",
+          "repo_name",
+          "number",
+          "html_url",
+          "state",
+          "pending_push"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "Issue のリンク表は GitHub 専用なので常に `github`"
+          },
+          "html_url": {
+            "type": "string",
+            "description": "サーバー側で組み立てた Issue の URL"
+          },
+          "last_synced_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "最後に同期（取り込み・webhook の適用・書き戻し）した時刻。同期の時刻を控える前の行では null"
+          },
+          "number": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pending_push": {
+            "type": "boolean",
+            "description": "タスク側の変更が GitHub へまだ反映されていない"
+          },
+          "repo_name": {
+            "type": "string"
+          },
+          "repo_owner": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "description": "`open` / `closed` / `unknown`（同期で控えていない行）"
           }
         }
       },
@@ -26831,7 +27048,7 @@
           "unresolved": {
             "type": ["integer", "null"],
             "format": "int64",
-            "description": "未解決のレビュー指摘の件数。レビューとの結線（TASK-264）までは常に null"
+            "description": "マージを塞いでいるレビュー指摘（High / Medium の open / fixing / fixed）の件数。\nレビューの無い PR、タスクと別プロジェクトの PR 行、`read:review` を持たない PAT では null"
           }
         }
       },
@@ -26865,14 +27082,24 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TaskForgeBranch"
-            },
-            "description": "ブランチのリンクは未実装（TASK-291）で、常に空"
+            }
           },
           "commits": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TaskForgeCommit"
             }
+          },
+          "issue": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskForgeIssue",
+                "description": "取り込み元の Issue。Issue から取り込んでいない（または連携を解除した）タスクでは null"
+              }
+            ]
           },
           "pull_requests": {
             "type": "array",

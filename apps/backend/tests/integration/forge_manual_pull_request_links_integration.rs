@@ -4,33 +4,29 @@ use crate::common::TestApp;
 use crate::forge_commit_links_integration::{
     REPO_NAME, REPO_OWNER, insert_project, insert_status, insert_task, setup,
 };
-use crate::forge_pull_request_links_integration::{deliver, links, pr_payload};
+use crate::forge_pull_request_links_integration::{
+    deliver, links, mount_github_defaults, pr_payload,
+};
 use entity::{forge_pull_requests, scopes::Scope, task_activities};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use service::forge::pull_requests::{PULL_REQUEST_LINKED_EVENT, PULL_REQUEST_UNLINKED_EVENT};
 use uuid::Uuid;
-use wiremock::matchers::{method, path, path_regex};
+use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-/// GitHub API のモック。インストールトークンだけ返し、PR 取得は各テストで足す（無ければ 404）
-async fn github_mock() -> MockServer {
+/// GitHub API のモック。インストールトークンと空のコミット一覧（`Opened` が引く）だけ返し、
+/// PR 取得は各テストで足す（無ければ 404）
+pub(crate) async fn github_mock() -> MockServer {
     let mock_server = MockServer::start().await;
     // SAFETY: 統合テストは --test-threads=1 で直列に走る
     unsafe {
         std::env::set_var("GITHUB_API_BASE_URL", mock_server.uri());
     }
-    Mock::given(method("POST"))
-        .and(path_regex(r"^/app/installations/\d+/access_tokens$"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-            "token": "ghs_test_installation_token",
-            "expires_at": "2030-01-01T00:00:00Z"
-        })))
-        .mount(&mock_server)
-        .await;
+    mount_github_defaults(&mock_server).await;
     mock_server
 }
 
-fn forget_github_mock() {
+pub(crate) fn forget_github_mock() {
     // SAFETY: 統合テストは --test-threads=1 で直列に走る
     unsafe {
         std::env::remove_var("GITHUB_API_BASE_URL");
@@ -41,7 +37,7 @@ fn pulls_url(tenant_id: Uuid, project_id: Uuid, task_id: Uuid) -> String {
     format!("/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{task_id}/forge/pull-requests")
 }
 
-async fn link(
+pub(crate) async fn link(
     app: &TestApp,
     tenant_id: Uuid,
     project_id: Uuid,
