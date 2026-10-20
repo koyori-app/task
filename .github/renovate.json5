@@ -7,6 +7,19 @@
   "timezone": "Asia/Tokyo",
   // "dependencyDashboard": false,
   "automerge": false,
+  // 枝を焼き直すのは衝突した時だけにする。
+  // 何のために: 既定の auto は automerge を持つ規則に behind-base-branch を
+  // 当てる。main が一つ進むたびに開いておる枝が全て焼き直され、CI が積もって
+  // 捌けなくなった。
+  // automerge は止まらぬ: main に枝の保護も ruleset も無く、最新であることを
+  // 強いておらぬ。
+  // 二つの更新が互いに試されぬまま続けて入りうることは承知の上である。
+  // main への push で backend-test や e2e などが走り、壊れればそこで露見する。
+  // 露見したら、その時に直す。焼き直しを増やして先回りで防ぐことはせぬ。
+  "rebaseWhen": "conflicted",
+  // この札を貼った PR だけは、main より遅れるたびに焼き直す。
+  // merge する前に最新の main で試し直したい PR に貼る。外しても害は無い。
+  "keepUpdatedLabel": "dependencies/keep-updated",
   "prHourlyLimit": 100,
   "prConcurrentLimit": 100,
   "branchConcurrentLimit": 100,
