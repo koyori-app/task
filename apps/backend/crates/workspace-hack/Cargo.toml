@@ -16,7 +16,7 @@ publish = false
 ### BEGIN HAKARI SECTION
 [dependencies]
 axum = { version = "0.8", features = ["macros", "multipart"] }
-base64 = { version = "0.22" }
+base64 = { version = "0.23" }
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 crossbeam-utils = { version = "0.8" }
 crypto-common-6f8ce4dd05d13bba = { package = "crypto-common", version = "0.2", default-features = false, features = ["getrandom"] }
@@ -73,7 +73,7 @@ uuid = { version = "1", features = ["serde", "v4"] }
 zerocopy = { version = "0.8", default-features = false, features = ["derive", "simd"] }
 
 [build-dependencies]
-base64 = { version = "0.22" }
+base64 = { version = "0.23" }
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 crossbeam-utils = { version = "0.8" }
 crypto-common-c65f7effa3be6d31 = { package = "crypto-common", version = "0.1", default-features = false, features = ["getrandom", "std"] }
