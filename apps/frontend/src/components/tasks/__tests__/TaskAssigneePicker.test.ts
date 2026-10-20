@@ -99,7 +99,7 @@ describe('TaskAssigneePicker の保存が遅れて反映される時', () => {
     await flushPromises();
 
     await optionOf(wrapper, 'user-2').trigger('click');
-    // 保存中（disabled）に、途中の値（まだ足しておらぬ）が届く
+    // 保存中（disabled）に、途中の値（まだ足していない）が届く
     await wrapper.setProps({ disabled: true, selected: [{ ...members[0] }] });
     await flushPromises();
     expect(optionOf(wrapper, 'user-2').attributes('aria-selected')).toBe('true');
@@ -120,7 +120,7 @@ describe('TaskAssigneePicker の保存が遅れて反映される時', () => {
     await flushPromises();
     expect(optionOf(wrapper, 'user-2').attributes('aria-selected')).toBe('true');
 
-    // 失敗では再取得せず、呼び手の選択は変わらぬまま保存が終わる
+    // 失敗では再取得せず、呼び手の選択は変わらないまま保存が終わる
     await wrapper.setProps({ disabled: false });
     await flushPromises();
     expect(optionOf(wrapper, 'user-2').attributes('aria-selected')).toBe('false');

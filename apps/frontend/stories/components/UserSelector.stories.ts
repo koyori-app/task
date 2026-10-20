@@ -230,7 +230,7 @@ export const DeferredSave: Story = {
     const listbox = await body.findByRole('listbox');
     await waitFor(() => expect(within(listbox).getAllByRole('option').length).toBeGreaterThan(0));
 
-    // 一覧を下へ送り、見えておる後ろの候補を選ぶ
+    // 一覧を下へ送り、見えている後ろの候補を選ぶ
     listbox.scrollTop = listbox.scrollHeight;
     await waitFor(() =>
       expect(within(listbox).queryByRole('option', { name: /member040/ })).toBeInTheDocument(),
@@ -240,14 +240,14 @@ export const DeferredSave: Story = {
 
     for (const name of ['member040', 'member039']) {
       const option = () => within(listbox).getByRole('option', { name: new RegExp(name) });
-      // 保存中は選べぬ。保存が終わるのを待ってから選ぶ
+      // 保存中は選べない。保存が終わるのを待ってから選ぶ
       await waitFor(() => expect(option()).not.toHaveAttribute('data-disabled'));
       await user.click(option());
       await waitFor(() => expect(option()).toHaveAttribute('aria-selected', 'true'));
-      // 保存の反映（80ms）と、その後に reka が送るかもしれぬ間を待つ
+      // 保存の反映（80ms）と、その後に reka が送るかもしれない間を待つ
       await new Promise((resolve) => setTimeout(resolve, 300));
       await expect(option()).toHaveAttribute('aria-selected', 'true');
-      // 反映の後も、一覧は先頭の選んだ者へ巻き戻らぬ
+      // 反映の後も、一覧は先頭の選んだ者へ巻き戻らない
       await expect(listbox.scrollTop).toBe(scrolled);
     }
     await user.keyboard('{Escape}');
