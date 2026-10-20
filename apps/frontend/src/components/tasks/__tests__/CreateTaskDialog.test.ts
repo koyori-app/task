@@ -6,13 +6,16 @@ import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 const isHydrated = ref(true);
 const isPending = ref(false);
 const mutateAsync = vi.fn();
+const { navigate } = vi.hoisted(() => ({ navigate: vi.fn() }));
+
+vi.mock('vike/client/router', () => ({ navigate }));
 
 vi.mock('@/composables/useHydrated', () => ({
   useHydrated: () => isHydrated,
 }));
 
-vi.mock('@/lib/task-display', () => ({
-  taskDetailHref: vi.fn(() => '/tenant/projects/proj/tasks/1'),
+vi.mock('@/lib/task-display', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/task-display')>()),
   PRIORITY_CONFIG: {
     CriticalFire: { label: '緊急', color: '#dc2626', icon: {} },
     Critical: { label: '重大', color: '#ef4444', icon: {} },
@@ -138,6 +141,8 @@ function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
       stubs: dropdownStubs,
+      // 似ているタスクのリンクは表示用のテナント ID（ルートの tenant）で組む
+      provide: { 'vike-vue:usePageContext': { routeParams: { tenant: 'acme' } } },
     },
     attachTo: document.body,
   });
@@ -901,6 +906,152 @@ describe('CreateTaskDialog assignable-users query states', () => {
     expect(group).not.toBeNull();
     expect(group!.getAttribute('role')).toBe('group');
     expect(document.getElementById('task-assignees-label')?.textContent).toContain('担当者');
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog similar tasks', () => {
+  let queryClient: QueryClient;
+
+  const similarHit = { id: 'task-7', seq_id: 7, title: 'ログイン画面の修正', score: 0.5 };
+  const json = (data: unknown, status = 200) =>
+    new Response(JSON.stringify(data), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  /** 似ているタスクの問い合わせ（GET /tasks/similar）だけを拾う */
+  const similarRequests = (fetchMock: ReturnType<typeof vi.fn>) =>
+    fetchMock.mock.calls
+      .map(([request]) => new URL((request as Request).url))
+      .filter((url) => url.pathname.endsWith('/tasks/similar'));
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  /** debounce（300ms）を確実に過ぎるまで待つ */
+  const afterDebounce = () => sleep(400);
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    navigate.mockReset();
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    document.body.innerHTML = '';
+  });
+
+  it('入力後に似ているタスクを描画する', async () => {
+    const fetchMock = vi.fn(async () => json({ tasks: [similarHit] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    await new DOMWrapper(getTitleInput()).setValue('  ログイン画面  ');
+
+    await vi.waitFor(() => {
+      expect(document.body.querySelector('[data-similar-tasks]')?.textContent).toContain(
+        'ログイン画面の修正',
+      );
+    });
+    const [url] = similarRequests(fetchMock);
+    expect(url?.pathname).toBe('/api/v1/tenants/tenant-uuid/projects/project-uuid/tasks/similar');
+    expect(url?.searchParams.get('title')).toBe('ログイン画面');
+    expect(url?.searchParams.get('limit')).toBe('5');
+    expect(url?.searchParams.has('exclude_task_id')).toBe(false);
+    wrapper.unmount();
+  });
+
+  it.each([
+    ['空白のみ', '   '],
+    ['1 文字', ' ロ '],
+  ])('%s では問い合わせない', async (_, value) => {
+    const fetchMock = vi.fn(async () => json({ tasks: [similarHit] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    await new DOMWrapper(getTitleInput()).setValue(value);
+    await afterDebounce();
+    await flushPromises();
+
+    expect(similarRequests(fetchMock)).toHaveLength(0);
+    expect(document.body.querySelector('[data-similar-tasks]')).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('候補を押すと表示用のテナント ID の詳細へ遷移し、ダイアログを閉じる', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => json({ tasks: [similarHit] })),
+    );
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('ログイン画面');
+
+    const link = await vi.waitFor(() => {
+      const el = document.body.querySelector<HTMLAnchorElement>('[data-similar-tasks] a');
+      if (!el) throw new Error('候補がまだ出ていない');
+      return el;
+    });
+    expect(link.getAttribute('href')).toBe('/acme/projects/PROJ/tasks/PROJ-7');
+    link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+    await nextTick();
+
+    expect(navigate).toHaveBeenCalledWith('/acme/projects/PROJ/tasks/PROJ-7');
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it('入力を消した後に旧タイトルの応答が届いても表示しない', async () => {
+    let resolveOld: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveOld = resolve;
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    const titleInput = new DOMWrapper(getTitleInput());
+
+    await titleInput.setValue('ログイン画面');
+    await vi.waitFor(() => expect(similarRequests(fetchMock)).toHaveLength(1));
+    await titleInput.setValue('');
+    // debounce が追いつく前（問い合わせの key がまだ旧タイトル）に旧応答が届く
+    resolveOld?.(json({ tasks: [similarHit] }));
+    await flushPromises();
+
+    expect(document.body.querySelector('[data-similar-tasks]')).toBeNull();
+    await afterDebounce();
+    await flushPromises();
+    expect(document.body.querySelector('[data-similar-tasks]')).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('似ているタスクの取得に失敗しても作成できる', async () => {
+    const fetchMock = vi.fn(async () => json({ message: 'internal-error' }, 500));
+    vi.stubGlobal('fetch', fetchMock);
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    await new DOMWrapper(getTitleInput()).setValue('ログイン画面');
+    await vi.waitFor(() => expect(similarRequests(fetchMock)).toHaveLength(1));
+    await flushPromises();
+
+    expect(document.body.querySelector('[data-similar-tasks]')).toBeNull();
+    const submit = document.body.querySelector<HTMLButtonElement>('button[type="submit"]');
+    expect(submit?.disabled).toBe(false);
+    await new DOMWrapper(getForm()).trigger('submit');
+    await flushPromises();
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+    expect(wrapper.emitted('created')?.[0]).toEqual([createdTask]);
     wrapper.unmount();
   });
 });
