@@ -45,6 +45,7 @@ import {
 import { Input } from '@/components/ui/input';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import { lookup, toPlainText } from '@/lib/comment-mention';
+import { isImeComposing } from '@/lib/keyboard';
 import {
   PRIORITY_CONFIG,
   clampProgressPct,
@@ -330,6 +331,8 @@ function commitEditing(field: EditableField) {
 }
 
 function onEditKeydown(event: KeyboardEvent, field: EditableField) {
+  // 変換の確定・取り消しで編集を確定・破棄しない
+  if (isImeComposing(event)) return;
   if (event.key === 'Escape') {
     event.preventDefault();
     cancelEditing();

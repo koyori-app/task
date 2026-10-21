@@ -6,6 +6,8 @@
  * いるので、ここではそれ以外の入力欄と IME 変換中・入れ子の `<dialog>` を守る。
  */
 
+import { isImeComposing } from '@/lib/keyboard';
+
 const EDITABLE_SELECTOR = 'input,textarea,[contenteditable="true"],[contenteditable=""]';
 
 /** 入力途中か（空の input/textarea は入力途中と見なさない） */
@@ -22,7 +24,7 @@ function isDirtyEditable(element: Element | null): boolean {
 /** Esc で器を閉じずに残すか。IME 変換中・入力途中・入れ子の <dialog> が開いている間は残す */
 export function shouldKeepOverlayOnEscape(event: KeyboardEvent): boolean {
   // Firefox / Safari は変換確定の Esc でも keydown を流してくる
-  if (event.isComposing || event.keyCode === 229) return true;
+  if (isImeComposing(event)) return true;
   const target = event.target instanceof Element ? event.target : null;
   // 削除確認のネイティブ <dialog showModal> は Esc を自分で閉じるが、keydown は window まで届く
   if (target?.closest('dialog[open]')) return true;

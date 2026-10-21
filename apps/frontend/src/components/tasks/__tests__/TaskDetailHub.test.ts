@@ -351,6 +351,25 @@ describe('TaskDetailHub', () => {
     expect(wrapper.emitted('save:planned_start_on')).toEqual([['2026-08-20']]);
   });
 
+  it('タイトル編集中、IME の変換を確定・取り消す Enter / Esc では確定も破棄もしない', async () => {
+    const wrapper = mount(TaskDetailHub, {
+      props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id },
+    });
+    await wrapper.get('h1').trigger('click');
+    const input = wrapper.get('input[aria-label="タイトル"]');
+    await input.setValue('変換中のタイトル');
+    await input.trigger('keydown', { key: 'Enter', isComposing: true });
+    // Safari は compositionend の後に isComposing=false・keyCode 229 で流してくる
+    await input.trigger('keydown', { key: 'Enter', keyCode: 229 });
+    await input.trigger('keydown', { key: 'Escape', isComposing: true });
+
+    expect(wrapper.emitted('save:title')).toBeUndefined();
+    expect(wrapper.find('input[aria-label="タイトル"]').exists()).toBe(true);
+
+    await input.trigger('keydown', { key: 'Enter' });
+    expect(wrapper.emitted('save:title')).toEqual([['変換中のタイトル']]);
+  });
+
   it('does not save an empty progress value as zero percent', async () => {
     const wrapper = mount(TaskDetailHub, {
       props: {

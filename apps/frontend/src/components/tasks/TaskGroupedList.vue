@@ -16,6 +16,7 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { isImeComposing } from '@/lib/keyboard';
 import TaskGroupedRow from '@/components/tasks/TaskGroupedRow.vue';
 import TaskSubtaskBranch from '@/components/tasks/TaskSubtaskBranch.vue';
 import type { components } from '@/generated/api';
@@ -500,8 +501,8 @@ async function commitAdding(statusId: string) {
                   placeholder="タスク名を入力"
                   :aria-label="`${group.status.name} にタスクを追加`"
                   :disabled="!!creatingStatusIds?.[group.status.id]"
-                  @keydown.enter.prevent="commitAdding(group.status.id)"
-                  @keydown.esc.prevent="cancelAdding"
+                  @keydown.enter.prevent="!isImeComposing($event) && commitAdding(group.status.id)"
+                  @keydown.esc.prevent="!isImeComposing($event) && cancelAdding()"
                 />
                 <!-- 作成時にその場で決める（後から行で直せるが、入れ直す手間を省く） -->
                 <TaskAssigneePicker

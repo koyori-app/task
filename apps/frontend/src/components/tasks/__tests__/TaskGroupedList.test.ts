@@ -171,6 +171,24 @@ describe('TaskGroupedList のタスク追加', () => {
     });
   });
 
+  it('IME の変換を確定・取り消す Enter / Esc ではタスクを作らず、行も閉じない', async () => {
+    const { wrapper, onCreate } = mountList();
+    await openAddRow(wrapper);
+
+    const input = wrapper.get('input[aria-label="Todo にタスクを追加"]');
+    await input.setValue('変換中のタスク');
+    await input.trigger('keydown', { key: 'Enter', isComposing: true });
+    // Safari は compositionend の後に isComposing=false・keyCode 229 で流してくる
+    await input.trigger('keydown', { key: 'Enter', keyCode: 229 });
+    await input.trigger('keydown', { key: 'Escape', isComposing: true });
+
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(wrapper.find('input[aria-label="Todo にタスクを追加"]').exists()).toBe(true);
+
+    await input.trigger('keydown', { key: 'Enter' });
+    expect(onCreate).toHaveBeenCalledTimes(1);
+  });
+
   it('空のタイトルでは作らず、行を閉じる', async () => {
     const { wrapper, onCreate } = mountList();
     await openAddRow(wrapper);

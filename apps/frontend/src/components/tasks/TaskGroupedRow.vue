@@ -11,6 +11,7 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { isImeComposing } from '@/lib/keyboard';
 import { Textarea } from '@/components/ui/textarea';
 import {
   DropdownMenu,
@@ -431,7 +432,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
         :disabled="commentPending"
         @keydown.enter.meta.prevent="submitComment"
         @keydown.enter.ctrl.prevent="submitComment"
-        @keydown.esc.prevent="commentOpen = false"
+        @keydown.esc.prevent="!isImeComposing($event) && (commentOpen = false)"
       />
       <div class="flex flex-col gap-1">
         <Button

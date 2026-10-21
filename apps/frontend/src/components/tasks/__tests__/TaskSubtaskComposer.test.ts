@@ -18,6 +18,22 @@ describe('TaskSubtaskComposer', () => {
     expect(input.element.value).toBe('');
   });
 
+  it('IME の変換を確定・取り消す Enter / Esc では作成もキャンセルもしない', async () => {
+    const onCreate = vi.fn(async () => true);
+    const wrapper = mount(TaskSubtaskComposer, { props: { onCreate } });
+    const input = wrapper.get<HTMLInputElement>('input[aria-label="サブタスク名"]');
+    await input.setValue('変換中');
+    await input.trigger('keydown', { key: 'Enter', isComposing: true });
+    // Safari は compositionend の後に isComposing=false・keyCode 229 で流してくる
+    await input.trigger('keydown', { key: 'Enter', keyCode: 229 });
+    await input.trigger('keydown', { key: 'Escape', isComposing: true });
+    await flushPromises();
+
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(wrapper.emitted('cancel')).toBeUndefined();
+    expect(input.element.value).toBe('変換中');
+  });
+
   it('作成失敗時は下書きとエラーを残す', async () => {
     const wrapper = mount(TaskSubtaskComposer, {
       props: {

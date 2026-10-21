@@ -4,6 +4,7 @@ import { nextTick, onMounted, ref } from 'vue';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { isImeComposing } from '@/lib/keyboard';
 
 const props = withDefaults(
   defineProps<{
@@ -58,8 +59,8 @@ async function submit() {
         :aria-label="ariaLabel"
         placeholder="サブタスク名を入力"
         :disabled="pending || disabled"
-        @keydown.enter.prevent="submit"
-        @keydown.esc.prevent="!disabled && emit('cancel')"
+        @keydown.enter.prevent="!isImeComposing($event) && submit()"
+        @keydown.esc.prevent="!isImeComposing($event) && !disabled && emit('cancel')"
       />
       <Button
         type="button"
