@@ -38,10 +38,22 @@ pub fn etag_matches(header_value: &str, current: &str) -> bool {
     value == "*" || value.split(',').any(|tag| tag.trim() == current)
 }
 
-#[derive(Debug, Deserialize, IntoParams)]
+/// ファイル名の部分一致検索（`q`）の最大文字数。
+pub const MAX_NAME_QUERY_LEN: u64 = 200;
+
+#[derive(Debug, Deserialize, Validate, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ListFilesQuery {
+    /// 省略時はドライブ直下（フォルダ無し）のファイル
     pub folder_id: Option<Uuid>,
+    /// MIME タイプの前方一致。`text/markdown` は `text/markdown` で始まる MIME（`text/markdown; charset=…` など）にも一致し、`text/` は text 全体
+    pub mime_type: Option<String>,
+    /// ファイル名の部分一致（大文字小文字を区別しない）。200 文字まで
+    #[validate(length(max = MAX_NAME_QUERY_LEN))]
+    pub q: Option<String>,
+    #[serde(default)]
+    #[param(inline)]
+    pub sort: DriveFileSort,
     #[param(minimum = 1, maximum = 200)]
     #[serde(default = "default_list_limit")]
     pub limit: u32,
@@ -51,6 +63,16 @@ pub struct ListFilesQuery {
 
 fn default_list_limit() -> u32 {
     DEFAULT_LIST_LIMIT
+}
+
+/// ファイル一覧の並び順。既定は作成日時の新しい順。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DriveFileSort {
+    #[default]
+    CreatedAtDesc,
+    NameAsc,
+    UpdatedAtDesc,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -105,6 +127,25 @@ pub struct UpdateFileRequest {
     #[serde(default, deserialize_with = "crate::nullable::deserialize_some")]
     #[schema(value_type = String, format = "uuid", nullable)]
     pub folder_id: Option<Option<Uuid>>,
+}
+
+/// ファイルに結び付いたタスク 1 件（`GET .../drive/files/{id}/tasks`）。
+#[derive(Serialize, ToSchema)]
+pub struct DriveFileTaskLink {
+    #[schema(value_type = String, format = "uuid")]
+    pub task_id: Uuid,
+    pub seq_key: String,
+    pub title: String,
+    pub project: crate::my_tasks::MyTaskProjectInfo,
+    pub status: crate::my_tasks::MyTaskStatusInfo,
+    /// 結び付きの由来。`manual`（手動添付）または `body`（本文から抽出）
+    #[schema(example = "body")]
+    pub source: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct DriveFileTasksResponse {
+    pub tasks: Vec<DriveFileTaskLink>,
 }
 
 /// ドライブファイルの本文差し替えリクエスト。

@@ -107,4 +107,68 @@ describe('CommentBody', () => {
     expect(wrapper.find('h1').exists()).toBe(false);
     expect(wrapper.get('[data-comment-body]').text().startsWith('# 長い')).toBe(true);
   });
+
+  it('札は頭にアバターを置く（画像があれば img、無ければ頭文字の丸。字には混ぜぬ）', async () => {
+    const wrapper = mount(CommentBody, {
+      props: {
+        body: `<@${ME}> <@${OTHER}>`,
+        commentId: 'comment-6',
+        mentions: {
+          [ME]: { status: 'member', name: '田中', avatar_url: 'https://cdn.example.com/me.png' },
+          [OTHER]: { status: 'member', name: 'bob', avatar_url: null },
+        },
+        currentUserId: ME,
+      },
+    });
+    await waitForKfm(wrapper);
+    const chips = wrapper.findAll('.kfm-mention');
+    expect(chips[0].classes()).toEqual(
+      expect.arrayContaining(['kfm-mention', 'kfm-mention-member', 'kfm-mention-self']),
+    );
+    const own = chips[0].get('.kfm-mention-avatar');
+    expect(own.attributes('aria-hidden')).toBe('true');
+    expect(own.get('img').attributes()).toMatchObject({
+      src: 'https://cdn.example.com/me.png',
+      alt: '',
+    });
+    const bob = chips[1].get('.kfm-mention-avatar');
+    expect(bob.attributes('data-initials')).toBe('BO');
+    expect(bob.find('img').exists()).toBe(false);
+    // 札の字は名だけ（頭文字は CSS で描くので text に出ない）
+    expect(chips.map((c) => c.text())).toEqual(['@田中', '@bob']);
+  }, 30_000);
+
+  it('外れた者の札は灰色で頭にアバター、名の引けぬ者・退会した者の札はアバター無し', async () => {
+    const wrapper = mount(CommentBody, {
+      props: {
+        body: `<@${OTHER}> <@${OUT}> <@${GONE}>`,
+        commentId: 'comment-7',
+        mentions: {
+          [OTHER]: { status: 'outside', name: 'bob', avatar_url: 'https://cdn.example.com/b.png' },
+          [OUT]: { status: 'outside', name: null },
+          [GONE]: { status: 'gone', name: null },
+        },
+      },
+    });
+    await waitForKfm(wrapper);
+    const chips = wrapper.findAll('.kfm-mention');
+    expect(chips[0].classes()).toContain('kfm-mention-outside');
+    expect(chips[0].find('.kfm-mention-avatar img').exists()).toBe(true);
+    expect(chips[1].find('.kfm-mention-avatar').exists()).toBe(false);
+    expect(chips[2].find('.kfm-mention-avatar').exists()).toBe(false);
+    expect(chips[2].classes()).toContain('kfm-mention-gone');
+  }, 30_000);
+
+  it('危ない URL のアバターは img にせぬ', async () => {
+    const wrapper = mount(CommentBody, {
+      props: {
+        body: `<@${OTHER}>`,
+        commentId: 'comment-8',
+        mentions: { [OTHER]: { status: 'member', name: 'bob', avatar_url: 'javascript:alert(1)' } },
+      },
+    });
+    await waitForKfm(wrapper);
+    expect(wrapper.find('img').exists()).toBe(false);
+    expect(wrapper.get('.kfm-mention-avatar').attributes('data-initials')).toBe('BO');
+  }, 30_000);
 });

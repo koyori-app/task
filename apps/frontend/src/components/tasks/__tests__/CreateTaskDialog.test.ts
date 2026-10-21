@@ -46,6 +46,7 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
 }));
 
 import CreateTaskDialog from '../CreateTaskDialog.vue';
+import { useListLayout } from '@/components/users/__tests__/list-layout';
 
 const statuses = [
   {
@@ -102,6 +103,7 @@ type MountOptions = {
   members?: typeof members;
   membersLoading?: boolean;
   membersError?: boolean;
+  initialTitle?: string;
 };
 
 /**
@@ -109,6 +111,11 @@ type MountOptions = {
  * 差し替えて直接読む。チェック項目は押すと反転した値を返すボタンにする。
  */
 const dropdownStubs = {
+  // 担当者の窓（UserSelector）は Popover の中。中身の listbox は本物のまま読む
+  PopoverRoot: { template: '<div><slot /></div>' },
+  PopoverTrigger: { template: '<div><slot /></div>' },
+  PopoverPortal: { template: '<div><slot /></div>' },
+  PopoverContent: { template: '<div><slot /></div>' },
   DropdownMenu: { template: '<div><slot /></div>' },
   DropdownMenuTrigger: { template: '<div><slot /></div>' },
   DropdownMenuContent: { template: '<div><slot /></div>' },
@@ -134,6 +141,7 @@ function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
       members: options.members,
       membersLoading: options.membersLoading,
       membersError: options.membersError,
+      initialTitle: options.initialTitle,
     },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
@@ -721,6 +729,7 @@ describe('CreateTaskDialog labels query states', () => {
 });
 
 describe('CreateTaskDialog assignee selection', () => {
+  useListLayout();
   let queryClient: QueryClient;
 
   beforeEach(() => {
@@ -741,7 +750,15 @@ describe('CreateTaskDialog assignee selection', () => {
     document.body.innerHTML = '';
   });
 
-  const memberButton = menuItem;
+  /** 担当者の候補（listbox の option）を名で引く。項の字には頭文字も混じるので id で引く */
+  function memberButton(name: string) {
+    const member = members.find((m) => m.username === name);
+    const item = member
+      ? document.body.querySelector(`[role="option"][data-user-id="${member.id}"]`)
+      : null;
+    if (!item) throw new Error(`member option ${name} not found`);
+    return item as HTMLElement;
+  }
 
   /**
    * 担当者は作成後にしか付けられなかった。作成時に選べると、割り当て済みの状態で
@@ -755,7 +772,7 @@ describe('CreateTaskDialog assignee selection', () => {
     expect(document.getElementById('task-assignees-value')?.textContent).toContain('未割り当て');
     memberButton('yupix').click();
     await nextTick();
-    expect(memberButton('yupix').getAttribute('aria-checked')).toBe('true');
+    expect(memberButton('yupix').getAttribute('aria-selected')).toBe('true');
     // 選んだ人は欄の中にも出る
     expect(document.getElementById('task-assignees-value')?.textContent).toContain('yupix');
 
@@ -901,6 +918,49 @@ describe('CreateTaskDialog assignable-users query states', () => {
     expect(group).not.toBeNull();
     expect(group!.getAttribute('role')).toBe('group');
     expect(document.getElementById('task-assignees-label')?.textContent).toContain('担当者');
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog initialTitle', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('開いたときにタイトルの初期値を入れる', async () => {
+    const wrapper = mountDialog(queryClient, { initialTitle: '選択した文' });
+    await nextTick();
+
+    expect(getTitleInput().value).toBe('選択した文');
+    wrapper.unmount();
+  });
+
+  it('閉じて開き直すと、その時点の初期値を入れ直す', async () => {
+    const wrapper = mountDialog(queryClient, { open: false, initialTitle: '一度目' });
+    await wrapper.setProps({ open: true });
+    await nextTick();
+    getTitleInput().value = '書き換えた';
+    getTitleInput().dispatchEvent(new Event('input'));
+
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ initialTitle: '二度目', open: true });
+    await nextTick();
+
+    expect(getTitleInput().value).toBe('二度目');
+    wrapper.unmount();
+  });
+
+  it('指定しなければ空のまま（既存の呼び出し元）', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    expect(getTitleInput().value).toBe('');
     wrapper.unmount();
   });
 });

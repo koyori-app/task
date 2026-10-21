@@ -6,7 +6,7 @@
 use entity::{notifications, projects, tasks, tenants};
 
 use common::notifications::{
-    TYPE_ASSIGNED, TYPE_COMMENT_ADDED, TYPE_MENTIONED, TYPE_REVIEW_FINDING_CHANGED,
+    TYPE_ASSIGNED, TYPE_COMMENT_ADDED, TYPE_MENTIONED, TYPE_PR_MERGED, TYPE_REVIEW_FINDING_CHANGED,
     TYPE_REVIEW_ROUND_CREATED, TYPE_STATUS_CHANGED,
 };
 
@@ -95,6 +95,13 @@ fn link(
             tenant.display_id,
             project.key,
             number(&notification.payload, "pr_number")
+        )),
+        // レビュワー宛ての `pr_merged` はタスクに結ばれていない。レビュー画面のその PR へ
+        TYPE_PR_MERGED if task.is_none() => Some(format!(
+            "{base}/{}/projects/{}/reviews?pr={}",
+            tenant.display_id,
+            project.key,
+            number(&notification.payload, "number")
         )),
         _ => task.map(|task| {
             format!(
@@ -190,6 +197,19 @@ pub fn subject_and_line(
                 truncate(field(payload, "title")),
                 field(payload, "from"),
                 field(payload, "to")
+            ),
+        ),
+        TYPE_PR_MERGED => (
+            format!(
+                "[Koyori] PR #{} がマージされました",
+                number(payload, "number")
+            ),
+            format!(
+                "{}/{} の PR #{}「{}」がマージされました。",
+                field(payload, "repo_owner"),
+                field(payload, "repo_name"),
+                number(payload, "number"),
+                truncate(field(payload, "title"))
             ),
         ),
         other => (format!("[Koyori] {other}"), format!("{other}: {payload}")),
@@ -344,6 +364,38 @@ mod tests {
         assert!(mail.text.contains("/projects/KOY/reviews?pr=618"));
     }
 
+    /// レビュワー宛て（タスク無し）の `pr_merged` はレビュー画面のその PR へ、タスク宛てはタスクへ。
+    #[test]
+    fn pr_merged_links_to_review_or_task() {
+        let payload = serde_json::json!({
+            "number": 87, "title": "feat: OAuth", "html_url": "https://github.com/acme/api/pull/87",
+            "repo_owner": "acme", "repo_name": "api",
+        });
+        let mail = render(
+            &notification(TYPE_PR_MERGED, payload.clone()),
+            None,
+            &project(),
+            &tenant(),
+            "http://localhost:3000",
+        );
+        assert_eq!(mail.subject, "[Koyori] PR #87 がマージされました");
+        assert!(mail.text.contains("acme/api の PR #87「feat: OAuth」"));
+        assert!(mail.text.contains("/projects/KOY/reviews?pr=87"));
+
+        let mail = render(
+            &notification(TYPE_PR_MERGED, payload),
+            Some(&task("t")),
+            &project(),
+            &tenant(),
+            "http://localhost:3000",
+        );
+        assert!(
+            mail.text.contains("/projects/KOY/tasks/KOY-"),
+            "{}",
+            mail.text
+        );
+    }
+
     /// payload が空でも、種別ごとの件名は出して落ちない。
     #[test]
     fn empty_payload_does_not_panic() {
@@ -354,6 +406,7 @@ mod tests {
             TYPE_STATUS_CHANGED,
             TYPE_REVIEW_ROUND_CREATED,
             TYPE_REVIEW_FINDING_CHANGED,
+            TYPE_PR_MERGED,
             "unknown_type",
         ] {
             let mail = render(

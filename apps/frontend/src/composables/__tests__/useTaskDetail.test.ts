@@ -122,6 +122,12 @@ const listQueryKey = [
   LIST_TASKS_PATH,
   { params: { path: { tenant_id: TENANT_ID, project_id: PROJECT_ID } } },
 ] as const;
+// カレンダーの帯。オーバーレイで詳細を開いたまま裏に残るので、更新・削除で取り直す
+const scheduleQueryKey = [
+  'get',
+  '/v1/tenants/{tenant_id}/schedule',
+  { params: { path: { tenant_id: TENANT_ID }, query: { from: '2026-10-12', to: '2026-10-25' } } },
+] as const;
 const searchQueryKey = [
   'get',
   TASK_SEARCH_PATH,
@@ -158,6 +164,7 @@ describe('useTaskDetail のキャッシュ同期', () => {
   function seedListAndSearchCaches() {
     queryClient.setQueryData(listQueryKey, { tasks: [baseTask] });
     queryClient.setQueryData(searchQueryKey, { tasks: [baseTask] });
+    queryClient.setQueryData(scheduleQueryKey, { tasks: [] });
   }
 
   beforeEach(() => {
@@ -219,7 +226,7 @@ describe('useTaskDetail のキャッシュ同期', () => {
     expect(queryClient.getQueryState(searchQueryKey)?.isInvalidated).toBe(true);
   });
 
-  it('検索結果表示中の更新で検索キャッシュも invalidate される（mount したまま）', async () => {
+  it('検索結果表示中の更新で検索キャッシュとカレンダーの予定も invalidate される（mount したまま）', async () => {
     mountHost();
     await flushPromises();
     seedListAndSearchCaches();
@@ -231,6 +238,7 @@ describe('useTaskDetail のキャッシュ同期', () => {
 
     expect(queryClient.getQueryState(searchQueryKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(listQueryKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(scheduleQueryKey)?.isInvalidated).toBe(true);
   });
 
   it('保存が確定したら savedField にそのフィールドが入り、2 秒で消える', async () => {
@@ -463,7 +471,7 @@ describe('useTaskDetail のキャッシュ同期', () => {
     expect(detail.priorityUpdating.value).toBe(false);
   });
 
-  it('削除成功時に検索キャッシュが invalidate され、詳細キャッシュは除去される', async () => {
+  it('削除成功時に検索キャッシュとカレンダーの予定が invalidate され、詳細キャッシュは除去される', async () => {
     mountHost();
     await flushPromises();
     seedListAndSearchCaches();
@@ -474,6 +482,7 @@ describe('useTaskDetail のキャッシュ同期', () => {
     expect(queryClient.getQueryState(taskQueryKey)).toBeUndefined();
     expect(queryClient.getQueryState(listQueryKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(searchQueryKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(scheduleQueryKey)?.isInvalidated).toBe(true);
     expect(onAfterDelete).toHaveBeenCalledWith('/acme/projects/ENG/tasks');
   });
 });

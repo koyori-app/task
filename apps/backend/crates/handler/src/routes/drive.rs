@@ -1,3 +1,4 @@
+use axum::extract::DefaultBodyLimit;
 use tower_http::limit::RequestBodyLimitLayer;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -27,9 +28,12 @@ pub fn tenant_drive_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(crate::handlers::drive_files::get_drive_usage))
         .routes(routes!(crate::handlers::drive_files::update_drive_quota))
         .routes(routes!(crate::handlers::drive_files::get_file))
+        .routes(routes!(crate::handlers::drive_files::list_file_tasks))
         .routes(routes!(crate::handlers::drive_files::update_file))
         .routes(routes!(crate::handlers::drive_files::update_file_content))
         .routes(routes!(crate::handlers::drive_files::delete_file))
+        // Multipart / Json は axum 既定の 2 MB 上限も別に掛かるので、同じ値まで広げる
+        .layer(DefaultBodyLimit::max(upload_limit as usize))
         .layer(RequestBodyLimitLayer::new(upload_limit as usize))
 }
 

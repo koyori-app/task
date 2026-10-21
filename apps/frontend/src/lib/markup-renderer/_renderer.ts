@@ -275,7 +275,13 @@ export function createRenderer(options: CreateRendererOptions): RenderDescriptio
         ? ''
         : JSON.stringify({
             users: Object.entries(mentions)
-              .map(([id, user]) => [id.toLowerCase(), user.status, user.name ?? null])
+              .map(([id, user]) => [
+                id.toLowerCase(),
+                user.status,
+                user.name ?? null,
+                // 札の画像も表から引くので、アイコンの差し替えで別の HTML になるよう鍵に含める
+                user.avatar_url ?? null,
+              ])
               .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
             currentUserId,
           });

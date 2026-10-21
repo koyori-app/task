@@ -145,12 +145,12 @@ describe('TaskDetailPane', () => {
       // 記法がそのまま見えていたのが直したい症状
       expect(rendered.text()).not.toContain('# 見出し');
 
-      // 描画元はタスク UUID・テナント・本文。scope と taskRef の組み立てはサーバ側に閉じる。
+      // 描画元は本文と、詳細ページの +data.ts と同じ組み立ての scope（task-<UUID>）・テナント。
       // ペインはコメント・履歴・担当者も取りに行くので、順番ではなく宛先で拾う
       const call = fetchMock.mock.calls.find(([input]) => input === RENDER_DESCRIPTION_PATH);
       expect(call).toBeTruthy();
       expect(JSON.parse(call![1]!.body as string)).toEqual({
-        taskId: 'task-id',
+        scope: 'task-task-id',
         tenant: 'acme',
         description: '# 見出し',
         // 説明文のメンションの表（このタスクには印が無いので空）
@@ -170,6 +170,75 @@ describe('TaskDetailPane', () => {
 
       expect(wrapper.find('[data-task-description-html]').exists()).toBe(false);
       expect(wrapper.text()).toContain('# 見出し');
+    });
+  });
+
+  /*
+   * 説明の KEY-N は v-html の素のリンクなので、そのままだとオーバーレイの上でも詳細ページへ
+   * 遷移していた（TASK-303）。器（オーバーレイ・分割ビュー）の中で開けるよう横取りする。
+   */
+  describe('説明の KEY-N のクリック', () => {
+    async function mountWithTaskRef(href: string) {
+      task.description = 'ENG-7 を見る';
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(
+          async () =>
+            new Response(
+              JSON.stringify({ html: `<p><a href="${href}" class="kfm-task-ref">ENG-7</a></p>` }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } },
+            ),
+        ),
+      );
+      const wrapper = mount(TaskDetailPane, {
+        props: { tenantDisplayId: 'acme', projectKey: 'ENG', taskId: 'ENG-42' },
+        global: { plugins: [[VueQueryPlugin, { queryClient }]] },
+        attachTo: document.body,
+      });
+      await flushPromises();
+      return { wrapper, link: wrapper.get('a.kfm-task-ref').element };
+    }
+
+    /** vike のリンク横取りは document の click なので、そこまで届いたかも見る */
+    function click(link: Element, init: MouseEventInit = {}) {
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true, ...init });
+      const reachedDocument = vi.fn();
+      document.addEventListener('click', reachedDocument);
+      link.dispatchEvent(event);
+      document.removeEventListener('click', reachedDocument);
+      return { event, reachedDocument };
+    }
+
+    it('左クリックは遷移させず open-task-ref を emit する', async () => {
+      const { wrapper, link } = await mountWithTaskRef('/acme/projects/ENG/tasks/ENG-7');
+      const { event, reachedDocument } = click(link);
+      expect(event.defaultPrevented).toBe(true);
+      expect(reachedDocument).not.toHaveBeenCalled();
+      expect(wrapper.emitted('open-task-ref')).toEqual([
+        [{ projectKey: 'ENG', seqKey: 'ENG-7', href: '/acme/projects/ENG/tasks/ENG-7' }],
+      ]);
+    });
+
+    it('別プロジェクトの KEY-N もプロジェクトを添えて渡す（扱いは器が決める）', async () => {
+      const { wrapper, link } = await mountWithTaskRef('/acme/projects/OPS/tasks/OPS-3');
+      click(link);
+      expect(wrapper.emitted('open-task-ref')?.[0]?.[0]).toMatchObject({
+        projectKey: 'OPS',
+        seqKey: 'OPS-3',
+      });
+    });
+
+    it.each([
+      ['Cmd', { metaKey: true }],
+      ['Ctrl', { ctrlKey: true }],
+      ['Shift', { shiftKey: true }],
+      ['中クリック', { button: 1 }],
+    ])('%s 付きは横取りしない（新しいタブはブラウザの既定）', async (_, init) => {
+      const { wrapper, link } = await mountWithTaskRef('/acme/projects/ENG/tasks/ENG-7');
+      const { event, reachedDocument } = click(link, init);
+      expect(event.defaultPrevented).toBe(false);
+      expect(reachedDocument).toHaveBeenCalled();
+      expect(wrapper.emitted('open-task-ref')).toBeUndefined();
     });
   });
 

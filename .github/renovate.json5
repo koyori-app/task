@@ -3,10 +3,33 @@
   "extends": ["config:base"],
   "ignorePresets": [":prHourlyLimit2"],
   // "baseBranches": ["develop", "master"],
-  "schedule": ["before 9am on monday"],
+  // 窓は月曜の 5 時から 9 時（JST）にする。
+  // 何のために: before 9am だけでは窓の始まりが無く、月曜の 0 時から効く。
+  // 8 月からの renovate の PR は、9 割が月曜の 0 時台から 2 時台に作られて
+  // いた。深夜に手を動かしている時に PR と CI が一斉に湧き、作業の CI を
+  // 押し退けていた。人が寝ている明け方に湧かせ、朝には捌けているようにする。
+  "schedule": ["after 5am and before 9am on monday"],
   "timezone": "Asia/Tokyo",
   // "dependencyDashboard": false,
   "automerge": false,
+  // 枝を焼き直すのは、衝突した時だけにする。
+  // 理由: 既定の auto は、automerge を持つ規則に behind-base-branch を当てる。
+  // main が一つ進むたびに開いている枝が全て焼き直され、CI が積もって捌けなく
+  // なった。この設定を書いた時点で、開いている PR 82 件のうち renovate の PR
+  // が 60 件あり、Actions の待ち行列には run が 302 本並んでいた。
+  // main には枝の保護も ruleset も無く、PR が最新であることを強いていない。
+  // そのため、焼き直さなくても automerge は止まらない。
+  // 二つの更新が互いに試されないまま続けて入りうることは承知している。
+  // そもそも main に保護が無いので、焼き直していても、この隙は閉じていない。
+  // 検めが通った時の main と、実際に入る時の main は今でも別物になりうる。
+  // この変更で広がるのは隙の幅であって、隙が新しく生まれるわけではない。
+  // main への push で backend-test や e2e などが走るので、壊れればそこで分かる。
+  // 分かった時に直す。焼き直しを増やして先回りで防ぐことはしない。
+  "rebaseWhen": "conflicted",
+  // この札を貼った PR だけは、main より遅れるたびに焼き直す。
+  // merge する前に最新の main で試し直したい PR に貼る。
+  // 札を PR から外せば、その PR は他と同じく衝突した時だけ焼き直す。
+  "keepUpdatedLabel": "dependencies/keep-updated",
   "prHourlyLimit": 100,
   "prConcurrentLimit": 100,
   "branchConcurrentLimit": 100,
@@ -78,16 +101,31 @@
       // Extension を受け渡す。版がずれると state が二つ入り、同じ型が別の実体
       // になって typecheck が落ちる。実行時も instanceof が壊れ、編集器が描け
       // なくなる（#694）。別々の PR で上げれば、途中の版で必ずずれる。
-      // なぜ前方一致か: どの package も state を引くゆえ、後から足した package
+      // なぜ前方一致か: どの package も state を引くので、後から足した package
       // も同じ群れに入る。名指しにすると、足した時の書き足しを忘れて漏れる。
       // renovate の既定（group:recommended の group:codemirror）も同じく束ねる。
-      // ここに書くのは、束ねる理由を残し、既定が変わっても外れぬためである。
-      // 束ねても、lock の推移の解決に古い state が残ることは防げぬ（#694 で
+      // ここに書くのは、束ねる理由を残し、既定が変わっても外れないようにするため。
+      // 束ねても、lock の推移の解決に古い state が残ることは防げない（#694 で
       // 起きた）。二重取りが出たら lock を取り直す。
-      // 何が起きたら解くか: 解かぬ。分けた方が細かく見られると思っても分けるな。
+      // 何が起きたら解くか: 解かない。分けた方が細かく見られると思っても分けない。
       "matchManagers": ["npm"],
       "matchPackagePatterns": ["^@codemirror/"],
       "groupName": "codemirror"
+    },
+    {
+      // workspace-hack の Cargo.toml は renovate に上げさせない。
+      // 理由: この file は cargo hakari generate が生む（設定は
+      // apps/backend/.config/hakari.toml）。中の版は本体の crate の依存から
+      // 決まる。renovate が直に上げると generate の出力と食い違い、CI の
+      // backend-fmt の検め（cargo hakari generate --diff）で必ず落ちる。
+      // hakari が付けた sha2-93f6ce9d446188ac のような名も、別の依存と見なされる。
+      // この規則を書いた時点で、開いている renovate の PR 63 件のうち 41 件が
+      // この file だけを触る PR だった。
+      // 本体の crate を上げる PR は、これまでどおり作られる。workspace-hack が
+      // 追従していなければ同じ検めで落ちるので、その時は generate を打つ。
+      "matchManagers": ["cargo"],
+      "matchFileNames": ["apps/backend/crates/workspace-hack/Cargo.toml"],
+      "enabled": false
     }
   ]
 }

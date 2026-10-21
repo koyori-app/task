@@ -2,6 +2,7 @@
 import { ChevronDown, Loader2, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { useQueryClient } from '@tanstack/vue-query';
+import { getActivePinia } from 'pinia';
 import {
   Dialog,
   DialogClose,
@@ -13,6 +14,7 @@ import {
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import { Button } from '@/components/ui/button';
+import UserSelector from '@/components/users/UserSelector.vue';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -33,6 +35,7 @@ import type { components } from '@/generated/api';
 import { apiClient } from '@/lib/api-vue-query';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
 import { toIsoDate } from '@/lib/task-date';
+import { useAuthStore } from '@/stores/auth';
 
 const CREATE_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 
@@ -83,6 +86,8 @@ const props = defineProps<{
   membersLoading?: boolean;
   /** 候補が手元に無いときだけ true にすること（使えるキャッシュがあれば false。labelsError と同じ約束） */
   membersError?: boolean;
+  /** 開いたときのタイトルの初期値（ドキュメントの選択範囲から作るとき等） */
+  initialTitle?: string;
 }>();
 
 const emit = defineEmits<{
@@ -119,6 +124,10 @@ const defaultStatusId = computed(
 const selectedLabels = computed(() =>
   (props.labels ?? []).filter((label) => selectedLabelIds.value.includes(label.id)),
 );
+// 候補で自分を選んだ者の次に置く。pinia の無い所（試験）でも組めるよう、在る時だけ引く。
+const authStore = getActivePinia() ? useAuthStore() : null;
+const currentUserId = computed(() => authStore?.user?.id ?? null);
+
 const selectedAssignees = computed(() =>
   (props.members ?? []).filter((user) => selectedAssigneeIds.value.includes(user.id)),
 );
@@ -131,6 +140,15 @@ watch(
     if (open && !props.statuses.some((status) => status.id === statusId.value)) {
       statusId.value = defaultStatusId.value;
     }
+  },
+  { immediate: true },
+);
+
+// 開くたびに初期値を入れる。閉じると resetForm が空に戻す
+watch(
+  () => props.open,
+  (open) => {
+    if (open && props.initialTitle) title.value = props.initialTitle;
   },
   { immediate: true },
 );
@@ -180,12 +198,6 @@ function onOpenChange(value: boolean) {
   // resetForm は冪等なので watch と二重に走っても問題ない
   if (!value) resetForm();
   emit('update:open', value);
-}
-
-function toggleAssignee(userId: string) {
-  selectedAssigneeIds.value = selectedAssigneeIds.value.includes(userId)
-    ? selectedAssigneeIds.value.filter((id) => id !== userId)
-    : [...selectedAssigneeIds.value, userId];
 }
 
 function toggleLabel(labelId: string) {
@@ -444,8 +456,16 @@ async function submit() {
                   再試行
                 </Button>
               </div>
-              <DropdownMenu v-else>
-                <DropdownMenuTrigger as-child>
+              <UserSelector
+                v-else
+                v-model="selectedAssigneeIds"
+                :users="members ?? []"
+                :current-user-id="currentUserId"
+                search-label="メンバーを検索"
+                empty-text="担当者に指定できる利用者がいません"
+                no-match-text="一致するメンバーがいません"
+              >
+                <template #trigger>
                   <button
                     type="button"
                     :class="fieldTriggerClass"
@@ -464,20 +484,8 @@ async function submit() {
                     </span>
                     <ChevronDown class="size-4 shrink-0 opacity-50" aria-hidden="true" />
                   </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" class="min-w-56">
-                  <!-- 複数選べるので、選んでもメニューを閉じない -->
-                  <DropdownMenuCheckboxItem
-                    v-for="user in members"
-                    :key="user.id"
-                    :model-value="selectedAssigneeIds.includes(user.id)"
-                    @select="(event: Event) => event.preventDefault()"
-                    @update:model-value="toggleAssignee(user.id)"
-                  >
-                    {{ user.username }}
-                  </DropdownMenuCheckboxItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                </template>
+              </UserSelector>
             </div>
 
             <div

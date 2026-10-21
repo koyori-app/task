@@ -37,6 +37,10 @@ const MAX_LIMIT: u64 = 500;
 // LEAST / GREATEST は NULL を無視するので、片方しか無ければ両端ともその日になる
 const END_DATE: &str = "GREATEST(tasks.planned_start_on, (COALESCE(tasks.soft_deadline, tasks.hard_deadline) AT TIME ZONE $1)::date)";
 const START_DATE: &str = "LEAST(tasks.planned_start_on, (COALESCE(tasks.soft_deadline, tasks.hard_deadline) AT TIME ZONE $1)::date)";
+const NOT_DONE: &str = "NOT EXISTS (SELECT 1 FROM project_statuses s WHERE s.id = tasks.status_id AND s.is_done_state)";
+// 作業記録の合計。担当者以外の記録も含め、`time-logs/summary` の `actual_minutes` と同じ定義にする
+const LOGGED_MINUTES: &str =
+    "(SELECT COALESCE(SUM(l.logged_minutes), 0) FROM time_logs l WHERE l.task_id = tasks.id)::int4";
 
 #[derive(Serialize, Deserialize)]
 struct ScheduleCursor {
@@ -106,10 +110,21 @@ pub async fn get_schedule(
         .filter(tasks::Column::DeletedAt.is_null())
         .filter(tasks::Column::IsArchived.eq(false))
         .filter(Expr::cust_with_values(
-            format!("{START_DATE} <= $2 AND {END_DATE} >= $3"),
+            if q.include_overdue == Some(true) {
+                // 終点が from より前でも、山積みに積める（Soft 締切・開始予定日・見積がある）未完了の
+                // ものは締切超過として含める。積めないものまで返すと締切超過の backlog を毎回全部取る
+                format!(
+                    "{START_DATE} <= $2 AND ({END_DATE} >= $3 OR (tasks.soft_deadline IS NOT NULL \
+                     AND tasks.planned_start_on IS NOT NULL AND tasks.estimated_minutes IS NOT NULL \
+                     AND {NOT_DONE}))"
+                )
+            } else {
+                format!("{START_DATE} <= $2 AND {END_DATE} >= $3")
+            },
             [tz(), q.to.into(), q.from.into()],
         ))
-        .column_as(Expr::cust_with_values(START_DATE, [tz()]), "schedule_start");
+        .column_as(Expr::cust_with_values(START_DATE, [tz()]), "schedule_start")
+        .column_as(Expr::cust(LOGGED_MINUTES), "logged_minutes");
     if !q.user_id.is_empty() {
         query = query.filter(Expr::cust_with_values(
             "EXISTS (SELECT 1 FROM task_assignees a WHERE a.task_id = tasks.id AND a.user_id = ANY($1))",
@@ -117,9 +132,7 @@ pub async fn get_schedule(
         ));
     }
     if q.include_done == Some(false) {
-        query = query.filter(Expr::cust(
-            "NOT EXISTS (SELECT 1 FROM project_statuses s WHERE s.id = tasks.status_id AND s.is_done_state)",
-        ));
+        query = query.filter(Expr::cust(NOT_DONE));
     }
     if let Some(c) = &cursor {
         query = query.filter(Expr::cust_with_values(
@@ -145,12 +158,17 @@ pub async fn get_schedule(
     };
     let page = rows
         .iter()
-        .map(|row| tasks::Model::from_query_result(row, ""))
+        .map(|row| {
+            Ok::<_, sea_orm::DbErr>((
+                tasks::Model::from_query_result(row, "")?,
+                row.try_get::<i32>("", "logged_minutes")?,
+            ))
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let task_ids: Vec<Uuid> = page.iter().map(|t| t.id).collect();
+    let task_ids: Vec<Uuid> = page.iter().map(|(t, _)| t.id).collect();
     let statuses: HashMap<Uuid, project_statuses::Model> = project_statuses::Entity::find()
-        .filter(project_statuses::Column::Id.is_in(page.iter().map(|t| t.status_id)))
+        .filter(project_statuses::Column::Id.is_in(page.iter().map(|(t, _)| t.status_id)))
         .all(&state.db)
         .await?
         .into_iter()
@@ -185,7 +203,7 @@ pub async fn get_schedule(
         .collect();
 
     let mut items = Vec::with_capacity(page.len());
-    for task in page {
+    for (task, logged_minutes) in page {
         let project = project_map
             .get(&task.project_id)
             .ok_or(AppError::NotFound)?;
@@ -213,6 +231,7 @@ pub async fn get_schedule(
             soft_deadline: task.soft_deadline.map(|d| d.to_utc()),
             hard_deadline: task.hard_deadline.map(|d| d.to_utc()),
             estimated_minutes: task.estimated_minutes,
+            logged_minutes,
             assignees: assignees.remove(&task.id).unwrap_or_default(),
             sprint_id: task.sprint_id,
             milestone_id: task.milestone_id,

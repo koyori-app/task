@@ -35,7 +35,7 @@ import {
   fromClipboardHtml,
   lookup,
   markerOf,
-  mentionLabel,
+  mentionChip,
   mentionTrigger,
   toClipboardHtml,
   toPlainText,
@@ -43,6 +43,9 @@ import {
   type MentionTable,
   type MentionUser,
 } from '@/lib/comment-mention';
+import { avatarInitials } from '@/lib/initials';
+// 札の見た目は説明文の KFM の札と同じ一枚（span.kfm-mention）を使う
+import '@/lib/remark-kfm-mention/style.css';
 
 export interface MentionEditorOptions {
   /** `@` で出す候補（呼ぶたびに最新を返す） */
@@ -103,16 +106,32 @@ class MentionWidget extends WidgetType {
     return (
       other.id === this.id &&
       other.user?.status === this.user?.status &&
-      other.user?.name === this.user?.name
+      other.user?.name === this.user?.name &&
+      other.user?.avatar_url === this.user?.avatar_url
     );
   }
 
+  /** 説明文の KFM の札と同じ形（丸い地・頭のアバター・`@名`）。clipboard の形式は doc の文から作るので変わらぬ */
   override toDOM(): HTMLElement {
+    const chip = mentionChip(this.user, this.id);
     const el = document.createElement('span');
-    el.className = 'cm-mention';
+    el.className = `cm-mention kfm-mention kfm-mention-${chip.state}`;
     el.dataset.mention = '';
-    el.dataset.mentionStatus = this.user?.status ?? 'unknown';
-    el.textContent = mentionLabel(this.user);
+    el.dataset.mentionStatus = chip.state;
+    if (chip.avatar) {
+      const avatar = document.createElement('span');
+      avatar.className = 'kfm-mention-avatar';
+      avatar.dataset.initials = avatarInitials(chip.avatar.name);
+      avatar.setAttribute('aria-hidden', 'true');
+      if (chip.avatar.src) {
+        const img = document.createElement('img');
+        img.src = chip.avatar.src;
+        img.alt = '';
+        avatar.append(img);
+      }
+      el.append(avatar);
+    }
+    el.append(chip.label);
     return el;
   }
 
@@ -127,18 +146,6 @@ function composingGuard(run: (v: EditorView) => boolean) {
 }
 
 export const mentionTheme = EditorView.theme({
-  '.cm-mention': {
-    padding: '0 0.25rem',
-    borderRadius: '0.25rem',
-    fontWeight: '500',
-    color: 'var(--primary)',
-    backgroundColor: 'color-mix(in oklab, var(--primary) 12%, transparent)',
-  },
-  '.cm-mention[data-mention-status="outside"], .cm-mention[data-mention-status="gone"], .cm-mention[data-mention-status="unknown"]':
-    {
-      color: 'var(--muted-foreground)',
-      backgroundColor: 'var(--muted)',
-    },
   '.cm-tooltip.cm-tooltip-autocomplete': {
     border: '1px solid var(--border)',
     borderRadius: '0.375rem',

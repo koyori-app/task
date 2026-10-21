@@ -154,6 +154,17 @@ impl Fx {
     }
 
     /// テナントから除名する（`tenant_members` の行が消える。`users` の行は残る）。
+    async fn set_avatar(&self, user: &TestUser, url: &str) {
+        let model = users::Entity::find_by_id(user.id)
+            .one(&self.app.state.db)
+            .await
+            .expect("query")
+            .expect("user");
+        let mut active: users::ActiveModel = model.into();
+        active.avatar_url = Set(Some(url.to_string()));
+        active.update(&self.app.state.db).await.expect("avatar");
+    }
+
     async fn remove_from_tenant(&self, user: &TestUser) {
         let res = self
             .app
@@ -321,6 +332,7 @@ async fn detail_returns_current_names_after_a_rename() {
 async fn removed_member_keeps_their_name_but_is_not_notified() {
     let fx = setup().await;
     let alice = fx.member().await;
+    fx.set_avatar(&alice, "https://example.com/alice.png").await;
     let base = fx.create(None).await;
     // テナントに足跡を残してから除名する
     fx.assign(base["id"].as_str().unwrap(), &alice).await;
@@ -334,9 +346,9 @@ async fn removed_member_keeps_their_name_but_is_not_notified() {
     let entry = &created["mentions"][alice.id.to_string()];
     assert_eq!(entry["status"], "outside", "状態の区別は保つ");
     assert_eq!(entry["name"], alice_name, "外れた者でも名前は消えない");
-    assert!(
-        entry["avatar_url"].is_null(),
-        "名前以外（アイコン）は返さない"
+    assert_eq!(
+        entry["avatar_url"], "https://example.com/alice.png",
+        "名前と同じ境でアイコンも返す（札で灰色にして描く）"
     );
     assert_eq!(
         fx.any_mentioned(&alice).await,
@@ -352,6 +364,8 @@ async fn user_of_another_tenant_never_gets_a_name() {
     let other_owner = fx.app.insert_user(false, false).await;
     let other = fx.app.insert_tenant_project(other_owner.id).await;
     assert_ne!(other.tenant_id, fx.tenant_id);
+    fx.set_avatar(&other_owner, "https://example.com/other.png")
+        .await;
 
     let created = fx
         .create(Some(&format!("{} 他のテナントの人", mark(&other_owner))))
@@ -363,6 +377,11 @@ async fn user_of_another_tenant_never_gets_a_name() {
         entry["name"].is_null(),
         "印の id を知っただけで別のテナントの利用者の名前は引けない: {entry}"
     );
+    assert!(
+        entry["avatar_url"].is_null(),
+        "別のテナントの利用者のアイコンも引けない: {entry}"
+    );
+    assert!(!created.to_string().contains("other.png"));
     // 返りの JSON のどこにも、その名前が出ない
     let other_name = fx.username(&other_owner).await;
     assert!(!created.to_string().contains(&other_name));

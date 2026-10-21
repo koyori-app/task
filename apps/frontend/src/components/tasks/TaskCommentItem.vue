@@ -5,8 +5,7 @@ import { nextTick, ref } from 'vue';
 import { Button } from '@/components/ui/button';
 import CommentBody from '@/components/tasks/CommentBody.vue';
 import CommentEditor from '@/components/tasks/CommentEditor.vue';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { avatarInitials } from '@/lib/initials';
+import UserAvatar from '@/components/UserAvatar.vue';
 import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
 import { formatTaskDate } from '@/lib/task-display';
 import type { CommentReply, CommentThread } from '@/composables/useTaskComments';
@@ -105,16 +104,7 @@ async function confirmDelete() {
         data-comment-author
       >
         <!-- 投稿者のアイコン。avatar_url が無いユーザーは頭文字で描く -->
-        <Avatar class="size-6">
-          <AvatarImage
-            v-if="comment.user.avatar_url"
-            :src="comment.user.avatar_url"
-            :alt="comment.user.name"
-          />
-          <AvatarFallback class="bg-muted text-[10px] text-muted-foreground">
-            {{ avatarInitials(comment.user.name) }}
-          </AvatarFallback>
-        </Avatar>
+        <UserAvatar :user="comment.user" size="md" />
         <span class="font-medium text-foreground">{{ comment.user.name }}</span>
       </component>
       <span>{{ formatTaskDate(comment.created_at) }}</span>

@@ -4,13 +4,12 @@
 // 他のファイルの残骸で落ちる。鍵を共有しないと、その TRUNCATE がこちらの実行中の行を
 // 巻き添えにする（CASCADE は drive_folder_shares と task_attachments にも及ぶ）。
 
-use crate::common::{TestApp, insert_extra_project};
+use crate::common::{TestApp, file_id_of, insert_extra_project, upload_drive_file as upload_file};
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
 use entity::{
     drive_files, drive_folder_shares, drive_folders, project_members, scopes::Scope, tenants,
 };
-use reqwest::multipart::{Form, Part};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use uuid::Uuid;
 
@@ -102,52 +101,8 @@ async fn set_tenant_quota(app: &TestApp, tenant_id: Uuid, quota_bytes: i64) {
         .expect("update tenant quota");
 }
 
-/// ログイン済みセッションでファイルをアップロードし、レスポンス JSON を返す。
-async fn upload_file(
-    app: &TestApp,
-    tenant_id: Uuid,
-    folder_id: Option<Uuid>,
-    file_name: &str,
-    mime: &str,
-    body: &[u8],
-) -> serde_json::Value {
-    // ハンドラは 'file' より前に 'folder_id' を読む前提。reqwest は挿入順を保持する。
-    let mut form = Form::new();
-    if let Some(folder_id) = folder_id {
-        form = form.text("folder_id", folder_id.to_string());
-    }
-    form = form.part(
-        "file",
-        Part::bytes(body.to_vec())
-            .file_name(file_name.to_string())
-            .mime_str(mime)
-            .expect("mime"),
-    );
-
-    let response = app
-        .client()
-        .post(format!(
-            "{}/v1/tenants/{tenant_id}/drive/files",
-            app.base_url()
-        ))
-        .multipart(form)
-        .send()
-        .await
-        .expect("upload request");
-    assert_eq!(
-        response.status(),
-        StatusCode::CREATED,
-        "アップロードは成功するはず"
-    );
-    response.json().await.expect("upload response json")
-}
-
 fn content_path(tenant_id: Uuid, file_id: Uuid) -> String {
     format!("/v1/tenants/{tenant_id}/drive/files/{file_id}/content")
-}
-
-fn file_id_of(file: &serde_json::Value) -> Uuid {
-    Uuid::parse_str(file["id"].as_str().expect("id is string")).expect("id is uuid")
 }
 
 fn timestamp_of(file: &serde_json::Value, field: &str) -> DateTime<Utc> {
@@ -837,6 +792,300 @@ async fn content_delivery_does_not_render_uploaded_html() {
         response.text().await.expect("content body").as_bytes(),
         body,
         "内容は変わらず取得できる"
+    );
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// 一覧の絞り込み用に、名前・MIME・作成日時を決めた行を直接入れる（本文は読まない）。
+async fn insert_listed_file(
+    app: &TestApp,
+    tenant_id: Uuid,
+    folder_id: Uuid,
+    uploader: Uuid,
+    name: &str,
+    mime: &str,
+    created_at: DateTime<Utc>,
+) -> Uuid {
+    let file_id = Uuid::new_v4();
+    drive_files::ActiveModel {
+        id: Set(file_id),
+        name: Set(name.into()),
+        size: Set(1),
+        mime_type: Set(mime.into()),
+        storage_type: Set(drive_files::StorageType::Local),
+        storage_key: Set(Uuid::new_v4().to_string()),
+        tenant_id: Set(tenant_id),
+        project_id: Set(None),
+        uploader_id: Set(uploader),
+        folder_id: Set(Some(folder_id)),
+        created_at: Set(created_at.into()),
+        updated_at: Set(created_at.into()),
+        content_hash: Set(None),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert listed file");
+    file_id
+}
+
+/// フォルダ内のファイル一覧を引き、`(total, files)` を返す。
+async fn list_files_in(
+    app: &TestApp,
+    tenant_id: Uuid,
+    folder_id: Uuid,
+    query: &[(&str, &str)],
+) -> (u64, Vec<serde_json::Value>) {
+    let response = list_files_response(app, tenant_id, folder_id, query).await;
+    assert_eq!(response.status(), StatusCode::OK, "query: {query:?}");
+    let body: serde_json::Value = response.json().await.expect("json");
+    (
+        body["total"].as_u64().expect("total"),
+        body["files"].as_array().expect("files").clone(),
+    )
+}
+
+async fn list_files_response(
+    app: &TestApp,
+    tenant_id: Uuid,
+    folder_id: Uuid,
+    query: &[(&str, &str)],
+) -> reqwest::Response {
+    let folder = folder_id.to_string();
+    let url = reqwest::Url::parse_with_params(
+        &format!("{}/v1/tenants/{tenant_id}/drive/files", app.base_url()),
+        std::iter::once(&("folder_id", folder.as_str())).chain(query),
+    )
+    .expect("list url");
+    app.client().get(url).send().await.expect("list files")
+}
+
+fn names_of(files: &[serde_json::Value]) -> Vec<&str> {
+    files
+        .iter()
+        .map(|f| f["name"].as_str().expect("name"))
+        .collect()
+}
+
+/// `mime_type` は前方一致: 完全な型なら完全一致、末尾 `/` なら種別全体。
+/// 利用者入力の `%` `_` はワイルドカードにならない。件数は既定の limit（50）を越えさせ、
+/// 絞り込み後もページングと `total` が効くことを見る。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn list_files_filters_by_mime_type_prefix() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let folder = insert_tenant_folder(&app, tp.tenant_id, owner.id).await;
+    let base = Utc::now();
+    for i in 0..55 {
+        let at = base + chrono::Duration::seconds(i);
+        insert_listed_file(
+            &app,
+            tp.tenant_id,
+            folder,
+            owner.id,
+            &format!("doc-{i:02}.md"),
+            "text/markdown",
+            at,
+        )
+        .await;
+    }
+    insert_listed_file(
+        &app,
+        tp.tenant_id,
+        folder,
+        owner.id,
+        "extra.md",
+        "text/markdown-extra",
+        base,
+    )
+    .await;
+    for i in 0..3 {
+        insert_listed_file(
+            &app,
+            tp.tenant_id,
+            folder,
+            owner.id,
+            &format!("plain-{i}.txt"),
+            "text/plain",
+            base,
+        )
+        .await;
+    }
+    for i in 0..2 {
+        insert_listed_file(
+            &app,
+            tp.tenant_id,
+            folder,
+            owner.id,
+            &format!("image-{i}.png"),
+            "image/png",
+            base,
+        )
+        .await;
+    }
+
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+
+    let (total, first) = list_files_in(
+        &app,
+        tp.tenant_id,
+        folder,
+        &[("mime_type", "text/markdown")],
+    )
+    .await;
+    assert_eq!(
+        total, 56,
+        "text/markdown は前方一致（text/markdown-extra も含む）"
+    );
+    assert_eq!(first.len(), 50, "既定の limit で切れる");
+    let (_, rest) = list_files_in(
+        &app,
+        tp.tenant_id,
+        folder,
+        &[("mime_type", "text/markdown"), ("offset", "50")],
+    )
+    .await;
+    assert_eq!(rest.len(), 6, "残りは次のページに出る");
+    assert!(
+        first.iter().chain(&rest).all(|f| f["mime_type"]
+            .as_str()
+            .unwrap()
+            .starts_with("text/markdown")),
+        "markdown 以外が混ざらない"
+    );
+
+    let (text_total, _) =
+        list_files_in(&app, tp.tenant_id, folder, &[("mime_type", "text/")]).await;
+    assert_eq!(text_total, 59, "text/ は text 全体");
+
+    for wildcard in ["%", "text_", "%markdown"] {
+        let (total, _) =
+            list_files_in(&app, tp.tenant_id, folder, &[("mime_type", wildcard)]).await;
+        assert_eq!(total, 0, "{wildcard} はワイルドカードとして効かない");
+    }
+
+    let (all, _) = list_files_in(&app, tp.tenant_id, folder, &[]).await;
+    assert_eq!(all, 61, "省略時は従来どおり全件");
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// `q` はファイル名の部分一致で、大文字小文字を区別せず、`%` `_` を字義どおりに扱う。
+/// 長さは 200 文字まで（201 文字で 400）。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn list_files_searches_names_case_insensitively() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let folder = insert_tenant_folder(&app, tp.tenant_id, owner.id).await;
+    let now = Utc::now();
+    for name in [
+        "Design-Notes.md",
+        "design-review.md",
+        "other.md",
+        "100%_done.md",
+        "100x-done.md",
+    ] {
+        insert_listed_file(
+            &app,
+            tp.tenant_id,
+            folder,
+            owner.id,
+            name,
+            "text/markdown",
+            now,
+        )
+        .await;
+    }
+
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+
+    let (total, files) = list_files_in(
+        &app,
+        tp.tenant_id,
+        folder,
+        &[("q", "DESIGN"), ("sort", "name_asc")],
+    )
+    .await;
+    assert_eq!(total, 2);
+    assert_eq!(names_of(&files), ["Design-Notes.md", "design-review.md"]);
+
+    let (_, literal) = list_files_in(&app, tp.tenant_id, folder, &[("q", "0%_")]).await;
+    assert_eq!(
+        names_of(&literal),
+        ["100%_done.md"],
+        "% と _ はワイルドカードにならない"
+    );
+
+    let max = "a".repeat(200);
+    let (none, _) = list_files_in(&app, tp.tenant_id, folder, &[("q", max.as_str())]).await;
+    assert_eq!(none, 0, "200 文字は受け付ける");
+
+    let too_long = "a".repeat(201);
+    let rejected =
+        list_files_response(&app, tp.tenant_id, folder, &[("q", too_long.as_str())]).await;
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST, "201 文字は 400");
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// `sort` は既定の作成日時降順のほか、名前昇順・更新日時降順を選べる。未知の値は 400。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn list_files_sorts_by_requested_order() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let folder = insert_tenant_folder(&app, tp.tenant_id, owner.id).await;
+    let base = Utc::now();
+    // 作成順は b → c → a。名前順と作成日時順が食い違うように置く
+    for (i, name) in ["b.md", "c.md", "a.md"].into_iter().enumerate() {
+        let at = base + chrono::Duration::seconds(i as i64);
+        insert_listed_file(
+            &app,
+            tp.tenant_id,
+            folder,
+            owner.id,
+            name,
+            "text/markdown",
+            at,
+        )
+        .await;
+    }
+
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+
+    let (_, default) = list_files_in(&app, tp.tenant_id, folder, &[]).await;
+    assert_eq!(
+        names_of(&default),
+        ["a.md", "c.md", "b.md"],
+        "既定は新しい順"
+    );
+
+    let (_, by_name) = list_files_in(&app, tp.tenant_id, folder, &[("sort", "name_asc")]).await;
+    assert_eq!(names_of(&by_name), ["a.md", "b.md", "c.md"]);
+
+    let (_, by_updated) =
+        list_files_in(&app, tp.tenant_id, folder, &[("sort", "updated_at_desc")]).await;
+    assert_eq!(names_of(&by_updated), ["a.md", "c.md", "b.md"]);
+
+    let rejected = list_files_response(&app, tp.tenant_id, folder, &[("sort", "name_desc")]).await;
+    assert_eq!(
+        rejected.status(),
+        StatusCode::BAD_REQUEST,
+        "未知の sort は 400"
     );
 
     app.cleanup_user(owner.id).await;

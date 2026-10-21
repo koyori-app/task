@@ -2,7 +2,7 @@
 
 use crate::AppState;
 use crate::auth_helpers::{is_tenant_owner, require_project_access};
-use crate::error::AppError;
+use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
@@ -83,17 +83,6 @@ pub async fn search_tasks(
     }
 }
 
-fn escape_like(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 4);
-    for c in s.chars() {
-        if matches!(c, '\\' | '%' | '_') {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out
-}
-
 async fn search_tasks_ilike(
     state: &AppState,
     project_id: Uuid,
@@ -101,7 +90,7 @@ async fn search_tasks_ilike(
     limit: u64,
     offset: u64,
 ) -> Result<Json<SearchTasksResponse>, AppError> {
-    let pattern = format!("%{}%", escape_like(query));
+    let pattern = format!("%{}%", common::db::escape_like(query));
     let base = tasks::Entity::find()
         .filter(tasks::Column::ProjectId.eq(project_id))
         .filter(tasks::Column::DeletedAt.is_null())
@@ -770,6 +759,7 @@ pub async fn list_task_attachments(
                 size: file.size,
                 url: content_url(file.id),
                 created_at: row.created_at.with_timezone(&Utc),
+                source: row.source,
             })
         })
         .collect::<Result<Vec<_>, AppError>>()?;
@@ -791,6 +781,11 @@ pub async fn list_task_attachments(
     request_body = AttachFileRequest,
     responses(
         (status = 201, description = "添付完了", body = TaskAttachmentResponse),
+        (
+            status = 200,
+            description = "本文から付いていた添付（`source = body`）を手動へ昇格した",
+            body = TaskAttachmentResponse
+        ),
         CrudErrors,
     )
 )]
@@ -819,33 +814,63 @@ pub async fn attach_task_file(
         return Err(AppError::Forbidden);
     }
 
-    let already_attached = task_attachments::Entity::find()
+    let existing = task_attachments::Entity::find()
         .filter(task_attachments::Column::TaskId.eq(task.id))
         .filter(task_attachments::Column::DriveFileId.eq(payload.drive_file_id))
         .one(&state.db)
-        .await?
-        .is_some();
-    if already_attached {
-        return Err(AppError::Conflict);
-    }
+        .await?;
 
-    let model = match (task_attachments::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        task_id: Set(task.id),
-        drive_file_id: Set(payload.drive_file_id),
-        created_by: Set(auth.user_id),
-        created_at: Set(chrono::Utc::now().into()),
-    })
-    .insert(&state.db)
-    .await
-    {
-        Ok(model) => model,
-        Err(e) if is_postgres_unique_violation(&e) => return Err(AppError::Conflict),
-        Err(e) => return Err(e.into()),
+    let (status, model) = match existing {
+        // 本文から付いた行は手動へ昇格する（本文から参照が消えても残したい意思を優先）。
+        // 解除できるのは昇格させた人になる
+        Some(row) if row.source == task_attachments::SOURCE_BODY => {
+            let promoted = task_attachments::Entity::update_many()
+                .col_expr(
+                    task_attachments::Column::Source,
+                    Expr::value(task_attachments::SOURCE_MANUAL),
+                )
+                .col_expr(
+                    task_attachments::Column::CreatedBy,
+                    Expr::value(auth.user_id),
+                )
+                .filter(task_attachments::Column::Id.eq(row.id))
+                .filter(task_attachments::Column::Source.eq(task_attachments::SOURCE_BODY))
+                .exec(&state.db)
+                .await?;
+            // 本文の保存と競合して行が消えた・先に昇格された
+            if promoted.rows_affected == 0 {
+                return Err(AppError::Conflict);
+            }
+            let model = task_attachments::Model {
+                source: task_attachments::SOURCE_MANUAL.to_string(),
+                created_by: auth.user_id,
+                ..row
+            };
+            (StatusCode::OK, model)
+        }
+        Some(_) => return Err(AppError::Conflict),
+        None => {
+            let model = match (task_attachments::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                task_id: Set(task.id),
+                drive_file_id: Set(payload.drive_file_id),
+                created_by: Set(auth.user_id),
+                created_at: Set(chrono::Utc::now().into()),
+                source: Set(task_attachments::SOURCE_MANUAL.to_string()),
+            })
+            .insert(&state.db)
+            .await
+            {
+                Ok(model) => model,
+                Err(e) if is_postgres_unique_violation(&e) => return Err(AppError::Conflict),
+                Err(e) => return Err(e.into()),
+            };
+            (StatusCode::CREATED, model)
+        }
     };
 
     Ok((
-        StatusCode::CREATED,
+        status,
         Json(TaskAttachmentResponse {
             id: model.id,
             drive_file_id: file.id,
@@ -854,6 +879,7 @@ pub async fn attach_task_file(
             size: file.size,
             url: content_url(file.id),
             created_at: model.created_at.with_timezone(&Utc),
+            source: model.source,
         }),
     ))
 }
@@ -872,6 +898,11 @@ pub async fn attach_task_file(
     ),
     responses(
         (status = 204, description = "解除成功"),
+        (
+            status = 409,
+            description = "本文から抽出した参照（`source = body`）は本文を編集して外す",
+            body = ServerError
+        ),
         CrudErrors,
     )
 )]
@@ -891,6 +922,14 @@ pub async fn detach_task_file(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+
+    // ここで消しても次の本文保存で付き直すので、本文側で外させる
+    if attachment.source == task_attachments::SOURCE_BODY {
+        return Err(AppError::ConflictDetail(
+            "本文から抽出した参照は解除できません。Drive ファイルの本文を編集して参照を外してください"
+                .into(),
+        ));
+    }
 
     let owner = is_tenant_owner(&state.db, tenant_id, auth.user_id).await?;
     if attachment.created_by != auth.user_id && !owner {

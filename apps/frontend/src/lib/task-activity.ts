@@ -65,9 +65,22 @@ export function activityText(item: ActivityItem): string {
       return 'コメントを削除しました';
     case 'archived':
       return 'タスクをアーカイブしました';
+    case 'forge_merge_effects_acknowledged': {
+      const number = payload.number;
+      const pr =
+        typeof number === 'number' && Number.isInteger(number) && number > 0
+          ? `PR #${number}`
+          : 'PR';
+      return `${pr} の自動完了を未適用のまま確認済みにしました`;
+    }
     default:
       return '操作しました';
   }
+}
+
+/** http(s) の URL だけを返す（`javascript:` 等をリンクにしない）。 */
+export function httpUrl(url: string): string | null {
+  return /^https?:\/\//i.test(url) ? url : null;
 }
 
 export type CommitActivity = {
@@ -85,22 +98,59 @@ export function commitActivity(item: ActivityItem): CommitActivity | null {
   if (item.event_type !== 'forge_commit_linked') return null;
   const payload = (item.payload ?? {}) as Record<string, unknown>;
   const str = (key: string) => (typeof payload[key] === 'string' ? (payload[key] as string) : '');
-  const url = str('html_url');
   return {
     author: str('author_handle') || str('author_name'),
     shortSha: str('sha').slice(0, 7),
     message: str('message'),
-    url: /^https?:\/\//i.test(url) ? url : null,
+    url: httpUrl(str('html_url')),
+  };
+}
+
+export type PullRequestActivity = {
+  /** ホスト上の PR 作成者 */
+  author: string;
+  /** 番号が読めなければ null */
+  number: number | null;
+  title: string;
+  /** http(s) 以外は null */
+  url: string | null;
+  /** リンクを外した履歴（`forge_pull_request_unlinked`）。主語は外した人 */
+  unlinked: boolean;
+  /** 手でリンクした履歴（`source = manual`）。主語はリンクした人。`source` の無い旧い行は false */
+  manual: boolean;
+  /** マージでタスクを完了した履歴（`forge_pull_request_merged`）。操作者はいない */
+  merged: boolean;
+};
+
+/**
+ * `forge_pull_request_linked` / `forge_pull_request_unlinked` / `forge_pull_request_merged` の
+ * 表示要素。それ以外の履歴は null。
+ */
+export function pullRequestActivity(item: ActivityItem): PullRequestActivity | null {
+  const unlinked = item.event_type === 'forge_pull_request_unlinked';
+  const merged = item.event_type === 'forge_pull_request_merged';
+  if (!unlinked && !merged && item.event_type !== 'forge_pull_request_linked') return null;
+  const payload = (item.payload ?? {}) as Record<string, unknown>;
+  const str = (key: string) => (typeof payload[key] === 'string' ? (payload[key] as string) : '');
+  const number = payload.number;
+  return {
+    author: str('author_handle'),
+    number: typeof number === 'number' && Number.isInteger(number) && number > 0 ? number : null,
+    title: str('title'),
+    url: httpUrl(str('html_url')),
+    unlinked,
+    manual: item.event_type === 'forge_pull_request_linked' && str('source') === 'manual',
+    merged,
   };
 }
 
 /**
- * 履歴の主語。コミットのリンクはシステムが積み、連携済みユーザーに結べないことが多いので、
+ * 履歴の主語。コミット・PR のリンクはシステムが積み、連携済みユーザーに結べないことが多いので、
  * ホスト上の作者名で補う。
  */
 export function activityActor(item: ActivityItem): string {
   if (item.user) return item.user.name;
-  return commitActivity(item)?.author || 'システム';
+  return commitActivity(item)?.author || pullRequestActivity(item)?.author || 'システム';
 }
 
 /** 「1分前」形式。1 日以上は日付にする（履歴は古いものほど絶対時刻の方が読みやすい）。 */

@@ -97,6 +97,7 @@ fn job_state(app: &TestApp) -> job::JobState {
         smtp_client: app.state.smtp_client.clone(),
         http_client: app.state.http_client.clone(),
         review_summary_storage: app.state.review_summary_storage.clone(),
+        github_issue_sync_storage: app.state.github_issue_sync_storage.clone(),
         pg_pool: app.state.pg_pool.clone(),
         oauth_settings: app.state.oauth_settings.clone(),
     }
@@ -854,7 +855,8 @@ async fn discord_format_sends_content_and_embeds_without_signature() {
             .expect("content")
             .contains("Discord に流す")
     );
-    assert_eq!(body["embeds"][0]["title"], "task.created");
+    assert_eq!(body["embeds"][0]["title"], "タスクの作成");
+    assert_eq!(body["embeds"][0]["color"], 0x2ecc71);
 }
 
 /// 再送は同じ payload で新しい配信を作り、元の行は変えない。Member は履歴も再送も読めない。

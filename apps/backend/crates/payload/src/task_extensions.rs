@@ -164,6 +164,9 @@ pub struct TaskAttachmentResponse {
     pub url: String,
     #[schema(value_type = String, format = "date-time")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// 添付の由来。`manual`（手動）または `body`（Drive の Markdown 本文から抽出）
+    #[schema(example = "manual")]
+    pub source: String,
 }
 
 #[derive(Serialize, ToSchema)]

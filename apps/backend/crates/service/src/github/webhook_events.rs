@@ -7,7 +7,8 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use crate::forge::events::{ForgeCommit, ForgeEvent, ForgeRepo};
+use crate::forge::events::{ForgeCommit, ForgeEvent, ForgeRepo, PrAction};
+use crate::forge::pull_requests::PullRequestSnapshot;
 
 pub const HOST: &str = "github";
 /// GitHub App の連携先は github.com だけなので固定する
@@ -110,6 +111,148 @@ pub fn push_event(payload: &serde_json::Value) -> Result<ForgeEvent, serde_json:
     })
 }
 
+/// GitHub の PR オブジェクト（webhook の `pull_request` と REST の `GET /pulls/{number}` で同じ形）。
+#[derive(Deserialize)]
+pub(crate) struct GithubPullRequest {
+    number: i32,
+    title: String,
+    /// 本文が空の PR は `null` で届く
+    #[serde(default)]
+    body: Option<String>,
+    user: PushOwner,
+    state: String,
+    #[serde(default)]
+    merged_at: Option<DateTime<Utc>>,
+    head: GithubPullRequestHead,
+    html_url: String,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Deserialize)]
+struct GithubPullRequestHead {
+    sha: String,
+    #[serde(rename = "ref")]
+    ref_name: String,
+}
+
+impl GithubPullRequest {
+    pub(crate) fn into_snapshot(self) -> PullRequestSnapshot {
+        PullRequestSnapshot {
+            title: self.title,
+            body: self.body.unwrap_or_default(),
+            author_handle: self.user.login,
+            state: self.state,
+            merged_at: self.merged_at,
+            head_sha: self.head.sha.to_ascii_lowercase(),
+            head_branch: self.head.ref_name,
+            html_url: self.html_url,
+            updated_at: self.updated_at,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct PullRequestPayload {
+    pull_request: GithubPullRequest,
+    repository: PushRepository,
+}
+
+/// `pull_request` イベントを正規化する。処理しない action（`labeled` 等）は `None`。
+pub fn pull_request_event(
+    payload: &serde_json::Value,
+) -> Result<Option<ForgeEvent>, serde_json::Error> {
+    // 処理しない action のペイロードは形を問わない（解釈できなくても 400 にしない）
+    let action = match payload.get("action").and_then(|a| a.as_str()) {
+        Some("opened") => PrAction::Opened,
+        Some("edited") => PrAction::Edited,
+        Some("synchronize") => PrAction::Synchronize,
+        Some("reopened") => PrAction::Reopened,
+        Some("closed") => PrAction::Closed { merged: false },
+        _ => return Ok(None),
+    };
+    let PullRequestPayload {
+        pull_request,
+        repository,
+    } = PullRequestPayload::deserialize(payload)?;
+    let action = match action {
+        PrAction::Closed { .. } => PrAction::Closed {
+            merged: pull_request.merged_at.is_some(),
+        },
+        action => action,
+    };
+    let number = pull_request.number;
+    let pr = pull_request.into_snapshot();
+    Ok(Some(ForgeEvent::PullRequest {
+        repo: ForgeRepo {
+            host: HOST.to_string(),
+            host_url: HOST_URL.to_string(),
+            repo_owner: repository.owner.login,
+            repo_name: repository.name,
+        },
+        action,
+        number,
+        title: pr.title,
+        body: pr.body,
+        author_handle: pr.author_handle,
+        state: pr.state,
+        merged_at: pr.merged_at,
+        head_sha: pr.head_sha,
+        head_branch: pr.head_branch,
+        html_url: pr.html_url,
+        updated_at: pr.updated_at,
+    }))
+}
+
+#[derive(Deserialize)]
+struct RefPayload {
+    #[serde(rename = "ref")]
+    ref_name: String,
+    repository: RefRepository,
+}
+
+#[derive(Deserialize)]
+struct RefRepository {
+    name: String,
+    owner: PushOwner,
+    html_url: String,
+}
+
+/// `create` / `delete` イベントのうちブランチのものを正規化する。タグ（`ref_type = tag`）は `None`。
+pub fn branch_event(
+    payload: &serde_json::Value,
+    created: bool,
+) -> Result<Option<ForgeEvent>, serde_json::Error> {
+    // タグのペイロードは形を問わない（解釈できなくても 400 にしない）
+    if payload.get("ref_type").and_then(|t| t.as_str()) != Some("branch") {
+        return Ok(None);
+    }
+    let RefPayload {
+        ref_name: branch,
+        repository,
+    } = RefPayload::deserialize(payload)?;
+    let repo = ForgeRepo {
+        host: HOST.to_string(),
+        host_url: HOST_URL.to_string(),
+        repo_owner: repository.owner.login,
+        repo_name: repository.name,
+    };
+    Ok(Some(if created {
+        ForgeEvent::BranchCreated {
+            html_url: branch_url(&repository.html_url, &branch),
+            repo,
+            branch,
+        }
+    } else {
+        ForgeEvent::BranchDeleted { repo, branch }
+    }))
+}
+
+/// ブランチの URL。`#` `%` `?` などは ref 名に使えるので、`/` で区切った各要素をエンコードする
+fn branch_url(repository_url: &str, branch: &str) -> String {
+    let path: Vec<_> = branch.split('/').map(urlencoding::encode).collect();
+    format!("{repository_url}/tree/{}", path.join("/"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,7 +351,9 @@ mod tests {
         let mut payload = push_fixture();
         payload["deleted"] = true.into();
         payload["commits"] = serde_json::json!([]);
-        let ForgeEvent::Push { commits, .. } = push_event(&payload).expect("convert push");
+        let ForgeEvent::Push { commits, .. } = push_event(&payload).expect("convert push") else {
+            panic!("push");
+        };
         assert!(commits.is_empty());
     }
 
@@ -218,7 +363,9 @@ mod tests {
         let mut payload = push_fixture();
         payload["before"] = "B17CD9000000000000000000000000000000000A".into();
 
-        let ForgeEvent::Push { before, .. } = push_event(&payload).expect("convert push");
+        let ForgeEvent::Push { before, .. } = push_event(&payload).expect("convert push") else {
+            panic!("push");
+        };
         assert_eq!(
             before.as_deref(),
             Some("b17cd9000000000000000000000000000000000a")
@@ -232,7 +379,9 @@ mod tests {
         payload["created"] = true.into();
         payload["before"] = "b17cd9000000000000000000000000000000000a".into();
 
-        let ForgeEvent::Push { before, .. } = push_event(&payload).expect("convert push");
+        let ForgeEvent::Push { before, .. } = push_event(&payload).expect("convert push") else {
+            panic!("push");
+        };
         assert!(before.is_none());
     }
 
@@ -249,7 +398,10 @@ mod tests {
             commits_truncated,
             after,
             ..
-        } = push_event(&payload).expect("convert push");
+        } = push_event(&payload).expect("convert push")
+        else {
+            panic!("push");
+        };
         assert_eq!(commits.len(), COMMITS_MAX);
         assert!(commits_truncated, "上限に達した push は取り直しの対象");
         assert_eq!(after, "a3f92c1e7b81d4000000000000000000000000aa");
@@ -260,5 +412,226 @@ mod tests {
         let mut payload = push_fixture();
         payload.as_object_mut().unwrap().remove("repository");
         assert!(push_event(&payload).is_err());
+    }
+
+    /// GitHub の pull_request ペイロード（関係するフィールドを残して削ったもの）
+    fn pull_request_fixture(action: &str) -> serde_json::Value {
+        serde_json::json!({
+            "action": action,
+            "number": 87,
+            "pull_request": {
+                "id": 1001,
+                "number": 87,
+                "state": "open",
+                "locked": false,
+                "title": "feat: OAuth 対応 TASK-42",
+                "body": "Closes TASK-43",
+                "user": { "login": "yupix", "id": 20 },
+                "html_url": "https://github.com/acme/backend/pull/87",
+                "created_at": "2026-09-10T03:00:00Z",
+                "updated_at": "2026-09-10T12:00:00+09:00",
+                "closed_at": null,
+                "merged_at": null,
+                "merged": false,
+                "head": { "label": "acme:feat/TASK-42-oauth", "ref": "feat/TASK-42-oauth", "sha": "A3F92C1E7B81D4000000000000000000000000AA" },
+                "base": { "label": "acme:main", "ref": "main", "sha": "b17cd9000000000000000000000000000000000a" }
+            },
+            "repository": {
+                "id": 1,
+                "name": "backend",
+                "full_name": "acme/backend",
+                "owner": { "login": "acme", "id": 10 }
+            },
+            "sender": { "login": "yupix", "id": 20 },
+            "installation": { "id": 30 }
+        })
+    }
+
+    fn expected_pull_request(action: PrAction, state: &str, merged_at: Option<&str>) -> ForgeEvent {
+        ForgeEvent::PullRequest {
+            repo: ForgeRepo {
+                host: "github".into(),
+                host_url: "https://github.com".into(),
+                repo_owner: "acme".into(),
+                repo_name: "backend".into(),
+            },
+            action,
+            number: 87,
+            title: "feat: OAuth 対応 TASK-42".into(),
+            body: "Closes TASK-43".into(),
+            author_handle: "yupix".into(),
+            state: state.into(),
+            merged_at: merged_at.map(|at| at.parse().unwrap()),
+            head_sha: "a3f92c1e7b81d4000000000000000000000000aa".into(),
+            head_branch: "feat/TASK-42-oauth".into(),
+            html_url: "https://github.com/acme/backend/pull/87".into(),
+            // オフセット付きの時刻は UTC に揃える
+            updated_at: "2026-09-10T03:00:00Z".parse().unwrap(),
+        }
+    }
+
+    #[test]
+    fn pull_request_actions_become_normalized_events() {
+        for (action, expected) in [
+            ("opened", PrAction::Opened),
+            ("edited", PrAction::Edited),
+            ("synchronize", PrAction::Synchronize),
+            ("reopened", PrAction::Reopened),
+        ] {
+            assert_eq!(
+                pull_request_event(&pull_request_fixture(action)).expect("convert"),
+                Some(expected_pull_request(expected, "open", None)),
+                "action: {action}"
+            );
+        }
+    }
+
+    #[test]
+    fn closed_pull_request_carries_whether_it_was_merged() {
+        let mut merged = pull_request_fixture("closed");
+        merged["pull_request"]["state"] = "closed".into();
+        merged["pull_request"]["merged"] = true.into();
+        merged["pull_request"]["merged_at"] = "2026-09-10T03:00:00Z".into();
+        assert_eq!(
+            pull_request_event(&merged).expect("convert"),
+            Some(expected_pull_request(
+                PrAction::Closed { merged: true },
+                "closed",
+                Some("2026-09-10T03:00:00Z")
+            ))
+        );
+
+        let mut unmerged = pull_request_fixture("closed");
+        unmerged["pull_request"]["state"] = "closed".into();
+        assert_eq!(
+            pull_request_event(&unmerged).expect("convert"),
+            Some(expected_pull_request(
+                PrAction::Closed { merged: false },
+                "closed",
+                None
+            ))
+        );
+    }
+
+    /// 本文が空の PR は `body: null` で届く
+    #[test]
+    fn pull_request_without_body_has_empty_body() {
+        let mut payload = pull_request_fixture("opened");
+        payload["pull_request"]["body"] = serde_json::Value::Null;
+        let Some(ForgeEvent::PullRequest { body, .. }) =
+            pull_request_event(&payload).expect("convert")
+        else {
+            panic!("pull request event");
+        };
+        assert_eq!(body, "");
+    }
+
+    /// 処理しない action は形を問わず捨てる（400 にしない）
+    #[test]
+    fn unhandled_pull_request_actions_are_ignored() {
+        assert_eq!(
+            pull_request_event(&pull_request_fixture("labeled")).expect("convert"),
+            None
+        );
+        assert_eq!(
+            pull_request_event(&serde_json::json!({ "action": "assigned" })).expect("convert"),
+            None
+        );
+    }
+
+    /// GitHub の create / delete ペイロード（関係するフィールドを残して削ったもの）
+    fn ref_fixture(ref_type: &str) -> serde_json::Value {
+        serde_json::json!({
+            "ref": "feat/TASK-12-foo",
+            "ref_type": ref_type,
+            "master_branch": "main",
+            "description": null,
+            "pusher_type": "user",
+            "repository": {
+                "id": 1,
+                "name": "backend",
+                "full_name": "acme/backend",
+                "html_url": "https://github.com/acme/backend",
+                "owner": { "login": "acme", "id": 10 }
+            },
+            "sender": { "login": "yupix", "id": 20 },
+            "installation": { "id": 30 }
+        })
+    }
+
+    #[test]
+    fn branch_create_and_delete_become_normalized_events() {
+        let repo = ForgeRepo {
+            host: "github".into(),
+            host_url: "https://github.com".into(),
+            repo_owner: "acme".into(),
+            repo_name: "backend".into(),
+        };
+        assert_eq!(
+            branch_event(&ref_fixture("branch"), true).expect("convert"),
+            Some(ForgeEvent::BranchCreated {
+                repo: repo.clone(),
+                branch: "feat/TASK-12-foo".into(),
+                html_url: "https://github.com/acme/backend/tree/feat/TASK-12-foo".into(),
+            })
+        );
+        // delete のペイロードには master_branch / description が無い
+        let mut deleted = ref_fixture("branch");
+        let object = deleted.as_object_mut().unwrap();
+        object.remove("master_branch");
+        object.remove("description");
+        assert_eq!(
+            branch_event(&deleted, false).expect("convert"),
+            Some(ForgeEvent::BranchDeleted {
+                repo,
+                branch: "feat/TASK-12-foo".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn branch_url_encodes_each_path_segment() {
+        for (branch, url) in [
+            (
+                "feat/TASK-12#qa",
+                "https://github.com/acme/backend/tree/feat/TASK-12%23qa",
+            ),
+            (
+                "feat/100%-done",
+                "https://github.com/acme/backend/tree/feat/100%25-done",
+            ),
+        ] {
+            let mut payload = ref_fixture("branch");
+            payload["ref"] = branch.into();
+            let Some(ForgeEvent::BranchCreated { html_url, .. }) =
+                branch_event(&payload, true).expect("convert")
+            else {
+                panic!("branch event expected");
+            };
+            assert_eq!(html_url, url);
+        }
+    }
+
+    #[test]
+    fn tag_create_and_delete_are_ignored() {
+        assert_eq!(
+            branch_event(&ref_fixture("tag"), true).expect("convert"),
+            None
+        );
+        assert_eq!(
+            branch_event(&ref_fixture("tag"), false).expect("convert"),
+            None
+        );
+        assert_eq!(
+            branch_event(&serde_json::json!({ "ref_type": "tag" }), true).expect("convert"),
+            None
+        );
+    }
+
+    #[test]
+    fn branch_payload_missing_repository_is_rejected() {
+        let mut payload = ref_fixture("branch");
+        payload.as_object_mut().unwrap().remove("repository");
+        assert!(branch_event(&payload, true).is_err());
     }
 }
