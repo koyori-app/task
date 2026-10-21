@@ -354,4 +354,29 @@ describe('DocumentDetail 編集', () => {
     expect(confirm).toHaveBeenCalled();
     expect(wrapper.find('form').exists()).toBe(true);
   });
+
+  it('保存の応答を待つ間はタイトルと本文を編集できない', async () => {
+    // 待つ間の追記は送った本文に入らず、成功で下書きごと閉じて失われる
+    let release!: () => void;
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: Request | string, init?: RequestInit) => {
+      if (typeof input !== 'string' && input.method === 'PUT') {
+        await new Promise<void>((resolve) => (release = resolve));
+      }
+      return original(input, init);
+    });
+    const wrapper = mountDetail({ editing: true });
+    await flushPromises();
+    await editBody(wrapper, '送る本文');
+
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+
+    expect(wrapper.get('input').attributes('disabled')).toBeDefined();
+    expect(wrapper.get('textarea').attributes('disabled')).toBeDefined();
+
+    release();
+    await flushPromises();
+    expect(puts).toEqual([{ ifMatch: ETAG, body: { content: '送る本文' } }]);
+  });
 });

@@ -392,6 +392,7 @@ function taskHref(task: { seq_key: string; project: { key: string } }) {
           name="title"
           autocomplete="off"
           :maxlength="MAX_DOCUMENT_TITLE_LENGTH"
+          :disabled="saving"
           class="text-lg font-semibold"
         />
       </div>
@@ -427,8 +428,10 @@ function taskHref(task: { seq_key: string; project: { key: string } }) {
       <p v-if="saveError" role="alert" class="text-sm text-destructive">{{ saveError }}</p>
 
       <div class="grid gap-4 lg:grid-cols-2">
+        <!-- 保存中の入力は送った内容に入らず、成功で下書きごと閉じて失われるので止める -->
         <MarkdownEditor
           v-model="draftBody"
+          :disabled="saving"
           aria-label="本文"
           placeholder="Markdown で書けます"
           min-height-class="min-h-96"
