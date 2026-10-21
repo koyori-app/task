@@ -45,10 +45,12 @@ const passesMentionTenant = (args: string) => /\bmentionTenant\b/.test(args);
 describe('メンションの札を描く経路', () => {
   it('描き手を呼ぶ所を全て拾えている（探し方が空振りしていない）', () => {
     const files = renderCalls().map(({ file }) => file);
-    // 全画面の説明文（SSR）、分割ビューの説明文（server の口）、コメント、レビューの指摘
+    // 全画面の説明文（SSR）、分割ビューの説明文（server の口）、コメント、レビューの指摘、
+    // ドキュメント（SSR）。ドキュメントとレビューの指摘は札の表を渡さず、札を描かない
     expect(files).toEqual(
       expect.arrayContaining([
         'src/pages/@tenant/projects/@projectKey/tasks/@taskId/+data.ts',
+        'src/pages/@tenant/projects/@projectKey/docs/@fileId/+data.ts',
         'server/middlewares/render-description.ts',
         'src/components/tasks/CommentBody.vue',
         'src/components/reviews/ReviewFindingBody.vue',

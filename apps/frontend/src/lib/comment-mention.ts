@@ -6,6 +6,8 @@
  * 印の形は backend の `payload::mentions`（`<@` + ハイフン付き UUID + `>`）と揃える。
  */
 
+import { rankUsersByQuery } from '@/lib/user-search';
+
 /** API が返す、印の id から引ける表示情報（`components['schemas']['MentionedUser']` と同じ形）。 */
 export interface MentionUser {
   /**
@@ -159,22 +161,16 @@ export function mentionTrigger(before: string): MentionTrigger | null {
   return { from, query: match[1] };
 }
 
-/** 候補の絞り込み。前方一致を先に、次に部分一致。大文字小文字は無視。 */
+/**
+ * 候補の絞り込み。前方一致を先に、次に部分一致。利用者の選択（UserSelector）と同じ規則
+ * （`rankUsersByQuery`: 大文字小文字・全角半角・片仮名平仮名を問わぬ）で、上限だけを足す。
+ */
 export function filterCandidates(
   candidates: readonly MentionCandidate[],
   query: string,
   limit = 20,
 ): MentionCandidate[] {
-  const q = query.toLowerCase();
-  if (q === '') return candidates.slice(0, limit);
-  const prefix: MentionCandidate[] = [];
-  const partial: MentionCandidate[] = [];
-  for (const candidate of candidates) {
-    const name = candidate.username.toLowerCase();
-    if (name.startsWith(q)) prefix.push(candidate);
-    else if (name.includes(q)) partial.push(candidate);
-  }
-  return [...prefix, ...partial].slice(0, limit);
+  return rankUsersByQuery(candidates, query).slice(0, limit);
 }
 
 /**
