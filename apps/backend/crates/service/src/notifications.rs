@@ -151,6 +151,10 @@ pub async fn notify_assigned<C: ConnectionTrait>(
     role: &str,
 ) -> Result<(), AppError> {
     ensure_watcher(db, task_id, assignee_id).await?;
+    // 自分で自分を担当にしたときは通知しない（ウォッチャー登録だけ行う）
+    if assignee_id == assigned_by {
+        return Ok(());
+    }
     let assigner_name = users::Entity::find_by_id(assigned_by)
         .one(db)
         .await?
