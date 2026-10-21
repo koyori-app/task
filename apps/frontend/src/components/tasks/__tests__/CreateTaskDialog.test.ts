@@ -313,7 +313,9 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     await vi.waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({
         queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks'],
-        refetchType: 'none',
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/search'],
       });
     });
     expect(wrapper.emitted('created')?.[0]).toEqual([createdTask]);

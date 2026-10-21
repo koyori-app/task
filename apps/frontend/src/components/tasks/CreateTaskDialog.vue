@@ -32,7 +32,7 @@ import {
 } from '@/components/ui/select';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import type { components } from '@/generated/api';
-import { apiClient } from '@/lib/api-vue-query';
+import { apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
 import { toIsoDate } from '@/lib/task-date';
 import { useAuthStore } from '@/stores/auth';
@@ -279,10 +279,10 @@ async function submit() {
       params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
       body,
     });
-    void queryClient.invalidateQueries({
-      queryKey: ['get', CREATE_TASK_PATH],
-      refetchType: 'none',
-    });
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['get', CREATE_TASK_PATH] }),
+      queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),
+    ]);
     emit('created', created);
     resetForm();
     successMessage.value = 'タスクを作成しました';
