@@ -111,6 +111,26 @@ describe('POST /internal/render-description', () => {
     expect(html).toContain('href="/acme/projects/TASK/tasks/TASK-58"');
   });
 
+  it('いま入れる者の札を、渡したテナントのプロフィールへの link にする（詳細ページと同じ組み立て）', async () => {
+    const member = '11111111-1111-4111-8111-111111111101';
+    const outsider = '33333333-3333-4333-8333-333333333333';
+    const response = await post({
+      taskId: TASK_UUID,
+      tenant: TENANT,
+      description: `<@${member}> と <@${outsider}>`,
+      mentions: {
+        [member]: { status: 'member', name: '田中太郎' },
+        [outsider]: { status: 'outside', name: 'プロジェクト外' },
+      },
+    });
+
+    const { html } = (await response.json()) as { html: string | null };
+    // 分割ビューの説明文はこの口で描く。全画面（+data.ts）と同じく札が link になること
+    expect(html).toContain(`href="/acme/users/${member}"`);
+    // 外れた者の札は link にしない
+    expect(html).not.toContain(`/users/${outsider}`);
+  });
+
   it.each([
     ['字種外', 'acme/../x'],
     ['未指定', undefined],

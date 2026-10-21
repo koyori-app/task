@@ -131,6 +131,9 @@ export const renderDescriptionPlugin = new Elysia()
             taskRef: { tenant },
             // 説明文のメンションの印を札にする表（API の `mentions`）。省略なら印は素の文字のまま
             mentions: mentions as MentionTable | undefined,
+            // いま入れる者の札をプロフィールへの link にする。詳細ページ（+data.ts）と同じく、
+            // 道は利用者の id とテナントだけで組む。tenant は body の字種の縛りを通った値である
+            mentionTenant: tenant,
           }),
         };
       } catch (error) {
