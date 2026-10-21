@@ -1246,3 +1246,78 @@ async fn retention_deletes_old_rows_but_keeps_pending_emails() {
     assert!(!exists(with_email[1]).await, "送信済みは消す");
     assert!(!exists(with_email[2]).await, "送信を諦めた行は消す");
 }
+
+/// 自分を担当にしても自分宛ての assigned 通知は作らない（ウォッチャーにはなる）。
+/// 他人を担当にした場合は従来どおり通知する。
+#[tokio::test]
+async fn self_assignment_does_not_notify_actor() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let other = app.insert_user(false, false).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, other.id).await;
+
+    let base = format!("/v1/tenants/{}/projects/{}", tp.tenant_id, tp.project_id);
+    let status_resp = app
+        .post_json_with_session(
+            &format!("{base}/statuses"),
+            serde_json::json!({"name":"Backlog","color":"#336699","position":0,"is_default":true}),
+        )
+        .await;
+    assert_eq!(status_resp.status(), StatusCode::CREATED);
+    let status_id = status_resp.json::<Value>().await.expect("json")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let task_resp = app
+        .post_json_with_session(
+            &format!("{base}/tasks"),
+            serde_json::json!({"title":"Self assign","status_id":status_id}),
+        )
+        .await;
+    assert_eq!(task_resp.status(), StatusCode::CREATED);
+    let task_id = task_resp.json::<Value>().await.expect("json")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let task_base = format!("{base}/tasks/{task_id}");
+
+    let assign_self = app
+        .post_json_with_session(
+            &format!("{task_base}/assignees"),
+            serde_json::json!({"user_id": owner.id, "role": "primary"}),
+        )
+        .await;
+    assert_eq!(assign_self.status(), StatusCode::CREATED);
+    let watchers = app.get_with_session(&format!("{task_base}/watchers")).await;
+    assert_eq!(
+        watchers.json::<Value>().await.expect("json")["watchers"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let notif = app.get_with_session("/v1/users/me/notifications").await;
+    assert_eq!(notif.status(), StatusCode::OK);
+    assert_eq!(
+        notif.json::<Value>().await.expect("json")["unread_count"].as_u64(),
+        Some(0)
+    );
+
+    let assign_other = app
+        .post_json_with_session(
+            &format!("{task_base}/assignees"),
+            serde_json::json!({"user_id": other.id, "role": "secondary"}),
+        )
+        .await;
+    assert_eq!(assign_other.status(), StatusCode::CREATED);
+    app.reset_session_client();
+    app.login_session_no_content(&other.email, &other.password)
+        .await;
+    let notif = app.get_with_session("/v1/users/me/notifications").await;
+    let body: Value = notif.json::<Value>().await.expect("json");
+    assert_eq!(body["unread_count"].as_u64(), Some(1));
+    assert_eq!(body["notifications"][0]["notification_type"], "assigned");
+}
