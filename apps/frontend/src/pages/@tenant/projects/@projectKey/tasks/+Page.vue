@@ -78,6 +78,7 @@ import TaskGroupQuery from '@/components/tasks/TaskGroupQuery.vue';
 import type { TaskGroup } from '@/components/tasks/task-grouped-columns';
 import TaskDetailOverlay from '@/components/tasks/TaskDetailOverlay.vue';
 import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts';
 import { taskListApiSort, type TaskListSortingState } from '@/components/tasks/task-list-sort';
 
 // ---- 定数 ----
@@ -585,6 +586,20 @@ const isError = computed(
     (usesTaskList.value && tasksQuery.isError.value),
 );
 
+/** 一覧本体（作成ボタンと作成ダイアログを含む分岐）が出ているか。T のショートカットとも共有する */
+const canCreate = computed(
+  () =>
+    !isInitialLoading.value &&
+    !isError.value &&
+    !isTenantNotFound.value &&
+    !isProjectNotFound.value,
+);
+useKeyboardShortcuts({
+  t: () => {
+    if (canCreate.value) isCreateDialogOpen.value = true;
+  },
+});
+
 // ---- ヘルパー ----
 const PRIORITY_ORDER: Record<ApiPriority, number> = {
   CriticalFire: 0,
@@ -899,7 +914,7 @@ const table = useTable({
 
     <!-- 一覧（左）＋ 詳細ペイン（右）の分割ビュー -->
     <ResizablePanelGroup
-      v-else
+      v-else-if="canCreate"
       direction="horizontal"
       auto-save-id="tasks-split-view"
       class="min-h-0 flex-1"
