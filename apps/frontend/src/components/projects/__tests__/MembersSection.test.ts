@@ -39,6 +39,9 @@ function tenantMember(
     user_id: userId,
     role: 'Member',
     user: user(userId, username),
+    department: null,
+    position: null,
+    team: null,
   };
 }
 

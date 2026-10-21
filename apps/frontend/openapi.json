@@ -8846,7 +8846,8 @@
     "/v1/tenants/{tenant_id}/members/{user_id}": {
       "put": {
         "tags": ["Tenant Members"],
-        "summary": "テナントメンバーの権限を変更",
+        "summary": "テナントメンバーの権限・所属を変更",
+        "description": "どの欄も省略すれば変更しない。部署・役職・チームは前後の空白を除き、空なら未設定に戻す。",
         "operationId": "update_member",
         "parameters": [
           {
@@ -27762,12 +27763,24 @@
         "type": "object",
         "required": ["id", "tenant_id", "user_id", "role", "user"],
         "properties": {
+          "department": {
+            "type": ["string", "null"],
+            "description": "このテナント（会社）での部署"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
           },
+          "position": {
+            "type": ["string", "null"],
+            "description": "このテナント（会社）での役職"
+          },
           "role": {
             "$ref": "#/components/schemas/TenantRole"
+          },
+          "team": {
+            "type": ["string", "null"],
+            "description": "このテナント（会社）でのチーム"
           },
           "tenant_id": {
             "type": "string",
@@ -28316,10 +28329,26 @@
       },
       "UpdateTenantMemberRequest": {
         "type": "object",
-        "required": ["role"],
+        "description": "どの欄も省略（`None`）なら変更しない。部署・役職・チームは trim して空なら NULL に戻す。\n`role` を省略可にしているのは、所属だけを直す保存が古い `role` を送り返して、\n別の管理者による降格を巻き戻さないようにするため",
         "properties": {
+          "department": {
+            "type": ["string", "null"]
+          },
+          "position": {
+            "type": ["string", "null"]
+          },
           "role": {
-            "$ref": "#/components/schemas/TenantRole"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TenantRole"
+              }
+            ]
+          },
+          "team": {
+            "type": ["string", "null"]
           }
         }
       },
@@ -28396,9 +28425,21 @@
           "bio": {
             "type": ["string", "null"]
           },
+          "department": {
+            "type": ["string", "null"],
+            "description": "このテナントでの部署。所属行の無いオーナー・客分では null"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "position": {
+            "type": ["string", "null"],
+            "description": "このテナントでの役職。所属行の無いオーナー・客分では null"
+          },
+          "team": {
+            "type": ["string", "null"],
+            "description": "このテナントでのチーム。所属行の無いオーナー・客分では null"
           },
           "username": {
             "type": "string"
