@@ -5,6 +5,15 @@ import { PhArrowClockwise, PhEnvelopeSimple, PhPaperPlaneTilt, PhX } from '@phos
 import { computed, ref } from 'vue';
 
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
 import { userProfileHref } from '@/lib/task-display';
@@ -78,6 +87,9 @@ const members = computed<TenantMemberResponse[]>(() => {
       user_id: me.id,
       role: 'Admin',
       user: { id: me.id, username: me.username, avatar_url: me.avatar_url ?? null },
+      department: null,
+      position: null,
+      team: null,
     });
   }
   return currentMembers;
@@ -262,6 +274,64 @@ async function onRoleChange(member: TenantMemberResponse, role: TenantRole) {
     roleError.value = 'ロールを変更できませんでした。';
     // 表示は membersQuery のデータに束縛しているので、再取得で元のロールへ戻る
     await invalidateMembers();
+  } finally {
+    busy.value = false;
+  }
+}
+
+// --- 所属（部署・役職・チーム） ---
+
+const ORG_FIELDS = [
+  { key: 'department', label: '部署' },
+  { key: 'position', label: '役職' },
+  { key: 'team', label: 'チーム' },
+] as const;
+type OrgField = (typeof ORG_FIELDS)[number]['key'];
+
+function orgProfileText(member: TenantMemberResponse) {
+  return ORG_FIELDS.map((field) => member[field.key])
+    .filter(Boolean)
+    .join(' · ');
+}
+
+const editingMember = ref<TenantMemberResponse | null>(null);
+const orgDraft = ref<Record<OrgField, string>>({ department: '', position: '', team: '' });
+const orgError = ref<string | null>(null);
+
+function openOrgEditor(member: TenantMemberResponse) {
+  if (!canManageMembers.value || isOwner(member) || busy.value) return;
+  orgError.value = null;
+  orgDraft.value = {
+    department: member.department ?? '',
+    position: member.position ?? '',
+    team: member.team ?? '',
+  };
+  editingMember.value = member;
+}
+
+function onOrgEditorOpenChange(open: boolean) {
+  // 保存の最中は閉じない（結果を見逃さないため）
+  if (!open && !busy.value) editingMember.value = null;
+}
+
+/**
+ * 所属の 3 欄だけを送る。`role` を送り返すと、開いている間に別の管理者が
+ * 変えたロールを古い値で巻き戻してしまう。空欄は API 側で未設定（NULL）に戻る。
+ */
+async function onSaveOrg() {
+  const member = editingMember.value;
+  if (!member || !canManageMembers.value || isOwner(member) || busy.value) return;
+  orgError.value = null;
+  busy.value = true;
+  try {
+    await updateMutation.mutateAsync({
+      params: { path: { tenant_id: props.tenant.id, user_id: member.user_id } },
+      body: { ...orgDraft.value },
+    });
+    editingMember.value = null;
+    await invalidateMembers();
+  } catch {
+    orgError.value = '所属を保存できませんでした。';
   } finally {
     busy.value = false;
   }
@@ -472,6 +542,12 @@ async function onRemove(member: TenantMemberResponse) {
                 <span class="block truncate text-xs text-muted-foreground">
                   {{ roleDescription(member.role) }}
                 </span>
+                <span
+                  v-if="orgProfileText(member)"
+                  class="block truncate text-xs text-muted-foreground"
+                >
+                  {{ orgProfileText(member) }}
+                </span>
               </span>
 
               <span
@@ -482,6 +558,17 @@ async function onRemove(member: TenantMemberResponse) {
               </span>
 
               <template v-else>
+                <Button
+                  v-if="canManageMembers"
+                  variant="ghost"
+                  size="sm"
+                  :disabled="busy"
+                  class="h-7 shrink-0 text-muted-foreground"
+                  :aria-label="`${member.user.username}の所属を編集`"
+                  @click="openOrgEditor(member)"
+                >
+                  所属を編集
+                </Button>
                 <Select
                   :model-value="member.role"
                   :disabled="!canManageMembers || busy"
@@ -526,6 +613,43 @@ async function onRemove(member: TenantMemberResponse) {
           </p>
         </template>
       </section>
+
+      <Dialog v-if="editingMember" :open="true" @update:open="onOrgEditorOpenChange">
+        <DialogContent class="max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>{{ editingMember.user.username }}の所属</DialogTitle>
+            <DialogDescription>
+              このテナントでの部署・役職・チームです。空欄にすると未設定に戻ります。
+            </DialogDescription>
+          </DialogHeader>
+          <form class="flex flex-col gap-3" @submit.prevent="onSaveOrg">
+            <div v-for="field in ORG_FIELDS" :key="field.key">
+              <Label :for="`org-profile-${field.key}`" class="mb-1.5 text-[13px] font-medium">
+                {{ field.label }}
+              </Label>
+              <input
+                :id="`org-profile-${field.key}`"
+                v-model="orgDraft[field.key]"
+                maxlength="100"
+                :disabled="busy"
+                class="h-9 w-full rounded-md border bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              />
+            </div>
+            <p v-if="orgError" role="alert" class="text-sm text-destructive">{{ orgError }}</p>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                :disabled="busy"
+                @click="onOrgEditorOpenChange(false)"
+              >
+                キャンセル
+              </Button>
+              <Button type="submit" :disabled="busy">保存</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   </div>
 </template>

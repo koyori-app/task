@@ -16,6 +16,14 @@ const profileQuery = useUserProfileQuery(tenantId, userId);
 const meQuery = useMeQuery();
 
 const profile = computed(() => profileQuery.data.value);
+/** 部署・役職・チームは、値があるものだけを出す */
+const orgProfile = computed(() =>
+  [
+    { label: '部署', value: profile.value?.department },
+    { label: '役職', value: profile.value?.position },
+    { label: 'チーム', value: profile.value?.team },
+  ].filter((field) => field.value),
+);
 const isForbidden = computed(
   () => (profileQuery.error.value as { status?: number } | null)?.status === 403,
 );
@@ -52,6 +60,13 @@ const isForbidden = computed(
         <UserAvatar :user="profile" size="3xl" shape="lg" />
         <div class="flex min-w-0 flex-1 flex-col gap-1">
           <h1 class="truncate text-2xl font-bold">{{ profile.username }}</h1>
+          <p
+            v-for="field in orgProfile"
+            :key="field.label"
+            class="truncate text-sm text-muted-foreground"
+          >
+            {{ field.label }}: {{ field.value }}
+          </p>
           <a
             v-if="profile.id === meQuery.data.value?.id"
             href="/settings/profile"

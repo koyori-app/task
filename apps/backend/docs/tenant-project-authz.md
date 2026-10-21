@@ -113,6 +113,9 @@ NTFS では「継承を無効にする」が明示の操作である。
 | `tenant_id` | `UUID` NOT NULL | `tenants(id)` ON DELETE CASCADE |
 | `user_id` | `UUID` NOT NULL | `users(id)` ON DELETE CASCADE |
 | `role` | `VARCHAR` NOT NULL | `TenantRole`（`Admin` / `Member` / `Viewer`） |
+| `department` | `TEXT` NULL | このテナント（会社）での部署。自由記述、100 文字以内 |
+| `position` | `TEXT` NULL | このテナントでの役職。自由記述、100 文字以内 |
+| `team` | `TEXT` NULL | このテナントでのチーム。自由記述、100 文字以内 |
 
 `UNIQUE (tenant_id, user_id)` と `user_id` 単独の索引を張る。
 前者の索引は先頭列が `tenant_id` なので、`user_id` だけで引く経路（ログインごとに通る 2FA 強制の判定、テナント一覧）には効かない。
@@ -258,8 +261,8 @@ project 層のスコープ（`read:project` や `write:task` など）ではこ�
 | My Tasks（`GET /v1/tenants/{id}/users/me/tasks`） | 所属者: 従来どおり。客分: 己の project の分に絞る |
 | テナントの更新・削除 | オーナーのみ |
 | メンバー一覧の閲覧 | テナントに入れる人全員（客分は含まない） |
-| 利用者のプロフィール（`GET /v1/tenants/{id}/users/{user_id}`） | テナントに入れる人全員（客分は含まない）。対象はそのテナントのオーナー・メンバー・客分のいずれかで、それ以外は 404。返すのは id / username / bio / avatar_url だけ。PAT は `read:tenant` |
-| メンバーの追加・ロール変更・削除 | オーナー + テナント `Admin` |
+| 利用者のプロフィール（`GET /v1/tenants/{id}/users/{user_id}`） | テナントに入れる人全員（客分は含まない）。対象はそのテナントのオーナー・メンバー・客分のいずれかで、それ以外は 404。返すのは id / username / bio / avatar_url と、このテナントでの department / position / team（所属行の無いオーナー・客分では null）だけ。PAT は `read:tenant` |
+| メンバーの追加・ロールと所属（部署・役職・チーム）の変更・削除 | オーナー + テナント `Admin` |
 | 招待の発行・一覧・再送・取り消し（`/v1/tenants/{id}/invitations`） | オーナー + テナント `Admin`。PAT は一覧に `read:tenant`、それ以外に `write:tenant` |
 | 招待の中身を見る（`POST /v1/invitations/preview`） | トークンを持つ人（ログイン不要） |
 | 招待の承諾（`POST /v1/invitations/accept`） | 招待先のアドレスでログインしている本人（セッションのみ） |
@@ -289,6 +292,14 @@ project 層のスコープ（`read:project` や `write:task` など）ではこ�
 メンバー系レスポンス（`TenantMemberResponse` / `ProjectMemberResponse`）には表示用の
 `user`（`UserSummary`: id / username / avatar_url）を同梱する。メンバー管理 UI（#317）が
 ID とは別にユーザー名・アバターを引けるようにするためで、メールアドレス等は含めない。
+`TenantMemberResponse` はこのテナントでの `department` / `position` / `team` も返す。
+オーナーの合成行（`from_owner`）では null。
+
+`PUT /v1/tenants/{id}/members/{user_id}`（`UpdateTenantMemberRequest`）は全欄省略可で、
+省略した欄（`None`）は変更しない。`role` を省略可にしているのは、所属だけを直す保存が
+古い `role` を送り返して、別の管理者による降格を巻き戻さないため。部署・役職・チームは
+前後の空白を除き、空文字なら NULL に戻す。所属行の無いオーナーへの PUT は 404。
+実在の行があるオーナーは、他のメンバーと同様に更新できる。UI ではオーナーの編集操作を出さない。
 
 ## 守っている不変条件
 
@@ -353,7 +364,7 @@ ID とは別にユーザー名・アバターを引けるようにするため�
 | `Viewer` ロール | 「所属している」以上の意味を持たない。書き込みの制限は全ハンドラーに波及するため未着手 |
 | テナント `Admin` の権限 | テナントメンバーの管理のみ。プロジェクトの作成はオーナー専用（プロジェクトメンバーの管理は、上の表のとおりオーナー + プロジェクト `Admin`） |
 | フォルダ共有 | テナントから外しても `drive_folder_shares` は失効しない。共有は所属とは独立した明示的な付与として扱っている |
-| 管理 UI | プロジェクトメンバーは frontend 実装済み（#317。プロジェクト設定のメンバー節）。テナントメンバーはテナント設定のメンバーページ（ロール変更・除外・メールでの招待）。CLI は未実装 |
+| 管理 UI | プロジェクトメンバーは frontend 実装済み（#317。プロジェクト設定のメンバー節）。テナントメンバーはテナント設定のメンバーページ（ロール変更・所属の編集・除外・メールでの招待）。CLI は未実装 |
 | 客分からのプロフィール閲覧 | できない（403）。同じプロジェクトの人に絞って開く規則は持っていない |
 | 招待と登録の停止 | 管理者が新規登録を止めている（`user_registration_enabled = false`）と、未登録の受け手は招待を承諾できない |
 
@@ -362,3 +373,4 @@ ID とは別にユーザー名・アバターを引けるようにするため�
 | 日付 | 決定 |
 |---|---|
 | 2026-10-21 | 共有プロジェクトの最後のメンバーは Admin でも外せる（0 件にして継承へ戻す手段として。TASK-217）。他の行が残る削除・単独 Admin の降格・個人プロジェクトは従来どおり 409 |
+| 2026-10-21 | 会社での情報（部署・役職・チーム）は `users` ではなく `tenant_members` に持ち、テナント `Admin` / オーナーが編集する。本人による編集は未対応（TASK-334） |
