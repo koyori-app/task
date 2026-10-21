@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use common::settings::Settings;
-use service::forge::events::ForgeEvent;
+use service::forge::events::{ForgeEvent, ForgeRepo, PrAction};
+use service::forge::pull_requests::PullRequestSnapshot;
 
 use crate::JobState;
 
@@ -146,9 +147,99 @@ fn backfill_schedule_key(job: &GithubWebhookJob, after: &str, page: u32) -> Stri
     )
 }
 
-/// `issues` はタスクへ反映し、正規化済みの `push` はコミットをタスクへリンクする。
-/// それ以外は受信をログに残すのみ。
+/// `issues` はタスクへ反映し、正規化済みの `push` はコミットを、`pull_request` は PR を、
+/// `create` / `delete` はブランチをタスクへリンクする。それ以外は受信をログに残すのみ。
 pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(), BoxDynError> {
+    if let Some(ForgeEvent::PullRequest {
+        repo,
+        action,
+        number,
+        title,
+        body,
+        author_handle,
+        state: pr_state,
+        merged_at,
+        head_sha,
+        head_branch,
+        html_url,
+        updated_at,
+    }) = &job.forge_event
+    {
+        let event = PullRequestSnapshot {
+            title: title.clone(),
+            body: body.clone(),
+            author_handle: author_handle.clone(),
+            state: pr_state.clone(),
+            merged_at: *merged_at,
+            head_sha: head_sha.clone(),
+            head_branch: head_branch.clone(),
+            html_url: html_url.clone(),
+            updated_at: *updated_at,
+        };
+        let applied = service::forge::pull_requests::apply_pull_request(
+            &state.db,
+            job.project_id,
+            repo,
+            *number,
+            event.clone(),
+            || async {
+                let github = state
+                    .settings
+                    .require_github_app()
+                    .map_err(|e| anyhow::anyhow!("github app settings are required: {e}"))?;
+                service::github::client::fetch_pull_request(
+                    &state.db,
+                    &state.http_client,
+                    github,
+                    job.project_id,
+                    repo,
+                    *number,
+                )
+                .await
+            },
+        )
+        .await?;
+        // 古いイベントで共通処理を飛ばしたときも、コミット集合は現在の一覧へ同期する
+        if matches!(action, PrAction::Opened | PrAction::Synchronize) {
+            sync_pull_request_commits(&job, &state, repo, *number).await?;
+        }
+        // 共通処理とは独立に、古いイベントでも未処理なら一度だけ行う（§5「マージ時副作用の独立処理」）
+        let merge_effects = if matches!(action, PrAction::Closed { merged: true }) {
+            service::forge::merge_effects::apply_merge_effects(
+                &state.db,
+                job.project_id,
+                repo,
+                *number,
+                &event,
+            )
+            .await?
+        } else {
+            None
+        };
+        // 書き戻しの印は完了と同じトランザクションで立ててあるので、積めなくてもスイープが拾う
+        for task_id in merge_effects.iter().flatten() {
+            if let Err(e) = crate::github_issue_sync::enqueue(
+                &state.github_issue_sync_storage,
+                crate::github_issue_sync::GithubIssueSyncJob::Push { task_id: *task_id },
+            )
+            .await
+            {
+                tracing::warn!(error = %e, %task_id, "enqueue github issue push failed; sweep will retry");
+            }
+        }
+        tracing::info!(
+            integration_id = %job.integration_id,
+            project_id = %job.project_id,
+            delivery_id = ?job.delivery_id,
+            number,
+            action = ?action,
+            applied,
+            merge_effects = merge_effects.is_some(),
+            "forge pull request event processed"
+        );
+        return Ok(());
+    }
+
     if let Some(ForgeEvent::Push {
         repo,
         commits,
@@ -236,6 +327,28 @@ pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(),
         return Ok(());
     }
 
+    if let Some(ForgeEvent::BranchCreated {
+        repo,
+        branch,
+        html_url,
+    }) = &job.forge_event
+    {
+        service::forge::branches::apply_branch_created(
+            &state.db,
+            job.project_id,
+            repo,
+            branch,
+            html_url,
+        )
+        .await?;
+        return Ok(());
+    }
+    if let Some(ForgeEvent::BranchDeleted { repo, branch }) = &job.forge_event {
+        service::forge::branches::apply_branch_deleted(&state.db, job.project_id, repo, branch)
+            .await?;
+        return Ok(());
+    }
+
     if job.event == "issues" {
         let applied =
             service::github::sync::apply_issue_event(&state.db, job.project_id, &job.payload)
@@ -258,6 +371,37 @@ pub async fn process(job: GithubWebhookJob, state: Data<JobState>) -> Result<(),
         "github webhook received (wave 0 ack)"
     );
     Ok(())
+}
+
+/// PR のコミット一覧（ホストの API）を全ページ読み、中間表を一致させる。
+async fn sync_pull_request_commits(
+    job: &GithubWebhookJob,
+    state: &JobState,
+    repo: &ForgeRepo,
+    number: i32,
+) -> Result<(), anyhow::Error> {
+    let github = state
+        .settings
+        .require_github_app()
+        .map_err(|e| anyhow::anyhow!("github app settings are required: {e}"))?;
+    service::forge::pull_request_commits::sync_pull_request_commits(
+        &state.db,
+        job.project_id,
+        repo,
+        number,
+        |page| {
+            service::github::commits::fetch_pull_request_commits_page(
+                &state.db,
+                &state.http_client,
+                github,
+                job.project_id,
+                repo,
+                number,
+                page,
+            )
+        },
+    )
+    .await
 }
 
 pub fn worker_concurrency(settings: &Settings) -> usize {
@@ -357,6 +501,90 @@ mod tests {
                 "sha"
             ]
         );
+    }
+
+    /// PR のジョブも同じ。本文は公開情報なので運んでよいが、それ以外のホストの語彙は持たない
+    #[test]
+    fn pull_request_payload_contains_no_sensitive_fields() {
+        let job = GithubWebhookJob {
+            integration_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+            event: "pull_request".into(),
+            delivery_id: Some("delivery".into()),
+            payload: serde_json::Value::Null,
+            backfill_page: None,
+            forge_event: Some(ForgeEvent::PullRequest {
+                repo: ForgeRepo {
+                    host: "github".into(),
+                    host_url: "https://github.com".into(),
+                    repo_owner: "acme".into(),
+                    repo_name: "backend".into(),
+                },
+                action: service::forge::events::PrAction::Closed { merged: true },
+                number: 87,
+                title: "feat: TASK-1".into(),
+                body: "Closes TASK-1".into(),
+                author_handle: "yupix".into(),
+                state: "closed".into(),
+                merged_at: Some(chrono::Utc::now()),
+                head_sha: "a3f92c1".into(),
+                head_branch: "feat/TASK-1".into(),
+                html_url: "https://github.com/acme/backend/pull/87".into(),
+                updated_at: chrono::Utc::now(),
+            }),
+        };
+        let value = serde_json::to_value(&job).expect("serialize job");
+        assert_eq!(
+            sorted_keys(&value["forge_event"]),
+            vec![
+                "action",
+                "author_handle",
+                "body",
+                "head_branch",
+                "head_sha",
+                "html_url",
+                "kind",
+                "merged_at",
+                "number",
+                "repo",
+                "state",
+                "title",
+                "updated_at"
+            ]
+        );
+        assert_eq!(
+            value["forge_event"]["action"],
+            serde_json::json!({ "closed": { "merged": true } })
+        );
+    }
+
+    /// ブランチのジョブはブランチ名と URL だけを運ぶ
+    #[test]
+    fn branch_payload_contains_no_sensitive_fields() {
+        let job = GithubWebhookJob {
+            integration_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+            event: "create".into(),
+            delivery_id: Some("delivery".into()),
+            payload: serde_json::Value::Null,
+            backfill_page: None,
+            forge_event: Some(ForgeEvent::BranchCreated {
+                repo: ForgeRepo {
+                    host: "github".into(),
+                    host_url: "https://github.com".into(),
+                    repo_owner: "acme".into(),
+                    repo_name: "backend".into(),
+                },
+                branch: "feat/TASK-1".into(),
+                html_url: "https://github.com/acme/backend/tree/feat/TASK-1".into(),
+            }),
+        };
+        let value = serde_json::to_value(&job).expect("serialize job");
+        assert_eq!(
+            sorted_keys(&value["forge_event"]),
+            vec!["branch", "html_url", "kind", "repo"]
+        );
+        assert_eq!(value["forge_event"]["kind"], "branch_created");
     }
 
     /// 切り詰められた push のジョブ（続きが生まれる形）

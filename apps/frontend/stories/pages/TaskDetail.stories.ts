@@ -217,6 +217,8 @@ type MockOptions = {
     url: string;
     created_at: string;
   }[];
+  /** `GET /tasks/{id}/forge` の応答。省略時は空 */
+  forge?: Record<string, unknown>;
 };
 
 function applyPutBody(
@@ -302,6 +304,9 @@ function createMockFetch(overrides: MockOptions = {}) {
         blocks: [],
         blocked_by: [],
       });
+    }
+    if (method === 'GET' && url.includes('/forge')) {
+      return jsonResponse({ pull_requests: [], commits: [], branches: [], ...overrides.forge });
     }
     if (method === 'GET' && url.includes('/attachments')) {
       return jsonResponse({ attachments: overrides.attachments ?? [] });
@@ -525,6 +530,153 @@ export const WithAttachments: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByText('仕様書.pdf')).resolves.toBeInTheDocument();
+  },
+};
+
+export const WithForge: Story = {
+  name: 'PR とコミットあり',
+  beforeEach: () =>
+    createMockFetch({
+      forge: {
+        pull_requests: [
+          {
+            id: 'pr-1',
+            project_id: 'project-1',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            number: 87,
+            title: 'feat: OAuth 対応',
+            author_handle: 'yupix',
+            state: 'merged',
+            html_url: 'https://github.com/acme/backend/pull/87',
+            merged_at: '2026-10-01T00:00:00Z',
+            merge_effects_processed_at: null,
+            commits_complete: false,
+            sources: ['body', 'title'],
+            closes: true,
+            unresolved: 0,
+          },
+          {
+            id: 'pr-2',
+            project_id: 'project-1',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            number: 91,
+            title: 'fix: エラーハンドリング',
+            author_handle: 'beta',
+            state: 'open',
+            html_url: 'https://github.com/acme/backend/pull/91',
+            merged_at: null,
+            merge_effects_processed_at: null,
+            commits_complete: false,
+            sources: ['title'],
+            closes: false,
+            unresolved: 2,
+          },
+        ],
+        commits: [
+          {
+            id: 'commit-1',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            sha: 'a3f92c1e7b81d4000000000000000000000000aa',
+            message: 'fix: トークン期限切れを修正',
+            author_handle: 'yupix',
+            author_name: 'Yupix',
+            committed_at: '2026-10-01T00:00:00Z',
+            html_url: 'https://github.com/acme/backend/commit/a3f92c1',
+          },
+        ],
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.findByText('feat: OAuth 対応', { exact: false }),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('a3f92c1')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('2 件が未解決')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('未解決なし')).resolves.toBeInTheDocument();
+  },
+};
+
+export const WithIssueSource: Story = {
+  name: '取り込み元 Issue あり（反映待ち）',
+  beforeEach: () =>
+    createMockFetch({
+      forge: {
+        issue: {
+          host: 'github',
+          repo_owner: 'acme',
+          repo_name: 'backend',
+          number: 42,
+          html_url: 'https://github.com/acme/backend/issues/42',
+          state: 'closed',
+          // 1 日以上前にして、相対時刻ではなく日付で出す（VRT を安定させる）
+          last_synced_at: '2026-10-01T00:00:00Z',
+          pending_push: true,
+        },
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const link = await canvas.findByRole('link', { name: 'acme/backend#42' });
+    await expect(link).toHaveAttribute('href', 'https://github.com/acme/backend/issues/42');
+    await expect(canvas.findByText('GitHub への反映待ち')).resolves.toBeInTheDocument();
+  },
+};
+
+export const WithForgeBranches: Story = {
+  name: 'ブランチとコミット一覧が一部のみの PR',
+  beforeEach: () =>
+    createMockFetch({
+      forge: {
+        pull_requests: [
+          {
+            id: 'pr-1',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            number: 87,
+            title: 'feat: OAuth 対応',
+            author_handle: 'yupix',
+            state: 'open',
+            html_url: 'https://github.com/acme/backend/pull/87',
+            merged_at: null,
+            merge_effects_processed_at: null,
+            commits_complete: false,
+            sources: ['branch'],
+            closes: false,
+            unresolved: null,
+          },
+        ],
+        branches: [
+          {
+            id: 'branch-1',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            branch: 'feat/TASK-1-oauth',
+            html_url: 'https://github.com/acme/backend/tree/feat/TASK-1-oauth',
+            created_at: '2026-10-01T00:00:00Z',
+          },
+        ],
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('feat/TASK-1-oauth')).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByText('コミット一覧は一部のみ', { exact: false }),
+    ).resolves.toBeInTheDocument();
   },
 };
 

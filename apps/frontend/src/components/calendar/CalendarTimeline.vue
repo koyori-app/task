@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ChevronLeft, ChevronRight, Flag, TriangleAlert } from '@lucide/vue';
+import { ChevronLeft, ChevronRight, Flag, TriangleAlert, UserRound } from '@lucide/vue';
 import { computed } from 'vue';
-import { navigate } from 'vike/client/router';
 
+import UserAvatar from '@/components/UserAvatar.vue';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { components } from '@/generated/api';
 import { DAILY_CAPACITY_HOURS, dailyLoadByMember, isOverCapacity } from '@/lib/calendar/load';
 import {
@@ -29,6 +30,11 @@ const props = withDefaults(
     timeZone: string;
     tenantSlug: string;
     tasks: ScheduleTask[];
+    /**
+     * 山（残工数/日）を計算するタスク。絞り込み前の全タスクを渡す。
+     * 見えていないプロジェクトの負荷を落とすと超過を見落とすため。省略時は `tasks`
+     */
+    loadTasks?: ScheduleTask[];
     members: Member[];
     sprints?: Sprint[];
     milestones?: Milestone[];
@@ -37,6 +43,8 @@ const props = withDefaults(
   }>(),
   { days: 14, sprints: () => [], milestones: () => [], showUnassigned: true },
 );
+
+const emit = defineEmits<{ 'open-task': [task: ScheduleTask] }>();
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -121,21 +129,34 @@ const rows = computed(() => {
       if (p) add(assignee.user_id, p);
     }
   }
-  const loadByMember = dailyLoadByMember(props.tasks, props.timeZone);
+  const loadByMember = dailyLoadByMember(
+    props.loadTasks ?? props.tasks,
+    props.timeZone,
+    props.today,
+  );
   const loadsOf = (memberId: string) =>
     dates.value.flatMap((date, col) => {
-      const hours = loadByMember.get(memberId)?.get(date) ?? 0;
-      return hours > 0 ? [{ date, col, hours, over: isOverCapacity(hours) }] : [];
+      const day = loadByMember.get(memberId)?.get(date);
+      return day && day.hours > 0
+        ? [{ date, col, hours: day.hours, items: day.items, over: isOverCapacity(day.hours) }]
+        : [];
     });
   const result = props.members.map((member) => ({
     id: member.id,
     name: member.username,
+    avatarUrl: member.avatar_url ?? null,
     lanes: pack(rowsById.get(member.id) ?? []),
     loads: loadsOf(member.id),
   }));
   const unassigned = rowsById.get(UNASSIGNED_ID);
   if (props.showUnassigned && unassigned) {
-    result.push({ id: UNASSIGNED_ID, name: '担当者なし', lanes: pack(unassigned), loads: [] });
+    result.push({
+      id: UNASSIGNED_ID,
+      name: '担当者なし',
+      avatarUrl: null,
+      lanes: pack(unassigned),
+      loads: [],
+    });
   }
   return result;
 });
@@ -144,8 +165,21 @@ function loadLabel(hours: number) {
   return `${Math.round(hours * 10) / 10}h`;
 }
 
+/** 上限（6h）の段の高さ（rem）。超過分はその上の余白に最大で半分まで描く */
+const LOAD_STAGE_REM = 1.5;
+const LOAD_OVERFLOW_RATIO = 0.5;
+
+function loadBarStyle(hours: number) {
+  return { height: `${Math.min(hours / DAILY_CAPACITY_HOURS, 1) * LOAD_STAGE_REM}rem` };
+}
+
+function loadOverflowStyle(hours: number) {
+  const ratio = Math.min(hours / DAILY_CAPACITY_HOURS - 1, LOAD_OVERFLOW_RATIO);
+  return { bottom: `${LOAD_STAGE_REM}rem`, height: `${ratio * LOAD_STAGE_REM}rem` };
+}
+
 function loadAria(date: string, hours: number) {
-  const base = `${date} の見積 ${loadLabel(hours)}`;
+  const base = `${date} の残り ${loadLabel(hours)}`;
   return isOverCapacity(hours) ? `${base}（上限 ${DAILY_CAPACITY_HOURS}h を超過）` : base;
 }
 
@@ -208,8 +242,10 @@ function hrefOf(task: ScheduleTask) {
 function onTaskClick(task: ScheduleTask, event: MouseEvent) {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
     return;
+  // vike は document の click でリンクを横取りし defaultPrevented を見ないので、伝播も止める
   event.preventDefault();
-  void navigate(hrefOf(task));
+  event.stopPropagation();
+  emit('open-task', task);
 }
 
 function cellStyle(col: number, row: string) {
@@ -294,7 +330,7 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
       </div>
 
       <p
-        v-if="!tasks.length"
+        v-if="!tasks.length && !rows.some((row) => row.loads.length)"
         class="px-4 py-12 text-center text-sm text-muted-foreground"
         data-calendar-empty
       >
@@ -309,14 +345,26 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
           class="grid border-b last:border-b-0"
           :style="{
             ...gridStyle,
-            gridTemplateRows: `1rem repeat(${Math.max(row.lanes.length, 1)}, 1.75rem)`,
+            gridTemplateRows: `${LOAD_STAGE_REM * (1 + LOAD_OVERFLOW_RATIO)}rem repeat(${Math.max(row.lanes.length, 1)}, 1.75rem)`,
           }"
           :data-member-row="row.id"
         >
           <div
-            class="sticky left-0 z-10 flex items-center border-r bg-background px-2 text-sm"
+            class="sticky left-0 z-10 flex items-center gap-1.5 border-r bg-background px-2 text-sm"
             style="grid-column: 1; grid-row: 1 / -1"
           >
+            <!-- 名前が隣にあるので飾り（頭文字まで読み上げると名前と二重になる） -->
+            <UserAvatar
+              :user="{ id: row.id, name: row.name, avatar_url: row.avatarUrl }"
+              size="sm"
+              decorative
+              :initial-length="1"
+              class="shrink-0"
+              aria-hidden="true"
+              data-member-avatar
+            >
+              <UserRound v-if="row.id === UNASSIGNED_ID" class="size-3" aria-hidden="true" />
+            </UserAvatar>
             <span class="truncate">{{ row.name }}</span>
           </div>
           <div
@@ -326,23 +374,58 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
             :class="columnClass(date)"
             :style="cellStyle(col, '1 / -1')"
           />
-          <!-- 見積/日（主担当・開始予定日と Soft 締切あり・未完了のタスクから） -->
-          <div
-            v-for="load in row.loads"
-            :key="`load-${load.date}`"
-            class="relative z-[1] flex items-center justify-end gap-0.5 px-1 text-[10px] leading-none"
-            :class="load.over ? 'font-medium text-destructive' : 'text-muted-foreground'"
-            :style="cellStyle(load.col, '1')"
-            :aria-label="loadAria(load.date, load.hours)"
-            :data-load-date="load.date"
-            :data-over="load.over || undefined"
-            role="note"
-          >
-            <TriangleAlert v-if="load.over" class="size-2.5" aria-hidden="true" />
-            <span aria-hidden="true"
-              >{{ loadLabel(load.hours) }}{{ load.over ? ' 超過' : '' }}</span
-            >
-          </div>
+          <!-- 残工数/日の山（計算規則は lib/calendar/load.ts） -->
+          <Tooltip v-for="load in row.loads" :key="`load-${load.date}`">
+            <TooltipTrigger as-child>
+              <div
+                class="relative z-[1] mx-0.5 overflow-hidden"
+                :style="cellStyle(load.col, '1')"
+                :aria-label="loadAria(load.date, load.hours)"
+                :data-load-date="load.date"
+                :data-over="load.over || undefined"
+                tabindex="0"
+              >
+                <div
+                  class="absolute inset-x-1 bottom-0 rounded-t-sm"
+                  :class="load.over ? 'bg-destructive/30' : 'bg-primary/30'"
+                  :style="loadBarStyle(load.hours)"
+                  aria-hidden="true"
+                  data-load-bar
+                />
+                <div
+                  v-if="load.over"
+                  class="absolute inset-x-1 bg-destructive/70"
+                  :style="loadOverflowStyle(load.hours)"
+                  aria-hidden="true"
+                  data-load-overflow
+                />
+                <!-- 上限の線 -->
+                <div
+                  class="absolute inset-x-0 border-t border-dashed border-muted-foreground/50"
+                  :style="{ bottom: `${LOAD_STAGE_REM}rem` }"
+                  aria-hidden="true"
+                />
+                <span
+                  class="absolute top-0.5 right-0.5 flex items-center gap-0.5 text-[10px] leading-none"
+                  :class="load.over ? 'font-medium text-destructive' : 'text-muted-foreground'"
+                  aria-hidden="true"
+                >
+                  <TriangleAlert v-if="load.over" class="size-2.5" />
+                  {{ loadLabel(load.hours) }}{{ load.over ? ' 超過' : '' }}
+                </span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" class="max-w-64">
+              <p class="mb-1 font-medium">{{ loadAria(load.date, load.hours) }}</p>
+              <ul data-load-items>
+                <li v-for="item in load.items" :key="item.task.id" class="flex gap-2">
+                  <span class="shrink-0 font-mono">{{ item.task.seq_key }}</span>
+                  <span class="truncate">{{ item.task.title }}</span>
+                  <span class="ml-auto shrink-0">{{ loadLabel(item.hours) }}</span>
+                </li>
+              </ul>
+            </TooltipContent>
+          </Tooltip>
           <template v-for="(lane, laneIndex) in row.lanes" :key="laneIndex">
             <a
               v-for="placed in lane"

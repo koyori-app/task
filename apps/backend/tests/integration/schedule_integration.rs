@@ -7,7 +7,9 @@ use crate::common::{
 };
 use axum::http::StatusCode;
 use chrono::{DateTime, NaiveDate, Utc};
-use entity::{milestones, project_statuses, scopes::Scope, sprints, task_assignees, tasks};
+use entity::{
+    milestones, project_statuses, scopes::Scope, sprints, task_assignees, tasks, time_logs,
+};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 use serde_json::Value;
 use uuid::Uuid;
@@ -119,6 +121,20 @@ async fn assign(app: &TestApp, task: Uuid, user: Uuid, role: &str) {
     .await
     .unwrap();
 }
+async fn log_time(app: &TestApp, task: Uuid, user: Uuid, minutes: i32) {
+    time_logs::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        task_id: Set(task),
+        user_id: Set(user),
+        logged_minutes: Set(minutes),
+        logged_at: Set(d(13)),
+        note: Set(None),
+        created_at: Set(Utc::now().into()),
+    }
+    .insert(&app.state.db)
+    .await
+    .unwrap();
+}
 async fn setup(app: &mut TestApp) -> (TestUser, TestTenantProject, Uuid, Uuid) {
     let user = app.insert_user_default().await;
     app.login_session_no_content(&user.email, &user.password)
@@ -216,6 +232,91 @@ async fn includes_tasks_whose_span_overlaps_the_range_inclusively() {
     assert_eq!(body["range"]["to"], "2026-10-25");
     assert_eq!(body["range"]["timezone"], "UTC");
     assert!(body["next_cursor"].is_null());
+}
+
+#[tokio::test]
+async fn logged_minutes_sums_every_time_log_of_the_task() {
+    let mut app = TestApp::new().await;
+    let (owner, tp, todo, _) = setup(&mut app).await;
+    let alice = app.insert_user_default().await;
+    let bob = app.insert_user_default().await;
+    let logged = task(&app, tp.project_id, todo, owner.id, Some(d(13)), None, None).await;
+    let unlogged = task(&app, tp.project_id, todo, owner.id, Some(d(14)), None, None).await;
+    assign(&app, logged, alice.id, "primary").await;
+    assign(&app, logged, bob.id, "assignee").await;
+    log_time(&app, logged, alice.id, 30).await;
+    log_time(&app, logged, alice.id, 45).await;
+    log_time(&app, logged, bob.id, 60).await;
+    // 担当者でない人（作成者）の記録も含める
+    log_time(&app, logged, owner.id, 15).await;
+
+    let body = get(&app, tp.tenant_id, RANGE).await;
+    assert_eq!(ids(&body), vec![logged.to_string(), unlogged.to_string()]);
+    assert_eq!(body["tasks"][0]["logged_minutes"], 150);
+    assert_eq!(body["tasks"][1]["logged_minutes"], 0);
+    // ページを分けても同じ値になる
+    let first = get(&app, tp.tenant_id, &format!("{RANGE}&limit=1")).await;
+    assert_eq!(first["tasks"][0]["logged_minutes"], 150);
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let second = get(
+        &app,
+        tp.tenant_id,
+        &format!("{RANGE}&limit=1&cursor={cursor}"),
+    )
+    .await;
+    assert_eq!(second["tasks"][0]["logged_minutes"], 0);
+}
+
+#[tokio::test]
+async fn include_overdue_adds_unfinished_tasks_whose_soft_deadline_has_passed() {
+    let mut app = TestApp::new().await;
+    let (user, tp, todo, done) = setup(&mut app).await;
+    let (p, u) = (tp.project_id, user.id);
+    let in_range = task(&app, p, todo, u, Some(d(13)), Some(at(14)), None).await;
+    let overdue = task(&app, p, todo, u, Some(d(1)), Some(at(5)), None).await;
+    // Soft 締切・開始予定日・見積のどれかが無い（山に積めない）・完了済み・期間より後のものは足さない
+    let hard_only = task(&app, p, todo, u, Some(d(1)), None, Some(at(5))).await;
+    let planned_only = task(&app, p, todo, u, Some(d(1)), None, None).await;
+    let soft_only = task(&app, p, todo, u, None, Some(at(5)), None).await;
+    let _no_estimate = task(&app, p, todo, u, Some(d(1)), Some(at(5)), None).await;
+    let finished = task(&app, p, done, u, Some(d(1)), Some(at(5)), None).await;
+    let later = task(&app, p, todo, u, Some(d(26)), Some(at(30)), None).await;
+    execute_sql(
+        &app.state.db,
+        "UPDATE tasks SET estimated_minutes = 60 WHERE id = ANY($1)",
+        vec![
+            vec![
+                in_range,
+                overdue,
+                hard_only,
+                planned_only,
+                soft_only,
+                finished,
+                later,
+            ]
+            .into(),
+        ],
+    )
+    .await;
+    let t = tp.tenant_id;
+
+    assert_eq!(got(&get(&app, t, RANGE).await), set(&[in_range]));
+    let with = get(&app, t, &format!("{RANGE}&include_overdue=true")).await;
+    assert_eq!(ids(&with), vec![overdue.to_string(), in_range.to_string()]);
+    let without = get(&app, t, &format!("{RANGE}&include_overdue=false")).await;
+    assert_eq!(got(&without), set(&[in_range]));
+    // ページングしても漏れない
+    let first = get(&app, t, &format!("{RANGE}&include_overdue=true&limit=1")).await;
+    assert_eq!(ids(&first), vec![overdue.to_string()]);
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let second = get(
+        &app,
+        t,
+        &format!("{RANGE}&include_overdue=true&limit=1&cursor={cursor}"),
+    )
+    .await;
+    assert_eq!(ids(&second), vec![in_range.to_string()]);
+    assert!(second["next_cursor"].is_null());
 }
 
 #[tokio::test]

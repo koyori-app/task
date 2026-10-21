@@ -3,6 +3,7 @@ import { expect, fn, within } from 'storybook/test';
 import { provide } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import CalendarPage from '@/pages/@tenant/calendar/+Page.vue';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import type { components } from '@/generated/api';
 
 type ScheduleTask = components['schemas']['ScheduleTask'];
@@ -36,6 +37,7 @@ function task(seq: number, overrides: Partial<ScheduleTask>): ScheduleTask {
     status: TODO,
     priority: 'Medium',
     progress_pct: 0,
+    logged_minutes: 0,
     assignees: [],
     ...overrides,
   };
@@ -136,10 +138,16 @@ const jsonResponse = (data: unknown, status = 200) =>
 
 type MockOptions = {
   tasks?: ScheduleTask[];
+  /** `include_overdue=true` のときだけ足す締切超過のタスク（期間より前に終わっている） */
+  overdue?: ScheduleTask[];
   withPeriods?: boolean;
 };
 
-function createMockFetch({ tasks = sampleTasks, withPeriods = true }: MockOptions = {}) {
+function createMockFetch({
+  tasks: rangeTasks = sampleTasks,
+  overdue = [],
+  withPeriods = true,
+}: MockOptions = {}) {
   const original = globalThis.fetch;
   globalThis.fetch = fn().mockImplementation(async (req: Request | string) => {
     const url = new URL(typeof req === 'string' ? req : req.url, 'http://localhost');
@@ -156,6 +164,8 @@ function createMockFetch({ tasks = sampleTasks, withPeriods = true }: MockOption
         },
       ]);
     }
+    const tasks =
+      url.searchParams.get('include_overdue') === 'true' ? [...overdue, ...rangeTasks] : rangeTasks;
     const ids = new Set(tasks.flatMap((t) => t.assignees.map((a) => a.user_id)));
     return jsonResponse({
       range: {
@@ -197,7 +207,9 @@ const meta = {
         provide(VUE_QUERY_CLIENT, queryClient);
         provide(PAGE_CONTEXT_KEY, mockContext);
       },
-      template: '<story />',
+      // 本番では SidebarProvider が用意している（山の内訳の Tooltip が使う）
+      components: { TooltipProvider },
+      template: '<TooltipProvider :delay-duration="0"><story /></TooltipProvider>',
     }),
   ],
 } satisfies Meta<typeof CalendarPage>;
@@ -233,7 +245,41 @@ export const Overloaded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(
-      canvas.findByLabelText('2026-07-15 の見積 10h（上限 6h を超過）'),
+      canvas.findByLabelText('2026-07-15 の残り 10h（上限 6h を超過）'),
     ).resolves.toBeInTheDocument();
+  },
+};
+
+export const Overdue: Story = {
+  name: '締切超過あり',
+  beforeEach: () =>
+    createMockFetch({
+      tasks: [],
+      overdue: [
+        task(21, {
+          title: '先週締切の残り',
+          planned_start_on: '2026-07-01',
+          soft_deadline: '2026-07-03T00:00:00Z',
+          estimated_minutes: 300,
+          logged_minutes: 60,
+          assignees: [{ user_id: 'u-bob', role: 'primary' }],
+        }),
+        // 開始予定日が無いので積まれない。carol の行を空のまま出さない
+        task(22, {
+          title: '先週締切の点',
+          soft_deadline: '2026-07-03T00:00:00Z',
+          estimated_minutes: 300,
+          assignees: [{ user_id: 'u-carol', role: 'primary' }],
+        }),
+      ],
+      withPeriods: false,
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // 期間より前に締切を過ぎた残工数（5h − 1h）を今日に全部積む。帯は期間外なので出ない
+    await expect(canvas.findByLabelText('2026-07-15 の残り 4h')).resolves.toBeInTheDocument();
+    await expect(canvas.queryByRole('link', { name: /先週締切の残り/ })).toBeNull();
+    await expect(canvasElement.querySelector('[data-member-row="u-bob"]')).not.toBeNull();
+    await expect(canvasElement.querySelector('[data-member-row="u-carol"]')).toBeNull();
   },
 };

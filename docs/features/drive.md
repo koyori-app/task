@@ -8,7 +8,7 @@ icon: lucide:hard-drive
 
 > ステータス: **バックエンド実装済み／フロントエンド未実装（既知の差分あり）**
 > 作成日: 2026-05-26
-> 最終更新: 2026-10-17（ファイル本文の ETag / If-Match 楽観ロック、Markdown 本文からのタスク参照の抽出、フォルダ・ファイル一覧の絞り込み、ドキュメント画面を追加）
+> 最終更新: 2026-10-17（ファイル本文の ETag / If-Match 楽観ロック、フォルダ・ファイル一覧の絞り込み、Markdown 本文からのタスク参照の抽出を反映。ドキュメント画面を追加）
 
 ---
 
@@ -507,7 +507,7 @@ GET /v1/drive/files/{id}/content?token={share_token}
 | `PATCH` | `/v1/tenants/{tenant_id}/drive/files/{id}` | `write:drive` | |
 | `PUT` | `/v1/tenants/{tenant_id}/drive/files/{id}/content` | `write:drive` | テキスト本文更新・クォータ検証あり |
 | `DELETE` | `/v1/tenants/{tenant_id}/drive/files/{id}` | `write:drive` | |
-| `GET` | `/v1/tenants/{tenant_id}/drive/files/{id}/tasks` | `read:drive` | 結び付いたタスク一覧（§8.5） |
+| `GET` | `/v1/tenants/{tenant_id}/drive/files/{id}/tasks` | `read:drive` + `read:task` | 結び付いたタスク一覧（§8.5） |
 | `GET` | `/v1/drive/files/{id}/content` | `read:drive` | 共有トークン利用時はスコープ不要 |
 | `GET` | `/v1/drive/files/{id}/content?token=` | スコープ不要 | 公開リンクトークンで代替 |
 | `GET` | `/v1/tenants/{tenant_id}/drive/usage` | `read:drive` | |
@@ -791,6 +791,7 @@ Drive ファイル本体は削除しない。
 `source = 'body'` で結び付ける。DB 更新と同じトランザクションで行う。名前変更・移動では本文を読み直さない
 （移動で外す行は末尾の項目を参照）。
 
+- 結び付けは `write:task` を持つ場合だけ行う（セッションは常に持つ）。`write:drive` だけの PAT では保存そのものは通し、同期を飛ばして既存の `body` 行にも触れない（手動添付と同じく `write:task` の絞りを越えさせない）
 - 抽出は GitHub 連携と同じ `service::forge::task_refs` を使う（キーは大小文字不問、`Closes` 等のキーワードは無視）
 - 拾う前にフェンスコードブロック（```` ``` ```` / `~~~`）とインラインコードの中身を落とす。閉じられていないフェンスは末尾まで落とす。インラインコードは行内でだけ対にする
 - 解決はファイルのテナント内のプロジェクトだけ。見つからない参照・削除済みタスクは捨てる
@@ -803,7 +804,8 @@ Drive ファイル本体は削除しない。
 
 #### GET `/v1/tenants/{tenant_id}/drive/files/{id}/tasks`
 
-ファイルに結び付いたタスク（`manual` と `body` の両方）を返す。`read:drive` が必要で、ファイルの
+ファイルに結び付いたタスク（`manual` と `body` の両方）を返す。`read:drive` と `read:task` が必要で
+（タスクの題・状態を返すので、タスク側の添付一覧と同じく `read:task` の絞りを越えさせない）、ファイルの
 閲覧権限はメタデータ取得（`GET .../drive/files/{id}`）と同じ判定（閲覧できなければ `403` / `404`）。
 呼び出し側が入れないプロジェクトのタスクと削除済みタスクは含めない。
 

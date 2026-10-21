@@ -7,6 +7,8 @@ import type { components, paths } from '@/generated/api';
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
 const TASK_SEARCH_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/search' as const;
+// カレンダー（オーバーレイで詳細を開いたまま裏に残る）の帯も同じタスクを持つ
+const SCHEDULE_PATH = '/v1/tenants/{tenant_id}/schedule' as const;
 export const TASK_RELATIONS_PATH =
   '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/relations' as const;
 
@@ -141,6 +143,7 @@ export function useTaskSubtasks(params: UseTaskSubtasksParams) {
         queryClient.invalidateQueries({ queryKey: ['get', LIST_TASKS_PATH] }),
         queryClient.invalidateQueries({ queryKey: ['get', GET_TASK_PATH] }),
         queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),
+        queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_PATH] }),
       ]);
       return true;
     } catch {

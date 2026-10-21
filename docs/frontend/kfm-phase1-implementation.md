@@ -105,6 +105,11 @@ GitHub 完全互換の境界仕様をテストで固定している:
   説明（`POST /internal/render-description`。body の `tenant` を同じ字種で検め、外れたら 422）、
   レビュー指摘の本文（`ReviewFindingBody.vue`）、ドキュメント詳細（`docs/@fileId/+data.ts` と
   内部エンドポイント経由のプレビュー）。いずれも URL の tenant display_id を渡す
+- 分割ビュー・オーバーレイ（`TaskDetailPane`）の中では、修飾キーなしの左クリックを横取りして
+  ページ遷移させず器の中で開く（`open-task-ref`）。オーバーレイは子タスクと同じく戻り先を積む。
+  タスク一覧は 1 プロジェクト分なので、別プロジェクトの KEY-N は詳細ページへ送る（カレンダーは
+  テナント横断なのでオーバーレイで開く）。Cmd / Ctrl / Shift / 中クリックはブラウザの既定のまま。
+  vike は document の click でリンクを横取りし `defaultPrevented` を見ないため、伝播も止める
 
 ## mermaid 図（remark-kfm-mermaid）
 

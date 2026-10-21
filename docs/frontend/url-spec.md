@@ -49,7 +49,7 @@
 | URL | 説明 |
 |-----|------|
 | `/{tenant}` | テナントホーム（プロジェクト一覧 or ダッシュボード） |
-| `/{tenant}/calendar` | テナントのタイムライン（[仕様](../features/tasks/11.schedule.md)）。`?from=YYYY-MM-DD`（起点の月曜。省略時は今週）、`?member=` / `?project=`（ID。繰り返し指定可）で絞り込み |
+| `/{tenant}/calendar` | テナントのタイムライン（[仕様](../features/tasks/11.schedule.md)）。`?from=YYYY-MM-DD`（起点の月曜。省略時は今週）、`?member=` / `?project=`（ID。繰り返し指定可）で絞り込み、`?selected=KEY-N`（詳細のオーバーレイで開いているタスク。タスク一覧と同じく replaceState で書き、履歴を汚さない） |
 | `/{tenant}/settings` | テナント設定 |
 | `/{tenant}/settings/members` | テナントメンバー管理 |
 | `/{tenant}/users/{user_id}` | 利用者のプロフィール（閲覧のみ） |

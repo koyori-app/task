@@ -567,18 +567,30 @@ async fn file_tasks_respects_file_and_project_access() {
         "対照: オーナーは閉じたプロジェクトのファイルも読める"
     );
 
-    // PAT は read:drive が要る
-    let without = app
-        .insert_pat(owner.id, tp.tenant_id, vec![Scope::ReadProject], None)
-        .await;
-    assert_eq!(
-        app.get_with_bearer(&tasks_path(tp.tenant_id, shared), &without)
-            .await
-            .status(),
-        StatusCode::FORBIDDEN
-    );
+    // PAT は read:drive と read:task の両方が要る（タスクの題・状態を返すため）
+    for scopes in [
+        vec![Scope::ReadProject],
+        vec![Scope::ReadDrive],
+        vec![Scope::ReadTask],
+    ] {
+        let token = app
+            .insert_pat(owner.id, tp.tenant_id, scopes.clone(), None)
+            .await;
+        assert_eq!(
+            app.get_with_bearer(&tasks_path(tp.tenant_id, shared), &token)
+                .await
+                .status(),
+            StatusCode::FORBIDDEN,
+            "{scopes:?}"
+        );
+    }
     let with = app
-        .insert_pat(owner.id, tp.tenant_id, vec![Scope::ReadDrive], None)
+        .insert_pat(
+            owner.id,
+            tp.tenant_id,
+            vec![Scope::ReadDrive, Scope::ReadTask],
+            None,
+        )
         .await;
     assert_eq!(
         app.get_with_bearer(&tasks_path(tp.tenant_id, shared), &with)
@@ -609,6 +621,126 @@ async fn file_tasks_respects_file_and_project_access() {
     for user in [owner, member, outsider] {
         app.cleanup_user(user.id).await;
     }
+}
+
+async fn upload_with_bearer(app: &TestApp, tenant_id: Uuid, token: &str, content: &str) -> Uuid {
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(content.as_bytes().to_vec())
+            .file_name("pat.md")
+            .mime_str("text/markdown")
+            .expect("mime"),
+    );
+    let response = app
+        .client()
+        .post(format!(
+            "{}/v1/tenants/{tenant_id}/drive/files",
+            app.base_url()
+        ))
+        .bearer_auth(token)
+        .multipart(form)
+        .send()
+        .await
+        .expect("upload request");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    file_id_of(&response.json().await.expect("upload response json"))
+}
+
+async fn put_content_with_bearer(
+    app: &TestApp,
+    tenant_id: Uuid,
+    file_id: Uuid,
+    token: &str,
+    content: &str,
+) {
+    let response = app
+        .client()
+        .put(format!(
+            "{}/v1/tenants/{tenant_id}/drive/files/{file_id}/content",
+            app.base_url()
+        ))
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "content": content }))
+        .send()
+        .await
+        .expect("put request");
+    assert_eq!(response.status(), StatusCode::OK, "保存そのものは通る");
+}
+
+/// write:task の無い PAT は保存できても body 行を作りも消しもしない（手動添付は write:task が要る）。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn saving_without_write_task_leaves_body_links_untouched() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let p = project(&app, tp.project_id).await;
+    let t1 = insert_task(&app, &p, owner.id, 1).await;
+    let t2 = insert_task(&app, &p, owner.id, 2).await;
+    let key = &p.key;
+
+    login(&mut app, &owner).await;
+    let file_id = file_id_of(
+        &upload_file(
+            &app,
+            tp.tenant_id,
+            None,
+            "spec.md",
+            "text/markdown",
+            format!("{key}-1").as_bytes(),
+        )
+        .await,
+    );
+    assert_eq!(
+        links(&app, file_id).await,
+        HashMap::from([(t1, "body".into())])
+    );
+
+    let drive_only = app
+        .insert_pat(owner.id, tp.tenant_id, vec![Scope::WriteDrive], None)
+        .await;
+    put_content_with_bearer(
+        &app,
+        tp.tenant_id,
+        file_id,
+        &drive_only,
+        &format!("{key}-2"),
+    )
+    .await;
+    assert_eq!(
+        links(&app, file_id).await,
+        HashMap::from([(t1, "body".into())]),
+        "外れた参照の行は消えず、新しい参照の行も付かない"
+    );
+    let uploaded =
+        upload_with_bearer(&app, tp.tenant_id, &drive_only, &format!("{key}-1 {key}-2")).await;
+    assert!(
+        links(&app, uploaded).await.is_empty(),
+        "アップロードでも行は付かない"
+    );
+
+    // 対照: write:task も持てば従来どおり同期される
+    let with_task = app
+        .insert_pat(
+            owner.id,
+            tp.tenant_id,
+            vec![Scope::WriteDrive, Scope::WriteTask],
+            None,
+        )
+        .await;
+    put_content_with_bearer(&app, tp.tenant_id, file_id, &with_task, &format!("{key}-2")).await;
+    assert_eq!(
+        links(&app, file_id).await,
+        HashMap::from([(t2, "body".into())])
+    );
+    let uploaded =
+        upload_with_bearer(&app, tp.tenant_id, &with_task, &format!("{key}-1 {key}-2")).await;
+    assert_eq!(
+        links(&app, uploaded).await,
+        HashMap::from([(t1, "body".into()), (t2, "body".into())])
+    );
+
+    app.cleanup_user(owner.id).await;
 }
 
 /// 1 ファイルの参照は 200 件で止まる（201 件目は捨てる）。

@@ -191,7 +191,6 @@ mod tests {
         assert_eq!(extract("ABCDEFGHIJK-1"), vec![]);
     }
 
-    /// キーに見えるだけのものも拾う。解決できなければ捨てるので許容する。
     #[test]
     fn extract_limited_stops_at_the_first_unique_refs() {
         let text: String = (1..=500).map(|i| format!("APP-{i} ")).collect();
@@ -208,6 +207,7 @@ mod tests {
         assert_eq!(refs, [r("APP", 1, true), r("APP", 2, false)]);
     }
 
+    /// キーに見えるだけのものも拾う。解決できなければ捨てるので許容する。
     #[test]
     fn false_positive_is_extracted_and_left_to_resolution() {
         assert_eq!(extract("SHA256-1"), vec![r("SHA256", 1, false)]);
