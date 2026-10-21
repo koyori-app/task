@@ -19,6 +19,7 @@ import { taskDetailHref, taskListHref, PRIORITY_CONFIG } from '@/lib/task-displa
 import { activityActor, activityText, relativeTime } from '@/lib/task-activity';
 import { useNow } from '@/composables/useNow';
 import { useHydrated } from '@/composables/useHydrated';
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts';
 import { Button } from '@/components/ui/button';
 import UserAvatar from '@/components/UserAvatar.vue';
 import DashboardCreateTask from './DashboardCreateTask.vue';
@@ -75,6 +76,12 @@ const query = useQuery({
 });
 const data = computed(() => query.data.value);
 const projects = computed(() => data.value?.projects.filter((p) => !p.project.is_personal) ?? []);
+const canCreate = computed(() => !!data.value?.projects.length && !query.isError.value);
+useKeyboardShortcuts({
+  t: () => {
+    if (canCreate.value) createOpen.value = true;
+  },
+});
 const dateLabel = computed(() =>
   now.value.toLocaleDateString('ja-JP', { month: 'long', day: 'numeric', weekday: 'long' }),
 );
@@ -213,7 +220,7 @@ async function complete(item: DashboardTask) {
       </div>
       <Button
         class="shrink-0 gap-1.5 max-sm:px-2 max-sm:text-xs"
-        :disabled="!data?.projects.length || query.isError.value"
+        :disabled="!canCreate"
         @click="createOpen = true"
         ><Plus class="size-4" />タスクを作成</Button
       >
