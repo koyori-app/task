@@ -212,20 +212,26 @@ async function save() {
       void queryClient.invalidateQueries({ queryKey: tasksKey.value });
     }
     if (nextTitle !== draftBaseTitle.value) {
-      const { data, error } = await fetchClient.PATCH(DRIVE_FILE_PATH, {
-        params: { path },
-        body: { name: documentFileName(nextTitle) },
-      });
-      if (error) {
+      // 通信そのものの失敗（null）も改名の失敗と同じに扱う。本文は保存済みなので下の catch に回さない
+      const result = await fetchClient
+        .PATCH(DRIVE_FILE_PATH, {
+          params: { path },
+          body: { name: documentFileName(nextTitle) },
+        })
+        .catch(() => null);
+      if (!result || result.error) {
         queryClient.setQueryData(metaKey.value, updated);
         saveError.value = '本文は保存しましたが、タイトルを変更できませんでした';
         return;
       }
-      updated = data;
+      updated = result.data;
     }
     queryClient.setQueryData(metaKey.value, updated);
     void queryClient.invalidateQueries({ queryKey: ['get', DRIVE_FILES_PATH] });
     stopEditing();
+  } catch {
+    // オフライン・切断で fetch が reject した。下書きは残して編集を続ける
+    saveError.value = '保存できませんでした';
   } finally {
     saving.value = false;
   }
@@ -348,12 +354,15 @@ function openCreateTask() {
 
 async function onTaskCreated(task: CreatedTask) {
   createTaskOpen.value = false;
-  const { error, response } = await fetchClient.POST(ATTACHMENTS_PATH, {
-    params: { path: { tenant_id: props.tenantId, project_id: props.projectId, id: task.id } },
-    body: { drive_file_id: props.fileId },
-  });
+  // null はオフライン・切断で fetch が reject したとき
+  const result = await fetchClient
+    .POST(ATTACHMENTS_PATH, {
+      params: { path: { tenant_id: props.tenantId, project_id: props.projectId, id: task.id } },
+      body: { drive_file_id: props.fileId },
+    })
+    .catch(() => null);
   // 409 は既に結び付いている（本文の参照から付いた等）ので失敗扱いにしない
-  if (error && response.status !== 409) {
+  if (!result || (result.error && result.response.status !== 409)) {
     linkError.value = 'タスクは作成しましたが、このドキュメントに結び付けられませんでした';
   }
   await queryClient.invalidateQueries({ queryKey: tasksKey.value });

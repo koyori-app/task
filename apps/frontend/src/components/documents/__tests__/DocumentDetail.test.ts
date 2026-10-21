@@ -380,3 +380,65 @@ describe('DocumentDetail 編集', () => {
     expect(puts).toEqual([{ ifMatch: ETAG, body: { content: '送る本文' } }]);
   });
 });
+
+describe('DocumentDetail 通信の失敗', () => {
+  /** 指定したメソッドとパスの要求だけ、オフライン時の fetch と同じく reject させる */
+  function failRequest(method: string, pathSuffix: string) {
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: Request | string, init?: RequestInit) => {
+      if (
+        typeof input !== 'string' &&
+        input.method === method &&
+        new URL(input.url).pathname.endsWith(pathSuffix)
+      ) {
+        throw new TypeError('Failed to fetch');
+      }
+      return original(input, init);
+    });
+  }
+
+  it('本文の保存で通信が切れたら、下書きを残してエラーを出す', async () => {
+    failRequest('PUT', '/drive/files/file-1/content');
+    const wrapper = mountDetail({ editing: true });
+    await flushPromises();
+    await editBody(wrapper, '送れなかった本文');
+
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+
+    expect(wrapper.get('[role="alert"]').text()).toBe('保存できませんでした');
+    const textarea = wrapper.get('textarea');
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('送れなかった本文');
+    expect(textarea.attributes('disabled')).toBeUndefined();
+  });
+
+  it('改名で通信が切れたら、本文は保存済みと分かるエラーを出して編集を続ける', async () => {
+    failRequest('PATCH', '/drive/files/file-1');
+    const wrapper = mountDetail({ editing: true });
+    await flushPromises();
+    await editBody(wrapper, '新しい本文');
+    await wrapper.get('input').setValue('新しい仕様');
+
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+
+    expect(puts).toHaveLength(1);
+    expect(wrapper.get('[role="alert"]').text()).toBe(
+      '本文は保存しましたが、タイトルを変更できませんでした',
+    );
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('新しい仕様');
+  });
+
+  it('タスク作成後の結び付けで通信が切れたら、タスクは作成済みと分かるエラーを出す', async () => {
+    failRequest('POST', '/tasks/task-9/attachments');
+    const wrapper = mountDetail();
+    await flushPromises();
+
+    wrapper.findComponent({ name: 'CreateTaskDialog' }).vm.$emit('created', { id: 'task-9' });
+    await flushPromises();
+
+    expect(wrapper.get('[role="alert"]').text()).toBe(
+      'タスクは作成しましたが、このドキュメントに結び付けられませんでした',
+    );
+  });
+});

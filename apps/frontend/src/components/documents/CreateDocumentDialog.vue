@@ -100,6 +100,9 @@ async function submit() {
     }
     void queryClient.invalidateQueries({ queryKey: ['get', DRIVE_FILES_PATH] });
     emit('created', data);
+  } catch {
+    // オフライン・切断で fetch が reject した。入力は残す
+    errorMessage.value = 'ドキュメントを作成できませんでした';
   } finally {
     pending.value = false;
   }
