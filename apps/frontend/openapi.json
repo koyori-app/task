@@ -12597,7 +12597,7 @@
             }
           },
           "409": {
-            "description": "最後のAdminは削除できません",
+            "description": "最後の在籍 Admin は削除できません（共有プロジェクトの最後のメンバーを外す場合を除く）",
             "content": {
               "application/json": {
                 "schema": {
