@@ -40,7 +40,7 @@ export function toBreadcrumbList(segments: readonly BreadcrumbSegment[], origin:
  * `useBreadcrumbs` のどの分岐にも当たらないまま task 扱いへ落ちて、
  * 骨組みを出したまま固まる（「登録し忘れたら何も出さない」の決めが破れる）。
  */
-type RouteKind = 'static' | 'home' | 'tenant' | 'project' | 'task';
+type RouteKind = 'static' | 'home' | 'tenant' | 'project' | 'task' | 'document';
 
 /** 共通レイアウトのルート台帳。未知のページに他ページの段を流用しない。 */
 export function breadcrumbRoute(pathname: string, params: Record<string, string | undefined>) {
@@ -48,6 +48,7 @@ export function breadcrumbRoute(pathname: string, params: Record<string, string 
   const project = encodeURIComponent(params.projectKey ?? '');
   const task = encodeURIComponent(params.taskId ?? '');
   const user = encodeURIComponent(params.userId ?? '');
+  const file = encodeURIComponent(params.fileId ?? '');
   const tenantBase = `/${tenant}`;
   const projectBase = `${tenantBase}/projects/${project}`;
   const routes = new Map<string, { kind: RouteKind; name: string }>([
@@ -74,6 +75,10 @@ export function breadcrumbRoute(pathname: string, params: Record<string, string 
           [`${projectBase}/settings`, { kind: 'project', name: 'プロジェクト設定' }],
           [`${projectBase}/reviews`, { kind: 'project', name: 'レビュー' }],
           [`${projectBase}/labels`, { kind: 'project', name: 'ラベル' }],
+          [`${projectBase}/docs`, { kind: 'project', name: 'ドキュメント' }],
+          ...(file
+            ? ([[`${projectBase}/docs/${file}`, { kind: 'document', name: '' }]] as const)
+            : []),
           ...(task
             ? ([[`${projectBase}/tasks/${task}`, { kind: 'task', name: '' }]] as const)
             : []),
