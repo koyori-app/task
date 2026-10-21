@@ -251,7 +251,13 @@ function openRelatedTask(task: TaskResponse) {
         :project-key="projectKey"
         @open="openRelatedTask"
       />
-      <TaskForgeSection :tenant-id="tenantId" :project-id="projectId" :task-id="taskId" />
+      <TaskForgeSection
+        :tenant-id="tenantId"
+        :project-id="projectId"
+        :task-id="taskId"
+        :tenant-display-id="tenantDisplayId"
+        :project-key="projectKey"
+      />
     </template>
     <template #header-actions>
       <dialog

@@ -53,14 +53,17 @@ import {
   relativeReviewFindingHref,
   type ReviewFindingsUrlState,
 } from '@/lib/review-findings-url-state';
+import { pullRequestState } from '@/lib/forge-pull-request';
 import {
   PR_PAGE_SIZE,
+  PR_STATE_FILTERS,
   filterPullRequests,
   hasGithubConnection,
   isMyPullRequest,
   pageCount,
   pageOfPullRequest,
   viewerGithubLogin,
+  type PrStateFilter,
 } from '@/lib/review-pr-rail';
 
 const props = defineProps<{
@@ -123,12 +126,18 @@ const githubNeedsRelink = computed(
 );
 /** 選択中 PR とは別——サイドバーの見える行だけを絞る。 */
 const prQuery = ref('');
+const prStateFilter = ref<PrStateFilter>('all');
 // PR 一覧は連携一覧を待たずに出す（連携一覧は外部への問い合わせで遅れることがある）。
 // 連携一覧が要るのは「自分の PR」の判定だけで、その間スイッチは使えない
 const railReady = computed(() => prsQuery.isSuccess.value);
 const connectionsFailed = computed(() => connectionsQuery.isError.value);
 const railList = computed(() =>
-  filterPullRequests(pullRequests.value, prQuery.value, mineOnly.value ? githubLogin.value : null),
+  filterPullRequests(
+    pullRequests.value,
+    prQuery.value,
+    mineOnly.value ? githubLogin.value : null,
+    prStateFilter.value,
+  ),
 );
 /**
  * 実際に作成者で絞っているか。連携一覧の待機中・取得失敗の間は `mineOnly`（URL の mine=1）が
@@ -367,6 +376,11 @@ function onPrQueryInput() {
   writeUrl('replace');
 }
 
+function setPrStateFilter(value: unknown) {
+  prStateFilter.value = value as PrStateFilter;
+  onPrQueryInput();
+}
+
 function setMineOnly(value: boolean) {
   mineOnly.value = value;
   prPage.value = 1;
@@ -527,6 +541,26 @@ async function onRoundCreated() {
                 @update:model-value="onPrQueryInput"
               />
             </div>
+            <div>
+              <label for="filter-pr-state" class="mb-1.5 block text-xs font-medium"
+                >PR の状態</label
+              >
+              <Select :model-value="prStateFilter" @update:model-value="setPrStateFilter">
+                <SelectTrigger
+                  id="filter-pr-state"
+                  size="sm"
+                  class="w-full"
+                  data-testid="filter-pr-state"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="state in PR_STATE_FILTERS" :key="state" :value="state">
+                    {{ state === 'all' ? 'すべて' : pullRequestState(state).label }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <!-- PR の作成者は GitHub のユーザー名なので、連携が無いと見分けられない -->
             <label
               class="mb-1 flex items-start gap-2.5 rounded-md border p-2.5"
@@ -580,6 +614,7 @@ async function onRoundCreated() {
               あなた（GitHub @{{ githubLogin }}）が作成した PR
               で、レビューのあるものはまだありません。
             </p>
+            <p v-else-if="prQuery.trim() === ''">この状態の PR はありません。</p>
             <p v-else>
               「{{ prQuery.trim() }}」に一致する{{ mineApplied ? '、自分が作成した' : '' }} PR
               はありません。
@@ -625,6 +660,18 @@ async function onRoundCreated() {
             >
               <span class="flex items-center gap-2">
                 <span class="font-mono text-xs">#{{ pr.pr_number }}</span>
+                <span
+                  class="inline-flex items-center gap-1 text-xs"
+                  :class="pullRequestState(pr.state).class"
+                  data-testid="pr-state"
+                >
+                  <component
+                    :is="pullRequestState(pr.state).icon"
+                    class="size-3.5"
+                    aria-hidden="true"
+                  />
+                  {{ pullRequestState(pr.state).label }}
+                </span>
                 <!--
                   バッジは件数の事実だけを出す。可否の断定はしない——可否には鮮度と
                   連携の有無も要り（mergeVerdict の片道降格）、この一覧はその材料を
@@ -632,14 +679,23 @@ async function onRoundCreated() {
                   等と言う横で一覧だけ緑になる
                 -->
                 <span
-                  class="rounded-full px-2 py-0.5 text-xs"
-                  :class="
-                    pr.blocking === 0
-                      ? 'bg-green-600/10 text-green-700 dark:text-green-400'
-                      : 'bg-destructive/10 text-destructive'
-                  "
+                  v-if="pr.blocking === 0"
+                  class="rounded-full bg-green-600/10 px-2 py-0.5 text-xs text-green-700 dark:text-green-400"
                 >
-                  {{ pr.blocking === 0 ? '未解決なし' : `${pr.blocking} 件が未解決` }}
+                  未解決なし
+                </span>
+                <span
+                  v-else-if="pr.blocking > pr.blocking_fixed"
+                  class="bg-destructive/10 text-destructive rounded-full px-2 py-0.5 text-xs"
+                >
+                  {{ pr.blocking - pr.blocking_fixed }} 件が未解決
+                </span>
+                <!-- High / Medium がすべて fixed。直す側の作業は無く、レビュー側の確認を待つだけ -->
+                <span
+                  v-else
+                  class="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400"
+                >
+                  {{ pr.blocking }} 件が承認待ち
                 </span>
               </span>
               <span class="line-clamp-2 font-medium">{{

@@ -8,8 +8,8 @@ use axum::{
 use axum_valid::Valid;
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter, Statement,
-    prelude::Uuid,
+    ColumnTrait, DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
+    Statement, prelude::Uuid,
 };
 
 use crate::AppState;
@@ -17,16 +17,17 @@ use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
-use entity::github_integrations;
+use entity::{forge_branch_links, github_integrations, tasks};
 use payload::forge::{
-    LinkTaskPullRequestRequest, TaskForgeCommit, TaskForgePullRequest, TaskForgeRepository,
-    TaskForgeResponse,
+    LinkTaskPullRequestRequest, TaskForgeBranch, TaskForgeCommit, TaskForgePullRequest,
+    TaskForgeRepository, TaskForgeResponse,
 };
 use service::forge::events::ForgeRepo;
 
 #[derive(FromQueryResult)]
 struct PullRequestRow {
     id: Uuid,
+    project_id: Uuid,
     host: String,
     host_url: String,
     repo_owner: String,
@@ -87,7 +88,7 @@ pub async fn get_task_forge(
     // 返すのはこのタスクに結ばれたものだけなので、タスクの閲覧権限で足りる
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
-    let pull_requests = task_pull_requests(&state.db, task.id, None).await?;
+    let pull_requests = task_pull_requests(&state, &auth, &task, None).await?;
 
     let backend = state.db.get_database_backend();
     let commits = CommitRow::find_by_statement(Statement::from_sql_and_values(
@@ -131,9 +132,31 @@ pub async fn get_task_forge(
     Ok(Json(TaskForgeResponse {
         pull_requests,
         commits,
-        branches: Vec::new(),
+        branches: task_branches(&state, task.id).await?,
         repository,
+        issue: service::forge::issue_source::find_for_task(&state.db, task.id).await?,
     }))
+}
+
+async fn task_branches(state: &AppState, task_id: Uuid) -> Result<Vec<TaskForgeBranch>, AppError> {
+    Ok(forge_branch_links::Entity::find()
+        .filter(forge_branch_links::Column::TaskId.eq(task_id))
+        .order_by_desc(forge_branch_links::Column::CreatedAt)
+        .order_by_desc(forge_branch_links::Column::Id)
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|row| TaskForgeBranch {
+            id: row.id,
+            host: row.host,
+            host_url: row.host_url,
+            repo_owner: row.repo_owner,
+            repo_name: row.repo_name,
+            branch: row.branch,
+            html_url: row.html_url,
+            created_at: row.created_at.into(),
+        })
+        .collect())
 }
 
 /// プロジェクトの現在の連携先（GitHub だけ）
@@ -155,15 +178,26 @@ async fn project_repository(
 
 /// タスクに結ばれた PR を参照元ごとの行からまとめる。`only` を渡すとその PR だけ
 async fn task_pull_requests(
-    db: &DatabaseConnection,
-    task_id: Uuid,
+    state: &AppState,
+    auth: &AuthUser,
+    task: &tasks::Model,
     only: Option<Uuid>,
 ) -> Result<Vec<TaskForgePullRequest>, AppError> {
+    let db = &state.db;
+    // レビューの中身は review 系のスコープで守る（write:review は read:review を包含）
+    let unresolved = service::reviews::blocking_by_task_pull_request(
+        db,
+        task.id,
+        task.project_id,
+        auth.require_scope(entity::scopes::Scope::ReadReview)
+            .is_ok(),
+    )
+    .await?;
     Ok(
         PullRequestRow::find_by_statement(Statement::from_sql_and_values(
             db.get_database_backend(),
-            "SELECT p.id, p.host, p.host_url, p.repo_owner, p.repo_name, p.number, p.title,
-                p.author_handle, p.state, p.html_url, p.merged_at, p.merge_effects_processed_at,
+            "SELECT p.id, p.project_id, p.host, p.host_url, p.repo_owner, p.repo_name, p.number,
+                p.title, p.author_handle, p.state, p.html_url, p.merged_at, p.merge_effects_processed_at,
                 p.commits_complete,
                 string_agg(l.source, ',' ORDER BY l.source) AS sources,
                 bool_or(l.closes) AS closes
@@ -172,13 +206,14 @@ async fn task_pull_requests(
          WHERE l.task_id = $1 AND ($2::uuid IS NULL OR p.id = $2)
          GROUP BY p.id
          ORDER BY p.created_at DESC, p.id DESC",
-            [task_id.into(), only.into()],
+            [task.id.into(), only.into()],
         ))
         .all(db)
         .await?
         .into_iter()
         .map(|row| TaskForgePullRequest {
             id: row.id,
+            project_id: row.project_id,
             host: row.host,
             host_url: row.host_url,
             repo_owner: row.repo_owner,
@@ -193,7 +228,7 @@ async fn task_pull_requests(
             commits_complete: row.commits_complete,
             sources: row.sources.split(',').map(str::to_owned).collect(),
             closes: row.closes,
-            unresolved: None,
+            unresolved: unresolved.get(&row.id).copied(),
         })
         .collect(),
     )
@@ -285,7 +320,7 @@ pub async fn link_task_pull_request(
         auth.user_id,
     )
     .await?;
-    let pull_request = task_pull_requests(&state.db, task.id, Some(pull_request_id))
+    let pull_request = task_pull_requests(&state, &auth, &task, Some(pull_request_id))
         .await?
         .pop()
         .ok_or_else(|| anyhow::anyhow!("linked pull request {pull_request_id} is missing"))?;
@@ -324,6 +359,44 @@ pub async fn unlink_task_pull_request(
     if !service::forge::pull_requests::unlink(&state.db, task.id, pull_request_id, auth.user_id)
         .await?
     {
+        return Err(AppError::NotFound);
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    delete,
+    path = "/{id}/forge/branches/{link_id}",
+    tag = "Tasks",
+    summary = "ブランチのリンクを外す",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        ("id" = String, Path, description = "タスクID"),
+        ("link_id" = Uuid, Path, description = "ブランチのリンクID"),
+    ),
+    responses(
+        (status = 204, description = "外しました"),
+        CrudErrors,
+    )
+)]
+pub async fn delete_task_forge_branch(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id, id, link_id)): Path<(Uuid, Uuid, String, Uuid)>,
+) -> Result<StatusCode, AppError> {
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
+    let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+    // 他タスクの link_id は存在を明かさず 404
+    let deleted = forge_branch_links::Entity::delete_many()
+        .filter(forge_branch_links::Column::Id.eq(link_id))
+        .filter(forge_branch_links::Column::TaskId.eq(task.id))
+        .exec(&state.db)
+        .await?;
+    if deleted.rows_affected == 0 {
         return Err(AppError::NotFound);
     }
     Ok(StatusCode::NO_CONTENT)

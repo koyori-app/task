@@ -207,3 +207,44 @@ describe('UserAvatar の大きさ・形・灰色', () => {
     expect(classes).not.toContain('text-foreground');
   });
 });
+
+describe('UserAvatar の slot（頭文字の代わり）', () => {
+  it('slot が無ければ頭文字を出す', () => {
+    const wrapper = mount(UserAvatar, { props: { user: { username: 'yupix' } } });
+
+    expect(wrapper.find('[data-slot=avatar-fallback]').text()).toBe('YU');
+  });
+
+  it('slot があれば頭文字の代わりに slot を出す', () => {
+    const wrapper = mount(UserAvatar, {
+      props: { user: { username: 'yupix' } },
+      slots: { default: '<svg data-testid="icon" />' },
+    });
+    const fallback = wrapper.find('[data-slot=avatar-fallback]');
+
+    expect(fallback.find('[data-testid=icon]').exists()).toBe(true);
+    expect(fallback.text()).toBe('');
+  });
+
+  it('slot を入れても地と字の色は頭文字と同じ（text-muted-foreground にならぬ）', () => {
+    const wrapper = mount(UserAvatar, {
+      props: { user: { username: 'a' }, size: 'sm' },
+      slots: { default: '<svg />' },
+    });
+    const classes = wrapper.find('[data-slot=avatar-fallback]').classes();
+
+    expect(classes).toEqual(expect.arrayContaining(['bg-muted', 'text-foreground']));
+    expect(classes).not.toContain('text-muted-foreground');
+  });
+
+  it('画像が読めた時は slot ではなく画像を出す', async () => {
+    const wrapper = mount(UserAvatar, {
+      props: { user: { username: 'a', avatar_url: 'https://example.com/a.png' } },
+      slots: { default: '<svg data-testid="icon" />' },
+    });
+    await flushPromises();
+
+    expect(wrapper.find('img').exists()).toBe(true);
+    expect(wrapper.find('[data-testid=icon]').exists()).toBe(false);
+  });
+});

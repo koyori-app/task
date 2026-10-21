@@ -1037,6 +1037,58 @@ async fn a_pull_request_without_any_round_is_not_mergeable() {
     fx.app.cleanup_user(fx.developer.id).await;
 }
 
+/// PR 一覧の `blocking_fixed` は High / Medium かつ fixed だけを数え、`blocking` /
+/// `unresolved` は従来どおり open / fixing / fixed を数える（TASK-302）。
+#[tokio::test]
+async fn pull_request_list_separates_fixed_blocking_findings() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    // 731: High / Medium がすべて fixed（Low の fixed は blocking_fixed に入らない）
+    let (_, high_fixed) = submit_round(&fx, 731, "high", "fixed の High").await;
+    let (_, medium_fixed) = submit_round(&fx, 731, "medium", "fixed の Medium").await;
+    let (_, low_fixed) = submit_round(&fx, 731, "low", "fixed の Low").await;
+    // 732: fixed と open が混ざる
+    let (_, mixed_fixed) = submit_round(&fx, 732, "high", "fixed の High").await;
+    submit_round(&fx, 732, "medium", "open の Medium").await;
+    // 733: 着手中（fixing）だけ
+    let (_, fixing) = submit_round(&fx, 733, "high", "fixing の High").await;
+
+    fx.login(&fx.developer.clone()).await;
+    for id in [&high_fixed, &medium_fixed, &low_fixed, &mixed_fixed] {
+        assert_eq!(transition(&fx, id, "fixed").await.status(), StatusCode::OK);
+    }
+    assert_eq!(
+        transition(&fx, &fixing, "fixing").await.status(),
+        StatusCode::OK
+    );
+
+    let prs = json(
+        fx.app
+            .get_with_session(&format!("{}/pull-requests", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    let row = |pr: i32| {
+        prs.as_array()
+            .expect("array")
+            .iter()
+            .find(|row| row["pr_number"] == pr)
+            .unwrap_or_else(|| panic!("PR {pr} が一覧にある: {prs}"))
+            .clone()
+    };
+    for (pr, unresolved, blocking, blocking_fixed) in
+        [(731, 3, 2, 2), (732, 2, 2, 1), (733, 1, 1, 0)]
+    {
+        let row = row(pr);
+        assert_eq!(row["unresolved"], unresolved, "PR {pr}: {row}");
+        assert_eq!(row["blocking"], blocking, "PR {pr}: {row}");
+        assert_eq!(row["blocking_fixed"], blocking_fixed, "PR {pr}: {row}");
+    }
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
 /// マージ前必須の重大度は繰り延べられない。
 ///
 /// 繰り延べはマージ可否の集計から外れるので、High / Medium に許すと

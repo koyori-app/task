@@ -349,13 +349,14 @@ pub(crate) fn job_state(app: &TestApp) -> job::JobState {
         smtp_client: app.state.smtp_client.clone(),
         http_client: app.state.http_client.clone(),
         review_summary_storage: app.state.review_summary_storage.clone(),
+        github_issue_sync_storage: app.state.github_issue_sync_storage.clone(),
         pg_pool: app.state.pg_pool.clone(),
         oauth_settings: app.state.oauth_settings.clone(),
     }
 }
 
 /// List commits API が返すコミット 1 件。
-fn api_commit(sha: &str, message: &str) -> serde_json::Value {
+pub(crate) fn api_commit(sha: &str, message: &str) -> serde_json::Value {
     serde_json::json!({
         "sha": sha,
         "html_url": format!("https://github.com/{REPO_OWNER}/{REPO_NAME}/commit/{sha}"),

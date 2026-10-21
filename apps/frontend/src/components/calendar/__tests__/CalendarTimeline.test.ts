@@ -197,9 +197,51 @@ describe('CalendarTimeline', () => {
     expect(wrapper.find(`[data-member-row="${ALICE.id}"] a`).exists()).toBe(false);
   });
 
+  it('帯の左クリックは遷移させず open-task を emit し、修飾キー付きはブラウザに任せる', async () => {
+    const wrapper = mountTimeline([task({ soft_deadline: '2026-10-20T00:00:00Z' })]);
+    const entry = wrapper.get(`[data-member-row="${ALICE.id}"] a`);
+
+    const plain = new MouseEvent('click', { bubbles: true, cancelable: true });
+    entry.element.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(true);
+    expect(wrapper.findComponent(CalendarTimeline).emitted('open-task')?.[0]?.[0]).toMatchObject({
+      seq_key: 'ENG-1',
+    });
+
+    const withMeta = new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true });
+    entry.element.dispatchEvent(withMeta);
+    expect(withMeta.defaultPrevented).toBe(false);
+    expect(wrapper.findComponent(CalendarTimeline).emitted('open-task')).toHaveLength(1);
+  });
+
   it('今日の列を aria-current で示す', () => {
     const wrapper = mountTimeline([]);
     expect(wrapper.get('[aria-current="date"]').attributes('data-date')).toBe('2026-10-14');
+  });
+
+  it('メンバーの行の見出しに担当者のアバターを出し、画像が無ければ頭文字にする', () => {
+    const wrapper = mountTimeline([task({ soft_deadline: '2026-10-14T00:00:00Z' })]);
+    const avatar = wrapper.get(`[data-member-row="${ALICE.id}"] [data-member-avatar]`);
+    expect(avatar.text()).toBe('A');
+    // 名前が隣にあるので読み上げない
+    expect(avatar.attributes('aria-hidden')).toBe('true');
+    expect(wrapper.get(`[data-member-row="${BOB.id}"] [data-member-avatar]`).text()).toBe('B');
+    // 画像が無い行の頭文字は 1 文字、色は UserAvatar の組
+    expect(avatar.classes()).toContain('size-5');
+    expect(avatar.get('[data-slot=avatar-fallback]').classes()).toContain('text-foreground');
+  });
+
+  it('担当者なしの行は頭文字ではなく人のアイコンを出す', () => {
+    const wrapper = mountTimeline([task({ soft_deadline: '2026-10-14T00:00:00Z', assignees: [] })]);
+    const avatar = wrapper.get('[data-member-row="__unassigned__"] [data-member-avatar]');
+    expect(avatar.text()).toBe('');
+    expect(avatar.find('svg').exists()).toBe(true);
+    // 地は bg-muted、字（アイコン）は継ぐ色の text-foreground。薄い text-muted-foreground は使わぬ
+    const fallback = avatar.get('[data-slot=avatar-fallback]');
+    expect(fallback.classes()).toEqual(expect.arrayContaining(['bg-muted', 'text-foreground']));
+    expect(avatar.find('svg').classes()).not.toContain('text-muted-foreground');
+    expect(avatar.attributes('aria-hidden')).toBe('true');
+    expect(avatar.classes()).toContain('size-5');
   });
 
   it('期間にタスクが無ければ空状態を出し、メンバーの行は出さない', () => {

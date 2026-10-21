@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { defineComponent } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
-import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
+import { VueQueryPlugin, QueryClient, useQuery } from '@tanstack/vue-query';
 import type { paths } from '@/generated/api';
 import { useTaskRowMutations } from '../useTaskRowMutations';
 import { useTaskActivities } from '../useTaskActivities';
@@ -188,6 +188,29 @@ describe('useTaskRowMutations', () => {
     await flushPromises();
 
     expect(activityRequests().length).toBeGreaterThan(before);
+  });
+
+  // カレンダーはオーバーレイで詳細を開いたまま裏に残るので、帯（schedule）も取り直す
+  it('更新のあとにカレンダーの予定を取り直す', async () => {
+    const scheduleFetch = vi.fn(async () => ({ tasks: [] }));
+    const Calendar = defineComponent({
+      setup() {
+        useQuery({
+          queryKey: ['get', '/v1/tenants/{tenant_id}/schedule', { params: {} }],
+          queryFn: scheduleFetch,
+        });
+        return () => null;
+      },
+    });
+    mount(Calendar, { global: { plugins: [[VueQueryPlugin, { queryClient }]] } });
+    mountHost();
+    await flushPromises();
+    expect(scheduleFetch).toHaveBeenCalledTimes(1);
+
+    await mutations.setSoftDeadline({ id: 'task-1' } as never, '2026-10-20T00:00:00Z');
+    await flushPromises();
+
+    expect(scheduleFetch).toHaveBeenCalledTimes(2);
   });
 
   // 行と詳細（useTaskComments）が同じコメント一覧へ書くので、行から投稿したときも

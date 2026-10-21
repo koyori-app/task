@@ -2,9 +2,14 @@
 import { ChevronDown, ChevronLeft, ChevronRight, Loader2 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
+import { useMediaQuery } from '@vueuse/core';
+import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 
 import CalendarTimeline from '@/components/calendar/CalendarTimeline.vue';
+import { popOverlayParent, pushOverlayParent } from '@/components/tasks/overlay-parent-stack';
+import TaskDetailOverlay from '@/components/tasks/TaskDetailOverlay.vue';
+import type { TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -23,9 +28,12 @@ import {
   parseCalendarUrlState,
   shiftFrom,
 } from '@/lib/calendar/url-state';
+import { taskDetailHref, taskSeqKey } from '@/lib/task-display';
 
 type ScheduleResponse = components['schemas']['ScheduleResponse'];
 type Member = components['schemas']['UserSummary'];
+type ScheduleTask = components['schemas']['ScheduleTask'];
+type TaskResponse = components['schemas']['TaskResponse'];
 
 const SCHEDULE_PATH = '/v1/tenants/{tenant_id}/schedule' as const;
 /** API の上限。14 日なら実用上 1〜2 ページで済む */
@@ -48,17 +56,22 @@ const from = ref(initial.from);
 const memberIds = ref<string[]>(initial.memberIds);
 const projectIds = ref<string[]>(initial.projectIds);
 const to = computed(() => addDays(from.value, CALENDAR_DAYS - 1));
+// オーバーレイで開いているタスク（seq key）
+const selectedTaskId = ref<string | null>(initial.selected);
 
-watch([from, memberIds, projectIds], ([nextFrom, nextMembers, nextProjects]) => {
-  if (typeof window === 'undefined') return;
-  const url = applyCalendarUrlState(
-    new URL(window.location.href),
-    { from: nextFrom, memberIds: nextMembers, projectIds: nextProjects },
-    today,
-  );
-  // history を汚さない（タスク一覧と同じ）
-  window.history.replaceState(window.history.state, '', url);
-});
+watch(
+  [from, memberIds, projectIds, selectedTaskId],
+  ([nextFrom, nextMembers, nextProjects, selected]) => {
+    if (typeof window === 'undefined') return;
+    const url = applyCalendarUrlState(
+      new URL(window.location.href),
+      { from: nextFrom, memberIds: nextMembers, projectIds: nextProjects, selected },
+      today,
+    );
+    // history を汚さない（タスク一覧と同じ）
+    window.history.replaceState(window.history.state, '', url);
+  },
+);
 
 const scheduleQuery = useQuery({
   queryKey: computed(
@@ -144,6 +157,52 @@ const filtered = computed(() => {
     milestones: data.milestones.filter((milestone) => byProject(milestone.project_id)),
   };
 });
+
+// ---- タスクの詳細: タスク一覧の List 表示と同じオーバーレイと戻り先の積み ----
+// 狭い画面はタスク一覧と同じく詳細ページへ送る（オーバーレイの 3 カラムが収まらない）
+const canInline = useMediaQuery('(min-width: 1024px)');
+const overlayParentStack = ref<string[]>([]);
+// useMediaQuery はマウント前は false なので、URL から復元した選択もマウント後に開く（SSR と揃う）
+const overlayOpenSeqKey = computed(() => (canInline.value ? selectedTaskId.value : null));
+// 閉じるアニメーションの間も中身を残すため、最後に開いたタスクを持ち続ける
+// （閉じ切れば Dialog が中身ごと DOM から外す）
+const overlayTaskSeqKey = ref<string | null>(null);
+watch(
+  overlayOpenSeqKey,
+  (seqKey) => {
+    if (seqKey) overlayTaskSeqKey.value = seqKey;
+  },
+  { immediate: true },
+);
+// カレンダーはテナント横断なので、プロジェクトは seq key（KEY-N）の KEY から取る
+const overlayProjectKey = computed(() => overlayTaskSeqKey.value?.replace(/-\d+$/, '') ?? '');
+
+function openTask(task: ScheduleTask) {
+  if (!canInline.value) {
+    void navigate(taskDetailHref(tenantDisplayId.value, task.project.key, task.seq_id));
+    return;
+  }
+  overlayParentStack.value = [];
+  selectedTaskId.value = task.seq_key;
+}
+
+/** オーバーレイの中から子タスク・説明の KEY-N を開く。戻れるように今のタスクを積む */
+function openInOverlay(next: string) {
+  overlayParentStack.value = pushOverlayParent(
+    overlayParentStack.value,
+    selectedTaskId.value,
+    next,
+  );
+  selectedTaskId.value = next;
+}
+
+/** Esc・外側クリック・× で閉じる。子から開いていたら親へ 1 段戻る */
+function onOverlayOpenChange(open: boolean) {
+  if (open) return;
+  const { stack, next } = popOverlayParent(overlayParentStack.value);
+  overlayParentStack.value = stack;
+  selectedTaskId.value = next;
+}
 
 function toggled(list: string[], id: string) {
   return list.includes(id) ? list.filter((v) => v !== id) : [...list, id];
@@ -277,6 +336,19 @@ function formatRangeDate(date: string) {
       :sprints="filtered.sprints"
       :milestones="filtered.milestones"
       :show-unassigned="!memberIds.length"
+      @open-task="openTask"
+    />
+
+    <TaskDetailOverlay
+      v-if="overlayTaskSeqKey"
+      :key="overlayTaskSeqKey"
+      :open="!!overlayOpenSeqKey"
+      :tenant-display-id="tenantDisplayId"
+      :project-key="overlayProjectKey"
+      :task-id="overlayTaskSeqKey"
+      @open-task="(task: TaskResponse) => openInOverlay(taskSeqKey(overlayProjectKey, task.seq_id))"
+      @open-task-ref="(ref: TaskRefLink) => openInOverlay(ref.seqKey)"
+      @update:open="onOverlayOpenChange"
     />
   </div>
 </template>

@@ -105,6 +105,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::forge::get_task_forge))
                         .routes(routes!(crate::handlers::forge::link_task_pull_request))
                         .routes(routes!(crate::handlers::forge::unlink_task_pull_request))
+                        .routes(routes!(crate::handlers::forge::delete_task_forge_branch))
                         .routes(routes!(crate::handlers::time_tracking::get_time_summary))
                         .routes(routes!(crate::handlers::time_tracking::list_time_logs))
                         .routes(routes!(crate::handlers::time_tracking::create_time_log))
@@ -121,6 +122,12 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         ))
                         .routes(routes!(crate::handlers::task_extensions::attach_task_file))
                         .routes(routes!(crate::handlers::task_extensions::detach_task_file)),
+                )
+                .nest(
+                    "/{project_id}/forge",
+                    OpenApiRouter::<AppState>::new().routes(routes!(
+                        crate::handlers::forge_merge_effects::acknowledge_merge_effects
+                    )),
                 )
                 .nest(
                     "/{project_id}/task-views",

@@ -65,6 +65,14 @@ export function activityText(item: ActivityItem): string {
       return 'コメントを削除しました';
     case 'archived':
       return 'タスクをアーカイブしました';
+    case 'forge_merge_effects_acknowledged': {
+      const number = payload.number;
+      const pr =
+        typeof number === 'number' && Number.isInteger(number) && number > 0
+          ? `PR #${number}`
+          : 'PR';
+      return `${pr} の自動完了を未適用のまま確認済みにしました`;
+    }
     default:
       return '操作しました';
   }
@@ -110,12 +118,18 @@ export type PullRequestActivity = {
   unlinked: boolean;
   /** 手でリンクした履歴（`source = manual`）。主語はリンクした人。`source` の無い旧い行は false */
   manual: boolean;
+  /** マージでタスクを完了した履歴（`forge_pull_request_merged`）。操作者はいない */
+  merged: boolean;
 };
 
-/** `forge_pull_request_linked` / `forge_pull_request_unlinked` の表示要素。それ以外の履歴は null。 */
+/**
+ * `forge_pull_request_linked` / `forge_pull_request_unlinked` / `forge_pull_request_merged` の
+ * 表示要素。それ以外の履歴は null。
+ */
 export function pullRequestActivity(item: ActivityItem): PullRequestActivity | null {
   const unlinked = item.event_type === 'forge_pull_request_unlinked';
-  if (!unlinked && item.event_type !== 'forge_pull_request_linked') return null;
+  const merged = item.event_type === 'forge_pull_request_merged';
+  if (!unlinked && !merged && item.event_type !== 'forge_pull_request_linked') return null;
   const payload = (item.payload ?? {}) as Record<string, unknown>;
   const str = (key: string) => (typeof payload[key] === 'string' ? (payload[key] as string) : '');
   const number = payload.number;
@@ -125,7 +139,8 @@ export function pullRequestActivity(item: ActivityItem): PullRequestActivity | n
     title: str('title'),
     url: httpUrl(str('html_url')),
     unlinked,
-    manual: !unlinked && str('source') === 'manual',
+    manual: item.event_type === 'forge_pull_request_linked' && str('source') === 'manual',
+    merged,
   };
 }
 
