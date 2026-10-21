@@ -4,7 +4,6 @@ import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { TooltipProvider } from 'reka-ui';
 import { defineComponent, h } from 'vue';
 
-vi.mock('vike/client/router', () => ({ navigate: vi.fn() }));
 const { put } = vi.hoisted(() => ({ put: vi.fn() }));
 vi.mock('@/lib/api-vue-query', () => ({ fetchClient: { PUT: put } }));
 
@@ -547,9 +546,7 @@ describe('CalendarTimeline', () => {
       const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
       bar(wrapper).element.dispatchEvent(click);
       expect(click.defaultPrevented).toBe(true);
-      const { navigate } = await import('vike/client/router');
-      expect(navigate).toHaveBeenCalledWith('/acme/projects/ENG/tasks/ENG-1');
-      vi.mocked(navigate).mockClear();
+      expect(wrapper.findComponent(CalendarTimeline).emitted('open-task')).toHaveLength(1);
     });
 
     it('ドラッグした後の click ではタスク詳細へ遷移しない', async () => {
@@ -560,8 +557,7 @@ describe('CalendarTimeline', () => {
       const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
       bar(wrapper).element.dispatchEvent(click);
       expect(click.defaultPrevented).toBe(true);
-      const { navigate } = await import('vike/client/router');
-      expect(navigate).not.toHaveBeenCalled();
+      expect(wrapper.findComponent(CalendarTimeline).emitted('open-task')).toBeUndefined();
     });
   });
 });
