@@ -254,12 +254,11 @@ fn find_match_char_range(text: &str, query: &str) -> Option<(usize, usize)> {
     }
     let text_chars: Vec<char> = text.chars().collect();
     let q_len = query_chars.len();
-    // 検索語が本文より長ければ、当たりようが無い。`saturating_sub` は 0 に張り付くだけで、
-    // 範囲を一度回すので、このガードが無いと `text_chars[0..q_len]` が範囲外で panic する。
+    // 近似一致（`<%`）や空白の連続する検索語では、対象より検索語の方が長いことがある
     if q_len > text_chars.len() {
         return None;
     }
-    for start in 0..=text_chars.len() - q_len {
+    for start in 0..=text_chars.len().saturating_sub(q_len) {
         if text_chars[start..start + q_len]
             .iter()
             .zip(query_chars.iter())
@@ -303,10 +302,16 @@ fn highlight_ilike(title: &str, description: Option<&str>, query: &str) -> Strin
     }
 }
 
-/// tsvector の道の WHERE の当て方と、その値（`$1` は project_id、`$2` は検索語の全体）。
+/// tsvector の道の FROM 句（`$2` は検索語の全体、`tsq` はその全体の tsquery）。
+const TSVECTOR_FROM: &str = "FROM tasks CROSS JOIN plainto_tsquery('pg_catalog.simple', $2) AS tsq";
+
+/// tsvector の道の WHERE の当て方と、その値（`$1` は project_id、`$2` は検索語の全体、`$3` はその ILIKE のパターン）。
 ///
-/// 今どおりの「検索語の全体を `plainto_tsquery` で当てる」に、`@名` の語ごとに「その語の文字か、
-/// 境の中のその名の者の印を含む」を AND で束ね、残りの語の当てと合わせた形を OR で足す。
+/// 今どおりの「検索語の全体を tsvector、部分一致（ILIKE）、表記ゆれ（`<%`）のどれかで当てる」に、
+/// `@名` の語ごとに「その語の文字か、境の中のその名の者の印を含む」を AND で束ね、
+/// 残りの語の当てと合わせた形を OR で足す。
+/// 語の文字の当て方は、検索語の全体と同じ三つの OR に揃える（語の当て方だけが狭いと、
+/// メンションを含む検索だけ当たり方が変わるため）。
 fn tsvector_match(
     project_id: Uuid,
     query: &str,
@@ -316,15 +321,28 @@ fn tsvector_match(
         values.push(value);
         format!("${}", values.len())
     }
-    let mut values: Vec<sea_orm::Value> = vec![project_id.into(), query.into()];
-    let mut matched = "search_vector @@ plainto_tsquery('pg_catalog.simple', $2)".to_string();
+    /// 一語を、tsvector、部分一致、表記ゆれのどれかで当てる形（値を二つ使う）。
+    fn text_match(text: &str, values: &mut Vec<sea_orm::Value>) -> String {
+        let t = placeholder(text.into(), values);
+        let p = placeholder(ilike_pattern(text).into(), values);
+        format!(
+            "(search_vector @@ plainto_tsquery('pg_catalog.simple', {t}) \
+             OR title ILIKE {p} ESCAPE '\\' \
+             OR COALESCE(description, '') ILIKE {p} ESCAPE '\\' \
+             OR {t} <% title)"
+        )
+    }
+    let mut values: Vec<sea_orm::Value> =
+        vec![project_id.into(), query.into(), ilike_pattern(query).into()];
+    let mut matched = "(search_vector @@ tsq \
+         OR title ILIKE $3 ESCAPE '\\' \
+         OR COALESCE(description, '') ILIKE $3 ESCAPE '\\' \
+         OR $2 <% title)"
+        .to_string();
     if let Some(mentions) = mentions {
         let mut all = Vec::new();
         for (name, ids) in &mentions.terms {
-            let text = placeholder(format!("@{name}").into(), &mut values);
-            let mut any = vec![format!(
-                "search_vector @@ plainto_tsquery('pg_catalog.simple', {text})"
-            )];
+            let mut any = vec![text_match(&format!("@{name}"), &mut values)];
             for id in ids {
                 let marker = placeholder(marker_pattern(id).into(), &mut values);
                 any.push(format!("COALESCE(description, '') LIKE {marker}"));
@@ -332,10 +350,7 @@ fn tsvector_match(
             all.push(format!("({})", any.join(" OR ")));
         }
         if !mentions.rest.is_empty() {
-            let rest = placeholder(mentions.rest.clone().into(), &mut values);
-            all.push(format!(
-                "search_vector @@ plainto_tsquery('pg_catalog.simple', {rest})"
-            ));
+            all.push(text_match(&mentions.rest, &mut values));
         }
         matched = format!("({matched} OR ({}))", all.join(" AND "));
     }
@@ -354,7 +369,7 @@ async fn search_tasks_tsvector(
     offset: u64,
 ) -> Result<Json<SearchTasksResponse>, AppError> {
     let (where_clause, values) = tsvector_match(project_id, query, mentions);
-    let count_sql = format!("SELECT COUNT(*)::bigint AS cnt FROM tasks WHERE {where_clause}");
+    let count_sql = format!("SELECT COUNT(*)::bigint AS cnt {TSVECTOR_FROM} WHERE {where_clause}");
     let count_result = state
         .db
         .query_one_raw(Statement::from_sql_and_values(
@@ -372,12 +387,15 @@ async fn search_tasks_tsvector(
     let limit_at = values.len();
     values.push((offset as i64).into());
     let offset_at = values.len();
+    // ts_rank（0.1 前後）と word_similarity（0.6〜1.0）は値域が揃わないので、
+    // タイトル一致を第 1 キーにして大小比較を同じ一致種別の中に閉じる。
     // score は同値が頻発する。並びが一意でないと offset のページ境界で行が重複・欠落する
     let search_sql = format!(
         "SELECT id, seq_id, title, description, \
-                ts_rank(search_vector, plainto_tsquery('pg_catalog.simple', $2))::real AS score \
-         FROM tasks WHERE {where_clause} \
-         ORDER BY score DESC, id ASC LIMIT ${limit_at} OFFSET ${offset_at}"
+                GREATEST(ts_rank(search_vector, tsq), word_similarity($2, title))::real AS score \
+         {TSVECTOR_FROM} WHERE {where_clause} \
+         ORDER BY (title ILIKE $3 ESCAPE '\\' OR $2 <% title) DESC, score DESC, id ASC \
+         LIMIT ${limit_at} OFFSET ${offset_at}"
     );
     let rows = state
         .db
@@ -1105,18 +1123,26 @@ mod tests {
             rest: "仕様".into(),
         };
         let (clause, values) = tsvector_match(Uuid::nil(), "@alice 仕様", Some(&mentions));
-        assert_eq!(values.len(), 5);
-        assert!(clause.contains("plainto_tsquery('pg_catalog.simple', $3)"));
-        assert!(clause.contains("LIKE $4"));
-        assert!(clause.contains("plainto_tsquery('pg_catalog.simple', $5)"));
-        assert_eq!(values[3], sea_orm::Value::from(format!("%<@{id}>%")));
+        // $1 project_id、$2 検索語の全体、$3 そのパターン、$4 $5 `@alice` の語とそのパターン、
+        // $6 印、$7 $8 残りの語とそのパターン
+        assert_eq!(values.len(), 8);
+        assert!(clause.contains("plainto_tsquery('pg_catalog.simple', $4)"));
+        assert!(clause.contains("title ILIKE $5"));
+        assert!(clause.contains("$4 <% title"));
+        assert!(clause.contains("LIKE $6"));
+        assert!(clause.contains("plainto_tsquery('pg_catalog.simple', $7)"));
+        assert_eq!(values[4], sea_orm::Value::from("%@alice%".to_string()));
+        assert_eq!(values[5], sea_orm::Value::from(format!("%<@{id}>%")));
+        assert_eq!(values[7], sea_orm::Value::from("%仕様%".to_string()));
     }
 
     #[test]
     fn tsvector_match_without_mentions_keeps_plain_query() {
         let (clause, values) = tsvector_match(Uuid::nil(), "仕様", None);
-        assert_eq!(values.len(), 2);
-        assert!(!clause.contains("LIKE"));
+        assert_eq!(values.len(), 3);
+        assert_eq!(values[2], sea_orm::Value::from("%仕様%".to_string()));
+        assert!(!clause.contains("description, '') LIKE"));
+        assert!(clause.contains("search_vector @@ tsq"));
     }
 
     #[test]
@@ -1150,5 +1176,23 @@ mod tests {
     fn highlight_returns_the_plain_text_when_a_long_query_matches_nothing() {
         let highlight = highlight_ilike("題", Some("説明"), "どこにも無い長い検索語");
         assert_eq!(highlight, "題 説明");
+    }
+
+    #[test]
+    fn find_match_char_range_returns_none_when_query_is_longer_than_text() {
+        // 範囲外スライスで panic していた（検索語 8 文字 > 対象 4 文字）
+        assert_eq!(find_match_char_range("a b ", "a      b"), None);
+        assert_eq!(find_match_char_range("", "a"), None);
+    }
+
+    #[test]
+    fn find_match_char_range_matches_by_char_index() {
+        assert_eq!(
+            find_match_char_range("認証ログイン画面", "ログイン"),
+            Some((2, 6))
+        );
+        assert_eq!(find_match_char_range("OAuth", "oauth"), Some((0, 5)));
+        assert_eq!(find_match_char_range("abc", "abc"), Some((0, 3)));
+        assert_eq!(find_match_char_range("abc", "abd"), None);
     }
 }

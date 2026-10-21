@@ -7,6 +7,7 @@
 | [tenant-project-authz.md](./tenant-project-authz.md) | テナント / プロジェクト認可（`tenant_members`、メール招待、公開規則、不変条件） | 実装済み |
 | [personal-access-tokens-authz.md](./personal-access-tokens-authz.md) | Bearer 認証・認可（PAT の 2 層モデルとテナント/プロジェクト束縛、Koyori Desktop の Device Token） | 未実装 |
 | [redis-trust-boundary.md](./redis-trust-boundary.md) | Redis 信頼境界（セッション・WebAuthn チャレンジ） | 運用ガイド |
+| [task-similarity-search.md](./task-similarity-search.md) | タスクの曖昧検索・類似タスク候補（pg_trgm による title の trigram 類似度、`GET /tasks/similar`） | 設計中 |
 
 ## 開発環境セットアップ
 

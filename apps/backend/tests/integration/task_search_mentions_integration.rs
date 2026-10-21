@@ -157,15 +157,18 @@ async fn at_name_matches_description_mentioning_that_user() {
 
     // 他の語と並べれば、両方を満たす物だけが当たる
     let (ids, _) = fx.search(&format!("@{name} 見て")).await;
-    assert_eq!(ids, vec![hit]);
+    assert_eq!(ids, vec![hit.clone()]);
     let (ids, _) = fx.search(&format!("@{name} 頼まぬ")).await;
     assert!(ids.is_empty(), "{ids:?}");
 
-    // 名の一部では、印に当てぬ（`@` だけの語も同じ）
+    // 名の一部では、印に当てぬ
     let (ids, _) = fx.search(&format!("@{}", &name[..5])).await;
     assert!(ids.is_empty(), "{ids:?}");
+
+    // `@` だけの語は、名に引かず、文字で当てる。文字の当ては本文の生の字に及ぶので、
+    // 印の `<@` を含む説明文にだけ当たる（main の部分一致の当て方。誰の印かは引かれていない）
     let (ids, _) = fx.search("@").await;
-    assert!(ids.is_empty(), "{ids:?}");
+    assert_eq!(ids, vec![hit], "{ids:?}");
 }
 
 #[tokio::test]
