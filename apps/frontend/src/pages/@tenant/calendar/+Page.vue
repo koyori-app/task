@@ -329,6 +329,7 @@ function formatRangeDate(date: string) {
       :today="today"
       :time-zone="timeZone"
       :tenant-slug="tenantDisplayId"
+      :tenant-id="tenantId"
       :tasks="filtered.tasks"
       :load-tasks="schedule?.tasks"
       :members="filtered.members"
