@@ -14,6 +14,11 @@
   gap: 0.25rem;
   box-sizing: border-box;
   height: 1.25em;
+  /* 札は inline-flex の箱で、行の高さには margin の箱で効く。1.25em の札を中ほどに置くと、
+   * 字の形によっては行の下へわずかにはみ出し、行を広げる（14px の字、20px の行で 0.046875px）。
+   * 上下を 0.125em ずつ引いて margin の箱を 1em にし、行の中に収める。上下に同じだけ引くので、
+   * 札の見える大きさと位置は変わらない。 */
+  margin-block: -0.125em;
   padding: 0 0.5rem;
   border: 1px solid transparent;
   border-radius: 9999px;
