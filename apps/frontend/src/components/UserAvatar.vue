@@ -5,6 +5,7 @@ import { computed } from 'vue';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { avatarInitials } from '@/lib/initials';
 import {
+  USER_AVATAR_INACTIVE_CLASS,
   USER_AVATAR_INITIALS_CLASS,
   USER_AVATAR_SIZES,
   type UserAvatarSize,
@@ -69,7 +70,12 @@ const SHAPES = { full: 'rounded-full', md: 'rounded-md', lg: 'rounded-lg' } as c
 <template>
   <Avatar
     :class="
-      cn(USER_AVATAR_SIZES[size], SHAPES[shape], inactive && 'opacity-60 grayscale', props.class)
+      cn(
+        USER_AVATAR_SIZES[size],
+        SHAPES[shape],
+        inactive && USER_AVATAR_INACTIVE_CLASS,
+        props.class,
+      )
     "
   >
     <AvatarImage v-if="src" :src="src" :alt="decorative ? '' : name" />

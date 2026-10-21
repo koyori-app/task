@@ -7,8 +7,10 @@
  * - text ノードだけを分割する。code / inlineCode / link / linkReference / definition / html の
  *   内側は走査しない（コードブロックとインラインコードの中の `<@id>` は札にしない）
  * - 札の字は `mentionLabel`（コメントの札と同じ）。id は HTML に出さない
- * - 状態は class（`kfm-mention-member` / `-outside` / `-gone` / `-unknown`）で運ぶ。見た目は
- *   `style.css`（コメントの札 `CommentMention.vue` と同じ色）
+ * - 名で出る札は頭にアバター（`span.kfm-mention-avatar`。画像は `safeAvatarUrl` を通った URL だけ）を置く。
+ *   定型の句の札にはアバターを出さない（`mentionChip` の判じ。入力欄・コメントの札と同じ）
+ * - 状態は class（`kfm-mention-member` / `-outside` / `-gone` / `-unknown`）で運ぶ。ログイン中の
+ *   member と同じ id なら `kfm-mention-self` も付ける。見た目は `style.css` に集約する
  *
  * 表（id → 状態・名前）はプラグインの options ではなく vfile の `data.kfm.mentions` から読む
  * （processor は profile ごとに memoize されるため、`remark-kfm-task-ref` と同じ理由）。
@@ -20,12 +22,16 @@
 import type { Parent, PhrasingContent, Root, Text } from 'mdast';
 import { SKIP, visit } from 'unist-util-visit';
 
-import { findMarkers, lookup, mentionLabel, type MentionTable } from '@/lib/comment-mention';
+import { findMarkers, lookup, mentionChip, type MentionTable } from '@/lib/comment-mention';
+import { avatarInitials } from '@/lib/initials';
 
 const SKIP_TYPES = new Set(['code', 'inlineCode', 'link', 'linkReference', 'definition', 'html']);
 
 /** vfile の data.kfm に載せる描画時コンテキスト（_renderer.ts が process 時に渡す） */
-export type KfmMentionData = { readonly mentions?: MentionTable };
+export type KfmMentionData = {
+  readonly mentions?: MentionTable;
+  readonly currentUserId?: string | null;
+};
 
 /** 札の class。状態は既知の 4 つに限る（表の値をそのまま class にしない） */
 const STATUS_CLASS = {
@@ -34,12 +40,44 @@ const STATUS_CLASS = {
   gone: 'kfm-mention-gone',
 } as const;
 
+/**
+ * 札の頭のアバター（`UserAvatar` の xs と同じ丸）。頭文字は字の node にせず `data-initials` に載せ、
+ * CSS の `::before` で描く（コピーした文・読み上げに頭文字が混ざらぬ）。画像は安全な URL の時だけ
+ * `<img alt="">` を重ね、読み込めねば下の頭文字が見える。丸ごと `aria-hidden`（名は隣の字が担う）。
+ */
+function avatarNode(name: string, src: string | null): PhrasingContent {
+  return {
+    type: 'emphasis',
+    data: {
+      hName: 'span',
+      hProperties: {
+        className: ['kfm-mention-avatar'],
+        dataInitials: avatarInitials(name),
+        ariaHidden: 'true',
+      },
+    },
+    children: src
+      ? [
+          {
+            type: 'emphasis',
+            data: { hName: 'img', hProperties: { src, alt: '' } },
+            children: [],
+          },
+        ]
+      : [],
+  };
+}
+
 function readTable(data: Readonly<Record<string, unknown>>): MentionTable | undefined {
   const table = (data.kfm as KfmMentionData | undefined)?.mentions;
   return table !== null && typeof table === 'object' ? table : undefined;
 }
 
-function splitText(node: Text, table: MentionTable): PhrasingContent[] | undefined {
+function splitText(
+  node: Text,
+  table: MentionTable,
+  currentUserId?: string | null,
+): PhrasingContent[] | undefined {
   const markers = findMarkers(node.value);
   if (markers.length === 0) return undefined;
   const parts: PhrasingContent[] = [];
@@ -52,11 +90,19 @@ function splitText(node: Text, table: MentionTable): PhrasingContent[] | undefin
       user && Object.hasOwn(STATUS_CLASS, user.status)
         ? STATUS_CLASS[user.status]
         : 'kfm-mention-unknown';
+    const className = ['kfm-mention', statusClass];
+    if (user?.status === 'member' && currentUserId && marker.id === currentUserId.toLowerCase()) {
+      className.push('kfm-mention-self');
+    }
+    const chip = mentionChip(user, marker.id, currentUserId);
+    const children: PhrasingContent[] = [];
+    if (chip.avatar) children.push(avatarNode(chip.avatar.name, chip.avatar.src));
+    children.push({ type: 'text', value: chip.label });
     parts.push({
       // span を出すための入れ物（hName で置き換わる）。意味を持つ mdast ノードではない
       type: 'emphasis',
-      data: { hName: 'span', hProperties: { className: ['kfm-mention', statusClass] } },
-      children: [{ type: 'text', value: mentionLabel(user) }],
+      data: { hName: 'span', hProperties: { className } },
+      children,
     });
     last = marker.to;
   }
@@ -66,12 +112,13 @@ function splitText(node: Text, table: MentionTable): PhrasingContent[] | undefin
 
 export function remarkKfmMention() {
   return (tree: Root, file: { readonly data: Readonly<Record<string, unknown>> }): void => {
+    const data = file.data.kfm as KfmMentionData | undefined;
     const table = readTable(file.data);
     if (table === undefined) return;
     visit(tree, (node, index, parent) => {
       if (SKIP_TYPES.has(node.type)) return SKIP;
       if (node.type !== 'text' || parent === undefined || index === undefined) return;
-      const parts = splitText(node, table);
+      const parts = splitText(node, table, data?.currentUserId);
       if (parts === undefined) return;
       (parent as Parent).children.splice(index, 1, ...parts);
       // 差し込んだ札の内側へ降りない
@@ -88,5 +135,7 @@ export const kfmMentionSanitizeSchema = {
     'kfm-mention-outside',
     'kfm-mention-gone',
     'kfm-mention-unknown',
+    'kfm-mention-self',
+    'kfm-mention-avatar',
   ],
 } as const;

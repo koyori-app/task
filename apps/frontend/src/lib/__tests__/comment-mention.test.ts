@@ -6,9 +6,10 @@ import {
   fromClipboardHtml,
   lookup,
   markerOf,
+  mentionChip,
   mentionLabel,
   mentionTrigger,
-  splitBody,
+  safeAvatarUrl,
   toClipboardHtml,
   toPlainText,
   type MentionTable,
@@ -43,22 +44,6 @@ describe('findMarkers / markerOf', () => {
 
   it('大文字の id は小文字に揃えて返す', () => {
     expect(findMarkers(`<@${A.toUpperCase()}>`)[0].id).toBe(A);
-  });
-});
-
-describe('splitBody', () => {
-  it('地の文と札に分け、既存の素の @username は地の文のまま残す', () => {
-    const segments = splitBody(`@legacy さん ${markerOf(A)} へ`, table);
-    expect(segments).toEqual([
-      { kind: 'text', text: '@legacy さん ' },
-      { kind: 'mention', id: A, user: table[A] },
-      { kind: 'text', text: ' へ' },
-    ]);
-  });
-
-  it('表に無い id の user は undefined（不明な札になる）', () => {
-    const [segment] = splitBody(markerOf(B.replace('2', '3')), table);
-    expect(segment).toMatchObject({ kind: 'mention', user: undefined });
   });
 });
 
@@ -144,5 +129,67 @@ describe('クリップボードの札（toClipboardHtml / fromClipboardHtml）',
   it('script・style の中身は読まない', () => {
     const html = `<style>.x{}</style><script>alert(1)</script><span data-task-mention="1" data-user-id="${A}">@a</span>`;
     expect(fromClipboardHtml(html)).toBe(`<@${A}>`);
+  });
+});
+
+describe('mentionChip（札の見た目の判じ。KFM・入力欄・コメントの札が共に通る）', () => {
+  const ID = '11111111-1111-4111-8111-111111111111';
+
+  it('いま入れる者はアバター付き、本人なら self', () => {
+    const user = {
+      status: 'member',
+      name: 'alice',
+      avatar_url: 'https://cdn.example.com/a.png',
+    } as const;
+    expect(mentionChip(user, ID, ID.toUpperCase())).toEqual({
+      state: 'member',
+      self: true,
+      label: '@alice',
+      avatar: { name: 'alice', src: 'https://cdn.example.com/a.png', inactive: false },
+    });
+    expect(mentionChip(user, ID, null).self).toBe(false);
+  });
+
+  it('外れた者は灰色のアバター、本人でも self にせぬ', () => {
+    const chip = mentionChip({ status: 'outside', name: 'former', avatar_url: null }, ID, ID);
+    expect(chip.self).toBe(false);
+    expect(chip.avatar).toEqual({ name: 'former', src: null, inactive: true });
+  });
+
+  it('名の引けぬ者・表に無い者は定型の句だけでアバター無し', () => {
+    expect(mentionChip({ status: 'outside', name: null }, ID).avatar).toBeNull();
+    expect(mentionChip({ status: 'gone', name: null }, ID).avatar).toBeNull();
+    expect(mentionChip(undefined, ID)).toMatchObject({
+      state: 'unknown',
+      label: '@（不明な利用者）',
+      avatar: null,
+    });
+  });
+});
+
+describe('safeAvatarUrl', () => {
+  it('http(s) の絶対 URL と同じ origin の道だけを通す', () => {
+    expect(safeAvatarUrl('https://cdn.example.com/a.png')).toBe('https://cdn.example.com/a.png');
+    expect(safeAvatarUrl('http://cdn.example.com/a.png')).toBe('http://cdn.example.com/a.png');
+    expect(safeAvatarUrl('/v1/avatars/a.png')).toBe('/v1/avatars/a.png');
+    expect(safeAvatarUrl('data:image/png;base64,iVBORw0KGgo=')).toBe(
+      'data:image/png;base64,iVBORw0KGgo=',
+    );
+    for (const url of [
+      null,
+      undefined,
+      '',
+      'javascript:alert(1)',
+      'JAVASCRIPT:alert(1)',
+      'data:image/svg+xml;base64,PHN2Zz4=',
+      'data:image/svg+xml,<svg onload=alert(1)>',
+      'data:text/html;base64,PHNjcmlwdD4=',
+      'data:image/png;base64,AA"onerror="x',
+      '//evil.example.com/a.png',
+      '/\\evil.example.com/a.png',
+      'a.png',
+    ]) {
+      expect(safeAvatarUrl(url), String(url)).toBeNull();
+    }
   });
 });

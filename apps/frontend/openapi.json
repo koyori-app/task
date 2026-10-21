@@ -25426,7 +25426,8 @@
         "required": ["status"],
         "properties": {
           "avatar_url": {
-            "type": ["string", "null"]
+            "type": ["string", "null"],
+            "description": "アイコンの URL。名前と同じ境で返す（`member` と、名前を返す `outside`）。それ以外と、\nアイコンを持たぬ者は `null`。"
           },
           "name": {
             "type": ["string", "null"],

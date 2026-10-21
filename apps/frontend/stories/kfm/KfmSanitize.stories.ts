@@ -45,7 +45,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const ScriptDropped: Story = {
-  name: 'script は消える（フェンス内の同文は残る）',
+  name: 'script は要素にならず字で出る（フェンス内の同文は残る）',
   args: {
     html: `${scriptHtml}${sanitizeStoryProbe(
       '<p data-kfm-sanitize-probe="script">DOMPurify probe<script>alert(1)</script></p>',
@@ -55,14 +55,17 @@ export const ScriptDropped: Story = {
     docs: {
       description: {
         story:
-          '壊れたら: 「この下から消える:」の直後に何かが現れたら生 HTML が通っている。フェンス内のエスケープ済み script 文字列が消えたら通すべき側が壊れている。',
+          '壊れたら: 「字としてこの下に出る:」の直後の script が字でなく要素になる・実行されると生 HTML が通っている。フェンス内のエスケープ済み script 文字列が消えたら通すべき側が壊れている。',
       },
     },
   },
   play: async ({ canvasElement }) => {
     await expect(canvasElement.querySelector('[data-kfm-sanitize-probe="script"]')).not.toBeNull();
-    // 通してはならぬもの: script 要素は DOM に存在しない
+    // 通してはならぬもの: script 要素は DOM に存在しない。生 HTML は字として見える
     await expect(canvasElement.querySelector('script')).toBeNull();
+    await expect(canvasElement.querySelector(`.${KFM_CONTENT_CLASS}`)?.textContent).toContain(
+      '<script>alert(1)</script>',
+    );
     // 通すべきもの: フェンス内の同じ文字列はエスケープ済みテキストとして見えている
     await expect(canvasElement.querySelector('pre code')?.textContent).toContain(
       '<script>alert(1)</script>',
@@ -71,7 +74,7 @@ export const ScriptDropped: Story = {
 };
 
 export const InlineStyleDropped: Story = {
-  name: 'inline style は消える（強調は通る）',
+  name: 'inline style は効かず字で出る（強調は通る）',
   args: {
     html: `${inlineStyleHtml}${sanitizeStoryProbe(
       '<span data-kfm-sanitize-probe="inline-style" style="position:fixed;color:red">DOMPurify style probe</span>',
@@ -95,13 +98,15 @@ export const InlineStyleDropped: Story = {
     await expect(container?.querySelector('[style]')).toBeNull();
     // 通すべきもの: markdown の強調は要素として生きている
     await expect(container?.querySelector('strong')?.textContent).toBe('強調は通る');
-    // inline 生 HTML はタグだけ落ち、テキストは無装飾で残る (絵では黒い素のテキスト)
-    await expect(container?.textContent).toContain('style 付き生 HTML');
+    // inline 生 HTML は tag も含めて字として出る (絵では黒い素のテキスト。赤くならぬ)
+    await expect(container?.textContent).toContain(
+      '<span style="color:red">style 付き生 HTML</span>',
+    );
   },
 };
 
 export const ClassSpoofDropped: Story = {
-  name: 'アプリ class の騙りは消える（正規 alert は通る）',
+  name: 'アプリ class の騙りは字で出る（正規 alert は通る）',
   args: {
     html: `${classSpoofHtml}${sanitizeStoryProbe(
       '<div data-kfm-sanitize-probe="class-spoof" class="modal-overlay">DOMPurify class probe</div>',
@@ -122,7 +127,8 @@ export const ClassSpoofDropped: Story = {
     // 正規 alert (プラグイン経由) のちょうど 1 つだけが callout になる
     await expect(canvasElement.querySelectorAll('.kfm-alert')).toHaveLength(1);
     await expect(canvasElement.querySelector('.kfm-alert--note')).not.toBeNull();
-    // 騙り側 (caution を名乗る生 HTML) は要素ごと消えている
+    // 騙り側 (caution を名乗る生 HTML) は要素にならず、字として出る
     await expect(canvasElement.querySelector('.kfm-alert--caution')).toBeNull();
+    await expect(canvasElement.textContent).toContain('<div class="kfm-alert kfm-alert--caution">');
   },
 };

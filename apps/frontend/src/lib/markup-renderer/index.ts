@@ -44,6 +44,7 @@ import remarkBreaks from 'remark-breaks';
 import { rehypeKfmCode } from '@/lib/rehype-kfm-code';
 import { remarkGfm } from '@/lib/remark-gfm';
 import { remarkKfmMermaid } from '@/lib/remark-kfm-mermaid';
+import { remarkKfmRawHtml } from '@/lib/remark-kfm-raw-html';
 import { remarkKfmMention } from '@/lib/remark-kfm-mention';
 import { remarkKfmTaskRef } from '@/lib/remark-kfm-task-ref';
 import { remarkKoyoriAlerts } from '@/lib/remark-koyori-alerts';
@@ -108,6 +109,7 @@ export const renderDescription = createRenderer({
       // 後ろ (alerts は先頭 text の position で原文照合するため、先に分割すると alert 化しない)。
       // remarkKfmMention も同じ位置（印は text ノードの分割で札にする。表が渡されぬ描画では何もしない）。
       remarkPlugins: [
+        remarkKfmRawHtml,
         remarkGfm,
         remarkKoyoriAlerts,
         remarkKfmMermaid,
@@ -124,6 +126,7 @@ export const renderDescription = createRenderer({
     // remarkBreaks は mdast の text 内改行を break へ割るだけで、他プラグインと干渉しない。
     comment: {
       remarkPlugins: [
+        remarkKfmRawHtml,
         remarkGfm,
         remarkKoyoriAlerts,
         remarkKfmMermaid,

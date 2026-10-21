@@ -211,29 +211,31 @@ describe('renderDescription (改行コード不変条件: LF と CRLF は同一 
 });
 
 describe('renderDescription (安全 core)', () => {
-  it('markdown 中の生 HTML は黙って消える (allowDangerousHtml 不使用)', async () => {
+  // 生 HTML (allowDangerousHtml 不使用) は要素にならず、escape した字として出る
+  // (remark-kfm-raw-html。詳細は kfm-raw-html テスト)。
+  it('markdown 中の生 HTML は字として出る (要素にならず、style / class も効かぬ)', async () => {
     const html = await renderDescription(
       '前\n\n<div style="color:red" class="modal-overlay">生HTML</div>\n\n後',
     );
-    expect(html).toContain('前');
-    expect(html).toContain('後');
-    expect(html).not.toContain('style=');
-    expect(html).not.toContain('modal-overlay');
-    expect(html).not.toContain('生HTML');
+    expect(html).toContain('<p>前</p>');
+    expect(html).toContain('<p>後</p>');
+    expect(html).toContain('&lt;div style="color:red" class="modal-overlay"&gt;生HTML&lt;/div&gt;');
+    expect(html).not.toContain('<div');
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    expect(doc.querySelector('[style]')).toBeNull();
+    expect(doc.querySelector('.modal-overlay')).toBeNull();
   });
 
-  it('block の script は丸ごと消える', async () => {
+  it('block の script は要素にならず字として出る', async () => {
     const html = await renderDescription('前\n\n<script>alert(1)</script>\n\n後');
     expect(html).not.toContain('<script');
-    expect(html).not.toContain('alert(1)');
+    expect(html).toContain('<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>');
   });
 
-  it('inline の script はタグが消え、中身は実行不能な平文としてのみ残る', async () => {
+  it('inline の script も要素にならず、tag も中身も字として出る', async () => {
     const html = await renderDescription('こちら <script>alert(1)</script> です');
     expect(html).not.toContain('<script');
-    // inline raw HTML はタグ 2 つの html ノードに分割され (中間テキストは text ノード)、
-    // html ノードだけが落ちる。平文 alert(1) は <p> 内テキストで実行経路を持たない。
-    expect(html).toContain('<p>こちら alert(1) です</p>');
+    expect(html).toContain('<p>こちら &lt;script&gt;alert(1)&lt;/script&gt; です</p>');
   });
 
   it('MFM 構文 ($[...] / :emoji: / @mention / #hashtag) は Phase 1 では素通し (装飾しない)', async () => {

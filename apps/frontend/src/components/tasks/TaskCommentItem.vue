@@ -179,14 +179,13 @@ async function confirmDelete() {
       </div>
     </div>
 
-    <!-- コメント本文は素テキスト表示（whitespace-pre-wrap）。v-html は使わない。
-         `<@利用者ID>` の印だけを `@今の名` の札に描く -->
+    <!-- CommentBody が KFM 描画と sanitize の唯一の境界になる。 -->
     <CommentBody
       v-else
       :body="comment.body ?? ''"
+      :comment-id="comment.id"
       :mentions="mentions"
       :current-user-id="currentUserId"
-      :profile-href="profileHref"
     />
 
     <div

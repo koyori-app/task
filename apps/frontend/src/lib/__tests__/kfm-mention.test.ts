@@ -17,14 +17,17 @@ const mentions: MentionTable = {
 const render = (text: string, table: MentionTable | null = mentions) =>
   renderDescription(text, table === null ? {} : { mentions: table });
 
-const chip = (status: string, label: string) =>
-  `<span class="kfm-mention kfm-mention-${status}">${label}</span>`;
+// 名で出る札は頭にアバター（頭文字は data-initials。画像が無ければ img は出ない）
+const chip = (status: string, label: string, initials?: string) =>
+  initials === undefined
+    ? `<span class="kfm-mention kfm-mention-${status}">${label}</span>`
+    : `<span class="kfm-mention kfm-mention-${status}"><span class="kfm-mention-avatar" data-initials="${initials}" aria-hidden="true"></span>${label}</span>`;
 
 describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
   it('印を札にする（id は HTML に出ず、状態は class で運ぶ）', async () => {
     const html = await render(`見て <@${A}> と <@${B}> へ`);
     expect(html).toBe(
-      `<p>見て ${chip('member', '@alice')} と ${chip('outside', '@former')} へ</p>`,
+      `<p>見て ${chip('member', '@alice', 'AL')} と ${chip('outside', '@former', 'FO')} へ</p>`,
     );
     expect(html).not.toContain(A);
     expect(html).not.toContain('&lt;@');
@@ -42,10 +45,30 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
     expect(html).toBe(`<p>${chip('gone', '@（退会した利用者）')}</p>`);
   });
 
+  it('ログイン中の member への札だけを強調し、キャッシュでも他の閲覧者と混ぜない', async () => {
+    const source = `<@${A}> <@${B}>`;
+    const self = await renderDescription(source, {
+      scope: 'comment-1',
+      profile: 'comment',
+      mentions,
+      currentUserId: A,
+    });
+    const otherViewer = await renderDescription(source, {
+      scope: 'comment-1',
+      profile: 'comment',
+      mentions,
+      currentUserId: B,
+    });
+    expect(self).toContain('kfm-mention-member kfm-mention-self');
+    expect(otherViewer).not.toContain('kfm-mention-member kfm-mention-self');
+    expect(self).not.toBe(otherViewer);
+  });
+
   it('強調・リスト・見出しの内側でも札にする', async () => {
-    expect(await render(`**<@${A}>**`)).toBe(`<p><strong>${chip('member', '@alice')}</strong></p>`);
-    expect(await render(`- <@${A}>`)).toContain(chip('member', '@alice'));
-    expect(await render(`# <@${A}>`)).toContain(chip('member', '@alice'));
+    const alice = chip('member', '@alice', 'AL');
+    expect(await render(`**<@${A}>**`)).toBe(`<p><strong>${alice}</strong></p>`);
+    expect(await render(`- <@${A}>`)).toContain(alice);
+    expect(await render(`# <@${A}>`)).toContain(alice);
   });
 
   it('コードブロックとインラインコードの中の印は札にしない（印の文字のまま）', async () => {
@@ -98,5 +121,75 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
     });
     expect(html).not.toContain('<img');
     expect(html).toContain('&lt;img');
+  });
+  it('アバターの画像は安全な URL の時だけ img にし、alt は空（名は隣の字が担う）', async () => {
+    const html = await render(`<@${A}>`, {
+      [A]: { status: 'member', name: 'alice', avatar_url: 'https://cdn.example.com/a.png' },
+    });
+    expect(html).toBe(
+      '<p><span class="kfm-mention kfm-mention-member"><span class="kfm-mention-avatar" data-initials="AL" aria-hidden="true">' +
+        '<img src="https://cdn.example.com/a.png" alt=""></span>@alice</span></p>',
+    );
+    const local = await render(`<@${A}>`, {
+      [A]: { status: 'member', name: 'alice', avatar_url: '/v1/avatars/a.png' },
+    });
+    expect(local).toContain('<img src="/v1/avatars/a.png" alt="">');
+  });
+
+  it('危ない URL のアバターは img にせず頭文字の丸に倒す', async () => {
+    for (const url of [
+      'javascript:alert(1)',
+      'data:image/svg+xml,<svg onload=alert(1)>',
+      '//evil.example.com/a.png',
+      'avatar.png',
+      'vbscript:msgbox(1)',
+    ]) {
+      const html = await render(`<@${A}>`, {
+        [A]: { status: 'member', name: 'alice', avatar_url: url },
+      });
+      expect(html, url).not.toContain('<img');
+      expect(html, url).toContain('data-initials="AL"');
+    }
+  });
+
+  it('URL や名に混ぜた字は属性の外へ出ない（img に別の属性が生えぬ）', async () => {
+    const html = await render(`<@${A}>`, {
+      [A]: {
+        status: 'member',
+        name: '"><img src=x onerror=alert(1)>',
+        avatar_url: 'https://cdn.example.com/a.png" onerror="alert(1)',
+      },
+    });
+    expect(html).not.toContain('onerror="');
+    expect(html).not.toContain('<img src=x');
+    expect(html.match(/<img /g)).toHaveLength(1);
+    expect(html).toContain('src="https://cdn.example.com/a.png%22%20onerror=%22alert(1)"');
+  });
+
+  it('外れた者は灰色の札に灰色のアバター、名の引けぬ者と退会した者はアバター無し', async () => {
+    const html = await render(`<@${B}> <@${C}>`, {
+      [B]: { status: 'outside', name: 'former', avatar_url: 'https://cdn.example.com/b.png' },
+      [C]: { status: 'outside', name: null, avatar_url: null },
+    });
+    expect(html).toContain(
+      '<span class="kfm-mention kfm-mention-outside"><span class="kfm-mention-avatar"',
+    );
+    expect(html).toContain('<img src="https://cdn.example.com/b.png" alt="">');
+    expect(html).toContain(chip('outside', '@（このプロジェクトの外の利用者）'));
+    expect(await render(`<@${A}>`, { [A]: { status: 'gone', name: null } })).not.toContain(
+      'kfm-mention-avatar',
+    );
+    expect(await render(`<@${A}>`, {})).not.toContain('kfm-mention-avatar');
+  });
+
+  it('アイコンが替われば別の HTML（キャッシュが画像を取り違えない）', async () => {
+    const before = await render(`<@${A}>`, {
+      [A]: { status: 'member', name: 'alice', avatar_url: 'https://cdn.example.com/1.png' },
+    });
+    const after = await render(`<@${A}>`, {
+      [A]: { status: 'member', name: 'alice', avatar_url: 'https://cdn.example.com/2.png' },
+    });
+    expect(before).toContain('1.png');
+    expect(after).toContain('2.png');
   });
 });

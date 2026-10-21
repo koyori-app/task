@@ -177,10 +177,11 @@ export const KFM_STORY_INPUTS = {
 
   'alerts-unknown-type': ['> [!HINT]', '> 未知の型は素の blockquote のまま。'].join('\n'),
 
-  // 通してはならぬもの (生 HTML の script) と、通すべきもの (フェンス内の同じ文字列が
-  // エスケープ済みテキストとして見えること) を同じ絵に並べる。
+  // 通してはならぬもの (生 HTML の script は要素にならぬ) と、通すべきもの (フェンス内の
+  // 同じ文字列がエスケープ済みテキストとして見えること) を同じ絵に並べる。生 HTML は
+  // 落とさず escape した字として出る (remark-kfm-raw-html) ので、script も字として見える。
   'sanitize-script': [
-    '生 HTML の script はこの下から消える:',
+    '生 HTML の script は要素にならず、字としてこの下に出る:',
     '',
     '<script>alert(1)</script>',
     '',
@@ -191,18 +192,18 @@ export const KFM_STORY_INPUTS = {
     '```',
   ].join('\n'),
 
-  // inline style 付き生 HTML の落ち方は要素で違う: block の div は要素ごと消えるが、
-  // inline の span はタグだけ落ちて中のテキストが素の文として残る (rendered fixture 参照)。
-  // どちらも style は絵に現れない。markdown の強調は通る。
+  // inline style 付き生 HTML は、block の div も inline の span も要素にならず、tag を含めて
+  // 字として出る (rendered fixture 参照)。style は効かぬ (絵は黒い素の字)。markdown の強調は通る。
   'sanitize-inline-style': [
-    '**強調は通る**。次の行の赤字指定 (inline style) は絵に現れない:',
+    '**強調は通る**。次の行の赤字指定 (inline style) は効かず、字として出る:',
     '',
     '<span style="color:red">style 付き生 HTML</span>',
     '',
     '<div style="position:fixed;inset:0">画面を覆う style 付き生 HTML</div>',
   ].join('\n'),
 
-  // アプリ側クラスの騙り: 生 HTML で kfm-alert を名乗っても alert の絵は増えない。
+  // アプリ側クラスの騙り: 生 HTML で kfm-alert を名乗っても alert の絵は増えない
+  // (名乗った生 HTML は要素にならず、字として出る)。
   // 正規の alert (プラグイン経由) だけが callout になる。
   // タスク詳細ページ story (Pages/TaskDetail の DescriptionKfmRendered) の入力対。
   // story は本番同様 descriptionHtml/descriptionSource の対で受けるため、
