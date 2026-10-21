@@ -186,9 +186,9 @@ GET /v1/tenants/{tenant_id}/projects/{project_id}/tasks/similar?title=ログイ�
 |---|---|
 | ③ `CreateTaskDialog.vue` | タイトル入力を 300ms debounce（`tasks/+Page.vue` の `SEARCH_DEBOUNCE_MS` と同じ手法）して問い合わせ。タイトル欄の下に最大 5 件を `TaskTitleLink` で表示。**作成はブロックしない**（注意喚起のみ。取得失敗時も作成できる）。`TaskTitleLink` と `taskDetailHref` は **表示用の tenant ID** を使い、ダイアログは API 用 UUID の `tenantId` しか持たないので、ダイアログ内で `usePageContext().routeParams.tenant` を読む（他の component 層でも使っている手法。これで `DashboardCreateTask.vue` / `HomeDashboard.vue` の変更が不要）。unit テストが pageContext を provide できなければ props `tenantDisplayId` を足して呼び出し元から渡す。`TaskTitleLink` は通常クリックで遷移せず `select` を emit するので、ダイアログ側で受けて `navigate(taskDetailHref(tenantDisplayId, projectKey, seqId))` し、ダイアログを閉じる |
 | ② タスク詳細 | 「似ているタスク」欄。`TaskDetailHub.vue` は tenant id を受け取っていないため、Hub 内ではなく **呼び出し側** が既存の `main` slot に置く。`tasks/@taskId/+Page.vue` では `select` で `navigate`、`TaskDetailPane.vue` では既存の `open-task-ref` emit に繋ぐ（ペイン内でタスクを切り替える既存経路）。形は `{ projectKey, seqKey, href }` なので、候補の `seq_id` から `taskSeqKey()` と `taskDetailHref()` で組み立てる（`open-task` は `TaskResponse` 全体を要求するので候補では使えない）。`title` に現在のタイトル、`excludeTaskId` に自分の id。0 件なら欄ごと非表示 |
+| ① | 変更なし（同じエンドポイント） |
 
 **古い応答を見せない**: TanStack Query は `enabled: false` にしてもキャッシュ済みの `data` を返すので、無効化では消えない。query key に tenant / project / title / excludeTaskId を全部含め（key が変われば `data` は新しい key のものになる）、遅れて届いた旧応答は旧 key に保存されて表示されない。残る隙間は debounce 中の 300ms だけなので、表示条件は「ダイアログが開いている ∧ `debouncedTitle === title.trim()` ∧ 2 文字以上」にする。詳細のタスク切替も key が変わるので持ち越さない。
-| ① | 変更なし（同じエンドポイント） |
 
 `DashboardCreateTask.vue` は同じ `CreateTaskDialog` を開くので、③の変更がそのまま効く。
 
@@ -243,7 +243,7 @@ PR 2 と 3 は 1 本にまとめてもよい（API 単体では利用者が居�
 | 指摘 | 見送った理由 |
 |---|---|
 | 「migration → `sync()` → 再起動」を通して index と拡張が維持されることを検証するテスト（専用ハーネス、または e2e への 1 ケース追加） | `sync()` が落とすのは UNIQUE index だけで拡張は触らない（sea-orm 2.0.4 `schema/builder.rs`）ことはソースで確認済み。migration の適用は既存 e2e の起動で踏まれ、失敗すれば全ケース落ちる。e2e は現状 users しか seed せず検索 UI までの fixture も無いので 1 ケースでは済まず、index の有無は検索結果に出ないので index の検証にもならない |
-| ハーネスでの `show_trgm('日本語テスト')` 非空テスト | §8 ①の日本語部分一致テストがロケール C なら落ちるので二重。負のケース（C ロケールで migration が止まる）は手元では試験しない |
+| ハーネスでの `show_trgm('日本語テスト')` 非空テスト | ロケールの保証は §4 のマイグレーション内の `show_trgm` 検査が担う。§8 ①の日本語部分一致テストでは代わりにならない（§6 の `ILIKE` の条件がロケール C でも一致するので、trigram が作られなくても通る）。負のケース（C ロケールで migration が止まる）は手元では試験しない |
 | GiST index への変更 | 性能問題が実測で出てから判断する（§11） |
 | `CREATE INDEX CONCURRENTLY` | sea-orm-migration 2.0.4 では `use_transaction()` を `Some(false)` にすれば実装できる。ただし失敗時に INVALID index が残る片付けが要り、更新デプロイ中に旧 backend が動いたまま構築されても title のみの GIN で現状の件数なら書き込み待ちは秒単位なので、単純な `CREATE INDEX` を採る（§4）。待ちが問題になる規模になったら切り替える |
 | PAT のテナント・プロジェクト束縛や project-only guest の許可範囲の網羅試験 | `search_tasks` と同じ `ensure_tenant_access` を通すので新しい認可規則は増えない。既存の認可テストが担う範囲を重複して書かない。`ReadTask` 無し PAT の 403 と別テナント project id の拒否だけ §8 に足した |
