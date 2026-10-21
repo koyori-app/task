@@ -84,6 +84,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::tasks::list_tasks))
                         .routes(routes!(crate::handlers::tasks::create_task))
                         .routes(routes!(crate::handlers::task_extensions::search_tasks))
+                        .routes(routes!(crate::handlers::task_extensions::similar_tasks))
                         .routes(routes!(crate::handlers::task_extensions::bulk_update_tasks))
                         .routes(routes!(crate::handlers::tasks::get_task))
                         .routes(routes!(crate::handlers::tasks::update_task))

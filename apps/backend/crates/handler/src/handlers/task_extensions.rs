@@ -83,6 +83,59 @@ pub async fn search_tasks(
     }
 }
 
+#[axum::debug_handler]
+#[utoipa::path(
+    get,
+    path = "/similar",
+    tag = "Tasks",
+    summary = "類似タスク候補",
+    description = "同一プロジェクト内で title が似ているタスクを類似度の高い順に返す。",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        SimilarTasksQuery,
+    ),
+    responses(
+        (status = 200, description = "類似タスク候補", body = SimilarTasksResponse),
+        CrudErrors,
+    )
+)]
+pub async fn similar_tasks(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+    Query(q): Query<SimilarTasksQuery>,
+) -> Result<Json<SimilarTasksResponse>, AppError> {
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
+
+    let title = q.title.trim();
+    // CreateTaskRequest の title と同じ上限。長い入力の trigram 比較コストも抑える
+    if title.is_empty() || title.chars().count() > 255 {
+        return Err(AppError::BadRequest);
+    }
+
+    let tasks = service::tasks::find_similar(
+        &state.db,
+        project_id,
+        title,
+        q.exclude_task_id,
+        q.limit.min(20),
+    )
+    .await?
+    .into_iter()
+    .map(|t| SimilarTaskHit {
+        id: t.id,
+        seq_id: t.seq_id,
+        title: t.title,
+        score: t.score,
+    })
+    .collect();
+
+    Ok(Json(SimilarTasksResponse { tasks }))
+}
+
 async fn search_tasks_ilike(
     state: &AppState,
     project_id: Uuid,
