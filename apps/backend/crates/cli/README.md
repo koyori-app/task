@@ -119,7 +119,13 @@ task tasks list --project TASK --page 2 --limit 100
 task tasks list --project TASK --status Todo --label bug --sort deadline_asc
 task tasks list --project TASK --archived
 task tasks search --project TASK ページング
+task tasks search --project TASK @alice      # alice を印でメンションした説明文にも当たる
+task tasks show TASK-181                     # 説明文のメンションは @今の名 で出る
+task tasks show TASK-181 --raw               # 保存されたまま（<@利用者ID> の印）で出す
 ```
+
+`tasks show` は説明文のメンションの印を `@今の名` に戻して出す。それを `tasks update --description` へ
+そのまま戻すとメンションが素の文字になるので、書き換えて戻すときは `--raw` で印のまま取る（`--json` でも同じ）。
 
 `--status` / `--label` / `--assignee` / `--milestone` / `--sprint` は名前または UUID で指せる。
 名前は完全一致を優先し、それがなければ大文字小文字を無視して照合する。候補が複数あるときは

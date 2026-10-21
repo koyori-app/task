@@ -198,14 +198,18 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 .await?;
             print(&task_for_display(created), output);
         }
-        TasksCommand::Show { task_ref, project } => {
+        TasksCommand::Show {
+            task_ref,
+            project,
+            raw,
+        } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
             let api = &context.connect()?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let task: TaskDetailResponse = api
                 .get(&borrow(&task_path(api, project.id, &task_id)), &[])
                 .await?;
-            print(&task_for_display(task), output);
+            print(&task_for_show(task, raw), output);
         }
         TasksCommand::Update {
             task_ref,
@@ -881,6 +885,17 @@ fn task_for_display(mut detail: TaskDetailResponse) -> TaskDetailResponse {
     detail
 }
 
+/// `tasks show` の出す形。既定は `@今の名` に戻す。`--raw` なら保存されたままの本文（印を含む）を出す。
+/// 印のままの本文は、書き換えて `tasks update` へ戻しても、メンションが名の文字に落ちぬ。
+/// `--json` でも同じに従う（`mentions` の表はどちらでも載る）。
+fn task_for_show(detail: TaskDetailResponse, raw: bool) -> TaskDetailResponse {
+    if raw {
+        detail
+    } else {
+        task_for_display(detail)
+    }
+}
+
 /// 一覧は説明文の `mentions` の表を持たぬので、印は id を出さぬ定型の句に落とす。
 fn tasks_for_display(mut list: TaskListResponse) -> TaskListResponse {
     let none = payload::mentions::MentionMap::new();
@@ -1285,6 +1300,23 @@ mod tests {
         // 出力に印が残らぬこと（`mentions` の表は id → 名前の対応として残るが、本文には id が出ない）
         let out = crate::output::render(&shown, crate::output::OutputOptions::new(true));
         assert!(!out.contains("<@"), "{out}");
+    }
+
+    #[test]
+    fn task_show_raw_keeps_markers_and_default_shows_names() {
+        let alice = Uuid::new_v4();
+        let body = format!("<@{alice}> へ確認");
+        let table = json!({
+            alice.to_string(): { "status": "member", "name": "alice", "avatar_url": null },
+        });
+
+        let raw = task_for_show(task_detail_with(&body, table.clone()), true);
+        assert_eq!(raw.task.description.as_deref(), Some(body.as_str()));
+        let out = crate::output::render(&raw, crate::output::OutputOptions::new(true));
+        assert!(out.contains(&format!("<@{alice}>")), "{out}");
+
+        let shown = task_for_show(task_detail_with(&body, table), false);
+        assert_eq!(shown.task.description.as_deref(), Some("@alice へ確認"));
     }
 
     #[test]
