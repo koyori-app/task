@@ -670,16 +670,19 @@ async fn removed_tenant_member_does_not_hold_last_project_admin_slot() {
         );
     }
 
-    // alice をプロジェクト唯一の Admin にする
-    assert_eq!(
-        app.post_json_with_session(
-            &project_members_path,
-            serde_json::json!({ "user_id": alice.id, "role": "Admin" }),
-        )
-        .await
-        .status(),
-        StatusCode::CREATED
-    );
+    // bob を Viewer、alice をプロジェクト唯一の Admin にする。他のメンバー（bob）が残るので、
+    // 最後の 1 行を外して継承へ戻す例外には当たらない
+    for (user, role) in [(&bob, "Viewer"), (&alice, "Admin")] {
+        assert_eq!(
+            app.post_json_with_session(
+                &project_members_path,
+                serde_json::json!({ "user_id": user.id, "role": role }),
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+    }
 
     // テナントに居るあいだは最後の Admin として守られる（過剰に許可していないこと）
     assert_eq!(
@@ -715,6 +718,14 @@ async fn removed_tenant_member_does_not_hold_last_project_admin_slot() {
             .status(),
         StatusCode::NO_CONTENT,
         "テナントに居ない Admin は最後の Admin として数えない"
+    );
+
+    // 残った bob の行も外し、メンバー未指定（継承）に戻す
+    assert_eq!(
+        app.delete_with_session(&format!("{project_members_path}/{}", bob.id))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
     );
 
     // 後始末が済んだので、メンバー未指定に戻ったプロジェクトはテナントメンバーに開放される

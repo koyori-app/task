@@ -9,6 +9,7 @@ import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts';
 import { renderOnServer, TRANSIENT_FAILURE_RETRIES } from '@/composables/useRenderedDescription';
 import type { components } from '@/generated/api';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
@@ -131,6 +132,16 @@ watch(
     resetDraft();
   },
   { immediate: true },
+);
+
+/** 閲覧画面（「タスクを作成」ボタン）が出ているか。テンプレートの分岐と T のショートカットで共有する */
+const canCreateTask = computed(
+  () =>
+    !isLoading.value &&
+    !isError.value &&
+    !isNotFound.value &&
+    !(editing.value && draftReady.value) &&
+    !!meta.value,
 );
 
 const dirty = computed(
@@ -352,6 +363,12 @@ function openCreateTask() {
   createTaskOpen.value = true;
 }
 
+useKeyboardShortcuts({
+  t: () => {
+    if (canCreateTask.value) openCreateTask();
+  },
+});
+
 async function onTaskCreated(task: CreatedTask) {
   createTaskOpen.value = false;
   // null はオフライン・切断で fetch が reject したとき
@@ -466,7 +483,7 @@ function taskHref(task: { seq_key: string; project: { key: string } }) {
     </form>
 
     <!-- 閲覧 -->
-    <div v-else-if="meta" class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
+    <div v-else-if="canCreateTask && meta" class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
       <article class="min-w-0">
         <header class="mb-4 flex flex-wrap items-start gap-2">
           <div class="min-w-0 flex-1">

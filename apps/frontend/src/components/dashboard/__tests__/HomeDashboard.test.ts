@@ -69,6 +69,11 @@ const json = (data: unknown, status = 200) =>
 function respond(request: Request, data: components['schemas']['DashboardResponse']) {
   return json(request.url.includes('/auth/me') ? { id: 'user', username: 'yupix' } : data);
 }
+const pressT = () =>
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 't', cancelable: true }));
+const createOpen = (wrapper: ReturnType<typeof setup>['wrapper']) =>
+  wrapper.findComponent({ name: 'DashboardCreateTask' }).exists() &&
+  wrapper.getComponent({ name: 'DashboardCreateTask' }).props('open');
 
 describe('HomeDashboard', () => {
   it('サーバーの集計件数を表示し、表示中の行だけで数え直さない', async () => {
@@ -222,5 +227,38 @@ describe('HomeDashboard', () => {
         .find((b) => b.text() === 'タスクを作成')!
         .attributes('disabled'),
     ).toBeDefined();
+  });
+
+  it('T でタスク作成モーダルを開く', async () => {
+    const { wrapper } = setup((req) => respond(req, fixture()));
+    await flushPromises();
+    pressT();
+    await flushPromises();
+    expect(createOpen(wrapper)).toBe(true);
+  });
+
+  it('プロジェクトが 0 件なら T でも開かない', async () => {
+    const { wrapper } = setup((req) => respond(req, { ...fixture(), projects: [] }));
+    await flushPromises();
+    pressT();
+    await flushPromises();
+    expect(createOpen(wrapper)).toBe(false);
+  });
+
+  it('取得に失敗したら T でも開かない', async () => {
+    let failed = false;
+    const { wrapper, client } = setup((req) =>
+      req.url.includes('/dashboard') && failed ? json({}, 503) : respond(req, fixture()),
+    );
+    await flushPromises();
+    failed = true;
+    await client.invalidateQueries({
+      queryKey: ['get', '/v1/tenants/{tenant_id}/users/me/dashboard'],
+    });
+    await flushPromises();
+    expect(wrapper.get('[role=alert]').text()).toContain('取得できませんでした');
+    pressT();
+    await flushPromises();
+    expect(createOpen(wrapper)).toBe(false);
   });
 });

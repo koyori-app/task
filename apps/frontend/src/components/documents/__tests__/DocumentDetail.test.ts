@@ -442,3 +442,84 @@ describe('DocumentDetail 通信の失敗', () => {
     );
   });
 });
+
+describe('DocumentDetail の T ショートカット', () => {
+  const pressT = () =>
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 't', cancelable: true }));
+  const createOpen = (wrapper: ReturnType<typeof mountDetail>) =>
+    wrapper.getComponent({ name: 'CreateTaskDialog' }).props('open');
+
+  it('閲覧中は T で作成ダイアログを開く', async () => {
+    const wrapper = mountDetail();
+    await flushPromises();
+    pressT();
+    await flushPromises();
+    expect(createOpen(wrapper)).toBe(true);
+  });
+
+  it('編集中は T で開かない', async () => {
+    const wrapper = mountDetail({ editing: true });
+    await flushPromises();
+    expect(wrapper.find('form').exists()).toBe(true);
+    pressT();
+    await flushPromises();
+    expect(createOpen(wrapper)).toBe(false);
+  });
+
+  it('読み込み中は T で開かず、読み込み後も勝手に開かない', async () => {
+    const original = globalThis.fetch;
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    vi.stubGlobal('fetch', async (input: Request | string, init?: RequestInit) => {
+      if (typeof input !== 'string' && new URL(input.url).pathname.endsWith('/drive/folders')) {
+        await gate;
+      }
+      return original(input, init);
+    });
+    const wrapper = mountDetail();
+    await flushPromises();
+    expect(wrapper.find('[aria-label="読み込み中"]').exists()).toBe(true);
+    pressT();
+    finish();
+    await flushPromises();
+    expect(wrapper.get('h1').text()).toBe('仕様');
+    expect(createOpen(wrapper)).toBe(false);
+  });
+
+  it('取得に失敗したら T で開かない', async () => {
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: Request | string, init?: RequestInit) => {
+      if (
+        typeof input !== 'string' &&
+        new URL(input.url).pathname.endsWith('/drive/files/file-1')
+      ) {
+        return Response.json({ message: 'x' }, { status: 500 });
+      }
+      return original(input, init);
+    });
+    const wrapper = mountDetail();
+    await flushPromises();
+    expect(wrapper.text()).toContain('ドキュメントが見つかりません');
+    pressT();
+    await flushPromises();
+    expect(createOpen(wrapper)).toBe(false);
+  });
+
+  it('対象外のファイルでは T で開かない', async () => {
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: Request | string, init?: RequestInit) => {
+      if (typeof input !== 'string' && new URL(input.url).pathname.endsWith('/drive/folders')) {
+        return Response.json([{ id: 'other-root' }]);
+      }
+      return original(input, init);
+    });
+    const wrapper = mountDetail();
+    await flushPromises();
+    expect(wrapper.text()).toContain('ドキュメントが見つかりません');
+    pressT();
+    await flushPromises();
+    expect(createOpen(wrapper)).toBe(false);
+  });
+});
