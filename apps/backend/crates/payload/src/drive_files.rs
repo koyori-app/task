@@ -31,11 +31,17 @@ pub fn file_etag(model: &drive_files::Model) -> String {
 
 /// `If-Match` / `If-None-Match` の 1 行が現在の ETag に一致するか。
 ///
-/// `*` は常に一致。カンマ区切りの複数指定はどれか 1 つの完全一致で一致とする。
-/// 弱い ETag（`W/"..."`）は完全一致しないので一致しない。
+/// `*` は常に一致。カンマ区切りの複数指定はどれか 1 つの一致で一致とする。
+/// 弱い ETag（`W/"..."`）は `W/` を外して比べる（弱い比較）。本文の ETag は内容のハッシュ
+/// （導入前の行は updated_at + size）なので弱い一致で十分で、Cloudflare などの中継が
+/// 圧縮時に強い ETag を弱くして返しても、それをそのまま `If-Match` に戻した保存を 412 にしない（TASK-336）。
 pub fn etag_matches(header_value: &str, current: &str) -> bool {
     let value = header_value.trim();
-    value == "*" || value.split(',').any(|tag| tag.trim() == current)
+    value == "*"
+        || value.split(',').any(|tag| {
+            let tag = tag.trim();
+            tag.strip_prefix("W/").unwrap_or(tag) == current
+        })
 }
 
 /// ファイル名の部分一致検索（`q`）の最大文字数。
@@ -208,8 +214,11 @@ mod tests {
     }
 
     #[test]
-    fn weak_etag_is_rejected() {
-        assert!(!etag_matches("W/\"sha256:abc\"", CURRENT));
-        assert!(!etag_matches("\"x\", W/\"sha256:abc\"", CURRENT));
+    fn weak_etag_matches_by_weak_comparison() {
+        assert!(etag_matches("W/\"sha256:abc\"", CURRENT));
+        assert!(etag_matches("\"x\", W/\"sha256:abc\"", CURRENT));
+        assert!(!etag_matches("W/\"sha256:abd\"", CURRENT));
+        // `W/` は先頭だけ。途中にあるものは別の値
+        assert!(!etag_matches("\"W/sha256:abc\"", CURRENT));
     }
 }

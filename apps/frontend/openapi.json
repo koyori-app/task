@@ -6551,7 +6551,7 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "現在の ETag（`etag` の値をそのまま。カンマ区切りで複数可、`*` は常に一致）。一致しなければ 412。省略時は無条件に上書きする",
+            "description": "現在の ETag（`etag` の値をそのまま。カンマ区切りで複数可、`*` は常に一致、`W/` 付きの弱い ETag は `W/` を外して比べる）。一致しなければ 412。省略時は無条件に上書きする",
             "required": false,
             "schema": {
               "type": ["string", "null"]
