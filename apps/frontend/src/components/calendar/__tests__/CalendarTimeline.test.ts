@@ -550,14 +550,20 @@ describe('CalendarTimeline', () => {
     });
 
     it('ドラッグした後の click ではタスク詳細へ遷移しない', async () => {
-      const wrapper = mountTimeline([movable()]);
+      const wrapper = mountTimeline([movable()], [ALICE, BOB], {}, document.body);
+      // vike は document の click でリンクを横取りするので、そこまで届かないことを見る
+      const reachedDocument = vi.fn();
+      document.addEventListener('click', reachedDocument);
       await bar(wrapper).trigger('pointerdown', { clientX: 0, button: 0 });
       await bar(wrapper).trigger('pointermove', { clientX: 300 });
       await bar(wrapper).trigger('pointerup');
       const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
       bar(wrapper).element.dispatchEvent(click);
+      document.removeEventListener('click', reachedDocument);
       expect(click.defaultPrevented).toBe(true);
+      expect(reachedDocument).not.toHaveBeenCalled();
       expect(wrapper.findComponent(CalendarTimeline).emitted('open-task')).toBeUndefined();
+      wrapper.unmount();
     });
   });
 });

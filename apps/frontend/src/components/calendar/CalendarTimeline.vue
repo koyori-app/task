@@ -443,6 +443,7 @@ function onTaskClick(task: ScheduleTask, event: MouseEvent) {
   if (suppressClick) {
     suppressClick = false;
     event.preventDefault();
+    event.stopPropagation();
     return;
   }
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
