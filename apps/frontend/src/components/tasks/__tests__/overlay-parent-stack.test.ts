@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { popOverlayParent, pushOverlayParent } from '../task-list-overlay-stack';
+import { popOverlayParent, pushOverlayParent } from '../overlay-parent-stack';
 
 describe('pushOverlayParent', () => {
   it('子を開くと今のタスクが積まれる', () => {

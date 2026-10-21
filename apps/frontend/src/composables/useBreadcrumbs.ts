@@ -2,16 +2,18 @@ import { computed, onScopeDispose, ref, toValue, type MaybeRefOrGetter } from 'v
 import { useQueryClient, type QueryKey } from '@tanstack/vue-query';
 import type { components } from '@/generated/api';
 import { useTenantStore } from '@/stores/tenant';
-import { LIST_PROJECTS_PATH } from '@/lib/api-vue-query';
+import { DRIVE_FILE_PATH, LIST_PROJECTS_PATH } from '@/lib/api-vue-query';
 import { GET_TASK_PATH } from '@/composables/useTaskDetail';
 import { TASK_RELATIONS_PATH } from '@/composables/useTaskSubtasks';
 import { breadcrumbRoute, breadcrumbSegments, type BreadcrumbState } from '@/lib/breadcrumbs';
+import { documentTitle } from '@/lib/documents/name';
 import { taskDetailHref, taskListHref } from '@/lib/task-display';
 
 type Tenant = components['schemas']['TenantListItemResponse'];
 type Project = components['schemas']['ProjectResponse'];
 type Task = components['schemas']['TaskDetailResponse'];
 type Relations = components['schemas']['TaskRelationsResponse'];
+type DriveFile = components['schemas']['DriveFileResponse'];
 
 /** 既存取得の購読だけを行う。ヘッダーのための query observer / 通信は作らない。 */
 export function useBreadcrumbs(
@@ -83,6 +85,26 @@ export function useBreadcrumbs(
     if (descriptor.kind === 'project') {
       return {
         segments: breadcrumbSegments([home, projectSegment, ...(current.name ? [current] : [])]),
+        loading: false,
+      };
+    }
+
+    if (descriptor.kind === 'document') {
+      // 詳細画面のメタデータ取得（driveFileQueryOptions）を購読する
+      const file = cached<DriveFile>([
+        'get',
+        DRIVE_FILE_PATH,
+        { params: { path: { tenant_id: tenant.id, id: params.fileId ?? '' } } },
+      ]);
+      if (file?.status === 'error') return empty;
+      if (!file?.data) return { ...empty, loading: true };
+      return {
+        segments: breadcrumbSegments([
+          home,
+          projectSegment,
+          { name: 'ドキュメント', href: `/${tenantSlug}/projects/${projectKey}/docs` },
+          { name: documentTitle(file.data.name), href: page.urlPathname },
+        ]),
         loading: false,
       };
     }

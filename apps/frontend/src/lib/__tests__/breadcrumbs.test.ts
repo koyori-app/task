@@ -19,6 +19,8 @@ describe('パンくずのルート台帳', () => {
     ['/acme/projects/ENG/reviews', 'レビュー'],
     ['/acme/projects/ENG/labels', 'ラベル'],
     ['/acme/projects/ENG/tasks/ENG-3', ''],
+    ['/acme/projects/ENG/docs', 'ドキュメント'],
+    ['/acme/projects/ENG/docs/file-1', ''],
   ])('%s はページと実データから段を組む', (pathname, name) => {
     expect(
       breadcrumbRoute(pathname, {
@@ -26,6 +28,7 @@ describe('パンくずのルート台帳', () => {
         projectKey: 'ENG',
         taskId: 'ENG-3',
         userId: 'u-1',
+        fileId: 'file-1',
       })?.name,
     ).toBe(name);
   });

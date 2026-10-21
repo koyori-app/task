@@ -5,6 +5,7 @@ import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import TaskDetailPage from '@/pages/@tenant/projects/@projectKey/tasks/@taskId/+Page.vue';
 import { KFM_STORY_INPUTS } from '@/lib/kfm-story-fixtures/inputs';
 import kfmDescriptionHtml from '@/lib/kfm-story-fixtures/rendered/task-detail-description.html?raw';
+import type { MentionTable } from '@/lib/comment-mention';
 
 const PAGE_CONTEXT_KEY = 'vike-vue:usePageContext';
 // vike-vue の useData は inject('vike-vue:useData') の素通し。+data.ts の戻り値と
@@ -204,6 +205,8 @@ type MockOptions = {
   onPut?: (body: unknown) => void;
   onDelete?: () => void;
   comments?: MockComment[];
+  /** コメント一覧 API が本文の印を解くために返す表 */
+  commentMentions?: MentionTable;
   /** コメント一覧 GET だけを 500 で落とす（ページ本体は生かす） */
   rejectCommentsList?: boolean;
   /** コメント投稿 POST を { message } 付きで拒否する */
@@ -217,6 +220,8 @@ type MockOptions = {
     url: string;
     created_at: string;
   }[];
+  /** `GET /tasks/{id}/forge` の応答。省略時は空 */
+  forge?: Record<string, unknown>;
 };
 
 function applyPutBody(
@@ -256,7 +261,9 @@ function createMockFetch(overrides: MockOptions = {}) {
   }));
   const original = globalThis.fetch;
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
-    const url = typeof req === 'string' ? req : req.url;
+    const url = typeof req === 'string' ? req : req?.url;
+    // KFM の遅延 chunk 読み込みなど、API mock の対象でない呼び出しは元の fetch へ渡す。
+    if (!url) return original(req);
     // ログイン中ユーザーは alpha。コメントの編集ボタンの出し分け（投稿者本人のみ）が
     // ストーリーでも実挙動どおりになる
     if (url.includes('/v1/auth/me')) {
@@ -303,6 +310,9 @@ function createMockFetch(overrides: MockOptions = {}) {
         blocked_by: [],
       });
     }
+    if (method === 'GET' && url.includes('/forge')) {
+      return jsonResponse({ pull_requests: [], commits: [], branches: [], ...overrides.forge });
+    }
     if (method === 'GET' && url.includes('/attachments')) {
       return jsonResponse({ attachments: overrides.attachments ?? [] });
     }
@@ -312,7 +322,10 @@ function createMockFetch(overrides: MockOptions = {}) {
         if (overrides.rejectCommentsList) {
           return jsonResponse({ message: 'server error' }, 500);
         }
-        return jsonResponse({ comments: mutableComments });
+        return jsonResponse({
+          comments: mutableComments,
+          mentions: overrides.commentMentions ?? {},
+        });
       }
       if (method === 'POST') {
         if (overrides.rejectCommentPost) {
@@ -525,6 +538,153 @@ export const WithAttachments: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByText('仕様書.pdf')).resolves.toBeInTheDocument();
+  },
+};
+
+export const WithForge: Story = {
+  name: 'PR とコミットあり',
+  beforeEach: () =>
+    createMockFetch({
+      forge: {
+        pull_requests: [
+          {
+            id: 'pr-1',
+            project_id: 'project-1',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            number: 87,
+            title: 'feat: OAuth 対応',
+            author_handle: 'yupix',
+            state: 'merged',
+            html_url: 'https://github.com/acme/backend/pull/87',
+            merged_at: '2026-10-01T00:00:00Z',
+            merge_effects_processed_at: null,
+            commits_complete: false,
+            sources: ['body', 'title'],
+            closes: true,
+            unresolved: 0,
+          },
+          {
+            id: 'pr-2',
+            project_id: 'project-1',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            number: 91,
+            title: 'fix: エラーハンドリング',
+            author_handle: 'beta',
+            state: 'open',
+            html_url: 'https://github.com/acme/backend/pull/91',
+            merged_at: null,
+            merge_effects_processed_at: null,
+            commits_complete: false,
+            sources: ['title'],
+            closes: false,
+            unresolved: 2,
+          },
+        ],
+        commits: [
+          {
+            id: 'commit-1',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            sha: 'a3f92c1e7b81d4000000000000000000000000aa',
+            message: 'fix: トークン期限切れを修正',
+            author_handle: 'yupix',
+            author_name: 'Yupix',
+            committed_at: '2026-10-01T00:00:00Z',
+            html_url: 'https://github.com/acme/backend/commit/a3f92c1',
+          },
+        ],
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.findByText('feat: OAuth 対応', { exact: false }),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('a3f92c1')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('2 件が未解決')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('未解決なし')).resolves.toBeInTheDocument();
+  },
+};
+
+export const WithIssueSource: Story = {
+  name: '取り込み元 Issue あり（反映待ち）',
+  beforeEach: () =>
+    createMockFetch({
+      forge: {
+        issue: {
+          host: 'github',
+          repo_owner: 'acme',
+          repo_name: 'backend',
+          number: 42,
+          html_url: 'https://github.com/acme/backend/issues/42',
+          state: 'closed',
+          // 1 日以上前にして、相対時刻ではなく日付で出す（VRT を安定させる）
+          last_synced_at: '2026-10-01T00:00:00Z',
+          pending_push: true,
+        },
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const link = await canvas.findByRole('link', { name: 'acme/backend#42' });
+    await expect(link).toHaveAttribute('href', 'https://github.com/acme/backend/issues/42');
+    await expect(canvas.findByText('GitHub への反映待ち')).resolves.toBeInTheDocument();
+  },
+};
+
+export const WithForgeBranches: Story = {
+  name: 'ブランチとコミット一覧が一部のみの PR',
+  beforeEach: () =>
+    createMockFetch({
+      forge: {
+        pull_requests: [
+          {
+            id: 'pr-1',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            number: 87,
+            title: 'feat: OAuth 対応',
+            author_handle: 'yupix',
+            state: 'open',
+            html_url: 'https://github.com/acme/backend/pull/87',
+            merged_at: null,
+            merge_effects_processed_at: null,
+            commits_complete: false,
+            sources: ['branch'],
+            closes: false,
+            unresolved: null,
+          },
+        ],
+        branches: [
+          {
+            id: 'branch-1',
+            host: 'github',
+            host_url: 'https://github.com',
+            repo_owner: 'acme',
+            repo_name: 'backend',
+            branch: 'feat/TASK-1-oauth',
+            html_url: 'https://github.com/acme/backend/tree/feat/TASK-1-oauth',
+            created_at: '2026-10-01T00:00:00Z',
+          },
+        ],
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('feat/TASK-1-oauth')).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByText('コミット一覧は一部のみ', { exact: false }),
+    ).resolves.toBeInTheDocument();
   },
 };
 
@@ -1129,7 +1289,7 @@ export const Comments: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const user = userEvent.setup();
-    // 素テキスト表示: 改行を保ったまま本文が出る（v-html なし）
+    // comment profile は空行を挟まない改行を <br> にする
     await expect(
       canvas.findByText(/最初のコメントです。\s*改行も保たれます。/),
     ).resolves.toBeInTheDocument();
@@ -1142,6 +1302,65 @@ export const Comments: Story = {
     // 佐藤花子は担当者欄の名前リンクにも出るので、コメントの投稿者に絞って確かめる
     const authorNames = await canvas.findAllByText('佐藤花子');
     await expect(authorNames.some((el) => el.closest('[data-comment-author]'))).toBe(true);
+  },
+};
+
+export const CommentsKfmRendered: Story = {
+  name: 'コメント KFM・メンション・sanitize',
+  beforeEach: () =>
+    createMockFetch({
+      comments: [
+        {
+          id: 'comment-kfm-1',
+          body: [
+            '# KFM コメント',
+            '- **強調**',
+            '- `const safe = true`',
+            '',
+            '[安全なリンク](https://example.com/comment)',
+            '',
+            `<@${mockUsers.alpha.id}> <@33333333-3333-4333-8333-333333333333> <@44444444-4444-4444-8444-444444444444>`,
+            '',
+            '<script>alert(1)</script>',
+            '[危険なリンク](javascript:alert(2))',
+          ].join('\n'),
+          is_deleted: false,
+          created_at: '2026-06-10T00:00:00Z',
+          updated_at: '2026-06-10T00:00:00Z',
+          user: { id: mockUsers.alpha.id, name: mockUsers.alpha.username },
+          replies: [],
+        },
+      ],
+      commentMentions: {
+        [mockUsers.alpha.id]: { status: 'member', name: mockUsers.alpha.username },
+        '33333333-3333-4333-8333-333333333333': {
+          status: 'outside',
+          name: 'プロジェクト外',
+        },
+        '44444444-4444-4444-8444-444444444444': { status: 'gone', name: '退会済み' },
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const heading = await canvas.findByRole('heading', { name: 'KFM コメント' });
+    const body = heading.closest<HTMLElement>('[data-comment-body]')!;
+
+    await expect(within(body).getByText('強調').tagName).toBe('STRONG');
+    await expect(within(body).getByText('const safe = true').tagName).toBe('CODE');
+    await expect(within(body).getByRole('link', { name: '安全なリンク' })).toHaveAttribute(
+      'href',
+      'https://example.com/comment',
+    );
+    // コメントの見出しは説明文（h1 は 2em）より詰める: 14px の器の 1.25em で 20px を超えぬ
+    await expect(parseFloat(getComputedStyle(heading).fontSize)).toBeLessThanOrEqual(20);
+    await expect(body.querySelector('.kfm-mention-self')).not.toBeNull();
+    await expect(body.querySelector('.kfm-mention-outside')?.textContent).toBe('@プロジェクト外');
+    await expect(body.querySelector('.kfm-mention-gone')?.textContent).toBe('@退会済み');
+    // 生の HTML は要素にならず、字として見える
+    await expect(body.querySelector('script')).toBeNull();
+    await expect(body.textContent).toContain('<script>alert(1)</script>');
+    await expect(within(body).getByText('危険なリンク')).not.toHaveAttribute('href');
+    await expect(body.innerHTML).not.toContain('javascript:');
   },
 };
 

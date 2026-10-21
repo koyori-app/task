@@ -149,7 +149,7 @@ pub async fn tenant_footprint_ids<C: ConnectionTrait>(
 /// 印の id を、いまの状態に引く。返す表は `ids` の全てを含む（引けぬ id は `gone`）。
 ///
 /// 名前を返すのは、いまそのプロジェクトに入れる者（`member`。アイコンも）と、外れた者・テナントを
-/// 抜けた者のうちそのテナントに属しておった者（`outside`。名前だけ）。属した形跡の無い利用者
+/// 抜けた者のうちそのテナントに属しておった者（`outside`。名前とアイコン）。属した形跡の無い利用者
 /// （別のテナントの利用者）は `outside` で名前を返さぬ。印の id を知っただけでは、
 /// 別のテナントの利用者の名前は引けぬ。通知の宛先（`member` だけ）はこの拡張で変わらぬ。
 pub async fn resolve<C: ConnectionTrait>(
@@ -185,10 +185,12 @@ pub async fn resolve<C: ConnectionTrait>(
                 avatar_url: user.avatar_url,
             }
         } else {
+            // 名前と同じ境: そのテナントに属している・属しておった者だけ、名前とアイコンを返す
+            let belongs = belonged.contains(&user.id);
             MentionedUser {
                 status: MentionStatus::Outside,
-                name: belonged.contains(&user.id).then_some(user.username),
-                avatar_url: None,
+                name: belongs.then_some(user.username),
+                avatar_url: if belongs { user.avatar_url } else { None },
             }
         };
         map.insert(user.id, entry);

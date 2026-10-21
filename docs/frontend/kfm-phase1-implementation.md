@@ -12,7 +12,8 @@ UI 接続まで**。本番の呼び出し元はタスク詳細の `+data.ts`（�
 する（不一致はプレーンテキスト表示へフォールバック）。サイドカー CSS 4 本も
 `TaskDetailHub.vue` が import 済み。後述の「利用方法」はこの接続実体の要約である。
 接続済みの消費側はこのタスク詳細ページ一つだけで、他の本文表示箇所
-（タスク一覧の分割ビューのペイン・コメント本文など）は未接続の残件である。
+（タスク一覧の分割ビューのペインなど）は未接続の残件である。コメント本文は `CommentBody` が
+`comment` profile で接続済み（詳細は [コメント・アクティビティ](/features/tasks/collaboration)）。
 
 ## 構成
 
@@ -35,6 +36,7 @@ apps/frontend/src/lib/
     index.ts                   remark 変換と sanitize スキーマ
     element.ts                 遅延ロード・SVG 描画・再接続処理
     style.css                  JS 無効/描画失敗時のソース表示フォールバック
+  remark-kfm-raw-html/         生の HTML を字として出す（html ノード → text ノード）
   remark-kfm-task-ref/         タスク参照 KEY-N → タスク詳細へのリンク
     index.ts                   remark 変換と sanitize スキーマ
   markup-renderer/             KFM コア
@@ -60,13 +62,22 @@ composition root が remark 層と sanitize スキーマを注入する。
 ## パイプライン
 
 ```
-入力テキスト → 改行 LF 正規化 → remark-parse → remark-gfm → remark-koyori-alerts
+入力テキスト → 改行 LF 正規化 → remark-parse → remark-kfm-raw-html → remark-gfm → remark-koyori-alerts
   → remark-kfm-mermaid → remark-kfm-task-ref → remark-rehype → rehype-scope-footnote-label（scope 付きのみ）
   → rehype-starry-night → rehype-stringify → DOMPurify → HTML 文字列 → <div v-html>
 ```
 
-- `allowDangerousHtml` は使わない。mdast の生 `html` ノードは remark-rehype 既定で消える。
+- `allowDangerousHtml` は使わない。生の HTML を HTML として通す経路は無く、通してよい生の tag の
+  一覧（allowlist）も無い（DOMPurify の許可は、プラグインが emit する要素と class だけ）。
   プラグインは `data.hName` / `hProperties` の型付き emit のみ行う。
+- **生の HTML は字として出す**（`remark-kfm-raw-html`）。markdown の構文として読まれた生の HTML
+  （行中の tag・HTML の行で始まる段落・HTML のコメント）は mdast の `html` ノードになり、remark-rehype 既定ではそのまま
+  捨てられて画面から消える（`Vec<String>` の `<String>`、`<b>太字</b>`、`<!-- 注 -->`）。そこで、全 profile の先頭の
+  remark 層が `html` ノードを同じ値の `text` ノードへ替え、出力で escape して**書いたとおりの字で見せる**。
+  行中は `text` に繋ぎ、行の HTML は `text` を一つ持つ段落にする。コードスパン・コードブロックの中は元から
+  字なので変わらない。要素・属性・scheme が増える経路は無い（字は `&lt;` に escape され、DOMPurify の入力にも tag として
+  現れない）。説明文・コメント・レビュー指摘の本文は同じ描き手なので、全て同じ振る舞いになる。
+  試験は `kfm-raw-html.test.ts`（入力ごとの出力・tag と属性が生えぬこと）。
 - processor は profile ごとに 1 回だけ build して memoize する。ただし memoize されるのは
   scope なし（既定 `clobberPrefix`）の経路のみ。scope 付き描画は毎回 build する——scope の
   値空間（comment id 等）は非有界で、singleton に溜めるとメモリが漏れるため
@@ -103,7 +114,13 @@ GitHub 完全互換の境界仕様をテストで固定している:
 - 同じ本文でもテナントで href が変わるため、テナントはキャッシュキーに載る
 - `taskRef` を渡している消費側はタスク詳細ページの説明（`+data.ts`）、分割ビュー・オーバーレイの
   説明（`POST /internal/render-description`。body の `tenant` を同じ字種で検め、外れたら 422）、
-  レビュー指摘の本文（`ReviewFindingBody.vue`）。いずれも URL の tenant display_id を渡す
+  レビュー指摘の本文（`ReviewFindingBody.vue`）、ドキュメント詳細（`docs/@fileId/+data.ts` と
+  内部エンドポイント経由のプレビュー）。いずれも URL の tenant display_id を渡す
+- 分割ビュー・オーバーレイ（`TaskDetailPane`）の中では、修飾キーなしの左クリックを横取りして
+  ページ遷移させず器の中で開く（`open-task-ref`）。オーバーレイは子タスクと同じく戻り先を積む。
+  タスク一覧は 1 プロジェクト分なので、別プロジェクトの KEY-N は詳細ページへ送る（カレンダーは
+  テナント横断なのでオーバーレイで開く）。Cmd / Ctrl / Shift / 中クリックはブラウザの既定のまま。
+  vike は document の click でリンクを横取りし `defaultPrevented` を見ないため、伝播も止める
 
 ## mermaid 図（remark-kfm-mermaid）
 
@@ -210,7 +227,7 @@ DOMPurify を最終段に置くのは、remark プラグインが emit したも
   を呼ぶ**前**に敷き、超過は `descriptionHtml: null` = プレーンテキスト表示へ倒す
   （エラー表示は出さない）。renderDescription の CPU も L1 キャッシュ
   （full-text キー）のメモリも本文長に比例するため、SSR に非有界の入力を
-  入れない。新しい消費側（分割ビューのペイン・コメント本文等）を接続するときも
+  入れない。新しい消費側（分割ビューのペイン等。コメント本文は `CommentBody` が同じ値で写し済み）を接続するときも
   同じ上限を写すこと。
   非対称に注意: backend は本文長を制限しないため、上限超の本文も保存はできる（表示だけプレーンへ倒れる）
 - SSR の消費側で KFM 描画前に backend 取得が必要なら、直列リクエストごとの timeout
@@ -235,6 +252,23 @@ DOMPurify を最終段に置くのは、remark プラグインが emit したも
 - カスタム要素の登録は `src/pages/+client.ts`（client 専用 entry）から行い、関数側にも
   `customElements` 不在ガードを持つ二重防御。main.ts は存在せず、`+onCreateApp.ts` は
   SSR でも走るため使わない
+
+## クライアントからの描画（`POST /internal/render-description`）
+
+選択がクライアント操作の画面（タスク一覧の分割ビュー）や、入力中のプレビュー（ドキュメントの編集）は
+`+data.ts` が追従できないので、Elysia の内部エンドポイント
+（`apps/frontend/server/middlewares/render-description.ts`）へ本文を送って HTML だけを受け取る。
+KFM 一式を client bundle へ載せない（+417.5 KB）ための口で、ログイン済みのセッションだけを通す。
+
+- 受けるのは `{ description, scope, tenant? }`。`scope` は断片ごとの決定的な識別子で、
+  `+data.ts` と同じ組み立てにする（タスク説明は `task-<uuid>`、ドキュメントは `doc-<file_id>`）。
+  `[A-Za-z0-9_-]{1,64}` に合わなければ `400`（スキーマ違反の `422` とは分ける）。`fn` / `fnref`
+  セグメントを含む scope は renderDescription が throw するので `html: null` に倒れる
+- `tenant` は任意で `renderDescription` の `taskRef` に渡す（本文の `KEY-N` がリンクになる）。
+  字種外ならプラグインが何もしない
+- 旧形式の `{ description, taskId }`（`scope = task-<taskId>`）も当面受ける
+- 呼び出し側（`composables/useRenderedDescription.ts` の `renderOnServer`）は `400` / `411` /
+  `413` / `422` を「その入力では通らない」として `html: null` で覚え、`401` と `5xx` は再試行する
 
 ## 利用方法
 

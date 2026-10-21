@@ -152,6 +152,24 @@ task tasks update TASK-181 --clear-sprint --archive
   同じユーザー ID に解決される指定は一人分にまとめる
 - 渡さなかった項目は送らないので、既存の値は消えない。消すときは `--clear-*` を使う
 
+### PR との連携
+
+タスクに結ばれた PR を一覧し、PR 番号で手動リンク・解除する
+（仕様は `docs/features/tasks/9.github-tasks.md` §8）。
+
+```bash
+task tasks pr list TASK-181                 # 連携リポジトリと、リンク済み PR（番号・状態・closes・リンク元・タイトル）
+task tasks pr link TASK-181 87 --closes     # --closes でマージ時にタスクを完了にする
+task tasks pr unlink TASK-181 87
+```
+
+- リンク先のリポジトリはプロジェクトの現在の GitHub 連携先で決まる。連携していなければ
+  `github-integration-missing` を含むエラーで終了する（終了コード 1）
+- 解除はリンク元（タイトル・本文・ブランチ・手動）によらずすべて外す。タイトル・本文に
+  `KEY-N` が残っていれば、次の PR イベントで自動リンクが戻る
+- 解除する PR は一覧から番号で引く。リンクされていない番号は終了コード 5。別リポジトリの
+  同じ番号もリンクされていれば現在の連携先のものを選び、選べなければ候補を並べて終了コード 2
+
 ## 設定
 
 `~/.config/task/config.yaml`（トークンを含むので `0600` で保存する）。環境変数が優先される。

@@ -182,4 +182,128 @@ describe('TaskActivityFeed', () => {
       expect(wrapper.text()).toContain('コミット a3f92c1 をリンクしました');
     });
   });
+
+  describe('PR のリンク', () => {
+    const payload = {
+      host: 'github',
+      number: 87,
+      title: 'feat: OAuth 対応 TASK-1',
+      author_handle: 'yupix',
+      html_url: 'https://github.com/acme/backend/pull/87',
+      state: 'open',
+    };
+
+    function prItem(
+      overrides: Record<string, unknown> = {},
+      user: ActivityItem['user'] = null,
+    ): ActivityItem {
+      return {
+        ...activity('pr-1', 10),
+        event_type: 'forge_pull_request_linked',
+        user,
+        payload: { ...payload, ...overrides },
+      } as ActivityItem;
+    }
+
+    it('番号を PR へのリンクにし、作者とタイトルを出す', () => {
+      const wrapper = mount(TaskActivityFeed, { props: { activities: [prItem()] } });
+
+      expect(wrapper.text()).toContain(
+        'yupixの PR #87 をリンクしました「feat: OAuth 対応 TASK-1」',
+      );
+      const link = wrapper.get('a');
+      expect(link.text()).toBe('#87');
+      expect(link.attributes('href')).toBe(payload.html_url);
+      expect(link.attributes('rel')).toBe('noopener noreferrer');
+    });
+
+    it('連携済みユーザーに結べていればそのユーザー名を出す', () => {
+      const wrapper = mount(TaskActivityFeed, {
+        props: {
+          activities: [prItem({}, { id: 'user-1', name: 'ゆぴ' } as ActivityItem['user'])],
+        },
+      });
+      expect(wrapper.text()).toContain('ゆぴの PR #87');
+    });
+
+    it('http(s) 以外の URL はリンクにしない', () => {
+      const wrapper = mount(TaskActivityFeed, {
+        props: { activities: [prItem({ html_url: 'javascript:alert(1)' })] },
+      });
+      expect(wrapper.find('a').exists()).toBe(false);
+      expect(wrapper.text()).toContain('PR #87 をリンクしました');
+    });
+
+    it('マージによる完了は作者を主語にせず、PR へリンクする', () => {
+      const wrapper = mount(TaskActivityFeed, {
+        props: {
+          activities: [{ ...prItem({ state: 'merged' }), event_type: 'forge_pull_request_merged' }],
+        },
+      });
+      expect(wrapper.text()).toContain(
+        'PR #87 のマージでタスクを完了しました「feat: OAuth 対応 TASK-1」',
+      );
+      expect(wrapper.text()).not.toContain('yupixの');
+      expect(wrapper.get('a').attributes('href')).toBe(payload.html_url);
+    });
+
+    it('確認済みの操作を操作者とともに出す', () => {
+      const wrapper = mount(TaskActivityFeed, {
+        props: {
+          activities: [
+            {
+              ...activity('ack-1', 10),
+              event_type: 'forge_merge_effects_acknowledged',
+              payload: { host: 'github', pull_request_id: 'pr-1', number: 87, html_url: '' },
+            } as ActivityItem,
+          ],
+        },
+      });
+      expect(wrapper.text()).toContain('yupixがPR #87 の自動完了を未適用のまま確認済みにしました');
+    });
+  });
+
+  it('手でリンクした PR は操作者を主語にし、source の無い旧い行は従来の文言にする', () => {
+    const manual = {
+      ...activity('pr-manual', 10),
+      event_type: 'forge_pull_request_linked',
+      user: { id: 'user-1', name: 'ゆぴ' },
+      payload: {
+        host: 'github',
+        number: 87,
+        title: 'feat: OAuth',
+        author_handle: 'yupix',
+        html_url: 'https://github.com/acme/backend/pull/87',
+        state: 'open',
+        source: 'manual',
+      },
+    } as ActivityItem;
+    const wrapper = mount(TaskActivityFeed, { props: { activities: [manual] } });
+    expect(wrapper.text()).toContain('ゆぴが PR #87 を手動でリンクしました「feat: OAuth」');
+
+    const legacy = {
+      ...manual,
+      id: 'pr-legacy',
+      payload: { ...(manual.payload as Record<string, unknown>), source: undefined },
+    };
+    const old = mount(TaskActivityFeed, { props: { activities: [legacy as ActivityItem] } });
+    expect(old.text()).toContain('ゆぴの PR #87 をリンクしました');
+  });
+
+  it('PR のリンクを外した履歴は操作者を主語にする', () => {
+    const item = {
+      ...activity('pr-unlink', 10),
+      event_type: 'forge_pull_request_unlinked',
+      user: { id: 'user-1', name: 'ゆぴ' },
+      payload: {
+        host: 'github',
+        number: 87,
+        html_url: 'https://github.com/acme/backend/pull/87',
+        pull_request_id: 'pr-1',
+      },
+    } as ActivityItem;
+    const wrapper = mount(TaskActivityFeed, { props: { activities: [item] } });
+    expect(wrapper.text()).toContain('ゆぴが PR #87 のリンクを外しました');
+    expect(wrapper.get('a').attributes('href')).toBe('https://github.com/acme/backend/pull/87');
+  });
 });

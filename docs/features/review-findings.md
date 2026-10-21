@@ -216,7 +216,7 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
 | `POST /v1/tenants/{t}/projects/{p}/reviews` | ラウンド + 指摘の**一括作成**（1 リクエスト）。成功後に GitHub 要約更新をジョブ投入 |
 | `GET  /v1/tenants/{t}/projects/{p}/reviews?pr=618` | ラウンドの一覧（指摘の件数つき） |
 | `GET  /v1/tenants/{t}/projects/{p}/reviews/{id}` | ラウンドの詳細（指摘含む。各指摘に `available_actions`） |
-| `GET  /v1/tenants/{t}/projects/{p}/reviews/pull-requests` | レビューのある PR の一覧（ラウンド数・未解決数・塞いでいる件数）。**可否は返さない**——可否には鮮度と連携の有無も要り（§8 の 6 値）、この一覧はその材料を持たない。画面の PR 一覧が使う |
+| `GET  /v1/tenants/{t}/projects/{p}/reviews/pull-requests` | レビューのある PR の一覧（ラウンド数・未解決数 `unresolved`・塞いでいる件数 `blocking`・そのうち fixed の件数 `blocking_fixed`・ホスト上の PR の状態 `state`）。`unresolved` / `blocking` は open / fixing / fixed を数え（`blocking` は High / Medium のみ）、`blocking_fixed` は `blocking` の内数で確認（verified）待ちの分。**可否は返さない**——可否には鮮度と連携の有無も要り（§8 の 6 値）、この一覧はその材料を持たない。画面の PR 一覧が使う |
 | `GET  /v1/tenants/{t}/projects/{p}/reviews/summary?pr=618` | PR 単位の集計: 重大度 × 状態の件数、ラウンド数、最新ラウンドの `head_sha`、集計対象のリポジトリ、オーナー代行での棄却件数、「マージ可否」、表示用の判定 `gate` |
 | `GET  /v1/tenants/{t}/projects/{p}/review-findings?pr=618&state=&severity=` | PR の指摘一覧（状態・重大度で絞り込み。各指摘に `available_actions`）。CLI の `review list` と UI の一覧が使う |
 | `PATCH /v1/tenants/{t}/projects/{p}/review-findings/{id}` | 状態遷移（`state` と任意のコメント）。応答の指摘にも遷移後の `available_actions` |
@@ -226,6 +226,13 @@ open ──→ fixed ──→ verified        （修正宣言 → レビュー�
 指定した場合は自然キーの候補探索を行わず、その PR 行だけを対象にする。ただし `repo` / `host` /
 `host_url` も指定された場合は対象行との一致を検証し、1 つでも一致しなければ 400 とする。
 
+- `ReviewedPullRequest`（`/reviews/pull-requests` の行）は PR 行（[Git ホスティング↔タスク連携](/features/tasks/github-tasks) §2 の
+  `forge_pull_requests`）から `state`（`open` / `closed` / `merged` / `unknown`）・`merged_at`・
+  `merge_effects_processed_at`・`pull_request_id` を返す。PR 行とは自然キー
+  `(project_id, repo_owner, repo_name, pr_number)` で結ぶ（`reviews.pull_request_id` への FK 付け替えは未実施。
+  `host` / `host_url` を含めた結合は GitLab 対応時）。PR 行が無ければ `state = unknown`、他は null
+- ラウンドの起票は、連携先のリポジトリが決まっていれば PR 行を `state = unknown` で用意する
+  （既にあれば触らない。同 §6）。後から届いた webhook が同じ行に合流する
 - PR 番号は**1 以上の整数**として検証する。実在確認まではしない（それは要約コメントの
   投稿時に判明する。投稿失敗は起票を巻き戻さない）
 - 状態遷移後も要約更新ジョブを投入する
@@ -555,9 +562,13 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
   補完できなければ、スイッチは無効のまま「GitHub を連携し直すと使えます」と案内する（未連携とは言わない）。
   問い合わせは接続ごとに 3 秒で打ち切って並べ、PR 一覧は連携一覧の到着を待たずに出す（待つのはスイッチと
   URL の `mine` の確かめだけ）。連携一覧の取得自体に失敗したときは未連携と言わず、URL の `mine=1` も消さない
+  各行にホスト上の PR の状態（Open / Merged / Closed / 状態不明）をバッジで出し、状態で絞り込める
+  （状態の絞り込みは URL に載せない）。
   10 件ごとにページを分け、`page` が無ければ表示中の PR が載っているページを開く。
   範囲外の `page` は最後のページに寄せて理由を出す。絞り込みとページ分割は画面側で行う
   （API は全件を集計して返す。サーバーで切っても集計の仕事は減らない）
+  各行のバッジは件数の事実だけを出す: `blocking` が 0 なら「未解決なし」、open / fixing が
+  残れば赤の「N 件が未解決」（N は `blocking - blocking_fixed`）、すべて fixed なら「N 件が承認待ち」
 - **PR 単位の指摘一覧**: 重大度・状態・ラウンドでフィルタ。各指摘は title / file:line / 本文 /
   遷移履歴を持つ
 - **状態遷移の操作**: fixing / fixed / verified / deferred / rejected に加えて、**戻り遷移**
@@ -835,3 +846,7 @@ CLI からも使えるようにするためで、これが無いと AI レビュ
   満たせる。§2）。トークンは GitHub App のユーザー認可で取り、ログイン用の OAuth App の scope は
   広げない（ログインで全リポジトリへの書き込みを求めることになる）。未連携のときは承認しない。
   重複の控えは DB 列ではなく GitHub のレビュー一覧（本人の ID・同じ commit）で見る。取り消しは範囲外（§9）
+- 2026-10-18: PR 一覧に `blocking_fixed`（High / Medium かつ fixed の件数）を足し、バッジで
+  すべて fixed の PR を「N 件が承認待ち」として未対応と分けた（TASK-302）。`blocking` /
+  `unresolved` の値と意味はマージ判定と同じ集計のまま変えない。確認待ちだけの PR が修正の要る
+  PR と同じ赤で出ており、iOS は PR ごとに指摘一覧を読み直して fixed を数えていた

@@ -77,7 +77,7 @@ pub enum MentionStatus {
     /// いまそのプロジェクトに入れる者。名前とアイコンを返す。
     Member,
     /// 利用者は在るが、このプロジェクトに入れぬ者（外れた・テナントを抜けた）。
-    /// 名前は、そのテナントに属している・属しておった者（`service::mentions::tenant_footprint_ids`）
+    /// 名前とアイコンは、そのテナントに属している・属しておった者（`service::mentions::tenant_footprint_ids`）
     /// の時だけ返す。印の id を知っただけで、別のテナントの利用者の名を引けぬようにするため。
     Outside,
     /// 利用者の行が無い者（削除。名前は引けぬ）。
@@ -92,6 +92,8 @@ pub struct MentionedUser {
     /// 別のテナントの利用者・行の無い者は `null`。
     #[schema(nullable)]
     pub name: Option<String>,
+    /// アイコンの URL。名前と同じ境で返す（`member` と、名前を返す `outside`）。それ以外と、
+    /// アイコンを持たぬ者は `null`。
     #[schema(nullable)]
     pub avatar_url: Option<String>,
 }

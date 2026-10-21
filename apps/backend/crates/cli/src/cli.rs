@@ -282,6 +282,48 @@ pub enum TasksCommand {
         #[arg(long)]
         project: Option<String>,
     },
+    /// Pull requests linked to a task
+    Pr {
+        #[command(subcommand)]
+        command: TaskPrCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TaskPrCommand {
+    /// List the pull requests linked to a task, and the project's repository
+    List {
+        /// Task ref (KEY-N or UUID)
+        task_ref: String,
+        /// Project key when using UUID
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Link a pull request of the project's GitHub repository to a task
+    Link {
+        /// Task ref (KEY-N or UUID)
+        task_ref: String,
+        /// Pull request number
+        #[arg(value_parser = clap::value_parser!(i32).range(1..))]
+        number: i32,
+        /// Complete the task when the pull request is merged
+        #[arg(long)]
+        closes: bool,
+        /// Project key when using UUID
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Unlink a pull request from a task (removes the link from every source)
+    Unlink {
+        /// Task ref (KEY-N or UUID)
+        task_ref: String,
+        /// Pull request number
+        #[arg(value_parser = clap::value_parser!(i32).range(1..))]
+        number: i32,
+        /// Project key when using UUID
+        #[arg(long)]
+        project: Option<String>,
+    },
 }
 
 /// 作成と更新で同じ綴りにする項目。片方だけ増えると使う側が覚え直しになる。
@@ -669,6 +711,20 @@ mod tests {
         assert!(parse(&["--planned-start", "2026-10-16T00:00:00Z"]).is_err());
         assert!(parse(&["--planned-start", "2026-10-16", "--clear-planned-start"]).is_err());
         assert!(parse(&["--clear-planned-start"]).is_ok());
+    }
+
+    /// API は 0 以下の番号を 400 で返すだけなので、引数の段階で断る。
+    #[test]
+    fn takes_only_a_positive_pull_request_number() {
+        for action in ["link", "unlink"] {
+            for bad in ["0", "-1", "abc"] {
+                assert!(
+                    Cli::try_parse_from(["task", "tasks", "pr", action, "APP-1", bad]).is_err(),
+                    "{action} {bad}"
+                );
+            }
+            assert!(Cli::try_parse_from(["task", "tasks", "pr", action, "APP-1", "1"]).is_ok());
+        }
     }
 
     #[test]

@@ -20,6 +20,7 @@ import { activityActor, activityText, relativeTime } from '@/lib/task-activity';
 import { useNow } from '@/composables/useNow';
 import { useHydrated } from '@/composables/useHydrated';
 import { Button } from '@/components/ui/button';
+import UserAvatar from '@/components/UserAvatar.vue';
 import DashboardCreateTask from './DashboardCreateTask.vue';
 
 const props = defineProps<{ tenantId: TenantUuid; tenantSlug: string }>();
@@ -450,11 +451,12 @@ async function complete(item: DashboardTask) {
                 :key="item.activity.id"
                 class="flex items-start gap-2.5"
               >
-                <span
+                <UserAvatar
+                  :user="{ name: activityActor(item.activity) }"
+                  size="md"
+                  :initial-length="1"
                   aria-hidden="true"
-                  class="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] text-muted-foreground"
-                  >{{ Array.from(activityActor(item.activity))[0] }}</span
-                >
+                />
                 <div class="min-w-0 text-[11px] leading-relaxed text-muted-foreground">
                   <p class="break-words">
                     {{ activityActor(item.activity) }}が{{ activityText(item.activity) }}

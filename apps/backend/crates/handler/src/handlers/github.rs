@@ -1044,10 +1044,17 @@ pub async fn github_webhook(
     let payload: serde_json::Value =
         serde_json::from_slice(&body).map_err(|_| AppError::BadRequest)?;
 
-    // push は受信口で正規化してから積む。ジョブ（apalis.jobs に永続化される）には
+    // push / pull_request / create / delete は受信口で正規化してから積む。ジョブ（apalis.jobs に永続化される）には
     // ホスト固有のペイロードを残さず、タスク側の処理はホストを知らない形で受け取る。
     let forge_event = match event.as_str() {
         "push" => Some(webhook_events::push_event(&payload).map_err(|_| AppError::BadRequest)?),
+        // 処理しない action（labeled 等）は従来どおりペイロードのまま積む
+        "pull_request" => {
+            webhook_events::pull_request_event(&payload).map_err(|_| AppError::BadRequest)?
+        }
+        // タグの作成・削除は従来どおりペイロードのまま積む
+        "create" | "delete" => webhook_events::branch_event(&payload, event == "create")
+            .map_err(|_| AppError::BadRequest)?,
         _ => None,
     };
 
