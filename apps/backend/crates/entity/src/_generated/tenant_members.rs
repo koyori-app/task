@@ -13,6 +13,12 @@ pub struct Model {
     #[sea_orm(unique_key = "tenant_members_tenant_id_user_id_key")]
     pub user_id: Uuid,
     pub role: super::super::tenant_members::TenantRole,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub department: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub position: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub team: Option<String>,
     #[sea_orm(
         belongs_to,
         from = "tenant_id",

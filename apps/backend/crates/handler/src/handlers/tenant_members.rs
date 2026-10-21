@@ -10,7 +10,7 @@ use sea_orm::{
 };
 
 use crate::AppState;
-use crate::auth_helpers::{explicit_member_project_ids, is_tenant_member, is_tenant_owner};
+use crate::auth_helpers::{explicit_member_project_ids, is_tenant_owner};
 use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::handlers::project_members;
@@ -77,6 +77,12 @@ async fn attach_users(
             Ok(TenantMemberResponse::from_parts(m, user))
         })
         .collect()
+}
+
+/// 部署・役職・チームの入力を保存する値にする。前後の空白を除き、空なら NULL
+fn org_profile_value(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
 async fn find_member(
@@ -165,9 +171,15 @@ pub async fn get_user_profile(
     auth.require_scope(Scope::ReadTenant)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
 
+    // 部署・役職・チームは所属行に付く。所属行の無いオーナー・客分では null
+    let member = tenant_members::Entity::find()
+        .filter(tenant_members::Column::TenantId.eq(tenant_id))
+        .filter(tenant_members::Column::UserId.eq(user_id))
+        .one(&state.db)
+        .await?;
     // users はテナント横断の表なので、テナントに関わらない人は 403 ではなく 404 にして存在を明かさない
-    let visible = is_tenant_owner(&state.db, tenant_id, user_id).await?
-        || is_tenant_member(&state.db, tenant_id, user_id).await?
+    let visible = member.is_some()
+        || is_tenant_owner(&state.db, tenant_id, user_id).await?
         || !explicit_member_project_ids(&state.db, tenant_id, user_id)
             .await?
             .is_empty();
@@ -178,7 +190,7 @@ pub async fn get_user_profile(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
-    Ok(Json(user.into()))
+    Ok(Json(UserProfileResponse::from_parts(user, member.as_ref())))
 }
 
 #[axum::debug_handler]
@@ -217,6 +229,9 @@ pub async fn add_member(
         tenant_id: Set(tenant_id),
         user_id: Set(payload.user_id),
         role: Set(payload.role),
+        department: Set(None),
+        position: Set(None),
+        team: Set(None),
     })
     .insert(&state.db)
     .await
@@ -237,7 +252,8 @@ pub async fn add_member(
     put,
     path = "/{user_id}",
     tag = "Tenant Members",
-    summary = "テナントメンバーの権限を変更",
+    summary = "テナントメンバーの権限・所属を変更",
+    description = "どの欄も省略すれば変更しない。部署・役職・チームは前後の空白を除き、空なら未設定に戻す。",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
         ("user_id" = Uuid, Path, description = "ユーザーID"),
@@ -264,7 +280,18 @@ pub async fn update_member(
         .await?
         .ok_or_else(|| anyhow::anyhow!("tenant member {user_id} has no user row"))?;
     let mut active: tenant_members::ActiveModel = member.into();
-    active.role = Set(payload.role);
+    if let Some(role) = payload.role {
+        active.role = Set(role);
+    }
+    if let Some(department) = payload.department {
+        active.department = Set(org_profile_value(&department));
+    }
+    if let Some(position) = payload.position {
+        active.position = Set(org_profile_value(&position));
+    }
+    if let Some(team) = payload.team {
+        active.team = Set(org_profile_value(&team));
+    }
     let updated = active.update(&state.db).await?;
     Ok(Json(TenantMemberResponse::from_parts(updated, user)))
 }

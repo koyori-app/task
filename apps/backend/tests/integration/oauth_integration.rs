@@ -628,6 +628,9 @@ async fn oauth_callback_requires_2fa_setup_for_every_membership_form() {
                 tenant_id: Set(tenant_id),
                 user_id: Set(user_id),
                 role: Set(entity::tenant_members::TenantRole::Member),
+                department: Set(None),
+                position: Set(None),
+                team: Set(None),
             }
             .insert(&app.state.db)
             .await

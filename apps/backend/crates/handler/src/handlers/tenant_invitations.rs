@@ -370,6 +370,9 @@ pub async fn accept_invitation(
         tenant_id: Set(invitation.tenant_id),
         user_id: Set(user.id),
         role: Set(invitation.role),
+        department: Set(None),
+        position: Set(None),
+        team: Set(None),
     })
     .insert(&txn)
     .await

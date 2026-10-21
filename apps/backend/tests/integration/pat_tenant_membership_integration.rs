@@ -25,6 +25,9 @@ async fn insert_tenant_member(db: &DatabaseConnection, tenant_id: Uuid, user_id:
         tenant_id: Set(tenant_id),
         user_id: Set(user_id),
         role: Set(tenant_members::TenantRole::Member),
+        department: Set(None),
+        position: Set(None),
+        team: Set(None),
     }
     .insert(db)
     .await
