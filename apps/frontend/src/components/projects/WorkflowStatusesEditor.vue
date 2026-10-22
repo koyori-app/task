@@ -3,16 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhArrowDown, PhArrowUp, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { computed, ref, watch } from 'vue';
 
-import { Button, Input } from '@koyori-app/ui-vue';
+import { Button, ConfirmDialog, Input } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import type { components } from '@/generated/api';
 import { apiClient } from '@/lib/api-vue-query';
 
@@ -196,7 +188,8 @@ function requestDelete(status: ProjectStatus) {
 
 async function confirmDelete() {
   const target = deleteTarget.value;
-  if (!target) return;
+  // ConfirmDialog の確定ボタンは無効にできないので、二重送信はここで止める
+  if (!target || isMutating.value) return;
   const migrationTarget = statuses.value.find((status) => status.is_default);
   await run('ステータスを削除できませんでした', () =>
     deleteMutation.mutateAsync({
@@ -209,13 +202,9 @@ async function confirmDelete() {
   if (!operationError.value) deleteTarget.value = null;
 }
 
-function handleDeleteDialogOpen(open: boolean) {
-  if (!open && isMutating.value) return;
-  if (!open) deleteTarget.value = null;
-}
-
-function preventDeleteDialogClose(event: Event) {
-  if (isMutating.value) event.preventDefault();
+function closeDeleteDialog() {
+  if (isMutating.value) return;
+  deleteTarget.value = null;
 }
 
 async function moveStatus(index: number, offset: -1 | 1) {
@@ -400,29 +389,13 @@ async function moveStatus(index: number, offset: -1 | 1) {
     </div>
   </section>
 
-  <Dialog :open="!!deleteTarget" @update:open="handleDeleteDialogOpen">
-    <DialogContent
-      :show-close-button="false"
-      @cancel="preventDeleteDialogClose"
-      @escape-key-down="preventDeleteDialogClose"
-      @pointer-down-outside="preventDeleteDialogClose"
-    >
-      <DialogHeader>
-        <DialogTitle>ステータスを削除しますか？</DialogTitle>
-        <DialogDescription>
-          「{{ deleteTarget?.name }}」を削除します。この操作は取り消せません。
-        </DialogDescription>
-      </DialogHeader>
-      <DialogFooter>
-        <Button type="button" variant="tertiary" label="キャンセル" @click="deleteTarget = null" />
-        <Button
-          type="button"
-          variant="danger"
-          :disabled="isMutating"
-          label="削除する"
-          @click="confirmDelete"
-        />
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+  <ConfirmDialog
+    :open="!!deleteTarget"
+    title="ステータスを削除しますか？"
+    :message="`「${deleteTarget?.name}」を削除します。この操作は取り消せません。`"
+    confirm-label="削除する"
+    destructive
+    :on-confirm="confirmDelete"
+    :on-cancel="closeDeleteDialog"
+  />
 </template>

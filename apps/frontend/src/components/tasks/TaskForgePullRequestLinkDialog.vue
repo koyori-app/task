@@ -5,16 +5,8 @@ import { OpenApiVueQueryError } from '@koyori-app/openapi-vue-query';
 import { type } from 'arktype';
 import { ref } from 'vue';
 
-import { Button, Field, Input } from '@koyori-app/ui-vue';
+import { Button, Dialog, Field, Input } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import { apiClient } from '@/lib/api-vue-query';
 
@@ -72,80 +64,77 @@ const form = useForm({
   },
 });
 
-function onOpenChange(open: boolean) {
+function onClose() {
   // 送信中は閉じない（結果の見逃し防止）
-  if (!open && linkMutation.isPending.value) return;
-  if (!open) emit('close');
+  if (linkMutation.isPending.value) return;
+  emit('close');
 }
 </script>
 
 <template>
-  <Dialog :open="true" @update:open="onOpenChange">
-    <DialogContent class="max-w-md">
-      <DialogHeader>
-        <DialogTitle>PR をリンク</DialogTitle>
-        <DialogDescription>
-          {{
-            repoFullName
-              ? `${repoFullName} の PR をこのタスクに結びます。`
-              : 'プロジェクトに連携したリポジトリの PR をこのタスクに結びます。'
-          }}
-        </DialogDescription>
-      </DialogHeader>
+  <Dialog
+    :open="true"
+    title="PR をリンク"
+    :description="
+      repoFullName
+        ? `${repoFullName} の PR をこのタスクに結びます。`
+        : 'プロジェクトに連携したリポジトリの PR をこのタスクに結びます。'
+    "
+    :on-close="onClose"
+  >
+    <form id="forge-pr-link-form" class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
+      <form.Field name="number">
+        <template #default="{ field }">
+          <Field
+            id="forge-pr-number"
+            label="PR 番号"
+            :error="field.state.meta.errors.length ? 'PR 番号を数字で入力してください' : ''"
+          >
+            <Input
+              input-mode="numeric"
+              placeholder="87"
+              autocomplete="off"
+              :value="field.state.value"
+              :on-value-change="field.handleChange"
+              :on-blur="field.handleBlur"
+            />
+          </Field>
+        </template>
+      </form.Field>
 
-      <form class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
-        <form.Field name="number">
-          <template #default="{ field }">
-            <Field
-              id="forge-pr-number"
-              label="PR 番号"
-              :error="field.state.meta.errors.length ? 'PR 番号を数字で入力してください' : ''"
-            >
-              <Input
-                input-mode="numeric"
-                placeholder="87"
-                autocomplete="off"
-                :value="field.state.value"
-                :on-value-change="field.handleChange"
-                :on-blur="field.handleBlur"
-              />
-            </Field>
-          </template>
-        </form.Field>
+      <form.Field name="closes">
+        <template #default="{ field }">
+          <label class="flex cursor-pointer items-center gap-2 text-sm">
+            <Checkbox
+              :model-value="field.state.value"
+              @update:model-value="(v) => field.handleChange(v === true)"
+            />
+            マージしたらこのタスクを完了にする
+          </label>
+        </template>
+      </form.Field>
 
-        <form.Field name="closes">
-          <template #default="{ field }">
-            <label class="flex cursor-pointer items-center gap-2 text-sm">
-              <Checkbox
-                :model-value="field.state.value"
-                @update:model-value="(v) => field.handleChange(v === true)"
-              />
-              マージしたらこのタスクを完了にする
-            </label>
-          </template>
-        </form.Field>
+      <p v-if="submitError" role="alert" class="text-sm text-destructive">{{ submitError }}</p>
+    </form>
 
-        <p v-if="submitError" role="alert" class="text-sm text-destructive">{{ submitError }}</p>
-
-        <DialogFooter>
+    <template #actions>
+      <Button
+        type="button"
+        variant="tertiary"
+        :disabled="linkMutation.isPending.value"
+        label="キャンセル"
+        @click="emit('close')"
+      />
+      <form.Subscribe>
+        <template #default="{ canSubmit, isSubmitting }">
           <Button
-            type="button"
-            variant="tertiary"
-            :disabled="linkMutation.isPending.value"
-            label="キャンセル"
-            @click="emit('close')"
+            type="submit"
+            form="forge-pr-link-form"
+            :disabled="!canSubmit || isSubmitting || linkMutation.isPending.value"
+            :label="isSubmitting || linkMutation.isPending.value ? 'リンク中…' : 'リンクする'"
           />
-          <form.Subscribe>
-            <template #default="{ canSubmit, isSubmitting }">
-              <Button
-                type="submit"
-                :disabled="!canSubmit || isSubmitting || linkMutation.isPending.value"
-                :label="isSubmitting || linkMutation.isPending.value ? 'リンク中…' : 'リンクする'"
-              />
-            </template>
-          </form.Subscribe>
-        </DialogFooter>
-      </form>
-    </DialogContent>
+        </template>
+      </form.Subscribe>
+    </template>
   </Dialog>
 </template>

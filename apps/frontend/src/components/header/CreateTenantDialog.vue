@@ -2,16 +2,7 @@
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { ref, watch } from 'vue';
-import { Button, Field, Input, Textarea } from '@koyori-app/ui-vue';
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Button, Dialog, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import { useTenantStore } from '@/stores/tenant';
 
 const props = defineProps<{ open: boolean }>();
@@ -60,17 +51,6 @@ const form = useForm({
   },
 });
 
-function onOpenChange(open: boolean) {
-  emit('update:open', open);
-}
-
-const nameInputRef = ref<InstanceType<typeof Input> | null>(null);
-
-// 開いて入力欄ができたら当てる。koyori の Input は autofocus を root の span に落とすので中の input に当てる
-watch(nameInputRef, (input) => {
-  (input?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
-});
-
 watch(
   () => props.open,
   (open) => {
@@ -84,15 +64,14 @@ watch(
 </script>
 
 <template>
-  <Dialog v-if="open" :open="true" @update:open="onOpenChange">
-    <DialogContent class="max-w-lg" :show-close-button="false">
-      <DialogHeader>
-        <DialogTitle>テナントを作成</DialogTitle>
-        <DialogDescription>
-          新しいワークスペースの名前と表示IDを入力してください。
-        </DialogDescription>
-      </DialogHeader>
-      <form class="space-y-4" @submit.prevent="form.handleSubmit">
+  <div class="contents [--koyori-dialog-width:32rem]">
+    <Dialog
+      :open="open"
+      title="テナントを作成"
+      description="新しいワークスペースの名前と表示IDを入力してください。"
+      :on-close="() => emit('update:open', false)"
+    >
+      <form id="create-tenant-form" class="space-y-4" @submit.prevent="form.handleSubmit">
         <div class="flex flex-col gap-6">
           <form.Field name="name">
             <template #default="{ field }">
@@ -106,7 +85,6 @@ watch(
                 "
               >
                 <Input
-                  ref="nameInputRef"
                   :value="field.state.value"
                   :on-blur="field.handleBlur"
                   :on-value-change="
@@ -164,21 +142,25 @@ watch(
           </form.Field>
         </div>
         <p v-if="submitError" role="alert" class="text-sm text-destructive">{{ submitError }}</p>
-        <DialogFooter>
-          <DialogClose as-child>
-            <Button type="button" variant="tertiary" label="キャンセル" />
-          </DialogClose>
-          <form.Subscribe>
-            <template #default="{ canSubmit, isSubmitting }">
-              <Button
-                type="submit"
-                :disabled="!canSubmit || isSubmitting"
-                :label="isSubmitting ? '作成中…' : '作成'"
-              />
-            </template>
-          </form.Subscribe>
-        </DialogFooter>
       </form>
-    </DialogContent>
-  </Dialog>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          label="キャンセル"
+          @click="emit('update:open', false)"
+        />
+        <form.Subscribe>
+          <template #default="{ canSubmit, isSubmitting }">
+            <Button
+              type="submit"
+              form="create-tenant-form"
+              :disabled="!canSubmit || isSubmitting"
+              :label="isSubmitting ? '作成中…' : '作成'"
+            />
+          </template>
+        </form.Subscribe>
+      </template>
+    </Dialog>
+  </div>
 </template>

@@ -3,7 +3,7 @@
  *
  * 閉じると器ごと中身が消えるので、入力途中の下書き（コメントなど）が失われる。
  * 入力欄の Esc を自前で処理する箇所（インライン編集など）は既に preventDefault して
- * いるので、ここではそれ以外の入力欄と IME 変換中・入れ子の `<dialog>` を守る。
+ * いるので、ここではそれ以外の入力欄と IME 変換中を守る。
  */
 
 const EDITABLE_SELECTOR = 'input,textarea,[contenteditable="true"],[contenteditable=""]';
@@ -19,13 +19,16 @@ function isDirtyEditable(element: Element | null): boolean {
   return true;
 }
 
-/** Esc で器を閉じずに残すか。IME 変換中・入力途中・入れ子の <dialog> が開いている間は残す */
+/**
+ * Esc で器を閉じずに残すか（true なら keydown の既定動作を止める）。IME 変換中・入力途中は残す。
+ * 器も <dialog showModal> なので、器の中に重ねた <dialog>（削除確認など）の Esc は手前の dialog の
+ * cancel になり、器には届かない。ここで止めると手前の dialog が閉じなくなるので、判定しない
+ */
 export function shouldKeepOverlayOnEscape(event: KeyboardEvent): boolean {
   // Firefox / Safari は変換確定の Esc でも keydown を流してくる
   if (event.isComposing || event.keyCode === 229) return true;
   const target = event.target instanceof Element ? event.target : null;
-  // 削除確認のネイティブ <dialog showModal> は Esc を自分で閉じるが、keydown は window まで届く
-  if (target?.closest('dialog[open]')) return true;
+  if (target?.closest('dialog[open]')?.parentElement?.closest('dialog[open]')) return false;
   return isDirtyEditable(target);
 }
 

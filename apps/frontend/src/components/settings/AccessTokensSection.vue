@@ -2,16 +2,8 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhCaretDown, PhCopy, PhKey, PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button, Field, Input } from '@koyori-app/ui-vue';
+import { Button, Dialog, Field, Input } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -188,9 +180,15 @@ function openRevokeDialog(token: PersonalToken) {
   revokeError.value = null;
 }
 
-function onRevokeOpenChange(open: boolean) {
+const revokeDescription = computed(() =>
+  revokeTarget.value
+    ? `テナント「${tenantName(revokeTarget.value.tenant_id)}」の「${revokeTarget.value.name}」を取り消します。このトークンを使っている API・CLI は即座に認証できなくなります。この操作は元に戻せません。`
+    : '',
+);
+
+function onRevokeClose() {
   // 取り消しリクエスト進行中はダイアログを閉じない（結果の見逃し防止）
-  if (!open && !revokeToken.isPending.value) revokeTarget.value = null;
+  if (!revokeToken.isPending.value) revokeTarget.value = null;
 }
 
 async function onRevokeConfirm() {
@@ -428,34 +426,29 @@ async function onRevokeConfirm() {
     </template>
 
     <!-- 取り消し確認 -->
-    <Dialog v-if="revokeTarget" :open="true" @update:open="onRevokeOpenChange">
-      <DialogContent class="max-w-md" :show-close-button="false">
-        <DialogHeader>
-          <DialogTitle>トークンを取り消しますか？</DialogTitle>
-          <DialogDescription>
-            テナント「{{ tenantName(revokeTarget.tenant_id) }}」の「{{ revokeTarget.name }}」を
-            取り消します。このトークンを使っている API・CLI
-            は即座に認証できなくなります。この操作は元に戻せません。
-          </DialogDescription>
-        </DialogHeader>
-        <p v-if="revokeError" class="text-destructive text-sm">{{ revokeError }}</p>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="tertiary"
-            :disabled="revokeToken.isPending.value"
-            label="キャンセル"
-            @click="revokeTarget = null"
-          />
-          <Button
-            type="button"
-            variant="danger"
-            :disabled="revokeToken.isPending.value"
-            :label="revokeToken.isPending.value ? '取り消し中…' : '取り消す'"
-            @click="onRevokeConfirm"
-          />
-        </DialogFooter>
-      </DialogContent>
+    <Dialog
+      :open="revokeTarget !== null"
+      title="トークンを取り消しますか？"
+      :description="revokeDescription"
+      :on-close="onRevokeClose"
+    >
+      <p v-if="revokeError" class="text-destructive text-sm">{{ revokeError }}</p>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="revokeToken.isPending.value"
+          label="キャンセル"
+          @click="revokeTarget = null"
+        />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="revokeToken.isPending.value"
+          :label="revokeToken.isPending.value ? '取り消し中…' : '取り消す'"
+          @click="onRevokeConfirm"
+        />
+      </template>
     </Dialog>
   </div>
 </template>

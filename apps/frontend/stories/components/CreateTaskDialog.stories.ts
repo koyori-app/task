@@ -196,7 +196,8 @@ export const EscapeCloses: Story = {
     const user = userEvent.setup();
     const titleInput = await canvas.findByLabelText(/タイトル/);
     await user.click(titleInput);
-    await user.keyboard('{Escape}');
+    // Esc は dialog の cancel として届く。user-event の keydown は合成なので、ブラウザは cancel を起こさない
+    titleInput.closest('dialog')!.dispatchEvent(new Event('cancel', { cancelable: true }));
     await expect(openChangeSpy).toHaveBeenCalledWith(false);
   },
 };

@@ -3,15 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhGithubLogo } from '@phosphor-icons/vue';
 import { OpenApiVueQueryError } from '@koyori-app/openapi-vue-query';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Button, Input } from '@koyori-app/ui-vue';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Button, Dialog, Input } from '@koyori-app/ui-vue';
 import { apiClient, fetchClient } from '@/lib/api-vue-query';
 import {
   forgetSelectToken as discardSelectToken,
@@ -644,36 +636,36 @@ async function confirmDisconnect() {
       </p>
     </div>
 
-    <Dialog v-if="isDisconnectOpen" :open="true" @update:open="onDisconnectOpenChange">
-      <DialogContent class="max-w-md" :show-close-button="false">
-        <DialogHeader>
-          <DialogTitle>GitHub 連携を解除しますか？</DialogTitle>
-          <DialogDescription>
-            <template v-if="repoFullName">「{{ repoFullName }}」との連携を解除します。</template>
-            <template v-else>GitHub との連携を解除します。</template>
-            コミットや Pull Request の紐付けは更新されなくなります。
-          </DialogDescription>
-        </DialogHeader>
-        <p v-if="disconnectError" role="alert" class="text-sm text-destructive">
-          {{ disconnectError }}
-        </p>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="tertiary"
-            :disabled="disconnectMutation.isPending.value"
-            label="キャンセル"
-            @click="onDisconnectOpenChange(false)"
-          />
-          <Button
-            type="button"
-            variant="danger"
-            :disabled="disconnectMutation.isPending.value"
-            :label="disconnectMutation.isPending.value ? '解除中…' : '解除する'"
-            @click="confirmDisconnect"
-          />
-        </DialogFooter>
-      </DialogContent>
+    <Dialog
+      :open="isDisconnectOpen"
+      title="GitHub 連携を解除しますか？"
+      :description="
+        (repoFullName
+          ? `「${repoFullName}」との連携を解除します。`
+          : 'GitHub との連携を解除します。') +
+        'コミットや Pull Request の紐付けは更新されなくなります。'
+      "
+      :on-close="() => onDisconnectOpenChange(false)"
+    >
+      <p v-if="disconnectError" role="alert" class="text-sm text-destructive">
+        {{ disconnectError }}
+      </p>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="disconnectMutation.isPending.value"
+          label="キャンセル"
+          @click="onDisconnectOpenChange(false)"
+        />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="disconnectMutation.isPending.value"
+          :label="disconnectMutation.isPending.value ? '解除中…' : '解除する'"
+          @click="confirmDisconnect"
+        />
+      </template>
     </Dialog>
   </div>
 </template>

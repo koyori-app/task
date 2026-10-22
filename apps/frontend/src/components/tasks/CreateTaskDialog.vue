@@ -3,17 +3,9 @@ import { ChevronDown, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { getActivePinia } from 'pinia';
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Button, Field, Input, Spinner } from '@koyori-app/ui-vue';
+import { Button, Dialog, Field, Input, Spinner } from '@koyori-app/ui-vue';
 import UserSelector from '@/components/users/UserSelector.vue';
 import {
   DropdownMenu,
@@ -187,7 +179,7 @@ watch(
 
 // 閉じたら入力と結果表示を捨てる。
 //
-// onOpenChange 側だけで捨てていたときは、作成に成功して親が open を false にする
+// onClose 側だけで捨てていたときは、作成に成功して親が open を false にする
 // 経路（created を受けてダイアログを閉じる）がここを通らないため、「タスクを
 // 作成しました」が残り、次に開いた瞬間に前回の成功が表示されていた。
 watch(
@@ -197,12 +189,12 @@ watch(
   },
 );
 
-function onOpenChange(value: boolean) {
-  if (!value && createMutation.isPending.value) return;
+function onClose() {
+  if (createMutation.isPending.value) return;
   // 親が open を握っていない場合でも捨てられるよう、ここでも呼ぶ。
   // resetForm は冪等なので watch と二重に走っても問題ない
-  if (!value) resetForm();
-  emit('update:open', value);
+  resetForm();
+  emit('update:open', false);
 }
 
 function toggleLabel(labelId: string) {
@@ -298,38 +290,37 @@ async function submit() {
 </script>
 
 <template>
-  <Dialog v-if="open" :open="true" @update:open="onOpenChange">
+  <div class="contents [--koyori-dialog-width:1040px] md:[--koyori-dialog-height:min(720px,90vh)]">
     <!--
       左に本文（タイトル・説明）、右にプロパティを置く 2 列。説明を広く書けるよう
       ダイアログを大きく取り、狭い画面では縦に積んで全体をスクロールさせる。
+      見出しは画面に出さない（タイトル欄が見出しの役をする）。plain の title はダイアログの名前として残る
     -->
-    <DialogContent
-      class="flex max-h-[90vh] flex-col gap-0 overflow-y-auto p-0 sm:max-w-[1040px] md:h-[min(720px,90vh)] md:overflow-hidden"
-      :show-close-button="false"
+    <Dialog
+      :open="open"
+      title="新規タスク"
+      :description="`${projectKey} にタスクを追加します`"
+      plain
+      :on-close="onClose"
     >
-      <!-- 見出しは画面に出さない（タイトル欄が見出しの役をする）。ダイアログの名前として残す -->
-      <DialogHeader class="sr-only">
-        <DialogTitle>新規タスク</DialogTitle>
-        <DialogDescription>{{ projectKey }} にタスクを追加します</DialogDescription>
-      </DialogHeader>
-
       <!--
         閉じるボタンはダイアログの右上に 1 個だけ絶対配置する。右列の中に置くと、
         狭い画面で右列が本文の下に積まれて × が画面の途中に現れる
       -->
-      <DialogClose as-child>
-        <Button
-          type="button"
-          variant="ghost"
-          class="absolute top-2 right-3 z-10"
-          ariaLabel="閉じる"
-          :disabled="createMutation.isPending.value"
-        >
-          <template #icon><X class="size-4" /></template>
-        </Button>
-      </DialogClose>
+      <Button
+        type="button"
+        variant="ghost"
+        class="absolute top-2 right-3 z-10"
+        ariaLabel="閉じる"
+        :disabled="createMutation.isPending.value"
+        @click="onClose"
+      >
+        <template #icon><X class="size-4" /></template>
+      </Button>
 
+      <!-- 本文は開いている間だけ置く（閉じた Dialog も DOM に残るので、Markdown エディタを常駐させない） -->
       <HydrationSafeForm
+        v-if="open"
         v-slot="{ isHydrated }"
         class="flex flex-col md:min-h-0 md:flex-1 md:flex-row"
         @submit="submit"
@@ -382,14 +373,13 @@ async function submit() {
                 <Spinner v-if="createMutation.isPending.value" hide-label />
               </template>
             </Button>
-            <DialogClose as-child>
-              <Button
-                type="button"
-                variant="tertiary"
-                :disabled="createMutation.isPending.value"
-                label="取り消す"
-              />
-            </DialogClose>
+            <Button
+              type="button"
+              variant="tertiary"
+              :disabled="createMutation.isPending.value"
+              label="取り消す"
+              @click="onClose"
+            />
           </div>
         </div>
 
@@ -620,6 +610,6 @@ async function submit() {
           </div>
         </div>
       </HydrationSafeForm>
-    </DialogContent>
-  </Dialog>
+    </Dialog>
+  </div>
 </template>

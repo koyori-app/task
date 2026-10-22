@@ -3,15 +3,7 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { ref, watch } from 'vue';
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Button, Field, Input, Spinner } from '@koyori-app/ui-vue';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Button, Dialog, Field, Input, Spinner } from '@koyori-app/ui-vue';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -20,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useHydrated } from '@/composables/useHydrated';
 import type { components } from '@/generated/api';
 import { DRIVE_FILES_PATH, fetchClient } from '@/lib/api-vue-query';
 import { documentFileName, MAX_DOCUMENT_TITLE_LENGTH } from '@/lib/documents/name';
@@ -44,12 +37,8 @@ const title = ref('');
 const templateId = ref(DOCUMENT_TEMPLATES[0]!.id);
 const pending = ref(false);
 const errorMessage = ref<string | null>(null);
-const titleInputRef = ref<InstanceType<typeof Input> | null>(null);
-
-// 開いて入力欄ができたら当てる。koyori の Input は autofocus を root の span に落とすので中の input に当てる
-watch(titleInputRef, (input) => {
-  (input?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
-});
+// 送信ボタンはフォームの外（#actions）にあるので、HydrationSafeForm のスロットの値は使えない
+const isHydrated = useHydrated();
 
 watch(
   () => props.open,
@@ -61,9 +50,9 @@ watch(
   },
 );
 
-function onOpenChange(value: boolean) {
-  if (!value && pending.value) return;
-  emit('update:open', value);
+function onClose() {
+  if (pending.value) return;
+  emit('update:open', false);
 }
 
 async function submit() {
@@ -114,19 +103,17 @@ async function submit() {
 </script>
 
 <template>
-  <Dialog v-if="open" :open="true" @update:open="onOpenChange">
-    <DialogContent class="sm:max-w-md">
-      <DialogHeader>
-        <DialogTitle>新しいドキュメント</DialogTitle>
-        <DialogDescription
-          >種類は本文のテンプレートを選ぶだけで、保存はされません</DialogDescription
-        >
-      </DialogHeader>
-      <HydrationSafeForm v-slot="{ isHydrated }" class="flex flex-col gap-4" @submit="submit">
+  <div class="contents [--koyori-dialog-width:28rem]">
+    <Dialog
+      :open="open"
+      title="新しいドキュメント"
+      description="種類は本文のテンプレートを選ぶだけで、保存はされません"
+      :on-close="onClose"
+    >
+      <HydrationSafeForm id="create-document-form" class="flex flex-col gap-4" @submit="submit">
         <!-- 文字数の上限は送信時に検証する -->
         <Field id="document-title" label="タイトル" required>
           <Input
-            ref="titleInputRef"
             name="title"
             autocomplete="off"
             :value="title"
@@ -149,23 +136,24 @@ async function submit() {
         <p v-if="errorMessage" role="alert" class="text-sm text-destructive">
           {{ errorMessage }}
         </p>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="tertiary"
-            :disabled="pending"
-            label="取り消す"
-            @click="onOpenChange(false)"
-          />
-          <Button
-            type="submit"
-            :disabled="pending || !isHydrated"
-            :label="pending ? '作成中…' : '作成'"
-          >
-            <template #icon><Spinner v-if="pending" hide-label /></template>
-          </Button>
-        </DialogFooter>
       </HydrationSafeForm>
-    </DialogContent>
-  </Dialog>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="pending"
+          label="取り消す"
+          @click="onClose"
+        />
+        <Button
+          type="submit"
+          form="create-document-form"
+          :disabled="pending || !isHydrated"
+          :label="pending ? '作成中…' : '作成'"
+        >
+          <template #icon><Spinner v-if="pending" hide-label /></template>
+        </Button>
+      </template>
+    </Dialog>
+  </div>
 </template>
