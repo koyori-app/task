@@ -6,7 +6,6 @@ import { enableAutoUnmount, mount, type VueWrapper } from '@vue/test-utils';
 import { navigate } from 'vike/client/router';
 import { useAuthStore } from '@/stores/auth';
 import type { Tenant } from '@/stores/tenant';
-import SidebarProvider from '../../ui/sidebar/SidebarProvider.vue';
 import TenantSwitcher from '../TenantSwitcher.vue';
 
 vi.mock('vike/client/router', () => ({ navigate: vi.fn() }));
@@ -67,8 +66,8 @@ function mountSwitcher(
   }
   return mount(
     {
-      components: { SidebarProvider, TenantSwitcher },
-      template: '<SidebarProvider><TenantSwitcher v-bind="props" /></SidebarProvider>',
+      components: { TenantSwitcher },
+      template: '<TenantSwitcher v-bind="props" />',
       setup: () => {
         provide(
           VUE_QUERY_CLIENT,

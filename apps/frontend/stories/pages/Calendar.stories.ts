@@ -207,7 +207,7 @@ const meta = {
         provide(VUE_QUERY_CLIENT, queryClient);
         provide(PAGE_CONTEXT_KEY, mockContext);
       },
-      // 本番では SidebarProvider が用意している（山の内訳の Tooltip が使う）
+      // 本番では +Layout が用意している（山の内訳の Tooltip が使う）
       components: { TooltipProvider },
       template: '<TooltipProvider :delay-duration="0"><story /></TooltipProvider>',
     }),
