@@ -3,8 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhArrowDown, PhArrowUp, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { computed, ref, watch } from 'vue';
 
-import { Button, ConfirmDialog, Input } from '@koyori-app/ui-vue';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Button, Checkbox, ConfirmDialog, Input } from '@koyori-app/ui-vue';
 import type { components } from '@/generated/api';
 import { apiClient } from '@/lib/api-vue-query';
 
@@ -270,7 +269,8 @@ async function moveStatus(index: number, offset: -1 | 1) {
       <ul v-else aria-label="ステータス一覧" class="mb-4 space-y-2">
         <li v-for="(status, index) in statuses" :key="status.id" class="rounded-lg border p-3">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div class="flex min-w-0 flex-1 items-center gap-2">
+            <!-- 名前欄を潰さず、右の Checkbox 群を折り返させるため min-w-0 を付けない -->
+            <div class="flex flex-1 items-center gap-2">
               <!-- 色は koyori に無いので素の input -->
               <input
                 :aria-label="`${status.name}の色`"
@@ -304,33 +304,25 @@ async function moveStatus(index: number, offset: -1 | 1) {
             </div>
 
             <div class="flex flex-wrap items-center gap-3">
-              <label class="flex cursor-pointer items-center gap-1.5 text-xs">
-                <Checkbox
-                  :model-value="status.is_default"
-                  :disabled="isMutating"
-                  @update:model-value="setUniqueFlag(status, 'is_default')"
-                />
-                Default
-              </label>
-              <label class="flex cursor-pointer items-center gap-1.5 text-xs">
-                <Checkbox
-                  :model-value="status.is_done_state"
-                  :disabled="isMutating"
-                  @update:model-value="toggleDoneState(status)"
-                />
-                Done state
-              </label>
-              <label
+              <Checkbox
+                label="Default"
+                :checked="status.is_default"
+                :disabled="isMutating"
+                :on-checked-change="() => setUniqueFlag(status, 'is_default')"
+              />
+              <Checkbox
+                label="Done state"
+                :checked="status.is_done_state"
+                :disabled="isMutating"
+                :on-checked-change="() => toggleDoneState(status)"
+              />
+              <Checkbox
                 v-if="status.is_done_state"
-                class="flex cursor-pointer items-center gap-1.5 text-xs"
-              >
-                <Checkbox
-                  :model-value="defaultDoneId === status.id"
-                  :disabled="isMutating"
-                  @update:model-value="setUniqueFlag(status, 'is_default_done')"
-                />
-                既定の完了
-              </label>
+                label="既定の完了"
+                :checked="defaultDoneId === status.id"
+                :disabled="isMutating"
+                :on-checked-change="() => setUniqueFlag(status, 'is_default_done')"
+              />
               <div class="flex">
                 <Button
                   type="button"
