@@ -2,15 +2,17 @@
 // server は /manifest.webmanifest としてこれを返し、+Head.vue は theme-color と
 // apple-touch-icon をここから引く。
 //
-// 色と icon は仮の値である。正式な物は TASK-299 で差し替える。差し替えはこの
-// file の色と、public/pwa/ の画像（同じ名で置き換える）だけで済む。
+// icon は TASK-299 で新しい絵に差し替えた。絵は仮の物で、清書したら
+// public/pwa/ と public/ の画像を同じ名で置き換えるだけで済む。元の絵と焼き方は
+// apps/frontend/design/app-icon/ にある。色は仮の値のまま変えていない
+// （icon の地は background_color と同じ白で塗っている）。
 
 /** header（bg-sidebar の --sidebar: oklch(0.985 0 0)）に合わせた仮の色。 */
 export const PWA_THEME_COLOR = '#fafafa';
-/** 起動の間に出る地の色。--background: oklch(1 0 0) に合わせた仮の色。 */
+/** 起動の間に出る地の色。--background: oklch(1 0 0) に合わせた仮の色。icon の地もこの白。 */
 export const PWA_BACKGROUND_COLOR = '#ffffff';
 
-/** 仮の icon（今の favicon の logo.svg を焼いた物）。TASK-299 で同じ名のまま差し替える。 */
+/** 元の絵（design/app-icon/source.png）を焼いた icon（TASK-299）。どれも不透明で、透けは白で埋めてある。 */
 export const PWA_ICONS = {
   icon192: '/pwa/icon-192.png',
   icon512: '/pwa/icon-512.png',
@@ -45,6 +47,12 @@ export const webAppManifest = {
     { src: PWA_ICONS.maskable512, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
   ],
 } as const;
+
+/** タブの favicon。icon と同じ元の絵を縮めた物で、透けたまま出す（タブの地の色に乗せるため）。 */
+export const FAVICONS = [
+  { href: '/favicon-16.png', sizes: '16x16' },
+  { href: '/favicon-32.png', sizes: '32x32' },
+] as const;
 
 export const MANIFEST_PATH = '/manifest.webmanifest';
 export const MANIFEST_CONTENT_TYPE = 'application/manifest+json; charset=utf-8';
