@@ -61,9 +61,9 @@ function input(id: string) {
 }
 
 function checkEvent(label: string) {
-  const box = document.body.querySelector<HTMLButtonElement>(
-    `button[role="checkbox"][aria-label="${label}"]`,
-  );
+  const box = [...document.body.querySelectorAll('label')]
+    .find((l) => l.textContent?.trim() === label)
+    ?.querySelector<HTMLInputElement>('input[type="checkbox"]');
   if (!box) throw new Error(`checkbox "${label}" not found`);
   box.click();
 }

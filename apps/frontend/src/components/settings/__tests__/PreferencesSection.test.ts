@@ -130,8 +130,8 @@ describe('PreferencesSection（環境設定の画面）', () => {
 
     const html = await renderToString(app);
 
-    expect(html).toContain('data-state="unchecked"');
-    expect(html).not.toContain('data-state="checked"');
+    expect(html).toContain('aria-checked="false"');
+    expect(html).not.toContain('aria-checked="true"');
     expect(html).toMatch(/<button[^>]*role="switch"[^>]*disabled/);
     // 有効のフラグの知らせも、残った値が要るので SSR では出ない
     expect(html).not.toContain('data-hidden-experiments-notice');

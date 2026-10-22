@@ -4,6 +4,7 @@ import { PhCopy, PhKey, PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
 import {
   Button,
+  Checkbox,
   Dialog,
   Dropdown,
   Field,
@@ -11,9 +12,7 @@ import {
   Picker,
   type DropdownItem,
 } from '@koyori-app/ui-vue';
-import { Checkbox } from '@/components/ui/checkbox';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   personalTokensQueryOptions,
@@ -312,30 +311,29 @@ function scopeItems(scopes: string[]): DropdownItem[] {
             </div>
           </div>
 
-          <div class="flex flex-col gap-2">
-            <Label>スコープ</Label>
-            <div class="flex flex-col gap-3">
-              <label
-                v-for="entry in SCOPE_CATALOG"
-                :key="entry.scope"
-                class="flex cursor-pointer items-start gap-3"
-              >
-                <Checkbox
-                  class="mt-0.5"
-                  :model-value="selectedScopes.includes(entry.scope)"
-                  :name="`scope-${entry.scope}`"
-                  @update:model-value="(v) => toggleScope(entry.scope, v === true)"
-                />
-                <span class="flex flex-col">
-                  <code class="font-mono text-sm">{{ entry.scope }}</code>
-                  <span class="text-muted-foreground text-sm">{{ entry.description }}</span>
-                </span>
-              </label>
-            </div>
-            <p role="alert" class="min-h-[1.25rem] text-sm text-(--koyori-color-danger)">
+          <fieldset class="min-w-0">
+            <legend class="text-sm font-medium">スコープ</legend>
+            <p id="token-scopes-error" role="alert" class="text-sm text-(--koyori-color-danger)">
               {{ scopesError ?? '' }}
             </p>
-          </div>
+            <div class="mt-2 flex flex-col gap-3">
+              <div v-for="entry in SCOPE_CATALOG" :key="entry.scope" class="flex flex-col">
+                <Checkbox
+                  :label="entry.scope"
+                  :name="`scope-${entry.scope}`"
+                  :checked="selectedScopes.includes(entry.scope)"
+                  :ariaDescribedBy="`token-scope-${entry.scope}-description token-scopes-error`"
+                  :on-checked-change="(checked: boolean) => toggleScope(entry.scope, checked)"
+                />
+                <p
+                  :id="`token-scope-${entry.scope}-description`"
+                  class="text-muted-foreground pl-[calc(var(--koyori-control-height-sm)+var(--koyori-space-xs))] text-sm"
+                >
+                  {{ entry.description }}
+                </p>
+              </div>
+            </div>
+          </fieldset>
 
           <p v-if="submitError" class="text-destructive text-sm">{{ submitError }}</p>
 

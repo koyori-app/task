@@ -46,7 +46,7 @@ describe('TaskForgePullRequestLinkDialog', () => {
     await flushPromises();
     expect(document.body.textContent).toContain('acme/backend の PR');
 
-    document.body.querySelector<HTMLButtonElement>('button[role="checkbox"]')!.click();
+    document.body.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click();
     await flushPromises();
     await submitWith(' 87 ');
 
