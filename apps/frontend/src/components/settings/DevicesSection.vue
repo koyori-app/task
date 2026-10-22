@@ -2,8 +2,7 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhDesktop } from '@phosphor-icons/vue';
 import { ref } from 'vue';
-import { Button, Dialog } from '@koyori-app/ui-vue';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Button, Dialog, Skeleton } from '@koyori-app/ui-vue';
 import { devicesQueryOptions, useDevicesQuery, useRevokeDeviceMutation } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 import { formatExpiry, formatLastUsed, maskedToken } from '@/lib/personal-tokens';
@@ -43,7 +42,7 @@ async function onRevokeConfirm() {
       </p>
     </div>
 
-    <Skeleton v-if="devicesQuery.isPending.value" class="h-16 w-full" />
+    <Skeleton v-if="devicesQuery.isPending.value" height="4rem" />
     <p v-else-if="devicesQuery.isError.value" class="text-destructive text-sm">
       端末の一覧を取得できませんでした。再読み込みしてください。
     </p>
