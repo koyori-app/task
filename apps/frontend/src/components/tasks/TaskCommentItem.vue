@@ -30,6 +30,8 @@ const props = defineProps<{
    * 可否は backend が判定し、拒否されたら deleteError を拒まれた通りに表示する。
    */
   currentUserId?: string | null;
+  /** 本文の札をプロフィールへの link にするテナント（表示用 id。CommentBody 参照） */
+  mentionTenant?: string;
   /** このコメントの更新失敗メッセージ（対象コメントの中に出す） */
   updateError?: string | null;
   /** このコメントの削除失敗メッセージ（対象コメントの中に出す） */
@@ -186,6 +188,7 @@ async function confirmDelete() {
       :comment-id="comment.id"
       :mentions="mentions"
       :current-user-id="currentUserId"
+      :mention-tenant="mentionTenant"
     />
 
     <div

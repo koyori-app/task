@@ -302,6 +302,7 @@ function openRelatedTask(task: TaskResponse) {
         :on-retry="refetchComments"
         :current-user-id="currentUserId"
         :profile-href="profileHref"
+        :mention-tenant="tenantDisplayId"
         :submit-pending="submitPending"
         :submit-error="submitError"
         :reply-error="replyError"

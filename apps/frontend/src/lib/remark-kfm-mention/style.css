@@ -80,3 +80,25 @@
   opacity: 0.6;
   filter: grayscale(1);
 }
+
+/* プロフィールへの link になった札（いま入れる者だけ）。.kfm-content a の色と下線より強い詳細度で、札の見た目を保つ。
+ * 指した時だけ下線を引き、キーボードの focus には輪を出す。輪の色は --primary（白い地に約 17:1。--ring は
+ * 約 2.6:1 で、輪に要る 3:1 に届かぬ） */
+a.kfm-mention.kfm-mention-member {
+  color: var(--primary);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a.kfm-mention.kfm-mention-self {
+  color: var(--primary-foreground);
+}
+
+a.kfm-mention.kfm-mention-member:hover {
+  text-decoration: underline;
+}
+
+a.kfm-mention.kfm-mention-member:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}

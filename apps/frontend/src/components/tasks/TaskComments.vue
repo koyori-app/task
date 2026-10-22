@@ -35,6 +35,8 @@ const props = defineProps<{
   currentUserId?: string | null;
   /** 投稿者のプロフィール画面の URL（TaskCommentItem 参照） */
   profileHref?: (userId: string) => string;
+  /** 本文の札をプロフィールへの link にするテナント（表示用 id。CommentBody 参照） */
+  mentionTenant?: string;
   /** 投稿（新規・返信共通）の進行中 */
   submitPending?: boolean;
   /** 新規投稿の失敗。新規投稿フォームの直下に出す */
@@ -225,6 +227,7 @@ async function deleteThread(threadId: string) {
               :mentions="mentions"
               :mention-candidates="mentionCandidates"
               :profile-href="profileHref"
+              :mention-tenant="mentionTenant"
               :updating="updatingCommentId === openThread.id"
               :deleting="deletingCommentId === openThread.id"
               :update-error="updateErrorCommentId === openThread.id ? updateError : null"
@@ -254,6 +257,7 @@ async function deleteThread(threadId: string) {
               :mentions="mentions"
               :mention-candidates="mentionCandidates"
               :profile-href="profileHref"
+              :mention-tenant="mentionTenant"
               :updating="updatingCommentId === reply.id"
               :deleting="deletingCommentId === reply.id"
               :update-error="updateErrorCommentId === reply.id ? updateError : null"
@@ -284,6 +288,7 @@ async function deleteThread(threadId: string) {
               :mentions="mentions"
               :mention-candidates="mentionCandidates"
               :profile-href="profileHref"
+              :mention-tenant="mentionTenant"
               :updating="updatingCommentId === thread.id"
               :deleting="deletingCommentId === thread.id"
               :update-error="updateErrorCommentId === thread.id ? updateError : null"
