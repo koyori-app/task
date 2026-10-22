@@ -107,24 +107,15 @@ type MountOptions = {
 };
 
 /**
- * 担当者・ラベルのメニューはトリガーを押さないと描画されないので、中身を素の要素に
- * 差し替えて直接読む。チェック項目は押すと反転した値を返すボタンにする。
+ * 担当者の窓（UserSelector）は Popover の中で、トリガーを押さないと描画されないので、
+ * 中身を素の要素に差し替えて直接読む。中身の listbox は本物のまま読む。
+ * ラベルのメニュー（koyori の Dropdown）は閉じていても項目が DOM にあるので差し替えない。
  */
 const dropdownStubs = {
-  // 担当者の窓（UserSelector）は Popover の中。中身の listbox は本物のまま読む
   PopoverRoot: { template: '<div><slot /></div>' },
   PopoverTrigger: { template: '<div><slot /></div>' },
   PopoverPortal: { template: '<div><slot /></div>' },
   PopoverContent: { template: '<div><slot /></div>' },
-  DropdownMenu: { template: '<div><slot /></div>' },
-  DropdownMenuTrigger: { template: '<div><slot /></div>' },
-  DropdownMenuContent: { template: '<div><slot /></div>' },
-  DropdownMenuCheckboxItem: {
-    props: ['modelValue'],
-    emits: ['update:modelValue', 'select'],
-    template:
-      '<button type="button" role="menuitemcheckbox" :aria-checked="String(!!modelValue)" @click="$emit(\'update:modelValue\', !modelValue)"><slot /></button>',
-  },
 };
 
 function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
@@ -151,7 +142,7 @@ function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
   });
 }
 
-/** 担当者・ラベルのメニューの項目（stub 済み）を表示名で引く */
+/** ラベルのメニューの項目を表示名で引く */
 function menuItem(name: string) {
   const item = [...document.body.querySelectorAll('[role="menuitemcheckbox"]')].find(
     (el) => el.textContent?.trim() === name,

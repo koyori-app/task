@@ -9,15 +9,7 @@ import {
   PhTag,
 } from '@phosphor-icons/vue';
 
-import { Button, Input, Textarea } from '@koyori-app/ui-vue';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Button, Dropdown, Input, Textarea, type DropdownItem } from '@koyori-app/ui-vue';
 import {
   formatDeadline,
   isoToLocalDateInput,
@@ -134,17 +126,38 @@ async function submitComment() {
   commentOpen.value = false;
 }
 
-// ---- ラベル ----
-const labelQuery = ref('');
-const visibleLabels = computed(() => {
-  const query = labelQuery.value.trim().toLowerCase();
-  if (!query) return props.projectLabels;
-  return props.projectLabels.filter((label) => label.name.toLowerCase().includes(query));
-});
+// ---- メニュー ----
+const statusItems = computed<DropdownItem[]>(() =>
+  props.statuses.map((status) => ({
+    value: status.id,
+    label: status.name,
+    kind: 'radio',
+    checked: status.id === props.task.status_id,
+  })),
+);
 
 function hasLabel(labelId: string) {
   return props.task.labels.some((label) => label.id === labelId);
 }
+
+const labelItems = computed<DropdownItem[]>(() =>
+  props.projectLabels.map((label) => ({
+    value: label.id,
+    label: label.name,
+    kind: 'checkbox',
+    checked: hasLabel(label.id),
+    disabled: isBusy.value,
+  })),
+);
+
+const priorityItems = computed<DropdownItem[]>(() =>
+  PRIORITIES.map((value) => ({
+    value,
+    label: PRIORITY_CONFIG[value].label,
+    kind: 'radio',
+    checked: value === props.task.priority,
+  })),
+);
 
 /** 既存の入力・メニュー・タイトル操作を横取りせず、行の空白だけを選択に使う。 */
 function selectFromBlank(event: MouseEvent) {
@@ -216,15 +229,19 @@ function selectFromKeyboard(event: KeyboardEvent) {
         <span v-else class="size-6 shrink-0" aria-hidden="true" />
 
         <!-- グループがステータスなので列は持たず、名前の左の丸から変える（参照デザイン） -->
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <button
-              type="button"
-              class="grid size-4 shrink-0 place-items-center rounded-full border-2 disabled:opacity-50"
+        <Dropdown
+          class="shrink-0"
+          :ariaLabel="`ステータス: ${statusName}`"
+          :title="statusName"
+          :disabled="isBusy"
+          :icon="null"
+          :items="statusItems"
+          :on-select="(id: string) => emit('update:status', id)"
+        >
+          <template #trigger>
+            <span
+              class="grid size-4 place-items-center rounded-full border-2"
               :style="statusColor ? { borderColor: statusColor } : undefined"
-              :aria-label="`ステータス: ${statusName}`"
-              :title="statusName"
-              :disabled="isBusy"
             >
               <span
                 v-if="statusColor"
@@ -232,19 +249,9 @@ function selectFromKeyboard(event: KeyboardEvent) {
                 :style="{ backgroundColor: statusColor }"
                 aria-hidden="true"
               />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuRadioGroup
-              :model-value="task.status_id"
-              @update:model-value="(v) => emit('update:status', String(v))"
-            >
-              <DropdownMenuRadioItem v-for="status in statuses" :key="status.id" :value="status.id">
-                {{ status.name }}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </span>
+          </template>
+        </Dropdown>
 
         <button
           type="button"
@@ -267,52 +274,22 @@ function selectFromKeyboard(event: KeyboardEvent) {
           {{ label.name }}
         </span>
 
-        <!-- ラベルの付け外し。行にカーソルを合わせたときだけ出す -->
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <Button
-              type="button"
-              variant="ghost"
-              class="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
-              :disabled="isBusy"
-              ariaLabel="ラベルを編集"
-              title="ラベル"
-            >
-              <template #icon><PhTag class="size-4" /></template>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" class="w-56">
-            <div class="p-1">
-              <Input
-                placeholder="ラベルを検索"
-                aria-label="ラベルを検索"
-                :value="labelQuery"
-                :on-value-change="(v: string) => (labelQuery = v)"
-              />
-            </div>
-            <p v-if="!projectLabels.length" class="px-2 py-1.5 text-sm text-muted-foreground">
-              ラベルがありません
-            </p>
-            <p v-else-if="!visibleLabels.length" class="px-2 py-1.5 text-sm text-muted-foreground">
-              一致するラベルがありません
-            </p>
-            <DropdownMenuCheckboxItem
-              v-for="label in visibleLabels"
-              :key="label.id"
-              :model-value="hasLabel(label.id)"
-              :disabled="isBusy"
-              @select="(event: Event) => event.preventDefault()"
-              @update:model-value="(v) => emit('toggle:label', label.id, !!v)"
-            >
-              <span
-                class="inline-block size-2.5 shrink-0 rounded-full"
-                :style="{ backgroundColor: label.color }"
-                aria-hidden="true"
-              />
-              {{ label.name }}
-            </DropdownMenuCheckboxItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <!--
+          ラベルの付け外し。行にカーソルを合わせたときだけ出す。一覧は根の中に出るので、
+          開いている間（フォーカスが中にある間）も根を見せておく。
+          更新中は項目だけを止める。Dropdown ごと disabled にすると一覧が閉じ、続けて選べない
+        -->
+        <Dropdown
+          variant="ghost"
+          class="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+          ariaLabel="ラベルを編集"
+          title="ラベル"
+          :items="labelItems"
+          empty-message="ラベルがありません"
+          :on-select="(id: string) => emit('toggle:label', id, !hasLabel(id))"
+        >
+          <template #icon><PhTag class="size-4" /></template>
+        </Dropdown>
       </div>
 
       <!-- 担当者 -->
@@ -364,39 +341,19 @@ function selectFromKeyboard(event: KeyboardEvent) {
 
       <!-- 優先度 -->
       <div class="px-2">
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <!-- アイコンと文字の両方に優先度の色を載せる（モックと同じ） -->
-            <Button
-              type="button"
-              variant="ghost"
-              :style="{ color: PRIORITY_CONFIG[task.priority].color }"
-              :disabled="isBusy"
-              ariaLabel="優先度"
-              :label="PRIORITY_CONFIG[task.priority].label"
-            >
-              <template #icon><PhFlag class="size-4" aria-hidden="true" /></template>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuRadioGroup
-              :model-value="task.priority"
-              @update:model-value="
-                (v) => emit('update:priority', String(v) as TaskResponse['priority'])
-              "
-            >
-              <DropdownMenuRadioItem
-                v-for="value in PRIORITIES"
-                :key="value"
-                :value="value"
-                :style="{ color: PRIORITY_CONFIG[value].color }"
-              >
-                <PhFlag class="size-4" aria-hidden="true" />
-                {{ PRIORITY_CONFIG[value].label }}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <!-- アイコンと文字の両方に優先度の色を載せる（モックと同じ） -->
+        <Dropdown
+          variant="ghost"
+          class="[&>button]:text-(--priority-color)"
+          :style="{ '--priority-color': PRIORITY_CONFIG[task.priority].color }"
+          :disabled="isBusy"
+          ariaLabel="優先度"
+          :label="PRIORITY_CONFIG[task.priority].label"
+          :items="priorityItems"
+          :on-select="(value: string) => emit('update:priority', value as TaskResponse['priority'])"
+        >
+          <template #icon><PhFlag class="size-4" aria-hidden="true" /></template>
+        </Dropdown>
       </div>
 
       <!-- コメント -->

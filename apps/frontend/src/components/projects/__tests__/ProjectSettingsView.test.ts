@@ -154,10 +154,10 @@ describe('ProjectSettingsView', () => {
 
   it('アイコンを外して保存すると clear_icon_emoji を送る', async () => {
     updateMutateAsync.mockResolvedValue({ ...sampleProject, icon_emoji: null });
-    const wrapper = mountView();
+    mountView();
     await flushPromises();
 
-    await wrapper.find('button[aria-label="アイコンを選択"]').trigger('click');
+    // アイコンの選択は開閉の無い格子。「アイコンなし」はその下にある
     const clearButton = [...document.body.querySelectorAll('button')].find(
       (b) => b.textContent?.trim() === 'アイコンなし',
     );

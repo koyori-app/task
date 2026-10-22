@@ -31,18 +31,10 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import { useMediaQuery } from '@vueuse/core';
 
 import { valueUpdater } from '@/components/ui/table/utils';
-import { Button, Input, Spinner } from '@koyori-app/ui-vue';
+import { Button, Dropdown, Input, Spinner, type DropdownItem } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import TaskDetailPane, { type TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import {
   Table,
   TableBody,
@@ -885,6 +877,30 @@ const table = useTable({
     },
   },
 });
+
+/** ラベルでの絞り込み。「すべて」は value を空にして選択なしに戻す */
+const labelFilterItems = computed<DropdownItem[]>(() => [
+  { value: '', label: 'すべて', kind: 'radio', checked: !selectedLabelId.value },
+  ...projectLabels.value.map((label) => ({
+    value: label.id,
+    label: label.name,
+    kind: 'radio' as const,
+    checked: label.id === selectedLabelId.value,
+  })),
+]);
+
+/** 外せる列の表示切り替え。checkbox なので選んでもメニューは閉じない */
+const columnItems = computed<DropdownItem[]>(() =>
+  table
+    .getAllColumns()
+    .filter((col) => col.getCanHide())
+    .map((col) => ({
+      value: col.id,
+      label: col.id,
+      kind: 'checkbox' as const,
+      checked: col.getIsVisible(),
+    })),
+);
 </script>
 
 <template>
@@ -971,56 +987,21 @@ const table = useTable({
               <span>ラベルの取得に失敗しました</span>
               <Button variant="tertiary" label="再試行" @click="labelsQuery.refetch()" />
             </div>
-            <DropdownMenu v-if="!isSearchActive && projectLabels.length">
-              <DropdownMenuTrigger as-child>
-                <Button
-                  variant="tertiary"
-                  :class="selectedLabelId ? 'text-link' : ''"
-                  :label="selectedLabelName ?? 'ラベル'"
-                >
-                  <template #icon><PhCaretDown class="size-4" /></template>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuRadioGroup
-                  :model-value="selectedLabelId ?? ''"
-                  @update:model-value="(v) => (selectedLabelId = v ? String(v) : null)"
-                >
-                  <DropdownMenuRadioItem class="text-sm" value="">すべて</DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem
-                    v-for="label in projectLabels"
-                    :key="label.id"
-                    class="text-sm"
-                    :value="label.id"
-                  >
-                    <span
-                      class="mr-1.5 inline-block size-2.5 shrink-0 rounded-full"
-                      :style="{ backgroundColor: label.color }"
-                      aria-hidden="true"
-                    />
-                    {{ label.name }}
-                  </DropdownMenuRadioItem>
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <DropdownMenu v-if="!isSearchActive">
-              <DropdownMenuTrigger as-child>
-                <Button variant="tertiary" label="列">
-                  <template #icon><PhCaretDown class="size-4" /></template>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuCheckboxItem
-                  v-for="col in table.getAllColumns().filter((c) => c.getCanHide())"
-                  :key="col.id"
-                  class="text-sm"
-                  :model-value="col.getIsVisible()"
-                  @update:model-value="(v) => col.toggleVisibility(!!v)"
-                >
-                  {{ col.id }}
-                </DropdownMenuCheckboxItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Dropdown
+              v-if="!isSearchActive && projectLabels.length"
+              variant="tertiary"
+              :class="selectedLabelId ? '[&>button]:text-link' : ''"
+              :label="selectedLabelName ?? 'ラベル'"
+              :items="labelFilterItems"
+              :on-select="(value: string) => (selectedLabelId = value || null)"
+            />
+            <Dropdown
+              v-if="!isSearchActive"
+              variant="tertiary"
+              label="列"
+              :items="columnItems"
+              :on-select="(id: string) => table.getColumn(id)?.toggleVisibility()"
+            />
           </div>
 
           <!-- 表示形式の切り替え。既定は List -->

@@ -122,8 +122,8 @@ export const MultipleTenants: Story = {
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(page.getByRole('button', { name: /Acme/ }));
-    await userEvent.click(await page.findByRole('menuitem', { name: 'Globex' }));
-    await expect(within(canvasElement).getByText('Globex')).toBeInTheDocument();
+    await userEvent.click(await page.findByRole('menuitemradio', { name: 'Globex' }));
+    await expect(within(canvasElement).getByRole('button', { name: 'Globex' })).toBeInTheDocument();
   },
 };
 
@@ -138,15 +138,11 @@ export const LinksToTenantSettings: Story = {
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(page.getByRole('button', { name: /Acme/ }));
 
-    await expect(page.findByText('3 人のメンバー')).resolves.toBeInTheDocument();
-    await expect(page.getByRole('menuitem', { name: 'テナント設定' })).toHaveAttribute(
-      'href',
-      '/acme/settings',
-    );
-    await expect(page.getByRole('menuitem', { name: 'メンバー' })).toHaveAttribute(
-      'href',
-      '/acme/settings/members',
-    );
+    // 項目は閉じていても DOM にあるので、文字ではなく役割で開くのを待つ
+    await expect(page.findByRole('menuitem', { name: 'テナント設定' })).resolves.toBeVisible();
+    await expect(page.findByText(/3 人のメンバー/)).resolves.toBeInTheDocument();
+    await userEvent.click(page.getByRole('menuitem', { name: 'メンバー' }));
+    await expect(window.location.pathname).toBe('/acme/settings/members');
   },
 };
 
@@ -166,10 +162,10 @@ export const NoMemberships: Story = {
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(page.getByRole('button', { name: /所属テナントなし/ }));
-    await expect(await page.findByText('所属テナントがありません')).toBeInTheDocument();
+    await expect(page.findByRole('menuitem', { name: 'テナントを作成' })).resolves.toBeVisible();
+    await expect(page.getByText('所属テナントがありません')).toBeInTheDocument();
     // テナントが決まっていないので、設定への導線は出さない（行き先を組めない）
     await expect(page.queryByRole('menuitem', { name: 'テナント設定' })).not.toBeInTheDocument();
-    await expect(page.getByRole('button', { name: 'テナントを作成' })).toBeInTheDocument();
   },
 };
 
@@ -194,7 +190,7 @@ export const SingleTenant: Story = {
   beforeEach: mockMembers(1),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText('Acme')).toBeInTheDocument();
+    await expect(canvas.getByRole('button', { name: 'Acme' })).toBeInTheDocument();
   },
 };
 
@@ -207,7 +203,9 @@ export const MissingSelectionFallsBack: Story = {
   beforeEach: mockMembers(),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText('指定されたテナントが見つかりません')).toBeInTheDocument();
-    await expect(canvas.queryByText('Acme')).not.toBeInTheDocument();
+    // 引き金に最初のテナントを黙って出さない（一覧の項目は閉じていても DOM にある）
+    const trigger = canvas.getByRole('button', { name: '指定されたテナントが見つかりません' });
+    await expect(trigger).toHaveTextContent('指定されたテナントが見つかりません');
+    await expect(trigger).not.toHaveTextContent('Acme');
   },
 };

@@ -175,15 +175,14 @@ export const EmojiSelectionIsSaved: Story = {
   beforeEach: mockFetch(),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    // ピッカーの中身は DropdownMenuPortal で canvas の外に出る
-    const page = within(canvasElement.ownerDocument.body);
     const user = userEvent.setup();
 
-    await user.click(await canvas.findByRole('button', { name: 'テナントアイコンを変更' }));
-    await user.click(await page.findByRole('button', { name: 'アイコン 🚀' }));
-    // 選択肢は素の button なのでメニューは開いたまま。閉じないと背後が aria-hidden で触れない
-    await user.keyboard('{Escape}');
-    await waitFor(() => expect(page.queryByText('絵文字を選択')).not.toBeInTheDocument());
+    const picker = within(await canvas.findByRole('group', { name: 'テナントアイコンを変更' }));
+    await user.click(picker.getByRole('button', { name: '🚀' }));
+    await expect(picker.getByRole('button', { name: '🚀' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
 
     await expect(canvas.findByText('保存されていない変更があります')).resolves.toBeInTheDocument();
     await user.click(canvas.getByRole('button', { name: '変更を保存' }));

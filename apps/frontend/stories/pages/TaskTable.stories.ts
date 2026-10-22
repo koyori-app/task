@@ -1479,6 +1479,10 @@ export const ColumnVisibility: Story = {
       expect(canvas.queryByRole('button', { name: '優先度' })).not.toBeInTheDocument(),
     );
     await expect(canvas.findByRole('button', { name: /タイトル/ })).resolves.toBeInTheDocument();
+    // checkbox なのでメニューは開いたまま。続けて別の列も切り替えられる
+    await expect(menu.getByRole('menu', { name: '列' })).toBeVisible();
+    await expect(priorityItem).toHaveAttribute('aria-checked', 'false');
+    await expect(priorityItem).toHaveFocus();
   },
 };
 

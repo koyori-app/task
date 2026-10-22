@@ -183,7 +183,6 @@ export const UnlinkFlow: Story = {
     await user.click(await canvas.findByRole('button', { name: '#87 の操作' }));
     await user.click(await page.findByRole('menuitem', { name: 'リンクを外す' }));
     await expect(page.findByText('PR のリンクを外しますか？')).resolves.toBeInTheDocument();
-    // メニューが閉じ切るまでは、メニューの外（ダイアログを含む）に aria-hidden が残る
     await user.click(await page.findByRole('button', { name: 'リンクを外す' }));
 
     await waitFor(() => expect(requestsOf('DELETE')).toHaveLength(1));
