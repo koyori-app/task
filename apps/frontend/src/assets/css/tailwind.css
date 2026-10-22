@@ -128,19 +128,3 @@
     @apply bg-background text-foreground;
   }
 }
-
-@layer components {
-  /*
-   * shortcut: koyori の Button の不足を補う。@koyori-app/ui-vue 側で直ったら消す。
-   * - 置き換え前の Button と同じく縮めず折り返さない。狭い行で日本語のラベルが 1 字ずつ折れる
-   * - 外側の button が w-full や flex-col で広がっても、色の付いた内側の面（直下の span）が
-   *   中身の幅のまま左に寄るので、面を外側いっぱいに広げる
-   */
-  button[data-variant][data-icon-only] {
-    flex-shrink: 0;
-    white-space: nowrap;
-  }
-  button[data-variant][data-icon-only] > span {
-    flex-grow: 1;
-  }
-}

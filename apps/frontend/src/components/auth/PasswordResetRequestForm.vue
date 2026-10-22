@@ -2,11 +2,9 @@
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { ref } from 'vue';
-import { Button } from '@koyori-app/ui-vue';
+import { Button, Field, Input } from '@koyori-app/ui-vue';
 import { Card, CardContent } from '@/components/ui/card';
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Input } from '@/components/ui/input';
 import { usePasswordResetRequestMutation } from '@/lib/api-vue-query';
 import { arkMessage } from '@/lib/auth-validation';
 
@@ -51,7 +49,7 @@ const form = useForm({
   <Card v-else class="overflow-hidden p-0">
     <CardContent class="p-0">
       <HydrationSafeForm v-slot="{ isHydrated }" class="p-6 md:p-8" @submit="form.handleSubmit">
-        <FieldGroup>
+        <div class="flex flex-col gap-6">
           <div class="flex flex-col items-center gap-2 text-center">
             <h1 class="text-2xl font-bold">パスワード再設定</h1>
             <p class="text-muted-foreground text-sm text-balance">
@@ -60,25 +58,24 @@ const form = useForm({
           </div>
           <form.Field name="email" :validators="{ onBlur: type('string.email') }">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">メールアドレス</FieldLabel>
+              <Field
+                :id="field.name"
+                label="メールアドレス"
+                :error="
+                  field.state.meta.errors.length
+                    ? arkMessage(String(field.state.meta.errors[0]))
+                    : ''
+                "
+              >
                 <Input
-                  :id="field.name"
                   :name="field.name"
                   type="email"
                   placeholder="m@example.com"
                   autocomplete="email"
-                  :model-value="field.state.value"
-                  @blur="field.handleBlur"
-                  @update:model-value="(v) => field.handleChange(String(v))"
+                  :value="field.state.value"
+                  :on-value-change="field.handleChange"
+                  :on-blur="field.handleBlur"
                 />
-                <FieldError class="min-h-[1.25rem]">
-                  {{
-                    field.state.meta.errors.length
-                      ? arkMessage(String(field.state.meta.errors[0]))
-                      : ''
-                  }}
-                </FieldError>
               </Field>
             </template>
           </form.Field>
@@ -87,20 +84,18 @@ const form = useForm({
           </p>
           <form.Subscribe>
             <template #default="{ canSubmit, isSubmitting }">
-              <Field>
-                <Button
-                  type="submit"
-                  class="w-full"
-                  :disabled="!canSubmit || isSubmitting || !isHydrated"
-                  :label="isSubmitting ? '送信中…' : '再設定リンクを送信'"
-                />
-              </Field>
+              <Button
+                type="submit"
+                class="w-full"
+                :disabled="!canSubmit || isSubmitting || !isHydrated"
+                :label="isSubmitting ? '送信中…' : '再設定リンクを送信'"
+              />
             </template>
           </form.Subscribe>
-          <FieldDescription class="text-center">
+          <p class="text-muted-foreground text-center text-sm">
             <a href="/signin" class="underline underline-offset-4">サインインページへ戻る</a>
-          </FieldDescription>
-        </FieldGroup>
+          </p>
+        </div>
       </HydrationSafeForm>
     </CardContent>
   </Card>

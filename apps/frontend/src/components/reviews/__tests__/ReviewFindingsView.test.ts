@@ -692,7 +692,7 @@ describe('ReviewFindingsView', () => {
 
     expect(prNavButtons()).toHaveLength(6);
 
-    const input = wrapper.get('[data-testid="filter-pr"]');
+    const input = wrapper.get('#filter-pr');
     await input.setValue('77');
     await flushPromises();
     expect(prNavButtons()).toHaveLength(5);
@@ -715,7 +715,7 @@ describe('ReviewFindingsView', () => {
     const wrapper = mountView();
     await flushPromises();
 
-    await wrapper.get('[data-testid="filter-pr"]').setValue('PR 779');
+    await wrapper.get('#filter-pr').setValue('PR 779');
     await flushPromises();
     expect(prNavButtons().map((b) => b.textContent)).toEqual([expect.stringContaining('#779')]);
   });
@@ -942,7 +942,7 @@ describe('ReviewFindingsView の PR 一覧（自分の PR・ページ）', () =>
     });
     await flushPromises();
 
-    await wrapper.get('[data-testid="filter-pr"]').setValue('99999');
+    await wrapper.get('#filter-pr').setValue('99999');
     await flushPromises();
     const empty = wrapper.get('[data-testid="no-pr-match"]');
     expect(empty.text()).toContain('「99999」に一致する PR はありません');

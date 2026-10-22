@@ -6,9 +6,7 @@ import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from
 
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
-import { Button, Spinner } from '@koyori-app/ui-vue';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Button, Field, Input, Spinner } from '@koyori-app/ui-vue';
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts';
 import { renderOnServer, TRANSIENT_FAILURE_RETRIES } from '@/composables/useRenderedDescription';
 import type { components } from '@/generated/api';
@@ -410,18 +408,16 @@ function taskHref(task: { seq_key: string; project: { key: string } }) {
       aria-label="ドキュメントを編集"
       @submit.prevent="save"
     >
-      <div class="space-y-1.5">
-        <Label for="document-edit-title">タイトル</Label>
+      <!-- 文字数の上限は保存時に検証する -->
+      <Field id="document-edit-title" label="タイトル">
         <Input
-          id="document-edit-title"
-          v-model="draftTitle"
           name="title"
           autocomplete="off"
-          :maxlength="MAX_DOCUMENT_TITLE_LENGTH"
           :disabled="saving"
-          class="text-lg font-semibold"
+          :value="draftTitle"
+          :on-value-change="(v: string) => (draftTitle = v)"
         />
-      </div>
+      </Field>
 
       <div
         v-if="conflict"

@@ -9,9 +9,7 @@ import {
   PhTag,
 } from '@phosphor-icons/vue';
 
-import { Button } from '@koyori-app/ui-vue';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { Button, Input, Textarea } from '@koyori-app/ui-vue';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -100,7 +98,8 @@ async function startEditingDeadline() {
   deadlineDraft.value = isoToLocalDateInput(props.task.soft_deadline);
   editingDeadline.value = true;
   await nextTick();
-  (deadlineInputRef.value?.$el as HTMLInputElement | undefined)?.focus();
+  // koyori の Input の root は枠の span なので、中の input に当てる
+  (deadlineInputRef.value?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
 }
 
 function commitDeadline() {
@@ -285,10 +284,10 @@ function selectFromKeyboard(event: KeyboardEvent) {
           <DropdownMenuContent align="start" class="w-56">
             <div class="p-1">
               <Input
-                v-model="labelQuery"
-                class="h-8"
                 placeholder="ラベルを検索"
                 aria-label="ラベルを検索"
+                :value="labelQuery"
+                :on-value-change="(v: string) => (labelQuery = v)"
               />
             </div>
             <p v-if="!projectLabels.length" class="px-2 py-1.5 text-sm text-muted-foreground">
@@ -332,13 +331,13 @@ function selectFromKeyboard(event: KeyboardEvent) {
         <Input
           v-if="editingDeadline"
           ref="deadlineInputRef"
-          v-model="deadlineDraft"
           type="date"
-          class="h-7"
           aria-label="期限"
+          :value="deadlineDraft"
+          :on-value-change="(v: string) => (deadlineDraft = v)"
+          :on-blur="commitDeadline"
           @keydown.enter.prevent="commitDeadline"
           @keydown.esc.prevent="editingDeadline = false"
-          @blur="commitDeadline"
         />
         <button
           v-else-if="deadline"
@@ -411,12 +410,13 @@ function selectFromKeyboard(event: KeyboardEvent) {
     <div v-if="commentOpen" class="flex items-start gap-2 border-t bg-muted/20 px-3 py-2">
       <Textarea
         ref="commentInputRef"
-        v-model="commentDraft"
-        rows="2"
-        class="min-h-0 flex-1 text-sm"
+        :rows="2"
+        class="flex-1"
         placeholder="コメントを追加"
         aria-label="コメント"
         :disabled="commentPending"
+        :value="commentDraft"
+        :on-value-change="(v: string) => (commentDraft = v)"
         @keydown.enter.meta.prevent="submitComment"
         @keydown.enter.ctrl.prevent="submitComment"
         @keydown.esc.prevent="commentOpen = false"

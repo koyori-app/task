@@ -5,12 +5,9 @@ import { type } from 'arktype';
 import { onMounted, ref } from 'vue';
 import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
 import OAuthButtons from '@/components/auth/OAuthButtons.vue';
-import { Button } from '@koyori-app/ui-vue';
+import { Button, Field, Input, PasswordInput } from '@koyori-app/ui-vue';
 import { Card, CardContent } from '@/components/ui/card';
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import PasswordInput from '@/components/auth/PasswordInput.vue';
-import { Input } from '@/components/ui/input';
 import { meQueryOptions, useLoginMutation, useLogoutMutation } from '@/lib/api-vue-query';
 import { arkMessage } from '@/lib/auth-validation';
 import { DESKTOP_AUTHORIZE_RETURN, desktopAuthorizeReturnPath } from '@/lib/desktop-authorize';
@@ -105,7 +102,7 @@ function handleSubmit() {
     <Card class="overflow-hidden p-0">
       <CardContent class="grid p-0 md:grid-cols-2">
         <HydrationSafeForm v-slot="{ isHydrated }" class="p-6 md:p-8" @submit="handleSubmit">
-          <FieldGroup>
+          <div class="flex flex-col gap-6">
             <div class="flex flex-col items-center gap-2 text-center">
               <h1 class="text-2xl font-bold">おかえりなさい</h1>
               <p class="text-muted-foreground text-sm text-balance">
@@ -125,56 +122,55 @@ function handleSubmit() {
             -->
             <form.Field name="email" :validators="{ onChange: type('string.email') }">
               <template #default="{ field }">
-                <Field>
-                  <FieldLabel :for="field.name">メールアドレス</FieldLabel>
+                <Field
+                  :id="field.name"
+                  label="メールアドレス"
+                  :error="
+                    field.state.meta.errors.length &&
+                    (field.state.meta.isBlurred || submitAttempted)
+                      ? arkMessage(String(field.state.meta.errors[0]))
+                      : ''
+                  "
+                >
                   <Input
-                    :id="field.name"
                     :name="field.name"
                     type="email"
                     placeholder="m@example.com"
                     autocomplete="email"
-                    :model-value="field.state.value"
-                    @blur="field.handleBlur"
-                    @update:model-value="(v) => field.handleChange(String(v))"
+                    :value="field.state.value"
+                    :on-value-change="field.handleChange"
+                    :on-blur="field.handleBlur"
                   />
-                  <FieldError class="min-h-[1.25rem]">
-                    {{
-                      field.state.meta.errors.length &&
-                      (field.state.meta.isBlurred || submitAttempted)
-                        ? arkMessage(String(field.state.meta.errors[0]))
-                        : ''
-                    }}
-                  </FieldError>
                 </Field>
               </template>
             </form.Field>
             <form.Field name="password" :validators="{ onBlur: type('string >= 8') }">
               <template #default="{ field }">
-                <Field>
-                  <div class="flex items-center justify-between">
-                    <FieldLabel :for="field.name">パスワード</FieldLabel>
+                <Field
+                  :id="field.name"
+                  label="パスワード"
+                  :error="
+                    field.state.meta.errors.length
+                      ? arkMessage(String(field.state.meta.errors[0]))
+                      : ''
+                  "
+                >
+                  <template #aside>
                     <a
                       href="/auth/reset-password"
                       class="text-muted-foreground text-xs underline underline-offset-4"
                     >
                       パスワードをお忘れですか?
                     </a>
-                  </div>
+                  </template>
+                  <!-- koyori の PasswordInput は onBlur を持たず root が span なので、root の捕捉フェーズで blur を拾う -->
                   <PasswordInput
-                    :id="field.name"
                     :name="field.name"
                     autocomplete="current-password"
-                    :model-value="field.state.value"
-                    @update:model-value="field.handleChange"
-                    @blur="field.handleBlur"
+                    :value="field.state.value"
+                    :on-value-change="field.handleChange"
+                    @blur.capture="field.handleBlur"
                   />
-                  <FieldError class="min-h-[1.25rem]">
-                    {{
-                      field.state.meta.errors.length
-                        ? arkMessage(String(field.state.meta.errors[0]))
-                        : ''
-                    }}
-                  </FieldError>
                 </Field>
               </template>
             </form.Field>
@@ -187,22 +183,20 @@ function handleSubmit() {
             -->
             <form.Subscribe>
               <template #default="{ isSubmitting }">
-                <Field>
-                  <Button
-                    type="submit"
-                    class="w-full"
-                    :disabled="isSubmitting || !isHydrated"
-                    :label="isSubmitting ? 'サインイン中…' : 'サインイン'"
-                  />
-                </Field>
+                <Button
+                  type="submit"
+                  class="w-full"
+                  :disabled="isSubmitting || !isHydrated"
+                  :label="isSubmitting ? 'サインイン中…' : 'サインイン'"
+                />
               </template>
             </form.Subscribe>
             <OAuthButtons redirect-after="/" error-redirect-after="/signin" />
-            <FieldDescription class="text-center">
+            <p class="text-muted-foreground text-center text-sm">
               アカウントをお持ちでない方は
               <a href="/signup" class="underline underline-offset-4">新規登録</a>
-            </FieldDescription>
-          </FieldGroup>
+            </p>
+          </div>
         </HydrationSafeForm>
         <div class="bg-muted relative hidden md:block">
           <img

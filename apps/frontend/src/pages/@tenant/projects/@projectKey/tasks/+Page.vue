@@ -31,9 +31,8 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import { useMediaQuery } from '@vueuse/core';
 
 import { valueUpdater } from '@/components/ui/table/utils';
-import { Button, Spinner } from '@koyori-app/ui-vue';
+import { Button, Input, Spinner } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import TaskDetailPane, { type TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
 import {
@@ -929,29 +928,28 @@ const table = useTable({
               role="search"
               @submit.prevent="submitSearch"
             >
-              <div class="relative min-w-0 flex-1">
-                <Search
-                  class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                />
-                <Input
-                  type="search"
-                  class="h-8 appearance-none pl-8 pr-8 text-sm [&::-webkit-search-cancel-button]:hidden"
-                  placeholder="タスクを検索..."
-                  aria-label="タスクを検索"
-                  :model-value="searchInput"
-                  @update:model-value="scheduleSearch"
-                />
-                <Button
-                  v-if="searchInput"
-                  type="button"
-                  variant="ghost"
-                  class="absolute right-0 top-0"
-                  ariaLabel="検索をクリア"
-                  @click="clearSearch"
-                >
-                  <template #icon><X class="size-4" /></template>
-                </Button>
-              </div>
+              <!-- 消去は suffix のボタンだけにする（ブラウザの検索欄の × は隠す） -->
+              <Input
+                type="search"
+                class="min-w-0 flex-1 [&_input::-webkit-search-cancel-button]:hidden"
+                placeholder="タスクを検索..."
+                aria-label="タスクを検索"
+                :value="searchInput"
+                :on-value-change="scheduleSearch"
+              >
+                <template #prefix><Search class="size-4" /></template>
+                <template #suffix>
+                  <Button
+                    v-if="searchInput"
+                    type="button"
+                    variant="ghost"
+                    ariaLabel="検索をクリア"
+                    @click="clearSearch"
+                  >
+                    <template #icon><X class="size-4" /></template>
+                  </Button>
+                </template>
+              </Input>
               <Button
                 type="submit"
                 variant="tertiary"
