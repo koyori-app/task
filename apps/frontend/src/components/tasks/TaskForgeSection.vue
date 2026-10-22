@@ -6,13 +6,7 @@ import { computed, ref } from 'vue';
 import TaskForgeMergeEffectsBadge from '@/components/tasks/TaskForgeMergeEffectsBadge.vue';
 import TaskForgePullRequestLinkDialog from '@/components/tasks/TaskForgePullRequestLinkDialog.vue';
 import TaskIssueSourceRow from '@/components/tasks/TaskIssueSourceRow.vue';
-import { Button, Dialog } from '@koyori-app/ui-vue';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Button, Dialog, Dropdown, type DropdownItem } from '@koyori-app/ui-vue';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import type { components } from '@/generated/api';
 import { apiClient, fetchClient } from '@/lib/api-vue-query';
@@ -72,6 +66,9 @@ const queryClient = useQueryClient();
 const unlinkMutation = apiClient.useMutation('delete', UNLINK_PATH);
 const unlinkTarget = ref<PullRequest | null>(null);
 const unlinkError = ref<string | null>(null);
+const PR_ACTION_ITEMS: DropdownItem[] = [
+  { value: 'unlink', label: 'リンクを外す', destructive: true },
+];
 
 function onUnlinkClose() {
   if (unlinkMutation.isPending.value) return;
@@ -212,24 +209,19 @@ const SOURCE_LABELS: Record<string, string> = {
               data-forge-unresolved
               >{{ pr.unresolved ? `${pr.unresolved} 件が未解決` : '未解決なし' }}</a
             >
-            <DropdownMenu>
-              <DropdownMenuTrigger as-child>
-                <Button type="button" variant="ghost" :ariaLabel="`#${pr.number} の操作`">
-                  <template #icon><MoreHorizontal class="size-4" aria-hidden="true" /></template>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  variant="destructive"
-                  @select="
-                    unlinkError = null;
-                    unlinkTarget = pr;
-                  "
-                >
-                  リンクを外す
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Dropdown
+              variant="ghost"
+              :ariaLabel="`#${pr.number} の操作`"
+              :items="PR_ACTION_ITEMS"
+              :on-select="
+                () => {
+                  unlinkError = null;
+                  unlinkTarget = pr;
+                }
+              "
+            >
+              <template #icon><MoreHorizontal class="size-4" aria-hidden="true" /></template>
+            </Dropdown>
           </li>
         </ul>
       </div>

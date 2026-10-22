@@ -1,17 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { PhArrowDown, PhArrowUp, PhCaretDown, PhCheck, PhX } from '@phosphor-icons/vue';
-import type { AcceptableValue } from 'reka-ui';
+import { PhArrowDown, PhArrowUp } from '@phosphor-icons/vue';
+import { Dropdown, type DropdownSection } from '@koyori-app/ui-vue';
 
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import {
   activeTaskListSort,
   type TaskListSortColumnOption,
@@ -45,9 +36,33 @@ const triggerLabel = computed(() => {
     : `${props.column.label}を並べ替え`;
 });
 
-function setDirection(value: AcceptableValue) {
-  if (value !== 'asc' && value !== 'desc') return;
+const sections = computed<DropdownSection[]>(() => [
+  {
+    items: [
+      {
+        value: 'asc',
+        label: props.column.ascendingLabel,
+        kind: 'radio',
+        checked: direction.value === 'asc',
+      },
+      {
+        value: 'desc',
+        label: props.column.descendingLabel,
+        kind: 'radio',
+        checked: direction.value === 'desc',
+      },
+    ],
+  },
+  { items: [{ value: 'clear', label: '並べ替えをクリア', disabled: !direction.value }] },
+]);
+
+function setDirection(value: 'asc' | 'desc') {
   emit('update:sorting', [{ id: props.column.id, desc: value === 'desc' }]);
+}
+
+function onSelect(value: string) {
+  if (value === 'asc' || value === 'desc') setDirection(value);
+  else if (value === 'clear') clearSorting();
 }
 
 function clearSorting() {
@@ -62,47 +77,21 @@ function reverseDirection() {
 
 <template>
   <div class="flex h-8 min-w-0 items-center">
-    <DropdownMenu>
-      <DropdownMenuTrigger as-child>
-        <button
-          type="button"
-          class="group/sort flex h-8 min-w-0 flex-1 items-center gap-1 rounded-sm px-2 text-left text-xs font-medium whitespace-nowrap text-muted-foreground transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 active:bg-muted/90 disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:bg-muted data-[state=open]:text-foreground"
-          :aria-label="triggerLabel"
-          :disabled="disabled"
-        >
-          <span>{{ column.label }}</span>
-          <PhCaretDown
-            v-if="!direction"
-            class="size-3 opacity-45 group-hover/sort:opacity-80 group-focus-visible/sort:opacity-80"
-            aria-hidden="true"
-          />
-        </button>
-      </DropdownMenuTrigger>
-
-      <DropdownMenuContent align="start" class="w-56">
-        <DropdownMenuRadioGroup :model-value="direction ?? ''" @update:model-value="setDirection">
-          <DropdownMenuRadioItem value="asc">
-            <template #indicator-icon>
-              <PhCheck class="size-3.5" aria-hidden="true" />
-            </template>
-            <PhArrowUp class="size-4" aria-hidden="true" />
-            {{ column.ascendingLabel }}
-          </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="desc">
-            <template #indicator-icon>
-              <PhCheck class="size-3.5" aria-hidden="true" />
-            </template>
-            <PhArrowDown class="size-4" aria-hidden="true" />
-            {{ column.descendingLabel }}
-          </DropdownMenuRadioItem>
-        </DropdownMenuRadioGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem :disabled="!direction" @select="clearSorting">
-          <PhX class="size-4" aria-hidden="true" />
-          並べ替えをクリア
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <!-- 並びが有効なときは右の矢印が向きを示すので、▾ は出さない -->
+    <Dropdown
+      class="min-w-0 flex-1"
+      :label="triggerLabel"
+      :disabled="disabled"
+      :icon="direction ? null : undefined"
+      :items="sections"
+      :on-select="onSelect"
+    >
+      <template #trigger>
+        <span class="text-xs font-medium whitespace-nowrap text-muted-foreground">{{
+          column.label
+        }}</span>
+      </template>
+    </Dropdown>
 
     <button
       v-if="direction"

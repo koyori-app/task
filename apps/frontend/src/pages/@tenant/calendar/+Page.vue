@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, ChevronLeft, ChevronRight, Loader2 } from '@lucide/vue';
+import { ChevronLeft, ChevronRight, Loader2 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 import { useMediaQuery } from '@vueuse/core';
@@ -10,13 +10,7 @@ import CalendarTimeline from '@/components/calendar/CalendarTimeline.vue';
 import { popOverlayParent, pushOverlayParent } from '@/components/tasks/overlay-parent-stack';
 import TaskDetailOverlay from '@/components/tasks/TaskDetailOverlay.vue';
 import type { TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
-import { Button } from '@koyori-app/ui-vue';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Button, Dropdown, type DropdownItem } from '@koyori-app/ui-vue';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import type { components } from '@/generated/api';
 import { fetchClient } from '@/lib/api-vue-query';
@@ -212,6 +206,24 @@ function formatRangeDate(date: string) {
   const [year, month, day] = date.split('-');
   return `${year}/${Number(month)}/${Number(day)}`;
 }
+
+/** 絞り込みは checkbox。選んでもメニューは閉じないので、続けて複数を選べる */
+const memberItems = computed<DropdownItem[]>(() =>
+  memberOptions.value.map((member) => ({
+    value: member.id,
+    label: member.username,
+    kind: 'checkbox',
+    checked: memberIds.value.includes(member.id),
+  })),
+);
+const projectItems = computed<DropdownItem[]>(() =>
+  projectOptions.value.map((project) => ({
+    value: project.id,
+    label: `${project.key} ${project.name}`,
+    kind: 'checkbox',
+    checked: projectIds.value.includes(project.id),
+  })),
+);
 </script>
 
 <template>
@@ -238,60 +250,20 @@ function formatRangeDate(date: string) {
       </span>
 
       <div class="ml-auto flex flex-wrap gap-2">
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <Button
-              variant="tertiary"
-              :label="memberIds.length ? `メンバー（${memberIds.length}）` : 'メンバー'"
-            >
-              <template #icon>
-                <ChevronDown class="size-4 opacity-50" aria-hidden="true" />
-              </template>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" class="min-w-48">
-            <p v-if="!memberOptions.length" class="px-2 py-1.5 text-sm text-muted-foreground">
-              候補がありません
-            </p>
-            <DropdownMenuCheckboxItem
-              v-for="member in memberOptions"
-              :key="member.id"
-              :model-value="memberIds.includes(member.id)"
-              @select="(event: Event) => event.preventDefault()"
-              @update:model-value="memberIds = toggled(memberIds, member.id)"
-            >
-              {{ member.username }}
-            </DropdownMenuCheckboxItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <Button
-              variant="tertiary"
-              :label="projectIds.length ? `プロジェクト（${projectIds.length}）` : 'プロジェクト'"
-            >
-              <template #icon>
-                <ChevronDown class="size-4 opacity-50" aria-hidden="true" />
-              </template>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" class="min-w-48">
-            <p v-if="!projectOptions.length" class="px-2 py-1.5 text-sm text-muted-foreground">
-              候補がありません
-            </p>
-            <DropdownMenuCheckboxItem
-              v-for="project in projectOptions"
-              :key="project.id"
-              :model-value="projectIds.includes(project.id)"
-              @select="(event: Event) => event.preventDefault()"
-              @update:model-value="projectIds = toggled(projectIds, project.id)"
-            >
-              <span class="rounded bg-muted px-1.5 py-0.5 text-xs">{{ project.key }}</span>
-              {{ project.name }}
-            </DropdownMenuCheckboxItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Dropdown
+          variant="tertiary"
+          :label="memberIds.length ? `メンバー（${memberIds.length}）` : 'メンバー'"
+          :items="memberItems"
+          empty-message="候補がありません"
+          :on-select="(id: string) => (memberIds = toggled(memberIds, id))"
+        />
+        <Dropdown
+          variant="tertiary"
+          :label="projectIds.length ? `プロジェクト（${projectIds.length}）` : 'プロジェクト'"
+          :items="projectItems"
+          empty-message="候補がありません"
+          :on-select="(id: string) => (projectIds = toggled(projectIds, id))"
+        />
 
         <Button
           v-if="memberIds.length || projectIds.length"
