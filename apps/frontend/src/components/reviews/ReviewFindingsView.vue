@@ -8,8 +8,7 @@ import {
   PhWarningCircle,
 } from '@phosphor-icons/vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Button } from '@koyori-app/ui-vue';
-import { Input } from '@/components/ui/input';
+import { Button, Input } from '@koyori-app/ui-vue';
 import {
   Select,
   SelectContent,
@@ -532,13 +531,16 @@ async function onRoundCreated() {
               </label>
               <Input
                 id="filter-pr"
-                v-model="prQuery"
                 type="search"
                 autocomplete="off"
                 placeholder="例: 231、共有リンク"
-                class="text-sm"
-                data-testid="filter-pr"
-                @update:model-value="onPrQueryInput"
+                :value="prQuery"
+                :on-value-change="
+                  (v: string) => {
+                    prQuery = v;
+                    onPrQueryInput();
+                  }
+                "
               />
             </div>
             <div>

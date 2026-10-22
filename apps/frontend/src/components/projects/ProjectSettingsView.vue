@@ -15,10 +15,7 @@ import {
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { computed, ref, watch, type Component } from 'vue';
-import { Button } from '@koyori-app/ui-vue';
-import { Field, FieldError, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { Button, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import DeleteProjectDialog from '@/components/sidebar/DeleteProjectDialog.vue';
 import CustomFieldsSection from '@/components/projects/CustomFieldsSection.vue';
 import EmojiIconPicker from '@/components/projects/EmojiIconPicker.vue';
@@ -214,21 +211,22 @@ function onDeleted() {
             <div class="min-w-0 flex-1">
               <form.Field name="name">
                 <template #default="{ field }">
-                  <Field>
-                    <FieldLabel :for="field.name">名前</FieldLabel>
+                  <Field
+                    :id="field.name"
+                    label="名前"
+                    description="サイドバーとパンくずに表示されます。"
+                    :error="
+                      field.state.meta.isTouched && field.state.meta.errors.length
+                        ? '名前は必須です'
+                        : ''
+                    "
+                  >
                     <Input
-                      :id="field.name"
                       placeholder="プロジェクト名"
-                      :model-value="field.state.value"
-                      @blur="field.handleBlur"
-                      @update:model-value="(v) => field.handleChange(String(v))"
+                      :value="field.state.value"
+                      :on-value-change="field.handleChange"
+                      :on-blur="field.handleBlur"
                     />
-                    <p class="text-xs text-muted-foreground">
-                      サイドバーとパンくずに表示されます。
-                    </p>
-                    <FieldError v-if="field.state.meta.isTouched && field.state.meta.errors.length"
-                      >名前は必須です</FieldError
-                    >
                   </Field>
                 </template>
               </form.Field>
@@ -236,34 +234,24 @@ function onDeleted() {
           </div>
 
           <div class="mb-5 max-w-[220px]">
-            <Field>
-              <FieldLabel for="project-key-readonly">キー</FieldLabel>
-              <Input
-                id="project-key-readonly"
-                class="font-mono"
-                :model-value="project.key"
-                disabled
-                aria-describedby="project-key-fixed-help"
-              />
-              <p id="project-key-fixed-help" class="text-xs text-muted-foreground">
-                タスク番号（例:
-                <span class="font-mono">{{ project.key + '-1' }}</span
-                >）の基準のため変更できません
-              </p>
+            <Field
+              id="project-key-readonly"
+              label="キー"
+              :description="`タスク番号（例: ${project.key + '-1'}）の基準のため変更できません`"
+            >
+              <Input class="[&_input]:font-mono" :value="project.key" disabled />
             </Field>
           </div>
 
           <div class="mb-5">
             <form.Field name="description">
               <template #default="{ field }">
-                <Field>
-                  <FieldLabel :for="field.name">説明</FieldLabel>
+                <Field :id="field.name" label="説明">
                   <Textarea
-                    :id="field.name"
-                    rows="3"
+                    :rows="3"
                     placeholder="このプロジェクトは何のためのものですか？"
-                    :model-value="field.state.value"
-                    @update:model-value="(v) => field.handleChange(String(v))"
+                    :value="field.state.value"
+                    :on-value-change="field.handleChange"
                   />
                 </Field>
               </template>

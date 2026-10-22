@@ -13,9 +13,7 @@ import {
   PhX,
 } from '@phosphor-icons/vue';
 import { computed, onMounted, ref, watch, type Component } from 'vue';
-import { Button } from '@koyori-app/ui-vue';
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
+import { Button, Field, Input } from '@koyori-app/ui-vue';
 import { Skeleton } from '@/components/ui/skeleton';
 import PasswordMethodRow from '@/components/settings/PasswordMethodRow.vue';
 import {
@@ -450,23 +448,28 @@ async function onPasswordSet() {
           </div>
 
           <div v-if="provider.requires_instance_url" class="px-4 pb-4 md:pl-16">
-            <Field>
-              <FieldLabel :for="`instance-${provider.provider}`">インスタンス URL</FieldLabel>
+            <Field
+              :id="`instance-${provider.provider}`"
+              label="インスタンス URL"
+              :description="
+                instanceAlreadyLinked(provider)
+                  ? undefined
+                  : 'インスタンス URL の入力が必要なプロバイダーです。承認前に指定してください。'
+              "
+              :error="
+                instanceAlreadyLinked(provider)
+                  ? 'このインスタンスは連携済みです。別のインスタンス URL を入力してください。'
+                  : ''
+              "
+            >
               <Input
-                :id="`instance-${provider.provider}`"
                 type="url"
-                inputmode="url"
+                input-mode="url"
                 placeholder="https://gitlab.example.com"
-                class="max-w-md font-mono"
-                :model-value="instanceDrafts[provider.provider] ?? ''"
-                @update:model-value="(v) => (instanceDrafts[provider.provider] = String(v))"
+                class="max-w-md [&_input]:font-mono"
+                :value="instanceDrafts[provider.provider] ?? ''"
+                :on-value-change="(v: string) => (instanceDrafts[provider.provider] = v)"
               />
-              <FieldDescription v-if="instanceAlreadyLinked(provider)" role="alert">
-                このインスタンスは連携済みです。別のインスタンス URL を入力してください。
-              </FieldDescription>
-              <FieldDescription v-else>
-                インスタンス URL の入力が必要なプロバイダーです。承認前に指定してください。
-              </FieldDescription>
             </Field>
           </div>
         </div>

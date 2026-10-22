@@ -14,8 +14,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-import { Button } from '@koyori-app/ui-vue';
-import { Input } from '@/components/ui/input';
+import { Button, Input } from '@koyori-app/ui-vue';
 import TaskGroupedRow from '@/components/tasks/TaskGroupedRow.vue';
 import TaskSubtaskBranch from '@/components/tasks/TaskSubtaskBranch.vue';
 import type { components } from '@/generated/api';
@@ -210,10 +209,11 @@ type InputRef = InstanceType<typeof Input>;
  * v-for の内側に置いた ref は、対象が 1 つでも Vue が配列で入れる
  * （コンパイラが `ref_for` を付けるため）。追加行は同時に 1 つしか開かないので
  * 先頭を取る。素の `.$el` を読むと常に undefined でフォーカスが当たらない。
+ * koyori の Input の root は枠の span なので、中の input に当てる。
  */
 function focusDraft(target: InputRef | InputRef[] | null) {
   const instance = Array.isArray(target) ? target[0] : target;
-  (instance?.$el as HTMLInputElement | undefined)?.focus();
+  (instance?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
 }
 
 const draftInputRef = ref<InputRef | InputRef[] | null>(null);
@@ -488,11 +488,12 @@ async function commitAdding(statusId: string) {
                 />
                 <Input
                   ref="draftInputRef"
-                  v-model="draftTitle"
-                  class="h-7 flex-1 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
+                  class="flex-1"
                   placeholder="タスク名を入力"
                   :aria-label="`${group.status.name} にタスクを追加`"
                   :disabled="!!creatingStatusIds?.[group.status.id]"
+                  :value="draftTitle"
+                  :on-value-change="(v: string) => (draftTitle = v)"
                   @keydown.enter.prevent="commitAdding(group.status.id)"
                   @keydown.esc.prevent="cancelAdding"
                 />
@@ -507,11 +508,12 @@ async function commitAdding(statusId: string) {
                 <Input
                   v-if="showDraftDeadline"
                   ref="draftDeadlineRef"
-                  v-model="draftDeadline"
                   type="date"
-                  class="h-7 w-36 text-xs"
+                  class="w-36"
                   aria-label="期限"
-                  @blur="showDraftDeadline = false"
+                  :value="draftDeadline"
+                  :on-value-change="(v: string) => (draftDeadline = v)"
+                  :on-blur="() => (showDraftDeadline = false)"
                   @keydown.esc.prevent="showDraftDeadline = false"
                 />
                 <Button

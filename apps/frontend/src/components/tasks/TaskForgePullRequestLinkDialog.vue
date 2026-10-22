@@ -5,7 +5,7 @@ import { OpenApiVueQueryError } from '@koyori-app/openapi-vue-query';
 import { type } from 'arktype';
 import { ref } from 'vue';
 
-import { Button } from '@koyori-app/ui-vue';
+import { Button, Field, Input } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -15,8 +15,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Field, FieldError, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import { apiClient } from '@/lib/api-vue-query';
 
@@ -98,20 +96,19 @@ function onOpenChange(open: boolean) {
       <form class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
         <form.Field name="number">
           <template #default="{ field }">
-            <Field>
-              <FieldLabel for="forge-pr-number">PR 番号</FieldLabel>
+            <Field
+              id="forge-pr-number"
+              label="PR 番号"
+              :error="field.state.meta.errors.length ? 'PR 番号を数字で入力してください' : ''"
+            >
               <Input
-                id="forge-pr-number"
-                inputmode="numeric"
+                input-mode="numeric"
                 placeholder="87"
                 autocomplete="off"
-                :model-value="field.state.value"
-                @blur="field.handleBlur"
-                @update:model-value="(v) => field.handleChange(String(v))"
+                :value="field.state.value"
+                :on-value-change="field.handleChange"
+                :on-blur="field.handleBlur"
               />
-              <FieldError v-if="field.state.meta.errors.length"
-                >PR 番号を数字で入力してください</FieldError
-              >
             </Field>
           </template>
         </form.Field>
