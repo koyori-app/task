@@ -147,7 +147,7 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ['vue', 'reka-ui', '@lucide/vue', '@phosphor-icons/vue'],
+    include: ['vue', '@lucide/vue', '@phosphor-icons/vue'],
   },
   server: {
     proxy: {
@@ -170,15 +170,6 @@ export default defineConfig({
   },
   build: {
     sourcemap: buildEnv.ANALYZE || process.env.NODE_ENV !== 'production',
-    rollupOptions: {
-      output: {
-        manualChunks(id: string) {
-          if (id.includes('reka-ui') || id.includes('@floating-ui')) {
-            return 'vendor-reka';
-          }
-        },
-      },
-    },
   },
   test: {
     maxWorkers: 4,
@@ -192,8 +183,6 @@ export default defineConfig({
         '**/*.story.{ts,tsx,js,jsx}',
         '**/.storybook/**',
         'storybook-static/**',
-        'src/components/ui/**',
-        'src/components/originui/**',
         'src/generated/**',
       ],
     },
@@ -248,8 +237,6 @@ export default defineConfig({
     trailingComma: 'all',
     ignorePatterns: [
       'content/**/*.md',
-      'src/components/ui/**',
-      'src/components/originui/**',
       // renderDescription の事前生成 fixture (toMatchFileSnapshot)。整形すると
       // レンダラ出力とのバイト一致が壊れ drift 検査が偽陽性で落ちる
       'src/lib/kfm-story-fixtures/rendered/**',

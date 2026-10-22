@@ -4,7 +4,6 @@
 import AppSidebarSkeleton from '@/components/sidebar/AppSidebarSkeleton.vue';
 import AppBreadcrumbs from '@/components/AppBreadcrumbs.vue';
 import { useBreadcrumbs } from '@/composables/useBreadcrumbs';
-import { Separator } from '@/components/ui/separator';
 import { Button, Drawer } from '@koyori-app/ui-vue';
 import { PhSidebarSimple } from '@phosphor-icons/vue';
 import { defaultDocument, useEventListener, useMediaQuery } from '@vueuse/core';
@@ -120,7 +119,8 @@ const AppHeader = defineAsyncComponent(() => import('@/components/header/AppHead
             >
               <template #icon><PhSidebarSimple /></template>
             </Button>
-            <Separator orientation="vertical" class="mr-2 data-[orientation=vertical]:h-4" />
+            <!-- koyori の縦線は左右に余白を持ち高さいっぱいに伸びるため、右だけ空けて高さ 1rem で中央に置く -->
+            <hr aria-orientation="vertical" class="koyori-separator ml-0 mr-2 h-4 self-center" />
             <AppBreadcrumbs v-bind="breadcrumbs" />
           </div>
         </header>
