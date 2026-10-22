@@ -24,11 +24,16 @@ import {
   useTable,
 } from '@tanstack/vue-table';
 import { PhRows, PhTable } from '@phosphor-icons/vue';
-import { computed, h, onUnmounted, ref, watch, type Component } from 'vue';
+import { computed, h, onMounted, onUnmounted, ref, watch, type Component } from 'vue';
 import { useQuery, keepPreviousData } from '@tanstack/vue-query';
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
-import { useMediaQuery } from '@vueuse/core';
+import {
+  StorageSerializers,
+  createReusableTemplate,
+  useLocalStorage,
+  useMediaQuery,
+} from '@vueuse/core';
 
 import {
   AvatarGroup,
@@ -40,11 +45,11 @@ import {
   Input,
   Pagination,
   Spinner,
+  SplitPane,
   type DataListColumn,
   type DataListProps,
   type DropdownItem,
 } from '@koyori-app/ui-vue';
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import TaskDetailPane, { type TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
 import TaskTitleLink from '@/components/tasks/TaskTitleLink.vue';
@@ -59,6 +64,7 @@ import {
   useTaskLabelFilter,
   watchAvailableTaskLabels,
 } from './task-list-label-filter';
+import { keepTaskListFocusAcrossSplit } from './task-list-split-focus';
 import { popOverlayParent, pushOverlayParent } from '@/components/tasks/overlay-parent-stack';
 import {
   parseTaskListUrlState,
@@ -136,6 +142,31 @@ const overlayParentStack = ref<string[]>([]);
 const canInline = useMediaQuery('(min-width: 1024px)');
 // Table 表示だけが右ペインを出す。List 表示の詳細はオーバーレイ（overlayTaskSeqKey）。
 const showDetail = computed(() => canInline.value && !!selectedTaskId.value && !isListView.value);
+
+// 一覧は詳細の開閉で SplitPane の内と外を行き来するので、テンプレートを 1 か所で定義して使い回す。
+const [DefineTaskList, ReuseTaskList] = createReusableTemplate();
+const pageRoot = ref<HTMLElement | null>(null);
+const taskListEl = ref<HTMLElement | null>(null);
+const taskListScroller = ref<HTMLElement | null>(null);
+keepTaskListFocusAcrossSplit(
+  () => (showDetail.value ? selectedTaskId.value : null),
+  pageRoot,
+  taskListEl,
+  taskListScroller,
+);
+// 一覧ペインの幅（px）。境界を動かした値だけを残し、無ければ mount 時の親の幅の 60%。
+const savedListPaneSize = useLocalStorage<number | null>('tasks-split-view', null, {
+  serializer: StorageSerializers.number,
+});
+const listPaneSize = ref<number>();
+onMounted(() => {
+  listPaneSize.value =
+    savedListPaneSize.value ?? Math.round((pageRoot.value?.clientWidth ?? 0) * 0.6);
+});
+function onListPaneSizeChange(size: number) {
+  listPaneSize.value = size;
+  savedListPaneSize.value = size;
+}
 
 // 一覧の状態（選択・ページ・検索語・ラベル・並び替え）を URL クエリから読む
 // （クライアントのみ）。復元先の ref はこの後で定義するので、値だけ先に取る。
@@ -911,7 +942,7 @@ const columnItems = computed<DropdownItem[]>(() =>
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col gap-3">
+  <div ref="pageRoot" class="flex min-h-0 flex-1 flex-col gap-3">
     <!-- ローディング / エラー表示 -->
     <div v-if="isInitialLoading" class="flex justify-center py-8">
       <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
@@ -935,15 +966,10 @@ const columnItems = computed<DropdownItem[]>(() =>
       プロジェクトが見つかりません
     </div>
 
-    <!-- 一覧（左）＋ 詳細ペイン（右）の分割ビュー -->
-    <ResizablePanelGroup
-      v-else-if="canCreate"
-      direction="horizontal"
-      auto-save-id="tasks-split-view"
-      class="min-h-0 flex-1"
-    >
-      <ResizablePanel :order="1" :min-size="30" class="min-w-0">
-        <div class="flex h-full min-h-0 flex-col gap-3">
+    <!-- 一覧（左）＋ 詳細ペイン（右）の分割ビュー。詳細が閉じているときは一覧だけ -->
+    <template v-else-if="canCreate">
+      <DefineTaskList>
+        <div ref="taskListEl" class="flex h-full min-h-0 flex-col gap-3">
           <!-- サーバー側検索ツールバー -->
           <div class="flex items-center gap-2">
             <form
@@ -1015,6 +1041,7 @@ const columnItems = computed<DropdownItem[]>(() =>
           <div class="flex items-center gap-1 border-b" role="tablist" aria-label="表示形式">
             <button
               v-for="option in VIEW_OPTIONS"
+              :id="`task-list-view-${option.value}`"
               :key="option.value"
               type="button"
               role="tab"
@@ -1070,7 +1097,7 @@ const columnItems = computed<DropdownItem[]>(() =>
           />
 
           <!-- スクロールするテーブル領域（ツールバーとページネーションは固定） -->
-          <div class="min-h-0 flex-1 overflow-y-auto">
+          <div ref="taskListScroller" class="min-h-0 flex-1 overflow-y-auto">
             <!-- 検索結果。API は検索ヒットの最小情報のみ返すため、虚偽の状態値は補完しない。 -->
             <div
               v-if="
@@ -1091,6 +1118,7 @@ const columnItems = computed<DropdownItem[]>(() =>
               <DataList
                 id="task-search-results"
                 label="検索結果"
+                tabindex="-1"
                 :heading-level="2"
                 :columns="SEARCH_COLUMNS"
                 :count="taskSearchQuery.data.value?.total ?? 0"
@@ -1164,6 +1192,7 @@ const columnItems = computed<DropdownItem[]>(() =>
               v-else
               id="task-table"
               label="タスク一覧"
+              tabindex="-1"
               class="[--koyori-data-list-min-width:64rem]"
               :heading-level="2"
               :columns="taskListColumns"
@@ -1215,11 +1244,23 @@ const columnItems = computed<DropdownItem[]>(() =>
             />
           </div>
         </div>
-      </ResizablePanel>
+      </DefineTaskList>
 
-      <template v-if="showDetail">
-        <ResizableHandle with-handle />
-        <ResizablePanel :order="2" :default-size="40" :min-size="26" class="min-w-0">
+      <!-- text-base: SplitPane のルートが付ける koyori の文字サイズを、一覧・詳細では使わない -->
+      <SplitPane
+        v-if="showDetail"
+        label="タスク一覧と詳細"
+        primary-id="task-list-pane"
+        :size="listPaneSize"
+        :min-size="320"
+        :min-secondary-size="280"
+        :on-size-change="onListPaneSizeChange"
+        class="min-h-0 flex-1 text-base"
+      >
+        <template #primary>
+          <ReuseTaskList />
+        </template>
+        <template #secondary>
           <TaskDetailPane
             :key="selectedTaskId ?? ''"
             :tenant-display-id="tenantDisplayId"
@@ -1229,9 +1270,12 @@ const columnItems = computed<DropdownItem[]>(() =>
             @open-task="openOverlay"
             @open-task-ref="openTaskRefInPane"
           />
-        </ResizablePanel>
-      </template>
-    </ResizablePanelGroup>
+        </template>
+      </SplitPane>
+      <div v-else class="flex min-h-0 flex-1 flex-col">
+        <ReuseTaskList />
+      </div>
+    </template>
 
     <!-- List 表示の詳細は分割ではなくオーバーレイ -->
     <TaskDetailOverlay
