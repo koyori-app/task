@@ -1,25 +1,24 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui';
+import { computed, ref, useTemplateRef, watch } from 'vue';
+import { useFocusWithin } from '@vueuse/core';
+import { Picker } from '@koyori-app/ui-vue';
 
-import UserSelectorList from '@/components/users/UserSelectorList.vue';
-import { useDialogPortalTarget } from '@/composables/useDialogPortalTarget';
 import type { SelectableUser, UserSelectorState } from '@/components/users/types';
-import { cn } from '@/lib/utils';
 import { orderUsersForPicker } from '@/lib/user-search';
 
 /**
- * 利用者を選ぶ部品。利用者を選ぶ所は全てこれを通す。
+ * 利用者を選ぶ部品。利用者を選ぶ所は全てこれを通す（中身は koyori の Picker）。
  *
- * - trigger は呼び手が `#trigger` で描く（アバターの重ね・名の並び・ボタン等）。
- *   受け取る `selectedUsers` は候補から引いた選択中の利用者
- * - 候補は開いた時に一度だけ並べる（選んだ者、自分、その他の名の順）。開いている間に
- *   付け外ししても並びは動かさない（押した項が指の下から逃げぬように）
- * - 単数（`multiple=false`）では選ぶと閉じる
- * - Esc で閉じて trigger へ focus が戻る。外を押すか Tab で外れても閉じる
+ * - 候補は自分を先頭に、その他は名の順。自分の名には「（自分）」を添える。絞り込みは名の部分一致
+ * - 単数（`multiple=false`）では選ぶと閉じ、複数では開いたまま続けて選べる
+ * - トリガーの中身を替える呼び手は `#trigger` で描く（Picker のボタンの内側に入る）
+ * - 保存中（`disabled`）は選択を受けない。Picker の disabled は開いた一覧を隠すので、フォーカスが
+ *   中にある間（開いている間）は渡さない。一人ずつ保存する担当者で、選ぶたびに一覧が閉じてしまう
  */
 const props = withDefaults(
   defineProps<{
+    /** Picker の名。Field の中なら Field の見出しと同じ文言 */
+    label: string;
     users: SelectableUser[];
     modelValue: string[];
     multiple?: boolean;
@@ -29,10 +28,8 @@ const props = withDefaults(
     searchLabel?: string;
     emptyText?: string;
     noMatchText?: string;
-    align?: 'start' | 'center' | 'end';
-    contentClass?: string;
   }>(),
-  { multiple: true, align: 'start' },
+  { multiple: true },
 );
 
 const emit = defineEmits<{
@@ -40,95 +37,53 @@ const emit = defineEmits<{
   toggle: [userId: string, checked: boolean];
 }>();
 
-const open = ref(false);
-const portalTarget = useDialogPortalTarget();
-
-// 並べに使う「選んだ者」は、開いた時に凍らせる。開いている間に付け外ししても並びは
-// 動かさず、候補が届いた時（取得の後）だけ並べ直す。閉じている間は今の選択に従う。
-const orderSelection = ref<string[]>([...props.modelValue]);
-
-// 一覧へ渡す選択。選んだ時に手元で先に反映し、呼び手の保存が遅れて届いても中身が同じなら
-// 差し替えない。reka の ListboxRoot は、押した直後（1ms）を過ぎてから modelValue が変わると
-// 選んだ者へ一覧を送り直す。担当者のように保存してから再取得する呼び手では、選ぶたびに一覧が
-// 先頭の選んだ者へ巻き戻っていた。
-//
-// 呼び手の選択と突き合わせるのは、保存中（disabled）でない時だけにする。保存中に届く値は途中の
-// 物でありうる。保存が終わって disabled が下りた時に突き合わせ、中身が違えば（保存の失敗で戻った・
-// 他で変わった）呼び手に従う
-const listValue = ref<string[]>([...props.modelValue]);
-const sameIds = (a: string[], b: string[]) =>
-  a.length === b.length && a.every((id) => b.includes(id));
-function followCaller() {
-  if (!sameIds(props.modelValue, listValue.value)) listValue.value = [...props.modelValue];
-}
-
-watch(open, (isOpen) => {
-  if (isOpen) {
-    orderSelection.value = [...props.modelValue];
-    listValue.value = [...props.modelValue];
-  }
-});
-watch(
-  () => props.modelValue,
-  (ids) => {
-    if (!open.value) orderSelection.value = [...ids];
-    if (!props.disabled) followCaller();
-  },
+const items = computed(() =>
+  orderUsersForPicker(props.users, [], props.currentUserId).map((user) => ({
+    value: user.id,
+    label: user.id === props.currentUserId ? `${user.username}（自分）` : user.username,
+    src: user.avatar_url || undefined,
+  })),
 );
-watch(
-  () => props.disabled,
-  (disabled) => {
-    if (!disabled) followCaller();
-  },
-);
-const ordered = computed(() =>
-  orderUsersForPicker(props.users, orderSelection.value, props.currentUserId),
-);
+const userIds = computed(() => new Set(props.users.map((user) => user.id)));
+const { focused } = useFocusWithin(useTemplateRef('picker'));
 
-const selectedUsers = computed(() => {
-  const byId = new Map(props.users.map((user) => [user.id, user]));
-  return props.modelValue.flatMap((id) => byId.get(id) ?? []);
+// 選んだ値は手元で先に反映する（保存してから再取得する呼び手でも、押した項がすぐ選ばれて見える）。
+// 呼び手の値に揃えるのは保存中でない時だけ。保存中に届く値は途中の物でありうる
+const value = ref([...props.modelValue]);
+watch([() => props.modelValue, () => props.disabled], ([ids, disabled]) => {
+  if (!disabled) value.value = [...ids];
 });
 
-function onUpdate(ids: string[]) {
-  listValue.value = ids;
-  emit('update:modelValue', ids);
-  if (!props.multiple && ids.length) open.value = false;
+function onSelectionChange(ids: string[]) {
+  if (props.disabled) return;
+  const before = value.value;
+  // Picker は候補に無い id（プロジェクトを外れた担当者など）を落として返す。複数では外さずに残す
+  const next = props.multiple ? [...before.filter((id) => !userIds.value.has(id)), ...ids] : ids;
+  value.value = next;
+  for (const id of next) if (!before.includes(id)) emit('toggle', id, true);
+  for (const id of before) if (!next.includes(id)) emit('toggle', id, false);
+  emit('update:modelValue', next);
 }
 </script>
 
 <template>
-  <PopoverRoot v-model:open="open">
-    <PopoverTrigger as-child :disabled="disabled">
-      <slot name="trigger" :selected-users="selectedUsers" :open="open" />
-    </PopoverTrigger>
-    <PopoverPortal :to="portalTarget">
-      <PopoverContent
-        :align="align"
-        :side-offset="4"
-        data-slot="user-selector-content"
-        :class="
-          cn(
-            'bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 z-50 w-64 max-w-[calc(100vw-2rem)] origin-(--reka-popover-content-transform-origin) overflow-hidden rounded-md border shadow-md outline-hidden',
-            contentClass,
-          )
-        "
-      >
-        <UserSelectorList
-          :users="ordered"
-          :model-value="listValue"
-          :multiple="multiple"
-          :disabled="disabled"
-          :state="state"
-          :current-user-id="currentUserId"
-          :search-label="searchLabel"
-          :empty-text="emptyText"
-          :no-match-text="noMatchText"
-          auto-focus
-          @toggle="(id, checked) => emit('toggle', id, checked)"
-          @update:model-value="onUpdate"
-        />
-      </PopoverContent>
-    </PopoverPortal>
-  </PopoverRoot>
+  <Picker
+    ref="picker"
+    :label="label"
+    :items="items"
+    avatars
+    :selection-mode="multiple ? 'multiple' : 'single'"
+    :selected-values="value"
+    :on-selection-change="onSelectionChange"
+    :loading="state?.loading"
+    :error="state?.error ? '候補を読み込めませんでした' : undefined"
+    :on-retry="state?.onRetry"
+    :disabled="disabled && !focused"
+    :search-label="searchLabel"
+    :search-placeholder="searchLabel"
+    :empty-message="emptyText"
+    :no-results-message="noMatchText"
+  >
+    <template v-if="$slots.trigger" #trigger><slot name="trigger" /></template>
+  </Picker>
 </template>

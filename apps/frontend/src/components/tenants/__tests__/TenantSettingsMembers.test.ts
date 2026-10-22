@@ -1,6 +1,5 @@
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { createPinia } from 'pinia';
-import { defineComponent } from 'vue';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -67,8 +66,6 @@ function member(userId: string, username: string, role: 'Admin' | 'Member'): Ten
   };
 }
 
-const PassThrough = defineComponent({ template: '<div><slot /></div>' });
-
 let wrapper: VueWrapper;
 
 /** 操作するのは Admin 本人。オーナーは別人なので、自分の行にも除名ボタンの条件が効く。 */
@@ -92,12 +89,6 @@ function mountMembers(
           { queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
         ],
       ],
-      stubs: {
-        Select: PassThrough,
-        SelectContent: PassThrough,
-        SelectItem: PassThrough,
-        SelectTrigger: PassThrough,
-      },
     },
   });
   return wrapper;
@@ -171,7 +162,8 @@ describe('TenantSettingsMembers', () => {
       params: { path: { tenant_id: TENANT_ID } },
       body: { email: 'new@example.com', role: 'Member' },
     });
-    expect(wrapper.get('[role="status"]').text()).toContain('new@example.com に招待を送りました');
+    // Picker も読み上げ用の role=status を持つので、知らせの段落に絞る
+    expect(wrapper.get('p[role="status"]').text()).toContain('new@example.com に招待を送りました');
     expect((wrapper.get('input[type="email"]').element as HTMLInputElement).value).toBe('');
   });
 

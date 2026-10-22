@@ -1,14 +1,7 @@
 <script setup lang="ts">
 import { PhTrash } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button, Field, Input, Textarea } from '@koyori-app/ui-vue';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Button, Field, Input, Picker, Textarea } from '@koyori-app/ui-vue';
 import { useCreateReviewMutation } from '@/lib/api-vue-query';
 import { SEVERITIES, SEVERITY_LABELS, type FindingSeverity } from '@/lib/review-findings';
 
@@ -31,6 +24,7 @@ type StagedFinding = {
 };
 
 const createReview = useCreateReviewMutation();
+const severityItems = SEVERITIES.map((value) => ({ value, label: SEVERITY_LABELS[value] }));
 
 const headSha = ref('');
 const summary = ref('');
@@ -178,20 +172,17 @@ async function commit() {
     <div class="flex flex-col gap-2 rounded-md border p-3">
       <div class="flex flex-wrap gap-2">
         <div class="w-[130px]">
-          <label for="draft-severity" class="mb-1.5 block text-xs font-medium">重大度</label>
-          <Select
-            :model-value="draft.severity"
-            @update:model-value="(v) => (draft.severity = v as FindingSeverity)"
-          >
-            <SelectTrigger id="draft-severity" size="sm" class="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="severity in SEVERITIES" :key="severity" :value="severity">
-                {{ SEVERITY_LABELS[severity] }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+          <Field id="draft-severity" label="重大度">
+            <Picker
+              label="重大度"
+              :searchable="false"
+              :items="severityItems"
+              :selected-values="[draft.severity]"
+              :on-selection-change="
+                (values: string[]) => (draft.severity = values[0] as FindingSeverity)
+              "
+            />
+          </Field>
         </div>
         <div class="min-w-[200px] flex-1">
           <label for="draft-title" class="mb-1.5 block text-xs font-medium">タイトル</label>

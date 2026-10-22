@@ -4,7 +4,6 @@ import { getActivePinia } from 'pinia';
 import { PhUserPlus } from '@phosphor-icons/vue';
 
 import UserAvatar from '@/components/UserAvatar.vue';
-import { Button } from '@koyori-app/ui-vue';
 import UserSelector from '@/components/users/UserSelector.vue';
 import { useAuthStore } from '@/stores/auth';
 
@@ -15,6 +14,8 @@ export type PickableMember = { id: string; username: string; avatar_url?: string
  *
  * 中身は `UserSelector`（利用者を選ぶ所は全てこれを通す）。担当は複数付けられ、
  * 一人ずつ保存するので `toggle` で付け外しを返す（契約は作り直す前と同じ）。
+ * 読み上げ名は Picker が「担当者」か「担当者: 選んだ人の名」で付ける。
+ * 枠に切られる所（タスク一覧の群）では `top-layer` を渡す（根の UserSelector から Picker へ届く）。
  */
 const props = withDefaults(
   defineProps<{
@@ -29,7 +30,7 @@ const props = withDefaults(
     membersState?: { loading?: boolean; error?: boolean; onRetry?: () => void };
     /** 重ねて出すアバターの最大数。超過分は +N */
     maxDisplay?: number;
-    /** 自分の id。候補で自分を選んだ者の次に置く。省けばログイン中の利用者 */
+    /** 自分の id。候補の先頭に置く。省けばログイン中の利用者 */
     currentUserId?: string | null;
   }>(),
   { maxDisplay: 3, currentUserId: undefined },
@@ -46,15 +47,11 @@ const me = computed(() => props.currentUserId ?? authStore?.user?.id ?? null);
 const selectedIds = computed(() => props.selected.map((user) => user.id));
 const shown = computed(() => props.selected.slice(0, props.maxDisplay));
 const hiddenCount = computed(() => Math.max(0, props.selected.length - props.maxDisplay));
-const label = computed(() =>
-  props.selected.length
-    ? `担当者: ${props.selected.map((user) => user.username).join('、')}`
-    : '担当者を割り当てる',
-);
 </script>
 
 <template>
   <UserSelector
+    label="担当者"
     :users="members"
     :model-value="selectedIds"
     :disabled="disabled"
@@ -66,25 +63,21 @@ const label = computed(() =>
     @toggle="(userId, checked) => emit('toggle', userId, checked)"
   >
     <template #trigger>
-      <Button type="button" variant="ghost" :disabled="disabled" :ariaLabel="label">
-        <template #icon>
-          <!-- 重ねたアバターも装飾。名前は aria-label で読ませる -->
-          <template v-if="selected.length">
-            <UserAvatar
-              v-for="user in shown"
-              :key="user.id"
-              :user="user"
-              size="md"
-              decorative
-              class="-ml-1.5 border border-background first:ml-0"
-            />
-            <span v-if="hiddenCount" class="ml-1 text-xs text-muted-foreground">
-              +{{ hiddenCount }}
-            </span>
-          </template>
-          <PhUserPlus v-else class="size-4" />
-        </template>
-      </Button>
+      <!-- 重ねたアバターも装飾。名前は Picker の aria-label で読ませる -->
+      <span v-if="selected.length" class="flex items-center">
+        <UserAvatar
+          v-for="user in shown"
+          :key="user.id"
+          :user="user"
+          size="md"
+          decorative
+          class="-ml-1.5 border border-background first:ml-0"
+        />
+        <span v-if="hiddenCount" class="ml-1 text-xs text-muted-foreground">
+          +{{ hiddenCount }}
+        </span>
+      </span>
+      <PhUserPlus v-else class="size-4" aria-hidden="true" />
     </template>
   </UserSelector>
 </template>

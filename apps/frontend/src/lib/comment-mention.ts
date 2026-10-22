@@ -162,7 +162,7 @@ export function mentionTrigger(before: string): MentionTrigger | null {
 }
 
 /**
- * 候補の絞り込み。前方一致を先に、次に部分一致。利用者の選択（UserSelector）と同じ規則
+ * 候補の絞り込み。前方一致を先に、次に部分一致
  * （`rankUsersByQuery`: 大文字小文字・全角半角・片仮名平仮名を問わぬ）で、上限だけを足す。
  */
 export function filterCandidates(

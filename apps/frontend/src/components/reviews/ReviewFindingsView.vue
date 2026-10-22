@@ -8,14 +8,7 @@ import {
   PhWarningCircle,
 } from '@phosphor-icons/vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Button, Input } from '@koyori-app/ui-vue';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Button, Field, Input, Picker } from '@koyori-app/ui-vue';
 import ReviewFindingBody from '@/components/reviews/ReviewFindingBody.vue';
 import ReviewRoundComposer from '@/components/reviews/ReviewRoundComposer.vue';
 import {
@@ -201,6 +194,24 @@ function checkUrlRailState() {
 }
 watch(urlRailCheckReady, checkUrlRailState, { immediate: true });
 const rounds = computed(() => roundsQuery.data.value ?? []);
+
+const ALL_ITEM = { value: 'all', label: 'すべて' };
+const prStateItems = PR_STATE_FILTERS.map((state) => ({
+  value: state,
+  label: state === 'all' ? 'すべて' : pullRequestState(state).label,
+}));
+const roundItems = computed(() => [
+  ALL_ITEM,
+  ...rounds.value.map((round: Review) => ({
+    value: String(round.round),
+    label: `R${round.round}`,
+  })),
+]);
+const severityItems = [
+  ALL_ITEM,
+  ...SEVERITIES.map((value) => ({ value, label: SEVERITY_LABELS[value] })),
+];
+const stateItems = [ALL_ITEM, ...STATES.map((value) => ({ value, label: STATE_LABELS[value] }))];
 
 function currentUrlState(): ReviewFindingsUrlState {
   return {
@@ -543,26 +554,15 @@ async function onRoundCreated() {
                 "
               />
             </div>
-            <div>
-              <label for="filter-pr-state" class="mb-1.5 block text-xs font-medium"
-                >PR の状態</label
-              >
-              <Select :model-value="prStateFilter" @update:model-value="setPrStateFilter">
-                <SelectTrigger
-                  id="filter-pr-state"
-                  size="sm"
-                  class="w-full"
-                  data-testid="filter-pr-state"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="state in PR_STATE_FILTERS" :key="state" :value="state">
-                    {{ state === 'all' ? 'すべて' : pullRequestState(state).label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <Field id="filter-pr-state" label="PR の状態">
+              <Picker
+                label="PR の状態"
+                :searchable="false"
+                :items="prStateItems"
+                :selected-values="[prStateFilter]"
+                :on-selection-change="(values: string[]) => setPrStateFilter(values[0])"
+              />
+            </Field>
             <!-- PR の作成者は GitHub のユーザー名なので、連携が無いと見分けられない -->
             <label
               class="mb-1 flex items-start gap-2.5 rounded-md border p-2.5"
@@ -806,56 +806,37 @@ async function onRoundCreated() {
             <!-- 絞り込みと起票 -->
             <div class="flex flex-wrap items-end gap-2">
               <div class="w-[110px]">
-                <label for="filter-round" class="mb-1.5 block text-xs font-medium">Round</label>
-                <Select
-                  :model-value="roundFilter === null ? 'all' : String(roundFilter)"
-                  @update:model-value="setRoundFilter"
-                >
-                  <SelectTrigger id="filter-round" size="sm" class="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">すべて</SelectItem>
-                    <SelectItem
-                      v-for="round in rounds"
-                      :key="round.id"
-                      :value="String(round.round)"
-                    >
-                      R{{ round.round }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <Field id="filter-round" label="Round">
+                  <Picker
+                    label="Round"
+                    :searchable="roundItems.length > 8"
+                    :items="roundItems"
+                    :selected-values="[roundFilter === null ? 'all' : String(roundFilter)]"
+                    :on-selection-change="(values: string[]) => setRoundFilter(values[0])"
+                  />
+                </Field>
               </div>
               <div class="w-[130px]">
-                <label for="filter-severity" class="mb-1.5 block text-xs font-medium">重大度</label>
-                <Select
-                  :model-value="severityFilter ?? 'all'"
-                  @update:model-value="setSeverityFilter"
-                >
-                  <SelectTrigger id="filter-severity" size="sm" class="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">すべて</SelectItem>
-                    <SelectItem v-for="severity in SEVERITIES" :key="severity" :value="severity">
-                      {{ SEVERITY_LABELS[severity] }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <Field id="filter-severity" label="重大度">
+                  <Picker
+                    label="重大度"
+                    :searchable="false"
+                    :items="severityItems"
+                    :selected-values="[severityFilter ?? 'all']"
+                    :on-selection-change="(values: string[]) => setSeverityFilter(values[0])"
+                  />
+                </Field>
               </div>
               <div class="w-[130px]">
-                <label for="filter-state" class="mb-1.5 block text-xs font-medium">状態</label>
-                <Select :model-value="stateFilter ?? 'all'" @update:model-value="setStateFilter">
-                  <SelectTrigger id="filter-state" size="sm" class="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">すべて</SelectItem>
-                    <SelectItem v-for="state in STATES" :key="state" :value="state">
-                      {{ STATE_LABELS[state] }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <Field id="filter-state" label="状態">
+                  <Picker
+                    label="状態"
+                    :searchable="false"
+                    :items="stateItems"
+                    :selected-values="[stateFilter ?? 'all']"
+                    :on-selection-change="(values: string[]) => setStateFilter(values[0])"
+                  />
+                </Field>
               </div>
               <Button
                 v-if="hasFilters"
