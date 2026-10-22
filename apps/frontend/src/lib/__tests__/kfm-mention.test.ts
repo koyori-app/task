@@ -71,18 +71,57 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
     expect(await render(`# <@${A}>`)).toContain(alice);
   });
 
-  it('コードブロックとインラインコードの中の印は札にしない（印の文字のまま）', async () => {
+  it('コードブロックとインラインコードの中の印は札にせず、現在の名前へ戻す', async () => {
     const inline = await render(`\`<@${A}>\``);
-    expect(inline).toBe(`<p><code>&lt;@${A}&gt;</code></p>`);
+    expect(inline).toBe('<p><code>@alice</code></p>');
     expect(inline).not.toContain('kfm-mention');
     const block = await render(`\`\`\`\n<@${A}>\n\`\`\``);
     expect(block).not.toContain('kfm-mention');
-    expect(block).toContain(A);
+    expect(block).toContain('@alice');
+    expect(block).not.toContain(A);
   });
 
-  it('リンクの内側・URL の中は札にしない', async () => {
-    const html = await render(`[<@${A}>](https://example.com)`);
-    expect(html).not.toContain('kfm-mention');
+  it('リンクの入れ子の文字は札にせず、現在の名前へ戻す', async () => {
+    const inline = await render(`[**<@${A}>**](https://example.com)`);
+    expect(inline).toContain('<a href="https://example.com"><strong>@alice</strong></a>');
+    expect(inline).not.toContain('kfm-mention');
+    expect(inline).not.toContain(A);
+
+    const titled = await render(`[<@${A}>](https://example.com "担当 <@${B}>")`);
+    expect(titled).toContain('title="担当 @former"');
+    expect(titled).toContain('>@alice</a>');
+    expect(titled).not.toContain(A);
+    expect(titled).not.toContain(B);
+
+    const reference = await render(
+      `[<@${A}>][person]\n\n[person]: https://example.com "担当 <@${B}>"`,
+    );
+    expect(reference).toContain('title="担当 @former"');
+    expect(reference).toContain('>@alice</a>');
+    expect(reference).not.toContain(A);
+    expect(reference).not.toContain(B);
+  });
+
+  it('画像と参照画像の alt・title は現在の名前へ戻す', async () => {
+    const inline = await render(`![<@${A}>](https://example.com/a.png "担当 <@${B}>")`);
+    expect(inline).toContain('alt="@alice"');
+    expect(inline).toContain('title="担当 @former"');
+    expect(inline).not.toContain(A);
+    expect(inline).not.toContain(B);
+
+    const reference = await render(
+      `![<@${A}>][avatar]\n\n[avatar]: https://example.com/a.png "担当 <@${B}>"`,
+    );
+    expect(reference).toContain('alt="@alice"');
+    expect(reference).toContain('title="担当 @former"');
+    expect(reference).not.toContain(A);
+    expect(reference).not.toContain(B);
+  });
+
+  it('コードフェンスの title 属性は現在の名前へ戻す', async () => {
+    const html = await render(`\`\`\`ts title="担当 <@${A}>"\nconst n = 1;\n\`\`\``);
+    expect(html).toContain('data-title="担当 @alice"');
+    expect(html).not.toContain(A);
   });
 
   it('壊れた印・手で打った @名前・メールアドレスは素の文字', async () => {

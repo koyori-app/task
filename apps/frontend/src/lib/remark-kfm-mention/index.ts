@@ -4,8 +4,9 @@
  * 規則（kfm-mention テストで固定）:
  * - 印は `<@` + ハイフン付き UUID + `>`（コメントの入力欄・backend の `payload::mentions` と同じ形）。
  *   壊れた印（字数違い・閉じ無し）は素のテキストのまま
- * - text ノードだけを分割する。code / inlineCode / link / linkReference / definition / html の
- *   内側は走査しない（コードブロックとインラインコードの中の `<@id>` は札にしない）
+ * - text ノードは札へ分割する。code / inlineCode と link / linkReference の内側は札にせず
+ *   `@今の名` の字へ戻す。画像の alt、リンク・画像・定義の title、code の meta も同じ
+ * - URL と生の HTML は意味を変えない
  * - 札の字は `mentionLabel`（コメントの札と同じ）。id は HTML に出さない
  * - 名で出る札は頭にアバター（`span.kfm-mention-avatar`。画像は `safeAvatarUrl` を通った URL だけ）を置く。
  *   定型の句の札にはアバターを出さない（`mentionChip` の判じ。入力欄・コメントの札と同じ）
@@ -19,13 +20,17 @@
  *
  * 出力は mdast ノード ＋ data.hName / hProperties の型付き emit のみ（生 html・inline style なし）。
  */
-import type { Parent, PhrasingContent, Root, Text } from 'mdast';
+import type { Nodes, Parent, PhrasingContent, Root, Text } from 'mdast';
 import { SKIP, visit } from 'unist-util-visit';
 
-import { findMarkers, lookup, mentionChip, type MentionTable } from '@/lib/comment-mention';
+import {
+  findMarkers,
+  lookup,
+  mentionChip,
+  toPlainText,
+  type MentionTable,
+} from '@/lib/comment-mention';
 import { avatarInitials } from '@/lib/initials';
-
-const SKIP_TYPES = new Set(['code', 'inlineCode', 'link', 'linkReference', 'definition', 'html']);
 
 /** vfile の data.kfm に載せる描画時コンテキスト（_renderer.ts が process 時に渡す） */
 export type KfmMentionData = {
@@ -73,6 +78,48 @@ function readTable(data: Readonly<Record<string, unknown>>): MentionTable | unde
   return table !== null && typeof table === 'object' ? table : undefined;
 }
 
+function plainText(value: string, table: MentionTable): string {
+  return toPlainText(value, (id) => lookup(table, id));
+}
+
+/**
+ * 札を置けない文脈の字を、入れ子も含めて `@今の名` へ戻す。
+ * URL・識別子・生 HTML は Markdown の意味を変えぬよう触らない。
+ */
+function replacePlainMentions(node: Nodes, table: MentionTable): void {
+  switch (node.type) {
+    case 'text':
+    case 'inlineCode':
+      node.value = plainText(node.value, table);
+      return;
+    case 'code':
+      node.value = plainText(node.value, table);
+      if (node.meta) node.meta = plainText(node.meta, table);
+      return;
+    case 'image':
+      if (node.alt) node.alt = plainText(node.alt, table);
+      if (node.title) node.title = plainText(node.title, table);
+      return;
+    case 'imageReference':
+      if (node.alt) node.alt = plainText(node.alt, table);
+      return;
+    case 'link':
+      if (node.title) node.title = plainText(node.title, table);
+      for (const child of node.children) replacePlainMentions(child, table);
+      return;
+    case 'linkReference':
+      for (const child of node.children) replacePlainMentions(child, table);
+      return;
+    case 'definition':
+      if (node.title) node.title = plainText(node.title, table);
+      return;
+    default:
+      if ('children' in node) {
+        for (const child of node.children) replacePlainMentions(child, table);
+      }
+  }
+}
+
 function splitText(
   node: Text,
   table: MentionTable,
@@ -116,7 +163,19 @@ export function remarkKfmMention() {
     const table = readTable(file.data);
     if (table === undefined) return;
     visit(tree, (node, index, parent) => {
-      if (SKIP_TYPES.has(node.type)) return SKIP;
+      if (
+        node.type === 'code' ||
+        node.type === 'inlineCode' ||
+        node.type === 'link' ||
+        node.type === 'linkReference' ||
+        node.type === 'image' ||
+        node.type === 'imageReference' ||
+        node.type === 'definition'
+      ) {
+        replacePlainMentions(node, table);
+        return SKIP;
+      }
+      if (node.type === 'html') return SKIP;
       if (node.type !== 'text' || parent === undefined || index === undefined) return;
       const parts = splitText(node, table, data?.currentUserId);
       if (parts === undefined) return;
