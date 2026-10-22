@@ -3,6 +3,7 @@ import type { TooltipContentEmits, TooltipContentProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
 import { TooltipArrow, TooltipContent, TooltipPortal, useForwardPropsEmits } from "reka-ui"
+import { useDialogPortalTarget } from "@/composables/useDialogPortalTarget"
 import { cn } from "@/lib/utils"
 
 defineOptions({
@@ -17,10 +18,11 @@ const emits = defineEmits<TooltipContentEmits>()
 
 const delegatedProps = reactiveOmit(props, "class")
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
+const portalTarget = useDialogPortalTarget()
 </script>
 
 <template>
-  <TooltipPortal>
+  <TooltipPortal :to="portalTarget">
     <TooltipContent
       data-slot="tooltip-content"
       v-bind="{ ...forwarded, ...$attrs }"

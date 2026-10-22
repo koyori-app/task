@@ -4,16 +4,8 @@ import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhCopy } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button, Field, Input } from '@koyori-app/ui-vue';
+import { Button, Dialog, Field, Input } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -151,23 +143,28 @@ async function copySecret() {
   }
 }
 
-function onOpenChange(open: boolean) {
+function onClose() {
   // 保存リクエスト進行中はダイアログを閉じない（結果の見逃し防止）
-  if (!open && isPending.value) return;
-  if (!open) emit('close');
+  if (isPending.value) return;
+  emit('close');
 }
 </script>
 
 <template>
-  <Dialog :open="true" @update:open="onOpenChange">
-    <DialogContent class="max-w-lg">
-      <template v-if="createdSecret">
-        <DialogHeader>
-          <DialogTitle>Webhook を作成しました</DialogTitle>
-          <DialogDescription>
-            署名用のシークレットは今しか表示されません。必ずコピーして受信側に設定してください。
-          </DialogDescription>
-        </DialogHeader>
+  <div class="contents [--koyori-dialog-width:32rem]">
+    <Dialog
+      :open="true"
+      :title="
+        createdSecret ? 'Webhook を作成しました' : webhook ? 'Webhook を編集' : 'Webhook を追加'
+      "
+      :description="
+        createdSecret
+          ? '署名用のシークレットは今しか表示されません。必ずコピーして受信側に設定してください。'
+          : 'イベントを送る URL と形式、購読するイベントを設定します。'
+      "
+      :on-close="onClose"
+    >
+      <div v-if="createdSecret" class="grid gap-4">
         <div class="flex items-center gap-2">
           <code
             class="min-w-0 flex-1 truncate rounded-md bg-muted px-3 py-2 font-mono text-sm"
@@ -184,158 +181,147 @@ function onOpenChange(open: boolean) {
           </Button>
         </div>
         <p v-if="copyError" role="alert" class="text-sm text-destructive">{{ copyError }}</p>
-        <DialogFooter>
-          <Button type="button" label="閉じる" @click="emit('close')" />
-        </DialogFooter>
-      </template>
+      </div>
 
-      <template v-else>
-        <DialogHeader>
-          <DialogTitle>{{ webhook ? 'Webhook を編集' : 'Webhook を追加' }}</DialogTitle>
-          <DialogDescription
-            >イベントを送る URL と形式、購読するイベントを設定します。</DialogDescription
-          >
-        </DialogHeader>
+      <form
+        v-else
+        id="webhook-form"
+        class="flex flex-col gap-4"
+        @submit.prevent="form.handleSubmit"
+      >
+        <form.Field name="url">
+          <template #default="{ field }">
+            <Field
+              id="webhook-url"
+              label="URL"
+              :description="
+                urlHidden
+                  ? '送信先の URL は認証情報を含みうるため表示しません。変えるときだけ入力してください'
+                  : undefined
+              "
+              :error="field.state.meta.errors.length ? 'URL の形式で入力してください' : ''"
+            >
+              <Input
+                type="url"
+                class="[&_input]:font-mono"
+                :placeholder="urlHidden ? '空欄なら変更しません' : 'https://example.com/webhook'"
+                :value="field.state.value"
+                :on-value-change="field.handleChange"
+                :on-blur="field.handleBlur"
+              />
+            </Field>
+          </template>
+        </form.Field>
 
-        <form class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
-          <form.Field name="url">
-            <template #default="{ field }">
-              <Field
-                id="webhook-url"
-                label="URL"
-                :description="
-                  urlHidden
-                    ? '送信先の URL は認証情報を含みうるため表示しません。変えるときだけ入力してください'
-                    : undefined
-                "
-                :error="field.state.meta.errors.length ? 'URL の形式で入力してください' : ''"
+        <form.Field name="secret">
+          <template #default="{ field }">
+            <Field
+              id="webhook-secret"
+              label="シークレット"
+              description="16 文字以上。Discord 形式では署名に使いません"
+              :error="
+                field.state.meta.errors.length ? 'シークレットは 16 文字以上で入力してください' : ''
+              "
+            >
+              <Input
+                type="password"
+                autocomplete="new-password"
+                :placeholder="webhook ? '空欄なら変更しません' : ''"
+                :value="field.state.value"
+                :on-value-change="field.handleChange"
+                :on-blur="field.handleBlur"
+              />
+            </Field>
+          </template>
+        </form.Field>
+
+        <form.Field name="format">
+          <template #default="{ field }">
+            <div class="flex flex-col gap-2">
+              <Label for="webhook-format">形式</Label>
+              <Select
+                :model-value="field.state.value"
+                @update:model-value="(v) => field.handleChange(v as WebhookFormat)"
               >
-                <Input
-                  type="url"
-                  class="[&_input]:font-mono"
-                  :placeholder="urlHidden ? '空欄なら変更しません' : 'https://example.com/webhook'"
-                  :value="field.state.value"
-                  :on-value-change="field.handleChange"
-                  :on-blur="field.handleBlur"
-                />
-              </Field>
-            </template>
-          </form.Field>
-
-          <form.Field name="secret">
-            <template #default="{ field }">
-              <Field
-                id="webhook-secret"
-                label="シークレット"
-                description="16 文字以上。Discord 形式では署名に使いません"
-                :error="
-                  field.state.meta.errors.length
-                    ? 'シークレットは 16 文字以上で入力してください'
-                    : ''
-                "
-              >
-                <Input
-                  type="password"
-                  autocomplete="new-password"
-                  :placeholder="webhook ? '空欄なら変更しません' : ''"
-                  :value="field.state.value"
-                  :on-value-change="field.handleChange"
-                  :on-blur="field.handleBlur"
-                />
-              </Field>
-            </template>
-          </form.Field>
-
-          <form.Field name="format">
-            <template #default="{ field }">
-              <div class="flex flex-col gap-2">
-                <Label for="webhook-format">形式</Label>
-                <Select
-                  :model-value="field.state.value"
-                  @update:model-value="(v) => field.handleChange(v as WebhookFormat)"
-                >
-                  <SelectTrigger id="webhook-format" class="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem
-                      v-for="format in WEBHOOK_FORMATS"
-                      :key="format.value"
-                      :value="format.value"
-                    >
-                      <span class="inline-flex items-center gap-2">
-                        <component :is="format.icon" class="size-4" aria-hidden="true" />
-                        {{ format.label }}
-                      </span>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </template>
-          </form.Field>
-
-          <form.Field name="events">
-            <template #default="{ field }">
-              <div class="flex flex-col gap-2">
-                <Label>イベント</Label>
-                <div class="flex flex-col gap-2">
-                  <label
-                    v-for="event in WEBHOOK_EVENTS"
-                    :key="event.value"
-                    class="flex cursor-pointer items-center gap-2 text-sm"
+                <SelectTrigger id="webhook-format" class="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="format in WEBHOOK_FORMATS"
+                    :key="format.value"
+                    :value="format.value"
                   >
-                    <Checkbox
-                      :model-value="field.state.value.includes(event.value)"
-                      :aria-label="event.label"
-                      @update:model-value="
-                        (v) =>
-                          field.handleChange(
-                            toggleEvent(field.state.value, event.value, v === true),
-                          )
-                      "
-                    />
-                    {{ event.label }}
-                  </label>
-                </div>
-                <p
-                  v-if="field.state.meta.errors.length"
-                  role="alert"
-                  class="text-sm text-(--koyori-color-danger)"
+                    <span class="inline-flex items-center gap-2">
+                      <component :is="format.icon" class="size-4" aria-hidden="true" />
+                      {{ format.label }}
+                    </span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </template>
+        </form.Field>
+
+        <form.Field name="events">
+          <template #default="{ field }">
+            <div class="flex flex-col gap-2">
+              <Label>イベント</Label>
+              <div class="flex flex-col gap-2">
+                <label
+                  v-for="event in WEBHOOK_EVENTS"
+                  :key="event.value"
+                  class="flex cursor-pointer items-center gap-2 text-sm"
                 >
-                  イベントを 1 つ以上選んでください
-                </p>
+                  <Checkbox
+                    :model-value="field.state.value.includes(event.value)"
+                    :aria-label="event.label"
+                    @update:model-value="
+                      (v) =>
+                        field.handleChange(toggleEvent(field.state.value, event.value, v === true))
+                    "
+                  />
+                  {{ event.label }}
+                </label>
               </div>
+              <p
+                v-if="field.state.meta.errors.length"
+                role="alert"
+                class="text-sm text-(--koyori-color-danger)"
+              >
+                イベントを 1 つ以上選んでください
+              </p>
+            </div>
+          </template>
+        </form.Field>
+
+        <p v-if="submitError" role="alert" class="text-sm text-destructive">{{ submitError }}</p>
+      </form>
+
+      <template #actions>
+        <Button v-if="createdSecret" type="button" label="閉じる" @click="emit('close')" />
+        <template v-else>
+          <Button
+            type="button"
+            variant="tertiary"
+            :disabled="isPending"
+            label="キャンセル"
+            @click="emit('close')"
+          />
+          <form.Subscribe>
+            <template #default="{ canSubmit, isSubmitting }">
+              <Button
+                type="submit"
+                form="webhook-form"
+                :disabled="!canSubmit || isSubmitting || isPending"
+                :label="
+                  isSubmitting || isPending ? '保存中…' : webhook ? '変更を保存' : 'Webhook を追加'
+                "
+              />
             </template>
-          </form.Field>
-
-          <p v-if="submitError" role="alert" class="text-sm text-destructive">{{ submitError }}</p>
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="tertiary"
-              :disabled="isPending"
-              label="キャンセル"
-              @click="emit('close')"
-            />
-            <form.Subscribe>
-              <template #default="{ canSubmit, isSubmitting }">
-                <Button
-                  type="submit"
-                  :disabled="!canSubmit || isSubmitting || isPending"
-                  :label="
-                    isSubmitting || isPending
-                      ? '保存中…'
-                      : webhook
-                        ? '変更を保存'
-                        : 'Webhook を追加'
-                  "
-                />
-              </template>
-            </form.Subscribe>
-          </DialogFooter>
-        </form>
+          </form.Subscribe>
+        </template>
       </template>
-    </DialogContent>
-  </Dialog>
+    </Dialog>
+  </div>
 </template>

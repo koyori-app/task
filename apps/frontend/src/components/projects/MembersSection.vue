@@ -5,15 +5,7 @@ import { computed, ref } from 'vue';
 import { ChevronDown } from '@lucide/vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import UserSelector from '@/components/users/UserSelector.vue';
-import { Button } from '@koyori-app/ui-vue';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Button, Dialog } from '@koyori-app/ui-vue';
 import {
   Select,
   SelectContent,
@@ -202,10 +194,24 @@ function openRemove(member: ProjectMemberResponse) {
   removeTarget.value = member;
 }
 
-function onRemoveOpenChange(open: boolean) {
+// 警告も説明に含める。説明（aria-describedby）に入れないと、開いたときに読み上げられない
+const removeDescription = computed(() => {
+  const target = removeTarget.value;
+  if (!target) return '';
+  return [
+    `「${target.user.username}」をこのプロジェクトから外します。担当タスクの割り当ては残りますが、ウォッチしていたタスクの通知は解除されます。`,
+    members.value.length === 1 &&
+      'これが最後のメンバーです。外すとメンバー指定が無くなり、このプロジェクトはテナントメンバー全員が開けるようになります。',
+    isSelf(target) && '自分をこのプロジェクトから外します。以後この設定画面は開けなくなります。',
+  ]
+    .filter(Boolean)
+    .join('');
+});
+
+function onRemoveClose() {
   // 削除リクエスト進行中はダイアログを閉じない（結果の見逃し防止）
-  if (!open && removeMutation.isPending.value) return;
-  if (!open) removeTarget.value = null;
+  if (removeMutation.isPending.value) return;
+  removeTarget.value = null;
 }
 
 async function confirmRemove() {
@@ -377,42 +383,29 @@ async function confirmRemove() {
       </ul>
     </template>
 
-    <Dialog v-if="removeTarget" :open="true" @update:open="onRemoveOpenChange">
-      <DialogContent class="max-w-md" :show-close-button="false">
-        <DialogHeader>
-          <DialogTitle>メンバーを削除しますか？</DialogTitle>
-          <DialogDescription>
-            <span class="block">
-              「{{ removeTarget.user.username }}」をこのプロジェクトから外します。
-              担当タスクの割り当ては残りますが、ウォッチしていたタスクの通知は解除されます。
-            </span>
-            <span v-if="members.length === 1" class="mt-2 block text-destructive">
-              これが最後のメンバーです。外すとメンバー指定が無くなり、このプロジェクトは
-              テナントメンバー全員が開けるようになります。
-            </span>
-            <span v-if="isSelf(removeTarget)" class="mt-2 block text-destructive">
-              自分をこのプロジェクトから外します。以後この設定画面は開けなくなります。
-            </span>
-          </DialogDescription>
-        </DialogHeader>
-        <p v-if="removeError" role="alert" class="text-sm text-destructive">{{ removeError }}</p>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="tertiary"
-            :disabled="removeMutation.isPending.value"
-            label="キャンセル"
-            @click="removeTarget = null"
-          />
-          <Button
-            type="button"
-            variant="danger"
-            :disabled="removeMutation.isPending.value"
-            :label="removeMutation.isPending.value ? '削除中…' : '削除する'"
-            @click="confirmRemove"
-          />
-        </DialogFooter>
-      </DialogContent>
+    <Dialog
+      :open="removeTarget !== null"
+      title="メンバーを削除しますか？"
+      :description="removeDescription"
+      :on-close="onRemoveClose"
+    >
+      <p v-if="removeError" role="alert" class="text-sm text-destructive">{{ removeError }}</p>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="removeMutation.isPending.value"
+          label="キャンセル"
+          @click="removeTarget = null"
+        />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="removeMutation.isPending.value"
+          :label="removeMutation.isPending.value ? '削除中…' : '削除する'"
+          @click="confirmRemove"
+        />
+      </template>
     </Dialog>
   </div>
 </template>

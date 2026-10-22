@@ -8,6 +8,7 @@ import {
   SelectViewport,
   useForwardPropsEmits,
 } from "reka-ui"
+import { useDialogPortalTarget } from "@/composables/useDialogPortalTarget"
 import { cn } from "@/lib/utils"
 import { SelectScrollDownButton, SelectScrollUpButton } from "."
 
@@ -26,10 +27,11 @@ const emits = defineEmits<SelectContentEmits>()
 const delegatedProps = reactiveOmit(props, "class")
 
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
+const portalTarget = useDialogPortalTarget()
 </script>
 
 <template>
-  <SelectPortal>
+  <SelectPortal :to="portalTarget">
     <SelectContent
       data-slot="select-content"
       v-bind="{ ...$attrs, ...forwarded }"

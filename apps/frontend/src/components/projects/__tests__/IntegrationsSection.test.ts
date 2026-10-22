@@ -202,6 +202,11 @@ function clickSelectButton(index: number) {
   button.click();
 }
 
+/** 開いているダイアログ。閉じたダイアログも DOM に残るので open で絞る */
+function openDialog() {
+  return document.body.querySelector<HTMLDialogElement>('dialog[open]');
+}
+
 function clickBodyButton(label: string) {
   const button = bodyButton(label);
   if (!button) throw new Error(`button "${label}" not found`);
@@ -833,7 +838,7 @@ describe('IntegrationsSection', () => {
 
     clickBodyButton('連携を解除');
     await flushPromises();
-    expect(document.body.textContent).toContain('GitHub 連携を解除しますか？');
+    expect(openDialog()?.textContent).toContain('GitHub 連携を解除しますか？');
     expect(document.body.textContent).toContain('「koyori-app/koyori」との連携を解除します。');
 
     clickBodyButton('解除する');
@@ -850,7 +855,7 @@ describe('IntegrationsSection', () => {
 
     // invalidate による再取得後は未連携カードに戻り、ダイアログは閉じる
     await flushPromises();
-    expect(document.body.textContent).not.toContain('GitHub 連携を解除しますか？');
+    expect(openDialog()).toBeNull();
     expect(bodyButton('連携する')).toBeTruthy();
   });
 
@@ -865,29 +870,28 @@ describe('IntegrationsSection', () => {
     await flushPromises();
 
     expect(document.body.textContent).toContain('連携を解除できませんでした');
-    expect(document.body.textContent).toContain('GitHub 連携を解除しますか？');
+    expect(openDialog()?.textContent).toContain('GitHub 連携を解除しますか？');
   });
 
   it('解除リクエスト進行中は確認ダイアログのクローズ要求を無視する', async () => {
-    // DELETE を hang させ、mutation が pending の間に Esc/オーバーレイ相当の
-    // update:open(false) を発火してもダイアログが閉じないことを検証する
+    // DELETE を hang させ、mutation が pending の間に Esc（dialog の cancel）を
+    // 発火してもダイアログが閉じないことを検証する
     stubFetch({ connected: true, hangDelete: true });
-    const { wrapper } = mountSection();
+    mountSection();
     await flushPromises();
 
     clickBodyButton('連携を解除');
     await flushPromises();
-    expect(document.body.textContent).toContain('GitHub 連携を解除しますか？');
+    expect(openDialog()?.textContent).toContain('GitHub 連携を解除しますか？');
 
     // 解除を開始（DELETE は never-resolve なので isPending が true のまま）
     clickBodyButton('解除する');
     await flushPromises();
 
-    const dialogRoot = wrapper.findComponent({ name: 'DialogRoot' });
-    dialogRoot.vm.$emit('update:open', false);
+    openDialog()!.dispatchEvent(new Event('cancel', { cancelable: true }));
     await flushPromises();
 
-    expect(document.body.textContent).toContain('GitHub 連携を解除しますか？');
+    expect(openDialog()?.textContent).toContain('GitHub 連携を解除しますか？');
   });
 
   it('状態取得に失敗したらエラーと「再試行」を表示し、再試行で回復する', async () => {

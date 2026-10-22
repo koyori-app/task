@@ -2,15 +2,7 @@
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@koyori-app/ui-vue';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Button, Dialog } from '@koyori-app/ui-vue';
 import { Skeleton } from '@/components/ui/skeleton';
 import WebhookFormDialog from '@/components/projects/WebhookFormDialog.vue';
 import {
@@ -168,10 +160,10 @@ function openDelete(webhook: WebhookResponse) {
   deleteTarget.value = webhook;
 }
 
-function onDeleteOpenChange(open: boolean) {
+function onDeleteClose() {
   // 削除リクエスト進行中はダイアログを閉じない（結果の見逃し防止）
-  if (!open && deleteMutation.isPending.value) return;
-  if (!open) deleteTarget.value = null;
+  if (deleteMutation.isPending.value) return;
+  deleteTarget.value = null;
 }
 
 async function confirmDelete() {
@@ -353,33 +345,33 @@ async function confirmDelete() {
       @close="isFormOpen = false"
     />
 
-    <Dialog v-if="deleteTarget" :open="true" @update:open="onDeleteOpenChange">
-      <DialogContent class="max-w-md" :show-close-button="false">
-        <DialogHeader>
-          <DialogTitle>Webhook を削除しますか？</DialogTitle>
-          <DialogDescription>
-            <span class="break-all font-mono">{{ deleteTarget.url }}</span>
-            への送信をやめ、配信履歴も削除します。この操作は取り消せません。
-          </DialogDescription>
-        </DialogHeader>
-        <p v-if="deleteError" role="alert" class="text-sm text-destructive">{{ deleteError }}</p>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="tertiary"
-            :disabled="deleteMutation.isPending.value"
-            label="キャンセル"
-            @click="deleteTarget = null"
-          />
-          <Button
-            type="button"
-            variant="danger"
-            :disabled="deleteMutation.isPending.value"
-            :label="deleteMutation.isPending.value ? '削除中…' : '削除する'"
-            @click="confirmDelete"
-          />
-        </DialogFooter>
-      </DialogContent>
+    <Dialog
+      :open="deleteTarget !== null"
+      title="Webhook を削除しますか？"
+      :description="
+        deleteTarget
+          ? `${deleteTarget.url} への送信をやめ、配信履歴も削除します。この操作は取り消せません。`
+          : ''
+      "
+      :on-close="onDeleteClose"
+    >
+      <p v-if="deleteError" role="alert" class="text-sm text-destructive">{{ deleteError }}</p>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="deleteMutation.isPending.value"
+          label="キャンセル"
+          @click="deleteTarget = null"
+        />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="deleteMutation.isPending.value"
+          :label="deleteMutation.isPending.value ? '削除中…' : '削除する'"
+          @click="confirmDelete"
+        />
+      </template>
     </Dialog>
   </div>
 </template>

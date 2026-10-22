@@ -230,9 +230,11 @@ describe('WebhooksSection', () => {
     mountView();
     await flushPromises();
 
+    // 閉じたダイアログも DOM に残るので、open の dialog で開閉を見る
+    const openDialog = () => document.body.querySelector('dialog[open]');
     clickButton('削除', row(activeHook.url));
     await flushPromises();
-    expect(document.body.textContent).toContain('Webhook を削除しますか？');
+    expect(openDialog()?.textContent).toContain('Webhook を削除しますか？');
     expect(mutateAsync.delete).not.toHaveBeenCalled();
 
     clickButton('削除する');
@@ -241,7 +243,7 @@ describe('WebhooksSection', () => {
     expect(mutateAsync.delete).toHaveBeenCalledWith({
       params: { path: { tenant_id: TENANT_UUID, project_id: PROJECT_UUID, id: activeHook.id } },
     });
-    expect(document.body.textContent).not.toContain('Webhook を削除しますか？');
+    expect(openDialog()).toBeNull();
   });
 
   it('配信履歴を展開すると取得し、「再送」で POST して履歴を再取得する', async () => {

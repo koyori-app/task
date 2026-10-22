@@ -21,7 +21,6 @@ describe('CreateDocumentDialog', () => {
       attachTo: document.body,
     });
     await flushPromises();
-    // ダイアログは body へテレポートされるので document から引く
     const input = document.body.querySelector<HTMLInputElement>('input[name="title"]')!;
     await new DOMWrapper(input).setValue('設計メモ');
     await new DOMWrapper(document.body.querySelector('form')!).trigger('submit');

@@ -2,15 +2,7 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { computed, ref, watch } from 'vue';
 
-import { Button, Field, Input } from '@koyori-app/ui-vue';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Button, Dialog, Field, Input } from '@koyori-app/ui-vue';
 import { apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
@@ -48,10 +40,10 @@ watch(
   },
 );
 
-function onOpenChange(open: boolean) {
+function onClose() {
   // 削除の最中は閉じない（結果を見逃さないため）
-  if (!open && deleteMutation.isPending.value) return;
-  emit('update:open', open);
+  if (deleteMutation.isPending.value) return;
+  emit('update:open', false);
 }
 
 async function confirmDelete() {
@@ -69,38 +61,43 @@ async function confirmDelete() {
 </script>
 
 <template>
-  <Dialog v-if="open" :open="true" @update:open="onOpenChange">
-    <DialogContent class="max-w-[440px]" :show-close-button="false">
-      <DialogHeader>
-        <DialogTitle>「{{ tenant.name }}」を削除しますか？</DialogTitle>
-        <DialogDescription>
-          この操作は取り消せません。このテナントのプロジェクト・タスク・ラベル・招待がすべて完全に削除されます。
-        </DialogDescription>
-      </DialogHeader>
+  <div class="contents [--koyori-dialog-width:440px]">
+    <Dialog
+      :open="open"
+      :title="`「${tenant.name}」を削除しますか？`"
+      description="この操作は取り消せません。このテナントのプロジェクト・タスク・ラベル・招待がすべて完全に削除されます。"
+      :on-close="onClose"
+    >
+      <div class="grid gap-4">
+        <Field
+          id="delete-tenant-confirm"
+          :label="`確認のため ${tenant.display_id} と入力してください`"
+        >
+          <Input
+            class="[&_input]:font-mono"
+            :placeholder="tenant.display_id"
+            :value="confirmText"
+            :on-value-change="(v: string) => (confirmText = v)"
+          />
+        </Field>
 
-      <Field
-        id="delete-tenant-confirm"
-        :label="`確認のため ${tenant.display_id} と入力してください`"
-      >
-        <Input
-          class="[&_input]:font-mono"
-          :placeholder="tenant.display_id"
-          :value="confirmText"
-          :on-value-change="(v: string) => (confirmText = v)"
+        <p v-if="deleteError" role="alert" class="text-sm text-destructive">{{ deleteError }}</p>
+      </div>
+
+      <template #actions>
+        <Button
+          variant="tertiary"
+          :disabled="deleteMutation.isPending.value"
+          label="キャンセル"
+          @click="onClose"
         />
-      </Field>
-
-      <p v-if="deleteError" role="alert" class="text-sm text-destructive">{{ deleteError }}</p>
-
-      <DialogFooter>
-        <Button variant="tertiary" label="キャンセル" @click="onOpenChange(false)" />
         <Button
           variant="danger"
           :disabled="!canDelete || deleteMutation.isPending.value"
           label="テナントを削除"
           @click="confirmDelete"
         />
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+      </template>
+    </Dialog>
+  </div>
 </template>

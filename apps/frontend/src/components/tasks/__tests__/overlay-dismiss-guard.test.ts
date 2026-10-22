@@ -7,11 +7,14 @@ import {
 
 function renderOverlay() {
   document.body.innerHTML = `
-    <div role="dialog">
+    <dialog open>
       <button id="button">親タスク</button>
       <textarea id="draft"></textarea>
-      <dialog id="confirm"><button id="confirm-cancel">キャンセル</button></dialog>
-    </div>
+      <dialog id="confirm">
+        <button id="confirm-cancel">キャンセル</button>
+        <input id="confirm-input" />
+      </dialog>
+    </dialog>
   `;
 }
 
@@ -48,10 +51,13 @@ describe('shouldKeepOverlayOnEscape', () => {
     expect(shouldKeepOverlayOnEscape(escapeOn('#button', { keyCode: 229 }))).toBe(true);
   });
 
-  it('入れ子の <dialog> が開いている間の Esc は閉じない', () => {
+  // 器には cancel が届かないので、止めると手前の dialog の Esc まで殺してしまう
+  it('入れ子の <dialog> の中の Esc は止めない（値のある入力欄でも）', () => {
     renderOverlay();
     get('#confirm').setAttribute('open', '');
-    expect(shouldKeepOverlayOnEscape(escapeOn('#confirm-cancel'))).toBe(true);
+    get<HTMLInputElement>('#confirm-input').value = '入力中';
+    expect(shouldKeepOverlayOnEscape(escapeOn('#confirm-cancel'))).toBe(false);
+    expect(shouldKeepOverlayOnEscape(escapeOn('#confirm-input'))).toBe(false);
   });
 
   it('値のある入力欄での Esc は閉じない（下書きを残す）', () => {

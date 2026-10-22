@@ -104,9 +104,8 @@ describe('DeleteProjectDialog', () => {
     const wrapper = mountDialog();
     await flushPromises();
 
-    // reka-ui の update:open(false)（Esc 等）を直接シミュレート
-    const dialog = wrapper.findComponent({ name: 'DialogRoot' });
-    dialog.vm.$emit('update:open', false);
+    // Esc（dialog の cancel）を直接シミュレート
+    wrapper.get('dialog').element.dispatchEvent(new Event('cancel', { cancelable: true }));
     await flushPromises();
 
     expect(wrapper.emitted('update:open')).toBeUndefined();

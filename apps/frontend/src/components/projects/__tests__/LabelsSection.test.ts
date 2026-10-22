@@ -118,6 +118,18 @@ function clickBodyButton(label: string) {
   button.click();
 }
 
+/** 開いているダイアログ。閉じたダイアログも DOM に残るので open で絞る */
+function openDialog() {
+  return document.body.querySelector<HTMLDialogElement>('dialog[open]');
+}
+
+/** Esc（dialog の cancel）を直接シミュレート */
+function pressEscape() {
+  const dialog = openDialog();
+  if (!dialog) throw new Error('open dialog not found');
+  dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+}
+
 function clickByAriaLabel(label: string) {
   const button = document.body.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
   if (!button) throw new Error(`button[aria-label="${label}"] not found`);
@@ -243,36 +255,33 @@ describe('LabelsSection', () => {
 
   it('保存リクエスト進行中はフォームダイアログのクローズ要求を無視する', async () => {
     mutationPending.post.value = true;
-    const wrapper = mountView();
+    mountView();
     await flushPromises();
 
     clickBodyButton('新しいラベル');
     await flushPromises();
-    expect(document.body.textContent).toContain('ラベルを作成');
+    expect(openDialog()?.textContent).toContain('ラベルを作成');
 
-    // reka-ui の update:open(false)（Esc 等）を直接シミュレート
-    const dialogRoot = wrapper.findComponent({ name: 'DialogRoot' });
-    dialogRoot.vm.$emit('update:open', false);
+    pressEscape();
     await flushPromises();
 
-    expect(document.body.textContent).toContain('ラベルを作成');
+    expect(openDialog()?.textContent).toContain('ラベルを作成');
   });
 
   it('削除リクエスト進行中は確認ダイアログのクローズ要求を無視する', async () => {
     mutationPending.delete.value = true;
     queryState.labels = [bugLabel];
-    const wrapper = mountView();
+    mountView();
     await flushPromises();
 
     clickByAriaLabel('ラベル「bug」を削除');
     await flushPromises();
-    expect(document.body.textContent).toContain('ラベルを削除しますか？');
+    expect(openDialog()?.textContent).toContain('ラベルを削除しますか？');
 
-    const dialogRoot = wrapper.findComponent({ name: 'DialogRoot' });
-    dialogRoot.vm.$emit('update:open', false);
+    pressEscape();
     await flushPromises();
 
-    expect(document.body.textContent).toContain('ラベルを削除しますか？');
+    expect(openDialog()?.textContent).toContain('ラベルを削除しますか？');
   });
 
   it('行の削除ボタン → 確認ダイアログで DELETE を送る', async () => {
@@ -294,7 +303,7 @@ describe('LabelsSection', () => {
         path: { tenant_id: TENANT_UUID, project_id: PROJECT_UUID, id: bugLabel.id },
       },
     });
-    expect(document.body.textContent).not.toContain('ラベルを削除しますか？');
+    expect(openDialog()).toBeNull();
   });
 
   it('保存失敗時はダイアログ内にエラーを表示する', async () => {
