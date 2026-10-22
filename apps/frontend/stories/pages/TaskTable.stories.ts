@@ -1395,22 +1395,35 @@ export const Sorting: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const user = userEvent.setup();
-    const titleHeader = await canvas.findByRole('button', { name: /タイトル/ });
-    await user.click(titleHeader);
+    const titleHeader = await canvas.findByRole('columnheader', { name: 'タイトル' });
+    const sortButton = within(titleHeader).getByRole('button', { name: 'タイトル' });
+    await expect(titleHeader).toHaveAttribute('aria-sort', 'none');
+
+    // 見出しのボタンは 昇順 → 降順 → 解除 と進む
+    await user.click(sortButton);
+    await expect(titleHeader).toHaveAttribute('aria-sort', 'ascending');
+    await user.click(sortButton);
+    await expect(titleHeader).toHaveAttribute('aria-sort', 'descending');
+    await user.click(sortButton);
+    await expect(titleHeader).toHaveAttribute('aria-sort', 'none');
+    // 並べ替えられない列（ラベル）は見出しがボタンにならない
+    const labelsHeader = canvas.getByRole('columnheader', { name: 'ラベル' });
+    await expect(labelsHeader).not.toHaveAttribute('aria-sort');
+    await expect(within(labelsHeader).queryByRole('button')).not.toBeInTheDocument();
     await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
   },
 };
 
 export const RowSelection: Story = {
-  name: '行選択（Select all で全行選択）',
+  name: '行選択（すべて選択で全行選択）',
   beforeEach: mockFetch,
   parameters: {
     docs: {
       description: {
         story:
-          '壊れたら: header の Select all を押しても選択件数の行が動かない' +
+          '壊れたら: すべて選択を押しても選択件数の行が動かない' +
           '（getIsAllPageRowsSelected / getFilteredSelectedRowModel の配線切れ）。' +
-          '押した先の状態（n / total 件選択と各行の checkbox）まで見る。',
+          '一部選択の途中状態（indeterminate）と、押した先の状態（n / total 件選択と各行の checkbox）まで見る。',
       },
     },
   },
@@ -1419,33 +1432,43 @@ export const RowSelection: Story = {
     const user = userEvent.setup();
     await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
 
-    // 押す前: 描画された行数はフィクスチャの全件、選択は 0
-    const rowCount = canvasElement.querySelectorAll('tbody tr').length;
+    // 押す前: 描画された行数はフィクスチャの全件、選択は 0。
+    // すべて選択は一覧の外（選択件数の横）にあるので、一覧の中の checkbox は行の分だけ
+    const list = canvas.getByRole('table', { name: 'タスク一覧' });
+    const rowBoxes = within(list).getAllByRole('checkbox');
+    const rowCount = rowBoxes.length;
     await expect(rowCount).toBe(sampleTasks.total);
+    await expect(within(list).getAllByRole('row')).toHaveLength(rowCount + 1);
     await expect(
       canvas.findByText(new RegExp(`0 / ${sampleTasks.total} 件選択`)),
     ).resolves.toBeInTheDocument();
+    const selectAll = canvas.getByRole('checkbox', { name: 'すべて選択' });
+    await expect(selectAll).not.toBeChecked();
+    await expect(selectAll).not.toBePartiallyChecked();
 
-    // header の Select all を押す（toggleAllPageRowsSelected →
-    // getIsAllPageRowsSelected / getFilteredSelectedRowModel を踏む）。
-    // ariaLabel は accessible name に出ておらず findByRole では引けぬ
-    // （既存の RowAccessibility も querySelector で取っておる）ため、
-    // thead の checkbox を構造で取る。
-    const selectAll = canvasElement.querySelector('thead [role="checkbox"]');
-    if (!(selectAll instanceof HTMLElement)) {
-      throw new Error('Select all checkbox not found');
-    }
+    // 1 行だけ選ぶと、すべて選択は途中状態（indeterminate）になり、行に選択の印が付く
+    await user.click(canvas.getByRole('checkbox', { name: 'ENG-1 を選択' }));
+    await expect(
+      canvas.findByText(new RegExp(`1 / ${sampleTasks.total} 件選択`)),
+    ).resolves.toBeInTheDocument();
+    await expect(selectAll).toBePartiallyChecked();
+    await expect(canvas.getByRole('row', { name: /OAuth 対応を実装する/ })).toHaveAttribute(
+      'data-selected',
+      'true',
+    );
+
+    // すべて選択を押す（toggleAllPageRowsSelected →
+    // getIsAllPageRowsSelected / getFilteredSelectedRowModel を踏む）
     await user.click(selectAll);
 
-    // 押した先: 選択件数の行が行数と一致し、header と各行の checkbox が選択状態
+    // 押した先: 選択件数の行が行数と一致し、すべて選択と各行の checkbox が選択状態
     await expect(
       canvas.findByText(new RegExp(`${rowCount} / ${sampleTasks.total} 件選択`)),
     ).resolves.toBeInTheDocument();
-    await expect(selectAll).toHaveAttribute('aria-checked', 'true');
-    const rowBoxes = [...canvasElement.querySelectorAll('tbody [role="checkbox"]')];
-    await expect(rowBoxes).toHaveLength(rowCount);
+    await expect(selectAll).toBeChecked();
+    await expect(selectAll).not.toBePartiallyChecked();
     for (const box of rowBoxes) {
-      await expect(box).toHaveAttribute('aria-checked', 'true');
+      await expect(box).toBeChecked();
     }
   },
 };
@@ -1467,7 +1490,9 @@ export const ColumnVisibility: Story = {
     const canvas = within(canvasElement);
     const user = userEvent.setup();
     // 押す前: 優先度のヘッダが出ている
-    await expect(canvas.findByRole('button', { name: '優先度' })).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByRole('columnheader', { name: '優先度' }),
+    ).resolves.toBeInTheDocument();
 
     // 列のドロップダウンを開く
     await user.click(await canvas.findByRole('button', { name: '列' }));
@@ -1484,9 +1509,11 @@ export const ColumnVisibility: Story = {
     // 押した先: その列のヘッダが現に消える（getVisibleCells の帰結）。
     // 他の列（タイトル）は残る——過剰に消えていないことの対照
     await waitFor(() =>
-      expect(canvas.queryByRole('button', { name: '優先度' })).not.toBeInTheDocument(),
+      expect(canvas.queryByRole('columnheader', { name: '優先度' })).not.toBeInTheDocument(),
     );
-    await expect(canvas.findByRole('button', { name: /タイトル/ })).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByRole('columnheader', { name: 'タイトル' }),
+    ).resolves.toBeInTheDocument();
     // checkbox なのでメニューは開いたまま。続けて別の列も切り替えられる
     await expect(menu.getByRole('menu', { name: '列' })).toBeVisible();
     await expect(priorityItem).toHaveAttribute('aria-checked', 'false');
@@ -1641,10 +1668,7 @@ export const RowAccessibility: Story = {
     await expect(taskRow).not.toHaveAttribute('role');
     await expect(taskRow).not.toHaveAttribute('tabindex');
     await expect(taskLink).toHaveAttribute('href', '/tenant-123/projects/ENG/tasks/ENG-1');
-    const rowCheckbox = taskRow.querySelector('[role="checkbox"]');
-    if (!(rowCheckbox instanceof HTMLElement)) {
-      throw new Error('row checkbox not found');
-    }
+    const rowCheckbox = within(taskRow).getByRole('checkbox', { name: 'ENG-1 を選択' });
     rowCheckbox.focus();
     rowCheckbox.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
     await expect(rowCheckbox).toHaveFocus();

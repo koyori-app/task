@@ -38,7 +38,7 @@ function onPlainClick(event: MouseEvent) {
       以前はここで `after:absolute after:inset-0` を敷き、当たり判定を行全体へ広げていた。
       `<tr>` は WebKit で絶対配置の包含ブロックにならないため、判定が行を飛び越えて
       テーブル全体へ広がり、「どこをタップしても一番下の行が開く」状態になっていた。
-      行全体の当たり判定は一覧側（TableRow の click）が持つ。
+      一覧の行（DataListRow）はクリック操作を持たないので、開くのはこのリンクだけ。
     -->
     {{ title }}
   </a>
