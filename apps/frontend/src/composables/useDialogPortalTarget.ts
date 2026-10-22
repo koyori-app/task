@@ -1,7 +1,7 @@
 import { getCurrentInstance, onMounted, ref } from 'vue';
 
 /**
- * reka-ui の浮き出し（Select・Popover・Tooltip）を Teleport する先。
+ * reka-ui の浮き出し（Tooltip）を Teleport する先。
  *
  * showModal した `<dialog>` の外は inert になり、top layer の下に描かれる。body へ出すと
  * ダイアログの中から開いた浮き出しが見えず押せないので、置かれた場所が `<dialog>` の中なら

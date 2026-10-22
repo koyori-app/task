@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import ReviewFindingsView from '../ReviewFindingsView.vue';
-import { Select } from '@/components/ui/select';
+import { pickerOption } from '@/components/__tests__/picker';
 import type { components } from '@/generated/api';
 import {
   DEFAULT_REVIEW_FINDINGS_URL_STATE,
@@ -547,10 +547,7 @@ describe('ReviewFindingsView', () => {
     });
     await flushPromises();
 
-    wrapper
-      .findAllComponents(Select)
-      .find((select) => select.find('#filter-severity').exists())!
-      .vm.$emit('update:modelValue', 'high');
+    pickerOption(wrapper.get('#filter-severity').element, 'High').click();
     await flushPromises();
 
     expect(replaceSpy).toHaveBeenCalledOnce();
@@ -728,10 +725,7 @@ describe('ReviewFindingsView', () => {
     });
     const wrapper = mountView();
     await flushPromises();
-    wrapper
-      .findAllComponents(Select)
-      .find((select) => select.find('#filter-pr-state').exists())!
-      .vm.$emit('update:modelValue', 'merged');
+    pickerOption(wrapper.get('#filter-pr-state').element, 'Merged').click();
     await flushPromises();
     expect(prNavButtons().map((b) => b.textContent)).toEqual([expect.stringContaining('#620')]);
   });

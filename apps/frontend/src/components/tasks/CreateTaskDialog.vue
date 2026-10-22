@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, X } from '@lucide/vue';
+import { X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { getActivePinia } from 'pinia';
@@ -11,18 +11,11 @@ import {
   Dropdown,
   Field,
   Input,
+  Picker,
   Spinner,
   type DropdownItem,
 } from '@koyori-app/ui-vue';
 import UserSelector from '@/components/users/UserSelector.vue';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import type { components } from '@/generated/api';
 import { apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
@@ -48,14 +41,11 @@ const ASSIGNEE_ROLE = 'primary';
  */
 const MAX_ESTIMATE_MINUTES = 2_147_483_647;
 
-const priorityOptions = Object.entries(PRIORITY_CONFIG) as [
-  Priority,
-  (typeof PRIORITY_CONFIG)[Priority],
-][];
+const PRIORITY_ITEMS = (Object.keys(PRIORITY_CONFIG) as Priority[]).map((value) => ({
+  value,
+  label: PRIORITY_CONFIG[value].label,
+}));
 
-/** 右列の選択欄。Select のトリガーと見た目を揃える */
-const fieldTriggerClass =
-  'flex h-9 w-full items-center gap-2 rounded-md border bg-background px-3 text-left text-sm shadow-xs outline-none transition-colors hover:bg-accent focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50';
 const fieldLabelClass = 'text-xs font-normal text-muted-foreground';
 
 const props = defineProps<{
@@ -113,6 +103,9 @@ const successMessage = ref<string | null>(null);
 const defaultStatusId = computed(
   () => props.statuses.find((status) => status.is_default)?.id ?? props.statuses[0]?.id ?? '',
 );
+const statusItems = computed(() =>
+  props.statuses.map((status) => ({ value: status.id, label: status.name, color: status.color })),
+);
 
 const selectedLabels = computed(() =>
   (props.labels ?? []).filter((label) => selectedLabelIds.value.includes(label.id)),
@@ -129,7 +122,7 @@ const labelItems = computed<DropdownItem[]>(() =>
     checked: selectedLabelIds.value.includes(label.id),
   })),
 );
-// 候補で自分を選んだ者の次に置く。pinia の無い所（試験）でも組めるよう、在る時だけ引く。
+// 候補で自分を先頭に置く。pinia の無い所（試験）でも組めるよう、在る時だけ引く。
 const authStore = getActivePinia() ? useAuthStore() : null;
 const currentUserId = computed(() => authStore?.user?.id ?? null);
 
@@ -407,102 +400,71 @@ async function submit() {
               <p class="flex h-9 items-center px-3 text-sm">{{ projectKey }}</p>
             </div>
 
-            <div class="space-y-1">
-              <Label for="task-priority" :class="fieldLabelClass">優先度</Label>
-              <Select v-model="priority">
-                <SelectTrigger id="task-priority" class="w-full bg-background">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem
-                    v-for="[value, config] in priorityOptions"
-                    :key="value"
-                    :value="value"
-                  >
-                    <component
-                      :is="config.icon"
-                      class="size-4"
-                      :style="{ color: config.color }"
-                      aria-hidden="true"
-                    />
-                    {{ config.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+            <Field id="task-priority" label="優先度">
+              <Picker
+                label="優先度"
+                :searchable="false"
+                :items="PRIORITY_ITEMS"
+                :selected-values="[priority]"
+                :on-selection-change="(values: string[]) => (priority = values[0] as Priority)"
+              />
               <input type="hidden" name="priority" :value="priority" />
-            </div>
+            </Field>
 
-            <div class="space-y-1">
-              <Label for="task-status" :class="fieldLabelClass">
-                ステータス <span class="text-destructive">*</span>
-              </Label>
-              <Select v-model="statusId">
-                <SelectTrigger id="task-status" class="w-full bg-background">
-                  <SelectValue placeholder="選択してください" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="status in statuses" :key="status.id" :value="status.id">
-                    <span
-                      class="inline-block size-2 shrink-0 rounded-full"
-                      :style="{ backgroundColor: status.color }"
-                      aria-hidden="true"
-                    />
-                    {{ status.name }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+            <Field id="task-status" label="ステータス" required>
+              <Picker
+                label="ステータス"
+                :searchable="false"
+                :items="statusItems"
+                :selected-values="statusId ? [statusId] : []"
+                :on-selection-change="(values: string[]) => (statusId = values[0] ?? '')"
+              />
               <input type="hidden" name="status_id" :value="statusId" />
-            </div>
+            </Field>
 
             <div
               v-if="membersLoading || membersError || members?.length"
-              class="space-y-1"
               role="group"
               aria-labelledby="task-assignees-label"
             >
-              <p id="task-assignees-label" :class="fieldLabelClass">担当者</p>
-              <p v-if="membersLoading" class="flex h-9 items-center text-xs text-muted-foreground">
-                メンバーを読み込み中...
-              </p>
-              <div v-else-if="membersError" class="flex items-center gap-2">
-                <p role="alert" class="text-xs text-destructive">メンバーの取得に失敗しました</p>
-                <Button
-                  type="button"
-                  variant="tertiary"
-                  label="再試行"
-                  @click="emit('retryMembers')"
-                />
-              </div>
-              <UserSelector
-                v-else
-                v-model="selectedAssigneeIds"
-                :users="members ?? []"
-                :current-user-id="currentUserId"
-                search-label="メンバーを検索"
-                empty-text="担当者に指定できる利用者がいません"
-                no-match-text="一致するメンバーがいません"
-              >
-                <template #trigger>
-                  <button
+              <!-- 見出しは Field が task-assignees-label の id で描く -->
+              <Field id="task-assignees" label="担当者">
+                <p
+                  v-if="membersLoading"
+                  class="flex h-9 items-center text-xs text-muted-foreground"
+                >
+                  メンバーを読み込み中...
+                </p>
+                <div v-else-if="membersError" class="flex items-center gap-2">
+                  <p role="alert" class="text-xs text-destructive">メンバーの取得に失敗しました</p>
+                  <Button
                     type="button"
-                    :class="fieldTriggerClass"
-                    aria-labelledby="task-assignees-label task-assignees-value"
-                  >
-                    <span
-                      id="task-assignees-value"
-                      class="min-w-0 flex-1 truncate"
-                      :class="selectedAssignees.length ? '' : 'text-muted-foreground'"
-                    >
+                    variant="tertiary"
+                    label="再試行"
+                    @click="emit('retryMembers')"
+                  />
+                </div>
+                <UserSelector
+                  v-else
+                  v-model="selectedAssigneeIds"
+                  label="担当者"
+                  :users="members ?? []"
+                  :current-user-id="currentUserId"
+                  search-label="メンバーを検索"
+                  empty-text="担当者に指定できる利用者がいません"
+                  no-match-text="一致するメンバーがいません"
+                >
+                  <template #trigger>
+                    <span :class="selectedAssignees.length ? '' : 'text-muted-foreground'">
                       {{
                         selectedAssignees.length
                           ? selectedAssignees.map((user) => user.username).join('、')
                           : '未割り当て'
                       }}
                     </span>
-                    <ChevronDown class="size-4 shrink-0 opacity-50" aria-hidden="true" />
-                  </button>
-                </template>
-              </UserSelector>
+                  </template>
+                </UserSelector>
+              </Field>
             </div>
 
             <div

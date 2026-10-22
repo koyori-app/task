@@ -4,15 +4,7 @@ import { type } from 'arktype';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { computed, ref, useId } from 'vue';
-import { Button, Dialog, Field, Input, Textarea } from '@koyori-app/ui-vue';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Button, Dialog, Field, Input, Picker, Textarea } from '@koyori-app/ui-vue';
 import {
   CUSTOM_FIELD_TYPES,
   customFieldTypeMeta,
@@ -289,22 +281,17 @@ async function confirmDelete() {
         <!-- 型は作成時のみ選択可（PATCH で変更できないため編集時は非表示） -->
         <form.Field v-if="!editingField" name="fieldType">
           <template #default="{ field }">
-            <div class="flex flex-col gap-2">
-              <Label for="custom-field-type">型</Label>
-              <Select
-                :model-value="field.state.value"
-                @update:model-value="(v) => field.handleChange(v as CustomFieldType)"
-              >
-                <SelectTrigger id="custom-field-type" class="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="t in CUSTOM_FIELD_TYPES" :key="t.value" :value="t.value">
-                    {{ t.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <Field id="custom-field-type" label="型">
+              <Picker
+                label="型"
+                :searchable="false"
+                :items="CUSTOM_FIELD_TYPES"
+                :selected-values="[field.state.value]"
+                :on-selection-change="
+                  (values: string[]) => field.handleChange(values[0] as CustomFieldType)
+                "
+              />
+            </Field>
           </template>
         </form.Field>
 

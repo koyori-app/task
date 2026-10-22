@@ -361,11 +361,10 @@ async function commitAdding(statusId: string) {
         :class="collapsed[group.status.id] ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'"
       >
         <!--
-          開閉と横スクロールの枠が、行の Dropdown の一覧を切り取る。印の下の Dropdown は
-          一覧をトップレイヤーに出す（koyori の DataList と同じ仕組み）。
-          shortcut: koyori の内部の印に頼っている。Dropdown が枠外へ出す指定を公開したら差し替える
+          開閉と横スクロールの枠が、行の Dropdown / 担当者の一覧を切り取る。
+          中の Dropdown と担当者の選択は top-layer で一覧をトップレイヤーに出す。
         -->
-        <div class="overflow-hidden" data-menu-top-layer>
+        <div class="overflow-hidden">
           <div class="overflow-x-auto" :inert="collapsed[group.status.id] || undefined">
             <div :class="[TASK_ROW_GRID, 'border-b text-xs text-muted-foreground']">
               <TaskListSortHeader
@@ -513,6 +512,7 @@ async function commitAdding(statusId: string) {
                 />
                 <!-- 作成時にその場で決める（後から行で直せるが、入れ直す手間を省く） -->
                 <TaskAssigneePicker
+                  top-layer
                   :members="members"
                   :selected="draftAssignees"
                   :members-state="membersState"
@@ -546,6 +546,7 @@ async function commitAdding(statusId: string) {
                 </Button>
                 <Dropdown
                   variant="ghost"
+                  top-layer
                   :class="draftPriority ? '[&>button]:text-(--priority-color)' : ''"
                   :style="
                     draftPriority
@@ -562,6 +563,7 @@ async function commitAdding(statusId: string) {
                 </Dropdown>
                 <Dropdown
                   variant="ghost"
+                  top-layer
                   :class="
                     draftLabels.length
                       ? '[&>button]:text-(--koyori-color-text)'

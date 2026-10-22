@@ -665,6 +665,10 @@ function createProjectSwitchMockFetch(): ProjectSwitchMock {
     if (url.includes('/tasks')) {
       return jsonResponse(sampleTasks);
     }
+    // 担当者候補は利用者の配列。プロジェクト系の受け口に落とすと、名の無い候補になる
+    if (url.includes('/assignable-users')) {
+      return jsonResponse(sampleMembers.map((member) => member.user));
+    }
     // 残ったプロジェクト系だけを最後に受ける
     if (url.includes('/v1/tenants/') && url.includes('/projects')) {
       return jsonResponse(sampleProjects);
@@ -716,6 +720,10 @@ function createLabelFilterMockFetch(): LabelFilterMock {
     }
     if (url.includes('/tasks')) {
       return jsonResponse(sampleTasks);
+    }
+    // 担当者候補は利用者の配列。プロジェクト系の受け口に落とすと、名の無い候補になる
+    if (url.includes('/assignable-users')) {
+      return jsonResponse(sampleMembers.map((member) => member.user));
     }
     // 残ったプロジェクト系だけを最後に受ける
     if (url.includes('/v1/tenants/') && url.includes('/projects')) {

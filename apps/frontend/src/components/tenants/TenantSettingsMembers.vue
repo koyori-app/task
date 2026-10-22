@@ -4,8 +4,7 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { PhArrowClockwise, PhEnvelopeSimple, PhPaperPlaneTilt, PhX } from '@phosphor-icons/vue';
 import { computed, ref, useId } from 'vue';
 
-import { Button, Dialog, Field } from '@koyori-app/ui-vue';
-import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
+import { Button, Dialog, Field, Picker } from '@koyori-app/ui-vue';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
 import { userProfileHref } from '@/lib/task-display';
 import { MEMBER_AVATAR_COLORS } from '@/lib/user-avatar';
@@ -389,16 +388,15 @@ async function onRemove(member: TenantMemberResponse) {
               class="h-9 w-full rounded-md border bg-background pl-8 pr-3 text-sm shadow-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
             />
           </div>
-          <Select v-model="inviteRole" :disabled="inviting">
-            <SelectTrigger aria-label="招待するロール" class="h-9 w-[130px]">
-              <span class="truncate">{{ inviteRole }}</span>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="role in ROLES" :key="role.value" :value="role.value">
-                {{ role.label }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+          <Picker
+            label="招待するロール"
+            class="w-[130px]"
+            :searchable="false"
+            :disabled="inviting"
+            :items="ROLES"
+            :selected-values="[inviteRole]"
+            :on-selection-change="(values: string[]) => (inviteRole = values[0] as TenantRole)"
+          />
           <Button
             type="submit"
             :disabled="inviting || !inviteEmailValid"
@@ -561,31 +559,17 @@ async function onRemove(member: TenantMemberResponse) {
                   label="所属を編集"
                   @click="openOrgEditor(member)"
                 />
-                <Select
-                  :model-value="member.role"
+                <Picker
+                  :label="`${member.user.username}のロール`"
+                  class="w-[110px] shrink-0"
+                  :searchable="false"
                   :disabled="!canManageMembers || busy"
-                  @update:model-value="onRoleChange(member, $event as TenantRole)"
-                >
-                  <SelectTrigger
-                    :aria-label="`${member.user.username}のロール`"
-                    class="h-8 w-[110px] shrink-0"
-                  >
-                    <!--
-                      `SelectValue` は選んだ項目の中身をそのまま写すため、説明まで
-                      引き金に出てしまう（「Adminメン…」のような潰れた表示になる）。
-                      引き金にはロール名だけを置く。
-                    -->
-                    <span class="truncate text-[13px]">{{ member.role }}</span>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem v-for="role in ROLES" :key="role.value" :value="role.value">
-                      <span class="block text-sm font-medium">{{ role.label }}</span>
-                      <span class="block text-xs text-muted-foreground">
-                        {{ role.description }}
-                      </span>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                  :items="ROLES"
+                  :selected-values="[member.role]"
+                  :on-selection-change="
+                    (values: string[]) => onRoleChange(member, values[0] as TenantRole)
+                  "
+                />
                 <Button
                   variant="ghost"
                   :disabled="!canRemove(member) || busy"

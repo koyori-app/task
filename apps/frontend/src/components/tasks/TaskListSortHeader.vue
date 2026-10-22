@@ -80,6 +80,7 @@ function reverseDirection() {
     <!-- 並びが有効なときは右の矢印が向きを示すので、▾ は出さない -->
     <Dropdown
       class="min-w-0 flex-1"
+      top-layer
       :label="triggerLabel"
       :disabled="disabled"
       :icon="direction ? null : undefined"
