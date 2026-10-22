@@ -5,7 +5,6 @@ import AppSidebarSkeleton from '@/components/sidebar/AppSidebarSkeleton.vue';
 import AppBreadcrumbs from '@/components/AppBreadcrumbs.vue';
 import { useBreadcrumbs } from '@/composables/useBreadcrumbs';
 import { Separator } from '@/components/ui/separator';
-import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button, Drawer } from '@koyori-app/ui-vue';
 import { PhSidebarSimple } from '@phosphor-icons/vue';
 import { defaultDocument, useEventListener, useMediaQuery } from '@vueuse/core';
@@ -91,47 +90,44 @@ const AppHeader = defineAsyncComponent(() => import('@/components/header/AppHead
   <!--
     テナントとアカウントは全幅のヘッダーに置く（サイドバーの上下ではなく）。
     1 段目をヘッダー、2 段目をサイドバー + 本文にし、スクロールは本文だけにする。
-    TooltipProvider はカレンダーなどの Tooltip が使う。
   -->
-  <TooltipProvider v-else-if="meQuery.isSuccess.value">
-    <div class="flex h-svh flex-col overflow-hidden">
-      <AppHeader />
-      <div class="flex min-h-0 flex-1">
-        <Drawer
-          label="ナビゲーション"
-          placement="left"
-          :modal="isMobile"
-          :open="drawerOpen"
-          @close="drawerOpen = false"
-        >
-          <Suspense>
-            <AppSidebar :rail="sidebarRail" @update:rail="setRail" @close="drawerOpen = false" />
-            <template #fallback>
-              <AppSidebarSkeleton :rail="sidebarRail" />
-            </template>
-          </Suspense>
-        </Drawer>
-        <main class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-          <header class="flex h-16 shrink-0 items-center gap-2">
-            <div class="flex w-full min-w-0 items-center gap-2 px-4">
-              <Button
-                variant="ghost"
-                ariaLabel="サイドバーを開閉"
-                :ariaExpanded="isMobile ? drawerOpen : !rail"
-                ariaControls="app-sidebar"
-                @click="toggleSidebar"
-              >
-                <template #icon><PhSidebarSimple /></template>
-              </Button>
-              <Separator orientation="vertical" class="mr-2 data-[orientation=vertical]:h-4" />
-              <AppBreadcrumbs v-bind="breadcrumbs" />
-            </div>
-          </header>
-          <div class="flex flex-1 flex-col gap-4 p-4 pt-0">
-            <slot />
+  <div v-else-if="meQuery.isSuccess.value" class="flex h-svh flex-col overflow-hidden">
+    <AppHeader />
+    <div class="flex min-h-0 flex-1">
+      <Drawer
+        label="ナビゲーション"
+        placement="left"
+        :modal="isMobile"
+        :open="drawerOpen"
+        @close="drawerOpen = false"
+      >
+        <Suspense>
+          <AppSidebar :rail="sidebarRail" @update:rail="setRail" @close="drawerOpen = false" />
+          <template #fallback>
+            <AppSidebarSkeleton :rail="sidebarRail" />
+          </template>
+        </Suspense>
+      </Drawer>
+      <main class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+        <header class="flex h-16 shrink-0 items-center gap-2">
+          <div class="flex w-full min-w-0 items-center gap-2 px-4">
+            <Button
+              variant="ghost"
+              ariaLabel="サイドバーを開閉"
+              :ariaExpanded="isMobile ? drawerOpen : !rail"
+              ariaControls="app-sidebar"
+              @click="toggleSidebar"
+            >
+              <template #icon><PhSidebarSimple /></template>
+            </Button>
+            <Separator orientation="vertical" class="mr-2 data-[orientation=vertical]:h-4" />
+            <AppBreadcrumbs v-bind="breadcrumbs" />
           </div>
-        </main>
-      </div>
+        </header>
+        <div class="flex flex-1 flex-col gap-4 p-4 pt-0">
+          <slot />
+        </div>
+      </main>
     </div>
-  </TooltipProvider>
+  </div>
 </template>

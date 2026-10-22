@@ -2,8 +2,7 @@
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button, Dialog } from '@koyori-app/ui-vue';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Button, Dialog, Skeleton } from '@koyori-app/ui-vue';
 import WebhookFormDialog from '@/components/projects/WebhookFormDialog.vue';
 import {
   webhookErrorMessage,
@@ -201,10 +200,7 @@ async function confirmDelete() {
 
     <p v-if="actionError" role="alert" class="mb-4 text-sm text-destructive">{{ actionError }}</p>
 
-    <div v-if="webhooksQuery.isPending.value" class="flex flex-col gap-2">
-      <Skeleton class="h-16 w-full" />
-      <Skeleton class="h-16 w-full" />
-    </div>
+    <Skeleton v-if="webhooksQuery.isPending.value" :lines="2" height="4rem" />
 
     <p v-else-if="listError" role="alert" class="text-sm text-destructive">{{ listError }}</p>
 
@@ -288,7 +284,7 @@ async function confirmDelete() {
           :id="`webhook-deliveries-${webhook.id}`"
           class="mt-3 rounded-md border bg-muted/30 p-3"
         >
-          <Skeleton v-if="deliveriesQuery.isPending.value" class="h-10 w-full" />
+          <Skeleton v-if="deliveriesQuery.isPending.value" height="2.5rem" />
           <p v-else-if="deliveriesError" role="alert" class="text-sm text-destructive">
             {{ deliveriesError }}
           </p>

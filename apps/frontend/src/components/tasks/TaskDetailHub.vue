@@ -29,11 +29,11 @@ import {
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import type { components } from '@/generated/api';
-import AvatarGroup from '@/components/AvatarGroup.vue';
 import type { EditableField } from '@/components/tasks/editable-field';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
 import TaskPropertyRow from '@/components/tasks/TaskPropertyRow.vue';
 import {
+  AvatarGroup,
   Button,
   Dropdown,
   Input,
@@ -870,8 +870,15 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                   />
                   <AvatarGroup
                     v-else-if="task.assignees.length"
-                    hide-names
-                    :users="task.assignees.map((assignee) => assignee.user)"
+                    label="担当者"
+                    :items="
+                      task.assignees.map(({ user }) => ({
+                        name: user.username,
+                        src: user.avatar_url ?? undefined,
+                      }))
+                    "
+                    :max="3"
+                    :size="28"
                   />
                   <!-- ピッカーのトリガーはボタンなので、リンクは中に入れず横に並べる -->
                   <div

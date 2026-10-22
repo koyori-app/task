@@ -205,7 +205,8 @@ export const Editor: Story = {
 
 /**
  * 札のアバターと、本物の UserAvatar の xs（頭文字・灰色）を並べ、描かれた値が同じことを縛る。
- * 札は CSS の写しなので、UserAvatar の段・頭文字の組・灰色のどれかが替われば、ここが落ちる。
+ * 札は CSS の写しなので、UserAvatar の直径・頭文字の地と字の色・灰色のどれかが替われば、ここが落ちる。
+ * 頭文字の字とその大きさは UserAvatar では koyori の Avatar が決めるので、札とは比べない。
  */
 export const AvatarMatchesUserAvatar: Story = {
   render: () => ({
@@ -234,25 +235,16 @@ export const AvatarMatchesUserAvatar: Story = {
     for (const state of ['active', 'inactive']) {
       const chip = chipAvatar(`chip-${state}`);
       const root = userAvatar(`avatar-${state}`);
-      const fallback = await waitFor(async () => {
-        const el = root.querySelector<HTMLElement>('[data-slot="avatar-fallback"]');
-        await expect(el).not.toBeNull();
-        return el!;
-      });
       const c = getComputedStyle(chip);
       const r = getComputedStyle(root);
-      const f = getComputedStyle(fallback);
-      // 丸の大きさ・頭文字の字の大きさ・地と字の色
+      // 丸の大きさ・地と字の色
       await expect(c.width).toBe(r.width);
       await expect(c.height).toBe(r.height);
-      await expect(getComputedStyle(chip, '::before').fontSize).toBe(f.fontSize);
-      await expect(contrast(c.backgroundColor, f.backgroundColor)).toBe(1);
-      await expect(contrast(c.color, f.color)).toBe(1);
+      await expect(contrast(c.backgroundColor, r.backgroundColor)).toBe(1);
+      await expect(contrast(c.color, r.color)).toBe(1);
       // 灰色（不透明度と grayscale）
       await expect(c.opacity).toBe(r.opacity);
       await expect(c.filter).toBe(r.filter);
-      // 頭文字の字は同じ
-      await expect(chip.dataset.initials).toBe(fallback.textContent?.trim());
     }
     await expect(getComputedStyle(chipAvatar('chip-inactive')).filter).toContain('grayscale');
   },
