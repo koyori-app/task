@@ -15,6 +15,7 @@ import {
   createFilteredRowModel,
   createSortedRowModel,
   filterFns,
+  functionalUpdate,
   rowPaginationFeature,
   rowSelectionFeature,
   rowSortingFeature,
@@ -22,34 +23,29 @@ import {
   tableFeatures,
   useTable,
 } from '@tanstack/vue-table';
-import { PhCaretDown, PhCaretUp, PhCaretUpDown, PhRows, PhTable } from '@phosphor-icons/vue';
+import { PhRows, PhTable } from '@phosphor-icons/vue';
 import { computed, h, onUnmounted, ref, watch, type Component } from 'vue';
-import type { Column } from '@tanstack/vue-table';
 import { useQuery, keepPreviousData } from '@tanstack/vue-query';
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { useMediaQuery } from '@vueuse/core';
 
-import { valueUpdater } from '@/components/ui/table/utils';
 import {
   AvatarGroup,
   Button,
+  Checkbox,
+  DataList,
+  DataListRow,
   Dropdown,
   Input,
+  Pagination,
   Spinner,
+  type DataListColumn,
+  type DataListProps,
   type DropdownItem,
 } from '@koyori-app/ui-vue';
-import { Checkbox } from '@/components/ui/checkbox';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import TaskDetailPane, { type TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
 import TaskTitleLink from '@/components/tasks/TaskTitleLink.vue';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
@@ -64,7 +60,6 @@ import {
   watchAvailableTaskLabels,
 } from './task-list-label-filter';
 import { popOverlayParent, pushOverlayParent } from '@/components/tasks/overlay-parent-stack';
-import { shouldActivateRow, shouldOpenRowInNewTab } from './task-list-row-activate';
 import {
   parseTaskListUrlState,
   useTaskListUrlSync,
@@ -176,34 +171,6 @@ function onSelectRow(seqId: number) {
   }
   overlayParentStack.value = [];
   selectedTaskId.value = taskSeqKey(projectKey.value, seqId);
-}
-
-/** 行のどこを押しても詳細へ入れるようにする（判定は task-list-row-activate に切り出し）。 */
-function onRowActivate(event: MouseEvent, seqId: number) {
-  // 修飾キー付きは別タブ。分割ビューでも「別タブで開く」を優先する
-  if (openRowInNewTab(event, seqId)) return;
-  if (!shouldActivateRow(event)) return;
-  // 右ペインに出すか詳細ページへ送るかは onSelectRow に任せる。ここで同じ分岐を
-  // 書くと、タイトルの `a` を押した経路と行を押した経路で判定が二重になる
-  onSelectRow(seqId);
-}
-
-/** 中クリックは click ではなく auxclick で来る。 */
-function onRowAuxClick(event: MouseEvent, seqId: number) {
-  openRowInNewTab(event, seqId);
-}
-
-/**
- * 行を別タブで開けたら true。
- *
- * 行全体を覆う実リンクを外した代わりに、行側で新しいタブの操作を引き受ける。
- * `noopener` を付けて開いた先から元のページを触れないようにする。
- */
-function openRowInNewTab(event: MouseEvent, seqId: number): boolean {
-  if (!shouldOpenRowInNewTab(event)) return false;
-  event.preventDefault();
-  window.open(taskDetailHref(tenantDisplayId.value, projectKey.value, seqId), '_blank', 'noopener');
-  return true;
 }
 
 function closeDetail() {
@@ -346,7 +313,7 @@ const tasksQuery = useQuery({
 });
 
 // 取得済みの総件数。未取得は null にして「0 件だった」と区別する
-// （同じ 0 だと範囲外ページの丸めが走らない経路ができる）
+// （同じ 0 だと範囲外ページの丸めが走らない経路ができる。一覧の件数とページャも未取得なら出さない）
 const fetchedTaskTotal = computed(() => tasksQuery.data.value?.total ?? null);
 /** 表示用。未取得は 0 件として出す */
 const taskTotal = computed(() => fetchedTaskTotal.value ?? 0);
@@ -562,25 +529,14 @@ const taskRows = computed<TaskRow[]>(() => {
   });
 });
 
-/** 初回ローディング表示。isLoading を使い、初回のみスピナー表示とする。
- *  背景refetch中は古いデータを表示し続ける（isFetching だとrefetch毎にテーブルが
- *  スピナーに置き換わりちらつくため）。refetch中の表示を強化したい場合は別途
- *  インジケーターを追加すること。 */
+/** 初回ローディング表示。Table 用一覧の取得中・失敗はここで画面を止めず、
+ *  一覧（DataList）の status で出す（taskListStatus）。 */
 const isInitialLoading = computed(
-  () =>
-    isTenantResolving.value ||
-    isProjectResolving.value ||
-    statusesQuery.isLoading.value ||
-    // Table 用一覧を使わない表示（List・検索）では、この query で画面を止めない
-    (usesTaskList.value && tasksQuery.isLoading.value),
+  () => isTenantResolving.value || isProjectResolving.value || statusesQuery.isLoading.value,
 );
 
 const isError = computed(
-  () =>
-    isTenantResolveError.value ||
-    isProjectResolveError.value ||
-    statusesQuery.isError.value ||
-    (usesTaskList.value && tasksQuery.isError.value),
+  () => isTenantResolveError.value || isProjectResolveError.value || statusesQuery.isError.value,
 );
 
 /** 一覧本体（作成ボタンと作成ダイアログを含む分岐）が出ているか。T のショートカットとも共有する */
@@ -625,27 +581,6 @@ const features = tableFeatures({
 });
 type TaskTableFeatures = typeof features;
 
-/** ソート可能な列ヘッダー: 矢印アイコン付きボタンを返す */
-function sortableHeader(column: Column<TaskTableFeatures, TaskRow>, label: string) {
-  const sorted = column.getIsSorted();
-  const icon =
-    sorted === 'asc'
-      ? h(PhCaretUp, { class: 'size-4' })
-      : sorted === 'desc'
-        ? h(PhCaretDown, { class: 'size-4' })
-        : h(PhCaretUpDown, { class: 'size-4 opacity-40' });
-  return h(
-    Button,
-    {
-      variant: 'ghost',
-      label,
-      class: '-ml-3',
-      onClick: () => column.toggleSorting(sorted === 'asc'),
-    },
-    { icon: () => icon },
-  );
-}
-
 const PRIORITY_CONFIG: Record<ApiPriority, { label: string; color: string; icon: LucideIcon }> = {
   CriticalFire: { label: '緊急', color: '#dc2626', icon: Signal },
   Critical: { label: '重大', color: '#ef4444', icon: Signal },
@@ -676,19 +611,14 @@ function onTaskCreated(task: CreatedTask) {
 const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
   {
     id: 'select',
-    header: ({ table }) =>
-      h(Checkbox, {
-        modelValue:
-          table.getIsAllPageRowsSelected() ||
-          (table.getIsSomePageRowsSelected() && 'indeterminate'),
-        'onUpdate:modelValue': (value) => table.toggleAllPageRowsSelected(!!value),
-        ariaLabel: 'Select all',
-      }),
+    // 見出しはラベルだけ。DataList の見出しに部品を置けないので、すべて選択は一覧の下に置く
+    header: '選択',
     cell: ({ row }) =>
       h(Checkbox, {
-        modelValue: row.getIsSelected(),
-        'onUpdate:modelValue': (value) => row.toggleSelected(!!value),
-        ariaLabel: 'Select row',
+        label: `${taskKey(row.original)} を選択`,
+        hideLabel: true,
+        checked: row.getIsSelected(),
+        onCheckedChange: (checked: boolean) => row.toggleSelected(checked),
       }),
     enableSorting: false,
     enableHiding: false,
@@ -696,7 +626,7 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
   {
     id: 'key',
     accessorFn: (row) => taskKey(row),
-    header: ({ column }) => sortableHeader(column, 'ID'),
+    header: 'ID',
     cell: ({ row }) =>
       h(
         'span',
@@ -706,7 +636,7 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
   },
   {
     accessorKey: 'title',
-    header: ({ column }) => sortableHeader(column, 'タイトル'),
+    header: 'タイトル',
     cell: ({ row }) => {
       const task = row.original;
       const pc = PRIORITY_CONFIG[task.priority];
@@ -725,7 +655,7 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
   {
     id: 'status',
     accessorFn: (row) => row.status.name,
-    header: ({ column }) => sortableHeader(column, 'ステータス'),
+    header: 'ステータス',
     cell: ({ row }) => {
       const s = row.original.status;
       return h(
@@ -747,7 +677,7 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
     id: 'priority',
     accessorFn: (row) => row.priority,
     sortFn: (a, b) => PRIORITY_ORDER[a.original.priority] - PRIORITY_ORDER[b.original.priority],
-    header: ({ column }) => sortableHeader(column, '優先度'),
+    header: '優先度',
     cell: ({ row }) => {
       const pc = PRIORITY_CONFIG[row.original.priority];
       return h(
@@ -763,7 +693,7 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
   {
     id: 'labels',
     enableSorting: false,
-    header: () => 'ラベル',
+    header: 'ラベル',
     cell: ({ row }) => {
       const labels = row.original.labels;
       if (labels.length === 0) {
@@ -794,7 +724,7 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
   {
     id: 'assignee',
     accessorFn: (row) => row.assignees[0]?.username ?? '',
-    header: ({ column }) => sortableHeader(column, '担当者'),
+    header: '担当者',
     cell: ({ row }) => {
       const users = row.original.assignees;
       if (users.length === 0) {
@@ -821,7 +751,7 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
   {
     id: 'due_date',
     accessorFn: (row) => row.due_date ?? '',
-    header: ({ column }) => sortableHeader(column, '期限'),
+    header: '期限',
     cell: ({ row }) => {
       const formatted = formatDeadline(row.original.due_date);
       if (!formatted) return h('span', { class: 'text-muted-foreground text-xs' }, '−');
@@ -875,11 +805,12 @@ const table = useTable({
   get rowCount() {
     return taskTotal.value;
   },
-  onSortingChange: (u) => valueUpdater(u, sorting),
-  onColumnFiltersChange: (u) => valueUpdater(u, columnFilters),
-  onColumnVisibilityChange: (u) => valueUpdater(u, columnVisibility),
-  onRowSelectionChange: (u) => valueUpdater(u, rowSelection),
-  onPaginationChange: (u) => valueUpdater(u, pagination),
+  onSortingChange: (u) => (sorting.value = functionalUpdate(u, sorting.value)),
+  onColumnFiltersChange: (u) => (columnFilters.value = functionalUpdate(u, columnFilters.value)),
+  onColumnVisibilityChange: (u) =>
+    (columnVisibility.value = functionalUpdate(u, columnVisibility.value)),
+  onRowSelectionChange: (u) => (rowSelection.value = functionalUpdate(u, rowSelection.value)),
+  onPaginationChange: (u) => (pagination.value = functionalUpdate(u, pagination.value)),
   state: {
     get sorting() {
       return sorting.value;
@@ -898,6 +829,61 @@ const table = useTable({
     },
   },
 });
+
+// ---- Table 表示の描画（DataList）----
+// 状態の持ち主は TanStack Table のまま。DataList は並べ替えもページングもしない。
+
+/** table-layout: fixed なので、幅を決めない列（タイトル）が残りを使う */
+const TASK_COLUMN_WIDTHS: Record<string, string> = {
+  select: '3.5rem',
+  key: '6rem',
+  status: '8rem',
+  priority: '6rem',
+  labels: '10rem',
+  assignee: '12rem',
+  due_date: '7rem',
+};
+
+const taskListColumns = computed<DataListColumn[]>(() =>
+  table.getVisibleLeafColumns().map((column) => ({
+    id: column.id,
+    label: String(column.columnDef.header ?? column.id),
+    sortable: column.getCanSort(),
+    width: TASK_COLUMN_WIDTHS[column.id],
+  })),
+);
+
+const taskListSort = computed<DataListProps['sort']>(() => {
+  const current = sorting.value[0];
+  return current
+    ? { columnId: current.id, direction: current.desc ? 'descending' : 'ascending' }
+    : null;
+});
+
+function onTaskListSortChange(next: DataListProps['sort']) {
+  sorting.value = next ? [{ id: next.columnId, desc: next.direction === 'descending' }] : [];
+}
+
+/** 初回・ページ送り・再試行の取得中は loading。データがある裏の再取得では一覧を出し続ける */
+const taskListStatus = computed<DataListProps['status']>(() => {
+  const { isFetching, isError, isPlaceholderData, data } = tasksQuery;
+  if (isFetching.value && (!data.value || isPlaceholderData.value || isError.value)) {
+    return 'loading';
+  }
+  if (isError.value) return 'error';
+  return table.getRowModel().rows.length ? 'ready' : 'empty';
+});
+
+/** v9 の getIsSomePageRowsSelected は全選択でも true なので、全選択を除く */
+const isSomePageRowsSelected = computed(
+  () => table.getIsSomePageRowsSelected() && !table.getIsAllPageRowsSelected(),
+);
+
+const SEARCH_COLUMNS: DataListColumn[] = [
+  { id: 'key', label: 'ID', width: '6rem' },
+  { id: 'title', label: 'タイトル' },
+  { id: 'highlight', label: '一致箇所' },
+];
 
 /** ラベルでの絞り込み。「すべて」は value を空にして選択なしに戻す */
 const labelFilterItems = computed<DropdownItem[]>(() => [
@@ -1102,54 +1088,37 @@ const columnItems = computed<DropdownItem[]>(() =>
               <Button variant="tertiary" label="再試行" @click="taskSearchQuery.refetch()" />
             </div>
             <template v-else-if="isSearchActive">
-              <div class="rounded-md border overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead class="h-9 px-3 text-xs">ID</TableHead>
-                      <TableHead class="h-9 px-3 text-xs">タイトル</TableHead>
-                      <TableHead class="h-9 px-3 text-xs">一致箇所</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    <TableRow
-                      v-for="task in taskSearchQuery.data.value?.tasks ?? []"
-                      :key="task.id"
-                      class="h-10 cursor-pointer"
-                      :class="isRowActive(task.seq_id) && 'bg-muted'"
-                      @click="onRowActivate($event, task.seq_id)"
-                      @auxclick="onRowAuxClick($event, task.seq_id)"
-                    >
-                      <TableCell class="px-3 py-1.5 font-mono text-xs text-muted-foreground">
-                        {{ projectKey }}-{{ task.seq_id }}
-                      </TableCell>
-                      <TableCell class="px-3 py-1.5">
-                        <TaskTitleLink
-                          :tenant-display-id="tenantDisplayId"
-                          :project-key="projectKey"
-                          :seq-id="task.seq_id"
-                          :title="task.title"
-                          @select="onSelectRow"
-                        />
-                      </TableCell>
-                      <!-- highlight は backend の ilike/tsvector/no-match 全経路で動的文字列を
+              <DataList
+                id="task-search-results"
+                label="検索結果"
+                :heading-level="2"
+                :columns="SEARCH_COLUMNS"
+                :count="taskSearchQuery.data.value?.total ?? 0"
+                :status="taskSearchQuery.data.value?.tasks.length ? 'ready' : 'empty'"
+                message="検索結果がありません"
+              >
+                <DataListRow
+                  v-for="task in taskSearchQuery.data.value?.tasks ?? []"
+                  :key="task.id"
+                  :class="isRowActive(task.seq_id) && 'bg-muted'"
+                >
+                  <td class="font-mono text-xs text-muted-foreground">
+                    {{ projectKey }}-{{ task.seq_id }}
+                  </td>
+                  <td>
+                    <TaskTitleLink
+                      :tenant-display-id="tenantDisplayId"
+                      :project-key="projectKey"
+                      :seq-id="task.seq_id"
+                      :title="task.title"
+                      @select="onSelectRow"
+                    />
+                  </td>
+                  <!-- highlight は backend の ilike/tsvector/no-match 全経路で動的文字列を
                      html_escape 済み。唯一 backend が付与する <em> のみ HTML として描画する。 -->
-                      <TableCell
-                        class="max-w-md truncate px-3 py-1.5 text-xs text-muted-foreground"
-                        v-html="task.highlight"
-                      />
-                    </TableRow>
-                    <TableRow v-if="!taskSearchQuery.data.value?.tasks.length">
-                      <TableCell
-                        :colspan="3"
-                        class="h-24 text-center text-sm text-muted-foreground"
-                      >
-                        検索結果がありません
-                      </TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </div>
+                  <td class="truncate text-xs text-muted-foreground" v-html="task.highlight" />
+                </DataListRow>
+              </DataList>
               <div class="text-xs text-muted-foreground">
                 上位 {{ taskSearchQuery.data.value?.tasks.length ?? 0 }} 件 / 全
                 {{ taskSearchQuery.data.value?.total ?? 0 }} 件
@@ -1190,91 +1159,60 @@ const columnItems = computed<DropdownItem[]>(() =>
               :on-move-status="(task, statusId) => rowMutations.setStatus(task, statusId)"
             />
 
-            <!-- 通常一覧テーブル -->
-            <div v-else class="rounded-md border overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow v-for="hg in table.getHeaderGroups()" :key="hg.id">
-                    <TableHead
-                      v-for="header in hg.headers"
-                      :key="header.id"
-                      class="h-9 text-xs px-3"
-                    >
-                      <FlexRender
-                        v-if="!header.isPlaceholder"
-                        :render="header.column.columnDef.header"
-                        :props="header.getContext()"
-                      />
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <template v-if="table.getRowModel().rows?.length">
-                    <TableRow
-                      v-for="row in table.getRowModel().rows"
-                      :key="row.id"
-                      :data-state="row.getIsSelected() && 'selected'"
-                      class="h-10 cursor-pointer"
-                      :class="isRowActive(row.original.seq_id) && 'bg-muted'"
-                      @click="onRowActivate($event, row.original.seq_id)"
-                      @auxclick="onRowAuxClick($event, row.original.seq_id)"
-                    >
-                      <TableCell
-                        v-for="cell in row.getVisibleCells()"
-                        :key="cell.id"
-                        class="py-1.5 px-3"
-                      >
-                        <FlexRender
-                          :render="cell.column.columnDef.cell"
-                          :props="cell.getContext()"
-                        />
-                      </TableCell>
-                    </TableRow>
-                  </template>
-                  <TableRow v-else>
-                    <TableCell
-                      :colspan="columns.length"
-                      class="h-24 text-center text-sm text-muted-foreground"
-                    >
-                      タスクが見つかりません
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </div>
+            <!-- 通常一覧テーブル。行はクリック操作を持たず、開くのはタイトルのリンク -->
+            <DataList
+              v-else
+              id="task-table"
+              label="タスク一覧"
+              class="[--koyori-data-list-min-width:64rem]"
+              :heading-level="2"
+              :columns="taskListColumns"
+              :count="fetchedTaskTotal ?? undefined"
+              :status="taskListStatus"
+              :message="taskListStatus === 'empty' ? 'タスクが見つかりません' : undefined"
+              :on-retry="() => void tasksQuery.refetch()"
+              :sort="taskListSort"
+              :on-sort-change="onTaskListSortChange"
+            >
+              <DataListRow
+                v-for="row in table.getRowModel().rows"
+                :key="row.id"
+                :selected="row.getIsSelected()"
+                :class="isRowActive(row.original.seq_id) && 'bg-muted'"
+              >
+                <td v-for="cell in row.getVisibleCells()" :key="cell.id">
+                  <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
+                </td>
+              </DataListRow>
+            </DataList>
           </div>
 
           <!-- ページネーション（API total 連動のサーバーサイド）。
                List 表示はステータスごとに「もっと見る」で伸ばすのでページャは出さない -->
           <div
             v-if="!isSearchActive && !isListView"
-            class="flex items-center justify-between text-xs text-muted-foreground"
+            class="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"
           >
-            <span>
-              {{ table.getFilteredSelectedRowModel().rows.length }} / {{ taskTotal }} 件選択
-            </span>
             <div class="flex items-center gap-2">
+              <Checkbox
+                label="すべて選択"
+                hide-label
+                :checked="table.getIsAllPageRowsSelected()"
+                :indeterminate="isSomePageRowsSelected"
+                :on-checked-change="(checked: boolean) => table.toggleAllPageRowsSelected(checked)"
+              />
               <span>
-                {{ taskTotal === 0 ? 0 : pagination.pageIndex * pagination.pageSize + 1 }}–{{
-                  Math.min((pagination.pageIndex + 1) * pagination.pageSize, taskTotal)
-                }}
-                / {{ taskTotal }} 件
+                {{ table.getFilteredSelectedRowModel().rows.length }} / {{ taskTotal }} 件選択
               </span>
-              <div class="flex gap-1.5">
-                <Button
-                  variant="tertiary"
-                  :disabled="!table.getCanPreviousPage()"
-                  label="前へ"
-                  @click="table.previousPage()"
-                />
-                <Button
-                  variant="tertiary"
-                  :disabled="!table.getCanNextPage()"
-                  label="次へ"
-                  @click="table.nextPage()"
-                />
-              </div>
             </div>
+            <Pagination
+              label="タスクのページ"
+              :page="pagination.pageIndex + 1"
+              :page-size="pagination.pageSize"
+              :total="fetchedTaskTotal ?? undefined"
+              :loading="taskListStatus === 'loading'"
+              :on-page-change="(page: number) => table.setPageIndex(page - 1)"
+            />
           </div>
         </div>
       </ResizablePanel>
