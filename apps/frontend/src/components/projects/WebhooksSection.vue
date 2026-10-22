@@ -2,7 +2,7 @@
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -202,9 +202,8 @@ async function confirmDelete() {
           タスク・コメント・レビューのイベントを外部の URL へ送ります
         </p>
       </div>
-      <Button type="button" variant="outline" class="shrink-0" @click="openCreate">
-        <PhPlus class="size-4" />
-        追加
+      <Button type="button" variant="tertiary" class="shrink-0" label="追加" @click="openCreate">
+        <template #icon><PhPlus class="size-4" /></template>
       </Button>
     </div>
 
@@ -268,38 +267,35 @@ async function confirmDelete() {
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              :aria-expanded="expandedId === webhook.id"
+              label="配信履歴"
+              :ariaExpanded="expandedId === webhook.id"
+              :ariaControls="`webhook-deliveries-${webhook.id}`"
               @click="toggleDeliveries(webhook)"
-            >
-              配信履歴
-            </Button>
-            <Button type="button" variant="ghost" size="sm" @click="openEdit(webhook)">
-              編集
-            </Button>
+            />
+            <Button type="button" variant="ghost" label="編集" @click="openEdit(webhook)" />
             <Button
               type="button"
               variant="ghost"
-              size="sm"
               :disabled="updateMutation.isPending.value"
+              :label="webhook.is_active ? '無効にする' : '有効にする'"
               @click="toggleActive(webhook)"
-            >
-              {{ webhook.is_active ? '無効にする' : '有効にする' }}
-            </Button>
+            />
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              class="text-destructive hover:text-destructive"
+              class="text-(--koyori-color-danger)"
+              label="削除"
               @click="openDelete(webhook)"
-            >
-              削除
-            </Button>
+            />
           </div>
         </div>
 
         <!-- 配信履歴 -->
-        <div v-if="expandedId === webhook.id" class="mt-3 rounded-md border bg-muted/30 p-3">
+        <div
+          v-if="expandedId === webhook.id"
+          :id="`webhook-deliveries-${webhook.id}`"
+          class="mt-3 rounded-md border bg-muted/30 p-3"
+        >
           <Skeleton v-if="deliveriesQuery.isPending.value" class="h-10 w-full" />
           <p v-else-if="deliveriesError" role="alert" class="text-sm text-destructive">
             {{ deliveriesError }}
@@ -324,14 +320,12 @@ async function confirmDelete() {
                 >
                 <Button
                   type="button"
-                  variant="outline"
-                  size="sm"
-                  class="ml-auto h-7"
+                  variant="tertiary"
+                  class="ml-auto"
                   :disabled="redeliverMutation.isPending.value"
+                  label="再送"
                   @click="redeliver(webhook.id, delivery)"
-                >
-                  再送
-                </Button>
+                />
               </div>
               <p
                 v-if="!delivery.delivered_at && !delivery.next_attempt_at && delivery.last_error"
@@ -372,20 +366,18 @@ async function confirmDelete() {
         <DialogFooter>
           <Button
             type="button"
-            variant="outline"
+            variant="tertiary"
             :disabled="deleteMutation.isPending.value"
+            label="キャンセル"
             @click="deleteTarget = null"
-          >
-            キャンセル
-          </Button>
+          />
           <Button
             type="button"
-            variant="destructive"
+            variant="danger"
             :disabled="deleteMutation.isPending.value"
+            :label="deleteMutation.isPending.value ? '削除中…' : '削除する'"
             @click="confirmDelete"
-          >
-            {{ deleteMutation.isPending.value ? '削除中…' : '削除する' }}
-          </Button>
+          />
         </DialogFooter>
       </DialogContent>
     </Dialog>

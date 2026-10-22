@@ -5,7 +5,7 @@ import { OpenApiVueQueryError } from '@koyori-app/openapi-vue-query';
 import { type } from 'arktype';
 import { ref } from 'vue';
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -133,20 +133,18 @@ function onOpenChange(open: boolean) {
         <DialogFooter>
           <Button
             type="button"
-            variant="outline"
+            variant="tertiary"
             :disabled="linkMutation.isPending.value"
+            label="キャンセル"
             @click="emit('close')"
-          >
-            キャンセル
-          </Button>
+          />
           <form.Subscribe>
             <template #default="{ canSubmit, isSubmitting }">
               <Button
                 type="submit"
                 :disabled="!canSubmit || isSubmitting || linkMutation.isPending.value"
-              >
-                {{ isSubmitting || linkMutation.isPending.value ? 'リンク中…' : 'リンクする' }}
-              </Button>
+                :label="isSubmitting || linkMutation.isPending.value ? 'リンク中…' : 'リンクする'"
+              />
             </template>
           </form.Subscribe>
         </DialogFooter>

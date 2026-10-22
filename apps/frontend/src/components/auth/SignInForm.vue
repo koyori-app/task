@@ -5,7 +5,7 @@ import { type } from 'arktype';
 import { onMounted, ref } from 'vue';
 import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
 import OAuthButtons from '@/components/auth/OAuthButtons.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Card, CardContent } from '@/components/ui/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
@@ -188,9 +188,12 @@ function handleSubmit() {
             <form.Subscribe>
               <template #default="{ isSubmitting }">
                 <Field>
-                  <Button type="submit" class="w-full" :disabled="isSubmitting || !isHydrated">
-                    {{ isSubmitting ? 'サインイン中…' : 'サインイン' }}
-                  </Button>
+                  <Button
+                    type="submit"
+                    class="w-full"
+                    :disabled="isSubmitting || !isHydrated"
+                    :label="isSubmitting ? 'サインイン中…' : 'サインイン'"
+                  />
                 </Field>
               </template>
             </form.Subscribe>

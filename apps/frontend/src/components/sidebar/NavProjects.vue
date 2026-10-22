@@ -13,7 +13,7 @@ import {
 import { computed } from 'vue';
 import type { components } from '@/generated/api';
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   SidebarGroup,
@@ -123,9 +123,8 @@ function isChildActive(child: ProjectChild) {
         <p class="mb-2.5 text-xs leading-snug text-muted-foreground">
           プロジェクトはまだありません。
         </p>
-        <Button v-if="tenantSlug" size="sm" class="h-8 w-full text-[13px]" @click="emit('create')">
-          <PhPlus class="size-3.5" />
-          プロジェクトを作成
+        <Button v-if="tenantSlug" class="w-full" label="プロジェクトを作成" @click="emit('create')">
+          <template #icon><PhPlus class="size-3.5" /></template>
         </Button>
       </div>
     </div>

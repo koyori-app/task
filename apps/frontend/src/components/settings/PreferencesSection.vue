@@ -2,7 +2,7 @@
 import { PhInfo } from '@phosphor-icons/vue';
 import { computed } from 'vue';
 import SettingToggleList from '@/components/settings/SettingToggleList.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { useHydrated } from '@/composables/useHydrated';
 import { defaultValues } from '@/lib/local-settings';
 import { PREFERENCE_TABLE, type PreferenceKey } from '@/lib/preferences';
@@ -46,9 +46,12 @@ function change(key: string, value: boolean) {
     </p>
 
     <div>
-      <Button variant="outline" :disabled="!ready" @click="store.resetAll()">
-        すべて既定に戻す
-      </Button>
+      <Button
+        variant="tertiary"
+        :disabled="!ready"
+        label="すべて既定に戻す"
+        @click="store.resetAll()"
+      />
     </div>
   </div>
 </template>

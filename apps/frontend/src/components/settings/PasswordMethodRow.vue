@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { PhLockKey, PhWarning } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Field, FieldError, FieldLabel } from '@/components/ui/field';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import PasswordInput from '@/components/auth/PasswordInput.vue';
@@ -138,9 +138,7 @@ async function onSubmit() {
           {{ hasPassword ? email : 'OAuth 連携のみでサインインしています' }}
         </p>
       </div>
-      <Button type="button" variant="outline" size="sm" @click="toggle">
-        {{ actionLabel }}
-      </Button>
+      <Button type="button" variant="tertiary" :label="actionLabel" @click="toggle" />
     </div>
 
     <div v-if="isOpen" class="px-4 pb-4 md:pl-16">
@@ -180,10 +178,12 @@ async function onSubmit() {
         <p v-if="submitError" role="alert" class="text-destructive text-sm">{{ submitError }}</p>
 
         <div class="flex gap-2">
-          <Button type="submit" :disabled="isSubmitting || !isHydrated">
-            {{ isSubmitting ? '保存中…' : submitLabel }}
-          </Button>
-          <Button type="button" variant="outline" @click="reset">キャンセル</Button>
+          <Button
+            type="submit"
+            :disabled="isSubmitting || !isHydrated"
+            :label="isSubmitting ? '保存中…' : submitLabel"
+          />
+          <Button type="button" variant="tertiary" label="キャンセル" @click="reset" />
         </div>
       </HydrationSafeForm>
     </div>

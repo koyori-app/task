@@ -44,9 +44,8 @@ function toggleVisibility() {
     <InputGroupAddon align="inline-end">
       <InputGroupButton
         type="button"
-        size="icon-xs"
-        :aria-label="isVisible ? 'パスワードを隠す' : 'パスワードを表示する'"
-        :aria-pressed="isVisible"
+        :ariaLabel="isVisible ? 'パスワードを隠す' : 'パスワードを表示する'"
+        :aria-pressed="isVisible ? 'true' : 'false'"
         @click="toggleVisibility"
       >
         <PhEye v-if="isVisible" :size="16" />

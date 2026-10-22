@@ -9,7 +9,7 @@ import {
   projectLabelsQueryOptions,
 } from '@/lib/api-vue-query';
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -91,7 +91,7 @@ function close() {
       </label>
       <div v-if="statuses.isError.value" role="alert" class="text-sm text-destructive">
         ステータスを取得できませんでした。
-        <Button variant="outline" size="sm" @click="statuses.refetch()">再試行</Button>
+        <Button variant="tertiary" label="再試行" @click="statuses.refetch()" />
       </div>
       <p
         v-else-if="statuses.isSuccess.value && !statuses.data.value?.length"
@@ -101,10 +101,9 @@ function close() {
       </p>
       <Button
         :disabled="!project || !statuses.isSuccess.value || !statuses.data.value?.length"
+        :label="statuses.isLoading.value ? '読み込み中…' : '次へ'"
         @click="editing = true"
-      >
-        {{ statuses.isLoading.value ? '読み込み中…' : '次へ' }}
-      </Button>
+      />
     </DialogContent>
   </Dialog>
   <CreateTaskDialog

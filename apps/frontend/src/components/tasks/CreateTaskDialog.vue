@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, Loader2, X } from '@lucide/vue';
+import { ChevronDown, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { getActivePinia } from 'pinia';
@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog';
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Button } from '@/components/ui/button';
+import { Button, Spinner } from '@koyori-app/ui-vue';
 import UserSelector from '@/components/users/UserSelector.vue';
 import {
   DropdownMenu,
@@ -316,12 +316,11 @@ async function submit() {
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          class="absolute top-2 right-3 z-10 size-8"
-          aria-label="閉じる"
+          class="absolute top-2 right-3 z-10"
+          ariaLabel="閉じる"
           :disabled="createMutation.isPending.value"
         >
-          <X class="size-4" />
+          <template #icon><X class="size-4" /></template>
         </Button>
       </DialogClose>
 
@@ -371,14 +370,19 @@ async function submit() {
             <Button
               type="submit"
               :disabled="createMutation.isPending.value || !isHydrated || !statusId"
+              :label="createMutation.isPending.value ? '作成中...' : '作成'"
             >
-              <Loader2 v-if="createMutation.isPending.value" class="mr-2 size-4 animate-spin" />
-              {{ createMutation.isPending.value ? '作成中...' : '作成' }}
+              <template #icon>
+                <Spinner v-if="createMutation.isPending.value" hide-label />
+              </template>
             </Button>
             <DialogClose as-child>
-              <Button type="button" variant="outline" :disabled="createMutation.isPending.value">
-                取り消す
-              </Button>
+              <Button
+                type="button"
+                variant="tertiary"
+                :disabled="createMutation.isPending.value"
+                label="取り消す"
+              />
             </DialogClose>
           </div>
         </div>
@@ -452,9 +456,12 @@ async function submit() {
               </p>
               <div v-else-if="membersError" class="flex items-center gap-2">
                 <p role="alert" class="text-xs text-destructive">メンバーの取得に失敗しました</p>
-                <Button type="button" variant="outline" size="sm" @click="emit('retryMembers')">
-                  再試行
-                </Button>
+                <Button
+                  type="button"
+                  variant="tertiary"
+                  label="再試行"
+                  @click="emit('retryMembers')"
+                />
               </div>
               <UserSelector
                 v-else
@@ -500,9 +507,12 @@ async function submit() {
               </p>
               <div v-else-if="labelsError" class="flex items-center gap-2">
                 <p role="alert" class="text-xs text-destructive">ラベルの取得に失敗しました</p>
-                <Button type="button" variant="outline" size="sm" @click="emit('retryLabels')">
-                  再試行
-                </Button>
+                <Button
+                  type="button"
+                  variant="tertiary"
+                  label="再試行"
+                  @click="emit('retryLabels')"
+                />
               </div>
               <DropdownMenu v-else>
                 <DropdownMenuTrigger as-child>

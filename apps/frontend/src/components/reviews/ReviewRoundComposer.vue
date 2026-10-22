@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { PhTrash } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -171,11 +171,10 @@ async function commit() {
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            :aria-label="`下書きから「${finding.title}」を外す`"
+            :ariaLabel="`下書きから「${finding.title}」を外す`"
             @click="removeStaged(index)"
           >
-            <PhTrash class="size-4" />
+            <template #icon><PhTrash class="size-4" /></template>
           </Button>
         </li>
       </ul>
@@ -225,7 +224,7 @@ async function commit() {
       <p v-if="draftError" role="alert" class="text-destructive text-sm">{{ draftError }}</p>
 
       <div>
-        <Button type="button" variant="outline" size="sm" @click="addToDraft">下書きに追加</Button>
+        <Button type="button" variant="tertiary" label="下書きに追加" @click="addToDraft" />
       </div>
     </div>
 
@@ -244,11 +243,10 @@ async function commit() {
         type="button"
         :disabled="!canCommit || createReview.isPending.value"
         :title="canCommit ? undefined : '40 桁の commit SHA を入力してください'"
+        :label="createReview.isPending.value ? '確定中…' : `確定（${staged.length} 件）`"
         @click="commit"
-      >
-        {{ createReview.isPending.value ? '確定中…' : `確定（${staged.length} 件）` }}
-      </Button>
-      <Button type="button" variant="outline" @click="emit('cancel')">キャンセル</Button>
+      />
+      <Button type="button" variant="tertiary" label="キャンセル" @click="emit('cancel')" />
     </div>
   </div>
 </template>

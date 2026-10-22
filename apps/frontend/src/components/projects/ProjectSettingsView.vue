@@ -15,7 +15,7 @@ import {
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { computed, ref, watch, type Component } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Field, FieldError, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -280,9 +280,11 @@ function onDeleted() {
           <div class="border-t pt-4">
             <form.Subscribe>
               <template #default="{ canSubmit, isSubmitting }">
-                <Button type="submit" :disabled="!canSubmit || isSubmitting || isPending">
-                  {{ isSubmitting ? '保存中…' : '変更を保存' }}
-                </Button>
+                <Button
+                  type="submit"
+                  :disabled="!canSubmit || isSubmitting || isPending"
+                  :label="isSubmitting ? '保存中…' : '変更を保存'"
+                />
               </template>
             </form.Subscribe>
           </div>
@@ -343,12 +345,12 @@ function onDeleted() {
               </div>
               <Button
                 type="button"
-                variant="destructive"
+                variant="danger"
                 class="shrink-0"
-                aria-label="プロジェクトを削除"
+                ariaLabel="プロジェクトを削除"
+                label="削除"
                 @click="isDeleteOpen = true"
-                >削除</Button
-              >
+              />
             </div>
           </div>
         </div>

@@ -31,7 +31,7 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import { useMediaQuery } from '@vueuse/core';
 
 import { valueUpdater } from '@/components/ui/table/utils';
-import { Button } from '@/components/ui/button';
+import { Button, Spinner } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
@@ -633,18 +633,19 @@ function sortableHeader(column: Column<TaskTableFeatures, TaskRow>, label: strin
   const sorted = column.getIsSorted();
   const icon =
     sorted === 'asc'
-      ? h(PhCaretUp, { class: 'ml-1 size-4' })
+      ? h(PhCaretUp, { class: 'size-4' })
       : sorted === 'desc'
-        ? h(PhCaretDown, { class: 'ml-1 size-4' })
-        : h(PhCaretUpDown, { class: 'ml-1 size-4 opacity-40' });
+        ? h(PhCaretDown, { class: 'size-4' })
+        : h(PhCaretUpDown, { class: 'size-4 opacity-40' });
   return h(
     Button,
     {
       variant: 'ghost',
-      class: '-ml-3 h-8 text-xs font-medium',
+      label,
+      class: '-ml-3',
       onClick: () => column.toggleSorting(sorted === 'asc'),
     },
-    () => [label, icon],
+    { icon: () => icon },
   );
 }
 
@@ -944,56 +945,42 @@ const table = useTable({
                   v-if="searchInput"
                   type="button"
                   variant="ghost"
-                  size="icon"
-                  class="absolute right-0 top-0 size-8"
-                  aria-label="検索をクリア"
+                  class="absolute right-0 top-0"
+                  ariaLabel="検索をクリア"
                   @click="clearSearch"
                 >
-                  <X class="size-4" />
+                  <template #icon><X class="size-4" /></template>
                 </Button>
               </div>
               <Button
                 type="submit"
-                variant="outline"
-                size="sm"
-                class="h-8"
+                variant="tertiary"
                 :disabled="!searchInput.trim()"
+                :label="taskSearchQuery.isFetching.value && isSearchActive ? '検索中…' : '検索'"
               >
-                <Loader2
-                  v-if="taskSearchQuery.isFetching.value && isSearchActive"
-                  class="mr-1.5 size-4 animate-spin"
-                />
-                <Search v-else class="mr-1.5 size-4" />
-                検索
+                <template #icon>
+                  <Spinner v-if="taskSearchQuery.isFetching.value && isSearchActive" hide-label />
+                  <Search v-else class="size-4" />
+                </template>
               </Button>
             </form>
-            <Button size="sm" class="ml-auto h-8 text-xs" @click="isCreateDialogOpen = true">
-              新規タスク
-            </Button>
+            <Button class="ml-auto" label="新規タスク" @click="isCreateDialogOpen = true" />
             <!-- ラベル取得失敗はタスク一覧をブロックせず、ツールバー内で再試行を出す -->
             <div
               v-if="!isSearchActive && labelsQuery.isError.value && !projectLabels.length"
               class="flex items-center gap-1.5 text-xs text-destructive"
             >
               <span>ラベルの取得に失敗しました</span>
-              <Button
-                variant="outline"
-                size="sm"
-                class="h-8 text-xs"
-                @click="labelsQuery.refetch()"
-              >
-                再試行
-              </Button>
+              <Button variant="tertiary" label="再試行" @click="labelsQuery.refetch()" />
             </div>
             <DropdownMenu v-if="!isSearchActive && projectLabels.length">
               <DropdownMenuTrigger as-child>
                 <Button
-                  variant="outline"
-                  size="sm"
-                  class="h-8 text-xs"
-                  :class="selectedLabelId ? 'border-primary text-primary' : ''"
+                  variant="tertiary"
+                  :class="selectedLabelId ? 'text-(--koyori-color-selection-indicator)' : ''"
+                  :label="selectedLabelName ?? 'ラベル'"
                 >
-                  {{ selectedLabelName ?? 'ラベル' }} <PhCaretDown class="ml-1 size-4" />
+                  <template #icon><PhCaretDown class="size-4" /></template>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -1020,8 +1007,8 @@ const table = useTable({
             </DropdownMenu>
             <DropdownMenu v-if="!isSearchActive">
               <DropdownMenuTrigger as-child>
-                <Button variant="outline" size="sm" class="h-8 text-xs">
-                  列 <PhCaretDown class="ml-1 size-4" />
+                <Button variant="tertiary" label="列">
+                  <template #icon><PhCaretDown class="size-4" /></template>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -1112,7 +1099,7 @@ const table = useTable({
               class="flex flex-col items-center gap-2 py-8 text-sm text-destructive"
             >
               <span>検索に失敗しました</span>
-              <Button variant="outline" size="sm" @click="taskSearchQuery.refetch()">再試行</Button>
+              <Button variant="tertiary" label="再試行" @click="taskSearchQuery.refetch()" />
             </div>
             <template v-else-if="isSearchActive">
               <div class="rounded-md border overflow-x-auto">
@@ -1275,21 +1262,17 @@ const table = useTable({
               </span>
               <div class="flex gap-1.5">
                 <Button
-                  variant="outline"
-                  size="sm"
-                  class="h-7 text-xs"
+                  variant="tertiary"
                   :disabled="!table.getCanPreviousPage()"
+                  label="前へ"
                   @click="table.previousPage()"
-                  >前へ</Button
-                >
+                />
                 <Button
-                  variant="outline"
-                  size="sm"
-                  class="h-7 text-xs"
+                  variant="tertiary"
                   :disabled="!table.getCanNextPage()"
+                  label="次へ"
                   @click="table.nextPage()"
-                  >次へ</Button
-                >
+                />
               </div>
             </div>
           </div>

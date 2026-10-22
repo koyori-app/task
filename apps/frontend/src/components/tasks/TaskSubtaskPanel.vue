@@ -3,7 +3,7 @@ import { ArrowUpLeft, GitBranch, Loader2, Plus, RotateCcw } from '@lucide/vue';
 import { computed, ref } from 'vue';
 
 import TaskSubtaskComposer from '@/components/tasks/TaskSubtaskComposer.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { useTaskSubtasks } from '@/composables/useTaskSubtasks';
 import type { components } from '@/generated/api';
 import { taskSeqKey } from '@/lib/task-display';
@@ -93,15 +93,8 @@ function createSubtask(title: string) {
 
     <div v-else-if="subtasks.error.value" class="flex items-center gap-2 py-1">
       <p class="text-sm text-destructive">サブタスクを読み込めませんでした</p>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        class="h-7 gap-1.5"
-        @click="subtasks.refetch"
-      >
-        <RotateCcw class="size-3.5" aria-hidden="true" />
-        再試行
+      <Button type="button" variant="tertiary" label="再試行" @click="subtasks.refetch">
+        <template #icon><RotateCcw class="size-3.5" aria-hidden="true" /></template>
       </Button>
     </div>
 
@@ -150,13 +143,11 @@ function createSubtask(title: string) {
         v-else-if="!parentTaskId"
         type="button"
         variant="ghost"
-        size="sm"
-        class="h-8 gap-2 px-2 text-sm font-normal text-muted-foreground"
         :disabled="statusUpdating"
+        label="サブタスクを追加"
         @click="openComposer"
       >
-        <Plus class="size-4" aria-hidden="true" />
-        サブタスクを追加
+        <template #icon><Plus class="size-4" aria-hidden="true" /></template>
       </Button>
     </template>
   </div>

@@ -9,7 +9,7 @@ import {
   PhTag,
 } from '@phosphor-icons/vue';
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -274,13 +274,12 @@ function selectFromKeyboard(event: KeyboardEvent) {
             <Button
               type="button"
               variant="ghost"
-              size="icon"
-              class="size-6 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+              class="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
               :disabled="isBusy"
-              aria-label="ラベルを編集"
+              ariaLabel="ラベルを編集"
               title="ラベル"
             >
-              <PhTag class="size-4" />
+              <template #icon><PhTag class="size-4" /></template>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" class="w-56">
@@ -356,13 +355,11 @@ function selectFromKeyboard(event: KeyboardEvent) {
           v-else
           type="button"
           variant="ghost"
-          size="icon"
-          class="size-7 text-muted-foreground"
           :disabled="isBusy"
-          aria-label="期限を設定"
+          ariaLabel="期限を設定"
           @click="startEditingDeadline"
         >
-          <PhCalendarPlus class="size-4" />
+          <template #icon><PhCalendarPlus class="size-4" /></template>
         </Button>
       </div>
 
@@ -374,14 +371,12 @@ function selectFromKeyboard(event: KeyboardEvent) {
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              class="h-7 gap-1.5 px-2 text-sm font-normal"
               :style="{ color: PRIORITY_CONFIG[task.priority].color }"
               :disabled="isBusy"
-              aria-label="優先度"
+              ariaLabel="優先度"
+              :label="PRIORITY_CONFIG[task.priority].label"
             >
-              <PhFlag class="size-4" aria-hidden="true" />
-              {{ PRIORITY_CONFIG[task.priority].label }}
+              <template #icon><PhFlag class="size-4" aria-hidden="true" /></template>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
@@ -407,15 +402,8 @@ function selectFromKeyboard(event: KeyboardEvent) {
 
       <!-- コメント -->
       <div class="px-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          class="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
-          aria-label="コメントを追加"
-          @click="toggleComment"
-        >
-          <PhChat class="size-4" />
+        <Button type="button" variant="ghost" ariaLabel="コメントを追加" @click="toggleComment">
+          <template #icon><PhChat class="size-4" /></template>
         </Button>
       </div>
     </div>
@@ -436,15 +424,11 @@ function selectFromKeyboard(event: KeyboardEvent) {
       <div class="flex flex-col gap-1">
         <Button
           type="button"
-          size="sm"
           :disabled="commentPending || !commentDraft.trim()"
+          label="送信"
           @click="submitComment"
-        >
-          送信
-        </Button>
-        <Button type="button" size="sm" variant="ghost" @click="commentOpen = false">
-          閉じる
-        </Button>
+        />
+        <Button type="button" variant="ghost" label="閉じる" @click="commentOpen = false" />
       </div>
     </div>
 

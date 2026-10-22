@@ -68,10 +68,6 @@ function member(userId: string, username: string, role: 'Admin' | 'Member'): Ten
 }
 
 const PassThrough = defineComponent({ template: '<div><slot /></div>' });
-const ButtonStub = defineComponent({
-  inheritAttrs: false,
-  template: '<button v-bind="$attrs"><slot /></button>',
-});
 
 let wrapper: VueWrapper;
 
@@ -97,7 +93,6 @@ function mountMembers(
         ],
       ],
       stubs: {
-        Button: ButtonStub,
         Select: PassThrough,
         SelectContent: PassThrough,
         SelectItem: PassThrough,

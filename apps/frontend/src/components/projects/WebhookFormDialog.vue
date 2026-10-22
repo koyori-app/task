@@ -4,7 +4,7 @@ import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhCopy } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -175,14 +175,18 @@ function onOpenChange(open: boolean) {
             data-testid="created-secret"
             >{{ createdSecret }}</code
           >
-          <Button type="button" variant="outline" size="sm" @click="copySecret">
-            <PhCopy class="size-4" />
-            {{ copied ? 'コピーしました' : 'コピー' }}
+          <Button
+            type="button"
+            variant="tertiary"
+            :label="copied ? 'コピーしました' : 'コピー'"
+            @click="copySecret"
+          >
+            <template #icon><PhCopy class="size-4" /></template>
           </Button>
         </div>
         <p v-if="copyError" role="alert" class="text-sm text-destructive">{{ copyError }}</p>
         <DialogFooter>
-          <Button type="button" @click="emit('close')">閉じる</Button>
+          <Button type="button" label="閉じる" @click="emit('close')" />
         </DialogFooter>
       </template>
 
@@ -301,20 +305,26 @@ function onOpenChange(open: boolean) {
           <p v-if="submitError" role="alert" class="text-sm text-destructive">{{ submitError }}</p>
 
           <DialogFooter>
-            <Button type="button" variant="outline" :disabled="isPending" @click="emit('close')">
-              キャンセル
-            </Button>
+            <Button
+              type="button"
+              variant="tertiary"
+              :disabled="isPending"
+              label="キャンセル"
+              @click="emit('close')"
+            />
             <form.Subscribe>
               <template #default="{ canSubmit, isSubmitting }">
-                <Button type="submit" :disabled="!canSubmit || isSubmitting || isPending">
-                  {{
+                <Button
+                  type="submit"
+                  :disabled="!canSubmit || isSubmitting || isPending"
+                  :label="
                     isSubmitting || isPending
                       ? '保存中…'
                       : webhook
                         ? '変更を保存'
                         : 'Webhook を追加'
-                  }}
-                </Button>
+                  "
+                />
               </template>
             </form.Subscribe>
           </DialogFooter>

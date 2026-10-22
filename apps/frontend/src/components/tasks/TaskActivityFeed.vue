@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { useNow } from '@/composables/useNow';
 import {
   activityActor,
@@ -53,9 +53,7 @@ const rows = computed(() =>
 
     <div v-else-if="error" class="flex items-center gap-2">
       <p class="text-sm text-destructive">履歴を読み込めませんでした</p>
-      <Button v-if="onRetry" type="button" variant="outline" size="sm" @click="onRetry">
-        再試行
-      </Button>
+      <Button v-if="onRetry" type="button" variant="tertiary" label="再試行" @click="onRetry" />
     </div>
 
     <div v-else-if="activities.length" class="flex flex-col gap-2">
@@ -122,13 +120,10 @@ const rows = computed(() =>
         <Button
           type="button"
           variant="ghost"
-          size="sm"
-          class="h-7 text-xs text-muted-foreground"
           :disabled="fetchingMore"
+          :label="fetchingMore ? '読み込み中…' : '以前の履歴を見る'"
           @click="onLoadMore"
-        >
-          {{ fetchingMore ? '読み込み中…' : '以前の履歴を見る' }}
-        </Button>
+        />
       </div>
     </div>
   </div>

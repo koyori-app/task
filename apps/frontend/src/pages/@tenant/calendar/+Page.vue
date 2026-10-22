@@ -10,7 +10,7 @@ import CalendarTimeline from '@/components/calendar/CalendarTimeline.vue';
 import { popOverlayParent, pushOverlayParent } from '@/components/tasks/overlay-parent-stack';
 import TaskDetailOverlay from '@/components/tasks/TaskDetailOverlay.vue';
 import type { TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -222,24 +222,16 @@ function formatRangeDate(date: string) {
     </div>
 
     <div class="flex flex-wrap items-center gap-2">
-      <Button
-        variant="outline"
-        size="icon"
-        aria-label="前の 2 週間"
-        @click="from = shiftFrom(from, -1)"
-      >
-        <ChevronLeft class="size-4" aria-hidden="true" />
-      </Button>
-      <Button variant="outline" size="sm" @click="from = parseCalendarUrlState({}, today).from">
-        今日
+      <Button variant="tertiary" ariaLabel="前の 2 週間" @click="from = shiftFrom(from, -1)">
+        <template #icon><ChevronLeft class="size-4" aria-hidden="true" /></template>
       </Button>
       <Button
-        variant="outline"
-        size="icon"
-        aria-label="次の 2 週間"
-        @click="from = shiftFrom(from, 1)"
-      >
-        <ChevronRight class="size-4" aria-hidden="true" />
+        variant="tertiary"
+        label="今日"
+        @click="from = parseCalendarUrlState({}, today).from"
+      />
+      <Button variant="tertiary" ariaLabel="次の 2 週間" @click="from = shiftFrom(from, 1)">
+        <template #icon><ChevronRight class="size-4" aria-hidden="true" /></template>
       </Button>
       <span class="text-sm font-medium" aria-live="polite">
         {{ formatRangeDate(from) }} 〜 {{ formatRangeDate(to) }}
@@ -248,9 +240,13 @@ function formatRangeDate(date: string) {
       <div class="ml-auto flex flex-wrap gap-2">
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
-            <Button variant="outline" size="sm">
-              メンバー{{ memberIds.length ? `（${memberIds.length}）` : '' }}
-              <ChevronDown class="size-4 opacity-50" aria-hidden="true" />
+            <Button
+              variant="tertiary"
+              :label="memberIds.length ? `メンバー（${memberIds.length}）` : 'メンバー'"
+            >
+              <template #icon>
+                <ChevronDown class="size-4 opacity-50" aria-hidden="true" />
+              </template>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" class="min-w-48">
@@ -271,9 +267,13 @@ function formatRangeDate(date: string) {
 
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
-            <Button variant="outline" size="sm">
-              プロジェクト{{ projectIds.length ? `（${projectIds.length}）` : '' }}
-              <ChevronDown class="size-4 opacity-50" aria-hidden="true" />
+            <Button
+              variant="tertiary"
+              :label="projectIds.length ? `プロジェクト（${projectIds.length}）` : 'プロジェクト'"
+            >
+              <template #icon>
+                <ChevronDown class="size-4 opacity-50" aria-hidden="true" />
+              </template>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" class="min-w-48">
@@ -296,14 +296,12 @@ function formatRangeDate(date: string) {
         <Button
           v-if="memberIds.length || projectIds.length"
           variant="ghost"
-          size="sm"
+          label="絞り込みを解除"
           @click="
             memberIds = [];
             projectIds = [];
           "
-        >
-          絞り込みを解除
-        </Button>
+        />
       </div>
     </div>
 

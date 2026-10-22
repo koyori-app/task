@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { CornerDownLeft, Loader2, X } from '@lucide/vue';
+import { CornerDownLeft, X } from '@lucide/vue';
 import { nextTick, onMounted, ref } from 'vue';
 
-import { Button } from '@/components/ui/button';
+import { Button, Spinner } from '@koyori-app/ui-vue';
 import { Input } from '@/components/ui/input';
 
 const props = withDefaults(
@@ -63,25 +63,24 @@ async function submit() {
       />
       <Button
         type="button"
-        size="sm"
-        class="h-8 gap-1.5 px-2.5"
         :disabled="pending || disabled || !draft.trim()"
+        :label="pending ? '追加中…' : '追加'"
         @click="submit"
       >
-        <Loader2 v-if="pending" class="size-3.5 animate-spin" aria-hidden="true" />
-        <CornerDownLeft v-else class="size-3.5" aria-hidden="true" />
-        追加
+        <template #icon>
+          <Spinner v-if="pending" hide-label :size="14" />
+          <CornerDownLeft v-else class="size-3.5" aria-hidden="true" />
+        </template>
       </Button>
       <Button
         type="button"
         variant="ghost"
-        size="icon"
-        class="size-8 shrink-0"
+        class="shrink-0"
         :disabled="pending || disabled"
-        aria-label="サブタスクの追加をやめる"
+        ariaLabel="サブタスクの追加をやめる"
         @click="emit('cancel')"
       >
-        <X class="size-4" aria-hidden="true" />
+        <template #icon><X class="size-4" aria-hidden="true" /></template>
       </Button>
     </div>
     <p v-if="error" class="text-xs text-destructive" role="alert">{{ error }}</p>

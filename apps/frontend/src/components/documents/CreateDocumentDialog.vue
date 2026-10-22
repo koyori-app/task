@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { Loader2 } from '@lucide/vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { ref, watch } from 'vue';
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Button } from '@/components/ui/button';
+import { Button, Spinner } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -148,12 +147,19 @@ async function submit() {
           {{ errorMessage }}
         </p>
         <DialogFooter>
-          <Button type="button" variant="outline" :disabled="pending" @click="onOpenChange(false)">
-            取り消す
-          </Button>
-          <Button type="submit" :disabled="pending || !isHydrated">
-            <Loader2 v-if="pending" class="mr-2 size-4 animate-spin" />
-            作成
+          <Button
+            type="button"
+            variant="tertiary"
+            :disabled="pending"
+            label="取り消す"
+            @click="onOpenChange(false)"
+          />
+          <Button
+            type="submit"
+            :disabled="pending || !isHydrated"
+            :label="pending ? '作成中…' : '作成'"
+          >
+            <template #icon><Spinner v-if="pending" hide-label /></template>
           </Button>
         </DialogFooter>
       </HydrationSafeForm>
