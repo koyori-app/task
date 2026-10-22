@@ -2,7 +2,6 @@
 import { usePageContext } from 'vike-vue/usePageContext';
 import { ref, watch } from 'vue';
 import { Button } from '@koyori-app/ui-vue';
-import { Card, CardContent } from '@/components/ui/card';
 import { useCreateDesktopAuthCodeMutation, useMeQuery } from '@/lib/api-vue-query';
 import {
   DESKTOP_AUTHORIZE_RETURN,
@@ -52,36 +51,34 @@ async function approve() {
 
 <template>
   <div class="bg-muted flex min-h-svh flex-col items-center justify-center p-6 md:p-10">
-    <Card class="w-full max-w-sm">
-      <CardContent class="flex flex-col gap-4 p-6 text-center">
-        <template v-if="!request">
-          <h1 class="text-xl font-bold">リンクが正しくありません</h1>
-          <p class="text-muted-foreground text-sm">Koyori Desktop からやり直してください。</p>
-        </template>
-        <p v-else-if="!meQuery.isSuccess.value" class="text-muted-foreground text-sm">
-          読み込み中…
+    <div
+      class="koyori-card flex w-full max-w-sm flex-col gap-4 text-center [--koyori-card-padding:1.5rem]"
+    >
+      <template v-if="!request">
+        <h1 class="text-xl font-bold">リンクが正しくありません</h1>
+        <p class="text-muted-foreground text-sm">Koyori Desktop からやり直してください。</p>
+      </template>
+      <p v-else-if="!meQuery.isSuccess.value" class="text-muted-foreground text-sm">読み込み中…</p>
+      <p v-else-if="done" class="text-muted-foreground text-sm">
+        Koyori Desktop に戻っています。このタブは閉じてかまいません。
+      </p>
+      <template v-else>
+        <h1 class="text-xl font-bold">Koyori Desktop（{{ request.name }}）を承認しますか</h1>
+        <p class="text-muted-foreground text-sm">
+          {{ meQuery.data.value!.username }}
+          としてサインインします。承認した端末はアカウント設定のセキュリティから失効できます。
         </p>
-        <p v-else-if="done" class="text-muted-foreground text-sm">
-          Koyori Desktop に戻っています。このタブは閉じてかまいません。
-        </p>
-        <template v-else>
-          <h1 class="text-xl font-bold">Koyori Desktop（{{ request.name }}）を承認しますか</h1>
-          <p class="text-muted-foreground text-sm">
-            {{ meQuery.data.value!.username }}
-            としてサインインします。承認した端末はアカウント設定のセキュリティから失効できます。
-          </p>
-          <p v-if="submitError" class="text-destructive text-sm">{{ submitError }}</p>
-          <div class="flex flex-col gap-2">
-            <Button
-              type="button"
-              :disabled="createCode.isPending.value"
-              :label="createCode.isPending.value ? '承認中…' : '承認する'"
-              @click="approve"
-            />
-            <a href="/" class="text-center text-sm underline underline-offset-4">キャンセル</a>
-          </div>
-        </template>
-      </CardContent>
-    </Card>
+        <p v-if="submitError" class="text-destructive text-sm">{{ submitError }}</p>
+        <div class="flex flex-col gap-2">
+          <Button
+            type="button"
+            :disabled="createCode.isPending.value"
+            :label="createCode.isPending.value ? '承認中…' : '承認する'"
+            @click="approve"
+          />
+          <a href="/" class="text-center text-sm underline underline-offset-4">キャンセル</a>
+        </div>
+      </template>
+    </div>
   </div>
 </template>
