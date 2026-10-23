@@ -138,6 +138,57 @@ async fn config_set_persists_the_selected_key_without_calling_the_api() {
     assert!(harness.sent_nothing().await);
 }
 
+/// config が完全でも、env の URL とトークンの片方だけでは接続しない。
+/// 補うと config のトークンが env の送り先へ（または env のトークンが config の送り先へ）飛ぶ。
+#[tokio::test]
+async fn a_url_or_token_alone_in_the_environment_stops_before_any_request() {
+    let one_sided: [&'static [(&str, &str)]; 2] = [
+        &[("TASK_API_URL", "http://127.0.0.1:9")],
+        &[("TASK_TOKEN", "token-2")],
+    ];
+    for env in one_sided {
+        let harness = harness_with(Some(TENANT), env).await;
+
+        for args in [
+            &["task", "projects", "list"][..],
+            &["task", "auth", "whoami"],
+        ] {
+            let err = harness.run(args).await.unwrap_err();
+
+            assert_eq!(err.exit_code, 2, "{env:?} {args:?}: {}", err.message);
+            assert!(
+                err.message.contains("is set without"),
+                "{env:?} {args:?}: {}",
+                err.message
+            );
+        }
+        assert!(harness.sent_nothing().await, "{env:?}");
+    }
+}
+
+/// 手元の設定だけを触るコマンドは接続を作らないので、片側 env でも動く。
+#[tokio::test]
+async fn local_commands_work_with_a_url_or_token_alone_in_the_environment() {
+    let one_sided: [&'static [(&str, &str)]; 2] = [
+        &[("TASK_API_URL", "http://127.0.0.1:9")],
+        &[("TASK_TOKEN", "token-2")],
+    ];
+    for env in one_sided {
+        let harness = harness_with(Some(TENANT), env).await;
+
+        for args in [
+            &["task", "config", "list"][..],
+            &["task", "config", "get", "api_url"],
+            &["task", "auth", "token", "token-3"],
+            &["task", "auth", "logout"],
+        ] {
+            assert_eq!(harness.run(args).await.unwrap(), 0, "{env:?} {args:?}");
+        }
+        assert_eq!(harness.store().load().unwrap().token, None, "{env:?}");
+        assert!(harness.sent_nothing().await, "{env:?}");
+    }
+}
+
 #[tokio::test]
 async fn my_list_sends_its_filter() {
     let harness = harness().await;
