@@ -14,7 +14,7 @@ pub mod text_input;
 
 use api::ApiClient;
 use cli::{Cli, Command};
-use config::{ConfigStore, RuntimeConfig, resolve_runtime_with, resolve_token_runtime_with};
+use config::{ConfigStore, RuntimeConfig, resolve_runtime_with};
 use error::Result;
 use output::OutputOptions;
 
@@ -51,17 +51,19 @@ impl Context {
         resolve_runtime_with(&self.store, |key| (self.env)(key))
     }
 
-    /// API クライアントを作る。設定の不足を、引数の検証より先に報告しないよう
-    /// 呼ぶのは各コマンドが実際に送る直前にする。
-    pub(crate) fn connect(&self) -> Result<ApiClient> {
-        ApiClient::new(self.runtime()?)
+    /// テナント付きのパスを叩く API クライアントを作る。tenant_id が未設定なら
+    /// `personal_tokens/me` を 1 回叩いて埋める。設定の不足を、引数の検証より先に
+    /// 報告しないよう呼ぶのは各コマンドが実際に送る直前にする。
+    pub(crate) async fn connect(&self) -> Result<ApiClient> {
+        ApiClient::new(self.runtime()?)?.resolve_tenant().await
     }
 
-    /// `auth whoami` 用。tenant_id を要さず鍵だけで `personal_tokens/me` を叩く。
+    /// テナントを含まないパスだけを叩く口（`auth whoami` と通知）。tenant を引かない。
     pub(crate) fn connect_token_only(&self) -> Result<ApiClient> {
-        ApiClient::new(resolve_token_runtime_with(&self.store, |key| {
-            (self.env)(key)
-        })?)
+        ApiClient::new(RuntimeConfig {
+            tenant: None,
+            ..self.runtime()?
+        })
     }
 }
 
