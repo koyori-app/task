@@ -16,7 +16,7 @@ const PAGE: u64 = 200;
 pub async fn run(context: &Context, command: MyCommand, output: OutputOptions) -> Result<i32> {
     match command {
         MyCommand::List { filter } => {
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let tasks: MyTasksListResponse =
                 api.get(&my_tasks_path(api), &[("filter", filter)]).await?;
             print(&tasks, output);
@@ -24,7 +24,7 @@ pub async fn run(context: &Context, command: MyCommand, output: OutputOptions) -
         MyCommand::Complete { task_ref } => {
             // 参照の形は送る前に確かめる（設定不足より先に、直せる誤りを出す）
             let parsed = parse_task_ref(&task_ref)?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let (project_id, task_id) = match parsed {
                 TaskRef::Uuid(uuid) => {
                     let task = find_my_task(api, &uuid.to_string()).await?;
