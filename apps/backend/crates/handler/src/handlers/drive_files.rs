@@ -783,7 +783,7 @@ pub async fn update_file(
         ("id" = Uuid, Path, description = "ファイルID"),
         (
             "If-Match" = Option<String>, Header,
-            description = "現在の ETag（`etag` の値をそのまま。カンマ区切りで複数可、`*` は常に一致）。一致しなければ 412。省略時は無条件に上書きする"
+            description = "現在の ETag（`etag` の値をそのまま。カンマ区切りで複数可、`*` は常に一致、`W/` 付きの弱い ETag は `W/` を外して比べる）。一致しなければ 412。省略時は無条件に上書きする"
         ),
     ),
     request_body = UpdateFileContentRequest,
