@@ -7,6 +7,8 @@ mod common;
 
 use common::*;
 use serde_json::json;
+use std::path::Path;
+use task_cli::config::{ConfigStore, TaskConfig};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -82,20 +84,9 @@ async fn an_explicit_tenant_from_config_or_env_skips_the_token_endpoint() {
     }
 }
 
-/// URL とトークンが両方 env にあれば、config の tenant_id も見ずにトークンから引く。
-/// env のトークンは別テナントのことが多く、config の tenant_id を残すと毎回 403 になる。
-#[tokio::test]
-async fn the_env_url_and_token_ignore_the_config_tenant_and_resolve_it_from_the_token() {
+/// URL とトークンを env で渡して `projects list` を走らせ、tenant が `/me` から引かれることを確かめる。
+async fn list_projects_with_the_env_pair(home: &Path, tenant_env: Option<&'static str>) {
     let server = MockServer::start().await;
-    let home = tempfile::tempdir().unwrap();
-    let store = task_cli::config::ConfigStore::from_home(home.path());
-    store
-        .save(&task_cli::config::TaskConfig {
-            api_url: Some("http://127.0.0.1:9".into()),
-            token: Some("file-token".into()),
-            tenant_id: Some("88888888-8888-4888-8888-888888888888".into()),
-        })
-        .unwrap();
     Mock::given(method("GET"))
         .and(path(ME))
         .and(header("authorization", "Bearer env-token"))
@@ -111,9 +102,10 @@ async fn the_env_url_and_token_ignore_the_config_tenant_and_resolve_it_from_the_
         .await;
 
     let uri = server.uri();
-    let context = task_cli::Context::new(store, move |key| match key {
+    let context = task_cli::Context::new(ConfigStore::from_home(home), move |key| match key {
         "TASK_API_URL" => Some(uri.clone()),
         "TASK_TOKEN" => Some("env-token".into()),
+        "TASK_TENANT" => tenant_env.map(Into::into),
         _ => None,
     });
     let code = task_cli::run(parse(&["task", "projects", "list"]), &context)
@@ -121,6 +113,43 @@ async fn the_env_url_and_token_ignore_the_config_tenant_and_resolve_it_from_the_
         .unwrap();
 
     assert_eq!(code, 0);
+    server.verify().await;
+}
+
+/// URL とトークンが両方 env にあれば、config の tenant_id も見ずにトークンから引く。
+/// env のトークンは別テナントのことが多く、config の tenant_id を残すと毎回 403 になる。
+#[tokio::test]
+async fn the_env_url_and_token_ignore_the_config_tenant_and_resolve_it_from_the_token() {
+    let home = tempfile::tempdir().unwrap();
+    ConfigStore::from_home(home.path())
+        .save(&TaskConfig {
+            api_url: Some("http://127.0.0.1:9".into()),
+            token: Some("file-token".into()),
+            tenant_id: Some("88888888-8888-4888-8888-888888888888".into()),
+        })
+        .unwrap();
+
+    list_projects_with_the_env_pair(home.path(), None).await;
+}
+
+/// 空の `TASK_TENANT` を明示 tenant にすると `/v1/tenants//...` へ送ってしまう。
+#[tokio::test]
+async fn an_empty_task_tenant_is_resolved_from_the_token() {
+    let home = tempfile::tempdir().unwrap();
+
+    list_projects_with_the_env_pair(home.path(), Some("")).await;
+}
+
+/// 両方が env にあれば config は読まないので、壊れていても接続できる。
+#[tokio::test]
+async fn the_env_url_and_token_connect_even_when_the_config_is_broken() {
+    let home = tempfile::tempdir().unwrap();
+    let store = ConfigStore::from_home(home.path());
+    std::fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+    std::fs::write(store.path(), "tenant_id: [invalid-type]\n").unwrap();
+    assert!(store.load().is_err(), "the config must fail to parse");
+
+    list_projects_with_the_env_pair(home.path(), None).await;
 }
 
 #[tokio::test]

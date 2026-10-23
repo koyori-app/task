@@ -191,12 +191,13 @@ task auth whoami                   # 使用中の鍵と持ち主・scope・有�
 API の URL とトークンは組で決める。片方ずつ config から補うと、あるインスタンスの
 トークンを別のインスタンスへ送ってしまうため。
 
-1. `TASK_API_URL` と `TASK_TOKEN` が両方あれば、両方とも環境変数を使う。config は `tenant_id` も含めて見ない
-   （環境変数のトークンは別テナントのことが多いため）。テナントは `TASK_TENANT` があればそれ、無ければトークンから引く
+1. `TASK_API_URL` と `TASK_TOKEN` が両方あれば、両方とも環境変数を使う。config は `tenant_id` も含めて読まない
+   （環境変数のトークンは別テナントのことが多いため。config が無くても壊れていても動く）。
+   テナントは `TASK_TENANT` があればそれ、無ければトークンから引く
 2. どちらも無ければ、両方とも config を使う
 3. 片方だけなら、config が揃っていても終了コード 2 で止まり、API には何も送らない
 
-空文字の環境変数（`TASK_TOKEN=`）は未設定として扱う。`config *` / `auth token` / `auth logout`
+空文字の環境変数（`TASK_TOKEN=` や `TASK_TENANT=`）は未設定として扱う。`config *` / `auth token` / `auth logout`
 は接続しないので、片方だけの状態でも動く。
 
 以前は項目ごとに環境変数が優先されたので、`TASK_TOKEN` だけを渡して URL は config から
