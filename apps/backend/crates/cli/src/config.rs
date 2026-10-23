@@ -210,7 +210,8 @@ pub struct RuntimeConfig {
 /// 環境変数を設定ファイルより優先して解決する。
 ///
 /// `TASK_API_URL` と `TASK_TOKEN` は組で扱う。項目ごとに上書きすると、config の
-/// トークンが env の別インスタンスへ送られる。`TASK_TENANT` は送り先を変えないので単独で効く。
+/// トークンが env の別インスタンスへ送られる。両方が env にあれば config の tenant_id も使わない。
+/// `TASK_TENANT` は送り先を変えないので単独で効く。
 pub fn resolve_runtime_with(
     store: &ConfigStore,
     env: impl Fn(&str) -> Option<String>,
@@ -218,9 +219,10 @@ pub fn resolve_runtime_with(
     let file = store.load()?;
     // 空文字は未設定として扱う（`TASK_TOKEN=` で外したつもりの値を拾わない）
     let pair_var = |key: &str| env(key).filter(|value| !value.is_empty());
-    let (api_url, token) = match (pair_var("TASK_API_URL"), pair_var("TASK_TOKEN")) {
-        (Some(api_url), Some(token)) => (Some(api_url), Some(token)),
-        (None, None) => (file.api_url, file.token),
+    let (api_url, token, file_tenant) = match (pair_var("TASK_API_URL"), pair_var("TASK_TOKEN")) {
+        // config は tenant_id も見ない。env のトークンは別テナントのことが多く、残すと毎回 403 になる
+        (Some(api_url), Some(token)) => (Some(api_url), Some(token), None),
+        (None, None) => (file.api_url, file.token, file.tenant_id),
         (api_url, _) => {
             let (set, unset) = if api_url.is_some() {
                 ("TASK_API_URL", "TASK_TOKEN")
@@ -236,7 +238,7 @@ pub fn resolve_runtime_with(
     };
     let tenant = match env("TASK_TENANT") {
         Some(id) => Some((id, TenantSource::Env)),
-        None => file.tenant_id.map(|id| (id, TenantSource::Config)),
+        None => file_tenant.map(|id| (id, TenantSource::Config)),
     };
 
     let missing: Vec<&str> = [

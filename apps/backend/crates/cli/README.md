@@ -191,7 +191,8 @@ task auth whoami                   # 使用中の鍵と持ち主・scope・有�
 API の URL とトークンは組で決める。片方ずつ config から補うと、あるインスタンスの
 トークンを別のインスタンスへ送ってしまうため。
 
-1. `TASK_API_URL` と `TASK_TOKEN` が両方あれば、両方とも環境変数を使う（config の `api_url` / `token` は見ない）
+1. `TASK_API_URL` と `TASK_TOKEN` が両方あれば、両方とも環境変数を使う。config は `tenant_id` も含めて見ない
+   （環境変数のトークンは別テナントのことが多いため）。テナントは `TASK_TENANT` があればそれ、無ければトークンから引く
 2. どちらも無ければ、両方とも config を使う
 3. 片方だけなら、config が揃っていても終了コード 2 で止まり、API には何も送らない
 

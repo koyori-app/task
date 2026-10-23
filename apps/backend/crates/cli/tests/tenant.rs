@@ -7,8 +7,8 @@ mod common;
 
 use common::*;
 use serde_json::json;
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, ResponseTemplate};
+use wiremock::matchers::{header, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const ME: &str = "/v1/personal_tokens/me";
 const PERMISSION_DENIED: &str = "Permission denied: insufficient access for this resource";
@@ -80,6 +80,47 @@ async fn an_explicit_tenant_from_config_or_env_skips_the_token_endpoint() {
         assert_eq!(harness.run(&["task", "projects", "list"]).await.unwrap(), 0);
         assert_eq!(harness.calls_to(ME).await, 0);
     }
+}
+
+/// URL とトークンが両方 env にあれば、config の tenant_id も見ずにトークンから引く。
+/// env のトークンは別テナントのことが多く、config の tenant_id を残すと毎回 403 になる。
+#[tokio::test]
+async fn the_env_url_and_token_ignore_the_config_tenant_and_resolve_it_from_the_token() {
+    let server = MockServer::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let store = task_cli::config::ConfigStore::from_home(home.path());
+    store
+        .save(&task_cli::config::TaskConfig {
+            api_url: Some("http://127.0.0.1:9".into()),
+            token: Some("file-token".into()),
+            tenant_id: Some("88888888-8888-4888-8888-888888888888".into()),
+        })
+        .unwrap();
+    Mock::given(method("GET"))
+        .and(path(ME))
+        .and(header("authorization", "Bearer env-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(token_identity_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(projects_path()))
+        .respond_with(project_list())
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let uri = server.uri();
+    let context = task_cli::Context::new(store, move |key| match key {
+        "TASK_API_URL" => Some(uri.clone()),
+        "TASK_TOKEN" => Some("env-token".into()),
+        _ => None,
+    });
+    let code = task_cli::run(parse(&["task", "projects", "list"]), &context)
+        .await
+        .unwrap();
+
+    assert_eq!(code, 0);
 }
 
 #[tokio::test]
