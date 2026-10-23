@@ -859,7 +859,7 @@ dependencies = [
  "bytes",
  "form_urlencoded",
  "futures-util",
- "http 1.4.1",
+ "http 1.5.0",
  "http-body",
  "http-body-util",
  "hyper",
@@ -891,7 +891,7 @@ checksum = "08c78f31d7b1291f7ee735c1c6780ccde7785daae9a9206026862dab7d8792d1"
 dependencies = [
  "bytes",
  "futures-core",
- "http 1.4.1",
+ "http 1.5.0",
  "http-body",
  "http-body-util",
  "mime",
@@ -913,7 +913,7 @@ dependencies = [
  "form_urlencoded",
  "futures-core",
  "futures-util",
- "http 1.4.1",
+ "http 1.5.0",
  "http-body",
  "http-body-util",
  "mime",
@@ -963,7 +963,7 @@ dependencies = [
  "forwarded-header-value",
  "futures",
  "hmac 0.13.0",
- "http 1.4.1",
+ "http 1.5.0",
  "http-body",
  "rand 0.10.3",
  "serde",
@@ -978,13 +978,44 @@ dependencies = [
 ]
 
 [[package]]
-name = "axum_session_redispool"
-version = "0.11.0"
+name = "axum_session"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37414d0bc42b9aef5b779bb0b185d8c35a60320631e816116d2ff437ffde7a22"
+checksum = "0f407ea025dd02197de6c16cadebb44cf9e0f91f59eeb128be9ae2198d040f49"
+dependencies = [
+ "aes-gcm 0.11.1",
+ "async-trait",
+ "axum",
+ "base64 0.23.1",
+ "bytes",
+ "cookie",
+ "dashmap",
+ "forwarded-header-value",
+ "futures",
+ "hmac 0.13.0",
+ "http 1.5.0",
+ "http-body",
+ "rand 0.10.3",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "axum_session_redispool"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b38e2462e0023715ec4ad3e0e5e6f75d9fa4d853d3b6282832c6a699e3c7561"
 dependencies = [
  "async-trait",
- "axum_session",
+ "axum_session 0.22.0",
  "redis",
  "redis_pool",
 ]
@@ -997,7 +1028,7 @@ dependencies = [
  "apalis-board",
  "auth-core",
  "axum",
- "axum_session",
+ "axum_session 0.20.1",
  "axum_session_redispool",
  "chrono",
  "common",
@@ -1188,7 +1219,7 @@ dependencies = [
  "futures-util",
  "hex",
  "home",
- "http 1.4.1",
+ "http 1.5.0",
  "http-body-util",
  "hyper",
  "hyper-named-pipe",
@@ -2115,7 +2146,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2525,7 +2556,7 @@ dependencies = [
  "fnv",
  "futures-core",
  "futures-sink",
- "http 1.4.1",
+ "http 1.5.0",
  "indexmap 2.14.2",
  "slab",
  "tokio",
@@ -2555,7 +2586,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "axum-valid",
- "axum_session",
+ "axum_session 0.20.1",
  "axum_session_redispool",
  "base64 0.23.1",
  "bytes",
@@ -2745,9 +2776,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "1.4.1"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8be7462df143984c4598a256ef469b251d7d7f9e271135073e78fc535414f3d0"
+checksum = "918d3568bebf352712bc2ef3d46a8bcf1a75b373be6539de198e9105cbbf9ce0"
 dependencies = [
  "bytes",
  "itoa",
@@ -2755,12 +2786,12 @@ dependencies = [
 
 [[package]]
 name = "http-body"
-version = "1.0.1"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1efedce1fb8e6913f23e0c92de8e62cd5b772a67e7b3946df930a62566c93184"
+checksum = "ca2a8f2913ee65f60facd6a5905613afaa448497a0230cc41ce022d93290bc2c"
 dependencies = [
  "bytes",
- "http 1.4.1",
+ "http 1.5.0",
 ]
 
 [[package]]
@@ -2771,7 +2802,7 @@ checksum = "23169fe34a5fbcdd3f3862e78fb9b6fccd5f02a6dc6f732547005d45631ce71c"
 dependencies = [
  "bytes",
  "futures-core",
- "http 1.4.1",
+ "http 1.5.0",
  "http-body",
  "pin-project-lite",
 ]
@@ -2814,7 +2845,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "h2",
- "http 1.4.1",
+ "http 1.5.0",
  "http-body",
  "httparse",
  "httpdate",
@@ -2846,7 +2877,7 @@ version = "0.27.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
 dependencies = [
- "http 1.4.1",
+ "http 1.5.0",
  "hyper",
  "hyper-util",
  "rustls",
@@ -2895,7 +2926,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-util",
- "http 1.4.1",
+ "http 1.5.0",
  "http-body",
  "httparse",
  "hyper",
@@ -3620,7 +3651,7 @@ dependencies = [
  "bytes",
  "encoding_rs",
  "futures-util",
- "http 1.4.1",
+ "http 1.5.0",
  "httparse",
  "memchr",
  "mime",
@@ -4603,7 +4634,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -4641,7 +4672,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
  "windows-sys 0.52.0",
 ]
@@ -4888,7 +4919,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http 1.4.1",
+ "http 1.5.0",
  "http-body",
  "http-body-util",
  "hyper",
@@ -4933,7 +4964,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http 1.4.1",
+ "http 1.5.0",
  "http-body",
  "http-body-util",
  "hyper",
@@ -5123,7 +5154,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5182,7 +5213,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5540,7 +5571,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a64a8a0a33239c65f95ff719fcb56655f398f4e4e74a01af8daca725cf7c2b5f"
 dependencies = [
  "axum",
- "http 1.4.1",
+ "http 1.5.0",
  "pin-project",
  "sentry-core",
  "tower-layer",
@@ -5792,7 +5823,7 @@ dependencies = [
  "auth-core-github",
  "auth-core-gitlab",
  "axum",
- "axum_session",
+ "axum_session 0.20.1",
  "axum_session_redispool",
  "base64 0.23.1",
  "bytes",
@@ -5983,7 +6014,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -6561,10 +6592,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6582,7 +6613,7 @@ dependencies = [
  "etcetera 0.11.0",
  "ferroid",
  "futures",
- "http 1.4.1",
+ "http 1.5.0",
  "itertools 0.14.0",
  "log",
  "memchr",
@@ -6722,9 +6753,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.54.0"
+version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0c168a474b95bfecfe908a65d4bdffc523144b649a74c09c286afb35d53e0bc"
+checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
 dependencies = [
  "bytes",
  "libc",
@@ -6856,7 +6887,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "h2",
- "http 1.4.1",
+ "http 1.5.0",
  "http-body",
  "http-body-util",
  "hyper",
@@ -6929,7 +6960,7 @@ dependencies = [
  "bitflags 2.13.2",
  "bytes",
  "futures-util",
- "http 1.4.1",
+ "http 1.5.0",
  "http-body",
  "pin-project-lite",
  "tower",
@@ -6946,7 +6977,7 @@ checksum = "08a05a66a4fdd61cbbe0a1d755ffe0ca6aba159dd4820936a0ff8a8278245b9c"
 dependencies = [
  "bitflags 2.13.2",
  "bytes",
- "http 1.4.1",
+ "http 1.5.0",
  "http-body",
  "http-body-util",
  "percent-encoding",
@@ -7188,7 +7219,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e994ba84b0bd1b1b0cf92878b7ef898a5c1760108fe7b6010327e274917a808c"
 dependencies = [
  "base64 0.22.1",
- "http 1.4.1",
+ "http 1.5.0",
  "httparse",
  "log",
 ]
@@ -7677,7 +7708,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7912,7 +7943,7 @@ dependencies = [
  "base64 0.22.1",
  "deadpool",
  "futures",
- "http 1.4.1",
+ "http 1.5.0",
  "http-body-util",
  "hyper",
  "hyper-util",
