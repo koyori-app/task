@@ -164,8 +164,9 @@ const canInline = useMediaQuery('(min-width: 1024px)');
 const overlayParentStack = ref<string[]>([]);
 // useMediaQuery はマウント前は false なので、URL から復元した選択もマウント後に開く（SSR と揃う）
 const overlayOpenSeqKey = computed(() => (canInline.value ? selectedTaskId.value : null));
-// 閉じるアニメーションの間も中身を残すため、最後に開いたタスクを持ち続ける
-// （閉じ切れば Dialog が中身ごと DOM から外す）
+// 閉じても最後に開いたタスクを持ち続け、オーバーレイを外さずに open だけを false にする
+// （v-if で外すと <dialog> が close() を通らず、開く前の要素へフォーカスが戻らない。
+// 閉じている間のペインは TaskDetailOverlay が v-if で外す）
 const overlayTaskSeqKey = ref<string | null>(null);
 watch(
   overlayOpenSeqKey,
