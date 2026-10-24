@@ -39,7 +39,7 @@ function mountTimeline(
 ) {
   const queryClient = new QueryClient();
   const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
-  // TooltipProvider は本番では SidebarProvider が用意している（山の内訳が Tooltip を使う）
+  // TooltipProvider は本番では +Layout が用意している（山の内訳が Tooltip を使う）
   const Host = defineComponent(
     () => () =>
       h(TooltipProvider, { delayDuration: 0 }, () =>

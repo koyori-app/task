@@ -1,17 +1,17 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import { createPinia, setActivePinia } from 'pinia';
-import { expect, fn, userEvent, within } from 'storybook/test';
-import { provide } from 'vue';
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
+import { provide, ref } from 'vue';
 
-import { PhGear } from '@phosphor-icons/vue';
+import { Button, Drawer } from '@koyori-app/ui-vue';
+import { PhGear, PhSidebarSimple } from '@phosphor-icons/vue';
 
 import AppHeader from '@/components/header/AppHeader.vue';
 import NavUser from '@/components/header/NavUser.vue';
 import TenantSwitcher from '@/components/header/TenantSwitcher.vue';
 import AppSidebar from '@/components/sidebar/AppSidebar.vue';
 import { useAuthStore } from '@/stores/auth';
-import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import type { Tenant } from '@/stores/tenant';
 import { useTenantStore } from '@/stores/tenant';
 
@@ -52,6 +52,32 @@ const layoutPageContext = {
   routeParams: { tenant: 'acme' },
 };
 
+// アイコン（絵文字）付きと無しを並べ、レールでの見え方（無しは頭文字）を確かめる
+const layoutProjects = [
+  {
+    id: '00000000-0000-4000-8000-000000000101',
+    tenant_id: acme.id,
+    name: 'Design Engineering',
+    description: '',
+    key: 'design',
+    is_personal: false,
+    icon_emoji: null,
+    icon_url: null,
+    personal_owner_id: null,
+  },
+  {
+    id: '00000000-0000-4000-8000-000000000102',
+    tenant_id: acme.id,
+    name: 'Inbox',
+    description: '',
+    key: 'inbox',
+    is_personal: true,
+    icon_emoji: '📥',
+    icon_url: null,
+    personal_owner_id: ownerId,
+  },
+];
+
 const jsonResponse = (data: unknown) =>
   new Response(JSON.stringify(data), {
     status: 200,
@@ -67,7 +93,7 @@ function mockLayoutFetch() {
     // 実際のパスは baseUrl（/api）付きなので、完全一致ではなく末尾で見る
     if (pathname.endsWith('/v1/auth/me')) return jsonResponse(authUser);
     if (pathname.endsWith('/v1/tenants')) return jsonResponse([acme, globex]);
-    if (pathname.endsWith(`/tenants/${acme.id}/projects`)) return jsonResponse([]);
+    if (pathname.endsWith(`/tenants/${acme.id}/projects`)) return jsonResponse(layoutProjects);
     return jsonResponse([]);
   });
 
@@ -208,34 +234,143 @@ export const NoTenants: Story = {
   beforeEach: mockMembers(),
 };
 
-/** ヘッダーとサイドバーの重なりを見るための並び。 */
+/**
+ * +Layout と同じ並び（全幅のヘッダーの下に、サイドバーと本文）を組む。
+ * +Layout は認証や devtools まで抱えるので、開閉の状態だけを同じ形で持たせる。
+ * `narrow` は狭い画面（サイドバーをモーダルの Drawer で出す）。
+ */
+const renderLayout = (narrow: boolean) => () => ({
+  components: { AppHeader, AppSidebar, Button, Drawer, PhSidebarSimple },
+  setup() {
+    const rail = ref(false);
+    const drawerOpen = ref(false);
+    function toggle() {
+      if (narrow) drawerOpen.value = !drawerOpen.value;
+      else rail.value = !rail.value;
+    }
+    // ストーリーの iframe を遷移させない（閉じる処理は先に委譲で走る）
+    function stayOnPage(event: MouseEvent) {
+      if ((event.target as Element).closest('a')) event.preventDefault();
+    }
+    return { narrow, rail, drawerOpen, toggle, stayOnPage };
+  },
+  template: `
+    <div class="flex h-svh flex-col overflow-hidden" @click="stayOnPage">
+      <AppHeader />
+      <div class="flex min-h-0 flex-1">
+        <Drawer
+          label="ナビゲーション"
+          placement="left"
+          :modal="narrow"
+          :open="drawerOpen"
+          @close="drawerOpen = false"
+        >
+          <AppSidebar
+            :rail="!narrow && rail"
+            @update:rail="rail = $event"
+            @close="drawerOpen = false"
+          />
+        </Drawer>
+        <main class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+          <header class="flex h-16 shrink-0 items-center gap-2 px-4">
+            <Button
+              variant="ghost"
+              ariaLabel="サイドバーを開閉"
+              :ariaExpanded="narrow ? drawerOpen : !rail"
+              ariaControls="app-sidebar"
+              @click="toggle"
+            >
+              <template #icon><PhSidebarSimple /></template>
+            </Button>
+          </header>
+          <div class="flex flex-col gap-4 p-4 pt-0 text-sm text-muted-foreground">
+            <p v-for="n in 40" :key="n">本文 {{ n }}</p>
+          </div>
+        </main>
+      </div>
+    </div>
+  `,
+});
+
+/**
+ * 広い画面。ヘッダーは全幅のまま、本文だけがスクロールする。
+ * 開閉ボタンと端のつまみは、どちらもアイコンだけの表示（rail）を切り替える。
+ */
 export const WithSidebar: Story = {
   decorators: [realLayoutDecorator()],
   beforeEach: mockLayoutFetch,
-  render: () => ({
-    components: { AppHeader, AppSidebar, SidebarInset, SidebarProvider },
-    template: `
-      <SidebarProvider class="min-h-0 h-svh flex-col">
-        <AppHeader />
-        <div class="flex min-h-0 w-full flex-1">
-          <AppSidebar desktop-top-offset="3rem" />
-          <SidebarInset>
-            <div class="flex-1 p-4 text-sm text-muted-foreground">本文</div>
-          </SidebarInset>
-        </div>
-      </SidebarProvider>
-    `,
-  }),
+  render: renderLayout(false),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole('banner')).toBeInTheDocument();
-
-    const desktopSidebar = canvasElement.querySelector<HTMLElement>(
-      '[data-slot="sidebar"] > [style]',
+    // 本文の見出し行も header なので、アプリのヘッダーは印で取る
+    const banner = canvasElement.querySelector<HTMLElement>('[data-slot="app-header"]')!;
+    await canvas.findByRole('navigation', { name: 'ナビゲーション' });
+    const main = canvas.getByRole('main');
+    // ヘッダーはサイドバー・本文の上に全幅で載り、スクロールするのは本文だけ
+    await expect(main.contains(banner)).toBe(false);
+    await expect(banner.getBoundingClientRect().width).toBe(
+      (main.parentElement as HTMLElement).getBoundingClientRect().width,
     );
-    if (!desktopSidebar) throw new Error('desktop Sidebar was not rendered');
-    await expect(desktopSidebar.style.top).toBe('3rem');
-    await expect(desktopSidebar.style.height).toContain('100svh');
-    await expect(desktopSidebar.style.height).toContain('3rem');
+    await expect(getComputedStyle(main).overflowY).toBe('auto');
+
+    const toggle = canvas.getByRole('button', { name: 'サイドバーを開閉' });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+    await userEvent.click(toggle);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(canvasElement.querySelector('#app-sidebar')).toHaveAttribute(
+      'data-sidebar-rail',
+      'true',
+    );
+    // 畳んでもリンクは名前ごと残る
+    await expect(canvas.getByRole('link', { name: 'My Tasks' })).toBeInTheDocument();
+
+    // 端のつまみでも戻せる
+    await userEvent.click(canvas.getByRole('button', { name: 'アイコンだけの表示' }));
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(canvasElement.querySelector('#app-sidebar')).toHaveAttribute(
+      'data-sidebar-rail',
+      'false',
+    );
+  },
+};
+
+/** 広い画面でアイコンだけの表示（rail）にした状態。 */
+export const WithSidebarRail: Story = {
+  decorators: [realLayoutDecorator()],
+  beforeEach: mockLayoutFetch,
+  render: renderLayout(false),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: 'サイドバーを開閉' }));
+    await expect(await canvas.findByText('📥')).toBeVisible();
+  },
+};
+
+/**
+ * 狭い画面。サイドバーはモーダルの Drawer で、開閉ボタンで開く。
+ * ナビのリンクを押したら閉じる。
+ */
+export const WithSidebarNarrow: Story = {
+  decorators: [realLayoutDecorator()],
+  beforeEach: mockLayoutFetch,
+  globals: { viewport: { value: 'mobile2', isRotated: false } },
+  render: renderLayout(true),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const toggle = canvas.getByRole('button', { name: 'サイドバーを開閉' });
+    // 閉じている Drawer の中身は読み上げにも出ない
+    await expect(canvas.queryByRole('navigation', { name: 'ナビゲーション' })).toBeNull();
+
+    await userEvent.click(toggle);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(await canvas.findByRole('navigation', { name: 'ナビゲーション' })).toBeVisible();
+
+    await userEvent.click(await canvas.findByRole('link', { name: 'My Tasks' }));
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    // 閉じるアニメーションのあいだは残るので、消えるのを待つ
+    await waitFor(() =>
+      expect(canvas.queryByRole('navigation', { name: 'ナビゲーション' })).toBeNull(),
+    );
   },
 };
