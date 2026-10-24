@@ -83,6 +83,15 @@ pub async fn search_tasks(
     }
 }
 
+// CreateTaskRequest の title と同じ上限。長い入力の trigram 比較コストも抑える
+fn normalize_similar_title(raw: &str) -> Result<&str, AppError> {
+    let title = raw.trim();
+    if title.is_empty() || title.chars().count() > 255 {
+        return Err(AppError::BadRequest);
+    }
+    Ok(title)
+}
+
 #[axum::debug_handler]
 #[utoipa::path(
     get,
@@ -110,11 +119,7 @@ pub async fn similar_tasks(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
 
-    let title = q.title.trim();
-    // CreateTaskRequest の title と同じ上限。長い入力の trigram 比較コストも抑える
-    if title.is_empty() || title.chars().count() > 255 {
-        return Err(AppError::BadRequest);
-    }
+    let title = normalize_similar_title(&q.title)?;
 
     let tasks = service::tasks::find_similar(
         &state.db,
@@ -1027,5 +1032,24 @@ mod tests {
         assert_eq!(find_match_char_range("OAuth", "oauth"), Some((0, 5)));
         assert_eq!(find_match_char_range("abc", "abc"), Some((0, 3)));
         assert_eq!(find_match_char_range("abc", "abd"), None);
+    }
+
+    #[test]
+    fn normalize_similar_title_trims_and_limits_by_char_count() {
+        assert!(matches!(
+            normalize_similar_title(" \t\n　"),
+            Err(AppError::BadRequest)
+        ));
+        assert!(matches!(
+            normalize_similar_title("  ログイン画面  "),
+            Ok("ログイン画面")
+        ));
+        // 上限はバイト数ではなく文字数
+        let max = "あ".repeat(255);
+        assert!(matches!(normalize_similar_title(&max), Ok(t) if t == max));
+        assert!(matches!(
+            normalize_similar_title(&"あ".repeat(256)),
+            Err(AppError::BadRequest)
+        ));
     }
 }
