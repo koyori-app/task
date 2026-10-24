@@ -52,7 +52,7 @@ type MockOptions = { fields?: unknown[]; rejectWrite?: number };
 let fetchSpy: ReturnType<typeof fn> | null = null;
 
 /**
- * reka-ui Select のポップアップ（floating-ui）が発する無害な
+ * ポップアップの配置計算が発する無害な
  * 「ResizeObserver loop completed with undelivered notifications」を
  * vitest browser mode が未処理エラー扱いして story を落とすため、
  * コールバックを rAF に遅延させて発生自体を抑止する（定番ワークアラウンド）。
