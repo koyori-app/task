@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { taskDetailHref } from '@/lib/task-display';
+import { taskDetailHref, taskSeqKey } from '@/lib/task-display';
 
 const props = defineProps<{
   tenantDisplayId: string;
@@ -31,6 +31,7 @@ function onPlainClick(event: MouseEvent) {
 <template>
   <a
     :href="taskDetailHref(tenantDisplayId, projectKey, seqId)"
+    :data-task-seq-key="taskSeqKey(projectKey, seqId)"
     class="truncate text-sm text-primary hover:underline"
     @click="onPlainClick"
   >

@@ -1682,3 +1682,43 @@ export const RowAccessibility: Story = {
     await expect(new URLSearchParams(window.location.search).get('selected')).toBe('ENG-1');
   },
 };
+
+export const SplitPaneResize: Story = {
+  name: '一覧と詳細の境界をキーボードで動かす',
+  beforeEach() {
+    localStorage.removeItem('tasks-split-view');
+    const restoreFetch = mockFetch();
+    return () => {
+      restoreFetch();
+      localStorage.removeItem('tasks-split-view');
+    };
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    const titleCell = await canvas.findByText('OAuth 対応を実装する');
+    // 詳細が閉じている間は分割しない
+    await expect(canvas.queryByRole('separator')).not.toBeInTheDocument();
+    const taskLink = titleCell.closest('a');
+    if (!(taskLink instanceof HTMLAnchorElement)) {
+      throw new Error('task link not found');
+    }
+    await userEvent.click(taskLink);
+
+    const handle = await canvas.findByRole('separator', { name: 'タスク一覧と詳細' });
+    await expect(handle).toHaveAttribute('aria-controls', 'task-list-pane');
+    // 幅を測るまでは操作を受けない
+    await waitFor(() => expect(handle).not.toHaveAttribute('aria-disabled'));
+    const valueNow = () => Number(handle.getAttribute('aria-valuenow'));
+    const start = valueNow();
+    await expect(start).toBeGreaterThan(0);
+
+    handle.focus();
+    await userEvent.keyboard('{ArrowRight}');
+    await waitFor(() => expect(valueNow()).toBe(start + 10));
+    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}');
+    await waitFor(() => expect(valueNow()).toBe(start - 10));
+    // 動かした幅は次に開いたときのために残す
+    await expect(localStorage.getItem('tasks-split-view')).toBe(String(start - 10));
+  },
+};
