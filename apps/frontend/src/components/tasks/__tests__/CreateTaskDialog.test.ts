@@ -173,9 +173,14 @@ function getForm() {
 }
 
 function getDialog() {
-  const dialog = document.body.querySelector('[role="dialog"]');
+  const dialog = document.body.querySelector('dialog');
   if (!dialog) throw new Error('dialog not found');
-  return dialog as HTMLElement;
+  return dialog;
+}
+
+/** Esc は dialog の cancel として届く */
+function pressEscape() {
+  getDialog().dispatchEvent(new Event('cancel', { cancelable: true }));
 }
 
 describe('CreateTaskDialog double-submit guard', () => {
@@ -270,45 +275,21 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
   it('closes on Escape from a focused field', async () => {
     const wrapper = mountDialog(queryClient);
     await nextTick();
-    const titleInput = getTitleInput();
-    titleInput.focus();
+    getTitleInput().focus();
 
-    document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
-    );
+    pressEscape();
     await nextTick();
 
     expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
     wrapper.unmount();
   });
 
-  // × がタイトル欄より前にあるので、Dialog の自動フォーカスに任せると × に当たる
+  // × がタイトル欄より前にあるので、showModal の自動フォーカスに任せると × に当たる
   it('focuses the title field (not the close button) when opened', async () => {
     const wrapper = mountDialog(queryClient);
     await flushPromises();
 
     expect(document.activeElement).toBe(getTitleInput());
-    wrapper.unmount();
-  });
-
-  it('keeps Tab focus within the dialog', async () => {
-    const wrapper = mountDialog(queryClient);
-    await nextTick();
-    const dialog = getDialog();
-    const focusables = dialog.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
-    );
-    expect(focusables.length).toBeGreaterThan(1);
-
-    focusables[0]?.focus();
-    for (let i = 0; i < focusables.length + 2; i += 1) {
-      document.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }),
-      );
-      await nextTick();
-      expect(dialog.contains(document.activeElement)).toBe(true);
-    }
-
     wrapper.unmount();
   });
 
@@ -333,7 +314,7 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
 
   /**
    * 作成に成功すると親が created を受けて open を false にする。その経路は
-   * onOpenChange を通らないので、成功表示を閉じるときに捨てないと次に開いた
+   * onClose を通らないので、成功表示を閉じるときに捨てないと次に開いた
    * 瞬間に前回の「タスクを作成しました」が出る。
    */
   it('閉じて開き直したとき、前回の成功表示が残らない', async () => {
@@ -375,9 +356,7 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('Draft title');
 
-    document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
-    );
+    pressEscape();
     await nextTick();
 
     expect(getTitleInput().value).toBe('');

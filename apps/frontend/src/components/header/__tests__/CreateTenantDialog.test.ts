@@ -19,7 +19,8 @@ const createdTenant = {
 };
 
 const input = (id: string) => document.querySelector<HTMLInputElement>(`#${id}`)!;
-const overlay = () => document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]')!;
+// 背景のクリックは dialog 要素そのものへの pointerdown として届く
+const backdrop = () => document.querySelector<HTMLDialogElement>('dialog')!;
 
 function updateInput(id: string, value: string) {
   const element = input(id);
@@ -135,8 +136,7 @@ describe('CreateTenantDialog', () => {
     {
       label: 'overlay close',
       close: async (wrapper: VueWrapper) => {
-        overlay().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-        overlay().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        backdrop().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
         await flushPromises();
         expect(wrapper.emitted('update:open')).toContainEqual([false]);
       },

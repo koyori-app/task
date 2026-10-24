@@ -4,15 +4,7 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { PhArrowClockwise, PhEnvelopeSimple, PhPaperPlaneTilt, PhX } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
 
-import { Button, Field } from '@koyori-app/ui-vue';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Button, Dialog, Field } from '@koyori-app/ui-vue';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
 import { userProfileHref } from '@/lib/task-display';
@@ -308,9 +300,9 @@ function openOrgEditor(member: TenantMemberResponse) {
   editingMember.value = member;
 }
 
-function onOrgEditorOpenChange(open: boolean) {
+function onOrgEditorClose() {
   // 保存の最中は閉じない（結果を見逃さないため）
-  if (!open && !busy.value) editingMember.value = null;
+  if (!busy.value) editingMember.value = null;
 }
 
 /**
@@ -611,15 +603,14 @@ async function onRemove(member: TenantMemberResponse) {
         </template>
       </section>
 
-      <Dialog v-if="editingMember" :open="true" @update:open="onOrgEditorOpenChange">
-        <DialogContent class="max-w-[440px]">
-          <DialogHeader>
-            <DialogTitle>{{ editingMember.user.username }}の所属</DialogTitle>
-            <DialogDescription>
-              このテナントでの部署・役職・チームです。空欄にすると未設定に戻ります。
-            </DialogDescription>
-          </DialogHeader>
-          <form class="flex flex-col gap-3" @submit.prevent="onSaveOrg">
+      <div class="contents [--koyori-dialog-width:440px]">
+        <Dialog
+          :open="editingMember !== null"
+          :title="editingMember ? `${editingMember.user.username}の所属` : ''"
+          description="このテナントでの部署・役職・チームです。空欄にすると未設定に戻ります。"
+          :on-close="onOrgEditorClose"
+        >
+          <form id="org-profile-form" class="flex flex-col gap-3" @submit.prevent="onSaveOrg">
             <!-- koyori の Input は maxlength を持たず、ここは送信前に長さを検証していないので素の input のまま -->
             <Field
               v-for="field in ORG_FIELDS"
@@ -636,19 +627,19 @@ async function onRemove(member: TenantMemberResponse) {
               />
             </Field>
             <p v-if="orgError" role="alert" class="text-sm text-destructive">{{ orgError }}</p>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="tertiary"
-                :disabled="busy"
-                label="キャンセル"
-                @click="onOrgEditorOpenChange(false)"
-              />
-              <Button type="submit" :disabled="busy" label="保存" />
-            </DialogFooter>
           </form>
-        </DialogContent>
-      </Dialog>
+          <template #actions>
+            <Button
+              type="button"
+              variant="tertiary"
+              :disabled="busy"
+              label="キャンセル"
+              @click="onOrgEditorClose"
+            />
+            <Button type="submit" form="org-profile-form" :disabled="busy" label="保存" />
+          </template>
+        </Dialog>
+      </div>
     </div>
   </div>
 </template>

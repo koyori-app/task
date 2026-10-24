@@ -402,7 +402,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
         スクロールする器はこの div。左右 2 列に割るのは lg 以上だけで、そこでは
         本文と履歴がそれぞれ内側でスクロールする（親は lg:overflow-hidden で止める）。
         ペイン表示と lg 未満は 1 列に積むので、ここが唯一のスクロール容器になる。
-        親（SplitterPanel / DialogContent）は overflow-hidden で高さを固定するため、
+        親（SplitterPanel / オーバーレイの Dialog）は高さを固定するため、
         ここに overflow を持たせないと、はみ出した分に到達できなくなる。
       -->
       <div

@@ -1,15 +1,7 @@
 <script setup lang="ts">
 import { useQueryClient } from '@tanstack/vue-query';
 import { ref, watch } from 'vue';
-import { Button } from '@koyori-app/ui-vue';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Button, Dialog } from '@koyori-app/ui-vue';
 import { apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
@@ -41,10 +33,10 @@ watch(
   },
 );
 
-function onOpenChange(open: boolean) {
+function onClose() {
   // 削除リクエスト進行中はダイアログを閉じない（結果の見逃し防止）
-  if (!open && deleteMutation.isPending.value) return;
-  emit('update:open', open);
+  if (deleteMutation.isPending.value) return;
+  emit('update:open', false);
 }
 
 async function confirmDelete() {
@@ -65,31 +57,28 @@ async function confirmDelete() {
 </script>
 
 <template>
-  <Dialog v-if="open" :open="true" @update:open="onOpenChange">
-    <DialogContent class="max-w-md" :show-close-button="false">
-      <DialogHeader>
-        <DialogTitle>プロジェクトを削除しますか？</DialogTitle>
-        <DialogDescription>
-          「{{ project?.name }}」を削除します。この操作は取り消せません。
-        </DialogDescription>
-      </DialogHeader>
-      <p v-if="deleteError" role="alert" class="text-sm text-destructive">{{ deleteError }}</p>
-      <DialogFooter>
-        <Button
-          type="button"
-          variant="tertiary"
-          :disabled="deleteMutation.isPending.value"
-          label="キャンセル"
-          @click="emit('update:open', false)"
-        />
-        <Button
-          type="button"
-          variant="danger"
-          :disabled="deleteMutation.isPending.value"
-          :label="deleteMutation.isPending.value ? '削除中…' : '削除する'"
-          @click="confirmDelete"
-        />
-      </DialogFooter>
-    </DialogContent>
+  <Dialog
+    :open="open"
+    title="プロジェクトを削除しますか？"
+    :description="`「${project?.name}」を削除します。この操作は取り消せません。`"
+    :on-close="onClose"
+  >
+    <p v-if="deleteError" role="alert" class="text-sm text-destructive">{{ deleteError }}</p>
+    <template #actions>
+      <Button
+        type="button"
+        variant="tertiary"
+        :disabled="deleteMutation.isPending.value"
+        label="キャンセル"
+        @click="emit('update:open', false)"
+      />
+      <Button
+        type="button"
+        variant="danger"
+        :disabled="deleteMutation.isPending.value"
+        :label="deleteMutation.isPending.value ? '削除中…' : '削除する'"
+        @click="confirmDelete"
+      />
+    </template>
   </Dialog>
 </template>
