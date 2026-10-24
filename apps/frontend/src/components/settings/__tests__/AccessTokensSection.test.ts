@@ -128,10 +128,10 @@ function clickBodyButton(label: string) {
 
 /** スコープのチェックボックスをラベルの scope 文字列で探してクリックする。 */
 function clickScopeCheckbox(scope: string) {
-  const label = [...document.body.querySelectorAll('label')].find((l) =>
-    l.textContent?.includes(scope),
+  const label = [...document.body.querySelectorAll('label')].find(
+    (l) => l.textContent?.trim() === scope,
   );
-  const checkbox = label?.querySelector<HTMLButtonElement>('[data-slot="checkbox"]');
+  const checkbox = label?.querySelector<HTMLInputElement>('input[type="checkbox"]');
   if (!checkbox) throw new Error(`scope checkbox "${scope}" not found`);
   checkbox.click();
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Switch } from '@/components/ui/switch';
+import { Switch } from '@koyori-app/ui-vue';
 import type { SettingTable } from '@/lib/local-settings';
 
 /**
@@ -31,13 +31,16 @@ const idOf = (key: string) => `setting-${key}`;
           {{ definition.description }}
         </p>
       </div>
+      <!-- 行の左に文言を出すので、スイッチ横のラベルは隠す（読み上げ名は label で保つ） -->
       <Switch
         :id="idOf(key)"
-        :model-value="props.values[key]"
+        :label="definition.name"
+        hideLabel
+        :checked="props.values[key]"
         :disabled="!props.ready"
-        :aria-describedby="`${idOf(key)}-description`"
+        :ariaDescribedBy="`${idOf(key)}-description`"
         class="mt-0.5"
-        @update:model-value="(value) => emit('change', key, value === true)"
+        :on-checked-change="(value: boolean) => emit('change', key, value)"
       />
     </li>
   </ul>
