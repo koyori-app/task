@@ -4,8 +4,8 @@ import { ref } from 'vue';
 
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
 import type { SelectableUser } from '@/components/users/types';
-import UserSelectorList from '@/components/users/UserSelectorList.vue';
-import { orderUsersForPicker } from '@/lib/user-search';
+import UserSelector from '@/components/users/UserSelector.vue';
+import { accessibleText } from '@/components/__tests__/picker';
 
 const NAMES = [
   'yupix',
@@ -55,16 +55,20 @@ function pickerStory(members: SelectableUser[], initial: string[], currentUserId
   };
 }
 
+/** 開いている一覧の項目の名（アバターの頭文字を除く）。 */
+const optionNames = (listbox: HTMLElement) =>
+  within(listbox).getAllByRole('option').map(accessibleText);
+
 const meta = {
   title: 'Components/UserSelector',
-  component: UserSelectorList,
-  args: { users: people(5), modelValue: [] },
-} satisfies Meta<typeof UserSelectorList>;
+  component: UserSelector,
+  args: { label: '担当者', users: people(5), modelValue: [] },
+} satisfies Meta<typeof UserSelector>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** 選んだ者が先、次に自分。開いている間は付け外ししても並びは動かない。 */
+/** 自分が先頭、その他は名の順。名の部分一致で絞り込み、複数は選んでも開いたまま。 */
 export const Default: Story = {
   render: () => pickerStory(people(12), ['user-2', 'user-1'], 'user-9'),
   play: async ({ canvasElement }) => {
@@ -75,120 +79,63 @@ export const Default: Story = {
     const trigger = canvas.getByRole('button', { name: /^担当者: / });
     await user.click(trigger);
     const listbox = await body.findByRole('listbox');
-    const names = () =>
-      within(listbox)
-        .getAllByRole('option')
-        .map((o) => o.getAttribute('data-user-id'));
-
-    // 選んだ者（名の順）、自分、その他
-    await expect(names().slice(0, 3)).toEqual(['user-2', 'user-1', 'user-9']);
-    const before = names();
+    await expect(optionNames(listbox).slice(0, 3)).toEqual(['frank（自分）', 'alice', 'bob']);
 
     // 絞り込んでキーボードで選ぶ
-    const input = body.getByRole('textbox', { name: 'メンバーを検索' });
-    await expect(input).toHaveFocus();
+    const input = body.getByRole('searchbox', { name: 'メンバーを検索' });
+    await waitFor(() => expect(input).toHaveFocus());
     await user.type(input, 'ali');
-    await expect(names()).toEqual(['user-4']);
+    await expect(optionNames(listbox)).toEqual(['alice']);
     await user.keyboard('{ArrowDown}{Enter}');
     await waitFor(() =>
-      expect(within(listbox).getByRole('option', { selected: true })).toHaveAttribute(
-        'data-user-id',
-        'user-4',
+      expect(within(listbox).getByRole('option', { name: 'alice' })).toHaveAttribute(
+        'aria-selected',
+        'true',
       ),
     );
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
 
-    // 絞り込みを消しても、選んだ者は上へ飛ばない（開いている間は並びを保つ）
-    await user.clear(input);
-    await expect(names()).toEqual(before);
-
-    // Esc で閉じて trigger へ戻り、開き直すと選んだ者が先に来る
+    // Esc で閉じて trigger へ戻る
     await user.keyboard('{Escape}');
-    await waitFor(() => expect(body.queryByRole('listbox')).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'false'));
     await expect(trigger).toHaveFocus();
-    await user.click(canvas.getByRole('button', { name: /^担当者: / }));
-    const reopened = await body.findByRole('listbox');
-    await expect(
-      within(reopened)
-        .getAllByRole('option')
-        .slice(0, 3)
-        .map((o) => o.getAttribute('data-user-id')),
-    ).toEqual(['user-4', 'user-2', 'user-1']);
+  },
+};
+
+/**
+ * 多くの人数。開くまでの時間と絞り込みの応えを測る。Picker は一覧を仮想化しないので、
+ * 全員が DOM に載る。測った値は console に `MEASURE` として出す（閾値は緩く置き、遅さの退行だけを捕まえる）。
+ */
+export const ManyUsers: Story = {
+  render: () => pickerStory(people(500), []),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const body = within(document.body);
+    const user = userEvent.setup();
+
+    const t0 = performance.now();
+    await user.click(canvas.getByRole('button', { name: '担当者' }));
+    const listbox = await body.findByRole('listbox');
+    await waitFor(() => expect(within(listbox).getAllByRole('option')).toHaveLength(500));
+    const openMs = performance.now() - t0;
+
+    const input = body.getByRole('searchbox', { name: 'メンバーを検索' });
+    const t1 = performance.now();
+    await user.type(input, 'member500');
+    await waitFor(() => expect(optionNames(listbox)).toEqual(['member500']));
+    const filterMs = performance.now() - t1;
+
+    console.log(
+      `MEASURE users=500 open=${openMs.toFixed(0)}ms filter(9 keys)=${filterMs.toFixed(0)}ms`,
+    );
+    await expect(openMs).toBeLessThan(3000);
     await user.keyboard('{Escape}');
   },
 };
 
 /**
- * 多くの人数。候補は仮想化して全員を描く（DOM に載るのは見えている項だけ）。開くまでの時間と
- * 絞り込みの応えを測り、キーボードの End で末尾の者まで一覧が送られて届くことを見る。
- * 測った値は console に `MEASURE` として出す（閾値は緩く置き、遅さの退行だけを捕まえる）。
- */
-async function measureManyUsers(canvasElement: HTMLElement, count: number) {
-  const canvas = within(canvasElement);
-  const body = within(document.body);
-  const user = userEvent.setup();
-  const members = people(count);
-  // 末尾は並べた後の最後の者（名の順。片仮名の名が後ろに来る）
-  const last = orderUsersForPicker(members, [], null).at(-1)!.id;
-  const deepest = `user-${count}`;
-
-  const t0 = performance.now();
-  await user.click(canvas.getByRole('button', { name: '担当者を割り当てる' }));
-  const listbox = await body.findByRole('listbox');
-  await waitFor(() => expect(within(listbox).getAllByRole('option').length).toBeGreaterThan(0));
-  const openMs = performance.now() - t0;
-
-  const input = body.getByRole('textbox', { name: 'メンバーを検索' });
-  const query = `member${String(count).padStart(3, '0')}`;
-  const t1 = performance.now();
-  await user.type(input, query);
-  await waitFor(() =>
-    expect(
-      within(listbox)
-        .getAllByRole('option')
-        .map((o) => o.getAttribute('data-user-id')),
-    ).toEqual([deepest]),
-  );
-  const filterMs = performance.now() - t1;
-
-  await user.clear(input);
-  await expect(
-    within(listbox).queryByRole('option', { name: members.at(-1)!.username }),
-  ).toBeNull();
-  await user.keyboard('{End}');
-  await waitFor(async () => {
-    const highlighted = listbox.querySelector('[data-highlighted]');
-    await expect(highlighted?.getAttribute('data-user-id')).toBe(last);
-    // 末尾の項が一覧の見える範囲に送られておる
-    const box = listbox.getBoundingClientRect();
-    const rect = highlighted!.getBoundingClientRect();
-    await expect(rect.top).toBeGreaterThanOrEqual(box.top - 1);
-    await expect(rect.bottom).toBeLessThanOrEqual(box.bottom + 1);
-    // 支援技術へも、照らしておる項が伝わっておる
-    await expect(input.getAttribute('aria-activedescendant')).toBe(highlighted!.id);
-  });
-  await expect(within(listbox).getAllByRole('option').length).toBeLessThan(60);
-
-  console.log(
-    `MEASURE users=${count} open=${openMs.toFixed(0)}ms filter(${query.length} keys)=${filterMs.toFixed(0)}ms per-key=${(filterMs / query.length).toFixed(1)}ms`,
-  );
-  await expect(openMs).toBeLessThan(3000);
-  await user.keyboard('{Escape}');
-}
-
-export const ManyUsers: Story = {
-  render: () => pickerStory(people(500), []),
-  play: async ({ canvasElement }) => measureManyUsers(canvasElement, 500),
-};
-
-export const HugeUsers: Story = {
-  render: () => pickerStory(people(5000), []),
-  play: async ({ canvasElement }) => measureManyUsers(canvasElement, 5000),
-};
-
-/**
  * 保存が遅れて反映される呼び手（担当者は一人ずつ POST して再取得し、保存中は選択を止める）。
- * 選んだ後に `modelValue` が遅れて変わっても、一覧は送った位置のまま動かず、後ろの候補を
- * 続けて選べる。
+ * 押した項はすぐ選ばれて見え、保存中も一覧は開いたまま、送った位置から動かない。
  */
 export const DeferredSave: Story = {
   render: () => {
@@ -226,29 +173,25 @@ export const DeferredSave: Story = {
     const body = within(document.body);
     const user = userEvent.setup();
 
-    await user.click(canvas.getByRole('button', { name: /^担当者: / }));
+    const trigger = canvas.getByRole('button', { name: /^担当者: / });
+    await user.click(trigger);
     const listbox = await body.findByRole('listbox');
-    await waitFor(() => expect(within(listbox).getAllByRole('option').length).toBeGreaterThan(0));
-
-    // 一覧を下へ送り、見えている後ろの候補を選ぶ
-    listbox.scrollTop = listbox.scrollHeight;
-    await waitFor(() =>
-      expect(within(listbox).queryByRole('option', { name: /member040/ })).toBeInTheDocument(),
-    );
-    const scrolled = listbox.scrollTop;
+    // 一覧か、それを包む窓のどちらかが送られる
+    const panel = listbox.closest<HTMLElement>('[role="group"]')!;
+    const scroller = [listbox, panel].find((el) => el.scrollHeight > el.clientHeight)!;
+    scroller.scrollTop = scroller.scrollHeight;
+    const scrolled = scroller.scrollTop;
     await expect(scrolled).toBeGreaterThan(0);
 
     for (const name of ['member040', 'member039']) {
-      const option = () => within(listbox).getByRole('option', { name: new RegExp(name) });
-      // 保存中は選べない。保存が終わるのを待ってから選ぶ
-      await waitFor(() => expect(option()).not.toHaveAttribute('data-disabled'));
+      const option = () => within(listbox).getByRole('option', { name });
       await user.click(option());
-      await waitFor(() => expect(option()).toHaveAttribute('aria-selected', 'true'));
-      // 保存の反映（80ms）と、その後に reka が送るかもしれない間を待つ
+      await expect(option()).toHaveAttribute('aria-selected', 'true');
+      // 保存の反映（80ms）を待つ。保存中も一覧は閉じない
       await new Promise((resolve) => setTimeout(resolve, 300));
       await expect(option()).toHaveAttribute('aria-selected', 'true');
-      // 反映の後も、一覧は先頭の選んだ者へ巻き戻らない
-      await expect(listbox.scrollTop).toBe(scrolled);
+      await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+      await expect(scroller.scrollTop).toBe(scrolled);
     }
     await user.keyboard('{Escape}');
   },
@@ -260,7 +203,7 @@ export const StackedSelection: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const trigger = canvas.getByRole('button', {
-      name: '担当者: yupix、sousuke、kousuke、alice、bob',
+      name: '担当者: alice、bob、kousuke、sousuke、yupix',
     });
     await expect(within(trigger).getByText('+2')).toBeInTheDocument();
   },
@@ -280,10 +223,9 @@ export const NarrowWidth: Story = {
     const body = within(document.body);
     const user = userEvent.setup();
 
-    await user.click(canvas.getByRole('button', { name: '担当者を割り当てる' }));
+    await user.click(canvas.getByRole('button', { name: '担当者' }));
     const listbox = await body.findByRole('listbox');
-    const content = listbox.closest('[data-slot="user-selector-content"]') as HTMLElement;
-    const rect = content.getBoundingClientRect();
+    const rect = listbox.closest('[role="group"]')!.getBoundingClientRect();
     await expect(rect.left).toBeGreaterThanOrEqual(0);
     await expect(rect.right).toBeLessThanOrEqual(window.innerWidth);
     for (const option of within(listbox).getAllByRole('option')) {
@@ -294,26 +236,32 @@ export const NarrowWidth: Story = {
   },
 };
 
-/** 取得中・失敗・0 人・一致なしの見え方（窓の中身を並べて見せる）。 */
+/** 取得中・失敗・0 人・選択ありの見え方。押すと窓の中身が開く。 */
 export const States: Story = {
   render: () => ({
-    components: { UserSelectorList },
+    components: { UserSelector },
     setup: () => ({ users: people(3), retry: () => {} }),
-    template: `<div class="grid w-[34rem] grid-cols-2 gap-3">
-      <div class="rounded-md border"><UserSelectorList :users="[]" :model-value="[]" :state="{ loading: true }" /></div>
-      <div class="rounded-md border"><UserSelectorList :users="[]" :model-value="[]" :state="{ error: true, onRetry: retry }" /></div>
-      <div class="rounded-md border"><UserSelectorList :users="[]" :model-value="[]" /></div>
-      <div class="rounded-md border"><UserSelectorList :users="users" :model-value="['user-2']" current-user-id="user-3" /></div>
+    template: `<div class="flex flex-wrap gap-3">
+      <UserSelector label="取得中" :users="[]" :model-value="[]" :state="{ loading: true }" />
+      <UserSelector label="失敗" :users="[]" :model-value="[]" :state="{ error: true, onRetry: retry }" />
+      <UserSelector label="0 人" :users="[]" :model-value="[]" empty-text="選べる利用者がいません" />
+      <UserSelector label="選択あり" :users="users" :model-value="['user-2']" current-user-id="user-3" />
     </div>`,
   }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    // 閉じた窓の中身も DOM にはあるので、字で確かめる
     await expect(canvas.getByText('読み込み中…')).toBeInTheDocument();
     await expect(canvas.getByText('候補を読み込めませんでした')).toBeInTheDocument();
     await expect(canvas.getByText('選べる利用者がいません')).toBeInTheDocument();
-    await expect(canvas.getByRole('option', { selected: true })).toHaveAttribute(
-      'data-user-id',
-      'user-2',
+
+    await user.click(canvas.getByRole('button', { name: /^選択あり/ }));
+    const listbox = await canvas.findByRole('listbox');
+    await expect(within(listbox).getByRole('option', { selected: true })).toHaveAccessibleName(
+      'sousuke',
     );
+    await expect(optionNames(listbox)[0]).toBe('kousuke（自分）');
+    await user.keyboard('{Escape}');
   },
 };

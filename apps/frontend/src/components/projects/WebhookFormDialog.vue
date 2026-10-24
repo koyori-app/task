@@ -4,16 +4,9 @@ import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhCopy } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button, Dialog, Field, Input } from '@koyori-app/ui-vue';
+import { Button, Dialog, Field, Input, Picker } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   WEBHOOK_EVENTS,
   WEBHOOK_FORMATS,
@@ -31,6 +24,8 @@ const WEBHOOKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/webhooks' a
 const WEBHOOK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/webhooks/{id}' as const;
 
 const SECRET_MIN_LENGTH = 16;
+
+const FORMAT_ITEMS = [...WEBHOOK_FORMATS];
 /** 一覧 API が送信先 URL の代わりに返す値 */
 const REDACTED_URL = '[redacted]';
 
@@ -237,29 +232,17 @@ function onClose() {
 
         <form.Field name="format">
           <template #default="{ field }">
-            <div class="flex flex-col gap-2">
-              <Label for="webhook-format">形式</Label>
-              <Select
-                :model-value="field.state.value"
-                @update:model-value="(v) => field.handleChange(v as WebhookFormat)"
-              >
-                <SelectTrigger id="webhook-format" class="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem
-                    v-for="format in WEBHOOK_FORMATS"
-                    :key="format.value"
-                    :value="format.value"
-                  >
-                    <span class="inline-flex items-center gap-2">
-                      <component :is="format.icon" class="size-4" aria-hidden="true" />
-                      {{ format.label }}
-                    </span>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <Field id="webhook-format" label="形式">
+              <Picker
+                label="形式"
+                :searchable="false"
+                :items="FORMAT_ITEMS"
+                :selected-values="[field.state.value]"
+                :on-selection-change="
+                  (values: string[]) => field.handleChange(values[0] as WebhookFormat)
+                "
+              />
+            </Field>
           </template>
         </form.Field>
 

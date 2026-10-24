@@ -2,17 +2,9 @@
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { ChevronDown } from '@lucide/vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import UserSelector from '@/components/users/UserSelector.vue';
-import { Button, Dialog } from '@koyori-app/ui-vue';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Button, Dialog, Field, Picker } from '@koyori-app/ui-vue';
 import { LIST_PROJECTS_PATH, apiClient, useMeQuery } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
@@ -29,10 +21,6 @@ const ROLES: { value: ProjectRole; label: string; description: string }[] = [
   { value: 'Member', label: 'メンバー', description: 'プロジェクトに参加して作業する' },
   { value: 'Viewer', label: '閲覧者', description: 'プロジェクトを閲覧する' },
 ];
-
-function roleLabel(role: ProjectRole) {
-  return ROLES.find((r) => r.value === role)?.label ?? role;
-}
 
 const props = defineProps<{
   tenantId: string;
@@ -262,52 +250,31 @@ async function confirmRemove() {
     <template v-else>
       <!-- 追加フォーム -->
       <div class="mb-5 flex flex-wrap items-end gap-2">
-        <div class="min-w-[220px] flex-1">
-          <label for="member-candidate" class="mb-1.5 block text-sm font-medium">
-            テナントメンバーから追加
-          </label>
+        <Field id="member-candidate" label="テナントメンバーから追加" class="min-w-[220px] flex-1">
           <UserSelector
+            label="テナントメンバーから追加"
             :users="candidateUsers"
             :model-value="selectedUserId ? [selectedUserId] : []"
             :multiple="false"
+            :state="{
+              loading: tenantMembersQuery.isPending.value,
+              error: tenantMembersQuery.isError.value,
+            }"
             search-label="テナントメンバーを検索"
             empty-text="追加できるテナントメンバーがいません。"
             no-match-text="一致するテナントメンバーがいません"
             @update:model-value="(ids) => (selectedUserId = ids[0] ?? null)"
-          >
-            <template #trigger="{ selectedUsers }">
-              <button
-                id="member-candidate"
-                type="button"
-                class="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <span
-                  class="min-w-0 flex-1 truncate text-left"
-                  :class="selectedUsers.length ? '' : 'text-muted-foreground'"
-                >
-                  {{ selectedUsers[0]?.username ?? '利用者を選択' }}
-                </span>
-                <ChevronDown class="size-4 shrink-0 opacity-50" aria-hidden="true" />
-              </button>
-            </template>
-          </UserSelector>
-        </div>
-        <div class="w-[140px]">
-          <label for="member-role" class="mb-1.5 block text-sm font-medium">ロール</label>
-          <Select
-            :model-value="selectedRole"
-            @update:model-value="(v) => (selectedRole = v as ProjectRole)"
-          >
-            <SelectTrigger id="member-role" class="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="role in ROLES" :key="role.value" :value="role.value">
-                {{ role.label }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+          />
+        </Field>
+        <Field id="member-role" label="ロール" class="w-[140px]">
+          <Picker
+            label="ロール"
+            :searchable="false"
+            :items="ROLES"
+            :selected-values="[selectedRole]"
+            :on-selection-change="(values: string[]) => (selectedRole = values[0] as ProjectRole)"
+          />
+        </Field>
         <Button
           type="button"
           :disabled="!selectedUserId || addMutation.isPending.value"
@@ -350,27 +317,19 @@ async function confirmRemove() {
           <span class="min-w-0 flex-1 truncate text-sm font-medium">
             {{ member.user.username }}
           </span>
-          <Select
-            :model-value="member.role"
+          <!-- 一覧の overflow-hidden に切られないよう、一覧はトップレイヤーに出す -->
+          <Picker
+            :label="`${member.user.username} のロール`"
+            class="w-[130px]"
+            top-layer
+            :searchable="false"
             :disabled="updateMutation.isPending.value"
-            @update:model-value="(v) => onRoleChange(member, v as ProjectRole)"
-          >
-            <SelectTrigger
-              class="w-[130px]"
-              :aria-label="`${member.user.username} のロール`"
-              size="sm"
-            >
-              <SelectValue>{{ roleLabel(member.role) }}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="role in ROLES" :key="role.value" :value="role.value">
-                <span class="flex flex-col">
-                  <span>{{ role.label }}</span>
-                  <span class="text-xs text-muted-foreground">{{ role.description }}</span>
-                </span>
-              </SelectItem>
-            </SelectContent>
-          </Select>
+            :items="ROLES"
+            :selected-values="[member.role]"
+            :on-selection-change="
+              (values: string[]) => onRoleChange(member, values[0] as ProjectRole)
+            "
+          />
           <Button
             type="button"
             variant="ghost"

@@ -197,7 +197,7 @@ export const AddFlow: Story = {
     await expect(page.findByLabelText('名前')).resolves.toBeInTheDocument();
 
     await user.type(page.getByLabelText('名前'), '完了予定日');
-    await user.click(page.getByRole('combobox', { name: '型' }));
+    await user.click(page.getByRole('button', { name: /^型/ }));
     await user.click(await page.findByRole('option', { name: '日付' }));
     // ポップアップの閉じアニメーション中は他要素が a11y ツリーから隠れるため findByRole で待つ
     await user.click(await page.findByRole('button', { name: '追加する' }));
@@ -221,7 +221,7 @@ export const AddSelectFlow: Story = {
     await canvas.findByRole('list', { name: 'カスタムフィールド一覧' });
     await user.click(canvas.getByRole('button', { name: 'フィールドを追加' }));
     await user.type(await page.findByLabelText('名前'), '重要度');
-    await user.click(page.getByRole('combobox', { name: '型' }));
+    await user.click(page.getByRole('button', { name: /^型/ }));
     await user.click(await page.findByRole('option', { name: '選択' }));
 
     // 選択肢が空のまま送信するとバリデーションエラーになる
@@ -263,7 +263,7 @@ export const EditFlow: Story = {
 
     const name = await page.findByLabelText('名前');
     await expect(name).toHaveValue('見積もり');
-    await expect(page.queryByRole('combobox', { name: '型' })).toBeNull();
+    await expect(page.queryByRole('button', { name: /^型/ })).toBeNull();
 
     await user.clear(name);
     await user.type(name, 'ポイント');

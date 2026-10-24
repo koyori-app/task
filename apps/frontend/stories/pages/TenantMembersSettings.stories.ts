@@ -217,11 +217,11 @@ export const Default: Story = {
 
     // オーナーはロールを変えられず、外せもしない
     await expect(canvas.getByText('オーナー')).toBeInTheDocument();
-    await expect(canvas.queryByLabelText('shadcnのロール')).not.toBeInTheDocument();
+    await expect(canvas.queryByRole('button', { name: /^shadcnのロール/ })).not.toBeInTheDocument();
     await expect(canvas.queryByLabelText('shadcnを外す')).not.toBeInTheDocument();
 
     // オーナー以外は操作できる
-    await expect(canvas.getByLabelText('rei.tanakaのロール')).toBeInTheDocument();
+    await expect(canvas.getByRole('button', { name: /^rei\.tanakaのロール/ })).toBeInTheDocument();
     await expect(canvas.getByLabelText('rei.tanakaを外す')).toBeInTheDocument();
   },
 };
@@ -234,7 +234,7 @@ export const ChangeRole: Story = {
     const page = within(canvasElement.ownerDocument.body);
     const user = userEvent.setup();
 
-    await user.click(await canvas.findByLabelText('daisuke.satoのロール'));
+    await user.click(await canvas.findByRole('button', { name: /^daisuke\.satoのロール/ }));
     await user.click(await page.findByRole('option', { name: /Viewer/ }));
 
     const put = (fetchSpy!.mock.calls as [Request | string][])
@@ -273,7 +273,7 @@ export const RoleChangeError: Story = {
     const page = within(canvasElement.ownerDocument.body);
     const user = userEvent.setup();
 
-    await user.click(await canvas.findByLabelText('rei.tanakaのロール'));
+    await user.click(await canvas.findByRole('button', { name: /^rei\.tanakaのロール/ }));
     await user.click(await page.findByRole('option', { name: /^Member/ }));
 
     await expect(canvas.findByText('ロールを変更できませんでした。')).resolves.toBeInTheDocument();
@@ -313,7 +313,9 @@ export const MemberReadOnly: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.findByLabelText('rei.tanakaのロール')).resolves.toBeDisabled();
+    await expect(
+      canvas.findByRole('button', { name: /^rei\.tanakaのロール/ }),
+    ).resolves.toBeDisabled();
     await expect(canvas.findByLabelText('rei.tanakaを外す')).resolves.toBeDisabled();
     // 招待は管理者だけの操作なので、欄ごと出さない
     await expect(canvas.queryByRole('button', { name: '招待' })).not.toBeInTheDocument();
