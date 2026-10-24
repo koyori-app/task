@@ -2,8 +2,7 @@
 import { CornerDownLeft, X } from '@lucide/vue';
 import { nextTick, onMounted, ref } from 'vue';
 
-import { Button, Spinner } from '@koyori-app/ui-vue';
-import { Input } from '@/components/ui/input';
+import { Button, Input, Spinner } from '@koyori-app/ui-vue';
 
 const props = withDefaults(
   defineProps<{
@@ -31,10 +30,15 @@ const emit = defineEmits<{
 const draft = ref('');
 const inputRef = ref<InstanceType<typeof Input> | null>(null);
 
+// koyori の Input の root は枠の span なので、中の input に当てる
+function focusInput() {
+  (inputRef.value?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
+}
+
 onMounted(async () => {
   if (!props.autofocus) return;
   await nextTick();
-  (inputRef.value?.$el as HTMLInputElement | undefined)?.focus();
+  focusInput();
 });
 
 async function submit() {
@@ -44,7 +48,7 @@ async function submit() {
   draft.value = '';
   emit('created');
   await nextTick();
-  (inputRef.value?.$el as HTMLInputElement | undefined)?.focus();
+  focusInput();
 }
 </script>
 
@@ -53,11 +57,12 @@ async function submit() {
     <div class="flex min-w-0 items-center gap-1.5">
       <Input
         ref="inputRef"
-        v-model="draft"
-        class="h-8 min-w-0 flex-1 text-sm"
+        class="min-w-0 flex-1"
         :aria-label="ariaLabel"
         placeholder="サブタスク名を入力"
         :disabled="pending || disabled"
+        :value="draft"
+        :on-value-change="(v: string) => (draft = v)"
         @keydown.enter.prevent="submit"
         @keydown.esc.prevent="!disabled && emit('cancel')"
       />

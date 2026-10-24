@@ -2,7 +2,7 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { computed, ref, watch } from 'vue';
 
-import { Button } from '@koyori-app/ui-vue';
+import { Button, Field, Input } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -11,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
 import { apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
@@ -79,17 +78,17 @@ async function confirmDelete() {
         </DialogDescription>
       </DialogHeader>
 
-      <div>
-        <Label for="delete-tenant-confirm" class="mb-1.5 text-[13px] font-medium">
-          確認のため <span class="font-mono">{{ tenant.display_id }}</span> と入力してください
-        </Label>
-        <input
-          id="delete-tenant-confirm"
-          v-model="confirmText"
+      <Field
+        id="delete-tenant-confirm"
+        :label="`確認のため ${tenant.display_id} と入力してください`"
+      >
+        <Input
+          class="[&_input]:font-mono"
           :placeholder="tenant.display_id"
-          class="h-9 w-full rounded-md border bg-background px-3 font-mono text-[13px] shadow-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          :value="confirmText"
+          :on-value-change="(v: string) => (confirmText = v)"
         />
-      </div>
+      </Field>
 
       <p v-if="deleteError" role="alert" class="text-sm text-destructive">{{ deleteError }}</p>
 

@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { PhArrowClockwise, PhEnvelopeSimple, PhPaperPlaneTilt, PhX } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
 
-import { Button } from '@koyori-app/ui-vue';
+import { Button, Field } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -13,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
 import { userProfileHref } from '@/lib/task-display';
@@ -621,10 +620,13 @@ async function onRemove(member: TenantMemberResponse) {
             </DialogDescription>
           </DialogHeader>
           <form class="flex flex-col gap-3" @submit.prevent="onSaveOrg">
-            <div v-for="field in ORG_FIELDS" :key="field.key">
-              <Label :for="`org-profile-${field.key}`" class="mb-1.5 text-[13px] font-medium">
-                {{ field.label }}
-              </Label>
+            <!-- koyori の Input は maxlength を持たず、ここは送信前に長さを検証していないので素の input のまま -->
+            <Field
+              v-for="field in ORG_FIELDS"
+              :id="`org-profile-${field.key}`"
+              :key="field.key"
+              :label="field.label"
+            >
               <input
                 :id="`org-profile-${field.key}`"
                 v-model="orgDraft[field.key]"
@@ -632,7 +634,7 @@ async function onRemove(member: TenantMemberResponse) {
                 :disabled="busy"
                 class="h-9 w-full rounded-md border bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
               />
-            </div>
+            </Field>
             <p v-if="orgError" role="alert" class="text-sm text-destructive">{{ orgError }}</p>
             <DialogFooter>
               <Button

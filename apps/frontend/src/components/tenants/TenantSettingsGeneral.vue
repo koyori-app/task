@@ -5,8 +5,7 @@ import { navigate } from 'vike/client/router';
 
 import TenantIconPicker from '@/components/tenants/TenantIconPicker.vue';
 import { DEFAULT_TENANT_EMOJI } from '@/components/tenants/tenant-icon';
-import { Button } from '@koyori-app/ui-vue';
-import { Input } from '@/components/ui/input';
+import { Button, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -15,7 +14,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import DeleteTenantDialog from '@/components/tenants/DeleteTenantDialog.vue';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
@@ -195,48 +193,36 @@ const ACCESS_FLAGS = [
                 :disabled="!canEditGeneral"
               />
             </div>
-            <div class="min-w-0 flex-1">
-              <Label for="tenant-name" class="mb-1.5 text-[13px] font-medium">テナント名</Label>
+            <Field id="tenant-name" label="テナント名" class="min-w-0 flex-1">
               <Input
-                id="tenant-name"
-                v-model="draft.name"
                 placeholder="Acme Inc"
-                class="h-9"
                 :disabled="!canEditGeneral"
+                :value="draft.name"
+                :on-value-change="(v: string) => (draft.name = v)"
               />
-            </div>
+            </Field>
           </div>
 
-          <div class="mb-4">
-            <Label for="tenant-slug" class="mb-1.5 text-[13px] font-medium">URL</Label>
-            <div class="flex h-9 items-center overflow-hidden rounded-md border shadow-sm">
-              <span
-                class="flex h-full shrink-0 items-center border-r bg-secondary px-2.5 font-mono text-[13px] text-muted-foreground"
-              >
-                task.app/
-              </span>
-              <input
-                id="tenant-slug"
-                :value="props.tenant.display_id"
-                disabled
-                class="h-full min-w-0 flex-1 bg-transparent px-2.5 font-mono text-[13px] text-muted-foreground outline-none"
-              />
-            </div>
-            <p class="mt-1.5 text-xs text-muted-foreground">
-              URL は作成時に決まり、あとから変えられません。
-            </p>
-          </div>
+          <Field
+            id="tenant-slug"
+            label="URL"
+            description="URL は作成時に決まり、あとから変えられません。"
+            class="mb-4"
+          >
+            <Input class="[&_input]:font-mono" :value="props.tenant.display_id" disabled>
+              <template #prefix><span class="font-mono">task.app/</span></template>
+            </Input>
+          </Field>
 
-          <div>
-            <Label for="tenant-description" class="mb-1.5 text-[13px] font-medium">説明</Label>
+          <Field id="tenant-description" label="説明">
             <Textarea
-              id="tenant-description"
-              v-model="draft.description"
-              rows="2"
+              :rows="2"
               placeholder="このテナントの用途"
               :disabled="!canEditGeneral"
+              :value="draft.description"
+              :on-value-change="(v: string) => (draft.description = v)"
             />
-          </div>
+          </Field>
         </section>
 
         <p

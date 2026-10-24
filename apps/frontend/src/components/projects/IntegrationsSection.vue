@@ -3,8 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhGithubLogo } from '@phosphor-icons/vue';
 import { OpenApiVueQueryError } from '@koyori-app/openapi-vue-query';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Button } from '@koyori-app/ui-vue';
-import { Input } from '@/components/ui/input';
+import { Button, Input } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -560,11 +559,12 @@ async function confirmDisconnect() {
         <template v-else-if="repositories.length">
           <!-- 数百リポジトリの org では全件を並べても選べないので、手元で絞り込む -->
           <Input
-            v-model="repositoryFilter"
             class="mt-3"
             type="search"
             aria-label="リポジトリを絞り込む"
             placeholder="owner/name で絞り込む"
+            :value="repositoryFilter"
+            :on-value-change="(v: string) => (repositoryFilter = v)"
           />
           <p
             v-if="!filteredRepositories.length"

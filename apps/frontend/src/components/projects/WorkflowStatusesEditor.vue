@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhArrowDown, PhArrowUp, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { computed, ref, watch } from 'vue';
 
-import { Button } from '@koyori-app/ui-vue';
+import { Button, Input } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -13,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import type { components } from '@/generated/api';
 import { apiClient } from '@/lib/api-vue-query';
 
@@ -283,23 +282,25 @@ async function moveStatus(index: number, offset: -1 | 1) {
         <li v-for="(status, index) in statuses" :key="status.id" class="rounded-lg border p-3">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div class="flex min-w-0 flex-1 items-center gap-2">
-              <Input
+              <!-- 色は koyori に無いので素の input -->
+              <input
                 :aria-label="`${status.name}の色`"
                 type="color"
-                class="h-9 w-12 shrink-0 cursor-pointer p-1"
-                :model-value="drafts[status.id]?.color ?? status.color"
-                @update:model-value="
-                  (value) => {
-                    if (drafts[status.id]) drafts[status.id]!.color = String(value);
+                class="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-input bg-transparent p-1"
+                :value="drafts[status.id]?.color ?? status.color"
+                @input="
+                  (event) => {
+                    if (drafts[status.id])
+                      drafts[status.id]!.color = (event.target as HTMLInputElement).value;
                   }
                 "
               />
               <Input
                 :aria-label="`${status.name}の名前`"
-                :model-value="drafts[status.id]?.name ?? status.name"
-                @update:model-value="
-                  (value) => {
-                    if (drafts[status.id]) drafts[status.id]!.name = String(value);
+                :value="drafts[status.id]?.name ?? status.name"
+                :on-value-change="
+                  (value: string) => {
+                    if (drafts[status.id]) drafts[status.id]!.name = value;
                   }
                 "
               />
@@ -379,13 +380,18 @@ async function moveStatus(index: number, offset: -1 | 1) {
       <form class="rounded-lg border border-dashed p-3" @submit.prevent="createStatus">
         <p class="mb-2 text-sm font-medium">ステータスを追加</p>
         <div class="flex flex-col gap-2 sm:flex-row">
-          <Input
+          <input
             v-model="newColor"
             aria-label="新しいステータスの色"
             type="color"
-            class="h-9 w-12 shrink-0 cursor-pointer p-1"
+            class="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-input bg-transparent p-1"
           />
-          <Input v-model="newName" aria-label="新しいステータス名" placeholder="例: レビュー中" />
+          <Input
+            aria-label="新しいステータス名"
+            placeholder="例: レビュー中"
+            :value="newName"
+            :on-value-change="(v: string) => (newName = v)"
+          />
           <Button type="submit" :disabled="isMutating" label="追加">
             <template #icon><PhPlus class="size-4" /></template>
           </Button>

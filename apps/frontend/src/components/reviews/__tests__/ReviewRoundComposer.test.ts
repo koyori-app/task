@@ -72,14 +72,14 @@ describe('ReviewRoundComposer', () => {
     await wrapper.find('#composer-head').setValue('60cdd77');
     await flushPromises();
 
-    expect(wrapper.get('[data-testid="head-sha-error"]').text()).toContain('40 桁');
+    expect(wrapper.get('#composer-head-error').text()).toContain('40 桁');
     expect(bodyButton('確定')?.disabled).toBe(true);
 
     // 40 桁を入れれば通る
     await wrapper.find('#composer-head').setValue(HEAD_SHA);
     await flushPromises();
 
-    expect(wrapper.find('[data-testid="head-sha-error"]').exists()).toBe(false);
+    expect(wrapper.get('#composer-head-error').text()).toBe('');
     expect(bodyButton('確定')?.disabled).toBe(false);
 
     bodyButton('確定')!.click();

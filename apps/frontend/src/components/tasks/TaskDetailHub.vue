@@ -34,7 +34,7 @@ import AvatarGroup from '@/components/AvatarGroup.vue';
 import type { EditableField } from '@/components/tasks/editable-field';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
 import TaskPropertyRow from '@/components/tasks/TaskPropertyRow.vue';
-import { Button } from '@koyori-app/ui-vue';
+import { Button, Input } from '@koyori-app/ui-vue';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -42,7 +42,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import { lookup, toPlainText } from '@/lib/comment-mention';
 import {
@@ -265,7 +264,8 @@ async function startEditing(field: EditableField) {
   }
   const element =
     control instanceof HTMLElement ? control : (control?.$el as HTMLElement | undefined);
-  element?.focus();
+  // koyori の Input の root は枠の span なので、中の input に当てる
+  (element?.querySelector('input') ?? element)?.focus();
 }
 
 function cancelEditing() {
@@ -489,14 +489,15 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
             <div>
               <div v-if="editingField === 'title'" class="flex flex-col gap-1">
                 <Input
-                  v-model="draftValue"
                   ref="editingControlRef"
                   data-editing="title"
-                  class="h-auto py-1 text-2xl font-semibold md:text-2xl"
+                  class="font-semibold [--koyori-font-size-sm:1.5rem]"
                   :disabled="isFieldUpdating('title')"
                   aria-label="タイトル"
+                  :value="draftValue"
+                  :on-value-change="(v: string) => (draftValue = v)"
+                  :on-blur="() => commitEditing('title')"
                   @keydown="onEditKeydown($event, 'title')"
-                  @blur="commitEditing('title')"
                 />
               </div>
               <button
@@ -604,20 +605,18 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 <TaskPropertyRow label="日付" :icon="CalendarDays">
                   <div class="flex flex-wrap items-center gap-1">
                     <div v-if="editingField === 'planned_start_on'" class="flex items-center gap-1">
+                      <!-- koyori の Input は date に max / aria-invalid を付けない。期限より後かは保存時に止め、下の alert で知らせる -->
                       <Input
-                        v-model="draftValue"
                         ref="editingControlRef"
                         data-editing="planned_start_on"
                         type="date"
-                        class="h-7 max-w-40"
-                        :max="
-                          task.soft_deadline ? isoToLocalDateInput(task.soft_deadline) : undefined
-                        "
+                        class="max-w-40"
                         :disabled="isFieldUpdating('planned_start_on')"
-                        :aria-invalid="plannedStartAfterSoft || undefined"
                         aria-label="開始予定日"
+                        :value="draftValue"
+                        :on-value-change="(v: string) => (draftValue = v)"
+                        :on-blur="() => commitEditing('planned_start_on')"
                         @keydown="onEditKeydown($event, 'planned_start_on')"
-                        @blur="commitEditing('planned_start_on')"
                       />
                       <Button
                         type="button"
@@ -648,15 +647,16 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
 
                     <div v-if="editingField === 'soft_deadline'" class="flex items-center gap-1">
                       <Input
-                        v-model="draftValue"
                         ref="editingControlRef"
                         data-editing="soft_deadline"
                         type="date"
-                        class="h-7 max-w-40"
+                        class="max-w-40"
                         :disabled="isFieldUpdating('soft_deadline')"
                         aria-label="ソフト期限"
+                        :value="draftValue"
+                        :on-value-change="(v: string) => (draftValue = v)"
+                        :on-blur="() => commitEditing('soft_deadline')"
                         @keydown="onEditKeydown($event, 'soft_deadline')"
-                        @blur="commitEditing('soft_deadline')"
                       />
                       <Button
                         type="button"
@@ -693,15 +693,16 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
 
                     <div v-if="editingField === 'hard_deadline'" class="flex items-center gap-1">
                       <Input
-                        v-model="draftValue"
                         ref="editingControlRef"
                         data-editing="hard_deadline"
                         type="date"
-                        class="h-7 max-w-40"
+                        class="max-w-40"
                         :disabled="isFieldUpdating('hard_deadline')"
                         aria-label="ハード期限"
+                        :value="draftValue"
+                        :on-value-change="(v: string) => (draftValue = v)"
+                        :on-blur="() => commitEditing('hard_deadline')"
                         @keydown="onEditKeydown($event, 'hard_deadline')"
-                        @blur="commitEditing('hard_deadline')"
                       />
                       <Button
                         type="button"
@@ -980,17 +981,18 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 <TaskPropertyRow label="進捗" :icon="Percent">
                   <Input
                     v-if="editingField === 'progress_pct'"
-                    v-model="draftValue"
                     ref="editingControlRef"
                     data-editing="progress_pct"
                     type="number"
-                    min="0"
-                    max="100"
-                    class="h-7 max-w-24"
+                    :min="0"
+                    :max="100"
+                    class="max-w-24"
                     :disabled="isFieldUpdating('progress_pct')"
                     aria-label="進捗率"
+                    :value="draftValue"
+                    :on-value-change="(v: string) => (draftValue = v)"
+                    :on-blur="() => commitEditing('progress_pct')"
                     @keydown="onEditKeydown($event, 'progress_pct')"
-                    @blur="commitEditing('progress_pct')"
                   />
                   <button
                     v-else

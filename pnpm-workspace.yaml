@@ -15,7 +15,7 @@ allowBuilds:
   unrs-resolver: true
   vue-demi: true
 catalog:
-  '@koyori-app/ui-vue': 0.1.0
+  '@koyori-app/ui-vue': 0.2.0
   '@lezer/highlight': 1.2.5
   '@tanstack/vue-virtual': 3.13.38
   remark-breaks: 4.0.0

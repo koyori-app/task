@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { PhTrash } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@koyori-app/ui-vue';
-import { Input } from '@/components/ui/input';
+import { Button, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import {
   Select,
   SelectContent,
@@ -10,7 +9,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { useCreateReviewMutation } from '@/lib/api-vue-query';
 import { SEVERITIES, SEVERITY_LABELS, type FindingSeverity } from '@/lib/review-findings';
 
@@ -125,32 +123,28 @@ async function commit() {
       <p class="text-muted-foreground text-xs">下書き · 確定するまでサーバーには作られません</p>
     </div>
 
-    <div class="flex flex-col gap-1.5">
-      <label for="composer-head" class="text-sm font-medium">レビュー対象の head SHA</label>
+    <Field
+      id="composer-head"
+      label="レビュー対象の head SHA"
+      description="40 桁の commit SHA（git rev-parse HEAD）"
+      :error="headShaError ?? ''"
+    >
       <Input
-        id="composer-head"
-        v-model="headSha"
         placeholder="60cdd7795f94fa4e4148ce996c2efb4c363e3f5e"
-        class="font-mono"
-        :aria-invalid="headShaError !== null"
+        class="[&_input]:font-mono"
+        :value="headSha"
+        :on-value-change="(v: string) => (headSha = v)"
       />
-      <p v-if="headShaError" class="text-destructive text-xs" data-testid="head-sha-error">
-        {{ headShaError }}
-      </p>
-      <p v-else class="text-muted-foreground text-xs">
-        40 桁の commit SHA（<code>git rev-parse HEAD</code>）
-      </p>
-    </div>
+    </Field>
 
-    <div class="flex flex-col gap-1.5">
-      <label for="composer-summary" class="text-sm font-medium">総評</label>
+    <Field id="composer-summary" label="総評">
       <Textarea
-        id="composer-summary"
-        v-model="summary"
-        rows="2"
+        :rows="2"
         placeholder="具体的な不具合は見つからなかった"
+        :value="summary"
+        :on-value-change="(v: string) => (summary = v)"
       />
-    </div>
+    </Field>
 
     <!-- 下書きに積んだ指摘 -->
     <div v-if="staged.length > 0" class="flex flex-col gap-2">
@@ -201,24 +195,47 @@ async function commit() {
         </div>
         <div class="min-w-[200px] flex-1">
           <label for="draft-title" class="mb-1.5 block text-xs font-medium">タイトル</label>
-          <Input id="draft-title" v-model="draft.title" placeholder="1 行の要約" />
+          <Input
+            id="draft-title"
+            placeholder="1 行の要約"
+            :value="draft.title"
+            :on-value-change="(v: string) => (draft.title = v)"
+          />
         </div>
       </div>
 
       <div class="flex flex-wrap gap-2">
         <div class="min-w-[200px] flex-1">
           <label for="draft-file" class="mb-1.5 block text-xs font-medium">ファイル（任意）</label>
-          <Input id="draft-file" v-model="draft.file" placeholder="src/App.vue" class="font-mono" />
+          <Input
+            id="draft-file"
+            placeholder="src/App.vue"
+            class="[&_input]:font-mono"
+            :value="draft.file"
+            :on-value-change="(v: string) => (draft.file = v)"
+          />
         </div>
         <div class="w-[110px]">
           <label for="draft-line" class="mb-1.5 block text-xs font-medium">行（任意）</label>
-          <Input id="draft-line" v-model="draft.line" inputmode="numeric" placeholder="42" />
+          <Input
+            id="draft-line"
+            input-mode="numeric"
+            placeholder="42"
+            :value="draft.line"
+            :on-value-change="(v: string) => (draft.line = v)"
+          />
         </div>
       </div>
 
       <div>
         <label for="draft-body" class="mb-1.5 block text-xs font-medium">本文</label>
-        <Textarea id="draft-body" v-model="draft.body" rows="3" placeholder="再現条件と根拠" />
+        <Textarea
+          id="draft-body"
+          :rows="3"
+          placeholder="再現条件と根拠"
+          :value="draft.body"
+          :on-value-change="(v: string) => (draft.body = v)"
+        />
       </div>
 
       <p v-if="draftError" role="alert" class="text-destructive text-sm">{{ draftError }}</p>

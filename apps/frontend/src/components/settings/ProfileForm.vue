@@ -3,11 +3,8 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { useForm } from '@tanstack/vue-form';
 import { computed, ref } from 'vue';
 import UserAvatar from '@/components/UserAvatar.vue';
-import { Button } from '@koyori-app/ui-vue';
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Button, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { meQueryOptions, useUpdateProfileMutation } from '@/lib/api-vue-query';
 import { codePointLength } from '@/lib/code-points';
 import { useAuthStore } from '@/stores/auth';
@@ -159,7 +156,7 @@ async function uploadAvatar(event: Event) {
     @submit="() => form.handleSubmit()"
     @input="resetSubmitFeedback"
   >
-    <FieldGroup>
+    <div class="flex flex-col gap-6">
       <form.Field
         name="avatarUrl"
         :validators="{
@@ -170,8 +167,12 @@ async function uploadAvatar(event: Event) {
         }"
       >
         <template #default="{ field }">
-          <Field>
-            <FieldLabel :for="field.name">アバター</FieldLabel>
+          <Field
+            :id="field.name"
+            label="アバター"
+            description="画像（PNG・JPEG・GIF・WebP、2 MiB まで）をアップロードするか、画像の URL を指定します。"
+            :error="field.state.meta.errors.length ? field.state.meta.errors[0] : ''"
+          >
             <div class="flex items-center gap-4">
               <UserAvatar
                 :user="{
@@ -183,14 +184,13 @@ async function uploadAvatar(event: Event) {
               />
               <div class="flex flex-1 flex-col gap-2">
                 <Input
-                  :id="field.name"
                   :name="field.name"
                   type="url"
-                  inputmode="url"
+                  input-mode="url"
                   placeholder="https://example.com/avatar.png"
-                  :model-value="field.state.value"
-                  @blur="field.handleBlur"
-                  @update:model-value="(v) => field.handleChange(String(v))"
+                  :value="field.state.value"
+                  :on-value-change="field.handleChange"
+                  :on-blur="field.handleBlur"
                 />
                 <div class="flex gap-2">
                   <input
@@ -221,13 +221,6 @@ async function uploadAvatar(event: Event) {
                 </div>
               </div>
             </div>
-            <FieldDescription>
-              画像（PNG・JPEG・GIF・WebP、2 MiB まで）をアップロードするか、画像の URL
-              を指定します。
-            </FieldDescription>
-            <FieldError class="min-h-[1.25rem]">
-              {{ field.state.meta.errors.length ? field.state.meta.errors[0] : '' }}
-            </FieldError>
           </Field>
         </template>
       </form.Field>
@@ -240,19 +233,18 @@ async function uploadAvatar(event: Event) {
         }"
       >
         <template #default="{ field }">
-          <Field>
-            <FieldLabel :for="field.name">ユーザー名</FieldLabel>
+          <Field
+            :id="field.name"
+            label="ユーザー名"
+            :error="field.state.meta.errors.length ? field.state.meta.errors[0] : ''"
+          >
             <Input
-              :id="field.name"
               :name="field.name"
               autocomplete="username"
-              :model-value="field.state.value"
-              @blur="field.handleBlur"
-              @update:model-value="(v) => field.handleChange(String(v))"
+              :value="field.state.value"
+              :on-value-change="field.handleChange"
+              :on-blur="field.handleBlur"
             />
-            <FieldError class="min-h-[1.25rem]">
-              {{ field.state.meta.errors.length ? field.state.meta.errors[0] : '' }}
-            </FieldError>
           </Field>
         </template>
       </form.Field>
@@ -265,19 +257,18 @@ async function uploadAvatar(event: Event) {
         }"
       >
         <template #default="{ field }">
-          <Field>
-            <FieldLabel :for="field.name">自己紹介</FieldLabel>
+          <Field
+            :id="field.name"
+            label="自己紹介"
+            :error="field.state.meta.errors.length ? field.state.meta.errors[0] : ''"
+          >
             <Textarea
-              :id="field.name"
               :name="field.name"
-              rows="4"
-              :model-value="field.state.value"
-              @blur="field.handleBlur"
-              @update:model-value="(v) => field.handleChange(String(v))"
+              :rows="4"
+              :value="field.state.value"
+              :on-value-change="field.handleChange"
+              :on-blur="field.handleBlur"
             />
-            <FieldError class="min-h-[1.25rem]">
-              {{ field.state.meta.errors.length ? field.state.meta.errors[0] : '' }}
-            </FieldError>
           </Field>
         </template>
       </form.Field>
@@ -287,17 +278,15 @@ async function uploadAvatar(event: Event) {
 
       <form.Subscribe>
         <template #default="{ canSubmit, isSubmitting }">
-          <Field>
-            <div>
-              <Button
-                type="submit"
-                :disabled="!canSubmit || isSubmitting || !isHydrated"
-                :label="isSubmitting ? '保存中…' : '変更を保存'"
-              />
-            </div>
-          </Field>
+          <div>
+            <Button
+              type="submit"
+              :disabled="!canSubmit || isSubmitting || !isHydrated"
+              :label="isSubmitting ? '保存中…' : '変更を保存'"
+            />
+          </div>
         </template>
       </form.Subscribe>
-    </FieldGroup>
+    </div>
   </HydrationSafeForm>
 </template>

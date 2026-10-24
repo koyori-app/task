@@ -2,7 +2,7 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhCaretDown, PhCopy, PhKey, PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@koyori-app/ui-vue';
+import { Button, Field, Input } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -18,9 +18,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -259,25 +258,31 @@ async function onRevokeConfirm() {
     <!-- 発行フォーム -->
     <div v-if="isFormOpen" class="rounded-lg border p-4">
       <HydrationSafeForm v-slot="{ isHydrated }" @submit="onSubmit">
-        <FieldGroup>
+        <div class="flex flex-col gap-6">
           <h3 class="text-base font-semibold">新しいトークンを発行</h3>
 
-          <Field>
-            <FieldLabel for="token-name">トークン名</FieldLabel>
+          <Field
+            id="token-name"
+            label="トークン名"
+            description="このトークンの用途がわかる名前を付けます。"
+            :error="nameError ?? ''"
+          >
             <Input
-              id="token-name"
-              v-model="tokenName"
               placeholder="例: CI デプロイ"
-              @blur="validateName()"
-              @input="nameError = null"
+              :value="tokenName"
+              :on-value-change="
+                (v: string) => {
+                  tokenName = v;
+                  nameError = null;
+                }
+              "
+              :on-blur="validateName"
             />
-            <FieldDescription>このトークンの用途がわかる名前を付けます。</FieldDescription>
-            <FieldError class="min-h-[1.25rem]">{{ nameError ?? '' }}</FieldError>
           </Field>
 
           <!-- 候補が一つでも出す。出さぬと、どのテナントに縛られるかが発行後まで見えぬ。 -->
-          <Field v-if="issuableTenants.length > 0">
-            <FieldLabel for="token-tenant">テナント</FieldLabel>
+          <div v-if="issuableTenants.length > 0" class="flex flex-col gap-2">
+            <Label for="token-tenant">テナント</Label>
             <Select
               :model-value="formTenantId ?? undefined"
               @update:model-value="(v) => (selectedTenantId = v == null ? null : String(v))"
@@ -291,11 +296,11 @@ async function onRevokeConfirm() {
                 </SelectItem>
               </SelectContent>
             </Select>
-            <FieldDescription>トークンはこのテナントの中でだけ使えます。</FieldDescription>
-          </Field>
+            <p class="text-muted-foreground text-sm">トークンはこのテナントの中でだけ使えます。</p>
+          </div>
 
-          <Field>
-            <FieldLabel>有効期限</FieldLabel>
+          <div class="flex flex-col gap-2">
+            <p class="text-sm font-medium">有効期限</p>
             <div class="flex flex-wrap gap-2">
               <Button
                 v-for="preset in EXPIRATION_PRESETS"
@@ -307,10 +312,10 @@ async function onRevokeConfirm() {
                 @click="expiration = preset.key"
               />
             </div>
-          </Field>
+          </div>
 
-          <Field>
-            <FieldLabel>スコープ</FieldLabel>
+          <div class="flex flex-col gap-2">
+            <Label>スコープ</Label>
             <div class="flex flex-col gap-3">
               <label
                 v-for="entry in SCOPE_CATALOG"
@@ -329,22 +334,22 @@ async function onRevokeConfirm() {
                 </span>
               </label>
             </div>
-            <FieldError class="min-h-[1.25rem]">{{ scopesError ?? '' }}</FieldError>
-          </Field>
+            <p role="alert" class="min-h-[1.25rem] text-sm text-(--koyori-color-danger)">
+              {{ scopesError ?? '' }}
+            </p>
+          </div>
 
           <p v-if="submitError" class="text-destructive text-sm">{{ submitError }}</p>
 
-          <Field>
-            <div class="flex gap-2">
-              <Button
-                type="submit"
-                :disabled="!isHydrated || createToken.isPending.value"
-                :label="createToken.isPending.value ? '発行中…' : 'トークンを発行'"
-              />
-              <Button type="button" variant="tertiary" label="キャンセル" @click="resetForm" />
-            </div>
-          </Field>
-        </FieldGroup>
+          <div class="flex gap-2">
+            <Button
+              type="submit"
+              :disabled="!isHydrated || createToken.isPending.value"
+              :label="createToken.isPending.value ? '発行中…' : 'トークンを発行'"
+            />
+            <Button type="button" variant="tertiary" label="キャンセル" @click="resetForm" />
+          </div>
+        </div>
       </HydrationSafeForm>
     </div>
 

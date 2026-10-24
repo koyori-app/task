@@ -4,7 +4,7 @@ import { type } from 'arktype';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@koyori-app/ui-vue';
+import { Button, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -13,8 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Field, FieldError, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -22,7 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import {
   CUSTOM_FIELD_TYPES,
   customFieldTypeMeta,
@@ -277,18 +275,21 @@ async function confirmDelete() {
         <form class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
           <form.Field name="name">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">名前</FieldLabel>
+              <Field
+                :id="field.name"
+                label="名前"
+                :error="
+                  field.state.meta.isTouched && field.state.meta.errors.length
+                    ? '名前は 1〜100 文字で入力してください'
+                    : ''
+                "
+              >
                 <Input
-                  :id="field.name"
                   placeholder="例: 見積もり"
-                  :model-value="field.state.value"
-                  @blur="field.handleBlur"
-                  @update:model-value="(v) => field.handleChange(String(v))"
+                  :value="field.state.value"
+                  :on-value-change="field.handleChange"
+                  :on-blur="field.handleBlur"
                 />
-                <FieldError v-if="field.state.meta.isTouched && field.state.meta.errors.length"
-                  >名前は 1〜100 文字で入力してください</FieldError
-                >
               </Field>
             </template>
           </form.Field>
@@ -296,8 +297,8 @@ async function confirmDelete() {
           <!-- 型は作成時のみ選択可（PATCH で変更できないため編集時は非表示） -->
           <form.Field v-if="!editingField" name="fieldType">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel for="custom-field-type">型</FieldLabel>
+              <div class="flex flex-col gap-2">
+                <Label for="custom-field-type">型</Label>
                 <Select
                   :model-value="field.state.value"
                   @update:model-value="(v) => field.handleChange(v as CustomFieldType)"
@@ -311,21 +312,19 @@ async function confirmDelete() {
                     </SelectItem>
                   </SelectContent>
                 </Select>
-              </Field>
+              </div>
             </template>
           </form.Field>
 
           <!-- 選択肢は select 型なら作成・編集とも表示・更新できる -->
           <form.Field v-if="formFieldType === 'select'" name="optionsText">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">選択肢（1行に1つ）</FieldLabel>
+              <Field :id="field.name" label="選択肢（1行に1つ）">
                 <Textarea
-                  :id="field.name"
-                  rows="4"
+                  :rows="4"
                   placeholder="高&#10;中&#10;低"
-                  :model-value="field.state.value"
-                  @update:model-value="(v) => field.handleChange(String(v))"
+                  :value="field.state.value"
+                  :on-value-change="field.handleChange"
                 />
               </Field>
             </template>

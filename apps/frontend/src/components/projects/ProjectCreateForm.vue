@@ -3,11 +3,8 @@ import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { navigate } from 'vike/client/router';
-import { computed, ref } from 'vue';
-import { Button } from '@koyori-app/ui-vue';
-import { Field, FieldError, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { computed, onMounted, ref } from 'vue';
+import { Button, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import EmojiIconPicker from '@/components/projects/EmojiIconPicker.vue';
 import {
   DEFAULT_STATUS_PREVIEW,
@@ -30,6 +27,12 @@ const queryClient = useQueryClient();
 const submitError = ref<string | null>(null);
 const keyEdited = ref(false);
 const icon = ref<string | null>(null);
+const nameInputRef = ref<InstanceType<typeof Input> | null>(null);
+
+// koyori の Input は autofocus を root の span に落とすので、中の input に当てる
+onMounted(() => {
+  (nameInputRef.value?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
+});
 
 const nonBlankName = type('string').narrow((name) => name.trim().length >= 1);
 
@@ -95,26 +98,28 @@ function onCancel() {
           <div class="min-w-0 flex-1">
             <form.Field name="name">
               <template #default="{ field }">
-                <Field>
-                  <FieldLabel :for="field.name">名前</FieldLabel>
+                <Field
+                  :id="field.name"
+                  label="名前"
+                  description="サイドバーとパンくずに表示されます。"
+                  :error="
+                    field.state.meta.isTouched && field.state.meta.errors.length
+                      ? '名前は必須です'
+                      : ''
+                  "
+                >
                   <Input
-                    :id="field.name"
-                    autofocus
+                    ref="nameInputRef"
                     placeholder="プロジェクト名"
-                    :model-value="field.state.value"
-                    @blur="field.handleBlur"
-                    @update:model-value="
-                      (v) => {
-                        const name = String(v);
+                    :value="field.state.value"
+                    :on-blur="field.handleBlur"
+                    :on-value-change="
+                      (name: string) => {
                         field.handleChange(name);
                         if (!keyEdited) form.setFieldValue('key', suggestKey(name));
                       }
                     "
                   />
-                  <p class="text-xs text-muted-foreground">サイドバーとパンくずに表示されます。</p>
-                  <FieldError v-if="field.state.meta.isTouched && field.state.meta.errors.length"
-                    >名前は必須です</FieldError
-                  >
                 </Field>
               </template>
             </form.Field>
@@ -124,31 +129,29 @@ function onCancel() {
         <div class="mb-5 max-w-[220px]">
           <form.Field name="key">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">キー</FieldLabel>
+              <!-- 文字数は送信時に PROJECT_KEY_PATTERN で検証する -->
+              <Field
+                :id="field.name"
+                label="キー"
+                :description="`タスク番号の接頭辞（例: ${(field.state.value || 'ABC') + '-1'}）。空欄なら自動生成`"
+                :error="
+                  field.state.meta.isTouched && field.state.meta.errors.length
+                    ? 'キーは 2〜10 文字で、先頭は大文字英字、残りは大文字英字または数字です'
+                    : ''
+                "
+              >
                 <Input
-                  :id="field.name"
                   placeholder="ABC"
-                  maxlength="10"
-                  class="font-mono uppercase"
-                  :model-value="field.state.value"
-                  aria-describedby="project-key-help"
-                  @blur="field.handleBlur"
-                  @update:model-value="
-                    (v) => {
+                  class="[&_input]:font-mono [&_input]:uppercase"
+                  :value="field.state.value"
+                  :on-blur="field.handleBlur"
+                  :on-value-change="
+                    (v: string) => {
                       keyEdited = true;
-                      field.handleChange(String(v).toUpperCase());
+                      field.handleChange(v.toUpperCase());
                     }
                   "
                 />
-                <p id="project-key-help" class="text-xs text-muted-foreground">
-                  タスク番号の接頭辞（例:
-                  <span class="font-mono">{{ (field.state.value || 'ABC') + '-1' }}</span
-                  >）。空欄なら自動生成
-                </p>
-                <FieldError v-if="field.state.meta.isTouched && field.state.meta.errors.length"
-                  >キーは 2〜10 文字で、先頭は大文字英字、残りは大文字英字または数字です</FieldError
-                >
               </Field>
             </template>
           </form.Field>
@@ -156,14 +159,12 @@ function onCancel() {
 
         <form.Field name="description">
           <template #default="{ field }">
-            <Field>
-              <FieldLabel :for="field.name">説明</FieldLabel>
+            <Field :id="field.name" label="説明">
               <Textarea
-                :id="field.name"
-                rows="3"
+                :rows="3"
                 placeholder="このプロジェクトは何のためのものですか？"
-                :model-value="field.state.value"
-                @update:model-value="(v) => field.handleChange(String(v))"
+                :value="field.state.value"
+                :on-value-change="field.handleChange"
               />
             </Field>
           </template>
