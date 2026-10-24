@@ -991,7 +991,7 @@ const table = useTable({
                   variant="outline"
                   size="sm"
                   class="h-8 text-xs"
-                  :class="selectedLabelId ? 'border-primary text-primary' : ''"
+                  :class="selectedLabelId ? 'border-link text-link' : ''"
                 >
                   {{ selectedLabelName ?? 'ラベル' }} <PhCaretDown class="ml-1 size-4" />
                 </Button>

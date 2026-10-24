@@ -70,7 +70,7 @@ const isForbidden = computed(
           <a
             v-if="profile.id === meQuery.data.value?.id"
             href="/settings/profile"
-            class="text-sm text-primary hover:underline"
+            class="text-sm text-link hover:underline"
           >
             プロフィールを編集
           </a>

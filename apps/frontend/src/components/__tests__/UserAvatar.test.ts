@@ -151,7 +151,7 @@ describe('UserAvatar の大きさ・形・灰色', () => {
     const inactive = mount(UserAvatar, { props: { user: { username: 'a' }, inactive: true } });
 
     expect(active.classes()).not.toContain('grayscale');
-    expect(inactive.classes()).toEqual(expect.arrayContaining(['grayscale', 'opacity-60']));
+    expect(inactive.classes()).toEqual(expect.arrayContaining(['grayscale', 'opacity-75']));
   });
 
   it('class は根に足され、aria-hidden 等の属性は根へ渡る', () => {
