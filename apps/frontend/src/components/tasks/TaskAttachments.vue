@@ -348,7 +348,7 @@ async function removeAttachment(attachmentId: string) {
         <button
           v-if="previewType(attachment)"
           type="button"
-          class="min-w-0 flex-1 truncate text-left text-primary underline"
+          class="min-w-0 flex-1 truncate text-left text-link underline"
           :title="`${attachment.name} をプレビュー`"
           @click="openPreview(attachment)"
         >
@@ -357,7 +357,7 @@ async function removeAttachment(attachmentId: string) {
         <a
           v-else
           :href="`${apiBase}${attachment.url}`"
-          class="min-w-0 flex-1 truncate text-primary underline"
+          class="min-w-0 flex-1 truncate text-link underline"
           :title="attachment.name"
           >{{ attachment.name }}</a
         >
@@ -398,7 +398,7 @@ async function removeAttachment(attachmentId: string) {
           <a
             v-if="previewFile"
             :href="`${apiBase}${previewFile.url}`"
-            class="text-sm text-primary underline"
+            class="text-sm text-link underline"
             >ダウンロード</a
           >
           <Button

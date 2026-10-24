@@ -31,7 +31,7 @@ function onPlainClick(event: MouseEvent) {
 <template>
   <a
     :href="taskDetailHref(tenantDisplayId, projectKey, seqId)"
-    class="truncate text-sm text-primary hover:underline"
+    class="truncate text-sm text-link hover:underline"
     @click="onPlainClick"
   >
     <!--
