@@ -30,6 +30,7 @@
     "@elysiajs/static": "1.4.10",
     "@formkit/drag-and-drop": "0.6.1",
     "@koyori-app/openapi-vue-query": "0.1.4",
+    "@koyori-app/ui-vue": "catalog:",
     "@lezer/highlight": "catalog:",
     "@lucide/vue": "1.48.0",
     "@phosphor-icons/vue": "2.2.1",

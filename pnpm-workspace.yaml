@@ -15,6 +15,7 @@ allowBuilds:
   unrs-resolver: true
   vue-demi: true
 catalog:
+  '@koyori-app/ui-vue': 0.1.0
   '@lezer/highlight': 1.2.5
   '@tanstack/vue-virtual': 3.13.38
   remark-breaks: 4.0.0
@@ -22,6 +23,7 @@ catalog:
   vite-plus: 0.3.3
 minimumReleaseAgeExclude:
   - '@koyori-app/openapi-vue-query'
+  - '@koyori-app/ui-vue'
 overrides:
   vite: 'catalog:'
 peerDependencyRules:

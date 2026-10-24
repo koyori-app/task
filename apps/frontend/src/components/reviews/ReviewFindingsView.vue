@@ -959,7 +959,7 @@ async function onRoundCreated() {
                   </span>
                   <span class="text-muted-foreground text-xs">R{{ finding.round }}</span>
                   <a
-                    class="hover:text-primary min-w-0 flex-1 truncate font-medium underline-offset-4 hover:underline"
+                    class="hover:text-link min-w-0 flex-1 truncate font-medium underline-offset-4 hover:underline"
                     :href="findingHref(finding.id)"
                     :aria-label="`指摘「${finding.title}」へのリンク`"
                     @click="focusFinding($event, finding.id)"
