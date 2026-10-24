@@ -14,7 +14,7 @@ use sea_orm::{
 };
 
 use crate::AppState;
-use crate::auth_helpers::is_tenant_owner;
+use crate::auth_helpers::{has_tenant_admin_role, is_tenant_owner, project_is_open_or_member};
 use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -113,13 +113,20 @@ async fn get_project_in_tenant<C: ConnectionTrait>(
         .ok_or(AppError::NotFound)
 }
 
+/// プロジェクトのメンバー・Webhook を管理できる人: テナントオーナー、プロジェクト `Admin` の ACE、
+/// そして共有プロジェクトに**今も入れる**テナント `Admin`。
+///
+/// 呼び出し元は先に `ensure_tenant_access(Some(project_id))` を通すこと（PAT の束縛と見える範囲は
+/// そちらが保証する）。ただしそれはロックの外で走るので、テナント `Admin` の分岐ではロック内で
+/// `project_is_open_or_member` を見直す。ロック待ちの間に別の操作が最初の ACE を置いて閉じていれば、
+/// 入れなくなったプロジェクトを管理させない。個人プロジェクト（Inbox）はテナントロールでは触れない。
 pub(crate) async fn require_project_admin<C: ConnectionTrait>(
     db: &C,
     tenant_id: Uuid,
     project_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), AppError> {
-    let _ = get_project_in_tenant(db, tenant_id, project_id).await?;
+    let project = get_project_in_tenant(db, tenant_id, project_id).await?;
     if is_tenant_owner(db, tenant_id, user_id).await? {
         return Ok(());
     }
@@ -128,10 +135,16 @@ pub(crate) async fn require_project_admin<C: ConnectionTrait>(
         .filter(project_members::Column::UserId.eq(user_id))
         .one(db)
         .await?;
-    match member {
-        Some(m) if m.role == ProjectRole::Admin => Ok(()),
-        _ => Err(AppError::Forbidden),
+    if member.is_some_and(|m| m.role == ProjectRole::Admin) {
+        return Ok(());
     }
+    if !project.is_personal
+        && has_tenant_admin_role(db, tenant_id, user_id).await?
+        && project_is_open_or_member(db, project_id, user_id).await?
+    {
+        return Ok(());
+    }
+    Err(AppError::Forbidden)
 }
 
 /// メンバー行に表示用のユーザー情報を同梱する。FK があるため利用者は必ず居るはずで、
@@ -201,7 +214,8 @@ async fn find_member<C: ConnectionTrait>(
 /// どのみち同じ状態には到達する。
 ///
 /// 実際に維持しているのは**「そのプロジェクトを管理できる人が常に居る」**で、
-/// [`require_project_admin`] がテナントオーナーを無条件で通すことで成立している。
+/// [`require_project_admin`] がテナントオーナーを無条件で通すことで成立している
+/// （テナント Admin も開いたプロジェクトなら直せるが、閉じたプロジェクトからは締め出されるので保証主体ではない）。
 /// Admin が全員テナントから抜けた状態は想定内で、[`would_drop_last_admin`] が
 /// 在籍者だけを数えるのはまさにそこから復旧できるようにするため。
 ///
@@ -340,7 +354,7 @@ pub async fn add_member(
     // テナントに居るかは問わない。明示 ACE はテナント所属（継承）と独立に置ける
     // （apps/backend/docs/tenant-project-authz.md の「継承と明示」）。テナントに居ない人を
     // 招けば、その人はその場で project-only の客分になる。GitHub の outside collaborator
-    // と同じ形で、招けるのは従来どおりプロジェクト Admin とオーナーだけ（`require_project_admin`）。
+    // と同じ形で、招けるのはプロジェクト Admin・オーナー・入れるテナント Admin だけ（`require_project_admin`）。
     // テナント側で客分の招待を締める旗は別 Issue で扱う。
     // テナント行のロックは「最後の 1 行」の削除（`remove_member`）との競合のため。
     // 削除が他の行は無いと数えた後に追加が通ると、Admin の居ない明示 ACE（Viewer だけ）が残る

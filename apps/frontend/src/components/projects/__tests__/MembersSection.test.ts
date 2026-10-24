@@ -177,7 +177,7 @@ describe('MembersSection', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain(
-      'メンバーを管理できるのは、テナントオーナーとこのプロジェクトの管理者だけです。',
+      'メンバーを管理できるのは、テナントオーナー・テナント管理者とこのプロジェクトの管理者だけです。',
     );
     expect(wrapper.find('#member-candidate').exists()).toBe(false);
   });

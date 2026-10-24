@@ -101,7 +101,7 @@ async fn project_member_responses_embed_user_summary() {
     app.cleanup_user(member.id).await;
 }
 
-/// 一覧を見られるのはオーナーとプロジェクト Admin だけ（UI の 403 表示の前提）。
+/// 一覧を見られるのはオーナー・プロジェクト Admin・入れるテナント Admin だけ（UI の 403 表示の前提）。
 /// Admin へ昇格すると見られるようになる対照付き。
 #[tokio::test]
 async fn project_member_list_requires_project_admin() {
@@ -747,4 +747,273 @@ async fn removing_a_member_rechecks_authorization_after_the_lock() {
     app.cleanup_user(owner.id).await;
     app.cleanup_user(alice.id).await;
     app.cleanup_user(bob.id).await;
+}
+
+// テナント `Admin` によるプロジェクトメンバー管理（TASK-372）。
+// `require_project_admin` が「共有プロジェクトに今も入れるテナント Admin」を通す。
+// 修正前はテナント Admin でもプロジェクト Admin の ACE が無ければ 403。
+
+/// オーナーでログインし、`user` をテナントに `role` で登録する。
+async fn add_tenant_member_with_role(
+    app: &mut TestApp,
+    tp: &TestTenantProject,
+    owner: &TestUser,
+    user: &TestUser,
+    role: &str,
+) {
+    app.reset_session_client();
+    app.login_session(&owner.email, &owner.password).await;
+    let res = app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/members", tp.tenant_id),
+            serde_json::json!({ "user_id": user.id, "role": role }),
+        )
+        .await;
+    assert_eq!(
+        res.status(),
+        StatusCode::CREATED,
+        "add tenant member {role}"
+    );
+}
+
+fn members_path(tp: &TestTenantProject) -> String {
+    format!(
+        "/v1/tenants/{}/projects/{}/members",
+        tp.tenant_id, tp.project_id
+    )
+}
+
+/// 開いた共有プロジェクトのメンバーを、ACE の無いテナント `Admin` が管理できる。
+/// 最初の ACE で継承が止まるので、自分を先に入れてから他人を足す（仕様書の手順）。
+#[tokio::test]
+async fn tenant_admin_manages_members_of_an_open_project() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let admin = app.insert_user(false, false).await;
+    let bob = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    add_tenant_member_with_role(&mut app, &tp, &owner, &admin, "Admin").await;
+    add_tenant_member_with_role(&mut app, &tp, &owner, &bob, "Member").await;
+    let path = members_path(&tp);
+
+    app.reset_session_client();
+    app.login_session(&admin.email, &admin.password).await;
+    assert_eq!(
+        app.get_with_session(&path).await.status(),
+        StatusCode::OK,
+        "ACE の無いテナント Admin が一覧を読める"
+    );
+    assert_eq!(
+        app.post_json_with_session(
+            &path,
+            serde_json::json!({ "user_id": admin.id, "role": "Admin" })
+        )
+        .await
+        .status(),
+        StatusCode::CREATED,
+        "自分を先に入れる"
+    );
+    assert_eq!(
+        app.post_json_with_session(
+            &path,
+            serde_json::json!({ "user_id": bob.id, "role": "Viewer" })
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        app.put_json_with_session(
+            &format!("{path}/{}", bob.id),
+            serde_json::json!({ "role": "Member" }),
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        app.delete_with_session(&format!("{path}/{}", bob.id))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+
+    for u in [&owner, &admin, &bob] {
+        app.cleanup_user(u.id).await;
+    }
+}
+
+/// 閉じた共有プロジェクト: `Viewer` の ACE で入れるテナント `Admin` はメンバーを足せる。
+/// ACE の無いテナント `Admin` は入れないので一覧も 403（見える範囲は変えない）。
+#[tokio::test]
+async fn tenant_admin_manages_a_closed_project_only_with_an_ace() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let inside = app.insert_user(false, false).await;
+    let outside = app.insert_user(false, false).await;
+    let alice = app.insert_user(false, false).await;
+    let bob = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    add_tenant_member_with_role(&mut app, &tp, &owner, &inside, "Admin").await;
+    add_tenant_member_with_role(&mut app, &tp, &owner, &outside, "Admin").await;
+    add_tenant_member_with_role(&mut app, &tp, &owner, &alice, "Member").await;
+    add_tenant_member_with_role(&mut app, &tp, &owner, &bob, "Member").await;
+    let path = members_path(&tp);
+
+    // オーナーが alice（Admin）と inside（Viewer）の ACE で閉じる
+    for (user, role) in [(&alice, "Admin"), (&inside, "Viewer")] {
+        assert_eq!(
+            app.post_json_with_session(
+                &path,
+                serde_json::json!({ "user_id": user.id, "role": role })
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+    }
+
+    app.reset_session_client();
+    app.login_session(&outside.email, &outside.password).await;
+    assert_eq!(
+        app.get_with_session(&path).await.status(),
+        StatusCode::FORBIDDEN,
+        "入れないテナント Admin は一覧も読めない"
+    );
+
+    app.reset_session_client();
+    app.login_session(&inside.email, &inside.password).await;
+    assert_eq!(
+        app.post_json_with_session(
+            &path,
+            serde_json::json!({ "user_id": bob.id, "role": "Viewer" })
+        )
+        .await
+        .status(),
+        StatusCode::CREATED,
+        "Viewer ACE しか無いテナント Admin がメンバーを足せる"
+    );
+
+    for u in [&owner, &inside, &outside, &alice, &bob] {
+        app.cleanup_user(u.id).await;
+    }
+}
+
+/// 個人プロジェクト（Inbox）はテナントロールでは管理できない。`Viewer` の ACE で入れる
+/// テナント `Admin` でも一覧・追加は 403。本人の自動 Admin 行は従来どおり通る。
+#[tokio::test]
+async fn tenant_admin_cannot_manage_personal_project_members() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let admin = app.insert_user(false, false).await;
+    let bob = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    add_tenant_member_with_role(&mut app, &tp, &owner, &admin, "Admin").await;
+    add_tenant_member_with_role(&mut app, &tp, &owner, &bob, "Member").await;
+
+    app.reset_session_client();
+    app.login_session(&bob.email, &bob.password).await;
+    let personal = app
+        .get_with_session(&format!(
+            "/v1/tenants/{}/users/me/personal-project",
+            tp.tenant_id
+        ))
+        .await;
+    assert_eq!(personal.status(), StatusCode::OK);
+    let personal_id = json_body(personal).await["id"]
+        .as_str()
+        .expect("personal id")
+        .to_string();
+    let path = format!(
+        "/v1/tenants/{}/projects/{personal_id}/members",
+        tp.tenant_id
+    );
+    assert_eq!(
+        app.post_json_with_session(
+            &path,
+            serde_json::json!({ "user_id": admin.id, "role": "Viewer" })
+        )
+        .await
+        .status(),
+        StatusCode::CREATED,
+        "本人（自動 Admin 行）は Inbox のメンバーを管理できる"
+    );
+
+    app.reset_session_client();
+    app.login_session(&admin.email, &admin.password).await;
+    assert_eq!(
+        app.get_with_session(&path).await.status(),
+        StatusCode::FORBIDDEN,
+        "他人の Inbox の一覧は読めない"
+    );
+    assert_eq!(
+        app.post_json_with_session(
+            &path,
+            serde_json::json!({ "user_id": owner.id, "role": "Viewer" })
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN,
+        "他人の Inbox にメンバーを足せない"
+    );
+
+    for u in [&owner, &admin, &bob] {
+        app.cleanup_user(u.id).await;
+    }
+}
+
+/// テナント `Admin` の分岐もロック内で「今も入れるか」を見直す。
+///
+/// 可視性の確認（`ensure_tenant_access`）はロックの外で走る。開いたプロジェクトへの追加が
+/// ロック待ちの間に、別の操作が他人の ACE を置いて閉じると、ACE の無いテナント Admin は
+/// もう入れない。待っていた追加は 403 で終わらなければならない。
+#[tokio::test]
+async fn tenant_admin_rechecks_visibility_after_the_lock() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let admin = app.insert_user(false, false).await;
+    let alice = app.insert_user(false, false).await;
+    let bob = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    add_tenant_member_with_role(&mut app, &tp, &owner, &admin, "Admin").await;
+    add_tenant_member_with_role(&mut app, &tp, &owner, &alice, "Member").await;
+    add_tenant_member_with_role(&mut app, &tp, &owner, &bob, "Member").await;
+
+    app.reset_session_client();
+    app.login_session(&admin.email, &admin.password).await;
+
+    let txn = lock_tenant(&app, tp.tenant_id).await;
+    let path = members_path(&tp);
+    let add = app.post_json_with_session(
+        &path,
+        serde_json::json!({ "user_id": bob.id, "role": "Viewer" }),
+    );
+    tokio::pin!(add);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(700), &mut add)
+            .await
+            .is_err(),
+        "ロックを握っている間、追加は待たされる"
+    );
+
+    // 待っている間に alice の ACE を置いて閉じる
+    txn.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        "INSERT INTO project_members (id, project_id, user_id, role) VALUES ($1, $2, $3, 'Admin')",
+        [Uuid::new_v4().into(), tp.project_id.into(), alice.id.into()],
+    ))
+    .await
+    .expect("insert ace");
+    txn.commit().await.expect("commit");
+
+    assert_eq!(
+        add.await.status(),
+        StatusCode::FORBIDDEN,
+        "閉じられた後の追加は通らない"
+    );
+    assert_eq!(member_count(&app, tp.project_id, bob.id).await, 0);
+
+    for u in [&owner, &admin, &alice, &bob] {
+        app.cleanup_user(u.id).await;
+    }
 }
