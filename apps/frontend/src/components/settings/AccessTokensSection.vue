@@ -10,10 +10,10 @@ import {
   Field,
   Input,
   Picker,
+  Skeleton,
   type DropdownItem,
 } from '@koyori-app/ui-vue';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Skeleton } from '@/components/ui/skeleton';
 import {
   personalTokensQueryOptions,
   useCreatePersonalTokenMutation,
@@ -350,10 +350,7 @@ function scopeItems(scopes: string[]): DropdownItem[] {
     </div>
 
     <!-- 一覧 -->
-    <div v-if="tokensQuery.isPending.value" class="flex flex-col gap-2">
-      <Skeleton class="h-16 w-full" />
-      <Skeleton class="h-16 w-full" />
-    </div>
+    <Skeleton v-if="tokensQuery.isPending.value" :lines="2" height="4rem" />
     <p v-else-if="tokensQuery.isError.value" class="text-destructive text-sm">
       トークンの一覧を取得できませんでした。再読み込みしてください。
     </p>

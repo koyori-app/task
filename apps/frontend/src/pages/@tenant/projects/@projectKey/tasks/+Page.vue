@@ -31,7 +31,14 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import { useMediaQuery } from '@vueuse/core';
 
 import { valueUpdater } from '@/components/ui/table/utils';
-import { Button, Dropdown, Input, Spinner, type DropdownItem } from '@koyori-app/ui-vue';
+import {
+  AvatarGroup,
+  Button,
+  Dropdown,
+  Input,
+  Spinner,
+  type DropdownItem,
+} from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import TaskDetailPane, { type TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
@@ -43,7 +50,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import AvatarGroup from '@/components/AvatarGroup.vue';
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
 import TaskTitleLink from '@/components/tasks/TaskTitleLink.vue';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
@@ -794,7 +800,22 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
       if (users.length === 0) {
         return h('span', { class: 'text-muted-foreground text-xs' }, '−');
       }
-      return h(AvatarGroup, { users, maxDisplay: 3 });
+      const max = 3;
+      const first = users[0]?.username ?? '';
+      return h('div', { class: 'flex items-center gap-1.5' }, [
+        h(AvatarGroup, {
+          label: '担当者',
+          items: users.map((user) => ({ name: user.username, src: user.avatar_url ?? undefined })),
+          max,
+          size: 28,
+        }),
+        // 先頭名 + 他N名（殿指示により維持。N は +N と同じ数）
+        h(
+          'span',
+          { class: 'max-w-28 truncate text-xs text-muted-foreground' },
+          users.length > max ? `${first} 他${users.length - max}名` : first,
+        ),
+      ]);
     },
   },
   {

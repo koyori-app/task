@@ -2,8 +2,7 @@
 import { PhFlask } from '@phosphor-icons/vue';
 import { computed } from 'vue';
 import SettingToggleList from '@/components/settings/SettingToggleList.vue';
-import { Button } from '@koyori-app/ui-vue';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Button, Skeleton } from '@koyori-app/ui-vue';
 import { useHydrated } from '@/composables/useHydrated';
 import { EXPERIMENT_TABLE, type ExperimentKey } from '@/lib/experiments';
 import { useExperimentsStore } from '@/stores/experiments';
@@ -25,8 +24,8 @@ function change(key: string, value: boolean) {
 <template>
   <div class="flex flex-col gap-4" data-experiments-section>
     <div v-if="!ready" class="flex flex-col gap-3" aria-busy="true" data-experiments-loading>
-      <Skeleton class="h-5 w-2/3" />
-      <Skeleton class="h-20 w-full" />
+      <Skeleton width="66.667%" height="1.25rem" />
+      <Skeleton height="5rem" />
     </div>
 
     <!-- 表示が無効のまま直に開いた時は、送り返さず、ここが何で・どうすれば使えるかを案内する -->

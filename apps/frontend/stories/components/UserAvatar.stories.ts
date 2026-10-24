@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { UserRound } from '@lucide/vue';
 import { expect, waitFor, within } from 'storybook/test';
 
 import UserAvatar from '@/components/UserAvatar.vue';
@@ -26,30 +25,11 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+/** 頭文字は koyori の Avatar が名から作り、名で読み上げる。 */
 export const Initials: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText('YU')).toBeInTheDocument();
-  },
-};
-
-/** 頭文字の代わりにアイコンを置く（担当者なし等）。アイコンの色は頭文字と同じ text-foreground。 */
-export const IconSlot: Story = {
-  render: () => ({
-    components: { UserAvatar, UserRound },
-    template: `<div class="flex items-end gap-3" data-testid="icon-slot">
-      <UserAvatar size="sm" decorative :user="{ name: '担当者なし' }"><UserRound class="size-3" aria-hidden="true" /></UserAvatar>
-      <UserAvatar size="xl" decorative :user="{ name: '担当者なし' }"><UserRound class="size-4" aria-hidden="true" /></UserAvatar>
-    </div>`,
-  }),
-  play: async ({ canvasElement }) => {
-    const root = within(canvasElement).getByTestId('icon-slot');
-    const fallbacks = root.querySelectorAll('[data-slot=avatar-fallback]');
-    await expect(fallbacks).toHaveLength(2);
-    for (const fallback of fallbacks) {
-      await expect(fallback.querySelector('svg')).not.toBeNull();
-      await expect(fallback.textContent?.trim()).toBe('');
-    }
+    await expect(canvas.getByRole('img', { name: 'yupix' })).toHaveTextContent('y');
   },
 };
 
@@ -87,7 +67,7 @@ export const BrokenImage: Story = {
   args: { user: { name: 'yupix', avatar_url: BROKEN_URL } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await waitFor(() => expect(canvas.getByText('YU')).toBeVisible());
+    await waitFor(() => expect(canvas.getByText('y')).toBeVisible());
   },
 };
 
@@ -102,8 +82,4 @@ export const Inactive: Story = {
       <UserAvatar :user="{ name: 'yupix', avatar_url: IMAGE_URL }" inactive />
     </div>`,
   }),
-};
-
-export const Overflow: Story = {
-  args: { user: { name: '' }, fallbackText: '+3', size: 'lg' },
 };

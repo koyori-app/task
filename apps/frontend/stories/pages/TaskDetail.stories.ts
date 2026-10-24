@@ -493,13 +493,15 @@ export const Default: Story = {
     ).resolves.toBeInTheDocument();
     await expect(canvas.findByText('PKCE の検証を追加する')).resolves.toBeInTheDocument();
     // 担当者はアバター（頭文字）と、その横のプロフィールへの名前リンクで表示する。
-    // 頭文字は avatarInitials の既定どおり 2 文字（田中太郎 → 田中）
-    await expect(canvas.findByText('田中')).resolves.toBeInTheDocument();
-    const assigneeLinks = canvasElement.querySelector<HTMLElement>('[data-assignee-profile-links]');
-    await expect(assigneeLinks).not.toBeNull();
-    await expect(
-      within(assigneeLinks!).getByRole('link', { name: '田中太郎' }),
-    ).toBeInTheDocument();
+    // 頭文字は koyori の Avatar が決める（区切りの無い名は先頭の 1 文字。田中太郎 → 田）
+    const assigneeLinks = await waitFor(() => {
+      const found = canvasElement.querySelector<HTMLElement>('[data-assignee-profile-links]');
+      if (!found) throw new Error('担当者のリンクがまだ無い');
+      return found;
+    });
+    // 選び直しの一覧の行にも同じ頭文字が出るので、一つ以上あることを見る
+    await expect(within(assigneeLinks.parentElement!).getAllByText('田')).not.toHaveLength(0);
+    await expect(within(assigneeLinks).getByRole('link', { name: '田中太郎' })).toBeInTheDocument();
 
     const user = userEvent.setup();
     await user.click(await canvas.findByRole('button', { name: 'サブタスクを追加' }));

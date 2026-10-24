@@ -3,11 +3,17 @@ import { ChevronLeft, ChevronRight, Flag, TriangleAlert, UserRound } from '@luci
 import { useQueryClient } from '@tanstack/vue-query';
 import { computed, nextTick, ref } from 'vue';
 
+import { Tooltip } from '@koyori-app/ui-vue';
+
 import UserAvatar from '@/components/UserAvatar.vue';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { components } from '@/generated/api';
 import { fetchClient } from '@/lib/api-vue-query';
-import { DAILY_CAPACITY_HOURS, dailyLoadByMember, isOverCapacity } from '@/lib/calendar/load';
+import {
+  DAILY_CAPACITY_HOURS,
+  dailyLoadByMember,
+  isOverCapacity,
+  type DayLoad,
+} from '@/lib/calendar/load';
 import {
   addDays,
   clipSpan,
@@ -20,6 +26,7 @@ import {
   type ClippedSpan,
 } from '@/lib/calendar/timeline';
 import { taskDetailHref } from '@/lib/task-display';
+import { USER_AVATAR_INITIALS_CLASS } from '@/lib/user-avatar';
 
 type ScheduleTask = components['schemas']['ScheduleTask'];
 type Member = components['schemas']['UserSummary'];
@@ -229,6 +236,14 @@ function loadOverflowStyle(hours: number) {
 function loadAria(date: string, hours: number) {
   const base = `${date} の残り ${loadLabel(hours)}`;
   return isOverCapacity(hours) ? `${base}（上限 ${DAILY_CAPACITY_HOURS}h を超過）` : base;
+}
+
+/** 山の内訳。Tooltip は字だけなので、1 行目に合計、2 行目からタスクごとの残りを改行で並べる */
+function loadTooltip(load: DayLoad<ScheduleTask> & { date: string }) {
+  return [
+    loadAria(load.date, load.hours),
+    ...load.items.map((item) => `${item.task.seq_key} ${item.task.title} ${loadLabel(item.hours)}`),
+  ].join('\n');
 }
 
 function isOverdue(task: ScheduleTask) {
@@ -568,17 +583,23 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
             style="grid-column: 1; grid-row: 1 / -1"
           >
             <!-- 名前が隣にあるので飾り（頭文字まで読み上げると名前と二重になる） -->
-            <UserAvatar
-              :user="{ id: row.id, name: row.name, avatar_url: row.avatarUrl }"
-              size="sm"
-              decorative
-              :initial-length="1"
-              class="shrink-0"
+            <span
+              v-if="row.id === UNASSIGNED_ID"
+              class="flex size-5 shrink-0 items-center justify-center rounded-full"
+              :class="USER_AVATAR_INITIALS_CLASS"
               aria-hidden="true"
               data-member-avatar
             >
-              <UserRound v-if="row.id === UNASSIGNED_ID" class="size-3" aria-hidden="true" />
-            </UserAvatar>
+              <UserRound class="size-3" />
+            </span>
+            <UserAvatar
+              v-else
+              :user="{ id: row.id, name: row.name, avatar_url: row.avatarUrl }"
+              size="sm"
+              decorative
+              class="shrink-0"
+              data-member-avatar
+            />
             <span class="truncate">{{ row.name }}</span>
           </div>
           <div
@@ -589,56 +610,52 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
             :style="cellStyle(col, '1 / -1')"
           />
           <!-- 残工数/日の山（計算規則は lib/calendar/load.ts） -->
-          <Tooltip v-for="load in row.loads" :key="`load-${load.date}`">
-            <TooltipTrigger as-child>
+          <!-- Tooltip の根（span）が格子の升に入るので、升の位置は根に置く -->
+          <Tooltip
+            v-for="load in row.loads"
+            :id="`calendar-load-${row.id}-${load.date}`"
+            :key="`load-${load.date}`"
+            :content="loadTooltip(load)"
+            placement="bottom"
+            class="relative z-[1] mx-0.5"
+            :style="cellStyle(load.col, '1')"
+          >
+            <div
+              class="relative w-full overflow-hidden"
+              :aria-label="loadAria(load.date, load.hours)"
+              :data-load-date="load.date"
+              :data-over="load.over || undefined"
+              tabindex="0"
+            >
               <div
-                class="relative z-[1] mx-0.5 overflow-hidden"
-                :style="cellStyle(load.col, '1')"
-                :aria-label="loadAria(load.date, load.hours)"
-                :data-load-date="load.date"
-                :data-over="load.over || undefined"
-                tabindex="0"
+                class="absolute inset-x-1 bottom-0 rounded-t-sm"
+                :class="load.over ? 'bg-destructive/30' : 'bg-primary/30'"
+                :style="loadBarStyle(load.hours)"
+                aria-hidden="true"
+                data-load-bar
+              />
+              <div
+                v-if="load.over"
+                class="absolute inset-x-1 bg-destructive/70"
+                :style="loadOverflowStyle(load.hours)"
+                aria-hidden="true"
+                data-load-overflow
+              />
+              <!-- 上限の線 -->
+              <div
+                class="absolute inset-x-0 border-t border-dashed border-muted-foreground/50"
+                :style="{ bottom: `${LOAD_STAGE_REM}rem` }"
+                aria-hidden="true"
+              />
+              <span
+                class="absolute top-0.5 right-0.5 flex items-center gap-0.5 text-[10px] leading-none"
+                :class="load.over ? 'font-medium text-destructive' : 'text-muted-foreground'"
+                aria-hidden="true"
               >
-                <div
-                  class="absolute inset-x-1 bottom-0 rounded-t-sm"
-                  :class="load.over ? 'bg-destructive/30' : 'bg-primary/30'"
-                  :style="loadBarStyle(load.hours)"
-                  aria-hidden="true"
-                  data-load-bar
-                />
-                <div
-                  v-if="load.over"
-                  class="absolute inset-x-1 bg-destructive/70"
-                  :style="loadOverflowStyle(load.hours)"
-                  aria-hidden="true"
-                  data-load-overflow
-                />
-                <!-- 上限の線 -->
-                <div
-                  class="absolute inset-x-0 border-t border-dashed border-muted-foreground/50"
-                  :style="{ bottom: `${LOAD_STAGE_REM}rem` }"
-                  aria-hidden="true"
-                />
-                <span
-                  class="absolute top-0.5 right-0.5 flex items-center gap-0.5 text-[10px] leading-none"
-                  :class="load.over ? 'font-medium text-destructive' : 'text-muted-foreground'"
-                  aria-hidden="true"
-                >
-                  <TriangleAlert v-if="load.over" class="size-2.5" />
-                  {{ loadLabel(load.hours) }}{{ load.over ? ' 超過' : '' }}
-                </span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" class="max-w-64">
-              <p class="mb-1 font-medium">{{ loadAria(load.date, load.hours) }}</p>
-              <ul data-load-items>
-                <li v-for="item in load.items" :key="item.task.id" class="flex gap-2">
-                  <span class="shrink-0 font-mono">{{ item.task.seq_key }}</span>
-                  <span class="truncate">{{ item.task.title }}</span>
-                  <span class="ml-auto shrink-0">{{ loadLabel(item.hours) }}</span>
-                </li>
-              </ul>
-            </TooltipContent>
+                <TriangleAlert v-if="load.over" class="size-2.5" />
+                {{ loadLabel(load.hours) }}{{ load.over ? ' 超過' : '' }}
+              </span>
+            </div>
           </Tooltip>
           <a
             v-for="placed in row.entries"

@@ -507,9 +507,8 @@ async function onRemove(member: TenantMemberResponse) {
               <UserAvatar
                 :user="{ name: member.user.username }"
                 shape="lg"
-                class="size-[34px]"
-                fallback-class="rounded-none font-semibold text-white"
-                :fallback-style="{ background: avatarColor(member) }"
+                class="text-white"
+                :style="{ background: avatarColor(member) }"
                 aria-hidden="true"
               />
               <span class="min-w-0 flex-1 overflow-hidden leading-snug">

@@ -460,7 +460,6 @@ async function complete(item: DashboardTask) {
                 <UserAvatar
                   :user="{ name: activityActor(item.activity) }"
                   size="md"
-                  :initial-length="1"
                   aria-hidden="true"
                 />
                 <div class="min-w-0 text-[11px] leading-relaxed text-muted-foreground">
