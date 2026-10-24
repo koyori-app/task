@@ -40,6 +40,7 @@ use job::{
     review_summary::{
         self, MAX_RETRIES as REVIEW_SUMMARY_MAX_RETRIES, QUEUE_NAME as REVIEW_SUMMARY_QUEUE,
     },
+    supervise::supervise,
     tenant_invitation_email::{
         self, MAX_RETRIES as TENANT_INVITATION_MAX_RETRIES, QUEUE_NAME as TENANT_INVITATION_QUEUE,
     },
@@ -117,97 +118,134 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         oauth_settings: state.oauth_settings.clone(),
     };
 
+    // 各ワーカーは監督ループの下で動かし、heartbeat の失敗などで終了したら世代を作り直す
+    // （job::supervise）。
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let email_worker_storage = state.verification_email_storage.as_ref().clone();
-    let worker_state = job_state.clone();
-    let worker_concurrency = verification_email::worker_concurrency(settings);
-    let email_worker = WorkerBuilder::new(format!("{QUEUE_NAME}-worker"))
-        .backend(email_worker_storage)
-        .retry(RetryPolicy::retries(MAX_RETRIES))
-        .enable_tracing()
-        .concurrency(worker_concurrency)
-        .data(worker_state)
-        .build(verification_email::process);
+    let email_worker_state = job_state.clone();
+    let email_worker_concurrency = verification_email::worker_concurrency(settings);
+    let email_worker = tokio::spawn(supervise(
+        format!("{QUEUE_NAME}-worker"),
+        move |mut ctx| {
+            let worker = WorkerBuilder::new(ctx.name())
+                .backend(email_worker_storage.clone())
+                .retry(RetryPolicy::retries(MAX_RETRIES))
+                .enable_tracing()
+                .concurrency(email_worker_concurrency)
+                .data(email_worker_state.clone())
+                .build(verification_email::process);
+            Box::pin(async move { worker.run_with_ctx(&mut ctx).await })
+        },
+        shutdown_rx.clone(),
+    ));
 
     let pw_reset_worker_storage = state.password_reset_email_storage.as_ref().clone();
     let pw_reset_worker_state = job_state.clone();
-    let pw_reset_worker = WorkerBuilder::new(format!("{PW_RESET_QUEUE}-worker"))
-        .backend(pw_reset_worker_storage)
-        .retry(RetryPolicy::retries(PW_RESET_MAX_RETRIES))
-        .enable_tracing()
-        .concurrency(password_reset_email::worker_concurrency(settings))
-        .data(pw_reset_worker_state)
-        .build(password_reset_email::process);
+    let pw_reset_worker_concurrency = password_reset_email::worker_concurrency(settings);
+    let pw_reset_worker = tokio::spawn(supervise(
+        format!("{PW_RESET_QUEUE}-worker"),
+        move |mut ctx| {
+            let worker = WorkerBuilder::new(ctx.name())
+                .backend(pw_reset_worker_storage.clone())
+                .retry(RetryPolicy::retries(PW_RESET_MAX_RETRIES))
+                .enable_tracing()
+                .concurrency(pw_reset_worker_concurrency)
+                .data(pw_reset_worker_state.clone())
+                .build(password_reset_email::process);
+            Box::pin(async move { worker.run_with_ctx(&mut ctx).await })
+        },
+        shutdown_rx.clone(),
+    ));
 
     let already_registered_worker_storage = state.already_registered_email_storage.as_ref().clone();
     let already_registered_worker_state = job_state.clone();
-    let already_registered_worker =
-        WorkerBuilder::new(format!("{ALREADY_REGISTERED_QUEUE}-worker"))
-            .backend(already_registered_worker_storage)
-            .retry(RetryPolicy::retries(ALREADY_REGISTERED_MAX_RETRIES))
-            .enable_tracing()
-            .concurrency(already_registered_email::worker_concurrency(settings))
-            .data(already_registered_worker_state)
-            .build(already_registered_email::process);
+    let already_registered_worker_concurrency =
+        already_registered_email::worker_concurrency(settings);
+    let already_registered_worker = tokio::spawn(supervise(
+        format!("{ALREADY_REGISTERED_QUEUE}-worker"),
+        move |mut ctx| {
+            let worker = WorkerBuilder::new(ctx.name())
+                .backend(already_registered_worker_storage.clone())
+                .retry(RetryPolicy::retries(ALREADY_REGISTERED_MAX_RETRIES))
+                .enable_tracing()
+                .concurrency(already_registered_worker_concurrency)
+                .data(already_registered_worker_state.clone())
+                .build(already_registered_email::process);
+            Box::pin(async move { worker.run_with_ctx(&mut ctx).await })
+        },
+        shutdown_rx.clone(),
+    ));
 
-    let tenant_invitation_worker = WorkerBuilder::new(format!("{TENANT_INVITATION_QUEUE}-worker"))
-        .backend(state.tenant_invitation_email_storage.as_ref().clone())
-        .retry(RetryPolicy::retries(TENANT_INVITATION_MAX_RETRIES))
-        .enable_tracing()
-        .data(job_state.clone())
-        .build(tenant_invitation_email::process);
+    let tenant_invitation_worker_storage = state.tenant_invitation_email_storage.as_ref().clone();
+    let tenant_invitation_worker_state = job_state.clone();
+    let tenant_invitation_worker = tokio::spawn(supervise(
+        format!("{TENANT_INVITATION_QUEUE}-worker"),
+        move |mut ctx| {
+            let worker = WorkerBuilder::new(ctx.name())
+                .backend(tenant_invitation_worker_storage.clone())
+                .retry(RetryPolicy::retries(TENANT_INVITATION_MAX_RETRIES))
+                .enable_tracing()
+                .data(tenant_invitation_worker_state.clone())
+                .build(tenant_invitation_email::process);
+            Box::pin(async move { worker.run_with_ctx(&mut ctx).await })
+        },
+        shutdown_rx.clone(),
+    ));
 
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let worker_shutdown = shutdown_rx.clone();
     let github_worker_storage = state.github_webhook_storage.as_ref().clone();
     let github_worker_state = job_state.clone();
-    let github_worker = WorkerBuilder::new(format!("{GITHUB_WEBHOOK_QUEUE}-worker"))
-        .backend(github_worker_storage)
-        .retry(RetryPolicy::retries(github_webhook::MAX_RETRIES))
-        .enable_tracing()
-        .concurrency(github_webhook::worker_concurrency(settings))
-        .data(github_worker_state)
-        .build(github_webhook::process);
+    let github_worker_concurrency = github_webhook::worker_concurrency(settings);
+    let github_worker = tokio::spawn(supervise(
+        format!("{GITHUB_WEBHOOK_QUEUE}-worker"),
+        move |mut ctx| {
+            let worker = WorkerBuilder::new(ctx.name())
+                .backend(github_worker_storage.clone())
+                .retry(RetryPolicy::retries(github_webhook::MAX_RETRIES))
+                .enable_tracing()
+                .concurrency(github_worker_concurrency)
+                .data(github_worker_state.clone())
+                .build(github_webhook::process);
+            Box::pin(async move { worker.run_with_ctx(&mut ctx).await })
+        },
+        shutdown_rx.clone(),
+    ));
 
     let review_summary_worker_storage = state.review_summary_storage.as_ref().clone();
     let review_summary_worker_state = job_state.clone();
-    let review_summary_worker = WorkerBuilder::new(format!("{REVIEW_SUMMARY_QUEUE}-worker"))
-        .backend(review_summary_worker_storage)
-        .retry(RetryPolicy::retries(REVIEW_SUMMARY_MAX_RETRIES))
-        .enable_tracing()
-        .concurrency(review_summary::worker_concurrency(settings))
-        .data(review_summary_worker_state)
-        .build(review_summary::process);
+    let review_summary_worker_concurrency = review_summary::worker_concurrency(settings);
+    let review_summary_worker = tokio::spawn(supervise(
+        format!("{REVIEW_SUMMARY_QUEUE}-worker"),
+        move |mut ctx| {
+            let worker = WorkerBuilder::new(ctx.name())
+                .backend(review_summary_worker_storage.clone())
+                .retry(RetryPolicy::retries(REVIEW_SUMMARY_MAX_RETRIES))
+                .enable_tracing()
+                .concurrency(review_summary_worker_concurrency)
+                .data(review_summary_worker_state.clone())
+                .build(review_summary::process);
+            Box::pin(async move { worker.run_with_ctx(&mut ctx).await })
+        },
+        shutdown_rx.clone(),
+    ));
 
     let job_state_for_sweeper = job_state.clone();
     let issue_sync_worker_storage = state.github_issue_sync_storage.as_ref().clone();
-    let issue_sync_worker = WorkerBuilder::new(format!("{GITHUB_ISSUE_SYNC_QUEUE}-worker"))
-        .backend(issue_sync_worker_storage)
-        .retry(RetryPolicy::retries(github_issue_sync::MAX_RETRIES))
-        .enable_tracing()
-        .concurrency(github_issue_sync::worker_concurrency(settings))
-        .data(job_state)
-        .build(github_issue_sync::process);
-
-    let github_shutdown = shutdown_rx.clone();
-    let github_worker_handle = tokio::spawn(async move {
-        github_worker
-            .run_until(wait_for_shutdown(github_shutdown))
-            .await
-    });
-
-    let review_summary_shutdown = shutdown_rx.clone();
-    let review_summary_worker_handle = tokio::spawn(async move {
-        review_summary_worker
-            .run_until(wait_for_shutdown(review_summary_shutdown))
-            .await
-    });
-
-    let issue_sync_shutdown = shutdown_rx.clone();
-    let issue_sync_worker_handle = tokio::spawn(async move {
-        issue_sync_worker
-            .run_until(wait_for_shutdown(issue_sync_shutdown))
-            .await
-    });
+    let issue_sync_worker_state = job_state;
+    let issue_sync_worker_concurrency = github_issue_sync::worker_concurrency(settings);
+    let issue_sync_worker = tokio::spawn(supervise(
+        format!("{GITHUB_ISSUE_SYNC_QUEUE}-worker"),
+        move |mut ctx| {
+            let worker = WorkerBuilder::new(ctx.name())
+                .backend(issue_sync_worker_storage.clone())
+                .retry(RetryPolicy::retries(github_issue_sync::MAX_RETRIES))
+                .enable_tracing()
+                .concurrency(issue_sync_worker_concurrency)
+                .data(issue_sync_worker_state.clone())
+                .build(github_issue_sync::process);
+            Box::pin(async move { worker.run_with_ctx(&mut ctx).await })
+        },
+        shutdown_rx.clone(),
+    ));
 
     // 書き戻し要求（pending_push）の取りこぼしを定期的に拾い直す。
     // タスク更新後のジョブ登録が失敗しても、要求は DB に残っているのでここで回収する。
@@ -252,32 +290,6 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         job_state_for_sweeper,
         shutdown_rx.clone(),
     ));
-
-    let pw_reset_shutdown = shutdown_rx.clone();
-    let email_worker_handle = tokio::spawn(async move {
-        email_worker
-            .run_until(wait_for_shutdown(worker_shutdown))
-            .await
-    });
-    let pw_reset_worker_handle = tokio::spawn(async move {
-        pw_reset_worker
-            .run_until(wait_for_shutdown(pw_reset_shutdown))
-            .await
-    });
-
-    let already_registered_shutdown = shutdown_rx.clone();
-    let already_registered_worker_handle = tokio::spawn(async move {
-        already_registered_worker
-            .run_until(wait_for_shutdown(already_registered_shutdown))
-            .await
-    });
-
-    let tenant_invitation_shutdown = shutdown_rx.clone();
-    let tenant_invitation_worker_handle = tokio::spawn(async move {
-        tenant_invitation_worker
-            .run_until(wait_for_shutdown(tenant_invitation_shutdown))
-            .await
-    });
 
     let api = router
         .merge(Scalar::with_url("/scalar", openapi.clone()))
@@ -326,54 +338,21 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
 
-    match email_worker_handle.await {
-        Ok(Ok(())) => info!("verification email worker stopped"),
-        Ok(Err(e)) => warn!("verification email worker error: {e}"),
-        Err(e) => warn!("verification email worker join error: {e}"),
-    }
-    match pw_reset_worker_handle.await {
-        Ok(Ok(())) => info!("password reset email worker stopped"),
-        Ok(Err(e)) => warn!("password reset email worker error: {e}"),
-        Err(e) => warn!("password reset email worker join error: {e}"),
-    }
-    match already_registered_worker_handle.await {
-        Ok(Ok(())) => info!("already registered email worker stopped"),
-        Ok(Err(e)) => warn!("already registered email worker error: {e}"),
-        Err(e) => warn!("already registered email worker join error: {e}"),
-    }
-    match tenant_invitation_worker_handle.await {
-        Ok(Ok(())) => info!("tenant invitation email worker stopped"),
-        Ok(Err(e)) => warn!("tenant invitation email worker error: {e}"),
-        Err(e) => warn!("tenant invitation email worker join error: {e}"),
-    }
-
-    match github_worker_handle.await {
-        Ok(Ok(())) => info!("github webhook worker stopped"),
-        Ok(Err(e)) => warn!("github webhook worker error: {e}"),
-        Err(e) => warn!("github webhook worker join error: {e}"),
-    }
-
-    match issue_sync_worker_handle.await {
-        Ok(Ok(())) => info!("github issue sync worker stopped"),
-        Ok(Err(e)) => warn!("github issue sync worker error: {e}"),
-        Err(e) => warn!("github issue sync worker join error: {e}"),
-    }
-
-    match review_summary_worker_handle.await {
-        Ok(Ok(())) => info!("review summary worker stopped"),
-        Ok(Err(e)) => warn!("review summary worker error: {e}"),
-        Err(e) => warn!("review summary worker join error: {e}"),
-    }
-
-    Ok(())
-}
-
-async fn wait_for_shutdown(mut shutdown: watch::Receiver<bool>) -> Result<(), std::io::Error> {
-    while !*shutdown.borrow() {
-        if shutdown.changed().await.is_err() {
-            break;
+    for handle in [
+        email_worker,
+        pw_reset_worker,
+        already_registered_worker,
+        tenant_invitation_worker,
+        github_worker,
+        review_summary_worker,
+        issue_sync_worker,
+    ] {
+        if let Err(e) = handle.await {
+            warn!("apalis worker supervisor join error: {e}");
         }
     }
+    info!("apalis workers stopped");
+
     Ok(())
 }
 

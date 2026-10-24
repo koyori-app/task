@@ -7,6 +7,7 @@ pub mod notification_email;
 pub mod notification_retention;
 pub mod password_reset_email;
 pub mod review_summary;
+pub mod supervise;
 pub mod tenant_invitation_email;
 pub mod verification_email;
 pub mod webhook_delivery;
@@ -52,7 +53,12 @@ pub struct JobState {
 }
 
 pub async fn setup_pool(database_url: &str) -> Result<PgPool, anyhow::Error> {
-    Ok(PgPool::connect(database_url).await?)
+    // 通常時の予算: ワーカー 7 本の LISTEN が 1 本ずつ常時占有し、残り 9 本を heartbeat・poll・
+    // 孤児回収・ハンドラーからの投入が共有する。世代交代中は旧リスナーの接続が UNLISTEN まで残る
+    Ok(sqlx::postgres::PgPoolOptions::new()
+        .max_connections(16)
+        .connect(database_url)
+        .await?)
 }
 
 pub async fn setup_verification_email_storage(
