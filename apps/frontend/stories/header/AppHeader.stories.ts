@@ -194,17 +194,12 @@ export const TenantMenuOpen: Story = {
 
     await userEvent.click(await canvas.findByRole('button', { name: /Acme Inc/ }));
 
-    await expect(page.findByText('4 人のメンバー')).resolves.toBeInTheDocument();
-    await expect(page.getByRole('menuitem', { name: 'テナント設定' })).toHaveAttribute(
-      'href',
-      '/acme/settings',
-    );
-    await expect(page.getByRole('menuitem', { name: 'メンバー' })).toHaveAttribute(
-      'href',
-      '/acme/settings/members',
-    );
+    // 項目は閉じていても DOM にあるので、文字ではなく役割で開くのを待つ
+    await expect(page.findByRole('menuitem', { name: 'テナント設定' })).resolves.toBeVisible();
+    await expect(page.findByText(/4 人のメンバー/)).resolves.toBeInTheDocument();
+    await expect(page.getByRole('menuitem', { name: 'メンバー' })).toBeInTheDocument();
     await expect(page.getByText('テナントを切り替え')).toBeInTheDocument();
-    await expect(page.getByRole('button', { name: 'テナントを作成' })).toBeInTheDocument();
+    await expect(page.getByRole('menuitem', { name: 'テナントを作成' })).toBeInTheDocument();
   },
 };
 

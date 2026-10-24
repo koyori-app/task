@@ -779,9 +779,9 @@ export const StatusChange: Story = {
     ).resolves.toBeInTheDocument();
 
     // ステータスはモックに合わせて枠付きピル + メニューにした（素の select ではない）
-    const trigger = await canvas.findByRole('combobox', { name: 'ステータス' });
+    const trigger = await canvas.findByRole('button', { name: 'ステータス' });
     await user.click(trigger);
-    await user.click(await screen.findByRole('menuitemcheckbox', { name: /Done/ }));
+    await user.click(await screen.findByRole('menuitemradio', { name: /Done/ }));
     await expect(trigger).toHaveTextContent('Done');
   },
 };
@@ -796,10 +796,10 @@ export const StatusChangeFailure500: Story = {
       canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).resolves.toBeInTheDocument();
 
-    const trigger = await canvas.findByRole('combobox', { name: 'ステータス' });
+    const trigger = await canvas.findByRole('button', { name: 'ステータス' });
     await expect(trigger).toHaveTextContent('In Progress');
     await user.click(trigger);
-    await user.click(await screen.findByRole('menuitemcheckbox', { name: /Done/ }));
+    await user.click(await screen.findByRole('menuitemradio', { name: /Done/ }));
     await expect(canvas.findByText('ステータスの更新に失敗しました')).resolves.toBeInTheDocument();
     // 失敗したら元の表示へ戻る
     await expect(trigger).toHaveTextContent('In Progress');
@@ -816,10 +816,10 @@ export const StatusChangeFailure413: Story = {
       canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).resolves.toBeInTheDocument();
 
-    const trigger = await canvas.findByRole('combobox', { name: 'ステータス' });
+    const trigger = await canvas.findByRole('button', { name: 'ステータス' });
     await expect(trigger).toHaveTextContent('In Progress');
     await user.click(trigger);
-    await user.click(await screen.findByRole('menuitemcheckbox', { name: /Done/ }));
+    await user.click(await screen.findByRole('menuitemradio', { name: /Done/ }));
     await expect(canvas.findByText('ステータスの更新に失敗しました')).resolves.toBeInTheDocument();
     // 失敗したら元の表示へ戻る
     await expect(trigger).toHaveTextContent('In Progress');

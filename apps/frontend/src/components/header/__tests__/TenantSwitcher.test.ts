@@ -1,12 +1,15 @@
-import { defineComponent, h, inject, provide, ref, type Ref } from 'vue';
+import { defineComponent, provide } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import { createPinia, setActivePinia } from 'pinia';
-import { afterEach, describe, expect, it } from 'vitest';
-import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { enableAutoUnmount, mount, type VueWrapper } from '@vue/test-utils';
+import { navigate } from 'vike/client/router';
 import { useAuthStore } from '@/stores/auth';
 import type { Tenant } from '@/stores/tenant';
 import SidebarProvider from '../../ui/sidebar/SidebarProvider.vue';
 import TenantSwitcher from '../TenantSwitcher.vue';
+
+vi.mock('vike/client/router', () => ({ navigate: vi.fn() }));
 
 enableAutoUnmount(afterEach);
 
@@ -33,52 +36,7 @@ const tenants: Tenant[] = [
   },
 ];
 
-const DROPDOWN_OPEN = Symbol('dropdown-open');
-
-const DropdownMenu = defineComponent({
-  name: 'DropdownMenu',
-  setup(_, { slots }) {
-    const open = ref(false);
-    provide(DROPDOWN_OPEN, open);
-    return () => slots.default?.();
-  },
-});
-
-const DropdownMenuTrigger = defineComponent({
-  name: 'DropdownMenuTrigger',
-  inheritAttrs: false,
-  setup(_, { slots, attrs }) {
-    const open = inject<Ref<boolean>>(DROPDOWN_OPEN)!;
-    return () =>
-      h(
-        'button',
-        {
-          ...attrs,
-          type: 'button',
-          'data-testid': 'tenant-switcher-trigger',
-          onClick: () => {
-            open.value = !open.value;
-          },
-        },
-        slots.default?.(),
-      );
-  },
-});
-
-const DropdownMenuContent = defineComponent({
-  name: 'DropdownMenuContent',
-  setup(_, { slots }) {
-    const open = inject<Ref<boolean>>(DROPDOWN_OPEN)!;
-    return () =>
-      open.value ? h('div', { 'data-testid': 'tenant-switcher-menu' }, slots.default?.()) : null;
-  },
-});
-
 const PassThrough = defineComponent({ template: '<div><slot /></div>' });
-const Item = defineComponent({
-  inheritAttrs: false,
-  template: '<button v-bind="$attrs"><slot /></button>',
-});
 const ButtonStub = defineComponent({
   inheritAttrs: false,
   template: '<button v-bind="$attrs"><slot /></button>',
@@ -125,12 +83,6 @@ function mountSwitcher(
       global: {
         plugins: [pinia],
         stubs: {
-          DropdownMenu,
-          DropdownMenuTrigger,
-          DropdownMenuContent,
-          DropdownMenuLabel: PassThrough,
-          DropdownMenuSeparator: PassThrough,
-          DropdownMenuItem: Item,
           SidebarMenu: PassThrough,
           SidebarMenuItem: PassThrough,
           SidebarMenuButton: ButtonStub,
@@ -141,18 +93,31 @@ function mountSwitcher(
   );
 }
 
+/** 引き金を押して開いたメニューを返す。項目は閉じていても DOM にあるので、開いたことも確かめる */
+async function openMenu(wrapper: VueWrapper) {
+  await wrapper.get('button[aria-haspopup="menu"]').trigger('click');
+  const menu = wrapper.get('[role="menu"]');
+  expect(menu.attributes('hidden')).toBeUndefined();
+  return menu;
+}
+
+function menuItem(wrapper: VueWrapper, name: string) {
+  return wrapper.findAll('[role^="menuitem"]').find((item) => item.text().includes(name));
+}
+
 describe('TenantSwitcher', () => {
   it('opens the tenant menu and emits the selected tenant', async () => {
     const wrapper = mountSwitcher({ tenants, selectedTenantId: 'tenant-1' });
 
-    expect(wrapper.text()).toContain('Alpha');
-    expect(wrapper.text()).not.toContain('Beta');
+    expect(wrapper.get('button[aria-haspopup="menu"]').text()).toContain('Alpha');
+    expect(wrapper.get('[role="menu"]').attributes('hidden')).toBeDefined();
 
-    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
-    const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
-    expect(menu.text()).toContain('Beta');
-
-    const beta = menu.findAll('button').find((button) => button.text().includes('Beta'))!;
+    await openMenu(wrapper);
+    // 今いるテナントに印が付く
+    expect(menuItem(wrapper, 'Alpha')!.attributes('aria-checked')).toBe('true');
+    const beta = menuItem(wrapper, 'Beta')!;
+    expect(beta.attributes('role')).toBe('menuitemradio');
+    expect(beta.attributes('aria-checked')).toBe('false');
     await beta.trigger('click');
 
     expect(wrapper.findComponent(TenantSwitcher).emitted('select')).toEqual([[tenants[1]]]);
@@ -164,10 +129,7 @@ describe('TenantSwitcher', () => {
     // ヘッダーのトリガーは 1 行なので、状態は主文で伝える
     expect(wrapper.text()).toContain('所属テナントなし');
 
-    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
-    expect(wrapper.get('[data-testid="tenant-switcher-menu"]').text()).toContain(
-      '所属テナントがありません',
-    );
+    expect((await openMenu(wrapper)).text()).toContain('所属テナントがありません');
   });
 
   it('shows a disabled loading state', () => {
@@ -184,12 +146,9 @@ describe('TenantSwitcher', () => {
       error: 'テナント一覧を取得できませんでした',
     });
 
-    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
+    await openMenu(wrapper);
 
-    const retry = wrapper
-      .get('[data-testid="tenant-switcher-menu"]')
-      .findAll('button')
-      .find((button) => button.text().includes('テナント一覧を取得できませんでした'))!;
+    const retry = menuItem(wrapper, 'テナント一覧を取得できませんでした')!;
     expect(retry.text()).toContain('再試行');
     await retry.trigger('click');
 
@@ -200,36 +159,34 @@ describe('TenantSwitcher', () => {
     const guest: Tenant = { ...tenants[0], membership: 'Guest' as const };
     const wrapper = mountSwitcher({ tenants: [guest], selectedTenantId: guest.id });
 
-    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
-    const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
+    await openMenu(wrapper);
     // 客分はメンバー一覧 API が 403 になるので、押せば必ず失敗する導線は出さない
-    expect(menu.find('a[href="/alpha/settings/members"]').exists()).toBe(false);
+    expect(menuItem(wrapper, 'メンバー')).toBeUndefined();
   });
 
   it('keeps the members link for a tenant member', async () => {
     const memberTenant: Tenant = { ...tenants[0], membership: 'Member' as const };
     const wrapper = mountSwitcher({ tenants: [memberTenant], selectedTenantId: memberTenant.id });
 
-    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
-    const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
-    expect(menu.find('a[href="/alpha/settings/members"]').exists()).toBe(true);
+    await openMenu(wrapper);
+    await menuItem(wrapper, 'メンバー')!.trigger('click');
+    expect(navigate).toHaveBeenCalledWith('/alpha/settings/members');
   });
 
   it('keeps the tenant settings link before /me resolves', async () => {
     // 永続化された利用者だけが居る初回描画。AppHeader の歯車と出方を揃える
     const wrapper = mountSwitcher({ tenants, selectedTenantId: 'tenant-1' }, 'owner-1');
 
-    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
-    const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
-    expect(menu.find('a[href="/alpha/settings"]').exists()).toBe(true);
+    await openMenu(wrapper);
+    await menuItem(wrapper, 'テナント設定')!.trigger('click');
+    expect(navigate).toHaveBeenCalledWith('/alpha/settings');
   });
 
   it('hides the tenant settings link from a non-owner', async () => {
     const wrapper = mountSwitcher({ tenants, selectedTenantId: 'tenant-1' }, 'member-1');
 
-    await wrapper.get('[data-testid="tenant-switcher-trigger"]').trigger('click');
-    const menu = wrapper.get('[data-testid="tenant-switcher-menu"]');
-    expect(menu.find('a[href="/alpha/settings"]').exists()).toBe(false);
+    await openMenu(wrapper);
+    expect(menuItem(wrapper, 'テナント設定')).toBeUndefined();
   });
 
   it('shows not-found instead of silently displaying the first tenant', () => {

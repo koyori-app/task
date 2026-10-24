@@ -123,12 +123,4 @@
   body {
     @apply bg-background text-foreground;
   }
-  /*
-    koyori の Dialog は中央寄せをブラウザー既定の margin: auto に任せているが、preflight の
-    margin: 0 が消して左上に寄る。全 dialog に戻すと、自前で中央に置いている素の dialog がずれる。
-    shortcut: koyori の内部 id の接頭辞で見分けている。koyori の Dialog が margin を持てば消す
-  */
-  dialog[aria-labelledby^='koyori-dialog-'] {
-    margin: auto;
-  }
 }

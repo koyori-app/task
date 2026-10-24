@@ -1,15 +1,9 @@
 <script setup lang="ts">
 import { useQueryClient } from '@tanstack/vue-query';
-import { PhCaretDown, PhCopy, PhKey, PhPlus } from '@phosphor-icons/vue';
+import { PhCopy, PhKey, PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button, Dialog, Field, Input } from '@koyori-app/ui-vue';
+import { Button, Dialog, Dropdown, Field, Input, type DropdownItem } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import { Label } from '@/components/ui/label';
 import {
@@ -203,6 +197,11 @@ async function onRevokeConfirm() {
   } catch {
     revokeError.value = 'トークンを取り消せませんでした。時間をおいて再度お試しください。';
   }
+}
+
+/** スコープは見せるだけ。トークンの行ごとに出すので、配列は行の scopes から組む */
+function scopeItems(scopes: string[]): DropdownItem[] {
+  return scopes.map((scope) => ({ value: scope, label: scope, disabled: true }));
 }
 </script>
 
@@ -402,18 +401,7 @@ async function onRevokeConfirm() {
             </p>
             <p class="text-muted-foreground text-xs">{{ formatLastUsed(token.last_used_at) }}</p>
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child>
-              <Button type="button" variant="tertiary" label="スコープを表示">
-                <template #icon><PhCaretDown class="size-3" /></template>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem v-for="scope in token.scopes" :key="scope" disabled>
-                <code class="font-mono text-xs">{{ scope }}</code>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Dropdown variant="tertiary" label="スコープを表示" :items="scopeItems(token.scopes)" />
           <Button
             type="button"
             variant="tertiary"

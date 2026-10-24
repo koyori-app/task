@@ -5,16 +5,8 @@ import { emitTransferAsStatusChange } from '@/components/tasks/task-grouped-dnd'
 import { PhCaretDown, PhPlus } from '@phosphor-icons/vue';
 import { CornerDownLeft } from '@lucide/vue';
 import { PhCalendarPlus, PhFlag, PhTag } from '@phosphor-icons/vue';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 
-import { Button, Input } from '@koyori-app/ui-vue';
+import { Button, Dropdown, Input, type DropdownItem } from '@koyori-app/ui-vue';
 import TaskGroupedRow from '@/components/tasks/TaskGroupedRow.vue';
 import TaskSubtaskBranch from '@/components/tasks/TaskSubtaskBranch.vue';
 import type { components } from '@/generated/api';
@@ -236,6 +228,23 @@ function toggleDraftAssignee(userId: string, checked: boolean) {
     : draftAssigneeIds.value.filter((id) => id !== userId);
 }
 
+const draftPriorityItems = computed<DropdownItem[]>(() =>
+  (Object.keys(PRIORITY_CONFIG) as TaskPriority[]).map((value) => ({
+    value,
+    label: PRIORITY_CONFIG[value].label,
+    kind: 'radio',
+    checked: value === draftPriority.value,
+  })),
+);
+const draftLabelItems = computed<DropdownItem[]>(() =>
+  props.projectLabels.map((label) => ({
+    value: label.id,
+    label: label.name,
+    kind: 'checkbox',
+    checked: draftLabelIds.value.includes(label.id),
+  })),
+);
+
 function toggleDraftLabel(labelId: string, checked: boolean) {
   draftLabelIds.value = checked
     ? [...draftLabelIds.value, labelId]
@@ -351,7 +360,12 @@ async function commitAdding(statusId: string) {
         class="grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none"
         :class="collapsed[group.status.id] ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'"
       >
-        <div class="overflow-hidden">
+        <!--
+          開閉と横スクロールの枠が、行の Dropdown の一覧を切り取る。印の下の Dropdown は
+          一覧をトップレイヤーに出す（koyori の DataList と同じ仕組み）。
+          shortcut: koyori の内部の印に頼っている。Dropdown が枠外へ出す指定を公開したら差し替える
+        -->
+        <div class="overflow-hidden" data-menu-top-layer>
           <div class="overflow-x-auto" :inert="collapsed[group.status.id] || undefined">
             <div :class="[TASK_ROW_GRID, 'border-b text-xs text-muted-foreground']">
               <TaskListSortHeader
@@ -530,76 +544,36 @@ async function commitAdding(statusId: string) {
                 >
                   <template #icon><PhCalendarPlus class="size-4" aria-hidden="true" /></template>
                 </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger as-child>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      :style="
-                        draftPriority ? { color: PRIORITY_CONFIG[draftPriority].color } : undefined
-                      "
-                      :ariaLabel="
-                        draftPriority ? `優先度: ${PRIORITY_CONFIG[draftPriority].label}` : '優先度'
-                      "
-                    >
-                      <template #icon><PhFlag class="size-4" aria-hidden="true" /></template>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuRadioGroup
-                      :model-value="draftPriority ?? ''"
-                      @update:model-value="(v) => (draftPriority = String(v) as TaskPriority)"
-                    >
-                      <DropdownMenuRadioItem
-                        v-for="(config, value) in PRIORITY_CONFIG"
-                        :key="value"
-                        :value="value"
-                        :style="{ color: config.color }"
-                      >
-                        <PhFlag class="size-4" aria-hidden="true" />
-                        {{ config.label }}
-                      </DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <DropdownMenu>
-                  <DropdownMenuTrigger as-child>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      :class="
-                        draftLabels.length
-                          ? 'text-(--koyori-color-text)'
-                          : 'text-(--koyori-color-text-muted)'
-                      "
-                      :ariaLabel="draftLabels.length ? `ラベル: ${draftLabels.length}件` : 'ラベル'"
-                    >
-                      <template #icon><PhTag class="size-4" aria-hidden="true" /></template>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <p
-                      v-if="!projectLabels.length"
-                      class="px-2 py-1.5 text-sm text-muted-foreground"
-                    >
-                      ラベルがありません
-                    </p>
-                    <DropdownMenuCheckboxItem
-                      v-for="label in projectLabels"
-                      :key="label.id"
-                      :model-value="draftLabelIds.includes(label.id)"
-                      @select="(event: Event) => event.preventDefault()"
-                      @update:model-value="(v) => toggleDraftLabel(label.id, !!v)"
-                    >
-                      <span
-                        class="inline-block size-2.5 shrink-0 rounded-full"
-                        :style="{ backgroundColor: label.color }"
-                        aria-hidden="true"
-                      />
-                      {{ label.name }}
-                    </DropdownMenuCheckboxItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <Dropdown
+                  variant="ghost"
+                  :class="draftPriority ? '[&>button]:text-(--priority-color)' : ''"
+                  :style="
+                    draftPriority
+                      ? { '--priority-color': PRIORITY_CONFIG[draftPriority].color }
+                      : undefined
+                  "
+                  :ariaLabel="
+                    draftPriority ? `優先度: ${PRIORITY_CONFIG[draftPriority].label}` : '優先度'
+                  "
+                  :items="draftPriorityItems"
+                  :on-select="(value: string) => (draftPriority = value as TaskPriority)"
+                >
+                  <template #icon><PhFlag class="size-4" aria-hidden="true" /></template>
+                </Dropdown>
+                <Dropdown
+                  variant="ghost"
+                  :class="
+                    draftLabels.length
+                      ? '[&>button]:text-(--koyori-color-text)'
+                      : '[&>button]:text-(--koyori-color-text-muted)'
+                  "
+                  :ariaLabel="draftLabels.length ? `ラベル: ${draftLabels.length}件` : 'ラベル'"
+                  :items="draftLabelItems"
+                  empty-message="ラベルがありません"
+                  :on-select="(id: string) => toggleDraftLabel(id, !draftLabelIds.includes(id))"
+                >
+                  <template #icon><PhTag class="size-4" aria-hidden="true" /></template>
+                </Dropdown>
 
                 <Button type="button" variant="ghost" label="キャンセル" @click="cancelAdding" />
                 <Button

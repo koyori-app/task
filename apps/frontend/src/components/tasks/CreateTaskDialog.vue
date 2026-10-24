@@ -5,14 +5,16 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { getActivePinia } from 'pinia';
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Button, Dialog, Field, Input, Spinner } from '@koyori-app/ui-vue';
-import UserSelector from '@/components/users/UserSelector.vue';
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  Button,
+  Dialog,
+  Dropdown,
+  Field,
+  Input,
+  Spinner,
+  type DropdownItem,
+} from '@koyori-app/ui-vue';
+import UserSelector from '@/components/users/UserSelector.vue';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -114,6 +116,18 @@ const defaultStatusId = computed(
 
 const selectedLabels = computed(() =>
   (props.labels ?? []).filter((label) => selectedLabelIds.value.includes(label.id)),
+);
+/** 引き金の読み上げ名。欄の見出しに、選んだラベル（無ければ「ラベルなし」）を続ける */
+const labelsTriggerLabel = computed(
+  () => `ラベル ${selectedLabels.value.map((label) => label.name).join(' ') || 'ラベルなし'}`,
+);
+const labelItems = computed<DropdownItem[]>(() =>
+  (props.labels ?? []).map((label) => ({
+    value: label.id,
+    label: label.name,
+    kind: 'checkbox',
+    checked: selectedLabelIds.value.includes(label.id),
+  })),
 );
 // 候補で自分を選んだ者の次に置く。pinia の無い所（試験）でも組めるよう、在る時だけ引く。
 const authStore = getActivePinia() ? useAuthStore() : null;
@@ -510,53 +524,37 @@ async function submit() {
                   @click="emit('retryLabels')"
                 />
               </div>
-              <DropdownMenu v-else>
-                <DropdownMenuTrigger as-child>
-                  <button
-                    type="button"
-                    :class="fieldTriggerClass"
-                    aria-labelledby="task-labels-label task-labels-value"
+              <Dropdown
+                v-else
+                variant="tertiary"
+                class="w-full [&>button]:w-full"
+                :label="labelsTriggerLabel"
+                :items="labelItems"
+                :on-select="toggleLabel"
+              >
+                <template #trigger>
+                  <span
+                    id="task-labels-value"
+                    class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-left"
                   >
-                    <span
-                      id="task-labels-value"
-                      class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"
-                    >
-                      <template v-if="selectedLabels.length">
+                    <template v-if="selectedLabels.length">
+                      <span
+                        v-for="label in selectedLabels"
+                        :key="label.id"
+                        class="inline-flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs"
+                      >
                         <span
-                          v-for="label in selectedLabels"
-                          :key="label.id"
-                          class="inline-flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs"
-                        >
-                          <span
-                            class="inline-block size-2 rounded-full"
-                            :style="{ backgroundColor: label.color }"
-                            aria-hidden="true"
-                          />
-                          {{ label.name }}
-                        </span>
-                      </template>
-                      <span v-else class="text-muted-foreground">ラベルなし</span>
-                    </span>
-                    <ChevronDown class="size-4 shrink-0 opacity-50" aria-hidden="true" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" class="min-w-56">
-                  <DropdownMenuCheckboxItem
-                    v-for="label in labels"
-                    :key="label.id"
-                    :model-value="selectedLabelIds.includes(label.id)"
-                    @select="(event: Event) => event.preventDefault()"
-                    @update:model-value="toggleLabel(label.id)"
-                  >
-                    <span
-                      class="inline-block size-2.5 shrink-0 rounded-full"
-                      :style="{ backgroundColor: label.color }"
-                      aria-hidden="true"
-                    />
-                    {{ label.name }}
-                  </DropdownMenuCheckboxItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                          class="inline-block size-2 rounded-full"
+                          :style="{ backgroundColor: label.color }"
+                          aria-hidden="true"
+                        />
+                        {{ label.name }}
+                      </span>
+                    </template>
+                    <span v-else class="text-muted-foreground">ラベルなし</span>
+                  </span>
+                </template>
+              </Dropdown>
             </div>
 
             <!-- koyori の Input は date に max を付けない。期限より後かは送信時にも検証する -->
