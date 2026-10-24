@@ -483,7 +483,7 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
           v-for="date in dates"
           :key="date"
           class="border-r px-1 py-1.5 text-center last:border-r-0"
-          :class="[columnClass(date), date === today ? 'font-semibold text-primary' : '']"
+          :class="[columnClass(date), date === today ? 'font-semibold text-link' : '']"
           :aria-current="date === today ? 'date' : undefined"
           :data-date="date"
         >
@@ -530,7 +530,7 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
             <ChevronLeft v-if="placed.clippedStart" class="size-3 shrink-0" aria-hidden="true" />
             <Flag
               v-if="placed.item.kind === 'milestone'"
-              class="size-3 shrink-0 text-primary"
+              class="size-3 shrink-0 text-link"
               aria-label="マイルストーン"
             />
             <span class="truncate">{{ placed.item.name }}</span>
