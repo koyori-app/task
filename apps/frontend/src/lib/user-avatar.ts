@@ -15,12 +15,12 @@ export const USER_AVATAR_SIZES = {
 
 /**
  * 頭文字の色。地（bg-muted）に対する text-foreground は、明るい面でも暗い面でも対比が 4.5:1 を
- * 十分に超える。薄い字（text-muted-foreground）は明るい面で 4.34:1 しかなく、12px 以下の字には足りぬ。
+ * 十分に超える。薄い字（text-muted-foreground）は明るい面で 4.47:1 しかなく、12px 以下の字には足りぬ。
  */
 export const USER_AVATAR_INITIALS_CLASS = 'bg-muted text-foreground';
 
 /** 外れた者（退会・プロジェクトの外）のアバターの灰色。画像も頭文字も灰色にして薄くする。 */
-export const USER_AVATAR_INACTIVE_CLASS = 'opacity-60 grayscale';
+export const USER_AVATAR_INACTIVE_CLASS = 'opacity-75 grayscale';
 
 /*
  * メンションの札（`remark-kfm-mention/style.css` の `.kfm-mention-avatar`）は v-html と CodeMirror の

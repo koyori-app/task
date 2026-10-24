@@ -1,15 +1,25 @@
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { MEMBER_AVATAR_COLORS, USER_AVATAR_INITIALS_CLASS } from '@/lib/user-avatar';
+import {
+  MEMBER_AVATAR_COLORS,
+  USER_AVATAR_INACTIVE_CLASS,
+  USER_AVATAR_INITIALS_CLASS,
+} from '@/lib/user-avatar';
 
 /**
  * 頭文字の字と地の対比（WCAG 2.x の相対輝度）。色は task の design token（tailwind.css の
  * `:root` と `.dark`）から読み、頭文字の組が明るい面でも暗い面でも 4.5:1 以上であることを縛る。
+ * `:root` の値は `var(--koyori-*)` なので、@koyori-app/ui-vue の `:root` トークンまでたどる。
  */
 const CSS = readFileSync(resolve(__dirname, '../../assets/css/tailwind.css'), 'utf8');
+const KOYORI_CSS = readFileSync(
+  createRequire(import.meta.url).resolve('@koyori-app/ui-vue/style.css'),
+  'utf8',
+);
 
 function block(selector: string): string {
   const start = CSS.indexOf(`${selector} {`);
@@ -17,12 +27,21 @@ function block(selector: string): string {
   return CSS.slice(start, CSS.indexOf('\n}', start));
 }
 
-/** `--name: oklch(L C H)` を線形 sRGB へ。 */
+/** `--name` の値。無ければ koyori の `:root` を見て、`var(--…)` は値までたどる。 */
+function raw(scope: string, name: string): string {
+  const find = (css: string) => new RegExp(`--${name}:\\s*([^;}]+)`).exec(css)?.[1].trim();
+  const value = find(block(scope)) ?? find(KOYORI_CSS);
+  if (value === undefined) throw new Error(`${scope} の --${name} が見つからぬ`);
+  const ref = /^var\(--([\w-]+)\)$/.exec(value);
+  return ref ? raw(scope, ref[1]) : value;
+}
+
+/** `--name` の色（`#rrggbb` か `oklch(L C H)`）を線形 sRGB へ。 */
 function token(scope: string, name: string): [number, number, number] {
-  const m = new RegExp(`--${name}:\\s*oklch\\(([\\d.]+) ([\\d.]+)(?: ([\\d.]+))?\\)`).exec(
-    block(scope),
-  );
-  if (!m) throw new Error(`${scope} の --${name} が oklch で読めぬ`);
+  const value = raw(scope, name);
+  if (/^#[\da-f]{6}$/i.test(value)) return hex(value);
+  const m = /^oklch\(([\d.]+) ([\d.]+)(?: ([\d.]+))?\)$/.exec(value);
+  if (!m) throw new Error(`${scope} の --${name} が色で読めぬ: ${value}`);
   const [L, C, h] = [Number(m[1]), Number(m[2]), (Number(m[3] ?? 0) * Math.PI) / 180];
   const a = C * Math.cos(h);
   const b = C * Math.sin(h);
@@ -71,12 +90,15 @@ describe('頭文字の対比', () => {
     expect(r).toBeGreaterThan(4.3);
   });
 
-  it('灰色（opacity-60）にしても、面の上で 4.5:1 以上', () => {
+  it('灰色（USER_AVATAR_INACTIVE_CLASS の opacity）にしても、面の上で 4.5:1 以上', () => {
+    const opacity = /\bopacity-(\d+)\b/.exec(USER_AVATAR_INACTIVE_CLASS);
+    if (!opacity) throw new Error('USER_AVATAR_INACTIVE_CLASS に opacity-* が無い');
+    const alpha = Number(opacity[1]) / 100;
     // ブラウザは符号化した sRGB の値のまま重ねる（線形のまま混ぜると値がずれる）
     const encode = (v: number) => (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055);
     const decode = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
     const mix = (fg: number[], bg: number[]) =>
-      fg.map((v, i) => decode(0.6 * encode(v) + 0.4 * encode(bg[i])));
+      fg.map((v, i) => decode(alpha * encode(v) + (1 - alpha) * encode(bg[i])));
     for (const scope of [':root', '.dark']) {
       const page = token(scope, 'background');
       const text = mix(token(scope, 'foreground'), page);
