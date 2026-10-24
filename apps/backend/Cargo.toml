@@ -60,6 +60,8 @@ utoipa-scalar = { version = "0.3.0", features = ["axum"] }
 workspace-hack = { version = "0.1", path = "crates/workspace-hack" }
 
 [dev-dependencies]
+# job と同じ版・feature。監督の統合テストで keep_alive などを短縮した storage を組む
+apalis-postgres = { version = "1.0.0-rc.8", default-features = false, features = ["migrate", "tokio-comp", "time"] }
 auth-core = { workspace = true }
 dotenvy = { workspace = true }
 forge-core = { workspace = true }
