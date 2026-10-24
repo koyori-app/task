@@ -5,7 +5,7 @@ import { useTenantsQuery } from '@/lib/api-vue-query';
 import { useTenantStore } from '@/stores/tenant';
 import { useHydrated } from '@/composables/useHydrated';
 import CreateTenantDialog from '@/components/header/CreateTenantDialog.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 
 const store = useTenantStore();
 const query = useTenantsQuery();
@@ -31,16 +31,18 @@ watch([hydrated, query.data], () => void openHome(), { immediate: true });
   <div class="mx-auto flex max-w-lg flex-col items-center gap-4 py-20 text-center">
     <template v-if="query.isError.value || navigationError">
       <p role="alert" class="text-sm text-destructive">ホームを開けませんでした。</p>
-      <Button variant="outline" @click="navigationError ? openHome() : query.refetch()"
-        >再試行</Button
-      >
+      <Button
+        variant="tertiary"
+        label="再試行"
+        @click="navigationError ? openHome() : query.refetch()"
+      />
     </template>
     <template v-else-if="query.isSuccess.value && !query.data.value?.length">
       <h1 class="text-2xl font-semibold">Koyori へようこそ</h1>
       <p class="text-sm text-muted-foreground">
         ワークスペースを作成して、タスクをまとめましょう。
       </p>
-      <Button @click="createOpen = true">ワークスペースを作成</Button>
+      <Button label="ワークスペースを作成" @click="createOpen = true" />
       <CreateTenantDialog v-model:open="createOpen" />
     </template>
     <p v-else role="status" class="text-sm text-muted-foreground">ホームを開いています…</p>

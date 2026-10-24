@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { useOAuthProvidersQuery } from '@/lib/api-vue-query';
@@ -62,23 +62,21 @@ function onStart(provider: string, requiresInstanceUrl: boolean) {
         </Field>
         <Button
           type="button"
-          variant="outline"
+          variant="tertiary"
           class="w-full"
           :disabled="!instanceUrls[provider.provider]?.trim()"
+          :label="`${providerLabel(provider.provider)} で続ける`"
           @click="onStart(provider.provider, true)"
-        >
-          {{ providerLabel(provider.provider) }} で続ける
-        </Button>
+        />
       </div>
       <Button
         v-else
         type="button"
-        variant="outline"
+        variant="tertiary"
         class="w-full"
+        :label="`${providerLabel(provider.provider)} で続ける`"
         @click="onStart(provider.provider, false)"
-      >
-        {{ providerLabel(provider.provider) }} で続ける
-      </Button>
+      />
     </template>
   </div>
 </template>

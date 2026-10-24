@@ -4,7 +4,7 @@ import { type } from 'arktype';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -204,9 +204,14 @@ async function confirmDelete() {
   <div>
     <div class="mb-5 flex items-center justify-between gap-4 border-b pb-4">
       <h2 class="text-xl font-semibold">カスタムフィールド</h2>
-      <Button type="button" variant="outline" class="shrink-0" @click="openAdd">
-        <PhPlus class="size-4" />
-        フィールドを追加
+      <Button
+        type="button"
+        variant="tertiary"
+        class="shrink-0"
+        label="フィールドを追加"
+        @click="openAdd"
+      >
+        <template #icon><PhPlus class="size-4" /></template>
       </Button>
     </div>
     <p class="mb-4 text-sm text-muted-foreground">
@@ -330,17 +335,18 @@ async function confirmDelete() {
           <DialogFooter>
             <Button
               type="button"
-              variant="outline"
+              variant="tertiary"
               :disabled="isSaving"
+              label="キャンセル"
               @click="onFormOpenChange(false)"
-            >
-              キャンセル
-            </Button>
+            />
             <form.Subscribe>
               <template #default="{ canSubmit, isSubmitting }">
-                <Button type="submit" :disabled="!canSubmit || isSubmitting || isSaving">
-                  {{ submitLabel }}
-                </Button>
+                <Button
+                  type="submit"
+                  :disabled="!canSubmit || isSubmitting || isSaving"
+                  :label="submitLabel"
+                />
               </template>
             </form.Subscribe>
           </DialogFooter>
@@ -363,20 +369,18 @@ async function confirmDelete() {
         <DialogFooter>
           <Button
             type="button"
-            variant="outline"
+            variant="tertiary"
             :disabled="deleteMutation.isPending.value"
+            label="キャンセル"
             @click="onDeleteOpenChange(false)"
-          >
-            キャンセル
-          </Button>
+          />
           <Button
             type="button"
-            variant="destructive"
+            variant="danger"
             :disabled="deleteMutation.isPending.value"
+            :label="deleteMutation.isPending.value ? '削除中…' : '削除する'"
             @click="confirmDelete"
-          >
-            {{ deleteMutation.isPending.value ? '削除中…' : '削除する' }}
-          </Button>
+          />
         </DialogFooter>
       </DialogContent>
     </Dialog>

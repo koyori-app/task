@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { ListboxContent, ListboxFilter, ListboxRoot, ListboxVirtualizer } from 'reka-ui';
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import type { SelectableUser, UserSelectorState } from '@/components/users/types';
 import UserSelectorOption from '@/components/users/UserSelectorOption.vue';
 import { rankUsersByQuery } from '@/lib/user-search';
@@ -111,13 +111,10 @@ function onUpdate(value: unknown) {
       <Button
         v-if="state.onRetry"
         type="button"
-        variant="outline"
-        size="sm"
-        class="h-7 text-xs"
+        variant="tertiary"
+        label="再試行"
         @click="state.onRetry()"
-      >
-        再試行
-      </Button>
+      />
     </div>
     <p v-else-if="!users.length" role="status" class="px-2 py-1.5 text-sm text-muted-foreground">
       {{ emptyText }}

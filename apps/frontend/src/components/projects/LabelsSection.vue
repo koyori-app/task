@@ -2,7 +2,7 @@
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -88,9 +88,8 @@ async function confirmDelete() {
   <div>
     <div class="mb-5 flex items-center justify-between border-b pb-4">
       <h2 class="text-xl font-semibold">ラベル</h2>
-      <Button type="button" variant="outline" @click="openCreate">
-        <PhPlus class="size-4" />
-        新しいラベル
+      <Button type="button" variant="tertiary" label="新しいラベル" @click="openCreate">
+        <template #icon><PhPlus class="size-4" /></template>
       </Button>
     </div>
 
@@ -126,22 +125,18 @@ async function confirmDelete() {
         <Button
           type="button"
           variant="ghost"
-          size="icon-sm"
-          class="size-7 text-muted-foreground"
-          :aria-label="`ラベル「${label.name}」を編集`"
+          :ariaLabel="`ラベル「${label.name}」を編集`"
           @click="openEdit(label)"
         >
-          <PhPencilSimple class="size-4" />
+          <template #icon><PhPencilSimple class="size-4" /></template>
         </Button>
         <Button
           type="button"
           variant="ghost"
-          size="icon-sm"
-          class="size-7 text-muted-foreground"
-          :aria-label="`ラベル「${label.name}」を削除`"
+          :ariaLabel="`ラベル「${label.name}」を削除`"
           @click="openDelete(label)"
         >
-          <PhTrash class="size-4" />
+          <template #icon><PhTrash class="size-4" /></template>
         </Button>
       </li>
     </ul>
@@ -166,20 +161,18 @@ async function confirmDelete() {
         <DialogFooter>
           <Button
             type="button"
-            variant="outline"
+            variant="tertiary"
             :disabled="deleteMutation.isPending.value"
+            label="キャンセル"
             @click="deleteTarget = null"
-          >
-            キャンセル
-          </Button>
+          />
           <Button
             type="button"
-            variant="destructive"
+            variant="danger"
             :disabled="deleteMutation.isPending.value"
+            :label="deleteMutation.isPending.value ? '削除中…' : '削除する'"
             @click="confirmDelete"
-          >
-            {{ deleteMutation.isPending.value ? '削除中…' : '削除する' }}
-          </Button>
+          />
         </DialogFooter>
       </DialogContent>
     </Dialog>

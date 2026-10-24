@@ -5,7 +5,7 @@ import { navigate } from 'vike/client/router';
 
 import TenantIconPicker from '@/components/tenants/TenantIconPicker.vue';
 import { DEFAULT_TENANT_EMOJI } from '@/components/tenants/tenant-icon';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -317,9 +317,7 @@ const ACCESS_FLAGS = [
                 このテナントを別の管理者に渡します。自分はメンバーとして残ります。
               </span>
             </span>
-            <Button variant="outline" size="sm" class="shrink-0" disabled title="未実装">
-              移す
-            </Button>
+            <Button variant="tertiary" class="shrink-0" disabled title="未実装" label="移す" />
           </div>
 
           <div class="flex items-center gap-3 pt-3.5">
@@ -329,9 +327,7 @@ const ACCESS_FLAGS = [
                 プロジェクト・タスク・メンバーの権限をすべて消します。
               </span>
             </span>
-            <Button variant="destructive" size="sm" class="shrink-0" @click="isDeleteOpen = true">
-              削除
-            </Button>
+            <Button variant="danger" class="shrink-0" label="削除" @click="isDeleteOpen = true" />
           </div>
         </section>
       </div>
@@ -348,10 +344,12 @@ const ACCESS_FLAGS = [
       >
         {{ submitError ?? '保存されていない変更があります' }}
       </span>
-      <Button variant="outline" @click="discard">取り消す</Button>
-      <Button :disabled="!canSave || updateMutation.isPending.value" @click="save">
-        変更を保存
-      </Button>
+      <Button variant="tertiary" label="取り消す" @click="discard" />
+      <Button
+        :disabled="!canSave || updateMutation.isPending.value"
+        label="変更を保存"
+        @click="save"
+      />
     </div>
 
     <DeleteTenantDialog

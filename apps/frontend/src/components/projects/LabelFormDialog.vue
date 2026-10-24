@@ -3,7 +3,7 @@ import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -200,14 +200,22 @@ function onOpenChange(open: boolean) {
         <p v-if="submitError" role="alert" class="text-sm text-destructive">{{ submitError }}</p>
 
         <DialogFooter>
-          <Button type="button" variant="outline" :disabled="isPending" @click="emit('close')">
-            キャンセル
-          </Button>
+          <Button
+            type="button"
+            variant="tertiary"
+            :disabled="isPending"
+            label="キャンセル"
+            @click="emit('close')"
+          />
           <form.Subscribe>
             <template #default="{ canSubmit, isSubmitting }">
-              <Button type="submit" :disabled="!canSubmit || isSubmitting || isPending">
-                {{ isSubmitting || isPending ? '保存中…' : label ? '変更を保存' : 'ラベルを作成' }}
-              </Button>
+              <Button
+                type="submit"
+                :disabled="!canSubmit || isSubmitting || isPending"
+                :label="
+                  isSubmitting || isPending ? '保存中…' : label ? '変更を保存' : 'ラベルを作成'
+                "
+              />
             </template>
           </form.Subscribe>
         </DialogFooter>

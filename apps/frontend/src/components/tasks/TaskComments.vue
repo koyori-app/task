@@ -12,7 +12,7 @@ import { computed, ref, useTemplateRef, watch } from 'vue';
 
 import CommentEditor from '@/components/tasks/CommentEditor.vue';
 import TaskCommentItem from '@/components/tasks/TaskCommentItem.vue';
-import { Button } from '@/components/ui/button';
+import { Button, Spinner } from '@koyori-app/ui-vue';
 import type { CommentThread } from '@/composables/useTaskComments';
 import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
 
@@ -165,15 +165,8 @@ async function deleteThread(threadId: string) {
     -->
     <!-- スレッドを開いているときは、列の頭に戻る導線を出す（参照） -->
     <div v-if="openThread" class="-mx-4 flex items-center gap-2 border-b px-4 pb-2">
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        class="size-7"
-        aria-label="コメント一覧へ戻る"
-        @click="backToList"
-      >
-        <ArrowLeft class="size-4" aria-hidden="true" />
+      <Button type="button" variant="ghost" ariaLabel="コメント一覧へ戻る" @click="backToList">
+        <template #icon><ArrowLeft class="size-4" aria-hidden="true" /></template>
       </Button>
       <p class="min-w-0 truncate text-sm font-medium">{{ openThread.user.name }} のスレッド</p>
     </div>
@@ -201,16 +194,7 @@ async function deleteThread(threadId: string) {
 
       <div v-else-if="listError" class="flex items-center gap-2">
         <p class="text-sm text-destructive">コメントを読み込めませんでした</p>
-        <Button
-          v-if="onRetry"
-          type="button"
-          variant="outline"
-          size="sm"
-          class="h-7 px-2"
-          @click="onRetry"
-        >
-          再試行
-        </Button>
+        <Button v-if="onRetry" type="button" variant="tertiary" label="再試行" @click="onRetry" />
       </div>
 
       <p v-else-if="!threads.length" class="text-sm text-muted-foreground">
@@ -312,12 +296,9 @@ async function deleteThread(threadId: string) {
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              class="h-7 px-2 text-xs text-muted-foreground"
+              :label="thread.replies.length ? `${thread.replies.length}件の返信` : '返信'"
               @click="showThread(thread.id)"
-            >
-              {{ thread.replies.length ? `${thread.replies.length}件の返信` : '返信' }}
-            </Button>
+            />
           </div>
         </li>
       </ul>
@@ -351,15 +332,8 @@ async function deleteThread(threadId: string) {
           :mentions="mentions"
         />
         <div class="flex items-center gap-1 px-2 pb-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            class="size-7 text-muted-foreground"
-            aria-label="追加"
-            disabled
-          >
-            <Plus class="size-4" aria-hidden="true" />
+          <Button type="button" variant="ghost" ariaLabel="追加" disabled>
+            <template #icon><Plus class="size-4" aria-hidden="true" /></template>
           </Button>
           <span
             class="inline-flex h-7 items-center gap-1 rounded-md bg-muted px-2 text-xs text-muted-foreground"
@@ -367,36 +341,28 @@ async function deleteThread(threadId: string) {
             コメント
             <ChevronDown class="size-3" aria-hidden="true" />
           </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            class="size-7 text-muted-foreground"
-            aria-label="ファイルを添付"
-            disabled
-          >
-            <Paperclip class="size-4" aria-hidden="true" />
+          <Button type="button" variant="ghost" ariaLabel="ファイルを添付" disabled>
+            <template #icon><Paperclip class="size-4" aria-hidden="true" /></template>
           </Button>
           <Button
             type="button"
             variant="ghost"
-            size="icon"
-            class="size-7 text-muted-foreground"
-            aria-label="メンション"
+            ariaLabel="メンション"
             :disabled="submitPending"
             @click="composer?.openMentionPicker()"
           >
-            <AtSign class="size-4" aria-hidden="true" />
+            <template #icon><AtSign class="size-4" aria-hidden="true" /></template>
           </Button>
           <Button
             type="submit"
-            size="icon"
-            class="ml-auto size-7"
-            :aria-label="submitPending ? '送信中' : openThread ? '返信する' : 'コメントする'"
+            class="ml-auto"
+            :ariaLabel="submitPending ? '送信中' : openThread ? '返信する' : 'コメントする'"
             :disabled="submitPending || !newDraft.trim()"
           >
-            <Loader2 v-if="submitPending" class="size-4 animate-spin" aria-hidden="true" />
-            <SendHorizontal v-else class="size-4" aria-hidden="true" />
+            <template #icon>
+              <Spinner v-if="submitPending" hide-label />
+              <SendHorizontal v-else class="size-4" aria-hidden="true" />
+            </template>
           </Button>
         </div>
       </div>

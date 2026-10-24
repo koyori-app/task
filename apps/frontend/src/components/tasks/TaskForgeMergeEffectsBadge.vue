@@ -2,7 +2,7 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { computed, ref } from 'vue';
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -112,23 +112,21 @@ async function acknowledge() {
           <template v-if="confirming">
             <Button
               type="button"
-              variant="outline"
+              variant="tertiary"
               :disabled="acknowledgeMutation.isPending.value"
+              label="キャンセル"
               @click="confirming = false"
-            >
-              キャンセル
-            </Button>
+            />
             <Button
               type="button"
               :disabled="acknowledgeMutation.isPending.value"
+              :label="acknowledgeMutation.isPending.value ? '送信中…' : '確認済みにする'"
               @click="acknowledge"
-            >
-              {{ acknowledgeMutation.isPending.value ? '送信中…' : '確認済みにする' }}
-            </Button>
+            />
           </template>
           <template v-else>
-            <Button type="button" variant="outline" @click="open = false">閉じる</Button>
-            <Button type="button" @click="confirming = true">確認済みにする…</Button>
+            <Button type="button" variant="tertiary" label="閉じる" @click="open = false" />
+            <Button type="button" label="確認済みにする…" @click="confirming = true" />
           </template>
         </DialogFooter>
       </DialogContent>

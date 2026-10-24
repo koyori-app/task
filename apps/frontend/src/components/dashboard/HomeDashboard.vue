@@ -20,7 +20,7 @@ import { activityActor, activityText, relativeTime } from '@/lib/task-activity';
 import { useNow } from '@/composables/useNow';
 import { useHydrated } from '@/composables/useHydrated';
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import DashboardCreateTask from './DashboardCreateTask.vue';
 
@@ -219,11 +219,13 @@ async function complete(item: DashboardTask) {
         </p>
       </div>
       <Button
-        class="shrink-0 gap-1.5 max-sm:px-2 max-sm:text-xs"
+        class="shrink-0"
         :disabled="!canCreate"
+        label="タスクを作成"
         @click="createOpen = true"
-        ><Plus class="size-4" />タスクを作成</Button
       >
+        <template #icon><Plus class="size-4" /></template>
+      </Button>
     </div>
 
     <div
@@ -233,12 +235,11 @@ async function complete(item: DashboardTask) {
     >
       <p class="text-sm text-destructive">ダッシュボードを取得できませんでした。</p>
       <Button
-        variant="outline"
-        size="sm"
+        variant="tertiary"
         :disabled="query.isFetching.value"
+        label="再試行"
         @click="query.refetch()"
-        >再試行</Button
-      >
+      />
     </div>
     <div
       v-if="!data && !query.isError.value"
@@ -373,12 +374,12 @@ async function complete(item: DashboardTask) {
           <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
             <Button
               variant="ghost"
-              size="sm"
-              class="h-auto gap-1 p-0 text-xs text-muted-foreground"
               :disabled="!data.projects.length"
+              label="タスクを追加"
               @click="createOpen = true"
-              ><Plus class="size-3.5" />タスクを追加</Button
             >
+              <template #icon><Plus class="size-3.5" /></template>
+            </Button>
             <div
               class="flex items-center gap-3 text-[11px] text-muted-foreground"
               aria-live="polite"
@@ -392,19 +393,17 @@ async function complete(item: DashboardTask) {
               <Button
                 v-if="offset > 0"
                 :disabled="query.isPlaceholderData.value"
-                variant="outline"
-                size="sm"
+                variant="tertiary"
+                label="前へ"
                 @click="offset = Math.max(0, offset - pageSize)"
-                >前へ</Button
-              >
+              />
               <Button
                 v-if="offset + pageSize < data.total"
                 :disabled="query.isPlaceholderData.value"
-                variant="outline"
-                size="sm"
+                variant="tertiary"
+                label="次へ"
                 @click="offset += pageSize"
-                >次へ</Button
-              >
+              />
             </div>
           </div>
           <p class="mt-3 text-[11px] text-muted-foreground">

@@ -2,7 +2,7 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { computed, ref, watch } from 'vue';
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -94,14 +94,13 @@ async function confirmDelete() {
       <p v-if="deleteError" role="alert" class="text-sm text-destructive">{{ deleteError }}</p>
 
       <DialogFooter>
-        <Button variant="outline" @click="onOpenChange(false)">キャンセル</Button>
+        <Button variant="tertiary" label="キャンセル" @click="onOpenChange(false)" />
         <Button
-          variant="destructive"
+          variant="danger"
           :disabled="!canDelete || deleteMutation.isPending.value"
+          label="テナントを削除"
           @click="confirmDelete"
-        >
-          テナントを削除
-        </Button>
+        />
       </DialogFooter>
     </DialogContent>
   </Dialog>

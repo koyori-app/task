@@ -2,7 +2,7 @@
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { onMounted, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Card, CardContent } from '@/components/ui/card';
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
@@ -67,7 +67,7 @@ const form = useForm({
     <h1 class="text-2xl font-bold">パスワードを再設定しました</h1>
     <p class="text-muted-foreground text-sm">新しいパスワードでサインインしてください。</p>
     <a href="/signin">
-      <Button>サインインページへ</Button>
+      <Button label="サインインページへ" />
     </a>
   </div>
   <div
@@ -85,7 +85,7 @@ const form = useForm({
       パスワード再設定用のリンクが無効か、有効期限が切れています。お手数ですが再度リクエストしてください。
     </p>
     <a href="/auth/reset-password">
-      <Button variant="outline">再設定リンクを再取得する</Button>
+      <Button variant="tertiary" label="再設定リンクを再取得する" />
     </a>
   </div>
   <Card v-else class="overflow-hidden p-0">
@@ -149,9 +149,8 @@ const form = useForm({
                   type="submit"
                   class="w-full"
                   :disabled="!canSubmit || isSubmitting || !isHydrated"
-                >
-                  {{ isSubmitting ? '設定中…' : 'パスワードを再設定する' }}
-                </Button>
+                  :label="isSubmitting ? '設定中…' : 'パスワードを再設定する'"
+                />
               </Field>
             </template>
           </form.Subscribe>

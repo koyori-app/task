@@ -2,7 +2,7 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhCaretDown, PhCopy, PhKey, PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -222,10 +222,10 @@ async function onRevokeConfirm() {
         v-if="!isFormOpen"
         type="button"
         :disabled="issuableTenants.length === 0"
+        label="トークンを発行"
         @click="openForm"
       >
-        <PhPlus class="size-4" />
-        トークンを発行
+        <template #icon><PhPlus class="size-4" /></template>
       </Button>
     </div>
 
@@ -244,9 +244,13 @@ async function onRevokeConfirm() {
           data-testid="created-token"
           >{{ createdToken }}</code
         >
-        <Button type="button" variant="outline" size="sm" @click="copyCreatedToken">
-          <PhCopy class="size-4" />
-          {{ copied ? 'コピーしました' : 'コピー' }}
+        <Button
+          type="button"
+          variant="tertiary"
+          :label="copied ? 'コピーしました' : 'コピー'"
+          @click="copyCreatedToken"
+        >
+          <template #icon><PhCopy class="size-4" /></template>
         </Button>
       </div>
       <p v-if="copyError" role="alert" class="text-destructive text-sm">{{ copyError }}</p>
@@ -297,13 +301,11 @@ async function onRevokeConfirm() {
                 v-for="preset in EXPIRATION_PRESETS"
                 :key="preset.key"
                 type="button"
-                size="sm"
-                :variant="expiration === preset.key ? 'default' : 'outline'"
-                :aria-pressed="expiration === preset.key"
+                :variant="expiration === preset.key ? 'primary' : 'tertiary'"
+                :ariaPressed="expiration === preset.key ? 'true' : 'false'"
+                :label="preset.label"
                 @click="expiration = preset.key"
-              >
-                {{ preset.label }}
-              </Button>
+              />
             </div>
           </Field>
 
@@ -334,10 +336,12 @@ async function onRevokeConfirm() {
 
           <Field>
             <div class="flex gap-2">
-              <Button type="submit" :disabled="!isHydrated || createToken.isPending.value">
-                {{ createToken.isPending.value ? '発行中…' : 'トークンを発行' }}
-              </Button>
-              <Button type="button" variant="outline" @click="resetForm">キャンセル</Button>
+              <Button
+                type="submit"
+                :disabled="!isHydrated || createToken.isPending.value"
+                :label="createToken.isPending.value ? '発行中…' : 'トークンを発行'"
+              />
+              <Button type="button" variant="tertiary" label="キャンセル" @click="resetForm" />
             </div>
           </Field>
         </FieldGroup>
@@ -397,9 +401,8 @@ async function onRevokeConfirm() {
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger as-child>
-              <Button type="button" variant="outline" size="sm">
-                スコープを表示
-                <PhCaretDown class="size-3" />
+              <Button type="button" variant="tertiary" label="スコープを表示">
+                <template #icon><PhCaretDown class="size-3" /></template>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -410,13 +413,11 @@ async function onRevokeConfirm() {
           </DropdownMenu>
           <Button
             type="button"
-            variant="outline"
-            size="sm"
-            class="text-destructive hover:text-destructive"
+            variant="tertiary"
+            class="text-(--koyori-color-danger)"
+            label="取り消し"
             @click="openRevokeDialog(token)"
-          >
-            取り消し
-          </Button>
+          />
         </li>
       </ul>
     </template>
@@ -436,20 +437,18 @@ async function onRevokeConfirm() {
         <DialogFooter>
           <Button
             type="button"
-            variant="outline"
+            variant="tertiary"
             :disabled="revokeToken.isPending.value"
+            label="キャンセル"
             @click="revokeTarget = null"
-          >
-            キャンセル
-          </Button>
+          />
           <Button
             type="button"
-            variant="destructive"
+            variant="danger"
             :disabled="revokeToken.isPending.value"
+            :label="revokeToken.isPending.value ? '取り消し中…' : '取り消す'"
             @click="onRevokeConfirm"
-          >
-            {{ revokeToken.isPending.value ? '取り消し中…' : '取り消す' }}
-          </Button>
+          />
         </DialogFooter>
       </DialogContent>
     </Dialog>

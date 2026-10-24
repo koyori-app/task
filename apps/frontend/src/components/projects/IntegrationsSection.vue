@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhGithubLogo } from '@phosphor-icons/vue';
 import { OpenApiVueQueryError } from '@koyori-app/openapi-vue-query';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Input } from '@/components/ui/input';
 import {
   Dialog,
@@ -434,9 +434,12 @@ async function confirmDisconnect() {
 
     <div v-else-if="integrationQuery.isError.value" class="flex items-center gap-3">
       <p role="alert" class="text-sm text-destructive">連携状態を取得できませんでした</p>
-      <Button type="button" variant="outline" size="sm" @click="() => integrationQuery.refetch()">
-        再試行
-      </Button>
+      <Button
+        type="button"
+        variant="tertiary"
+        label="再試行"
+        @click="() => integrationQuery.refetch()"
+      />
     </div>
 
     <div v-else class="flex flex-col gap-3">
@@ -463,27 +466,26 @@ async function confirmDisconnect() {
         <div v-if="integration?.connected" class="flex shrink-0 gap-2">
           <Button
             type="button"
-            variant="outline"
-            size="sm"
+            variant="tertiary"
             :disabled="importDisabled"
+            :label="importLabel"
             @click="startImport"
-          >
-            {{ importLabel }}
-          </Button>
-          <Button type="button" variant="outline" size="sm" @click="onDisconnectOpenChange(true)">
-            連携を解除
-          </Button>
+          />
+          <Button
+            type="button"
+            variant="tertiary"
+            label="連携を解除"
+            @click="onDisconnectOpenChange(true)"
+          />
         </div>
         <Button
           v-else
           type="button"
-          size="sm"
           class="shrink-0"
           :disabled="candidatesPending"
+          :label="candidatesPending ? '読み込み中…' : '連携する'"
           @click="loadCandidates"
-        >
-          {{ candidatesPending ? '読み込み中…' : '連携する' }}
-        </Button>
+        />
       </div>
       <p v-if="callbackError" role="alert" class="text-sm text-destructive">{{ callbackError }}</p>
 
@@ -510,14 +512,12 @@ async function confirmDisconnect() {
             }}</span>
             <Button
               type="button"
-              size="sm"
-              variant="outline"
+              variant="tertiary"
               class="shrink-0"
               :disabled="selectionBusy"
+              :label="reusePendingId === candidate.source_integration_id ? '確認中…' : 'これを使う'"
               @click="reuseInstallation(candidate.source_integration_id)"
-            >
-              {{ reusePendingId === candidate.source_integration_id ? '確認中…' : 'これを使う' }}
-            </Button>
+            />
           </li>
         </ul>
         <div v-if="candidatesError" class="mt-3 flex items-center gap-3">
@@ -525,24 +525,20 @@ async function confirmDisconnect() {
           <Button
             v-if="!candidates"
             type="button"
-            variant="outline"
-            size="sm"
+            variant="tertiary"
             :disabled="candidatesPending"
+            label="再試行"
             @click="loadCandidates"
-          >
-            再試行
-          </Button>
+          />
         </div>
         <Button
           type="button"
-          variant="outline"
-          size="sm"
+          variant="tertiary"
           class="mt-3"
           :disabled="installPending"
+          :label="installPending ? '接続中…' : '別の GitHub アカウント・組織を追加'"
           @click="startInstall"
-        >
-          {{ installPending ? '接続中…' : '別の GitHub アカウント・組織を追加' }}
-        </Button>
+        />
         <p v-if="installError" role="alert" class="mt-3 text-sm text-destructive">
           {{ installError }}
         </p>
@@ -588,14 +584,12 @@ async function confirmDisconnect() {
               >
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
+                variant="tertiary"
                 class="shrink-0"
                 :disabled="selectionBusy"
+                label="選択"
                 @click="connectRepository(repo.owner, repo.name)"
-              >
-                選択
-              </Button>
+              />
             </li>
           </ul>
         </template>
@@ -604,13 +598,11 @@ async function confirmDisconnect() {
           <Button
             v-if="selectToken && !repositories.length"
             type="button"
-            variant="outline"
-            size="sm"
+            variant="tertiary"
             :disabled="selectionBusy"
+            label="再試行"
             @click="loadRepositories"
-          >
-            再試行
-          </Button>
+          />
         </div>
         <!-- 目的のリポジトリが無いとき。GitHub 側の保存後に callback は来ないので、ここで取り直す -->
         <div v-if="selectToken" class="mt-3 flex flex-col gap-2">
@@ -619,18 +611,19 @@ async function confirmDisconnect() {
             で対象のアカウント・組織の「Configure」を開いてリポジトリを追加・保存し、「再読み込み」を押してください。
           </p>
           <div class="flex gap-2">
-            <Button type="button" variant="outline" size="sm" @click="openGithubAccessSettings">
-              GitHub でアクセス対象を追加
-            </Button>
             <Button
               type="button"
-              variant="outline"
-              size="sm"
+              variant="tertiary"
+              label="GitHub でアクセス対象を追加"
+              @click="openGithubAccessSettings"
+            />
+            <Button
+              type="button"
+              variant="tertiary"
               :disabled="selectionBusy"
+              label="再読み込み"
               @click="loadRepositories"
-            >
-              再読み込み
-            </Button>
+            />
           </div>
           <p v-if="addAccessError" role="alert" class="text-sm text-destructive">
             {{ addAccessError }}
@@ -667,20 +660,18 @@ async function confirmDisconnect() {
         <DialogFooter>
           <Button
             type="button"
-            variant="outline"
+            variant="tertiary"
             :disabled="disconnectMutation.isPending.value"
+            label="キャンセル"
             @click="onDisconnectOpenChange(false)"
-          >
-            キャンセル
-          </Button>
+          />
           <Button
             type="button"
-            variant="destructive"
+            variant="danger"
             :disabled="disconnectMutation.isPending.value"
+            :label="disconnectMutation.isPending.value ? '解除中…' : '解除する'"
             @click="confirmDisconnect"
-          >
-            {{ disconnectMutation.isPending.value ? '解除中…' : '解除する' }}
-          </Button>
+          />
         </DialogFooter>
       </DialogContent>
     </Dialog>

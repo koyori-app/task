@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhArrowDown, PhArrowUp, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { computed, ref, watch } from 'vue';
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -257,12 +257,11 @@ async function moveStatus(index: number, offset: -1 | 1) {
       ステータスを読み込めませんでした
       <Button
         type="button"
-        variant="outline"
-        size="sm"
+        variant="tertiary"
         class="ml-3"
+        label="再試行"
         @click="statusesQuery.refetch()"
-        >再試行</Button
-      >
+      />
     </div>
     <div v-else>
       <p
@@ -306,14 +305,12 @@ async function moveStatus(index: number, offset: -1 | 1) {
               />
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
+                variant="tertiary"
                 :disabled="isMutating"
-                :aria-label="`${status.name}を保存`"
+                :ariaLabel="`${status.name}を保存`"
+                label="保存"
                 @click="saveStatus(status)"
-              >
-                保存
-              </Button>
+              />
             </div>
 
             <div class="flex flex-wrap items-center gap-3">
@@ -347,34 +344,31 @@ async function moveStatus(index: number, offset: -1 | 1) {
               <div class="flex">
                 <Button
                   type="button"
-                  size="icon"
                   variant="ghost"
                   :disabled="index === 0 || isMutating"
-                  :aria-label="`${status.name}を上へ`"
+                  :ariaLabel="`${status.name}を上へ`"
                   @click="moveStatus(Number(index), -1)"
                 >
-                  <PhArrowUp class="size-4" />
+                  <template #icon><PhArrowUp class="size-4" /></template>
                 </Button>
                 <Button
                   type="button"
-                  size="icon"
                   variant="ghost"
                   :disabled="index === statuses.length - 1 || isMutating"
-                  :aria-label="`${status.name}を下へ`"
+                  :ariaLabel="`${status.name}を下へ`"
                   @click="moveStatus(Number(index), 1)"
                 >
-                  <PhArrowDown class="size-4" />
+                  <template #icon><PhArrowDown class="size-4" /></template>
                 </Button>
                 <Button
                   type="button"
-                  size="icon"
                   variant="ghost"
-                  class="text-destructive"
+                  class="enabled:text-(--koyori-color-danger)"
                   :disabled="isMutating"
-                  :aria-label="`${status.name}を削除`"
+                  :ariaLabel="`${status.name}を削除`"
                   @click="requestDelete(status)"
                 >
-                  <PhTrash class="size-4" />
+                  <template #icon><PhTrash class="size-4" /></template>
                 </Button>
               </div>
             </div>
@@ -392,7 +386,9 @@ async function moveStatus(index: number, offset: -1 | 1) {
             class="h-9 w-12 shrink-0 cursor-pointer p-1"
           />
           <Input v-model="newName" aria-label="新しいステータス名" placeholder="例: レビュー中" />
-          <Button type="submit" :disabled="isMutating"> <PhPlus class="size-4" />追加 </Button>
+          <Button type="submit" :disabled="isMutating" label="追加">
+            <template #icon><PhPlus class="size-4" /></template>
+          </Button>
         </div>
       </form>
     </div>
@@ -412,10 +408,14 @@ async function moveStatus(index: number, offset: -1 | 1) {
         </DialogDescription>
       </DialogHeader>
       <DialogFooter>
-        <Button type="button" variant="outline" @click="deleteTarget = null">キャンセル</Button>
-        <Button type="button" variant="destructive" :disabled="isMutating" @click="confirmDelete"
-          >削除する</Button
-        >
+        <Button type="button" variant="tertiary" label="キャンセル" @click="deleteTarget = null" />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="isMutating"
+          label="削除する"
+          @click="confirmDelete"
+        />
       </DialogFooter>
     </DialogContent>
   </Dialog>

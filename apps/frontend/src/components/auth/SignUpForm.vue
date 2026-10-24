@@ -7,7 +7,7 @@ import OAuthButtons from '@/components/auth/OAuthButtons.vue';
 import PasswordInput from '@/components/auth/PasswordInput.vue';
 import PasswordStrengthBar from '@/components/auth/PasswordStrengthBar.vue';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Card, CardContent } from '@/components/ui/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -175,9 +175,8 @@ const form = useForm({
                     type="submit"
                     class="w-full"
                     :disabled="!canSubmit || isSubmitting || !isHydrated"
-                  >
-                    {{ isSubmitting ? '登録中…' : 'アカウント作成' }}
-                  </Button>
+                    :label="isSubmitting ? '登録中…' : 'アカウント作成'"
+                  />
                 </Field>
               </template>
             </form.Subscribe>

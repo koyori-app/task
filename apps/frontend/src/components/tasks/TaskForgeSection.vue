@@ -6,7 +6,7 @@ import { computed, ref } from 'vue';
 import TaskForgeMergeEffectsBadge from '@/components/tasks/TaskForgeMergeEffectsBadge.vue';
 import TaskForgePullRequestLinkDialog from '@/components/tasks/TaskForgePullRequestLinkDialog.vue';
 import TaskIssueSourceRow from '@/components/tasks/TaskIssueSourceRow.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -141,13 +141,12 @@ const SOURCE_LABELS: Record<string, string> = {
       <Button
         type="button"
         variant="ghost"
-        size="sm"
         :disabled="notConnected"
         :aria-describedby="notConnected ? 'forge-link-disabled-reason' : undefined"
+        label="PR をリンク"
         @click="isLinkOpen = true"
       >
-        <Plus class="size-4" aria-hidden="true" />
-        PR をリンク
+        <template #icon><Plus class="size-4" aria-hidden="true" /></template>
       </Button>
     </div>
     <p v-if="notConnected" id="forge-link-disabled-reason" class="text-xs text-muted-foreground">
@@ -161,9 +160,7 @@ const SOURCE_LABELS: Record<string, string> = {
       class="flex items-center gap-2 text-sm text-destructive"
     >
       リポジトリの情報を読み込めませんでした
-      <Button type="button" variant="outline" size="sm" @click="forgeQuery.refetch()"
-        >再試行</Button
-      >
+      <Button type="button" variant="tertiary" label="再試行" @click="forgeQuery.refetch()" />
     </div>
     <p
       v-else-if="!pullRequests.length && !commits.length && !branches.length"
@@ -225,13 +222,8 @@ const SOURCE_LABELS: Record<string, string> = {
             >
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  :aria-label="`#${pr.number} の操作`"
-                >
-                  <MoreHorizontal class="size-4" aria-hidden="true" />
+                <Button type="button" variant="ghost" :ariaLabel="`#${pr.number} の操作`">
+                  <template #icon><MoreHorizontal class="size-4" aria-hidden="true" /></template>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -312,20 +304,18 @@ const SOURCE_LABELS: Record<string, string> = {
         <DialogFooter>
           <Button
             type="button"
-            variant="outline"
+            variant="tertiary"
             :disabled="unlinkMutation.isPending.value"
+            label="キャンセル"
             @click="unlinkTarget = null"
-          >
-            キャンセル
-          </Button>
+          />
           <Button
             type="button"
-            variant="destructive"
+            variant="danger"
             :disabled="unlinkMutation.isPending.value"
+            :label="unlinkMutation.isPending.value ? '外しています…' : 'リンクを外す'"
             @click="confirmUnlink"
-          >
-            {{ unlinkMutation.isPending.value ? '外しています…' : 'リンクを外す' }}
-          </Button>
+          />
         </DialogFooter>
       </DialogContent>
     </Dialog>

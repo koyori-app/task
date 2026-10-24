@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useQueryClient } from '@tanstack/vue-query';
 import { ref, watch } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -77,20 +77,18 @@ async function confirmDelete() {
       <DialogFooter>
         <Button
           type="button"
-          variant="outline"
+          variant="tertiary"
           :disabled="deleteMutation.isPending.value"
+          label="キャンセル"
           @click="emit('update:open', false)"
-        >
-          キャンセル
-        </Button>
+        />
         <Button
           type="button"
-          variant="destructive"
+          variant="danger"
           :disabled="deleteMutation.isPending.value"
+          :label="deleteMutation.isPending.value ? '削除中…' : '削除する'"
           @click="confirmDelete"
-        >
-          {{ deleteMutation.isPending.value ? '削除中…' : '削除する' }}
-        </Button>
+        />
       </DialogFooter>
     </DialogContent>
   </Dialog>

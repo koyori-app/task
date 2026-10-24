@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import HomeDashboard from '@/components/dashboard/HomeDashboard.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 
 const pageContext = usePageContext();
 const slug = computed(() => String(pageContext.routeParams.tenant ?? ''));
@@ -13,7 +13,7 @@ const { tenantId, isError, isTenantNotFound, tenantsQuery } = useResolvedTenantI
 <template>
   <div v-if="isError" role="alert" class="p-6 text-sm">
     ワークスペースを取得できませんでした。
-    <Button variant="outline" size="sm" @click="tenantsQuery.refetch()">再試行</Button>
+    <Button variant="tertiary" label="再試行" @click="tenantsQuery.refetch()" />
   </div>
   <div v-else-if="isTenantNotFound" class="p-6 text-sm text-muted-foreground">
     ワークスペースが見つかりません。<a href="/" class="underline">ホームへ戻る</a>

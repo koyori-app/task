@@ -6,7 +6,7 @@ import { computed, ref, watch } from 'vue';
 import { navigate } from 'vike/client/router';
 
 import CreateDocumentDialog from '@/components/documents/CreateDocumentDialog.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Input } from '@/components/ui/input';
 import type { components } from '@/generated/api';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
@@ -84,9 +84,8 @@ function onCreated(file: DriveFile) {
   <div class="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 pt-2 pb-10">
     <div class="flex items-center gap-2">
       <h1 class="text-xl font-semibold">ドキュメント</h1>
-      <Button class="ml-auto" size="sm" :disabled="!rootFolderId" @click="createOpen = true">
-        <Plus class="size-4" />
-        新規作成
+      <Button class="ml-auto" :disabled="!rootFolderId" label="新規作成" @click="createOpen = true">
+        <template #icon><Plus class="size-4" /></template>
       </Button>
     </div>
 

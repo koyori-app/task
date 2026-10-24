@@ -8,7 +8,7 @@ import {
   PhWarningCircle,
 } from '@phosphor-icons/vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -619,9 +619,12 @@ async function onRoundCreated() {
               「{{ prQuery.trim() }}」に一致する{{ mineApplied ? '、自分が作成した' : '' }} PR
               はありません。
             </p>
-            <Button v-if="mineApplied" variant="outline" size="sm" @click="setMineOnly(false)">
-              {{ prQuery.trim() === '' ? 'すべての PR を表示' : 'すべての PR から探す' }}
-            </Button>
+            <Button
+              v-if="mineApplied"
+              variant="tertiary"
+              :label="prQuery.trim() === '' ? 'すべての PR を表示' : 'すべての PR から探す'"
+              @click="setMineOnly(false)"
+            />
           </div>
 
           <template v-else>
@@ -716,13 +719,12 @@ async function onRoundCreated() {
             >
               <Button
                 variant="ghost"
-                size="sm"
                 :disabled="currentPage <= 1"
                 data-testid="pr-pager-prev"
+                label="前へ"
                 @click="goToPage(currentPage - 1)"
               >
-                <PhCaretLeft class="size-3.5" />
-                前へ
+                <template #icon><PhCaretLeft class="size-3.5" /></template>
               </Button>
               <p class="flex flex-1 flex-col text-center text-xs" aria-live="polite">
                 <strong class="font-medium">
@@ -734,13 +736,12 @@ async function onRoundCreated() {
               </p>
               <Button
                 variant="ghost"
-                size="sm"
                 :disabled="currentPage >= pageTotal"
                 data-testid="pr-pager-next"
+                label="次へ"
                 @click="goToPage(currentPage + 1)"
               >
-                次へ
-                <PhCaretRight class="size-3.5" />
+                <template #icon><PhCaretRight class="size-3.5" /></template>
               </Button>
             </div>
           </template>
@@ -858,20 +859,17 @@ async function onRoundCreated() {
                 v-if="hasFilters"
                 type="button"
                 variant="ghost"
-                size="sm"
+                label="絞り込み解除"
                 @click="clearFilters"
-              >
-                絞り込み解除
-              </Button>
+              />
               <Button
                 v-if="!isComposerOpen"
                 type="button"
-                size="sm"
                 class="ml-auto"
+                label="指摘を起票"
                 @click="isComposerOpen = true"
               >
-                <PhPlus class="size-4" />
-                指摘を起票
+                <template #icon><PhPlus class="size-4" /></template>
               </Button>
             </div>
 
@@ -985,13 +983,11 @@ async function onRoundCreated() {
                     v-for="action in findingActions(finding)"
                     :key="action.to"
                     type="button"
-                    size="sm"
-                    :variant="action.to === 'verified' ? 'default' : 'outline'"
+                    :variant="action.to === 'verified' ? 'primary' : 'tertiary'"
                     :disabled="updateState.isPending.value"
+                    :label="action.label"
                     @click="transition(finding, action.to)"
-                  >
-                    {{ action.label }}
-                  </Button>
+                  />
                   <!-- 確認ボタンが出ない理由の説明だけ。出すかどうかは available_actions が決める -->
                   <span
                     v-if="finding.state === 'fixed' && finding.fixed_by === viewerId"

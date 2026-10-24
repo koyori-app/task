@@ -2,7 +2,7 @@
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { ref, watch } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogClose,
@@ -167,13 +167,15 @@ watch(
         <p v-if="submitError" role="alert" class="text-sm text-destructive">{{ submitError }}</p>
         <DialogFooter>
           <DialogClose as-child>
-            <Button type="button" variant="outline">キャンセル</Button>
+            <Button type="button" variant="tertiary" label="キャンセル" />
           </DialogClose>
           <form.Subscribe>
             <template #default="{ canSubmit, isSubmitting }">
-              <Button type="submit" :disabled="!canSubmit || isSubmitting">
-                {{ isSubmitting ? '作成中…' : '作成' }}
-              </Button>
+              <Button
+                type="submit"
+                :disabled="!canSubmit || isSubmitting"
+                :label="isSubmitting ? '作成中…' : '作成'"
+              />
             </template>
           </form.Subscribe>
         </DialogFooter>

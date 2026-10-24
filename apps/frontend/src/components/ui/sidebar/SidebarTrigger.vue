@@ -1,13 +1,7 @@
 <script setup lang="ts">
-import type { HTMLAttributes } from "vue"
 import { PhSidebarSimple } from '@phosphor-icons/vue'
-import { cn } from "@/lib/utils"
-import { Button } from '@/components/ui/button'
+import { Button } from '@koyori-app/ui-vue'
 import { useSidebar } from "./utils"
-
-const props = defineProps<{
-  class?: HTMLAttributes["class"]
-}>()
 
 const { toggleSidebar } = useSidebar()
 </script>
@@ -17,11 +11,11 @@ const { toggleSidebar } = useSidebar()
     data-sidebar="trigger"
     data-slot="sidebar-trigger"
     variant="ghost"
-    size="icon"
-    :class="cn('h-7 w-7', props.class)"
+    ariaLabel="サイドバーを開閉"
     @click="toggleSidebar"
   >
-    <PhSidebarSimple />
-    <span class="sr-only">Toggle Sidebar</span>
+    <template #icon>
+      <PhSidebarSimple />
+    </template>
   </Button>
 </template>

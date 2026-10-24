@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Input } from '@/components/ui/input';
 import TaskGroupedRow from '@/components/tasks/TaskGroupedRow.vue';
 import TaskSubtaskBranch from '@/components/tasks/TaskSubtaskBranch.vue';
@@ -314,17 +314,18 @@ async function commitAdding(statusId: string) {
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          class="size-5"
-          :aria-label="`${group.status.name} を折りたたむ`"
-          :aria-expanded="!collapsed[group.status.id]"
+          :ariaLabel="`${group.status.name} を折りたたむ`"
+          :ariaExpanded="!collapsed[group.status.id]"
+          :ariaControls="`task-group-${group.status.id}`"
           @click="toggle(group.status.id)"
         >
-          <!-- 2 つのアイコンを差し替えると切り替わるだけになるので、1 つを回して見せる -->
-          <PhCaretDown
-            class="size-3 transition-transform duration-200 ease-out motion-reduce:transition-none"
-            :class="collapsed[group.status.id] && '-rotate-90'"
-          />
+          <template #icon>
+            <!-- 2 つのアイコンを差し替えると切り替わるだけになるので、1 つを回して見せる -->
+            <PhCaretDown
+              class="size-3 transition-transform duration-200 ease-out motion-reduce:transition-none"
+              :class="collapsed[group.status.id] && '-rotate-90'"
+            />
+          </template>
         </Button>
         <span
           class="inline-flex h-5 items-center gap-1.5 rounded-md border px-2 text-[11px] font-semibold uppercase tracking-wide"
@@ -346,6 +347,7 @@ async function commitAdding(statusId: string) {
         遷移させる（中身の高さが変わっても指定を直さなくてよい）。
       -->
       <div
+        :id="`task-group-${group.status.id}`"
         class="grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none"
         :class="collapsed[group.status.id] ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'"
       >
@@ -367,13 +369,10 @@ async function commitAdding(statusId: string) {
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                class="h-7 text-xs"
                 :disabled="group.isLoading"
+                :label="`もっと見る（残り ${group.total - group.tasks.length} 件）`"
                 @click="emit('more', group.status.id)"
-              >
-                もっと見る（残り {{ group.total - group.tasks.length }} 件）
-              </Button>
+              />
             </div>
 
             <div
@@ -443,13 +442,10 @@ async function commitAdding(statusId: string) {
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                class="h-7 text-xs"
                 :disabled="group.isLoading"
+                :label="`もっと見る（残り ${group.total - group.tasks.length} 件）`"
                 @click="emit('more', group.status.id)"
-              >
-                もっと見る（残り {{ group.total - group.tasks.length }} 件）
-              </Button>
+              />
             </div>
 
             <!-- 失敗したページは取り直せるようにする。導線が無いと、以降のページへ進めない -->
@@ -457,14 +453,11 @@ async function commitAdding(statusId: string) {
               <p class="text-sm text-destructive">読み込みに失敗しました</p>
               <Button
                 type="button"
-                variant="outline"
-                size="sm"
-                class="h-7 text-xs"
+                variant="tertiary"
                 :disabled="group.isLoading"
+                label="再試行"
                 @click="group.retry()"
-              >
-                再試行
-              </Button>
+              />
             </div>
             <p
               v-else-if="group.isLoading && !group.tasks.length"
@@ -525,29 +518,29 @@ async function commitAdding(statusId: string) {
                   v-else
                   type="button"
                   variant="ghost"
-                  size="icon"
-                  class="size-7"
-                  :class="draftDeadline ? 'text-foreground' : 'text-muted-foreground'"
-                  aria-label="期限を設定"
+                  :class="
+                    draftDeadline
+                      ? 'text-(--koyori-color-text)'
+                      : 'text-(--koyori-color-text-muted)'
+                  "
+                  ariaLabel="期限を設定"
                   @click="openDraftDeadline"
                 >
-                  <PhCalendarPlus class="size-4" aria-hidden="true" />
+                  <template #icon><PhCalendarPlus class="size-4" aria-hidden="true" /></template>
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger as-child>
                     <Button
                       type="button"
                       variant="ghost"
-                      size="sm"
-                      class="size-7 p-0"
                       :style="
                         draftPriority ? { color: PRIORITY_CONFIG[draftPriority].color } : undefined
                       "
-                      :aria-label="
+                      :ariaLabel="
                         draftPriority ? `優先度: ${PRIORITY_CONFIG[draftPriority].label}` : '優先度'
                       "
                     >
-                      <PhFlag class="size-4" aria-hidden="true" />
+                      <template #icon><PhFlag class="size-4" aria-hidden="true" /></template>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
@@ -572,14 +565,14 @@ async function commitAdding(statusId: string) {
                     <Button
                       type="button"
                       variant="ghost"
-                      size="sm"
-                      class="size-7 p-0"
-                      :class="draftLabels.length ? 'text-foreground' : 'text-muted-foreground'"
-                      :aria-label="
-                        draftLabels.length ? `ラベル: ${draftLabels.length}件` : 'ラベル'
+                      :class="
+                        draftLabels.length
+                          ? 'text-(--koyori-color-text)'
+                          : 'text-(--koyori-color-text-muted)'
                       "
+                      :ariaLabel="draftLabels.length ? `ラベル: ${draftLabels.length}件` : 'ラベル'"
                     >
-                      <PhTag class="size-4" aria-hidden="true" />
+                      <template #icon><PhTag class="size-4" aria-hidden="true" /></template>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
@@ -606,36 +599,25 @@ async function commitAdding(statusId: string) {
                   </DropdownMenuContent>
                 </DropdownMenu>
 
+                <Button type="button" variant="ghost" label="キャンセル" @click="cancelAdding" />
                 <Button
                   type="button"
-                  size="sm"
-                  variant="ghost"
-                  class="h-7 px-2 text-xs"
-                  @click="cancelAdding"
-                >
-                  キャンセル
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  class="h-7 gap-1 px-2 text-xs"
                   :disabled="!!creatingStatusIds?.[group.status.id] || !draftTitle.trim()"
+                  label="保存"
                   @click="commitAdding(group.status.id)"
                 >
-                  保存
-                  <CornerDownLeft class="size-3" aria-hidden="true" />
+                  <template #icon><CornerDownLeft class="size-3" aria-hidden="true" /></template>
                 </Button>
               </div>
               <Button
                 v-else
                 type="button"
                 variant="ghost"
-                size="sm"
-                class="ml-2 h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                class="ml-2"
+                label="タスクを追加"
                 @click="startAdding(group.status.id)"
               >
-                <PhPlus class="size-3.5" />
-                タスクを追加
+                <template #icon><PhPlus class="size-3.5" /></template>
               </Button>
               <p
                 v-if="createErrors?.[group.status.id]"

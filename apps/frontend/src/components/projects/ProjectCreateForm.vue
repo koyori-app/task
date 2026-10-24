@@ -4,7 +4,7 @@ import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { navigate } from 'vike/client/router';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Field, FieldError, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -207,14 +207,20 @@ function onCancel() {
       </p>
 
       <div class="flex items-center justify-end gap-2 pt-2">
-        <Button type="button" variant="ghost" :disabled="isPending" @click="onCancel">
-          キャンセル
-        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          :disabled="isPending"
+          label="キャンセル"
+          @click="onCancel"
+        />
         <form.Subscribe>
           <template #default="{ canSubmit, isSubmitting }">
-            <Button type="submit" :disabled="!canSubmit || isSubmitting">
-              {{ isSubmitting ? '作成中…' : 'プロジェクトを作成' }}
-            </Button>
+            <Button
+              type="submit"
+              :disabled="!canSubmit || isSubmitting"
+              :label="isSubmitting ? '作成中…' : 'プロジェクトを作成'"
+            />
           </template>
         </form.Subscribe>
       </div>

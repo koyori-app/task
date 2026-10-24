@@ -4,7 +4,7 @@ import { computed, ref } from 'vue';
 
 import TaskGroupedRow from '@/components/tasks/TaskGroupedRow.vue';
 import TaskSubtaskComposer from '@/components/tasks/TaskSubtaskComposer.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { useTaskSubtasks, type TaskSubtaskFilters } from '@/composables/useTaskSubtasks';
 import type { TaskRowField } from '@/composables/useTaskRowMutations';
 import type { components } from '@/generated/api';
@@ -82,15 +82,8 @@ function createSubtask(title: string) {
 
     <div v-else-if="subtasks.error.value" class="flex min-w-[42rem] items-center gap-2 px-3 py-2">
       <p class="text-sm text-destructive">サブタスクを読み込めませんでした</p>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        class="h-7 gap-1.5"
-        @click="subtasks.refetch"
-      >
-        <RotateCcw class="size-3.5" aria-hidden="true" />
-        再試行
+      <Button type="button" variant="tertiary" label="再試行" @click="subtasks.refetch">
+        <template #icon><RotateCcw class="size-3.5" aria-hidden="true" /></template>
       </Button>
     </div>
 
@@ -134,13 +127,11 @@ function createSubtask(title: string) {
           v-else
           type="button"
           variant="ghost"
-          size="sm"
-          class="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
           :disabled="statusUpdating"
+          label="サブタスクを追加"
           @click="openComposer"
         >
-          <Plus class="size-3.5" aria-hidden="true" />
-          サブタスクを追加
+          <template #icon><Plus class="size-3.5" aria-hidden="true" /></template>
         </Button>
       </div>
     </template>

@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { useForm } from '@tanstack/vue-form';
 import { computed, ref } from 'vue';
 import UserAvatar from '@/components/UserAvatar.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import { Input } from '@/components/ui/input';
@@ -203,25 +203,21 @@ async function uploadAvatar(event: Event) {
                   />
                   <Button
                     type="button"
-                    variant="outline"
-                    size="sm"
+                    variant="tertiary"
                     :disabled="uploading"
+                    :label="uploading ? 'アップロード中…' : '画像を選ぶ'"
                     @click="avatarFileInput?.click()"
-                  >
-                    {{ uploading ? 'アップロード中…' : '画像を選ぶ' }}
-                  </Button>
+                  />
                   <Button
                     type="button"
-                    variant="outline"
-                    size="sm"
+                    variant="tertiary"
                     :disabled="!field.state.value"
+                    label="削除"
                     @click="
                       field.handleChange('');
                       resetSubmitFeedback();
                     "
-                  >
-                    削除
-                  </Button>
+                  />
                 </div>
               </div>
             </div>
@@ -293,9 +289,11 @@ async function uploadAvatar(event: Event) {
         <template #default="{ canSubmit, isSubmitting }">
           <Field>
             <div>
-              <Button type="submit" :disabled="!canSubmit || isSubmitting || !isHydrated">
-                {{ isSubmitting ? '保存中…' : '変更を保存' }}
-              </Button>
+              <Button
+                type="submit"
+                :disabled="!canSubmit || isSubmitting || !isHydrated"
+                :label="isSubmitting ? '保存中…' : '変更を保存'"
+              />
             </div>
           </Field>
         </template>

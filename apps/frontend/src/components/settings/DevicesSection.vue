@@ -2,7 +2,7 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhDesktop } from '@phosphor-icons/vue';
 import { ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -80,16 +80,14 @@ async function onRevokeConfirm() {
         </div>
         <Button
           type="button"
-          variant="outline"
-          size="sm"
-          class="text-destructive hover:text-destructive"
+          variant="tertiary"
+          class="text-(--koyori-color-danger)"
+          label="失効"
           @click="
             revokeTarget = device;
             revokeError = null;
           "
-        >
-          失効
-        </Button>
+        />
       </li>
     </ul>
 
@@ -106,20 +104,18 @@ async function onRevokeConfirm() {
         <DialogFooter>
           <Button
             type="button"
-            variant="outline"
+            variant="tertiary"
             :disabled="revokeDevice.isPending.value"
+            label="キャンセル"
             @click="revokeTarget = null"
-          >
-            キャンセル
-          </Button>
+          />
           <Button
             type="button"
-            variant="destructive"
+            variant="danger"
             :disabled="revokeDevice.isPending.value"
+            :label="revokeDevice.isPending.value ? '失効中…' : '失効する'"
             @click="onRevokeConfirm"
-          >
-            {{ revokeDevice.isPending.value ? '失効中…' : '失効する' }}
-          </Button>
+          />
         </DialogFooter>
       </DialogContent>
     </Dialog>

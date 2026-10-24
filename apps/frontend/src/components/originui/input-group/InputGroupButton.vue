@@ -1,29 +1,24 @@
 <script setup lang="ts">
-import type { HTMLAttributes } from 'vue';
-import type { InputGroupButtonVariants } from '.';
-import type { ButtonVariants } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { inputGroupButtonVariants } from '.';
+import type { ButtonProps } from '@koyori-app/ui-vue';
+import { Button } from '@koyori-app/ui-vue';
 
-interface InputGroupButtonProps {
-  variant?: ButtonVariants['variant'];
-  size?: InputGroupButtonVariants['size'];
-  class?: HTMLAttributes['class'];
-}
-
-const props = withDefaults(defineProps<InputGroupButtonProps>(), {
-  size: 'xs',
-  variant: 'ghost',
-});
+// template の class: 入力欄の中に収まるよう、koyori の高さのトークンをこのボタンだけ縮める
+const props = withDefaults(
+  defineProps<{
+    variant?: ButtonProps['variant'];
+    /** アイコンだけのボタンなので、読み上げる名前を必ず受ける */
+    ariaLabel: string;
+  }>(),
+  { variant: 'ghost' },
+);
 </script>
 
 <template>
   <Button
-    :data-size="props.size"
     :variant="props.variant"
-    :class="cn(inputGroupButtonVariants({ size: props.size }), props.class)"
+    :ariaLabel="props.ariaLabel"
+    class="[--koyori-control-height-sm:24px]"
   >
-    <slot />
+    <template #icon><slot /></template>
   </Button>
 </template>

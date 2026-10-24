@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { usePageContext } from 'vike-vue/usePageContext';
 import { ref, watch } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Card, CardContent } from '@/components/ui/card';
 import { useCreateDesktopAuthCodeMutation, useMeQuery } from '@/lib/api-vue-query';
 import {
@@ -72,10 +72,13 @@ async function approve() {
           </p>
           <p v-if="submitError" class="text-destructive text-sm">{{ submitError }}</p>
           <div class="flex flex-col gap-2">
-            <Button type="button" :disabled="createCode.isPending.value" @click="approve">
-              {{ createCode.isPending.value ? '承認中…' : '承認する' }}
-            </Button>
-            <Button as="a" href="/" variant="outline">キャンセル</Button>
+            <Button
+              type="button"
+              :disabled="createCode.isPending.value"
+              :label="createCode.isPending.value ? '承認中…' : '承認する'"
+              @click="approve"
+            />
+            <a href="/" class="text-center text-sm underline underline-offset-4">キャンセル</a>
           </div>
         </template>
       </CardContent>
