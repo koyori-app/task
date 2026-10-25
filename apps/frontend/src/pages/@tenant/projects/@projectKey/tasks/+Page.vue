@@ -977,7 +977,7 @@ const table = useTable({
               <DropdownMenuTrigger as-child>
                 <Button
                   variant="tertiary"
-                  :class="selectedLabelId ? 'text-(--koyori-color-selection-indicator)' : ''"
+                  :class="selectedLabelId ? 'text-link' : ''"
                   :label="selectedLabelName ?? 'ラベル'"
                 >
                   <template #icon><PhCaretDown class="size-4" /></template>

@@ -31,7 +31,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
             let pr = pr.as_deref().map(parse_pr_number).transpose()?;
             let payload = parse_submit_payload(&read_json_input(&file)?, pr)?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let created: ReviewDetailResponse = api
                 .post(
@@ -68,7 +68,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
                 "severity",
             )?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
 
             let mut query = vec![("pr", pr.to_string())];
@@ -101,7 +101,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
             let pr = parse_pr_number(&pr)?;
             let repo = validate_repo(repo.as_deref())?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
 
             let mut query = vec![("pr", pr.to_string())];
@@ -136,7 +136,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
         } => {
             let state = parse_state(&state)?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let updated: FindingResponse = api
                 .patch(
@@ -165,7 +165,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
             let pr = parse_pr_number(&pr)?;
             let repo = validate_repo(repo.as_deref())?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
 
             let mut query = vec![("pr", pr.to_string())];

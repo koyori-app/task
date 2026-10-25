@@ -24,6 +24,14 @@ pub struct Harness {
 }
 
 pub async fn harness() -> Harness {
+    harness_with(Some(TENANT), &[]).await
+}
+
+/// config の tenant_id と、環境変数を選べる足場。tenant の解決経路を確かめる。
+pub async fn harness_with(
+    tenant_id: Option<&str>,
+    env: &'static [(&'static str, &'static str)],
+) -> Harness {
     let server = MockServer::start().await;
     let home = tempfile::tempdir().unwrap();
     let store = ConfigStore::from_home(home.path());
@@ -31,11 +39,15 @@ pub async fn harness() -> Harness {
         .save(&TaskConfig {
             api_url: Some(server.uri()),
             token: Some("token-1".into()),
-            tenant_id: Some(TENANT.into()),
+            tenant_id: tenant_id.map(Into::into),
         })
         .unwrap();
 
-    let context = task_cli::Context::new(ConfigStore::from_home(home.path()), |_| None);
+    let context = task_cli::Context::new(ConfigStore::from_home(home.path()), |key| {
+        env.iter()
+            .find(|(name, _)| *name == key)
+            .map(|(_, value)| value.to_string())
+    });
     Harness {
         _home: home,
         server,
@@ -65,6 +77,17 @@ impl Harness {
         self.context.store()
     }
 
+    /// 指定のパスへ届いたリクエストの数。
+    pub async fn calls_to(&self, path: &str) -> usize {
+        self.server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|request| request.url.path() == path)
+            .count()
+    }
+
     /// 送信前に弾いたことを確かめる（1 本もリクエストが出ていないこと）。
     pub async fn sent_nothing(&self) -> bool {
         self.server
@@ -72,6 +95,20 @@ impl Harness {
             .await
             .is_some_and(|requests| requests.is_empty())
     }
+}
+
+/// `GET /v1/personal_tokens/me` の応答。tenant を自動で引くときの元になる。
+pub fn token_identity_json() -> serde_json::Value {
+    serde_json::json!({
+        "id": "77777777-7777-4777-8777-777777777777",
+        "name": "review-bot",
+        "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "username": "yupix",
+        "tenant_id": TENANT,
+        "scopes": ["read:task"],
+        "allowed_project_ids": null,
+        "expires_at": null,
+    })
 }
 
 pub fn project_json() -> serde_json::Value {

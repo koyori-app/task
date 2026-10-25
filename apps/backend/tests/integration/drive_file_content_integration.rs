@@ -1227,7 +1227,13 @@ async fn get_content_if_none_match_returns_not_modified() {
     let file_id = file_id_of(&uploaded);
     let etag = etag_of(&uploaded);
 
-    for value in [etag.clone(), format!("\"other\", {etag}"), "*".to_string()] {
+    // 弱い ETag（中継が圧縮時に付け替えたもの）も一致として 304
+    for value in [
+        etag.clone(),
+        format!("\"other\", {etag}"),
+        "*".to_string(),
+        format!("W/{etag}"),
+    ] {
         let response = get_content_if_none_match(&app, file_id, &value).await;
         assert_eq!(
             response.status(),
@@ -1244,8 +1250,11 @@ async fn get_content_if_none_match_returns_not_modified() {
         );
     }
 
-    // 不一致・弱い ETag は 200 で本文を返す
-    for value in ["\"sha256:stale\"".to_string(), format!("W/{etag}")] {
+    // 不一致・弱くても値が違うものは 200 で本文を返す
+    for value in [
+        "\"sha256:stale\"".to_string(),
+        "W/\"sha256:stale\"".to_string(),
+    ] {
         let response = get_content_if_none_match(&app, file_id, &value).await;
         assert_eq!(
             response.status(),
@@ -1300,7 +1309,8 @@ async fn update_content_if_match_guards_overwrite() {
         "412 では本文が変わらない"
     );
 
-    // 弱い ETag は受けない
+    // 弱い ETag（Cloudflare などの中継が圧縮時に `W/` を付けたもの）も一致として更新できる（TASK-336）。
+    // ブラウザは受け取った ETag をそのまま If-Match に戻すので、ここを 412 にすると保存が一切通らない
     let response = put_content_if_match(
         &app,
         tp.tenant_id,
@@ -1309,8 +1319,27 @@ async fn update_content_if_match_guards_overwrite() {
         "weak",
     )
     .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "弱い ETag でも値が同じなら更新できる"
+    );
+    let updated: serde_json::Value = response.json().await.expect("json");
+    let etag_weak = etag_of(&updated);
+    assert_eq!(etag_weak, sha256_etag(b"weak"));
+    assert_eq!(read_content(&app, file_id).await, "weak");
+
+    // 弱くても値が違えば 412
+    let response = put_content_if_match(
+        &app,
+        tp.tenant_id,
+        file_id,
+        Some(&format!("W/{etag_v2}")),
+        "lost",
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::PRECONDITION_FAILED);
-    assert_eq!(read_content(&app, file_id).await, "v2");
+    assert_eq!(read_content(&app, file_id).await, "weak");
 
     // `*` → 200
     let response = put_content_if_match(&app, tp.tenant_id, file_id, Some("*"), "v3").await;

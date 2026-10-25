@@ -194,7 +194,7 @@ function priorityLabel(p: string) {
           <Check class="h-4 w-4 text-muted-foreground" />
           <a
             :href="taskDetailHref(tenantDisplayId, task.project.key, task.seq_id)"
-            class="flex-1 text-primary hover:underline"
+            class="flex-1 text-link hover:underline"
             @click="navigateToTask(task, $event)"
           >
             {{ task.title }}
@@ -220,7 +220,7 @@ function priorityLabel(p: string) {
           <Check class="h-4 w-4 text-muted-foreground" />
           <a
             :href="taskDetailHref(tenantDisplayId, task.project.key, task.seq_id)"
-            class="flex-1 text-primary hover:underline"
+            class="flex-1 text-link hover:underline"
             @click="navigateToTask(task, $event)"
           >
             {{ task.title }}

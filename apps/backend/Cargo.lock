@@ -995,6 +995,7 @@ version = "0.1.0"
 dependencies = [
  "apalis",
  "apalis-board",
+ "apalis-postgres",
  "auth-core",
  "axum",
  "axum_session",

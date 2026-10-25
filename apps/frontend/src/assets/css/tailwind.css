@@ -33,6 +33,7 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-link: var(--link);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -55,6 +56,8 @@
   --popover-foreground: var(--koyori-color-text);
   --primary: var(--koyori-color-accent);
   --primary-foreground: var(--koyori-color-on-accent);
+  /* accent は淡くリンク文字に使えないため、koyori が選択中の文字色に使う濃い紫を当てる */
+  --link: var(--koyori-color-selection-indicator);
   --secondary: var(--koyori-color-accent-soft);
   --secondary-foreground: var(--koyori-color-text);
   --muted: var(--koyori-color-surface-disabled);
@@ -91,6 +94,7 @@
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
+  --link: oklch(0.922 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);

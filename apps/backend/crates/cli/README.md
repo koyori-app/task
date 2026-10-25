@@ -174,18 +174,49 @@ task tasks pr unlink TASK-181 87
 
 `~/.config/task/config.yaml`（トークンを含むので `0600` で保存する）。環境変数が優先される。
 
-| 設定 | 環境変数 |
-|---|---|
-| `api_url` | `TASK_API_URL` |
-| `token` | `TASK_TOKEN` |
-| `tenant_id` | `TASK_TENANT` |
+| 設定 | 環境変数 | 環境変数の効き方 |
+|---|---|---|
+| `api_url` | `TASK_API_URL` | `TASK_TOKEN` と組で渡す |
+| `token` | `TASK_TOKEN` | `TASK_API_URL` と組で渡す |
+| `tenant_id` | `TASK_TENANT` | 単独で上書きできる |
 
 ```bash
 task config set api_url https://task.example.com
-task config set tenant_id <tenant-uuid>
 task auth token < token.txt        # 引数を省くと標準入力から読む
 task auth whoami                   # 使用中の鍵と持ち主・scope・有効期限が出る
 ```
+
+### 設定の優先順位
+
+API の URL とトークンは組で決める。片方ずつ config から補うと、あるインスタンスの
+トークンを別のインスタンスへ送ってしまうため。
+
+1. `TASK_API_URL` と `TASK_TOKEN` が両方あれば、両方とも環境変数を使う。config は `tenant_id` も含めて読まない
+   （環境変数のトークンは別テナントのことが多いため。config が無くても壊れていても動く）。
+   テナントは `TASK_TENANT` があればそれ、無ければトークンから引く
+2. どちらも無ければ、両方とも config を使う
+3. 片方だけなら、config が揃っていても終了コード 2 で止まり、API には何も送らない
+
+空文字の環境変数（`TASK_TOKEN=` や `TASK_TENANT=`）は未設定として扱う。`config *` / `auth token` / `auth logout`
+は接続しないので、片方だけの状態でも動く。
+
+以前は項目ごとに環境変数が優先されたので、`TASK_TOKEN` だけを渡して URL は config から
+読ませる使い方ができた。今はエラーになるので、次のどちらかに揃える。
+
+```bash
+# 両方を環境変数で渡す
+export TASK_API_URL=https://task.example.com
+export TASK_TOKEN=...
+
+# 両方を解除して config に揃える
+unset TASK_API_URL TASK_TOKEN
+task config set api_url https://task.example.com
+task auth token < token.txt
+```
+
+`tenant_id` は任意。未設定ならトークンの属するテナントを `GET /v1/personal_tokens/me` から引く
+（config には書かない）。設定していればそちらを使うので、別テナントのトークンに替えたら
+`task config unset tenant_id`（環境変数なら `TASK_TENANT` の解除）で外す。外さないと 403 になる。
 
 トークンは Web のアカウント設定（アクセストークン）で発行する。CLI のすべての操作を使うなら
 `api`、読むだけなら `read_api` を付ける。資源ごとに絞るなら `read:task` / `write:review` の

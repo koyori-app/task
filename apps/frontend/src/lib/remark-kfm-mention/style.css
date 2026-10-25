@@ -26,7 +26,7 @@
   line-height: 1;
   white-space: nowrap;
   font-weight: 500;
-  color: var(--primary);
+  color: var(--link);
   background-color: color-mix(in oklab, var(--primary) 12%, transparent);
 }
 
@@ -82,10 +82,10 @@
 }
 
 /* プロフィールへの link になった札（いま入れる者だけ）。.kfm-content a の色と下線より強い詳細度で、札の見た目を保つ。
- * 指した時だけ下線を引き、キーボードの focus には輪を出す。輪の色は --primary（白い地に約 17:1。--ring は
- * 約 2.6:1 で、輪に要る 3:1 に届かぬ） */
+ * 指した時だけ下線を引き、キーボードの focus には輪を出す。輪の色は --link（明るい面に約 7.8:1、暗い面に約
+ * 15.7:1。--primary は明るい面に約 1.8:1 で、輪に要る 3:1 に届かぬ） */
 a.kfm-mention.kfm-mention-member {
-  color: var(--primary);
+  color: var(--link);
   text-decoration: none;
   cursor: pointer;
 }
@@ -99,6 +99,6 @@ a.kfm-mention.kfm-mention-member:hover {
 }
 
 a.kfm-mention.kfm-mention-member:focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--link);
   outline-offset: 2px;
 }

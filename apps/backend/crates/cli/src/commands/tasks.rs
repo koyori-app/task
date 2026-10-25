@@ -57,7 +57,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let limit = check_limit(limit, MAX_LIST_LIMIT)?;
             let offset = offset_for(page, limit)?;
 
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
 
             let mut query: Vec<(&str, String)> = vec![
@@ -128,7 +128,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let limit = check_limit(limit, MAX_SEARCH_LIMIT)?;
             let offset = offset_for(page, limit)?;
 
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let mut segments = tasks_path(api, project.id);
             segments.push("search".into());
@@ -161,7 +161,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             // 本文の読み取りは API を叩く前に済ませる（ファイルが無いときに
             // タスクを作ってから落ちるのを避ける）
             let description = resolve_body(description, description_file, "description")?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let status_id = match status {
                 Some(status) => resolve_status_id(api, project.id, &status).await?,
@@ -204,7 +204,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             raw,
         } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let task: TaskDetailResponse = api
                 .get(&borrow(&task_path(api, project.id, &task_id)), &[])
@@ -227,7 +227,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let priority = priority.as_deref().map(parse_priority).transpose()?;
             let description = resolve_body(description, description_file, "description")?;
             let target = check_task_target(&task_ref, project.as_deref())?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let status_id = match status {
                 Some(status) => Some(resolve_status_id(api, project.id, &status).await?),
@@ -257,7 +257,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
         }
         TasksCommand::Complete { task_ref, project } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let status_id = find_done_status_id(api, project.id).await?;
             let body = done_request(status_id);
@@ -285,7 +285,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 return Err(CliError::validation("Comment body is required"));
             }
             let target = check_task_target(&task_ref, project.as_deref())?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let mut segments = task_path(api, project.id, &task_id);
             segments.push("comments".into());
@@ -302,7 +302,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
         }
         TasksCommand::Delete { task_ref, project } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             api.delete(&borrow(&task_path(api, project.id, &task_id)))
                 .await?;
@@ -326,7 +326,7 @@ async fn run_pull_requests(
     match command {
         TaskPrCommand::List { task_ref, project } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let forge = task_forge(api, project.id, &task_id).await?;
             if output.json {
@@ -342,7 +342,7 @@ async fn run_pull_requests(
             project,
         } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let mut segments = task_forge_path(api, project.id, &task_id);
             segments.push("pull-requests".into());
@@ -364,7 +364,7 @@ async fn run_pull_requests(
             project,
         } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             // API は PR の ID で外すので、一覧から番号で引く
             let forge = task_forge(api, project.id, &task_id).await?;

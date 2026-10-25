@@ -14,7 +14,7 @@ use crate::output::{OutputOptions, print};
 use crate::resolve::{is_uuid, resolve_project};
 
 pub async fn run(context: &Context, command: SprintsCommand, output: OutputOptions) -> Result<i32> {
-    let api = &context.connect()?;
+    let api = &context.connect().await?;
     match command {
         SprintsCommand::List { project, status } => {
             // 検証せず素通しすると、綴りを外したまま絞り込みが効かない結果が返る
