@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { Loader2 } from '@lucide/vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { ref, watch } from 'vue';
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Button } from '@/components/ui/button';
+import { Button, Field, Input, Spinner } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -13,7 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -46,6 +44,12 @@ const title = ref('');
 const templateId = ref(DOCUMENT_TEMPLATES[0]!.id);
 const pending = ref(false);
 const errorMessage = ref<string | null>(null);
+const titleInputRef = ref<InstanceType<typeof Input> | null>(null);
+
+// 開いて入力欄ができたら当てる。koyori の Input は autofocus を root の span に落とすので中の input に当てる
+watch(titleInputRef, (input) => {
+  (input?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
+});
 
 watch(
   () => props.open,
@@ -119,18 +123,16 @@ async function submit() {
         >
       </DialogHeader>
       <HydrationSafeForm v-slot="{ isHydrated }" class="flex flex-col gap-4" @submit="submit">
-        <div class="space-y-1.5">
-          <Label for="document-title">タイトル</Label>
+        <!-- 文字数の上限は送信時に検証する -->
+        <Field id="document-title" label="タイトル" required>
           <Input
-            id="document-title"
-            v-model="title"
+            ref="titleInputRef"
             name="title"
             autocomplete="off"
-            autofocus
-            required
-            :maxlength="MAX_DOCUMENT_TITLE_LENGTH"
+            :value="title"
+            :on-value-change="(v: string) => (title = v)"
           />
-        </div>
+        </Field>
         <div class="space-y-1.5">
           <Label for="document-template">種類</Label>
           <Select v-model="templateId">
@@ -148,12 +150,19 @@ async function submit() {
           {{ errorMessage }}
         </p>
         <DialogFooter>
-          <Button type="button" variant="outline" :disabled="pending" @click="onOpenChange(false)">
-            取り消す
-          </Button>
-          <Button type="submit" :disabled="pending || !isHydrated">
-            <Loader2 v-if="pending" class="mr-2 size-4 animate-spin" />
-            作成
+          <Button
+            type="button"
+            variant="tertiary"
+            :disabled="pending"
+            label="取り消す"
+            @click="onOpenChange(false)"
+          />
+          <Button
+            type="submit"
+            :disabled="pending || !isHydrated"
+            :label="pending ? '作成中…' : '作成'"
+          >
+            <template #icon><Spinner v-if="pending" hide-label /></template>
           </Button>
         </DialogFooter>
       </HydrationSafeForm>

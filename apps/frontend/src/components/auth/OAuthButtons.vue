@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { Button } from '@/components/ui/button';
-import { Field, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
+import { Button, Field, Input } from '@koyori-app/ui-vue';
 import { useOAuthProvidersQuery } from '@/lib/api-vue-query';
 import { providerLabel, startOAuth } from '@/lib/oauth-providers';
 
@@ -47,38 +45,35 @@ function onStart(provider: string, requiresInstanceUrl: boolean) {
     </p>
     <template v-for="provider in signInProviders" :key="provider.provider">
       <div v-if="provider.requires_instance_url" class="flex flex-col gap-2">
-        <Field>
-          <FieldLabel :for="`oauth-instance-${provider.provider}`">
-            {{ providerLabel(provider.provider) }} インスタンス URL
-          </FieldLabel>
+        <Field
+          :id="`oauth-instance-${provider.provider}`"
+          :label="`${providerLabel(provider.provider)} インスタンス URL`"
+        >
           <Input
-            :id="`oauth-instance-${provider.provider}`"
             type="url"
-            inputmode="url"
+            input-mode="url"
             placeholder="https://gitlab.example.com"
-            :model-value="instanceUrls[provider.provider] ?? ''"
-            @update:model-value="(v) => (instanceUrls[provider.provider] = String(v))"
+            :value="instanceUrls[provider.provider] ?? ''"
+            :on-value-change="(v: string) => (instanceUrls[provider.provider] = v)"
           />
         </Field>
         <Button
           type="button"
-          variant="outline"
+          variant="tertiary"
           class="w-full"
           :disabled="!instanceUrls[provider.provider]?.trim()"
+          :label="`${providerLabel(provider.provider)} で続ける`"
           @click="onStart(provider.provider, true)"
-        >
-          {{ providerLabel(provider.provider) }} で続ける
-        </Button>
+        />
       </div>
       <Button
         v-else
         type="button"
-        variant="outline"
+        variant="tertiary"
         class="w-full"
+        :label="`${providerLabel(provider.provider)} で続ける`"
         @click="onStart(provider.provider, false)"
-      >
-        {{ providerLabel(provider.provider) }} で続ける
-      </Button>
+      />
     </template>
   </div>
 </template>

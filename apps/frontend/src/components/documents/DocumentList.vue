@@ -6,8 +6,7 @@ import { computed, ref, watch } from 'vue';
 import { navigate } from 'vike/client/router';
 
 import CreateDocumentDialog from '@/components/documents/CreateDocumentDialog.vue';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Button, Input } from '@koyori-app/ui-vue';
 import type { components } from '@/generated/api';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
 import {
@@ -84,26 +83,23 @@ function onCreated(file: DriveFile) {
   <div class="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 pt-2 pb-10">
     <div class="flex items-center gap-2">
       <h1 class="text-xl font-semibold">ドキュメント</h1>
-      <Button class="ml-auto" size="sm" :disabled="!rootFolderId" @click="createOpen = true">
-        <Plus class="size-4" />
-        新規作成
+      <Button class="ml-auto" :disabled="!rootFolderId" label="新規作成" @click="createOpen = true">
+        <template #icon><Plus class="size-4" /></template>
       </Button>
     </div>
 
-    <div class="relative">
-      <Search
-        class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-        aria-hidden="true"
-      />
-      <Input
-        v-model="query"
-        type="search"
-        name="q"
-        aria-label="ドキュメントを検索"
-        placeholder="タイトルで検索"
-        class="pl-8"
-      />
-    </div>
+    <Input
+      type="search"
+      name="q"
+      aria-label="ドキュメントを検索"
+      placeholder="タイトルで検索"
+      :value="query"
+      :on-value-change="(v: string) => (query = v)"
+    >
+      <template #prefix>
+        <Search class="size-4" aria-hidden="true" />
+      </template>
+    </Input>
 
     <div v-if="isLoading" class="flex justify-center py-16">
       <Loader2 class="size-6 animate-spin text-muted-foreground" aria-label="読み込み中" />

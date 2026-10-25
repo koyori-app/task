@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { PhArrowClockwise, PhEnvelopeSimple, PhPaperPlaneTilt, PhX } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
 
-import { Button } from '@/components/ui/button';
+import { Button, Field } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -13,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
 import { userProfileHref } from '@/lib/task-display';
@@ -406,9 +405,12 @@ async function onRemove(member: TenantMemberResponse) {
               </SelectItem>
             </SelectContent>
           </Select>
-          <Button type="submit" class="gap-2" :disabled="inviting || !inviteEmailValid">
-            <PhPaperPlaneTilt class="size-4" />
-            {{ inviting ? '送信中…' : '招待' }}
+          <Button
+            type="submit"
+            :disabled="inviting || !inviteEmailValid"
+            :label="inviting ? '送信中…' : '招待'"
+          >
+            <template #icon><PhPaperPlaneTilt class="size-4" /></template>
           </Button>
         </form>
         <p v-if="inviteError" role="alert" class="mt-2.5 text-sm text-destructive">
@@ -461,24 +463,22 @@ async function onRemove(member: TenantMemberResponse) {
             </span>
             <Button
               variant="ghost"
-              size="sm"
               :disabled="busy"
-              class="h-7 shrink-0 gap-1.5 text-muted-foreground"
-              :aria-label="`${invitation.email}へ招待を送り直す`"
+              class="shrink-0"
+              :ariaLabel="`${invitation.email}へ招待を送り直す`"
+              label="再送"
               @click="onResendInvitation(invitation)"
             >
-              <PhArrowClockwise class="size-3.5" />
-              再送
+              <template #icon><PhArrowClockwise class="size-3.5" /></template>
             </Button>
             <Button
               variant="ghost"
-              size="icon"
               :disabled="busy"
-              class="size-7 shrink-0 text-muted-foreground"
-              :aria-label="`${invitation.email}への招待を取り消す`"
+              class="shrink-0"
+              :ariaLabel="`${invitation.email}への招待を取り消す`"
               @click="onRevokeInvitation(invitation)"
             >
-              <PhX class="size-3.5" />
+              <template #icon><PhX class="size-3.5" /></template>
             </Button>
           </li>
         </ul>
@@ -561,14 +561,12 @@ async function onRemove(member: TenantMemberResponse) {
                 <Button
                   v-if="canManageMembers"
                   variant="ghost"
-                  size="sm"
                   :disabled="busy"
-                  class="h-7 shrink-0 text-muted-foreground"
-                  :aria-label="`${member.user.username}の所属を編集`"
+                  class="shrink-0"
+                  :ariaLabel="`${member.user.username}の所属を編集`"
+                  label="所属を編集"
                   @click="openOrgEditor(member)"
-                >
-                  所属を編集
-                </Button>
+                />
                 <Select
                   :model-value="member.role"
                   :disabled="!canManageMembers || busy"
@@ -596,13 +594,12 @@ async function onRemove(member: TenantMemberResponse) {
                 </Select>
                 <Button
                   variant="ghost"
-                  size="icon"
                   :disabled="!canRemove(member) || busy"
-                  class="size-7 shrink-0 text-muted-foreground"
-                  :aria-label="`${member.user.username}を外す`"
+                  class="shrink-0"
+                  :ariaLabel="`${member.user.username}を外す`"
                   @click="onRemove(member)"
                 >
-                  <PhX class="size-3.5" />
+                  <template #icon><PhX class="size-3.5" /></template>
                 </Button>
               </template>
             </li>
@@ -623,10 +620,13 @@ async function onRemove(member: TenantMemberResponse) {
             </DialogDescription>
           </DialogHeader>
           <form class="flex flex-col gap-3" @submit.prevent="onSaveOrg">
-            <div v-for="field in ORG_FIELDS" :key="field.key">
-              <Label :for="`org-profile-${field.key}`" class="mb-1.5 text-[13px] font-medium">
-                {{ field.label }}
-              </Label>
+            <!-- koyori の Input は maxlength を持たず、ここは送信前に長さを検証していないので素の input のまま -->
+            <Field
+              v-for="field in ORG_FIELDS"
+              :id="`org-profile-${field.key}`"
+              :key="field.key"
+              :label="field.label"
+            >
               <input
                 :id="`org-profile-${field.key}`"
                 v-model="orgDraft[field.key]"
@@ -634,18 +634,17 @@ async function onRemove(member: TenantMemberResponse) {
                 :disabled="busy"
                 class="h-9 w-full rounded-md border bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
               />
-            </div>
+            </Field>
             <p v-if="orgError" role="alert" class="text-sm text-destructive">{{ orgError }}</p>
             <DialogFooter>
               <Button
                 type="button"
-                variant="outline"
+                variant="tertiary"
                 :disabled="busy"
+                label="キャンセル"
                 @click="onOrgEditorOpenChange(false)"
-              >
-                キャンセル
-              </Button>
-              <Button type="submit" :disabled="busy">保存</Button>
+              />
+              <Button type="submit" :disabled="busy" label="保存" />
             </DialogFooter>
           </form>
         </DialogContent>

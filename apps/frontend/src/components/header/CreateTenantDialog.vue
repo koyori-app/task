@@ -2,7 +2,7 @@
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { ref, watch } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogClose,
@@ -12,9 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { useTenantStore } from '@/stores/tenant';
 
 const props = defineProps<{ open: boolean }>();
@@ -67,6 +64,13 @@ function onOpenChange(open: boolean) {
   emit('update:open', open);
 }
 
+const nameInputRef = ref<InstanceType<typeof Input> | null>(null);
+
+// 開いて入力欄ができたら当てる。koyori の Input は autofocus を root の span に落とすので中の input に当てる
+watch(nameInputRef, (input) => {
+  (input?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
+});
+
 watch(
   () => props.open,
   (open) => {
@@ -89,91 +93,88 @@ watch(
         </DialogDescription>
       </DialogHeader>
       <form class="space-y-4" @submit.prevent="form.handleSubmit">
-        <FieldGroup>
+        <div class="flex flex-col gap-6">
           <form.Field name="name">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">名前</FieldLabel>
+              <Field
+                :id="field.name"
+                label="名前"
+                :error="
+                  field.state.meta.isTouched && field.state.meta.errors.length
+                    ? '名前は必須です'
+                    : ''
+                "
+              >
                 <Input
-                  :id="field.name"
-                  autofocus
-                  :model-value="field.state.value"
-                  @blur="field.handleBlur"
-                  @update:model-value="
-                    (v) => {
-                      const name = String(v);
+                  ref="nameInputRef"
+                  :value="field.state.value"
+                  :on-blur="field.handleBlur"
+                  :on-value-change="
+                    (name: string) => {
                       field.handleChange(name);
                       if (!displayIdEdited) form.setFieldValue('display_id', slugify(name));
                     }
                   "
                 />
-                <FieldError v-if="field.state.meta.isTouched && field.state.meta.errors.length"
-                  >名前は必須です</FieldError
-                >
               </Field>
             </template>
           </form.Field>
           <form.Field name="display_id">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">表示ID</FieldLabel>
+              <Field
+                :id="field.name"
+                label="表示ID"
+                description="英小文字・数字・ハイフンのみ"
+                :error="
+                  field.state.meta.isTouched && field.state.meta.errors.length
+                    ? '有効な表示IDを入力してください'
+                    : ''
+                "
+              >
                 <Input
-                  :id="field.name"
-                  :model-value="field.state.value"
-                  aria-describedby="display-id-help"
-                  @blur="field.handleBlur"
-                  @update:model-value="
-                    (v) => {
+                  :value="field.state.value"
+                  :on-blur="field.handleBlur"
+                  :on-value-change="
+                    (v: string) => {
                       displayIdEdited = true;
-                      field.handleChange(String(v).toLowerCase());
+                      field.handleChange(v.toLowerCase());
                     }
                   "
                 />
-                <p id="display-id-help" class="text-xs text-muted-foreground">
-                  英小文字・数字・ハイフンのみ
-                </p>
-                <FieldError v-if="field.state.meta.isTouched && field.state.meta.errors.length"
-                  >有効な表示IDを入力してください</FieldError
-                >
               </Field>
             </template>
           </form.Field>
           <form.Field name="description">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">説明（任意）</FieldLabel>
-                <Textarea
-                  :id="field.name"
-                  :model-value="field.state.value"
-                  @update:model-value="(v) => field.handleChange(String(v))"
-                />
+              <Field :id="field.name" label="説明（任意）">
+                <Textarea :value="field.state.value" :on-value-change="field.handleChange" />
               </Field>
             </template>
           </form.Field>
           <form.Field name="icon_url">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">アイコンURL（任意）</FieldLabel>
+              <Field :id="field.name" label="アイコンURL（任意）">
                 <Input
-                  :id="field.name"
                   type="url"
-                  :model-value="field.state.value"
-                  @update:model-value="(v) => field.handleChange(String(v))"
+                  :value="field.state.value"
+                  :on-value-change="field.handleChange"
                 />
               </Field>
             </template>
           </form.Field>
-        </FieldGroup>
+        </div>
         <p v-if="submitError" role="alert" class="text-sm text-destructive">{{ submitError }}</p>
         <DialogFooter>
           <DialogClose as-child>
-            <Button type="button" variant="outline">キャンセル</Button>
+            <Button type="button" variant="tertiary" label="キャンセル" />
           </DialogClose>
           <form.Subscribe>
             <template #default="{ canSubmit, isSubmitting }">
-              <Button type="submit" :disabled="!canSubmit || isSubmitting">
-                {{ isSubmitting ? '作成中…' : '作成' }}
-              </Button>
+              <Button
+                type="submit"
+                :disabled="!canSubmit || isSubmitting"
+                :label="isSubmitting ? '作成中…' : '作成'"
+              />
             </template>
           </form.Subscribe>
         </DialogFooter>

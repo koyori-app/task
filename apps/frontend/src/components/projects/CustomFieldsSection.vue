@@ -4,7 +4,7 @@ import { type } from 'arktype';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -13,8 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Field, FieldError, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -22,7 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import {
   CUSTOM_FIELD_TYPES,
   customFieldTypeMeta,
@@ -204,9 +202,14 @@ async function confirmDelete() {
   <div>
     <div class="mb-5 flex items-center justify-between gap-4 border-b pb-4">
       <h2 class="text-xl font-semibold">カスタムフィールド</h2>
-      <Button type="button" variant="outline" class="shrink-0" @click="openAdd">
-        <PhPlus class="size-4" />
-        フィールドを追加
+      <Button
+        type="button"
+        variant="tertiary"
+        class="shrink-0"
+        label="フィールドを追加"
+        @click="openAdd"
+      >
+        <template #icon><PhPlus class="size-4" /></template>
       </Button>
     </div>
     <p class="mb-4 text-sm text-muted-foreground">
@@ -272,18 +275,21 @@ async function confirmDelete() {
         <form class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
           <form.Field name="name">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">名前</FieldLabel>
+              <Field
+                :id="field.name"
+                label="名前"
+                :error="
+                  field.state.meta.isTouched && field.state.meta.errors.length
+                    ? '名前は 1〜100 文字で入力してください'
+                    : ''
+                "
+              >
                 <Input
-                  :id="field.name"
                   placeholder="例: 見積もり"
-                  :model-value="field.state.value"
-                  @blur="field.handleBlur"
-                  @update:model-value="(v) => field.handleChange(String(v))"
+                  :value="field.state.value"
+                  :on-value-change="field.handleChange"
+                  :on-blur="field.handleBlur"
                 />
-                <FieldError v-if="field.state.meta.isTouched && field.state.meta.errors.length"
-                  >名前は 1〜100 文字で入力してください</FieldError
-                >
               </Field>
             </template>
           </form.Field>
@@ -291,8 +297,8 @@ async function confirmDelete() {
           <!-- 型は作成時のみ選択可（PATCH で変更できないため編集時は非表示） -->
           <form.Field v-if="!editingField" name="fieldType">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel for="custom-field-type">型</FieldLabel>
+              <div class="flex flex-col gap-2">
+                <Label for="custom-field-type">型</Label>
                 <Select
                   :model-value="field.state.value"
                   @update:model-value="(v) => field.handleChange(v as CustomFieldType)"
@@ -306,21 +312,19 @@ async function confirmDelete() {
                     </SelectItem>
                   </SelectContent>
                 </Select>
-              </Field>
+              </div>
             </template>
           </form.Field>
 
           <!-- 選択肢は select 型なら作成・編集とも表示・更新できる -->
           <form.Field v-if="formFieldType === 'select'" name="optionsText">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">選択肢（1行に1つ）</FieldLabel>
+              <Field :id="field.name" label="選択肢（1行に1つ）">
                 <Textarea
-                  :id="field.name"
-                  rows="4"
+                  :rows="4"
                   placeholder="高&#10;中&#10;低"
-                  :model-value="field.state.value"
-                  @update:model-value="(v) => field.handleChange(String(v))"
+                  :value="field.state.value"
+                  :on-value-change="field.handleChange"
                 />
               </Field>
             </template>
@@ -330,17 +334,18 @@ async function confirmDelete() {
           <DialogFooter>
             <Button
               type="button"
-              variant="outline"
+              variant="tertiary"
               :disabled="isSaving"
+              label="キャンセル"
               @click="onFormOpenChange(false)"
-            >
-              キャンセル
-            </Button>
+            />
             <form.Subscribe>
               <template #default="{ canSubmit, isSubmitting }">
-                <Button type="submit" :disabled="!canSubmit || isSubmitting || isSaving">
-                  {{ submitLabel }}
-                </Button>
+                <Button
+                  type="submit"
+                  :disabled="!canSubmit || isSubmitting || isSaving"
+                  :label="submitLabel"
+                />
               </template>
             </form.Subscribe>
           </DialogFooter>
@@ -363,20 +368,18 @@ async function confirmDelete() {
         <DialogFooter>
           <Button
             type="button"
-            variant="outline"
+            variant="tertiary"
             :disabled="deleteMutation.isPending.value"
+            label="キャンセル"
             @click="onDeleteOpenChange(false)"
-          >
-            キャンセル
-          </Button>
+          />
           <Button
             type="button"
-            variant="destructive"
+            variant="danger"
             :disabled="deleteMutation.isPending.value"
+            :label="deleteMutation.isPending.value ? '削除中…' : '削除する'"
             @click="confirmDelete"
-          >
-            {{ deleteMutation.isPending.value ? '削除中…' : '削除する' }}
-          </Button>
+          />
         </DialogFooter>
       </DialogContent>
     </Dialog>

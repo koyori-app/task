@@ -10,7 +10,7 @@ import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
 import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
 import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
 import { useTaskActivities } from '@/composables/useTaskActivities';
@@ -274,20 +274,18 @@ function openRelatedTask(task: TaskResponse) {
         <div class="flex justify-end gap-2">
           <Button
             type="button"
-            variant="outline"
+            variant="tertiary"
             :disabled="deletePending"
+            label="キャンセル"
             @click="closeDeleteDialog"
-          >
-            キャンセル
-          </Button>
+          />
           <Button
             type="button"
-            variant="destructive"
+            variant="danger"
             :disabled="deletePending"
+            :label="deletePending ? '削除中…' : '削除する'"
             @click="confirmDelete"
-          >
-            {{ deletePending ? '削除中…' : '削除する' }}
-          </Button>
+          />
         </div>
       </dialog>
     </template>

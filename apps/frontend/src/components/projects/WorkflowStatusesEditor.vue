@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhArrowDown, PhArrowUp, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { computed, ref, watch } from 'vue';
 
-import { Button } from '@/components/ui/button';
+import { Button, Input } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -13,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import type { components } from '@/generated/api';
 import { apiClient } from '@/lib/api-vue-query';
 
@@ -257,12 +256,11 @@ async function moveStatus(index: number, offset: -1 | 1) {
       ステータスを読み込めませんでした
       <Button
         type="button"
-        variant="outline"
-        size="sm"
+        variant="tertiary"
         class="ml-3"
+        label="再試行"
         @click="statusesQuery.refetch()"
-        >再試行</Button
-      >
+      />
     </div>
     <div v-else>
       <p
@@ -284,36 +282,36 @@ async function moveStatus(index: number, offset: -1 | 1) {
         <li v-for="(status, index) in statuses" :key="status.id" class="rounded-lg border p-3">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div class="flex min-w-0 flex-1 items-center gap-2">
-              <Input
+              <!-- 色は koyori に無いので素の input -->
+              <input
                 :aria-label="`${status.name}の色`"
                 type="color"
-                class="h-9 w-12 shrink-0 cursor-pointer p-1"
-                :model-value="drafts[status.id]?.color ?? status.color"
-                @update:model-value="
-                  (value) => {
-                    if (drafts[status.id]) drafts[status.id]!.color = String(value);
+                class="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-input bg-transparent p-1"
+                :value="drafts[status.id]?.color ?? status.color"
+                @input="
+                  (event) => {
+                    if (drafts[status.id])
+                      drafts[status.id]!.color = (event.target as HTMLInputElement).value;
                   }
                 "
               />
               <Input
                 :aria-label="`${status.name}の名前`"
-                :model-value="drafts[status.id]?.name ?? status.name"
-                @update:model-value="
-                  (value) => {
-                    if (drafts[status.id]) drafts[status.id]!.name = String(value);
+                :value="drafts[status.id]?.name ?? status.name"
+                :on-value-change="
+                  (value: string) => {
+                    if (drafts[status.id]) drafts[status.id]!.name = value;
                   }
                 "
               />
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
+                variant="tertiary"
                 :disabled="isMutating"
-                :aria-label="`${status.name}を保存`"
+                :ariaLabel="`${status.name}を保存`"
+                label="保存"
                 @click="saveStatus(status)"
-              >
-                保存
-              </Button>
+              />
             </div>
 
             <div class="flex flex-wrap items-center gap-3">
@@ -347,34 +345,31 @@ async function moveStatus(index: number, offset: -1 | 1) {
               <div class="flex">
                 <Button
                   type="button"
-                  size="icon"
                   variant="ghost"
                   :disabled="index === 0 || isMutating"
-                  :aria-label="`${status.name}を上へ`"
+                  :ariaLabel="`${status.name}を上へ`"
                   @click="moveStatus(Number(index), -1)"
                 >
-                  <PhArrowUp class="size-4" />
+                  <template #icon><PhArrowUp class="size-4" /></template>
                 </Button>
                 <Button
                   type="button"
-                  size="icon"
                   variant="ghost"
                   :disabled="index === statuses.length - 1 || isMutating"
-                  :aria-label="`${status.name}を下へ`"
+                  :ariaLabel="`${status.name}を下へ`"
                   @click="moveStatus(Number(index), 1)"
                 >
-                  <PhArrowDown class="size-4" />
+                  <template #icon><PhArrowDown class="size-4" /></template>
                 </Button>
                 <Button
                   type="button"
-                  size="icon"
                   variant="ghost"
-                  class="text-destructive"
+                  class="enabled:text-(--koyori-color-danger)"
                   :disabled="isMutating"
-                  :aria-label="`${status.name}を削除`"
+                  :ariaLabel="`${status.name}を削除`"
                   @click="requestDelete(status)"
                 >
-                  <PhTrash class="size-4" />
+                  <template #icon><PhTrash class="size-4" /></template>
                 </Button>
               </div>
             </div>
@@ -385,14 +380,21 @@ async function moveStatus(index: number, offset: -1 | 1) {
       <form class="rounded-lg border border-dashed p-3" @submit.prevent="createStatus">
         <p class="mb-2 text-sm font-medium">ステータスを追加</p>
         <div class="flex flex-col gap-2 sm:flex-row">
-          <Input
+          <input
             v-model="newColor"
             aria-label="新しいステータスの色"
             type="color"
-            class="h-9 w-12 shrink-0 cursor-pointer p-1"
+            class="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-input bg-transparent p-1"
           />
-          <Input v-model="newName" aria-label="新しいステータス名" placeholder="例: レビュー中" />
-          <Button type="submit" :disabled="isMutating"> <PhPlus class="size-4" />追加 </Button>
+          <Input
+            aria-label="新しいステータス名"
+            placeholder="例: レビュー中"
+            :value="newName"
+            :on-value-change="(v: string) => (newName = v)"
+          />
+          <Button type="submit" :disabled="isMutating" label="追加">
+            <template #icon><PhPlus class="size-4" /></template>
+          </Button>
         </div>
       </form>
     </div>
@@ -412,10 +414,14 @@ async function moveStatus(index: number, offset: -1 | 1) {
         </DialogDescription>
       </DialogHeader>
       <DialogFooter>
-        <Button type="button" variant="outline" @click="deleteTarget = null">キャンセル</Button>
-        <Button type="button" variant="destructive" :disabled="isMutating" @click="confirmDelete"
-          >削除する</Button
-        >
+        <Button type="button" variant="tertiary" label="キャンセル" @click="deleteTarget = null" />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="isMutating"
+          label="削除する"
+          @click="confirmDelete"
+        />
       </DialogFooter>
     </DialogContent>
   </Dialog>

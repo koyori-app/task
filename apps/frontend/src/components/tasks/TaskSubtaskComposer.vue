@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { CornerDownLeft, Loader2, X } from '@lucide/vue';
+import { CornerDownLeft, X } from '@lucide/vue';
 import { nextTick, onMounted, ref } from 'vue';
 
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Button, Input, Spinner } from '@koyori-app/ui-vue';
 
 const props = withDefaults(
   defineProps<{
@@ -31,10 +30,15 @@ const emit = defineEmits<{
 const draft = ref('');
 const inputRef = ref<InstanceType<typeof Input> | null>(null);
 
+// koyori の Input の root は枠の span なので、中の input に当てる
+function focusInput() {
+  (inputRef.value?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
+}
+
 onMounted(async () => {
   if (!props.autofocus) return;
   await nextTick();
-  (inputRef.value?.$el as HTMLInputElement | undefined)?.focus();
+  focusInput();
 });
 
 async function submit() {
@@ -44,7 +48,7 @@ async function submit() {
   draft.value = '';
   emit('created');
   await nextTick();
-  (inputRef.value?.$el as HTMLInputElement | undefined)?.focus();
+  focusInput();
 }
 </script>
 
@@ -53,35 +57,35 @@ async function submit() {
     <div class="flex min-w-0 items-center gap-1.5">
       <Input
         ref="inputRef"
-        v-model="draft"
-        class="h-8 min-w-0 flex-1 text-sm"
+        class="min-w-0 flex-1"
         :aria-label="ariaLabel"
         placeholder="サブタスク名を入力"
         :disabled="pending || disabled"
+        :value="draft"
+        :on-value-change="(v: string) => (draft = v)"
         @keydown.enter.prevent="submit"
         @keydown.esc.prevent="!disabled && emit('cancel')"
       />
       <Button
         type="button"
-        size="sm"
-        class="h-8 gap-1.5 px-2.5"
         :disabled="pending || disabled || !draft.trim()"
+        :label="pending ? '追加中…' : '追加'"
         @click="submit"
       >
-        <Loader2 v-if="pending" class="size-3.5 animate-spin" aria-hidden="true" />
-        <CornerDownLeft v-else class="size-3.5" aria-hidden="true" />
-        追加
+        <template #icon>
+          <Spinner v-if="pending" hide-label :size="14" />
+          <CornerDownLeft v-else class="size-3.5" aria-hidden="true" />
+        </template>
       </Button>
       <Button
         type="button"
         variant="ghost"
-        size="icon"
-        class="size-8 shrink-0"
+        class="shrink-0"
         :disabled="pending || disabled"
-        aria-label="サブタスクの追加をやめる"
+        ariaLabel="サブタスクの追加をやめる"
         @click="emit('cancel')"
       >
-        <X class="size-4" aria-hidden="true" />
+        <template #icon><X class="size-4" aria-hidden="true" /></template>
       </Button>
     </div>
     <p v-if="error" class="text-xs text-destructive" role="alert">{{ error }}</p>

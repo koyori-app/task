@@ -13,9 +13,7 @@ import {
   PhX,
 } from '@phosphor-icons/vue';
 import { computed, onMounted, ref, watch, type Component } from 'vue';
-import { Button } from '@/components/ui/button';
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
+import { Button, Field, Input } from '@koyori-app/ui-vue';
 import { Skeleton } from '@/components/ui/skeleton';
 import PasswordMethodRow from '@/components/settings/PasswordMethodRow.vue';
 import {
@@ -304,14 +302,8 @@ async function onPasswordSet() {
     >
       <PhCheckCircle class="size-4 shrink-0 text-green-700 dark:text-green-500" />
       <p class="flex-1 text-sm">{{ flash }}</p>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="通知を閉じる"
-        @click="flash = null"
-      >
-        <PhX class="size-4" />
+      <Button type="button" variant="ghost" ariaLabel="通知を閉じる" @click="flash = null">
+        <template #icon><PhX class="size-4" /></template>
       </Button>
     </div>
 
@@ -375,13 +367,11 @@ async function onPasswordSet() {
           </div>
           <Button
             type="button"
-            variant="outline"
-            size="sm"
-            class="text-destructive"
+            variant="tertiary"
+            class="text-(--koyori-color-danger)"
+            label="解除"
             @click="askUnlink(item.key)"
-          >
-            解除
-          </Button>
+          />
         </div>
 
         <div v-if="confirmingKey === item.key" class="px-4 pb-4 md:pl-16">
@@ -397,16 +387,17 @@ async function onPasswordSet() {
             </p>
             <Button
               type="button"
-              variant="destructive"
-              size="sm"
+              variant="danger"
               :disabled="disconnect.isPending.value"
+              label="解除する"
               @click="onUnlink(item.connection)"
-            >
-              解除する
-            </Button>
-            <Button type="button" variant="outline" size="sm" @click="confirmingKey = null">
-              キャンセル
-            </Button>
+            />
+            <Button
+              type="button"
+              variant="tertiary"
+              label="キャンセル"
+              @click="confirmingKey = null"
+            />
           </div>
         </div>
 
@@ -417,11 +408,10 @@ async function onPasswordSet() {
             <Button
               type="button"
               variant="ghost"
-              size="icon-sm"
-              aria-label="エラーを閉じる"
+              ariaLabel="エラーを閉じる"
               @click="delete rowError[item.key]"
             >
-              <PhX class="size-4" />
+              <template #icon><PhX class="size-4" /></template>
             </Button>
           </div>
         </div>
@@ -445,37 +435,41 @@ async function onPasswordSet() {
             </div>
             <Button
               type="button"
-              variant="outline"
-              size="sm"
+              variant="tertiary"
               :disabled="
                 provider.requires_instance_url &&
                 (!instanceDrafts[provider.provider]?.trim() || instanceAlreadyLinked(provider))
               "
+              label="連携する"
               @click="onLink(provider)"
             >
-              <PhPlus class="size-4" />
-              連携する
+              <template #icon><PhPlus class="size-4" /></template>
             </Button>
           </div>
 
           <div v-if="provider.requires_instance_url" class="px-4 pb-4 md:pl-16">
-            <Field>
-              <FieldLabel :for="`instance-${provider.provider}`">インスタンス URL</FieldLabel>
+            <Field
+              :id="`instance-${provider.provider}`"
+              label="インスタンス URL"
+              :description="
+                instanceAlreadyLinked(provider)
+                  ? undefined
+                  : 'インスタンス URL の入力が必要なプロバイダーです。承認前に指定してください。'
+              "
+              :error="
+                instanceAlreadyLinked(provider)
+                  ? 'このインスタンスは連携済みです。別のインスタンス URL を入力してください。'
+                  : ''
+              "
+            >
               <Input
-                :id="`instance-${provider.provider}`"
                 type="url"
-                inputmode="url"
+                input-mode="url"
                 placeholder="https://gitlab.example.com"
-                class="max-w-md font-mono"
-                :model-value="instanceDrafts[provider.provider] ?? ''"
-                @update:model-value="(v) => (instanceDrafts[provider.provider] = String(v))"
+                class="max-w-md [&_input]:font-mono"
+                :value="instanceDrafts[provider.provider] ?? ''"
+                :on-value-change="(v: string) => (instanceDrafts[provider.provider] = v)"
               />
-              <FieldDescription v-if="instanceAlreadyLinked(provider)" role="alert">
-                このインスタンスは連携済みです。別のインスタンス URL を入力してください。
-              </FieldDescription>
-              <FieldDescription v-else>
-                インスタンス URL の入力が必要なプロバイダーです。承認前に指定してください。
-              </FieldDescription>
             </Field>
           </div>
         </div>

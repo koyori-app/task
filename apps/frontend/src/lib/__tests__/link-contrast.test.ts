@@ -3,8 +3,6 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { buttonVariants } from '@/components/ui/button';
-
 import { ratio, token } from './design-token';
 
 /**
@@ -24,10 +22,6 @@ describe('リンク文字の対比', () => {
 
   it('従来のリンク文字（text-primary）は明るい面で 4.5:1 に届かなかった（陽性対照）', () => {
     expect(ratio(token(':root', 'primary'), token(':root', 'background'))).toBeLessThan(4.5);
-  });
-
-  it('Button の link variant は text-link を使う', () => {
-    expect(buttonVariants({ variant: 'link' }).split(' ')).toContain('text-link');
   });
 
   it('src に --primary を文字色・輪の色に読む箇所が無い', () => {
