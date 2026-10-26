@@ -10,13 +10,30 @@ use sea_orm::{
 };
 
 use crate::AppState;
-use crate::auth_helpers::{is_tenant_owner, require_tenant_owner, visible_project_ids};
+use crate::auth_helpers::{
+    is_tenant_owner, require_tenant_admin, require_tenant_owner, visible_project_ids,
+};
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use entity::{drive_folders, project_statuses, projects, scopes::Scope};
 use payload::projects::*;
 use service::db::is_postgres_unique_violation;
+
+/// プロジェクト本体の更新・削除を許す人。共有プロジェクトはオーナー + テナント `Admin`、
+/// 個人プロジェクト（Inbox）はオーナーのみ。テナント `Admin` は明示 ACE で他人の Inbox に
+/// 入れることがあるので、テナントロールだけで本体を触れないよう `is_personal` で切る。
+async fn require_project_manager<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    project: &projects::Model,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    if project.is_personal {
+        require_tenant_owner(db, project.tenant_id, user_id).await
+    } else {
+        require_tenant_admin(db, project.tenant_id, user_id).await
+    }
+}
 
 fn generate_project_key(name: &str) -> String {
     let upper: String = name
@@ -64,7 +81,7 @@ pub async fn create_project(
 ) -> Result<(StatusCode, Json<ProjectResponse>), AppError> {
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
-    require_tenant_owner(&state.db, tenant_id, auth.user_id).await?;
+    require_tenant_admin(&state.db, tenant_id, auth.user_id).await?;
     let explicit_key = payload.key;
     let mut key = match explicit_key.as_ref() {
         Some(k) if validate_project_key(k) => k.clone(),
@@ -277,12 +294,12 @@ pub async fn update_project(
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(id))
         .await?;
-    require_tenant_owner(&state.db, tenant_id, auth.user_id).await?;
     let project = projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    require_project_manager(&state.db, &project, auth.user_id).await?;
 
     let mut active: projects::ActiveModel = project.into();
     if let Some(name) = payload.name {
@@ -329,12 +346,12 @@ pub async fn delete_project(
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(id))
         .await?;
-    require_tenant_owner(&state.db, tenant_id, auth.user_id).await?;
-    projects::Entity::find_by_id(id)
+    let project = projects::Entity::find_by_id(id)
         .filter(projects::Column::TenantId.eq(tenant_id))
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    require_project_manager(&state.db, &project, auth.user_id).await?;
     projects::Entity::delete_by_id(id).exec(&state.db).await?;
     Ok(StatusCode::NO_CONTENT)
 }

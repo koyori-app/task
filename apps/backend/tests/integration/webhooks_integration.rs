@@ -163,7 +163,7 @@ async fn mock_server(status: u16) -> MockServer {
     server
 }
 
-/// 変更は Admin / オーナーだけ（Member は 403）。一覧の URL は管理者だけに返す。
+/// 変更はプロジェクト Admin / オーナー / 入れるテナント Admin だけ（Member は 403）。一覧の URL は管理者だけに返す。
 #[tokio::test]
 async fn crud_and_authorization() {
     let mut fx = setup().await;
@@ -940,4 +940,46 @@ async fn redeliver_creates_new_delivery() {
     let history: serde_json::Value = history.json().await.expect("json");
     assert_eq!(history.as_array().expect("array").len(), 1);
     assert_eq!(history[0]["id"], created["id"], "新しい順");
+}
+
+/// テナント `Admin` はプロジェクト Admin の ACE が無くても Webhook を作れる（TASK-372。
+/// `require_project_admin` 経由の対照）。
+#[tokio::test]
+async fn tenant_admin_can_create_webhooks() {
+    let mut fx = setup().await;
+    let admin = fx.app.insert_user_default().await;
+    let added = fx
+        .app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/members", fx.tenant_id),
+            serde_json::json!({ "user_id": admin.id, "role": "Admin" }),
+        )
+        .await;
+    assert_eq!(added.status(), StatusCode::CREATED);
+    // fixture のプロジェクトは `member` の ACE で閉じているので、入れるように Viewer の ACE を置く
+    let ace = fx
+        .app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/members",
+                fx.tenant_id, fx.project_id
+            ),
+            serde_json::json!({ "user_id": admin.id, "role": "Viewer" }),
+        )
+        .await;
+    assert_eq!(ace.status(), StatusCode::CREATED);
+
+    fx.login(&admin).await;
+    let created = fx
+        .app
+        .post_json_with_session(
+            &fx.webhooks_path(),
+            serde_json::json!({"url": "https://203.0.113.10/x", "secret": SECRET, "events": ["task.created"]}),
+        )
+        .await;
+    assert_eq!(
+        created.status(),
+        StatusCode::CREATED,
+        "テナント Admin は作れる"
+    );
 }

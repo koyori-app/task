@@ -482,7 +482,7 @@ GET /v1/drive/files/{id}/content?token={share_token}
 | スコープ | 説明 |
 |---------|------|
 | `read:project` | プロジェクトの読み取り |
-| `write:project` | プロジェクトの作成・更新・削除 |
+| `write:project` | プロジェクトの作成・更新（削除はセッション専用） |
 | `write:tenant` | テナントの設定変更（`read:tenant` を包含） |
 | `api` | すべての `read:*` / `write:*` を包含 |
 | `read_api` | すべての `read:*` を包含 |

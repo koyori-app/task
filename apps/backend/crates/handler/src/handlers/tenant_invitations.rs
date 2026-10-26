@@ -16,9 +16,9 @@ use sea_orm::{
 };
 
 use crate::AppState;
+use crate::auth_helpers::require_tenant_admin;
 use crate::error::{AppError, ServerError};
 use crate::extractors::{AuthUser, CurrentUser};
-use crate::handlers::tenant_members::require_tenant_admin;
 use crate::openapi::CrudErrors;
 use entity::{scopes::Scope, tenant_invitations, tenant_members, tenants, users};
 use job::tenant_invitation_email;
@@ -41,7 +41,7 @@ async fn require_invitation_admin(
 ) -> Result<(), AppError> {
     auth.require_scope(scope)?;
     auth.ensure_tenant_access(state, tenant_id, None).await?;
-    require_tenant_admin(state, tenant_id, auth.user_id).await
+    require_tenant_admin(&state.db, tenant_id, auth.user_id).await
 }
 
 /// 宛先ごとの送信の枠を取り、テナントごと・招待者ごとの上限を 1 通ぶん使う。

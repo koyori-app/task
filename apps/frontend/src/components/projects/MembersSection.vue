@@ -75,7 +75,7 @@ const tenantMembersQuery = useQuery(
 const members = computed<ProjectMemberResponse[]>(() => membersQuery.data.value ?? []);
 const tenantMembers = computed<TenantMemberResponse[]>(() => tenantMembersQuery.data.value ?? []);
 
-/** 一覧・追加・変更・削除はプロジェクト管理者（またはオーナー）専用。 */
+/** 一覧・追加・変更・削除はプロジェクト管理者（またはテナントオーナー・入れるテナント管理者）専用。 */
 const isForbidden = computed(
   () =>
     (membersQuery.error.value as { response?: { status?: number } } | null)?.response?.status ===
@@ -246,7 +246,7 @@ async function confirmRemove() {
     <p v-if="membersQuery.isPending.value" class="text-sm text-muted-foreground">読み込み中…</p>
 
     <p v-else-if="isForbidden" class="text-sm text-muted-foreground">
-      メンバーを管理できるのは、テナントオーナーとこのプロジェクトの管理者だけです。
+      メンバーを管理できるのは、テナントオーナー・テナント管理者とこのプロジェクトの管理者だけです。
     </p>
 
     <p v-else-if="membersQuery.isError.value" role="alert" class="text-sm text-destructive">

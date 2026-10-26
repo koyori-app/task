@@ -1,6 +1,7 @@
 //! 外部向け Webhook の管理 API（docs/features/tasks/10.webhooks.md §6）。
 //!
-//! 一覧は `read:project`、配信履歴と変更は `write:project` + プロジェクト Admin（またはテナントオーナー）。
+//! 一覧は `read:project`、配信履歴と変更は `write:project` + プロジェクト Admin
+//! （またはテナントオーナー・そのプロジェクトに入れるテナント Admin。`require_project_admin`）。
 //! 有効 / 無効の切り替えは専用の口を作らず、PUT の `is_active` で行う。
 
 use axum::{

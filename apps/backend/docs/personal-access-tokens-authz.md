@@ -75,7 +75,7 @@ GitLab の PAT と同じく、全部を任せる `api` / 読むだけの `read_a
 | `read:tenant` | テナントとメンバーの参照（テナント一覧・取得、メンバー一覧、明示 ACE の一覧、利用者のプロフィール） |
 | `write:tenant` | テナントの更新・削除、メンバーの追加・変更・削除、ドライブ容量の設定（`read:tenant` を含む） |
 | `read:project` | プロジェクトの参照 |
-| `write:project` | プロジェクトの更新と Webhook の管理（`read:project` を含む） |
+| `write:project` | プロジェクトの作成・更新、プロジェクトメンバーと Webhook の管理（`read:project` を含む）。削除はセッション専用で PAT では通らない |
 | `read:<資源>` / `write:<資源>` | task / milestone / sprint / review / drive の参照・変更 |
 | `read:task`（補足） | スケジュール `GET /v1/tenants/{tenant_id}/schedule` もこれだけで読める。期間に重なるスプリント・マイルストーンも `read:sprint` / `read:milestone` なしで返す |
 
@@ -310,8 +310,8 @@ Device Token にだけ見せる（Device Token はテナントに束縛しない
 ### `/v1/tenants/{tenant_id}/projects/{project_id}/webhooks`（外部向け Webhook）
 
 読み取りは `read:project`、変更は `write:project`。変更はスコープに加えて、利用者本人が
-そのプロジェクトの Admin かテナントオーナーであること（`require_project_admin`）が要る。
-PAT に `write:project` を付けても、発行者が Member なら 403。
+そのプロジェクトの Admin・テナントオーナー・そのプロジェクトに入れるテナント `Admin` の
+いずれかであること（`require_project_admin`）が要る。PAT に `write:project` を付けても、発行者が Member なら 403。
 
 | メソッド | パス | 必要スコープ |
 |---------|------|-------------|

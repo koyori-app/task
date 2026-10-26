@@ -12,10 +12,10 @@ use sea_orm::{
 };
 
 use crate::AppState;
+use crate::auth_helpers::require_tenant_admin;
 use crate::auth_helpers::require_tenant_owner;
 use crate::error::AppError;
 use crate::extractors::{AuthMethod, AuthUser};
-use crate::handlers::tenant_members::require_tenant_admin;
 use crate::openapi::{CrudErrors, PersonalTokenAuthErrors, SessionAuthErrors};
 use entity::scopes::ScopeList;
 use entity::{
@@ -257,7 +257,7 @@ pub async fn create_personal_token(
     // 発行はオーナーとテナント Admin に許す。PAT は発行者本人として動き
     // （user_id は発行者に固定）、得られる力は発行者の持つ力を超えぬため、
     // 主に閉じても守れる物が増えない（docs/personal-access-tokens-authz.md）。
-    require_tenant_admin(&state, payload.tenant_id, auth.user_id).await?;
+    require_tenant_admin(&state.db, payload.tenant_id, auth.user_id).await?;
 
     if let Some(ref project_ids) = payload.project_ids {
         validate_project_ids(&state, payload.tenant_id, project_ids).await?;

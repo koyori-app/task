@@ -10,12 +10,11 @@ use sea_orm::{
 };
 
 use crate::AppState;
-use crate::auth_helpers::{explicit_member_project_ids, is_tenant_owner};
+use crate::auth_helpers::{explicit_member_project_ids, is_tenant_owner, require_tenant_admin};
 use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::handlers::project_members;
 use crate::openapi::CrudErrors;
-use entity::tenant_members::TenantRole;
 use entity::{
     project_members as project_members_entity, projects, scopes::Scope, tenant_members, tenants,
     users,
@@ -24,35 +23,6 @@ use payload::tenant_members::*;
 use payload::users::UserProfileResponse;
 use service::access::visible_project_ids;
 use service::db::is_postgres_unique_violation;
-
-async fn ensure_tenant_exists(state: &AppState, tenant_id: Uuid) -> Result<(), AppError> {
-    tenants::Entity::find_by_id(tenant_id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(())
-}
-
-/// メンバーの追加・変更・削除はオーナーとテナント Admin だけに許す。
-pub(crate) async fn require_tenant_admin(
-    state: &AppState,
-    tenant_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    ensure_tenant_exists(state, tenant_id).await?;
-    if is_tenant_owner(&state.db, tenant_id, user_id).await? {
-        return Ok(());
-    }
-    let member = tenant_members::Entity::find()
-        .filter(tenant_members::Column::TenantId.eq(tenant_id))
-        .filter(tenant_members::Column::UserId.eq(user_id))
-        .one(&state.db)
-        .await?;
-    match member {
-        Some(m) if m.role == TenantRole::Admin => Ok(()),
-        _ => Err(AppError::Forbidden),
-    }
-}
 
 /// メンバー行に表示用のユーザー情報を同梱する。FK があるため利用者は必ず居るはずで、
 /// 居なければ握り潰さず 500 にする。
@@ -215,7 +185,7 @@ pub async fn add_member(
 ) -> Result<(StatusCode, Json<TenantMemberResponse>), AppError> {
     auth.require_scope(Scope::WriteTenant)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
-    require_tenant_admin(&state, tenant_id, auth.user_id).await?;
+    require_tenant_admin(&state.db, tenant_id, auth.user_id).await?;
 
     let user = users::Entity::find_by_id(payload.user_id)
         .one(&state.db)
@@ -272,7 +242,7 @@ pub async fn update_member(
 ) -> Result<Json<TenantMemberResponse>, AppError> {
     auth.require_scope(Scope::WriteTenant)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
-    require_tenant_admin(&state, tenant_id, auth.user_id).await?;
+    require_tenant_admin(&state.db, tenant_id, auth.user_id).await?;
 
     let member = find_member(&state, tenant_id, user_id).await?;
     let user = users::Entity::find_by_id(user_id)
@@ -318,7 +288,7 @@ pub async fn remove_member(
 ) -> Result<StatusCode, AppError> {
     auth.require_scope(Scope::WriteTenant)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
-    require_tenant_admin(&state, tenant_id, auth.user_id).await?;
+    require_tenant_admin(&state.db, tenant_id, auth.user_id).await?;
 
     let member = find_member(&state, tenant_id, user_id).await?;
 
@@ -330,7 +300,7 @@ pub async fn remove_member(
     // ここで Admin 数を数え直して 409 にはしない。除名は「この人はもう居ない」という
     // 宣言で、それをプロジェクトのロールで止めると、対象が単独 Admin のプロジェクトを
     // 全部直すまでオフボーディングできなくなる。Admin が全員抜けたプロジェクトは
-    // テナントオーナーが直せる（`project_members::require_project_admin` は
+    // テナントオーナー（開いていればテナント Admin も）が直せる（`project_members::require_project_admin` は
     // オーナーを無条件で通す）。詳細は `lock_membership_changes` の doc を見る
     let txn = state.db.begin().await?;
     project_members::lock_membership_changes(&txn, tenant_id).await?;
@@ -376,7 +346,7 @@ pub async fn list_explicit_projects(
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     // 除名と同じ相手（オーナーとテナント Admin）にだけ見せる。
     // 対象がテナントに居るかは問わない。除名した後に「まだ何が残っているか」を確かめる用途があるため
-    require_tenant_admin(&state, tenant_id, auth.user_id).await?;
+    require_tenant_admin(&state.db, tenant_id, auth.user_id).await?;
 
     let rows = project_members_entity::Entity::find()
         .filter(project_members_entity::Column::UserId.eq(user_id))

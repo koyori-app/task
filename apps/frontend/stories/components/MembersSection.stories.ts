@@ -196,7 +196,7 @@ export const Forbidden: Story = {
     const canvas = within(canvasElement);
     await expect(
       canvas.findByText(
-        'メンバーを管理できるのは、テナントオーナーとこのプロジェクトの管理者だけです。',
+        'メンバーを管理できるのは、テナントオーナー・テナント管理者とこのプロジェクトの管理者だけです。',
       ),
     ).resolves.toBeInTheDocument();
     await expect(canvas.queryByText('テナントメンバーから追加')).not.toBeInTheDocument();
