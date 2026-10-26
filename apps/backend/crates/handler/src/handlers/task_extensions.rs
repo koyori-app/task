@@ -84,6 +84,64 @@ pub async fn search_tasks(
     }
 }
 
+// CreateTaskRequest の title と同じ上限。長い入力の trigram 比較コストも抑える
+fn normalize_similar_title(raw: &str) -> Result<&str, AppError> {
+    let title = raw.trim();
+    if title.is_empty() || title.chars().count() > 255 {
+        return Err(AppError::BadRequest);
+    }
+    Ok(title)
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    get,
+    path = "/similar",
+    tag = "Tasks",
+    summary = "類似タスク候補",
+    description = "同一プロジェクト内で title が似ているタスクを類似度の高い順に返す。",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        SimilarTasksQuery,
+    ),
+    responses(
+        (status = 200, description = "類似タスク候補", body = SimilarTasksResponse),
+        CrudErrors,
+    )
+)]
+pub async fn similar_tasks(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+    Query(q): Query<SimilarTasksQuery>,
+) -> Result<Json<SimilarTasksResponse>, AppError> {
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
+
+    let title = normalize_similar_title(&q.title)?;
+
+    let tasks = service::tasks::find_similar(
+        &state.db,
+        project_id,
+        title,
+        q.exclude_task_id,
+        q.limit.min(20),
+    )
+    .await?
+    .into_iter()
+    .map(|t| SimilarTaskHit {
+        id: t.id,
+        seq_id: t.seq_id,
+        title: t.title,
+        score: t.score,
+    })
+    .collect();
+
+    Ok(Json(SimilarTasksResponse { tasks }))
+}
+
 /// 検索語のうち、`@名` を印のメンションにも当てる形に引いた物。
 ///
 /// 説明文のメンションは本文に `<@利用者ID>` の印で入り、名は入らぬ。ゆえに `@名` の語は、
@@ -1194,5 +1252,24 @@ mod tests {
         assert_eq!(find_match_char_range("OAuth", "oauth"), Some((0, 5)));
         assert_eq!(find_match_char_range("abc", "abc"), Some((0, 3)));
         assert_eq!(find_match_char_range("abc", "abd"), None);
+    }
+
+    #[test]
+    fn normalize_similar_title_trims_and_limits_by_char_count() {
+        assert!(matches!(
+            normalize_similar_title(" \t\n　"),
+            Err(AppError::BadRequest)
+        ));
+        assert!(matches!(
+            normalize_similar_title("  ログイン画面  "),
+            Ok("ログイン画面")
+        ));
+        // 上限はバイト数ではなく文字数
+        let max = "あ".repeat(255);
+        assert!(matches!(normalize_similar_title(&max), Ok(t) if t == max));
+        assert!(matches!(
+            normalize_similar_title(&"あ".repeat(256)),
+            Err(AppError::BadRequest)
+        ));
     }
 }
