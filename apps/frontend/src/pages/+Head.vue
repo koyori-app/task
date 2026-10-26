@@ -1,7 +1,14 @@
 <!-- https://vike.dev/Head -->
 
 <template>
-  <link rel="icon" :href="logoUrl" />
+  <link
+    v-for="favicon in FAVICONS"
+    :key="favicon.href"
+    rel="icon"
+    type="image/png"
+    :sizes="favicon.sizes"
+    :href="favicon.href"
+  />
   <link rel="manifest" :href="MANIFEST_PATH" />
   <meta name="theme-color" :content="PWA_THEME_COLOR" />
   <link rel="apple-touch-icon" :href="PWA_ICONS.appleTouch" />
@@ -10,8 +17,7 @@
 
 <script setup lang="ts">
 import '@/assets/css/tailwind.css';
-import logoUrl from '../assets/logo.svg';
-import { MANIFEST_PATH, PWA_ICONS, PWA_THEME_COLOR } from '@/lib/pwa/app-manifest';
+import { FAVICONS, MANIFEST_PATH, PWA_ICONS, PWA_THEME_COLOR } from '@/lib/pwa/app-manifest';
 import { useHead } from '@unhead/vue';
 import { usePageContext } from 'vike-vue/usePageContext';
 

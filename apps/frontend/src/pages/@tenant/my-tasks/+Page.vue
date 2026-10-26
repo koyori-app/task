@@ -5,7 +5,7 @@ import { keepPreviousData, useQuery } from '@tanstack/vue-query';
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 
-import { Button } from '@/components/ui/button';
+import { Button, Spinner } from '@koyori-app/ui-vue';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import type { components } from '@/generated/api';
 import { fetchClient } from '@/lib/api-vue-query';
@@ -160,12 +160,10 @@ function priorityLabel(p: string) {
       <Button
         v-for="tab in tabs"
         :key="tab.key"
-        size="sm"
-        :variant="activeFilter === tab.key ? 'default' : 'outline'"
+        :variant="activeFilter === tab.key ? 'primary' : 'tertiary'"
+        :label="tab.label"
         @click="activeFilter = tab.key"
-      >
-        {{ tab.label }}
-      </Button>
+      />
     </div>
 
     <div v-if="isTenantResolving || tasksQuery.isLoading.value" class="flex justify-center py-8">
@@ -196,7 +194,7 @@ function priorityLabel(p: string) {
           <Check class="h-4 w-4 text-muted-foreground" />
           <a
             :href="taskDetailHref(tenantDisplayId, task.project.key, task.seq_id)"
-            class="flex-1 text-primary hover:underline"
+            class="flex-1 text-link hover:underline"
             @click="navigateToTask(task, $event)"
           >
             {{ task.title }}
@@ -222,7 +220,7 @@ function priorityLabel(p: string) {
           <Check class="h-4 w-4 text-muted-foreground" />
           <a
             :href="taskDetailHref(tenantDisplayId, task.project.key, task.seq_id)"
-            class="flex-1 text-primary hover:underline"
+            class="flex-1 text-link hover:underline"
             @click="navigateToTask(task, $event)"
           >
             {{ task.title }}
@@ -238,9 +236,13 @@ function priorityLabel(p: string) {
       </p>
 
       <div v-if="hasMoreTasks" class="flex justify-center pt-2">
-        <Button variant="outline" :disabled="tasksQuery.isFetching.value" @click="loadMore">
-          <Loader2 v-if="tasksQuery.isFetching.value" class="mr-2 h-4 w-4 animate-spin" />
-          もっと見る
+        <Button
+          variant="tertiary"
+          :disabled="tasksQuery.isFetching.value"
+          :label="tasksQuery.isFetching.value ? '読み込み中…' : 'もっと見る'"
+          @click="loadMore"
+        >
+          <template #icon><Spinner v-if="tasksQuery.isFetching.value" hide-label /></template>
         </Button>
       </div>
     </template>

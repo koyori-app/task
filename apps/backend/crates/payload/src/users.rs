@@ -44,15 +44,30 @@ pub struct UserProfileResponse {
     pub bio: Option<String>,
     #[schema(nullable)]
     pub avatar_url: Option<String>,
+    /// このテナントでの部署。所属行の無いオーナー・客分では null
+    #[schema(nullable)]
+    pub department: Option<String>,
+    /// このテナントでの役職。所属行の無いオーナー・客分では null
+    #[schema(nullable)]
+    pub position: Option<String>,
+    /// このテナントでのチーム。所属行の無いオーナー・客分では null
+    #[schema(nullable)]
+    pub team: Option<String>,
 }
 
-impl From<entity::users::Model> for UserProfileResponse {
-    fn from(model: entity::users::Model) -> Self {
+impl UserProfileResponse {
+    pub fn from_parts(
+        user: entity::users::Model,
+        member: Option<&entity::tenant_members::Model>,
+    ) -> Self {
         Self {
-            id: model.id,
-            username: model.username,
-            bio: model.bio,
-            avatar_url: model.avatar_url,
+            id: user.id,
+            username: user.username,
+            bio: user.bio,
+            avatar_url: user.avatar_url,
+            department: member.and_then(|m| m.department.clone()),
+            position: member.and_then(|m| m.position.clone()),
+            team: member.and_then(|m| m.team.clone()),
         }
     }
 }

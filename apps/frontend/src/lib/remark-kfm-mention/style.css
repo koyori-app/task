@@ -26,7 +26,7 @@
   line-height: 1;
   white-space: nowrap;
   font-weight: 500;
-  color: var(--primary);
+  color: var(--link);
   background-color: color-mix(in oklab, var(--primary) 12%, transparent);
 }
 
@@ -46,7 +46,7 @@
 
 /* 頭のアバター。UserAvatar の xs（lib/user-avatar.ts の USER_AVATAR_SIZES.xs・USER_AVATAR_INITIALS_CLASS・
  * USER_AVATAR_INACTIVE_CLASS）の写し: 1rem の丸・8px の頭文字・bg-muted の地に text-foreground の字・
- * 灰色は opacity 0.6 と grayscale。字の太さは UserAvatar と同じく置かれた所（札）に従う。
+ * 灰色は opacity 0.75 と grayscale。字の太さは UserAvatar と同じく置かれた所（札）に従う。
  * 頭文字は data-initials を ::before で描き（字の node にせぬ）、画像はその上に重ねる */
 .kfm-mention-avatar {
   position: relative;
@@ -77,6 +77,28 @@
 
 .kfm-mention-outside .kfm-mention-avatar,
 .kfm-mention-gone .kfm-mention-avatar {
-  opacity: 0.6;
+  opacity: 0.75;
   filter: grayscale(1);
+}
+
+/* プロフィールへの link になった札（いま入れる者だけ）。.kfm-content a の色と下線より強い詳細度で、札の見た目を保つ。
+ * 指した時だけ下線を引き、キーボードの focus には輪を出す。輪の色は --link（明るい面に約 7.8:1、暗い面に約
+ * 15.7:1。--primary は明るい面に約 1.8:1 で、輪に要る 3:1 に届かぬ） */
+a.kfm-mention.kfm-mention-member {
+  color: var(--link);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a.kfm-mention.kfm-mention-self {
+  color: var(--primary-foreground);
+}
+
+a.kfm-mention.kfm-mention-member:hover {
+  text-decoration: underline;
+}
+
+a.kfm-mention.kfm-mention-member:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
 }

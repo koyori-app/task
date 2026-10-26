@@ -216,6 +216,10 @@ pub enum TasksCommand {
         /// Project key when using UUID
         #[arg(long)]
         project: Option<String>,
+        /// Print the description as stored, keeping mention markers (`<@user-id>`) instead of
+        /// `@name`; use it to edit the description and pass it back to `tasks update`
+        #[arg(long)]
+        raw: bool,
     },
     /// Update a task
     Update {
@@ -745,5 +749,20 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn tasks_show_takes_raw_flag() {
+        let raw_of = |argv: &[&str]| {
+            let Command::Tasks { command, .. } = Cli::try_parse_from(argv).unwrap().command else {
+                panic!("expected tasks");
+            };
+            let TasksCommand::Show { raw, .. } = *command else {
+                panic!("expected tasks show");
+            };
+            raw
+        };
+        assert!(raw_of(&["task", "tasks", "show", "APP-1", "--raw"]));
+        assert!(!raw_of(&["task", "tasks", "show", "APP-1"]));
     }
 }

@@ -4,7 +4,7 @@ import { getActivePinia } from 'pinia';
 import { PhUserPlus } from '@phosphor-icons/vue';
 
 import UserAvatar from '@/components/UserAvatar.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import UserSelector from '@/components/users/UserSelector.vue';
 import { useAuthStore } from '@/stores/auth';
 
@@ -66,28 +66,24 @@ const label = computed(() =>
     @toggle="(userId, checked) => emit('toggle', userId, checked)"
   >
     <template #trigger>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        class="h-7 gap-0 px-1"
-        :disabled="disabled"
-        :aria-label="label"
-      >
-        <template v-if="selected.length">
-          <UserAvatar
-            v-for="user in shown"
-            :key="user.id"
-            :user="user"
-            size="md"
-            decorative
-            class="-ml-1.5 border border-background first:ml-0"
-          />
-          <span v-if="hiddenCount" class="ml-1 text-xs text-muted-foreground">
-            +{{ hiddenCount }}
-          </span>
+      <Button type="button" variant="ghost" :disabled="disabled" :ariaLabel="label">
+        <template #icon>
+          <!-- 重ねたアバターも装飾。名前は aria-label で読ませる -->
+          <template v-if="selected.length">
+            <UserAvatar
+              v-for="user in shown"
+              :key="user.id"
+              :user="user"
+              size="md"
+              decorative
+              class="-ml-1.5 border border-background first:ml-0"
+            />
+            <span v-if="hiddenCount" class="ml-1 text-xs text-muted-foreground">
+              +{{ hiddenCount }}
+            </span>
+          </template>
+          <PhUserPlus v-else class="size-4" />
         </template>
-        <PhUserPlus v-else class="size-4 text-muted-foreground" />
       </Button>
     </template>
   </UserSelector>

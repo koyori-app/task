@@ -34,7 +34,7 @@ import AvatarGroup from '@/components/AvatarGroup.vue';
 import type { EditableField } from '@/components/tasks/editable-field';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
 import TaskPropertyRow from '@/components/tasks/TaskPropertyRow.vue';
-import { Button } from '@/components/ui/button';
+import { Button, Input } from '@koyori-app/ui-vue';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -42,7 +42,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import { lookup, toPlainText } from '@/lib/comment-mention';
 import {
@@ -265,7 +264,8 @@ async function startEditing(field: EditableField) {
   }
   const element =
     control instanceof HTMLElement ? control : (control?.$el as HTMLElement | undefined);
-  element?.focus();
+  // koyori の Input の root は枠の span なので、中の input に当てる
+  (element?.querySelector('input') ?? element)?.focus();
 }
 
 function cancelEditing() {
@@ -415,34 +415,20 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
           disabled で置く。押せるのに何も起きない状態にはしない。
         -->
           <header class="flex h-12 shrink-0 items-center gap-1 border-b px-3 pr-12">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              class="size-7"
-              aria-label="前のタスク"
-              disabled
-            >
-              <ChevronUp class="size-4" aria-hidden="true" />
+            <Button type="button" variant="ghost" ariaLabel="前のタスク" disabled>
+              <template #icon><ChevronUp class="size-4" aria-hidden="true" /></template>
             </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              class="size-7"
-              aria-label="次のタスク"
-              disabled
-            >
-              <ChevronDown class="size-4" aria-hidden="true" />
+            <Button type="button" variant="ghost" ariaLabel="次のタスク" disabled>
+              <template #icon><ChevronDown class="size-4" aria-hidden="true" /></template>
             </Button>
 
             <div class="ml-auto flex items-center gap-1">
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                class="mr-1 h-7 gap-1.5 px-2 font-mono text-sm font-normal text-muted-foreground"
-                :aria-label="
+                class="mr-1"
+                :label="taskSeqKey(projectKey, task.seq_id)"
+                :ariaLabel="
                   copyState === 'copied'
                     ? 'タスクIDをコピーしました'
                     : copyState === 'error'
@@ -451,36 +437,29 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 "
                 @click="copyTaskId(taskSeqKey(projectKey, task.seq_id))"
               >
-                {{ taskSeqKey(projectKey, task.seq_id) }}
-                <Check v-if="copyState === 'copied'" class="size-3.5" aria-hidden="true" />
-                <X v-else-if="copyState === 'error'" class="size-3.5" aria-hidden="true" />
-                <Copy v-else class="size-3.5" aria-hidden="true" />
+                <template #icon>
+                  <Check v-if="copyState === 'copied'" class="size-3.5" aria-hidden="true" />
+                  <X v-else-if="copyState === 'error'" class="size-3.5" aria-hidden="true" />
+                  <Copy v-else class="size-3.5" aria-hidden="true" />
+                </template>
               </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                class="size-7"
-                aria-label="スター"
-                disabled
-              >
-                <Star class="size-4" aria-hidden="true" />
+              <Button type="button" variant="ghost" ariaLabel="スター" disabled>
+                <template #icon><Star class="size-4" aria-hidden="true" /></template>
               </Button>
-              <Button type="button" variant="outline" size="sm" class="h-7 gap-1.5 px-2" disabled>
-                <UserPlus class="size-4" aria-hidden="true" />
-                共有
+              <Button type="button" variant="tertiary" disabled label="共有">
+                <template #icon><UserPlus class="size-4" aria-hidden="true" /></template>
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger as-child>
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon"
-                    class="size-7"
-                    aria-label="タスク操作"
+                    ariaLabel="タスク操作"
                     :disabled="deleteDisabled"
                   >
-                    <EllipsisVertical class="size-4" aria-hidden="true" />
+                    <template #icon>
+                      <EllipsisVertical class="size-4" aria-hidden="true" />
+                    </template>
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -510,14 +489,15 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
             <div>
               <div v-if="editingField === 'title'" class="flex flex-col gap-1">
                 <Input
-                  v-model="draftValue"
                   ref="editingControlRef"
                   data-editing="title"
-                  class="h-auto py-1 text-2xl font-semibold md:text-2xl"
+                  class="font-semibold [--koyori-font-size-sm:1.5rem]"
                   :disabled="isFieldUpdating('title')"
                   aria-label="タイトル"
+                  :value="draftValue"
+                  :on-value-change="(v: string) => (draftValue = v)"
+                  :on-blur="() => commitEditing('title')"
                   @keydown="onEditKeydown($event, 'title')"
-                  @blur="commitEditing('title')"
                 />
               </div>
               <button
@@ -611,13 +591,11 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                       v-if="doneStatus && doneStatus.id !== statusId"
                       type="button"
                       variant="ghost"
-                      size="icon"
-                      class="size-7"
-                      :aria-label="`${doneStatus.name} にする（完了）`"
+                      :ariaLabel="`${doneStatus.name} にする（完了）`"
                       :disabled="statusUpdating"
                       @click="emit('update:statusId', doneStatus.id)"
                     >
-                      <Check class="size-4" aria-hidden="true" />
+                      <template #icon><Check class="size-4" aria-hidden="true" /></template>
                     </Button>
                   </div>
                   <p v-if="statusError" class="mt-1 text-xs text-destructive">{{ statusError }}</p>
@@ -627,32 +605,29 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 <TaskPropertyRow label="日付" :icon="CalendarDays">
                   <div class="flex flex-wrap items-center gap-1">
                     <div v-if="editingField === 'planned_start_on'" class="flex items-center gap-1">
+                      <!-- koyori の Input は date に max / aria-invalid を付けない。期限より後かは保存時に止め、下の alert で知らせる -->
                       <Input
-                        v-model="draftValue"
                         ref="editingControlRef"
                         data-editing="planned_start_on"
                         type="date"
-                        class="h-7 max-w-40"
-                        :max="
-                          task.soft_deadline ? isoToLocalDateInput(task.soft_deadline) : undefined
-                        "
+                        class="max-w-40"
                         :disabled="isFieldUpdating('planned_start_on')"
-                        :aria-invalid="plannedStartAfterSoft || undefined"
                         aria-label="開始予定日"
+                        :value="draftValue"
+                        :on-value-change="(v: string) => (draftValue = v)"
+                        :on-blur="() => commitEditing('planned_start_on')"
                         @keydown="onEditKeydown($event, 'planned_start_on')"
-                        @blur="commitEditing('planned_start_on')"
                       />
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon"
-                        class="size-7 shrink-0"
-                        aria-label="開始予定日を消す"
+                        class="shrink-0"
+                        ariaLabel="開始予定日を消す"
                         :disabled="isFieldUpdating('planned_start_on')"
                         @mousedown.prevent
                         @click="clearDeadline('planned_start_on')"
                       >
-                        <X class="size-4" aria-hidden="true" />
+                        <template #icon><X class="size-4" aria-hidden="true" /></template>
                       </Button>
                     </div>
                     <button
@@ -672,27 +647,27 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
 
                     <div v-if="editingField === 'soft_deadline'" class="flex items-center gap-1">
                       <Input
-                        v-model="draftValue"
                         ref="editingControlRef"
                         data-editing="soft_deadline"
                         type="date"
-                        class="h-7 max-w-40"
+                        class="max-w-40"
                         :disabled="isFieldUpdating('soft_deadline')"
                         aria-label="ソフト期限"
+                        :value="draftValue"
+                        :on-value-change="(v: string) => (draftValue = v)"
+                        :on-blur="() => commitEditing('soft_deadline')"
                         @keydown="onEditKeydown($event, 'soft_deadline')"
-                        @blur="commitEditing('soft_deadline')"
                       />
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon"
-                        class="size-7 shrink-0"
-                        aria-label="ソフト期限を消す"
+                        class="shrink-0"
+                        ariaLabel="ソフト期限を消す"
                         :disabled="isFieldUpdating('soft_deadline')"
                         @mousedown.prevent
                         @click="clearDeadline('soft_deadline')"
                       >
-                        <X class="size-4" aria-hidden="true" />
+                        <template #icon><X class="size-4" aria-hidden="true" /></template>
                       </Button>
                     </div>
                     <button
@@ -718,27 +693,27 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
 
                     <div v-if="editingField === 'hard_deadline'" class="flex items-center gap-1">
                       <Input
-                        v-model="draftValue"
                         ref="editingControlRef"
                         data-editing="hard_deadline"
                         type="date"
-                        class="h-7 max-w-40"
+                        class="max-w-40"
                         :disabled="isFieldUpdating('hard_deadline')"
                         aria-label="ハード期限"
+                        :value="draftValue"
+                        :on-value-change="(v: string) => (draftValue = v)"
+                        :on-blur="() => commitEditing('hard_deadline')"
                         @keydown="onEditKeydown($event, 'hard_deadline')"
-                        @blur="commitEditing('hard_deadline')"
                       />
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon"
-                        class="size-7 shrink-0"
-                        aria-label="ハード期限を消す"
+                        class="shrink-0"
+                        ariaLabel="ハード期限を消す"
                         :disabled="isFieldUpdating('hard_deadline')"
                         @mousedown.prevent
                         @click="clearDeadline('hard_deadline')"
                       >
-                        <X class="size-4" aria-hidden="true" />
+                        <template #icon><X class="size-4" aria-hidden="true" /></template>
                       </Button>
                     </div>
                     <button
@@ -904,13 +879,12 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                         v-if="task.labels.length"
                         type="button"
                         variant="ghost"
-                        size="icon"
-                        class="size-7 shrink-0 text-muted-foreground"
-                        aria-label="ラベルをすべて外す"
+                        class="shrink-0"
+                        ariaLabel="ラベルをすべて外す"
                         :disabled="labelsUpdating"
                         @click="emit('save:label_ids', [])"
                       >
-                        <X class="size-4" aria-hidden="true" />
+                        <template #icon><X class="size-4" aria-hidden="true" /></template>
                       </Button>
                     </div>
                     <p v-if="labelsError" class="mt-1 text-xs text-destructive">
@@ -1007,17 +981,18 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 <TaskPropertyRow label="進捗" :icon="Percent">
                   <Input
                     v-if="editingField === 'progress_pct'"
-                    v-model="draftValue"
                     ref="editingControlRef"
                     data-editing="progress_pct"
                     type="number"
-                    min="0"
-                    max="100"
-                    class="h-7 max-w-24"
+                    :min="0"
+                    :max="100"
+                    class="max-w-24"
                     :disabled="isFieldUpdating('progress_pct')"
                     aria-label="進捗率"
+                    :value="draftValue"
+                    :on-value-change="(v: string) => (draftValue = v)"
+                    :on-blur="() => commitEditing('progress_pct')"
                     @keydown="onEditKeydown($event, 'progress_pct')"
-                    @blur="commitEditing('progress_pct')"
                   />
                   <button
                     v-else
@@ -1050,28 +1025,23 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                   v-if="editingField === 'description' && task.description"
                   type="button"
                   variant="ghost"
-                  size="sm"
-                  class="h-7 px-2"
                   :disabled="isFieldUpdating('description')"
+                  label="クリア"
                   @mousedown.prevent
                   @click="
                     emit('save:description', null);
                     cancelEditing();
                   "
-                >
-                  クリア
-                </Button>
+                />
                 <Button
                   v-else-if="editingField !== 'description' && freshDescriptionHtml"
                   type="button"
                   variant="ghost"
-                  size="icon"
-                  class="size-7"
-                  aria-label="説明を編集"
+                  ariaLabel="説明を編集"
                   :disabled="isFieldUpdating('description')"
                   @click="startEditing('description')"
                 >
-                  <Pencil class="size-4" aria-hidden="true" />
+                  <template #icon><Pencil class="size-4" aria-hidden="true" /></template>
                 </Button>
               </div>
 
@@ -1130,15 +1100,10 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
             <!-- モックのうち未対応のアクション。サブタスクは直後の main slot で実装済み -->
             <ul class="flex flex-col gap-1">
               <li v-for="action in PENDING_ACTIONS" :key="action.label">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  class="h-8 w-full justify-start gap-2 px-2 text-sm font-normal text-muted-foreground"
-                  disabled
-                >
-                  <component :is="action.icon" class="size-4" aria-hidden="true" />
-                  {{ action.label }}
+                <Button type="button" variant="ghost" class="w-full" :label="action.label" disabled>
+                  <template #icon>
+                    <component :is="action.icon" class="size-4" aria-hidden="true" />
+                  </template>
                 </Button>
               </li>
             </ul>
@@ -1167,25 +1132,11 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
           >
             <h2 class="text-sm font-semibold">アクティビティ</h2>
             <div class="ml-auto flex items-center gap-0.5">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                class="size-7"
-                aria-label="アクティビティを検索"
-                disabled
-              >
-                <Search class="size-4" aria-hidden="true" />
+              <Button type="button" variant="ghost" ariaLabel="アクティビティを検索" disabled>
+                <template #icon><Search class="size-4" aria-hidden="true" /></template>
               </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                class="size-7"
-                aria-label="アクティビティを絞り込む"
-                disabled
-              >
-                <Filter class="size-4" aria-hidden="true" />
+              <Button type="button" variant="ghost" ariaLabel="アクティビティを絞り込む" disabled>
+                <template #icon><Filter class="size-4" aria-hidden="true" /></template>
               </Button>
             </div>
           </div>

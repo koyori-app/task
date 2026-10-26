@@ -13,7 +13,7 @@ import { computed, ref } from 'vue';
 
 import CreateTenantDialog from './CreateTenantDialog.vue';
 import type { Tenant } from '@/stores/tenant';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -215,9 +215,8 @@ const membersHref = computed(() =>
       </DropdownMenuItem>
 
       <div class="p-1 pt-1.5">
-        <Button size="sm" class="w-full gap-1.5" @click="createDialogOpen = true">
-          <PhPlus class="size-3.5" />
-          テナントを作成
+        <Button class="w-full" label="テナントを作成" @click="createDialogOpen = true">
+          <template #icon><PhPlus class="size-3.5" /></template>
         </Button>
       </div>
     </DropdownMenuContent>

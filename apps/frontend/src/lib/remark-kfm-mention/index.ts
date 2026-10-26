@@ -4,9 +4,13 @@
  * 規則（kfm-mention テストで固定）:
  * - 印は `<@` + ハイフン付き UUID + `>`（コメントの入力欄・backend の `payload::mentions` と同じ形）。
  *   壊れた印（字数違い・閉じ無し）は素のテキストのまま
- * - text ノードだけを分割する。code / inlineCode / link / linkReference / definition / html の
- *   内側は走査しない（コードブロックとインラインコードの中の `<@id>` は札にしない）
+ * - text ノードは札へ分割する。code / inlineCode と link / linkReference の内側は札にせず
+ *   `@今の名` の字へ戻す。画像の alt、リンク・画像・定義の title、code の meta も同じ
+ * - URL と生の HTML は意味を変えない
  * - 札の字は `mentionLabel`（コメントの札と同じ）。id は HTML に出さない
+ * - いま入れる者で名が引ける札は、`data.kfm.mentionTenant` があればプロフィールへの link
+ *   （`<a class="kfm-mention …" href="/{tenant}/users/{利用者ID}">`）にする。道は表に在る id とテナントだけで組む。
+ *   外れた者・退会した者・名の引けぬ者の札は link にせぬ
  * - 名で出る札は頭にアバター（`span.kfm-mention-avatar`。画像は `safeAvatarUrl` を通った URL だけ）を置く。
  *   定型の句の札にはアバターを出さない（`mentionChip` の判じ。入力欄・コメントの札と同じ）
  * - 状態は class（`kfm-mention-member` / `-outside` / `-gone` / `-unknown`）で運ぶ。ログイン中の
@@ -19,19 +23,48 @@
  *
  * 出力は mdast ノード ＋ data.hName / hProperties の型付き emit のみ（生 html・inline style なし）。
  */
-import type { Parent, PhrasingContent, Root, Text } from 'mdast';
+import type { Nodes, Parent, PhrasingContent, Root, Text } from 'mdast';
 import { SKIP, visit } from 'unist-util-visit';
 
-import { findMarkers, lookup, mentionChip, type MentionTable } from '@/lib/comment-mention';
+import {
+  findMarkers,
+  lookup,
+  mentionChip,
+  toPlainText,
+  type MentionTable,
+} from '@/lib/comment-mention';
 import { avatarInitials } from '@/lib/initials';
-
-const SKIP_TYPES = new Set(['code', 'inlineCode', 'link', 'linkReference', 'definition', 'html']);
 
 /** vfile の data.kfm に載せる描画時コンテキスト（_renderer.ts が process 時に渡す） */
 export type KfmMentionData = {
   readonly mentions?: MentionTable;
   readonly currentUserId?: string | null;
+  /** 札をプロフィールへの link にする時のテナント（表示用 id）。無い・字種外なら link にせぬ */
+  readonly mentionTenant?: string;
 };
+
+/** テナントの表示用 id の字種（`remark-kfm-task-ref` と同じ）。URL の道に入るので fail-closed で見る */
+const TENANT_RE = /^[a-z0-9][a-z0-9-]{0,62}$/i;
+/** 印の id の形（`findMarkers` が返す小文字のハイフン付き UUID）。link の道に入れる前にもう一度見る */
+const USER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function readTenant(data: KfmMentionData | undefined): string | undefined {
+  const tenant = data?.mentionTenant;
+  return typeof tenant === 'string' && TENANT_RE.test(tenant) ? tenant : undefined;
+}
+
+/**
+ * 札の link の先（プロフィールの頁。`lib/task-display.ts` の `userProfileHref` と同じ道）。
+ * いま入れる者で名が引ける札だけ。道は表に在る利用者の id とテナントだけから組み、本文の字は入れぬ。
+ */
+function profileHref(
+  tenant: string | undefined,
+  id: string,
+  chip: ReturnType<typeof mentionChip>,
+): string | undefined {
+  if (!tenant || chip.state !== 'member' || !chip.avatar || !USER_ID_RE.test(id)) return undefined;
+  return `/${tenant}/users/${id}`;
+}
 
 /** 札の class。状態は既知の 4 つに限る（表の値をそのまま class にしない） */
 const STATUS_CLASS = {
@@ -73,10 +106,53 @@ function readTable(data: Readonly<Record<string, unknown>>): MentionTable | unde
   return table !== null && typeof table === 'object' ? table : undefined;
 }
 
+function plainText(value: string, table: MentionTable): string {
+  return toPlainText(value, (id) => lookup(table, id));
+}
+
+/**
+ * 札を置けない文脈の字を、入れ子も含めて `@今の名` へ戻す。
+ * URL・識別子・生 HTML は Markdown の意味を変えぬよう触らない。
+ */
+function replacePlainMentions(node: Nodes, table: MentionTable): void {
+  switch (node.type) {
+    case 'text':
+    case 'inlineCode':
+      node.value = plainText(node.value, table);
+      return;
+    case 'code':
+      node.value = plainText(node.value, table);
+      if (node.meta) node.meta = plainText(node.meta, table);
+      return;
+    case 'image':
+      if (node.alt) node.alt = plainText(node.alt, table);
+      if (node.title) node.title = plainText(node.title, table);
+      return;
+    case 'imageReference':
+      if (node.alt) node.alt = plainText(node.alt, table);
+      return;
+    case 'link':
+      if (node.title) node.title = plainText(node.title, table);
+      for (const child of node.children) replacePlainMentions(child, table);
+      return;
+    case 'linkReference':
+      for (const child of node.children) replacePlainMentions(child, table);
+      return;
+    case 'definition':
+      if (node.title) node.title = plainText(node.title, table);
+      return;
+    default:
+      if ('children' in node) {
+        for (const child of node.children) replacePlainMentions(child, table);
+      }
+  }
+}
+
 function splitText(
   node: Text,
   table: MentionTable,
   currentUserId?: string | null,
+  tenant?: string,
 ): PhrasingContent[] | undefined {
   const markers = findMarkers(node.value);
   if (markers.length === 0) return undefined;
@@ -98,12 +174,18 @@ function splitText(
     const children: PhrasingContent[] = [];
     if (chip.avatar) children.push(avatarNode(chip.avatar.name, chip.avatar.src));
     children.push({ type: 'text', value: chip.label });
-    parts.push({
-      // span を出すための入れ物（hName で置き換わる）。意味を持つ mdast ノードではない
-      type: 'emphasis',
-      data: { hName: 'span', hProperties: { className } },
-      children,
-    });
+    const href = profileHref(tenant, marker.id, chip);
+    parts.push(
+      href
+        ? // プロフィールへの link（mdast の link。href は上で組んだ道だけ）
+          { type: 'link', url: href, data: { hProperties: { className } }, children }
+        : {
+            // span を出すための入れ物（hName で置き換わる）。意味を持つ mdast ノードではない
+            type: 'emphasis',
+            data: { hName: 'span', hProperties: { className } },
+            children,
+          },
+    );
     last = marker.to;
   }
   if (last < node.value.length) parts.push({ type: 'text', value: node.value.slice(last) });
@@ -116,9 +198,21 @@ export function remarkKfmMention() {
     const table = readTable(file.data);
     if (table === undefined) return;
     visit(tree, (node, index, parent) => {
-      if (SKIP_TYPES.has(node.type)) return SKIP;
+      if (
+        node.type === 'code' ||
+        node.type === 'inlineCode' ||
+        node.type === 'link' ||
+        node.type === 'linkReference' ||
+        node.type === 'image' ||
+        node.type === 'imageReference' ||
+        node.type === 'definition'
+      ) {
+        replacePlainMentions(node, table);
+        return SKIP;
+      }
+      if (node.type === 'html') return SKIP;
       if (node.type !== 'text' || parent === undefined || index === undefined) return;
-      const parts = splitText(node, table, data?.currentUserId);
+      const parts = splitText(node, table, data?.currentUserId, readTenant(data));
       if (parts === undefined) return;
       (parent as Parent).children.splice(index, 1, ...parts);
       // 差し込んだ札の内側へ降りない
@@ -127,7 +221,10 @@ export function remarkKfmMention() {
   };
 }
 
-/** 本プラグインが emit する class トークン（完全一致 allowlist）。`span` は DOMPurify 既定で通る */
+/**
+ * 本プラグインが emit する class トークン（完全一致 allowlist）。`span`・`a`・`img` と、その `href`・`src`・`alt` は
+ * DOMPurify 既定で通る（札の link のために足した許可は無い）
+ */
 export const kfmMentionSanitizeSchema = {
   classTokens: [
     'kfm-mention',

@@ -61,24 +61,26 @@ function member(userId: string, username: string, role: 'Admin' | 'Member'): Ten
     user_id: userId,
     role,
     user: { id: userId, username, avatar_url: null },
+    department: null,
+    position: null,
+    team: null,
   };
 }
 
 const PassThrough = defineComponent({ template: '<div><slot /></div>' });
-const ButtonStub = defineComponent({
-  inheritAttrs: false,
-  template: '<button v-bind="$attrs"><slot /></button>',
-});
 
 let wrapper: VueWrapper;
 
 /** 操作するのは Admin 本人。オーナーは別人なので、自分の行にも除名ボタンの条件が効く。 */
-function mountMembers(asUserId = ADMIN_ID) {
-  membersData.value = [
+function mountMembers(
+  asUserId = ADMIN_ID,
+  rows = [
     member(OWNER_ID, 'owner', 'Admin'),
     member(ADMIN_ID, 'admin', 'Admin'),
     member(MEMBER_ID, 'member', 'Member'),
-  ];
+  ],
+) {
+  membersData.value = rows;
   meData.value = { id: asUserId, username: 'me', avatar_url: null };
   wrapper = mount(TenantSettingsMembers, {
     props: { tenant: { id: TENANT_ID, display_id: 'alpha', name: 'Alpha', owner_id: OWNER_ID } },
@@ -91,11 +93,16 @@ function mountMembers(asUserId = ADMIN_ID) {
         ],
       ],
       stubs: {
-        Button: ButtonStub,
         Select: PassThrough,
         SelectContent: PassThrough,
         SelectItem: PassThrough,
         SelectTrigger: PassThrough,
+        Dialog: PassThrough,
+        DialogContent: PassThrough,
+        DialogDescription: PassThrough,
+        DialogFooter: PassThrough,
+        DialogHeader: PassThrough,
+        DialogTitle: PassThrough,
       },
     },
   });
@@ -230,5 +237,41 @@ describe('TenantSettingsMembers', () => {
   it('管理者でなければ招待の欄を出さない', () => {
     const wrapper = mountMembers(MEMBER_ID);
     expect(wrapper.find('input[type="email"]').exists()).toBe(false);
+  });
+
+  it('所属をダイアログから保存すると、部署・役職・チームだけを送る（role は送らない）', async () => {
+    const wrapper = mountMembers(ADMIN_ID, [
+      member(OWNER_ID, 'owner', 'Admin'),
+      member(ADMIN_ID, 'admin', 'Admin'),
+      { ...member(MEMBER_ID, 'member', 'Member'), department: '開発部', team: '基盤' },
+    ]);
+    expect(wrapper.text()).toContain('開発部 · 基盤');
+
+    await wrapper.get('button[aria-label="memberの所属を編集"]').trigger('click');
+    expect((wrapper.get('#org-profile-department').element as HTMLInputElement).value).toBe(
+      '開発部',
+    );
+    await wrapper.get('#org-profile-position').setValue('課長');
+    await wrapper.get('#org-profile-team').setValue('');
+    await wrapper.findAll('form').at(-1)!.trigger('submit');
+    await flushPromises();
+
+    expect(updateMutateAsync).toHaveBeenCalledTimes(1);
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_ID, user_id: MEMBER_ID } },
+      body: { department: '開発部', position: '課長', team: '' },
+    });
+    expect(wrapper.find('#org-profile-department').exists(), '保存後は閉じる').toBe(false);
+  });
+
+  it('所属の編集ボタンは管理者にだけ出し、オーナー行には出さない', () => {
+    const asAdmin = mountMembers();
+    expect(asAdmin.find('button[aria-label="memberの所属を編集"]').exists()).toBe(true);
+    expect(asAdmin.find('button[aria-label="ownerの所属を編集"]').exists()).toBe(false);
+    asAdmin.unmount();
+
+    const asMember = mountMembers(MEMBER_ID);
+    expect(asMember.find('button[aria-label="memberの所属を編集"]').exists()).toBe(false);
+    expect(asMember.find('button[aria-label="adminの所属を編集"]').exists()).toBe(false);
   });
 });

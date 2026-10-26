@@ -5,6 +5,8 @@ import { renderDescription } from '../markup-renderer';
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
 const C = '33333333-3333-4333-8333-333333333333';
+const UNKNOWN_ID = '44444444-4444-4444-8444-444444444444';
+const GONE_ID = '55555555-5555-4555-8555-555555555555';
 
 const mentions: MentionTable = {
   [A]: { status: 'member', name: 'alice' },
@@ -71,18 +73,57 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
     expect(await render(`# <@${A}>`)).toContain(alice);
   });
 
-  it('コードブロックとインラインコードの中の印は札にしない（印の文字のまま）', async () => {
+  it('コードブロックとインラインコードの中の印は札にせず、現在の名前へ戻す', async () => {
     const inline = await render(`\`<@${A}>\``);
-    expect(inline).toBe(`<p><code>&lt;@${A}&gt;</code></p>`);
+    expect(inline).toBe('<p><code>@alice</code></p>');
     expect(inline).not.toContain('kfm-mention');
     const block = await render(`\`\`\`\n<@${A}>\n\`\`\``);
     expect(block).not.toContain('kfm-mention');
-    expect(block).toContain(A);
+    expect(block).toContain('@alice');
+    expect(block).not.toContain(A);
   });
 
-  it('リンクの内側・URL の中は札にしない', async () => {
-    const html = await render(`[<@${A}>](https://example.com)`);
-    expect(html).not.toContain('kfm-mention');
+  it('リンクの入れ子の文字は札にせず、現在の名前へ戻す', async () => {
+    const inline = await render(`[**<@${A}>**](https://example.com)`);
+    expect(inline).toContain('<a href="https://example.com"><strong>@alice</strong></a>');
+    expect(inline).not.toContain('kfm-mention');
+    expect(inline).not.toContain(A);
+
+    const titled = await render(`[<@${A}>](https://example.com "担当 <@${B}>")`);
+    expect(titled).toContain('title="担当 @former"');
+    expect(titled).toContain('>@alice</a>');
+    expect(titled).not.toContain(A);
+    expect(titled).not.toContain(B);
+
+    const reference = await render(
+      `[<@${A}>][person]\n\n[person]: https://example.com "担当 <@${B}>"`,
+    );
+    expect(reference).toContain('title="担当 @former"');
+    expect(reference).toContain('>@alice</a>');
+    expect(reference).not.toContain(A);
+    expect(reference).not.toContain(B);
+  });
+
+  it('画像と参照画像の alt・title は現在の名前へ戻す', async () => {
+    const inline = await render(`![<@${A}>](https://example.com/a.png "担当 <@${B}>")`);
+    expect(inline).toContain('alt="@alice"');
+    expect(inline).toContain('title="担当 @former"');
+    expect(inline).not.toContain(A);
+    expect(inline).not.toContain(B);
+
+    const reference = await render(
+      `![<@${A}>][avatar]\n\n[avatar]: https://example.com/a.png "担当 <@${B}>"`,
+    );
+    expect(reference).toContain('alt="@alice"');
+    expect(reference).toContain('title="担当 @former"');
+    expect(reference).not.toContain(A);
+    expect(reference).not.toContain(B);
+  });
+
+  it('コードフェンスの title 属性は現在の名前へ戻す', async () => {
+    const html = await render(`\`\`\`ts title="担当 <@${A}>"\nconst n = 1;\n\`\`\``);
+    expect(html).toContain('data-title="担当 @alice"');
+    expect(html).not.toContain(A);
   });
 
   it('壊れた印・手で打った @名前・メールアドレスは素の文字', async () => {
@@ -191,5 +232,92 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
     });
     expect(before).toContain('1.png');
     expect(after).toContain('2.png');
+  });
+  describe('札のプロフィールへの link', () => {
+    const ORIGIN = 'https://task.example';
+    const withTenant = (text: string, tenant: string | undefined, table: MentionTable = mentions) =>
+      renderDescription(text, { mentions: table, mentionTenant: tenant });
+    /** HTML の中の a を DOM で読み直し、href を（同じ origin の上で解いた形で）返す */
+    const links = (html: string) => {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      return [...doc.querySelectorAll('a')].map((a) => ({
+        raw: a.getAttribute('href') ?? '',
+        url: new URL(a.getAttribute('href') ?? '', ORIGIN),
+        className: a.className,
+        text: a.textContent,
+      }));
+    };
+
+    it('いま入れる者の札はテナントのプロフィールへの link（道は id とテナントだけ）', async () => {
+      const html = await withTenant(`見て <@${A}>`, 'acme');
+      const [link] = links(html);
+      expect(link.raw).toBe(`/acme/users/${A}`);
+      expect(link.className).toBe('kfm-mention kfm-mention-member');
+      expect(link.text).toBe('@alice');
+      expect(link.url.origin).toBe(ORIGIN);
+    });
+
+    it('テナントを渡さぬ描画は今どおり span（link にせぬ）', async () => {
+      const html = await render(`<@${A}>`);
+      expect(html).not.toContain('<a');
+      expect(html).toContain('<span class="kfm-mention kfm-mention-member">');
+    });
+
+    it('外れた者・名の引けぬ者・退会した者・表に無い者の札は link にせぬ', async () => {
+      const html = await withTenant(`<@${B}> <@${C}> <@${UNKNOWN_ID}> <@${GONE_ID}>`, 'acme', {
+        ...mentions,
+        [GONE_ID]: { status: 'gone', name: null },
+      });
+      expect(links(html)).toHaveLength(0);
+      expect(html.match(/class="kfm-mention /g)).toHaveLength(4);
+    });
+
+    it('字種外のテナントでは link にせず、他の scheme・他の origin へ向かう href を作らぬ', async () => {
+      for (const tenant of [
+        'evil.example.com',
+        '//evil.example.com',
+        'javascript:alert(1)',
+        '../admin',
+        'acme/users',
+        'acme"><img src=x>',
+        '',
+        '-acme',
+      ]) {
+        const html = await withTenant(`<@${A}>`, tenant);
+        expect(links(html), tenant).toHaveLength(0);
+        expect(html, tenant).not.toContain('evil');
+        expect(html, tenant).not.toContain('javascript:');
+      }
+    });
+
+    it('本文の字や link の記法で札の link の先を替えられぬ', async () => {
+      const html = await withTenant(
+        `[<@${A}>](https://evil.example.com) <@${A}> [x](javascript:alert(1)) <@${A}>`,
+        'acme',
+      );
+      for (const link of links(html).filter((l) => l.className.includes('kfm-mention'))) {
+        expect(link.raw).toBe(`/acme/users/${A}`);
+        expect(link.url.origin).toBe(ORIGIN);
+        expect(link.url.protocol).toBe('https:');
+      }
+      // link の記法の内の印は札にせぬ（今どおり）
+      expect(links(html).filter((l) => l.className.includes('kfm-mention'))).toHaveLength(2);
+    });
+
+    it('本人への札も link（self の強調を保つ）', async () => {
+      const html = await renderDescription(`<@${A}>`, {
+        mentions,
+        mentionTenant: 'acme',
+        currentUserId: A,
+      });
+      expect(links(html)[0].className).toBe('kfm-mention kfm-mention-member kfm-mention-self');
+    });
+
+    it('テナントが替われば別の HTML（キャッシュが link の先を取り違えない）', async () => {
+      const first = await withTenant(`<@${A}>`, 'acme');
+      const second = await withTenant(`<@${A}>`, 'other');
+      expect(links(first)[0].raw).toBe(`/acme/users/${A}`);
+      expect(links(second)[0].raw).toBe(`/other/users/${A}`);
+    });
   });
 });

@@ -22,7 +22,7 @@ pub async fn run(
 ) -> Result<i32> {
     match command {
         NotificationsCommand::List { unread, limit } => {
-            let api = &context.connect()?;
+            let api = &context.connect_token_only()?;
             let mut query = vec![("limit", limit.to_string())];
             if unread {
                 query.push(("unread", "true".into()));
@@ -33,14 +33,14 @@ pub async fn run(
             print(&listing, output);
         }
         NotificationsCommand::Read { id } => {
-            let api = &context.connect()?;
+            let api = &context.connect_token_only()?;
             let item: NotificationItem = api
                 .patch(&["v1", "users", "me", "notifications", &id, "read"], &())
                 .await?;
             print(&item, output);
         }
         NotificationsCommand::ReadAll => {
-            let api = &context.connect()?;
+            let api = &context.connect_token_only()?;
             api.patch_no_content(&["v1", "users", "me", "notifications", "read-all"])
                 .await?;
         }
@@ -53,14 +53,17 @@ pub async fn run(
             // 応答から読み取りにくい（`review` の絞り込みと同じ流儀）
             let in_app = parse_event_types(in_app.as_deref(), "--in-app")?;
             let email = parse_event_types(email.as_deref(), "--email")?;
-            let api = &context.connect()?;
             // UUID はプロジェクト API（`read:project`）を経ずにそのまま渡す。
-            // 設定 API は `read:task` / `write:task` だけで通るので、キーを引くときだけ余計に要る
-            let project_id = if is_uuid(&project) {
-                project
+            // 設定 API は `read:task` / `write:task` だけで通るので、キーを引くときだけ余計に要る。
+            // 接続前に分けるのは、UUID ならテナントも要らず `/me` を叩かずに済むため
+            let (api, project_id) = if is_uuid(&project) {
+                (context.connect_token_only()?, project)
             } else {
-                resolve_project(api, &project).await?.id.to_string()
+                let api = context.connect().await?;
+                let project_id = resolve_project(&api, &project).await?.id.to_string();
+                (api, project_id)
             };
+            let api = &api;
             let path = [
                 "v1",
                 "users",

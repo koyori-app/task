@@ -2,7 +2,7 @@
 import { PhFlask } from '@phosphor-icons/vue';
 import { computed } from 'vue';
 import SettingToggleList from '@/components/settings/SettingToggleList.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useHydrated } from '@/composables/useHydrated';
 import { EXPERIMENT_TABLE, type ExperimentKey } from '@/lib/experiments';
@@ -40,9 +40,9 @@ function change(key: string, value: boolean) {
       <p class="text-muted-foreground text-sm">
         環境設定で「実験的機能を表示する」を有効にすると、ここで機能ごとに切り替えられます。
       </p>
-      <Button as="a" href="/settings/preferences" variant="outline" size="sm">
+      <a href="/settings/preferences" class="text-sm underline underline-offset-4">
         環境設定を開く
-      </Button>
+      </a>
     </div>
 
     <template v-else>
@@ -59,7 +59,7 @@ function change(key: string, value: boolean) {
       />
 
       <div>
-        <Button variant="outline" @click="store.resetAll()">すべて既定に戻す</Button>
+        <Button variant="tertiary" label="すべて既定に戻す" @click="store.resetAll()" />
       </div>
     </template>
   </div>

@@ -98,7 +98,7 @@ const isError = computed(
                   :href="label.icon_url"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="text-xs text-primary hover:underline"
+                  class="text-xs text-link hover:underline"
                 >
                   View Icon
                 </a>

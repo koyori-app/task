@@ -6,9 +6,8 @@ import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from
 
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Button, Field, Input, Spinner } from '@koyori-app/ui-vue';
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts';
 import { renderOnServer, TRANSIENT_FAILURE_RETRIES } from '@/composables/useRenderedDescription';
 import type { components } from '@/generated/api';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
@@ -131,6 +130,16 @@ watch(
     resetDraft();
   },
   { immediate: true },
+);
+
+/** 閲覧画面（「タスクを作成」ボタン）が出ているか。テンプレートの分岐と T のショートカットで共有する */
+const canCreateTask = computed(
+  () =>
+    !isLoading.value &&
+    !isError.value &&
+    !isNotFound.value &&
+    !(editing.value && draftReady.value) &&
+    !!meta.value,
 );
 
 const dirty = computed(
@@ -352,6 +361,12 @@ function openCreateTask() {
   createTaskOpen.value = true;
 }
 
+useKeyboardShortcuts({
+  t: () => {
+    if (canCreateTask.value) openCreateTask();
+  },
+});
+
 async function onTaskCreated(task: CreatedTask) {
   createTaskOpen.value = false;
   // null はオフライン・切断で fetch が reject したとき
@@ -393,18 +408,16 @@ function taskHref(task: { seq_key: string; project: { key: string } }) {
       aria-label="ドキュメントを編集"
       @submit.prevent="save"
     >
-      <div class="space-y-1.5">
-        <Label for="document-edit-title">タイトル</Label>
+      <!-- 文字数の上限は保存時に検証する -->
+      <Field id="document-edit-title" label="タイトル">
         <Input
-          id="document-edit-title"
-          v-model="draftTitle"
           name="title"
           autocomplete="off"
-          :maxlength="MAX_DOCUMENT_TITLE_LENGTH"
           :disabled="saving"
-          class="text-lg font-semibold"
+          :value="draftTitle"
+          :on-value-change="(v: string) => (draftTitle = v)"
         />
-      </div>
+      </Field>
 
       <div
         v-if="conflict"
@@ -415,23 +428,23 @@ function taskHref(task: { seq_key: string; project: { key: string } }) {
         <span class="ml-auto flex gap-2">
           <Button
             type="button"
-            size="sm"
-            variant="outline"
+            variant="tertiary"
             :disabled="reloading"
+            :label="reloading ? '読み込み中…' : '最新を読み込む'"
             @click="reloadLatest"
           >
-            <RefreshCw class="size-4" :class="{ 'animate-spin': reloading }" />
-            最新を読み込む
+            <template #icon>
+              <Spinner v-if="reloading" hide-label />
+              <RefreshCw v-else class="size-4" />
+            </template>
           </Button>
           <Button
             type="button"
-            size="sm"
-            variant="outline"
+            variant="tertiary"
             :disabled="reloading"
+            label="自分の下書きで上書き"
             @click="overwriteWithDraft"
-          >
-            自分の下書きで上書き
-          </Button>
+          />
         </span>
       </div>
       <p v-if="saveError" role="alert" class="text-sm text-destructive">{{ saveError }}</p>
@@ -454,19 +467,22 @@ function taskHref(task: { seq_key: string; project: { key: string } }) {
       </div>
 
       <div class="flex items-center gap-2">
-        <Button type="submit" :disabled="saving || conflict">
-          <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
-          保存
+        <Button type="submit" :disabled="saving || conflict" :label="saving ? '保存中…' : '保存'">
+          <template #icon><Spinner v-if="saving" hide-label /></template>
         </Button>
-        <Button type="button" variant="outline" :disabled="saving" @click="cancel">
-          キャンセル
-        </Button>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="saving"
+          label="キャンセル"
+          @click="cancel"
+        />
         <span class="text-xs text-muted-foreground">⌘S / Ctrl+S で保存</span>
       </div>
     </form>
 
     <!-- 閲覧 -->
-    <div v-else-if="meta" class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
+    <div v-else-if="canCreateTask && meta" class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
       <article class="min-w-0">
         <header class="mb-4 flex flex-wrap items-start gap-2">
           <div class="min-w-0 flex-1">
@@ -475,13 +491,16 @@ function taskHref(task: { seq_key: string; project: { key: string } }) {
               更新 <time :datetime="meta.updated_at">{{ formatTaskDate(meta.updated_at) }}</time>
             </p>
           </div>
-          <Button size="sm" variant="outline" @mousedown.prevent @click="openCreateTask">
-            <ListPlus class="size-4" />
-            タスクを作成
+          <Button
+            variant="tertiary"
+            label="タスクを作成"
+            @mousedown.prevent
+            @click="openCreateTask"
+          >
+            <template #icon><ListPlus class="size-4" /></template>
           </Button>
-          <Button size="sm" @click="startEditing">
-            <Pencil class="size-4" />
-            編集
+          <Button label="編集" @click="startEditing">
+            <template #icon><Pencil class="size-4" /></template>
           </Button>
         </header>
         <p v-if="linkError" role="alert" class="mb-2 text-sm text-destructive">{{ linkError }}</p>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { usePageContext } from 'vike-vue/usePageContext';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { Card, CardContent } from '@/components/ui/card';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
 import { INVITATION_ACCEPT_RETURN } from '@/lib/invitation-accept';
@@ -100,8 +100,10 @@ async function accept() {
 
           <template v-if="signedOut">
             <div class="flex flex-col gap-2">
-              <Button type="button" @click="signIn">サインインして参加</Button>
-              <Button as="a" href="/signup" variant="outline">アカウントを作成</Button>
+              <Button type="button" label="サインインして参加" @click="signIn" />
+              <a href="/signup" class="text-center text-sm underline underline-offset-4"
+                >アカウントを作成</a
+              >
             </div>
             <p class="text-muted-foreground text-xs">
               アカウントをお持ちでない場合は {{ preview.email }}
@@ -116,17 +118,20 @@ async function accept() {
               いまは {{ meQuery.data.value!.email }} でログインしています。この招待は
               {{ preview.email }} 宛てなので、そのアドレスでログインし直してください。
             </p>
-            <Button as="a" href="/" variant="outline">ホームへ戻る</Button>
+            <a href="/" class="text-sm underline underline-offset-4">ホームへ戻る</a>
           </template>
           <template v-else>
             <p v-if="acceptError" class="text-destructive text-sm" role="alert">
               {{ acceptError }}
             </p>
             <div class="flex flex-col gap-2">
-              <Button type="button" :disabled="acceptMutation.isPending.value" @click="accept">
-                {{ acceptMutation.isPending.value ? '参加しています…' : '参加する' }}
-              </Button>
-              <Button as="a" href="/" variant="outline">あとで</Button>
+              <Button
+                type="button"
+                :disabled="acceptMutation.isPending.value"
+                :label="acceptMutation.isPending.value ? '参加しています…' : '参加する'"
+                @click="accept"
+              />
+              <a href="/" class="text-center text-sm underline underline-offset-4">あとで</a>
             </div>
           </template>
         </template>

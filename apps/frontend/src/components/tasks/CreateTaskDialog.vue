@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, Loader2, X } from '@lucide/vue';
+import { ChevronDown, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { getActivePinia } from 'pinia';
@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog';
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Button } from '@/components/ui/button';
+import { Button, Field, Input, Spinner } from '@koyori-app/ui-vue';
 import UserSelector from '@/components/users/UserSelector.vue';
 import {
   DropdownMenu,
@@ -21,7 +21,6 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -32,7 +31,7 @@ import {
 } from '@/components/ui/select';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import type { components } from '@/generated/api';
-import { apiClient } from '@/lib/api-vue-query';
+import { apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
 import { toIsoDate } from '@/lib/task-date';
 import { useAuthStore } from '@/stores/auth';
@@ -133,6 +132,12 @@ const selectedAssignees = computed(() =>
 );
 
 const createMutation = apiClient.useMutation('post', CREATE_TASK_PATH);
+const titleInputRef = ref<InstanceType<typeof Input> | null>(null);
+
+// 開いて入力欄ができたら当てる（× より先に）。koyori の Input は autofocus を root の span に落とすので中の input に当てる
+watch(titleInputRef, (input) => {
+  (input?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
+});
 
 watch(
   () => [props.open, defaultStatusId.value] as const,
@@ -279,10 +284,10 @@ async function submit() {
       params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
       body,
     });
-    void queryClient.invalidateQueries({
-      queryKey: ['get', CREATE_TASK_PATH],
-      refetchType: 'none',
-    });
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['get', CREATE_TASK_PATH] }),
+      queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),
+    ]);
     emit('created', created);
     resetForm();
     successMessage.value = 'タスクを作成しました';
@@ -316,12 +321,11 @@ async function submit() {
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          class="absolute top-2 right-3 z-10 size-8"
-          aria-label="閉じる"
+          class="absolute top-2 right-3 z-10"
+          ariaLabel="閉じる"
           :disabled="createMutation.isPending.value"
         >
-          <X class="size-4" />
+          <template #icon><X class="size-4" /></template>
         </Button>
       </DialogClose>
 
@@ -333,15 +337,16 @@ async function submit() {
         <div class="flex min-w-0 flex-col md:min-h-0 md:flex-1">
           <!-- 狭い画面ではタイトル欄の右上に × が重なるので、その分だけ右を空ける -->
           <div class="shrink-0 px-5 pt-5 pr-14 md:pr-5">
-            <Label for="task-title" class="sr-only">タイトル（必須）</Label>
             <Input
               id="task-title"
-              v-model="title"
+              ref="titleInputRef"
+              class="font-semibold [--koyori-font-size-sm:1.25rem]"
+              aria-label="タイトル（必須）"
               name="title"
               autocomplete="off"
-              autofocus
               placeholder="タイトルを入力"
-              class="h-auto rounded-none border-0 border-b px-0 pb-2 text-xl font-semibold shadow-none focus-visible:border-ring focus-visible:ring-0 md:text-xl"
+              :value="title"
+              :on-value-change="(v: string) => (title = v)"
             />
           </div>
 
@@ -371,14 +376,19 @@ async function submit() {
             <Button
               type="submit"
               :disabled="createMutation.isPending.value || !isHydrated || !statusId"
+              :label="createMutation.isPending.value ? '作成中...' : '作成'"
             >
-              <Loader2 v-if="createMutation.isPending.value" class="mr-2 size-4 animate-spin" />
-              {{ createMutation.isPending.value ? '作成中...' : '作成' }}
+              <template #icon>
+                <Spinner v-if="createMutation.isPending.value" hide-label />
+              </template>
             </Button>
             <DialogClose as-child>
-              <Button type="button" variant="outline" :disabled="createMutation.isPending.value">
-                取り消す
-              </Button>
+              <Button
+                type="button"
+                variant="tertiary"
+                :disabled="createMutation.isPending.value"
+                label="取り消す"
+              />
             </DialogClose>
           </div>
         </div>
@@ -452,9 +462,12 @@ async function submit() {
               </p>
               <div v-else-if="membersError" class="flex items-center gap-2">
                 <p role="alert" class="text-xs text-destructive">メンバーの取得に失敗しました</p>
-                <Button type="button" variant="outline" size="sm" @click="emit('retryMembers')">
-                  再試行
-                </Button>
+                <Button
+                  type="button"
+                  variant="tertiary"
+                  label="再試行"
+                  @click="emit('retryMembers')"
+                />
               </div>
               <UserSelector
                 v-else
@@ -500,9 +513,12 @@ async function submit() {
               </p>
               <div v-else-if="labelsError" class="flex items-center gap-2">
                 <p role="alert" class="text-xs text-destructive">ラベルの取得に失敗しました</p>
-                <Button type="button" variant="outline" size="sm" @click="emit('retryLabels')">
-                  再試行
-                </Button>
+                <Button
+                  type="button"
+                  variant="tertiary"
+                  label="再試行"
+                  @click="emit('retryLabels')"
+                />
               </div>
               <DropdownMenu v-else>
                 <DropdownMenuTrigger as-child>
@@ -553,67 +569,54 @@ async function submit() {
               </DropdownMenu>
             </div>
 
-            <div class="space-y-1">
-              <Label for="task-planned-start" :class="fieldLabelClass">開始予定日</Label>
+            <!-- koyori の Input は date に max を付けない。期限より後かは送信時にも検証する -->
+            <Field
+              id="task-planned-start"
+              label="開始予定日"
+              :error="plannedStartAfterSoft ? '期限より後になっています' : ''"
+            >
               <Input
-                id="task-planned-start"
-                v-model="plannedStartOn"
                 name="planned_start_on"
                 type="date"
-                class="bg-background"
-                :max="softDeadline || undefined"
-                :aria-invalid="plannedStartAfterSoft || undefined"
-                :aria-describedby="plannedStartAfterSoft ? 'task-planned-start-warning' : undefined"
+                :value="plannedStartOn"
+                :on-value-change="(v: string) => (plannedStartOn = v)"
               />
-              <p
-                v-if="plannedStartAfterSoft"
-                id="task-planned-start-warning"
-                class="text-xs text-destructive"
-              >
-                期限より後になっています
-              </p>
-            </div>
+            </Field>
 
-            <div class="space-y-1">
-              <Label for="task-soft-deadline" :class="fieldLabelClass">期限</Label>
+            <Field id="task-soft-deadline" label="期限">
               <Input
-                id="task-soft-deadline"
-                v-model="softDeadline"
                 name="soft_deadline"
                 type="date"
-                class="bg-background"
+                :value="softDeadline"
+                :on-value-change="(v: string) => (softDeadline = v)"
               />
-            </div>
+            </Field>
 
-            <div class="space-y-1">
-              <Label for="task-hard-deadline" :class="fieldLabelClass">最終期限</Label>
+            <Field id="task-hard-deadline" label="最終期限">
               <Input
-                id="task-hard-deadline"
-                v-model="hardDeadline"
                 name="hard_deadline"
                 type="date"
-                class="bg-background"
+                :value="hardDeadline"
+                :on-value-change="(v: string) => (hardDeadline = v)"
               />
-            </div>
+            </Field>
 
-            <div class="space-y-1">
-              <Label for="task-estimate" :class="fieldLabelClass">見積もり</Label>
+            <Field id="task-estimate" label="見積もり">
               <div class="flex items-center gap-2">
                 <Input
-                  id="task-estimate"
-                  v-model="estimate"
                   name="estimated_minutes"
                   type="number"
-                  min="1"
+                  :min="1"
                   :max="MAX_ESTIMATE_MINUTES"
-                  step="1"
-                  inputmode="numeric"
+                  :step="1"
+                  input-mode="numeric"
                   placeholder="未設定"
-                  class="bg-background"
+                  :value="String(estimate)"
+                  :on-value-change="(v: string) => (estimate = v)"
                 />
                 <span class="shrink-0 text-sm text-muted-foreground">分</span>
               </div>
-            </div>
+            </Field>
           </div>
         </div>
       </HydrationSafeForm>

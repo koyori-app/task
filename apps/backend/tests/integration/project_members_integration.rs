@@ -1,6 +1,7 @@
-use crate::common::{TestApp, json_body};
+use crate::common::{TestApp, TestTenantProject, TestUser, json_body};
 use axum::http::StatusCode;
-use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, TransactionTrait};
+use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseTransaction, Statement, TransactionTrait};
+use uuid::Uuid;
 
 // プロジェクトメンバー管理（#317）の統合テスト。
 //
@@ -398,6 +399,349 @@ async fn an_owner_can_still_manage_a_project_whose_admins_all_left() {
         .status(),
         StatusCode::OK,
         "オーナーは Admin を立て直せる"
+    );
+
+    app.cleanup_user(owner.id).await;
+    app.cleanup_user(alice.id).await;
+    app.cleanup_user(bob.id).await;
+}
+
+/// テナントメンバー全員を登録し、`roles` の順にプロジェクトメンバーとして足す。
+/// オーナーでログインした状態で戻る。
+async fn seed_project_members(
+    app: &mut TestApp,
+    tp: &TestTenantProject,
+    owner: &TestUser,
+    tenant_users: &[&TestUser],
+    roles: &[(&TestUser, &str)],
+) {
+    let tenant_members_path = format!("/v1/tenants/{}/members", tp.tenant_id);
+    let project_members_path = format!(
+        "/v1/tenants/{}/projects/{}/members",
+        tp.tenant_id, tp.project_id
+    );
+    app.reset_session_client();
+    app.login_session(&owner.email, &owner.password).await;
+    for user in tenant_users {
+        assert_eq!(
+            app.post_json_with_session(
+                &tenant_members_path,
+                serde_json::json!({ "user_id": user.id, "role": "Member" }),
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+    }
+    for (user, role) in roles {
+        assert_eq!(
+            app.post_json_with_session(
+                &project_members_path,
+                serde_json::json!({ "user_id": user.id, "role": role }),
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+    }
+}
+
+/// 共有プロジェクトの最後のメンバーである Admin は、自分を外せる（TASK-217）。
+///
+/// 外すと `project_members` が 0 件になり、継承（テナントメンバー全員に開く）へ戻る。
+/// 管理はテナントオーナーが引き継ぐので「管理できる人が常に居る」は崩れない。
+/// 修正前は `would_drop_last_admin` で 409 になり、継承へ戻す手段が無かった。
+#[tokio::test]
+async fn the_only_admin_of_a_shared_project_can_remove_themselves() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let alice = app.insert_user(false, false).await;
+    let bob = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    seed_project_members(&mut app, &tp, &owner, &[&alice, &bob], &[(&alice, "Admin")]).await;
+
+    let project_path = format!("/v1/tenants/{}/projects/{}", tp.tenant_id, tp.project_id);
+    let alice_path = format!("{project_path}/members/{}", alice.id);
+
+    // 前提: alice だけが指定されているので、明示 ACE の無い bob は開けない
+    app.reset_session_client();
+    app.login_session(&bob.email, &bob.password).await;
+    assert_ne!(
+        app.get_with_session(&project_path).await.status(),
+        StatusCode::OK,
+        "前提: メンバー指定がある間は bob に閉じている"
+    );
+
+    app.reset_session_client();
+    app.login_session(&alice.email, &alice.password).await;
+    assert_eq!(
+        app.delete_with_session(&alice_path).await.status(),
+        StatusCode::NO_CONTENT,
+        "共有プロジェクトの最後のメンバーは、Admin でも外せる"
+    );
+
+    // 継承に戻ったので、明示 ACE の無いテナントメンバーも開ける
+    app.reset_session_client();
+    app.login_session(&bob.email, &bob.password).await;
+    assert_eq!(
+        app.get_with_session(&project_path).await.status(),
+        StatusCode::OK,
+        "メンバー指定が無くなったプロジェクトはテナントメンバーに開放される"
+    );
+
+    app.cleanup_user(owner.id).await;
+    app.cleanup_user(alice.id).await;
+    app.cleanup_user(bob.id).await;
+}
+
+/// 対照: 他のメンバー（Viewer）が残るなら、最後の Admin は従来どおり外せない。
+/// Admin の居ない明示 ACE だけの状態を作らない。
+#[tokio::test]
+async fn the_last_admin_cannot_be_removed_while_other_members_remain() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let alice = app.insert_user(false, false).await;
+    let bob = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    seed_project_members(
+        &mut app,
+        &tp,
+        &owner,
+        &[&alice, &bob],
+        &[(&alice, "Admin"), (&bob, "Viewer")],
+    )
+    .await;
+
+    app.reset_session_client();
+    app.login_session(&alice.email, &alice.password).await;
+    assert_eq!(
+        app.delete_with_session(&format!(
+            "/v1/tenants/{}/projects/{}/members/{}",
+            tp.tenant_id, tp.project_id, alice.id
+        ))
+        .await
+        .status(),
+        StatusCode::CONFLICT,
+        "Viewer が残るなら最後の Admin は外せない"
+    );
+
+    app.cleanup_user(owner.id).await;
+    app.cleanup_user(alice.id).await;
+    app.cleanup_user(bob.id).await;
+}
+
+/// 対照: 単独メンバーの Admin を降格しても行は残る（継承へ戻らない）ので、従来どおり 409。
+#[tokio::test]
+async fn the_only_admin_still_cannot_be_demoted() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let alice = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    seed_project_members(&mut app, &tp, &owner, &[&alice], &[(&alice, "Admin")]).await;
+
+    app.reset_session_client();
+    app.login_session(&alice.email, &alice.password).await;
+    assert_eq!(
+        app.put_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/members/{}",
+                tp.tenant_id, tp.project_id, alice.id
+            ),
+            serde_json::json!({ "role": "Viewer" }),
+        )
+        .await
+        .status(),
+        StatusCode::CONFLICT,
+        "単独 Admin の降格は従来どおり弾く"
+    );
+
+    app.cleanup_user(owner.id).await;
+    app.cleanup_user(alice.id).await;
+}
+
+/// 対照: 個人プロジェクト（Inbox）は 0 件になっても継承へ戻らないので、本人の Admin 行は外せない。
+#[tokio::test]
+async fn the_owner_row_of_a_personal_project_cannot_be_removed() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let alice = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    seed_project_members(&mut app, &tp, &owner, &[&alice], &[]).await;
+
+    app.reset_session_client();
+    app.login_session(&alice.email, &alice.password).await;
+    let inbox = json_body(
+        app.get_with_session(&format!(
+            "/v1/tenants/{}/users/me/personal-project",
+            tp.tenant_id
+        ))
+        .await,
+    )
+    .await;
+    assert_eq!(inbox["is_personal"], true, "前提: 個人プロジェクト");
+    let inbox_id = inbox["id"].as_str().expect("inbox id");
+
+    assert_eq!(
+        app.delete_with_session(&format!(
+            "/v1/tenants/{}/projects/{inbox_id}/members/{}",
+            tp.tenant_id, alice.id
+        ))
+        .await
+        .status(),
+        StatusCode::CONFLICT,
+        "個人プロジェクトの本人 Admin 行は外せない"
+    );
+
+    app.cleanup_user(owner.id).await;
+    app.cleanup_user(alice.id).await;
+}
+
+/// 判定側が取るのと同じテナント行のロックを、テストが先に握る。
+async fn lock_tenant(app: &TestApp, tenant_id: Uuid) -> DatabaseTransaction {
+    let txn = app.state.db.begin().await.expect("begin");
+    txn.query_one_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        "SELECT id FROM tenants WHERE id = $1 FOR UPDATE",
+        [tenant_id.into()],
+    ))
+    .await
+    .expect("lock tenant row");
+    txn
+}
+
+/// 握っているロックの中でメンバー行を消してコミットする（待っている要求がここで動き出す）。
+async fn delete_member_row_and_commit(txn: DatabaseTransaction, project_id: Uuid, user_id: Uuid) {
+    txn.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        "DELETE FROM project_members WHERE project_id = $1 AND user_id = $2",
+        [project_id.into(), user_id.into()],
+    ))
+    .await
+    .expect("delete member row");
+    txn.commit().await.expect("commit");
+}
+
+async fn member_count(app: &TestApp, project_id: Uuid, user_id: Uuid) -> i64 {
+    let row = app
+        .state
+        .db
+        .query_one_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT COUNT(*) AS n FROM project_members WHERE project_id = $1 AND user_id = $2",
+            [project_id.into(), user_id.into()],
+        ))
+        .await
+        .expect("count")
+        .expect("row");
+    row.try_get("", "n").expect("n")
+}
+
+/// 追加もメンバー変更のロックを取り、認可はロックの後で見る。
+///
+/// 削除が「最後の 1 行」と数えた後に追加が通ると Viewer だけが残る。ロックを取るだけでは
+/// 足りず、待っている間に追加する本人の Admin 行が消されたら（継承へ戻ったら）、
+/// 権限を失った追加は 403 で終わらなければならない。
+#[tokio::test]
+async fn adding_a_member_waits_for_the_lock_and_rechecks_authorization() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let alice = app.insert_user(false, false).await;
+    let bob = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    seed_project_members(&mut app, &tp, &owner, &[&alice, &bob], &[(&alice, "Admin")]).await;
+
+    app.reset_session_client();
+    app.login_session(&alice.email, &alice.password).await;
+
+    let txn = lock_tenant(&app, tp.tenant_id).await;
+    let members_path = format!(
+        "/v1/tenants/{}/projects/{}/members",
+        tp.tenant_id, tp.project_id
+    );
+    let add = app.post_json_with_session(
+        &members_path,
+        serde_json::json!({ "user_id": bob.id, "role": "Viewer" }),
+    );
+    tokio::pin!(add);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(700), &mut add)
+            .await
+            .is_err(),
+        "ロックを握っている間、追加は待たされる"
+    );
+
+    // 待っている間に alice の行を消す（alice 自身の削除で継承へ戻ったのと同じ状態）
+    delete_member_row_and_commit(txn, tp.project_id, alice.id).await;
+    assert_eq!(
+        add.await.status(),
+        StatusCode::FORBIDDEN,
+        "権限を失った後の追加は通らない"
+    );
+    assert_eq!(
+        member_count(&app, tp.project_id, bob.id).await,
+        0,
+        "bob の行はできない（Viewer だけが残らない）"
+    );
+
+    app.cleanup_user(owner.id).await;
+    app.cleanup_user(alice.id).await;
+    app.cleanup_user(bob.id).await;
+}
+
+/// 削除も認可をロックの後で見る。
+///
+/// Admin A・B のプロジェクトで、B が A の削除をロック待ちしている間に B の行が消されると、
+/// 権限を失った B の削除が「最後の 1 行」の例外で通り、公開範囲が広がる。
+#[tokio::test]
+async fn removing_a_member_rechecks_authorization_after_the_lock() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let alice = app.insert_user(false, false).await;
+    let bob = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    seed_project_members(
+        &mut app,
+        &tp,
+        &owner,
+        &[&alice, &bob],
+        &[(&alice, "Admin"), (&bob, "Admin")],
+    )
+    .await;
+
+    app.reset_session_client();
+    app.login_session(&bob.email, &bob.password).await;
+
+    let txn = lock_tenant(&app, tp.tenant_id).await;
+    let alice_path = format!(
+        "/v1/tenants/{}/projects/{}/members/{}",
+        tp.tenant_id, tp.project_id, alice.id
+    );
+    let remove = app.delete_with_session(&alice_path);
+    tokio::pin!(remove);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(700), &mut remove)
+            .await
+            .is_err(),
+        "ロックを握っている間、削除は待たされる"
+    );
+
+    // 待っている間に bob の行を消す（alice が bob を外したのと同じ状態）
+    delete_member_row_and_commit(txn, tp.project_id, bob.id).await;
+    assert_eq!(
+        remove.await.status(),
+        StatusCode::FORBIDDEN,
+        "権限を失った後の削除は通らない"
+    );
+    assert_eq!(
+        member_count(&app, tp.project_id, alice.id).await,
+        1,
+        "alice の行は残る（継承へ戻らない）"
     );
 
     app.cleanup_user(owner.id).await;

@@ -39,6 +39,9 @@ function tenantMember(
     user_id: userId,
     role: 'Member',
     user: user(userId, username),
+    department: null,
+    position: null,
+    team: null,
   };
 }
 
@@ -369,8 +372,9 @@ describe('MembersSection', () => {
   });
 
   it('削除の 409 は最後の管理者であることを伝え、一覧は残る', async () => {
+    // 単独メンバーは外せる（継承へ戻る）ので、409 になるのは他のメンバーが残るとき
     stubFetch({
-      members: [projectMember(ALICE_ID, 'alice', 'Admin')],
+      members: [projectMember(ALICE_ID, 'alice', 'Admin'), projectMember(BOB_ID, 'bob', 'Viewer')],
       tenantMembers: [],
       deleteStatus: 409,
     });

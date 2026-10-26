@@ -3,17 +3,22 @@
 //! 手書きの型を挟まないのは、フィールド名の食い違いを実行時ではなくコンパイル時に
 //! 出したいため（#647 で手書き `paths.ts` が実際の応答とずれていた）。
 
+use payload::personal_tokens::PersonalTokenIdentityResponse;
 use reqwest::{Method, StatusCode, Url};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::config::RuntimeConfig;
+use crate::config::{RuntimeConfig, TenantSource};
 use crate::error::{CliError, Result};
 
 pub struct ApiClient {
     http: reqwest::Client,
     base: Url,
     tenant_id: String,
+    /// 明示した tenant の由来。自動解決・tenant 無しの口では `None`
+    tenant_source: Option<TenantSource>,
+    /// 自動解決で取った `/me` の応答。明示 tenant のときは取らない
+    token_identity: Option<PersonalTokenIdentityResponse>,
 }
 
 impl ApiClient {
@@ -33,15 +38,36 @@ impl ApiClient {
             .default_headers(headers)
             .build()
             .map_err(CliError::from)?;
+        let (tenant_id, tenant_source) = config.tenant.unzip();
         Ok(Self {
             http,
             base,
-            tenant_id: config.tenant_id,
+            tenant_id: tenant_id.unwrap_or_default(),
+            tenant_source,
+            token_identity: None,
         })
+    }
+
+    /// tenant が明示されていなければ、トークンの束縛先を `/me` から引いて埋める。
+    ///
+    /// config には書かない。トークンを替えたときに古いテナントが残るため
+    pub(crate) async fn resolve_tenant(mut self) -> Result<Self> {
+        if self.tenant_source.is_some() {
+            return Ok(self);
+        }
+        let identity: PersonalTokenIdentityResponse =
+            self.get(&["v1", "personal_tokens", "me"], &[]).await?;
+        self.tenant_id = identity.tenant_id.to_string();
+        self.token_identity = Some(identity);
+        Ok(self)
     }
 
     pub fn tenant_id(&self) -> &str {
         &self.tenant_id
+    }
+
+    pub fn token_identity(&self) -> Option<&PersonalTokenIdentityResponse> {
+        self.token_identity.as_ref()
     }
 
     pub async fn get<T: DeserializeOwned>(
@@ -94,7 +120,7 @@ impl ApiClient {
         if status.is_success() {
             Ok(())
         } else {
-            Err(CliError::http(status.as_u16(), &body))
+            Err(self.http_error(status, &body))
         }
     }
 
@@ -116,7 +142,7 @@ impl ApiClient {
         let text = response.text().await.unwrap_or_default();
 
         if !status.is_success() {
-            return Err(CliError::http(status.as_u16(), &text));
+            return Err(self.http_error(status, &text));
         }
         if status == StatusCode::NO_CONTENT || text.trim().is_empty() {
             return Err(CliError::new("API returned empty response"));
@@ -126,6 +152,16 @@ impl ApiClient {
             // 握り潰すと「なぜか空」に見えるので、どこで何が合わないかを出す
             CliError::new(format!("Cannot parse the API response for {path}: {err}"))
         })
+    }
+
+    /// 明示 tenant で 403 を受けたら、tenant を外す案内を 1 行添える。
+    /// 自動解決した tenant はトークンの束縛先そのものなので添えない
+    fn http_error(&self, status: StatusCode, body: &str) -> CliError {
+        let mut err = CliError::http(status.as_u16(), body);
+        if let (StatusCode::FORBIDDEN, Some(source)) = (status, self.tenant_source) {
+            err.message = format!("{}\n{}", err.message, source.forbidden_hint());
+        }
+        err
     }
 
     fn url(&self, segments: &[&str], query: &[(&str, String)]) -> Result<Url> {
@@ -156,7 +192,7 @@ mod tests {
         ApiClient::new(RuntimeConfig {
             api_url: api_url.into(),
             token: "token-1".into(),
-            tenant_id: "tenant-1".into(),
+            tenant: Some(("tenant-1".into(), TenantSource::Config)),
         })
         .unwrap()
     }

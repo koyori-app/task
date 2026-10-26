@@ -5,7 +5,7 @@ import { computed, ref } from 'vue';
 import { ChevronDown } from '@lucide/vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import UserSelector from '@/components/users/UserSelector.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -305,10 +305,10 @@ async function confirmRemove() {
         <Button
           type="button"
           :disabled="!selectedUserId || addMutation.isPending.value"
+          :label="addMutation.isPending.value ? '追加中…' : '追加'"
           @click="onAdd"
         >
-          <PhPlus class="size-4" />
-          {{ addMutation.isPending.value ? '追加中…' : '追加' }}
+          <template #icon><PhPlus class="size-4" /></template>
         </Button>
       </div>
       <p
@@ -368,13 +368,11 @@ async function confirmRemove() {
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            class="text-destructive hover:text-destructive"
-            :aria-label="`メンバー「${member.user.username}」を削除`"
+            class="text-(--koyori-color-danger)"
+            :ariaLabel="`メンバー「${member.user.username}」を削除`"
+            label="削除"
             @click="openRemove(member)"
-          >
-            削除
-          </Button>
+          />
         </li>
       </ul>
     </template>
@@ -401,20 +399,18 @@ async function confirmRemove() {
         <DialogFooter>
           <Button
             type="button"
-            variant="outline"
+            variant="tertiary"
             :disabled="removeMutation.isPending.value"
+            label="キャンセル"
             @click="removeTarget = null"
-          >
-            キャンセル
-          </Button>
+          />
           <Button
             type="button"
-            variant="destructive"
+            variant="danger"
             :disabled="removeMutation.isPending.value"
+            :label="removeMutation.isPending.value ? '削除中…' : '削除する'"
             @click="confirmRemove"
-          >
-            {{ removeMutation.isPending.value ? '削除中…' : '削除する' }}
-          </Button>
+          />
         </DialogFooter>
       </DialogContent>
     </Dialog>

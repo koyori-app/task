@@ -381,7 +381,9 @@ export const RoundComposer: Story = {
     // 短縮 SHA も確定できない。API は 40 桁しか受け付けず、通してしまうと
     // そのラウンドは鮮度の照合が永久に一致しなくなる
     await user.type(canvas.getByLabelText('レビュー対象の head SHA'), '9f4e7b2c1a08');
-    await expect(canvas.findByTestId('head-sha-error')).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByText('40 桁の commit SHA を入力してください（git rev-parse HEAD）。'),
+    ).resolves.toBeInTheDocument();
     await expect(canvas.getByRole('button', { name: /確定/ })).toBeDisabled();
 
     await user.clear(canvas.getByLabelText('レビュー対象の head SHA'));

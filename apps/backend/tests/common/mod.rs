@@ -1453,6 +1453,9 @@ pub async fn ensure_tenant_member_for_project(
         tenant_id: Set(project.tenant_id),
         user_id: Set(user_id),
         role: Set(entity::tenant_members::TenantRole::Member),
+        department: Set(None),
+        position: Set(None),
+        team: Set(None),
     }
     .insert(db)
     .await

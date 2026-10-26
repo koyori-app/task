@@ -3,7 +3,7 @@ import { GitBranch, X } from '@lucide/vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { ref } from 'vue';
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import type { components } from '@/generated/api';
 import { fetchClient } from '@/lib/api-vue-query';
 import { httpUrl } from '@/lib/task-activity';
@@ -85,13 +85,12 @@ async function unlink(linkId: string) {
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          class="size-7 shrink-0"
-          :aria-label="`${branch.branch} のリンクを外す`"
+          class="shrink-0"
+          :ariaLabel="`${branch.branch} のリンクを外す`"
           :disabled="removingId === branch.id"
           @click="unlink(branch.id)"
         >
-          <X class="size-4" aria-hidden="true" />
+          <template #icon><X class="size-4" aria-hidden="true" /></template>
         </Button>
       </li>
     </ul>

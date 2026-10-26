@@ -25,6 +25,8 @@ const props = defineProps<{
   /** 印の id から引ける表示情報（コメント一覧 API の `mentions`） */
   mentions?: MentionTable;
   currentUserId?: string | null;
+  /** 渡せば、いま入れる者の札をそのテナントのプロフィールへの link にする（表示用 id） */
+  mentionTenant?: string;
 }>();
 
 /**
@@ -49,6 +51,7 @@ watchEffect(async () => {
   const mentionsProp = props.mentions;
   const mentions = mentionsProp ?? {};
   const currentUserId = props.currentUserId ?? null;
+  const mentionTenant = props.mentionTenant;
   try {
     const { renderDescription } = await import('@/lib/markup-renderer');
     const rendered = await renderDescription(source, {
@@ -56,6 +59,7 @@ watchEffect(async () => {
       profile: 'comment',
       mentions,
       currentUserId,
+      mentionTenant,
     });
     if (version === renderVersion) html.value = rendered;
   } catch {

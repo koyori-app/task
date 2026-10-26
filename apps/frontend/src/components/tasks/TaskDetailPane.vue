@@ -8,7 +8,7 @@ import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
 import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
 import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
 import { useTaskActivities } from '@/composables/useTaskActivities';
@@ -302,6 +302,7 @@ function onDeleteDialogCancel(event: Event) {
             :on-retry="refetchComments"
             :current-user-id="currentUserId"
             :profile-href="profileHref"
+            :mention-tenant="tenantDisplayId"
             :submit-pending="submitPending"
             :submit-error="submitError"
             :reply-error="replyError"
@@ -337,13 +338,11 @@ function onDeleteDialogCancel(event: Event) {
             v-if="showCloseButton"
             type="button"
             variant="ghost"
-            size="icon"
-            class="size-8"
-            aria-label="詳細を閉じる"
+            ariaLabel="詳細を閉じる"
             title="閉じる"
             @click="emit('close')"
           >
-            <X class="size-4" />
+            <template #icon><X class="size-4" /></template>
           </Button>
           <dialog
             ref="deleteDialogRef"
@@ -361,20 +360,18 @@ function onDeleteDialogCancel(event: Event) {
             <div class="flex justify-end gap-2">
               <Button
                 type="button"
-                variant="outline"
+                variant="tertiary"
                 :disabled="deletePending"
+                label="キャンセル"
                 @click="closeDeleteDialog"
-              >
-                キャンセル
-              </Button>
+              />
               <Button
                 type="button"
-                variant="destructive"
+                variant="danger"
                 :disabled="deletePending"
+                :label="deletePending ? '削除中…' : '削除する'"
                 @click="confirmDelete"
-              >
-                {{ deletePending ? '削除中…' : '削除する' }}
-              </Button>
+              />
             </div>
           </dialog>
         </template>

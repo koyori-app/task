@@ -2,7 +2,7 @@
 import { Loader2, Pencil, Trash2 } from '@lucide/vue';
 import { nextTick, ref } from 'vue';
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import CommentBody from '@/components/tasks/CommentBody.vue';
 import CommentEditor from '@/components/tasks/CommentEditor.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
@@ -30,6 +30,8 @@ const props = defineProps<{
    * 可否は backend が判定し、拒否されたら deleteError を拒まれた通りに表示する。
    */
   currentUserId?: string | null;
+  /** 本文の札をプロフィールへの link にするテナント（表示用 id。CommentBody 参照） */
+  mentionTenant?: string;
   /** このコメントの更新失敗メッセージ（対象コメントの中に出す） */
   updateError?: string | null;
   /** このコメントの削除失敗メッセージ（対象コメントの中に出す） */
@@ -121,25 +123,21 @@ async function confirmDelete() {
           v-if="comment.user.id === currentUserId"
           type="button"
           variant="ghost"
-          size="icon"
-          class="size-6"
-          aria-label="コメントを編集"
+          ariaLabel="コメントを編集"
           :disabled="updating || deleting"
           @click="startEditing"
         >
-          <Pencil class="size-3.5" aria-hidden="true" />
+          <template #icon><Pencil class="size-3.5" aria-hidden="true" /></template>
         </Button>
         <Button
           v-if="!confirmingDelete"
           type="button"
           variant="ghost"
-          size="icon"
-          class="size-6"
-          aria-label="コメントを削除"
+          ariaLabel="コメントを削除"
           :disabled="updating || deleting"
           @click="openDeleteConfirm"
         >
-          <Trash2 class="size-3.5" aria-hidden="true" />
+          <template #icon><Trash2 class="size-3.5" aria-hidden="true" /></template>
         </Button>
       </span>
     </header>
@@ -159,23 +157,17 @@ async function confirmDelete() {
       <div class="flex justify-end gap-2">
         <Button
           type="button"
-          variant="outline"
-          size="sm"
-          class="h-7 px-2"
+          variant="tertiary"
           :disabled="updating"
+          label="キャンセル"
           @click="cancelEditing"
-        >
-          キャンセル
-        </Button>
+        />
         <Button
           type="button"
-          size="sm"
-          class="h-7 px-2"
           :disabled="updating || !editDraft.trim()"
+          :label="updating ? '保存中…' : '保存'"
           @click="commitEditing"
-        >
-          {{ updating ? '保存中…' : '保存' }}
-        </Button>
+        />
       </div>
     </div>
 
@@ -186,6 +178,7 @@ async function confirmDelete() {
       :comment-id="comment.id"
       :mentions="mentions"
       :current-user-id="currentUserId"
+      :mention-tenant="mentionTenant"
     />
 
     <div
@@ -195,24 +188,18 @@ async function confirmDelete() {
       <span class="text-muted-foreground">このコメントを削除しますか？</span>
       <Button
         type="button"
-        variant="outline"
-        size="sm"
-        class="h-7 px-2"
+        variant="tertiary"
         :disabled="deleting"
+        label="キャンセル"
         @click="closeDeleteConfirm"
-      >
-        キャンセル
-      </Button>
+      />
       <Button
         type="button"
-        variant="destructive"
-        size="sm"
-        class="h-7 px-2"
+        variant="danger"
         :disabled="deleting"
+        :label="deleting ? '削除中…' : '削除する'"
         @click="confirmDelete"
-      >
-        {{ deleting ? '削除中…' : '削除する' }}
-      </Button>
+      />
     </div>
 
     <!-- 失敗は失敗したコメントの中に出す。一覧末尾にまとめると、どの操作が

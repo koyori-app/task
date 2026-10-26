@@ -3,7 +3,7 @@ import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import {
   Dialog,
   DialogContent,
@@ -12,9 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Field, FieldError, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
@@ -126,26 +123,28 @@ function onOpenChange(open: boolean) {
       <form class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
         <form.Field name="name">
           <template #default="{ field }">
-            <Field>
-              <FieldLabel for="label-name">名前</FieldLabel>
+            <Field
+              id="label-name"
+              label="名前"
+              :error="field.state.meta.errors.length ? '名前は 1〜100 文字で入力してください' : ''"
+            >
               <Input
-                id="label-name"
                 placeholder="bug"
-                :model-value="field.state.value"
-                @blur="field.handleBlur"
-                @update:model-value="(v) => field.handleChange(String(v))"
+                :value="field.state.value"
+                :on-value-change="field.handleChange"
+                :on-blur="field.handleBlur"
               />
-              <FieldError v-if="field.state.meta.errors.length"
-                >名前は 1〜100 文字で入力してください</FieldError
-              >
             </Field>
           </template>
         </form.Field>
 
         <form.Field name="color">
           <template #default="{ field }">
-            <Field>
-              <FieldLabel for="label-color">色</FieldLabel>
+            <Field
+              id="label-color"
+              label="色"
+              :error="field.state.meta.errors.length ? '色は #RRGGBB 形式で入力してください' : ''"
+            >
               <div
                 class="flex flex-wrap items-center gap-1.5"
                 role="group"
@@ -167,31 +166,25 @@ function onOpenChange(open: boolean) {
                   @click="field.handleChange(preset)"
                 />
               </div>
+              <!-- 文字数は送信時に COLOR_PATTERN で検証する -->
               <Input
-                id="label-color"
-                class="max-w-[120px] font-mono"
-                maxlength="7"
-                :model-value="field.state.value"
-                @blur="field.handleBlur"
-                @update:model-value="(v) => field.handleChange(String(v))"
+                class="max-w-[120px] [&_input]:font-mono"
+                :value="field.state.value"
+                :on-value-change="field.handleChange"
+                :on-blur="field.handleBlur"
               />
-              <FieldError v-if="field.state.meta.errors.length"
-                >色は #RRGGBB 形式で入力してください</FieldError
-              >
             </Field>
           </template>
         </form.Field>
 
         <form.Field name="description">
           <template #default="{ field }">
-            <Field>
-              <FieldLabel for="label-description">説明</FieldLabel>
+            <Field id="label-description" label="説明">
               <Textarea
-                id="label-description"
-                rows="2"
+                :rows="2"
                 placeholder="このラベルの用途（任意）"
-                :model-value="field.state.value"
-                @update:model-value="(v) => field.handleChange(String(v))"
+                :value="field.state.value"
+                :on-value-change="field.handleChange"
               />
             </Field>
           </template>
@@ -200,14 +193,22 @@ function onOpenChange(open: boolean) {
         <p v-if="submitError" role="alert" class="text-sm text-destructive">{{ submitError }}</p>
 
         <DialogFooter>
-          <Button type="button" variant="outline" :disabled="isPending" @click="emit('close')">
-            キャンセル
-          </Button>
+          <Button
+            type="button"
+            variant="tertiary"
+            :disabled="isPending"
+            label="キャンセル"
+            @click="emit('close')"
+          />
           <form.Subscribe>
             <template #default="{ canSubmit, isSubmitting }">
-              <Button type="submit" :disabled="!canSubmit || isSubmitting || isPending">
-                {{ isSubmitting || isPending ? '保存中…' : label ? '変更を保存' : 'ラベルを作成' }}
-              </Button>
+              <Button
+                type="submit"
+                :disabled="!canSubmit || isSubmitting || isPending"
+                :label="
+                  isSubmitting || isPending ? '保存中…' : label ? '変更を保存' : 'ラベルを作成'
+                "
+              />
             </template>
           </form.Subscribe>
         </DialogFooter>

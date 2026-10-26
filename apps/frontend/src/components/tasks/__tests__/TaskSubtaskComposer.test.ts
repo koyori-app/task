@@ -6,6 +6,23 @@ import TaskSubtaskComposer from '@/components/tasks/TaskSubtaskComposer.vue';
 enableAutoUnmount(afterEach);
 
 describe('TaskSubtaskComposer', () => {
+  // koyori の Input は root が枠の span で、$el.focus() では入力欄に当たらない
+  it('開いたときと作成した後に入力欄へフォーカスを当てる', async () => {
+    const wrapper = mount(TaskSubtaskComposer, {
+      props: { onCreate: vi.fn(async () => true) },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const input = wrapper.get<HTMLInputElement>('input[aria-label="サブタスク名"]');
+    expect(document.activeElement).toBe(input.element);
+
+    input.element.blur();
+    await input.setValue('子タスク');
+    await input.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+    expect(document.activeElement).toBe(input.element);
+  });
+
   it('Enter で前後空白を除いたタイトルを作成し、成功時だけ入力を消す', async () => {
     const onCreate = vi.fn(async () => true);
     const wrapper = mount(TaskSubtaskComposer, { props: { onCreate } });

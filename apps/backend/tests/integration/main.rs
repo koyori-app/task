@@ -5,6 +5,7 @@ mod common;
 
 mod admin_tenants_integration;
 mod admin_users_integration;
+mod apalis_supervise_integration;
 mod auth_2fa_integration;
 mod avatar_upload_integration;
 mod custom_fields_integration;
@@ -60,6 +61,7 @@ mod task_extensions_integration;
 mod task_labels_integration;
 mod task_list_integration;
 mod task_notifications_integration;
+mod task_search_mentions_integration;
 mod task_search_trgm_integration;
 mod task_similar_integration;
 mod task_update_concurrency_integration;

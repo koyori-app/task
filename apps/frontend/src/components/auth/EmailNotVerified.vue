@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { useResendVerificationEmailMutation } from '@/lib/api-vue-query';
 
 const props = defineProps<{ email: string; backHref?: string; resetHref?: string }>();
@@ -31,17 +31,16 @@ async function resend() {
         </p>
         <Button
           :disabled="resendMutation.isPending.value || sent"
-          variant="outline"
+          variant="tertiary"
+          :label="resendMutation.isPending.value ? '送信中…' : '確認メールを再送する'"
           @click="resend"
-        >
-          {{ resendMutation.isPending.value ? '送信中…' : '確認メールを再送する' }}
-        </Button>
+        />
         <a v-if="props.backHref" :href="props.backHref">
-          <Button variant="ghost" size="sm">サインインページへ戻る</Button>
+          <Button variant="ghost" label="サインインページへ戻る" />
         </a>
-        <Button v-else variant="ghost" size="sm" @click="emit('logout')">サインアウト</Button>
+        <Button v-else variant="ghost" label="サインアウト" @click="emit('logout')" />
         <a v-if="props.resetHref" :href="props.resetHref">
-          <Button variant="ghost" size="sm">パスワードを再設定する</Button>
+          <Button variant="ghost" label="パスワードを再設定する" />
         </a>
       </div>
     </div>

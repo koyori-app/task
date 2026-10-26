@@ -12,7 +12,7 @@
 
 | 入れた物 | 入れておらぬ物 |
 |---|---|
-| Web App Manifest、仮の icon、`/sw.js`（何も cache しない）、install の案内のボタン | offline（TASK-300）、通知（TASK-301）、正式な icon（TASK-299）、asset の先取り（precache） |
+| Web App Manifest、icon と favicon（TASK-299、仮の絵）、`/sw.js`（何も cache しない）、install の案内のボタン | offline（TASK-300）、通知（TASK-301）、icon の清書、asset の先取り（precache） |
 
 道具（vite-plugin-pwa や Serwist）は足していない。依存を増やさず、manifest と最小の service worker を手で置いた。
 
@@ -22,7 +22,8 @@
 |---|---|---|
 | manifest の値・色・icon の道 | `apps/frontend/src/lib/pwa/app-manifest.ts` | 一か所に集めてある。`+Head.vue` と server がここから引く |
 | manifest の配り | `apps/frontend/server/pwa.ts`（`pwaManifestPlugin`）、`server/elysia.ts` | `/manifest.webmanifest` を Elysia から返す |
-| 仮の icon | `apps/frontend/public/pwa/` | `icon-192.png`、`icon-512.png`、`icon-maskable-512.png`、`apple-touch-icon.png` |
+| icon | `apps/frontend/public/pwa/` | `icon-192.png`、`icon-512.png`、`icon-maskable-512.png`、`apple-touch-icon.png`。favicon は `public/favicon-16.png` と `public/favicon-32.png` |
+| icon の元の絵と焼き方 | `apps/frontend/design/app-icon/` | `source.png` と `build.py`。焼く時の決めは同じ dir の `README.md` |
 | service worker | `apps/frontend/public/sw.js` | 後述 |
 | `/sw.js` の header | `apps/frontend/server/pwa.ts`（`pwaStaticHeaders`）、`+server.ts` の `prod.middleware` | 後述 |
 | 登録 | `apps/frontend/src/lib/pwa/register-service-worker.ts`、`src/pages/+client.ts` | client の entry から一度だけ |
@@ -40,7 +41,7 @@
 | `display` | `standalone` | |
 | `theme_color` | `#fafafa`（仮） | header の `--sidebar`（oklch(0.985 0 0)） |
 | `background_color` | `#ffffff`（仮） | `--background`（oklch(1 0 0)） |
-| `icons` | 192、512、maskable 512 | 仮（今の favicon の logo.svg を焼いた物） |
+| `icons` | 192、512、maskable 512 | 元の絵（`design/app-icon/source.png`）を焼いた物（TASK-299、仮の絵）。不透明で、透けは白で埋める |
 
 **`id`・`start_url`・`scope` は後で変えない。**
 

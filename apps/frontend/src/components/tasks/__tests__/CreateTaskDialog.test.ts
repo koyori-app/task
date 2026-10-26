@@ -282,6 +282,15 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     wrapper.unmount();
   });
 
+  // × がタイトル欄より前にあるので、Dialog の自動フォーカスに任せると × に当たる
+  it('focuses the title field (not the close button) when opened', async () => {
+    const wrapper = mountDialog(queryClient);
+    await flushPromises();
+
+    expect(document.activeElement).toBe(getTitleInput());
+    wrapper.unmount();
+  });
+
   it('keeps Tab focus within the dialog', async () => {
     const wrapper = mountDialog(queryClient);
     await nextTick();
@@ -313,7 +322,9 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     await vi.waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({
         queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks'],
-        refetchType: 'none',
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/search'],
       });
     });
     expect(wrapper.emitted('created')?.[0]).toEqual([createdTask]);
