@@ -58,7 +58,7 @@
     "lru-cache": "11.5.3",
     "mermaid": "11.16.1",
     "openapi-fetch": "0.17.0",
-    "pinia": "4.0.3",
+    "pinia": "4.1.0",
     "pinia-plugin-persistedstate": "4.7.1",
     "rehype-starry-night": "2.2.0",
     "rehype-stringify": "10.0.1",
