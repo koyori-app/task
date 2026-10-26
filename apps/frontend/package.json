@@ -40,7 +40,7 @@
     "@tanstack/vue-table": "9.3.1",
     "@tanstack/vue-virtual": "catalog:",
     "@unhead/vue": "3.3.1",
-    "@universal-middleware/core": "0.4.18",
+    "@universal-middleware/core": "0.7.2",
     "@vikejs/elysia": "0.2.1",
     "@vue/devtools-api": "8.2.1",
     "@vueuse/core": "14.4.0",
