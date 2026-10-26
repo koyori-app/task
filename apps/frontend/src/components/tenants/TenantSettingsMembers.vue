@@ -2,7 +2,7 @@
 import UserAvatar from '@/components/UserAvatar.vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhArrowClockwise, PhEnvelopeSimple, PhPaperPlaneTilt, PhX } from '@phosphor-icons/vue';
-import { computed, ref } from 'vue';
+import { computed, ref, useId } from 'vue';
 
 import { Button, Dialog, Field } from '@koyori-app/ui-vue';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
@@ -43,6 +43,8 @@ const ROLES: { value: TenantRole; label: string; description: string }[] = [
 ];
 
 const props = defineProps<{ tenant: TenantResponse }>();
+// 閉じた Dialog も DOM に残るため、送信ボタンを結ぶ form の id はインスタンスごとに分ける
+const formId = useId();
 
 const queryClient = useQueryClient();
 const authStore = useAuthStore();
@@ -610,7 +612,7 @@ async function onRemove(member: TenantMemberResponse) {
           description="このテナントでの部署・役職・チームです。空欄にすると未設定に戻ります。"
           :on-close="onOrgEditorClose"
         >
-          <form id="org-profile-form" class="flex flex-col gap-3" @submit.prevent="onSaveOrg">
+          <form :id="formId" class="flex flex-col gap-3" @submit.prevent="onSaveOrg">
             <!-- koyori の Input は maxlength を持たず、ここは送信前に長さを検証していないので素の input のまま -->
             <Field
               v-for="field in ORG_FIELDS"
@@ -636,7 +638,7 @@ async function onRemove(member: TenantMemberResponse) {
               label="キャンセル"
               @click="onOrgEditorClose"
             />
-            <Button type="submit" form="org-profile-form" :disabled="busy" label="保存" />
+            <Button type="submit" :form="formId" :disabled="busy" label="保存" />
           </template>
         </Dialog>
       </div>

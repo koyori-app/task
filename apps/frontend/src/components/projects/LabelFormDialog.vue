@@ -2,7 +2,7 @@
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
-import { computed, ref } from 'vue';
+import { computed, ref, useId } from 'vue';
 import { Button, Dialog, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import { apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
@@ -38,6 +38,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ close: [] }>();
+// 閉じた Dialog も DOM に残るため、送信ボタンを結ぶ form の id はインスタンスごとに分ける
+const formId = useId();
 
 const queryClient = useQueryClient();
 const submitError = ref<string | null>(null);
@@ -111,7 +113,7 @@ function onClose() {
     description="タスクの分類に使う名前・色・説明を設定します。"
     :on-close="onClose"
   >
-    <form id="label-form" class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
+    <form :id="formId" class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
       <form.Field name="name">
         <template #default="{ field }">
           <Field
@@ -192,7 +194,7 @@ function onClose() {
         <template #default="{ canSubmit, isSubmitting }">
           <Button
             type="submit"
-            form="label-form"
+            :form="formId"
             :disabled="!canSubmit || isSubmitting || isPending"
             :label="isSubmitting || isPending ? '保存中…' : label ? '変更を保存' : 'ラベルを作成'"
           />

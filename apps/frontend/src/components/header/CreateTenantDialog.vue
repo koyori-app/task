@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
-import { ref, watch } from 'vue';
+import { ref, useId, watch } from 'vue';
 import { Button, Dialog, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import { useTenantStore } from '@/stores/tenant';
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ 'update:open': [open: boolean] }>();
+// 閉じた Dialog も DOM に残るため、送信ボタンを結ぶ form の id はインスタンスごとに分ける
+const formId = useId();
 const store = useTenantStore();
 const submitError = ref<string | null>(null);
 const displayIdEdited = ref(false);
@@ -71,7 +73,7 @@ watch(
       description="新しいワークスペースの名前と表示IDを入力してください。"
       :on-close="() => emit('update:open', false)"
     >
-      <form id="create-tenant-form" class="space-y-4" @submit.prevent="form.handleSubmit">
+      <form :id="formId" class="space-y-4" @submit.prevent="form.handleSubmit">
         <div class="flex flex-col gap-6">
           <form.Field name="name">
             <template #default="{ field }">
@@ -154,7 +156,7 @@ watch(
           <template #default="{ canSubmit, isSubmitting }">
             <Button
               type="submit"
-              form="create-tenant-form"
+              :form="formId"
               :disabled="!canSubmit || isSubmitting"
               :label="isSubmitting ? '作成中…' : '作成'"
             />

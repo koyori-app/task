@@ -3,7 +3,7 @@ import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
-import { computed, ref } from 'vue';
+import { computed, ref, useId } from 'vue';
 import { Button, Dialog, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import { Label } from '@/components/ui/label';
 import {
@@ -33,6 +33,8 @@ const props = defineProps<{
   tenantId: string;
   projectId: string;
 }>();
+// 閉じた Dialog も DOM に残るため、送信ボタンを結ぶ form の id はインスタンスごとに分ける
+const formId = useId();
 
 const queryClient = useQueryClient();
 
@@ -262,7 +264,7 @@ async function confirmDelete() {
       "
       :on-close="onFormClose"
     >
-      <form id="custom-field-form" class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
+      <form :id="formId" class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
         <form.Field name="name">
           <template #default="{ field }">
             <Field
@@ -334,7 +336,7 @@ async function confirmDelete() {
           <template #default="{ canSubmit, isSubmitting }">
             <Button
               type="submit"
-              form="custom-field-form"
+              :form="formId"
               :disabled="!canSubmit || isSubmitting || isSaving"
               :label="submitLabel"
             />

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import { h } from 'vue';
 import { apiClient } from '@/lib/api';
 import CreateTenantDialog from '../CreateTenantDialog.vue';
 
@@ -181,6 +182,38 @@ describe('CreateTenantDialog', () => {
     expect(document.querySelector('[role="alert"]')?.textContent).toContain(
       'この表示IDはすでに使用されています',
     );
+  });
+
+  it('submits its own form when another instance precedes it in the document', async () => {
+    vi.mocked(apiClient.POST).mockResolvedValue({
+      data: createdTenant,
+      response: new Response(null, { status: 201 }),
+    });
+    vi.spyOn(window.location, 'assign').mockImplementation(() => undefined);
+    // テナント未所属のホームでは、ヘッダーの閉じたダイアログが本文のダイアログより先に DOM にある。
+    // useId はアプリごとに数えるので、実際の画面と同じく 1 つのアプリに並べる
+    mount(
+      {
+        render: () => [
+          h(CreateTenantDialog, { open: false }),
+          h(CreateTenantDialog, { open: true }),
+        ],
+      },
+      { attachTo: document.body },
+    );
+    await flushPromises();
+
+    const dialog = document.querySelectorAll('dialog')[1];
+    const name = dialog.querySelector<HTMLInputElement>('#name')!;
+    name.value = 'New Tenant';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    await flushPromises();
+
+    expect(apiClient.POST).toHaveBeenCalledWith('/v1/tenants', {
+      body: expect.objectContaining({ name: 'New Tenant', display_id: 'new-tenant' }),
+    });
   });
 
   it('auto-generates a slug until the display id is manually edited', async () => {

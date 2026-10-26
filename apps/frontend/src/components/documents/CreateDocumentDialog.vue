@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useQueryClient } from '@tanstack/vue-query';
-import { ref, watch } from 'vue';
+import { ref, useId, watch } from 'vue';
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import { Button, Dialog, Field, Input, Spinner } from '@koyori-app/ui-vue';
@@ -31,6 +31,8 @@ const emit = defineEmits<{
   'update:open': [value: boolean];
   created: [file: DriveFile];
 }>();
+// 閉じた Dialog も DOM に残るため、送信ボタンを結ぶ form の id はインスタンスごとに分ける
+const formId = useId();
 
 const queryClient = useQueryClient();
 const title = ref('');
@@ -110,7 +112,7 @@ async function submit() {
       description="種類は本文のテンプレートを選ぶだけで、保存はされません"
       :on-close="onClose"
     >
-      <HydrationSafeForm id="create-document-form" class="flex flex-col gap-4" @submit="submit">
+      <HydrationSafeForm :id="formId" class="flex flex-col gap-4" @submit="submit">
         <!-- 文字数の上限は送信時に検証する -->
         <Field id="document-title" label="タイトル" required>
           <Input
@@ -147,7 +149,7 @@ async function submit() {
         />
         <Button
           type="submit"
-          form="create-document-form"
+          :form="formId"
           :disabled="pending || !isHydrated"
           :label="pending ? '作成中…' : '作成'"
         >

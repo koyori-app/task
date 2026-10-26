@@ -3,7 +3,7 @@ import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhCopy } from '@phosphor-icons/vue';
-import { computed, ref } from 'vue';
+import { computed, ref, useId } from 'vue';
 import { Button, Dialog, Field, Input } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -46,6 +46,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ close: [] }>();
+// 閉じた Dialog も DOM に残るため、送信ボタンを結ぶ form の id はインスタンスごとに分ける
+const formId = useId();
 
 const queryClient = useQueryClient();
 const submitError = ref<string | null>(null);
@@ -183,12 +185,7 @@ function onClose() {
         <p v-if="copyError" role="alert" class="text-sm text-destructive">{{ copyError }}</p>
       </div>
 
-      <form
-        v-else
-        id="webhook-form"
-        class="flex flex-col gap-4"
-        @submit.prevent="form.handleSubmit"
-      >
+      <form v-else :id="formId" class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
         <form.Field name="url">
           <template #default="{ field }">
             <Field
@@ -312,7 +309,7 @@ function onClose() {
             <template #default="{ canSubmit, isSubmitting }">
               <Button
                 type="submit"
-                form="webhook-form"
+                :form="formId"
                 :disabled="!canSubmit || isSubmitting || isPending"
                 :label="
                   isSubmitting || isPending ? '保存中…' : webhook ? '変更を保存' : 'Webhook を追加'

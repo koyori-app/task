@@ -3,7 +3,7 @@ import { useForm } from '@tanstack/vue-form';
 import { useQueryClient } from '@tanstack/vue-query';
 import { OpenApiVueQueryError } from '@koyori-app/openapi-vue-query';
 import { type } from 'arktype';
-import { ref } from 'vue';
+import { ref, useId } from 'vue';
 
 import { Button, Dialog, Field, Input } from '@koyori-app/ui-vue';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -28,6 +28,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ close: [] }>();
+// 閉じた Dialog も DOM に残るため、送信ボタンを結ぶ form の id はインスタンスごとに分ける
+const formId = useId();
 
 const queryClient = useQueryClient();
 const submitError = ref<string | null>(null);
@@ -82,7 +84,7 @@ function onClose() {
     "
     :on-close="onClose"
   >
-    <form id="forge-pr-link-form" class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
+    <form :id="formId" class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
       <form.Field name="number">
         <template #default="{ field }">
           <Field
@@ -129,7 +131,7 @@ function onClose() {
         <template #default="{ canSubmit, isSubmitting }">
           <Button
             type="submit"
-            form="forge-pr-link-form"
+            :form="formId"
             :disabled="!canSubmit || isSubmitting || linkMutation.isPending.value"
             :label="isSubmitting || linkMutation.isPending.value ? 'リンク中…' : 'リンクする'"
           />
