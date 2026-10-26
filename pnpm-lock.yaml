@@ -93,8 +93,8 @@ importers:
         specifier: 'catalog:'
         version: 3.13.38(vue@3.5.43(typescript@6.0.3))
       '@unhead/vue':
-        specifier: 3.3.1
-        version: 3.3.1(@oxc-project/types@0.153.0)(@vitejs/devtools-kit@0.4.12(@modelcontextprotocol/client@2.1.0)(@modelcontextprotocol/server@2.1.0)(@voidzero-dev/vite-plus-core@0.3.3)(cac@7.0.0)(srvx@1.0.5))(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(lightningcss@1.33.0)(oxc-parser@0.104.0(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3))(rolldown@1.2.13)(vue@3.5.43(typescript@6.0.3))
+        specifier: 3.4.3
+        version: 3.4.3(@oxc-project/types@0.153.0)(@vitejs/devtools-kit@0.7.6(@devframes/agentic@1.1.0)(@voidzero-dev/vite-plus-core@0.3.3)(cac@7.0.0)(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5))(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(lightningcss@1.33.0)(oxc-parser@0.104.0(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3))(rolldown@1.2.13)(vue@3.5.43(typescript@6.0.3))
       '@universal-middleware/core':
         specifier: 0.4.18
         version: 0.4.18(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@0.12.8)
@@ -3202,16 +3202,16 @@ packages:
   '@ungap/structured-clone@1.4.0':
     resolution: {integrity: sha512-1mEZtMKPM09vDmQt5y7YvmN2+DFTP7Tg0EWXdic8/C6VRnpb33e4ghisCIE3WZjsE2N8mf+QV1Zqh7ZFYLWInQ==}
 
-  '@unhead/bundler@3.3.1':
-    resolution: {integrity: sha512-F9gEgqpUKqHFzOv+7Pgm3TbmXhUdLX+WjZiPAK/huLDzblzZmvAUE9vRDymWaOST7jqGT/tPKkwl2kqbgb3nPw==}
+  '@unhead/bundler@3.4.3':
+    resolution: {integrity: sha512-noUTzazRB4fMgO/nluoirrZJXngNbNb3sQzIslA805tKkwakRv2fib4Xe4EdiTuNB7V5XmpUFvfQkKRdBQ9qAA==}
     peerDependencies:
-      '@unhead/cli': ^3.3.1
-      '@vitejs/devtools-kit': ^0.4.1
+      '@unhead/cli': ^3.4.3
+      '@vitejs/devtools-kit': ^0.7.6
       esbuild: '>=0.17.0'
       lightningcss: '>=1.20.0'
       oxc-parser: '>=0.98.0'
       rolldown: '>=1.0.0'
-      unhead: ^3.3.1
+      unhead: ^3.4.3
       vite: '>=6.4.2'
       webpack: '>=5.0.0'
     peerDependenciesMeta:
@@ -3232,8 +3232,8 @@ packages:
       webpack:
         optional: true
 
-  '@unhead/vue@3.3.1':
-    resolution: {integrity: sha512-iS+eiE1NehbV/eF7wzR7UUuUVTv8fIphFOCekQvEMuPqfKPCB8f3wf7sgPgUngYX6mdgM6PmkGmaOQgTBxqwbw==}
+  '@unhead/vue@3.4.3':
+    resolution: {integrity: sha512-Wrmk62oC/V1EcBSKRDuy77kVaBtBXXsj6b+vEEWvmfo9AQfpLlc2b6vvvSj9WnXr8VY1ksKHj49Ejo8J/wLSOA==}
     peerDependencies:
       vite: '>=6.4.2'
       vue: '>=3.5.18'
@@ -7181,8 +7181,8 @@ packages:
     resolution: {integrity: sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==}
     engines: {node: '>=22.19.0'}
 
-  unhead@3.3.1:
-    resolution: {integrity: sha512-eqHlbLyuvIXw898WopQmosTml4PdYW5ZhXDom/sf7ysAqQB9uvYrw2/dNvbrmkJTufSkmNmgGCjoQcvoT2mS/A==}
+  unhead@3.4.3:
+    resolution: {integrity: sha512-0FZI/qCCyIey14CKlGMFpiQumWSatlthJy7Xvro7H3nmi/V2owkcCXG03k0GXDc2/TV1K6bvrbAwhzTRe5Nhdw==}
     peerDependencies:
       vite: '>=6.4.2'
     peerDependenciesMeta:
@@ -10345,14 +10345,14 @@ snapshots:
 
   '@ungap/structured-clone@1.4.0': {}
 
-  '@unhead/bundler@3.3.1(@oxc-project/types@0.153.0)(@vitejs/devtools-kit@0.4.12(@modelcontextprotocol/client@2.1.0)(@modelcontextprotocol/server@2.1.0)(@voidzero-dev/vite-plus-core@0.3.3)(cac@7.0.0)(srvx@1.0.5))(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(lightningcss@1.33.0)(oxc-parser@0.104.0(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3))(rolldown@1.2.13)(unhead@3.3.1(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(rolldown@1.2.13))':
+  '@unhead/bundler@3.4.3(@oxc-project/types@0.153.0)(@vitejs/devtools-kit@0.7.6(@devframes/agentic@1.1.0)(@voidzero-dev/vite-plus-core@0.3.3)(cac@7.0.0)(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5))(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(lightningcss@1.33.0)(oxc-parser@0.104.0(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3))(rolldown@1.2.13)(unhead@3.4.3(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(rolldown@1.2.13))':
     dependencies:
       magic-string: 1.3.1
       oxc-walker: 1.1.1(@oxc-project/types@0.153.0)(oxc-parser@0.104.0(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3))(rolldown@1.2.13)
-      unhead: 3.3.1(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(rolldown@1.2.13)
+      unhead: 3.4.3(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(rolldown@1.2.13)
       unplugin: 3.3.0(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(rolldown@1.2.13)
     optionalDependencies:
-      '@vitejs/devtools-kit': 0.4.12(@modelcontextprotocol/client@2.1.0)(@modelcontextprotocol/server@2.1.0)(@voidzero-dev/vite-plus-core@0.3.3)(cac@7.0.0)(srvx@1.0.5)
+      '@vitejs/devtools-kit': 0.7.6(@devframes/agentic@1.1.0)(@voidzero-dev/vite-plus-core@0.3.3)(cac@7.0.0)(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5)
       esbuild: 0.28.2
       lightningcss: 1.33.0
       oxc-parser: 0.104.0(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)
@@ -10366,11 +10366,11 @@ snapshots:
       - rollup
       - unloader
 
-  '@unhead/vue@3.3.1(@oxc-project/types@0.153.0)(@vitejs/devtools-kit@0.4.12(@modelcontextprotocol/client@2.1.0)(@modelcontextprotocol/server@2.1.0)(@voidzero-dev/vite-plus-core@0.3.3)(cac@7.0.0)(srvx@1.0.5))(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(lightningcss@1.33.0)(oxc-parser@0.104.0(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3))(rolldown@1.2.13)(vue@3.5.43(typescript@6.0.3))':
+  '@unhead/vue@3.4.3(@oxc-project/types@0.153.0)(@vitejs/devtools-kit@0.7.6(@devframes/agentic@1.1.0)(@voidzero-dev/vite-plus-core@0.3.3)(cac@7.0.0)(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5))(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(lightningcss@1.33.0)(oxc-parser@0.104.0(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3))(rolldown@1.2.13)(vue@3.5.43(typescript@6.0.3))':
     dependencies:
-      '@unhead/bundler': 3.3.1(@oxc-project/types@0.153.0)(@vitejs/devtools-kit@0.4.12(@modelcontextprotocol/client@2.1.0)(@modelcontextprotocol/server@2.1.0)(@voidzero-dev/vite-plus-core@0.3.3)(cac@7.0.0)(srvx@1.0.5))(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(lightningcss@1.33.0)(oxc-parser@0.104.0(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3))(rolldown@1.2.13)(unhead@3.3.1(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(rolldown@1.2.13))
+      '@unhead/bundler': 3.4.3(@oxc-project/types@0.153.0)(@vitejs/devtools-kit@0.7.6(@devframes/agentic@1.1.0)(@voidzero-dev/vite-plus-core@0.3.3)(cac@7.0.0)(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5))(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(lightningcss@1.33.0)(oxc-parser@0.104.0(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3))(rolldown@1.2.13)(unhead@3.4.3(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(rolldown@1.2.13))
       hookable: 6.1.1
-      unhead: 3.3.1(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(rolldown@1.2.13)
+      unhead: 3.4.3(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(rolldown@1.2.13)
       unplugin: 3.3.0(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(rolldown@1.2.13)
       vue: 3.5.43(typescript@6.0.3)
     optionalDependencies:
@@ -14798,7 +14798,7 @@ snapshots:
 
   undici@8.10.2: {}
 
-  unhead@3.3.1(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(rolldown@1.2.13):
+  unhead@3.4.3(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(rolldown@1.2.13):
     dependencies:
       hookable: 6.1.1
       unplugin: 3.3.0(@voidzero-dev/vite-plus-core@0.3.3)(esbuild@0.28.2)(rolldown@1.2.13)
