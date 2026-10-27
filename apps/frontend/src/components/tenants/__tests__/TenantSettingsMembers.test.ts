@@ -97,12 +97,6 @@ function mountMembers(
         SelectContent: PassThrough,
         SelectItem: PassThrough,
         SelectTrigger: PassThrough,
-        Dialog: PassThrough,
-        DialogContent: PassThrough,
-        DialogDescription: PassThrough,
-        DialogFooter: PassThrough,
-        DialogHeader: PassThrough,
-        DialogTitle: PassThrough,
       },
     },
   });
@@ -248,6 +242,7 @@ describe('TenantSettingsMembers', () => {
     expect(wrapper.text()).toContain('開発部 · 基盤');
 
     await wrapper.get('button[aria-label="memberの所属を編集"]').trigger('click');
+    expect(wrapper.get('dialog').attributes('open')).toBeDefined();
     expect((wrapper.get('#org-profile-department').element as HTMLInputElement).value).toBe(
       '開発部',
     );
@@ -261,7 +256,7 @@ describe('TenantSettingsMembers', () => {
       params: { path: { tenant_id: TENANT_ID, user_id: MEMBER_ID } },
       body: { department: '開発部', position: '課長', team: '' },
     });
-    expect(wrapper.find('#org-profile-department').exists(), '保存後は閉じる').toBe(false);
+    expect(wrapper.get('dialog').attributes('open'), '保存後は閉じる').toBeUndefined();
   });
 
   it('所属の編集ボタンは管理者にだけ出し、オーナー行には出さない', () => {

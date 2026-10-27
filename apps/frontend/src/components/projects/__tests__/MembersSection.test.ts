@@ -247,11 +247,10 @@ describe('MembersSection', () => {
       .querySelector<HTMLButtonElement>('button[aria-label="メンバー「alice」を削除"]')
       ?.click();
     await flushPromises();
-    expect(document.body.textContent).toContain('以後この設定画面は開けなくなります');
-
-    // 警告を足すときに要素を並べない（DialogDescription が指せる要素は 1 つだけ）。
-    // 文言と違って画面上の見た目が変わらないので、数で固定する
-    expect(document.body.querySelectorAll('[data-slot="dialog-description"]')).toHaveLength(1);
+    // 警告は説明（aria-describedby が指す要素）に入れる。本文に並べると開いたときに読み上げられない
+    const dialog = document.body.querySelector('dialog[open]')!;
+    const description = document.getElementById(dialog.getAttribute('aria-describedby') ?? '');
+    expect(description?.textContent).toContain('以後この設定画面は開けなくなります');
 
     // 他人を外すときは出さない
     clickBodyButton('キャンセル');

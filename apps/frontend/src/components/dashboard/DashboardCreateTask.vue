@@ -9,14 +9,7 @@ import {
   projectLabelsQueryOptions,
 } from '@/lib/api-vue-query';
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
-import { Button } from '@koyori-app/ui-vue';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Button, Dialog } from '@koyori-app/ui-vue';
 
 const props = defineProps<{
   open: boolean;
@@ -77,12 +70,13 @@ function close() {
 </script>
 
 <template>
-  <Dialog :open="open && !editing" @update:open="close">
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>タスクを作成</DialogTitle>
-        <DialogDescription>タスクを追加するプロジェクトを選んでください。</DialogDescription>
-      </DialogHeader>
+  <Dialog
+    :open="open && !editing"
+    title="タスクを作成"
+    description="タスクを追加するプロジェクトを選んでください。"
+    :on-close="close"
+  >
+    <div class="grid gap-4">
       <label class="grid gap-2 text-sm">
         プロジェクト
         <select v-model="selectedId" class="h-10 rounded-md border bg-background px-3">
@@ -99,12 +93,14 @@ function close() {
       >
         このプロジェクトにはステータスがありません。プロジェクト設定で追加してください。
       </p>
+    </div>
+    <template #actions>
       <Button
         :disabled="!project || !statuses.isSuccess.value || !statuses.data.value?.length"
         :label="statuses.isLoading.value ? '読み込み中…' : '次へ'"
         @click="editing = true"
       />
-    </DialogContent>
+    </template>
   </Dialog>
   <CreateTaskDialog
     v-if="project && editing"

@@ -2,15 +2,7 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhDesktop } from '@phosphor-icons/vue';
 import { ref } from 'vue';
-import { Button } from '@koyori-app/ui-vue';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Button, Dialog } from '@koyori-app/ui-vue';
 import { Skeleton } from '@/components/ui/skeleton';
 import { devicesQueryOptions, useDevicesQuery, useRevokeDeviceMutation } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
@@ -25,8 +17,8 @@ const revokeDevice = useRevokeDeviceMutation();
 const revokeTarget = ref<Device | null>(null);
 const revokeError = ref<string | null>(null);
 
-function onRevokeOpenChange(open: boolean) {
-  if (!open && !revokeDevice.isPending.value) revokeTarget.value = null;
+function onRevokeClose() {
+  if (!revokeDevice.isPending.value) revokeTarget.value = null;
 }
 
 async function onRevokeConfirm() {
@@ -91,33 +83,33 @@ async function onRevokeConfirm() {
       </li>
     </ul>
 
-    <Dialog v-if="revokeTarget" :open="true" @update:open="onRevokeOpenChange">
-      <DialogContent class="max-w-md" :show-close-button="false">
-        <DialogHeader>
-          <DialogTitle>端末を失効しますか？</DialogTitle>
-          <DialogDescription>
-            「{{ revokeTarget.name }}」を失効します。この端末の Koyori Desktop
-            はすぐにサインアウトされ、使うにはもう一度承認が必要です。
-          </DialogDescription>
-        </DialogHeader>
-        <p v-if="revokeError" class="text-destructive text-sm">{{ revokeError }}</p>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="tertiary"
-            :disabled="revokeDevice.isPending.value"
-            label="キャンセル"
-            @click="revokeTarget = null"
-          />
-          <Button
-            type="button"
-            variant="danger"
-            :disabled="revokeDevice.isPending.value"
-            :label="revokeDevice.isPending.value ? '失効中…' : '失効する'"
-            @click="onRevokeConfirm"
-          />
-        </DialogFooter>
-      </DialogContent>
+    <Dialog
+      :open="revokeTarget !== null"
+      title="端末を失効しますか？"
+      :description="
+        revokeTarget
+          ? `「${revokeTarget.name}」を失効します。この端末の Koyori Desktop はすぐにサインアウトされ、使うにはもう一度承認が必要です。`
+          : ''
+      "
+      :on-close="onRevokeClose"
+    >
+      <p v-if="revokeError" class="text-destructive text-sm">{{ revokeError }}</p>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="revokeDevice.isPending.value"
+          label="キャンセル"
+          @click="revokeTarget = null"
+        />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="revokeDevice.isPending.value"
+          :label="revokeDevice.isPending.value ? '失効中…' : '失効する'"
+          @click="onRevokeConfirm"
+        />
+      </template>
     </Dialog>
   </div>
 </template>

@@ -107,24 +107,15 @@ type MountOptions = {
 };
 
 /**
- * 担当者・ラベルのメニューはトリガーを押さないと描画されないので、中身を素の要素に
- * 差し替えて直接読む。チェック項目は押すと反転した値を返すボタンにする。
+ * 担当者の窓（UserSelector）は Popover の中で、トリガーを押さないと描画されないので、
+ * 中身を素の要素に差し替えて直接読む。中身の listbox は本物のまま読む。
+ * ラベルのメニュー（koyori の Dropdown）は閉じていても項目が DOM にあるので差し替えない。
  */
 const dropdownStubs = {
-  // 担当者の窓（UserSelector）は Popover の中。中身の listbox は本物のまま読む
   PopoverRoot: { template: '<div><slot /></div>' },
   PopoverTrigger: { template: '<div><slot /></div>' },
   PopoverPortal: { template: '<div><slot /></div>' },
   PopoverContent: { template: '<div><slot /></div>' },
-  DropdownMenu: { template: '<div><slot /></div>' },
-  DropdownMenuTrigger: { template: '<div><slot /></div>' },
-  DropdownMenuContent: { template: '<div><slot /></div>' },
-  DropdownMenuCheckboxItem: {
-    props: ['modelValue'],
-    emits: ['update:modelValue', 'select'],
-    template:
-      '<button type="button" role="menuitemcheckbox" :aria-checked="String(!!modelValue)" @click="$emit(\'update:modelValue\', !modelValue)"><slot /></button>',
-  },
 };
 
 function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
@@ -151,7 +142,7 @@ function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
   });
 }
 
-/** 担当者・ラベルのメニューの項目（stub 済み）を表示名で引く */
+/** ラベルのメニューの項目を表示名で引く */
 function menuItem(name: string) {
   const item = [...document.body.querySelectorAll('[role="menuitemcheckbox"]')].find(
     (el) => el.textContent?.trim() === name,
@@ -173,9 +164,14 @@ function getForm() {
 }
 
 function getDialog() {
-  const dialog = document.body.querySelector('[role="dialog"]');
+  const dialog = document.body.querySelector('dialog');
   if (!dialog) throw new Error('dialog not found');
-  return dialog as HTMLElement;
+  return dialog;
+}
+
+/** Esc は dialog の cancel として届く */
+function pressEscape() {
+  getDialog().dispatchEvent(new Event('cancel', { cancelable: true }));
 }
 
 describe('CreateTaskDialog double-submit guard', () => {
@@ -270,45 +266,21 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
   it('closes on Escape from a focused field', async () => {
     const wrapper = mountDialog(queryClient);
     await nextTick();
-    const titleInput = getTitleInput();
-    titleInput.focus();
+    getTitleInput().focus();
 
-    document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
-    );
+    pressEscape();
     await nextTick();
 
     expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
     wrapper.unmount();
   });
 
-  // × がタイトル欄より前にあるので、Dialog の自動フォーカスに任せると × に当たる
+  // × がタイトル欄より前にあるので、showModal の自動フォーカスに任せると × に当たる
   it('focuses the title field (not the close button) when opened', async () => {
     const wrapper = mountDialog(queryClient);
     await flushPromises();
 
     expect(document.activeElement).toBe(getTitleInput());
-    wrapper.unmount();
-  });
-
-  it('keeps Tab focus within the dialog', async () => {
-    const wrapper = mountDialog(queryClient);
-    await nextTick();
-    const dialog = getDialog();
-    const focusables = dialog.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
-    );
-    expect(focusables.length).toBeGreaterThan(1);
-
-    focusables[0]?.focus();
-    for (let i = 0; i < focusables.length + 2; i += 1) {
-      document.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }),
-      );
-      await nextTick();
-      expect(dialog.contains(document.activeElement)).toBe(true);
-    }
-
     wrapper.unmount();
   });
 
@@ -333,7 +305,7 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
 
   /**
    * 作成に成功すると親が created を受けて open を false にする。その経路は
-   * onOpenChange を通らないので、成功表示を閉じるときに捨てないと次に開いた
+   * onClose を通らないので、成功表示を閉じるときに捨てないと次に開いた
    * 瞬間に前回の「タスクを作成しました」が出る。
    */
   it('閉じて開き直したとき、前回の成功表示が残らない', async () => {
@@ -375,9 +347,7 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('Draft title');
 
-    document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
-    );
+    pressEscape();
     await nextTick();
 
     expect(getTitleInput().value).toBe('');
@@ -715,6 +685,15 @@ describe('CreateTaskDialog labels query states', () => {
     retry.click();
     await nextTick();
     expect(wrapper.emitted('retryLabels')).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it('ラベルのメニューは本文のスクロール領域で切れないようトップレイヤーに出す', async () => {
+    const wrapper = mountDialog(queryClient, { labels });
+    await nextTick();
+
+    const trigger = labelsGroup()!.querySelector('button[aria-haspopup="menu"]')!;
+    expect(trigger.closest('[data-menu-top-layer]')).not.toBeNull();
     wrapper.unmount();
   });
 

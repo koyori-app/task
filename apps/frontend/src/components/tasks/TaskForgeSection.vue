@@ -6,21 +6,7 @@ import { computed, ref } from 'vue';
 import TaskForgeMergeEffectsBadge from '@/components/tasks/TaskForgeMergeEffectsBadge.vue';
 import TaskForgePullRequestLinkDialog from '@/components/tasks/TaskForgePullRequestLinkDialog.vue';
 import TaskIssueSourceRow from '@/components/tasks/TaskIssueSourceRow.vue';
-import { Button } from '@koyori-app/ui-vue';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Button, Dialog, Dropdown, type DropdownItem } from '@koyori-app/ui-vue';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import type { components } from '@/generated/api';
 import { apiClient, fetchClient } from '@/lib/api-vue-query';
@@ -80,10 +66,13 @@ const queryClient = useQueryClient();
 const unlinkMutation = apiClient.useMutation('delete', UNLINK_PATH);
 const unlinkTarget = ref<PullRequest | null>(null);
 const unlinkError = ref<string | null>(null);
+const PR_ACTION_ITEMS: DropdownItem[] = [
+  { value: 'unlink', label: 'リンクを外す', destructive: true },
+];
 
-function onUnlinkOpenChange(open: boolean) {
-  if (!open && unlinkMutation.isPending.value) return;
-  if (!open) unlinkTarget.value = null;
+function onUnlinkClose() {
+  if (unlinkMutation.isPending.value) return;
+  unlinkTarget.value = null;
 }
 
 async function confirmUnlink() {
@@ -220,24 +209,20 @@ const SOURCE_LABELS: Record<string, string> = {
               data-forge-unresolved
               >{{ pr.unresolved ? `${pr.unresolved} 件が未解決` : '未解決なし' }}</a
             >
-            <DropdownMenu>
-              <DropdownMenuTrigger as-child>
-                <Button type="button" variant="ghost" :ariaLabel="`#${pr.number} の操作`">
-                  <template #icon><MoreHorizontal class="size-4" aria-hidden="true" /></template>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  variant="destructive"
-                  @select="
-                    unlinkError = null;
-                    unlinkTarget = pr;
-                  "
-                >
-                  リンクを外す
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Dropdown
+              top-layer
+              variant="ghost"
+              :ariaLabel="`#${pr.number} の操作`"
+              :items="PR_ACTION_ITEMS"
+              :on-select="
+                () => {
+                  unlinkError = null;
+                  unlinkTarget = pr;
+                }
+              "
+            >
+              <template #icon><MoreHorizontal class="size-4" aria-hidden="true" /></template>
+            </Dropdown>
           </li>
         </ul>
       </div>
@@ -290,34 +275,33 @@ const SOURCE_LABELS: Record<string, string> = {
       :repo-full-name="repoFullName"
       @close="isLinkOpen = false"
     />
-    <Dialog v-if="unlinkTarget" :open="true" @update:open="onUnlinkOpenChange">
-      <DialogContent class="max-w-md" :show-close-button="false">
-        <DialogHeader>
-          <DialogTitle>PR のリンクを外しますか？</DialogTitle>
-          <DialogDescription>
-            #{{ unlinkTarget.number }} とこのタスクのリンクをすべて外します。PR
-            のタイトル・本文にタスクの ID が残っていると、次に PR
-            が更新されたときに再びリンクされます。
-          </DialogDescription>
-        </DialogHeader>
-        <p v-if="unlinkError" role="alert" class="text-sm text-destructive">{{ unlinkError }}</p>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="tertiary"
-            :disabled="unlinkMutation.isPending.value"
-            label="キャンセル"
-            @click="unlinkTarget = null"
-          />
-          <Button
-            type="button"
-            variant="danger"
-            :disabled="unlinkMutation.isPending.value"
-            :label="unlinkMutation.isPending.value ? '外しています…' : 'リンクを外す'"
-            @click="confirmUnlink"
-          />
-        </DialogFooter>
-      </DialogContent>
+    <Dialog
+      :open="unlinkTarget !== null"
+      title="PR のリンクを外しますか？"
+      :description="
+        unlinkTarget
+          ? `#${unlinkTarget.number} とこのタスクのリンクをすべて外します。PR のタイトル・本文にタスクの ID が残っていると、次に PR が更新されたときに再びリンクされます。`
+          : ''
+      "
+      :on-close="onUnlinkClose"
+    >
+      <p v-if="unlinkError" role="alert" class="text-sm text-destructive">{{ unlinkError }}</p>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="unlinkMutation.isPending.value"
+          label="キャンセル"
+          @click="unlinkTarget = null"
+        />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="unlinkMutation.isPending.value"
+          :label="unlinkMutation.isPending.value ? '外しています…' : 'リンクを外す'"
+          @click="confirmUnlink"
+        />
+      </template>
     </Dialog>
   </section>
 </template>

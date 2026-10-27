@@ -1317,6 +1317,9 @@ export const ListViewOverlaySubtaskBack: Story = {
     const canvas = within(canvasElement);
     const user = userEvent.setup();
     // 開くタスクが変わるとオーバーレイは作り直されるので、毎回 dialog を引き直す
+    // Esc は dialog の cancel として届く。user-event の keydown は合成なので、ブラウザは cancel を起こさない
+    const pressEscape = () =>
+      screen.getByRole('dialog').dispatchEvent(new Event('cancel', { cancelable: true }));
     const expectOverlayHeading = (name: string) =>
       waitFor(() =>
         expect(
@@ -1330,11 +1333,11 @@ export const ListViewOverlaySubtaskBack: Story = {
     await expectOverlayHeading('PKCE の検証を追加する');
 
     // 子で Esc → 閉じずに親へ戻る
-    await user.keyboard('{Escape}');
+    pressEscape();
     await expectOverlayHeading('OAuth 対応を実装する');
 
-    // 親で Esc → 閉じる（退場アニメーションの後に外れる）
-    await user.keyboard('{Escape}');
+    // 親で Esc → 閉じる
+    pressEscape();
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   },
 };
@@ -1476,6 +1479,10 @@ export const ColumnVisibility: Story = {
       expect(canvas.queryByRole('button', { name: '優先度' })).not.toBeInTheDocument(),
     );
     await expect(canvas.findByRole('button', { name: /タイトル/ })).resolves.toBeInTheDocument();
+    // checkbox なのでメニューは開いたまま。続けて別の列も切り替えられる
+    await expect(menu.getByRole('menu', { name: '列' })).toBeVisible();
+    await expect(priorityItem).toHaveAttribute('aria-checked', 'false');
+    await expect(priorityItem).toHaveFocus();
   },
 };
 

@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui';
 
 import UserSelectorList from '@/components/users/UserSelectorList.vue';
+import { useDialogPortalTarget } from '@/composables/useDialogPortalTarget';
 import type { SelectableUser, UserSelectorState } from '@/components/users/types';
 import { cn } from '@/lib/utils';
 import { orderUsersForPicker } from '@/lib/user-search';
@@ -40,6 +41,7 @@ const emit = defineEmits<{
 }>();
 
 const open = ref(false);
+const portalTarget = useDialogPortalTarget();
 
 // 並べに使う「選んだ者」は、開いた時に凍らせる。開いている間に付け外ししても並びは
 // 動かさず、候補が届いた時（取得の後）だけ並べ直す。閉じている間は今の選択に従う。
@@ -100,7 +102,7 @@ function onUpdate(ids: string[]) {
     <PopoverTrigger as-child :disabled="disabled">
       <slot name="trigger" :selected-users="selectedUsers" :open="open" />
     </PopoverTrigger>
-    <PopoverPortal>
+    <PopoverPortal :to="portalTarget">
       <PopoverContent
         :align="align"
         :side-offset="4"

@@ -1,27 +1,12 @@
 <script setup lang="ts">
-import {
-  PhBuildings,
-  PhCaretDown,
-  PhCheck,
-  PhGear,
-  PhPlus,
-  PhUsers,
-  PhWarningCircle,
-} from '@phosphor-icons/vue';
+import { PhBuildings } from '@phosphor-icons/vue';
 import { useQuery } from '@tanstack/vue-query';
+import { navigate } from 'vike/client/router';
 import { computed, ref } from 'vue';
 
 import CreateTenantDialog from './CreateTenantDialog.vue';
 import type { Tenant } from '@/stores/tenant';
-import { Button } from '@koyori-app/ui-vue';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Dropdown, type DropdownItem, type DropdownSection } from '@koyori-app/ui-vue';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
 import { useAuthStore } from '@/stores/auth';
 
@@ -104,16 +89,64 @@ const settingsHref = computed(() =>
 const membersHref = computed(() =>
   activeTenant.value ? `/${activeTenant.value.display_id}/settings/members` : '',
 );
+
+const TENANT_PREFIX = 'tenant:';
+
+const sections = computed<DropdownSection[]>(() => {
+  const result: DropdownSection[] = [];
+  // 今どのテナントに居るか。切り替えの前に、開いた人の現在地を出す
+  if (activeTenant.value) {
+    const items: DropdownItem[] = [];
+    if (canManageGeneral.value) items.push({ value: 'settings', label: 'テナント設定' });
+    if (canSeeMembers.value) items.push({ value: 'members', label: 'メンバー' });
+    result.push({
+      heading: memberSummary.value
+        ? `${activeTenant.value.name}（${memberSummary.value}）`
+        : activeTenant.value.name,
+      items,
+    });
+  }
+
+  const switchItems: DropdownItem[] = [];
+  if (props.error) switchItems.push({ value: 'retry', label: `${props.error}（再試行）` });
+  else if (!props.loading && props.tenants.length === 0) {
+    switchItems.push({ value: 'empty', label: '所属テナントがありません', disabled: true });
+  }
+  for (const tenant of props.tenants) {
+    switchItems.push({
+      value: `${TENANT_PREFIX}${tenant.id}`,
+      label: tenant.name,
+      kind: 'radio',
+      checked: tenant.id === props.selectedTenantId,
+    });
+  }
+  result.push({ heading: 'テナントを切り替え', items: switchItems });
+  result.push({ items: [{ value: 'create', label: 'テナントを作成' }] });
+  return result;
+});
+
+function onSelect(value: string) {
+  if (value === 'settings') void navigate(settingsHref.value);
+  else if (value === 'members') void navigate(membersHref.value);
+  else if (value === 'retry') emit('retry');
+  else if (value === 'create') createDialogOpen.value = true;
+  else if (value.startsWith(TENANT_PREFIX)) {
+    const tenant = props.tenants.find((t) => `${TENANT_PREFIX}${t.id}` === value);
+    if (tenant) emit('select', tenant);
+  }
+}
 </script>
 
 <template>
-  <DropdownMenu>
-    <DropdownMenuTrigger as-child>
-      <button
-        type="button"
-        :disabled="loading"
-        class="flex max-w-65 items-center gap-2 rounded-lg border bg-background py-1.5 pr-2 pl-1.5 text-left text-sm shadow-xs hover:bg-accent disabled:opacity-50 data-[state=open]:bg-accent"
-      >
+  <Dropdown
+    variant="tertiary"
+    :label="triggerLabel"
+    :disabled="loading"
+    :items="sections"
+    :on-select="onSelect"
+  >
+    <template #trigger>
+      <span class="flex max-w-60 items-center gap-2 text-left">
         <span
           class="flex aspect-square size-6 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-secondary"
         >
@@ -129,97 +162,8 @@ const membersHref = computed(() =>
           <PhBuildings v-else class="size-3.5 text-muted-foreground" />
         </span>
         <span class="truncate font-medium">{{ triggerLabel }}</span>
-        <PhCaretDown class="size-3 shrink-0 text-muted-foreground" />
-      </button>
-    </DropdownMenuTrigger>
-
-    <DropdownMenuContent class="w-68 rounded-lg p-1" align="start" side="bottom" :side-offset="4">
-      <!-- 今どのテナントに居るか。切り替えの前に、開いた人の現在地を出す -->
-      <div v-if="activeTenant" class="flex items-center gap-2.5 p-2">
-        <span
-          class="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-secondary"
-        >
-          <img
-            v-if="activeTenant.icon_url"
-            :src="activeTenant.icon_url"
-            alt=""
-            class="size-full object-cover"
-          />
-          <span v-else-if="activeTenant.icon_emoji" class="text-base leading-none">{{
-            activeTenant.icon_emoji
-          }}</span>
-          <PhBuildings v-else class="size-4 text-muted-foreground" />
-        </span>
-        <span class="min-w-0 flex-1 leading-snug">
-          <span class="block truncate text-sm font-medium">{{ activeTenant.name }}</span>
-          <span v-if="memberSummary" class="block text-xs text-muted-foreground">
-            {{ memberSummary }}
-          </span>
-        </span>
-      </div>
-
-      <template v-if="activeTenant">
-        <DropdownMenuSeparator />
-        <DropdownMenuItem v-if="canManageGeneral" as-child class="gap-2">
-          <a :href="settingsHref">
-            <PhGear class="size-4 shrink-0 text-muted-foreground" />
-            <span class="min-w-0 flex-1">テナント設定</span>
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuItem v-if="canSeeMembers" as-child class="gap-2">
-          <a :href="membersHref">
-            <PhUsers class="size-4 shrink-0 text-muted-foreground" />
-            <span class="min-w-0 flex-1">メンバー</span>
-          </a>
-        </DropdownMenuItem>
-      </template>
-
-      <DropdownMenuSeparator />
-      <DropdownMenuLabel class="text-xs font-medium text-muted-foreground">
-        テナントを切り替え
-      </DropdownMenuLabel>
-
-      <DropdownMenuItem v-if="error" class="gap-2 p-2 text-destructive" @click="emit('retry')">
-        <PhWarningCircle class="size-4" />
-        {{ error }}（再試行）
-      </DropdownMenuItem>
-      <DropdownMenuItem v-else-if="!loading && tenants.length === 0" disabled class="p-2">
-        所属テナントがありません
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        v-for="tenant in tenants"
-        :key="tenant.id"
-        class="gap-2"
-        @click="emit('select', tenant)"
-      >
-        <span
-          class="flex size-5.5 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-secondary"
-        >
-          <img
-            v-if="tenant.icon_url"
-            :src="tenant.icon_url"
-            alt=""
-            class="size-full object-cover"
-          />
-          <span v-else-if="tenant.icon_emoji" class="text-xs leading-none">{{
-            tenant.icon_emoji
-          }}</span>
-          <PhBuildings v-else class="size-3 text-muted-foreground" />
-        </span>
-        <span class="min-w-0 flex-1 truncate">{{ tenant.name }}</span>
-        <!-- 今いるテナントに印を付ける。場所は固定して、行ごとにずれないようにする -->
-        <PhCheck
-          class="size-3.5 shrink-0"
-          :class="tenant.id === selectedTenantId ? 'text-foreground' : 'text-transparent'"
-        />
-      </DropdownMenuItem>
-
-      <div class="p-1 pt-1.5">
-        <Button class="w-full" label="テナントを作成" @click="createDialogOpen = true">
-          <template #icon><PhPlus class="size-3.5" /></template>
-        </Button>
-      </div>
-    </DropdownMenuContent>
-  </DropdownMenu>
+      </span>
+    </template>
+  </Dropdown>
   <CreateTenantDialog v-model:open="createDialogOpen" />
 </template>

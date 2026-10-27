@@ -2,15 +2,7 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { computed, ref } from 'vue';
 
-import { Button } from '@koyori-app/ui-vue';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Button, Dialog } from '@koyori-app/ui-vue';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import type { components } from '@/generated/api';
 import { apiClient } from '@/lib/api-vue-query';
@@ -47,10 +39,10 @@ function openDialog() {
   open.value = true;
 }
 
-function onOpenChange(next: boolean) {
+function onClose() {
   // 送信中に閉じると結果を見逃す
-  if (!next && acknowledgeMutation.isPending.value) return;
-  open.value = next;
+  if (acknowledgeMutation.isPending.value) return;
+  open.value = false;
 }
 
 async function acknowledge() {
@@ -87,15 +79,13 @@ async function acknowledge() {
     >
       マージ済み（自動完了は未適用）
     </button>
-    <Dialog v-if="open" :open="true" @update:open="onOpenChange">
-      <DialogContent class="max-w-md">
-        <DialogHeader>
-          <DialogTitle>#{{ pullRequest.number }} の自動完了は未適用です</DialogTitle>
-          <DialogDescription>
-            この PR
-            はマージ済みですが、マージ時のイベントを受け取れていないため、リンク先タスクの自動完了を行っていません。
-          </DialogDescription>
-        </DialogHeader>
+    <Dialog
+      :open="open"
+      :title="`#${pullRequest.number} の自動完了は未適用です`"
+      description="この PR はマージ済みですが、マージ時のイベントを受け取れていないため、リンク先タスクの自動完了を行っていません。"
+      :on-close="onClose"
+    >
+      <div class="grid gap-4">
         <ul class="list-disc space-y-1 pl-5 text-sm">
           <li>完了すべきタスクは、各タスクのステータスを手で変更してください。</li>
           <li>
@@ -108,28 +98,28 @@ async function acknowledge() {
           自動完了を未適用のまま確認済みにしますか？後から元の Webhook が届いても自動完了しません。
         </p>
         <p v-if="error" role="alert" class="text-sm text-destructive">{{ error }}</p>
-        <DialogFooter>
-          <template v-if="confirming">
-            <Button
-              type="button"
-              variant="tertiary"
-              :disabled="acknowledgeMutation.isPending.value"
-              label="キャンセル"
-              @click="confirming = false"
-            />
-            <Button
-              type="button"
-              :disabled="acknowledgeMutation.isPending.value"
-              :label="acknowledgeMutation.isPending.value ? '送信中…' : '確認済みにする'"
-              @click="acknowledge"
-            />
-          </template>
-          <template v-else>
-            <Button type="button" variant="tertiary" label="閉じる" @click="open = false" />
-            <Button type="button" label="確認済みにする…" @click="confirming = true" />
-          </template>
-        </DialogFooter>
-      </DialogContent>
+      </div>
+      <template #actions>
+        <template v-if="confirming">
+          <Button
+            type="button"
+            variant="tertiary"
+            :disabled="acknowledgeMutation.isPending.value"
+            label="キャンセル"
+            @click="confirming = false"
+          />
+          <Button
+            type="button"
+            :disabled="acknowledgeMutation.isPending.value"
+            :label="acknowledgeMutation.isPending.value ? '送信中…' : '確認済みにする'"
+            @click="acknowledge"
+          />
+        </template>
+        <template v-else>
+          <Button type="button" variant="tertiary" label="閉じる" @click="open = false" />
+          <Button type="button" label="確認済みにする…" @click="confirming = true" />
+        </template>
+      </template>
     </Dialog>
   </template>
 </template>

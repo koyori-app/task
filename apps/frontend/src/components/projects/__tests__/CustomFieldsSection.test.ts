@@ -114,7 +114,7 @@ function nameInput() {
 }
 
 function dialogForm() {
-  const el = document.body.querySelector('[role="dialog"] form');
+  const el = document.body.querySelector('dialog[open] form');
   if (!el) throw new Error('dialog form not found');
   return new DOMWrapper(el);
 }
@@ -173,7 +173,7 @@ describe('CustomFieldsSection', () => {
       params: { path: { tenant_id: TENANT_UUID, project_id: PROJECT_UUID } },
       body: { name: '担当チーム', field_type: 'text' },
     });
-    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('dialog[open]')).toBeNull();
   });
 
   it('追加失敗: エラーを表示しダイアログを開いたままにする', async () => {
@@ -189,7 +189,7 @@ describe('CustomFieldsSection', () => {
     await flushPromises();
 
     expect(document.body.textContent).toContain('カスタムフィールドを追加できませんでした');
-    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.querySelector('dialog[open]')).not.toBeNull();
   });
 
   it('名前 100 文字は送信でき、101 文字は送信せずフィールドエラーになる', async () => {
@@ -240,7 +240,7 @@ describe('CustomFieldsSection', () => {
       },
       body: { name: 'ポイント' },
     });
-    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('dialog[open]')).toBeNull();
   });
 
   it('編集(select): 既存の選択肢をプリフィルし、options 込みで PATCH する', async () => {
@@ -279,7 +279,7 @@ describe('CustomFieldsSection', () => {
         ],
       },
     });
-    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('dialog[open]')).toBeNull();
   });
 
   it('編集(select): 選択肢を空にすると送信せずエラーを表示する', async () => {
@@ -372,7 +372,7 @@ describe('CustomFieldsSection', () => {
         },
       },
     });
-    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('dialog[open]')).toBeNull();
   });
 
   it('削除失敗: エラーを表示しダイアログを開いたままにする', async () => {
@@ -386,7 +386,7 @@ describe('CustomFieldsSection', () => {
     await flushPromises();
 
     expect(document.body.textContent).toContain('カスタムフィールドを削除できませんでした');
-    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.querySelector('dialog[open]')).not.toBeNull();
   });
 
   /**

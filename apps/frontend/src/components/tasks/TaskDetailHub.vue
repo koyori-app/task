@@ -17,7 +17,6 @@ import {
   Percent,
   Plus,
   Search,
-  Settings,
   ListChecks,
   SquarePen,
   Star,
@@ -34,14 +33,13 @@ import AvatarGroup from '@/components/AvatarGroup.vue';
 import type { EditableField } from '@/components/tasks/editable-field';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
 import TaskPropertyRow from '@/components/tasks/TaskPropertyRow.vue';
-import { Button, Input } from '@koyori-app/ui-vue';
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  Button,
+  Dropdown,
+  Input,
+  type DropdownItem,
+  type DropdownSection,
+} from '@koyori-app/ui-vue';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import { lookup, toPlainText } from '@/lib/comment-mention';
 import {
@@ -182,6 +180,28 @@ const priorityOptions = Object.entries(PRIORITY_CONFIG) as [
   TaskDetail['priority'],
   (typeof PRIORITY_CONFIG)[TaskDetail['priority']],
 ][];
+
+const TASK_ACTION_ITEMS: DropdownItem[] = [{ value: 'delete', label: '削除', destructive: true }];
+
+const statusItems = computed<DropdownItem[]>(() =>
+  props.statuses.map((status) => ({
+    value: status.id,
+    label: status.name,
+    kind: 'radio',
+    checked: status.id === props.statusId,
+    disabled: props.statusUpdating,
+  })),
+);
+
+const priorityItems = computed<DropdownItem[]>(() =>
+  priorityOptions.map(([value, config]) => ({
+    value,
+    label: config.label,
+    kind: 'radio',
+    checked: value === props.task?.priority,
+    disabled: props.priorityUpdating,
+  })),
+);
 
 /** 「完了にする」の移動先。既定の完了に印が無ければ並び順で最初の完了へ倒す。 */
 const doneStatus = computed(
@@ -341,6 +361,23 @@ function onEditKeydown(event: KeyboardEvent, field: EditableField) {
   }
 }
 
+function hasLabel(labelId: string) {
+  return !!props.task?.labels.some((label) => label.id === labelId);
+}
+
+const labelSections = computed<DropdownSection[]>(() => [
+  {
+    heading: '選択してください',
+    items: (props.projectLabels ?? []).map((label) => ({
+      value: label.id,
+      label: label.name,
+      kind: 'checkbox',
+      checked: hasLabel(label.id),
+      disabled: props.labelsUpdating || props.projectLabelsError,
+    })),
+  },
+]);
+
 function toggleLabel(labelId: string, checked: boolean) {
   // 一覧の取得に失敗している間は、表示しているラベルが現在の集合か判断できない。
   // 引き算には使わない（下記）が、操作の受付自体は止める。UI 側もチェックボックスを
@@ -402,7 +439,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
         スクロールする器はこの div。左右 2 列に割るのは lg 以上だけで、そこでは
         本文と履歴がそれぞれ内側でスクロールする（親は lg:overflow-hidden で止める）。
         ペイン表示と lg 未満は 1 列に積むので、ここが唯一のスクロール容器になる。
-        親（SplitterPanel / DialogContent）は overflow-hidden で高さを固定するため、
+        親（SplitterPanel / オーバーレイの Dialog）は高さを固定するため、
         ここに overflow を持たせないと、はみ出した分に到達できなくなる。
       -->
       <div
@@ -449,25 +486,16 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
               <Button type="button" variant="tertiary" disabled label="共有">
                 <template #icon><UserPlus class="size-4" aria-hidden="true" /></template>
               </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger as-child>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    ariaLabel="タスク操作"
-                    :disabled="deleteDisabled"
-                  >
-                    <template #icon>
-                      <EllipsisVertical class="size-4" aria-hidden="true" />
-                    </template>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem variant="destructive" @select="emit('delete-request')">
-                    削除
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <Dropdown
+                top-layer
+                variant="ghost"
+                ariaLabel="タスク操作"
+                :disabled="deleteDisabled"
+                :items="TASK_ACTION_ITEMS"
+                :on-select="() => emit('delete-request')"
+              >
+                <template #icon><EllipsisVertical class="size-4" aria-hidden="true" /></template>
+              </Dropdown>
               <slot name="header-actions" />
             </div>
           </header>
@@ -538,45 +566,28 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                       右の矢印はワークフロー順の次へ 1 つ進める（入れ子のボタンは作れないので
                       見た目だけ 1 つの器に見せる）。
                     -->
-                    <div
-                      class="inline-flex h-7 max-w-full items-center overflow-hidden rounded bg-muted"
-                    >
-                      <DropdownMenu>
-                        <DropdownMenuTrigger as-child>
-                          <button
-                            type="button"
-                            role="combobox"
-                            aria-label="ステータス"
-                            :aria-expanded="false"
-                            class="inline-flex h-7 max-w-full items-center px-2 text-xs font-semibold uppercase tracking-wide hover:bg-muted-foreground/10 disabled:opacity-50"
-                            :disabled="statusUpdating"
-                          >
-                            <span class="truncate">{{ resolvedStatus?.name ?? '未設定' }}</span>
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
-                          <DropdownMenuCheckboxItem
-                            v-for="status in statuses"
-                            :key="status.id"
-                            :model-value="status.id === statusId"
-                            :disabled="statusUpdating"
-                            @update:model-value="emit('update:statusId', status.id)"
-                          >
-                            <span
-                              v-if="status.color"
-                              class="inline-block size-2.5 shrink-0 rounded-full"
-                              :style="{ backgroundColor: status.color }"
-                              aria-hidden="true"
-                            />
-                            {{ status.name }}
-                          </DropdownMenuCheckboxItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                    <div class="inline-flex h-7 max-w-full items-center rounded bg-muted">
+                      <!-- 一覧は根の中に出るので、器で切り取らない（overflow-hidden を付けない） -->
+                      <Dropdown
+                        top-layer
+                        class="min-w-0"
+                        label="ステータス"
+                        :disabled="statusUpdating"
+                        :icon="null"
+                        :items="statusItems"
+                        :on-select="(id: string) => emit('update:statusId', id)"
+                      >
+                        <template #trigger>
+                          <span class="truncate text-xs font-semibold uppercase tracking-wide">{{
+                            resolvedStatus?.name ?? '未設定'
+                          }}</span>
+                        </template>
+                      </Dropdown>
 
                       <button
                         v-if="nextStatus"
                         type="button"
-                        class="inline-flex h-7 items-center border-l border-background/60 px-1.5 hover:bg-muted-foreground/10 disabled:opacity-50"
+                        class="inline-flex h-7 items-center rounded-r border-l border-background/60 px-1.5 hover:bg-muted-foreground/10 disabled:opacity-50"
                         :aria-label="`${nextStatus.name} にする`"
                         :title="`次へ: ${nextStatus.name}`"
                         :disabled="statusUpdating"
@@ -785,13 +796,22 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                       右の × でまとめて外す。個別に外すのはメニューの中から。
                     -->
                     <div class="flex min-h-8 items-center gap-1 rounded hover:bg-muted">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger as-child>
-                          <button
-                            type="button"
-                            class="flex min-h-8 flex-1 flex-wrap items-center gap-1.5 px-2 py-1 text-left disabled:opacity-50"
-                            aria-label="ラベルを編集"
-                            :disabled="labelsUpdating || projectLabelsLoading"
+                      <!-- 更新中は項目だけを止める。Dropdown ごと disabled にすると一覧が閉じる -->
+                      <Dropdown
+                        top-layer
+                        class="min-w-0 flex-1 [&>button]:w-full"
+                        label="ラベルを編集"
+                        :icon="null"
+                        :disabled="projectLabelsLoading"
+                        :items="labelSections"
+                        :empty-message="
+                          projectLabelsError ? 'ラベルを読み込めませんでした' : 'ラベルがありません'
+                        "
+                        :on-select="(id: string) => toggleLabel(id, !hasLabel(id))"
+                      >
+                        <template #trigger>
+                          <span
+                            class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-left"
                           >
                             <span v-if="!task.labels.length" class="text-muted-foreground">
                               未設定
@@ -808,72 +828,9 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                               />
                               {{ label.name }}
                             </span>
-                          </button>
-                        </DropdownMenuTrigger>
-
-                        <DropdownMenuContent align="start" class="w-64">
-                          <!-- 選択済み。ここでは 1 件ずつ外せる -->
-                          <div
-                            v-if="task.labels.length"
-                            class="flex flex-wrap items-center gap-1.5 border-b p-2"
-                          >
-                            <span
-                              v-for="label in task.labels"
-                              :key="label.id"
-                              class="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs"
-                            >
-                              <span
-                                class="inline-block size-2 rounded-full"
-                                :style="{ backgroundColor: label.color }"
-                                aria-hidden="true"
-                              />
-                              {{ label.name }}
-                              <button
-                                type="button"
-                                class="rounded-full text-muted-foreground hover:text-foreground"
-                                :aria-label="`${label.name} を外す`"
-                                :disabled="labelsUpdating"
-                                @click.stop="toggleLabel(label.id, false)"
-                              >
-                                <X class="size-3" aria-hidden="true" />
-                              </button>
-                            </span>
-                          </div>
-
-                          <div
-                            class="flex items-center justify-between px-2 py-1.5 text-xs text-muted-foreground"
-                          >
-                            選択してください
-                            <!-- ラベルの管理はプロジェクト設定にあるので、ここでは出口を置くだけ -->
-                            <Settings class="size-3.5" aria-hidden="true" />
-                          </div>
-
-                          <p v-if="projectLabelsError" class="px-2 py-1.5 text-sm text-destructive">
-                            ラベルを読み込めませんでした
-                          </p>
-                          <p
-                            v-else-if="!projectLabels?.length"
-                            class="px-2 py-1.5 text-sm text-muted-foreground"
-                          >
-                            ラベルがありません
-                          </p>
-                          <DropdownMenuCheckboxItem
-                            v-for="label in projectLabels"
-                            :key="label.id"
-                            :model-value="task.labels.some((l) => l.id === label.id)"
-                            :disabled="labelsUpdating || projectLabelsError"
-                            @select="(event: Event) => event.preventDefault()"
-                            @update:model-value="(v) => toggleLabel(label.id, !!v)"
-                          >
-                            <span
-                              class="inline-block size-2.5 shrink-0 rounded-full"
-                              :style="{ backgroundColor: label.color }"
-                              aria-hidden="true"
-                            />
-                            {{ label.name }}
-                          </DropdownMenuCheckboxItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                          </span>
+                        </template>
+                      </Dropdown>
 
                       <Button
                         v-if="task.labels.length"
@@ -940,39 +897,25 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                     ステータスと同じピル + メニューで変える（#665 の native select から
                     参照デザインへ載せ替え）。旗と文字色は優先度ごとの色で出す。
                   -->
-                  <DropdownMenu>
-                    <DropdownMenuTrigger as-child>
-                      <button
-                        type="button"
-                        role="combobox"
-                        aria-label="優先度"
-                        :aria-expanded="false"
-                        class="inline-flex h-7 max-w-full items-center gap-1.5 rounded px-1.5 text-sm hover:bg-muted disabled:opacity-50"
-                        :style="{ color: PRIORITY_CONFIG[task.priority].color }"
-                        :disabled="priorityUpdating"
-                      >
+                  <Dropdown
+                    top-layer
+                    class="[&>button]:text-(--priority-color)"
+                    :style="{ '--priority-color': PRIORITY_CONFIG[task.priority].color }"
+                    label="優先度"
+                    :icon="null"
+                    :disabled="priorityUpdating"
+                    :items="priorityItems"
+                    :on-select="
+                      (value: string) => emit('change:priority', value as TaskDetail['priority'])
+                    "
+                  >
+                    <template #trigger>
+                      <span class="flex items-center gap-1.5">
                         <Flag class="size-4" aria-hidden="true" />
                         <span class="truncate">{{ PRIORITY_CONFIG[task.priority].label }}</span>
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start">
-                      <DropdownMenuCheckboxItem
-                        v-for="[value, config] in priorityOptions"
-                        :key="value"
-                        :model-value="value === task.priority"
-                        :disabled="priorityUpdating"
-                        @update:model-value="emit('change:priority', value)"
-                      >
-                        <component
-                          :is="config.icon"
-                          class="size-4"
-                          :style="{ color: config.color }"
-                          aria-hidden="true"
-                        />
-                        {{ config.label }}
-                      </DropdownMenuCheckboxItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                      </span>
+                    </template>
+                  </Dropdown>
                   <p v-if="priorityError" class="mt-1 text-xs text-destructive">
                     {{ priorityError }}
                   </p>

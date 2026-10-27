@@ -100,26 +100,16 @@ describe('TaskDetailHub', () => {
   /**
    * 優先度は表示だけで変更できなかった（作成時にしか決められなかった）。
    * 選び直しを emit する。ステータスと同じピル + メニュー（参照デザイン）なので、
-   * native select ではなくメニュー項目を押して確かめる。
+   * native select ではなくメニュー項目を押して確かめる。項目は閉じていても DOM にある。
    */
   function mountWithPriorityMenu(extra: Record<string, unknown> = {}) {
     return mount(TaskDetailHub, {
       props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id, ...extra },
-      global: {
-        stubs: {
-          DropdownMenu: { template: '<div><slot /></div>' },
-          DropdownMenuTrigger: { template: '<div><slot /></div>' },
-          DropdownMenuContent: { template: '<div><slot /></div>' },
-          DropdownMenuItem: { template: '<button type="button"><slot /></button>' },
-          DropdownMenuCheckboxItem: {
-            props: ['modelValue', 'disabled'],
-            emits: ['update:modelValue'],
-            template:
-              '<button type="button" data-menu-item :disabled="disabled" @click="$emit(\'update:modelValue\', true)"><slot /></button>',
-          },
-        },
-      },
     });
+  }
+
+  function priorityItems(wrapper: ReturnType<typeof mountWithPriorityMenu>) {
+    return wrapper.get('[role="menu"][aria-label="優先度"]').findAll('[role="menuitemradio"]');
   }
 
   it('優先度を選び直すと change:priority を emit する', async () => {
@@ -129,7 +119,7 @@ describe('TaskDetailHub', () => {
       PRIORITY_CONFIG.Medium.label,
     );
 
-    const items = wrapper.findAll('[data-menu-item]');
+    const items = priorityItems(wrapper);
     const high = items.find((item) => item.text().includes(PRIORITY_CONFIG.High.label));
     expect(high).toBeDefined();
     await high!.trigger('click');
@@ -137,10 +127,20 @@ describe('TaskDetailHub', () => {
     expect(wrapper.emitted('change:priority')).toEqual([['High']]);
   });
 
+  it('本文のスクロール領域で切れないよう、メニューはどれもトップレイヤーに出す', () => {
+    const wrapper = mountWithPriorityMenu({ statuses, projectLabels: [featureLabel] });
+
+    const triggers = wrapper.findAll('button[aria-haspopup="menu"]');
+    expect(triggers.length).toBeGreaterThanOrEqual(3);
+    for (const trigger of triggers) {
+      expect(trigger.element.closest('[data-menu-top-layer]'), trigger.text()).not.toBeNull();
+    }
+  });
+
   it('優先度の選択肢は表示できる優先度をすべて出す', () => {
     const wrapper = mountWithPriorityMenu();
 
-    const labels = wrapper.findAll('[data-menu-item]').map((item) => item.text());
+    const labels = priorityItems(wrapper).map((item) => item.text());
     expect(labels).toEqual(Object.values(PRIORITY_CONFIG).map((config) => config.label));
   });
 
@@ -149,9 +149,7 @@ describe('TaskDetailHub', () => {
 
     expect(wrapper.get('button[aria-label="優先度"]').attributes('disabled')).toBeDefined();
     expect(
-      wrapper
-        .findAll('[data-menu-item]')
-        .every((item) => item.attributes('disabled') !== undefined),
+      priorityItems(wrapper).every((item) => item.attributes('aria-disabled') === 'true'),
     ).toBe(true);
   });
 
@@ -385,7 +383,9 @@ describe('TaskDetailHub', () => {
     });
 
     await wrapper.get('button[aria-label="タスク操作"]').trigger('click');
-    const deleteItem = document.body.querySelector('[data-slot="dropdown-menu-item"]');
+    const deleteItem = document.body.querySelector(
+      '[role="menu"][aria-label="タスク操作"] [role="menuitem"]',
+    );
     expect(deleteItem?.textContent).toContain('削除');
     deleteItem?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -421,7 +421,7 @@ describe('TaskDetailHub', () => {
     });
 
     await wrapper.get('button[aria-label="ラベルを編集"]').trigger('click');
-    const items = document.body.querySelectorAll('[data-slot="dropdown-menu-checkbox-item"]');
+    const items = document.body.querySelectorAll('[role="menuitemcheckbox"]');
     const featureItem = Array.from(items).find((el) => el.textContent?.includes('feature'));
     expect(featureItem).toBeDefined();
     featureItem?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -462,9 +462,9 @@ describe('TaskDetailHub', () => {
     });
 
     await wrapper.get('button[aria-label="ラベルを編集"]').trigger('click');
-    const items = document.body.querySelectorAll('[data-slot="dropdown-menu-checkbox-item"]');
+    const items = document.body.querySelectorAll('[role="menuitemcheckbox"]');
     expect(items.length).toBe(1);
-    expect(items[0].getAttribute('data-disabled')).not.toBeNull();
+    expect(items[0].getAttribute('aria-disabled')).toBe('true');
     wrapper.unmount();
   });
 
@@ -495,7 +495,7 @@ describe('TaskDetailHub', () => {
     });
 
     await wrapper.get('button[aria-label="ラベルを編集"]').trigger('click');
-    const items = document.body.querySelectorAll('[data-slot="dropdown-menu-checkbox-item"]');
+    const items = document.body.querySelectorAll('[role="menuitemcheckbox"]');
     const bugItem = Array.from(items).find((el) => el.textContent?.includes('bug'));
     expect(bugItem).toBeDefined();
     bugItem?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -522,7 +522,7 @@ describe('TaskDetailHub', () => {
     });
 
     await wrapper.get('button[aria-label="ラベルを編集"]').trigger('click');
-    const items = document.body.querySelectorAll('[data-slot="dropdown-menu-checkbox-item"]');
+    const items = document.body.querySelectorAll('[role="menuitemcheckbox"]');
     const featureItem = Array.from(items).find((el) => el.textContent?.includes('feature'));
     expect(featureItem).toBeDefined();
     featureItem?.dispatchEvent(new MouseEvent('click', { bubbles: true }));

@@ -1,6 +1,5 @@
-import { defineComponent, h } from 'vue';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 
 import {
   type BeforeInstallPromptEvent,
@@ -9,34 +8,20 @@ import {
 } from '@/lib/pwa/install-prompt';
 import NavUser from '../NavUser.vue';
 
+vi.mock('vike/client/router', () => ({ navigate: vi.fn() }));
+
 enableAutoUnmount(afterEach);
 afterEach(() => resetInstallPromptForTest());
-
-// The real dropdown renders its content in a portal only while open; for these
-// tests every part just renders its slot (items keep their attrs and listeners).
-const passthrough = (tag: string) =>
-  defineComponent({
-    inheritAttrs: false,
-    setup(_, { slots, attrs }) {
-      return () => h(tag, attrs, slots.default?.());
-    },
-  });
-
-const stubs = {
-  DropdownMenu: passthrough('div'),
-  DropdownMenuTrigger: passthrough('div'),
-  DropdownMenuContent: passthrough('div'),
-  DropdownMenuLabel: passthrough('div'),
-  DropdownMenuGroup: passthrough('div'),
-  DropdownMenuSeparator: passthrough('hr'),
-  DropdownMenuItem: passthrough('div'),
-};
 
 function mountNavUser() {
   return mount(NavUser, {
     props: { user: { name: 'Alice', email: 'alice@example.test', avatar: '' } },
-    global: { stubs },
   });
+}
+
+/** メニューの項目は閉じていても DOM にあるので、名前で引く */
+function installItem(wrapper: VueWrapper) {
+  return wrapper.findAll('[role="menuitem"]').find((item) => item.text() === 'Install app');
 }
 
 function offerInstall() {
@@ -55,7 +40,7 @@ describe('NavUser install item', () => {
   it('is absent when the browser has not offered an install', () => {
     const wrapper = mountNavUser();
 
-    expect(wrapper.find('[data-testid="install-app"]').exists()).toBe(false);
+    expect(installItem(wrapper)).toBeUndefined();
   });
 
   it('appears after beforeinstallprompt and opens the browser prompt on click', async () => {
@@ -64,14 +49,14 @@ describe('NavUser install item', () => {
 
     offer.dispatch();
     await flushPromises();
-    const item = wrapper.find('[data-testid="install-app"]');
-    expect(item.exists()).toBe(true);
+    const item = installItem(wrapper);
+    expect(item).toBeDefined();
 
-    await item.trigger('click');
+    await item!.trigger('click');
     await flushPromises();
 
     expect(offer.prompt).toHaveBeenCalledTimes(1);
-    expect(wrapper.find('[data-testid="install-app"]').exists()).toBe(false);
+    expect(installItem(wrapper)).toBeUndefined();
   });
 
   it('disappears after appinstalled', async () => {
@@ -83,6 +68,6 @@ describe('NavUser install item', () => {
     offer.win.dispatchEvent(new Event('appinstalled'));
     await flushPromises();
 
-    expect(wrapper.find('[data-testid="install-app"]').exists()).toBe(false);
+    expect(installItem(wrapper)).toBeUndefined();
   });
 });

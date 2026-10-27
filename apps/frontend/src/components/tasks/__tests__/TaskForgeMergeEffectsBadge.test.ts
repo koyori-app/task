@@ -56,6 +56,11 @@ function button(name: string): HTMLButtonElement {
   return found;
 }
 
+/** 開いているダイアログ。閉じたダイアログも DOM に残るので open で絞る */
+function openDialog() {
+  return document.body.querySelector('dialog[open]');
+}
+
 describe('TaskForgeMergeEffectsBadge', () => {
   it.each([
     ['処理済み', { merge_effects_processed_at: '2026-10-01T00:10:00Z' }],
@@ -72,8 +77,8 @@ describe('TaskForgeMergeEffectsBadge', () => {
 
     await badge.trigger('click');
     await flushPromises();
-    expect(document.body.textContent).toContain('#87 の自動完了は未適用です');
-    expect(document.body.textContent).toContain('再配送');
+    expect(openDialog()?.textContent).toContain('#87 の自動完了は未適用です');
+    expect(openDialog()?.textContent).toContain('再配送');
 
     button('確認済みにする…').click();
     await flushPromises();
@@ -90,7 +95,7 @@ describe('TaskForgeMergeEffectsBadge', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge'],
     });
-    expect(document.body.textContent).not.toContain('#87 の自動完了は未適用です');
+    expect(openDialog()).toBeNull();
   });
 
   it('失敗したらダイアログに残してエラーを出す', async () => {

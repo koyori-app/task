@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import { h } from 'vue';
 import { apiClient } from '@/lib/api';
 import CreateTenantDialog from '../CreateTenantDialog.vue';
 
@@ -18,11 +19,18 @@ const createdTenant = {
   require_2fa: false,
 };
 
-const input = (id: string) => document.querySelector<HTMLInputElement>(`#${id}`)!;
-const overlay = () => document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]')!;
+// ラベルから入力欄を引く。ブラウザと同じく、for の id を文書の中で最初に持つ要素が結び付く
+const input = (label: string, root: ParentNode = document) => {
+  const element = Array.from(root.querySelectorAll('label')).find(
+    (candidate) => candidate.textContent?.trim() === label,
+  )!;
+  return document.getElementById(element.htmlFor) as HTMLInputElement;
+};
+// 背景のクリックは dialog 要素そのものへの pointerdown として届く
+const backdrop = () => document.querySelector<HTMLDialogElement>('dialog')!;
 
-function updateInput(id: string, value: string) {
-  const element = input(id);
+function updateInput(label: string, value: string) {
+  const element = input(label);
   element.value = value;
   element.dispatchEvent(new Event('input', { bubbles: true }));
 }
@@ -45,6 +53,19 @@ function mountDialog() {
   return wrapper;
 }
 
+// テナント未所属のホームでは、ヘッダーの閉じたダイアログが本文のダイアログより先に DOM にある。
+// useId はアプリごとに数えるので、実際の画面と同じく 1 つのアプリに並べ、本文側の dialog を返す
+async function mountBehindHeaderInstance() {
+  mount(
+    {
+      render: () => [h(CreateTenantDialog, { open: false }), h(CreateTenantDialog, { open: true })],
+    },
+    { attachTo: document.body },
+  );
+  await flushPromises();
+  return document.querySelectorAll('dialog')[1];
+}
+
 async function expectFormResetAfterReopen(
   wrapper: VueWrapper,
   reopenName: string,
@@ -52,12 +73,12 @@ async function expectFormResetAfterReopen(
 ) {
   await wrapper.setProps({ open: true });
   await flushPromises();
-  expect(input('name').value).toBe('');
-  expect(input('display_id').value).toBe('');
+  expect(input('名前').value).toBe('');
+  expect(input('表示ID').value).toBe('');
 
-  updateInput('name', reopenName);
+  updateInput('名前', reopenName);
   await flushPromises();
-  expect(input('display_id').value).toBe(expectedSlug);
+  expect(input('表示ID').value).toBe(expectedSlug);
 }
 
 describe('CreateTenantDialog', () => {
@@ -81,9 +102,9 @@ describe('CreateTenantDialog', () => {
     const wrapper = mountDialog();
     await flushPromises();
 
-    updateInput('name', '  New Tenant  ');
-    updateInput('description', '  Description  ');
-    updateInput('icon_url', '  https://example.com/icon.png  ');
+    updateInput('名前', '  New Tenant  ');
+    updateInput('説明（任意）', '  Description  ');
+    updateInput('アイコンURL（任意）', '  https://example.com/icon.png  ');
     submit();
     await flushPromises();
 
@@ -107,7 +128,7 @@ describe('CreateTenantDialog', () => {
     await flushPromises();
     expect(document.body.textContent).toContain('名前は必須です');
 
-    updateInput('name', '   ');
+    updateInput('名前', '   ');
     submit();
     await flushPromises();
 
@@ -135,8 +156,7 @@ describe('CreateTenantDialog', () => {
     {
       label: 'overlay close',
       close: async (wrapper: VueWrapper) => {
-        overlay().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-        overlay().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        backdrop().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
         await flushPromises();
         expect(wrapper.emitted('update:open')).toContainEqual([false]);
       },
@@ -152,14 +172,14 @@ describe('CreateTenantDialog', () => {
       const wrapper = mountDialog();
       await flushPromises();
 
-      updateInput('name', initialName);
+      updateInput('名前', initialName);
       await flushPromises();
-      expect(input('display_id').value).toBe(initialName.toLowerCase().replace(/\s+/g, '-'));
-      updateInput('display_id', customDisplayId);
+      expect(input('表示ID').value).toBe(initialName.toLowerCase().replace(/\s+/g, '-'));
+      updateInput('表示ID', customDisplayId);
       await flushPromises();
-      updateInput('name', ignoredSlugName);
+      updateInput('名前', ignoredSlugName);
       await flushPromises();
-      expect(input('display_id').value).toBe(customDisplayId);
+      expect(input('表示ID').value).toBe(customDisplayId);
 
       await close(wrapper);
       await expectFormResetAfterReopen(wrapper, reopenName, expectedSlug);
@@ -174,7 +194,7 @@ describe('CreateTenantDialog', () => {
     mountDialog();
     await flushPromises();
 
-    updateInput('name', 'Existing Tenant');
+    updateInput('名前', 'Existing Tenant');
     submit();
     await flushPromises();
 
@@ -183,19 +203,51 @@ describe('CreateTenantDialog', () => {
     );
   });
 
+  it('submits its own form when another instance precedes it in the document', async () => {
+    vi.mocked(apiClient.POST).mockResolvedValue({
+      data: createdTenant,
+      response: new Response(null, { status: 201 }),
+    });
+    vi.spyOn(window.location, 'assign').mockImplementation(() => undefined);
+    const dialog = await mountBehindHeaderInstance();
+    // 最初の入力欄が「名前」
+    const name = dialog.querySelector<HTMLInputElement>('input')!;
+    name.value = 'New Tenant';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    await flushPromises();
+
+    expect(apiClient.POST).toHaveBeenCalledWith('/v1/tenants', {
+      body: expect.objectContaining({ name: 'New Tenant', display_id: 'new-tenant' }),
+    });
+  });
+
+  it('links labels and descriptions to its own inputs when another instance precedes it', async () => {
+    const dialog = await mountBehindHeaderInstance();
+
+    for (const label of ['名前', '表示ID', '説明（任意）', 'アイコンURL（任意）']) {
+      expect(dialog.contains(input(label, dialog)), label).toBe(true);
+    }
+    const describedBy = input('表示ID', dialog).getAttribute('aria-describedby')!.split(' ');
+    for (const id of describedBy) {
+      expect(dialog.contains(document.getElementById(id)), id).toBe(true);
+    }
+  });
+
   it('auto-generates a slug until the display id is manually edited', async () => {
     mountDialog();
     await flushPromises();
 
-    updateInput('name', ' Hello, WORLD! ');
+    updateInput('名前', ' Hello, WORLD! ');
     await flushPromises();
-    expect(input('display_id').value).toBe('hello-world');
+    expect(input('表示ID').value).toBe('hello-world');
 
-    updateInput('display_id', 'MY-CUSTOM-ID');
+    updateInput('表示ID', 'MY-CUSTOM-ID');
     await flushPromises();
-    expect(input('display_id').value).toBe('my-custom-id');
-    updateInput('name', 'Changed Name');
+    expect(input('表示ID').value).toBe('my-custom-id');
+    updateInput('名前', 'Changed Name');
     await flushPromises();
-    expect(input('display_id').value).toBe('my-custom-id');
+    expect(input('表示ID').value).toBe('my-custom-id');
   });
 });

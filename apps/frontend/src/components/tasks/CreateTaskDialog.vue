@@ -3,24 +3,18 @@ import { ChevronDown, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { getActivePinia } from 'pinia';
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Button, Field, Input, Spinner } from '@koyori-app/ui-vue';
-import UserSelector from '@/components/users/UserSelector.vue';
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  Button,
+  Dialog,
+  Dropdown,
+  Field,
+  Input,
+  Spinner,
+  type DropdownItem,
+} from '@koyori-app/ui-vue';
+import UserSelector from '@/components/users/UserSelector.vue';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -123,6 +117,18 @@ const defaultStatusId = computed(
 const selectedLabels = computed(() =>
   (props.labels ?? []).filter((label) => selectedLabelIds.value.includes(label.id)),
 );
+/** 引き金の読み上げ名。欄の見出しに、選んだラベル（無ければ「ラベルなし」）を続ける */
+const labelsTriggerLabel = computed(
+  () => `ラベル ${selectedLabels.value.map((label) => label.name).join(' ') || 'ラベルなし'}`,
+);
+const labelItems = computed<DropdownItem[]>(() =>
+  (props.labels ?? []).map((label) => ({
+    value: label.id,
+    label: label.name,
+    kind: 'checkbox',
+    checked: selectedLabelIds.value.includes(label.id),
+  })),
+);
 // 候補で自分を選んだ者の次に置く。pinia の無い所（試験）でも組めるよう、在る時だけ引く。
 const authStore = getActivePinia() ? useAuthStore() : null;
 const currentUserId = computed(() => authStore?.user?.id ?? null);
@@ -187,7 +193,7 @@ watch(
 
 // 閉じたら入力と結果表示を捨てる。
 //
-// onOpenChange 側だけで捨てていたときは、作成に成功して親が open を false にする
+// onClose 側だけで捨てていたときは、作成に成功して親が open を false にする
 // 経路（created を受けてダイアログを閉じる）がここを通らないため、「タスクを
 // 作成しました」が残り、次に開いた瞬間に前回の成功が表示されていた。
 watch(
@@ -197,12 +203,12 @@ watch(
   },
 );
 
-function onOpenChange(value: boolean) {
-  if (!value && createMutation.isPending.value) return;
+function onClose() {
+  if (createMutation.isPending.value) return;
   // 親が open を握っていない場合でも捨てられるよう、ここでも呼ぶ。
   // resetForm は冪等なので watch と二重に走っても問題ない
-  if (!value) resetForm();
-  emit('update:open', value);
+  resetForm();
+  emit('update:open', false);
 }
 
 function toggleLabel(labelId: string) {
@@ -298,38 +304,37 @@ async function submit() {
 </script>
 
 <template>
-  <Dialog v-if="open" :open="true" @update:open="onOpenChange">
+  <div class="contents [--koyori-dialog-width:1040px] md:[--koyori-dialog-height:min(720px,90vh)]">
     <!--
       左に本文（タイトル・説明）、右にプロパティを置く 2 列。説明を広く書けるよう
       ダイアログを大きく取り、狭い画面では縦に積んで全体をスクロールさせる。
+      見出しは画面に出さない（タイトル欄が見出しの役をする）。plain の title はダイアログの名前として残る
     -->
-    <DialogContent
-      class="flex max-h-[90vh] flex-col gap-0 overflow-y-auto p-0 sm:max-w-[1040px] md:h-[min(720px,90vh)] md:overflow-hidden"
-      :show-close-button="false"
+    <Dialog
+      :open="open"
+      title="新規タスク"
+      :description="`${projectKey} にタスクを追加します`"
+      plain
+      :on-close="onClose"
     >
-      <!-- 見出しは画面に出さない（タイトル欄が見出しの役をする）。ダイアログの名前として残す -->
-      <DialogHeader class="sr-only">
-        <DialogTitle>新規タスク</DialogTitle>
-        <DialogDescription>{{ projectKey }} にタスクを追加します</DialogDescription>
-      </DialogHeader>
-
       <!--
         閉じるボタンはダイアログの右上に 1 個だけ絶対配置する。右列の中に置くと、
         狭い画面で右列が本文の下に積まれて × が画面の途中に現れる
       -->
-      <DialogClose as-child>
-        <Button
-          type="button"
-          variant="ghost"
-          class="absolute top-2 right-3 z-10"
-          ariaLabel="閉じる"
-          :disabled="createMutation.isPending.value"
-        >
-          <template #icon><X class="size-4" /></template>
-        </Button>
-      </DialogClose>
+      <Button
+        type="button"
+        variant="ghost"
+        class="absolute top-2 right-3 z-10"
+        ariaLabel="閉じる"
+        :disabled="createMutation.isPending.value"
+        @click="onClose"
+      >
+        <template #icon><X class="size-4" /></template>
+      </Button>
 
+      <!-- 本文は開いている間だけ置く（閉じた Dialog も DOM に残るので、Markdown エディタを常駐させない） -->
       <HydrationSafeForm
+        v-if="open"
         v-slot="{ isHydrated }"
         class="flex flex-col md:min-h-0 md:flex-1 md:flex-row"
         @submit="submit"
@@ -382,14 +387,13 @@ async function submit() {
                 <Spinner v-if="createMutation.isPending.value" hide-label />
               </template>
             </Button>
-            <DialogClose as-child>
-              <Button
-                type="button"
-                variant="tertiary"
-                :disabled="createMutation.isPending.value"
-                label="取り消す"
-              />
-            </DialogClose>
+            <Button
+              type="button"
+              variant="tertiary"
+              :disabled="createMutation.isPending.value"
+              label="取り消す"
+              @click="onClose"
+            />
           </div>
         </div>
 
@@ -520,53 +524,38 @@ async function submit() {
                   @click="emit('retryLabels')"
                 />
               </div>
-              <DropdownMenu v-else>
-                <DropdownMenuTrigger as-child>
-                  <button
-                    type="button"
-                    :class="fieldTriggerClass"
-                    aria-labelledby="task-labels-label task-labels-value"
+              <Dropdown
+                top-layer
+                v-else
+                variant="tertiary"
+                class="w-full [&>button]:w-full"
+                :label="labelsTriggerLabel"
+                :items="labelItems"
+                :on-select="toggleLabel"
+              >
+                <template #trigger>
+                  <span
+                    id="task-labels-value"
+                    class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-left"
                   >
-                    <span
-                      id="task-labels-value"
-                      class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"
-                    >
-                      <template v-if="selectedLabels.length">
+                    <template v-if="selectedLabels.length">
+                      <span
+                        v-for="label in selectedLabels"
+                        :key="label.id"
+                        class="inline-flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs"
+                      >
                         <span
-                          v-for="label in selectedLabels"
-                          :key="label.id"
-                          class="inline-flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs"
-                        >
-                          <span
-                            class="inline-block size-2 rounded-full"
-                            :style="{ backgroundColor: label.color }"
-                            aria-hidden="true"
-                          />
-                          {{ label.name }}
-                        </span>
-                      </template>
-                      <span v-else class="text-muted-foreground">ラベルなし</span>
-                    </span>
-                    <ChevronDown class="size-4 shrink-0 opacity-50" aria-hidden="true" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" class="min-w-56">
-                  <DropdownMenuCheckboxItem
-                    v-for="label in labels"
-                    :key="label.id"
-                    :model-value="selectedLabelIds.includes(label.id)"
-                    @select="(event: Event) => event.preventDefault()"
-                    @update:model-value="toggleLabel(label.id)"
-                  >
-                    <span
-                      class="inline-block size-2.5 shrink-0 rounded-full"
-                      :style="{ backgroundColor: label.color }"
-                      aria-hidden="true"
-                    />
-                    {{ label.name }}
-                  </DropdownMenuCheckboxItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                          class="inline-block size-2 rounded-full"
+                          :style="{ backgroundColor: label.color }"
+                          aria-hidden="true"
+                        />
+                        {{ label.name }}
+                      </span>
+                    </template>
+                    <span v-else class="text-muted-foreground">ラベルなし</span>
+                  </span>
+                </template>
+              </Dropdown>
             </div>
 
             <!-- koyori の Input は date に max を付けない。期限より後かは送信時にも検証する -->
@@ -620,6 +609,6 @@ async function submit() {
           </div>
         </div>
       </HydrationSafeForm>
-    </DialogContent>
-  </Dialog>
+    </Dialog>
+  </div>
 </template>
