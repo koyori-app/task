@@ -127,6 +127,16 @@ describe('TaskDetailHub', () => {
     expect(wrapper.emitted('change:priority')).toEqual([['High']]);
   });
 
+  it('本文のスクロール領域で切れないよう、メニューはどれもトップレイヤーに出す', () => {
+    const wrapper = mountWithPriorityMenu({ statuses, projectLabels: [featureLabel] });
+
+    const triggers = wrapper.findAll('button[aria-haspopup="menu"]');
+    expect(triggers.length).toBeGreaterThanOrEqual(3);
+    for (const trigger of triggers) {
+      expect(trigger.element.closest('[data-menu-top-layer]'), trigger.text()).not.toBeNull();
+    }
+  });
+
   it('優先度の選択肢は表示できる優先度をすべて出す', () => {
     const wrapper = mountWithPriorityMenu();
 

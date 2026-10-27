@@ -688,6 +688,15 @@ describe('CreateTaskDialog labels query states', () => {
     wrapper.unmount();
   });
 
+  it('ラベルのメニューは本文のスクロール領域で切れないようトップレイヤーに出す', async () => {
+    const wrapper = mountDialog(queryClient, { labels });
+    await nextTick();
+
+    const trigger = labelsGroup()!.querySelector('button[aria-haspopup="menu"]')!;
+    expect(trigger.closest('[data-menu-top-layer]')).not.toBeNull();
+    wrapper.unmount();
+  });
+
   it('正常な 0 件ではラベル欄を表示しない', async () => {
     const wrapper = mountDialog(queryClient, { labels: [] });
     await nextTick();

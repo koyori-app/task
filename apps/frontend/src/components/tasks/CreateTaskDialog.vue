@@ -525,6 +525,7 @@ async function submit() {
                 />
               </div>
               <Dropdown
+                top-layer
                 v-else
                 variant="tertiary"
                 class="w-full [&>button]:w-full"

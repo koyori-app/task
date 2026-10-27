@@ -151,6 +151,12 @@ describe('TaskForgeSection', () => {
     ).toBe(true);
   });
 
+  it('PR の操作メニューはタスク詳細のスクロール領域で切れないようトップレイヤーに出す', async () => {
+    const wrapper = await mountWith({ pull_requests: [pullRequest], repository });
+    const trigger = wrapper.get('button[aria-label="#87 の操作"]');
+    expect(trigger.element.closest('[data-menu-top-layer]')).not.toBeNull();
+  });
+
   it('コミット一覧を確定できていない PR にだけ「一部のみ」を添える', async () => {
     const wrapper = await mountWith({
       pull_requests: [

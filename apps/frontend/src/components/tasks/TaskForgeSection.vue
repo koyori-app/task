@@ -210,6 +210,7 @@ const SOURCE_LABELS: Record<string, string> = {
               >{{ pr.unresolved ? `${pr.unresolved} 件が未解決` : '未解決なし' }}</a
             >
             <Dropdown
+              top-layer
               variant="ghost"
               :ariaLabel="`#${pr.number} の操作`"
               :items="PR_ACTION_ITEMS"

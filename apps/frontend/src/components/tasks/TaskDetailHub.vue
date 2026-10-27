@@ -487,6 +487,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 <template #icon><UserPlus class="size-4" aria-hidden="true" /></template>
               </Button>
               <Dropdown
+                top-layer
                 variant="ghost"
                 ariaLabel="タスク操作"
                 :disabled="deleteDisabled"
@@ -568,6 +569,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                     <div class="inline-flex h-7 max-w-full items-center rounded bg-muted">
                       <!-- 一覧は根の中に出るので、器で切り取らない（overflow-hidden を付けない） -->
                       <Dropdown
+                        top-layer
                         class="min-w-0"
                         label="ステータス"
                         :disabled="statusUpdating"
@@ -796,6 +798,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                     <div class="flex min-h-8 items-center gap-1 rounded hover:bg-muted">
                       <!-- 更新中は項目だけを止める。Dropdown ごと disabled にすると一覧が閉じる -->
                       <Dropdown
+                        top-layer
                         class="min-w-0 flex-1 [&>button]:w-full"
                         label="ラベルを編集"
                         :icon="null"
@@ -895,6 +898,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                     参照デザインへ載せ替え）。旗と文字色は優先度ごとの色で出す。
                   -->
                   <Dropdown
+                    top-layer
                     class="[&>button]:text-(--priority-color)"
                     :style="{ '--priority-color': PRIORITY_CONFIG[task.priority].color }"
                     label="優先度"
