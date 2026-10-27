@@ -454,34 +454,22 @@ const overlayTaskSeqKey = computed(() =>
 );
 
 /**
- * 閉じるアニメーションの間だけ、直前に開いていたタスクを保持する。
+ * 閉じても最後に開いたタスクを持ち続け、オーバーレイを外さずに open だけを false にする。
  *
- * 選択を null にした瞬間に v-if でオーバーレイごと消すと、Dialog の退場
- * アニメーションが再生されないまま画面から消える。
+ * 選択が null になった瞬間に v-if で外すと、開いたままの <dialog> が DOM から
+ * 消えるだけで close() を通らず、開く前の行へフォーカスが戻らない。閉じている間の
+ * ペインは TaskDetailOverlay が v-if で外す。
  */
 const overlayRenderedTaskSeqKey = ref<string | null>(null);
-let overlayCleanupTimer: ReturnType<typeof setTimeout> | undefined;
 
 watch(
   overlayTaskSeqKey,
   (seqKey) => {
-    if (overlayCleanupTimer) clearTimeout(overlayCleanupTimer);
-    if (seqKey) {
-      overlayRenderedTaskSeqKey.value = seqKey;
-      return;
-    }
-    // Dialog の duration-200 に合わせて、閉じ切ってから外す
-    overlayCleanupTimer = setTimeout(() => {
-      overlayRenderedTaskSeqKey.value = null;
-    }, 250);
+    if (seqKey) overlayRenderedTaskSeqKey.value = seqKey;
   },
   // URL の ?selected= から復元した選択も拾う（初回は watch が走らないため）
   { immediate: true },
 );
-
-onUnmounted(() => {
-  if (overlayCleanupTimer) clearTimeout(overlayCleanupTimer);
-});
 
 function openOverlay(task: TaskResponse) {
   onSelectRow(task.seq_id);
