@@ -7,7 +7,8 @@ import { useTenantStore } from '@/stores/tenant';
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ 'update:open': [open: boolean] }>();
-// 閉じた Dialog も DOM に残るため、送信ボタンを結ぶ form の id はインスタンスごとに分ける
+// 閉じた Dialog も DOM に残るため、送信ボタンを結ぶ form の id と、ラベル・説明・エラーを結ぶ
+// Field の id はインスタンスごとに分ける
 const formId = useId();
 const store = useTenantStore();
 const submitError = ref<string | null>(null);
@@ -78,7 +79,7 @@ watch(
           <form.Field name="name">
             <template #default="{ field }">
               <Field
-                :id="field.name"
+                :id="`${formId}-${field.name}`"
                 label="名前"
                 :error="
                   field.state.meta.isTouched && field.state.meta.errors.length
@@ -102,7 +103,7 @@ watch(
           <form.Field name="display_id">
             <template #default="{ field }">
               <Field
-                :id="field.name"
+                :id="`${formId}-${field.name}`"
                 label="表示ID"
                 description="英小文字・数字・ハイフンのみ"
                 :error="
@@ -126,14 +127,14 @@ watch(
           </form.Field>
           <form.Field name="description">
             <template #default="{ field }">
-              <Field :id="field.name" label="説明（任意）">
+              <Field :id="`${formId}-${field.name}`" label="説明（任意）">
                 <Textarea :value="field.state.value" :on-value-change="field.handleChange" />
               </Field>
             </template>
           </form.Field>
           <form.Field name="icon_url">
             <template #default="{ field }">
-              <Field :id="field.name" label="アイコンURL（任意）">
+              <Field :id="`${formId}-${field.name}`" label="アイコンURL（任意）">
                 <Input
                   type="url"
                   :value="field.state.value"
