@@ -166,6 +166,10 @@ async fn can_access_file_content(
             .await;
     };
 
+    // PAT の束縛だけをファイル自身の tenant_id / project_id で突き合わせる。所属判定まで
+    // 足すと、テナント外の受信者にも効くユーザー指定共有の経路が塞がる。
+    auth_user.ensure_token_binding(file.tenant_id, Some(project_id))?;
+
     if is_tenant_owner(&state.db, file.tenant_id, auth_user.user_id).await? {
         return Ok(());
     }

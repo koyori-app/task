@@ -165,6 +165,21 @@ impl AuthUser {
         tenant_id: Uuid,
         project_id: Option<Uuid>,
     ) -> Result<(), AppError> {
+        self.ensure_token_binding(tenant_id, project_id)?;
+
+        // PAT のバインドは「どのテナントを触れるか」の制限であって、所属の証明ではない。
+        // テナントから外した利用者のトークンが読み取りを保持しないよう、
+        // 所属判定はセッションと同じ経路に通す。
+        has_tenant_access(state, self.user_id, tenant_id, project_id).await
+    }
+
+    /// PAT の束縛（`tenant_id` / `allowed_project_ids`）だけを突き合わせる。所属判定はしない。
+    /// セッションと Device Token は束縛を持たないので常に通る。
+    pub fn ensure_token_binding(
+        &self,
+        tenant_id: Uuid,
+        project_id: Option<Uuid>,
+    ) -> Result<(), AppError> {
         if let AuthMethod::PersonalToken {
             tenant_id: pat_tenant,
             allowed_project_ids,
@@ -187,11 +202,7 @@ impl AuthUser {
                 None => {}
             }
         }
-
-        // PAT のバインドは「どのテナントを触れるか」の制限であって、所属の証明ではない。
-        // テナントから外した利用者のトークンが読み取りを保持しないよう、
-        // 所属判定はセッションと同じ経路に通す。
-        has_tenant_access(state, self.user_id, tenant_id, project_id).await
+        Ok(())
     }
 
     /// テナント一覧系の 2 口（プロジェクト一覧・My Tasks）専用: 通常の所属判定に加えて
