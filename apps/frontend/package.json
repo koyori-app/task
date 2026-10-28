@@ -72,7 +72,7 @@
     "vike-vue": "0.9.14",
     "vike-vue-pinia": "0.2.6",
     "vike-vue-query": "0.2.3",
-    "vue": "3.5.43"
+    "vue": "3.5.44"
   },
   "devDependencies": {
     "@argos-ci/cli": "6.9.6",
