@@ -26,10 +26,15 @@ const emit = defineEmits<{
 const pageContext = usePageContext();
 const tenantStore = useTenantStore();
 
-const tenantSlug = computed(() => {
+const routeTenantSlug = computed(() => {
   const { tenant } = pageContext.routeParams;
   return typeof tenant === 'string' ? tenant : '';
 });
+
+// テナント外のページ（/settings/... など）では、ヘッダーのテナント切り替えが選んでいるテナントのナビを出す
+const tenantSlug = computed(
+  () => routeTenantSlug.value || (tenantStore.selectedTenant?.display_id ?? ''),
+);
 
 const myTasksUrl = computed(() => (tenantSlug.value ? `/${tenantSlug.value}/my-tasks` : '#'));
 
@@ -48,7 +53,9 @@ const navProjectsLoading = computed(
     (Boolean(tenantSlug.value) && routeAlignedTenantId.value === null && tenantStore.isLoading),
 );
 
-watch(tenantSlug, (slug) => void tenantStore.loadTenants(slug || undefined), { immediate: true });
+watch(routeTenantSlug, (slug) => void tenantStore.loadTenants(slug || undefined), {
+  immediate: true,
+});
 
 function retryProjects() {
   void projectsQuery.refetch();
@@ -101,8 +108,8 @@ function closeOnNavigate(event: MouseEvent) {
     @rail-change="emit('update:rail', $event)"
     @click="closeOnNavigate"
   >
-    <!-- テナント外のページ（/settings/... など）ではテナント文脈が無く、
-           リンク先も一覧も作れないためテナント依存のナビ自体を出さない。 -->
+    <!-- テナントが決まらない（読み込み中・所属テナントが無い）うちはリンク先も一覧も作れないので、
+           テナント依存のナビ自体を出さない。 -->
     <NavMain v-if="tenantSlug" :items="data.navMain" />
     <NavProjects
       v-if="tenantSlug"
