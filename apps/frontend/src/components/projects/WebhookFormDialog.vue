@@ -4,16 +4,7 @@ import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhCopy } from '@phosphor-icons/vue';
 import { computed, ref, useId } from 'vue';
-import { Button, Dialog, Field, Input } from '@koyori-app/ui-vue';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Button, Checkbox, Dialog, Field, Input, Picker } from '@koyori-app/ui-vue';
 import {
   WEBHOOK_EVENTS,
   WEBHOOK_FORMATS,
@@ -31,6 +22,8 @@ const WEBHOOKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/webhooks' a
 const WEBHOOK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/webhooks/{id}' as const;
 
 const SECRET_MIN_LENGTH = 16;
+
+const FORMAT_ITEMS = [...WEBHOOK_FORMATS];
 /** 一覧 API が送信先 URL の代わりに返す値 */
 const REDACTED_URL = '[redacted]';
 
@@ -234,61 +227,47 @@ function onClose() {
 
         <form.Field name="format">
           <template #default="{ field }">
-            <div class="flex flex-col gap-2">
-              <Label for="webhook-format">形式</Label>
-              <Select
-                :model-value="field.state.value"
-                @update:model-value="(v) => field.handleChange(v as WebhookFormat)"
-              >
-                <SelectTrigger id="webhook-format" class="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem
-                    v-for="format in WEBHOOK_FORMATS"
-                    :key="format.value"
-                    :value="format.value"
-                  >
-                    <span class="inline-flex items-center gap-2">
-                      <component :is="format.icon" class="size-4" aria-hidden="true" />
-                      {{ format.label }}
-                    </span>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <Field id="webhook-format" label="形式">
+              <Picker
+                top-layer
+                label="形式"
+                :searchable="false"
+                :items="FORMAT_ITEMS"
+                :selected-values="[field.state.value]"
+                :on-selection-change="
+                  (values: string[]) => field.handleChange(values[0] as WebhookFormat)
+                "
+              />
+            </Field>
           </template>
         </form.Field>
 
         <form.Field name="events">
           <template #default="{ field }">
-            <div class="flex flex-col gap-2">
-              <Label>イベント</Label>
-              <div class="flex flex-col gap-2">
-                <label
-                  v-for="event in WEBHOOK_EVENTS"
-                  :key="event.value"
-                  class="flex cursor-pointer items-center gap-2 text-sm"
-                >
-                  <Checkbox
-                    :model-value="field.state.value.includes(event.value)"
-                    :aria-label="event.label"
-                    @update:model-value="
-                      (v) =>
-                        field.handleChange(toggleEvent(field.state.value, event.value, v === true))
-                    "
-                  />
-                  {{ event.label }}
-                </label>
-              </div>
+            <fieldset class="min-w-0">
+              <legend class="text-sm font-medium">イベント</legend>
               <p
                 v-if="field.state.meta.errors.length"
+                id="webhook-events-error"
                 role="alert"
                 class="text-sm text-(--koyori-color-danger)"
               >
                 イベントを 1 つ以上選んでください
               </p>
-            </div>
+              <div class="mt-2 flex flex-col gap-2">
+                <Checkbox
+                  v-for="event in WEBHOOK_EVENTS"
+                  :key="event.value"
+                  :label="event.label"
+                  :checked="field.state.value.includes(event.value)"
+                  ariaDescribedBy="webhook-events-error"
+                  :on-checked-change="
+                    (checked: boolean) =>
+                      field.handleChange(toggleEvent(field.state.value, event.value, checked))
+                  "
+                />
+              </div>
+            </fieldset>
           </template>
         </form.Field>
 

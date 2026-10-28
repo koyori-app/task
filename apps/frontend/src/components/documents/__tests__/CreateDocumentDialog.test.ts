@@ -32,4 +32,17 @@ describe('CreateDocumentDialog', () => {
     expect(input.value).toBe('設計メモ');
     expect(wrapper.emitted('created')).toBeUndefined();
   });
+
+  it('種類の一覧はダイアログの枠で切れないようトップレイヤーに出す', async () => {
+    mount(CreateDocumentDialog, {
+      props: { open: true, tenantId: 'tenant-1', folderId: 'root-1' },
+      global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const trigger = document.body.querySelector('button[aria-label^="種類"]');
+    expect(trigger).not.toBeNull();
+    expect(trigger!.closest('[data-menu-top-layer]')).not.toBeNull();
+  });
 });

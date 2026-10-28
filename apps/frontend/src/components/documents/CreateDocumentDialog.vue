@@ -3,15 +3,7 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { ref, useId, watch } from 'vue';
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Button, Dialog, Field, Input, Spinner } from '@koyori-app/ui-vue';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Button, Dialog, Field, Input, Picker, Spinner } from '@koyori-app/ui-vue';
 import { useHydrated } from '@/composables/useHydrated';
 import type { components } from '@/generated/api';
 import { DRIVE_FILES_PATH, fetchClient } from '@/lib/api-vue-query';
@@ -19,6 +11,8 @@ import { documentFileName, MAX_DOCUMENT_TITLE_LENGTH } from '@/lib/documents/nam
 import { DOCUMENT_TEMPLATES } from '@/lib/documents/templates';
 
 type DriveFile = components['schemas']['DriveFileResponse'];
+
+const TEMPLATE_ITEMS = DOCUMENT_TEMPLATES.map((item) => ({ value: item.id, label: item.label }));
 
 const props = defineProps<{
   open: boolean;
@@ -122,19 +116,16 @@ async function submit() {
             :on-value-change="(v: string) => (title = v)"
           />
         </Field>
-        <div class="space-y-1.5">
-          <Label for="document-template">種類</Label>
-          <Select v-model="templateId">
-            <SelectTrigger id="document-template" class="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="item in DOCUMENT_TEMPLATES" :key="item.id" :value="item.id">
-                {{ item.label }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <Field id="document-template" label="種類">
+          <Picker
+            top-layer
+            label="種類"
+            :searchable="false"
+            :items="TEMPLATE_ITEMS"
+            :selected-values="[templateId]"
+            :on-selection-change="(values: string[]) => (templateId = values[0]!)"
+          />
+        </Field>
         <p v-if="errorMessage" role="alert" class="text-sm text-destructive">
           {{ errorMessage }}
         </p>

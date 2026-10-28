@@ -1,32 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { DOMWrapper, enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
-import { useListLayout } from '@/components/users/__tests__/list-layout';
+import { pickerOption, pickerTrigger } from '@/components/__tests__/picker';
 
 enableAutoUnmount(afterEach);
-useListLayout();
 
 const members = [
   { id: 'user-1', username: 'yupix', avatar_url: null },
   { id: 'user-2', username: 'sousuke', avatar_url: null },
 ];
 
-/**
- * 候補の窓はトリガーを押さないと描画されないので、
- * Popover の部品を素の div に差し替えて中を読む（中身の UserSelectorList は本物）。
- */
+/** 候補の一覧（Picker）は閉じていても hidden のまま DOM にあるので、開かずに読む。 */
 function mountPicker(props: Record<string, unknown>) {
   return mount(TaskAssigneePicker, {
     props: { members: [], selected: [], ...props },
-    global: {
-      stubs: {
-        PopoverRoot: { template: '<div><slot /></div>' },
-        PopoverTrigger: { template: '<div><slot /></div>' },
-        PopoverPortal: { template: '<div><slot /></div>' },
-        PopoverContent: { template: '<div><slot /></div>' },
-      },
-    },
   });
 }
 
@@ -61,8 +49,6 @@ describe('TaskAssigneePicker の候補の取得状態', () => {
 
   it('候補があれば絞り込める', async () => {
     const wrapper = mountPicker({ members });
-    // 候補の一覧は仮想化しており、描くのは一覧の丈を測った次の tick
-    await flushPromises();
 
     expect(wrapper.text()).toContain('yupix');
     expect(wrapper.text()).toContain('sousuke');
@@ -75,10 +61,15 @@ describe('TaskAssigneePicker の候補の取得状態', () => {
 });
 
 // 担当者は一人ずつ保存してから再取得するので、selected は選んでから遅れて変わる。一覧は選んだ時に
-// 先に反映し、遅れて届いた同じ中身では差し替えない（差し替えると reka が一覧を選んだ者へ送り直す）
+// 先に反映し、保存中に届く途中の値では差し替えない
 describe('TaskAssigneePicker の保存が遅れて反映される時', () => {
   const optionOf = (wrapper: ReturnType<typeof mountPicker>, id: string) =>
-    wrapper.get(`[role="option"][data-user-id="${id}"]`);
+    new DOMWrapper(
+      pickerOption(
+        pickerTrigger(wrapper.element, '担当者'),
+        members.find((m) => m.id === id)!.username,
+      ),
+    );
 
   it('選んだ時に一覧へ先に反映し、遅れて届いた同じ中身でも選んだままにする', async () => {
     const wrapper = mountPicker({ members, selected: [members[0]] });

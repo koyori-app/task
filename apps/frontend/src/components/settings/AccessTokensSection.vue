@@ -2,18 +2,18 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhCopy, PhKey, PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button, Dialog, Dropdown, Field, Input, type DropdownItem } from '@koyori-app/ui-vue';
-import { Checkbox } from '@/components/ui/checkbox';
-import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Label } from '@/components/ui/label';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
+  Button,
+  Checkbox,
+  Dialog,
+  Dropdown,
+  Field,
+  Input,
+  Picker,
+  Skeleton,
+  type DropdownItem,
+} from '@koyori-app/ui-vue';
+import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import {
   personalTokensQueryOptions,
   useCreatePersonalTokenMutation,
@@ -50,6 +50,9 @@ const issuableTenants = computed(() =>
   (tenantsQuery.data.value ?? []).filter(
     (t) => t.membership === 'Owner' || t.member_role === 'Admin',
   ),
+);
+const tenantItems = computed(() =>
+  issuableTenants.value.map((tenant) => ({ value: tenant.id, label: tenant.name })),
 );
 
 /** 一覧・取り消しダイアログでトークンの束縛先テナントを表示するための対応表。 */
@@ -278,23 +281,20 @@ function scopeItems(scopes: string[]): DropdownItem[] {
           </Field>
 
           <!-- 候補が一つでも出す。出さぬと、どのテナントに縛られるかが発行後まで見えぬ。 -->
-          <div v-if="issuableTenants.length > 0" class="flex flex-col gap-2">
-            <Label for="token-tenant">テナント</Label>
-            <Select
-              :model-value="formTenantId ?? undefined"
-              @update:model-value="(v) => (selectedTenantId = v == null ? null : String(v))"
-            >
-              <SelectTrigger id="token-tenant" class="w-full">
-                <SelectValue placeholder="選択してください" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="tenant in issuableTenants" :key="tenant.id" :value="tenant.id">
-                  {{ tenant.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <p class="text-muted-foreground text-sm">トークンはこのテナントの中でだけ使えます。</p>
-          </div>
+          <Field
+            v-if="issuableTenants.length > 0"
+            id="token-tenant"
+            label="テナント"
+            description="トークンはこのテナントの中でだけ使えます。"
+          >
+            <Picker
+              label="テナント"
+              :searchable="tenantItems.length > 8"
+              :items="tenantItems"
+              :selected-values="formTenantId ? [formTenantId] : []"
+              :on-selection-change="(values: string[]) => (selectedTenantId = values[0] ?? null)"
+            />
+          </Field>
 
           <div class="flex flex-col gap-2">
             <p class="text-sm font-medium">有効期限</p>
@@ -311,30 +311,29 @@ function scopeItems(scopes: string[]): DropdownItem[] {
             </div>
           </div>
 
-          <div class="flex flex-col gap-2">
-            <Label>スコープ</Label>
-            <div class="flex flex-col gap-3">
-              <label
-                v-for="entry in SCOPE_CATALOG"
-                :key="entry.scope"
-                class="flex cursor-pointer items-start gap-3"
-              >
-                <Checkbox
-                  class="mt-0.5"
-                  :model-value="selectedScopes.includes(entry.scope)"
-                  :name="`scope-${entry.scope}`"
-                  @update:model-value="(v) => toggleScope(entry.scope, v === true)"
-                />
-                <span class="flex flex-col">
-                  <code class="font-mono text-sm">{{ entry.scope }}</code>
-                  <span class="text-muted-foreground text-sm">{{ entry.description }}</span>
-                </span>
-              </label>
-            </div>
-            <p role="alert" class="min-h-[1.25rem] text-sm text-(--koyori-color-danger)">
+          <fieldset class="min-w-0">
+            <legend class="text-sm font-medium">スコープ</legend>
+            <p id="token-scopes-error" role="alert" class="text-sm text-(--koyori-color-danger)">
               {{ scopesError ?? '' }}
             </p>
-          </div>
+            <div class="mt-2 flex flex-col gap-3">
+              <div v-for="entry in SCOPE_CATALOG" :key="entry.scope" class="flex flex-col">
+                <Checkbox
+                  :label="entry.scope"
+                  :name="`scope-${entry.scope}`"
+                  :checked="selectedScopes.includes(entry.scope)"
+                  :ariaDescribedBy="`token-scope-${entry.scope}-description token-scopes-error`"
+                  :on-checked-change="(checked: boolean) => toggleScope(entry.scope, checked)"
+                />
+                <p
+                  :id="`token-scope-${entry.scope}-description`"
+                  class="text-muted-foreground pl-[calc(var(--koyori-control-height-sm)+var(--koyori-space-xs))] text-sm"
+                >
+                  {{ entry.description }}
+                </p>
+              </div>
+            </div>
+          </fieldset>
 
           <p v-if="submitError" class="text-destructive text-sm">{{ submitError }}</p>
 
@@ -351,10 +350,7 @@ function scopeItems(scopes: string[]): DropdownItem[] {
     </div>
 
     <!-- 一覧 -->
-    <div v-if="tokensQuery.isPending.value" class="flex flex-col gap-2">
-      <Skeleton class="h-16 w-full" />
-      <Skeleton class="h-16 w-full" />
-    </div>
+    <Skeleton v-if="tokensQuery.isPending.value" :lines="2" height="4rem" />
     <p v-else-if="tokensQuery.isError.value" class="text-destructive text-sm">
       トークンの一覧を取得できませんでした。再読み込みしてください。
     </p>

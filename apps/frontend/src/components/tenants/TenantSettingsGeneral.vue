@@ -5,15 +5,7 @@ import { navigate } from 'vike/client/router';
 
 import TenantIconPicker from '@/components/tenants/TenantIconPicker.vue';
 import { DEFAULT_TENANT_EMOJI } from '@/components/tenants/tenant-icon';
-import { Button, Field, Input, Textarea } from '@koyori-app/ui-vue';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Button, Field, Input, Picker, Textarea } from '@koyori-app/ui-vue';
 import DeleteTenantDialog from '@/components/tenants/DeleteTenantDialog.vue';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
@@ -240,21 +232,21 @@ const ACCESS_FLAGS = [
             この設定は API 未実装のため、現在は表示のみです。変更は保存されません。
           </p>
           <div class="grid grid-cols-2 gap-3">
-            <div v-for="field in DEFAULT_FIELDS" :key="field.key" class="min-w-0">
-              <Label :for="`tenant-default-${field.key}`" class="mb-1.5 text-[13px] font-medium">
-                {{ field.label }}
-              </Label>
-              <Select v-model="defaults[field.key]" disabled>
-                <SelectTrigger :id="`tenant-default-${field.key}`" class="h-9 w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="choice in field.choices" :key="choice" :value="choice">
-                    {{ choice }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <Field
+              v-for="field in DEFAULT_FIELDS"
+              :id="`tenant-default-${field.key}`"
+              :key="field.key"
+              :label="field.label"
+              class="min-w-0"
+            >
+              <Picker
+                :label="field.label"
+                :searchable="false"
+                disabled
+                :items="field.choices.map((choice) => ({ value: choice, label: choice }))"
+                :selected-values="[defaults[field.key]]"
+              />
+            </Field>
           </div>
         </section>
 

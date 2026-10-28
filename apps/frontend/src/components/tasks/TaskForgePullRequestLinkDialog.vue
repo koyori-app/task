@@ -5,8 +5,7 @@ import { OpenApiVueQueryError } from '@koyori-app/openapi-vue-query';
 import { type } from 'arktype';
 import { ref, useId } from 'vue';
 
-import { Button, Dialog, Field, Input } from '@koyori-app/ui-vue';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Button, Checkbox, Dialog, Field, Input } from '@koyori-app/ui-vue';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import { apiClient } from '@/lib/api-vue-query';
 
@@ -106,13 +105,11 @@ function onClose() {
 
       <form.Field name="closes">
         <template #default="{ field }">
-          <label class="flex cursor-pointer items-center gap-2 text-sm">
-            <Checkbox
-              :model-value="field.state.value"
-              @update:model-value="(v) => field.handleChange(v === true)"
-            />
-            マージしたらこのタスクを完了にする
-          </label>
+          <Checkbox
+            label="マージしたらこのタスクを完了にする"
+            :checked="field.state.value"
+            :on-checked-change="field.handleChange"
+          />
         </template>
       </form.Field>
 

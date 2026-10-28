@@ -9,7 +9,6 @@ import {
   PhUser,
 } from '@phosphor-icons/vue';
 import { computed, type Component } from 'vue';
-import { Separator } from '@/components/ui/separator';
 import { usePreference } from '@/composables/useLocalSettings';
 
 type NavItem = {
@@ -45,7 +44,7 @@ defineProps<{ currentPath: string }>();
 <template>
   <nav class="flex flex-col gap-1" aria-label="アカウント設定">
     <template v-for="(group, groupIndex) in groups" :key="groupIndex">
-      <Separator v-if="groupIndex > 0" class="my-1" data-nav-separator />
+      <hr v-if="groupIndex > 0" class="koyori-separator my-1" data-nav-separator />
       <template v-for="item in group" :key="item.title">
         <a
           v-if="item.href"

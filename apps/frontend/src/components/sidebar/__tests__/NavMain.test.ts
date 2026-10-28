@@ -3,70 +3,32 @@ import { mount, enableAutoUnmount } from '@vue/test-utils';
 
 enableAutoUnmount(afterEach);
 import NavMain from '../NavMain.vue';
-import SidebarProvider from '../../ui/sidebar/SidebarProvider.vue';
 
-const leafItems = [
+const items = [
   { title: 'Labels', url: '/tenant/projects/proj/labels', isActive: true },
   { title: 'Tasks', url: '/tenant/projects/proj/tasks', isActive: false },
 ];
 
-// isActive: true を設定すると Collapsible が default-open になりコンテンツが DOM に現れる
-const treeItems = [
-  {
-    title: 'Settings',
-    url: '/settings',
-    isActive: true,
-    items: [
-      { title: 'General', url: '/settings/general' },
-      { title: 'Team', url: '/settings/team' },
-    ],
-  },
-];
-
-function mountNavMain(items: typeof leafItems | typeof treeItems) {
-  return mount(
-    {
-      components: { SidebarProvider, NavMain },
-      template: '<SidebarProvider><NavMain :items="items" /></SidebarProvider>',
-      data: () => ({ items }),
-    },
-    { attachTo: document.body },
-  );
+function mountNavMain() {
+  return mount(NavMain, { props: { items }, attachTo: document.body });
 }
 
-describe('NavMain – leaf items (no sub-items)', () => {
-  it('renders each leaf item as a direct <a> link', () => {
-    const wrapper = mountNavMain(leafItems);
-    const links = wrapper.findAll('a');
-    const hrefs = links.map((l) => l.attributes('href'));
-    expect(hrefs).toContain('/tenant/projects/proj/labels');
-    expect(hrefs).toContain('/tenant/projects/proj/tasks');
+function findLink(wrapper: ReturnType<typeof mountNavMain>, name: string) {
+  const link = wrapper.findAll('a').find((a) => a.text() === name);
+  if (!link) throw new Error(`link "${name}" not found`);
+  return link;
+}
+
+describe('NavMain', () => {
+  it('各項目をリンクで出す', () => {
+    const wrapper = mountNavMain();
+    expect(findLink(wrapper, 'Labels').attributes('href')).toBe('/tenant/projects/proj/labels');
+    expect(findLink(wrapper, 'Tasks').attributes('href')).toBe('/tenant/projects/proj/tasks');
   });
 
-  it('active leaf item has data-active attribute set to true', () => {
-    const wrapper = mountNavMain(leafItems);
-    // SidebarMenuButtonChild renders with data-active on the element (via reka-ui Primitive as-child → merged onto <a>)
-    const activeLinks = wrapper.findAll('[data-active="true"]');
-    expect(activeLinks.length).toBeGreaterThan(0);
-    expect(activeLinks[0].text()).toContain('Labels');
-  });
-
-  it('inactive leaf item has data-active attribute set to false', () => {
-    const wrapper = mountNavMain(leafItems);
-    const inactiveLinks = wrapper.findAll('[data-active="false"]');
-    expect(inactiveLinks.length).toBeGreaterThan(0);
-    expect(inactiveLinks[0].text()).toContain('Tasks');
-  });
-});
-
-describe('NavMain – collapsible items (with sub-items)', () => {
-  it('renders the parent and sub-item links when collapsible is open (isActive: true)', () => {
-    const wrapper = mountNavMain(treeItems);
-    const hrefs = wrapper.findAll('a').map((l) => l.attributes('href'));
-    expect(hrefs).toContain('/settings/general');
-    expect(hrefs).toContain('/settings/team');
-    expect(wrapper.text()).toContain('Settings');
-    expect(wrapper.text()).toContain('General');
-    expect(wrapper.text()).toContain('Team');
+  it('現在地の項目だけを aria-current="page" で強調する', () => {
+    const wrapper = mountNavMain();
+    expect(findLink(wrapper, 'Labels').attributes('aria-current')).toBe('page');
+    expect(findLink(wrapper, 'Tasks').attributes('aria-current')).toBeUndefined();
   });
 });

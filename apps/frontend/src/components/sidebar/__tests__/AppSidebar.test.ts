@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { computed, defineComponent, h, ref } from 'vue';
+import { computed } from 'vue';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
 
 const { navigateSpy, projectsControl, tenantStoreStub } = vi.hoisted(() => ({
@@ -40,52 +40,32 @@ vi.mock('@/lib/api-vue-query', async (importOriginal) => {
   };
 });
 
-import { TooltipProvider } from 'reka-ui';
-
 import AppSidebar from '../AppSidebar.vue';
-import { provideSidebarContext } from '../../ui/sidebar/utils';
 
 enableAutoUnmount(afterEach);
 
 /**
- * モバイルのサイドバーを開いた状態で AppSidebar を組む。
- *
- * `SidebarProvider` は `useMediaQuery` で isMobile を決めるので、matchMedia を
- * 細工するより context を直接 provide したほうが状態を確実に固定できる。
+ * AppSidebar を組み、狭い画面のサイドバー（Drawer）を閉じる指示 `close` を拾う。
+ * 画面幅の判定と Drawer の開閉は +Layout が持つので、ここでは指示が出るかだけを見る。
  */
-function mountSidebar(setOpenMobile: (value: boolean) => void) {
-  const Host = defineComponent({
-    setup() {
-      provideSidebarContext({
-        state: computed(() => 'expanded' as const),
-        open: ref(true),
-        setOpen: vi.fn(),
-        isMobile: ref(true),
-        openMobile: ref(true),
-        setOpenMobile,
-        toggleSidebar: vi.fn(),
-      });
-      // `collapsible: 'none'` で素の div 描画にする。isMobile のままだと Sheet
-      // （portal）が挟まり jsdom で組めないが、閉じる処理は context の isMobile を
-      // 見るので、この指定でも検証したい経路は変わらない。
-      // TooltipProvider は本番では SidebarProvider が用意している（サイドバーの
-      // ボタンが Tooltip を使う）。
-      return () =>
-        h(TooltipProvider, { delayDuration: 0 }, () => h(AppSidebar, { collapsible: 'none' }));
-    },
-  });
-  return mount(Host, { attachTo: document.body });
+function mountSidebar(onClose: () => void) {
+  return mount(AppSidebar, { props: { onClose }, attachTo: document.body });
 }
 
 function findLink(href: string) {
-  const link = document.body.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
+  const nav = document.body.querySelector('nav[aria-label="ナビゲーション"]');
+  if (!nav) throw new Error('navigation not found');
+  const link = nav.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
   if (!link) throw new Error(`link "${href}" not found`);
   return link;
 }
 
-function findButton(label: string) {
-  const button = [...document.body.querySelectorAll('button')].find(
-    (el) => el.getAttribute('title') === label || el.textContent?.trim() === label,
+/** `aria-label` で名前を付けたアイコンだけのボタンか、文字で名前が出るボタンを探す */
+function findButton(label: string, by: 'aria-label' | 'text') {
+  const button = [...document.body.querySelectorAll('button')].find((el) =>
+    by === 'aria-label'
+      ? el.getAttribute('aria-label') === label
+      : el.textContent?.trim() === label,
   );
   if (!button) throw new Error(`button "${label}" not found`);
   return button as HTMLButtonElement;
@@ -100,37 +80,44 @@ beforeEach(() => {
 });
 
 /**
- * 「プロジェクトを作成」は <button> から navigate を呼ぶ。リンクを踏まないので
- * SidebarContent のイベント委譲（closest('a')）では拾えず、遷移しても作成画面が
- * モバイルのサイドバーに覆われたままになっていた。導線は 2 か所ある。
- */
-/**
- * ナビのリンクは SidebarContent に置いたイベント委譲で拾う。効かなくなる現実的な
- * 壊れ方は `@click` の行が消えることではなく、ナビが SidebarContent の外へ移ったり
+ * ナビのリンクは Sidebar の根に置いたイベント委譲で拾う。効かなくなる現実的な
+ * 壊れ方は `@click` の行が消えることではなく、ナビが Sidebar の外へ移ったり
  * 別のコンポーネントで包まれたりして委譲の下から抜けることなので、純粋関数ではなく
  * 実際のマークアップから辿って確認する。
  */
 describe('AppSidebar のナビリンク', () => {
-  it('モバイルでナビのリンクを押したらサイドバーを閉じる', () => {
-    const setOpenMobile = vi.fn<(value: boolean) => void>();
-    mountSidebar(setOpenMobile);
+  it('ナビのリンクを押したら、サイドバーを閉じる指示を出す', () => {
+    const onClose = vi.fn();
+    mountSidebar(onClose);
 
     findLink('/acme/my-tasks').click();
 
-    expect(setOpenMobile).toHaveBeenCalledWith(false);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('現在地のリンクを強調する', () => {
+    mountSidebar(vi.fn());
+
+    expect(findLink('/acme/my-tasks').getAttribute('aria-current')).toBe('page');
+    expect(findLink('/acme').getAttribute('aria-current')).toBeNull();
   });
 });
 
+/**
+ * 「プロジェクトを作成」は <button> から navigate を呼ぶ。リンクを踏まないので
+ * 本文のイベント委譲（closest('a')）では拾えず、遷移しても作成画面が
+ * 狭い画面のサイドバーに覆われたままになっていた。導線は 2 か所ある。
+ */
 describe('AppSidebar のプロジェクト作成導線', () => {
   it('空状態の作成ボタンで、遷移してサイドバーを閉じる', async () => {
-    const setOpenMobile = vi.fn<(value: boolean) => void>();
-    mountSidebar(setOpenMobile);
+    const onClose = vi.fn();
+    mountSidebar(onClose);
 
-    findButton('プロジェクトを作成').click();
+    findButton('プロジェクトを作成', 'text').click();
     await Promise.resolve();
 
     expect(navigateSpy).toHaveBeenCalledWith('/acme/projects/new');
-    expect(setOpenMobile).toHaveBeenCalledWith(false);
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it('プロジェクトがある状態の見出し横の作成ボタンでも、遷移してサイドバーを閉じる', async () => {
@@ -147,14 +134,14 @@ describe('AppSidebar のプロジェクト作成導線', () => {
         tenant_id: 'tenant-1',
       },
     ];
-    const setOpenMobile = vi.fn<(value: boolean) => void>();
-    mountSidebar(setOpenMobile);
+    const onClose = vi.fn();
+    mountSidebar(onClose);
 
-    // 空状態のカードは出ないので、拾えるのは見出し横のアクションだけ
-    findButton('プロジェクトを作成').click();
+    // 空状態のカードは出ないので、拾えるのは見出し横のボタンだけ
+    findButton('プロジェクトを作成', 'aria-label').click();
     await Promise.resolve();
 
     expect(navigateSpy).toHaveBeenCalledWith('/acme/projects/new');
-    expect(setOpenMobile).toHaveBeenCalledWith(false);
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

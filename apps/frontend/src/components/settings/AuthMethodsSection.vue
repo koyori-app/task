@@ -13,8 +13,7 @@ import {
   PhX,
 } from '@phosphor-icons/vue';
 import { computed, onMounted, ref, watch, type Component } from 'vue';
-import { Button, Field, Input } from '@koyori-app/ui-vue';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Button, Field, Input, Skeleton } from '@koyori-app/ui-vue';
 import PasswordMethodRow from '@/components/settings/PasswordMethodRow.vue';
 import {
   meQueryOptions,
@@ -319,7 +318,7 @@ async function onPasswordSet() {
       />
 
       <div v-if="connectionsQuery.isLoading.value" class="flex flex-col gap-2 p-4">
-        <Skeleton class="h-9 w-full" />
+        <Skeleton height="2.25rem" />
       </div>
 
       <p

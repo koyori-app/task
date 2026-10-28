@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
-import { TooltipProvider } from 'reka-ui';
 import { defineComponent, h } from 'vue';
 
 const { put } = vi.hoisted(() => ({ put: vi.fn() }));
@@ -39,21 +38,18 @@ function mountTimeline(
 ) {
   const queryClient = new QueryClient();
   const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
-  // TooltipProvider は本番では SidebarProvider が用意している（山の内訳が Tooltip を使う）
   const Host = defineComponent(
     () => () =>
-      h(TooltipProvider, { delayDuration: 0 }, () =>
-        h(CalendarTimeline, {
-          from: '2026-10-12',
-          today: '2026-10-14',
-          timeZone: 'UTC',
-          tenantSlug: 'acme',
-          tenantId: 'tenant-1',
-          tasks,
-          members,
-          ...extra,
-        }),
-      ),
+      h(CalendarTimeline, {
+        from: '2026-10-12',
+        today: '2026-10-14',
+        timeZone: 'UTC',
+        tenantSlug: 'acme',
+        tenantId: 'tenant-1',
+        tasks,
+        members,
+        ...extra,
+      }),
   );
   const wrapper = mount(Host, {
     attachTo,
@@ -131,13 +127,12 @@ describe('CalendarTimeline', () => {
     ]);
     const load = wrapper.get(`[data-member-row="${ALICE.id}"] [data-load-date="2026-10-14"]`);
     expect(load.attributes('tabindex')).toBe('0');
-    await load.trigger('focus');
-    await vi.waitFor(() => {
-      const items = document.body.querySelector('[data-load-items]');
-      expect(items?.textContent).toContain('ENG-1');
-      expect(items?.textContent).toContain('設計レビュー');
-      expect(items?.textContent).toContain('7h');
-    });
+    const tooltip = wrapper.get(`[id="${load.attributes('aria-describedby')}"]`);
+    expect(tooltip.attributes('role')).toBe('tooltip');
+    expect(tooltip.attributes('hidden')).toBeDefined();
+    await load.trigger('focusin');
+    expect(tooltip.attributes('hidden')).toBeUndefined();
+    expect(tooltip.text()).toBe('2026-10-14 の残り 7h（上限 6h を超過）\nENG-1 設計レビュー 7h');
     wrapper.unmount();
   });
 
@@ -221,13 +216,13 @@ describe('CalendarTimeline', () => {
   it('メンバーの行の見出しに担当者のアバターを出し、画像が無ければ頭文字にする', () => {
     const wrapper = mountTimeline([task({ soft_deadline: '2026-10-14T00:00:00Z' })]);
     const avatar = wrapper.get(`[data-member-row="${ALICE.id}"] [data-member-avatar]`);
-    expect(avatar.text()).toBe('A');
+    expect(avatar.text()).toBe('a');
     // 名前が隣にあるので読み上げない
     expect(avatar.attributes('aria-hidden')).toBe('true');
-    expect(wrapper.get(`[data-member-row="${BOB.id}"] [data-member-avatar]`).text()).toBe('B');
-    // 画像が無い行の頭文字は 1 文字、色は UserAvatar の組
-    expect(avatar.classes()).toContain('size-5');
-    expect(avatar.get('[data-slot=avatar-fallback]').classes()).toContain('text-foreground');
+    expect(wrapper.get(`[data-member-row="${BOB.id}"] [data-member-avatar]`).text()).toBe('b');
+    // 大きさは sm（20px）、頭文字の色は UserAvatar の組
+    expect(avatar.attributes('style')).toContain('width: 20px');
+    expect(avatar.classes()).toContain('text-foreground');
   });
 
   it('担当者なしの行は頭文字ではなく人のアイコンを出す', () => {
@@ -236,8 +231,7 @@ describe('CalendarTimeline', () => {
     expect(avatar.text()).toBe('');
     expect(avatar.find('svg').exists()).toBe(true);
     // 地は bg-muted、字（アイコン）は継ぐ色の text-foreground。薄い text-muted-foreground は使わぬ
-    const fallback = avatar.get('[data-slot=avatar-fallback]');
-    expect(fallback.classes()).toEqual(expect.arrayContaining(['bg-muted', 'text-foreground']));
+    expect(avatar.classes()).toEqual(expect.arrayContaining(['bg-muted', 'text-foreground']));
     expect(avatar.find('svg').classes()).not.toContain('text-muted-foreground');
     expect(avatar.attributes('aria-hidden')).toBe('true');
     expect(avatar.classes()).toContain('size-5');
