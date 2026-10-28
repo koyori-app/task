@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { X } from '@lucide/vue';
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { getActivePinia } from 'pinia';
+import { navigate } from 'vike/client/router';
+import { usePageContext } from 'vike-vue/usePageContext';
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import {
@@ -17,9 +19,11 @@ import {
 } from '@koyori-app/ui-vue';
 import UserSelector from '@/components/users/UserSelector.vue';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
+import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
+import { useSimilarTasks } from '@/composables/useSimilarTasks';
 import type { components } from '@/generated/api';
 import { apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
-import { PRIORITY_CONFIG } from '@/lib/task-display';
+import { PRIORITY_CONFIG, taskDetailHref } from '@/lib/task-display';
 import { toIsoDate } from '@/lib/task-date';
 import { useAuthStore } from '@/stores/auth';
 
@@ -40,6 +44,9 @@ const ASSIGNEE_ROLE = 'primary';
  * デシリアライズで落ち、利用者には入力の誤りではなく「作成に失敗しました」しか出ない。
  */
 const MAX_ESTIMATE_MINUTES = 2_147_483_647;
+
+/** 似ているタスクの問い合わせを待つ時間。一覧の検索（tasks/+Page.vue）と揃える */
+const TITLE_DEBOUNCE_MS = 300;
 
 const PRIORITY_ITEMS = (Object.keys(PRIORITY_CONFIG) as Priority[]).map((value) => ({
   value,
@@ -137,6 +144,38 @@ const titleInputRef = ref<InstanceType<typeof Input> | null>(null);
 watch(titleInputRef, (input) => {
   (input?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
 });
+
+// 似ているタスク（重複の注意喚起）。作成は妨げない: 取得中・失敗・0 件は何も出さない
+const pageContext = usePageContext();
+// ダイアログは API 用の UUID しか受け取らないので、リンクの表示用 ID はルートから取る
+const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
+const debouncedTitle = ref('');
+let titleDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+watch(title, (value) => {
+  if (titleDebounceTimer) clearTimeout(titleDebounceTimer);
+  titleDebounceTimer = setTimeout(() => {
+    debouncedTitle.value = value.trim();
+  }, TITLE_DEBOUNCE_MS);
+});
+onUnmounted(() => {
+  if (titleDebounceTimer) clearTimeout(titleDebounceTimer);
+});
+const similarQuery = useSimilarTasks({
+  tenantId: () => props.tenantId,
+  projectId: () => props.projectId,
+  title: debouncedTitle,
+});
+// debounce 中は入力と問い合わせがずれるので、追いつくまで旧タイトルの候補を出さない
+const similarTasks = computed(() =>
+  props.open && debouncedTitle.value === title.value.trim()
+    ? (similarQuery.data.value?.tasks ?? [])
+    : [],
+);
+
+function openSimilarTask(seqId: number) {
+  void navigate(taskDetailHref(tenantDisplayId.value, props.projectKey, seqId));
+  onClose();
+}
 
 watch(
   () => [props.open, defaultStatusId.value] as const,
@@ -345,6 +384,13 @@ async function submit() {
               placeholder="タイトルを入力"
               :value="title"
               :on-value-change="(v: string) => (title = v)"
+            />
+            <SimilarTasksList
+              class="pt-3"
+              :tasks="similarTasks"
+              :tenant-display-id="tenantDisplayId"
+              :project-key="projectKey"
+              @select="openSimilarTask"
             />
           </div>
 
