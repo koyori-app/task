@@ -284,6 +284,7 @@ GET /v1/tenants/{tenant_id}/projects/{project_id}/...
 ```
 
 path の ID と PAT の `tenant_id` / `allowed_project_ids` を突き合わせる。  
+path にテナントを持たない Drive の本体取得（`GET /v1/drive/files/{id}/content`）は、ファイル自身の `tenant_id` / `project_id` で同じ束縛を突き合わせる（`ensure_token_binding`。共有トークン `?token=` の経路は対象外）。  
 アカウント API（例: `GET /v1/auth/me`）は PAT 非対応（セッションのみ。`GET /v1/auth/me` は Device Token も通す）。
 
 ### `/v1/users/me/...`（通知）

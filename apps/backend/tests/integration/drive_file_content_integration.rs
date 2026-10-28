@@ -738,6 +738,147 @@ async fn tenant_level_folder_share_token_rejects_invalid_and_expired_tokens() {
     app.cleanup_user(owner.id).await;
 }
 
+/// 配信エンドポイントは URL にテナントを含まないため、PAT の束縛はファイル自身の
+/// tenant_id で突き合わせる。持ち主がオーナーとして入れる別テナントでも、
+/// 束縛外のテナントのプロジェクトファイルは読めない。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn project_file_content_rejects_pat_bound_to_other_tenant() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tenant_a = app.insert_tenant_project(owner.id).await;
+    let tenant_b = app.insert_tenant_project(owner.id).await;
+    let folder_a =
+        insert_project_folder(&app, tenant_a.tenant_id, tenant_a.project_id, owner.id).await;
+    let folder_b =
+        insert_project_folder(&app, tenant_b.tenant_id, tenant_b.project_id, owner.id).await;
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let file_a = file_id_of(
+        &upload_file(
+            &app,
+            tenant_a.tenant_id,
+            Some(folder_a),
+            "a.txt",
+            "text/plain",
+            b"tenant a",
+        )
+        .await,
+    );
+    let file_b = file_id_of(
+        &upload_file(
+            &app,
+            tenant_b.tenant_id,
+            Some(folder_b),
+            "b.txt",
+            "text/plain",
+            b"tenant b",
+        )
+        .await,
+    );
+
+    // セッション Cookie を落とし、PAT だけで認証させる。
+    app.reset_session_client();
+    let pat = app
+        .insert_pat(owner.id, tenant_a.tenant_id, vec![Scope::ReadDrive], None)
+        .await;
+
+    let cross_tenant = app
+        .get_with_bearer(&format!("/v1/drive/files/{file_b}/content"), &pat)
+        .await;
+    assert_eq!(
+        cross_tenant.status(),
+        StatusCode::FORBIDDEN,
+        "テナント A に束縛した PAT はテナント B のファイル本体を読めない"
+    );
+
+    // 対照: 束縛先テナントのプロジェクトファイルは読める（過剰拒否でない）。
+    let allowed = app
+        .get_with_bearer(&format!("/v1/drive/files/{file_a}/content"), &pat)
+        .await;
+    assert_eq!(
+        allowed.status(),
+        StatusCode::OK,
+        "束縛先テナントのファイル本体は読める"
+    );
+    assert_eq!(allowed.text().await.expect("content body"), "tenant a");
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// プロジェクト限定の PAT は、同じテナントでも `allowed_project_ids` 外のプロジェクトの
+/// ファイル本体を読めない。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn project_file_content_rejects_pat_outside_allowed_projects() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await; // tenant T + project P1
+    let project_2 = insert_extra_project(&app, tp.tenant_id).await;
+    let folder_1 = insert_project_folder(&app, tp.tenant_id, tp.project_id, owner.id).await;
+    let folder_2 = insert_project_folder(&app, tp.tenant_id, project_2, owner.id).await;
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let file_1 = file_id_of(
+        &upload_file(
+            &app,
+            tp.tenant_id,
+            Some(folder_1),
+            "p1.txt",
+            "text/plain",
+            b"project 1",
+        )
+        .await,
+    );
+    let file_2 = file_id_of(
+        &upload_file(
+            &app,
+            tp.tenant_id,
+            Some(folder_2),
+            "p2.txt",
+            "text/plain",
+            b"project 2",
+        )
+        .await,
+    );
+
+    app.reset_session_client();
+    let pat = app
+        .insert_pat(
+            owner.id,
+            tp.tenant_id,
+            vec![Scope::ReadDrive],
+            Some(vec![tp.project_id]),
+        )
+        .await;
+
+    let outside = app
+        .get_with_bearer(&format!("/v1/drive/files/{file_2}/content"), &pat)
+        .await;
+    assert_eq!(
+        outside.status(),
+        StatusCode::FORBIDDEN,
+        "P1 限定の PAT は P2 のファイル本体を読めない"
+    );
+
+    // 対照: 許可したプロジェクトのファイルは読める（過剰拒否でない）。
+    let allowed = app
+        .get_with_bearer(&format!("/v1/drive/files/{file_1}/content"), &pat)
+        .await;
+    assert_eq!(
+        allowed.status(),
+        StatusCode::OK,
+        "P1 限定の PAT は P1 のファイル本体を読める"
+    );
+    assert_eq!(allowed.text().await.expect("content body"), "project 1");
+
+    app.cleanup_user(owner.id).await;
+}
+
 /// アップロードされた HTML は、ブラウザがその場でレンダリングできない形で配信される。
 ///
 /// 配信は API と同一オリジンで行われるため、`Content-Disposition: inline` と
