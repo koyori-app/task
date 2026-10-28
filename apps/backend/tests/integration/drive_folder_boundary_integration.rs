@@ -7,7 +7,9 @@
 use crate::common::{TestApp, insert_extra_project};
 use axum::http::StatusCode;
 use entity::{drive_files, drive_folders, project_members};
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, TransactionTrait};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+};
 use uuid::Uuid;
 
 /// プロジェクト作成時に自動生成されるのと同じ形（`project_id` 付き・親なし）のルートフォルダ。
@@ -918,4 +920,98 @@ async fn listing_folders_of_a_foreign_project_is_forbidden() {
         list_folder_ids(&app, tp.tenant_id, &query).await,
         vec![root_b]
     );
+}
+
+fn shares_url(app: &TestApp, tenant_id: Uuid, folder_id: Uuid) -> String {
+    format!("{}/{folder_id}/shares", folders_url(app, tenant_id))
+}
+
+/// プロジェクトから外れたフォルダ作成者は、そのフォルダの共有を一覧・作成・削除できない。
+/// 共有を作れると、公開リンクや自分宛て共有で外されたプロジェクトのファイルを読み直せる。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn a_creator_removed_from_the_project_cannot_manage_its_folder_shares() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let root = insert_project_root_folder(&app, tp.tenant_id, tp.project_id, owner.id).await;
+
+    // メンバー指定で絞り込み、作成者 U を後から外しても P が閉じたままになるようにする
+    let member = app.insert_user(false, false).await;
+    add_member(&app, tp.project_id, member.id).await;
+    let creator = app.insert_user(false, false).await;
+    add_member(&app, tp.project_id, creator.id).await;
+
+    app.reset_session_client();
+    app.login_session_no_content(&creator.email, &creator.password)
+        .await;
+    let folder = create_child_folder(&app, tp.tenant_id, root, "mine").await;
+
+    // 対照: プロジェクトに入れる作成者は共有を作れる（過剰拒否でない）
+    let response = app
+        .client()
+        .post(shares_url(&app, tp.tenant_id, folder))
+        .json(&serde_json::json!({ "type": "public_link", "permission": "viewer" }))
+        .send()
+        .await
+        .expect("create share");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body: serde_json::Value = response.json().await.expect("json");
+    let share_id: Uuid = body["id"].as_str().expect("id").parse().expect("uuid");
+
+    project_members::Entity::delete_many()
+        .filter(project_members::Column::ProjectId.eq(tp.project_id))
+        .filter(project_members::Column::UserId.eq(creator.id))
+        .exec(&app.state.db)
+        .await
+        .expect("remove creator from project");
+
+    for body in [
+        serde_json::json!({ "type": "public_link", "permission": "viewer" }),
+        serde_json::json!({ "type": "user", "user_id": creator.id, "permission": "viewer" }),
+    ] {
+        let response = app
+            .client()
+            .post(shares_url(&app, tp.tenant_id, folder))
+            .json(&body)
+            .send()
+            .await
+            .expect("create share");
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "外された作成者が共有を作れると、プロジェクトのファイルを読み直せる: {body}"
+        );
+    }
+    let listed = app
+        .client()
+        .get(shares_url(&app, tp.tenant_id, folder))
+        .send()
+        .await
+        .expect("list shares");
+    assert_eq!(listed.status(), StatusCode::FORBIDDEN);
+    let deleted = app
+        .client()
+        .delete(format!(
+            "{}/{share_id}",
+            shares_url(&app, tp.tenant_id, folder)
+        ))
+        .send()
+        .await
+        .expect("delete share");
+    assert_eq!(deleted.status(), StatusCode::FORBIDDEN);
+
+    // 対照: テナントオーナーは作成者でなくても共有を作れる
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let response = app
+        .client()
+        .post(shares_url(&app, tp.tenant_id, folder))
+        .json(&serde_json::json!({ "type": "public_link", "permission": "viewer" }))
+        .send()
+        .await
+        .expect("create share");
+    assert_eq!(response.status(), StatusCode::CREATED);
 }
