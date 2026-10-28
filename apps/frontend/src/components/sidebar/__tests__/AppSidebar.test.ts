@@ -1,13 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { computed } from 'vue';
+import { computed, type Ref } from 'vue';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
 
-const { navigateSpy, projectsControl, tenantStoreStub } = vi.hoisted(() => ({
+const { navigateSpy, pageContextStub, projectsControl, tenantStoreStub } = vi.hoisted(() => ({
   navigateSpy: vi.fn(),
-  projectsControl: { data: [] as unknown[], isLoading: false, isError: false },
+  pageContextStub: { routeParams: {} as Record<string, string>, urlPathname: '' },
+  projectsControl: {
+    data: [] as unknown[],
+    isLoading: false,
+    isError: false,
+    tenantId: null as Ref<string | null> | null,
+  },
   tenantStoreStub: {
     tenants: [] as unknown[],
     selectedTenantId: null as string | null,
+    selectedTenant: null as unknown,
     isLoading: false,
     error: null as string | null,
     loadTenants: vi.fn(),
@@ -17,13 +24,7 @@ const { navigateSpy, projectsControl, tenantStoreStub } = vi.hoisted(() => ({
 
 vi.mock('vike/client/router', () => ({ navigate: navigateSpy }));
 
-vi.mock('vike-vue/usePageContext', () => ({
-  usePageContext: () => ({ routeParams: { tenant: 'acme' }, urlPathname: '/acme/my-tasks' }),
-}));
-
-vi.mock('@/composables/useRouteAlignedTenantId', () => ({
-  useRouteAlignedTenantId: () => computed(() => 'tenant-1'),
-}));
+vi.mock('vike-vue/usePageContext', () => ({ usePageContext: () => pageContextStub }));
 
 vi.mock('@/stores/tenant', () => ({ useTenantStore: () => tenantStoreStub }));
 
@@ -31,12 +32,15 @@ vi.mock('@/lib/api-vue-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api-vue-query')>();
   return {
     ...actual,
-    useProjectsQuery: () => ({
-      data: computed(() => projectsControl.data),
-      isLoading: computed(() => projectsControl.isLoading),
-      isError: computed(() => projectsControl.isError),
-      refetch: vi.fn(),
-    }),
+    useProjectsQuery: (tenantId: Ref<string | null>) => {
+      projectsControl.tenantId = tenantId;
+      return {
+        data: computed(() => projectsControl.data),
+        isLoading: computed(() => projectsControl.isLoading),
+        isError: computed(() => projectsControl.isError),
+        refetch: vi.fn(),
+      };
+    },
   };
 });
 
@@ -71,12 +75,67 @@ function findButton(label: string, by: 'aria-label' | 'text') {
   return button as HTMLButtonElement;
 }
 
+const ACME = { id: 'tenant-1', display_id: 'acme', name: 'Acme' };
+
+const ALPHA_PROJECT = {
+  id: 'project-1',
+  key: 'ALPHA',
+  name: 'Team Alpha',
+  description: '',
+  icon_emoji: null,
+  icon_url: null,
+  is_personal: false,
+  personal_owner_id: null,
+  tenant_id: 'tenant-1',
+};
+
 beforeEach(() => {
   navigateSpy.mockReset();
+  tenantStoreStub.loadTenants.mockReset();
+  pageContextStub.routeParams = { tenant: 'acme' };
+  pageContextStub.urlPathname = '/acme/my-tasks';
   projectsControl.data = [];
   projectsControl.isLoading = false;
   projectsControl.isError = false;
-  tenantStoreStub.tenants = [{ id: 'tenant-1', display_id: 'acme', name: 'Acme' }];
+  projectsControl.tenantId = null;
+  tenantStoreStub.tenants = [ACME];
+  tenantStoreStub.selectedTenant = ACME;
+});
+
+/**
+ * アカウント設定（/settings/...）はテナントの外に置いたページで、URL からテナントが
+ * 決まらない。そこでもヘッダーのテナント切り替えが選んでいるテナントのナビを出し、
+ * プロジェクトへ直接移れるようにする。
+ */
+describe('AppSidebar のテナント外のページ', () => {
+  beforeEach(() => {
+    pageContextStub.routeParams = {};
+    pageContextStub.urlPathname = '/settings/profile';
+  });
+
+  it('選択中のテナントのナビとプロジェクト一覧を出す', () => {
+    projectsControl.data = [ALPHA_PROJECT];
+    mountSidebar(vi.fn());
+
+    expect(findLink('/acme').getAttribute('aria-current')).toBeNull();
+    findLink('/acme/my-tasks');
+    findLink('/acme/calendar');
+    expect(projectsControl.tenantId?.value).toBe('tenant-1');
+    expect(document.body.querySelector('nav')?.textContent).toContain('Team Alpha');
+  });
+
+  it('テナント一覧の読み込みは URL のテナントで行い、選択中のテナントで上書きしない', () => {
+    mountSidebar(vi.fn());
+
+    expect(tenantStoreStub.loadTenants).toHaveBeenCalledExactlyOnceWith(undefined);
+  });
+
+  it('テナントが決まらないうちは、テナント依存のナビを出さない', () => {
+    tenantStoreStub.selectedTenant = null;
+    mountSidebar(vi.fn());
+
+    expect(document.body.querySelector('nav[aria-label="ナビゲーション"] a')).toBeNull();
+  });
 });
 
 /**
@@ -121,19 +180,7 @@ describe('AppSidebar のプロジェクト作成導線', () => {
   });
 
   it('プロジェクトがある状態の見出し横の作成ボタンでも、遷移してサイドバーを閉じる', async () => {
-    projectsControl.data = [
-      {
-        id: 'project-1',
-        key: 'ALPHA',
-        name: 'Team Alpha',
-        description: '',
-        icon_emoji: null,
-        icon_url: null,
-        is_personal: false,
-        personal_owner_id: null,
-        tenant_id: 'tenant-1',
-      },
-    ];
+    projectsControl.data = [ALPHA_PROJECT];
     const onClose = vi.fn();
     mountSidebar(onClose);
 
