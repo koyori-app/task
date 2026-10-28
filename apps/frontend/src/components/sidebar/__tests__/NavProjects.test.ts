@@ -4,7 +4,6 @@ import type { components } from '@/generated/api';
 
 type ProjectNavItem = components['schemas']['ProjectResponse'];
 import NavProjects from '../NavProjects.vue';
-import SidebarProvider from '../../ui/sidebar/SidebarProvider.vue';
 
 enableAutoUnmount(afterEach);
 
@@ -44,19 +43,17 @@ function mountNavProjects(props: {
 }) {
   return mount(
     {
-      components: { SidebarProvider, NavProjects },
+      components: { NavProjects },
       template: `
-        <SidebarProvider>
-          <NavProjects
-            :tenant-slug="tenantSlug"
-            :projects="projects"
-            :current-path="currentPath"
-            :loading="loading"
-            :error="error"
-            @retry="onRetry"
-            @create="onCreate"
-          />
-        </SidebarProvider>
+        <NavProjects
+          :tenant-slug="tenantSlug"
+          :projects="projects"
+          :current-path="currentPath"
+          :loading="loading"
+          :error="error"
+          @retry="onRetry"
+          @create="onCreate"
+        />
       `,
       data() {
         return {
@@ -86,20 +83,32 @@ function findRowButton(wrapper: ReturnType<typeof mountNavProjects>, name: strin
   return wrapper.findAll('button').find((b) => b.text().includes(name));
 }
 
+/** 畳んだ Accordion の子リンクは hidden の中に残るので、見えているものだけを数える */
+function visibleHrefs(wrapper: ReturnType<typeof mountNavProjects>) {
+  return wrapper
+    .findAll('a')
+    .filter((a) => a.isVisible())
+    .map((a) => a.attributes('href'));
+}
+
+function findChildLink(wrapper: ReturnType<typeof mountNavProjects>, href: string) {
+  return wrapper.findAll('a').find((a) => a.attributes('href') === href);
+}
+
 describe('NavProjects', () => {
   it('プロジェクト行はトグルボタンで、リンクは持たない', () => {
     const wrapper = mountNavProjects({});
-    expect(wrapper.text()).toContain('Team Alpha');
-    expect(wrapper.text()).toContain('Personal');
-    // 展開前は子リンクなし
-    expect(wrapper.findAll('a').length).toBe(0);
+    expect(findRowButton(wrapper, 'Team Alpha')!.attributes('aria-expanded')).toBe('false');
+    expect(findRowButton(wrapper, 'Personal')!.attributes('aria-expanded')).toBe('false');
+    // 展開前は子リンクが見えない
+    expect(visibleHrefs(wrapper)).toEqual([]);
   });
 
   it('行クリックで展開し、タスク/ラベル/レビュー/設定の子リンクを出す', async () => {
     const wrapper = mountNavProjects({});
     await findRowButton(wrapper, 'Team Alpha')!.trigger('click');
 
-    const hrefs = wrapper.findAll('a').map((a) => a.attributes('href'));
+    const hrefs = visibleHrefs(wrapper);
     expect(hrefs).toContain('/acme/projects/ALPHA/tasks');
     expect(hrefs).toContain('/acme/projects/ALPHA/labels');
     expect(hrefs).toContain('/acme/projects/ALPHA/reviews');
@@ -122,34 +131,34 @@ describe('NavProjects', () => {
     expect(hrefs).not.toContain('/acme/projects/ME01/reviews');
   });
 
-  it('現在のパスのプロジェクトは初期展開され、親子とも active になる', () => {
+  it('現在のパスのプロジェクトは初期展開され、子が現在地になる', () => {
     const wrapper = mountNavProjects({ currentPath: '/acme/projects/ALPHA/tasks' });
-    const activeChild = wrapper
-      .findAll('a')
-      .find((a) => a.attributes('href') === '/acme/projects/ALPHA/tasks');
-    expect(activeChild).toBeTruthy();
-    expect(activeChild!.attributes('data-active')).toBe('true');
-    // カレントプロジェクトの親行が active
-    const parentButton = findRowButton(wrapper, 'Team Alpha');
-    expect(parentButton!.attributes('data-active')).toBe('true');
-    // 非カレントプロジェクトは初期折りたたみ（子リンクが DOM に存在しない）
-    const hrefs = wrapper.findAll('a').map((a) => a.attributes('href'));
-    expect(hrefs).not.toContain('/acme/projects/ME01/tasks');
+    const activeChild = findChildLink(wrapper, '/acme/projects/ALPHA/tasks');
+    expect(activeChild!.isVisible()).toBe(true);
+    expect(activeChild!.attributes('aria-current')).toBe('page');
+    expect(findRowButton(wrapper, 'Team Alpha')!.attributes('aria-expanded')).toBe('true');
+    // 非カレントプロジェクトは初期折りたたみ（子リンクが見えない）
+    expect(findRowButton(wrapper, 'Personal')!.attributes('aria-expanded')).toBe('false');
+    expect(visibleHrefs(wrapper)).not.toContain('/acme/projects/ME01/tasks');
   });
 
   it('子の active は境界付き前方一致（接頭辞違いの誤マッチなし・配下ページはマッチ）', () => {
     // 配下ページ（タスク詳細）でも「タスク」が active
     const detail = mountNavProjects({ currentPath: '/acme/projects/ALPHA/tasks/ALPHA-1' });
-    const tasksChild = detail
-      .findAll('a')
-      .find((a) => a.attributes('href') === '/acme/projects/ALPHA/tasks');
-    expect(tasksChild!.attributes('data-active')).toBe('true');
+    const tasksChild = findChildLink(detail, '/acme/projects/ALPHA/tasks');
+    expect(tasksChild!.attributes('aria-current')).toBe('page');
     // 接頭辞だけ一致する別パスは active にならない
     const prefix = mountNavProjects({ currentPath: '/acme/projects/ALPHA/tasks-archive' });
-    const notActive = prefix
-      .findAll('a')
-      .find((a) => a.attributes('href') === '/acme/projects/ALPHA/tasks');
-    expect(notActive!.attributes('data-active')).toBe('false');
+    const notActive = findChildLink(prefix, '/acme/projects/ALPHA/tasks');
+    expect(notActive!.attributes('aria-current')).toBeUndefined();
+  });
+
+  it('アイコンの無いプロジェクトは見出しに頭文字を出す', () => {
+    const wrapper = mountNavProjects({});
+    // 見出しの最初の aria-hidden がアイコンの枠
+    const iconOf = (name: string) => findRowButton(wrapper, name)!.find('[aria-hidden="true"]');
+    expect(iconOf('Team Alpha').text()).toBe('T');
+    expect(iconOf('Personal').text()).toBe('📝');
   });
 
   it('lists personal projects before shared projects', () => {
@@ -166,9 +175,10 @@ describe('NavProjects', () => {
   it('空状態は破線カードで、作成ボタンが create を emit する', async () => {
     const wrapper = mountNavProjects({ projects: [] });
     expect(wrapper.text()).toContain('プロジェクトはまだありません');
+    // 見出し横の作成ボタンはアイコンだけ（aria-label）なので、文字を持つのはカードのボタン
     const createButton = wrapper
       .findAll('button')
-      .find((b) => b.text().includes('プロジェクトを作成') && !b.attributes('title'));
+      .find((b) => b.text().includes('プロジェクトを作成'));
     expect(createButton).toBeTruthy();
     await createButton!.trigger('click');
     expect(wrapper.vm.created).toBe(true);
@@ -177,16 +187,14 @@ describe('NavProjects', () => {
   it('shows error state and emits retry', async () => {
     const wrapper = mountNavProjects({ projects: [], error: true });
     expect(wrapper.text()).toContain('プロジェクト一覧を取得できませんでした');
-    const retryButton = wrapper
-      .findAll('button')
-      .find((b) => b.text().includes('プロジェクト一覧を取得できませんでした'));
+    const retryButton = wrapper.findAll('button').find((b) => b.text() === '再試行');
     await retryButton!.trigger('click');
     expect(wrapper.vm.retried).toBe(true);
   });
 
-  it('emits create when the group action is clicked', async () => {
+  it('emits create when the heading button is clicked', async () => {
     const wrapper = mountNavProjects({});
-    const createButton = wrapper.find('button[title="プロジェクトを作成"]');
+    const createButton = wrapper.find('button[aria-label="プロジェクトを作成"]');
     expect(createButton.exists()).toBe(true);
     await createButton.trigger('click');
     expect(wrapper.vm.created).toBe(true);
@@ -194,6 +202,6 @@ describe('NavProjects', () => {
 
   it('hides the create action when tenant slug is empty', () => {
     const wrapper = mountNavProjects({ tenantSlug: '' });
-    expect(wrapper.find('button[title="プロジェクトを作成"]').exists()).toBe(false);
+    expect(wrapper.find('button[aria-label="プロジェクトを作成"]').exists()).toBe(false);
   });
 });

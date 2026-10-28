@@ -168,9 +168,7 @@ describe('ProfileForm', () => {
 
     await wrapper.find('#username').setValue('  renamed  ');
     await wrapper.find('#avatarUrl').setValue('  https://example.com/b.png  ');
-    expect(wrapper.find('[data-slot="avatar-image"]').attributes('src')).toBe(
-      'https://example.com/b.png',
-    );
+    expect(wrapper.find('img').attributes('src')).toBe('https://example.com/b.png');
     await wrapper.find('form').trigger('submit');
     await flushPromises();
 
@@ -252,7 +250,7 @@ describe('ProfileForm', () => {
 
       expect(uploads).toHaveLength(1);
       expect(uploads[0]!.get('file')).toBeInstanceOf(File);
-      expect(wrapper.find('[data-slot="avatar-image"]').attributes('src')).toBe(uploadedUrl);
+      expect(wrapper.find('img').attributes('src')).toBe(uploadedUrl);
       expect((wrapper.find('#avatarUrl').element as HTMLInputElement).value).toBe(uploadedUrl);
       expect(useAuthStore().user?.avatar_url).toBe(uploadedUrl);
       expect(wrapper.text()).toContain('保存しました。');

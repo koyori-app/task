@@ -61,9 +61,9 @@ function input(id: string) {
 }
 
 function checkEvent(label: string) {
-  const box = document.body.querySelector<HTMLButtonElement>(
-    `button[role="checkbox"][aria-label="${label}"]`,
-  );
+  const box = [...document.body.querySelectorAll('label')]
+    .find((l) => l.textContent?.trim() === label)
+    ?.querySelector<HTMLInputElement>('input[type="checkbox"]');
   if (!box) throw new Error(`checkbox "${label}" not found`);
   box.click();
 }
@@ -118,6 +118,15 @@ describe('WebhookFormDialog', () => {
 
     expect(createMutateAsync).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('イベントを 1 つ以上選んでください');
+  });
+
+  it('形式の一覧はダイアログの枠で切れないようトップレイヤーに出す', async () => {
+    mountDialog();
+    await flushPromises();
+
+    const trigger = document.body.querySelector('button[aria-label^="形式"]');
+    expect(trigger).not.toBeNull();
+    expect(trigger!.closest('[data-menu-top-layer]')).not.toBeNull();
   });
 
   it('作成に成功したら secret を一度だけ表示する', async () => {

@@ -90,7 +90,7 @@ function checkbox(statusName: string, label: 'Default' | 'Done state' | '既定�
   if (!row) throw new Error(`status row not found: ${statusName}`);
   const target = row.findAll('label').find((item) => item.text().trim() === label);
   if (!target) throw new Error(`checkbox not found: ${label}`);
-  return target.find('button');
+  return target.find('input[type="checkbox"]');
 }
 
 async function mountEditor(nextStatuses: ProjectStatus[] = baseStatuses) {

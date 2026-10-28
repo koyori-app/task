@@ -46,7 +46,7 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
 }));
 
 import CreateTaskDialog from '../CreateTaskDialog.vue';
-import { useListLayout } from '@/components/users/__tests__/list-layout';
+import { pickerOption } from '@/components/__tests__/picker';
 
 const statuses = [
   {
@@ -106,18 +106,6 @@ type MountOptions = {
   initialTitle?: string;
 };
 
-/**
- * 担当者の窓（UserSelector）は Popover の中で、トリガーを押さないと描画されないので、
- * 中身を素の要素に差し替えて直接読む。中身の listbox は本物のまま読む。
- * ラベルのメニュー（koyori の Dropdown）は閉じていても項目が DOM にあるので差し替えない。
- */
-const dropdownStubs = {
-  PopoverRoot: { template: '<div><slot /></div>' },
-  PopoverTrigger: { template: '<div><slot /></div>' },
-  PopoverPortal: { template: '<div><slot /></div>' },
-  PopoverContent: { template: '<div><slot /></div>' },
-};
-
 function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
   return mount(CreateTaskDialog, {
     props: {
@@ -136,7 +124,6 @@ function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
     },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
-      stubs: dropdownStubs,
     },
     attachTo: document.body,
   });
@@ -697,6 +684,19 @@ describe('CreateTaskDialog labels query states', () => {
     wrapper.unmount();
   });
 
+  it('優先度・ステータス・担当者の一覧も本文のスクロール領域で切れないようトップレイヤーに出す', async () => {
+    const wrapper = mountDialog(queryClient, { members });
+    await nextTick();
+
+    for (const name of ['優先度', 'ステータス', '担当者']) {
+      // 選択中の値があると読み上げ名は「優先度: 中」の形になる
+      const trigger = document.body.querySelector(`button[aria-label^="${name}"]`);
+      expect(trigger, name).not.toBeNull();
+      expect(trigger!.closest('[data-menu-top-layer]'), name).not.toBeNull();
+    }
+    wrapper.unmount();
+  });
+
   it('正常な 0 件ではラベル欄を表示しない', async () => {
     const wrapper = mountDialog(queryClient, { labels: [] });
     await nextTick();
@@ -719,7 +719,6 @@ describe('CreateTaskDialog labels query states', () => {
 });
 
 describe('CreateTaskDialog assignee selection', () => {
-  useListLayout();
   let queryClient: QueryClient;
 
   beforeEach(() => {
@@ -740,14 +739,16 @@ describe('CreateTaskDialog assignee selection', () => {
     document.body.innerHTML = '';
   });
 
-  /** 担当者の候補（listbox の option）を名で引く。項の字には頭文字も混じるので id で引く */
+  /** 担当者の欄（Picker のトリガー。Field の id が付く） */
+  function assigneeTrigger() {
+    const trigger = document.getElementById('task-assignees');
+    if (!trigger) throw new Error('assignee trigger not found');
+    return trigger;
+  }
+
+  /** 担当者の候補（Picker の option）を名で引く。閉じていても DOM にある */
   function memberButton(name: string) {
-    const member = members.find((m) => m.username === name);
-    const item = member
-      ? document.body.querySelector(`[role="option"][data-user-id="${member.id}"]`)
-      : null;
-    if (!item) throw new Error(`member option ${name} not found`);
-    return item as HTMLElement;
+    return pickerOption(assigneeTrigger(), name);
   }
 
   /**
@@ -759,12 +760,12 @@ describe('CreateTaskDialog assignee selection', () => {
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('担当者付きで作成');
 
-    expect(document.getElementById('task-assignees-value')?.textContent).toContain('未割り当て');
+    expect(assigneeTrigger().textContent).toContain('未割り当て');
     memberButton('yupix').click();
     await nextTick();
     expect(memberButton('yupix').getAttribute('aria-selected')).toBe('true');
     // 選んだ人は欄の中にも出る
-    expect(document.getElementById('task-assignees-value')?.textContent).toContain('yupix');
+    expect(assigneeTrigger().textContent).toContain('yupix');
 
     getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await flushPromises();

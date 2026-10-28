@@ -176,6 +176,18 @@ describe('CustomFieldsSection', () => {
     expect(document.body.querySelector('dialog[open]')).toBeNull();
   });
 
+  it('追加: 型の一覧はダイアログの枠で切れないようトップレイヤーに出す', async () => {
+    mountSection();
+    await flushPromises();
+
+    bodyButton('フィールドを追加').click();
+    await flushPromises();
+
+    const trigger = document.body.querySelector('dialog[open] button[aria-label^="型"]');
+    expect(trigger).not.toBeNull();
+    expect(trigger!.closest('[data-menu-top-layer]')).not.toBeNull();
+  });
+
   it('追加失敗: エラーを表示しダイアログを開いたままにする', async () => {
     createMutateAsync.mockRejectedValue(new Error('bad request'));
     mountSection();

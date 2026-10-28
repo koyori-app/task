@@ -171,7 +171,9 @@ export const Default: Story = {
     await expect(canvas.findByRole('heading', { name: 'メンバー' })).resolves.toBeInTheDocument();
     await expect(canvas.findByText('alice')).resolves.toBeInTheDocument();
     await expect(canvas.findByText('bob')).resolves.toBeInTheDocument();
-    await expect(canvas.getByText('管理者')).toBeInTheDocument();
+    await expect(
+      canvas.getByRole('button', { name: 'alice のロール: 管理者' }),
+    ).toBeInTheDocument();
     await expect(
       canvas.getByRole('button', { name: 'メンバー「alice」を削除' }),
     ).toBeInTheDocument();
@@ -213,7 +215,7 @@ export const AddFlow: Story = {
     await canvas.findByText('alice');
 
     // 候補は未参加のテナントメンバー（carol）だけ
-    await user.click(canvas.getByLabelText('テナントメンバーから追加'));
+    await user.click(canvas.getByRole('button', { name: /^テナントメンバーから追加/ }));
     const option = await page.findByRole('option', { name: 'carol' });
     await user.click(option);
     // ポップアップの閉じアニメーション中は他要素が a11y ツリーから隠れるため findByRole で待つ
@@ -238,7 +240,10 @@ export const RemoveFlow: Story = {
     await expect(page.findByText('メンバーを削除しますか？')).resolves.toBeInTheDocument();
     await user.click(page.getByRole('button', { name: '削除する' }));
 
-    await waitFor(() => expect(canvas.queryByText('bob')).not.toBeInTheDocument());
+    // 外した bob は追加候補（閉じた Picker の項目）に移るので、一覧の中で確かめる
+    await waitFor(() =>
+      expect(within(canvas.getByTestId('member-list')).queryByText('bob')).not.toBeInTheDocument(),
+    );
     const [del] = requestsOf('DELETE');
     await expect(del).toBeTruthy();
     await expect(del.url).toContain(`/members/${BOB_ID}`);
@@ -254,10 +259,9 @@ export const LastAdminGuard: Story = {
     const user = userEvent.setup();
     await canvas.findByText('alice');
 
-    await user.click(canvas.getByLabelText('alice のロール'));
-    // オプションの accessible name はラベル＋説明文の連結になる。/メンバー/ だと
-    // 「管理者」の説明文（メンバーの管理を含む…）にも一致するので、説明文で特定する
-    await user.click(await page.findByRole('option', { name: /プロジェクトに参加して作業する/ }));
+    await user.click(canvas.getByRole('button', { name: /^alice のロール/ }));
+    // 説明文は読み上げ名に混ぜない（aria-hidden）ので、項目はロール名で引ける
+    await user.click(await page.findByRole('option', { name: 'メンバー' }));
 
     await expect(
       canvas.findByText('最後の管理者「alice」は降格できません。'),

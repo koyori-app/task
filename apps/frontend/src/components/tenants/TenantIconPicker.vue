@@ -16,9 +16,9 @@ const emit = defineEmits<{
 }>();
 
 /*
- * 画像のアップロードは専用 API の実装後に使える（今は準備中）。それまでは画像の操作
- * （onImageSelect / onImageRemove / accept）を渡さない。IconPicker は選ぶボタンを
- * 常に出すので、文言で準備中と伝える。絵文字を選ぶと画像は外れる。
+ * 画像のアップロードは専用 API の実装後に使える。それまでは画像の操作
+ * （onImageSelect / onImageRemove / accept）を渡さず、IconPicker は画像のボタンを出さない。
+ * 絵文字を選ぶと画像は外れる。
  */
 function selectEmoji(emoji: string) {
   emit('update:emoji', emoji);
@@ -34,7 +34,6 @@ function selectEmoji(emoji: string) {
     :emoji="props.emoji"
     :emojis="TENANT_EMOJI_CHOICES"
     :disabled="props.disabled"
-    upload-label="画像をアップロード（準備中）"
     :on-emoji-change="selectEmoji"
   />
 </template>

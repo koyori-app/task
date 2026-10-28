@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SidebarProps } from '@/components/ui/sidebar';
+import { Sidebar } from '@koyori-app/ui-vue';
 import { useRouteAlignedTenantId } from '@/composables/useRouteAlignedTenantId';
 import { useTenantStore } from '@/stores/tenant';
 import { useProjectsQuery } from '@/lib/api-vue-query';
@@ -10,16 +10,18 @@ import { computed, watch } from 'vue';
 import { Calendar, House, ListTodo } from '@lucide/vue';
 import NavMain from '@/components/sidebar/NavMain.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
-import {
-  closeSidebarForProgrammaticNavigate,
-  shouldCloseSidebarOnNavigate,
-} from '@/components/sidebar/sidebar-navigation';
+import { shouldCloseSidebarOnNavigate } from '@/components/sidebar/sidebar-navigation';
 
-import { Sidebar, SidebarContent, SidebarRail, useSidebar } from '@/components/ui/sidebar';
+defineProps<{
+  /** アイコンだけの表示（広い画面の畳んだ状態）。状態は呼び出し側が持つ */
+  rail?: boolean;
+}>();
 
-const props = withDefaults(defineProps<SidebarProps>(), {
-  collapsible: 'icon',
-});
+const emit = defineEmits<{
+  'update:rail': [rail: boolean];
+  /** ナビから遷移した。狭い画面ではサイドバー（Drawer）を閉じる */
+  close: [];
+}>();
 
 const pageContext = usePageContext();
 const tenantStore = useTenantStore();
@@ -53,11 +55,9 @@ function retryProjects() {
 }
 
 // ---- プロジェクト作成導線（編集・削除は各プロジェクトの設定ページへ集約） ----
-const { isMobile, setOpenMobile } = useSidebar();
-
 function onCreateProject() {
-  // 作成ボタンはリンクではないので、SidebarContent のイベント委譲では閉じられない
-  closeSidebarForProgrammaticNavigate(isMobile.value, setOpenMobile);
+  // 作成ボタンはリンクではないので、本文のイベント委譲では閉じられない
+  emit('close');
   void navigate(`/${tenantSlug.value}/projects/new`);
 }
 
@@ -84,29 +84,35 @@ const data = computed(() => ({
   ],
 }));
 
-/** ナビから遷移したらモバイルのサイドバーを閉じる（判定は sidebar-navigation に切り出し）。 */
+/**
+ * ナビから遷移したら狭い画面のサイドバーを閉じる（判定は sidebar-navigation に切り出し）。
+ * Sidebar の根の要素に付け、本文のリンクの click を委譲で拾う。
+ */
 function closeOnNavigate(event: MouseEvent) {
-  if (shouldCloseSidebarOnNavigate(event, isMobile.value)) setOpenMobile(false);
+  if (shouldCloseSidebarOnNavigate(event)) emit('close');
 }
 </script>
 
 <template>
-  <Sidebar v-bind="props">
-    <SidebarContent @click="closeOnNavigate">
-      <!-- テナント外のページ（/settings/... など）ではテナント文脈が無く、
+  <Sidebar
+    id="app-sidebar"
+    label="ナビゲーション"
+    :rail="rail"
+    @rail-change="emit('update:rail', $event)"
+    @click="closeOnNavigate"
+  >
+    <!-- テナント外のページ（/settings/... など）ではテナント文脈が無く、
            リンク先も一覧も作れないためテナント依存のナビ自体を出さない。 -->
-      <NavMain v-if="tenantSlug" :items="data.navMain" />
-      <NavProjects
-        v-if="tenantSlug"
-        :tenant-slug="tenantSlug"
-        :projects="navProjects"
-        :current-path="pageContext.urlPathname"
-        :loading="navProjectsLoading"
-        :error="projectsQuery.isError.value"
-        @retry="retryProjects"
-        @create="onCreateProject"
-      />
-    </SidebarContent>
-    <SidebarRail />
+    <NavMain v-if="tenantSlug" :items="data.navMain" />
+    <NavProjects
+      v-if="tenantSlug"
+      :tenant-slug="tenantSlug"
+      :projects="navProjects"
+      :current-path="pageContext.urlPathname"
+      :loading="navProjectsLoading"
+      :error="projectsQuery.isError.value"
+      @retry="retryProjects"
+      @create="onCreateProject"
+    />
   </Sidebar>
 </template>

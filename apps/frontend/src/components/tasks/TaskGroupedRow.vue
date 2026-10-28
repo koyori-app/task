@@ -231,6 +231,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
         <!-- グループがステータスなので列は持たず、名前の左の丸から変える（参照デザイン） -->
         <Dropdown
           class="shrink-0"
+          top-layer
           :ariaLabel="`ステータス: ${statusName}`"
           :title="statusName"
           :disabled="isBusy"
@@ -281,6 +282,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
         -->
         <Dropdown
           variant="ghost"
+          top-layer
           class="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
           ariaLabel="ラベルを編集"
           title="ラベル"
@@ -295,6 +297,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
       <!-- 担当者 -->
       <div class="px-2">
         <TaskAssigneePicker
+          top-layer
           :members="members"
           :selected="assignees"
           :disabled="isBusy"
@@ -344,6 +347,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
         <!-- アイコンと文字の両方に優先度の色を載せる（モックと同じ） -->
         <Dropdown
           variant="ghost"
+          top-layer
           class="[&>button]:text-(--priority-color)"
           :style="{ '--priority-color': PRIORITY_CONFIG[task.priority].color }"
           :disabled="isBusy"

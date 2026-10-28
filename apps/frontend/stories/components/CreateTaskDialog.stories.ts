@@ -133,7 +133,7 @@ export const Default: Story = {
     const canvas = within(canvasElement.ownerDocument.body);
     await expect(canvas.findByRole('dialog', { name: '新規タスク' })).resolves.toBeInTheDocument();
     await expect(canvas.getByLabelText(/タイトル/)).toBeInTheDocument();
-    await expect(canvas.getByLabelText(/ステータス/)).toHaveTextContent('Backlog');
+    await expect(canvas.getByRole('button', { name: /^ステータス/ })).toHaveTextContent('Backlog');
     // 右列の選択欄は未設定を薄い文字で出す
     await expect(canvas.getByRole('button', { name: /^担当者/ })).toHaveTextContent('未割り当て');
     await expect(canvas.getByRole('button', { name: /^ラベル/ })).toHaveTextContent('ラベルなし');
@@ -154,7 +154,7 @@ export const Success201: Story = {
     await user.type(canvas.getByLabelText('期限'), '2026-07-15');
     await user.type(canvas.getByLabelText('最終期限'), '2026-07-31');
     await user.type(canvas.getByLabelText('見積もり'), '90');
-    await user.click(canvas.getByLabelText('優先度'));
+    await user.click(canvas.getByRole('button', { name: /^優先度/ }));
     await user.click(await canvas.findByRole('option', { name: '高' }));
     const submit = await canvas.findByRole('button', { name: '作成' });
     await waitFor(() => expect(submit).toBeEnabled());

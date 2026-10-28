@@ -29,11 +29,11 @@ import {
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import type { components } from '@/generated/api';
-import AvatarGroup from '@/components/AvatarGroup.vue';
 import type { EditableField } from '@/components/tasks/editable-field';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
 import TaskPropertyRow from '@/components/tasks/TaskPropertyRow.vue';
 import {
+  AvatarGroup,
   Button,
   Dropdown,
   Input,
@@ -439,7 +439,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
         スクロールする器はこの div。左右 2 列に割るのは lg 以上だけで、そこでは
         本文と履歴がそれぞれ内側でスクロールする（親は lg:overflow-hidden で止める）。
         ペイン表示と lg 未満は 1 列に積むので、ここが唯一のスクロール容器になる。
-        親（SplitterPanel / オーバーレイの Dialog）は高さを固定するため、
+        親（SplitPane のペイン / オーバーレイの Dialog）は高さを固定するため、
         ここに overflow を持たせないと、はみ出した分に到達できなくなる。
       -->
       <div
@@ -860,6 +860,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 >
                   <!-- メンバーを渡された消費側では選び直せる。渡されなければ表示だけ -->
                   <TaskAssigneePicker
+                    top-layer
                     v-if="members"
                     :members="members"
                     :selected="task.assignees.map((assignee) => assignee.user)"
@@ -869,8 +870,15 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                   />
                   <AvatarGroup
                     v-else-if="task.assignees.length"
-                    hide-names
-                    :users="task.assignees.map((assignee) => assignee.user)"
+                    label="担当者"
+                    :items="
+                      task.assignees.map(({ user }) => ({
+                        name: user.username,
+                        src: user.avatar_url ?? undefined,
+                      }))
+                    "
+                    :max="3"
+                    :size="28"
                   />
                   <!-- ピッカーのトリガーはボタンなので、リンクは中に入れず横に並べる -->
                   <div

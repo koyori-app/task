@@ -64,6 +64,19 @@ function mountLayout(urlPathname: string) {
   });
 }
 
+function stubSignedIn() {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify(mockUser), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    ),
+  );
+}
+
 describe('+Layout', () => {
   it.each(PRE_AUTH_PATHS)('%s は認証ガードを通さずページを描画する', async (path) => {
     const wrapper = mountLayout(path);
@@ -81,27 +94,55 @@ describe('+Layout', () => {
   });
 
   it('アプリヘッダーを固定し、本文だけをスクロールさせる', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        async () =>
-          new Response(JSON.stringify(mockUser), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          }),
-      ),
-    );
+    stubSignedIn();
 
     const wrapper = mountLayout('/my-tasks');
     await flushPromises();
 
-    const shell = wrapper.get('[data-slot="sidebar-wrapper"]');
-    expect(shell.classes()).toEqual(expect.arrayContaining(['h-svh', 'overflow-hidden']));
+    // ヘッダーの親が画面の高さに固定された外枠
+    const shell = wrapper.get('app-header-stub').element.parentElement!;
+    expect([...shell.classList]).toEqual(expect.arrayContaining(['h-svh', 'overflow-hidden']));
 
-    const scrollContainer = wrapper.get('[data-slot="sidebar-inset"]');
+    const scrollContainer = wrapper.get('main');
     expect(scrollContainer.classes()).toEqual(
       expect.arrayContaining(['min-h-0', 'min-w-0', 'overflow-y-auto']),
     );
     expect(scrollContainer.element.contains(wrapper.get('app-header-stub').element)).toBe(false);
+  });
+
+  // 広い画面の開閉ボタンはアイコンだけの表示（rail）を切り替え、旧サイドバーと同じ cookie に残す。
+  // 値の意味も引き継ぐ（sidebar_state=false が畳んだ状態）ので、既存の利用者の状態がそのまま効く
+  describe('広い画面の開閉ボタン', () => {
+    afterEach(() => {
+      document.cookie = 'sidebar_state=; path=/; max-age=0';
+    });
+
+    it('rail を切り替えて cookie に残す', async () => {
+      stubSignedIn();
+      const wrapper = mountLayout('/my-tasks');
+      await flushPromises();
+
+      const toggle = wrapper.get('button[aria-label="サイドバーを開閉"]');
+      expect(toggle.attributes('aria-controls')).toBe('app-sidebar');
+      expect(toggle.attributes('aria-expanded')).toBe('true');
+
+      await toggle.trigger('click');
+      expect(toggle.attributes('aria-expanded')).toBe('false');
+      expect(document.cookie).toContain('sidebar_state=false');
+
+      await toggle.trigger('click');
+      expect(toggle.attributes('aria-expanded')).toBe('true');
+      expect(document.cookie).toContain('sidebar_state=true');
+    });
+
+    it('cookie が sidebar_state=false なら rail で開く', async () => {
+      document.cookie = 'sidebar_state=false; path=/';
+      stubSignedIn();
+      const wrapper = mountLayout('/my-tasks');
+      await flushPromises();
+
+      const toggle = wrapper.get('button[aria-label="サイドバーを開閉"]');
+      expect(toggle.attributes('aria-expanded')).toBe('false');
+    });
   });
 });
