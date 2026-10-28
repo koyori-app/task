@@ -402,6 +402,7 @@ async function submit() {
 
             <Field id="task-priority" label="優先度">
               <Picker
+                top-layer
                 label="優先度"
                 :searchable="false"
                 :items="PRIORITY_ITEMS"
@@ -413,6 +414,7 @@ async function submit() {
 
             <Field id="task-status" label="ステータス" required>
               <Picker
+                top-layer
                 label="ステータス"
                 :searchable="false"
                 :items="statusItems"
@@ -445,6 +447,7 @@ async function submit() {
                   />
                 </div>
                 <UserSelector
+                  top-layer
                   v-else
                   v-model="selectedAssigneeIds"
                   label="担当者"

@@ -283,6 +283,7 @@ async function confirmDelete() {
           <template #default="{ field }">
             <Field id="custom-field-type" label="型">
               <Picker
+                top-layer
                 label="型"
                 :searchable="false"
                 :items="CUSTOM_FIELD_TYPES"

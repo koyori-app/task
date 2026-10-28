@@ -118,6 +118,7 @@ async function submit() {
         </Field>
         <Field id="document-template" label="種類">
           <Picker
+            top-layer
             label="種類"
             :searchable="false"
             :items="TEMPLATE_ITEMS"

@@ -231,6 +231,7 @@ function onClose() {
           <template #default="{ field }">
             <Field id="webhook-format" label="形式">
               <Picker
+                top-layer
                 label="形式"
                 :searchable="false"
                 :items="FORMAT_ITEMS"

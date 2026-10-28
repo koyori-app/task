@@ -755,6 +755,13 @@ describe('TaskDetailHub の担当者', () => {
     expect(picker.get('button').attributes('disabled')).toBeDefined();
   });
 
+  it('ピッカーの一覧は本文のスクロール領域で切れないようトップレイヤーに出す', () => {
+    const wrapper = mountWithAssignee({});
+
+    const picker = wrapper.findComponent({ name: 'TaskAssigneePicker' });
+    expect(picker.get('button').element.closest('[data-menu-top-layer]')).not.toBeNull();
+  });
+
   it('更新の失敗をその場に出す', () => {
     const wrapper = mountWithAssignee({ assigneeError: '更新に失敗しました' });
 

@@ -860,6 +860,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 >
                   <!-- メンバーを渡された消費側では選び直せる。渡されなければ表示だけ -->
                   <TaskAssigneePicker
+                    top-layer
                     v-if="members"
                     :members="members"
                     :selected="task.assignees.map((assignee) => assignee.user)"

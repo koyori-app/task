@@ -684,6 +684,19 @@ describe('CreateTaskDialog labels query states', () => {
     wrapper.unmount();
   });
 
+  it('優先度・ステータス・担当者の一覧も本文のスクロール領域で切れないようトップレイヤーに出す', async () => {
+    const wrapper = mountDialog(queryClient, { members });
+    await nextTick();
+
+    for (const name of ['優先度', 'ステータス', '担当者']) {
+      // 選択中の値があると読み上げ名は「優先度: 中」の形になる
+      const trigger = document.body.querySelector(`button[aria-label^="${name}"]`);
+      expect(trigger, name).not.toBeNull();
+      expect(trigger!.closest('[data-menu-top-layer]'), name).not.toBeNull();
+    }
+    wrapper.unmount();
+  });
+
   it('正常な 0 件ではラベル欄を表示しない', async () => {
     const wrapper = mountDialog(queryClient, { labels: [] });
     await nextTick();
