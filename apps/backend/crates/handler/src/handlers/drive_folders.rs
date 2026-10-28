@@ -74,7 +74,14 @@ async fn require_folder_share_admin(
     user_id: Uuid,
 ) -> Result<(), AppError> {
     if folder.created_by == user_id {
-        return Ok(());
+        // プロジェクトから外れた作成者が共有で閲覧を取り戻せないよう、今入れるかも見る
+        return require_folder_project_write(
+            &state.db,
+            folder.tenant_id,
+            folder.project_id,
+            user_id,
+        )
+        .await;
     }
     if is_tenant_owner(&state.db, folder.tenant_id, user_id).await? {
         return Ok(());
