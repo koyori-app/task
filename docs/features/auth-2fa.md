@@ -288,7 +288,9 @@ half_authed セッション + { "requires_2fa_setup": true }
 
 2FA 設定完了前はそのテナントのリソースへのアクセスを `403`（`2fa-setup-required`）で拒否する。
 強制前から持っている本認証セッション・PAT・Device Token も同じで、ログイン時だけでなく
-テナントの所属判定（`has_tenant_access`）がリクエストごとに確かめる。
+テナントの所属判定（`has_tenant_access`）がリクエストごとに確かめる。所属判定を通らない口
+（オーナー専用の口、ファイル本文の配信 `GET /v1/drive/files/{id}/content`）も同じ判定を通す。
+ただし共有トークン（`?token=`）での配信は利用者を問わないので対象外。
 2FA を満たすのは、TOTP が有効（`users.totp_enabled` かつ `totp_credentials.is_verified`）か、
 パスキーを 1 件以上登録している利用者である。
 パスキーログインユーザーはテナント強制ポリシーの対象外（パスキー自体が MFA）。所属判定では
@@ -298,7 +300,10 @@ half_authed セッション + { "requires_2fa_setup": true }
 
 有効化（`enabled: true`）は、操作する本人が 2FA を満たすときだけ受け付ける。満たさなければ
 `403`（`2fa-setup-required`）を返し、`require_2fa` は変えない（有効にした途端に本人もテナントの
-口から締め出されるため）。無効化は常に受け付ける。
+口から締め出されるため）。
+オーナー専用の口（テナント更新・削除、Drive クォータ、GitHub 連携など）も強制の対象で、
+2FA を満たさないオーナーは `403`（`2fa-setup-required`）になる。例外は強制の無効化
+（`enabled: false`）だけで、2FA の無いオーナーが強制下に残った場合の救済経路として常に受け付ける。
 
 project にだけ参加しテナントに参加しない客分（project-only guest）も、関わるテナントの
 `require_2fa` の対象である（ここから漏れると、除名後に残る `project_members` の行で

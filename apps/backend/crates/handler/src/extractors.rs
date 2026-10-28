@@ -129,7 +129,22 @@ impl AuthUser {
     /// テナントオーナー専用操作向け。PAT 境界チェック + オーナー確認を一括実施し、
     /// テナントモデルを返す（呼び出し側で再取得不要）。
     /// `ensure_tenant_access` + `owner_id` 二重チェックの代替として使用する。
+    /// テナントが 2FA を強制していれば、オーナー本人も 2FA を満たす必要がある。
     pub async fn ensure_tenant_owner(
+        &self,
+        state: &AppState,
+        tenant_id: Uuid,
+    ) -> Result<tenants::Model, AppError> {
+        let tenant = self
+            .ensure_tenant_owner_skipping_2fa(state, tenant_id)
+            .await?;
+        ensure_tenant_2fa(state, &tenant, self.user_id).await?;
+        Ok(tenant)
+    }
+
+    /// `ensure_tenant_owner` から 2FA 強制の判定だけを除いたもの。
+    /// 2FA の無いオーナーが強制を無効化できるようにする救済経路（`set_tenant_require_2fa`）専用。
+    pub async fn ensure_tenant_owner_skipping_2fa(
         &self,
         state: &AppState,
         tenant_id: Uuid,
@@ -157,6 +172,20 @@ impl AuthUser {
             return Err(AppError::Forbidden);
         }
         Ok(tenant)
+    }
+
+    /// 所属判定（`ensure_tenant_access`）を通らずに通す口（ファイル本文の配信など）向け:
+    /// テナントが 2FA を強制していれば、本人が 2FA を満たすかだけを確かめる。
+    pub async fn ensure_tenant_2fa(
+        &self,
+        state: &AppState,
+        tenant_id: Uuid,
+    ) -> Result<(), AppError> {
+        let tenant = tenants::Entity::find_by_id(tenant_id)
+            .one(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        ensure_tenant_2fa(state, &tenant, self.user_id).await
     }
 
     /// テナント / プロジェクト境界チェック。
@@ -216,11 +245,7 @@ impl AuthUser {
                 if ids.is_empty() {
                     return Err(AppError::ForbiddenDetail(detail));
                 }
-                let tenant = tenants::Entity::find_by_id(tenant_id)
-                    .one(&state.db)
-                    .await?
-                    .ok_or(AppError::NotFound)?;
-                ensure_tenant_2fa(state, &tenant, self.user_id).await?;
+                self.ensure_tenant_2fa(state, tenant_id).await?;
                 Ok(Some(ids))
             }
             Err(e) => Err(e),
@@ -273,7 +298,7 @@ async fn has_tenant_access(
 
 /// テナントが 2FA を強制していれば、利用者が 2FA を満たすかを確かめる
 /// （docs/features/auth-2fa.md §9）。強制していないテナントでは DB を引かない。
-async fn ensure_tenant_2fa(
+pub(crate) async fn ensure_tenant_2fa(
     state: &AppState,
     tenant: &tenants::Model,
     user_id: Uuid,

@@ -4,16 +4,18 @@
 //! 修正前はログイン時（`establish_login_session`）にしか判定が無く、強制前に得た
 //! 本認証セッション・PAT・Device Token で 2FA 未設定の利用者がテナントを読み書きできた。
 //! 所属判定（`has_tenant_access`）が通すと決めた直後に 2FA を確かめ、
-//! 満たさなければ 403（`2fa-setup-required`）を返す。
+//! 満たさなければ 403（`2fa-setup-required`）を返す。所属判定を通らない口
+//! （ファイル本文の配信・オーナー専用の口）も同じ判定を通す。
 
 use crate::common::{
-    TestApp, TestUser, current_totp_code, ensure_tenant_member_for_project, insert_extra_project,
-    insert_passkey, insert_tenant, secret_from_otpauth_uri,
+    TestApp, TestUser, current_totp_code, ensure_tenant_member_for_project, file_id_of,
+    insert_extra_project, insert_passkey, insert_tenant, secret_from_otpauth_uri,
+    upload_drive_file,
 };
 use axum::http::StatusCode;
 use chrono::Utc;
 use entity::scopes::Scope;
-use entity::{project_members, tenants};
+use entity::{drive_folders, project_members, tenants};
 use reqwest::{Client, Response};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use uuid::Uuid;
@@ -66,6 +68,15 @@ async fn post_as(app: &TestApp, client: &Client, path: &str, body: serde_json::V
         .send()
         .await
         .expect("post")
+}
+
+async fn put_as(app: &TestApp, client: &Client, path: &str, body: serde_json::Value) -> Response {
+    client
+        .put(format!("{}{path}", app.base_url()))
+        .json(&body)
+        .send()
+        .await
+        .expect("put")
 }
 
 async fn assert_2fa_required(res: Response, what: &str) {
@@ -124,6 +135,33 @@ async fn require_2fa_applies_to_existing_credentials() {
         tp.tenant_id, guest_project_id
     );
 
+    // プロジェクトのファイル。本文の配信は所属判定を通らずに通す口なので別に確かめる
+    let folder_id = Uuid::new_v4();
+    drive_folders::ActiveModel {
+        id: Set(folder_id),
+        name: Set("project-folder".into()),
+        parent_id: Set(None),
+        tenant_id: Set(tp.tenant_id),
+        project_id: Set(Some(tp.project_id)),
+        created_by: Set(owner.id),
+        created_at: Set(Utc::now().into()),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert project folder");
+    app.login_session_no_content(&member.email, &member.password)
+        .await;
+    let file = upload_drive_file(
+        &app,
+        tp.tenant_id,
+        Some(folder_id),
+        "secret.txt",
+        "text/plain",
+        b"secret",
+    )
+    .await;
+    let content = format!("/v1/drive/files/{}/content", file_id_of(&file));
+
     // 強制前に資格情報を得ておく
     let member_session = login_client(&mut app, &member).await;
     let guest_session = login_client(&mut app, &guest).await;
@@ -149,6 +187,10 @@ async fn require_2fa_applies_to_existing_credentials() {
         StatusCode::OK
     );
     assert_eq!(
+        get_as(&app, &member_session, &content).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
         get_as(&app, &guest_session, &guest_tasks).await.status(),
         StatusCode::OK
     );
@@ -169,7 +211,7 @@ async fn require_2fa_applies_to_existing_credentials() {
     );
     assert!(require_2fa_of(&app, tp.tenant_id).await);
 
-    for path in [&projects, &tasks] {
+    for path in [&projects, &tasks, &content] {
         assert_2fa_required(
             get_as(&app, &member_session, path).await,
             &format!("既存セッション {path}"),
@@ -197,7 +239,7 @@ async fn require_2fa_applies_to_existing_credentials() {
     // 対照: 2FA 済みのオーナー・メンバー、パスキー登録済み（TOTP 未設定）のメンバーは通る
     let member_2fa_session =
         login_client_with_2fa(&mut app, &member_2fa, &member_2fa_codes.recovery_codes[0]).await;
-    for path in [&projects, &tasks] {
+    for path in [&projects, &tasks, &content] {
         assert_eq!(
             get_as(&app, &owner_session, path).await.status(),
             StatusCode::OK,
@@ -250,7 +292,8 @@ async fn require_2fa_applies_to_existing_credentials() {
         StatusCode::OK
     );
 
-    for user in [&member, &member_2fa, &passkey_member, &guest, &owner] {
+    // オーナーを先に消す（テナントごとメンバーが上げたファイルも消え、外部キーに掛からない）
+    for user in [&owner, &member, &member_2fa, &passkey_member, &guest] {
         app.cleanup_user(user.id).await;
     }
 }
@@ -305,6 +348,65 @@ async fn owner_without_2fa_cannot_enable_require_2fa() {
         "パスキー登録済みのオーナーは有効化できる"
     );
     assert!(require_2fa_of(&app, tenant_id).await);
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// 強制下では、オーナー専用の口（テナント更新・GitHub 連携など）も 2FA を満たさないオーナーを
+/// 403 で止める。強制の無効化だけは救済経路として通す。
+#[tokio::test]
+async fn owner_routes_require_2fa_except_disabling() {
+    let mut app = TestApp::new_with_github().await;
+    let owner = app.insert_user_default().await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let session = login_client(&mut app, &owner).await;
+    let tenant_path = format!("/v1/tenants/{}", tp.tenant_id);
+    let github_path = format!(
+        "/v1/tenants/{}/projects/{}/github/integration",
+        tp.tenant_id, tp.project_id
+    );
+    let rename = serde_json::json!({ "name": "renamed" });
+
+    // 強制下に 2FA の無いオーナーが残る状態（強制の有効化ガードより前のデータ・パスキーの削除後）を
+    // DB で作る
+    let mut active: tenants::ActiveModel = tenants::Entity::find_by_id(tp.tenant_id)
+        .one(&app.state.db)
+        .await
+        .expect("find tenant")
+        .expect("tenant exists")
+        .into();
+    active.require_2fa = Set(true);
+    active
+        .update(&app.state.db)
+        .await
+        .expect("enable require_2fa");
+
+    assert_2fa_required(
+        put_as(&app, &session, &tenant_path, rename.clone()).await,
+        "テナント更新",
+    )
+    .await;
+    assert_2fa_required(get_as(&app, &session, &github_path).await, "GitHub 連携").await;
+
+    let res = post_as(
+        &app,
+        &session,
+        &format!("{tenant_path}/require-2fa"),
+        serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK, "無効化は 2FA 無しでも通る");
+    assert!(!require_2fa_of(&app, tp.tenant_id).await);
+
+    // 強制が外れれば通る（以上の 403 が強制によるものである証明）
+    assert_eq!(
+        put_as(&app, &session, &tenant_path, rename).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        get_as(&app, &session, &github_path).await.status(),
+        StatusCode::OK
+    );
 
     app.cleanup_user(owner.id).await;
 }

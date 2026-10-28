@@ -421,7 +421,10 @@ pub async fn set_tenant_require_2fa(
     Valid(Json(payload)): Valid<Json<Require2faPolicyRequest>>,
 ) -> Result<Json<TenantResponse>, AppError> {
     auth.require_session()?;
-    let tenant = auth.ensure_tenant_owner(&state, tenant_id).await?;
+    // 無効化は 2FA の無いオーナーの救済経路なので、オーナー専用の口の 2FA 判定を省く
+    let tenant = auth
+        .ensure_tenant_owner_skipping_2fa(&state, tenant_id)
+        .await?;
     // 2FA を満たさない本人が有効にすると、自分もテナントの口から締め出される
     if payload.enabled && !user_satisfies_2fa(&state.db, auth.user_id).await? {
         return Err(AppError::ForbiddenDetail("2fa-setup-required".into()));
