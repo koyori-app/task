@@ -12,7 +12,8 @@ use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait,
 };
 
-use entity::{tenant_members, tenants, totp_credentials, users};
+use common::error::AppError;
+use entity::{passkeys, tenant_members, tenants, totp_credentials, users};
 use payload::auth_2fa::Login2faResponse;
 
 use crate::auth::AuthError;
@@ -29,6 +30,23 @@ async fn user_has_active_2fa(db: &DatabaseConnection, user_id: Uuid) -> Result<b
         .one(db)
         .await?;
     Ok(cred.map(|c| c.is_verified).unwrap_or(false))
+}
+
+/// テナントの 2FA 強制（`require_2fa`）を満たすか。TOTP が有効か、パスキーを登録済みなら満たす
+/// （パスキー自体が MFA。docs/features/auth-2fa.md §9）。
+/// テナントの所属判定と強制の有効化で使うので、handler の `AppError` で返す。
+pub async fn user_satisfies_2fa(db: &DatabaseConnection, user_id: Uuid) -> Result<bool, AppError> {
+    if user_has_active_2fa(db, user_id)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::Error::new(e)))?
+    {
+        return Ok(true);
+    }
+    Ok(passkeys::Entity::find()
+        .filter(passkeys::Column::UserId.eq(user_id))
+        .one(db)
+        .await?
+        .is_some())
 }
 
 /// ユーザーが関わるテナント — テナントオーナー・テナントメンバー・project-only の客分

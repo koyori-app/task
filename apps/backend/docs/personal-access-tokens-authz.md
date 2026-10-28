@@ -209,6 +209,7 @@ let tenant = auth.ensure_tenant_owner(&state, tenant_id).await?;
 |------|-----------|
 | 未認証・無効 PAT・失効・期限切れ | 401 |
 | 認証済みだがスコープ / テナント / プロジェクト不一致 | 403 |
+| テナントが 2FA を強制（`require_2fa`）し、利用者が 2FA を満たさない（TOTP もパスキーも無い） | 403（`2fa-setup-required`） |
 
 ## Desktop 認証（Device Token）
 

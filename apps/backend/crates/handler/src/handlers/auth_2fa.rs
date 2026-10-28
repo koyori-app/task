@@ -25,7 +25,7 @@ use crate::{
 use payload::auth_2fa::*;
 use payload::tenants::TenantResponse;
 use service::auth::AuthError;
-use service::login_session::user_in_require_2fa_tenant;
+use service::login_session::{user_in_require_2fa_tenant, user_satisfies_2fa};
 use service::totp::{
     self, clear_2fa_attempts, decrypt_totp_secret, encrypt_totp_secret, generate_recovery_codes,
     generate_totp_secret_base32, hash_recovery_code, normalize_recovery_code, otpauth_uri,
@@ -422,6 +422,10 @@ pub async fn set_tenant_require_2fa(
 ) -> Result<Json<TenantResponse>, AppError> {
     auth.require_session()?;
     let tenant = auth.ensure_tenant_owner(&state, tenant_id).await?;
+    // 2FA を満たさない本人が有効にすると、自分もテナントの口から締め出される
+    if payload.enabled && !user_satisfies_2fa(&state.db, auth.user_id).await? {
+        return Err(AppError::ForbiddenDetail("2fa-setup-required".into()));
+    }
 
     let mut active: tenants::ActiveModel = tenant.into();
     active.require_2fa = Set(payload.enabled);

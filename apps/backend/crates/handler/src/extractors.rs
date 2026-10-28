@@ -22,6 +22,7 @@ use crate::{AppState, error::AppError};
 use service::auth::{
     AuthError, DEVICE_TOKEN_PREFIX, authenticate_device_token, authenticate_personal_token,
 };
+use service::login_session::user_satisfies_2fa;
 
 type Session = axum_session::Session<SessionRedisPool>;
 
@@ -213,10 +214,14 @@ impl AuthUser {
             Err(AppError::ForbiddenDetail(detail)) if detail == "tenant-membership-missing" => {
                 let ids = explicit_member_project_ids(&state.db, tenant_id, self.user_id).await?;
                 if ids.is_empty() {
-                    Err(AppError::ForbiddenDetail(detail))
-                } else {
-                    Ok(Some(ids))
+                    return Err(AppError::ForbiddenDetail(detail));
                 }
+                let tenant = tenants::Entity::find_by_id(tenant_id)
+                    .one(&state.db)
+                    .await?
+                    .ok_or(AppError::NotFound)?;
+                ensure_tenant_2fa(state, &tenant, self.user_id).await?;
+                Ok(Some(ids))
             }
             Err(e) => Err(e),
         }
@@ -248,6 +253,9 @@ async fn verify_project_in_tenant(
 /// （apps/backend/docs/tenant-project-authz.md の「所属の 3 層」）。
 /// 一覧系 2 口（プロジェクト一覧・My Tasks）の客分への絞り込み開放は
 /// `ensure_tenant_access_or_guest_scope` が別途担う。
+///
+/// 所属があっても、テナントが 2FA を強制していて利用者が 2FA を満たさなければ 403
+/// （`2fa-setup-required`）。強制前に得たセッション・PAT・Device Token もここで止める。
 async fn has_tenant_access(
     state: &AppState,
     user_id: Uuid,
@@ -258,7 +266,32 @@ async fn has_tenant_access(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    // 2FA は所属が決まった後に見る（無関係な利用者へテナントの強制設定を漏らさない）
+    has_tenant_membership(state, &tenant, user_id, project_id).await?;
+    ensure_tenant_2fa(state, &tenant, user_id).await
+}
 
+/// テナントが 2FA を強制していれば、利用者が 2FA を満たすかを確かめる
+/// （docs/features/auth-2fa.md §9）。強制していないテナントでは DB を引かない。
+async fn ensure_tenant_2fa(
+    state: &AppState,
+    tenant: &tenants::Model,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    if tenant.require_2fa && !user_satisfies_2fa(&state.db, user_id).await? {
+        return Err(AppError::ForbiddenDetail("2fa-setup-required".into()));
+    }
+    Ok(())
+}
+
+/// `has_tenant_access` の所属判定（オーナー・テナントメンバー・客分）。
+async fn has_tenant_membership(
+    state: &AppState,
+    tenant: &tenants::Model,
+    user_id: Uuid,
+    project_id: Option<Uuid>,
+) -> Result<(), AppError> {
+    let tenant_id = tenant.id;
     if tenant.owner_id == user_id {
         if let Some(pid) = project_id {
             verify_project_in_tenant(state, tenant_id, pid).await?;
