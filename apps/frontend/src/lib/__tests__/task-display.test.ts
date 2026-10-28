@@ -82,6 +82,35 @@ describe('formatDeadline', () => {
     const result = formatDeadline('2020-01-01T00:00:00Z');
     expect(result?.overdue).toBe(true);
   });
+
+  describe('完了の状態にある task（done）', () => {
+    it('期限を過ぎてから完了した物は超過にせず、期限の日付だけを出す', () => {
+      vi.setSystemTime(new Date('2026-07-14T12:00:00'));
+      const result = formatDeadline('2026-07-10T00:00:00', { done: true });
+      expect(result).toEqual({ label: '7月10日', overdue: false });
+    });
+
+    it('期限の前に完了した物も、相対の字ではなく期限の日付を出す', () => {
+      vi.setSystemTime(new Date('2026-07-14T12:00:00'));
+      const result = formatDeadline('2026-07-16T00:00:00', { done: true });
+      expect(result).toEqual({ label: '7月16日', overdue: false });
+    });
+
+    it('期限の当日に完了した物も超過にしない', () => {
+      const now = new Date('2026-07-14T12:00:00');
+      vi.setSystemTime(now);
+      const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+      expect(formatDeadline(oneHourAgo, { done: true })?.overdue).toBe(false);
+    });
+
+    it('done が false なら今までどおり超過を出す', () => {
+      vi.setSystemTime(new Date('2026-07-14T12:00:00'));
+      expect(formatDeadline('2026-07-10T00:00:00', { done: false })).toEqual({
+        label: '4日超過',
+        overdue: true,
+      });
+    });
+  });
 });
 
 describe('PRIORITY_CONFIG', () => {

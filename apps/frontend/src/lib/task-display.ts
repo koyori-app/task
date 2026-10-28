@@ -50,9 +50,24 @@ function startOfLocalDay(date: Date): Date {
   return result;
 }
 
-export function formatDeadline(iso?: string | null): { label: string; overdue: boolean } | null {
+/**
+ * 期限の字と、期限を過ぎているか。
+ * 完了の状態にある task（done）は期限切れにしない。終わった仕事に「超過」と言うと、
+ * まだ手当てが要ると読まれるためである。期限の日付だけを出し、相対の字も出さない。
+ * 完了かどうかは状態の is_done_state で決める（completed_at は完了の列でも空のことがある）。
+ */
+export function formatDeadline(
+  iso?: string | null,
+  options: { done?: boolean } = {},
+): { label: string; overdue: boolean } | null {
   if (!iso) return null;
   const d = new Date(iso);
+  if (options.done) {
+    return {
+      label: d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' }),
+      overdue: false,
+    };
+  }
   const now = new Date();
   const diff = d.getTime() - now.getTime();
   const overdue = diff < 0;

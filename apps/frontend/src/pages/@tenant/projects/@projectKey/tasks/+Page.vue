@@ -106,7 +106,7 @@ interface TaskRow {
   seq_id: number;
   project_key: string;
   title: string;
-  status: { id: string; name: string; color: string };
+  status: { id: string; name: string; color: string; is_done_state: boolean };
   priority: ApiPriority;
   assignees: UserSummary[];
   labels: TaskLabel[];
@@ -520,10 +520,12 @@ const selectedLabelName = computed(
   () => projectLabels.value.find((label) => label.id === selectedLabelId.value)?.name ?? null,
 );
 
-/** status_id → { name, color } 解決用 Map */
+/** status_id → { name, color, is_done_state } 解決用 Map */
 const statusMap = computed(() => {
   const statuses = statusesQuery.data.value ?? [];
-  return new Map(statuses.map((s) => [s.id, { name: s.name, color: s.color }]));
+  return new Map(
+    statuses.map((s) => [s.id, { name: s.name, color: s.color, is_done_state: s.is_done_state }]),
+  );
 });
 
 // ---- テーブルデータ構築 ----
@@ -533,7 +535,11 @@ const taskRows = computed<TaskRow[]>(() => {
   if (!tasks) return [];
 
   return tasks.map((t) => {
-    const status = sMap.get(t.status_id) ?? { name: t.status_id, color: '#94a3b8' };
+    const status = sMap.get(t.status_id) ?? {
+      name: t.status_id,
+      color: '#94a3b8',
+      is_done_state: false,
+    };
     return {
       id: t.id,
       seq_id: t.seq_id,
@@ -772,7 +778,10 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
     accessorFn: (row) => row.due_date ?? '',
     header: '期限',
     cell: ({ row }) => {
-      const formatted = formatDeadline(row.original.due_date);
+      // 完了の状態にある task は期限切れにしない（formatDeadline の注釈を参照）
+      const formatted = formatDeadline(row.original.due_date, {
+        done: row.original.status.is_done_state,
+      });
       if (!formatted) return h('span', { class: 'text-muted-foreground text-xs' }, '−');
       return h(
         'span',

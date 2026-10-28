@@ -99,3 +99,61 @@ describe('TaskGroupedRow のサブタスク導線', () => {
     expect(wrapper.find('button[aria-label="サブタスクを展開"]').exists()).toBe(false);
   });
 });
+
+describe('TaskGroupedRow の期限の表示', () => {
+  const done: StatusResponse = {
+    ...status,
+    id: 'status-done',
+    name: 'Done',
+    is_default: false,
+    is_done_state: true,
+    is_default_done: true,
+  };
+
+  function mountWithDeadline(statusId: string, softDeadline: string) {
+    return mount(TaskGroupedRow, {
+      props: {
+        task: { ...task, status_id: statusId, soft_deadline: softDeadline },
+        statuses: [status, done],
+        projectLabels: [],
+        members: [],
+        onComment: vi.fn(async () => true),
+      },
+    });
+  }
+
+  function deadlineButton(wrapper: ReturnType<typeof mountWithDeadline>, label: string) {
+    const button = wrapper.findAll('button').find((b) => b.text() === label);
+    expect(button, `期限の button「${label}」が無い`).toBeDefined();
+    return button!;
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('期限を過ぎてから完了した task は赤くせず、超過とも言わない', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T12:00:00'));
+    const wrapper = mountWithDeadline(done.id, '2026-07-10T00:00:00');
+    const button = deadlineButton(wrapper, '7月10日');
+    expect(button.classes()).not.toContain('text-red-500');
+    expect(wrapper.text()).not.toContain('超過');
+  });
+
+  it('期限の前に完了した task は、相対の字ではなく期限の日付を出す', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T12:00:00'));
+    const wrapper = mountWithDeadline(done.id, '2026-07-16T00:00:00');
+    const button = deadlineButton(wrapper, '7月16日');
+    expect(button.classes()).not.toContain('text-red-500');
+  });
+
+  it('完了していない task は今までどおり、過ぎた期限を赤く超過と出す', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T12:00:00'));
+    const wrapper = mountWithDeadline(status.id, '2026-07-10T00:00:00');
+    const button = deadlineButton(wrapper, '4日超過');
+    expect(button.classes()).toContain('text-red-500');
+  });
+});
