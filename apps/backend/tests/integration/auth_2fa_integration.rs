@@ -1,7 +1,10 @@
 use crate::common::TestApp;
 use axum::http::StatusCode;
 use entity::{totp_credentials, users};
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, PaginatorTrait, QueryFilter,
+    Statement, TransactionTrait,
+};
 
 #[tokio::test]
 async fn auth_2fa_integration_suite() {
@@ -246,41 +249,72 @@ async fn auth_2fa_integration_suite() {
         app.cleanup_user(admin.id).await;
     }
 
-    // Test 8: Concurrent invalid codes cannot exceed the attempt limit
+    // Test 8: Concurrent attempts cannot exceed the attempt limit
     {
         let mut app = TestApp::new().await;
         let user = app.insert_user_default().await;
         let enabled = app.enable_2fa(&user).await;
         app.login_half_authed(&user).await;
 
-        let base = app.base_url.clone();
-        let client = app.client().clone();
-        let wrong = serde_json::json!({ "code": "000000" });
-        // 上限を越えた後の失敗も 429 で返るので、検証まで進んだかは最後に送る正解で見る
-        let valid = serde_json::json!({ "recovery_code": &enabled.recovery_codes[0] });
-        let responses = futures::future::join_all((0..50).map(|i| {
-            client
-                .post(format!("{base}/v1/auth/2fa/verify"))
-                .json(if i == 49 { &valid } else { &wrong })
-                .send()
-        }))
-        .await;
-        let statuses: Vec<StatusCode> = responses
+        // 有効なコードは失敗にならず修正前は回数が増えないので、検証まで進んだ件数が成功数に出る。
+        // 成功は回数を消すため、recovery_codes をロックして全件が検証前に揃うまで成功させない
+        let lock = app.state.db.begin().await.expect("begin lock");
+        lock.execute_unprepared("LOCK TABLE recovery_codes IN ACCESS EXCLUSIVE MODE")
+            .await
+            .expect("lock recovery_codes");
+
+        // 共有プール（既定 10 本）でロック待ちの要求が接続を持つので 7 件に抑える
+        let requests: Vec<_> = enabled.recovery_codes[..7]
+            .iter()
+            .map(|code| {
+                let request = app
+                    .client()
+                    .post(format!("{}/v1/auth/2fa/verify", app.base_url))
+                    .json(&serde_json::json!({ "recovery_code": code }));
+                tokio::spawn(async move { request.send().await.expect("verify request").status() })
+            })
+            .collect();
+        let mut settled = false;
+        for _ in 0..500 {
+            let waiting: i64 = lock
+                .query_one_raw(Statement::from_string(
+                    DatabaseBackend::Postgres,
+                    "SELECT count(*) AS n FROM pg_locks \
+                     WHERE NOT granted AND relation = 'recovery_codes'::regclass",
+                ))
+                .await
+                .expect("count lock waiters")
+                .expect("count row")
+                .try_get("", "n")
+                .expect("waiter count");
+            let finished = requests.iter().filter(|r| r.is_finished()).count();
+            if waiting as usize + finished == requests.len() {
+                settled = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(settled, "requests must reach the lock or finish");
+        lock.commit().await.expect("release lock");
+
+        let statuses: Vec<StatusCode> = futures::future::join_all(requests)
+            .await
             .into_iter()
-            .map(|r| r.expect("verify request").status())
+            .map(|r| r.expect("verify task"))
             .collect();
         let verified = statuses
             .iter()
-            .filter(|s| **s != StatusCode::TOO_MANY_REQUESTS)
+            .filter(|s| **s == StatusCode::NO_CONTENT)
             .count();
         assert!(
             verified <= 5,
-            "only 5 attempts may reach verification, got {verified}"
+            "only 5 attempts may reach verification, got {statuses:?}"
         );
-        assert_eq!(
-            statuses[49],
-            StatusCode::TOO_MANY_REQUESTS,
-            "a valid code sent beyond the limit must not be verified"
+        assert!(
+            statuses
+                .iter()
+                .all(|s| *s == StatusCode::NO_CONTENT || *s == StatusCode::TOO_MANY_REQUESTS),
+            "attempts beyond the limit must be 429, got {statuses:?}"
         );
 
         app.cleanup_user(user.id).await;
