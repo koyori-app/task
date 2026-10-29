@@ -225,7 +225,7 @@ async fn admin_delete_user_removes_uploaded_object() {
     app.cleanup_user(admin.id).await;
 }
 
-/// update_me と同じく PAT では使えない（セッション不在と同じ 401）。
+/// update_me と同じく PAT では使えない（認証方式の不一致なので 403）。
 #[tokio::test]
 async fn rejects_personal_access_token() {
     let app = TestApp::new().await;
@@ -242,7 +242,7 @@ async fn rejects_personal_access_token() {
         .send()
         .await
         .expect("upload with bearer");
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
     assert_eq!(stored_key(&app, &user).await, None);
 
     app.cleanup_user(user.id).await;

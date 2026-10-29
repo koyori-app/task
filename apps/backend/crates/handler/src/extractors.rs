@@ -500,10 +500,12 @@ impl FromRequestParts<AppState> for AdminUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        // PAT ではこのエンドポイント群を認証できない。従来もセッション不在で 401 を返して
-        // いたため、拒否のステータスは変えない。
+        // Bearer（PAT・Device Token）ではこのエンドポイント群を認証できない。無効なトークンは
+        // AuthUser が 401 を返し、有効なものは認証方式の不一致として 403 にする
+        // （Desktop は Device Token への 401 を失効とみなしてログアウトするため）。
         if bearer_token_from_parts(parts).is_some() {
-            return Err(AuthError::Unauthorized);
+            AuthUser::from_request_parts(parts, state).await?;
+            return Err(AuthError::Forbidden);
         }
         let session = session_from_parts(parts, state).await?;
         if session_is_half_authed(&session) {
@@ -538,10 +540,12 @@ impl FromRequestParts<AppState> for CurrentUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        // PAT ではこのエンドポイント群を認証できない。従来もセッション不在で 401 を返して
-        // いたため、拒否のステータスは変えない。
+        // Bearer（PAT・Device Token）ではこのエンドポイント群を認証できない。無効なトークンは
+        // AuthUser が 401 を返し、有効なものは認証方式の不一致として 403 にする
+        // （Desktop は Device Token への 401 を失効とみなしてログアウトするため）。
         if bearer_token_from_parts(parts).is_some() {
-            return Err(AuthError::Unauthorized);
+            AuthUser::from_request_parts(parts, state).await?;
+            return Err(AuthError::Forbidden);
         }
         let session = session_from_parts(parts, state).await?;
         if session_is_half_authed(&session) {

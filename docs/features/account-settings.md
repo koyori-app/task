@@ -130,7 +130,8 @@ icon: lucide:user-cog
 | 状態 | 応答 |
 |---|---|
 | 未ログイン | `401` |
-| `Authorization: Bearer` 付き（PAT） | `401` — アカウント API は PAT 非対応 |
+| `Authorization: Bearer` 付き（有効な PAT・Device Token） | `403` — アカウント API は Bearer 非対応 |
+| 無効な Bearer（存在しない・失効・期限切れ） | `401` |
 | 2FA の途中（half-authed） | `403` |
 | 凍結済みユーザー | `403` |
 | 入力チェック違反 | `400` |
@@ -161,7 +162,7 @@ PAT で自分のプロフィールを書き換えられないことは、
 
 ログイン中ユーザーのアバター画像をアップロードし、`avatar_url` を自サーバーの配信 URL に差し替える。
 
-- **認証**: `PATCH /v1/auth/me` と同じ `CurrentUser`（§3「認可」の表がそのまま当てはまる。PAT は 401）
+- **認証**: `PATCH /v1/auth/me` と同じ `CurrentUser`（§3「認可」の表がそのまま当てはまる。有効な PAT は 403）
 - **リクエスト**: `multipart/form-data`。フィールド `file` を 1 つ
 - **サイズ**: 画像は 2 MiB（`service::avatar::AVATAR_MAX_BYTES`）まで。超えたら `413`。
   本文全体の上限（`RequestBodyLimitLayer`）はこのルートだけに掛け、multipart の枠の分だけ 64 KiB 広げてある

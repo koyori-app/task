@@ -1,5 +1,6 @@
-use crate::common::TestApp;
+use crate::common::{TestApp, insert_tenant};
 use axum::http::StatusCode;
+use entity::scopes::Scope;
 use uuid::Uuid;
 
 /// セッション専用エンドポイントは `Authorization: Bearer` 付きのリクエストを拒否する。
@@ -105,6 +106,17 @@ async fn admin_user_endpoint_rejects_bearer_header() {
         rejected.status(),
         StatusCode::UNAUTHORIZED,
         "Bearer 付きの管理者リクエストは拒否される"
+    );
+
+    // 有効な PAT は認証方式の不一致なので 401 ではなく 403。
+    let tenant_id = insert_tenant(&app.state.db, admin.id).await;
+    let pat = app
+        .insert_pat(admin.id, tenant_id, vec![Scope::Api], None)
+        .await;
+    assert_eq!(
+        app.get_with_bearer("/v1/admin/users", &pat).await.status(),
+        StatusCode::FORBIDDEN,
+        "有効な PAT の管理者リクエストは 403"
     );
 
     app.cleanup_user(admin.id).await;
