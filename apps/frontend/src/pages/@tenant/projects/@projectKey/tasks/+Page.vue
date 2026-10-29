@@ -111,6 +111,7 @@ interface TaskRow {
   assignees: UserSummary[];
   labels: TaskLabel[];
   due_date?: string;
+  completed_at?: string;
 }
 
 // ---- ページコンテキスト ----
@@ -550,6 +551,7 @@ const taskRows = computed<TaskRow[]>(() => {
       assignees: t.assignees.map((a) => a.user),
       labels: t.labels,
       due_date: t.soft_deadline ?? undefined,
+      completed_at: t.completed_at ?? undefined,
     };
   });
 });
@@ -781,6 +783,7 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
       // 完了の状態にある task は期限切れにしない（formatDeadline の注釈を参照）
       const formatted = formatDeadline(row.original.due_date, {
         done: row.original.status.is_done_state,
+        completedAt: row.original.completed_at,
       });
       if (!formatted) return h('span', { class: 'text-muted-foreground text-xs' }, '−');
       return h(

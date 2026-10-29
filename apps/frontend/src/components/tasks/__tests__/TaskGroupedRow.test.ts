@@ -110,10 +110,19 @@ describe('TaskGroupedRow の期限の表示', () => {
     is_default_done: true,
   };
 
-  function mountWithDeadline(statusId: string, softDeadline: string) {
+  function mountWithDeadline(
+    statusId: string,
+    softDeadline: string,
+    completedAt: string | null = null,
+  ) {
     return mount(TaskGroupedRow, {
       props: {
-        task: { ...task, status_id: statusId, soft_deadline: softDeadline },
+        task: {
+          ...task,
+          status_id: statusId,
+          soft_deadline: softDeadline,
+          completed_at: completedAt,
+        },
         statuses: [status, done],
         projectLabels: [],
         members: [],
@@ -147,6 +156,30 @@ describe('TaskGroupedRow の期限の表示', () => {
     const wrapper = mountWithDeadline(done.id, '2026-07-16T00:00:00');
     const button = deadlineButton(wrapper, '7月16日');
     expect(button.classes()).not.toContain('text-red-500');
+  });
+
+  it('期限より後の日に完了した task は、遅れた日数を中立で添える', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+    const wrapper = mountWithDeadline(done.id, '2026-07-10T00:00:00', '2026-07-14T09:00:00');
+    const button = deadlineButton(wrapper, '7月10日（4日超過）');
+    expect(button.classes()).not.toContain('text-red-500');
+  });
+
+  it('期限の前に完了した task は、completed_at があっても期限の日付だけを出す', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+    const wrapper = mountWithDeadline(done.id, '2026-07-10T00:00:00', '2026-07-06T09:00:00');
+    const button = deadlineButton(wrapper, '7月10日');
+    expect(button.classes()).not.toContain('text-red-500');
+  });
+
+  it('completed_at が空の完了した task は、今日から数えず日付だけを出す', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+    const wrapper = mountWithDeadline(done.id, '2026-07-10T00:00:00', null);
+    deadlineButton(wrapper, '7月10日');
+    expect(wrapper.text()).not.toContain('超過');
   });
 
   it('完了していない task は今までどおり、過ぎた期限を赤く超過と出す', () => {

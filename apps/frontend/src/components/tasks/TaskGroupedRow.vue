@@ -75,7 +75,12 @@ const isBusy = computed(() => props.pendingField !== undefined);
 const isDone = computed(
   () => props.statuses.find((status) => status.id === props.task.status_id)?.is_done_state ?? false,
 );
-const deadline = computed(() => formatDeadline(props.task.soft_deadline, { done: isDone.value }));
+const deadline = computed(() =>
+  formatDeadline(props.task.soft_deadline, {
+    done: isDone.value,
+    completedAt: props.task.completed_at,
+  }),
+);
 const assignees = computed(() => props.task.assignees.map((entry) => entry.user));
 const statusColor = computed(
   () => props.statuses.find((status) => status.id === props.task.status_id)?.color ?? null,
@@ -326,7 +331,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
         <button
           v-else-if="deadline"
           type="button"
-          class="inline-flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-muted"
+          class="inline-flex items-center gap-1.5 rounded px-1 py-0.5 break-keep hover:bg-muted"
           :class="deadline.overdue ? 'text-red-500' : 'text-muted-foreground'"
           :disabled="isBusy"
           @click="startEditingDeadline"

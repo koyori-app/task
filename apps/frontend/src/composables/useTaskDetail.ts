@@ -306,8 +306,16 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     const appliedRevision = appliedFieldRevisions[field] ?? 0;
     if (revision > appliedRevision) {
       appliedFieldRevisions[field] = revision;
+      // 状態を変えると backend が completed_at も書き換える（完了へ移れば入り、出れば空になる）。
+      // 期限の遅れはこれで数えるので、状態と一緒に応答から取る
       queryClient.setQueryData<TaskDetail | null>(queryKey, (current) =>
-        current ? { ...current, [field]: data[field] } : data,
+        current
+          ? {
+              ...current,
+              [field]: data[field],
+              ...(field === 'status_id' && { completed_at: data.completed_at }),
+            }
+          : data,
       );
     }
 

@@ -783,9 +783,14 @@ describe('TaskDetailHub の期限の表示', () => {
     hard_deadline: '2026-07-11T00:00:00',
   };
 
-  function mountWithStatus(statusId: string) {
+  function mountWithStatus(statusId: string, completedAt: string | null = null) {
     return mount(TaskDetailHub, {
-      props: { task: pastDeadlines, projectKey: 'TEST', statuses, statusId },
+      props: {
+        task: { ...pastDeadlines, completed_at: completedAt },
+        projectKey: 'TEST',
+        statuses,
+        statusId,
+      },
     });
   }
 
@@ -805,6 +810,23 @@ describe('TaskDetailHub の期限の表示', () => {
     const wrapper = mountWithStatus('status-done');
     expect(buttonByText(wrapper, '7月10日').classes()).not.toContain('text-destructive');
     expect(buttonByText(wrapper, '7月11日').classes()).not.toContain('text-destructive');
+    expect(wrapper.text()).not.toContain('超過');
+  });
+
+  it('期限より後の日に完了した物は、ソフトとハードの両方に遅れた日数を中立で添える', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+    const wrapper = mountWithStatus('status-done', '2026-07-14T09:00:00');
+    expect(buttonByText(wrapper, '7月10日（4日超過）').classes()).not.toContain('text-destructive');
+    expect(buttonByText(wrapper, '7月11日（3日超過）').classes()).not.toContain('text-destructive');
+  });
+
+  it('期限の前に完了した物は、ソフトとハードの両方で日付だけを出す', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+    const wrapper = mountWithStatus('status-done', '2026-07-06T09:00:00');
+    buttonByText(wrapper, '7月10日');
+    buttonByText(wrapper, '7月11日');
     expect(wrapper.text()).not.toContain('超過');
   });
 

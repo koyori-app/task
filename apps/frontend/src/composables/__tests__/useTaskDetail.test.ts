@@ -226,6 +226,44 @@ describe('useTaskDetail のキャッシュ同期', () => {
     expect(queryClient.getQueryState(searchQueryKey)?.isInvalidated).toBe(true);
   });
 
+  it('状態を変えたら、応答の completed_at も詳細のキャッシュへ入る', async () => {
+    mountHost();
+    await flushPromises();
+
+    detail.onStatusChange('status-done');
+    await flushPromises();
+    putControl.resolve!({
+      ...baseTask,
+      status_id: 'status-done',
+      completed_at: '2026-07-14T09:00:00Z',
+    });
+    await flushPromises();
+
+    expect(queryClient.getQueryData(taskQueryKey)).toMatchObject({
+      status_id: 'status-done',
+      completed_at: '2026-07-14T09:00:00Z',
+    });
+  });
+
+  it('状態以外の更新では、completed_at を応答で書き換えない', async () => {
+    mountHost();
+    await flushPromises();
+    queryClient.setQueryData(taskQueryKey, {
+      ...baseTask,
+      completed_at: '2026-07-14T09:00:00Z',
+    });
+
+    detail.onSaveTitle('新しいタイトル');
+    await flushPromises();
+    putControl.resolve!({ ...baseTask, title: '新しいタイトル', completed_at: null });
+    await flushPromises();
+
+    expect(queryClient.getQueryData(taskQueryKey)).toMatchObject({
+      title: '新しいタイトル',
+      completed_at: '2026-07-14T09:00:00Z',
+    });
+  });
+
   it('検索結果表示中の更新で検索キャッシュとカレンダーの予定も invalidate される（mount したまま）', async () => {
     mountHost();
     await flushPromises();

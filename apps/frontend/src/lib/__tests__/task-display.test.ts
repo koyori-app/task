@@ -103,6 +103,58 @@ describe('formatDeadline', () => {
       expect(formatDeadline(oneHourAgo, { done: true })?.overdue).toBe(false);
     });
 
+    it('期限より後の日に完了した物は、遅れた日数を中立で添える', () => {
+      vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+      const result = formatDeadline('2026-07-10T00:00:00', {
+        done: true,
+        completedAt: '2026-07-14T09:00:00',
+      });
+      expect(result).toEqual({ label: '7月10日（4日超過）', overdue: false });
+    });
+
+    it('遅れは完了した日から数え、今日が進んでも増えない', () => {
+      const options = { done: true, completedAt: '2026-07-14T09:00:00' };
+      vi.setSystemTime(new Date('2026-07-15T12:00:00'));
+      const first = formatDeadline('2026-07-10T00:00:00', options);
+      vi.setSystemTime(new Date('2026-08-30T12:00:00'));
+      const later = formatDeadline('2026-07-10T00:00:00', options);
+      expect(first?.label).toBe('7月10日（4日超過）');
+      expect(later?.label).toBe('7月10日（4日超過）');
+    });
+
+    it('期限の前に完了した物は、期限の日付だけを出す', () => {
+      vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+      const result = formatDeadline('2026-07-10T00:00:00', {
+        done: true,
+        completedAt: '2026-07-06T09:00:00',
+      });
+      expect(result).toEqual({ label: '7月10日', overdue: false });
+    });
+
+    it('期限の当日の遅い刻に完了した物は、暦の日が同じなので日付だけを出す', () => {
+      vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+      const result = formatDeadline('2026-07-10T00:00:00', {
+        done: true,
+        completedAt: '2026-07-10T23:00:00',
+      });
+      expect(result).toEqual({ label: '7月10日', overdue: false });
+    });
+
+    it('completedAt が空なら、今日から数えて埋めず日付だけを出す', () => {
+      vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+      expect(formatDeadline('2026-07-10T00:00:00', { done: true, completedAt: null })).toEqual({
+        label: '7月10日',
+        overdue: false,
+      });
+    });
+
+    it('done が false なら completedAt があっても今までどおり今日から数えて超過を出す', () => {
+      vi.setSystemTime(new Date('2026-07-14T12:00:00'));
+      expect(
+        formatDeadline('2026-07-10T00:00:00', { done: false, completedAt: '2026-07-11T09:00:00' }),
+      ).toEqual({ label: '4日超過', overdue: true });
+    });
+
     it('done が false なら今までどおり超過を出す', () => {
       vi.setSystemTime(new Date('2026-07-14T12:00:00'));
       expect(formatDeadline('2026-07-10T00:00:00', { done: false })).toEqual({

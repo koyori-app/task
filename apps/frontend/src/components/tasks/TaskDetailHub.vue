@@ -700,8 +700,10 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                     >
                       <CalendarDays class="size-4" aria-hidden="true" />
                       {{
-                        formatDeadline(task.soft_deadline, { done: resolvedStatus?.is_done_state })
-                          ?.label ?? '期限'
+                        formatDeadline(task.soft_deadline, {
+                          done: resolvedStatus?.is_done_state,
+                          completedAt: task.completed_at,
+                        })?.label ?? '期限'
                       }}
                     </button>
 
@@ -751,8 +753,10 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                     >
                       <CalendarClock class="size-4" aria-hidden="true" />
                       {{
-                        formatDeadline(task.hard_deadline, { done: resolvedStatus?.is_done_state })
-                          ?.label ?? 'ハード期限'
+                        formatDeadline(task.hard_deadline, {
+                          done: resolvedStatus?.is_done_state,
+                          completedAt: task.completed_at,
+                        })?.label ?? 'ハード期限'
                       }}
                     </button>
                   </div>
