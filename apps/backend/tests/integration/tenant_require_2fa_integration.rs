@@ -5,7 +5,8 @@
 //! 本認証セッション・PAT・Device Token で 2FA 未設定の利用者がテナントを読み書きできた。
 //! 所属判定（`has_tenant_access`）が通すと決めた直後に 2FA を確かめ、
 //! 満たさなければ 403（`2fa-setup-required`）を返す。所属判定を通らない口
-//! （ファイル本文の配信・オーナー専用の口）も同じ判定を通す。
+//! （ファイル本文の配信・オーナー専用の口）も同じ判定を通し、通知の一覧は強制下のテナントの
+//! 通知を視界から外す。
 
 use crate::common::{
     TestApp, TestUser, current_totp_code, ensure_tenant_member_for_project, file_id_of,
@@ -409,4 +410,109 @@ async fn owner_routes_require_2fa_except_disabling() {
     );
 
     app.cleanup_user(owner.id).await;
+}
+
+/// 通知を 1 件直に挿す（視界の判定は `project_id` だけを見る）。
+async fn insert_notification(app: &TestApp, user_id: Uuid, project_id: Uuid) {
+    entity::notifications::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        user_id: Set(user_id),
+        task_id: Set(None),
+        project_id: Set(Some(project_id)),
+        notification_type: Set("review_round_created".into()),
+        payload: Set(serde_json::json!({ "pr_number": 1, "round": 1 })),
+        read_at: Set(None),
+        created_at: Set(Utc::now().into()),
+        email_queued_at: Set(None),
+        emailed_at: Set(None),
+        email_attempts: Set(0),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert notification");
+}
+
+/// 通知の一覧の（未読数, 件数）。
+async fn notification_counts(res: Response) -> (u64, usize) {
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value = res.json().await.expect("json");
+    (
+        body["unread_count"].as_u64().expect("unread_count"),
+        body["notifications"]
+            .as_array()
+            .expect("notifications")
+            .len(),
+    )
+}
+
+/// 通知の一覧は所属判定を通らずに視界を組むが、強制下のテナントの通知は 2FA を満たすまで
+/// 一覧にも未読数にも出さない。強制していないテナントの通知は出続ける。
+#[tokio::test]
+async fn require_2fa_hides_tenant_notifications() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user_default().await;
+    let member = app.insert_user_default().await;
+    let member_2fa = app.insert_user_default().await;
+
+    let enforced = app.insert_tenant_project(owner.id).await;
+    for user in [&member, &member_2fa] {
+        ensure_tenant_member_for_project(&app.state.db, enforced.project_id, user.id).await;
+    }
+    // member が自分で持つ、強制していないテナント
+    let own = app.insert_tenant_project(member.id).await;
+    let member_2fa_codes = app.enable_2fa(&member_2fa).await;
+    insert_notification(&app, member.id, enforced.project_id).await;
+    insert_notification(&app, member.id, own.project_id).await;
+    insert_notification(&app, member_2fa.id, enforced.project_id).await;
+
+    let notifications = "/v1/users/me/notifications";
+    let member_session = login_client(&mut app, &member).await;
+    let member_pat = app
+        .insert_pat(member.id, enforced.tenant_id, vec![Scope::ReadReview], None)
+        .await;
+
+    // 陽性対照: 強制前は強制するテナントの通知も見える
+    assert_eq!(
+        notification_counts(get_as(&app, &member_session, notifications).await).await,
+        (2, 2)
+    );
+    assert_eq!(
+        notification_counts(app.get_with_bearer(notifications, &member_pat).await).await,
+        (1, 1)
+    );
+
+    let tenant = tenants::Entity::find_by_id(enforced.tenant_id)
+        .one(&app.state.db)
+        .await
+        .expect("find tenant")
+        .expect("tenant exists");
+    let mut tenant: tenants::ActiveModel = tenant.into();
+    tenant.require_2fa = Set(true);
+    tenant
+        .update(&app.state.db)
+        .await
+        .expect("enable require_2fa");
+
+    assert_eq!(
+        notification_counts(get_as(&app, &member_session, notifications).await).await,
+        (1, 1),
+        "既存セッション: 強制していないテナントの通知だけ"
+    );
+    assert_eq!(
+        notification_counts(app.get_with_bearer(notifications, &member_pat).await).await,
+        (0, 0),
+        "強制するテナントの PAT"
+    );
+
+    // 対照: 2FA 済みのメンバーには強制下のテナントの通知も出る
+    let member_2fa_session =
+        login_client_with_2fa(&mut app, &member_2fa, &member_2fa_codes.recovery_codes[0]).await;
+    assert_eq!(
+        notification_counts(get_as(&app, &member_2fa_session, notifications).await).await,
+        (1, 1)
+    );
+
+    for user in [&owner, &member, &member_2fa] {
+        app.cleanup_user(user.id).await;
+    }
 }

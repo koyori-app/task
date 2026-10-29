@@ -291,6 +291,8 @@ half_authed セッション + { "requires_2fa_setup": true }
 テナントの所属判定（`has_tenant_access`）がリクエストごとに確かめる。所属判定を通らない口
 （オーナー専用の口、ファイル本文の配信 `GET /v1/drive/files/{id}/content`）も同じ判定を通す。
 ただし共有トークン（`?token=`）での配信は利用者を問わないので対象外。
+通知の一覧（`/v1/users/me/notifications` の一覧・未読数・既読化）は 403 にせず、強制下のテナントの
+通知を視界から外す。
 2FA を満たすのは、TOTP が有効（`users.totp_enabled` かつ `totp_credentials.is_verified`）か、
 パスキーを 1 件以上登録している利用者である。
 パスキーログインユーザーはテナント強制ポリシーの対象外（パスキー自体が MFA）。所属判定では
