@@ -17,7 +17,7 @@ use axum::{
 use axum_session::{SameSite, SessionConfig, SessionLayer, SessionMode, SessionStore};
 use axum_session_redispool::SessionRedisPool;
 use entity::{
-    github_integrations, oauth_connections, personal_tokens, projects,
+    github_integrations, oauth_connections, passkeys, personal_tokens, projects,
     scopes::{Scope, ScopeList},
     tenant_members, tenants, users,
 };
@@ -1330,6 +1330,24 @@ pub async fn insert_passkey_user(
         email,
         password,
     }
+}
+
+/// パスキーの行を DB へ直に挿す（登録フローを経ない）。2FA を満たす利用者を作る用。
+pub async fn insert_passkey(db: &DatabaseConnection, user_id: Uuid) {
+    passkeys::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        user_id: Set(user_id),
+        credential_id: Set(user_id.as_bytes().to_vec()),
+        public_key: Set(vec![1, 2, 3]),
+        aaguid: Set(None),
+        sign_count: Set(0),
+        name: Set("test-passkey".into()),
+        last_used_at: Set(None),
+        created_at: Set(chrono::Utc::now().into()),
+    }
+    .insert(db)
+    .await
+    .expect("insert passkey");
 }
 
 pub fn secret_from_otpauth_uri(uri: &str) -> String {

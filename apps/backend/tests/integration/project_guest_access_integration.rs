@@ -1,4 +1,4 @@
-use crate::common::{TestApp, TestUser};
+use crate::common::{TestApp, TestUser, insert_passkey};
 use axum::http::StatusCode;
 use entity::{projects, scopes::Scope};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
@@ -475,7 +475,9 @@ async fn guest_login_requires_2fa_setup_under_require_2fa() {
     let mut app = TestApp::new().await;
     let s = setup_guest(&mut app).await;
 
-    // owner がテナントの 2FA 強制を立てる（owner の現セッションは本認証のまま）
+    // owner がテナントの 2FA 強制を立てる（owner の現セッションは本認証のまま）。
+    // 有効化する本人は 2FA を満たす必要があるので、owner にはパスキーを持たせる
+    insert_passkey(&app.state.db, s.owner.id).await;
     app.reset_session_client();
     app.login_session(&s.owner.email, &s.owner.password).await;
     let policy = app
@@ -562,7 +564,8 @@ async fn guest_cannot_disable_totp_under_require_2fa() {
     app.reset_session_client();
     let enabled = app.enable_2fa(&guest2).await;
 
-    // 除名して客分にし、owner が 2FA 強制を立てる
+    // 除名して客分にし、owner が 2FA 強制を立てる（有効化する本人はパスキーで 2FA を満たす）
+    insert_passkey(&app.state.db, s.owner.id).await;
     app.reset_session_client();
     app.login_session(&s.owner.email, &s.owner.password).await;
     let removed = app

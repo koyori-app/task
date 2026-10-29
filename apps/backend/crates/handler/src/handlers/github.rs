@@ -16,7 +16,7 @@ use subtle::ConstantTimeEq;
 
 use crate::AppState;
 use crate::error::{AppError, ServerError};
-use crate::extractors::AuthUser;
+use crate::extractors::{AuthUser, ensure_tenant_2fa};
 use crate::openapi::CrudErrors;
 use crate::settings::GithubAppSettings;
 use entity::{github_integrations, github_issue_links, projects, tenants};
@@ -44,7 +44,8 @@ async fn require_tenant_owner(
     if tenant.owner_id != user_id {
         return Err(AppError::Forbidden);
     }
-    Ok(())
+    // オーナー専用の口も 2FA 強制の対象（`AuthUser::ensure_tenant_owner` と同じ判定）
+    ensure_tenant_2fa(state, &tenant, user_id).await
 }
 
 async fn require_project_in_tenant(
