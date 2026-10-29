@@ -72,7 +72,7 @@ async fn verify_user_totp_or_recovery(
     code: Option<&str>,
     recovery_code: Option<&str>,
 ) -> Result<(), AuthError> {
-    totp::check_2fa_lockout(&state.redis_client, user_id).await?;
+    let attempt = totp::reserve_2fa_attempt(&state.redis_client, user_id).await?;
 
     if let Some(recovery) = recovery_code {
         let normalized = normalize_recovery_code(recovery);
@@ -114,8 +114,7 @@ async fn verify_user_totp_or_recovery(
         }
 
         txn.rollback().await?;
-        totp::record_2fa_failure(&state.redis_client, user_id).await?;
-        return Err(AuthError::InvalidTwoFactorCode);
+        return Err(attempt.failure());
     }
 
     let code = code.ok_or(AuthError::InvalidTwoFactorCode)?;
@@ -140,8 +139,7 @@ async fn verify_user_totp_or_recovery(
         clear_2fa_attempts(&state.redis_client, user_id).await?;
         Ok(())
     } else {
-        totp::record_2fa_failure(&state.redis_client, user_id).await?;
-        Err(AuthError::InvalidTwoFactorCode)
+        Err(attempt.failure())
     }
 }
 
@@ -227,7 +225,7 @@ pub async fn totp_verify_setup(
         return Err(AuthError::TwoFactorAlreadyEnabled);
     }
 
-    totp::check_2fa_lockout(&state.redis_client, user.user_id).await?;
+    let attempt = totp::reserve_2fa_attempt(&state.redis_client, user.user_id).await?;
 
     let secret = decrypt_totp_secret(&cred.secret_enc, &state.settings.totp_encryption_key)?;
     if !verify_totp_code(
@@ -236,8 +234,7 @@ pub async fn totp_verify_setup(
         &user_model.email,
         payload.code.trim(),
     )? {
-        totp::record_2fa_failure(&state.redis_client, user.user_id).await?;
-        return Err(AuthError::InvalidTwoFactorCode);
+        return Err(attempt.failure());
     }
 
     let codes = generate_recovery_codes();
