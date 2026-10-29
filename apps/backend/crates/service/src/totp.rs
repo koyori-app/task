@@ -21,21 +21,17 @@ const NONCE_LEN: usize = 12;
 const RECOVERY_CODE_COUNT: usize = 10;
 const RECOVERY_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-/// INCR + EXPIRE + 上限判定を単一 Lua で実行（GET/INCR 分離によるレース回避）。
-static RECORD_2FA_FAILURE_SCRIPT: LazyLock<Script> = LazyLock::new(|| {
+/// 試行の予約。INCR と初回の EXPIRE を単一 Lua で行い、INCR 後の値（この試行の番号）を返す。
+static RESERVE_2FA_ATTEMPT_SCRIPT: LazyLock<Script> = LazyLock::new(|| {
     Script::new(
         r#"
         local key = KEYS[1]
-        local max = tonumber(ARGV[1])
-        local ttl = tonumber(ARGV[2])
+        local ttl = tonumber(ARGV[1])
         local count = redis.call('INCR', key)
         if count == 1 then
             redis.call('EXPIRE', key, ttl)
         end
-        if count >= max then
-            return 1
-        end
-        return 0
+        return count
         "#,
     )
 });
@@ -180,48 +176,44 @@ const ATTEMPT_KEY_PREFIX: &str = "2fa_attempts:";
 const MAX_ATTEMPTS: i64 = 5;
 const LOCKOUT_SECS: u64 = 900;
 
-pub async fn check_2fa_lockout(
-    redis: &common::cache::redis::RedisConnection,
-    user_id: Uuid,
-) -> Result<(), AuthError> {
-    let key = format!("{ATTEMPT_KEY_PREFIX}{user_id}");
-    let mut conn = redis
-        .conn
-        .acquire()
-        .await
-        .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis acquire: {e}")))?;
-    let count: Option<i64> = redis::cmd("GET")
-        .arg(&key)
-        .query_async(&mut conn)
-        .await
-        .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis get attempts: {e}")))?;
-    if count.unwrap_or(0) >= MAX_ATTEMPTS {
-        return Err(AuthError::TooManyRequests);
-    }
-    Ok(())
+/// 予約済みの 2FA 試行。
+pub struct TwoFactorAttempt {
+    count: i64,
 }
 
-pub async fn record_2fa_failure(
+impl TwoFactorAttempt {
+    /// 検証に失敗したときのエラー。上限ちょうどの試行の失敗は以降のロックを 429 で伝える。
+    pub fn failure(&self) -> AuthError {
+        if self.count >= MAX_ATTEMPTS {
+            AuthError::TooManyRequests
+        } else {
+            AuthError::InvalidTwoFactorCode
+        }
+    }
+}
+
+/// 2FA コードを検証する前に試行を 1 回分予約する。成功したら [`clear_2fa_attempts`] で消す。
+/// 同時リクエストもそれぞれ別の番号を得るので、上限を越えた試行は検証させずに 429 を返す。
+pub async fn reserve_2fa_attempt(
     redis: &common::cache::redis::RedisConnection,
     user_id: Uuid,
-) -> Result<(), AuthError> {
+) -> Result<TwoFactorAttempt, AuthError> {
     let key = format!("{ATTEMPT_KEY_PREFIX}{user_id}");
     let mut conn = redis
         .conn
         .acquire()
         .await
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis acquire: {e}")))?;
-    let locked_out: i32 = RECORD_2FA_FAILURE_SCRIPT
+    let count: i64 = RESERVE_2FA_ATTEMPT_SCRIPT
         .key(&key)
-        .arg(MAX_ATTEMPTS)
         .arg(LOCKOUT_SECS)
         .invoke_async(&mut conn)
         .await
-        .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis 2fa failure script: {e}")))?;
-    if locked_out == 1 {
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!("redis 2fa reserve script: {e}")))?;
+    if count > MAX_ATTEMPTS {
         return Err(AuthError::TooManyRequests);
     }
-    Ok(())
+    Ok(TwoFactorAttempt { count })
 }
 
 pub async fn clear_2fa_attempts(

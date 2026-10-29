@@ -245,4 +245,95 @@ async fn auth_2fa_integration_suite() {
         app.cleanup_user(user.id).await;
         app.cleanup_user(admin.id).await;
     }
+
+    // Test 8: Concurrent invalid codes cannot exceed the attempt limit
+    {
+        let mut app = TestApp::new().await;
+        let user = app.insert_user_default().await;
+        let enabled = app.enable_2fa(&user).await;
+        app.login_half_authed(&user).await;
+
+        let base = app.base_url.clone();
+        let client = app.client().clone();
+        let wrong = serde_json::json!({ "code": "000000" });
+        // 上限を越えた後の失敗も 429 で返るので、検証まで進んだかは最後に送る正解で見る
+        let valid = serde_json::json!({ "recovery_code": &enabled.recovery_codes[0] });
+        let responses = futures::future::join_all((0..50).map(|i| {
+            client
+                .post(format!("{base}/v1/auth/2fa/verify"))
+                .json(if i == 49 { &valid } else { &wrong })
+                .send()
+        }))
+        .await;
+        let statuses: Vec<StatusCode> = responses
+            .into_iter()
+            .map(|r| r.expect("verify request").status())
+            .collect();
+        let verified = statuses
+            .iter()
+            .filter(|s| **s != StatusCode::TOO_MANY_REQUESTS)
+            .count();
+        assert!(
+            verified <= 5,
+            "only 5 attempts may reach verification, got {verified}"
+        );
+        assert_eq!(
+            statuses[49],
+            StatusCode::TOO_MANY_REQUESTS,
+            "a valid code sent beyond the limit must not be verified"
+        );
+
+        app.cleanup_user(user.id).await;
+    }
+
+    // Test 9: A valid code within the limit passes and clears the counter
+    {
+        let mut app = TestApp::new().await;
+        let user = app.insert_user_default().await;
+        let enabled = app.enable_2fa(&user).await;
+        app.login_half_authed(&user).await;
+
+        for attempt in 1..=4 {
+            let bad = app
+                .post_json_with_session(
+                    "/v1/auth/2fa/verify",
+                    serde_json::json!({ "code": "000000" }),
+                )
+                .await;
+            assert_eq!(
+                bad.status(),
+                StatusCode::UNAUTHORIZED,
+                "attempt {attempt} should be 401"
+            );
+        }
+        let fifth = app
+            .post_json_with_session(
+                "/v1/auth/2fa/verify",
+                serde_json::json!({ "recovery_code": &enabled.recovery_codes[0] }),
+            )
+            .await;
+        assert_eq!(
+            fifth.status(),
+            StatusCode::NO_CONTENT,
+            "valid 5th attempt must pass"
+        );
+
+        app.reset_session_client();
+        app.login_half_authed(&user).await;
+        for attempt in 1..=4 {
+            let bad = app
+                .post_json_with_session(
+                    "/v1/auth/2fa/verify",
+                    serde_json::json!({ "code": "000000" }),
+                )
+                .await;
+            assert_eq!(
+                bad.status(),
+                StatusCode::UNAUTHORIZED,
+                "attempt {attempt} after success should be 401"
+            );
+        }
+
+        app.cleanup_user(user.id).await;
+    }
 }
