@@ -775,3 +775,66 @@ describe('TaskDetailHub の担当者', () => {
     expect(picker.get('button').attributes('disabled')).toBeUndefined();
   });
 });
+
+describe('TaskDetailHub の期限の表示', () => {
+  const pastDeadlines = {
+    ...task,
+    soft_deadline: '2026-07-10T00:00:00',
+    hard_deadline: '2026-07-11T00:00:00',
+  };
+
+  function mountWithStatus(statusId: string, completedAt: string | null = null) {
+    return mount(TaskDetailHub, {
+      props: {
+        task: { ...pastDeadlines, completed_at: completedAt },
+        projectKey: 'TEST',
+        statuses,
+        statusId,
+      },
+    });
+  }
+
+  function buttonByText(wrapper: ReturnType<typeof mountWithStatus>, label: string) {
+    const button = wrapper.findAll('button').find((b) => b.text() === label);
+    expect(button, `期限の button「${label}」が無い`).toBeDefined();
+    return button!;
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('完了の状態では、過ぎた期限（ソフトとハード）を赤くせず、日付だけを出す', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T12:00:00'));
+    const wrapper = mountWithStatus('status-done');
+    expect(buttonByText(wrapper, '7月10日').classes()).not.toContain('text-destructive');
+    expect(buttonByText(wrapper, '7月11日').classes()).not.toContain('text-destructive');
+    expect(wrapper.text()).not.toContain('超過');
+  });
+
+  it('期限より後の日に完了した物は、ソフトとハードの両方に遅れた日数を中立で添える', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+    const wrapper = mountWithStatus('status-done', '2026-07-14T09:00:00');
+    expect(buttonByText(wrapper, '7月10日（4日超過）').classes()).not.toContain('text-destructive');
+    expect(buttonByText(wrapper, '7月11日（3日超過）').classes()).not.toContain('text-destructive');
+  });
+
+  it('期限の前に完了した物は、ソフトとハードの両方で日付だけを出す', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+    const wrapper = mountWithStatus('status-done', '2026-07-06T09:00:00');
+    buttonByText(wrapper, '7月10日');
+    buttonByText(wrapper, '7月11日');
+    expect(wrapper.text()).not.toContain('超過');
+  });
+
+  it('完了していない状態では、今までどおり過ぎた期限を赤く超過と出す', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T12:00:00'));
+    const wrapper = mountWithStatus('status-progress');
+    expect(buttonByText(wrapper, '4日超過').classes()).toContain('text-destructive');
+    expect(buttonByText(wrapper, '3日超過').classes()).toContain('text-destructive');
+  });
+});
