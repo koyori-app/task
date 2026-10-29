@@ -209,6 +209,10 @@ let tenant = auth.ensure_tenant_owner(&state, tenant_id).await?;
 |------|-----------|
 | 未認証・無効 PAT・失効・期限切れ | 401 |
 | 認証済みだがスコープ / テナント / プロジェクト不一致 | 403 |
+| 有効な Bearer（PAT・Device Token）でセッション専用の口を叩いた | 403 |
+
+Bearer への 401 は、トークンが無効（存在しない・失効・期限切れ・全失効）のときだけ。認証方式の不一致は 403。
+Desktop は Device Token への 401 を失効とみなしてログアウトするため。
 
 ## Desktop 認証（Device Token）
 
@@ -229,7 +233,7 @@ PAT は 1 テナント束縛で、上の「テナント非紐づけ PAT は採�
 | 権限 | スコープ・テナント束縛はセッションと同等。`require_session` の口（PAT 管理・テナント作成・更新・削除、プロジェクト削除、GitHub 連携の管理・2FA・認可コードの発行）は 403 |
 | 通知 | `/v1/users/me/notifications` 系は `require_scope`（Device Token は常に通過）+ 視界の絞り込み（`visible_project_ids_for`）。Device Token の視界はセッションと同じ（本人が入れるプロジェクトすべて、`project_id` を持たない古い通知も含む）で、PAT のテナント絞り込みは掛けない（[通知](#v1usersme通知)） |
 | 端末管理 | `/v1/users/me/devices` 系はセッションと Device Token だけ（`require_session_or_device_token`）。PAT は 403 |
-| `/v1/auth/me` | `GET` はセッションと Device Token（`require_session_or_device_token`）。PAT は 403。Desktop のアカウント表示に使う。`PATCH` はセッション専用のまま（Bearer は 401） |
+| `/v1/auth/me` | `GET` はセッションと Device Token（`require_session_or_device_token`）。PAT は 403。Desktop のアカウント表示に使う。`PATCH` はセッション専用のまま（有効な Bearer は 403） |
 | `last_used_at` | 認証成功時に更新する。Desktop は 30 秒ごとにポーリングするので、前回から 5 分以上空いたときだけ書く |
 
 ### フロー（Authorization Code + PKCE、loopback）
@@ -348,7 +352,7 @@ Device Token にだけ見せる（Device Token はテナントに束縛しない
 - PAT 作成: 他人の `tenant_id` → 403
 - Device Token: 発行 → 交換 → Bearer で通知一覧が 200。code の再利用・verifier 不一致・TTL 超過は 401。
   2FA 途中のセッション・PAT・Device Token での発行は 403。PAT 管理・テナント作成は 403。
-  `GET /v1/auth/me` は Device Token で 200、PAT で 403。`PATCH /v1/auth/me` は Device Token で 401。
+  `GET /v1/auth/me` は Device Token で 200、PAT で 403。`PATCH /v1/auth/me` は Device Token・PAT で 403、無効なトークンで 401。
   失効後・`sessions_revoked_at` 更新後・期限切れは 401。他人の端末の失効は 404。交換の口は上限を越えると 429
 
 ## 採用しない方針

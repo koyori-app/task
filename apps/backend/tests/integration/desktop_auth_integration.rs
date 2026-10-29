@@ -333,6 +333,7 @@ async fn bearer_cannot_issue_code() {
 
 /// Desktop のアカウント表示: Device Token で自分のプロフィールを読める（401 だと Desktop は
 /// トークン失効とみなしてログアウトする）。PAT は 403、更新はセッション専用のまま。
+/// 更新を有効な Bearer で叩いたときも、認証方式の不一致なので 401 ではなく 403。
 #[tokio::test]
 async fn device_token_can_read_own_profile_but_not_edit_it() {
     let mut app = TestApp::new().await;
@@ -358,14 +359,34 @@ async fn device_token_can_read_own_profile_but_not_edit_it() {
         StatusCode::FORBIDDEN
     );
 
-    let res = reqwest::Client::new()
-        .patch(format!("{}/v1/auth/me", app.base_url()))
-        .bearer_auth(&device)
-        .json(&serde_json::json!({ "bio": "desk" }))
-        .send()
-        .await
-        .expect("update me with device token");
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let patch_me = |token: &str| {
+        reqwest::Client::new()
+            .patch(format!("{}/v1/auth/me", app.base_url()))
+            .bearer_auth(token)
+            .json(&serde_json::json!({ "bio": "desk" }))
+            .send()
+    };
+    assert_eq!(
+        patch_me(&device).await.expect("device").status(),
+        StatusCode::FORBIDDEN,
+        "有効な Device Token は 403（401 だと Desktop がログアウトする）"
+    );
+    assert_eq!(
+        patch_me(&pat).await.expect("pat").status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        patch_me("kdt_not_a_real_token")
+            .await
+            .expect("invalid")
+            .status(),
+        StatusCode::UNAUTHORIZED,
+        "無効なトークンは 401 のまま"
+    );
+    let res = app
+        .patch_json_with_session("/v1/auth/me", serde_json::json!({ "bio": "web" }))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK, "セッションなら更新できる");
 
     app.cleanup_user(user.id).await;
 }
