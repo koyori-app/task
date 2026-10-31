@@ -32,7 +32,7 @@
     "@koyori-app/openapi-vue-query": "0.1.4",
     "@koyori-app/ui-vue": "catalog:",
     "@lezer/highlight": "catalog:",
-    "@lucide/vue": "1.48.0",
+    "@lucide/vue": "1.65.0",
     "@phosphor-icons/vue": "2.2.1",
     "@sentry/vue": "10.69.0",
     "@tanstack/vue-form": "1.33.5",
