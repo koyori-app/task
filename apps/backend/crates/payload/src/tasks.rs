@@ -102,10 +102,18 @@ pub struct AssigneeInput {
     pub role: String,
 }
 
+/// タスク説明文の上限（文字数。`validator` の `length` は chars で数え、`u64` を受ける）。
+/// SSR の Markdown 描画（同期）が長大な本文で塞がらないようにする。
+/// frontend のタスク詳細 `+data.ts` の `MAX_DESCRIPTION_LENGTH` を同じ値に手で合わせる。
+pub const MAX_DESCRIPTION_LEN: u64 = 100_000;
+
 #[derive(Validate, Deserialize, ToSchema, serde::Serialize)]
 pub struct CreateTaskRequest {
     #[validate(length(min = 1, max = 255))]
     pub title: String,
+    #[validate(length(max = MAX_DESCRIPTION_LEN))]
+    #[schema(max_length = 100_000)]
+    // utoipa はリテラルしか受けない。MAX_DESCRIPTION_LEN と同じ値
     pub description: Option<String>,
     #[schema(value_type = String, format = "uuid")]
     pub status_id: Uuid,
@@ -139,6 +147,9 @@ pub struct CreateTaskRequest {
 pub struct UpdateTaskRequest {
     #[validate(length(min = 1, max = 255))]
     pub title: Option<String>,
+    #[validate(length(max = MAX_DESCRIPTION_LEN))]
+    #[schema(max_length = 100_000)]
+    // utoipa はリテラルしか受けない。MAX_DESCRIPTION_LEN と同じ値
     pub description: Option<String>,
     #[serde(default)]
     pub clear_description: bool,
