@@ -14,7 +14,7 @@ use axum::{
 use axum_valid::Valid;
 use bytes::Bytes;
 use chrono::Utc;
-use futures::{SinkExt, channel::mpsc as fmpsc};
+use futures::{SinkExt, StreamExt, channel::mpsc as fmpsc};
 use sea_orm::prelude::Uuid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait,
@@ -350,7 +350,7 @@ pub async fn upload_file(
     let result: Result<drive_files::Model, AppError> = async {
         let mut display_name: Option<String> = None;
         let mut folder_id: Option<Uuid> = None;
-        // (file_id, 元のファイル名, MIME, サイズ, SHA-256, Markdown の本文)
+        // (file_id, 元のファイル名, 申告された Content-Type, 流した時点の MIME, サイズ, SHA-256, Markdown の本文)
         let mut uploaded = None;
 
         while let Some(field) = multipart
@@ -366,18 +366,13 @@ pub async fn upload_file(
                     let original_filename = field.file_name().map(str::to_string);
                     let content_type = field.content_type().map(str::to_string);
 
-                    // ソースコード拡張子はクライアント申告より上書き表を優先する。
-                    // ブラウザは .ts を video/mp2t のように申告することがあり、
-                    // それを保存すると本文編集エンドポイントが弾いてしまう。
                     // ファイル名が無ければ、ここまでに届いた 'name' で推定する
+                    // （確定は全フィールドを読んだ後。後ろの 'name' で変わりうる）
                     let mime_source = original_filename
                         .clone()
                         .or_else(|| display_name.clone())
                         .unwrap_or_default();
-                    let mime_type = source_mime_override(&mime_source)
-                        .map(str::to_string)
-                        .or(content_type)
-                        .unwrap_or_else(|| guess_mime(&mime_source));
+                    let mime_type = resolve_upload_mime(&mime_source, content_type.clone());
 
                     // クォータ事前チェック（既に上限に達していれば即拒否）
                     let used = tenant_used_bytes(&state.db, tenant_id).await?;
@@ -502,6 +497,7 @@ pub async fn upload_file(
                     uploaded = Some((
                         file_id,
                         original_filename,
+                        content_type,
                         mime_type,
                         actual_size,
                         content_hash,
@@ -531,14 +527,46 @@ pub async fn upload_file(
             }
         }
 
-        let Some((file_id, original_filename, mime_type, actual_size, content_hash, body)) =
-            uploaded
+        let Some((
+            file_id,
+            original_filename,
+            content_type,
+            streamed_mime,
+            actual_size,
+            content_hash,
+            body,
+        )) = uploaded
         else {
             return Err(AppError::BadRequest); // 'file' フィールドなし
         };
+        // 'file' の時点と同じ規則で、全フィールドを読んだ後の値から決め直す。
+        // ストレージ側の Content-Type は流した時点の推定のまま（配信は DB の mime_type を使う）
+        let mime_type = resolve_upload_mime(
+            original_filename
+                .as_deref()
+                .or(display_name.as_deref())
+                .unwrap_or_default(),
+            content_type,
+        );
         let name = display_name
             .or(original_filename)
             .ok_or(AppError::BadRequest)?;
+        // 流した時点では Markdown と分からず本文を残していなければ、ストレージから読み戻す
+        // （大きさは upload_max_bytes 以内と確かめてある）
+        let body = if is_markdown(&mime_type) && !is_markdown(&streamed_mime) {
+            let mut stream = state
+                .storage
+                .get_stream(&file_id.to_string())
+                .await
+                .map_err(storage_to_app_error)?;
+            let mut body = Vec::with_capacity(actual_size as usize);
+            while let Some(chunk) = stream.next().await {
+                body.extend_from_slice(&chunk.map_err(storage_to_app_error)?);
+            }
+            body
+        } else {
+            body
+        };
 
         // テナント行を FOR UPDATE でロックしてクォータ確定チェックと INSERT をアトミックに実行。
         // 並行アップロードが同時にクォータチェックを通過してしまう競合を防ぐ。
@@ -1197,6 +1225,16 @@ fn is_body_limit_error(err: &MultipartError) -> bool {
         source = e.source();
     }
     false
+}
+
+/// アップロードの MIME。ソースコード拡張子はクライアント申告より上書き表を優先する。
+/// ブラウザは .ts を video/mp2t のように申告することがあり、
+/// それを保存すると本文編集エンドポイントが弾いてしまう。
+fn resolve_upload_mime(source: &str, content_type: Option<String>) -> String {
+    source_mime_override(source)
+        .map(str::to_string)
+        .or(content_type)
+        .unwrap_or_else(|| guess_mime(source))
 }
 
 fn storage_to_app_error(err: StorageError) -> AppError {

@@ -4,7 +4,7 @@ use std::env;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
 use object_store::aws::AmazonS3Builder;
 use object_store::{
@@ -148,18 +148,31 @@ impl StorageBackend for S3StorageBackend {
                     StorageError::Other(format!("S3 CreateMultipartUpload failed: {e}"))
                 })?;
 
-            let mut pending: Vec<u8> = Vec::with_capacity(MULTIPART_PART_SIZE);
+            // chunk は pending の空き分だけ足し、満杯（5 MiB）になったら送る。
+            // pending は MULTIPART_PART_SIZE を越えない
+            let mut pending = BytesMut::with_capacity(MULTIPART_PART_SIZE);
             let mut uploaded: u64 = 0;
 
             let result: Result<(), StorageError> = async {
                 while let Some(chunk) = stream.next().await {
-                    let chunk = chunk?;
+                    let mut chunk = chunk?;
                     uploaded += chunk.len() as u64;
-                    pending.extend_from_slice(&chunk);
-
-                    while pending.len() >= MULTIPART_PART_SIZE {
-                        let part =
-                            Bytes::from(pending.drain(..MULTIPART_PART_SIZE).collect::<Vec<_>>());
+                    while !chunk.is_empty() {
+                        let part = if pending.is_empty() && chunk.len() >= MULTIPART_PART_SIZE {
+                            // part を丸ごと取れるなら複製せずスライスで送る
+                            chunk.split_to(MULTIPART_PART_SIZE)
+                        } else {
+                            let room = MULTIPART_PART_SIZE - pending.len();
+                            pending.extend_from_slice(&chunk.split_to(room.min(chunk.len())));
+                            if pending.len() < MULTIPART_PART_SIZE {
+                                break; // chunk を使い切った
+                            }
+                            std::mem::replace(
+                                &mut pending,
+                                BytesMut::with_capacity(MULTIPART_PART_SIZE),
+                            )
+                            .freeze()
+                        };
                         upload.put_part(PutPayload::from(part)).await.map_err(|e| {
                             StorageError::Other(format!("S3 UploadPart failed: {e}"))
                         })?;
@@ -167,7 +180,7 @@ impl StorageBackend for S3StorageBackend {
                 }
                 if !pending.is_empty() {
                     upload
-                        .put_part(PutPayload::from(Bytes::from(std::mem::take(&mut pending))))
+                        .put_part(PutPayload::from(std::mem::take(&mut pending).freeze()))
                         .await
                         .map_err(|e| StorageError::Other(format!("S3 UploadPart failed: {e}")))?;
                 }
@@ -179,6 +192,10 @@ impl StorageBackend for S3StorageBackend {
                         actual: uploaded,
                     });
                 }
+                // complete の失敗も下の abort に回す（未完了の multipart を残さない）
+                upload.complete().await.map_err(|e| {
+                    StorageError::Other(format!("S3 CompleteMultipartUpload failed: {e}"))
+                })?;
                 Ok(())
             }
             .await;
@@ -187,10 +204,6 @@ impl StorageBackend for S3StorageBackend {
                 let _ = upload.abort().await;
                 return result;
             }
-
-            upload.complete().await.map_err(|e| {
-                StorageError::Other(format!("S3 CompleteMultipartUpload failed: {e}"))
-            })?;
         }
 
         Ok(())
@@ -290,12 +303,15 @@ mod tests {
     };
     use std::sync::Mutex;
 
-    /// InMemory に委譲しつつ、単一 PUT の回数と multipart の part の大きさを記録する。
+    /// InMemory に委譲しつつ、単一 PUT の回数と multipart の part の大きさ・abort の回数を記録する。
+    /// `fail_complete` なら multipart の complete を失敗させる。
     #[derive(Debug, Default)]
     struct Recording {
         inner: object_store::memory::InMemory,
         puts: Mutex<usize>,
         parts: Arc<Mutex<Vec<usize>>>,
+        aborts: Arc<Mutex<usize>>,
+        fail_complete: bool,
     }
 
     impl std::fmt::Display for Recording {
@@ -308,6 +324,8 @@ mod tests {
     struct RecordingUpload {
         inner: Box<dyn MultipartUpload>,
         parts: Arc<Mutex<Vec<usize>>>,
+        aborts: Arc<Mutex<usize>>,
+        fail_complete: bool,
     }
 
     #[async_trait]
@@ -317,9 +335,16 @@ mod tests {
             self.inner.put_part(data)
         }
         async fn complete(&mut self) -> object_store::Result<PutResult> {
+            if self.fail_complete {
+                return Err(object_store::Error::Generic {
+                    store: "Recording",
+                    source: "complete failed".into(),
+                });
+            }
             self.inner.complete().await
         }
         async fn abort(&mut self) -> object_store::Result<()> {
+            *self.aborts.lock().unwrap() += 1;
             self.inner.abort().await
         }
     }
@@ -344,6 +369,8 @@ mod tests {
             Ok(Box::new(RecordingUpload {
                 inner,
                 parts: self.parts.clone(),
+                aborts: self.aborts.clone(),
+                fail_complete: self.fail_complete,
             }))
         }
         async fn get_opts(
@@ -378,8 +405,11 @@ mod tests {
 
     const MIB: usize = 1024 * 1024;
 
-    fn recording_backend() -> (S3StorageBackend, Arc<Recording>) {
-        let store = Arc::new(Recording::default());
+    fn recording_backend(fail_complete: bool) -> (S3StorageBackend, Arc<Recording>) {
+        let store = Arc::new(Recording {
+            fail_complete,
+            ..Default::default()
+        });
         let backend = S3StorageBackend {
             store: store.clone(),
             bucket: "test".into(),
@@ -409,7 +439,7 @@ mod tests {
     /// 長さ未知の本文は全量を貯めず、5 MiB ごとの part で流す。
     #[test]
     fn upload_unknown_length_streams_in_parts() {
-        let (backend, store) = recording_backend();
+        let (backend, store) = recording_backend(false);
         futures::executor::block_on(backend.upload("k", mib_stream(6, false), None, "a/b"))
             .expect("upload");
 
@@ -422,7 +452,7 @@ mod tests {
     /// 途中で Err が来たら multipart を abort し、オブジェクトを残さない。
     #[test]
     fn upload_unknown_length_error_saves_nothing() {
-        let (backend, store) = recording_backend();
+        let (backend, store) = recording_backend(false);
         let result =
             futures::executor::block_on(backend.upload("k", mib_stream(6, true), None, "a/b"));
 
@@ -432,6 +462,7 @@ mod tests {
             vec![5 * MIB],
             "part は送り始めていた"
         );
+        assert_eq!(*store.aborts.lock().unwrap(), 1);
         assert!(matches!(
             read_back(&backend, "k"),
             Err(StorageError::NotFound)
@@ -441,7 +472,7 @@ mod tests {
     /// 5 MiB 未満と分かっている本文は単一 PUT。
     #[test]
     fn upload_small_known_length_uses_single_put() {
-        let (backend, store) = recording_backend();
+        let (backend, store) = recording_backend(false);
         futures::executor::block_on(backend.upload(
             "k",
             mib_stream(1, false),
@@ -453,5 +484,37 @@ mod tests {
         assert_eq!(*store.puts.lock().unwrap(), 1);
         assert!(store.parts.lock().unwrap().is_empty());
         assert_eq!(read_back(&backend, "k").expect("read back").len(), MIB);
+    }
+
+    /// 不揃いな chunk でも part は 5 MiB ちょうど（最後だけ端数）に詰め、内容と順序を保つ。
+    /// 5 MiB 以上の chunk は pending を通らずにスライスで送る経路も通す。
+    #[test]
+    fn upload_packs_uneven_chunks_into_full_parts() {
+        let (backend, store) = recording_backend(false);
+        let chunks: Vec<Bytes> = [3 * MIB, 7 * MIB, 1, 11 * MIB]
+            .iter()
+            .enumerate()
+            .map(|(i, &n)| Bytes::from(vec![i as u8 + 1; n]))
+            .collect();
+        let expected = chunks.concat();
+        let stream: ByteStream = Box::pin(futures::stream::iter(chunks.into_iter().map(Ok)));
+        futures::executor::block_on(backend.upload("k", stream, None, "a/b")).expect("upload");
+
+        assert_eq!(
+            *store.parts.lock().unwrap(),
+            vec![5 * MIB, 5 * MIB, 5 * MIB, 5 * MIB, MIB + 1]
+        );
+        assert_eq!(read_back(&backend, "k").expect("read back"), expected);
+    }
+
+    /// complete が失敗しても abort し、未完了の multipart を残さない。
+    #[test]
+    fn upload_aborts_when_complete_fails() {
+        let (backend, store) = recording_backend(true);
+        let result =
+            futures::executor::block_on(backend.upload("k", mib_stream(6, false), None, "a/b"));
+
+        assert!(result.is_err());
+        assert_eq!(*store.aborts.lock().unwrap(), 1);
     }
 }

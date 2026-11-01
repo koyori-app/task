@@ -1556,7 +1556,6 @@ pub async fn upload_drive_file(
     mime: &str,
     body: &[u8],
 ) -> serde_json::Value {
-    // ハンドラは 'file' より前に 'folder_id' を読む前提。reqwest は挿入順を保持する。
     let mut form = reqwest::multipart::Form::new();
     if let Some(folder_id) = folder_id {
         form = form.text("folder_id", folder_id.to_string());
