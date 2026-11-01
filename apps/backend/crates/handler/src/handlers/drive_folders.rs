@@ -1,13 +1,14 @@
 //! Drive folder CRUD, sharing, and public link handlers.
 
+use super::client_key;
 use crate::AppState;
-use crate::error::AppError;
+use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::openapi::{DriveFolderErrors, PublicShareErrors};
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
 };
 use axum_valid::Valid;
 use chrono::Utc;
@@ -29,7 +30,7 @@ use sea_orm::{
 };
 use service::drive::{
     can_access_project, is_project_root_folder, is_tenant_owner, lock_tenant_drive,
-    sync_subtree_project_id,
+    sync_subtree_project_id, try_acquire_public_share_request,
 };
 
 const SHARE_TOKEN_LEN: usize = 32;
@@ -582,13 +583,21 @@ pub async fn delete_share(
     params(("token" = String, Path, description = "共有トークン")),
     responses(
         (status = 200, description = "フォルダメタデータ", body = PublicFolderResponse),
+        (
+            status = 429,
+            description = "同じ接続元から同じ共有トークンへのリクエストが多すぎます（60 秒 120 回）",
+            body = ServerError,
+            headers(("Retry-After" = u64, description = "再試行できるまでの秒数"))
+        ),
         PublicShareErrors,
     )
 )]
 pub async fn get_public_share_folder(
     State(state): State<AppState>,
     Path(token): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Json<PublicFolderResponse>, AppError> {
+    try_acquire_public_share_request(&state.redis_client, &client_key(&headers), &token).await?;
     let share = load_active_share_by_token(&state, &token).await?;
     let folder = drive_folders::Entity::find_by_id(share.folder_id)
         .one(&state.db)
@@ -611,13 +620,21 @@ pub async fn get_public_share_folder(
     params(("token" = String, Path, description = "共有トークン")),
     responses(
         (status = 200, description = "ファイル一覧", body = [DriveFileResponse]),
+        (
+            status = 429,
+            description = "同じ接続元から同じ共有トークンへのリクエストが多すぎます（60 秒 120 回）",
+            body = ServerError,
+            headers(("Retry-After" = u64, description = "再試行できるまでの秒数"))
+        ),
         PublicShareErrors,
     )
 )]
 pub async fn list_public_share_files(
     State(state): State<AppState>,
     Path(token): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<DriveFileResponse>>, AppError> {
+    try_acquire_public_share_request(&state.redis_client, &client_key(&headers), &token).await?;
     let share = load_active_share_by_token(&state, &token).await?;
     let files = drive_files::Entity::find()
         .filter(drive_files::Column::FolderId.eq(share.folder_id))

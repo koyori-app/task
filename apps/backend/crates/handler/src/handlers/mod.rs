@@ -36,3 +36,13 @@ pub mod tenant_members;
 pub mod tenants;
 pub mod time_tracking;
 pub mod webhooks;
+
+/// レート制限の接続元キー。プロキシが付ける値を使う（監査ログと同じ取り方）。
+pub(crate) fn client_key(headers: &axum::http::HeaderMap) -> String {
+    headers
+        .get("x-forwarded-for")
+        .or_else(|| headers.get("x-real-ip"))
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(',').next().unwrap_or(s).trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}

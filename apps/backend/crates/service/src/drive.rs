@@ -3,8 +3,10 @@
 use std::env;
 use std::path::Path;
 
+use common::cache::redis::RedisConnection;
 use sea_orm::prelude::Uuid;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, QueryFilter, QuerySelect};
+use sha2::{Digest, Sha256};
 
 use crate::error::AppError;
 use entity::{drive_files, tenants};
@@ -358,6 +360,47 @@ pub async fn sync_subtree_project_id<C: ConnectionTrait>(
     }
 
     Ok(())
+}
+
+const KEY_PUBLIC_SHARE_RL: &str = "drive:share_rl:";
+/// 公開共有の 1 組（接続元 × トークン）あたりの上限。フォルダを開いて一覧と数十ファイルを読む利用が通る数
+const PUBLIC_SHARE_RATE_LIMIT: i64 = 120;
+const PUBLIC_SHARE_RATE_WINDOW_SECS: i64 = 60;
+
+/// 認証不要の公開共有 API の固定窓レート制限。超過は `TooManyRequestsRetryAfter(窓の残り秒)`。
+/// キーは平文トークンを避け、SHA-256 の先頭 16 hex を使う。
+pub async fn try_acquire_public_share_request(
+    redis: &RedisConnection,
+    client_key: &str,
+    token: &str,
+) -> Result<(), AppError> {
+    let mut conn = redis
+        .conn
+        .acquire()
+        .await
+        .map_err(|e| anyhow::anyhow!("redis acquire: {e}"))?;
+    let fingerprint = hex::encode(Sha256::digest(token.as_bytes()));
+    let key = format!("{KEY_PUBLIC_SHARE_RL}{client_key}:{}", &fingerprint[..16]);
+    let (count, _, ttl): (i64, i64, i64) = redis::pipe()
+        .atomic()
+        .cmd("INCR")
+        .arg(&key)
+        .cmd("EXPIRE")
+        .arg(&key)
+        .arg(PUBLIC_SHARE_RATE_WINDOW_SECS)
+        .arg("NX")
+        .cmd("TTL")
+        .arg(&key)
+        .query_async(&mut conn)
+        .await
+        .map_err(|e| anyhow::anyhow!("redis drive public share rate limit: {e}"))?;
+    if count <= PUBLIC_SHARE_RATE_LIMIT {
+        return Ok(());
+    }
+    // TTL は四捨五入で 0 になりうるので、すぐ再試行させないよう 1 秒以上にする
+    Err(AppError::TooManyRequestsRetryAfter(
+        ttl.clamp(1, PUBLIC_SHARE_RATE_WINDOW_SECS) as u64,
+    ))
 }
 
 #[cfg(test)]
