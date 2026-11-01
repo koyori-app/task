@@ -474,7 +474,7 @@ pub async fn upload_avatar(
         .upload(
             &key,
             Box::pin(futures::stream::iter([Ok::<_, StorageError>(bytes)])),
-            len,
+            Some(len),
             mime,
         )
         .await

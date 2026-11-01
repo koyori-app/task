@@ -27,11 +27,14 @@ pub enum StorageError {
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
     /// ストリーミングアップロード。大ファイルをメモリに全展開しない。
+    ///
+    /// `content_length` は本文の長さ。`None` は未知（multipart の本文など）で、
+    /// `Some` のときは実際に書いた長さと食い違えば `SizeMismatch` を返す。
     async fn upload(
         &self,
         key: &str,
         stream: ByteStream,
-        content_length: u64,
+        content_length: Option<u64>,
         mime: &str,
     ) -> Result<(), StorageError>;
 

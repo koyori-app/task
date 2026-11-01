@@ -42,7 +42,7 @@ impl StorageBackend for LocalStorageBackend {
         &self,
         key: &str,
         mut stream: ByteStream,
-        content_length: u64,
+        content_length: Option<u64>,
         _mime: &str,
     ) -> Result<(), StorageError> {
         let path = self.resolve_path(key)?;
@@ -61,10 +61,12 @@ impl StorageBackend for LocalStorageBackend {
         }
         writer.flush().await?;
 
-        if content_length > 0 && written != content_length {
+        if let Some(expected) = content_length
+            && written != expected
+        {
             let _ = tokio::fs::remove_file(&path).await;
             return Err(StorageError::SizeMismatch {
-                expected: content_length,
+                expected,
                 actual: written,
             });
         }

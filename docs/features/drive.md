@@ -390,12 +390,13 @@ WARN tenant drive quota exceeds system_max — update tenant quota or raise DRIV
 ```rust
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
-    /// ストリームを受け取る。全量バッファの有無はバックエンド実装に依存する。
+    /// ストリームを受け取る。`content_length` は `None` = 長さ未知、
+    /// `Some` なら書いた長さと食い違うと `SizeMismatch`。
     async fn upload(
         &self,
         key: &str,
         stream: BoxStream<'static, Result<Bytes, StorageError>>,
-        content_length: u64,
+        content_length: Option<u64>,
         mime: &str,
     ) -> Result<(), StorageError>;
 
@@ -414,7 +415,7 @@ pub trait StorageBackend: Send + Sync {
 > 同じバックエンドにユーザーのアバター画像も置く（キーは `avatar-{uuid}.{ext}`、`drive_files` の行は作らない）。
 > 規則は [アカウント設定](./account-settings.md) の `POST /v1/auth/me/avatar` を正とする。
 
-> **ストリーミング設計の理由**: 100MB ファイルを複数同時に全量バッファすると GByte 単位のメモリを消費しうる。`BoxStream` でチャンクを受け取り、ローカル実装は `BufWriter` へ順に書き込む。S3 実装は既知の長さが 5MiB 以上なら multipart upload を使うが、通常のアップロード API は長さ不明として `0` を渡すため全量バッファになる（§12）。
+> **ストリーミング設計の理由**: 100MB ファイルを複数同時に全量バッファすると GByte 単位のメモリを消費しうる。`BoxStream` でチャンクを受け取り、ローカル実装は `BufWriter` へ順に書き込む。S3 実装は長さが未知（`None`）か 5MiB 以上なら multipart upload を使い、5MiB ごとに part を送るので 5MiB を超えて貯めない（途中で失敗したら abort）。単一 PUT（全量バッファ）は 5MiB 未満と分かっている本文だけ。アップロード API は長さ未知、本文更新 API は既知の長さを渡す。
 
 ### 6.2 S3 バックエンド
 
@@ -622,16 +623,17 @@ pub fn implies(self, other: Scope) -> bool {
 | `name` | - | 表示名（省略時は元ファイル名） |
 | `folder_id` | - | アップロード先フォルダ UUID |
 
-現在のストリーミング実装では、`name` と `folder_id` は `file` パートより前に送る必要がある。
-`file` を処理した時点でレスポンスを返すため、それ以降のパートは解釈されない。この順序制約は
-OpenAPI だけでは表現できないため、クライアント実装でも明示的に順序を固定する。
+フィールドの順序は問わない。`file` はストリームのままストレージへ流し、DB への登録は
+全パートを読み終えてから行う（登録に失敗したらストレージから消す）。`folder_id` が `file` より
+前に届いた場合だけ、本文を流す前にフォルダの存在と書き込み権限を確かめて早く落とす。
 
 レスポンス: 作成された `DriveFile` オブジェクト (201 Created)
 
 制限:
-- 最大ファイルサイズ: 環境変数 `UPLOAD_MAX_SIZE_MB` で設定（デフォルト 100MB）
+- 最大ファイルサイズ: 環境変数 `UPLOAD_MAX_SIZE_MB` で設定（デフォルト 100MB）。ファイル本体に対する上限で、
+  ちょうどのサイズは受理する。リクエスト本文全体には multipart の枠（境界・ヘッダー）の分として 64KiB を足した上限を掛ける
 - 許可 MIME タイプ: 全種類
-- 空ファイルまたは `file` パートなし: `400 Bad Request`
+- 空ファイル、`file` パートなし、`file` パートが 2 つ以上: `400 Bad Request`
 
 #### PATCH `/v1/tenants/{tenant_id}/drive/files/{id}`
 
@@ -930,7 +932,7 @@ Drive ファイル本体は削除しない。
 STORAGE_BACKEND=local                 # "local" または "s3"
 
 # アップロード・クォータ設定（共通）
-UPLOAD_MAX_SIZE_MB=100                # 1ファイルあたりの上限 MB（デフォルト 100）
+UPLOAD_MAX_SIZE_MB=100                # 1ファイルあたりの上限 MB（ファイル本体。multipart の枠は含めない。デフォルト 100）
 DRIVE_SYSTEM_MAX_QUOTA_MB=51200       # テナントが設定できる容量の上限 MB（デフォルト 50GB）。0 = 天井なし
 DRIVE_DEFAULT_QUOTA_MB=10240          # テナントデフォルト容量 MB（デフォルト 10GB）。0 = 無制限
 
@@ -955,12 +957,10 @@ LOCAL_UPLOAD_DIR=./uploads
 
 | 優先度 | 項目 | 現状と影響 |
 |--------|------|------------|
-| 高 | S3 アップロードの全量バッファ | multipart からストレージへ `content_length = 0` を渡すため、S3 実装が常に単一 PUT 分岐へ入り、ファイル全体をメモリに保持する。§6.1 のストリーミング要件を満たしていない |
 | 高 | ストレージ削除の非同期整合性 | 個別削除は DB 削除後のストレージエラーを無視し、プロジェクト／テナントの CASCADE 削除ではストレージ削除自体を行わない。孤児オブジェクトを回収する仕組みが必要 |
 | 中 | ユーザー指定共有の一覧導線 | プロジェクトファイルの本文取得ではテナント外の共有受信者も許可できるが、ファイル・フォルダ一覧とメタデータ API が先にテナント所属を要求するため、共有受信者が対象を発見できない |
 | 中 | フォルダ一覧のプロジェクト別絞り込み | `project_id` を指定すればそのプロジェクトへのアクセス権を確認して絞り込める。省略時はテナント所属を確認した後、プロジェクト権限による絞り込みなしで全フォルダのメタデータを返す。ファイル一覧・本文の認可とは異なる |
 | 中 | 公開共有一覧の再帰性 | `/share/{token}/files` は共有フォルダ直下のファイルだけを返し、子フォルダとそのファイルを列挙しない。本文取得時のトークン判定だけは祖先方向へ継承する |
-| 中 | multipart の実効上限 | `UPLOAD_MAX_SIZE_MB` と同じ値をリクエスト body 全体へ適用するため、multipart のヘッダー・境界分だけ、受理できるファイル本体は設定値より小さい |
 | 中 | ストレージ種別切り替え | DB に `storage_type` を保存するが、取得・削除は起動中の単一バックエンドだけを使う。`STORAGE_BACKEND` を変更すると、変更前のファイルを取得・削除できない |
 | 中 | 共有トークンのレート制限 | 共有トークンは十分長いが、公開共有 API 専用のレートリミットは未実装 |
 | 低 | 未使用の S3 公開 URL 設定 | 実装は `S3_PUBLIC_BASE_URL` を読み込むが、全ファイルをプロキシ配信するため値は使われない |
@@ -976,7 +976,8 @@ LOCAL_UPLOAD_DIR=./uploads
 | `tests/drive_folder_boundary_integration.rs` | 作成・移動・削除のプロジェクト境界、配下同期、ルート保護、ロック待ち後の再認可 |
 | `tests/drive_project_id_backfill_integration.rs` | 深い階層・移動済みルート、冪等性、異なるプロジェクトや循環の検出 |
 | `tests/drive_file_content_integration.rs` | 本文更新・配信、空本文、MIME、クォータ、並行更新、認可・共有トークン、配信ヘッダー、ETag・`If-Match` / `If-None-Match` |
-| `tests/drive_upload_acl_integration.rs` / `tests/drive_usage_integration.rs` | プロジェクトへのアップロード認可、複数ファイルの使用量集計 |
+| `tests/drive_upload_acl_integration.rs` / `tests/drive_usage_integration.rs` | プロジェクトへのアップロード認可、フィールドの順序と `file` の重複、複数ファイルの使用量集計 |
+| `tests/drive_upload_body_limit_integration.rs` / `crates/service/src/storage/s3.rs` | アップロード上限ちょうど・超過の判定、S3 の長さ未知のアップロードが multipart になること |
 | `crates/handler/src/routes/mod.rs` | OpenAPI 全体の prefix 重複検出 |
 
 ---
@@ -988,11 +989,10 @@ LOCAL_UPLOAD_DIR=./uploads
 
 | 順序 | 内容 | 完了条件 |
 |------|------|----------|
-| 1 | S3 ストリーミング修正 | 設定上限近くのファイルでも全量バッファせず multipart upload になる |
-| 2 | ストレージ削除の回収経路追加 | 個別・プロジェクト・テナント削除と失敗時再試行をテストできる |
-| 3 | フォルダ・共有受信者向け一覧 API の整理 | プロジェクト権限と共有範囲に沿って、子フォルダを含む一覧を提供できる |
-| 4 | ストレージバックエンド移行方針の決定 | `storage_type` ごとに取得するか、切り替え前の移行を必須化する |
-| 5 | フロントエンド実装 | ファイルブラウザ、アップロード、本文編集、クォータ、共有 UI を提供する |
+| 1 | ストレージ削除の回収経路追加 | 個別・プロジェクト・テナント削除と失敗時再試行をテストできる |
+| 2 | フォルダ・共有受信者向け一覧 API の整理 | プロジェクト権限と共有範囲に沿って、子フォルダを含む一覧を提供できる |
+| 3 | ストレージバックエンド移行方針の決定 | `storage_type` ごとに取得するか、切り替え前の移行を必須化する |
+| 4 | フロントエンド実装 | ファイルブラウザ、アップロード、本文編集、クォータ、共有 UI を提供する |
 
 ---
 
@@ -1020,6 +1020,7 @@ LOCAL_UPLOAD_DIR=./uploads
 | 公開リンクトークン | 32 文字 URL-safe ランダム。有効期限設定可（NULL = 無期限）| 2026-05-26 |
 | PAT スコープ | `read:drive`（閲覧）・`write:drive`（書き込み）を新設。`write:drive` は `read:drive` を包含。`admin:tenant` は全 Drive 操作を包含（2026-10-04 に `admin:tenant` を廃止し、`api` が包含する形へ。クォータ設定は `write:tenant`） | 2026-05-26 |
 | ストリーミング | `StorageBackend` trait は `BoxStream` を使用する。S3 の全量バッファは既知の修正対象 | 2026-09-03 |
+| 長さ未知のアップロードとフィールド順序 | `StorageBackend::upload` の長さは `Option<u64>`（`None` = 未知）。S3 は未知か 5MiB 以上なら multipart で流し、全量を貯めない。アップロード API は全パートを読み終えてから DB に登録し、`name` / `folder_id` の順序を問わない（`file` が 2 つなら 400）。リクエスト本文の上限は `UPLOAD_MAX_SIZE_MB` + 64KiB（multipart の枠）とし、ファイル本体の上限はハンドラーが実測で守る（TASK-163） | 2026-11-01 |
 | URL 管理 | `drive_files.url` カラム廃止。全ファイルを `/v1/drive/files/{id}/content` で統一配信 | 2026-05-26 |
 | 不変条件保護 | `project_id IS NULL OR folder_id IS NOT NULL` を DB CHECK 制約 + アプリバリデーション両方で強制 | 2026-05-26 |
 | editor 権限 | `editor` を指定した場合は `422 Unprocessable Entity`。実装は将来対応 | 2026-09-03 |
