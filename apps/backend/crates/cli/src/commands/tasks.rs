@@ -1223,7 +1223,7 @@ mod tests {
             mentions: [(
                 alice,
                 MentionedUser {
-                    status: MentionStatus::Member,
+                    status: MentionStatus::Member.into(),
                     name: Some("alice".into()),
                     avatar_url: None,
                 },

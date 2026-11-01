@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
+use crate::or_unknown::OrUnknown;
 use entity::sprints::{self, SprintStatus};
 
 #[derive(Validate, Deserialize, ToSchema)]
@@ -78,7 +79,8 @@ pub struct SprintResponse {
     pub start_date: NaiveDate,
     #[schema(value_type = String, example = "2026-06-14")]
     pub end_date: NaiveDate,
-    pub status: SprintStatus,
+    #[schema(inline)]
+    pub status: OrUnknown<SprintStatus>,
     #[schema(value_type = String, format = "uuid")]
     pub created_by: Uuid,
     #[schema(value_type = String, format = "date-time")]
@@ -96,7 +98,7 @@ impl From<sprints::Model> for SprintResponse {
             goal: model.goal,
             start_date: model.start_date,
             end_date: model.end_date,
-            status: model.status,
+            status: model.status.into(),
             created_by: model.created_by,
             created_at: model.created_at.with_timezone(&Utc),
             updated_at: model.updated_at.with_timezone(&Utc),

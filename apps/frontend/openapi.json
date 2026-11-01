@@ -24646,7 +24646,12 @@
         "required": ["id", "name", "field_type", "is_required", "position"],
         "properties": {
           "field_type": {
-            "$ref": "#/components/schemas/CustomFieldType"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CustomFieldType"
+              }
+            ],
+            "x-or-unknown": true
           },
           "id": {
             "type": "string",
@@ -25147,7 +25152,12 @@
           "available_actions": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/FindingState"
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/FindingState"
+                }
+              ],
+              "x-or-unknown": true
             },
             "description": "要求者がいま遷移できる先の状態（`PATCH … {state}` にそのまま渡せる値）。\n`write:review` が無い場合は空。\n\n遷移規則・役割規則（仕様 §3）は backend だけが持つ。クライアントはこれを見て\n操作を出し、規則を写さない。"
           },
@@ -25192,10 +25202,20 @@
             "format": "int32"
           },
           "severity": {
-            "$ref": "#/components/schemas/FindingSeverity"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FindingSeverity"
+              }
+            ],
+            "x-or-unknown": true
           },
           "state": {
-            "$ref": "#/components/schemas/FindingState"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FindingState"
+              }
+            ],
+            "x-or-unknown": true
           },
           "title": {
             "type": "string"
@@ -25239,10 +25259,15 @@
                 "type": "null"
               },
               {
-                "$ref": "#/components/schemas/FindingState",
-                "description": "起票（登録）は `null`"
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/FindingState"
+                  }
+                ],
+                "x-or-unknown": true
               }
-            ]
+            ],
+            "description": "起票（登録）は `null`"
           },
           "id": {
             "type": "string",
@@ -25252,7 +25277,12 @@
             "type": ["string", "null"]
           },
           "to_state": {
-            "$ref": "#/components/schemas/FindingState"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FindingState"
+              }
+            ],
+            "x-or-unknown": true
           }
         }
       },
@@ -25579,7 +25609,12 @@
             "description": "`@今の名` の「今の名」。`member` と、そのテナントに属している・属しておった `outside` で返す。\n別のテナントの利用者・行の無い者は `null`。"
           },
           "status": {
-            "$ref": "#/components/schemas/MentionStatus"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MentionStatus"
+              }
+            ],
+            "x-or-unknown": true
           }
         }
       },
@@ -25686,7 +25721,12 @@
             "format": "date"
           },
           "priority": {
-            "$ref": "#/components/schemas/TaskPriority"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TaskPriority"
+              }
+            ],
+            "x-or-unknown": true
           },
           "project": {
             "$ref": "#/components/schemas/MyTaskProjectInfo"
@@ -26112,7 +26152,15 @@
             "type": "string"
           },
           "scopes": {
-            "$ref": "#/components/schemas/ScopeList"
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Scope"
+                }
+              ],
+              "x-or-unknown": true
+            }
           },
           "tenant_id": {
             "type": "string",
@@ -26238,7 +26286,12 @@
             "format": "uuid"
           },
           "role": {
-            "$ref": "#/components/schemas/ProjectRole"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProjectRole"
+              }
+            ],
+            "x-or-unknown": true
           },
           "user": {
             "$ref": "#/components/schemas/UserSummary",
@@ -26590,7 +26643,16 @@
             "description": "重大度 × 状態の件数"
           },
           "gate": {
-            "$ref": "#/components/schemas/ReviewGate",
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ReviewGate"
+                  }
+                ],
+                "x-or-unknown": true
+              }
+            ],
             "description": "表示用の判定（上から順に最初に当たったもの）。クライアントは再計算しない\n\n権威のゲートは引き続き CLI の `--head` 照合と branch protection。"
           },
           "latest_head_sha": {
@@ -26824,7 +26886,12 @@
             "format": "date"
           },
           "priority": {
-            "$ref": "#/components/schemas/TaskPriority"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TaskPriority"
+              }
+            ],
+            "x-or-unknown": true
           },
           "progress_pct": {
             "type": "integer",
@@ -26956,10 +27023,20 @@
             "minimum": 0
           },
           "severity": {
-            "$ref": "#/components/schemas/FindingSeverity"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FindingSeverity"
+              }
+            ],
+            "x-or-unknown": true
           },
           "state": {
-            "$ref": "#/components/schemas/FindingState"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FindingState"
+              }
+            ],
+            "x-or-unknown": true
           }
         }
       },
@@ -27068,7 +27145,12 @@
             "example": "2026-06-01"
           },
           "status": {
-            "$ref": "#/components/schemas/SprintStatus"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SprintStatus"
+              }
+            ],
+            "x-or-unknown": true
           },
           "updated_at": {
             "type": "string",
@@ -27787,7 +27869,12 @@
             "description": "開始予定日（`YYYY-MM-DD`）。計画用の値で、締切との前後関係は検証しない"
           },
           "priority": {
-            "$ref": "#/components/schemas/TaskPriority"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TaskPriority"
+              }
+            ],
+            "x-or-unknown": true
           },
           "progress_pct": {
             "type": "integer",

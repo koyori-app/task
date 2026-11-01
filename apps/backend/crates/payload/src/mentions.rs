@@ -14,6 +14,8 @@ use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::or_unknown::OrUnknown;
+
 /// 印の長さ（`<@` + ハイフン付き UUID 36 字 + `>`）。
 const MARKER_LEN: usize = 2 + 36 + 1;
 
@@ -87,7 +89,8 @@ pub enum MentionStatus {
 /// 本文のメンションを描くための、id から引ける利用者の表示情報。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct MentionedUser {
-    pub status: MentionStatus,
+    #[schema(inline)]
+    pub status: OrUnknown<MentionStatus>,
     /// `@今の名` の「今の名」。`member` と、そのテナントに属している・属しておった `outside` で返す。
     /// 別のテナントの利用者・行の無い者は `null`。
     #[schema(nullable)]
@@ -101,13 +104,15 @@ pub struct MentionedUser {
 impl MentionedUser {
     /// 本文が利用者の画面の外へ出る時の、`@` から始まる表示。
     pub fn plain_label(&self) -> String {
-        match (self.status, &self.name) {
-            // 名が引ける者は、外れた者・退会した者も名で出す（灰色にするのは画面の札の側）
-            (MentionStatus::Member | MentionStatus::Outside, Some(name)) => format!("@{name}"),
-            (MentionStatus::Member | MentionStatus::Outside, None) => {
+        match (self.status.known(), &self.name) {
+            (Some(MentionStatus::Gone), _) => "@（退会した利用者）".to_string(),
+            // 名が引ける者は、外れた者・退会した者も名で出す（灰色にするのは画面の札の側）。
+            // 新しいサーバーの知らない状態も、名を返してきたなら名で出す
+            (_, Some(name)) => format!("@{name}"),
+            (Some(MentionStatus::Member | MentionStatus::Outside), None) => {
                 "@（このプロジェクトの外の利用者）".to_string()
             }
-            (MentionStatus::Gone, _) => "@（退会した利用者）".to_string(),
+            (None, None) => UNKNOWN_LABEL.to_string(),
         }
     }
 }
@@ -172,7 +177,7 @@ mod tests {
         let map: MentionMap = [(
             id(A),
             MentionedUser {
-                status: MentionStatus::Member,
+                status: MentionStatus::Member.into(),
                 name: Some("alice".into()),
                 avatar_url: None,
             },
@@ -188,7 +193,7 @@ mod tests {
             (
                 id(A),
                 MentionedUser {
-                    status: MentionStatus::Member,
+                    status: MentionStatus::Member.into(),
                     name: Some("alice".into()),
                     avatar_url: None,
                 },
@@ -196,7 +201,7 @@ mod tests {
             (
                 id(B),
                 MentionedUser {
-                    status: MentionStatus::Outside,
+                    status: MentionStatus::Outside.into(),
                     name: Some("former".into()),
                     avatar_url: None,
                 },
@@ -212,7 +217,7 @@ mod tests {
         let stranger: MentionMap = [(
             id(B),
             MentionedUser {
-                status: MentionStatus::Outside,
+                status: MentionStatus::Outside.into(),
                 name: None,
                 avatar_url: None,
             },
@@ -227,11 +232,24 @@ mod tests {
     #[test]
     fn gone_user_has_its_own_label() {
         let user = MentionedUser {
-            status: MentionStatus::Gone,
+            status: MentionStatus::Gone.into(),
             name: None,
             avatar_url: None,
         };
         assert_eq!(user.plain_label(), "@（退会した利用者）");
+    }
+
+    /// 新しいサーバーが足した状態でも、返ってきた名は出し、名が無ければ id を出さず伏せる。
+    #[test]
+    fn unknown_status_shows_the_returned_name_or_hides_it() {
+        let mut user = MentionedUser {
+            status: OrUnknown::Unknown("suspended".into()),
+            name: Some("alice".into()),
+            avatar_url: None,
+        };
+        assert_eq!(user.plain_label(), "@alice");
+        user.name = None;
+        assert_eq!(user.plain_label(), UNKNOWN_LABEL);
     }
 
     #[test]

@@ -2,6 +2,7 @@ use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::or_unknown::OrUnknown;
 use entity::tasks;
 
 #[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
@@ -56,7 +57,8 @@ pub struct MyTaskItem {
     pub seq_key: String,
     pub title: String,
     pub status: MyTaskStatusInfo,
-    pub priority: tasks::TaskPriority,
+    #[schema(inline)]
+    pub priority: OrUnknown<tasks::TaskPriority>,
     #[schema(value_type = Option<String>, format = "date-time", nullable)]
     pub soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
     #[schema(value_type = Option<String>, format = "date-time", nullable)]

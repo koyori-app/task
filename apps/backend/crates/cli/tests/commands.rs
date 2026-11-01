@@ -737,7 +737,8 @@ async fn a_response_that_no_longer_matches_the_shared_type_is_reported_not_swall
 
     let err = harness.run(&["task", "auth", "whoami"]).await.unwrap_err();
     assert!(
-        err.message.contains("Cannot parse the API response"),
+        err.message.contains("Cannot parse the API response")
+            && err.message.contains("update to the latest release"),
         "{}",
         err.message
     );
