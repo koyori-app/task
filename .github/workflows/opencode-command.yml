@@ -22,7 +22,11 @@ jobs:
         startsWith(github.event.comment.body, '/opencode') ||
         contains(github.event.comment.body, ' /opencode')
       ) &&
-      contains(fromJson('["yupix", "sousuke0422"]'), github.event.comment.user.login)
+      contains(fromJson('["yupix", "sousuke0422"]'), github.event.comment.user.login) &&
+      (
+        github.event_name != 'pull_request_review_comment' ||
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
 
     runs-on: ubuntu-latest
 
@@ -33,12 +37,35 @@ jobs:
       issues: write
 
     steps:
+      # issue_comment には head リポジトリが無いので API で取る。fork の head は秘密と書き込み権限のもとで扱わない
+      - name: Check PR origin
+        id: origin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+        run: |
+          head_repo=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.head.repo.full_name')
+          if [ "$head_repo" = "$GITHUB_REPOSITORY" ]; then
+            echo "same_repo=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "same_repo=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Notify fork PR
+        if: steps.origin.outputs.same_repo == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+        run: gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "fork からの PR では /oc は動きません。"
+
       - name: Checkout repository
+        if: steps.origin.outputs.same_repo == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Run opencode
+        if: steps.origin.outputs.same_repo == 'true'
         uses: anomalyco/opencode/github@68bc26b7da1990ce10ffecfbc1e09eb13aa5d824 # v2.1.4
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}

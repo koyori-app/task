@@ -210,6 +210,7 @@ let tenant = auth.ensure_tenant_owner(&state, tenant_id).await?;
 | 未認証・無効 PAT・失効・期限切れ | 401 |
 | 認証済みだがスコープ / テナント / プロジェクト不一致 | 403 |
 | 有効な Bearer（PAT・Device Token）でセッション専用の口を叩いた | 403 |
+| テナントが 2FA を強制（`require_2fa`）し、利用者が 2FA を満たさない（TOTP もパスキーも無い） | 403（`2fa-setup-required`） |
 
 Bearer への 401 は、トークンが無効（存在しない・失効・期限切れ・全失効）のときだけ。認証方式の不一致は 403。
 Desktop は Device Token への 401 を失効とみなしてログアウトするため。

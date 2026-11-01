@@ -156,6 +156,8 @@ async fn can_access_file_content(
         return Err(AppError::Forbidden);
     };
     auth_user.require_scope(Scope::ReadDrive)?;
+    // プロジェクトファイルの枝は所属判定（ensure_tenant_access）を通らずに通すので、2FA 強制をここで見る
+    auth_user.ensure_tenant_2fa(state, file.tenant_id).await?;
 
     // この経路は URL に tenant_id を含まず、ファイル ID だけで引く。テナントレベルファイル
     // （project_id が NULL）を無条件に許可すると、ID を知る第三者に内容が渡るため、

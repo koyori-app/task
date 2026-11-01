@@ -687,7 +687,9 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                       class="inline-flex h-7 items-center gap-1.5 rounded px-1.5 text-sm hover:bg-muted"
                       :class="
                         task.soft_deadline
-                          ? formatDeadline(task.soft_deadline)?.overdue
+                          ? formatDeadline(task.soft_deadline, {
+                              done: resolvedStatus?.is_done_state,
+                            })?.overdue
                             ? 'text-destructive'
                             : ''
                           : 'text-muted-foreground'
@@ -697,7 +699,12 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                       @click="startEditing('soft_deadline')"
                     >
                       <CalendarDays class="size-4" aria-hidden="true" />
-                      {{ formatDeadline(task.soft_deadline)?.label ?? '期限' }}
+                      {{
+                        formatDeadline(task.soft_deadline, {
+                          done: resolvedStatus?.is_done_state,
+                          completedAt: task.completed_at,
+                        })?.label ?? '期限'
+                      }}
                     </button>
 
                     <ArrowRight class="size-3.5 text-muted-foreground" aria-hidden="true" />
@@ -733,7 +740,9 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                       class="inline-flex h-7 items-center gap-1.5 rounded px-1.5 text-sm hover:bg-muted"
                       :class="
                         task.hard_deadline
-                          ? formatDeadline(task.hard_deadline)?.overdue
+                          ? formatDeadline(task.hard_deadline, {
+                              done: resolvedStatus?.is_done_state,
+                            })?.overdue
                             ? 'text-destructive'
                             : ''
                           : 'text-muted-foreground'
@@ -743,7 +752,12 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                       @click="startEditing('hard_deadline')"
                     >
                       <CalendarClock class="size-4" aria-hidden="true" />
-                      {{ formatDeadline(task.hard_deadline)?.label ?? 'ハード期限' }}
+                      {{
+                        formatDeadline(task.hard_deadline, {
+                          done: resolvedStatus?.is_done_state,
+                          completedAt: task.completed_at,
+                        })?.label ?? 'ハード期限'
+                      }}
                     </button>
                   </div>
                   <p

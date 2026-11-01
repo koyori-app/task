@@ -31,6 +31,7 @@ use entity::{
     users,
 };
 use payload::task_notifications::*;
+use service::login_session::user_satisfies_2fa;
 use service::notifications::{DEFAULT_IN_APP_EVENTS, ensure_watcher};
 
 /// ユーザーがアクセス可能なプロジェクトID一覧を返す（メンバー or テナントオーナー）。
@@ -39,13 +40,37 @@ async fn accessible_project_ids(
     db: &sea_orm::DatabaseConnection,
     user_id: Uuid,
 ) -> Result<HashSet<Uuid>, AppError> {
-    let owned_tenant_ids: Vec<Uuid> = tenants::Entity::find()
+    let mut owned_tenant_ids: Vec<Uuid> = tenants::Entity::find()
         .filter(tenants::Column::OwnerId.eq(user_id))
         .all(db)
         .await?
         .into_iter()
         .map(|t| t.id)
         .collect();
+    let mut joined_tenant_ids: Vec<Uuid> = tenant_members::Entity::find()
+        .filter(tenant_members::Column::UserId.eq(user_id))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|m| m.tenant_id)
+        .collect();
+    // 2FA を強制するテナントは、本人が 2FA を満たすまで外す（docs/features/auth-2fa.md §9。
+    // テナントの口の `has_tenant_access` と同じ規則）
+    let enforcing_tenant_ids: HashSet<Uuid> = tenants::Entity::find()
+        .filter(
+            tenants::Column::Id.is_in(owned_tenant_ids.iter().chain(&joined_tenant_ids).copied()),
+        )
+        .filter(tenants::Column::Require2fa.eq(true))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    if !enforcing_tenant_ids.is_empty() && !user_satisfies_2fa(db, user_id).await? {
+        owned_tenant_ids.retain(|id| !enforcing_tenant_ids.contains(id));
+        joined_tenant_ids.retain(|id| !enforcing_tenant_ids.contains(id));
+    }
+
     let owner_project_ids: HashSet<Uuid> = if owned_tenant_ids.is_empty() {
         HashSet::new()
     } else {
@@ -59,13 +84,6 @@ async fn accessible_project_ids(
     };
 
     // 所属テナントのプロジェクトのうち、メンバー未指定のものと自分が指定されたもの（#568）
-    let joined_tenant_ids: Vec<Uuid> = tenant_members::Entity::find()
-        .filter(tenant_members::Column::UserId.eq(user_id))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|m| m.tenant_id)
-        .collect();
     let member_project_ids: HashSet<Uuid> = if joined_tenant_ids.is_empty() {
         HashSet::new()
     } else {

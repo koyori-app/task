@@ -50,9 +50,30 @@ function startOfLocalDay(date: Date): Date {
   return result;
 }
 
-export function formatDeadline(iso?: string | null): { label: string; overdue: boolean } | null {
+/**
+ * 期限の字と、期限を過ぎているか。
+ * 完了の状態にある task（done）は期限切れにしない。終わった仕事を赤くすると、
+ * まだ手当てが要ると読まれるためである。期限の日付を出し、相対の字は出さない。
+ * 期限より後の日に完了していれば、遅れた日数を `7月10日（4日超過）` のように添える。
+ * 遅れは完了した日（completedAt）から数え、今日からは数えない。今日から数えると、
+ * 同じ task の遅れが日ごとに増えてしまう。completedAt が無ければ日付だけを出す。
+ * 完了かどうかは状態の is_done_state で決め、completedAt は遅れを数えるためだけに使う。
+ */
+export function formatDeadline(
+  iso?: string | null,
+  options: { done?: boolean; completedAt?: string | null } = {},
+): { label: string; overdue: boolean } | null {
   if (!iso) return null;
   const d = new Date(iso);
+  if (options.done) {
+    const date = d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' });
+    if (!options.completedAt) return { label: date, overdue: false };
+    const lateDays = Math.round(
+      (startOfLocalDay(new Date(options.completedAt)).getTime() - startOfLocalDay(d).getTime()) /
+        86400000,
+    );
+    return { label: lateDays > 0 ? `${date}（${lateDays}日超過）` : date, overdue: false };
+  }
   const now = new Date();
   const diff = d.getTime() - now.getTime();
   const overdue = diff < 0;
