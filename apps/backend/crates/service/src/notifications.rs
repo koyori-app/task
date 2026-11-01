@@ -40,7 +40,7 @@ pub async fn ensure_watcher<C: ConnectionTrait>(
     Ok(())
 }
 
-async fn in_app_enabled<C: ConnectionTrait>(
+pub async fn in_app_enabled<C: ConnectionTrait>(
     db: &C,
     user_id: Uuid,
     project_id: Uuid,

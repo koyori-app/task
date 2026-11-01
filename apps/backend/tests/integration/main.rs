@@ -10,6 +10,7 @@ mod auth_2fa_integration;
 mod avatar_upload_integration;
 mod custom_fields_integration;
 mod dashboard_integration;
+mod deadline_soon_integration;
 mod desktop_auth_integration;
 mod drive_file_content_integration;
 mod drive_folder_boundary_integration;

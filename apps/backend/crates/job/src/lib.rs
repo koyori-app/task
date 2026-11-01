@@ -1,6 +1,7 @@
 //! Apalis バックグラウンドジョブ
 
 pub mod already_registered_email;
+pub mod deadline_soon;
 pub mod github_issue_sync;
 pub mod github_webhook;
 pub mod notification_email;
