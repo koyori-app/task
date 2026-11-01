@@ -31,6 +31,7 @@ use job::{
     already_registered_email::{
         self, MAX_RETRIES as ALREADY_REGISTERED_MAX_RETRIES, QUEUE_NAME as ALREADY_REGISTERED_QUEUE,
     },
+    deadline_soon,
     github_issue_sync::{self, QUEUE_NAME as GITHUB_ISSUE_SYNC_QUEUE},
     github_webhook::{self, QUEUE_NAME as GITHUB_WEBHOOK_QUEUE},
     notification_email, notification_retention,
@@ -280,6 +281,12 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
 
     // 保持期間を過ぎた通知の掃除（job::notification_retention）。1 日 1 回、起動直後にも走る
     tokio::spawn(notification_retention::run_sweeper(
+        job_state_for_sweeper.clone(),
+        shutdown_rx.clone(),
+    ));
+
+    // 期限の近いタスクの通知（job::deadline_soon）。15 分ごと、起動直後にも走る
+    tokio::spawn(deadline_soon::run_sweeper(
         job_state_for_sweeper.clone(),
         shutdown_rx.clone(),
     ));

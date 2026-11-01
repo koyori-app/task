@@ -3247,6 +3247,7 @@ dependencies = [
  "chrono",
  "common",
  "entity",
+ "redis",
  "reqwest 0.13.5",
  "sea-orm",
  "serde",
