@@ -535,6 +535,140 @@ describe('TaskDetailHub', () => {
   });
 });
 
+/*
+ * 保存は emit した直後に編集器を閉じ、失敗は親が fieldErrors で返す。以前は失敗すると
+ * 入力した下書きがどこにも残らず、書き直すしかなかった（TASK-250）。
+ */
+describe('TaskDetailHub の保存に失敗した下書き', () => {
+  const FAILED = '更新に失敗しました';
+
+  function mountHub() {
+    return mount(TaskDetailHub, {
+      props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id },
+    });
+  }
+
+  function resumeButton(wrapper: ReturnType<typeof mountHub>) {
+    return wrapper.findAll('button').find((button) => button.text() === '編集を再開');
+  }
+
+  async function resume(wrapper: ReturnType<typeof mountHub>) {
+    const button = resumeButton(wrapper);
+    expect(button, '「編集を再開」が無い').toBeDefined();
+    await button!.trigger('click');
+  }
+
+  function titleInput(wrapper: ReturnType<typeof mountHub>) {
+    return wrapper.get('input[aria-label="タイトル"]');
+  }
+
+  async function saveTitle(wrapper: ReturnType<typeof mountHub>, value: string) {
+    await wrapper.get('h1').trigger('click');
+    await titleInput(wrapper).setValue(value);
+    await titleInput(wrapper).trigger('blur');
+  }
+
+  it('タイトルの保存に失敗したら、編集を再開すると入力した値が入っている', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '書きかけのタイトル');
+    expect(wrapper.emitted('save:title')).toEqual([['書きかけのタイトル']]);
+    expect(wrapper.find('input[aria-label="タイトル"]').exists()).toBe(false);
+
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('書きかけのタイトル');
+  });
+
+  it('説明の保存に失敗したら、編集を再開すると入力した値が入っている', async () => {
+    const wrapper = mountHub();
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '説明を追加')!
+      .trigger('click');
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('書きかけの説明');
+    await textarea.trigger('blur');
+    expect(wrapper.emitted('save:description')).toEqual([['書きかけの説明']]);
+
+    await wrapper.setProps({ fieldErrors: { description: FAILED } });
+    await resume(wrapper);
+
+    const reopened = wrapper.get('textarea[aria-label="説明"]');
+    expect((reopened.element as HTMLTextAreaElement).value).toBe('書きかけの説明');
+  });
+
+  it('保存し直しも失敗したら、新しく入力した値から再開できる', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '一度目');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+    await titleInput(wrapper).setValue('二度目');
+    await titleInput(wrapper).trigger('blur');
+
+    // 親は保存を始めると失敗表示を消し、また失敗すると立て直す
+    await wrapper.setProps({ fieldErrors: {} });
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('二度目');
+  });
+
+  it('保存し直して成功したら下書きは捨て、次に開くと task の値が入っている', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '一度目');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+    await titleInput(wrapper).setValue('二度目');
+    await titleInput(wrapper).trigger('blur');
+    expect(wrapper.emitted('save:title')).toEqual([['一度目'], ['二度目']]);
+
+    await wrapper.setProps({ fieldErrors: {}, task: { ...task, title: '二度目' } });
+    expect(resumeButton(wrapper)).toBeUndefined();
+    expect(wrapper.text()).not.toContain(FAILED);
+
+    await wrapper.get('h1').trigger('click');
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('二度目');
+  });
+
+  it('Esc で取り消したら下書きを残さない', async () => {
+    const wrapper = mountHub();
+    await wrapper.get('h1').trigger('click');
+    await titleInput(wrapper).setValue('取り消す');
+    await titleInput(wrapper).trigger('keydown', { key: 'Escape' });
+
+    expect(wrapper.emitted('save:title')).toBeUndefined();
+    expect(wrapper.find('input[aria-label="タイトル"]').exists()).toBe(false);
+    expect(resumeButton(wrapper)).toBeUndefined();
+    expect(wrapper.text()).not.toContain(FAILED);
+  });
+
+  it('失敗後に再開した編集を Esc で取り消したら、その下書きも捨てる', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '書きかけ');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+    await titleInput(wrapper).trigger('keydown', { key: 'Escape' });
+
+    expect(resumeButton(wrapper)).toBeUndefined();
+    await wrapper.get('h1').trigger('click');
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe(task.title);
+  });
+
+  // 分割ビューのペインは別のタスクへ移っても同じインスタンスで、失敗表示も残りうる
+  it('別のタスクへ移ったら、前のタスクの下書きを出さない', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '前のタスクの下書き');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+
+    await wrapper.setProps({ task: { ...task, id: 'other-task', title: '別のタスク' } });
+
+    expect(resumeButton(wrapper)).toBeUndefined();
+    await wrapper.get('h1').trigger('click');
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('別のタスク');
+  });
+});
+
 describe('TaskDetailHub description KFM 表示', () => {
   const RENDERED_HTML = '<h1 id="user-content-task-uuid-h">見出し</h1><p><strong>強調</strong></p>';
 
