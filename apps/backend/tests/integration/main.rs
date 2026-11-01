@@ -57,6 +57,7 @@ mod task_assignable_users_integration;
 mod task_atomic_update_integration;
 mod task_comment_mentions_integration;
 mod task_comments_integration;
+mod task_description_limit_integration;
 mod task_description_mentions_integration;
 mod task_extensions_integration;
 mod task_labels_integration;

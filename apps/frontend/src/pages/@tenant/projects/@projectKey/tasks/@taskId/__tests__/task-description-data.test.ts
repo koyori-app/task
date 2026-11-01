@@ -191,13 +191,13 @@ describe('task description +data', () => {
     errorSpy.mockRestore();
   });
 
-  it('本文長上限: 65536 文字ちょうどは描画し、超過は null (プレーン表示) へ倒す', async () => {
-    stubBackend({ description: 'a'.repeat(65_536) });
+  it('本文長上限 (backend の MAX_DESCRIPTION_LEN): 100000 文字ちょうどは描画し、超過は null (プレーン表示) へ倒す', async () => {
+    stubBackend({ description: 'a'.repeat(100_000) });
     const atLimit = await data(pageContext());
     expect(atLimit.descriptionHtml).not.toBeNull();
-    expect(atLimit.descriptionSource).toHaveLength(65_536);
+    expect(atLimit.descriptionSource).toHaveLength(100_000);
 
-    stubBackend({ description: 'a'.repeat(65_537) });
+    stubBackend({ description: 'a'.repeat(100_001) });
     expect(await data(pageContext())).toEqual({ descriptionHtml: null, descriptionSource: null });
   });
 

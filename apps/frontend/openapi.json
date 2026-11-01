@@ -24473,7 +24473,8 @@
             }
           },
           "description": {
-            "type": ["string", "null"]
+            "type": ["string", "null"],
+            "maxLength": 100000
           },
           "estimated_minutes": {
             "type": ["integer", "null"],
@@ -28418,7 +28419,8 @@
             }
           },
           "description": {
-            "type": ["string", "null"]
+            "type": ["string", "null"],
+            "maxLength": 100000
           },
           "estimated_minutes": {
             "type": ["integer", "null"],
