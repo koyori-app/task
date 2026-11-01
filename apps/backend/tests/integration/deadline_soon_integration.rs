@@ -260,6 +260,50 @@ async fn respects_in_app_settings_and_project_access() {
     assert_eq!(deadline_notices(&fx, fx.owner.id).await.len(), 1);
 }
 
+/// 他のインスタンスがロックを持っている間は走査せずに 0 を返し、そのロックを消さない。
+/// 明けたら送り、終わったら自分のロックを解放する。
+#[tokio::test]
+async fn skips_while_another_instance_holds_the_lock() {
+    use job::deadline_soon::LOCK_KEY;
+
+    let fx = setup().await;
+    let t = task(&fx, fx.open, Some(Utc::now() + Duration::hours(12)), None).await;
+    assign(&fx, t.id, fx.member.id).await;
+    let state = job_state(&fx.app);
+    lock_cmd(
+        &fx,
+        redis::cmd("SET")
+            .arg(LOCK_KEY)
+            .arg("other-instance")
+            .arg("EX")
+            .arg(60),
+    )
+    .await;
+
+    assert_eq!(job::deadline_soon::send_once(&state).await.unwrap(), 0);
+    assert!(deadline_notices(&fx, fx.member.id).await.is_empty());
+    assert_eq!(
+        lock_cmd(&fx, redis::cmd("GET").arg(LOCK_KEY)).await,
+        redis::Value::BulkString(b"other-instance".to_vec()),
+        "他のインスタンスのロックは消さない"
+    );
+
+    // 対照: ロックが明けたら送る
+    lock_cmd(&fx, redis::cmd("DEL").arg(LOCK_KEY)).await;
+    assert!(job::deadline_soon::send_once(&state).await.unwrap() >= 1);
+    assert_eq!(deadline_notices(&fx, fx.member.id).await.len(), 1);
+    assert_eq!(
+        lock_cmd(&fx, redis::cmd("GET").arg(LOCK_KEY)).await,
+        redis::Value::Nil,
+        "終わったらロックを解放する"
+    );
+}
+
+async fn lock_cmd(fx: &Fixture, cmd: &mut redis::Cmd) -> redis::Value {
+    let mut conn = fx.app.state.redis_client.conn.acquire().await.unwrap();
+    cmd.query_async(&mut conn).await.unwrap()
+}
+
 /// 仮締めと Deadline が両方 24 時間以内なら、kind 違いで 2 件。
 #[tokio::test]
 async fn soft_and_hard_are_separate_notifications() {
