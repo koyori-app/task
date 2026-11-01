@@ -161,20 +161,33 @@ mod tests {
         ("TenantMemberResponse", "role"),
     ];
 
-    /// `$ref` なら指す先のスキーマ名と中身、そうでなければそのまま。
-    fn resolve<'a>(doc: &'a Value, schema: &'a Value) -> (Option<&'a str>, &'a Value) {
-        let Some(reference) = schema.get("$ref").and_then(Value::as_str) else {
-            return (None, schema);
-        };
-        let name = reference
-            .strip_prefix("#/components/schemas/")
-            .unwrap_or_else(|| panic!("components 以外を指す $ref: {reference}"));
-        let target = &doc["components"]["schemas"][name];
-        assert!(
-            !target.is_null(),
-            "未登録のスキーマを指す $ref: {reference}"
-        );
-        (Some(name), target)
+    /// `$ref` を、`$ref` でないスキーマに着くまで辿る（別名の別名も辿る）。
+    ///
+    /// 返すのは最後に辿った先の名前（辿らなければ `None`）と中身、途中も含めてどこかに
+    /// 目印があったか。`$ref` だけの循環は、同じ名前に戻ったところで止める。
+    fn resolve<'a>(doc: &'a Value, schema: &'a Value) -> (Option<&'a str>, &'a Value, bool) {
+        let mut chain = BTreeSet::new();
+        let (mut name, mut current) = (None, schema);
+        let mut marked = false;
+        loop {
+            marked |= current.get(OR_UNKNOWN_EXTENSION).is_some();
+            let Some(reference) = current.get("$ref").and_then(Value::as_str) else {
+                break;
+            };
+            let next = reference
+                .strip_prefix("#/components/schemas/")
+                .unwrap_or_else(|| panic!("components 以外を指す $ref: {reference}"));
+            if !chain.insert(next) {
+                break;
+            }
+            current = &doc["components"]["schemas"][next];
+            assert!(
+                !current.is_null(),
+                "未登録のスキーマを指す $ref: {reference}"
+            );
+            name = Some(next);
+        }
+        (name, current, marked)
     }
 
     fn children(schema: &Value) -> impl Iterator<Item = &Value> {
@@ -190,13 +203,15 @@ mod tests {
     }
 
     /// 目印を通らずに string の列挙へ届くか。オブジェクトの中は別のスキーマとして歩くので入らない。
-    fn reaches_bare_enum(doc: &Value, schema: &Value) -> bool {
-        if schema.get(OR_UNKNOWN_EXTENSION).is_some() {
+    /// `visited` は辿った名前付きスキーマ。再帰する型で同じスキーマへ戻ったら打ち切る。
+    fn reaches_bare_enum<'a>(
+        doc: &'a Value,
+        schema: &'a Value,
+        visited: &mut BTreeSet<&'a str>,
+    ) -> bool {
+        let (name, schema, marked) = resolve(doc, schema);
+        if marked || name.is_some_and(|name| !visited.insert(name)) {
             return false;
-        }
-        let (name, target) = resolve(doc, schema);
-        if name.is_some() {
-            return reaches_bare_enum(doc, target);
         }
         let is_string = match &schema["type"] {
             Value::String(ty) => ty == "string",
@@ -207,7 +222,7 @@ mod tests {
             return true;
         }
         schema.get("properties").is_none()
-            && children(schema).any(|child| reaches_bare_enum(doc, child))
+            && children(schema).any(|child| reaches_bare_enum(doc, child, visited))
     }
 
     /// 応答から辿れるスキーマを歩き、素の列挙を型に持つ欄を `スキーマ名.欄名` で集める。
@@ -218,7 +233,7 @@ mod tests {
         seen: &mut BTreeSet<&'a str>,
         found: &mut BTreeSet<String>,
     ) {
-        let (name, schema) = resolve(doc, schema);
+        let (name, schema, _) = resolve(doc, schema);
         if let Some(name) = name
             && !seen.insert(name)
         {
@@ -231,7 +246,7 @@ mod tests {
             .into_iter()
             .flatten()
         {
-            if reaches_bare_enum(doc, property) {
+            if reaches_bare_enum(doc, property, &mut BTreeSet::new()) {
                 found.insert(format!("{owner}.{field}"));
             }
             collect_bare_enum_fields(doc, property, &owner, seen, found);
