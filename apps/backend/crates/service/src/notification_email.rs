@@ -6,8 +6,8 @@
 use entity::{notifications, projects, tasks, tenants};
 
 use common::notifications::{
-    TYPE_ASSIGNED, TYPE_COMMENT_ADDED, TYPE_MENTIONED, TYPE_PR_MERGED, TYPE_REVIEW_FINDING_CHANGED,
-    TYPE_REVIEW_ROUND_CREATED, TYPE_STATUS_CHANGED,
+    TYPE_ASSIGNED, TYPE_COMMENT_ADDED, TYPE_DEADLINE_SOON, TYPE_MENTIONED, TYPE_PR_MERGED,
+    TYPE_REVIEW_FINDING_CHANGED, TYPE_REVIEW_ROUND_CREATED, TYPE_STATUS_CHANGED,
 };
 
 /// 件名に載せるタスクタイトルの長さ。長い件名はクライアント側で切られるので、
@@ -168,6 +168,26 @@ pub fn subject_and_line(
                 field(payload, "to")
             ),
         ),
+        TYPE_DEADLINE_SOON => {
+            let which = match field(payload, "kind") {
+                "soft" => "の仮締めは",
+                "hard" => "の Deadline は",
+                _ => "の期限は",
+            };
+            // payload は RFC 3339 の UTC。読める形にするだけで時差は足さない（宛先の時間帯を持っていない）
+            let raw = field(payload, "deadline");
+            let deadline = chrono::DateTime::parse_from_rfc3339(raw)
+                .map(|d| {
+                    d.with_timezone(&chrono::Utc)
+                        .format("%Y-%m-%d %H:%M UTC")
+                        .to_string()
+                })
+                .unwrap_or_else(|_| raw.to_string());
+            (
+                format!("[Koyori] {label} の期限が近づいています"),
+                format!("{label} {which} {deadline} です。"),
+            )
+        }
         TYPE_REVIEW_ROUND_CREATED => (
             format!(
                 "[Koyori] PR #{} のレビュー R{}（{}）",
@@ -396,6 +416,43 @@ mod tests {
         );
     }
 
+    /// 期限の通知は kind を日本語にし、期限を UTC の読める形で出す（生の payload を出さない）。
+    #[test]
+    fn deadline_soon_names_kind_and_deadline() {
+        let task = task("OAuth 対応");
+        let mail = render(
+            &notification(
+                TYPE_DEADLINE_SOON,
+                serde_json::json!({"kind": "hard", "deadline": "2026-11-02T03:04:05.123456Z"}),
+            ),
+            Some(&task),
+            &project(),
+            &tenant(),
+            "http://localhost:3000",
+        );
+        assert_eq!(
+            mail.subject,
+            "[Koyori] #12 OAuth 対応 の期限が近づいています"
+        );
+        assert!(
+            mail.text
+                .starts_with("#12 OAuth 対応 の Deadline は 2026-11-02 03:04 UTC です。\n"),
+            "text: {}",
+            mail.text
+        );
+        assert!(mail.text.contains("/projects/KOY/tasks/KOY-12"));
+
+        let (_, line) = subject_and_line(
+            TYPE_DEADLINE_SOON,
+            &serde_json::json!({"kind": "soft", "deadline": "2026-11-02T03:04:05Z"}),
+            Some(&task),
+        );
+        assert_eq!(
+            line,
+            "#12 OAuth 対応 の仮締めは 2026-11-02 03:04 UTC です。"
+        );
+    }
+
     /// payload が空でも、種別ごとの件名は出して落ちない。
     #[test]
     fn empty_payload_does_not_panic() {
@@ -404,6 +461,7 @@ mod tests {
             TYPE_MENTIONED,
             TYPE_COMMENT_ADDED,
             TYPE_STATUS_CHANGED,
+            TYPE_DEADLINE_SOON,
             TYPE_REVIEW_ROUND_CREATED,
             TYPE_REVIEW_FINDING_CHANGED,
             TYPE_PR_MERGED,
