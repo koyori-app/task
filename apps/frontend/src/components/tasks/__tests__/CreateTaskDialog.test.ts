@@ -451,23 +451,125 @@ describe('CreateTaskDialog estimate', () => {
     wrapper.unmount();
   });
 
-  function setDate(name: string, value: string) {
-    const input = document.body.querySelector(`input[name="${name}"]`);
-    if (!input) throw new Error(`${name} input not found`);
-    return new DOMWrapper(input as HTMLInputElement).setValue(value);
-  }
-
-  it('開始予定日を planned_start_on として日付文字列のまま送る', async () => {
+  /*
+   * 数値にならない入力は、ブラウザでは value が空・badInput が true で届く（happy-dom は
+   * 文字列を value に残すので状態を与える）。止めないと未入力と同じ扱いで見積もりが消える
+   */
+  it('数値にならない見積もりは未入力として扱わず、送らずに止める', async () => {
     const wrapper = mountDialog(queryClient);
     await nextTick();
-    await new DOMWrapper(getTitleInput()).setValue('開始予定付き');
-    await setDate('planned_start_on', '2026-10-19');
-    await setDate('soft_deadline', '2026-10-23');
+    await new DOMWrapper(getTitleInput()).setValue('見積もりの打ち間違い');
+    Object.defineProperty(getEstimateInput(), 'validity', {
+      value: { badInput: true, valid: false },
+    });
 
     getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await flushPromises();
 
-    expect(mutateAsync.mock.calls[0][0].body.planned_start_on).toBe('2026-10-19');
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(
+      '見積もりは 1 以上 2147483647 以下の整数（分）で入力してください',
+    );
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog dates', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+    // カレンダーは今日の月で開く。選ぶ日が同じ月に出るよう今日を固定する
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-15T12:00:00+09:00'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    document.body.innerHTML = '';
+  });
+
+  /** 日付欄のカレンダーを開いて日を選ぶ。カレンダーは開いている間だけ DOM にある */
+  async function pickDate(fieldId: string, date: string) {
+    const trigger = document.getElementById(fieldId);
+    if (!trigger) throw new Error(`${fieldId} not found`);
+    trigger.click();
+    await nextTick();
+    const day = document.body.querySelector<HTMLElement>(`[data-date="${date}"]`);
+    if (!day) throw new Error(`${date} not found in the calendar of ${fieldId}`);
+    day.click();
+    await nextTick();
+  }
+
+  it('開始予定日は日付のまま、期限と最終期限は UTC の日時にして送る', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('日付付き');
+    await pickDate('task-planned-start', '2026-10-19');
+    await pickDate('task-soft-deadline', '2026-10-23');
+    await pickDate('task-hard-deadline', '2026-10-31');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body).toMatchObject({
+      planned_start_on: '2026-10-19',
+      soft_deadline: '2026-10-23T00:00:00.000Z',
+      hard_deadline: '2026-10-31T00:00:00.000Z',
+    });
+    wrapper.unmount();
+  });
+
+  it('選ばなかった日付は送らない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('期限だけ');
+    await pickDate('task-soft-deadline', '2026-10-23');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    const { body } = mutateAsync.mock.calls[0][0];
+    expect(body.soft_deadline).toBe('2026-10-23T00:00:00.000Z');
+    expect(body).not.toHaveProperty('planned_start_on');
+    expect(body).not.toHaveProperty('hard_deadline');
+    wrapper.unmount();
+  });
+
+  // WebKit ではフォーカスが dialog へ移ると DatePicker がカレンダーを閉じ、月送りとクリアが効かない
+  it('カレンダーのボタンを押すと、そのボタンにフォーカスする', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    document.getElementById('task-hard-deadline')?.click();
+    await nextTick();
+
+    const nextMonth = document.body.querySelector('[aria-label="次の月"]');
+    if (!nextMonth) throw new Error('next month button not found');
+    nextMonth.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+
+    expect(document.activeElement).toBe(nextMonth);
+    wrapper.unmount();
+  });
+
+  /*
+   * type="date" は見た目と value が食い違う。WebKit は空欄に今日の日付を出し、途中までの
+   * 入力も見た目には残るのに value は空で、何も送られないまま作成が通っていた
+   */
+  it('未入力の日付欄は「未設定」と出し、見た目と送信内容が食い違う type="date" を置かない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    expect(document.body.querySelector('input[type="date"]')).toBeNull();
+    for (const id of ['task-planned-start', 'task-soft-deadline', 'task-hard-deadline']) {
+      expect(document.getElementById(id)?.textContent, id).toContain('未設定');
+    }
     wrapper.unmount();
   });
 
@@ -475,8 +577,8 @@ describe('CreateTaskDialog estimate', () => {
     const wrapper = mountDialog(queryClient);
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('逆転');
-    await setDate('planned_start_on', '2026-10-24');
-    await setDate('soft_deadline', '2026-10-23');
+    await pickDate('task-planned-start', '2026-10-24');
+    await pickDate('task-soft-deadline', '2026-10-23');
 
     getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await flushPromises();
