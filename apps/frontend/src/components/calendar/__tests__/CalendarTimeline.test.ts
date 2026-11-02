@@ -88,6 +88,23 @@ describe('CalendarTimeline', () => {
     expect(entry.find('.rotate-45').exists()).toBe(true);
   });
 
+  it('Soft 締切が範囲より前でも、Hard 締切が範囲に入れば帯で描く', () => {
+    const wrapper = mountTimeline([
+      task({ soft_deadline: '2026-10-05T00:00:00Z', hard_deadline: '2026-10-14T00:00:00Z' }),
+    ]);
+    const entry = wrapper.get(`[data-member-row="${ALICE.id}"] a`);
+    expect(entry.attributes('data-shape')).toBe('bar');
+    // 10/12（範囲の端で切り詰め）〜 10/14 = 列 0〜2
+    expect(entry.attributes('style')).toContain('grid-column: 2 / 5');
+  });
+
+  it('Soft 締切と Hard 締切が同じ日なら点で描く', () => {
+    const wrapper = mountTimeline([
+      task({ soft_deadline: '2026-10-14T01:00:00Z', hard_deadline: '2026-10-14T02:00:00Z' }),
+    ]);
+    expect(wrapper.get(`[data-member-row="${ALICE.id}"] a`).attributes('data-shape')).toBe('point');
+  });
+
   it('範囲をはみ出す帯は端で切り詰めて矢印を出す', () => {
     const wrapper = mountTimeline([
       task({ planned_start_on: '2026-10-01', soft_deadline: '2026-10-13T00:00:00Z' }),
@@ -334,6 +351,25 @@ describe('CalendarTimeline', () => {
       await flushPromises();
       expect(point.attributes('data-moving')).toBeUndefined();
       expect(point.attributes('style')).toContain('grid-column: 5 / 6');
+      expect(put).not.toHaveBeenCalled();
+    });
+
+    it('開始予定日の無い Soft〜Hard の帯も動かせない', async () => {
+      const wrapper = mountTimeline([
+        task({ soft_deadline: '2026-10-13T00:00:00Z', hard_deadline: '2026-10-15T00:00:00Z' }),
+      ]);
+      const entry = bar(wrapper);
+      expect(entry.attributes('data-shape')).toBe('bar');
+      expect(entry.classes()).not.toContain('cursor-grab');
+      expect(entry.attributes('aria-keyshortcuts')).toBeUndefined();
+      await entry.trigger('pointerdown', { clientX: 500, button: 0 });
+      await entry.trigger('pointermove', { clientX: 300 });
+      await entry.trigger('pointerup');
+      await entry.trigger('keydown', { key: 'ArrowLeft' });
+      await entry.trigger('keydown', { key: 'Enter' });
+      await flushPromises();
+      expect(entry.attributes('data-moving')).toBeUndefined();
+      expect(entry.attributes('style')).toContain('grid-column: 3 / 6');
       expect(put).not.toHaveBeenCalled();
     });
 
