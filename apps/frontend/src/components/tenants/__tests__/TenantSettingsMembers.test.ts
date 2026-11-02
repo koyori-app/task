@@ -238,6 +238,7 @@ describe('TenantSettingsMembers', () => {
     expect((wrapper.get('#org-profile-department').element as HTMLInputElement).value).toBe(
       '開発部',
     );
+    expect(wrapper.get('#org-profile-department').attributes('maxlength')).toBe('100');
     await wrapper.get('#org-profile-position').setValue('課長');
     await wrapper.get('#org-profile-team').setValue('');
     await wrapper.findAll('form').at(-1)!.trigger('submit');

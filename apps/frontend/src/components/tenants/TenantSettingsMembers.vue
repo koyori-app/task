@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { PhArrowClockwise, PhEnvelopeSimple, PhPaperPlaneTilt, PhX } from '@phosphor-icons/vue';
 import { computed, ref, useId } from 'vue';
 
-import { Button, Dialog, Field, Picker } from '@koyori-app/ui-vue';
+import { Button, Dialog, Field, Input, Picker } from '@koyori-app/ui-vue';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
 import { userProfileHref } from '@/lib/task-display';
 import { MEMBER_AVATAR_COLORS } from '@/lib/user-avatar';
@@ -596,19 +596,17 @@ async function onRemove(member: TenantMemberResponse) {
           :on-close="onOrgEditorClose"
         >
           <form :id="formId" class="flex flex-col gap-3" @submit.prevent="onSaveOrg">
-            <!-- koyori の Input は maxlength を持たず、ここは送信前に長さを検証していないので素の input のまま -->
             <Field
               v-for="field in ORG_FIELDS"
               :id="`org-profile-${field.key}`"
               :key="field.key"
               :label="field.label"
             >
-              <input
-                :id="`org-profile-${field.key}`"
-                v-model="orgDraft[field.key]"
-                maxlength="100"
+              <Input
+                :max-length="100"
                 :disabled="busy"
-                class="h-9 w-full rounded-md border bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                :value="orgDraft[field.key]"
+                :on-value-change="(v: string) => (orgDraft[field.key] = v)"
               />
             </Field>
             <p v-if="orgError" role="alert" class="text-sm text-destructive">{{ orgError }}</p>
