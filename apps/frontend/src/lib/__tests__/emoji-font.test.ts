@@ -1,37 +1,31 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { runInThisContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_EMOJI_FONT,
-  EMOJI_FONT_CHOICES,
+  EMOJI_FONT_LINK_ID,
   EMOJI_FONT_VAR,
   applyEmojiFont,
   emojiFontBootScript,
   emojiFontStackPrefix,
+  emojiFontStylesheet,
 } from '@/lib/emoji-font';
 import { PREFERENCE_TABLE } from '@/lib/preferences';
+
+// 絵文字の字の CSS（外の URL）の link を差す。happy-dom は外の CSS を読まず、読まなかったことを
+// error として log に出すので、読まなかった CSS を読めた物として扱わせる
+(
+  window as unknown as { happyDOM: { settings: { handleDisabledFileLoadingAsSuccess: boolean } } }
+).happyDOM.settings.handleDisabledFileLoadingAsSuccess = true;
 
 // CSS は vitest の変換を通すと中身が落ちるので、file をそのまま読む
 const require = createRequire(resolve(__dirname, 'emoji-font.test.ts'));
 const frontendRoot = resolve(__dirname, '../../..');
 const readText = (path: string) => readFileSync(path, 'utf8');
-const emojiFontsCss = readText(resolve(frontendRoot, 'src/assets/css/emoji-fonts.css'));
 const tailwindCss = readText(resolve(frontendRoot, 'src/assets/css/tailwind.css'));
 const tailwindThemeCss = readText(require.resolve('tailwindcss/theme.css'));
-
-/** CSS の @font-face を family と src と unicode-range の組にして返す */
-function fontFaces(css: string) {
-  return [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)].map(([, body]) => ({
-    family: /font-family:\s*'([^']+)'/.exec(body!)?.[1],
-    sources: [...body!.matchAll(/url\('([^']+)'\) format\('woff2'\) tech\(([^)]+)\)/g)].map(
-      ([, url, tech]) => ({ url: url!, tech: tech! }),
-    ),
-    src: /src:\s*([^;]+);/.exec(body!)?.[1] ?? '',
-    range: /unicode-range:\s*([^;]+);/.exec(body!)?.[1]?.trim(),
-  }));
-}
 
 /** @theme の中の custom property の値（改行と連続する空白は一つにまとめる） */
 function themeValue(css: string, name: string): string | undefined {
@@ -49,29 +43,40 @@ describe('絵文字の字の選び肢', () => {
     ]);
   });
 
-  it('OS の既定は字を指定しない（並びの頭に何も入れない）', () => {
+  it('OS の既定は字も字の CSS も指定しない', () => {
     expect(emojiFontStackPrefix('os')).toBeNull();
+    expect(emojiFontStylesheet('os')).toBeNull();
   });
 
-  it('Noto を選ぶと、並びの頭に Noto の字と区切りの , を入れる', () => {
-    expect(emojiFontStackPrefix('noto')).toBe("'Koyori Noto Color Emoji',");
+  it('Noto は Google が名乗る名で並びに入り、字の CSS は Google Fonts から引く', () => {
+    expect(emojiFontStackPrefix('noto')).toBe("'Noto Color Emoji',");
+    expect(emojiFontStylesheet('noto')).toBe(
+      'https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap',
+    );
   });
 
-  it.each(['twemoji', '', null, undefined, true, 1])(
-    '選び肢に無い値 %j は字を指定しない',
+  it.each(['twemoji', '', null, undefined, true, 1, 'toString'])(
+    '選び肢に無い値 %j は字も字の CSS も指定しない',
     (value) => {
       expect(emojiFontStackPrefix(value)).toBeNull();
+      expect(emojiFontStylesheet(value)).toBeNull();
     },
   );
 
-  it('applyEmojiFont は選んだ字を html の変数に置き、OS の既定に戻すと外す', () => {
-    const root = document.createElement('html');
+  it('applyEmojiFont は html に変数を置いて字の CSS を一つだけ読み込み、OS の既定に戻すと両方を外す', () => {
+    const doc = document.implementation.createHTMLDocument('');
+    const links = () => doc.head.querySelectorAll(`link#${EMOJI_FONT_LINK_ID}`);
 
-    applyEmojiFont(root, 'noto');
-    expect(root.style.getPropertyValue(EMOJI_FONT_VAR)).toBe("'Koyori Noto Color Emoji',");
+    applyEmojiFont(doc, 'noto');
+    applyEmojiFont(doc, 'noto');
+    expect(doc.documentElement.style.getPropertyValue(EMOJI_FONT_VAR)).toBe("'Noto Color Emoji',");
+    expect(links()).toHaveLength(1);
+    expect(links()[0]!.getAttribute('href')).toBe(emojiFontStylesheet('noto'));
+    expect(links()[0]!.getAttribute('rel')).toBe('stylesheet');
 
-    applyEmojiFont(root, 'os');
-    expect(root.style.getPropertyValue(EMOJI_FONT_VAR)).toBe('');
+    applyEmojiFont(doc, 'os');
+    expect(doc.documentElement.style.getPropertyValue(EMOJI_FONT_VAR)).toBe('');
+    expect(links()).toHaveLength(0);
   });
 });
 
@@ -105,41 +110,18 @@ describe('字の並び（tailwind.css）', () => {
   );
 });
 
-describe('絵文字の字の @font-face（emoji-fonts.css）', () => {
-  const faces = fontFaces(emojiFontsCss);
-  const family = EMOJI_FONT_CHOICES.find((choice) => choice.value === 'noto')?.family;
+describe('既定の CSS（tailwind.css）', () => {
+  const imports = [...tailwindCss.matchAll(/@import url\('([^']+)'\)/g)].map(([, url]) => url!);
 
-  it('字の名は選び肢の family と揃う', () => {
-    expect(faces.length).toBeGreaterThan(0);
-    for (const face of faces) expect(face.family).toBe(family);
+  it('Google Fonts の取り込みは一本だけで、本文の Noto Sans だけを引く（字の CSS を取りに行く回数を増やさない）', () => {
+    expect(imports).toEqual([
+      'https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&display=swap',
+    ]);
   });
 
-  it('src は COLRv1 を先に、OpenType SVG を後に並べ、tech() で browser に選ばせる', () => {
-    for (const face of faces) {
-      expect(face.sources.map((source) => source.tech)).toEqual(['color-COLRv1', 'color-SVG']);
-      expect(face.sources[0]!.url).toMatch(/^\/fonts\/noto-color-emoji\/colrv1\/\d+\.woff2$/);
-      expect(face.sources[1]!.url).toMatch(/^\/fonts\/noto-color-emoji\/svg\/\d+\.woff2$/);
-    }
-  });
-
-  it('字の file はこの app の public に在り、外の URL に繋がない', () => {
-    for (const face of faces) {
-      expect(face.src).not.toMatch(/https?:/);
-      for (const source of face.sources) {
-        expect(existsSync(resolve(frontendRoot, 'public', source.url.slice(1))), source.url).toBe(
-          true,
-        );
-      }
-    }
-  });
-
-  it('許諾（OFL）を字と同じ所に置く', () => {
-    const license = readText(resolve(frontendRoot, 'public/fonts/noto-color-emoji/OFL.txt'));
-    expect(license).toContain('SIL Open Font License');
-  });
-
-  it('どの切れも unicode-range を持つ（選ぶ字が要る切れだけを読む）', () => {
-    for (const face of faces) expect(face.range).toMatch(/^U\+[0-9a-f]/i);
+  it('既定の CSS は絵文字の字を引かない（末尾の Noto Color Emoji が Google の字を指さない）', () => {
+    expect(tailwindCss).not.toMatch(/family=Noto\+Color\+Emoji/);
+    expect(tailwindCss).not.toMatch(/@font-face\s*\{/);
   });
 });
 
@@ -147,18 +129,26 @@ describe('描く前に当てる script（emojiFontBootScript）', () => {
   afterEach(() => {
     localStorage.clear();
     document.documentElement.style.removeProperty(EMOJI_FONT_VAR);
+    document.getElementById(EMOJI_FONT_LINK_ID)?.remove();
     vi.restoreAllMocks();
   });
 
+  /** head に置く文字列と同じ物をそのまま走らせ、置いた変数と読み込んだ CSS を返す */
   function run() {
-    // head に置く文字列と同じ物を、そのまま走らせる
     runInThisContext(emojiFontBootScript('preferences'));
-    return document.documentElement.style.getPropertyValue(EMOJI_FONT_VAR);
+    const link = document.getElementById(EMOJI_FONT_LINK_ID);
+    return {
+      variable: document.documentElement.style.getPropertyValue(EMOJI_FONT_VAR),
+      stylesheet: link?.getAttribute('rel') === 'stylesheet' ? link.getAttribute('href') : null,
+    };
   }
 
-  it('Noto が残っていれば、html に字を置く', () => {
+  it('Noto が残っていれば、html に字を置き、字の CSS を読み込む', () => {
     localStorage.setItem('preferences', JSON.stringify({ values: { emojiFont: 'noto' } }));
-    expect(run()).toBe("'Koyori Noto Color Emoji',");
+    expect(run()).toEqual({
+      variable: "'Noto Color Emoji',",
+      stylesheet: emojiFontStylesheet('noto'),
+    });
   });
 
   it.each([
@@ -167,20 +157,20 @@ describe('描く前に当てる script（emojiFontBootScript）', () => {
     ['prototype の名前', JSON.stringify({ values: { emojiFont: 'toString' } })],
     ['項目の無い古い値', JSON.stringify({ values: { showExperiments: true } })],
     ['壊れた JSON', '{'],
-  ])('%s では何も置かない', (_, stored) => {
+  ])('%s では何も置かず、字の CSS も読み込まない', (_, stored) => {
     localStorage.setItem('preferences', stored);
-    expect(run()).toBe('');
+    expect(run()).toEqual({ variable: '', stylesheet: null });
   });
 
   it('何も残っていなければ何も置かない', () => {
-    expect(run()).toBe('');
+    expect(run()).toEqual({ variable: '', stylesheet: null });
   });
 
   it('localStorage が読めなくても投げない', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('blocked');
     });
-    expect(run()).toBe('');
+    expect(run()).toEqual({ variable: '', stylesheet: null });
   });
 
   it('script の中で </script> が閉じない', () => {

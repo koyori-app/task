@@ -2,7 +2,6 @@
 
 @import 'tailwindcss';
 @import '@koyori-app/ui-vue/style.css' layer(components);
-@import './emoji-fonts.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -10,6 +9,9 @@
  * 本文の字の並び。Tailwind の既定と同じ並びに、環境設定で選んだ絵文字の字を入れる口を置く。
  * --koyori-emoji-font は lib/emoji-font.ts が html に置く（末尾に区切りの , を含む）。
  * 置かれていなければ空になり、並びは Tailwind の既定と同じになる（OS の既定）。
+ *
+ * 選んだ字の @font-face は、選んだ人の画面にだけ lib/emoji-font.ts が読み込む（Google Fonts の CSS）。
+ * 既定のままなら読み込まないので、末尾の 'Noto Color Emoji' も今まで通り手元の字だけを指す。
  *
  * 口は本文の字の後ろ、総称（sans-serif）と OS の絵文字の字の前に置く。
  * 絵文字の字は数字や #、*、© なども持つので、頭に置くと普通の数字まで絵文字の字で描かれる。

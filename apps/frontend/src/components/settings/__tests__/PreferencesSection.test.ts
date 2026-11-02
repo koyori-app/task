@@ -7,10 +7,17 @@ import { useExperimentsStore } from '@/stores/experiments';
 import { usePreferencesStore } from '@/stores/preferences';
 import { persistedPinia, seedSettings } from './test-pinia';
 
+// 絵文字の字の CSS（外の URL）の link を差す。happy-dom は外の CSS を読まず、読まなかったことを
+// error として log に出すので、読まなかった CSS を読めた物として扱わせる
+(
+  window as unknown as { happyDOM: { settings: { handleDisabledFileLoadingAsSuccess: boolean } } }
+).happyDOM.settings.handleDisabledFileLoadingAsSuccess = true;
+
 enableAutoUnmount(afterEach);
 beforeEach(() => {
   localStorage.clear();
   document.documentElement.style.removeProperty('--koyori-emoji-font');
+  document.getElementById('koyori-emoji-font')?.remove();
 });
 
 async function mountSection() {
@@ -151,9 +158,10 @@ describe('PreferencesSection（環境設定の画面）', () => {
     ]);
     expect(select.element.value).toBe('os');
     expect(document.documentElement.style.getPropertyValue('--koyori-emoji-font')).toBe('');
+    expect(document.getElementById('koyori-emoji-font')).toBeNull();
   });
 
-  it('Noto を選ぶと store と localStorage に残り、html に字が当たる', async () => {
+  it('Noto を選ぶと store と localStorage に残り、html に字が当たり、字の CSS を読み込む', async () => {
     const { wrapper, pinia } = await mountSection();
 
     await wrapper.get('[data-setting="emojiFont"] select').setValue('noto');
@@ -161,11 +169,14 @@ describe('PreferencesSection（環境設定の画面）', () => {
     expect(usePreferencesStore(pinia).values.emojiFont).toBe('noto');
     expect(JSON.parse(localStorage.getItem('preferences')!).values.emojiFont).toBe('noto');
     expect(document.documentElement.style.getPropertyValue('--koyori-emoji-font')).toBe(
-      "'Koyori Noto Color Emoji',",
+      "'Noto Color Emoji',",
+    );
+    expect(document.getElementById('koyori-emoji-font')?.getAttribute('href')).toBe(
+      'https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap',
     );
   });
 
-  it('「すべて既定に戻す」で絵文字の字も OS の既定に戻り、html の字が外れる', async () => {
+  it('「すべて既定に戻す」で絵文字の字も OS の既定に戻り、html の字と字の CSS が外れる', async () => {
     seedSettings({ preferences: { emojiFont: 'noto' } });
     const { wrapper, pinia } = await mountSection();
     expect(wrapper.get<HTMLSelectElement>('[data-setting="emojiFont"] select').element.value).toBe(
@@ -179,6 +190,7 @@ describe('PreferencesSection（環境設定の画面）', () => {
 
     expect(usePreferencesStore(pinia).values.emojiFont).toBe('os');
     expect(document.documentElement.style.getPropertyValue('--koyori-emoji-font')).toBe('');
+    expect(document.getElementById('koyori-emoji-font')).toBeNull();
   });
 
   it('選び肢に無い値が残っていたら、OS の既定として読む', async () => {

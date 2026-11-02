@@ -16,12 +16,12 @@ export const usePreferencesStore = defineStore(
       values.value[key] = value;
     }
 
-    // 絵文字の字は html の CSS 変数で当てる。最初の値は描く前に head の script が当てる
+    // 絵文字の字は html の CSS 変数と、字の CSS の link で当てる。最初の値は描く前に head の script が当てる
     // （emojiFontBootScript）ので、ここでは変えた時と既定に戻した時だけを追う。SSR では document が無い
     if (typeof document !== 'undefined') {
       watch(
         () => values.value.emojiFont,
-        (value) => applyEmojiFont(document.documentElement, value),
+        (value) => applyEmojiFont(document, value),
       );
     }
 
