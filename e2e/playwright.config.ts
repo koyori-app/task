@@ -4,6 +4,14 @@ import { STORAGE_STATE } from './global-setup';
 
 const isCI = !!process.env.CI;
 
+// WebKit catches Safari-only bugs that Chromium never shows. It is not Safari itself,
+// so iOS input zoom and tap feel still need a real device.
+const targets = [
+  { name: 'chromium', device: 'Desktop Chrome' },
+  { name: 'webkit', device: 'Desktop Safari' },
+  { name: 'mobile-safari', device: 'iPhone 15' },
+];
+
 export default defineConfig({
   testDir: './tests',
   use: {
@@ -17,19 +25,21 @@ export default defineConfig({
       name: 'setup',
       testMatch: /auth\.setup\.ts/,
     },
-    // Unauthenticated specs (e.g. the sign-in page render check).
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-      testIgnore: [/auth\.setup\.ts/, /.*\.authenticated\.spec\.ts/],
-    },
-    // Authenticated specs reuse the saved session from the setup project.
-    {
-      name: 'authenticated',
-      use: { ...devices['Desktop Chrome'], storageState: STORAGE_STATE },
-      testMatch: /.*\.authenticated\.spec\.ts/,
-      dependencies: ['setup'],
-    },
+    ...targets.flatMap(({ name, device }) => [
+      // Unauthenticated specs (e.g. the sign-in page render check).
+      {
+        name,
+        use: { ...devices[device] },
+        testIgnore: [/auth\.setup\.ts/, /.*\.authenticated\.spec\.ts/],
+      },
+      // Authenticated specs reuse the saved session from the setup project.
+      {
+        name: `${name}-authenticated`,
+        use: { ...devices[device], storageState: STORAGE_STATE },
+        testMatch: /.*\.authenticated\.spec\.ts/,
+        dependencies: ['setup'],
+      },
+    ]),
   ],
   webServer: [
     {

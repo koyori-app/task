@@ -8,10 +8,11 @@ import {
 } from '../global-setup';
 import { setEmailVerified } from '../scripts/verify-email';
 
-test('user can sign up, verify email, and sign in', async ({ page }) => {
+test('user can sign up, verify email, and sign in', async ({ page }, testInfo) => {
   test.setTimeout(90_000);
 
-  const unique = Date.now();
+  // Browsers run this in parallel against one database, so the timestamp alone can collide.
+  const unique = `${Date.now()}${testInfo.parallelIndex}`;
   const username = `e2euser${unique}`;
   const email = `e2e.signup.${unique}@example.com`;
   const password = 'E2ePassword1!';
