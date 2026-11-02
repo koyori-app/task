@@ -181,8 +181,6 @@ async fn includes_tasks_whose_span_overlaps_the_range_inclusively() {
     let spanning = task(&app, p, todo, u, Some(d(1)), Some(at(12)), None).await;
     let start_at_to = task(&app, p, todo, u, Some(d(25)), Some(at(30)), None).await;
     let start_after = task(&app, p, todo, u, Some(d(26)), Some(at(30)), None).await;
-    // 終点は Soft が Hard より優先する
-    let soft_wins = task(&app, p, todo, u, None, Some(at(11)), Some(at(20))).await;
     let archived = task(&app, p, todo, u, Some(d(20)), None, None).await;
     let deleted = task(&app, p, todo, u, Some(d(20)), None, None).await;
     execute_sql(
@@ -203,13 +201,7 @@ async fn includes_tasks_whose_span_overlaps_the_range_inclusively() {
         got(&body),
         set(&[planned_to, soft_from, hard_from, spanning, start_at_to])
     );
-    for excluded in [
-        planned_after,
-        soft_before,
-        hard_before,
-        start_after,
-        soft_wins,
-    ] {
+    for excluded in [planned_after, soft_before, hard_before, start_after] {
         assert!(!got(&body).contains(&excluded.to_string()));
     }
     // 並びは始点の昇順
@@ -232,6 +224,44 @@ async fn includes_tasks_whose_span_overlaps_the_range_inclusively() {
     assert_eq!(body["range"]["to"], "2026-10-25");
     assert_eq!(body["range"]["timezone"], "UTC");
     assert!(body["next_cursor"].is_null());
+}
+
+#[tokio::test]
+async fn hard_deadline_keeps_the_task_in_range_when_a_soft_deadline_exists() {
+    let mut app = TestApp::new().await;
+    let (user, tp, todo, _) = setup(&mut app).await;
+    let (p, u) = (tp.project_id, user.id);
+    // Soft は期間より前で、Hard だけが期間の端に入る（開始予定日の有無を問わない）
+    let hard_at_from = task(&app, p, todo, u, None, Some(at(5)), Some(at(12))).await;
+    let planned_hard_at_to = task(&app, p, todo, u, Some(d(1)), Some(at(5)), Some(at(25))).await;
+    // Soft〜Hard が期間をまたぐ
+    let spanning = task(&app, p, todo, u, None, Some(at(5)), Some(at(30))).await;
+    // 1 日外れたら入らない
+    let hard_before = task(&app, p, todo, u, None, Some(at(5)), Some(at(11))).await;
+    let soft_after = task(&app, p, todo, u, None, Some(at(26)), Some(at(30))).await;
+
+    let body = get(&app, tp.tenant_id, RANGE).await;
+    assert_eq!(
+        got(&body),
+        set(&[hard_at_from, planned_hard_at_to, spanning])
+    );
+    assert!(!got(&body).contains(&hard_before.to_string()));
+    assert!(!got(&body).contains(&soft_after.to_string()));
+    // 始点と並びは開始予定日・Soft のまま
+    assert_eq!(ids(&body)[0], planned_hard_at_to.to_string());
+
+    // Hard の日付もタイムゾーンで決まる（東京では 10/27、UTC では 10/26）
+    let hard = "2026-10-26T15:30:00Z".parse::<DateTime<Utc>>().unwrap();
+    let zoned = task(&app, p, todo, u, None, Some(at(5)), Some(hard)).await;
+    let tokyo = get(
+        &app,
+        tp.tenant_id,
+        "from=2026-10-27&to=2026-10-27&timezone=Asia%2FTokyo",
+    )
+    .await;
+    assert!(got(&tokyo).contains(&zoned.to_string()));
+    let utc = get(&app, tp.tenant_id, "from=2026-10-27&to=2026-10-27").await;
+    assert!(!got(&utc).contains(&zoned.to_string()));
 }
 
 #[tokio::test]

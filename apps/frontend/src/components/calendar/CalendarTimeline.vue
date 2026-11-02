@@ -141,7 +141,7 @@ const bandLanes = computed(() => {
 type Entry = {
   task: ScheduleTask;
   primary: boolean;
-  /** 開始予定日の無いタスクは締切の点で描く */
+  /** 開始予定日が無く、締切が 1 日に収まるタスクは締切の点で描く */
   point: boolean;
 };
 
@@ -157,7 +157,7 @@ const rows = computed(() => {
   for (const task of withPreview(props.tasks)) {
     const span = taskSpan(task, props.timeZone);
     if (!span) continue;
-    const point = !task.planned_start_on;
+    const point = !task.planned_start_on && span.start === span.end;
     if (!task.assignees.length) {
       const p = place<Entry>({ task, primary: true, point }, span.start, span.end);
       if (p) add(UNASSIGNED_ID, p);
@@ -303,7 +303,7 @@ function hrefOf(task: ScheduleTask) {
 }
 
 function canMove(entry: Entry) {
-  return !entry.point && !!props.tenantId && !saving.value;
+  return !!entry.task.planned_start_on && !!props.tenantId && !saving.value;
 }
 
 /** 確定前の位置を送る。描画中のタスクは移動先を当てた写しなので、比較は元のタスクとする */
