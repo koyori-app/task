@@ -147,7 +147,7 @@ describe('PreferencesSection（環境設定の画面）', () => {
     expect(html).not.toContain('data-hidden-experiments-notice');
   });
 
-  it('「絵文字の字」の選び肢は OS の既定と Noto で、既定は OS の既定', async () => {
+  it('「絵文字の字」の選び肢は OS の既定と Noto と Twemoji で、既定は OS の既定', async () => {
     const { wrapper } = await mountSection();
 
     const select = wrapper.get<HTMLSelectElement>('[data-setting="emojiFont"] select');
@@ -155,6 +155,7 @@ describe('PreferencesSection（環境設定の画面）', () => {
     expect(select.findAll('option').map((option) => option.text())).toEqual([
       'OS の既定',
       'Noto Color Emoji',
+      'Twemoji',
     ]);
     expect(select.element.value).toBe('os');
     expect(document.documentElement.style.getPropertyValue('--koyori-emoji-font')).toBe('');
@@ -176,6 +177,21 @@ describe('PreferencesSection（環境設定の画面）', () => {
     );
   });
 
+  it('Twemoji を選ぶと、この app が配る字の CSS を一つだけ読み込み、Noto の CSS は外れる', async () => {
+    const { wrapper } = await mountSection();
+    const select = wrapper.get('[data-setting="emojiFont"] select');
+
+    await select.setValue('noto');
+    await select.setValue('twemoji');
+
+    expect(document.documentElement.style.getPropertyValue('--koyori-emoji-font')).toBe(
+      "'Koyori Twemoji',",
+    );
+    const links = document.querySelectorAll('#koyori-emoji-font');
+    expect(links).toHaveLength(1);
+    expect(links[0]!.getAttribute('href')).toBe('/fonts/twemoji/twemoji-17.0.3.css');
+  });
+
   it('「すべて既定に戻す」で絵文字の字も OS の既定に戻り、html の字と字の CSS が外れる', async () => {
     seedSettings({ preferences: { emojiFont: 'noto' } });
     const { wrapper, pinia } = await mountSection();
@@ -194,7 +210,7 @@ describe('PreferencesSection（環境設定の画面）', () => {
   });
 
   it('選び肢に無い値が残っていたら、OS の既定として読む', async () => {
-    seedSettings({ preferences: { emojiFont: 'twemoji', showExperiments: true } });
+    seedSettings({ preferences: { emojiFont: 'fluent', showExperiments: true } });
     const { wrapper, pinia } = await mountSection();
 
     expect(usePreferencesStore(pinia).values).toEqual({ showExperiments: true, emojiFont: 'os' });

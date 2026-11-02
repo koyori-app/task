@@ -5,8 +5,9 @@
  * `var(--koyori-emoji-font,)` として入る。OS の既定ではこの変数を置かず、並びは今までと同じになる。
  * コードブロック（等幅の並び）には効かせない（訳は tailwind.css の注釈）。
  *
- * 字の @font-face は Google Fonts の CSS（stylesheet）にあり、選んだ人の画面にだけ読み込む。
- * Google Fonts は browser ごとに描ける形の字を返す（Chromium と Firefox に COLRv1、Safari に OpenType SVG）。
+ * 字の @font-face は選び肢ごとの CSS（stylesheet）にあり、選んだ人の画面にだけ読み込む。
+ * Noto は Google Fonts の CSS で、Google Fonts は browser ごとに描ける形の字を返す（Chromium と Firefox に
+ * COLRv1、Safari に OpenType SVG）。Twemoji はこの app が配る COLRv0 の字（scripts/fonts/build-twemoji.sh）。
  * 既定の CSS に入れないのは、Tailwind の既定の並びの末尾の 'Noto Color Emoji' が Google の字を指してしまい、
  * OS の既定の人まで絵文字の字を取りに行き、OS の字に無い絵文字の見た目も変わるため。
  *
@@ -19,6 +20,13 @@ export const EMOJI_FONT_CHOICES = [
     label: 'Noto Color Emoji',
     family: 'Noto Color Emoji',
     stylesheet: 'https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap',
+  },
+  // 字と CSS は scripts/fonts/build-twemoji.sh で組み、この app から配る（public/fonts/twemoji/）
+  {
+    value: 'twemoji',
+    label: 'Twemoji',
+    family: 'Koyori Twemoji',
+    stylesheet: '/fonts/twemoji/twemoji-17.0.3.css',
   },
 ] as const;
 

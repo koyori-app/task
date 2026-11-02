@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { runInThisContext } from 'node:vm';
@@ -40,6 +40,7 @@ describe('絵文字の字の選び肢', () => {
     expect(PREFERENCE_TABLE.emojiFont.choices.map((choice) => choice.value)).toEqual([
       'os',
       'noto',
+      'twemoji',
     ]);
   });
 
@@ -55,7 +56,7 @@ describe('絵文字の字の選び肢', () => {
     );
   });
 
-  it.each(['twemoji', '', null, undefined, true, 1, 'toString'])(
+  it.each(['fluent', '', null, undefined, true, 1, 'toString'])(
     '選び肢に無い値 %j は字も字の CSS も指定しない',
     (value) => {
       expect(emojiFontStackPrefix(value)).toBeNull();
@@ -153,7 +154,7 @@ describe('描く前に当てる script（emojiFontBootScript）', () => {
 
   it.each([
     ['OS の既定', JSON.stringify({ values: { emojiFont: 'os' } })],
-    ['選び肢に無い値', JSON.stringify({ values: { emojiFont: 'twemoji' } })],
+    ['選び肢に無い値', JSON.stringify({ values: { emojiFont: 'fluent' } })],
     ['prototype の名前', JSON.stringify({ values: { emojiFont: 'toString' } })],
     ['項目の無い古い値', JSON.stringify({ values: { showExperiments: true } })],
     ['壊れた JSON', '{'],
@@ -175,5 +176,103 @@ describe('描く前に当てる script（emojiFontBootScript）', () => {
 
   it('script の中で </script> が閉じない', () => {
     expect(emojiFontBootScript('preferences')).not.toMatch(/<\/script/i);
+  });
+});
+
+describe('Twemoji の字（public/fonts/twemoji/）', () => {
+  const stylesheet = emojiFontStylesheet('twemoji')!;
+  const css = readText(resolve(frontendRoot, 'public', stylesheet.slice(1)));
+  const range = /unicode-range:\s*([^;]+);/.exec(css)?.[1] ?? '';
+  const points = new Set<number>();
+  for (const part of range.split(',')) {
+    const [from, to] = part.trim().replace(/^U\+/i, '').split('-');
+    const start = Number.parseInt(from!, 16);
+    const end = to === undefined ? start : Number.parseInt(to, 16);
+    for (let point = start; point <= end; point += 1) points.add(point);
+  }
+
+  it('Twemoji は選び肢の一行で、独自の名で並びに入り、この app が配る CSS を指す', () => {
+    expect(emojiFontStackPrefix('twemoji')).toBe("'Koyori Twemoji',");
+    expect(stylesheet).toMatch(/^\/fonts\/twemoji\/twemoji-[\d.]+\.css$/);
+    expect(existsSync(resolve(frontendRoot, 'public', stylesheet.slice(1))), stylesheet).toBe(true);
+  });
+
+  it('名は Tailwind の既定の並びの名とぶつからない', () => {
+    const tailwindFonts = themeValue(tailwindThemeCss, '--font-sans')!
+      .split(',')
+      .map((font) => font.trim().replace(/^['"]|['"]$/g, ''));
+    expect(tailwindFonts).not.toContain('Koyori Twemoji');
+    expect(css).toContain("font-family: 'Koyori Twemoji';");
+  });
+
+  it('@font-face は同じ所の WOFF2 を指し、外の URL に繋がない', () => {
+    const src = /src:\s*url\('([^']+)'\) format\('woff2'\);/.exec(css)?.[1] ?? '';
+    expect(src).toMatch(/^\/fonts\/twemoji\/twemoji-[\d.]+\.woff2$/);
+    expect(existsSync(resolve(frontendRoot, 'public', src.slice(1))), src).toBe(true);
+    expect(css).not.toMatch(/https?:\/\/(?!github\.com|creativecommons\.org)/);
+  });
+
+  it('@font-face の注釈に名（Twitter, Inc. and other contributors、jdecked、CC-BY 4.0）を置く', () => {
+    expect(css).toContain('Twitter, Inc. and other contributors');
+    expect(css).toContain('jdecked/twemoji');
+    expect(css).toContain('CC-BY 4.0');
+  });
+
+  it('unicode-range は keycap と ZWJ と tag の旗に要る字を持ち、数字を削らない', () => {
+    const needed = [
+      ...Array.from({ length: 10 }, (_, i) => 0x30 + i),
+      0x23,
+      0x2a,
+      0xfe0f,
+      0x20e3,
+      0x200d,
+      0x1f3f4,
+      0xe0067,
+      0xe007f,
+    ];
+    for (const point of needed) {
+      expect(points.has(point), `U+${point.toString(16)}`).toBe(true);
+    }
+  });
+});
+
+describe('Twemoji の組み直しの手順（scripts/fonts/build-twemoji.sh）', () => {
+  const script = readText(resolve(frontendRoot, 'scripts/fonts/build-twemoji.sh'));
+  const copies = readText(resolve(frontendRoot, 'scripts/fonts/twemoji-vs16-copies.txt'))
+    .split('\n')
+    .filter((line) => line && !line.startsWith('#'))
+    .map((line) => line.split(' <- ')[0]);
+
+  it('元の版と Emoji の版と道具の版を固定する', () => {
+    expect(script).toMatch(/^TAG=v17\.0\.3$/m);
+    expect(script).toContain('https://www.unicode.org/Public/17.0.0/emoji/emoji-test.txt');
+    expect(script).toMatch(/^EMOJI_TEST_SHA256=[0-9a-f]{64}$/m);
+    expect(script).toContain('twemoji-requirements.txt');
+    expect(script).toMatch(/^export SOURCE_DATE_EPOCH=\d+$/m);
+  });
+
+  it('emoji-test.txt から VS16 の有る無しを埋める写しを足す手順を持つ', () => {
+    for (const status of ['fully-qualified', 'minimally-qualified', 'unqualified']) {
+      expect(script).toContain(`'${status}'`);
+    }
+    expect(script).toContain('shutil.copyfile');
+  });
+
+  it('十二の keycap（0 から 9、#、*）の写しを足している', () => {
+    const keycaps = ['0023', '002A', ...Array.from({ length: 10 }, (_, i) => `003${i}`)].map(
+      (base) => `${base} FE0F 20E3`,
+    );
+    for (const keycap of keycaps) expect(copies).toContain(keycap);
+  });
+
+  it('keycap の他に、FE0F 抜きの名で配られる絵文字（❤️ など）にも写しを足している', () => {
+    expect(copies).toContain('2764 FE0F');
+    expect(copies.length).toBeGreaterThan(12);
+  });
+
+  it('VS16 入りの名で配られる ZWJ の並びに、VS16 を抜いた写しを足している（❤️‍🔥 と 🏳️‍🌈）', () => {
+    // Chromium と WebKit は並びの途中の VS16 を落として組むことがあり、この写しが無いと二つの絵に割れる
+    expect(copies).toContain('2764 200D 1F525');
+    expect(copies).toContain('1F3F3 200D 1F308');
   });
 });
