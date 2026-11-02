@@ -23,7 +23,9 @@ const emit = defineEmits<{
 function onPlainClick(event: MouseEvent) {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
     return;
+  // vike は document の click でリンクを横取りし defaultPrevented を見ないので、伝播も止める
   event.preventDefault();
+  event.stopPropagation();
   emit('select', props.seqId);
 }
 </script>
