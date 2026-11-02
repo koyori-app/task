@@ -106,13 +106,21 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     savedField.value = null;
   }
   onScopeDispose(clearSavedNotice);
-  // 別のタスクへ移ったら前のタスクの通知を残さない
-  watch(taskId, clearSavedNotice);
   const selectedStatusId = ref('');
   const optimisticTask = ref<Partial<TaskDetail>>({});
   const pendingFieldRevisions = ref<Partial<Record<MutatingField, number>>>({});
-  const appliedFieldRevisions: Partial<Record<MutatingField, number>> = {};
+  // タスクとフィールドの組で持つ。移った後に完了する mutation も前のタスクのキャッシュへ書くので、
+  // 移動時に消すと古い保存で巻き戻してしまい、共有すると別のタスクのリビジョンと比べてしまう
+  const appliedFieldRevisions = new Map<string, number>();
   let nextMutationRevision = 0;
+  // 別のタスクへ移ったら前のタスクの通知・楽観更新・進行中フラグを残さない。
+  // 移る前の mutation はリビジョンが pendingFieldRevisions と一致しなくなり、移った先に作用しない。
+  // この一致を保つため nextMutationRevision は戻さない
+  watch(taskId, () => {
+    clearSavedNotice();
+    optimisticTask.value = {};
+    pendingFieldRevisions.value = {};
+  });
 
   const taskQueryKey = computed(
     () =>
@@ -186,8 +194,9 @@ export function useTaskDetail(params: UseTaskDetailParams) {
   });
 
   watch(
-    () => taskQuery.data.value?.status_id,
-    (statusId) => {
+    // 移動先と status_id が同じだと値が変わらないので、前のタスクの選択を残さないよう taskId も見る
+    [() => taskQuery.data.value?.status_id, taskId],
+    ([statusId]) => {
       if (statusId) selectedStatusId.value = statusId;
     },
     { immediate: true },
@@ -303,9 +312,9 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     // mutation 開始時点の key。ペイン切替後の完了でも対象タスクのキャッシュに書くための固定値
     queryKey: typeof taskQueryKey.value,
   ) {
-    const appliedRevision = appliedFieldRevisions[field] ?? 0;
-    if (revision > appliedRevision) {
-      appliedFieldRevisions[field] = revision;
+    const appliedKey = `${queryKey[2].params.path.id}:${field}`;
+    if (revision > (appliedFieldRevisions.get(appliedKey) ?? 0)) {
+      appliedFieldRevisions.set(appliedKey, revision);
       // 状態を変えると backend が completed_at も書き換える（完了へ移れば入り、出れば空になる）。
       // 期限の遅れはこれで数えるので、状態と一緒に応答から取る
       queryClient.setQueryData<TaskDetail | null>(queryKey, (current) =>
