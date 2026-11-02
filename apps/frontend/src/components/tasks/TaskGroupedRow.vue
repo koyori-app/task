@@ -332,7 +332,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
           v-else-if="deadline"
           type="button"
           class="inline-flex items-center gap-1.5 rounded px-1 py-0.5 break-keep hover:bg-muted"
-          :class="deadline.overdue ? 'text-red-500' : 'text-muted-foreground'"
+          :class="deadline.overdue ? 'text-destructive' : 'text-muted-foreground'"
           :disabled="isBusy"
           @click="startEditingDeadline"
         >
@@ -353,19 +353,23 @@ function selectFromKeyboard(event: KeyboardEvent) {
 
       <!-- 優先度 -->
       <div class="px-2">
-        <!-- アイコンと文字の両方に優先度の色を載せる（モックと同じ） -->
+        <!-- 優先度の色は旗だけに載せる。文字に載せると「中」や「高」が読めない -->
         <Dropdown
           variant="ghost"
           top-layer
-          class="[&>button]:text-(--priority-color)"
-          :style="{ '--priority-color': PRIORITY_CONFIG[task.priority].color }"
           :disabled="isBusy"
           ariaLabel="優先度"
           :label="PRIORITY_CONFIG[task.priority].label"
           :items="priorityItems"
           :on-select="(value: string) => emit('update:priority', value as TaskResponse['priority'])"
         >
-          <template #icon><PhFlag class="size-4" aria-hidden="true" /></template>
+          <template #icon>
+            <PhFlag
+              class="size-4"
+              :style="{ color: PRIORITY_CONFIG[task.priority].color }"
+              aria-hidden="true"
+            />
+          </template>
         </Dropdown>
       </div>
 

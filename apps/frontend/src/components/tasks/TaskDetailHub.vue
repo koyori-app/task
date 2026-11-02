@@ -917,12 +917,11 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 <TaskPropertyRow label="優先度" :icon="Flag">
                   <!--
                     ステータスと同じピル + メニューで変える（#665 の native select から
-                    参照デザインへ載せ替え）。旗と文字色は優先度ごとの色で出す。
+                    参照デザインへ載せ替え）。優先度の色は旗だけに載せる。文字に載せると
+                    「中」や「高」が読めない。
                   -->
                   <Dropdown
                     top-layer
-                    class="[&>button]:text-(--priority-color)"
-                    :style="{ '--priority-color': PRIORITY_CONFIG[task.priority].color }"
                     label="優先度"
                     :icon="null"
                     :disabled="priorityUpdating"
@@ -933,7 +932,11 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                   >
                     <template #trigger>
                       <span class="flex items-center gap-1.5">
-                        <Flag class="size-4" aria-hidden="true" />
+                        <Flag
+                          class="size-4"
+                          :style="{ color: PRIORITY_CONFIG[task.priority].color }"
+                          aria-hidden="true"
+                        />
                         <span class="truncate">{{ PRIORITY_CONFIG[task.priority].label }}</span>
                       </span>
                     </template>

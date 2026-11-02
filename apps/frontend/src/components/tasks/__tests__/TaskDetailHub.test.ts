@@ -127,6 +127,14 @@ describe('TaskDetailHub', () => {
     expect(wrapper.emitted('change:priority')).toEqual([['High']]);
   });
 
+  it('優先度の色は旗だけに載せ、文字には載せない', () => {
+    const wrapper = mountWithPriorityMenu();
+
+    expect(wrapper.html()).not.toContain('--priority-color');
+    const flag = wrapper.get('button[aria-label="優先度"] svg');
+    expect(flag.attributes('style')).toContain('color: #eab308');
+  });
+
   it('本文のスクロール領域で切れないよう、メニューはどれもトップレイヤーに出す', () => {
     const wrapper = mountWithPriorityMenu({ statuses, projectLabels: [featureLabel] });
 

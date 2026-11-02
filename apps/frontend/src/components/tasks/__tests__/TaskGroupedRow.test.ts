@@ -100,6 +100,16 @@ describe('TaskGroupedRow のサブタスク導線', () => {
   });
 });
 
+describe('TaskGroupedRow の優先度の表示', () => {
+  it('優先度の色は旗だけに載せ、文字には載せない', () => {
+    const wrapper = mountRow();
+
+    expect(wrapper.html()).not.toContain('--priority-color');
+    const flag = wrapper.get('button[aria-label="優先度"] svg');
+    expect(flag.attributes('style')).toContain('color: #eab308');
+  });
+});
+
 describe('TaskGroupedRow の期限の表示', () => {
   const done: StatusResponse = {
     ...status,
@@ -146,7 +156,7 @@ describe('TaskGroupedRow の期限の表示', () => {
     vi.setSystemTime(new Date('2026-07-14T12:00:00'));
     const wrapper = mountWithDeadline(done.id, '2026-07-10T00:00:00');
     const button = deadlineButton(wrapper, '7月10日');
-    expect(button.classes()).not.toContain('text-red-500');
+    expect(button.classes()).not.toContain('text-destructive');
     expect(wrapper.text()).not.toContain('超過');
   });
 
@@ -155,7 +165,7 @@ describe('TaskGroupedRow の期限の表示', () => {
     vi.setSystemTime(new Date('2026-07-14T12:00:00'));
     const wrapper = mountWithDeadline(done.id, '2026-07-16T00:00:00');
     const button = deadlineButton(wrapper, '7月16日');
-    expect(button.classes()).not.toContain('text-red-500');
+    expect(button.classes()).not.toContain('text-destructive');
   });
 
   it('期限より後の日に完了した task は、遅れた日数を中立で添える', () => {
@@ -163,7 +173,7 @@ describe('TaskGroupedRow の期限の表示', () => {
     vi.setSystemTime(new Date('2026-07-20T12:00:00'));
     const wrapper = mountWithDeadline(done.id, '2026-07-10T00:00:00', '2026-07-14T09:00:00');
     const button = deadlineButton(wrapper, '7月10日（4日超過）');
-    expect(button.classes()).not.toContain('text-red-500');
+    expect(button.classes()).not.toContain('text-destructive');
   });
 
   it('期限の前に完了した task は、completed_at があっても期限の日付だけを出す', () => {
@@ -171,7 +181,7 @@ describe('TaskGroupedRow の期限の表示', () => {
     vi.setSystemTime(new Date('2026-07-20T12:00:00'));
     const wrapper = mountWithDeadline(done.id, '2026-07-10T00:00:00', '2026-07-06T09:00:00');
     const button = deadlineButton(wrapper, '7月10日');
-    expect(button.classes()).not.toContain('text-red-500');
+    expect(button.classes()).not.toContain('text-destructive');
   });
 
   it('completed_at が空の完了した task は、今日から数えず日付だけを出す', () => {
@@ -187,6 +197,6 @@ describe('TaskGroupedRow の期限の表示', () => {
     vi.setSystemTime(new Date('2026-07-14T12:00:00'));
     const wrapper = mountWithDeadline(status.id, '2026-07-10T00:00:00');
     const button = deadlineButton(wrapper, '4日超過');
-    expect(button.classes()).toContain('text-red-500');
+    expect(button.classes()).toContain('text-destructive');
   });
 });
