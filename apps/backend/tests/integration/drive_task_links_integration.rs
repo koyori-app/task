@@ -999,3 +999,45 @@ async fn saving_a_project_file_drops_body_links_outside_its_project() {
         app.cleanup_user(user.id).await;
     }
 }
+
+/// filename も Content-Type も無い `file` の後ろに `name=notes.md` を送っても、表示名から
+/// MIME を決めて Markdown として扱い、本文のタスク参照を結ぶ（フィールドの順序に依らない）。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn upload_treats_bare_file_as_markdown_by_name_sent_after_it() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let p = project(&app, tp.project_id).await;
+    let t1 = insert_task(&app, &p, owner.id, 1).await;
+    login(&mut app, &owner).await;
+
+    let form = reqwest::multipart::Form::new()
+        .part(
+            "file",
+            reqwest::multipart::Part::bytes(format!("{}-1 を参照", p.key).into_bytes()),
+        )
+        .text("name", "notes.md");
+    let response = app
+        .client()
+        .post(format!(
+            "{}/v1/tenants/{}/drive/files",
+            app.base_url(),
+            tp.tenant_id
+        ))
+        .multipart(form)
+        .send()
+        .await
+        .expect("upload request");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let uploaded: serde_json::Value = response.json().await.expect("upload json");
+    assert_eq!(uploaded["name"], "notes.md");
+    assert_eq!(uploaded["mime_type"], "text/markdown");
+    assert_eq!(
+        links(&app, file_id_of(&uploaded)).await,
+        HashMap::from([(t1, "body".into())]),
+        "後ろの name で Markdown と分かった本文からも参照を結ぶ"
+    );
+
+    app.cleanup_user(owner.id).await;
+}
