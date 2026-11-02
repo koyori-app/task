@@ -22,16 +22,11 @@ const emit = defineEmits<{
         <span class="shrink-0 font-mono text-xs text-muted-foreground">
           {{ taskSeqKey(projectKey, task.seq_id) }}
         </span>
-        <!--
-          vike は document の click でリンクを横取りし defaultPrevented を見ないので、伝播も止める
-          （ペインでは遷移させず open-task-ref で切り替えるため）
-        -->
         <TaskTitleLink
           :tenant-display-id="tenantDisplayId"
           :project-key="projectKey"
           :seq-id="task.seq_id"
           :title="task.title"
-          @click.stop
           @select="emit('select', $event)"
         />
       </li>
