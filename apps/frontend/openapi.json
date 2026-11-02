@@ -9845,7 +9845,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/UserSummary"
+                    "$ref": "#/components/schemas/AssignableUserResponse"
                   }
                 }
               }
@@ -23914,6 +23914,31 @@
               "type": "string",
               "format": "uuid"
             }
+          }
+        }
+      },
+      "AssignableUserResponse": {
+        "type": "object",
+        "description": "担当者候補。`UserSummary` に、このテナントでの部署・チームを足したもの。\n\n部署・チームはプロフィールと同じ主体にしか返さない（`read:tenant` を持ち、テナントに\n入れる人。客分やプロジェクト限定の PAT には見せない）。それ以外の主体では全員 null",
+        "required": ["id", "username"],
+        "properties": {
+          "avatar_url": {
+            "type": ["string", "null"]
+          },
+          "department": {
+            "type": ["string", "null"],
+            "description": "このテナントでの部署。未設定・所属行の無いオーナー・読めない主体では null"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "team": {
+            "type": ["string", "null"],
+            "description": "このテナントでのチーム。未設定・所属行の無いオーナー・読めない主体では null"
+          },
+          "username": {
+            "type": "string"
           }
         }
       },

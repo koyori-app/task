@@ -6,6 +6,38 @@ use validator::Validate;
 use crate::or_unknown::OrUnknown;
 use crate::users::UserSummary;
 use entity::project_members::{self, ProjectRole};
+use entity::{tenant_members, users};
+
+/// 担当者候補。`UserSummary` に、このテナントでの部署・チームを足したもの。
+///
+/// 部署・チームはプロフィールと同じ主体にしか返さない（`read:tenant` を持ち、テナントに
+/// 入れる人。客分やプロジェクト限定の PAT には見せない）。それ以外の主体では全員 null
+#[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
+pub struct AssignableUserResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    pub username: String,
+    #[schema(nullable)]
+    pub avatar_url: Option<String>,
+    /// このテナントでの部署。未設定・所属行の無いオーナー・読めない主体では null
+    #[schema(nullable)]
+    pub department: Option<String>,
+    /// このテナントでのチーム。未設定・所属行の無いオーナー・読めない主体では null
+    #[schema(nullable)]
+    pub team: Option<String>,
+}
+
+impl AssignableUserResponse {
+    pub fn from_parts(user: users::Model, member: Option<&tenant_members::Model>) -> Self {
+        Self {
+            id: user.id,
+            username: user.username,
+            avatar_url: user.avatar_url,
+            department: member.and_then(|m| m.department.clone()),
+            team: member.and_then(|m| m.team.clone()),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
 pub struct ProjectMemberResponse {

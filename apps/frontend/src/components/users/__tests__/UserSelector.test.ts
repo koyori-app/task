@@ -130,6 +130,99 @@ describe('UserSelector の選ぶ・外す', () => {
   });
 });
 
+describe('UserSelector の部署・チーム', () => {
+  const grouped = [
+    { id: 'u1', username: 'sousuke', department: '開発', team: '基盤' },
+    { id: 'u2', username: 'yupix', department: '開発', team: null },
+    { id: 'u3', username: 'kousuke', department: '営業', team: '基盤' },
+    { id: 'u4', username: 'alice' },
+  ];
+  const DEV = '部署「開発」の全員';
+  const CORE = 'チーム「基盤」の全員';
+
+  it('重複を除いた行を候補の後ろに出す（部署、チームの順）', () => {
+    const { names } = mountSelector({ users: grouped, currentUserId: 'u2' });
+
+    expect(names()).toEqual([
+      'yupix（自分）',
+      'alice',
+      'kousuke',
+      'sousuke',
+      '部署「営業」の全員',
+      DEV,
+      CORE,
+    ]);
+  });
+
+  it('行を選ぶと属する全員が選択に加わる', async () => {
+    const { wrapper, option } = mountSelector({ users: grouped });
+
+    option(DEV).click();
+    await flushPromises();
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['u1', 'u2']]]);
+    expect(wrapper.emitted('toggle')).toEqual([
+      ['u1', true],
+      ['u2', true],
+    ]);
+    expect(option('sousuke').getAttribute('aria-selected')).toBe('true');
+    expect(option('yupix').getAttribute('aria-selected')).toBe('true');
+    expect(option('alice').getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('選択済みの人は重ねず、候補に無い選択は残す', async () => {
+    const { wrapper, option } = mountSelector({ users: grouped, modelValue: ['gone', 'u1'] });
+
+    option(CORE).click();
+    await flushPromises();
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['gone', 'u1', 'u3']]]);
+    expect(wrapper.emitted('toggle')).toEqual([['u3', true]]);
+  });
+
+  it('行そのものは選択に残らず、続けて別の行も一人ずつの解除もできる', async () => {
+    const { wrapper, option } = mountSelector({ users: grouped });
+
+    option(DEV).click();
+    await flushPromises();
+    expect(option(DEV).getAttribute('aria-selected')).toBe('false');
+
+    option(CORE).click();
+    await flushPromises();
+    expect(wrapper.emitted('update:modelValue')?.[1]).toEqual([['u1', 'u2', 'u3']]);
+
+    option('sousuke').click();
+    await flushPromises();
+    expect(wrapper.emitted('update:modelValue')?.[2]).toEqual([['u3', 'u2']]);
+    expect(wrapper.emitted('toggle')?.at(-1)).toEqual(['u1', false]);
+  });
+
+  it('部署・チームの名で行を探せる', async () => {
+    const { wrapper, names } = mountSelector({ users: grouped });
+
+    await wrapper.get('input[type="search"]').setValue('開発');
+
+    expect(names()).toEqual([DEV]);
+  });
+
+  it('部署・チームが無い候補だけなら行を出さない', () => {
+    const { names } = mountSelector({
+      users: [
+        { id: 'u1', username: 'sousuke', department: null, team: null },
+        { id: 'u2', username: 'yupix' },
+      ],
+    });
+
+    expect(names()).toEqual(['sousuke', 'yupix']);
+  });
+
+  it('単数では行を出さない', () => {
+    const { names } = mountSelector({ users: grouped, multiple: false });
+
+    expect(names()).toEqual(['alice', 'kousuke', 'sousuke', 'yupix']);
+  });
+});
+
 describe('UserSelector の状態', () => {
   it('取得中は読み込み中を出し、「いません」と混ぜない', () => {
     const { wrapper } = mountSelector({

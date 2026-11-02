@@ -4,13 +4,15 @@ import { useFocusWithin } from '@vueuse/core';
 import { Picker } from '@koyori-app/ui-vue';
 
 import type { SelectableUser, UserSelectorState } from '@/components/users/types';
-import { orderUsersForPicker } from '@/lib/user-search';
+import { groupUsersForPicker, orderUsersForPicker } from '@/lib/user-search';
 
 /**
  * 利用者を選ぶ部品。利用者を選ぶ所は全てこれを通す（中身は koyori の Picker）。
  *
  * - 候補は自分を先頭に、その他は名の順。自分の名には「（自分）」を添える。絞り込みは名の部分一致
  * - 単数（`multiple=false`）では選ぶと閉じ、複数では開いたまま続けて選べる
+ * - 複数では候補の後ろに部署・チームの行を出す。選ぶと属する候補全員が選択に加わる。行そのものは
+ *   選択に持たないので、付けた人を外すときは一人ずつ外す
  * - トリガーの中身を替える呼び手は `#trigger` で描く（Picker のボタンの内側に入る）
  * - 保存中（`disabled`）は選択を受けない。Picker の disabled は開いた一覧を隠すので、フォーカスが
  *   中にある間（開いている間）は渡さない。一人ずつ保存する担当者で、選ぶたびに一覧が閉じてしまう
@@ -37,13 +39,20 @@ const emit = defineEmits<{
   toggle: [userId: string, checked: boolean];
 }>();
 
-const items = computed(() =>
-  orderUsersForPicker(props.users, [], props.currentUserId).map((user) => ({
+const groups = computed(() => (props.multiple ? groupUsersForPicker(props.users) : []));
+// 部署・チームの行は後ろに置く。前に置くと、一人を選ぶ（自分を担当にするなど）ときの並びが押し下がる
+const items = computed(() => [
+  ...orderUsersForPicker(props.users, [], props.currentUserId).map((user) => ({
     value: user.id,
     label: user.id === props.currentUserId ? `${user.username}（自分）` : user.username,
     src: user.avatar_url || undefined,
   })),
-);
+  ...groups.value.map(({ value, label, userIds }) => ({
+    value,
+    label,
+    description: `${userIds.length}人`,
+  })),
+]);
 const userIds = computed(() => new Set(props.users.map((user) => user.id)));
 const { focused } = useFocusWithin(useTemplateRef('picker'));
 
@@ -57,8 +66,16 @@ watch([() => props.modelValue, () => props.disabled], ([ids, disabled]) => {
 function onSelectionChange(ids: string[]) {
   if (props.disabled) return;
   const before = value.value;
+  // 部署・チームの行は属する候補に開く。既に選んだ人と重なるので重複を除く
+  const picked = [
+    ...new Set(
+      ids.flatMap((id) => groups.value.find((group) => group.value === id)?.userIds ?? [id]),
+    ),
+  ];
   // Picker は候補に無い id（プロジェクトを外れた担当者など）を落として返す。複数では外さずに残す
-  const next = props.multiple ? [...before.filter((id) => !userIds.value.has(id)), ...ids] : ids;
+  const next = props.multiple
+    ? [...before.filter((id) => !userIds.value.has(id)), ...picked]
+    : picked;
   value.value = next;
   for (const id of next) if (!before.includes(id)) emit('toggle', id, true);
   for (const id of before) if (!next.includes(id)) emit('toggle', id, false);

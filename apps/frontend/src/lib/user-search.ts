@@ -51,3 +51,34 @@ export function orderUsersForPicker<T extends NamedUser>(
   const rank = (user: T) => (selected.has(user.id) ? 0 : user.id === currentUserId ? 1 : 2);
   return [...users].sort((a, b) => rank(a) - rank(b) || collator.compare(a.username, b.username));
 }
+
+type AffiliatedUser = { id: string; department?: string | null; team?: string | null };
+
+/** 候補をまとめて選ぶ部署・チームの組。 */
+export type UserGroup = { value: string; label: string; userIds: string[] };
+
+/**
+ * 候補を部署・チームでまとめる。部署、チームの順で、各々は名の順（日本語の照合）。
+ * 名は完全一致で束ねる（「開発」と「開発部」は別の組）。値の無い者はどの組にも入らない。
+ * 読み上げに補足は載らないので、何を選ぶ行かは label だけで分かるようにする。
+ */
+export function groupUsersForPicker(users: readonly AffiliatedUser[]): UserGroup[] {
+  const groupsOf = (kind: string, nameOf: (user: AffiliatedUser) => string | null | undefined) => {
+    const idsByName = new Map<string, string[]>();
+    for (const user of users) {
+      const name = nameOf(user);
+      if (name) idsByName.set(name, [...(idsByName.get(name) ?? []), user.id]);
+    }
+    return [...idsByName]
+      .sort(([a], [b]) => collator.compare(a, b))
+      .map(([name, userIds]) => ({
+        value: `group:${kind}:${name}`,
+        label: `${kind}「${name}」の全員`,
+        userIds,
+      }));
+  };
+  return [
+    ...groupsOf('部署', (user) => user.department),
+    ...groupsOf('チーム', (user) => user.team),
+  ];
+}

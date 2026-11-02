@@ -23,7 +23,6 @@ use entity::{
     project_members, projects, scopes::Scope, task_watchers, tasks, tenant_members, tenants, users,
 };
 use payload::project_members::*;
-use payload::users::UserSummary;
 use service::access::assignable_user_ids;
 
 #[axum::debug_handler]
@@ -39,7 +38,7 @@ use service::access::assignable_user_ids;
         AssignableUsersQuery,
     ),
     responses(
-        (status = 200, description = "担当者候補", body = [UserSummary]),
+        (status = 200, description = "担当者候補", body = [AssignableUserResponse]),
         CrudErrors,
     )
 )]
@@ -67,7 +66,7 @@ pub async fn list_assignable_users(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Query(query): Query<AssignableUsersQuery>,
-) -> Result<Json<Vec<UserSummary>>, AppError> {
+) -> Result<Json<Vec<AssignableUserResponse>>, AppError> {
     match &query.username {
         // 読み書きどちらかがあればよい（write:task だけの PAT も名前で指せる）
         Some(_) => auth
@@ -90,13 +89,39 @@ pub async fn list_assignable_users(
         .await?;
     // 突き合わせは DB ではなくここで行う。SQL の lower() と Rust の大文字小文字の
     // 扱いがずれると、CLI が名前で引けたり引けなかったりする
-    let users = users
+    let users: Vec<users::Model> = users
         .into_iter()
         .filter(|user| match &query.username {
             Some(username) => user.username.eq_ignore_ascii_case(username),
             None => true,
         })
-        .map(UserSummary::from)
+        .collect();
+    // 部署・チームはプロフィール（`get_user_profile`）と同じ条件で返す。この口は客分と
+    // `read:tenant` の無い PAT も通るので、絞らないと読めないはずの所属がここから読める
+    let can_read_org = auth.require_scope(Scope::ReadTenant).is_ok()
+        && match auth.ensure_tenant_access(&state, tenant_id, None).await {
+            Ok(()) => true,
+            Err(AppError::Forbidden | AppError::ForbiddenDetail(_)) => false,
+            Err(error) => return Err(error),
+        };
+    let members: HashMap<Uuid, tenant_members::Model> = if can_read_org {
+        tenant_members::Entity::find()
+            .filter(tenant_members::Column::TenantId.eq(tenant_id))
+            .filter(tenant_members::Column::UserId.is_in(users.iter().map(|user| user.id)))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|member| (member.user_id, member))
+            .collect()
+    } else {
+        HashMap::new()
+    };
+    let users = users
+        .into_iter()
+        .map(|user| {
+            let member = members.get(&user.id);
+            AssignableUserResponse::from_parts(user, member)
+        })
         .collect();
     Ok(Json(users))
 }

@@ -2,10 +2,10 @@
 
 use payload::labels::LabelResponse;
 use payload::milestones::MilestoneResponse;
+use payload::project_members::AssignableUserResponse;
 use payload::projects::ProjectResponse;
 use payload::sprints::SprintResponse;
 use payload::statuses::ProjectStatusResponse;
-use payload::users::UserSummary;
 use uuid::Uuid;
 
 use crate::api::ApiClient;
@@ -228,7 +228,10 @@ pub async fn resolve_sprint_id(api: &ApiClient, project_id: Uuid, name: &str) ->
     )
 }
 
-pub async fn list_assignable_users(api: &ApiClient, project_id: Uuid) -> Result<Vec<UserSummary>> {
+pub async fn list_assignable_users(
+    api: &ApiClient,
+    project_id: Uuid,
+) -> Result<Vec<AssignableUserResponse>> {
     list_under_project(api, project_id, "assignable-users", &[]).await
 }
 
@@ -241,7 +244,7 @@ pub async fn resolve_user_id(api: &ApiClient, project_id: Uuid, name: &str) -> R
     if let Ok(uuid) = Uuid::parse_str(name) {
         return Ok(uuid);
     }
-    let matched: Vec<UserSummary> = list_under_project(
+    let matched: Vec<AssignableUserResponse> = list_under_project(
         api,
         project_id,
         "assignable-users",

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ref, nextTick } from 'vue';
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
+import type { components } from '@/generated/api';
 
 const isHydrated = ref(true);
 const isPending = ref(false);
@@ -93,7 +94,8 @@ const labels = [
 ];
 
 /** 担当者の候補。`assignable-users` はメンバー行ではなく利用者そのものを返す */
-const members = [
+type AssignableUser = components['schemas']['AssignableUserResponse'];
+const members: AssignableUser[] = [
   { id: 'user-1', username: 'yupix', avatar_url: null },
   { id: 'user-2', username: 'sousuke', avatar_url: null },
 ];
@@ -879,6 +881,32 @@ describe('CreateTaskDialog assignee selection', () => {
 
     expect(mutateAsync.mock.calls[0][0].body.assignees).toEqual([
       { user_id: 'user-1', role: 'primary' },
+    ]);
+    wrapper.unmount();
+  });
+
+  it('部署を選ぶと属する全員を assignees として作成リクエストに含める', async () => {
+    const wrapper = mountDialog(queryClient, {
+      members: [
+        { id: 'user-1', username: 'yupix', avatar_url: null, department: '開発' },
+        { id: 'user-2', username: 'sousuke', avatar_url: null, department: '開発' },
+        { id: 'user-3', username: 'kousuke', avatar_url: null, department: '営業' },
+      ],
+    });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('部署でまとめて作成');
+
+    memberButton('部署「開発」の全員').click();
+    await nextTick();
+    expect(assigneeTrigger().textContent).toContain('yupix');
+    expect(assigneeTrigger().textContent).toContain('sousuke');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toEqual([
+      { user_id: 'user-1', role: 'primary' },
+      { user_id: 'user-2', role: 'primary' },
     ]);
     wrapper.unmount();
   });

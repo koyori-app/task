@@ -23,6 +23,8 @@ type UpdateTaskRequest = components['schemas']['UpdateTaskRequest'];
 /** 一覧の行から直接変えられる項目。詳細を開かずに済ませたいものだけを載せる。 */
 export type TaskRowField = 'status_id' | 'priority' | 'soft_deadline' | 'label_ids' | 'assignees';
 
+type AssigneeChange = { userId: string; checked: boolean };
+
 /** 作成時にその場で決められる項目。未指定は API の既定に任せる。 */
 export type CreateTaskInput = {
   title: string;
@@ -65,6 +67,8 @@ export function useTaskRowMutations(params: TaskRowMutationsParams) {
   const creatingStatusIds = ref<Record<string, boolean>>({});
   /** グループごとの作成失敗。追加行の下に出す。 */
   const createErrors = ref<Record<string, string | undefined>>({});
+  /** 送信中の担当者の変更（タスク ID ごと）。 */
+  const assigneeChanges = new Map<string, AssigneeChange[]>();
 
   function pathParams(taskId: string) {
     return { tenant_id: tenantId.value, project_id: projectId.value, id: taskId };
@@ -141,31 +145,56 @@ export function useTaskRowMutations(params: TaskRowMutationsParams) {
     return run(task.id, 'label_ids', () => patchTask(task.id, { label_ids: next }));
   }
 
+  async function sendAssigneeChange(taskId: string, { userId, checked }: AssigneeChange) {
+    if (checked) {
+      const { error } = await fetchClient.POST(ASSIGNEES_PATH, {
+        params: { path: pathParams(taskId) },
+        // role はタスク作成時と同じ既定値。レビュアー等の役割はこの口で扱わない
+        body: { user_id: userId, role: 'assignee' },
+      });
+      if (error) throw error;
+      return;
+    }
+    const { error } = await fetchClient.DELETE(ASSIGNEE_PATH, {
+      params: { path: { ...pathParams(taskId), user_id: userId } },
+    });
+    if (error) throw error;
+  }
+
   /**
    * 担当者の付け外し。担当は複数持てるので、入れ替えではなく 1 人ずつ足す/外す。
    *
    * `UpdateTaskRequest` に assignees が無く専用の口しかないため、追加は POST、
-   * 解除は DELETE を叩く。
+   * 解除は DELETE を叩く。部署・チームを選ぶと同じ tick に複数来るので、送信中の
+   * タスクへの変更は `run` に落とされる前に受け、同じ送信の続きとして順に送る。
+   *
+   * 1 人の失敗で止めない（残りの人は付けられる）。通った人は保存済みなので、失敗でも
+   * 取り直す。取り直さないと、画面は保存の前に戻ったまま、同じ人を足し直して 409 になる。
    */
   function toggleAssignee(task: TaskResponse, userId: string, checked: boolean) {
     const currentIds = task.assignees.map((assignee) => assignee.user.id);
     if (checked === currentIds.includes(userId)) return Promise.resolve();
 
+    const sending = assigneeChanges.get(task.id);
+    if (sending) {
+      sending.push({ userId, checked });
+      return Promise.resolve();
+    }
+    const changes = [{ userId, checked }];
+    assigneeChanges.set(task.id, changes);
     return run(task.id, 'assignees', async () => {
-      if (checked) {
-        const { error } = await fetchClient.POST(ASSIGNEES_PATH, {
-          params: { path: pathParams(task.id) },
-          // role はタスク作成時と同じ既定値。レビュアー等の役割はこの口で扱わない
-          body: { user_id: userId, role: 'assignee' },
+      let failure: unknown;
+      // 配列をそのまま回すので、送信中に足された変更も拾う
+      for (const change of changes) {
+        await sendAssigneeChange(task.id, change).catch((error: unknown) => {
+          failure = error;
         });
-        if (error) throw error;
-        return;
       }
-      const { error } = await fetchClient.DELETE(ASSIGNEE_PATH, {
-        params: { path: { ...pathParams(task.id), user_id: userId } },
-      });
-      if (error) throw error;
-    });
+      if (failure) {
+        await invalidateLists();
+        throw failure;
+      }
+    }).finally(() => assigneeChanges.delete(task.id));
   }
 
   /**
