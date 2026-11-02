@@ -98,7 +98,7 @@ function handleSubmit() {
     reset-href="/auth/reset-password"
   />
   <div v-else class="flex flex-col gap-6">
-    <div class="koyori-card grid gap-0 overflow-hidden [--koyori-card-padding:0px] md:grid-cols-2">
+    <div class="koyori-card overflow-hidden [--koyori-card-padding:0px]">
       <HydrationSafeForm v-slot="{ isHydrated }" class="p-6 md:p-8" @submit="handleSubmit">
         <div class="flex flex-col gap-6">
           <div class="flex flex-col items-center gap-2 text-center">
@@ -195,13 +195,6 @@ function handleSubmit() {
           </p>
         </div>
       </HydrationSafeForm>
-      <div class="bg-muted relative hidden md:block">
-        <img
-          src="/placeholder.svg"
-          alt=""
-          class="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
-        />
-      </div>
     </div>
   </div>
 </template>

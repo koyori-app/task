@@ -57,6 +57,13 @@ afterEach(() => {
 });
 
 describe('SignInForm', () => {
+  it('中身のない画像の面を出さない', async () => {
+    stubLogin(200, {});
+    const wrapper = await mountForm();
+
+    expect(wrapper.find('img').exists()).toBe(false);
+  });
+
   it('メール形式のエラーは、フォーカスを外さなくても入力を直した時点で消える', async () => {
     stubLogin(200, {});
     const wrapper = await mountForm();
