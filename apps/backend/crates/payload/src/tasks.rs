@@ -7,6 +7,7 @@ use validator::Validate;
 use crate::custom_fields::{CustomFieldValueInput, TaskCustomFieldValueResponse};
 use crate::labels::LabelResponse;
 use crate::mentions::{MentionMap, MentionedUser};
+use crate::or_unknown::OrUnknown;
 use crate::users::UserSummary;
 use entity::{task_assignees, task_relations, tasks};
 
@@ -22,7 +23,8 @@ pub struct TaskResponse {
     pub description: Option<String>,
     #[schema(value_type = String, format = "uuid")]
     pub status_id: Uuid,
-    pub priority: tasks::TaskPriority,
+    #[schema(inline)]
+    pub priority: OrUnknown<tasks::TaskPriority>,
     pub progress_pct: i16,
     #[schema(value_type = Option<String>, format = "uuid", nullable)]
     pub parent_task_id: Option<Uuid>,
@@ -75,7 +77,7 @@ impl TaskResponse {
             title: model.title,
             description: model.description,
             status_id: model.status_id,
-            priority: model.priority,
+            priority: model.priority.into(),
             progress_pct: model.progress_pct,
             parent_task_id: model.parent_task_id,
             milestone_id: model.milestone_id,

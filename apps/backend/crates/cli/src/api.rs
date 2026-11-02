@@ -150,7 +150,10 @@ impl ApiClient {
         serde_json::from_str(&text).map_err(|err| {
             // 応答の形が型と合わないのは、たいてい API 側の変更に追いついていない状態。
             // 握り潰すと「なぜか空」に見えるので、どこで何が合わないかを出す
-            CliError::new(format!("Cannot parse the API response for {path}: {err}"))
+            CliError::new(format!(
+                "Cannot parse the API response for {path}: {err}. \
+                 The CLI may be older than the server; update to the latest release."
+            ))
         })
     }
 

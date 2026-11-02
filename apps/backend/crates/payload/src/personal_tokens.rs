@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::or_unknown::OrUnknown;
 use entity::{personal_tokens, scopes::Scope, scopes::ScopeList};
 
 #[derive(Validate, Debug, Deserialize, ToSchema)]
@@ -61,7 +62,8 @@ pub struct PersonalTokenIdentityResponse {
     /// 行き先（/v1/tenants/{id}/... の {id}）を自力で知るための欄
     #[schema(value_type = String, format = "uuid")]
     pub tenant_id: Uuid,
-    pub scopes: ScopeList,
+    #[schema(inline)]
+    pub scopes: Vec<OrUnknown<Scope>>,
     #[schema(value_type = Vec<String>, format = "uuid", nullable)]
     pub allowed_project_ids: Option<Vec<Uuid>>,
     #[schema(value_type = String, format = "date-time", nullable)]

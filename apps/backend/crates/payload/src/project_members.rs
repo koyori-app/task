@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::or_unknown::OrUnknown;
 use crate::users::UserSummary;
 use entity::project_members::{self, ProjectRole};
 
@@ -14,7 +15,8 @@ pub struct ProjectMemberResponse {
     pub project_id: Uuid,
     #[schema(value_type = String, format = "uuid")]
     pub user_id: Uuid,
-    pub role: ProjectRole,
+    #[schema(inline)]
+    pub role: OrUnknown<ProjectRole>,
     /// 表示用のユーザー情報。メンバー管理 UI が名前・アバターを引けるように同梱する
     pub user: UserSummary,
 }
@@ -25,7 +27,7 @@ impl ProjectMemberResponse {
             id: member.id,
             project_id: member.project_id,
             user_id: member.user_id,
-            role: member.role,
+            role: member.role.into(),
             user: user.into(),
         }
     }

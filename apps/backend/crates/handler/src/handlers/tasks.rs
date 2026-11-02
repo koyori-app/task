@@ -395,6 +395,14 @@ fn priority_rank(priority: tasks::TaskPriority) -> i32 {
     }
 }
 
+/// 応答はサーバー自身が行から作るので、優先度は既知の値に限る。
+fn response_priority_rank(task: &TaskResponse) -> Result<i32, AppError> {
+    let priority = task.priority.known().copied().ok_or_else(|| {
+        anyhow::anyhow!("task {} has a priority this server does not know", task.id)
+    })?;
+    Ok(priority_rank(priority))
+}
+
 impl TaskSort {
     /// 知らない値は既定（作成日の新しい順）に倒す。既存の挙動を変えない
     fn parse(raw: Option<&str>) -> Self {
@@ -438,11 +446,11 @@ impl TaskSort {
                 id: task.id,
             },
             Self::PriorityAsc => TaskCursor::PriorityAsc {
-                priority_rank: priority_rank(task.priority),
+                priority_rank: response_priority_rank(task)?,
                 id: task.id,
             },
             Self::PriorityDesc => TaskCursor::PriorityDesc {
-                priority_rank: priority_rank(task.priority),
+                priority_rank: response_priority_rank(task)?,
                 id: task.id,
             },
             Self::DeadlineAsc => TaskCursor::DeadlineAsc {

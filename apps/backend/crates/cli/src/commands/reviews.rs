@@ -983,7 +983,7 @@ mod tests {
             repository: repository.map(str::to_string),
             mergeable,
             // CLI は gate を見ない（権威のゲートは gate_failure）。形だけ合わせる
-            gate: payload::reviews::ReviewGate::StaleUnknown,
+            gate: payload::reviews::ReviewGate::StaleUnknown.into(),
         }
     }
 
@@ -1064,7 +1064,7 @@ mod tests {
     fn renders_the_verdict_and_the_severity_breakdown() {
         let mut blocked = summary(2, 1, Some("acme/app"), false);
         blocked.counts = vec![SeverityStateCount {
-            severity: FindingSeverity::High,
+            severity: FindingSeverity::High.into(),
             state: FindingState::Open.into(),
             count: 1,
         }];
@@ -1086,7 +1086,7 @@ mod tests {
             review_id: uuid::Uuid::nil(),
             pr_number: 618,
             round: 2,
-            severity: FindingSeverity::Medium,
+            severity: FindingSeverity::Medium.into(),
             title: "セレクタが複数一致する".into(),
             body: "…".into(),
             file: file.map(str::to_string),

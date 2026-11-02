@@ -180,7 +180,7 @@ pub async fn resolve<C: ConnectionTrait>(
     for user in found {
         let entry = if audience.contains(&user.id) {
             MentionedUser {
-                status: MentionStatus::Member,
+                status: MentionStatus::Member.into(),
                 name: Some(user.username),
                 avatar_url: user.avatar_url,
             }
@@ -188,7 +188,7 @@ pub async fn resolve<C: ConnectionTrait>(
             // 名前と同じ境: そのテナントに属している・属しておった者だけ、名前とアイコンを返す
             let belongs = belonged.contains(&user.id);
             MentionedUser {
-                status: MentionStatus::Outside,
+                status: MentionStatus::Outside.into(),
                 name: belongs.then_some(user.username),
                 avatar_url: if belongs { user.avatar_url } else { None },
             }
@@ -197,7 +197,7 @@ pub async fn resolve<C: ConnectionTrait>(
     }
     for id in ids {
         map.entry(*id).or_insert(MentionedUser {
-            status: MentionStatus::Gone,
+            status: MentionStatus::Gone.into(),
             name: None,
             avatar_url: None,
         });

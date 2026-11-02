@@ -102,7 +102,7 @@ pub async fn get_current_personal_token(
         user_id: auth.user_id,
         username: auth.username,
         tenant_id,
-        scopes,
+        scopes: scopes.0.into_iter().map(Into::into).collect(),
         allowed_project_ids,
         expires_at: expires_at.map(|value| value.with_timezone(&chrono::Utc)),
     }))
@@ -149,7 +149,7 @@ mod identity_tests {
 
         assert_eq!(identity.name, "review-bot");
         assert_eq!(identity.username, "automation");
-        assert!(identity.scopes.0.is_empty());
+        assert!(identity.scopes.is_empty());
         assert_eq!(identity.allowed_project_ids, Some(projects));
         assert!(identity.expires_at.is_some());
     }
@@ -175,7 +175,7 @@ mod identity_tests {
             .await
             .expect("PAT identity");
 
-        assert_eq!(identity.scopes.0, vec![Scope::ReadTask]);
+        assert_eq!(identity.scopes, vec![Scope::ReadTask]);
         assert_eq!(identity.allowed_project_ids, None);
     }
 

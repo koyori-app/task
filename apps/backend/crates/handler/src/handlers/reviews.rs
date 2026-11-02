@@ -454,7 +454,7 @@ pub async fn get_review_summary(
         counts: counts
             .into_iter()
             .map(|(severity, state, count)| SeverityStateCount {
-                severity,
+                severity: severity.into(),
                 state: state.into(),
                 count,
             })
@@ -470,7 +470,7 @@ pub async fn get_review_summary(
         // レビューが 1 件も無い PR を「可」にしない。件数だけで見ると未レビューの PR が
         // 0 件として通り、マージ前ゲートとして最も危ない誤りになる（仕様 §5）
         mergeable: rounds > 0 && blocking == 0,
-        gate,
+        gate: gate.into(),
     }))
 }
 

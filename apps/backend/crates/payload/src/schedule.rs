@@ -5,6 +5,7 @@ use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use crate::or_unknown::OrUnknown;
 use crate::{
     milestones::MilestoneResponse,
     my_tasks::{MyTaskProjectInfo, MyTaskStatusInfo},
@@ -69,7 +70,8 @@ pub struct ScheduleTask {
     pub title: String,
     pub project: MyTaskProjectInfo,
     pub status: MyTaskStatusInfo,
-    pub priority: tasks::TaskPriority,
+    #[schema(inline)]
+    pub priority: OrUnknown<tasks::TaskPriority>,
     pub progress_pct: i16,
     #[schema(value_type = Option<String>, format = "date", nullable)]
     pub planned_start_on: Option<NaiveDate>,

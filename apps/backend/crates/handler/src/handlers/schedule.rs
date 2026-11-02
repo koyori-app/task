@@ -225,7 +225,7 @@ pub async fn get_schedule(
                 color: status.color.clone(),
                 is_done_state: status.is_done_state,
             },
-            priority: task.priority,
+            priority: task.priority.into(),
             progress_pct: task.progress_pct,
             planned_start_on: task.planned_start_on,
             soft_deadline: task.soft_deadline.map(|d| d.to_utc()),
