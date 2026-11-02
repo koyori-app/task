@@ -1,5 +1,9 @@
 use crate::common::{TestApp, json_body};
 use axum::http::StatusCode;
+use entity::tenant_members;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+};
 use uuid::Uuid;
 
 // 担当者候補（`GET /projects/{id}/assignable-users`）の統合テスト。
@@ -386,5 +390,209 @@ async fn assignable_users_can_actually_be_assigned() {
         assigned.status(),
         StatusCode::CREATED,
         "候補として返した利用者は実際に割り当てられる"
+    );
+}
+
+/// テナントでの部署・チームを所属行に直接入れる。
+async fn set_org(app: &TestApp, tenant_id: Uuid, user_id: Uuid, department: &str, team: &str) {
+    let mut member = tenant_members::Entity::find()
+        .filter(tenant_members::Column::TenantId.eq(tenant_id))
+        .filter(tenant_members::Column::UserId.eq(user_id))
+        .one(&app.state.db)
+        .await
+        .expect("find tenant member")
+        .expect("tenant member row")
+        .into_active_model();
+    member.department = Set(Some(department.to_string()));
+    member.team = Set(Some(team.to_string()));
+    member.update(&app.state.db).await.expect("update org");
+}
+
+/// 候補の中からその利用者の `(department, team)` を引く。
+fn org_of(body: &serde_json::Value, user_id: Uuid) -> (serde_json::Value, serde_json::Value) {
+    let user = body
+        .as_array()
+        .expect("user list")
+        .iter()
+        .find(|u| u["id"] == serde_json::json!(user_id.to_string()))
+        .expect("候補に入る");
+    (user["department"].clone(), user["team"].clone())
+}
+
+/// 候補には、このテナントでの部署・チームが付く。所属行の無いオーナーと未設定の人は null。
+/// 名前引きの経路も同じ形で返す。部署を見て担当者をまとめて選ぶ UI の入力になる。
+#[tokio::test]
+async fn assignable_users_carry_department_and_team() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let member = app.insert_user(false, false).await;
+    let unset = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+
+    let tenant_members_path = format!("/v1/tenants/{}/members", tp.tenant_id);
+    let assignable_path = format!(
+        "/v1/tenants/{}/projects/{}/assignable-users",
+        tp.tenant_id, tp.project_id
+    );
+
+    app.reset_session_client();
+    app.login_session(&owner.email, &owner.password).await;
+    for user in [&member, &unset] {
+        let added = app
+            .post_json_with_session(
+                &tenant_members_path,
+                serde_json::json!({ "user_id": user.id, "role": "Member" }),
+            )
+            .await;
+        assert_eq!(added.status(), StatusCode::CREATED);
+    }
+    set_org(&app, tp.tenant_id, member.id, "開発部", "基盤").await;
+
+    let list = app.get_with_session(&assignable_path).await;
+    assert_eq!(list.status(), StatusCode::OK);
+    let body = json_body(list).await;
+    assert_eq!(
+        org_of(&body, member.id),
+        (serde_json::json!("開発部"), serde_json::json!("基盤"))
+    );
+    let null = (serde_json::Value::Null, serde_json::Value::Null);
+    assert_eq!(org_of(&body, unset.id), null, "未設定の人は null");
+    assert_eq!(org_of(&body, owner.id), null, "所属行の無いオーナーは null");
+
+    let resolved = app
+        .get_with_session(&format!(
+            "{assignable_path}?username={}",
+            username_of(&member)
+        ))
+        .await;
+    assert_eq!(resolved.status(), StatusCode::OK);
+    assert_eq!(
+        org_of(&json_body(resolved).await, member.id),
+        (serde_json::json!("開発部"), serde_json::json!("基盤")),
+        "名前引きも同じ形で返す"
+    );
+
+    // 対照: 管理者でないテナントメンバーも読める（プロフィールと同じ。過剰拒否でないこと）
+    app.reset_session_client();
+    app.login_session(&unset.email, &unset.password).await;
+    let as_member = app.get_with_session(&assignable_path).await;
+    assert_eq!(as_member.status(), StatusCode::OK);
+    assert_eq!(
+        org_of(&json_body(as_member).await, member.id),
+        (serde_json::json!("開発部"), serde_json::json!("基盤"))
+    );
+}
+
+/// 部署・チームはプロフィール API が読める主体にだけ返す。
+///
+/// 候補一覧は客分・`write:task` だけの PAT・`read:task` だけの PAT（名前引き）も通る。
+/// そのまま返すと、プロフィールでは 403 になる主体がテナント内の所属を読めてしまう。
+/// 候補そのものは今までどおり返す（担当者の編集を止めない）。
+#[tokio::test]
+async fn assignable_users_hide_org_from_principals_who_cannot_read_profiles() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let member = app.insert_user(false, false).await;
+    let guest = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+
+    let tenant_members_path = format!("/v1/tenants/{}/members", tp.tenant_id);
+    let project_members_path = format!(
+        "/v1/tenants/{}/projects/{}/members",
+        tp.tenant_id, tp.project_id
+    );
+    let assignable_path = format!(
+        "/v1/tenants/{}/projects/{}/assignable-users",
+        tp.tenant_id, tp.project_id
+    );
+
+    app.reset_session_client();
+    app.login_session(&owner.email, &owner.password).await;
+    let added = app
+        .post_json_with_session(
+            &tenant_members_path,
+            serde_json::json!({ "user_id": member.id, "role": "Member" }),
+        )
+        .await;
+    assert_eq!(added.status(), StatusCode::CREATED);
+    set_org(&app, tp.tenant_id, member.id, "開発部", "基盤").await;
+    // 客分: テナントに所属行が無く、このプロジェクトに名指しされただけの人
+    for user in [&member, &guest] {
+        let named = app
+            .post_json_with_session(
+                &project_members_path,
+                serde_json::json!({ "user_id": user.id, "role": "Member" }),
+            )
+            .await;
+        assert_eq!(named.status(), StatusCode::CREATED);
+    }
+
+    let null = (serde_json::Value::Null, serde_json::Value::Null);
+    let visible = (serde_json::json!("開発部"), serde_json::json!("基盤"));
+
+    let write_only = issue_token(&app, tp.tenant_id, "write-only", &["write:task"]).await;
+    let list = app.get_with_bearer(&assignable_path, &write_only).await;
+    assert_eq!(list.status(), StatusCode::OK, "候補そのものは読める");
+    assert_eq!(
+        org_of(&json_body(list).await, member.id),
+        null,
+        "read:tenant の無い PAT には所属を見せない"
+    );
+
+    let read_only = issue_token(&app, tp.tenant_id, "read-only", &["read:task"]).await;
+    let resolved = app
+        .get_with_bearer(
+            &format!("{assignable_path}?username={}", username_of(&member)),
+            &read_only,
+        )
+        .await;
+    assert_eq!(resolved.status(), StatusCode::OK);
+    assert_eq!(
+        org_of(&json_body(resolved).await, member.id),
+        null,
+        "名前引きからも所属は読めない"
+    );
+
+    // プロジェクト限定の PAT はテナント全体の口に入れない。ここで 403 に倒すと候補まで読めなくなる
+    let bound = app
+        .post_json_with_session(
+            "/v1/personal_tokens",
+            serde_json::json!({
+                "name": "bound",
+                "tenant_id": tp.tenant_id,
+                "scopes": ["write:task", "read:tenant"],
+                "project_ids": [tp.project_id],
+            }),
+        )
+        .await;
+    assert_eq!(bound.status(), StatusCode::CREATED);
+    let bound = json_body(bound).await["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let list = app.get_with_bearer(&assignable_path, &bound).await;
+    assert_eq!(list.status(), StatusCode::OK, "候補そのものは読める");
+    assert_eq!(
+        org_of(&json_body(list).await, member.id),
+        null,
+        "プロジェクト限定の PAT には所属を見せない"
+    );
+
+    // 対照: read:tenant があるテナント全体の PAT には返す
+    let both = issue_token(&app, tp.tenant_id, "both", &["write:task", "read:tenant"]).await;
+    let list = app.get_with_bearer(&assignable_path, &both).await;
+    assert_eq!(list.status(), StatusCode::OK);
+    assert_eq!(org_of(&json_body(list).await, member.id), visible);
+
+    app.reset_session_client();
+    app.login_session(&guest.email, &guest.password).await;
+    let list = app.get_with_session(&assignable_path).await;
+    assert_eq!(list.status(), StatusCode::OK, "客分も候補そのものは読める");
+    assert_eq!(
+        org_of(&json_body(list).await, member.id),
+        null,
+        "客分には所属を見せない"
     );
 }

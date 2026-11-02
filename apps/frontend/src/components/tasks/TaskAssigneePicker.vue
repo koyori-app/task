@@ -4,10 +4,11 @@ import { getActivePinia } from 'pinia';
 import { PhUserPlus } from '@phosphor-icons/vue';
 
 import UserAvatar from '@/components/UserAvatar.vue';
+import type { SelectableUser } from '@/components/users/types';
 import UserSelector from '@/components/users/UserSelector.vue';
 import { useAuthStore } from '@/stores/auth';
 
-export type PickableMember = { id: string; username: string; avatar_url?: string | null };
+export type PickableMember = SelectableUser;
 
 /**
  * 担当者の選択。一覧の行・まとめの一覧・詳細の 3 箇所で使う。
