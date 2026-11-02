@@ -4,10 +4,11 @@
 // 他のファイルの残骸で落ちる。鍵を共有しないと、その TRUNCATE がこちらの実行中の行を
 // 巻き添えにする（CASCADE は drive_folder_shares と task_attachments にも及ぶ）。
 
-use crate::common::TestApp;
+use crate::common::{TestApp, file_id_of, upload_drive_file};
 use axum::http::StatusCode;
 use entity::{drive_files, drive_folder_shares, drive_folders, users};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 /// 公開共有の 2 エンドポイントは仕様上 `/v1/drive/share/{token}` に居る。
@@ -200,4 +201,126 @@ async fn expired_token_is_gone_but_a_live_one_still_works() {
         .await
         .expect("request");
     assert_eq!(response.status(), StatusCode::OK, "期限内の共有は引ける");
+}
+
+/// 公開共有は接続元 IP × トークン指紋の組で 60 秒 120 回まで（仕様 §10）。
+const SHARE_RATE_LIMIT: usize = 120;
+const IP_A: &str = "198.51.100.7";
+const IP_B: &str = "198.51.100.8";
+
+/// 実装と同じ組み立て。平文トークンではなく SHA-256 の先頭 16 hex をキーに使う。
+fn share_rate_key(ip: &str, token: &str) -> String {
+    let fingerprint = hex::encode(Sha256::digest(token.as_bytes()));
+    format!("drive:share_rl:{ip}:{}", &fingerprint[..16])
+}
+
+async fn get_from(app: &TestApp, ip: &str, path: &str) -> reqwest::Response {
+    reqwest::Client::new()
+        .get(format!("{}{path}", app.base_url()))
+        .header("x-forwarded-for", ip)
+        .send()
+        .await
+        .expect("request")
+}
+
+/// 同じ IP・同じトークンは 3 つの公開口の合計で 121 回目から 429 + Retry-After。
+/// 別トークン・別 IP・認証済みの本文取得は巻き込まず、キーを消せば回復する。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn public_share_requests_are_rate_limited_per_ip_and_token() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let folder = insert_folder(&app, tp.tenant_id, owner.id).await;
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let uploaded = upload_drive_file(
+        &app,
+        tp.tenant_id,
+        Some(folder),
+        "shared.txt",
+        "text/plain",
+        b"shared body",
+    )
+    .await;
+    let file_id = file_id_of(&uploaded);
+    let token = insert_public_share(&app, folder, owner.id, None).await;
+    let other_token = insert_public_share(&app, folder, owner.id, None).await;
+
+    let paths = [
+        format!("{SHARE_BASE}/{token}"),
+        format!("{SHARE_BASE}/{token}/files"),
+        format!("/v1/drive/files/{file_id}/content?token={token}"),
+    ];
+
+    // 3 つの口を順に回して上限ちょうどまでは通る（口ごとのカウンタなら 40 回ずつで止まらない）
+    for i in 0..SHARE_RATE_LIMIT {
+        let path = &paths[i % paths.len()];
+        let response = get_from(&app, IP_A, path).await;
+        assert_eq!(response.status(), StatusCode::OK, "{i} 回目: {path}");
+    }
+
+    // 上限を越えた後は 3 つの口すべてが同じカウンタで 429 になる
+    for path in &paths {
+        let response = get_from(&app, IP_A, path).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "上限超過: {path}"
+        );
+        let retry_after: u64 = response
+            .headers()
+            .get("retry-after")
+            .expect("Retry-After ヘッダー")
+            .to_str()
+            .expect("ascii")
+            .parse()
+            .expect("整数秒");
+        assert!(
+            (1..=60).contains(&retry_after),
+            "Retry-After は窓の残り秒: {retry_after}"
+        );
+    }
+
+    // 対照: 同じ IP でも別のトークンは別勘定
+    let response = get_from(&app, IP_A, &format!("{SHARE_BASE}/{other_token}")).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "別トークンは巻き込まない"
+    );
+
+    // 対照: 同じトークンでも別の IP は別勘定
+    let response = get_from(&app, IP_B, &paths[0]).await;
+    assert_eq!(response.status(), StatusCode::OK, "別 IP は巻き込まない");
+
+    // 対照: 認証済み（token なし）の本文取得は数えない
+    for i in 0..=SHARE_RATE_LIMIT {
+        let response = app
+            .client()
+            .get(format!(
+                "{}/v1/drive/files/{file_id}/content",
+                app.base_url()
+            ))
+            .header("x-forwarded-for", IP_A)
+            .send()
+            .await
+            .expect("session request");
+        assert_eq!(response.status(), StatusCode::OK, "認証済み {i} 回目");
+    }
+
+    // 回復: 窓のキーを消すと再び通る
+    let mut conn = app.state.redis_client.conn.acquire().await.expect("redis");
+    let deleted: i64 = redis::cmd("DEL")
+        .arg(share_rate_key(IP_A, &token))
+        .query_async(&mut conn)
+        .await
+        .expect("DEL");
+    assert_eq!(deleted, 1, "キーは IP とトークン指紋の組で作られる");
+    let response = get_from(&app, IP_A, &paths[0]).await;
+    assert_eq!(response.status(), StatusCode::OK, "窓が消えれば回復する");
+
+    app.cleanup_user(owner.id).await;
 }

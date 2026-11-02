@@ -14,6 +14,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
 };
 
+use super::client_key;
 use crate::AppState;
 use crate::error::AppError;
 use crate::extractors::{AuthMethod, AuthUser};
@@ -53,16 +54,6 @@ pub async fn create_desktop_auth_code(
     )
     .await?;
     Ok((StatusCode::CREATED, Json(DesktopAuthCodeResponse { code })))
-}
-
-/// レート制限の接続元キー。プロキシが付ける値を使う（監査ログと同じ取り方）。
-fn client_key(headers: &HeaderMap) -> String {
-    headers
-        .get("x-forwarded-for")
-        .or_else(|| headers.get("x-real-ip"))
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or(s).trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string())
 }
 
 #[axum::debug_handler]

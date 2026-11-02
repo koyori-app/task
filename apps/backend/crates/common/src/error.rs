@@ -2,7 +2,7 @@
 
 use axum::{
     Json,
-    http::StatusCode,
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
@@ -46,6 +46,9 @@ pub enum AppError {
     PreconditionFailed,
     #[error("too many requests")]
     TooManyRequests,
+    /// 429 に `Retry-After: <秒>` を添える。
+    #[error("too many requests")]
+    TooManyRequestsRetryAfter(u64),
 }
 
 impl From<sea_orm::DbErr> for AppError {
@@ -132,6 +135,14 @@ impl IntoResponse for AppError {
                 .into_response(),
             AppError::TooManyRequests => (
                 StatusCode::TOO_MANY_REQUESTS,
+                Json(ServerError {
+                    message: "too-many-requests".into(),
+                }),
+            )
+                .into_response(),
+            AppError::TooManyRequestsRetryAfter(secs) => (
+                StatusCode::TOO_MANY_REQUESTS,
+                [(header::RETRY_AFTER, secs.to_string())],
                 Json(ServerError {
                     message: "too-many-requests".into(),
                 }),

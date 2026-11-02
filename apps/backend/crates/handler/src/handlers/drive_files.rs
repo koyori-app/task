@@ -22,6 +22,7 @@ use sea_orm::{
 };
 use sha2::{Digest, Sha256};
 
+use super::client_key;
 use crate::AppState;
 use crate::error::{AppError, ServerError};
 use crate::extractors::{AuthUser, OptionalAuthUser};
@@ -36,6 +37,7 @@ use service::access::visible_project_ids;
 use service::drive::{
     can_access_project, current_storage_type, effective_quota, guess_mime, is_editable_mime,
     is_tenant_owner, lock_tenant_drive, source_mime_override, tenant_used_bytes,
+    try_acquire_public_share_request,
 };
 use service::drive_task_links::{is_markdown, sync_body_links, unlink_body_outside_project};
 use service::storage::{ByteStream, StorageError};
@@ -1048,6 +1050,12 @@ pub async fn delete_file(
             description = "If-None-Match が現在の ETag と一致した（本文なし）",
             headers(("ETag" = String, description = "本文の ETag"))
         ),
+        (
+            status = 429,
+            description = "同じ接続元から同じ共有トークンへの（`token` 付きの）リクエストが多すぎます（60 秒 120 回）",
+            body = ServerError,
+            headers(("Retry-After" = u64, description = "再試行できるまでの秒数"))
+        ),
         CrudErrors,
     )
 )]
@@ -1058,6 +1066,10 @@ pub async fn get_file_content(
     Query(query): Query<ContentQuery>,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
+    // 共有トークンの枝（can_access_file_content と同じ判定）だけ数える。認証済みの経路は対象外
+    if let Some(token) = query.token.as_deref().filter(|t| !t.is_empty()) {
+        try_acquire_public_share_request(&state.redis_client, &client_key(&headers), token).await?;
+    }
     let file = drive_files::Entity::find_by_id(id)
         .one(&state.db)
         .await?

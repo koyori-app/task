@@ -4477,6 +4477,26 @@
               }
             }
           },
+          "429": {
+            "description": "同じ接続元から同じ共有トークンへの（`token` 付きの）リクエストが多すぎます（60 秒 120 回）",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "description": "再試行できるまでの秒数"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
           "500": {
             "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
             "content": {
@@ -4557,6 +4577,26 @@
                       "example": "internal-error"
                     }
                   }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "同じ接続元から同じ共有トークンへのリクエストが多すぎます（60 秒 120 回）",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "description": "再試行できるまでの秒数"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
                 }
               }
             }
@@ -4644,6 +4684,26 @@
                       "example": "internal-error"
                     }
                   }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "同じ接続元から同じ共有トークンへのリクエストが多すぎます（60 秒 120 回）",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "description": "再試行できるまでの秒数"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
                 }
               }
             }
