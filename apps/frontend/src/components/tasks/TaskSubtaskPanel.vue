@@ -55,6 +55,17 @@ const parentTask = computed(() => {
 // 親の変更が失敗すると親付きへ戻るので、確定までは「親が無い」前提で子を作らせない
 const composerBlocked = computed(() => props.statusUpdating || props.parentUpdating);
 
+// 作成中に親が付くと、親なしの前提で作った子が孫になる
+const parentChangeBlocked = computed(() => props.parentUpdating || subtasks.createPending.value);
+
+// 親の確定で閉じる。楽観更新の間に閉じると、拒否されたときに下書きが消える
+watch(
+  () => !!props.parentTaskId && !props.parentUpdating,
+  (isChild) => {
+    if (isChild) adding.value = false;
+  },
+);
+
 // オーバーレイと右ペインは別のタスクへ移っても同じインスタンス
 watch(
   () => props.taskUuid,
@@ -110,7 +121,7 @@ function createSubtask(title: string) {
       <Button
         type="button"
         variant="ghost"
-        :disabled="parentUpdating"
+        :disabled="parentChangeBlocked"
         :label="parentTaskId ? '親を変更' : '親を設定'"
         @click="pickingParent = !pickingParent"
       />
@@ -118,7 +129,7 @@ function createSubtask(title: string) {
         v-if="parentTaskId"
         type="button"
         variant="ghost"
-        :disabled="parentUpdating"
+        :disabled="parentChangeBlocked"
         label="親を外す"
         @click="changeParent(null)"
       />
@@ -130,6 +141,7 @@ function createSubtask(title: string) {
       :project-id="projectId"
       :project-key="projectKey"
       :exclude-task-ids="parentCandidateExclusions"
+      :disabled="parentChangeBlocked"
       @select="changeParent"
       @cancel="pickingParent = false"
     />
@@ -194,7 +206,7 @@ function createSubtask(title: string) {
       <p v-else-if="!adding" class="py-1 text-sm text-muted-foreground">サブタスクはありません</p>
 
       <TaskSubtaskComposer
-        v-if="!parentTaskId && adding"
+        v-if="adding"
         :pending="subtasks.createPending.value"
         :disabled="composerBlocked"
         :error="subtasks.createError.value"

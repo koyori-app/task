@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { nextTick, ref } from 'vue';
 
 const subtasksState = vi.hoisted(() => ({
   loading: { value: false },
@@ -57,11 +58,13 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 const searchInput = 'input[aria-label="親にするタスクを検索"]';
+const draftInput = 'input[aria-label="サブタスク名"]';
 
 describe('TaskSubtaskPanel', () => {
   beforeEach(() => {
     subtasksState.subtasks.value = [];
     subtasksState.parentTask.value = null;
+    subtasksState.createPending = { value: false };
     subtasksState.createSubtask.mockClear();
   });
 
@@ -110,6 +113,44 @@ describe('TaskSubtaskPanel', () => {
     expect(wrapper.findComponent(TaskSubtaskComposer).exists()).toBe(false);
     expect(await onCreate('作れない孫')).toBe(false);
     expect(subtasksState.createSubtask).not.toHaveBeenCalled();
+  });
+
+  it('親の変更が拒否されたら、Composerの下書きを残して入力できる状態へ戻す', async () => {
+    const wrapper = mountPanel();
+    await buttonByText(wrapper, 'サブタスクを追加')!.trigger('click');
+    await wrapper.get(draftInput).setValue('書きかけの子');
+
+    // 楽観更新で親付きに見える間も閉じず、作成だけ止める
+    await wrapper.setProps({ parentTaskId: 'descendant-id', parentUpdating: true });
+    const composer = wrapper.getComponent(TaskSubtaskComposer);
+    expect(composer.get(draftInput).attributes('disabled')).toBeDefined();
+    const onCreate = composer.props('onCreate') as (title: string) => Promise<boolean>;
+    expect(await onCreate('確定前の子')).toBe(false);
+    expect(subtasksState.createSubtask).not.toHaveBeenCalled();
+
+    await wrapper.setProps({
+      parentTaskId: null,
+      parentUpdating: false,
+      parentError: '自分自身や子孫のタスクは親にできません',
+    });
+    const input = wrapper.get<HTMLInputElement>(draftInput);
+    expect(input.element.value).toBe('書きかけの子');
+    expect(input.attributes('disabled')).toBeUndefined();
+  });
+
+  it('親の変更が確定したらComposerを閉じ、後で親を変更・解除しても開き直さない', async () => {
+    const wrapper = mountPanel();
+    await buttonByText(wrapper, 'サブタスクを追加')!.trigger('click');
+    await wrapper.setProps({ parentTaskId: 'parent-id', parentUpdating: true });
+    await wrapper.setProps({ parentUpdating: false });
+    expect(wrapper.findComponent(TaskSubtaskComposer).exists()).toBe(false);
+
+    await wrapper.setProps({ parentTaskId: 'other-parent-id', parentUpdating: true });
+    expect(wrapper.findComponent(TaskSubtaskComposer).exists()).toBe(false);
+
+    await wrapper.setProps({ parentTaskId: null, parentUpdating: false });
+    expect(wrapper.findComponent(TaskSubtaskComposer).exists()).toBe(false);
+    expect(buttonByText(wrapper, 'サブタスクを追加')).toBeDefined();
   });
 
   describe('親タスクの操作', () => {
@@ -221,6 +262,32 @@ describe('TaskSubtaskPanel', () => {
       await wrapper.get('[data-task-parent-picker] li button').trigger('click');
       expect(wrapper.emitted('change-parent')?.[0]).toEqual(['hit-id']);
       expect(wrapper.findComponent(TaskParentPicker).exists()).toBe(false);
+    });
+
+    it('サブタスクの作成中は親の操作と候補の選択を止める', async () => {
+      const createPending = ref(false);
+      subtasksState.createPending = createPending;
+      stubApi((url) =>
+        url.includes('/tasks/search')
+          ? jsonResponse({ tasks: [searchHit('hit-id', 7, '候補のタスク')], total: 1 })
+          : undefined,
+      );
+      const wrapper = mountPanel();
+      await openAndType(wrapper, '候補');
+      await vi.waitFor(() => expect(candidateTexts(wrapper)).toHaveLength(1));
+
+      createPending.value = true;
+      await nextTick();
+
+      expect(buttonByText(wrapper, '親を設定')!.attributes('disabled')).toBeDefined();
+      const candidate = wrapper.get('[data-task-parent-picker] li button');
+      expect(candidate.attributes('disabled')).toBeDefined();
+      await candidate.trigger('click');
+      expect(wrapper.emitted('change-parent')).toBeUndefined();
+
+      await wrapper.setProps({ parentTaskId: 'parent-id' });
+      expect(buttonByText(wrapper, '親を変更')!.attributes('disabled')).toBeDefined();
+      expect(buttonByText(wrapper, '親を外す')!.attributes('disabled')).toBeDefined();
     });
 
     it('自分自身・今の親・直下の子を候補から除く', async () => {

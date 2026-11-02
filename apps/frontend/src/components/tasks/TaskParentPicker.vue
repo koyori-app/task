@@ -18,6 +18,7 @@ const props = defineProps<{
   projectKey: string;
   /** 候補から除くタスク。深い子孫までは手元に無いので、残りは backend の 409 に任せる */
   excludeTaskIds: string[];
+  disabled: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -132,7 +133,8 @@ onMounted(async () => {
       >
         <button
           type="button"
-          class="flex w-full min-w-0 items-center gap-2 px-1 py-2 text-left transition-colors hover:bg-muted/40"
+          class="flex w-full min-w-0 items-center gap-2 px-1 py-2 text-left transition-colors hover:bg-muted/40 disabled:opacity-50"
+          :disabled="disabled"
           @click="emit('select', task.id)"
         >
           <span class="shrink-0 font-mono text-xs text-muted-foreground">
