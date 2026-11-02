@@ -1,18 +1,19 @@
 <script setup lang="ts">
 import { Switch } from '@koyori-app/ui-vue';
-import type { SettingTable } from '@/lib/local-settings';
+import { isChoiceSetting, type SettingTable } from '@/lib/local-settings';
 
 /**
  * 設定の表を、切り替えと説明の並びにして出す。値は親が渡す（mount の前は既定値）。
+ * 選び肢の項目（choices を持つ）は、切り替えの代わりに選択欄で出す。
  * `ready` が false の間は、まだ残った値を読んでおらぬので触れぬようにする。
  */
 const props = defineProps<{
   table: SettingTable;
-  values: Record<string, boolean>;
+  values: Record<string, boolean | string>;
   ready: boolean;
 }>();
 
-const emit = defineEmits<{ change: [key: string, value: boolean] }>();
+const emit = defineEmits<{ change: [key: string, value: boolean | string] }>();
 
 const idOf = (key: string) => `setting-${key}`;
 </script>
@@ -31,12 +32,26 @@ const idOf = (key: string) => `setting-${key}`;
           {{ definition.description }}
         </p>
       </div>
+      <select
+        v-if="isChoiceSetting(definition)"
+        :id="idOf(key)"
+        :value="props.values[key]"
+        :disabled="!props.ready"
+        :aria-describedby="`${idOf(key)}-description`"
+        class="h-9 shrink-0 rounded-md border bg-background px-3 text-sm"
+        @change="emit('change', key, ($event.target as HTMLSelectElement).value)"
+      >
+        <option v-for="choice in definition.choices" :key="choice.value" :value="choice.value">
+          {{ choice.label }}
+        </option>
+      </select>
       <!-- 行の左に文言を出すので、スイッチ横のラベルは隠す（読み上げ名は label で保つ） -->
       <Switch
+        v-else
         :id="idOf(key)"
         :label="definition.name"
         hideLabel
-        :checked="props.values[key]"
+        :checked="props.values[key] === true"
         :disabled="!props.ready"
         :ariaDescribedBy="`${idOf(key)}-description`"
         class="mt-0.5"

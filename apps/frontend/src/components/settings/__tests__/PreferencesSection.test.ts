@@ -8,7 +8,10 @@ import { usePreferencesStore } from '@/stores/preferences';
 import { persistedPinia, seedSettings } from './test-pinia';
 
 enableAutoUnmount(afterEach);
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  document.documentElement.style.removeProperty('--koyori-emoji-font');
+});
 
 async function mountSection() {
   const pinia = persistedPinia();
@@ -135,5 +138,69 @@ describe('PreferencesSection（環境設定の画面）', () => {
     expect(html).toMatch(/<button[^>]*role="switch"[^>]*disabled/);
     // 有効のフラグの知らせも、残った値が要るので SSR では出ない
     expect(html).not.toContain('data-hidden-experiments-notice');
+  });
+
+  it('「絵文字の字」の選び肢は OS の既定と Noto で、既定は OS の既定', async () => {
+    const { wrapper } = await mountSection();
+
+    const select = wrapper.get<HTMLSelectElement>('[data-setting="emojiFont"] select');
+    expect(wrapper.get('[data-setting="emojiFont"]').text()).toContain('絵文字の字');
+    expect(select.findAll('option').map((option) => option.text())).toEqual([
+      'OS の既定',
+      'Noto Color Emoji',
+    ]);
+    expect(select.element.value).toBe('os');
+    expect(document.documentElement.style.getPropertyValue('--koyori-emoji-font')).toBe('');
+  });
+
+  it('Noto を選ぶと store と localStorage に残り、html に字が当たる', async () => {
+    const { wrapper, pinia } = await mountSection();
+
+    await wrapper.get('[data-setting="emojiFont"] select').setValue('noto');
+
+    expect(usePreferencesStore(pinia).values.emojiFont).toBe('noto');
+    expect(JSON.parse(localStorage.getItem('preferences')!).values.emojiFont).toBe('noto');
+    expect(document.documentElement.style.getPropertyValue('--koyori-emoji-font')).toBe(
+      "'Koyori Noto Color Emoji',",
+    );
+  });
+
+  it('「すべて既定に戻す」で絵文字の字も OS の既定に戻り、html の字が外れる', async () => {
+    seedSettings({ preferences: { emojiFont: 'noto' } });
+    const { wrapper, pinia } = await mountSection();
+    expect(wrapper.get<HTMLSelectElement>('[data-setting="emojiFont"] select').element.value).toBe(
+      'noto',
+    );
+
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === 'すべて既定に戻す')!
+      .trigger('click');
+
+    expect(usePreferencesStore(pinia).values.emojiFont).toBe('os');
+    expect(document.documentElement.style.getPropertyValue('--koyori-emoji-font')).toBe('');
+  });
+
+  it('選び肢に無い値が残っていたら、OS の既定として読む', async () => {
+    seedSettings({ preferences: { emojiFont: 'twemoji', showExperiments: true } });
+    const { wrapper, pinia } = await mountSection();
+
+    expect(usePreferencesStore(pinia).values).toEqual({ showExperiments: true, emojiFont: 'os' });
+    expect(wrapper.get<HTMLSelectElement>('[data-setting="emojiFont"] select').element.value).toBe(
+      'os',
+    );
+  });
+
+  it('SSR（mount の前）は絵文字の字の選択欄も既定値で描き、触れぬ', async () => {
+    const pinia = persistedPinia();
+    usePreferencesStore(pinia).set('emojiFont', 'noto');
+    const app = createSSRApp({ render: () => h(PreferencesSection) });
+    app.use(pinia);
+
+    const html = await renderToString(app);
+
+    expect(html).toMatch(/<select[^>]*id="setting-emojiFont"[^>]*value="os"[^>]*disabled/);
+    // 何も選ばれていない select は最初の選び肢を出すので、最初は OS の既定であること
+    expect(html).toMatch(/<select[^>]*id="setting-emojiFont"[^>]*>(<!--\[-->)?<option value="os">/);
   });
 });
