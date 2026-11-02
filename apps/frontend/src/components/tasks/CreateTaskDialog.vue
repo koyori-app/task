@@ -9,6 +9,7 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import {
   Button,
+  DatePicker,
   Dialog,
   Dropdown,
   Field,
@@ -249,6 +250,17 @@ function toggleLabel(labelId: string) {
     : [...selectedLabelIds.value, labelId];
 }
 
+/**
+ * shortcut: WebKit はボタンを押してもフォーカスせず dialog へ移すので、koyori の DatePicker が
+ * 外へ出たと見てカレンダーを閉じ、月送りとクリアが効かない。koyori 側で直ったら外す
+ */
+function focusPressedButton(event: MouseEvent) {
+  const button = (event.target as Element).closest('button');
+  if (!button) return;
+  event.preventDefault();
+  button.focus();
+}
+
 function resetForm() {
   title.value = '';
   statusId.value = defaultStatusId.value;
@@ -265,7 +277,7 @@ function resetForm() {
   successMessage.value = null;
 }
 
-async function submit() {
+async function submit(event: SubmitEvent) {
   if (createMutation.isPending.value) return;
 
   const normalizedTitle = title.value.trim();
@@ -287,11 +299,16 @@ async function submit() {
   }
   const normalizedEstimate = String(estimate.value).trim();
   const estimatedMinutes = normalizedEstimate ? Number(normalizedEstimate) : undefined;
+  // 「1e」のように数値にならない入力は value が空で届き、未入力と区別できない
+  const estimateInput = (event.target as HTMLFormElement).elements.namedItem(
+    'estimated_minutes',
+  ) as HTMLInputElement;
   if (
-    estimatedMinutes !== undefined &&
-    (!Number.isInteger(estimatedMinutes) ||
-      estimatedMinutes < 1 ||
-      estimatedMinutes > MAX_ESTIMATE_MINUTES)
+    estimateInput.validity.badInput ||
+    (estimatedMinutes !== undefined &&
+      (!Number.isInteger(estimatedMinutes) ||
+        estimatedMinutes < 1 ||
+        estimatedMinutes > MAX_ESTIMATE_MINUTES))
   ) {
     validationMessage.value = `見積もりは 1 以上 ${MAX_ESTIMATE_MINUTES} 以下の整数（分）で入力してください`;
     return;
@@ -569,37 +586,39 @@ async function submit() {
               </Dropdown>
             </div>
 
-            <!-- koyori の Input は date に max を付けない。期限より後かは送信時にも検証する -->
-            <Field
-              id="task-planned-start"
-              label="開始予定日"
-              :error="plannedStartAfterSoft ? '期限より後になっています' : ''"
-            >
-              <Input
-                name="planned_start_on"
-                type="date"
-                :value="plannedStartOn"
-                :on-value-change="(v: string) => (plannedStartOn = v)"
-              />
-            </Field>
+            <!--
+              日付は type="date" の Input にしない。途中までの入力や、WebKit が空欄に出す今日の日付は
+              入力済みに見えるのに value が空で、何も送られない。期限より後かは送信時に検証する
+            -->
+            <div class="contents" @mousedown="focusPressedButton">
+              <Field
+                id="task-planned-start"
+                label="開始予定日"
+                :error="plannedStartAfterSoft ? '期限より後になっています' : ''"
+              >
+                <DatePicker
+                  label="開始予定日"
+                  :value="plannedStartOn"
+                  :on-value-change="(v: string) => (plannedStartOn = v)"
+                />
+              </Field>
 
-            <Field id="task-soft-deadline" label="期限">
-              <Input
-                name="soft_deadline"
-                type="date"
-                :value="softDeadline"
-                :on-value-change="(v: string) => (softDeadline = v)"
-              />
-            </Field>
+              <Field id="task-soft-deadline" label="期限">
+                <DatePicker
+                  label="期限"
+                  :value="softDeadline"
+                  :on-value-change="(v: string) => (softDeadline = v)"
+                />
+              </Field>
 
-            <Field id="task-hard-deadline" label="最終期限">
-              <Input
-                name="hard_deadline"
-                type="date"
-                :value="hardDeadline"
-                :on-value-change="(v: string) => (hardDeadline = v)"
-              />
-            </Field>
+              <Field id="task-hard-deadline" label="最終期限">
+                <DatePicker
+                  label="最終期限"
+                  :value="hardDeadline"
+                  :on-value-change="(v: string) => (hardDeadline = v)"
+                />
+              </Field>
+            </div>
 
             <Field id="task-estimate" label="見積もり">
               <div class="flex items-center gap-2">

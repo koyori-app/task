@@ -78,6 +78,21 @@ function postedRequest() {
     .find((request) => request.method === 'POST') as Request;
 }
 
+/** 日付欄のカレンダーを開いて日を選ぶ（カレンダーは preview が固定した今日の月で開く） */
+async function pickDate(
+  user: ReturnType<typeof userEvent.setup>,
+  trigger: HTMLElement,
+  date: string,
+) {
+  await user.click(trigger);
+  const day = await waitFor(() => {
+    const cell = trigger.ownerDocument.querySelector<HTMLElement>(`[data-date="${date}"]`);
+    if (!cell) throw new Error(`${date} がカレンダーに無い`);
+    return cell;
+  });
+  await user.click(day);
+}
+
 let invalidateQueriesSpy: ReturnType<typeof fn>;
 const createdSpy = fn();
 const openChangeSpy = fn();
@@ -164,8 +179,8 @@ export const Success201: Story = {
     const user = userEvent.setup();
     await user.type(await canvas.findByLabelText(/タイトル/), '  新しいタスク  ');
     await user.type(canvas.getByLabelText('説明'), 'Storybook から作成');
-    await user.type(canvas.getByLabelText('期限'), '2026-07-15');
-    await user.type(canvas.getByLabelText('最終期限'), '2026-07-31');
+    await pickDate(user, canvas.getByRole('button', { name: /^期限/ }), '2026-07-15');
+    await pickDate(user, canvas.getByRole('button', { name: /^最終期限/ }), '2026-07-31');
     await user.type(canvas.getByLabelText('見積もり'), '90');
     await user.click(canvas.getByRole('button', { name: /^優先度/ }));
     await user.click(await canvas.findByRole('option', { name: '高' }));
