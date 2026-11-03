@@ -47,13 +47,18 @@ const FONTS = {
     full: "'Noto Color Emoji'",
     narrow: "'Koyori Noto Narrow'",
     css: ['/noto.css', '/noto-narrow.css'],
+    cssZero: ['/noto.css', '/noto-narrow.css?zero=1'],
+    direct: NOTO_EMOJI,
   },
   twemoji: {
     full: "'Koyori Twemoji'",
     narrow: "'Koyori Twemoji Narrow'",
     css: [`/fonts/twemoji/${TWEMOJI_CSS}`, '/twemoji-narrow.css'],
+    cssZero: [`/fonts/twemoji/${TWEMOJI_CSS}`, '/twemoji-narrow.css?zero=1'],
+    direct: `/fonts/twemoji/${TWEMOJI_CSS}`,
   },
 };
+const NARROW_JS = "'Koyori Emoji Narrow'";
 
 // 字の並び。f は選んだ字（full と narrow）。os では字を入れない
 const VARIANTS = {
@@ -65,6 +70,10 @@ const VARIANTS = {
   'two-stage': (f) => [f.narrow, BODY, f.full, TAIL],
   // 頭に全ての範囲の物を置く（数字が奪われる見込み）
   head: (f) => [f.full, BODY, TAIL],
+  // 二段の写しを browser の中で作る（字の CSS の @font-face から FontFace で足す）
+  'two-stage-js': (f) => [f.full && NARROW_JS, BODY, f.full, TAIL],
+  // 二段の写しの行の高さを 0 に上書きする（Safari の一画素のずれを消せるか）
+  'two-stage-zero': (f) => [f.narrow, BODY, f.full, TAIL],
 };
 
 function stack(variant, font) {
@@ -97,7 +106,7 @@ function formatRange(ranges) {
     .join(', ');
 }
 // @font-face の名と unicode-range を替えた写しを作る（範囲が空になった物は落とす）
-function narrowCss(css, family) {
+function narrowCss(css, family, zero = false) {
   return css.replace(/@font-face\s*\{([^}]*)\}/g, (_, body) => {
     const range = /unicode-range:\s*([^;]+);/.exec(body);
     const narrowed = subtract(range ? parseRange(range[1]) : [[0, 0x10ffff]]);
@@ -106,6 +115,7 @@ function narrowCss(css, family) {
     next = range
       ? next.replace(/unicode-range:\s*[^;]+;/, `unicode-range: ${formatRange(narrowed)};`)
       : `${next}\n  unicode-range: ${formatRange(narrowed)};`;
+    if (zero) next += '\n  ascent-override: 0%;\n  descent-override: 0%;\n  line-gap-override: 0%;';
     return `@font-face {${next}}`;
   });
 }
@@ -115,10 +125,42 @@ async function googleCss(url, userAgent) {
   return res.text();
 }
 
+// browser の中で、字の CSS の @font-face から絵文字の範囲に絞った写しを FontFace で足す
+const NARROW_SCRIPT = `
+window.__narrow = { done: false, faces: 0, error: null };
+const EXCLUDE = ${JSON.stringify(EXCLUDE)};
+function parse(t) { return t.split(',').map((p) => { const [a, b] = p.trim().replace(/^U\\+/i, '').split('-'); return [parseInt(a, 16), parseInt(b ?? a, 16)]; }); }
+function subtract(r) { for (const [ea, eb] of EXCLUDE) r = r.flatMap(([a, b]) => { if (b < ea || a > eb) return [[a, b]]; const o = []; if (a < ea) o.push([a, ea - 1]); if (b > eb) o.push([eb + 1, b]); return o; }); return r; }
+function fmt(r) { return r.map(([a, b]) => a === b ? 'U+' + a.toString(16) : 'U+' + a.toString(16) + '-' + b.toString(16)).join(', '); }
+function addNarrow(sheet) {
+  for (const rule of sheet.cssRules) {
+    if (!(rule instanceof CSSFontFaceRule)) continue;
+    const range = subtract(parse(rule.style.getPropertyValue('unicode-range') || 'U+0-10FFFF'));
+    if (!range.length) continue;
+    document.fonts.add(new FontFace(${JSON.stringify(NARROW_JS.replace(/'/g, ''))}, rule.style.getPropertyValue('src'), { unicodeRange: fmt(range), display: 'swap' }));
+    window.__narrow.faces++;
+  }
+}
+const link = document.getElementById('emoji-css');
+const run = () => { try { addNarrow(link.sheet); } catch (e) { window.__narrow.error = String(e); } window.__narrow.done = true; };
+if (link) { if (link.sheet) run(); else link.addEventListener('load', run); } else window.__narrow.done = true;
+`;
+
 function page(variant, font) {
-  const links = [NOTO_SANS, ...FONTS[font].css]
-    .map((href) => `<link rel="stylesheet" href="${href}">`)
-    .join('\n');
+  const f = FONTS[font];
+  const sources =
+    variant === 'two-stage-js'
+      ? f.direct
+        ? [`<link id="emoji-css" rel="stylesheet" crossorigin="anonymous" href="${f.direct}">`]
+        : []
+      : (variant === 'two-stage-zero' ? (f.cssZero ?? f.css) : f.css).map(
+          (href) => `<link rel="stylesheet" href="${href}">`,
+        );
+  const links = [`<link rel="stylesheet" href="${NOTO_SANS}">`, ...sources].join('\n');
+  const script =
+    variant === 'two-stage-js'
+      ? `<script>${NARROW_SCRIPT}</script>`
+      : '<script>window.__narrow = { done: true };</script>';
   return `<!doctype html><html><head><meta charset="utf-8">${links}
 <style>
 body { margin: 16px; font-size: 32px; line-height: 1.6; font-family: ${stack(variant, font)}; background: #fff; color: #222; }
@@ -130,6 +172,7 @@ p { margin: 0 0 8px; white-space: nowrap; }
 <p id="keycap"><span class="g">1️⃣</span> <span class="g">#️⃣</span> <span class="g">*️⃣</span></p>
 <p id="text">0123456789 # * © ® ™</p>
 <p><span id="ref" class="g">😀</span></p>
+${script}
 </body></html>`;
 }
 
@@ -146,11 +189,17 @@ const server = http.createServer(async (req, res) => {
       res.end(await googleCss(NOTO_EMOJI, ua));
     } else if (url.pathname === '/noto-narrow.css') {
       res.writeHead(200, { 'Content-Type': 'text/css' });
-      res.end(narrowCss(await googleCss(NOTO_EMOJI, ua), "'Koyori Noto Narrow'"));
+      res.end(
+        narrowCss(
+          await googleCss(NOTO_EMOJI, ua),
+          "'Koyori Noto Narrow'",
+          url.searchParams.has('zero'),
+        ),
+      );
     } else if (url.pathname === '/twemoji-narrow.css') {
       const css = fs.readFileSync(path.join(FRONTEND, 'public/fonts/twemoji', TWEMOJI_CSS), 'utf8');
       res.writeHead(200, { 'Content-Type': 'text/css' });
-      res.end(narrowCss(css, "'Koyori Twemoji Narrow'"));
+      res.end(narrowCss(css, "'Koyori Twemoji Narrow'", url.searchParams.has('zero')));
     } else if (url.pathname.startsWith('/fonts/')) {
       const file = path.join(FRONTEND, 'public', url.pathname);
       res.writeHead(200, { 'Content-Type': file.endsWith('.css') ? 'text/css' : 'font/woff2' });
@@ -171,8 +220,11 @@ const BASE = `http://127.0.0.1:${server.address().port}`;
 const MEASURE = `return (() => {
   const ref = document.getElementById('ref').getBoundingClientRect().width;
   const widths = (id) => [...document.querySelectorAll('#' + id + ' .g')].map((el) => el.getBoundingClientRect().width / ref);
-  return { keycap: widths('keycap'), zwj: widths('zwj') };
+  return { keycap: widths('keycap'), zwj: widths('zwj'), narrow: window.__narrow };
 })()`;
+const WAIT = `const done = arguments[arguments.length - 1];
+const wait = () => (window.__narrow && window.__narrow.done ? document.fonts.ready.then(() => setTimeout(done, 1500)) : setTimeout(wait, 100));
+wait();`;
 
 const ROWS = ['emoji', 'zwj', 'keycap', 'text'];
 
@@ -187,6 +239,7 @@ async function shootPlaywright(type, name) {
     for (const font of Object.keys(FONTS)) {
       const p = await context.newPage();
       await p.goto(`${BASE}/page?variant=${variant}&font=${font}`);
+      await p.waitForFunction(() => window.__narrow?.done === true);
       await p.evaluate(() => document.fonts.ready);
       await p.waitForTimeout(1500);
       const shots = {};
@@ -211,9 +264,7 @@ async function shootSafari() {
     for (const variant of Object.keys(VARIANTS)) {
       for (const font of Object.keys(FONTS)) {
         await driver.get(`${BASE}/page?variant=${variant}&font=${font}`);
-        await driver.executeAsyncScript(
-          'const done = arguments[arguments.length - 1]; document.fonts.ready.then(() => setTimeout(done, 1500));',
-        );
+        await driver.executeAsyncScript(WAIT);
         const shots = {};
         for (const row of ROWS) {
           const file = path.join(OUT, 'png', `safari-${variant}-${font}-${row}.png`);
@@ -262,6 +313,7 @@ for (const [name, shoot] of Object.entries(BROWSERS)) {
           textDiff: diffRatio(os.shots.text, got.shots.text),
           keycapWidths: got.widths.keycap,
           zwjWidths: got.widths.zwj,
+          narrow: got.widths.narrow,
         };
       }
       results[name][`${variant}/os`] = { keycapWidths: os.widths.keycap, zwjWidths: os.widths.zwj };
