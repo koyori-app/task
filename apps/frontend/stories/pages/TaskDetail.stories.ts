@@ -205,6 +205,8 @@ type MockOptions = {
   onPut?: (body: unknown) => void;
   onDelete?: () => void;
   comments?: MockComment[];
+  /** `GET /tasks/{id}/activities` の応答。新しい順に渡す */
+  activities?: Record<string, unknown>[];
   /** コメント一覧 API が本文の印を解くために返す表 */
   commentMentions?: MentionTable;
   /** コメント一覧 GET だけを 500 で落とす（ページ本体は生かす） */
@@ -300,7 +302,8 @@ function createMockFetch(overrides: MockOptions = {}) {
       return jsonResponse([mockUsers.alpha, mockUsers.beta]);
     }
     if (url.includes('/activities')) {
-      return jsonResponse({ activities: [], total: 0 });
+      const activities = overrides.activities ?? [];
+      return jsonResponse({ activities, total: activities.length, next_cursor: null });
     }
     if (method === 'GET' && url.includes('/relations')) {
       return jsonResponse({
@@ -1392,13 +1395,93 @@ export const CommentPost: Story = {
     await waitFor(() => expect(textarea.textContent).not.toContain('新しく投稿するコメント'));
 
     const commentList = await waitFor(() => {
-      const list = canvasElement.querySelector('[data-task-comments] ul');
+      const list = canvasElement.querySelector('[data-activity-feed]');
       if (!list) throw new Error('comment list not ready');
       return list as HTMLElement;
     });
     await expect(
       within(commentList).findByText('新しく投稿するコメント'),
     ).resolves.toBeInTheDocument();
+  },
+};
+
+const sampleActivity = (
+  id: string,
+  created_at: string,
+  event_type: string,
+  payload: Record<string, unknown>,
+) => ({ id, created_at, event_type, payload, user: { id: 'user-alpha', name: 'yupix' } });
+
+export const ActivityTimeline: Story = {
+  name: 'アクティビティ（1 本のタイムライン）',
+  beforeEach: () =>
+    createMockFetch({
+      comments: sampleComments,
+      activities: [
+        sampleActivity('a4', '2026-06-12T05:03:00Z', 'status_changed', {
+          from: 'Todo',
+          to: 'Done',
+        }),
+        sampleActivity('a3', '2026-06-12T04:58:00Z', 'forge_pull_request_linked', {
+          number: 1065,
+          title: 'サインイン画面の修正',
+          html_url: 'https://github.com/acme/backend/pull/1065',
+          source: 'manual',
+        }),
+        sampleActivity('a2', '2026-06-01T01:13:00Z', 'priority_changed', {
+          from: 'medium',
+          to: 'high',
+        }),
+        sampleActivity('a1', '2026-06-01T01:12:00Z', 'task_created', {}),
+      ],
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('タスクを作成')).resolves.toBeInTheDocument();
+
+    // 古い順の 1 本に並ぶ。作成の履歴はコメントより前、ステータスの変更は後
+    const feed = canvasElement.querySelector('[data-activity-feed]') as HTMLElement;
+    const text = feed.textContent ?? '';
+    await expect(text.indexOf('タスクを作成')).toBeLessThan(text.indexOf('最初のコメントです'));
+    await expect(text.indexOf('最初のコメントです')).toBeLessThan(text.indexOf('ステータス'));
+    // 優先度は内部の値を出さない
+    await expect(text).not.toContain('medium');
+  },
+};
+
+export const ActivityTimelineFilter: Story = {
+  name: 'アクティビティ（絞り込み）',
+  beforeEach: () =>
+    createMockFetch({
+      comments: sampleComments,
+      activities: [
+        sampleActivity('a4', '2026-06-12T05:03:00Z', 'status_changed', {
+          from: 'Todo',
+          to: 'Done',
+        }),
+        sampleActivity('a3', '2026-06-12T04:58:00Z', 'forge_pull_request_linked', {
+          number: 1065,
+          title: 'サインイン画面の修正',
+          html_url: 'https://github.com/acme/backend/pull/1065',
+          source: 'manual',
+        }),
+        sampleActivity('a2', '2026-06-01T01:13:00Z', 'priority_changed', {
+          from: 'medium',
+          to: 'high',
+        }),
+        sampleActivity('a1', '2026-06-01T01:12:00Z', 'task_created', {}),
+      ],
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(canvas.findByText('タスクを作成')).resolves.toBeInTheDocument();
+    const feed = canvasElement.querySelector('[data-activity-feed]') as HTMLElement;
+
+    await user.click(canvas.getByRole('button', { name: /アクティビティの絞り込み/ }));
+    await user.click(await canvas.findByRole('menuitemradio', { name: 'コメント' }));
+    await waitFor(() => expect(feed.textContent).not.toContain('タスクを作成'));
+    await expect(feed.textContent).toContain('最初のコメントです');
   },
 };
 

@@ -10,13 +10,11 @@ import {
   CircleDashed,
   Copy,
   EllipsisVertical,
-  Filter,
   Flag,
   Loader2,
   Pencil,
   Percent,
   Plus,
-  Search,
   ListChecks,
   SquarePen,
   Star,
@@ -1100,12 +1098,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
           >
             <h2 class="text-sm font-semibold">アクティビティ</h2>
             <div class="ml-auto flex items-center gap-0.5">
-              <Button type="button" variant="ghost" ariaLabel="アクティビティを検索" disabled>
-                <template #icon><Search class="size-4" aria-hidden="true" /></template>
-              </Button>
-              <Button type="button" variant="ghost" ariaLabel="アクティビティを絞り込む" disabled>
-                <template #icon><Filter class="size-4" aria-hidden="true" /></template>
-              </Button>
+              <slot name="sidebar-actions" />
             </div>
           </div>
 
