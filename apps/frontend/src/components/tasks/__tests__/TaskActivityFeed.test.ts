@@ -40,6 +40,44 @@ describe('TaskActivityFeed', () => {
   });
 
   it.each([
+    ['critical_fire', '緊急'],
+    ['critical', '重大'],
+    ['high', '高'],
+    ['medium', '中'],
+    ['low', '低'],
+    ['trivial', '些細'],
+    // 表にない値は隠さずそのまま出す
+    ['urgent', 'urgent'],
+  ])('優先度の変更 %s を日本語で表示する', (to, label) => {
+    const wrapper = mount(TaskActivityFeed, {
+      props: {
+        activities: [
+          {
+            ...activity('priority-1', 10),
+            event_type: 'priority_changed',
+            payload: { from: 'low', to },
+          },
+        ],
+      },
+    });
+    expect(wrapper.text()).toContain(`yupixが優先度を ${label} に変更しました`);
+  });
+
+  it.each([
+    ['label_added', { label_id: 'label-1', name: 'バグ' }, 'ラベル「バグ」を追加しました'],
+    ['label_removed', { label_id: 'label-1', name: 'バグ' }, 'ラベル「バグ」を外しました'],
+    ['label_added', {}, 'ラベルを追加しました'],
+    ['label_removed', {}, 'ラベルを外しました'],
+  ])('ラベルの変更 %s %j を表示する', (event_type, payload, text) => {
+    const wrapper = mount(TaskActivityFeed, {
+      props: {
+        activities: [{ ...activity('label-1', 10), event_type, payload }],
+      },
+    });
+    expect(wrapper.text()).toContain(`yupixが${text}`);
+  });
+
+  it.each([
     [{ from: null, to: '2026-10-05' }, '開始予定日を 2026/10/05 に変更しました'],
     [{ from: '2026-10-05', to: null }, '開始予定日を解除しました'],
   ])('開始予定日の変更を表示する: %j', (payload, text) => {

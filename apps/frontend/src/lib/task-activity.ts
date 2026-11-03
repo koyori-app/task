@@ -1,6 +1,16 @@
 import type { components } from '@/generated/api';
+import { PRIORITY_CONFIG, type ApiPriority } from '@/lib/task-display';
 
 export type ActivityItem = components['schemas']['ActivityItem'];
+
+/**
+ * 履歴の優先度（backend の `priority_label`。`critical_fire` の形）を表示名にする。
+ * `PRIORITY_CONFIG` のキーは `CriticalFire` の形なので揃えて引く。未知の値はそのまま出す。
+ */
+function priorityLabel(value: string): string {
+  const key = value.replace(/(?:^|_)([a-z])/g, (_, c: string) => c.toUpperCase());
+  return PRIORITY_CONFIG[key as ApiPriority]?.label ?? value;
+}
 
 /**
  * 履歴 1 件の表示文言。
@@ -35,7 +45,15 @@ export function activityText(item: ActivityItem): string {
     }
     case 'priority_changed': {
       const to = str('to');
-      return to ? `優先度を ${to} に変更しました` : '優先度を変更しました';
+      return to ? `優先度を ${priorityLabel(to)} に変更しました` : '優先度を変更しました';
+    }
+    case 'label_added':
+    case 'label_removed': {
+      const name = str('name');
+      const target = name ? `ラベル「${name}」` : 'ラベル';
+      return item.event_type === 'label_added'
+        ? `${target}を追加しました`
+        : `${target}を外しました`;
     }
     case 'deadline_changed': {
       const field = str('field') === 'hard_deadline' ? 'ハード期限' : '期限';
