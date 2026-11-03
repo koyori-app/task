@@ -249,6 +249,26 @@ describe('activityLine', () => {
   });
 
   it.each([
+    ['critical_fire', '緊急'],
+    ['critical', '重大'],
+    ['high', '高'],
+    ['medium', '中'],
+    ['low', '低'],
+    ['trivial', '些細'],
+    // 表にない値は隠さずそのまま出す
+    ['urgent', 'urgent'],
+  ])('優先度 %s を %s と出す', (to, text) => {
+    expect(line('priority_changed', { from: 'low', to })).toMatchObject({ to: { text } });
+  });
+
+  it.each([
+    ['label_added', 'ラベルを追加'],
+    ['label_removed', 'ラベルを解除'],
+  ])('名前の無い %s は文で出す', (event_type, text) => {
+    expect(line(event_type, {})).toEqual({ kind: 'text', text });
+  });
+
+  it.each([
     [{ field: 'soft_deadline', from: '2026-10-05T00:00:00Z', to: '2026-10-07T00:00:00Z' }, '期限'],
     [{ field: 'hard_deadline', from: '2026-10-05T00:00:00Z', to: null }, 'ハード期限'],
   ])('期限は変更前後の日付を出す: %j', (payload, label) => {

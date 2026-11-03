@@ -5,10 +5,10 @@ import {
   activityActor,
   activityText,
   commitActivity,
+  priorityConfigOf,
   pullRequestActivity,
   type ActivityItem,
 } from '@/lib/task-activity';
-import { PRIORITY_CONFIG, type ApiPriority } from '@/lib/task-display';
 
 export type ActivityFilter = 'all' | 'comments' | 'history';
 
@@ -171,22 +171,10 @@ export type ActivityLine =
     }
   | { kind: 'text'; text: string };
 
-// 履歴の値は backend の priority_label の形。画面に出す語は PRIORITY_CONFIG が持つ
-const PRIORITY_BY_PAYLOAD: Record<string, ApiPriority> = {
-  critical_fire: 'CriticalFire',
-  critical: 'Critical',
-  high: 'High',
-  medium: 'Medium',
-  low: 'Low',
-  trivial: 'Trivial',
-};
-
 function priorityValue(raw: unknown): ActivityValue | null {
   if (typeof raw !== 'string') return null;
-  const priority = PRIORITY_BY_PAYLOAD[raw];
-  if (!priority) return { text: raw };
-  const { label, color, icon } = PRIORITY_CONFIG[priority];
-  return { text: label, color, icon };
+  const config = priorityConfigOf(raw);
+  return config ? { text: config.label, color: config.color, icon: config.icon } : { text: raw };
 }
 
 function dateValue(raw: unknown): ActivityValue | null {
@@ -281,14 +269,11 @@ export function activityLine(item: ActivityItem, lookups: ActivityLookups = {}):
     }
     case 'label_added':
     case 'label_removed': {
-      const added = item.event_type === 'label_added';
-      if (typeof payload.name !== 'string') {
-        return { kind: 'text', text: added ? 'ラベルを追加' : 'ラベルを削除' };
-      }
+      if (typeof payload.name !== 'string') return textLine(item);
       return {
         kind: 'membership',
         label: 'ラベル',
-        added,
+        added: item.event_type === 'label_added',
         value: {
           text: payload.name,
           color: lookups.labels?.find((l) => l.id === payload.label_id)?.color,
