@@ -4,12 +4,16 @@ import { PRIORITY_CONFIG, type ApiPriority } from '@/lib/task-display';
 export type ActivityItem = components['schemas']['ActivityItem'];
 
 /**
- * 履歴の優先度（backend の `priority_label`。`critical_fire` の形）を表示名にする。
- * `PRIORITY_CONFIG` のキーは `CriticalFire` の形なので揃えて引く。未知の値はそのまま出す。
+ * 履歴の優先度（backend の `priority_label`。`critical_fire` の形）の表示を引く。
+ * `PRIORITY_CONFIG` のキーは `CriticalFire` の形なので揃えて引く。未知の値は null出す。
  */
-function priorityLabel(value: string): string {
+export function priorityConfigOf(value: string) {
   const key = value.replace(/(?:^|_)([a-z])/g, (_, c: string) => c.toUpperCase());
-  return PRIORITY_CONFIG[key as ApiPriority]?.label ?? value;
+  return PRIORITY_CONFIG[key as ApiPriority] ?? null;
+}
+
+function priorityLabel(value: string): string {
+  return priorityConfigOf(value)?.label ?? value;
 }
 
 /**

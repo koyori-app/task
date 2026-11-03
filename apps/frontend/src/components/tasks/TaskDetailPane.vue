@@ -2,7 +2,7 @@
 import { X } from '@lucide/vue';
 import { computed, ref } from 'vue';
 
-import TaskActivityFeed from '@/components/tasks/TaskActivityFeed.vue';
+import TaskActivityFilter from '@/components/tasks/TaskActivityFilter.vue';
 import TaskAttachments from '@/components/tasks/TaskAttachments.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
@@ -10,6 +10,7 @@ import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
 import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
 import { Button } from '@koyori-app/ui-vue';
+import type { ActivityFilter, ActivityLookups } from '@/lib/activity-timeline';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
 import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
 import { useTaskActivities } from '@/composables/useTaskActivities';
@@ -173,6 +174,15 @@ const {
 const membersQuery = useAssignableUsersQuery(tenantId, projectId);
 const members = computed(() => membersQuery.data.value ?? []);
 
+// 列の見出しの絞り込み。スレッドの中は絞り込まないので、開いている間は出さない
+const activityFilter = ref<ActivityFilter>('all');
+const activityThreadId = ref<string | null>(null);
+const activityLookups = computed<ActivityLookups>(() => ({
+  statuses: statuses.value,
+  members: members.value,
+  labels: projectLabels.value,
+}));
+
 // 候補の取得状態はピッカーへ渡す（取得中・失敗を「候補 0 人」と混ぜない）
 const membersState = computed(() => ({
   loading: membersQuery.isLoading.value,
@@ -323,9 +333,23 @@ function onDeleteDialogCancel(event: Event) {
             :project-key="projectKey"
           />
         </template>
+        <template #sidebar-actions>
+          <TaskActivityFilter v-if="!activityThreadId" v-model="activityFilter" />
+        </template>
         <template #sidebar>
           <TaskComments
+            :task-id="taskId"
             :threads="threads"
+            v-model:open-thread-id="activityThreadId"
+            :activities="activities"
+            :activities-loading="activitiesLoading"
+            :activities-error="activitiesError"
+            :on-retry-activities="refetchActivities"
+            :has-more-activities="hasMoreActivities"
+            :activities-fetching-more="activitiesFetchingMore"
+            :on-load-more-activities="loadMoreActivities"
+            :filter="activityFilter"
+            :lookups="activityLookups"
             :mentions="mentions"
             :mention-candidates="members"
             :loading="commentsLoading"
@@ -351,17 +375,6 @@ function onDeleteDialogCancel(event: Event) {
             :on-clear-update-error="clearUpdateError"
             :on-clear-delete-error="clearDeleteError"
           >
-            <template #before-list>
-              <TaskActivityFeed
-                :activities="activities"
-                :loading="activitiesLoading"
-                :error="activitiesError"
-                :on-retry="refetchActivities"
-                :has-more="hasMoreActivities"
-                :fetching-more="activitiesFetchingMore"
-                :on-load-more="loadMoreActivities"
-              />
-            </template>
           </TaskComments>
         </template>
         <template #header-actions>

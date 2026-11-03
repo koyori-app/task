@@ -1298,10 +1298,10 @@ export const ListViewDetailOverlay: Story = {
     await user.click(await canvas.findByRole('button', { name: 'OAuth 対応を実装する' }));
 
     const dialog = await screen.findByRole('dialog');
-    // 履歴は箇条書き、コメントはカードで並ぶ
-    await expect(
-      within(dialog).findByText(/ステータスを In Progress に変更しました/),
-    ).resolves.toBeInTheDocument();
+    // 履歴とコメントを 1 本に並べる
+    await waitFor(() =>
+      expect(dialog.querySelector('[data-activity-feed]')?.textContent).toContain('In Progress'),
+    );
     await expect(
       within(dialog).findByText('ここは PKCE の検証を先に入れたほうがよさそうです。'),
     ).resolves.toBeInTheDocument();
