@@ -1,5 +1,6 @@
 import { computed, onScopeDispose, ref, watch, type MaybeRefOrGetter, toValue } from 'vue';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
+import { OpenApiVueQueryError } from '@koyori-app/openapi-vue-query';
 import { navigate } from 'vike/client/router';
 
 import type { EditableField, MutatingField } from '@/components/tasks/editable-field';
@@ -39,6 +40,14 @@ function compareStrings(left: string, right: string) {
     if (a !== b) return a < b ? -1 : 1;
   }
   return l.length - r.length;
+}
+
+/** backend は親の循環（自分自身・子孫を親にする）を 409、消えたタスクを 404 で拒む */
+function parentErrorMessage(error: unknown) {
+  const status = error instanceof OpenApiVueQueryError ? error.response?.status : undefined;
+  if (status === 409) return '自分自身や子孫のタスクは親にできません';
+  if (status === 404) return 'タスクが見つかりません。削除された可能性があります';
+  return '親タスクの更新に失敗しました';
 }
 
 export interface UseTaskDetailParams {
@@ -91,6 +100,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
   const statusError = ref<string | null>(null);
   const priorityError = ref<string | null>(null);
   const labelsError = ref<string | null>(null);
+  const parentError = ref<string | null>(null);
   const deleteError = ref<string | null>(null);
   const fieldErrors = ref<Partial<Record<EditableField, string>>>({});
   /** 直近に保存が確定したフィールド。一定時間で消える（Hub が「保存しました」を出す） */
@@ -120,6 +130,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     clearSavedNotice();
     optimisticTask.value = {};
     pendingFieldRevisions.value = {};
+    parentError.value = null;
   });
 
   const taskQueryKey = computed(
@@ -223,6 +234,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
   const statusUpdating = computed(() => pendingFieldRevisions.value.status_id !== undefined);
   const priorityUpdating = computed(() => pendingFieldRevisions.value.priority !== undefined);
   const labelsUpdating = computed(() => pendingFieldRevisions.value.labels !== undefined);
+  const parentUpdating = computed(() => pendingFieldRevisions.value.parent_task_id !== undefined);
 
   const updateTaskMutation = apiClient.useMutation('put', GET_TASK_PATH);
 
@@ -275,7 +287,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     },
   });
 
-  function rollbackOptimistic(field: MutatingField, revision: number) {
+  function rollbackOptimistic(field: MutatingField, revision: number, error: unknown) {
     if (pendingFieldRevisions.value[field] !== revision) return;
 
     const nextOptimistic = { ...optimisticTask.value };
@@ -297,6 +309,10 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     }
     if (field === 'labels') {
       labelsError.value = 'ラベルの更新に失敗しました';
+      return;
+    }
+    if (field === 'parent_task_id') {
+      parentError.value = parentErrorMessage(error);
       return;
     }
     fieldErrors.value = {
@@ -344,6 +360,8 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       priorityError.value = null;
     } else if (field === 'labels') {
       labelsError.value = null;
+    } else if (field === 'parent_task_id') {
+      parentError.value = null;
     } else {
       fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
       // 通知の欄があるのはインライン編集のフィールドだけ。ステータス等の保存で表示中の通知を消さない。
@@ -366,6 +384,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     if (field === 'status_id') statusError.value = null;
     else if (field === 'priority') priorityError.value = null;
     else if (field === 'labels') labelsError.value = null;
+    else if (field === 'parent_task_id') parentError.value = null;
     else fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
     if (savedField.value === field) savedField.value = null;
 
@@ -387,10 +406,14 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       .then((data: TaskDetail) => {
         applyMutationSuccess(field, revision, data, queryKey);
         void invalidateAfterTaskMutation();
+        // 親の変更は元の親と新しい親にも及ぶので、タスク本体も prefix 一致で取り直す
+        if (field === 'parent_task_id') {
+          void queryClient.invalidateQueries({ queryKey: ['get', GET_TASK_PATH] });
+        }
         params.onAfterFieldSaved?.(field);
       })
-      .catch(() => {
-        rollbackOptimistic(field, revision);
+      .catch((error: unknown) => {
+        rollbackOptimistic(field, revision, error);
         // ラベルは task.labels 全量を送るため、削除済みラベルが混ざると 400 になる。
         // タスクとラベル一覧を再取得して古いキャッシュを解消し、再操作できる状態に戻す
         if (field === 'labels') {
@@ -509,6 +532,17 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     mutateTask({ label_ids: labelIds }, { labels: chosen }, 'labels');
   }
 
+  /** `null` で親を外す。API は値と clear フラグを別に持つ */
+  function onChangeParent(parentTaskId: string | null) {
+    const current = taskQuery.data.value;
+    if (!current || parentTaskId === (current.parent_task_id ?? null)) return;
+    mutateTask(
+      parentTaskId ? { parent_task_id: parentTaskId } : { clear_parent_task_id: true },
+      { parent_task_id: parentTaskId },
+      'parent_task_id',
+    );
+  }
+
   function confirmDelete() {
     if (!tenantId.value || !projectId.value || !taskId.value) return;
     deleteError.value = null;
@@ -564,6 +598,8 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     onPriorityChange,
     labelsUpdating,
     labelsError,
+    parentUpdating,
+    parentError,
     fieldUpdating,
     fieldErrors,
     savedField,
@@ -579,6 +615,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     onSaveSoftDeadline,
     onSaveHardDeadline,
     onSaveLabels,
+    onChangeParent,
     // 削除
     deleteError,
     deletePending: computed(() => deleteTaskMutation.isPending.value),

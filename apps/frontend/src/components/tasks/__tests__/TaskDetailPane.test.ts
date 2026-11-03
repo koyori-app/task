@@ -25,6 +25,7 @@ const task: TaskDetail = {
 };
 
 const confirmDelete = vi.fn();
+const onChangeParent = vi.fn();
 // 既定は未解決（他のテストで取得を走らせない）。似ているタスクのテストだけ値を入れる
 const resolvedIds = {
   tenantId: ref<string | undefined>(undefined),
@@ -52,6 +53,9 @@ vi.mock('@/composables/useTaskDetail', () => ({
       statusError: ref(null),
       labelsUpdating: computed(() => false),
       labelsError: ref(null),
+      parentUpdating: computed(() => false),
+      parentError: ref(null),
+      onChangeParent,
       fieldUpdating: computed(() => ({})),
       fieldErrors: ref({}),
       savedField: ref(null),
@@ -73,6 +77,7 @@ vi.mock('@/composables/useTaskDetail', () => ({
 }));
 
 import TaskDetailPane from '../TaskDetailPane.vue';
+import TaskSubtaskPanel from '../TaskSubtaskPanel.vue';
 
 enableAutoUnmount(afterEach);
 
@@ -126,6 +131,14 @@ describe('TaskDetailPane', () => {
     const wrapper = mountPane();
     await wrapper.get('button[aria-label="詳細を閉じる"]').trigger('click');
     expect(wrapper.emitted('close')).toBeTruthy();
+  });
+
+  // オーバーレイもこのペインを描くので、ここの配線で右ペインとオーバーレイの両方を見る
+  it('サブタスク欄からの親の変更を useTaskDetail へ渡す', () => {
+    onChangeParent.mockReset();
+    const wrapper = mountPane();
+    wrapper.getComponent(TaskSubtaskPanel).vm.$emit('change-parent', 'parent-id');
+    expect(onChangeParent).toHaveBeenCalledWith('parent-id');
   });
 
   /*

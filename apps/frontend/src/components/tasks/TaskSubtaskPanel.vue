@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ArrowUpLeft, GitBranch, Loader2, Plus, RotateCcw } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
+import TaskParentPicker from '@/components/tasks/TaskParentPicker.vue';
 import TaskSubtaskComposer from '@/components/tasks/TaskSubtaskComposer.vue';
 import { Button } from '@koyori-app/ui-vue';
 import { useTaskSubtasks } from '@/composables/useTaskSubtasks';
@@ -21,15 +22,20 @@ const props = defineProps<{
   parentTaskId: string | null;
   statusId: string;
   statusUpdating: boolean;
+  parentUpdating: boolean;
+  parentError: string | null;
   statuses: StatusResponse[];
   projectKey: string;
 }>();
 
 const emit = defineEmits<{
   open: [task: TaskResponse];
+  /** `null` で親を外す */
+  'change-parent': [parentTaskId: string | null];
 }>();
 
 const adding = ref(false);
+const pickingParent = ref(false);
 const subtasks = useTaskSubtasks({
   tenantId: () => props.tenantId,
   projectId: () => props.projectId,
@@ -40,37 +46,105 @@ const subtasks = useTaskSubtasks({
 
 const statusesById = computed(() => new Map(props.statuses.map((status) => [status.id, status])));
 
+// 楽観更新中や取り直し中の古い relations を、今の親として描かない
+const parentTask = computed(() => {
+  const parent = subtasks.parentTask.value;
+  return parent && parent.id === props.parentTaskId ? parent : null;
+});
+
+// 親の変更が失敗すると親付きへ戻るので、確定までは「親が無い」前提で子を作らせない
+const composerBlocked = computed(() => props.statusUpdating || props.parentUpdating);
+
+// 作成中に親が付くと、親なしの前提で作った子が孫になる
+const parentChangeBlocked = computed(() => props.parentUpdating || subtasks.createPending.value);
+
+// 親の確定で閉じる。楽観更新の間に閉じると、拒否されたときに下書きが消える
+watch(
+  () => !!props.parentTaskId && !props.parentUpdating,
+  (isChild) => {
+    if (isChild) adding.value = false;
+  },
+);
+
+// オーバーレイと右ペインは別のタスクへ移っても同じインスタンス
+watch(
+  () => props.taskUuid,
+  () => {
+    pickingParent.value = false;
+  },
+);
+
+const parentCandidateExclusions = computed(() => [
+  props.taskUuid,
+  ...(props.parentTaskId ? [props.parentTaskId] : []),
+  ...subtasks.subtasks.value.map((subtask) => subtask.id),
+]);
+
+// 飛行中に次の親を選ばせないよう、送るときは候補を閉じる（ボタンは飛行中 disabled）
+function changeParent(parentTaskId: string | null) {
+  pickingParent.value = false;
+  emit('change-parent', parentTaskId);
+}
+
 function openComposer() {
-  if (props.parentTaskId || props.statusUpdating) return;
+  if (props.parentTaskId || composerBlocked.value) return;
   adding.value = true;
 }
 
 function cancelComposer() {
-  if (props.statusUpdating) return;
+  if (composerBlocked.value) return;
   adding.value = false;
 }
 
 function createSubtask(title: string) {
-  if (props.parentTaskId || props.statusUpdating) return Promise.resolve(false);
+  if (props.parentTaskId || composerBlocked.value) return Promise.resolve(false);
   return subtasks.createSubtask(title, props.statusId);
 }
 </script>
 
 <template>
   <div class="border-t pt-5" data-task-subtasks>
-    <button
-      v-if="subtasks.parentTask.value"
-      type="button"
-      class="mb-4 flex max-w-full items-center gap-2 rounded px-1 py-1 text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-      @click="emit('open', subtasks.parentTask.value!)"
-    >
-      <ArrowUpLeft class="size-4 shrink-0" aria-hidden="true" />
-      <span class="shrink-0">親タスク</span>
-      <span class="font-mono text-xs">
-        {{ taskSeqKey(projectKey, subtasks.parentTask.value!.seq_id) }}
-      </span>
-      <span class="truncate">{{ subtasks.parentTask.value!.title }}</span>
-    </button>
+    <div class="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1" data-task-parent>
+      <button
+        v-if="parentTask"
+        type="button"
+        class="flex max-w-full min-w-0 items-center gap-2 rounded px-1 py-1 text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+        @click="emit('open', parentTask!)"
+      >
+        <ArrowUpLeft class="size-4 shrink-0" aria-hidden="true" />
+        <span class="shrink-0">親タスク</span>
+        <span class="font-mono text-xs">
+          {{ taskSeqKey(projectKey, parentTask.seq_id) }}
+        </span>
+        <span class="truncate">{{ parentTask.title }}</span>
+      </button>
+      <Button
+        type="button"
+        variant="ghost"
+        :disabled="parentChangeBlocked"
+        :label="parentTaskId ? '親を変更' : '親を設定'"
+        @click="pickingParent = !pickingParent"
+      />
+      <Button
+        v-if="parentTaskId"
+        type="button"
+        variant="ghost"
+        :disabled="parentChangeBlocked"
+        label="親を外す"
+        @click="changeParent(null)"
+      />
+    </div>
+    <p v-if="parentError" class="mb-4 text-xs text-destructive" role="alert">{{ parentError }}</p>
+    <TaskParentPicker
+      v-if="pickingParent"
+      :tenant-id="tenantId"
+      :project-id="projectId"
+      :project-key="projectKey"
+      :exclude-task-ids="parentCandidateExclusions"
+      :disabled="parentChangeBlocked"
+      @select="changeParent"
+      @cancel="pickingParent = false"
+    />
 
     <div class="mb-2 flex items-center gap-2">
       <GitBranch class="size-4 text-muted-foreground" aria-hidden="true" />
@@ -132,9 +206,9 @@ function createSubtask(title: string) {
       <p v-else-if="!adding" class="py-1 text-sm text-muted-foreground">サブタスクはありません</p>
 
       <TaskSubtaskComposer
-        v-if="!parentTaskId && adding"
+        v-if="adding"
         :pending="subtasks.createPending.value"
-        :disabled="statusUpdating"
+        :disabled="composerBlocked"
         :error="subtasks.createError.value"
         :on-create="createSubtask"
         @cancel="cancelComposer"
@@ -143,7 +217,7 @@ function createSubtask(title: string) {
         v-else-if="!parentTaskId"
         type="button"
         variant="ghost"
-        :disabled="statusUpdating"
+        :disabled="composerBlocked"
         label="サブタスクを追加"
         @click="openComposer"
       >

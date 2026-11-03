@@ -92,6 +92,8 @@ const {
   priorityError,
   labelsUpdating,
   labelsError,
+  parentUpdating,
+  parentError,
   fieldUpdating,
   fieldErrors,
   savedField,
@@ -107,6 +109,7 @@ const {
   onSaveSoftDeadline,
   onSaveHardDeadline,
   onSaveLabels,
+  onChangeParent,
   deleteError,
   deletePending,
   confirmDelete,
@@ -298,9 +301,12 @@ function onDeleteDialogCancel(event: Event) {
             :parent-task-id="displayTask.parent_task_id ?? null"
             :status-id="selectedStatusId"
             :status-updating="statusUpdating"
+            :parent-updating="parentUpdating"
+            :parent-error="parentError"
             :statuses="statuses"
             :project-key="projectKey"
             @open="emit('open-task', $event)"
+            @change-parent="onChangeParent"
           />
           <SimilarTasksList
             class="border-t pt-5"

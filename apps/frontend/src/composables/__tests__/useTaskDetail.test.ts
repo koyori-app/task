@@ -8,6 +8,8 @@ import { useTaskDetail } from '../useTaskDetail';
 const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const TASK_SEARCH_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/search' as const;
+const TASK_RELATIONS_PATH =
+  '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/relations' as const;
 
 // vi.mock の factory から参照するため hoisted に置く
 const {
@@ -38,6 +40,7 @@ const {
     hard_deadline: null,
     // テストごとに差し替えるため、空配列（never[]）に推論させない
     labels: [] as Record<string, unknown>[],
+    parent_task_id: null as string | null,
   };
 
   // 移動先のタスク。status_id と priority は baseTask と同じ
@@ -59,6 +62,7 @@ const {
   const putControl: {
     resolve?: (task: Record<string, unknown>) => void;
     fail?: (status?: number) => void;
+    body?: Promise<unknown>;
   } = {};
 
   // ラベル一覧 GET の応答をテストごとに切り替える
@@ -89,6 +93,8 @@ const {
       method === 'PUT' &&
       (url.endsWith(`/tasks/${TASK_SEQ_KEY}`) || url.endsWith(`/tasks/${OTHER_TASK_SEQ_KEY}`))
     ) {
+      // await すると putControl.resolve の代入が遅れるので、Promise のまま持つ
+      putControl.body = input.clone().json();
       return new Promise<Response>((resolve) => {
         putControl.resolve = (task) => resolve(jsonResponse(task));
         putControl.fail = (status = 400) => resolve(jsonResponse({ message: 'invalid' }, status));
@@ -212,9 +218,11 @@ describe('useTaskDetail のキャッシュ同期', () => {
     });
     onAfterDelete = vi.fn<(listHref: string) => void>();
     putControl.resolve = undefined;
+    putControl.body = undefined;
     labelsControl.mode = 'success';
     labelsControl.data = [];
     baseTask.labels = [];
+    baseTask.parent_task_id = null;
   });
 
   afterEach(() => {
@@ -667,6 +675,163 @@ describe('useTaskDetail のキャッシュ同期', () => {
     expect(detail.displayTask.value?.priority).toBe('Medium');
     expect(detail.priorityError.value).toBe('優先度の更新に失敗しました');
     expect(detail.priorityUpdating.value).toBe(false);
+  });
+
+  describe('親タスクの変更', () => {
+    function relationsKey(id: string) {
+      return [
+        'get',
+        TASK_RELATIONS_PATH,
+        { params: { path: { tenant_id: TENANT_ID, project_id: PROJECT_ID, id } } },
+      ] as const;
+    }
+
+    it('親が無いタスクへの設定は parent_task_id を送り、確定まで楽観値と進行中フラグを出す', async () => {
+      mountHost();
+      await flushPromises();
+
+      detail.onChangeParent('parent-new');
+      await flushPromises();
+
+      expect(await putControl.body).toEqual({ parent_task_id: 'parent-new' });
+      expect(detail.displayTask.value?.parent_task_id).toBe('parent-new');
+      expect(detail.parentUpdating.value).toBe(true);
+
+      baseTask.parent_task_id = 'parent-new';
+      putControl.resolve!({ ...baseTask });
+      await flushPromises();
+
+      expect(detail.parentUpdating.value).toBe(false);
+      expect(detail.displayTask.value?.parent_task_id).toBe('parent-new');
+      expect(detail.parentError.value).toBeNull();
+    });
+
+    it('親の変更は新しい parent_task_id を送り、元と新しい親の関連・一覧・本体を取り直す', async () => {
+      baseTask.parent_task_id = 'parent-old';
+      mountHost();
+      await flushPromises();
+      seedListAndSearchCaches();
+      const oldParentDetailKey = [
+        'get',
+        GET_TASK_PATH,
+        { params: { path: { tenant_id: TENANT_ID, project_id: PROJECT_ID, id: 'ENG-9' } } },
+      ] as const;
+      const parentSubtasksKey = [...listQueryKey, 'subtasks'] as const;
+      queryClient.setQueryData(relationsKey('parent-old'), { parent: null, subtasks: [] });
+      queryClient.setQueryData(relationsKey('parent-new'), { parent: null, subtasks: [] });
+      queryClient.setQueryData(oldParentDetailKey, { ...otherTask });
+      queryClient.setQueryData(parentSubtasksKey, []);
+      const taskUpdates = queryClient.getQueryState(taskQueryKey)!.dataUpdateCount;
+
+      detail.onChangeParent('parent-new');
+      await flushPromises();
+      expect(await putControl.body).toEqual({ parent_task_id: 'parent-new' });
+
+      baseTask.parent_task_id = 'parent-new';
+      putControl.resolve!({ ...baseTask });
+      await flushPromises();
+
+      expect(queryClient.getQueryState(relationsKey('parent-old'))?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryState(relationsKey('parent-new'))?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryState(parentSubtasksKey)?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryState(oldParentDetailKey)?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryState(listQueryKey)?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryState(searchQueryKey)?.isInvalidated).toBe(true);
+      // 開いているタスク本体は observer があるので invalidate がそのまま再取得になる
+      // （応答の書き込みと再取得で 2 回以上進む）
+      expect(queryClient.getQueryState(taskQueryKey)!.dataUpdateCount).toBeGreaterThan(
+        taskUpdates + 1,
+      );
+    });
+
+    it('親以外の保存ではタスク本体を取り直さない', async () => {
+      mountHost();
+      await flushPromises();
+      const taskUpdates = queryClient.getQueryState(taskQueryKey)!.dataUpdateCount;
+
+      detail.onSaveTitle('新しいタイトル');
+      await flushPromises();
+      putControl.resolve!({ ...baseTask, title: '新しいタイトル' });
+      await flushPromises();
+
+      expect(queryClient.getQueryState(taskQueryKey)!.dataUpdateCount).toBe(taskUpdates + 1);
+    });
+
+    it('親の解除は clear_parent_task_id: true を送る', async () => {
+      baseTask.parent_task_id = 'parent-old';
+      mountHost();
+      await flushPromises();
+
+      detail.onChangeParent(null);
+      await flushPromises();
+
+      expect(await putControl.body).toEqual({ clear_parent_task_id: true });
+      expect(detail.displayTask.value?.parent_task_id).toBeNull();
+
+      baseTask.parent_task_id = null;
+      putControl.resolve!({ ...baseTask });
+      await flushPromises();
+      expect(detail.displayTask.value?.parent_task_id).toBeNull();
+    });
+
+    it('今と同じ親を選んでも、親が無いタスクを解除しても送らない', async () => {
+      mountHost();
+      await flushPromises();
+      detail.onChangeParent(null);
+      await flushPromises();
+      expect(putControl.body).toBeUndefined();
+      expect(detail.parentUpdating.value).toBe(false);
+    });
+
+    it.each([
+      [409, '自分自身や子孫のタスクは親にできません'],
+      [404, 'タスクが見つかりません。削除された可能性があります'],
+      [500, '親タスクの更新に失敗しました'],
+    ])('%i で拒まれたら親を巻き戻し、理由を出す', async (status, message) => {
+      baseTask.parent_task_id = 'parent-old';
+      mountHost();
+      await flushPromises();
+
+      detail.onChangeParent('descendant');
+      await flushPromises();
+      expect(detail.displayTask.value?.parent_task_id).toBe('descendant');
+
+      putControl.fail!(status);
+      await flushPromises();
+
+      expect(detail.displayTask.value?.parent_task_id).toBe('parent-old');
+      expect(detail.parentError.value).toBe(message);
+      expect(detail.parentUpdating.value).toBe(false);
+    });
+
+    it('次の変更を始めたら前のエラーを消す', async () => {
+      mountHost();
+      await flushPromises();
+      detail.onChangeParent('descendant');
+      await flushPromises();
+      putControl.fail!(409);
+      await flushPromises();
+      expect(detail.parentError.value).not.toBeNull();
+
+      detail.onChangeParent('parent-new');
+      await flushPromises();
+      expect(detail.parentError.value).toBeNull();
+    });
+
+    it('別のタスクへ移ったら、前のタスクの親のエラーを残さない', async () => {
+      const taskId = ref(TASK_SEQ_KEY);
+      mountHost(taskId);
+      await flushPromises();
+      detail.onChangeParent('descendant');
+      await flushPromises();
+      putControl.fail!(409);
+      await flushPromises();
+      expect(detail.parentError.value).not.toBeNull();
+
+      taskId.value = OTHER_TASK_SEQ_KEY;
+      await flushPromises();
+      expect(detail.parentError.value).toBeNull();
+    });
   });
 
   it('削除成功時に検索キャッシュとカレンダーの予定が invalidate され、詳細キャッシュは除去される', async () => {
