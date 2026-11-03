@@ -174,9 +174,10 @@ async function deleteThread(threadId: string) {
     <!--
       履歴とコメントを同じスクロール領域に入れ、少ないときは下端へ寄せる（参照）。
       帯は薄いグレーにして、コメントだけ白いカードで浮かせる。
+      下寄せは justify-end にしない。Chromium では上にはみ出した分へスクロールできなくなる。
     -->
     <div
-      class="-mx-4 flex min-h-0 flex-1 flex-col justify-end gap-3 overflow-y-auto bg-muted/30 px-4 py-3"
+      class="-mx-4 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto bg-muted/30 px-4 py-3 [&>:first-child]:mt-auto"
     >
       <!--
         履歴（before-list）はコメントの取得状態の外に置く。消費側はコメントと履歴を
