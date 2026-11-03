@@ -16,8 +16,9 @@ const ready = useHydrated();
 
 const visible = computed(() => ready.value && preferences.values.showExperiments);
 
-function change(key: string, value: boolean) {
-  store.set(key as ExperimentKey, value);
+// 実験的機能の表は切り替えだけなので、値は真偽で来る
+function change(key: string, value: boolean | string) {
+  store.set(key as ExperimentKey, value as boolean);
 }
 </script>
 

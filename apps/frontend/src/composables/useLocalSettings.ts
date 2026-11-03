@@ -3,7 +3,7 @@ import { useHydrated } from '@/composables/useHydrated';
 import { EXPERIMENT_TABLE, type ExperimentKey } from '@/lib/experiments';
 import { PREFERENCE_TABLE, type PreferenceKey } from '@/lib/preferences';
 import { useExperimentsStore } from '@/stores/experiments';
-import { usePreferencesStore } from '@/stores/preferences';
+import { usePreferencesStore, type PreferenceValues } from '@/stores/preferences';
 
 /*
  * 環境設定と実験的機能の値を読む口。
@@ -13,10 +13,12 @@ import { usePreferencesStore } from '@/stores/preferences';
  */
 
 /** 環境設定の値。mount の前は既定値。 */
-export function usePreference(key: PreferenceKey) {
+export function usePreference<K extends PreferenceKey>(key: K) {
   const store = usePreferencesStore();
   const hydrated = useHydrated();
-  return computed(() => (hydrated.value ? store.values[key] : PREFERENCE_TABLE[key].default));
+  return computed<PreferenceValues[K]>(() =>
+    hydrated.value ? store.values[key] : (PREFERENCE_TABLE[key].default as PreferenceValues[K]),
+  );
 }
 
 /**

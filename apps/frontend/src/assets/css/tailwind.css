@@ -5,6 +5,30 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * 本文の字の並び。Tailwind の既定と同じ並びに、環境設定で選んだ絵文字の字を入れる口を置く。
+ * --koyori-emoji-font は lib/emoji-font.ts が html に置く（末尾に区切りの , を含む）。
+ * 置かれていなければ空になり、並びは Tailwind の既定と同じになる（OS の既定）。
+ *
+ * 選んだ字の @font-face は、選んだ人の画面にだけ lib/emoji-font.ts が読み込む（Google Fonts の CSS）。
+ * 既定のままなら読み込まないので、末尾の 'Noto Color Emoji' も今まで通り手元の字だけを指す。
+ *
+ * 口は本文の字の後ろ、総称（sans-serif）と OS の絵文字の字の前に置く。
+ * 絵文字の字は数字や #、*、© なども持つので、頭に置くと普通の数字まで絵文字の字で描かれる。
+ * 後ろに置けば、本文の字（いつも読み込む Noto Sans を含む）が持つ字はそちらで描かれ、
+ * 本文の字に無い絵文字だけが絵文字の字へ落ちる。keycap（1️⃣）も絵文字の字で描かれる。
+ *
+ * 等幅の並び（--font-mono、コードブロック）には口を置かない。等幅には必ず在る web の字が無く、
+ * 名前の字が一つも無い環境では、Chromium が総称の monospace より先に絵文字の字を引き、
+ * コードの数字まで絵文字の字で描いてしまうため。コードの中の絵文字は今まで通り OS の字で描く。
+ */
+@theme {
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans', Arial,
+    var(--koyori-emoji-font,) sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+    'Noto Color Emoji';
+}
+
 @theme inline {
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-accent: var(--sidebar-accent);

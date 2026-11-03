@@ -7,7 +7,7 @@ import { useHydrated } from '@/composables/useHydrated';
 import { defaultValues } from '@/lib/local-settings';
 import { PREFERENCE_TABLE, type PreferenceKey } from '@/lib/preferences';
 import { useExperimentsStore } from '@/stores/experiments';
-import { usePreferencesStore } from '@/stores/preferences';
+import { usePreferencesStore, type PreferenceValues } from '@/stores/preferences';
 
 const store = usePreferencesStore();
 const experiments = useExperimentsStore();
@@ -23,8 +23,9 @@ const hiddenEnabledCount = computed(() =>
     : 0,
 );
 
-function change(key: string, value: boolean) {
-  store.set(key as PreferenceKey, value);
+// 値の型は項目ごとに違う（切り替えは真偽、選び肢は value）。SettingToggleList が項目に合う値を渡す
+function change(key: string, value: boolean | string) {
+  store.set(key as PreferenceKey, value as PreferenceValues[PreferenceKey]);
 }
 </script>
 

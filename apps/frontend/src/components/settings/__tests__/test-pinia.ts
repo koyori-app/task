@@ -10,8 +10,8 @@ export function persistedPinia(): Pinia {
 
 /** 環境設定・実験的機能を localStorage に先に置く（store を作る前に呼ぶ）。 */
 export function seedSettings(seed: {
-  preferences?: Record<string, boolean>;
-  experiments?: Record<string, boolean>;
+  preferences?: Record<string, unknown>;
+  experiments?: Record<string, unknown>;
 }) {
   if (seed.preferences) {
     localStorage.setItem('preferences', JSON.stringify({ values: seed.preferences }));

@@ -48,6 +48,52 @@ describe('pickKnownValues', () => {
   });
 });
 
+describe('選び肢の項目（choices を持つ）', () => {
+  const CHOICE_TABLE = {
+    toggle: { name: 'T', description: 't', default: false },
+    pick: {
+      name: 'P',
+      description: 'p',
+      choices: [
+        { value: 'first', label: '一つ目' },
+        { value: 'second', label: '二つ目' },
+      ],
+      default: 'first',
+    },
+  } as const satisfies SettingTable;
+
+  it('既定値は choices の既定の value', () => {
+    expect(defaultValues(CHOICE_TABLE)).toEqual({ toggle: false, pick: 'first' });
+  });
+
+  it('choices に在る value はそのまま残し、真偽の項目も今まで通り読む', () => {
+    expect(pickKnownValues(CHOICE_TABLE, { toggle: true, pick: 'second' })).toEqual({
+      toggle: true,
+      pick: 'second',
+    });
+  });
+
+  it('choices に無い value（消した選び肢など）は既定値に戻す', () => {
+    expect(pickKnownValues(CHOICE_TABLE, { pick: 'removed' }).pick).toBe('first');
+  });
+
+  it.each([true, false, 1, null, {}, ['second']])('文字列でない値 %j は既定値に戻す', (value) => {
+    expect(pickKnownValues(CHOICE_TABLE, { pick: value }).pick).toBe('first');
+  });
+
+  it('真偽の項目に choices の value を入れても既定値に戻す', () => {
+    expect(pickKnownValues(CHOICE_TABLE, { toggle: 'second' }).toggle).toBe(false);
+  });
+
+  it('選び肢の項目を足す前に残った値（項目が無かった頃の値）は、既定値で埋める', () => {
+    const text = JSON.stringify({ values: { toggle: true } });
+
+    expect(createSettingsSerializer(CHOICE_TABLE).deserialize(text)).toEqual({
+      values: { toggle: true, pick: 'first' },
+    });
+  });
+});
+
 describe('createSettingsSerializer', () => {
   const serializer = createSettingsSerializer(TABLE);
 

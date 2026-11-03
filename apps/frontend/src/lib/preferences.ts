@@ -1,3 +1,4 @@
+import { DEFAULT_EMOJI_FONT, EMOJI_FONT_CHOICES } from '@/lib/emoji-font';
 import type { SettingTable } from '@/lib/local-settings';
 
 /**
@@ -10,6 +11,13 @@ export const PREFERENCE_TABLE = {
     description:
       'アカウント設定の一覧に「実験的機能」を出します。不安定な機能を、公開の前に試せます。',
     default: false,
+  },
+  emojiFont: {
+    name: '絵文字の字',
+    description:
+      '絵文字をどの字で描くかを選びます。OS の既定では、使っている OS の絵文字で描きます。数字や # などの記号は変わりません。',
+    choices: EMOJI_FONT_CHOICES,
+    default: DEFAULT_EMOJI_FONT,
   },
 } as const satisfies SettingTable;
 
