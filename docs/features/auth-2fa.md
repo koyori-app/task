@@ -1,25 +1,19 @@
 ---
 title: 2段階認証（2FA）
-description: TOTP・リカバリーコード・テナント強制ポリシー
+description: TOTP・リカバリーコード・テナント強制ポリシー。バックエンドは実装済みで、画面は未実装
 ---
 
-> ステータス: **Draft** / 作成日: 2026-05-27
-> **依存: なし（`users` + `sessions` 基盤を拡張。[OAuth 拡張](/features/auth-oauth) と独立）**
+> 実装状況: バックエンドの API とテナント強制は実装済みである。TOTP の設定・入力の画面は未実装で、詳細は §12 に書く。
 
 ---
 
 ## 1. 概要
 
-メール/パスワードおよび OAuth ログイン後に TOTP（Time-based One-Time Password）による第二認証を追加する。
+2 段階認証は、メール/パスワードまたは OAuth のログイン（第一認証）の後に TOTP（Time-based One-Time Password）を要求する仕組みである。実装には [`totp-rs`](https://github.com/constantoine/totp-rs) を使う。
 
-**2FA が免除されるケース:**
-- **パスキーログイン**は「所持 + 生体」の多要素認証であるため、TOTP を要求しない（[パスキー仕様書](/features/auth-passkeys) 参照）
+パスキーログインには TOTP を要求しない。パスキーは利用者の検証（生体または端末の PIN）を必須にして認証するので、それ自体を多要素認証として扱う（[パスキー仕様書](/features/auth-passkeys)）。
 
-**テナント強制ポリシー:**
-- テナントオーナーは全メンバーに 2FA を強制できる
-- 強制後、2FA を満たさないユーザーは 2FA 設定を完了するまでそのテナントのリソースへのアクセスを `403` で拒否される。強制前から持っているセッション・PAT・Device Token も同じ（§9）
-
-実装ライブラリ: [`totp-rs`](https://github.com/constantoine/totp-rs)
+テナントオーナーはテナント全体に 2FA を強制できる。強制されたテナントでは、2FA を満たさない利用者のリソースへのアクセスを `403` で拒否する。強制前から持っているセッション・PAT・Device Token も同じである（§9）。
 
 ---
 
@@ -30,9 +24,11 @@ description: TOTP・リカバリーコード・テナント強制ポリシー
 | カラム | 型 | 制約 | 説明 |
 |--------|-----|------|------|
 | `user_id` | UUID | PK, FK→users CASCADE | 1 ユーザー 1 シークレット |
-| `secret_enc` | TEXT | NOT NULL | AES-256-GCM 暗号化済み TOTP シークレット（Base32） |
+| `secret_enc` | TEXT | NOT NULL | AES-256-GCM で暗号化した TOTP シークレット（Base32）。形式は `base64(nonce 12 バイト + 暗号文)` |
 | `is_verified` | BOOLEAN | NOT NULL DEFAULT false | 初回コード入力で `true` になるまで有効扱いしない |
 | `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+
+暗号鍵は環境変数 `TOTP_ENCRYPTION_KEY` で、UTF-8 で正確に 32 バイトでなければ起動できない。OAuth トークンの暗号鍵（HKDF で導出する）とは別の鍵である。
 
 ### 2.2 `recovery_codes`
 
@@ -40,46 +36,39 @@ description: TOTP・リカバリーコード・テナント強制ポリシー
 |--------|-----|------|------|
 | `id` | UUID | PK | |
 | `user_id` | UUID | NOT NULL, FK→users CASCADE | |
-| `code_hash` | VARCHAR | NOT NULL | HMAC-SHA256(secret, code) のハッシュ |
+| `code_hash` | VARCHAR | NOT NULL | 正規化したコードの HMAC-SHA256（鍵は `RECOVERY_CODE_SECRET`）を base64url にした値 |
 | `used_at` | TIMESTAMPTZ | NULLABLE | NULL = 未使用 |
 | `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
 
-### 2.3 `users` テーブル変更
+### 2.3 `users` の列
 
-```sql
-ALTER TABLE users ADD COLUMN totp_enabled BOOLEAN NOT NULL DEFAULT false;
-```
+`users.totp_enabled`（BOOLEAN NOT NULL DEFAULT false）を持つ。`totp_enabled = true` かつ `totp_credentials.is_verified = true` のときに TOTP が有効である。無効化すると `totp_enabled` を `false` に戻し、`totp_credentials` と `recovery_codes` の行を消す。
 
-> `totp_enabled = true` かつ `totp_credentials.is_verified = true` の場合に 2FA が有効。  
-> 無効化時は `totp_enabled = false` + `totp_credentials` + `recovery_codes` を削除。
+### 2.4 `tenants` の列（強制ポリシー）
 
-### 2.4 `tenants` テーブル変更（強制ポリシー）
-
-```sql
-ALTER TABLE tenants ADD COLUMN require_2fa BOOLEAN NOT NULL DEFAULT false;
-```
+`tenants.require_2fa`（BOOLEAN NOT NULL DEFAULT false）を持つ。
 
 ---
 
 ## 3. マイグレーション
 
-```sql
-ALTER TABLE users ADD COLUMN totp_enabled BOOLEAN NOT NULL DEFAULT false;
+これらの列と表は初期スキーマ（`m20260520000000_initial_schema`）に含まれる。
 
-ALTER TABLE tenants ADD COLUMN require_2fa BOOLEAN NOT NULL DEFAULT false;
+```sql
+-- users.totp_enabled / tenants.require_2fa は CREATE TABLE の中で定義する
 
 CREATE TABLE totp_credentials (
-    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    secret_enc TEXT NOT NULL,
+    user_id     UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    secret_enc  TEXT NOT NULL,
     is_verified BOOLEAN NOT NULL DEFAULT false,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE recovery_codes (
-    id UUID PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    code_hash VARCHAR NOT NULL,
-    used_at TIMESTAMPTZ,
+    id         UUID PRIMARY KEY,
+    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash  VARCHAR NOT NULL,
+    used_at    TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -90,124 +79,124 @@ CREATE INDEX idx_recovery_codes_user ON recovery_codes(user_id);
 
 ## 4. TOTP セットアップフロー
 
-```text
-1. POST /v1/auth/2fa/totp/setup
-   ← セッション必須（ログイン済みユーザー）
-   → サーバーが TOTP シークレット（Base32, 20 バイト）を生成
-   → secret_enc を DB に保存（is_verified = false）
-   → otpauth:// URI と QR コード用 Base64 PNG を返す
+セットアップは 2 段階で進む。`setup` がシークレットを未検証のまま保存し、利用者が認証アプリに登録したあと、`verify-setup` が初回のコードを確かめて有効にする。どちらもセッション専用（Bearer は `403`）で、半認証のセッションでも呼べる。テナントの強制で半認証になった利用者が、ここで設定を済ませられるようにするためである。
 
-2. ユーザーが認証アプリ（Google Authenticator・Authy・1Password 等）でQRを読み込む
+```mermaid
+sequenceDiagram
+    actor U as 利用者
+    participant A as 認証アプリ
+    participant B as API
+    participant D as DB
 
-3. POST /v1/auth/2fa/totp/verify-setup
-   Request: { "code": "123456" }
-   → TOTP コード検証（前後 1 ステップ許容）
-   → 成功: is_verified = true, users.totp_enabled = true
-   → リカバリーコードを 10 個生成して返す（この 1 回のみ平文表示）
+    U->>B: POST /v1/auth/2fa/totp/setup
+    B->>B: シークレットを生成
+    B->>D: 未検証の credential を保存し、古い行を置き換える
+    B-->>U: otpauth URI と QR コード（PNG の data URI）
+    U->>A: QR コードを読み取る
+    A-->>U: 6 桁のコード
+    U->>B: POST /v1/auth/2fa/totp/verify-setup
+    B->>B: コードを検証
+    B->>D: is_verified と totp_enabled を true にし、リカバリーコード 10 個のハッシュを保存
+    B-->>U: リカバリーコードの平文
 ```
 
-`POST /v1/auth/2fa/totp/setup` レスポンス:
+- TOTP が有効な利用者が呼ぶと `409`（`2fa-already-enabled`）を返す
+- `setup` を呼ばずに `verify-setup` を呼ぶと `400`（`2fa-not-enabled`）を返す
+- `verify-setup` が成功すると、セッションの `half_authed` を `false` にしてセッション ID を更新する
+- `otpauth` URI の issuer は環境変数 `TOTP_ISSUER`（既定は `TaskApp`）である
+
+`POST /v1/auth/2fa/totp/setup` のレスポンス:
 
 ```json
 {
-  "otpauth_uri": "otpauth://totp/TaskApp:user@example.com?secret=BASE32SECRET&issuer=TaskApp",
+  "otpauth_uri": "otpauth://totp/TaskApp:user%40example.com?secret=BASE32SECRET&issuer=TaskApp",
   "qr_code_png": "data:image/png;base64,..."
 }
 ```
 
-`POST /v1/auth/2fa/totp/verify-setup` レスポンス（初回設定時のみリカバリーコードを返す）:
+`POST /v1/auth/2fa/totp/verify-setup` のリクエストとレスポンス:
+
+```json
+{ "code": "123456" }
+```
 
 ```json
 {
-  "recovery_codes": [
-    "XXXX-XXXX-XXXX",
-    "YYYY-YYYY-YYYY",
-    "..."
-  ]
+  "recovery_codes": ["XXXX-XXXX-XXXX", "YYYY-YYYY-YYYY", "..."]
 }
 ```
 
-> リカバリーコードはこの 1 回しか表示されない。ユーザーに必ず保存を促すこと。
+リカバリーコードの平文を返すのは、このレスポンスと再生成（§7）のレスポンスだけである。
 
 ---
 
 ## 5. ログイン時の 2FA フロー（半セッション）
 
-2FA が有効なユーザーがメール/パスワードまたは OAuth でログインした場合:
+第一認証に成功したとき、`service::login_session::establish_login_session` がセッションを確立する。パスワードと OAuth コールバックの両方がこの関数を呼ぶので、2FA の要否の判定は経路によって変わらない。
 
-```text
-1. 第一認証成功（パスワード検証 or OAuth コールバック）
-   → Redis セッションに { user_id, half_authed: true } を保存
-   → 200 OK  { "requires_2fa": true }
+2FA が必要なら、セッションを半認証（`half_authed: true`）にする。半認証のセッションでは TOTP の入力と設定に関わる API しか通らず、通常の API は `403` になる。
 
-2. クライアントが POST /v1/auth/2fa/verify へ TOTP コード or リカバリーコードを送信
+```mermaid
+sequenceDiagram
+    actor U as 利用者
+    participant B as API
+    participant R as セッション（Redis）
 
-3. 検証成功
-   → Redis セッションを { user_id, half_authed: false } に更新（完全認証）
-   → 204 No Content
-
-4. 通常の API リクエスト
-   → AuthUser extractor が half_authed: true を検出したら 403 を返す
+    U->>B: POST /v1/auth/login
+    B->>B: パスワードを検証
+    alt 2FA が必要
+        B->>R: user_id と half_authed=true を保存
+        B-->>U: 200 と requires_2fa / requires_2fa_setup
+        U->>B: POST /v1/auth/2fa/verify
+        B->>B: TOTP またはリカバリーコードを検証
+        B->>R: half_authed=false にしてセッション ID を更新
+        B-->>U: 204
+    else 2FA が不要
+        B->>R: user_id と half_authed=false を保存
+        B-->>U: 204
+    end
 ```
 
-**セッション状態の遷移:**
+`POST /v1/auth/login` の `200` のレスポンスは次の形で、2 つの値は別々の条件を表す。`requires_2fa` は TOTP が有効であること、`requires_2fa_setup` は TOTP が未設定で、関わるテナントのいずれかが 2FA を強制していること（§9）を表す。
 
-```text
-[未ログイン]
-    │ POST /v1/login (password OK)
-    ▼
-[half_authed=true]  ← この状態では /v1/auth/2fa/verify 以外の API は 403
-    │ POST /v1/auth/2fa/verify (code OK)
-    ▼
-[half_authed=false]  ← 通常の認証済み状態
+```json
+{ "requires_2fa": true, "requires_2fa_setup": false }
 ```
 
-### エクストラクタ責務分離設計
+OAuth コールバックは JSON を返さず、半認証なら `/auth/2fa?redirect_after=...` へリダイレクトする（[フォローアップ](/features/auth-2fa-oauth-followup)）。
 
-`apps/backend/src/extractors.rs` に以下 3 つのエクストラクタを定義する。既存の `AuthUser` を直接変更すると PAT 認証経路や既存 API に影響が及ぶため、責務を分離して段階的に追加する。
+セッションの状態遷移は次のとおりである。パスキーログインは半認証を経ない。
 
-| エクストラクタ | 受理する認証 | `half_authed` 確認 | 用途 |
+```mermaid
+stateDiagram-v2
+    state "未ログイン" as anon
+    state "半認証 half_authed=true" as half
+    state "完全認証 half_authed=false" as full
+
+    [*] --> anon
+    anon --> half: 第一認証に成功し 2FA が必要
+    anon --> full: 第一認証に成功し 2FA が不要
+    anon --> full: パスキーで認証
+    half --> full: 2fa/verify に成功
+    half --> full: 2fa/totp/verify-setup に成功
+```
+
+### エクストラクタの責務
+
+半認証の扱いは、次のエクストラクタ（`handler::extractors`）で分けている。
+
+| エクストラクタ | 受理する認証 | `half_authed` の扱い | 用途 |
 |--------------|------------|-------------------|------|
-| `AuthUser` | セッション / PAT | セッション時のみ確認 | 通常の保護済み API 全般 |
-| `HalfAuthedUser` | セッションのみ | `true` を必須とする | `/v1/auth/2fa/verify` のみ |
-| `AdminUser` | セッションのみ | `false` を必須とする | `/v1/admin/**` |
+| `AuthUser` | セッション / PAT / Device Token | セッションで `true` なら `403` | 通常の保護済み API |
+| `OptionalAuthUser` | `AuthUser` と同じ | `true` のセッションは未認証として扱う | コンテンツ配信・OAuth 開始 |
+| `HalfAuthedUser` | セッションのみ | `true` を必須とする（`false` と Bearer は `403`） | `POST /v1/auth/2fa/verify` |
+| `LoggedInUser` | セッションのみ | 問わない | `setup` / `verify-setup` |
+| `CurrentUser` | セッションのみ | `true` なら `403` | アカウント API |
+| `AdminUser` | セッションのみ | `true` なら `403` | `/v1/admin/**` |
 
-**`AuthUser` への変更方針:**
+PAT と Device Token はセッションを持たないので、`half_authed` の確認の対象にならない。
 
-- PAT 認証の場合は `half_authed` チェックをスキップ（PAT はセッションを持たず、常に完全認証扱い）
-- セッション認証の場合のみ `half_authed` フラグを確認し、`true` なら `403`
-
-```rust
-// AuthUser::from_request_parts 内（セッション認証パスのみ追加）
-let half_authed = session.get::<bool>("half_authed").unwrap_or(false);
-if half_authed {
-    return Err(AuthError::Forbidden);
-}
-```
-
-**`HalfAuthedUser` エクストラクタ:**
-
-`/v1/auth/2fa/verify` 専用。`half_authed: true` のセッションのみ受理し、`false` または PAT は `403`。
-
-```rust
-pub struct HalfAuthedUser {
-    pub user_id: Uuid,
-}
-
-impl FromRequestParts<AppState> for HalfAuthedUser {
-    type Rejection = AuthError;
-
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
-        let session = session_from_request_parts(parts, state).await?;  // PAT は不可（セッションのみ）
-        let user_id = session.get::<Uuid>("user_id").ok_or(AuthError::Unauthorized)?;
-        let half_authed = session.get::<bool>("half_authed").unwrap_or(false);
-        if !half_authed {
-            return Err(AuthError::Forbidden);
-        }
-        Ok(HalfAuthedUser { user_id })
-    }
-}
-```
+`POST /v1/auth/logout` は `AuthUser` を使うので、半認証のセッションでは `403` になる。
 
 ---
 
@@ -219,25 +208,26 @@ impl FromRequestParts<AppState> for HalfAuthedUser {
 | 桁数 | 6 桁 |
 | ステップ | 30 秒 |
 | 許容スキュー | ±1 ステップ（±30 秒） |
-| ブルートフォース対策 | 5 回連続失敗で 15 分ロック（Redis カウンター。検証の前に試行を予約して数えるため、同時リクエストでも 6 回目以降は検証まで進まない） |
+| ブルートフォース対策 | 利用者ごとに最初の試行から 15 分のあいだ 5 回まで（§11） |
+
+試行の回数は Redis のカウンターで数える。コードを検証する前に Lua スクリプトで試行を予約するので、同時リクエストでも 6 回目以降は検証まで進まず `429` になる。5 回目の失敗も `429` を返す。検証に成功するとカウンターを消す。TOTP の検証を伴う `verify-setup`・`verify`・無効化・再生成は、同じカウンターを共有する。
 
 ---
 
 ## 7. リカバリーコード
 
 - 生成数: 10 個
-- 形式: `XXXX-XXXX-XXXX`（大文字英数字 12 文字、ハイフン区切り）
-- 保存: HMAC-SHA256(server_secret, code) のハッシュのみ DB に保存（平文は保存しない）
-- 使用: 1 回使用したら `used_at` を SET（再利用不可）
-- 再生成: 新しいコードを 10 個生成し古いものを全削除（残数が不安な場合に使用）
+- 形式: `XXXX-XXXX-XXXX`（大文字英数字 12 文字、ハイフン区切り）。文字は `I`・`O`・`0`・`1` を除く 32 種
+- 保存: HMAC-SHA256 のハッシュのみを DB に保存し、平文は保存しない
+- 比較: 入力から英数字以外を取り除いて大文字にしてからハッシュし、未使用の行と比べる
+- 使用: 1 回使用したら `used_at` を設定する。更新の条件に `used_at IS NULL` を含めるので、同じコードの同時使用は 1 回だけ成功する
+- 再生成: `POST /v1/auth/2fa/recovery-codes/regenerate`。古いコードをすべて消し、新しいコードを 10 個返す。要求するのは TOTP のコード（`{ "code": "123456" }`）で、リカバリーコードでは再生成できない
 
-`POST /v1/auth/2fa/verify` リクエスト（TOTP またはリカバリーコードのどちらか）:
+`POST /v1/auth/2fa/verify` のリクエストには、TOTP かリカバリーコードのどちらかを指定する。両方を指定するとリカバリーコードを検証し、どちらも無ければ `401`（`invalid-2fa-code`）を返す。
 
 ```json
 { "code": "123456" }
 ```
-
-または
 
 ```json
 { "recovery_code": "XXXX-XXXX-XXXX" }
@@ -247,66 +237,73 @@ impl FromRequestParts<AppState> for HalfAuthedUser {
 
 ## 8. 2FA 無効化
 
-```text
+```http
 DELETE /v1/auth/2fa/totp
-Request: { "code": "123456" }  (現在の TOTP コード or リカバリーコードが必要)
+Content-Type: application/json
+
+{ "code": "123456" }
 ```
 
-処理:
-1. コードを検証
-2. `users.totp_enabled = false`
-3. `totp_credentials` を DELETE
-4. `recovery_codes` を全 DELETE
+本文には §7 と同じく TOTP かリカバリーコードを指定する。セッション専用（Bearer は `403`）で、次の順に処理して `204` を返す。
+
+1. TOTP が有効でなければ `400`（`2fa-not-enabled`）を返す
+2. `require_2fa` のテナントに関わる利用者なら `403`（`forbidden`）を返す。試行の回数を消費する前に拒否する
+3. コードを検証する
+4. 同じトランザクションで `users.totp_enabled = false` にし、`totp_credentials` と `recovery_codes` の行を消す
+
+サービス管理者は `POST /v1/admin/users/{id}/reset-2fa` で同じ行を消せる。こちらは対象者のセッションも失効させる（[サービス管理者仕様書](/features/admin) §7.1）。
 
 ---
 
 ## 9. テナント強制ポリシー
 
-テナントオーナーが `require_2fa = true` に設定した場合:
+テナントオーナーが次の API で `require_2fa` を切り替える。セッション専用で、レスポンスは更新後のテナントである。
 
-```text
+```http
 POST /v1/tenants/{tenant_id}/require-2fa
-Request: { "enabled": true }
-権限: テナントオーナーのみ
+Content-Type: application/json
+
+{ "enabled": true }
 ```
 
-**強制後のフロー:**
+強制されたテナントに関わる利用者が TOTP 未設定のままパスワードか OAuth でログインすると、セッションは半認証になる。TOTP を設定するか（`verify-setup`）、パスキーでログインするまで、半認証は解けない。
 
-```text
-ログイン（パスワード/OAuth）
-    │ 該当テナントで require_2fa = true
-    │ かつ users.totp_enabled = false
-    ▼
-half_authed セッション + { "requires_2fa_setup": true }
-    │ POST /v1/auth/2fa/totp/setup → verify-setup
-    ▼
-通常認証済みセッション
+```mermaid
+flowchart TD
+    login["パスワードまたは OAuth で第一認証"] --> enabled{"TOTP が有効か"}
+    enabled -- はい --> half2fa["半認証。requires_2fa=true"]
+    half2fa --> verify["POST /v1/auth/2fa/verify"]
+    verify --> full["完全認証"]
+    enabled -- いいえ --> forced{"関わるテナントに require_2fa があるか"}
+    forced -- いいえ --> full
+    forced -- はい --> halfsetup["半認証。requires_2fa_setup=true"]
+    halfsetup --> setup["setup と verify-setup"]
+    setup --> full
 ```
 
-2FA 設定完了前はそのテナントのリソースへのアクセスを `403`（`2fa-setup-required`）で拒否する。
-強制前から持っている本認証セッション・PAT・Device Token も同じで、ログイン時だけでなく
-テナントの所属判定（`has_tenant_access`）がリクエストごとに確かめる。所属判定を通らない口
-（オーナー専用の口、ファイル本文の配信 `GET /v1/drive/files/{id}/content`）も同じ判定を通す。
-ただし共有トークン（`?token=`）での配信は利用者を問わないので対象外。
-通知の一覧（`/v1/users/me/notifications` の一覧・未読数・既読化）は 403 にせず、強制下のテナントの
-通知を視界から外す。
-2FA を満たすのは、TOTP が有効（`users.totp_enabled` かつ `totp_credentials.is_verified`）か、
-パスキーを 1 件以上登録している利用者である。
-パスキーログインユーザーはテナント強制ポリシーの対象外（パスキー自体が MFA）。所属判定では
-ログイン方式を問わず、パスキー登録済みの利用者を満たす扱いにする
-（ログイン時の half_authed 判定は上の図のとおり TOTP だけを見る）。
-2FA の設定口（`/v1/auth/2fa/...`）と `/v1/auth/me` は所属判定を通らないので、未設定の利用者も使える。
+2FA を満たすのは、TOTP が有効（`users.totp_enabled` かつ `totp_credentials.is_verified`）か、パスキーを 1 件以上登録している利用者である。ログイン時の判定と所属判定で基準が違う点に注意が要る。ログイン時の半認証の判定は TOTP だけを見るので、パスキー登録済みでもパスワードでログインすると半認証になる。所属判定は登録済みのパスキーも満たす扱いにする（パスキー自体が MFA であるため）。
 
-有効化（`enabled: true`）は、操作する本人が 2FA を満たすときだけ受け付ける。満たさなければ
-`403`（`2fa-setup-required`）を返し、`require_2fa` は変えない（有効にした途端に本人もテナントの
-口から締め出されるため）。
-オーナー専用の口（テナント更新・削除、Drive クォータ、GitHub 連携など）も強制の対象で、
-2FA を満たさないオーナーは `403`（`2fa-setup-required`）になる。例外は強制の無効化
-（`enabled: false`）だけで、2FA の無いオーナーが強制下に残った場合の救済経路として常に受け付ける。
+### リクエストごとの判定
 
-project にだけ参加しテナントに参加しない客分（project-only guest）も、関わるテナントの
-`require_2fa` の対象である（ここから漏れると、除名後に残る `project_members` の行で
-project へ入れる利用者が 2FA 無しで読み書きできてしまう）。
+2FA を満たさない利用者は、そのテナントのリソースへのアクセスを `403`（`2fa-setup-required`）で拒否される。強制前から持っている本認証セッション・PAT・Device Token も同じで、ログイン時だけでなくテナントの所属判定（`has_tenant_access`）がリクエストごとに確かめる。判定は所属が決まった後に行うので、無関係な利用者にテナントの強制設定は漏れない。
+
+所属判定を通らない経路にも、同じ判定を個別に置いている。
+
+- オーナー専用の API（テナント更新・削除、Drive クォータ、GitHub 連携など）は、2FA を満たさないオーナーを `403`（`2fa-setup-required`）で拒否する
+- ファイル本文の配信（`GET /v1/drive/files/{id}/content`）も同じ判定を通す。ただし共有トークン（`?token=`）での配信は利用者を問わないので対象外である
+- 通知の一覧（`/v1/users/me/notifications` の一覧・未読数・既読化）は `403` にせず、強制下のテナントの通知を視界から外す
+
+2FA の設定 API（`/v1/auth/2fa/...`）と `/v1/auth/me` は所属判定を通らないので、未設定の利用者も使える。
+
+### 強制の有効化と無効化
+
+有効化（`enabled: true`）は、操作する本人が 2FA を満たすときだけ受け付ける。満たさなければ `403`（`2fa-setup-required`）を返し、`require_2fa` は変えない。有効にした途端に本人もテナントの API から締め出されるためである。
+
+無効化（`enabled: false`）は、オーナー専用の API の中で唯一 2FA の判定を省く。2FA の無いオーナーが強制下に残った場合の救済経路として、常に受け付ける。
+
+### 客分の扱い
+
+project にだけ参加しテナントに参加しない客分（project-only guest）も、関わるテナントの `require_2fa` の対象である。ここから漏れると、除名後に残る `project_members` の行で project へ入れる利用者が 2FA 無しで読み書きできてしまう。
 
 ---
 
@@ -314,12 +311,12 @@ project へ入れる利用者が 2FA 無しで読み書きできてしまう）�
 
 | メソッド | パス | 認証 | 説明 |
 |---------|------|------|------|
-| `POST` | `/v1/auth/2fa/totp/setup` | セッション必須 | TOTP シークレット生成・QR 返却 |
-| `POST` | `/v1/auth/2fa/totp/verify-setup` | セッション必須 | 初回コード検証→有効化 |
-| `POST` | `/v1/auth/2fa/verify` | half_authed セッション | ログイン後の TOTP / リカバリーコード検証 |
-| `DELETE` | `/v1/auth/2fa/totp` | セッション必須 | 2FA 無効化（コード要求） |
-| `POST` | `/v1/auth/2fa/recovery-codes/regenerate` | セッション必須 | リカバリーコード再生成（コード要求） |
-| `POST` | `/v1/tenants/{tenant_id}/require-2fa` | テナントオーナー | テナント 2FA 強制ポリシー変更 |
+| `POST` | `/v1/auth/2fa/totp/setup` | セッション（半認証も可） | TOTP シークレット生成・QR 返却 |
+| `POST` | `/v1/auth/2fa/totp/verify-setup` | セッション（半認証も可） | 初回コード検証→有効化 |
+| `POST` | `/v1/auth/2fa/verify` | 半認証セッション | ログイン後の TOTP / リカバリーコード検証 |
+| `DELETE` | `/v1/auth/2fa/totp` | セッション | 2FA 無効化（コード要求） |
+| `POST` | `/v1/auth/2fa/recovery-codes/regenerate` | セッション | リカバリーコード再生成（TOTP コード要求） |
+| `POST` | `/v1/tenants/{tenant_id}/require-2fa` | テナントオーナーのセッション | テナント 2FA 強制ポリシー変更 |
 
 ---
 
@@ -327,63 +324,35 @@ project へ入れる利用者が 2FA 無しで読み書きできてしまう）�
 
 | 脅威 | 対策 |
 |------|------|
-| ブルートフォース | 5 回失敗で 15 分ロック（Redis: `2fa_attempts:{user_id}`。検証前に INCR で予約し、6 回目以降は検証せず 429。成功で消す） |
-| リカバリーコード漏洩 | HMAC-SHA256 ハッシュのみ保存。平文は生成時の 1 回のみ表示 |
-| TOTP シークレット漏洩 | AES-256-GCM で暗号化して保存。API で返却しない |
-| 半セッションの悪用 | `AuthUser` extractor が `half_authed: true` を検出したら即 `403`（§5 参照） |
-| タイミング攻撃 | リカバリーコード検証は `constant_time_eq` で比較 |
+| ブルートフォース | Redis の `2fa_attempts:{user_id}` で数える。検証前に予約し、最初の試行から 15 分のあいだに 6 回目以降は検証せず `429` を返す。成功で消す |
+| リカバリーコード漏洩 | HMAC-SHA256 ハッシュのみ保存。平文は生成時のレスポンスでのみ返す |
+| TOTP シークレット漏洩 | AES-256-GCM で暗号化して保存。`otpauth` URI を返すのは `setup` のレスポンスだけである |
+| 半セッションの悪用 | `AuthUser` と `CurrentUser` と `AdminUser` が `half_authed: true` のセッションを `403` で拒否する（§5） |
+| タイミング攻撃 | リカバリーコードのハッシュの比較に `subtle` の定数時間比較を使う |
 
 ---
 
-## 12. フロントエンド（Phase B）
+## 12. フロントエンド
 
-### ログイン後の 2FA 入力画面
+2FA の画面は未実装である。バックエンドの API は揃っているが、画面からは次のものを操作できない。
 
-```text
-┌─────────────────────────────────────────────┐
-│ 2段階認証                                    │
-├─────────────────────────────────────────────┤
-│ 認証アプリのコードを入力してください           │
-│                                             │
-│  [ _ _ _ _ _ _ ]                            │
-│                             [確認]           │
-│                                             │
-│  リカバリーコードを使用                       │
-└─────────────────────────────────────────────┘
-```
+| 未実装の画面 | 内容 |
+|---|---|
+| ログイン後の入力画面 | TOTP・リカバリーコードの入力。OAuth コールバックのリダイレクト先 `/auth/2fa` のページも無い |
+| セットアップ | QR の表示、初回コードの入力、リカバリーコードの表示 |
+| 管理 | `/settings/security` での再生成と無効化。この画面は今、パスワードと OAuth 連携と端末だけを扱う（[アカウント設定](/features/account-settings) §7） |
+| テナントの強制 | `require_2fa` を切り替える設定項目 |
 
-### セキュリティ設定画面
-
-```text
-/settings/security
-```
-
-```text
-┌─────────────────────────────────────────────┐
-│ 2段階認証                        [有効 ✅]   │
-├─────────────────────────────────────────────┤
-│ 認証アプリ: 設定済み                         │
-│                                             │
-│ リカバリーコード: 残り 8 / 10                │
-│ [リカバリーコードを再生成]                   │
-│                                             │
-│ [2段階認証を無効にする]                      │
-└─────────────────────────────────────────────┘
-```
-
-| コンポーネント | ファイル |
-|--------------|---------|
-| `TwoFactorPrompt` | `components/auth/TwoFactorPrompt.vue` |
-| `TotpSetupWizard` | `components/settings/TotpSetupWizard.vue` |
-| `RecoveryCodeDisplay` | `components/settings/RecoveryCodeDisplay.vue` |
-| `TwoFactorSettings` | `components/settings/TwoFactorSettings.vue` |
+サインイン画面（`components/auth/SignInForm.vue`）は、ログインのレスポンスに `requires_2fa` が含まれると、ログアウトを試みたうえで「二要素認証は現在サポートされていません。」と表示する。この分岐は `requires_2fa_setup` だけが `true` の場合も通る。したがって今の画面からは、TOTP が有効な利用者と、強制されたテナントに関わる TOTP 未設定の利用者はパスワードでサインインできない。
 
 ---
 
 ## 13. 未決事項
 
+いずれも未実装で、対応するかどうかも決まっていない。
+
 | 項目 | 内容 |
 |------|------|
-| SMS OTP | セキュリティが TOTP より低く、SIM スワップ攻撃のリスクあり。現仕様では非対応。要検討 |
+| SMS OTP | セキュリティが TOTP より低く、SIM スワップ攻撃のリスクがある |
 | メール OTP | パスワードリセットフローに組み込むかどうか |
-| テナント強制の猶予期間 | 強制有効化から何日以内に設定しなければアクセス不可にするか（例: 7 日間の猶予） |
+| テナント強制の猶予期間 | 今は有効化の直後から `403` になる。有効化から何日以内に設定しなければアクセス不可にするか（例: 7 日間の猶予） |

@@ -3,16 +3,14 @@ title: Drive 機能仕様
 description: Misskey ライクなドライブ機能の設計仕様書
 ---
 
-> ステータス: **バックエンド実装済み／フロントエンド未実装（既知の差分あり）**
+> ステータス: **バックエンド実装済み。フロントエンドはドキュメント画面（§9.5）とタスク添付だけで、ファイルブラウザは未実装（既知の差分は §12）**
 > 作成日: 2026-05-26
-> 最終更新: 2026-10-21（`If-Match` / `If-None-Match` の弱い ETag を弱い比較で受けるようにした。2026-10-17: ファイル本文の ETag / If-Match 楽観ロック、フォルダ・ファイル一覧の絞り込み、Markdown 本文からのタスク参照の抽出を反映。ドキュメント画面を追加）
 
 ---
 
 ## 1. 概要
 
-タスク管理 SaaS に Misskey ライクなドライブ機能を追加する。
-ドライブはテナント単位のファイル管理スペースであり、アップロードしたファイルをフォルダで整理し、タスクへの添付や共有 URL 発行に利用できる。
+ドライブは Misskey のドライブに倣った機能で、テナント単位のファイル管理スペースであり、アップロードしたファイルをフォルダで整理し、タスクへの添付や共有 URL 発行に利用できる。
 
 ストレージバックエンドは **S3 互換（AWS S3 / MinIO）** と **ローカルディスク** の 2 種類をサポートし、環境変数で切り替える。
 
@@ -31,12 +29,14 @@ description: Misskey ライクなドライブ機能の設計仕様書
 | フォルダ共有 | 一部差分あり | ユーザー指定共有、公開リンク共有、共有トークンによる本文取得 |
 | クォータ | 実装済み | 使用量取得、テナント個別クォータ設定、アップロード・本文更新時の検証 |
 | タスク添付 | 実装済み | Drive ファイルとタスクの紐付け・解除、Markdown 本文の `KEY-N` の自動紐付け |
-| フロントエンド UI | 未実装 | OpenAPI クライアント用定義と PAT スコープ表示のみ存在 |
+| ドキュメント画面 | 実装済み | プロジェクトのルートフォルダ直下の `.md` を読み書きする画面（§9.5） |
+| タスク添付 UI | 実装済み | タスク詳細の添付欄（`TaskAttachments.vue`）から Drive のファイルを添付する |
+| ファイルブラウザ UI | 未実装 | Drive ページ、クォータ、共有の画面は無い。OpenAPI クライアント用定義と PAT スコープ表示だけがある |
 
 実装済みとした項目にも、仕様を完全には満たしていない箇所がある。詳細は
 [§12 現在の実装との差分・既知の問題](#12-現在の実装との差分既知の問題)を参照。
 
-### 今後の拡張
+### 未実装の拡張
 
 - 画像サムネイル生成
 - ファイル全文検索
@@ -66,13 +66,13 @@ pub struct Model {
 |--------|-----|------|------|
 | `id` | UUID | PK | |
 | `name` | VARCHAR | NOT NULL | フォルダ名 |
-| `parent_id` | UUID | NULLABLE, FK→self | 親フォルダ（ルートは NULL） |
+| `parent_id` | UUID | NULLABLE, FK→self SET NULL | 親フォルダ（ルートは NULL） |
 | `tenant_id` | UUID | NOT NULL, FK→tenants CASCADE | |
 | `project_id` | UUID | NULLABLE, FK→projects CASCADE | セットされているとプロジェクトフォルダ |
 | `created_by` | UUID | NOT NULL, FK→users | |
 | `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
 
-> **プロジェクトフォルダの自動作成**: プロジェクト作成時に同名フォルダを `drive_folders` に自動作成し、`project_id` を紐付ける。プロジェクト削除時は CASCADE で削除される。
+> **プロジェクトフォルダの自動作成**: プロジェクト（個人プロジェクトを含む）の作成時に同名フォルダを `drive_folders` に自動作成し、`project_id` を紐付ける。プロジェクト削除時は CASCADE で削除される。
 
 ### 3.2 `drive_files` テーブル
 
@@ -117,7 +117,7 @@ pub struct Model {
 ```sql
 CHECK (project_id IS NULL OR folder_id IS NOT NULL)
 ```
-`project_id` がセットされているときは必ず `folder_id` も非 NULL でなければならない。DB レベルと API ハンドラ（バリデーション層）の両方で強制する。
+`project_id` がセットされているときは必ず `folder_id` も非 NULL でなければならない。DB の CHECK 制約と entity の `before_save` の両方で強制する。
 
 > **`url` カラムなし**: 全ファイルのアクセス URL は `/v1/drive/files/{id}/content` に統一。DB には `storage_key` のみ保持し、API レスポンス生成時に URL を組み立てる。S3 エンドポイント変更やローカルサーバー移転の影響を受けない。
 
@@ -134,7 +134,7 @@ pub struct Model {
     pub folder_id: Uuid,                 // FK → drive_folders CASCADE
     pub shared_with_user_id: Option<Uuid>, // ユーザー指定共有（NULL = 公開リンク共有）
     pub share_token: Option<String>,     // 公開リンク用トークン（NULL = ユーザー指定共有）
-    pub permission: SharePermission,     // enum: viewer | editor
+    pub permission: SharePermission,     // enum: viewer のみ
     pub created_by: Uuid,                // FK → users
     pub expires_at: Option<DateTimeWithTimeZone>, // 有効期限（NULL = 無期限）
     pub created_at: DateTimeWithTimeZone,
@@ -145,7 +145,7 @@ pub struct Model {
 |--------|-----|------|------|
 | `id` | UUID | PK | |
 | `folder_id` | UUID | NOT NULL, FK→drive_folders CASCADE | 共有対象フォルダ |
-| `shared_with_user_id` | UUID | NULLABLE, FK→users | 特定ユーザーへの共有。NULL の場合は公開リンク |
+| `shared_with_user_id` | UUID | NULLABLE, FK→users CASCADE | 特定ユーザーへの共有。NULL の場合は公開リンク |
 | `share_token` | VARCHAR | NULLABLE, UNIQUE | 公開リンク用トークン（URL-safe ランダム文字列）。NULL の場合はユーザー指定共有 |
 | `permission` | VARCHAR(16) | NOT NULL | Rust 側では enum。現行値は `viewer` のみ |
 | `created_by` | UUID | NOT NULL, FK→users | 共有を作成したユーザー |
@@ -158,7 +158,7 @@ pub struct Model {
 
 ### 3.4 `tenants` テーブルへの追加カラム
 
-既存テーブルに以下のカラムを追加する。
+`tenants` はドライブ用に次のカラムを持つ。
 
 | カラム | 型 | 制約 | 説明 |
 |--------|-----|------|------|
@@ -205,10 +205,20 @@ fn can_access_file(file: &DriveFile, caller: &Caller) -> bool {
         if !has_scope(user, "read:drive") {
             return false;
         }
+        // テナントが 2FA を強制していれば、ここで確かめる（プロジェクトファイルの枝は
+        // テナント所属の判定を通らないため）
+        if !satisfies_tenant_2fa(user, file.tenant_id) {
+            return false;
+        }
 
         // テナント一般ファイルはテナント所属者またはオーナーに許可（ユーザー指定共有は見ない）
         if file.project_id.is_none() {
             return can_access_tenant(user.id, file.tenant_id);
+        }
+
+        // PAT のテナント・プロジェクト束縛はファイル自身の値と突き合わせる
+        if !token_binding_allows(user, file.tenant_id, file.project_id) {
+            return false;
         }
 
         // テナントオーナー OR（テナントに所属 AND プロジェクトの公開規則を満たす）
@@ -239,7 +249,7 @@ fn can_access_file(file: &DriveFile, caller: &Caller) -> bool {
 | `viewer` | ファイル・フォルダの閲覧・ダウンロード |
 | `editor` | `viewer` に加え、ファイルアップロード・削除・フォルダ作成 |
 
-> 現在は `viewer` のみ実装。`editor` は将来対応。
+> 実装済みは `viewer` だけである。`editor` は未実装で enum にも値が無く、共有作成で指定すると `422` を返す（§8.3）。
 
 ### 4.4 URL 戦略
 
@@ -275,13 +285,18 @@ S3 バックエンドであっても S3 の直 URL はクライアントに渡�
 
 ### 5.1 クォータの 3 層構造
 
-```text
-DRIVE_SYSTEM_MAX_QUOTA_MB  ← システム上限（ハードキャップ。設定時はこれを超えて設定不可）
-        ↓ 上限として機能
-tenants.drive_quota_bytes  ← テナント個別設定（テナントオーナーが変更可）
-        ↓ NULL 時のフォールバック
-DRIVE_DEFAULT_QUOTA_MB     ← システムデフォルト（テナント未設定時に適用）
+有効クォータは、テナント個別の設定（無ければシステムデフォルト）にシステム上限を掛けて決まる。
+
+```mermaid
+flowchart TD
+  max["DRIVE_SYSTEM_MAX_QUOTA_MB<br/>システム上限。設定時はこれを超えて設定不可"]
+  tenant["tenants.drive_quota_bytes<br/>テナント個別設定。テナントオーナーが変更可"]
+  default_quota["DRIVE_DEFAULT_QUOTA_MB<br/>システムデフォルト。テナント未設定時に適用"]
+  max -->|"上限として機能"| tenant
+  tenant -->|"NULL 時のフォールバック"| default_quota
 ```
+
+システム上限とシステムデフォルトは環境変数だけで決まる。管理者のシステム設定 API（[サービス管理者](/features/admin) §7.4）にある同名の値は、現在の実装では読まれない（§12）。
 
 | 層 | 設定元 | 変更者 | 説明 |
 |----|--------|--------|------|
@@ -376,7 +391,7 @@ PATCH /v1/tenants/{tenant_id}/drive/quota
 WARN tenant drive quota exceeds system_max — update tenant quota or raise DRIVE_SYSTEM_MAX_QUOTA_MB
 ```
 
-将来の拡張で管理者向け監査エンドポイント（例: `GET /v1/admin/drive/quota-violations`）を追加し、超過テナント一覧を UI で確認できるようにする。実行時の有効クォータにはシステム上限が常に適用される。使用量が上限以上なら新規アップロードを拒否し、本文更新は差し替え後の合計が上限を超える場合に `413 Content Too Large` を返す。本文を縮めても合計が上限を超えたままなら拒否する。
+超過テナントの一覧を管理者が確かめるエンドポイントと UI は未実装で、確認手段はこの警告だけである。実行時の有効クォータにはシステム上限が常に適用される。使用量が上限以上なら新規アップロードを拒否し、本文更新は差し替え後の合計が上限を超える場合に `413 Content Too Large` を返す。本文を縮めても合計が上限を超えたままなら拒否する。
 
 ---
 
@@ -541,8 +556,8 @@ pub fn implies(self, other: Scope) -> bool {
         return true;
     }
     match self {
-        Scope::AdminTenant => true,
-        Scope::AdminProject => other.layer() == ScopeLayer::Project,
+        Scope::Api => true,
+        Scope::ReadApi => other.verb() == ScopeVerb::Read,
         Scope::WriteDrive => other == Scope::ReadDrive,
         // …他のスコープも同様に、含意する先を明示する
     }
@@ -617,12 +632,15 @@ pub fn implies(self, other: Scope) -> bool {
 | フィールド | 必須 | 説明 |
 |-----------|------|------|
 | `file` | ✓ | ファイルバイナリ |
-| `name` | - | 表示名（省略時は元ファイル名） |
+| `name` | - | 表示名（省略時は元ファイル名。どちらも無ければ `400`） |
 | `folder_id` | - | アップロード先フォルダ UUID |
 
 フィールドの順序は問わない。`file` はストリームのままストレージへ流し、DB への登録は
 全パートを読み終えてから行う（登録に失敗したらストレージから消す）。`folder_id` が `file` より
 前に届いた場合だけ、本文を流す前にフォルダの存在と書き込み権限を確かめて早く落とす。
+
+`mime_type` は、ソースコードの拡張子の上書き表（`.ts` など）、申告された `Content-Type`、ファイル名からの推定の順で決める。
+ブラウザが `.ts` を `video/mp2t` のように申告することがあり、そのまま保存すると本文更新 API が対象外として弾くためである。
 
 レスポンス: 作成された `DriveFile` オブジェクト (201 Created)
 
@@ -653,7 +671,7 @@ pub fn implies(self, other: Scope) -> bool {
 （TASK-336。止めていたときは、誰も触っていないのに「他の人が更新しました」が出続けた）。
 一致しなければ `412 Precondition Failed`（`precondition-failed`）を返し、本文は変えない。
 比較はファイル行のロック取得後に行うため、同じ ETag を持った並行更新は片方だけが通り、もう片方は
-`412` になる。ヘッダーを省略した場合は従来どおり無条件に上書きする（後勝ち）。応答の `etag` は更新後の値。
+`412` になる。ヘッダーを省略した場合は無条件に上書きする（後勝ち）。応答の `etag` は更新後の値。
 
 #### `DriveFile.etag`
 
@@ -700,9 +718,10 @@ pub fn implies(self, other: Scope) -> bool {
 作成時の `parent_id` で親フォルダを指定し、親の `project_id` を継承する。
 更新時の `parent_id` は省略で変更なし、明示的な `null` でドライブ直下への移動を表す。
 移動元・移動先の権限確認、配下の同期とルート保護は §4.5 に従う。
+自身や子孫を親に指定した場合と、空の `name` は `400` を返す。
 
 フォルダ削除時の挙動:
-- 直下にファイルまたは子フォルダが存在する場合: **`409 Conflict`** を返し削除しない（強制削除は将来対応）
+- 直下にファイルまたは子フォルダが存在する場合: **`409 Conflict`** を返し削除しない（強制削除は未実装）
 - プロジェクトルートは空でも **`409 Conflict`**。権限のないプロジェクト配下の操作は先に `403` で拒否する
 
 ### 8.3 フォルダ共有 API
@@ -743,16 +762,20 @@ pub fn implies(self, other: Scope) -> bool {
 ```json
 {
   "id": "...",
+  "folder_id": "...",
+  "shared_with_user_id": null,
   "share_token": "abc123xyz",
   "permission": "viewer",
-  "expires_at": "2026-12-31T23:59:59Z"
+  "created_by": "...",
+  "expires_at": "2026-12-31T23:59:59Z",
+  "created_at": "2026-05-26T12:00:00Z"
 }
 ```
 
-- `share_url` は返さない。フロントエンドが `window.location.origin + "/drive/share/" + share_token` で組み立てる
+- `share_url` は返さない。クライアントが `window.location.origin + "/drive/share/" + share_token` で組み立てる想定である（共有ページの UI は未実装）
 - `share_token` は URL-safe な 32 文字ランダム文字列
 - フォルダ作成者またはテナントオーナーのみ共有操作可。プロジェクトフォルダでは、作成者が現在そのプロジェクトに入れることも条件（外れた作成者は `403`）
-- 現在 `permission: "editor"` を指定した場合 → `422 Unprocessable Entity`（`editor` は将来対応）
+- `permission: "editor"` を指定した場合は `422 Unprocessable Entity`（`editor` は未実装）。それ以外の未知の値と、未知の `type`、`user_id` の無い `type: "user"` は `400 Bad Request`
 
 #### GET `/v1/drive/share/{token}`
 
@@ -838,25 +861,14 @@ Drive ファイル本体は削除しない。
 /{tenant}/drive/{folder_id}  # フォルダ内
 ```
 
-> 現在はページ・コンポーネントとも未実装。上記は
-> [`docs/frontend/url-spec.md`](/frontend/url-spec) に合わせた予定 URL。
+> §9.1〜§9.4 のファイルブラウザは未実装で、ページもコンポーネントも無い。ここに書くのは導入時の設計である。
+> URL は [`docs/frontend/url-spec.md`](/frontend/url-spec) に合わせた予定のものである。
 
 ### 9.2 レイアウト
 
-```text
-┌─────────────────────────────────────────────────────┐
-│ Breadcrumb: ドライブ > フォルダA > サブフォルダB      │
-├────────────────┬────────────────────────────────────┤
-│                │  ┌──────────────────────────────┐  │
-│ [+ 新しい      │  │ 🔍 ファイル検索               │  │
-│   フォルダ]    │  └──────────────────────────────┘  │
-│                │                                    │
-│ ▼ ドライブ     │  [▲ アップロード]  [リスト/グリッド] │
-│   フォルダA    │                                    │
-│   フォルダB    │  📁 フォルダA    📁 フォルダB       │
-│               │  📄 report.pdf  🖼 image.png        │
-└────────────────┴────────────────────────────────────┘
-```
+上部にパンくず、左にフォルダツリーと新規フォルダのボタン、右に検索欄、アップロード、表示切り替え、ファイル一覧を置く。
+
+![ドライブ画面の配置。上部にパンくず、左にフォルダツリー、右に検索欄とファイル一覧を置く](/diagrams/drive-layout.svg)
 
 ### 9.3 コンポーネント構成
 
@@ -895,7 +907,8 @@ Drive ファイル本体は削除しない。
   編集中のプレビューと保存後は `POST /internal/render-description`。scope は `doc-<file_id>`、
   本文の `KEY-N` はタスク詳細へのリンクになる）。関連タスクは §8.5 の `GET .../files/{id}/tasks`
 - 保存は `PUT .../content` に、読み込んだ時点の `DriveFile.etag` を `If-Match` で付ける。`412` なら
-  「他の人が更新しました」と出し、再読込で最新のメタデータ（ETag）と本文を取り直す（下書きは残す）。
+  「他の人が更新しました」と出し、最新を読み込んで下書きを捨てるか、自分の下書きで上書きするかを選ばせる。
+  どちらも最新の本文と ETag を取り直す。上書きはそこで取り直した ETag を付けて保存し直す。
   タイトルの変更は `PATCH .../files/{id}` の `name`（`<タイトル>.md`）で、下書きを始めた時のタイトルから
   変えたときだけ送る（取り直したメタデータと比べると、他の人の改名を下書きの古い名前へ戻してしまう）
 - 新規作成は `POST .../drive/files`（multipart、`folder_id` はルート）。作成時に選ぶ種類（機能仕様・
@@ -924,11 +937,11 @@ Drive ファイル本体は削除しない。
 
 ## 11. 設定まとめ
 
-`apps/backend/.env` に追加する環境変数:
+`apps/backend/.env` で設定する環境変数:
 
 ```env
 # ストレージバックエンド（未指定時は local）
-STORAGE_BACKEND=local                 # "local" または "s3"
+STORAGE_BACKEND=local                 # "local" または "s3"。それ以外は起動時にエラー
 
 # アップロード・クォータ設定（共通）
 UPLOAD_MAX_SIZE_MB=100                # 1ファイルあたりの上限 MB（ファイル本体。multipart の枠は含めない。デフォルト 100）
@@ -944,14 +957,14 @@ S3_SECRET_ACCESS_KEY=
 S3_FORCE_PATH_STYLE=false             # MinIO 等では true に設定
 
 # ローカル用（STORAGE_BACKEND=local の場合）
-LOCAL_UPLOAD_DIR=./uploads
+LOCAL_UPLOAD_DIR=./uploads            # 未指定時も ./uploads
 ```
 
 ---
 
 ## 12. 現在の実装との差分・既知の問題
 
-2026-09-20 時点で、次の差分を確認している。ここに記載した項目は期待仕様ではなく、
+現在の実装には次の差分がある。ここに記載した項目は期待仕様ではなく、
 修正対象として追跡するための現状説明である。
 
 | 優先度 | 項目 | 現状と影響 |
@@ -961,9 +974,10 @@ LOCAL_UPLOAD_DIR=./uploads
 | 中 | フォルダ一覧のプロジェクト別絞り込み | `project_id` を指定すればそのプロジェクトへのアクセス権を確認して絞り込める。省略時はテナント所属を確認した後、プロジェクト権限による絞り込みなしで全フォルダのメタデータを返す。ファイル一覧・本文の認可とは異なる |
 | 中 | 公開共有一覧の再帰性 | `/share/{token}/files` は共有フォルダ直下のファイルだけを返し、子フォルダとそのファイルを列挙しない。本文取得時のトークン判定だけは祖先方向へ継承する |
 | 中 | ストレージ種別切り替え | DB に `storage_type` を保存するが、取得・削除は起動中の単一バックエンドだけを使う。`STORAGE_BACKEND` を変更すると、変更前のファイルを取得・削除できない |
+| 中 | 管理者のシステム設定のクォータ値 | `system_settings.drive_default_quota_mb` / `drive_system_max_quota_mb` は `/v1/admin/system/settings` で変更できるが、有効クォータの計算（`DriveConfig`）は環境変数だけを読むので反映されない |
 | 低 | 接続元ごとの外れトークンの数え上げ | 公開共有のレートリミットは IP × トークン指紋が鍵なので、毎回違うトークンを送る総当たりは数えない。総当たり自体はエントロピー（192bit）で成立しないが、外れたトークンの `drive_folder_shares` 検索は毎回走る |
 | 低 | 未使用の S3 公開 URL 設定 | 実装は `S3_PUBLIC_BASE_URL` を読み込むが、全ファイルをプロキシ配信するため値は使われない |
-| 未実装 | フロントエンド | Drive ページ、ファイルブラウザ、アップロード、クォータ、共有 UI は未実装 |
+| 未実装 | フロントエンド | Drive ページ、ファイルブラウザ、クォータ、共有 UI は未実装。ドキュメント画面（§9.5）とタスク添付の UI だけがある |
 
 公開共有ルートの二重 prefix と、フォルダの `project_id` 継承・移動先認可・プロジェクトルート保護は修正済み。
 既存データの backfill、階層変更の直列化、ファイル更新・削除時のロック後の再認可も実装済み。
@@ -971,12 +985,13 @@ LOCAL_UPLOAD_DIR=./uploads
 
 | テスト | 対象 |
 |--------|------|
-| `tests/drive_public_share_integration.rs` | 正規 URL、二重 prefix の排除、不明・期限切れトークン、IP × トークン指紋のレートリミット |
-| `tests/drive_folder_boundary_integration.rs` | 作成・移動・削除のプロジェクト境界、配下同期、ルート保護、ロック待ち後の再認可 |
-| `tests/drive_project_id_backfill_integration.rs` | 深い階層・移動済みルート、冪等性、異なるプロジェクトや循環の検出 |
-| `tests/drive_file_content_integration.rs` | 本文更新・配信、空本文、MIME、クォータ、並行更新、認可・共有トークン、配信ヘッダー、ETag・`If-Match` / `If-None-Match` |
-| `tests/drive_upload_acl_integration.rs` / `tests/drive_usage_integration.rs` | プロジェクトへのアップロード認可、フィールドの順序と `file` の重複、複数ファイルの使用量集計 |
-| `tests/drive_upload_body_limit_integration.rs` / `crates/service/src/storage/s3.rs` | アップロード上限ちょうど・超過の判定、S3 の長さ未知のアップロードが multipart になること |
+| `tests/integration/drive_public_share_integration.rs` | 正規 URL、二重 prefix の排除、不明・期限切れトークン、IP × トークン指紋のレートリミット |
+| `tests/integration/drive_folder_boundary_integration.rs` | 作成・移動・削除のプロジェクト境界、配下同期、ルート保護、ロック待ち後の再認可 |
+| `tests/integration/drive_project_id_backfill_integration.rs` | 深い階層・移動済みルート、冪等性、異なるプロジェクトや循環の検出 |
+| `tests/integration/drive_file_content_integration.rs` | 本文更新・配信、空本文、MIME、クォータ、並行更新、認可・共有トークン、配信ヘッダー、ETag・`If-Match` / `If-None-Match` |
+| `tests/integration/drive_upload_acl_integration.rs` / `tests/integration/drive_usage_integration.rs` | プロジェクトへのアップロード認可、フィールドの順序と `file` の重複、複数ファイルの使用量集計 |
+| `tests/integration/drive_upload_body_limit_integration.rs` / `crates/service/src/storage/s3.rs` | アップロード上限ちょうど・超過の判定、S3 の長さ未知のアップロードが multipart になること |
+| `tests/integration/drive_task_links_integration.rs` | Markdown 本文からのタスク参照（§8.5） |
 | `crates/handler/src/routes/mod.rs` | OpenAPI 全体の prefix 重複検出 |
 
 ---
@@ -991,7 +1006,7 @@ LOCAL_UPLOAD_DIR=./uploads
 | 1 | ストレージ削除の回収経路追加 | 個別・プロジェクト・テナント削除と失敗時再試行をテストできる |
 | 2 | フォルダ・共有受信者向け一覧 API の整理 | プロジェクト権限と共有範囲に沿って、子フォルダを含む一覧を提供できる |
 | 3 | ストレージバックエンド移行方針の決定 | `storage_type` ごとに取得するか、切り替え前の移行を必須化する |
-| 4 | フロントエンド実装 | ファイルブラウザ、アップロード、本文編集、クォータ、共有 UI を提供する |
+| 4 | フロントエンド実装 | ファイルブラウザ、クォータ、共有 UI を提供する |
 
 ---
 
@@ -1001,7 +1016,7 @@ LOCAL_UPLOAD_DIR=./uploads
 |------|---------|--------|
 | ファイルサイズ上限 | `UPLOAD_MAX_SIZE_MB` 環境変数で設定変更可（デフォルト 100MB） | 2026-05-26 |
 | 一般ファイルの配信認証 | テナント所属者・オーナー、または有効なフォルダ共有トークンのみ | 2026-08-10 |
-| プロジェクトファイルのアクセス制御 | プロジェクトメンバーまたはテナントオーナーのみ閲覧可 | 2026-05-26 |
+| プロジェクトファイルのアクセス制御 | プロジェクトメンバーまたはテナントオーナーのみ閲覧可（次の行で改訂） | 2026-05-26 |
 | プロジェクトファイルのアクセス制御（改訂） | テナントに所属していることを先に確認したうえで、プロジェクトの公開規則で判定する | 2026-08-18 |
 | プロジェクトファイルの URL 戦略 | バックエンド経由でプロキシ（S3 URL は直接渡さない） | 2026-05-26 |
 | S3 バケット公開設定 | 公開を前提としない。全ファイルをバックエンドプロキシで配信 | 2026-09-03 |
@@ -1018,7 +1033,7 @@ LOCAL_UPLOAD_DIR=./uploads
 | 共有操作の権限 | プロジェクトフォルダの共有の一覧・作成・取り消しは、作成者であっても現在そのプロジェクトに入れること（またはテナントオーナー）を条件にする。プロジェクトから外れた作成者が公開リンクや自分宛て共有を作り、ファイルの閲覧を取り戻せたため（TASK-376） | 2026-10-29 |
 | 公開リンクトークン | 32 文字 URL-safe ランダム。有効期限設定可（NULL = 無期限）| 2026-05-26 |
 | PAT スコープ | `read:drive`（閲覧）・`write:drive`（書き込み）を新設。`write:drive` は `read:drive` を包含。`admin:tenant` は全 Drive 操作を包含（2026-10-04 に `admin:tenant` を廃止し、`api` が包含する形へ。クォータ設定は `write:tenant`） | 2026-05-26 |
-| ストリーミング | `StorageBackend` trait は `BoxStream` を使用する。S3 の全量バッファは既知の修正対象 | 2026-09-03 |
+| ストリーミング | `StorageBackend` trait は `BoxStream` を使用する。S3 の全量バッファは TASK-163 で解消した（次の行） | 2026-09-03 |
 | 長さ未知のアップロードとフィールド順序 | `StorageBackend::upload` の長さは `Option<u64>`（`None` = 未知）。S3 は未知か 5MiB 以上なら multipart で流し、全量を貯めない。アップロード API は全パートを読み終えてから DB に登録し、`name` / `folder_id` の順序を問わない（`file` が 2 つなら 400）。リクエスト本文の上限は `UPLOAD_MAX_SIZE_MB` + 64KiB（multipart の枠）とし、ファイル本体の上限はハンドラーが実測で守る（TASK-163） | 2026-11-01 |
 | URL 管理 | `drive_files.url` カラム廃止。全ファイルを `/v1/drive/files/{id}/content` で統一配信 | 2026-05-26 |
 | 不変条件保護 | `project_id IS NULL OR folder_id IS NOT NULL` を DB CHECK 制約 + アプリバリデーション両方で強制 | 2026-05-26 |
@@ -1030,7 +1045,7 @@ LOCAL_UPLOAD_DIR=./uploads
 | backfill の中断条件 | 配下に**別プロジェクト**の `project_id` を持つ行（フォルダ・ファイルとも）があるツリー、または親子が循環しているツリーは 1 行も書き換えず、マイグレーションを失敗させる。継承で上書きするとそのプロジェクトのファイルが別プロジェクトのメンバーへ公開され、元のメンバーはアクセスを失う（修正前はプロジェクトルートの移動もできたため、この状態が既存データにありうる）。該当する行を人が直してから流し直す | 2026-09-04 |
 | `If-Match` の弱い比較 | `If-Match` / `If-None-Match` の `W/"..."` は `W/` を外して比べる。本番は Cloudflare 越しで、圧縮した応答の強い ETag が弱い ETag に付け替えられ、ブラウザがそれを `If-Match` に戻すとドキュメントの保存が常に 412 になっていた（TASK-336）。本文の ETag は内容のハッシュなので弱い一致で失うものは無い | 2026-10-21 |
 | 階層変更の直列化 | フォルダの作成・移動、ファイルの作成・移動は、テナント単位のアドバイザリロック（`pg_advisory_xact_lock`）で直列化する。ACL と親の `project_id` はロック取得後に同一トランザクションで読み、挿入・移動・子孫の同期まで同じトランザクションで終える。ロックの外で読むと、移動中のフォルダへ子を作ったときに移動前の `project_id` を継承した行が同期の後から挿入され、ACL 漏れが再発する | 2026-09-04 |
-| ファイル本文の楽観ロック | 本文の ETag は SHA-256（`drive_files.content_hash`）から作る強い ETag。ハッシュを持たない既存行は backfill せず、`updated_at`（Unix ミリ秒）とサイズで代替する。比較は文字列の完全一致で、弱い ETag（`W/`）は受けない。期待値は標準の `If-Match` / `If-None-Match` ヘッダーで受け、JSON ボディでの期待値指定は採らない（同期型クライアントが標準の HTTP キャッシュ処理のまま扱えるようにするため）。`If-Match` の比較は行ロック取得後に行い、ヘッダー省略時は従来どおり後勝ち | 2026-10-16 |
+| ファイル本文の楽観ロック | 本文の ETag は SHA-256（`drive_files.content_hash`）から作る強い ETag。ハッシュを持たない既存行は backfill せず、`updated_at`（Unix ミリ秒）とサイズで代替する。比較は文字列の完全一致で、弱い ETag（`W/`）は受けないとした（2026-10-21 に `W/` を外して比べる形へ改めた。「`If-Match` の弱い比較」の行）。期待値は標準の `If-Match` / `If-None-Match` ヘッダーで受け、JSON ボディでの期待値指定は採らない（同期型クライアントが標準の HTTP キャッシュ処理のまま扱えるようにするため）。`If-Match` の比較は行ロック取得後に行い、ヘッダー省略時は後勝ち | 2026-10-16 |
 | 本文からのタスク参照 | Markdown 本文の `KEY-N` の抽出は forge の `task_refs` を再利用する。手動の添付（`manual`）は本文由来（`body`）に負けない（本文に書いても `body` に書き換えず、本文から消えても消さない）。`body` の解除は本文編集で行い、`DELETE` は `409`。手動で `POST` すると `manual` に昇格する。結び付け先は手動添付と同じ範囲（プロジェクトファイルは同じプロジェクトのタスクだけ。別プロジェクトに結ぶと添付一覧からファイル名が別プロジェクトの人に見えるため）で、さらに保存者が入れるプロジェクトのタスクだけ。1 ファイル 200 件まで。プロジェクトファイルが別プロジェクトのタスクに持つ `body` 行は、プロジェクトへの移動と本文の保存で外す（保存者が入れるかに依らない） | 2026-10-16 |
 | 一覧の絞り込み | フォルダ一覧に `project_id` / `parent_id` / `root_only`、ファイル一覧に `mime_type` / `q` / `sort` を足した。プロジェクトのルートは `project_id + root_only` で取る（`ProjectResponse` には持たせない） | 2026-10-16 |
 | ドキュメント画面 | プロジェクトのドキュメントは専用のテーブルを作らず、ルートフォルダ直下の `.md` ファイルとして扱う（§9.5）。種類・ステータス・承認・履歴は持たず、種類は作成時のテンプレート選択にだけ使う | 2026-10-16 |

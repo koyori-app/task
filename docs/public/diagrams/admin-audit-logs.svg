@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 190" role="img" aria-label="監査ログ画面の配置">
+  <style>
+    :root { --bg:#ffffff; --panel:#f4f4f5; --line:#a1a1aa; --text:#27272a; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#18181b; --panel:#27272a; --line:#71717a; --text:#f4f4f5; } }
+    text { fill:var(--text); font:13px system-ui, sans-serif; }
+    .box { fill:var(--panel); stroke:var(--line); }
+    .h { font-weight:600; }
+  </style>
+  <rect x="1" y="1" width="698" height="188" rx="6" fill="var(--bg)" stroke="var(--line)"/>
+  <text x="16" y="30" class="h">監査ログ</text>
+  <rect class="box" x="400" y="10" width="110" height="30" rx="4"/>
+  <text x="412" y="30">アクション</text>
+  <rect class="box" x="520" y="10" width="70" height="30" rx="4"/>
+  <text x="532" y="30">期間</text>
+  <rect class="box" x="600" y="10" width="84" height="30" rx="4"/>
+  <text x="612" y="30">検索</text>
+  <line x1="1" y1="50" x2="699" y2="50" stroke="var(--line)"/>
+  <text x="16" y="74" class="h">日時</text>
+  <text x="170" y="74" class="h">操作者</text>
+  <text x="350" y="74" class="h">アクション</text>
+  <text x="550" y="74" class="h">対象</text>
+  <line x1="1" y1="86" x2="699" y2="86" stroke="var(--line)"/>
+  <text x="16" y="110">2026-05-27 10:02</text>
+  <text x="170" y="110">alice@example.com</text>
+  <text x="350" y="110">user.admin.grant</text>
+  <text x="550" y="110">user:bob</text>
+  <text x="16" y="138">2026-05-27 09:55</text>
+  <text x="170" y="138">system</text>
+  <text x="350" y="138">user.admin.grant</text>
+  <text x="550" y="138">user:alice</text>
+  <text x="16" y="166">2026-05-27 09:30</text>
+  <text x="170" y="166">alice@example.com</text>
+  <text x="350" y="166">user.suspend</text>
+  <text x="550" y="166">user:bob</text>
+</svg>

@@ -13,10 +13,10 @@ export const mermaidFence = () => ({
       const pre = node.children?.find(isMermaid);
       if (!pre) return;
       return {
-        type: "element",
+        type: "element" as const,
         tagName: "pre",
         properties: { className: ["mermaid"] },
-        children: [{ type: "text", value: text(pre) }],
+        children: [{ type: "text" as const, value: text(pre) }],
       };
     },
   },

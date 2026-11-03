@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 320" role="img" aria-label="自動化ルールのエディタの画面案">
+  <style>
+    :root { --bg: #ffffff; --panel: #f4f4f5; --line: #d4d4d8; --text: #18181b; --muted: #71717a; --accent: #2563eb; --ok: #15803d; --warn: #b45309; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #18181b; --panel: #27272a; --line: #3f3f46; --text: #f4f4f5; --muted: #a1a1aa; --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; }
+    }
+    text { font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 14px; fill: var(--text); }
+    .muted { fill: var(--muted); font-size: 13px; }
+    .head { font-weight: 600; }
+    .link { fill: var(--accent); }
+    .ok { fill: var(--ok); font-size: 13px; }
+    .warn { fill: var(--warn); font-size: 13px; }
+    .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+    .frame { fill: var(--bg); stroke: var(--line); }
+    .ctl { fill: var(--panel); stroke: var(--line); }
+    .rule { stroke: var(--line); }
+  </style>
+  <rect class="frame" x="1" y="1" width="558" height="318" rx="8"/>
+  <text class="head" x="20" y="32">自動化ルール: 全サブタスク完了 → Done</text>
+  <rect class="ctl" x="474" y="14" width="66" height="26" rx="6"/>
+  <text x="488" y="32">有効</text>
+  <line class="rule" x1="1" y1="52" x2="559" y2="52"/>
+  <text class="muted" x="20" y="78">トリガー</text>
+  <rect class="ctl" x="20" y="88" width="280" height="30" rx="6"/>
+  <text x="32" y="108">全サブタスクが完了したとき ▾</text>
+  <text class="muted" x="20" y="146">条件（任意）</text>
+  <text class="link" x="20" y="170">+ 条件を追加</text>
+  <text class="muted" x="20" y="204">アクション</text>
+  <text x="20" y="230">1. ステータスを</text>
+  <rect class="ctl" x="124" y="214" width="84" height="26" rx="6"/>
+  <text x="136" y="232">Done ▾</text>
+  <text x="218" y="230">に変更</text>
+  <text x="20" y="266">2. 進捗率を</text>
+  <rect class="ctl" x="96" y="250" width="66" height="26" rx="6"/>
+  <text x="110" y="268">100%</text>
+  <text x="172" y="266">に設定</text>
+  <text class="link" x="20" y="302">+ アクションを追加</text>
+</svg>

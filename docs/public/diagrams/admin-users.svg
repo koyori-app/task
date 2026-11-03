@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 165" role="img" aria-label="ユーザー管理画面の配置">
+  <style>
+    :root { --bg:#ffffff; --panel:#f4f4f5; --line:#a1a1aa; --text:#27272a; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#18181b; --panel:#27272a; --line:#71717a; --text:#f4f4f5; } }
+    text { fill:var(--text); font:13px system-ui, sans-serif; }
+    .box { fill:var(--panel); stroke:var(--line); }
+    .h { font-weight:600; }
+  </style>
+  <rect x="1" y="1" width="638" height="163" rx="6" fill="var(--bg)" stroke="var(--line)"/>
+  <text x="16" y="30" class="h">ユーザー管理</text>
+  <rect class="box" x="500" y="10" width="124" height="30" rx="4"/>
+  <text x="512" y="30">+ ユーザー作成</text>
+  <line x1="1" y1="50" x2="639" y2="50" stroke="var(--line)"/>
+  <text x="16" y="74" class="h">名前</text>
+  <text x="170" y="74" class="h">メール</text>
+  <text x="390" y="74" class="h">状態</text>
+  <text x="510" y="74" class="h">操作</text>
+  <line x1="1" y1="86" x2="639" y2="86" stroke="var(--line)"/>
+  <text x="16" y="110">Alice</text>
+  <text x="170" y="110">alice@example.com</text>
+  <text x="390" y="110">通常</text>
+  <text x="510" y="110">詳細</text>
+  <text x="16" y="138">Bob</text>
+  <text x="170" y="138">bob@example.com</text>
+  <text x="390" y="138">停止中</text>
+  <text x="510" y="138">詳細</text>
+</svg>

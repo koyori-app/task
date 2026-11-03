@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 300" role="img" aria-labelledby="t d" font-family="system-ui, sans-serif" font-size="13">
+  <title id="t">バーンダウンチャートの案</title>
+  <desc id="d">横軸が日付、縦軸が残タスク数。理想線は 20 から 0 まで直線で下がり、実績線は現在地で理想線より上にあり遅延を示す。</desc>
+  <style>
+    .axis { stroke: #52525b; fill: none; }
+    .text { fill: #27272a; }
+    .ideal { stroke: #71717a; fill: none; stroke-width: 2; stroke-dasharray: 6 4; }
+    .actual { stroke: #dc2626; fill: none; stroke-width: 2.5; }
+    .now { fill: #dc2626; }
+    @media (prefers-color-scheme: dark) {
+      .axis { stroke: #a1a1aa; }
+      .text { fill: #e4e4e7; }
+      .ideal { stroke: #a1a1aa; }
+      .actual { stroke: #f87171; }
+      .now { fill: #f87171; }
+    }
+  </style>
+  <path class="axis" d="M60 20 V250 H530"/>
+  <text class="text" x="52" y="34" text-anchor="end">20</text>
+  <text class="text" x="52" y="144" text-anchor="end">10</text>
+  <text class="text" x="52" y="254" text-anchor="end">0</text>
+  <text class="text" x="60" y="272" text-anchor="middle">6/1</text>
+  <text class="text" x="530" y="272" text-anchor="middle">6/14</text>
+  <text class="text" x="295" y="290" text-anchor="middle">日付</text>
+  <text class="text" x="16" y="135" text-anchor="middle" transform="rotate(-90 16 135)">残タスク数</text>
+  <path class="ideal" d="M60 30 L530 250"/>
+  <path class="actual" d="M60 30 L132 63 L204 41 L276 85 L348 118"/>
+  <circle class="now" cx="348" cy="118" r="4"/>
+  <text class="text" x="358" y="112">現在地（遅延中）</text>
+  <text class="text" x="450" y="196">ideal</text>
+  <text class="text" x="228" y="56">actual</text>
+</svg>
