@@ -27,7 +27,14 @@ import {
   StateField,
   type Extension,
 } from '@codemirror/state';
-import { Decoration, EditorView, WidgetType, keymap, type DecorationSet } from '@codemirror/view';
+import {
+  Decoration,
+  EditorView,
+  WidgetType,
+  keymap,
+  tooltips,
+  type DecorationSet,
+} from '@codemirror/view';
 
 import {
   filterCandidates,
@@ -47,7 +54,20 @@ import { avatarInitials } from '@/lib/initials';
 // 札の見た目は説明文の KFM の札と同じ一枚（span.kfm-mention）を使う
 import '@/lib/remark-kfm-mention/style.css';
 
+/** メンション候補の `.cm-tooltip` に載せる z-index（ui-vue の menu 段）。 */
+export const MENTION_AUTOCOMPLETE_Z_INDEX = 'var(--koyori-z-menu)';
+
+/**
+ * 候補の箱を載せる親。`<dialog>` の top layer 内では `body` だと背後に隠れるため、
+ * 編集器の祖先に `dialog` がある時はそこへ、それ以外は `document.body` へ出す。
+ */
+export function resolveMentionAutocompleteTooltipParent(host: HTMLElement): HTMLElement {
+  return host.closest('dialog') ?? host.ownerDocument.body;
+}
+
 export interface MentionEditorOptions {
+  /** 候補の箱を載せる親（CommentEditor / MarkdownEditor が mount 時に決める） */
+  tooltipParent: HTMLElement;
   /** `@` で出す候補（呼ぶたびに最新を返す） */
   candidates: () => readonly MentionCandidate[];
   /** 札の字を引く表の初期値。以後は `setMentionNames` で替える */
@@ -147,6 +167,7 @@ function composingGuard(run: (v: EditorView) => boolean) {
 
 export const mentionTheme = EditorView.theme({
   '.cm-tooltip.cm-tooltip-autocomplete': {
+    zIndex: MENTION_AUTOCOMPLETE_Z_INDEX,
     border: '1px solid var(--border)',
     borderRadius: '0.375rem',
     backgroundColor: 'var(--popover)',
@@ -248,6 +269,7 @@ export function mentionExtensions(options: MentionEditorOptions): Extension[] {
   return [
     mentionField,
     namesCompartment.of(namesFacet.of(options.names)),
+    tooltips({ parent: options.tooltipParent }),
     autocompletion({
       override: [mentionSource],
       activateOnTyping: true,

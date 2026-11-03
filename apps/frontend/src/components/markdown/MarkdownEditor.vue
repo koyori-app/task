@@ -19,6 +19,7 @@ import {
   mentionExtensions,
   nameTableOf,
   openMentionPicker as openPicker,
+  resolveMentionAutocompleteTooltipParent,
   setMentionNames,
 } from '@/lib/comment-mention-extensions';
 
@@ -75,6 +76,7 @@ const host = useTemplateRef<HTMLDivElement>('host');
 const view = ref<EditorView | null>(null);
 /** 直近に自分が emit した値。v-model の往復で state を作り直さないための照合用 */
 let lastEmitted: string | null = null;
+let mentionTooltipParent: HTMLElement | null = null;
 /**
  * 破棄中フラグ。EditorView.destroy() はフォーカス中の DOM を外すため blur が飛ぶ。
  * これを素通しすると、呼び出し側が「blur = 確定」にしている場合に
@@ -194,10 +196,14 @@ function tabIndents(view: EditorViewType): boolean {
  * その間の履歴やカーソルは捨ててよいため、機構を増やさない。
  */
 function extensions(): Extension[] {
+  if (!mentionTooltipParent) {
+    throw new Error('MarkdownEditor: mentionTooltipParent is unset');
+  }
   return [
     history(),
     ...(props.candidates
       ? mentionExtensions({
+          tooltipParent: mentionTooltipParent,
           candidates: () => props.candidates ?? [],
           names: nameTable.value,
           disabled: () => props.disabled,
@@ -260,6 +266,7 @@ function extensions(): Extension[] {
 
 onMounted(() => {
   if (!host.value) return;
+  mentionTooltipParent = resolveMentionAutocompleteTooltipParent(host.value);
   view.value = new EditorView({
     state: EditorState.create({ doc: props.modelValue, extensions: extensions() }),
     parent: host.value,

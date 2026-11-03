@@ -9,6 +9,7 @@ import {
   mentionExtensions,
   nameTableOf,
   openMentionPicker as openPicker,
+  resolveMentionAutocompleteTooltipParent,
   setMentionNames,
 } from '@/lib/comment-mention-extensions';
 
@@ -64,14 +65,19 @@ const emit = defineEmits<{
 const host = useTemplateRef<HTMLDivElement>('host');
 let view: EditorView | null = null;
 let lastEmitted: string | null = null;
+let mentionTooltipParent: HTMLElement | null = null;
 
 /** 印の id を札の字へ引く表。候補（選んだばかりの者）を先に、API の表で上書きする。 */
 const nameTable = computed<MentionTable>(() => nameTableOf(props.candidates, props.mentions));
 
 function extensions(): Extension[] {
+  if (!mentionTooltipParent) {
+    throw new Error('CommentEditor: mentionTooltipParent is unset');
+  }
   return [
     history(),
     ...mentionExtensions({
+      tooltipParent: mentionTooltipParent,
       candidates: () => props.candidates,
       names: nameTable.value,
       disabled: () => props.disabled,
@@ -108,6 +114,7 @@ const theme = EditorView.theme({
 
 onMounted(() => {
   if (!host.value) return;
+  mentionTooltipParent = resolveMentionAutocompleteTooltipParent(host.value);
   view = new EditorView({
     state: EditorState.create({ doc: props.modelValue, extensions: extensions() }),
     parent: host.value,
