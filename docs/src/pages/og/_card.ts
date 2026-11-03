@@ -5,10 +5,9 @@
  * the title. This file is the cards' look; edit it freely.
  *
  * `@cloudflare/nimbus-docs/og` does the rest: it loads the fonts, fits text
- * to its lines by measuring it, and renders the PNG. To use another script,
- * such as Chinese or Japanese, add a font that covers it to `fonts`.
+ * to its lines by measuring it, and renders the PNG.
  *
- * The leading underscore keeps Astro from routing this file or `_fonts/`.
+ * The leading underscore keeps Astro from routing this file.
  */
 import { createCardRenderer, type CardNode, type CardTypography } from "@cloudflare/nimbus-docs/og";
 import { root } from "astro:config/server";
@@ -26,18 +25,17 @@ const HEIGHT = 630;
 const LEFT = 80;
 const COLUMN = WIDTH - LEFT - 200;
 
-const TITLE: CardTypography = { fontFamily: "Inter", fontWeight: 500, letterSpacing: "-0.025em", lineHeight: 1.1, color: FOREGROUND };
-const SECTION: CardTypography = { fontFamily: "Inter", fontWeight: 400, lineHeight: 1.2, color: MUTED };
+const TITLE: CardTypography = { fontFamily: "Noto Sans JP", fontWeight: 500, letterSpacing: "-0.025em", lineHeight: 1.1, color: FOREGROUND };
+const SECTION: CardTypography = { fontFamily: "Noto Sans JP", fontWeight: 400, lineHeight: 1.2, color: MUTED };
 
-// Fonts sit beside this file, not in public/, so they never ship. Read from
-// the project so `astro build --root <site>` finds them.
-const font = (file: string) => new URL(`src/pages/og/_fonts/${file}`, root);
+// ページ名は日本語なので、Latin も持つ Noto Sans JP だけで描く。
+const font = (file: string) => new URL(`node_modules/@expo-google-fonts/noto-sans-jp/${file}`, root);
 const renderer = await createCardRenderer({
   width: WIDTH,
   height: HEIGHT,
   fonts: [
-    { name: "Inter", source: font("Inter-Regular.ttf"), weight: 400 },
-    { name: "Inter", source: font("Inter-Medium.ttf"), weight: 500 },
+    { name: "Noto Sans JP", source: font("400Regular/NotoSansJP_400Regular.ttf"), weight: 400 },
+    { name: "Noto Sans JP", source: font("500Medium/NotoSansJP_500Medium.ttf"), weight: 500 },
   ],
   emoji: "strip",
 });
