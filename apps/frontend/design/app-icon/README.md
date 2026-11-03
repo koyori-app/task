@@ -6,16 +6,16 @@
 
 ここから焼いた物は次の八つです。
 
-| file                               | 寸法    | 性質   |
-| ---------------------------------- | ------- | ------ |
-| `public/pwa/apple-touch-icon.png`  | 180×180 | 不透明 |
-| `public/pwa/icon-192.png`          | 192×192 | 不透明 |
-| `public/pwa/icon-512.png`          | 512×512 | 不透明 |
-| `public/pwa/icon-maskable-512.png` | 512×512 | 不透明 |
-| `public/favicon-16.png`            | 16×16   | 透け   |
-| `public/favicon-32.png`            | 32×32   | 透け   |
-| `docs/public/favicon.png`（`favicon-32.png`）  | 32×32   | 透け   |
-| `docs/public/logo.png`（`favicon-128.png`）    | 128×128 | 透け   |
+| file                                          | 寸法    | 性質   |
+| --------------------------------------------- | ------- | ------ |
+| `public/pwa/apple-touch-icon.png`             | 180×180 | 不透明 |
+| `public/pwa/icon-192.png`                     | 192×192 | 不透明 |
+| `public/pwa/icon-512.png`                     | 512×512 | 不透明 |
+| `public/pwa/icon-maskable-512.png`            | 512×512 | 不透明 |
+| `public/favicon-16.png`                       | 16×16   | 透け   |
+| `public/favicon-32.png`                       | 32×32   | 透け   |
+| `docs/public/favicon.png`（`favicon-32.png`） | 32×32   | 透け   |
+| `docs/public/logo.png`（`favicon-128.png`）   | 128×128 | 透け   |
 
 ## 焼き方
 
