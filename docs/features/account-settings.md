@@ -1,20 +1,16 @@
 ---
 title: アカウント設定・プロフィール編集
-description: ログイン中ユーザーが自分のプロフィール・アクセストークンを管理する画面と API
+description: ログイン中ユーザーが自分のプロフィール・アクセストークン・認証方法を管理する画面と API
 ---
 
-> ステータス: **Draft** / 作成日: 2026-08-19
-> 依存: `users` テーブル（アバターのアップロードで `avatar_storage_key` 列を追加）、ストレージバックエンド（[ドライブ](/features/drive) §6）
+> 依存: `users` テーブル（アバターのキーは `avatar_storage_key` 列）、ストレージバックエンド（[ドライブ](/features/drive) §6）
 
 ---
 
 ## 1. 概要
 
-ログイン中のユーザーが、自分のプロフィールを自分で編集できるようにする。
-
-これまで `users` の内容を変更できる API は管理者専用の `PATCH /v1/admin/users/{id}` だけで、
-本人がユーザー名や自己紹介を直す手段が無かった。本仕様で `PATCH /v1/auth/me` を追加し、
-`/settings/profile` から編集できるようにする。
+ログイン中のユーザーは、`PATCH /v1/auth/me` と `/settings/profile` の画面で自分のプロフィールを編集できる。
+`users` の内容を変更する API には、ほかに管理者専用の `PATCH /v1/admin/users/{id}` がある。
 
 編集できるのは `users` の列のうち、本人が持ち主である 3 つに限る。
 
@@ -33,7 +29,7 @@ description: ログイン中ユーザーが自分のプロフィール・アク�
 本人によるプロフィール更新は監査ログに記録し、ユーザー名の変更前後を追跡できる。
 
 メンションの宛先は username の一致では決めない。コメント・タスクの説明文のメンションは `<@利用者ID>` の印で
-利用者の ID を指す（`docs/features/tasks/4.collaboration.md` §3）ので、同名の利用者が同じ
+利用者の ID を指す（[コメント・アクティビティ](/features/tasks/collaboration) §3）ので、同名の利用者が同じ
 プロジェクトにいても、補完で選んだ一人にだけ届く。改名しても印は切れない。
 ただし画面上では、コメント・担当者・`AvatarGroup` の表示名が同じになる。
 `users.username` の一意制約は、今も入れていない。
@@ -57,10 +53,13 @@ description: ログイン中ユーザーが自分のプロフィール・アク�
 
 左にアカウント設定のナビ、右にプロフィールのフォームを並べる。
 
-ナビは 6 項目を表示するが、リンクとして機能するのは
-**プロフィール** / **セキュリティ** / **アクセストークン**。
-残りの 3 項目（環境設定 / 通知 / セッション）は、
-対応する画面がまだ無いため `aria-disabled` の押せない項目として並べる。
+ナビは 6 項目を表示する。リンクとして機能するのは
+**プロフィール** / **環境設定** / **セキュリティ** / **アクセストークン** の 4 項目である。
+残りの 2 項目（通知 / セッション）は、対応する画面が無いため `aria-disabled` の押せない項目として並べる。
+環境設定で「実験的機能を表示する」を有効にしたときだけ、区切り線の下に **実験的機能**（`/settings/experiments`）が加わる。
+
+環境設定（`/settings/preferences`）と実験的機能の値はブラウザの localStorage に保存する。
+アカウントには保存しないので、ほかの端末や別のブラウザには引き継がれない。
 
 > ナビ項目は `apps/frontend/src/components/settings/AccountSettingsNav.vue` の `items` に定義する。
 > 画面を実装したら、その項目に `href` を足すだけで有効になる。
@@ -77,7 +76,7 @@ description: ログイン中ユーザーが自分のプロフィール・アク�
 - 保存すると `PATCH /v1/auth/me` を送り、成功したら `/v1/auth/me` のクエリを無効化して
   サイドバーの表示名・アバターにも反映する。
 - 入力チェックは送信前（`onSubmit`）と項目からフォーカスが外れたとき（`onBlur`）の両方で走る。
-  条件は後述の API 側と同じものを持たせているので、正常な入力が 400 で跳ね返ることはない。
+  条件は後述の API 側と同じものを持たせている。
 
 ---
 
@@ -104,7 +103,8 @@ description: ログイン中ユーザーが自分のプロフィール・アク�
 ### 省略と消去の区別
 
 送らなかったフィールドは変更しない。フィールドが 1 つも無い `{}` を送った場合も
-`200 OK` を返し、値は変わらない（空の `UPDATE` は発行しない）。
+`200 OK` を返し、値は変わらない。指定の有無ではなく現在値との差を見るので、同じ値を送っても
+`UPDATE` と監査ログは発行しない。
 
 `avatar_url` を消したいときだけ、値ではなくフラグで指定する。
 
@@ -212,7 +212,7 @@ PAT で自分のプロフィールを書き換えられないことは、
 
 ## 4. 未対応
 
-モックアップにあるが、この仕様では実装していない項目と、その理由。
+モックアップにあるが、実装していない項目と、その理由。
 
 | 項目 | 未対応の理由 | 必要な作業 |
 |---|---|---|
@@ -220,8 +220,8 @@ PAT で自分のプロフィールを書き換えられないことは、
 | タイムゾーン | 同上 | 同上。加えて日時表示側の適用箇所を決める必要がある |
 | 言語 | 同上 | 同上。i18n の仕組み自体がまだ無い |
 | メールアドレスの変更 | 変更後の再確認フローが無い（`email_verification` は新規登録用） | 変更要求 → 新アドレスへ確認メール → 確認後に反映、の経路を新設する |
-| 環境設定 / 通知 / セッション の各画面 | 本仕様の対象外 | 通知は `/v1/users/me/notification-settings/{project_id}` が既にある |
-| 二要素認証・パスキーの管理 | 認証方法（§7）とは別タスク（TASK-188 / TASK-189） | セキュリティ画面にセクションを足す。API は既にある |
+| 通知 / セッション の各画面 | 未実装 | 通知は `/v1/users/me/notification-settings/{project_id}` が既にある |
+| 二要素認証・パスキーの管理 | 認証方法（§7）とは別タスク（TASK-188 / TASK-189）で未実装。[2FA](/features/auth-2fa) §12、[パスキー](/features/auth-passkeys) §8 | セキュリティ画面にセクションを足す。API は既にある |
 | トークンのプロジェクト絞り込み | アクセストークン画面（§6）の対象外 | API（`project_ids`）は既にある。フォームに選択 UI を足す |
 
 画面上部のパンくずは実データから組まれるようになった（[breadcrumbs.md](/breadcrumbs)）。
@@ -234,17 +234,17 @@ PAT で自分のプロフィールを書き換えられないことは、
 
 | 種別 | ファイル | 内容 |
 |---|---|---|
-| 統合 | `apps/backend/tests/profile_update_integration.rs` | 更新と永続化、省略項目を壊さないこと、`clear_avatar_url`、空 PATCH、スキーム拒否、長さ制限、未ログイン拒否、Bearer 拒否 |
-| 統合 | `apps/backend/tests/personal_tokens_list_integration.rs` | 一覧が自分の有効なトークンだけを名前順で返すこと、平文・ハッシュを含まないこと、取り消しで一覧から消えること、空一覧、未ログイン拒否、Bearer 拒否 |
+| 統合 | `apps/backend/tests/integration/profile_update_integration.rs` | 更新と永続化、省略項目を壊さないこと、`clear_avatar_url`、空 PATCH、スキーム拒否、長さ制限、未ログイン拒否、Bearer 拒否 |
+| 統合 | `apps/backend/tests/integration/personal_tokens_list_integration.rs` | 一覧が自分の有効なトークンだけを名前順で返すこと、平文・ハッシュを含まないこと、取り消しで一覧から消えること、空一覧、未ログイン拒否、Bearer 拒否 |
 | 統合 | `apps/backend/tests/integration/avatar_upload_integration.rs` | アップロードで `avatar_url` と `avatar_storage_key` が入ること、認証なしの配信（`Content-Type` / `Cache-Control`）、2 MiB ちょうどは通り超えると 413、画像でない・空のバイト列の 400、再アップロード・`clear_avatar_url`・外部 URL への変更・管理者のユーザー削除で旧画像が 404 になること（アバター以外の更新では残る対照込み）、Bearer 拒否、不正なキー形式・存在しないキーの 404 |
 | 単体 | `apps/backend/crates/service/src/avatar.rs` | 先頭バイトでの形式判定（4 形式・不正・空・途中で切れた RIFF）、配信キーの形式 |
 | 単体 | `apps/frontend/src/components/settings/__tests__/ProfileForm.test.ts` | 空欄が `clear_avatar_url` になること、URL の送信、前後の空白を取り除くこと、不正スキームとユーザー名長を送信前に止めること、失敗時（400 / それ以外）の表示、保存後に編集を再開すると保存済み表示が消えること、画像アップロードの成功で表示・URL 欄・認証ストアが更新されること、その後の保存で `avatar_url` を送り直さないこと、2 MiB 超を送る前に止めること（ちょうどは送る）、413 / 400 / それ以外の表示 |
 | 単体 | `apps/frontend/src/components/settings/__tests__/AccessTokensSection.test.ts` | 一覧表示（伏せ字・スコープ数・期限・最終使用）、発行リクエストの内容（90 日既定・無期限）、名前とスコープの入力チェック、403 の表示、取り消しの確認ダイアログと失敗時の表示、オーナーのテナントが無い場合の無効化 |
 | 単体 | `apps/frontend/src/lib/__tests__/personal-tokens.test.ts` | 有効期限プリセットの計算、伏せ字、期限・最終使用の表示文言（境界値込み） |
-| 統合 | `apps/backend/tests/oauth_integration.rs` | `has_password` の反転、初回パスワード設定が一度きりであること、パスワードを得たあとに最後の連携を解除できること |
+| 統合 | `apps/backend/tests/integration/oauth_integration.rs` | `has_password` の反転、初回パスワード設定が一度きりであること、パスワードを得たあとに最後の連携を解除できること |
 | 単体 | `apps/frontend/src/components/settings/__tests__/AuthMethodsSection.test.ts` | パスワードあり／なしの出し分け、初回設定に現在のパスワード欄を出さないこと、確認不一致で送信しないこと、現在のパスワード不一致の表示、変更後のサインイン画面への遷移、連携一覧と追加候補、self-hosted の URL 未入力での無効化、連携済みでも別インスタンスを開始できること、同一インスタンスを開始しないこと、成功通知が印を根拠にすること（URL だけでは出ないこと）、確認を挟む解除と `instance_url` の付与、最後の認証方法の拒否表示 |
 | 単体 | `apps/frontend/src/lib/__tests__/auth-methods.test.ts` | 認証方法の数え方（パスキー込み）、パスワード入力チェック（8 文字の境界・現在と同値・確認不一致） |
-| 統合 | `apps/backend/tests/integration/user_profile_integration.rs` | 他人のプロフィール（§8）: 返す項目が 4 つだけでメールを含まないこと、オーナー・客分・自分を対象に開けること、テナントに関わらない人と存在しない UUID が同じ 404 になること、テナント外の人と客分の閲覧が 403 になること、PAT の `read:tenant` と `read:task` の対照、未ログイン拒否 |
+| 統合 | `apps/backend/tests/integration/user_profile_integration.rs` | 他人のプロフィール（§8）: 返す項目が 7 つだけでメールを含まないこと、オーナー・客分・自分を対象に開けること、テナントに関わらない人と存在しない UUID が同じ 404 になること、テナント外の人と客分の閲覧が 403 になること、PAT の `read:tenant` と `read:task` の対照、未ログイン拒否 |
 | 単体 | `apps/frontend/src/components/tasks/__tests__/TaskComments.test.ts` | `profileHref` を渡したときだけ投稿者がプロフィールへのリンクになること |
 
 拒否を確認するテストには、対照として通るケースも置いている（過剰に拒否していないことの確認）。
@@ -264,7 +264,7 @@ PAT で自分のプロフィールを書き換えられないことは、
 
 ### 画面の構成と挙動
 
-- **一覧**: `GET /v1/personal_tokens`（この画面のために新設）。自分が発行した
+- **一覧**: `GET /v1/personal_tokens`。自分が発行した
   取り消し前のトークンを名前の昇順で返す。各行にトークン名、末尾 4 文字だけの伏せ字
   （`pat_••••••7f3a`）、スコープ数、有効期限、最終使用日時を表示する。
   スコープの内訳は「スコープを表示」のドロップダウンで開く。
@@ -272,7 +272,7 @@ PAT で自分のプロフィールを書き換えられないことは、
   - トークン名（1〜100 文字）
   - テナント（自分が**オーナー**のテナントのみ。1 件ならフォームに出さず自動選択）
   - 有効期限プリセット: 30日 / 90日（既定）/ 1年 / 無期限
-  - スコープ（backend の全 11 種。1 つ以上必須。説明付きチェックボックス）
+  - スコープ（backend の全 16 種。1 つ以上必須。説明付きチェックボックス）
   - プロジェクトの絞り込み（`project_ids`）は常に `null`（テナント内全プロジェクト）で送る
 - **平文トークンは発行直後の応答でしか取得できない**。発行後にコピー付きで 1 度だけ表示し、
   再表示できないことを明記する。
@@ -288,7 +288,7 @@ PAT で自分のプロフィールを書き換えられないことは、
 
 ### `GET /v1/personal_tokens`
 
-この仕様で新設した一覧 API。
+自分のトークンの一覧 API。
 
 - 認可: セッション必須（PAT は 403）
 - 返すもの: 自分（`user_id`）のトークンのうち `revoked = false` のもの。
@@ -340,7 +340,7 @@ OAuth の認可フローと解除規則は [OAuth ログイン](/features/auth-o
   slug で比べると連携済みでも候補に残り続ける。ただし
   `requires_instance_url` のプロバイダー（GitLab セルフホスト）は、インスタンスが違えば
   別の連携として足せるので、1 件連携済みでも候補に残す。連携済みと同じインスタンス URL を
-  入れた場合は開始しない（backend も `(provider, instance_url)` の重複を 409 で弾く）。
+  入れた場合は開始しない（backend も同じインスタンスの別アカウントの接続を 409 で弾く。同じアカウントの接続し直しはトークンの更新になる）。
   「連携する」で既存の OAuth 開始 URL へフルページ遷移する。`redirect_after` にはこの画面の
   パスだけを渡す。プロバイダー側のエラーは backend が `?oauth_error=` を付けて同じ画面に戻す
 
@@ -362,8 +362,9 @@ OAuth の認可フローと解除規則は [OAuth ログイン](/features/auth-o
 
 ### 最後の認証方法
 
-利用できる認証方法が 0 件にならないよう、backend は「その連携が最後の 1 件 かつ
+利用できる認証方法が 0 件にならないよう、backend は「その連携がログイン用の最後の 1 件 かつ
 パスワード無し かつ パスキー無し」のとき解除を `403 oauth-last-auth-method` で拒む。
+PR 承認用の連携（`sign_in: false`）は数えない。
 
 画面はこの判定を先取りして注意書きを出すだけで、可否はサーバーの応答に従う
 （画面が数えた後に別のタブで増減されうるため）。先取りの数え方（`countAuthMethods`）は
@@ -375,10 +376,14 @@ backend と揃えてパスキーも数えるので、この画面は件数を見
 （`apps/frontend/src/components/settings/DevicesSection.vue`）。Device Token の規則は
 [Bearer 認証・認可の「Desktop 認証」](https://github.com/koyori-app/task/blob/main/apps/backend/docs/personal-access-tokens-authz.md) を正とする。
 
-- **一覧**: `GET /v1/users/me/devices`。失効済み・期限切れを除いた端末を新しい順に返す。
+- **一覧**: `GET /v1/users/me/devices`。失効済み・期限切れと、パスワードの変更などで無効になった
+  （`sessions_revoked_at` 以前に発行した）端末を除いて新しい順に返す。
   各行に端末名、末尾 4 文字だけの伏せ字、有効期限、最終使用を出す
 - **失効**: 確認ダイアログを経て `DELETE /v1/users/me/devices/{id}`。`revoked_at` を立てるだけで
   行は残り、一覧からは消える。その端末は次の要求から 401 になる
+
+どちらの API もセッションと Device Token で呼べる。PAT は 403 である。Device Token で失効できるのは
+その端末自身だけで、別の端末を指定すると 403 になる。
 
 承認そのものは `/desktop/authorize`（`apps/frontend/src/pages/desktop/authorize/+Page.vue`）で行う。
 Desktop が開いたクエリ（`port` / `code_challenge` / `state` / `name`）を `lib/desktop-authorize.ts` で
@@ -389,8 +394,8 @@ Desktop が開いたクエリ（`port` / `code_challenge` / `state` / `name`）�
 
 ### `UserResponse.has_password`
 
-パスワードの有無で表示を切り替えるために `GET /v1/auth/me`（`UserResponse`）へ
-`has_password: bool` を追加した。ハッシュそのものは返さない。
+パスワードの有無で表示を切り替えるために、`GET /v1/auth/me`（`UserResponse`）は
+`has_password: bool` を返す。ハッシュそのものは返さない。
 
 ---
 
@@ -419,11 +424,12 @@ Desktop が開いたクエリ（`port` / `code_challenge` / `state` / `name`）�
 | 状況 | 結果 |
 |---|---|
 | 閲覧者がテナントのオーナー・テナントメンバーで、対象がそのテナントのオーナー・メンバー・客分 | 200 |
-| 閲覧者がテナントに入れない（客分を含む） | 403 |
+| 閲覧者がテナントに入れない（客分を含む。テナントの 2FA 強制を満たさない場合も含む） | 403 |
 | 対象がそのテナントに関わっていない / 存在しない | 404 |
 | PAT | `read:tenant` を要求する（メンバー一覧と同じ） |
 
 対象がテナントに関わらない場合を 403 にしないのは、`users` がテナント横断の表だからである。
 403 と 404 を分けると、任意の UUID について利用者が実在するかを調べられてしまう。
-判定は [テナント / プロジェクト認可](https://github.com/koyori-app/task/blob/main/apps/backend/docs/tenant-project-authz.md) の既存関数
-（`is_tenant_owner` / `is_tenant_member` / `explicit_member_project_ids`）だけで行う。
+閲覧者の判定はテナントの所属判定（`ensure_tenant_access`）を通し、対象者の判定は `tenant_members` の行と
+[テナント / プロジェクト認可](https://github.com/koyori-app/task/blob/main/apps/backend/docs/tenant-project-authz.md) の既存関数
+（`is_tenant_owner` / `explicit_member_project_ids`）で行う。

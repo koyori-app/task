@@ -4,6 +4,7 @@ import nimbus, {
   defineConfig as defineNimbusConfig,
 } from "@cloudflare/nimbus-docs";
 import { tableScroll } from "@cloudflare/nimbus-docs/markdown";
+import { mermaidFence } from "./src/lib/mermaid-fence";
 
 const nimbusConfig = defineNimbusConfig({
   site: "https://docs.koyori.app",
@@ -65,7 +66,7 @@ export default defineConfig({
       markdown: {
         // Wrap wide tables so they scroll instead of overflowing the page
         // (styled by `.nb-table-scroll` in src/styles/prose.css).
-        hastPlugins: [tableScroll()],
+        hastPlugins: [tableScroll(), mermaidFence()],
       },
     }),
   ],

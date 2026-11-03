@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 330" role="img" aria-label="タスク詳細のリポジトリセクションの画面">
+  <style>
+    :root { --bg: #ffffff; --panel: #f4f4f5; --line: #d4d4d8; --text: #18181b; --muted: #71717a; --accent: #2563eb; --ok: #15803d; --warn: #b45309; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #18181b; --panel: #27272a; --line: #3f3f46; --text: #f4f4f5; --muted: #a1a1aa; --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; }
+    }
+    text { font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 14px; fill: var(--text); }
+    .muted { fill: var(--muted); font-size: 13px; }
+    .head { font-weight: 600; }
+    .link { fill: var(--accent); }
+    .ok { fill: var(--ok); font-size: 13px; }
+    .warn { fill: var(--warn); font-size: 13px; }
+    .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+    .frame { fill: var(--bg); stroke: var(--line); }
+    .ctl { fill: var(--panel); stroke: var(--line); }
+    .rule { stroke: var(--line); }
+  </style>
+  <rect class="frame" x="1" y="1" width="618" height="328" rx="8"/>
+  <text class="head" x="20" y="30">リポジトリ</text>
+  <rect class="ctl" x="490" y="12" width="112" height="28" rx="6"/>
+  <text x="506" y="31">+ PR をリンク</text>
+  <line class="rule" x1="1" y1="50" x2="619" y2="50"/>
+  <text class="muted" x="20" y="76">取り込み元</text>
+  <text class="link mono" x="92" y="76">acme/backend#42</text>
+  <text class="ok" x="232" y="76">Open</text>
+  <text class="muted" x="276" y="76">最終同期 3分前</text>
+  <text class="muted" x="20" y="110">Pull Requests</text>
+  <text class="ok" x="20" y="134">Merged</text>
+  <text x="76" y="134">#87  feat: OAuth 対応 ENG-42</text>
+  <text class="muted" x="330" y="134">タイトル  本文</text>
+  <text class="muted" x="440" y="134">yupix</text>
+  <text class="muted" x="500" y="134">未解決なし</text>
+  <text class="ok" x="20" y="160">Open</text>
+  <text x="76" y="160">#91  fix: エラーハンドリング</text>
+  <text class="muted" x="330" y="160">手動</text>
+  <text class="muted" x="440" y="160">yupix</text>
+  <text class="warn" x="500" y="160">2 件が未解決</text>
+  <text class="muted" x="20" y="194">Commits</text>
+  <text class="link mono" x="20" y="218">a3f92c1</text>
+  <text x="92" y="218">fix: トークン期限切れを修正</text>
+  <text class="muted" x="440" y="218">yupix</text>
+  <text class="link mono" x="20" y="244">e7b81d4</text>
+  <text x="92" y="244">feat: GitHub App 初期実装</text>
+  <text class="muted" x="440" y="244">yupix</text>
+  <text class="muted" x="20" y="278">Branches</text>
+  <text class="link mono" x="20" y="302">feat/ENG-42-oauth</text>
+  <text class="muted" x="500" y="302">リンクを外す</text>
+</svg>
