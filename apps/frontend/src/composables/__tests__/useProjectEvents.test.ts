@@ -131,22 +131,20 @@ describe('useProjectEvents', () => {
     expect(invalidate).toHaveBeenCalledTimes(callsPerInvalidation * 2);
   });
 
-  it('最初の open では無効化せず、エラー後に再接続した open で 1 回無効化する', () => {
+  it('open のたびに無効化する（初回も）', () => {
     const { invalidate } = mountComposable();
 
-    latestSource().emit('open');
-    vi.advanceTimersByTime(300);
-    expect(invalidate).not.toHaveBeenCalled();
-
-    latestSource().emit('error');
     latestSource().emit('open');
     vi.advanceTimersByTime(300);
     const callsPerInvalidation = invalidate.mock.calls.length;
     expect(callsPerInvalidation).toBeGreaterThan(0);
 
+    latestSource().emit('error');
+    expect(invalidate).toHaveBeenCalledTimes(callsPerInvalidation);
+
     latestSource().emit('open');
     vi.advanceTimersByTime(300);
-    expect(invalidate).toHaveBeenCalledTimes(callsPerInvalidation);
+    expect(invalidate).toHaveBeenCalledTimes(callsPerInvalidation * 2);
   });
 
   it('ブラウザが再接続を諦めたら 30 秒後に開き直し、open で無効化する', () => {

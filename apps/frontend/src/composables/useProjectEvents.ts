@@ -34,7 +34,6 @@ export function useProjectEvents(
   let source: EventSource | null = null;
   let invalidateTimer: ReturnType<typeof setTimeout> | undefined;
   let reopenTimer: ReturnType<typeof setTimeout> | undefined;
-  let missedEvents = false;
 
   function scheduleInvalidate() {
     if (invalidateTimer !== undefined) return;
@@ -67,13 +66,9 @@ export function useProjectEvents(
       { withCredentials: true },
     );
     eventSource.addEventListener('tasks', scheduleInvalidate);
-    eventSource.addEventListener('open', () => {
-      if (!missedEvents) return;
-      missedEvents = false;
-      scheduleInvalidate();
-    });
+    // 購読が成立する前の変更には合図が来ないので、初回も含めて接続のたびに取り直す
+    eventSource.addEventListener('open', scheduleInvalidate);
     eventSource.addEventListener('error', () => {
-      missedEvents = true;
       // デプロイ中の 502 のような非 200 の応答では、ブラウザは再接続せず閉じる
       if (eventSource.readyState === EventSource.CLOSED) {
         reopenTimer = setTimeout(connect, REOPEN_DELAY_MS);
