@@ -6,7 +6,7 @@ import nimbus, {
 import { tableScroll } from "@cloudflare/nimbus-docs/markdown";
 
 const nimbusConfig = defineNimbusConfig({
-  site: "https://koyori.pages.dev",
+  site: "https://docs.koyori.app",
   title: "Koyori Docs",
   description: "Koyori の仕様書と開発ドキュメント",
   locale: "ja",

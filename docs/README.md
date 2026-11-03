@@ -17,4 +17,4 @@ pnpm build && pnpm preview # 検索は build の索引を読むので preview �
 
 ## 公開
 
-Cloudflare Pages の `koyori` プロジェクト（https://koyori.pages.dev ）。ビルド設定はダッシュボードにある: ルート `docs`、コマンド `pnpm build`、出力 `dist`、`NODE_VERSION` は 22.12 以上。
+https://docs.koyori.app に出す。Cloudflare Pages の `koyori` プロジェクト（https://koyori.pages.dev ）でビルドする。ビルド設定はダッシュボードにある: ルート `docs`、コマンド `pnpm build`、出力 `dist`、`NODE_VERSION` は 22.12 以上。
