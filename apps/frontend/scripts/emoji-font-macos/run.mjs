@@ -60,6 +60,12 @@ const FONTS = {
 };
 const NARROW_JS = "'Koyori Emoji Narrow'";
 
+// repo の実の作り: tailwind.css の --font-sans と、lib/emoji-font.ts が組む描く前の script
+const TAILWIND = fs.readFileSync(path.join(FRONTEND, 'src/assets/css/tailwind.css'), 'utf8');
+const REPO_STACK = /--font-sans:\s*([^;]+);/.exec(TAILWIND)[1].replace(/\s+/g, ' ').trim();
+const { emojiFontBootScript } = await import(path.join(FRONTEND, 'src/lib/emoji-font.ts'));
+const REPO_BOOT = emojiFontBootScript('preferences');
+
 // 字の並び。f は選んだ字（full と narrow）。os では字を入れない
 const VARIANTS = {
   // 今の並び（本文の字の後ろ）
@@ -74,6 +80,10 @@ const VARIANTS = {
   'two-stage-js': (f) => [f.full && NARROW_JS, BODY, f.full, TAIL],
   // 二段の写しの行の高さを 0 に上書きする（Safari の一画素のずれを消せるか）
   'two-stage-zero': (f) => [f.narrow, BODY, f.full, TAIL],
+  // repo の実の作り（並びは tailwind.css、字の CSS と写しは描く前の script が当てる）
+  repo: () => [REPO_STACK],
+  // 変異: repo の並びから絞った写しの口を外す（直しを外して前の並びに戻す）
+  'repo-no-narrow': () => [REPO_STACK.replace('var(--koyori-emoji-narrow,) ', '')],
 };
 
 function stack(variant, font) {
@@ -146,7 +156,26 @@ const run = () => { try { addNarrow(link.sheet); } catch (e) { window.__narrow.e
 if (link) { if (link.sheet) run(); else link.addEventListener('load', run); } else window.__narrow.done = true;
 `;
 
+// repo の並びでは、localStorage に好みを置いてから、repo の描く前の script を走らせる。
+// 写しが足されたか（または OS の既定で何も差さないか）を待つ
+function repoScripts(font) {
+  return `<script>localStorage.setItem('preferences', JSON.stringify({ values: { emojiFont: ${JSON.stringify(font)} } }));</script>
+<script>${REPO_BOOT}</script>`;
+}
+const REPO_WAIT = `<script>
+window.__narrow = { done: false, faces: 0, error: null };
+const started = Date.now();
+const check = () => {
+  const faces = [...document.fonts].filter((f) => f.family.replace(/["']/g, '') === 'Koyori Emoji Narrow').length;
+  if (!document.getElementById('koyori-emoji-font') || faces > 0) { window.__narrow.faces = faces; window.__narrow.done = true; return; }
+  if (Date.now() - started > 15000) { window.__narrow.error = 'timeout'; window.__narrow.done = true; return; }
+  setTimeout(check, 100);
+};
+check();
+</script>`;
+
 function page(variant, font) {
+  if (variant === 'repo' || variant === 'repo-no-narrow') return repoPage(variant, font);
   const f = FONTS[font];
   const sources =
     variant === 'two-stage-js'
@@ -173,6 +202,24 @@ p { margin: 0 0 8px; white-space: nowrap; }
 <p id="text">0123456789 # * © ® ™</p>
 <p><span id="ref" class="g">😀</span></p>
 ${script}
+</body></html>`;
+}
+
+function repoPage(variant, font) {
+  return `<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="${NOTO_SANS}">
+${repoScripts(font)}
+<style>
+body { margin: 16px; font-size: 32px; line-height: 1.6; font-family: ${stack(variant, font)}; background: #fff; color: #222; }
+p { margin: 0 0 8px; white-space: nowrap; }
+.g { display: inline-block; }
+</style></head><body>
+<p id="emoji">😀 👍🏽 ❤️ ✅ 🎉 🇯🇵 🏴󠁧󠁢󠁳󠁣󠁴󠁿 ☺️</p>
+<p id="zwj"><span class="g">❤️‍🔥</span> <span class="g">👨‍👩‍👧</span></p>
+<p id="keycap"><span class="g">1️⃣</span> <span class="g">#️⃣</span> <span class="g">*️⃣</span></p>
+<p id="text">0123456789 # * © ® ™</p>
+<p><span id="ref" class="g">😀</span></p>
+${REPO_WAIT}
 </body></html>`;
 }
 
@@ -248,7 +295,10 @@ async function shootPlaywright(type, name) {
         await p.locator(`#${row}`).screenshot({ path: file });
         shots[row] = file;
       }
-      out[`${variant}/${font}`] = { shots, widths: await p.evaluate(new Function(MEASURE)) };
+      out[`${variant}/${font}`] = {
+        shots,
+        widths: await p.evaluate(MEASURE.replace(/^return /, '')),
+      };
       await p.close();
     }
   }
