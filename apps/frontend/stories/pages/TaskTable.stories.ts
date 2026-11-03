@@ -983,13 +983,12 @@ export const ListViewDnd: Story = {
     );
 
     // @formkit/drag-and-drop は mouse には native HTML5 drag を使う
-    // （node に draggable=true を付ける）。userEvent.pointer の座標列や
-    // playwright の dragTo では発火せぬことを実測済みゆえ、
+    // （node に draggable=true を付ける）。story から実の mouse は動かせないので、
     // DragEvent の列を dataTransfer 込みで直に撃つ。
     const fireDrag = (steps: Array<[HTMLElement, string]>) => {
       const dataTransfer = new DataTransfer();
       for (const [el, type] of steps) {
-        // sort・transfer の判定は event の座標を見る。的の中心を撃つ。
+        // sort の判定は event の座標を見る。的の中心を撃つ。
         const rect = el.getBoundingClientRect();
         el.dispatchEvent(
           new DragEvent(type, {
@@ -1009,9 +1008,7 @@ export const ListViewDnd: Story = {
     // 受け入れ 3（TASK-239）: 群の中の drag では順序が変わらぬ。
     // 移動の前に、二行在る In Progress の中で試す（mock の再取得と競らぬ順）。
     const progressToggle = await canvas.findByRole('button', { name: 'In Progress を折りたたむ' });
-    const progress = progressToggle
-      .closest('section')
-      ?.querySelector<HTMLElement>('[data-dnd-status-id]');
+    const progress = progressToggle.closest<HTMLElement>('[data-dnd-status-id]');
     if (!progress) throw new Error('progress container not found');
     await waitFor(() => expect(rowsOf(progress).length).toBeGreaterThan(1));
     const before = rowsOf(progress).map((row) => row.textContent?.slice(0, 24));
@@ -1051,9 +1048,7 @@ export const ListViewDnd: Story = {
     );
     if (!source) throw new Error('source row not found');
     const reviewToggle = await canvas.findByRole('button', { name: 'In Review を折りたたむ' });
-    const target = reviewToggle
-      .closest('section')
-      ?.querySelector<HTMLElement>('[data-dnd-status-id]');
+    const target = reviewToggle.closest<HTMLElement>('[data-dnd-status-id]');
     if (!target) throw new Error('target container not found');
     // 保存の確定後に表示を正本から引き直す。成功のときに一度元の群へ戻ってから
     // 動き直す（二重に動く）と見苦しいので、元の群へ戻ったことが一度でもあれば記録する。
@@ -1069,7 +1064,7 @@ export const ListViewDnd: Story = {
     await waitFor(() => expect(target.textContent).toContain('OAuth 対応を実装する'));
 
     // 受け入れ 1・2（TASK-239）: 移動は既存の PUT tasks/{id} { status_id } で保存される。
-    // 行は lib が DOM の上で動かすゆえ、上の検めだけでは保存の配線が切れても緑になる。
+    // 行は保存の確定を待たず先に動くので、上の検めだけでは保存の配線が切れても緑になる。
     const findPut = () => findTaskPut(globalThis.fetch, 'task-1');
     await waitFor(() => expect(findPut()).toBeTruthy());
     await expect(findPut()!.clone().json()).resolves.toEqual({ status_id: 's-review' });
@@ -1128,7 +1123,7 @@ async function dragOauthToReview(
   );
   const containerOf = async (name: string) => {
     const toggle = await canvas.findByRole('button', { name: `${name} を折りたたむ` });
-    const container = toggle.closest('section')?.querySelector<HTMLElement>('[data-dnd-status-id]');
+    const container = toggle.closest<HTMLElement>('[data-dnd-status-id]');
     if (!container) throw new Error(`${name} container not found`);
     return container;
   };
@@ -1174,7 +1169,7 @@ async function dragOauthToReview(
 /** PUT が失敗したとき、DnD で動いた行が元の群へ戻ることを確かめる。 */
 async function expectFailedMoveIsRolledBack(canvasElement: HTMLElement) {
   const { progress, review } = await dragOauthToReview(canvasElement);
-  // lib が先に DOM を動かすので、まず移った先に見える。
+  // 保存の確定を待たず先に動かすので、まず移った先に見える。
   await waitFor(() => expect(review.textContent).toContain('OAuth 対応を実装する'));
   await waitFor(() => expect(findTaskPut(globalThis.fetch, 'task-1')).toBeTruthy());
 
@@ -1251,6 +1246,108 @@ export const ListViewDndRefetchDuringSave: Story = {
     await new Promise((resolve) => setTimeout(resolve, 800));
     await expect(review.textContent).toContain('OAuth 対応を実装する');
     await expect(left.stop(), '移した行が保存中に移った先から消えた').toBe(false);
+  },
+};
+
+/** 実レイアウトで `el` の中心に当たる要素。ここに撃てば、そこが本当に落とせる場所か分かる。 */
+function hitAt(el: Element) {
+  el.scrollIntoView({ block: 'center' });
+  const { x, y, width, height } = el.getBoundingClientRect();
+  const clientX = x + width / 2;
+  const clientY = y + height / 2;
+  const hit = document.elementFromPoint(clientX, clientY);
+  if (!hit) throw new Error('hit target not found');
+  return { hit, clientX, clientY };
+}
+
+export const ListViewDndWholeGroup: Story = {
+  name: 'List 表示の DnD（群のどこへでも落とせて、落としたときだけ保存する）',
+  decorators: [storyDecorator(listContext)],
+  // In Review を空にする（行が無い群へも落とせることを見る）
+  beforeEach: () =>
+    createMockFetch({
+      persistTaskStatus: true,
+      tasks: {
+        tasks: sampleTasks.tasks.filter((task) => task.status_id !== 's-review'),
+        total: sampleTasks.tasks.length - 1,
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const rows = () => [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')];
+    await waitFor(() => expect(rows().length).toBe(5));
+    const rowOf = (title: string) => rows().find((row) => row.textContent?.includes(title))!;
+    const sectionOf = async (name: string) =>
+      (await canvas.findByRole('button', { name: `${name} を折りたたむ` })).closest<HTMLElement>(
+        '[data-dnd-status-id]',
+      )!;
+    const statusPuts = () =>
+      (globalThis.fetch as unknown as { mock: { calls: [Request | string][] } }).mock.calls
+        .map(([req]) => req)
+        .filter((req): req is Request => typeof req !== 'string' && req.method === 'PUT');
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    // 押して行にフォーカスが移っても掴めるまま。lib の既定はここで draggable を切り、
+    // 未フォーカスの行は初回の押下でドラッグにならなかった。
+    const oauth = rowOf('OAuth 対応を実装する');
+    const pressed = oauth.querySelector<HTMLElement>('[tabindex="0"]')!;
+    pressed.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse' }));
+    pressed.focus();
+    await expect(oauth.draggable).toBe(true);
+    pressed.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'mouse' }));
+
+    // マウス（native drag）。途中の群を通っても保存せず、空の群の文言の上へ落とせる。
+    const review = await sectionOf('In Review');
+    const dataTransfer = new DataTransfer();
+    const fire = (el: Element, type: string, clientX = 0, clientY = 0) =>
+      el.dispatchEvent(
+        new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer, clientX, clientY }),
+      );
+    fire(oauth, 'dragstart');
+    fire(rowOf('タスク一覧 API の実装'), 'dragover');
+    await sleep(50);
+    await expect(statusPuts()).toHaveLength(0);
+    await expect(rowOf('OAuth 対応を実装する').closest('section')).not.toBe(review);
+
+    const emptyText = within(review).getByText('タスクはありません');
+    const { hit: overEmpty, clientX, clientY } = hitAt(emptyText);
+    await expect(review.contains(overEmpty)).toBe(true);
+    // 要素へ入る dragenter を止める。止めないと WebKit は入った直後の drop を出さない。
+    await expect(fire(overEmpty, 'dragenter', clientX, clientY)).toBe(false);
+    fire(overEmpty, 'dragover', clientX, clientY);
+    await waitFor(() => expect(review.className).toContain('ring-2'));
+    fire(overEmpty, 'drop', clientX, clientY);
+    fire(oauth, 'dragend');
+    await waitFor(() => expect(review.textContent).toContain('OAuth 対応を実装する'));
+    await waitFor(() => expect(statusPuts()).toHaveLength(1));
+    await expect(statusPuts()[0]!.clone().json()).resolves.toEqual({ status_id: 's-review' });
+    await expect(review.className).not.toContain('ring-2');
+
+    // タッチ（lib の pointer drag）。長押しのあと群の見出しの上で離す。
+    const done = await sectionOf('Done');
+    const notify = rowOf('通知メール送信機能');
+    const touch = (type: string, x = 0, y = 0) =>
+      notify.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerType: 'touch',
+          clientX: x,
+          clientY: y,
+        }),
+      );
+    const toggle = await canvas.findByRole('button', { name: 'Done を折りたたむ' });
+    const heading = hitAt(toggle.parentElement!);
+    await expect(done.contains(heading.hit)).toBe(true);
+    touch('pointerdown');
+    await sleep(350);
+    touch('pointermove', heading.clientX, heading.clientY);
+    touch('pointermove', heading.clientX, heading.clientY);
+    await waitFor(() => expect(done.className).toContain('ring-2'));
+    touch('pointerup', heading.clientX, heading.clientY);
+    await waitFor(() => expect(statusPuts()).toHaveLength(2));
+    await expect(statusPuts()[1]!.clone().json()).resolves.toEqual({ status_id: 's-done' });
+    await waitFor(() => expect(done.textContent).toContain('通知メール送信機能'));
   },
 };
 
