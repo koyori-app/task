@@ -77,7 +77,10 @@ const projectBase = `/v1/tenants/${tenant.id}/projects/${project.id}`;
 function stubFetch() {
   const tasks = [
     makeTask(1, done.id, '2020-01-10T00:00:00Z'),
-    makeTask(2, todo.id, '2020-01-10T00:00:00Z'),
+    {
+      ...makeTask(2, todo.id, '2020-01-10T00:00:00Z'),
+      labels: [{ id: 'label-1', name: 'bug', color: '#e11d48' }],
+    },
     makeTask(3, done.id, '2020-01-10T00:00:00Z', '2020-01-14T09:00:00Z'),
     makeTask(4, done.id, '2020-01-10T00:00:00Z', '2020-01-06T09:00:00Z'),
   ];
@@ -153,20 +156,40 @@ describe('タスク一覧の表の期限の列', () => {
 
     const doneCell = deadlineCell(wrapper, 'ENG-1');
     expect(doneCell.textContent).toBe('1月10日');
-    expect(doneCell.classList.contains('text-red-500')).toBe(false);
+    expect(doneCell.classList.contains('text-destructive')).toBe(false);
 
     // 期限より後の日に完了した物は、遅れた日数を中立で添える
     const lateCell = deadlineCell(wrapper, 'ENG-3');
     expect(lateCell.textContent).toBe('1月10日（4日超過）');
-    expect(lateCell.classList.contains('text-red-500')).toBe(false);
+    expect(lateCell.classList.contains('text-destructive')).toBe(false);
 
     // 期限の前に完了した物は日付だけ
     const earlyCell = deadlineCell(wrapper, 'ENG-4');
     expect(earlyCell.textContent).toBe('1月10日');
-    expect(earlyCell.classList.contains('text-red-500')).toBe(false);
+    expect(earlyCell.classList.contains('text-destructive')).toBe(false);
 
     const todoCell = deadlineCell(wrapper, 'ENG-2');
     expect(todoCell.textContent).toMatch(/日超過$/);
-    expect(todoCell.classList.contains('text-red-500')).toBe(true);
+    expect(todoCell.classList.contains('text-destructive')).toBe(true);
+  });
+});
+
+describe('タスク一覧の表の色', () => {
+  it('ステータス、優先度、ラベルの色は点とアイコンにだけ載せ、文字には載せない', async () => {
+    stubFetch();
+    const wrapper = mountTable();
+    await vi.waitFor(() =>
+      expect(wrapper.find('a[data-task-seq-key="ENG-2"]').exists()).toBe(true),
+    );
+
+    const row = wrapper.find('a[data-task-seq-key="ENG-2"]').element.closest('tr')!;
+    const colored = [...row.querySelectorAll<HTMLElement>('*')].filter((el) => el.style.color);
+    // タイトルの横と優先度の列のアイコン
+    expect(colored.map((el) => el.tagName)).toEqual(['svg', 'svg']);
+
+    const dots = [...row.querySelectorAll<HTMLElement>('span')]
+      .map((el) => el.style.backgroundColor)
+      .filter(Boolean);
+    expect(dots).toEqual([todo.color, '#e11d48']);
   });
 });

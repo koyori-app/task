@@ -37,6 +37,7 @@ import {
 
 import {
   AvatarGroup,
+  Badge,
   Button,
   Checkbox,
   DataList,
@@ -685,19 +686,8 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
     header: 'ステータス',
     cell: ({ row }) => {
       const s = row.original.status;
-      return h(
-        'span',
-        {
-          class:
-            'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap',
-          style: {
-            backgroundColor: s.color + '1a',
-            borderColor: s.color + '66',
-            color: s.color,
-          },
-        },
-        s.name,
-      );
+      // 利用者が選ぶ色は読めるとは限らないので、文字には使わず点で出す
+      return h(Badge, { class: 'whitespace-nowrap', label: s.name, dotColor: s.color });
     },
   },
   {
@@ -709,11 +699,8 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
       const pc = PRIORITY_CONFIG[row.original.priority];
       return h(
         'span',
-        {
-          class: 'inline-flex items-center gap-1 text-xs whitespace-nowrap',
-          style: { color: pc.color },
-        },
-        [h(pc.icon, { class: 'size-4' }), pc.label],
+        { class: 'inline-flex items-center gap-1 text-xs whitespace-nowrap text-muted-foreground' },
+        [h(pc.icon, { class: 'size-4', style: { color: pc.color } }), pc.label],
       );
     },
   },
@@ -730,20 +717,12 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
         'div',
         { class: 'flex flex-wrap gap-1' },
         labels.map((label) =>
-          h(
-            'span',
-            {
-              key: label.id,
-              class:
-                'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap',
-              style: {
-                backgroundColor: label.color + '1a',
-                borderColor: label.color + '66',
-                color: label.color,
-              },
-            },
-            label.name,
-          ),
+          h(Badge, {
+            key: label.id,
+            class: 'whitespace-nowrap',
+            label: label.name,
+            dotColor: label.color,
+          }),
         ),
       );
     },
@@ -791,7 +770,7 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
         {
           class: [
             'text-xs whitespace-nowrap',
-            formatted.overdue ? 'text-red-500 font-medium' : 'text-muted-foreground',
+            formatted.overdue ? 'text-destructive font-medium' : 'text-muted-foreground',
           ],
         },
         formatted.label,

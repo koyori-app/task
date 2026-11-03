@@ -117,7 +117,7 @@ const stats = computed(() => [
     note: '期限を確認しましょう',
     icon: Clock3,
     filter: 'overdue' as const,
-    tone: 'text-red-600 dark:text-red-400',
+    tone: 'text-destructive',
   },
   {
     label: '未完了',
@@ -358,7 +358,7 @@ async function complete(item: DashboardTask) {
                   class="mb-1 block rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800 dark:bg-amber-950 dark:text-amber-300"
                   >優先度 {{ PRIORITY_CONFIG[item.task.priority].label }}</span
                 >
-                <span :class="deadline(item.task).overdue && 'text-red-600 dark:text-red-400'">{{
+                <span :class="deadline(item.task).overdue && 'text-destructive'">{{
                   deadline(item.task).text
                 }}</span>
               </div>
