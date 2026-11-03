@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Sidebar } from '@koyori-app/ui-vue';
+import { usePreference } from '@/composables/useLocalSettings';
 import { useRouteAlignedTenantId } from '@/composables/useRouteAlignedTenantId';
 import { useTenantStore } from '@/stores/tenant';
 import { useProjectsQuery } from '@/lib/api-vue-query';
@@ -7,7 +8,7 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import { navigate } from 'vike/client/router';
 import { computed, watch } from 'vue';
 
-import { Calendar, House, ListTodo } from '@lucide/vue';
+import { Calendar, ChartGantt, House, ListTodo } from '@lucide/vue';
 import NavMain from '@/components/sidebar/NavMain.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
 import { shouldCloseSidebarOnNavigate } from '@/components/sidebar/sidebar-navigation';
@@ -35,6 +36,10 @@ const routeTenantSlug = computed(() => {
 const tenantSlug = computed(
   () => routeTenantSlug.value || (tenantStore.selectedTenant?.display_id ?? ''),
 );
+
+// ガントは arc が alpha なので、環境設定の「実験的機能を表示する」を入れた人にだけ出す。
+// 残った値は SSR で読めぬので、mount の後に出る（usePreference が mount の前は既定値＝無効を返す）
+const showExperiments = usePreference('showExperiments');
 
 const myTasksUrl = computed(() => (tenantSlug.value ? `/${tenantSlug.value}/my-tasks` : '#'));
 
@@ -88,6 +93,16 @@ const data = computed(() => ({
       icon: Calendar,
       isActive: pageContext.urlPathname === `/${pageContext.routeParams.tenant}/calendar`,
     },
+    ...(showExperiments.value
+      ? [
+          {
+            title: 'ガント',
+            url: tenantSlug.value ? `/${tenantSlug.value}/gantt` : '#',
+            icon: ChartGantt,
+            isActive: pageContext.urlPathname === `/${pageContext.routeParams.tenant}/gantt`,
+          },
+        ]
+      : []),
   ],
 }));
 

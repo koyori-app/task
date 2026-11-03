@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { computed, type Ref } from 'vue';
-import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 
 const { navigateSpy, pageContextStub, projectsControl, tenantStoreStub } = vi.hoisted(() => ({
   navigateSpy: vi.fn(),
@@ -44,6 +44,7 @@ vi.mock('@/lib/api-vue-query', async (importOriginal) => {
   };
 });
 
+import { persistedPinia, seedSettings } from '@/components/settings/__tests__/test-pinia';
 import AppSidebar from '../AppSidebar.vue';
 
 enableAutoUnmount(afterEach);
@@ -53,7 +54,11 @@ enableAutoUnmount(afterEach);
  * 画面幅の判定と Drawer の開閉は +Layout が持つので、ここでは指示が出るかだけを見る。
  */
 function mountSidebar(onClose: () => void) {
-  return mount(AppSidebar, { props: { onClose }, attachTo: document.body });
+  return mount(AppSidebar, {
+    props: { onClose },
+    attachTo: document.body,
+    global: { plugins: [persistedPinia()] },
+  });
 }
 
 function findLink(href: string) {
@@ -90,6 +95,7 @@ const ALPHA_PROJECT = {
 };
 
 beforeEach(() => {
+  localStorage.clear();
   navigateSpy.mockReset();
   tenantStoreStub.loadTenants.mockReset();
   pageContextStub.routeParams = { tenant: 'acme' };
@@ -190,5 +196,41 @@ describe('AppSidebar のプロジェクト作成導線', () => {
 
     expect(navigateSpy).toHaveBeenCalledWith('/acme/projects/new');
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * ガントは arc が alpha なので、環境設定の「実験的機能を表示する」を入れた人にだけ出す。
+ * 全員に出すと、横の導きが写る頁の数だけ VRT の基準が動く。
+ */
+describe('AppSidebar のガントの導き', () => {
+  it('既定（実験的機能を表示しない）では出さない', async () => {
+    mountSidebar(vi.fn());
+    await flushPromises();
+
+    const nav = document.body.querySelector('nav[aria-label="ナビゲーション"]')!;
+    expect(nav.querySelector('a[href="/acme/gantt"]')).toBeNull();
+    expect(nav.textContent).not.toContain('ガント');
+  });
+
+  it('実験的機能を表示するなら、カレンダーのすぐ下に出す', async () => {
+    seedSettings({ preferences: { showExperiments: true } });
+    mountSidebar(vi.fn());
+    await flushPromises();
+
+    expect(findLink('/acme/gantt').textContent?.trim()).toBe('ガント');
+    const nav = document.body.querySelector('nav[aria-label="ナビゲーション"]')!;
+    const hrefs = [...nav.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    expect(hrefs.indexOf('/acme/gantt')).toBe(hrefs.indexOf('/acme/calendar') + 1);
+  });
+
+  it('ガントの頁にいる間は現在地として強調する', async () => {
+    seedSettings({ preferences: { showExperiments: true } });
+    pageContextStub.urlPathname = '/acme/gantt';
+    mountSidebar(vi.fn());
+    await flushPromises();
+
+    expect(findLink('/acme/gantt').getAttribute('aria-current')).toBe('page');
+    expect(findLink('/acme/calendar').getAttribute('aria-current')).toBeNull();
   });
 });

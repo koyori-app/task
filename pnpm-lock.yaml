@@ -6,6 +6,12 @@ settings:
 
 catalogs:
   default:
+    '@koyori-app/arc':
+      specifier: 0.1.0-alpha.3
+      version: 0.1.0-alpha.3
+    '@koyori-app/arc-vue':
+      specifier: 0.1.0-alpha.3
+      version: 0.1.0-alpha.3
     '@koyori-app/ui-vue':
       specifier: 0.6.0
       version: 0.6.0
@@ -62,6 +68,12 @@ importers:
       '@formkit/drag-and-drop':
         specifier: 0.6.1
         version: 0.6.1
+      '@koyori-app/arc':
+        specifier: 'catalog:'
+        version: 0.1.0-alpha.3
+      '@koyori-app/arc-vue':
+        specifier: 'catalog:'
+        version: 0.1.0-alpha.3(@koyori-app/arc@0.1.0-alpha.3)(vue@3.5.43(typescript@6.0.3))
       '@koyori-app/openapi-vue-query':
         specifier: 0.1.4
         version: 0.1.4(@tanstack/vue-query@5.104.0(vue@3.5.43(typescript@6.0.3)))(openapi-fetch@0.17.0)(openapi-typescript-helpers@0.1.0)(vue@3.5.43(typescript@6.0.3))
@@ -1325,6 +1337,15 @@ packages:
     resolution: {integrity: sha512-jRVXr+zsVHxzDXRoh+CDeXzvCsFJ6uiHhqqNQ26Cw9ZsZ3D6nqPUBt1gGVtj2ZPmRL3a9Uk1v8D1aJ8/I12Dow==}
     peerDependencies:
       solid-js: ^1.8.8
+
+  '@koyori-app/arc-vue@0.1.0-alpha.3':
+    resolution: {integrity: sha512-mOMT61jU8MuuA4x/AE2xGBZ+6cBNAIMioTpz165bYhYxNaags3CXIMsGZSsswgAgkEitcguEEeADhJ9b6cSc5w==}
+    peerDependencies:
+      '@koyori-app/arc': ^0.1.0-alpha.1
+      vue: ^3.5.0
+
+  '@koyori-app/arc@0.1.0-alpha.3':
+    resolution: {integrity: sha512-KVBgNPlmEhIlcz0RHsmC8/O69y3gelCwO+0AK3XSH8/goyWW+w6bEZAqn3J/O2bXr61iDF8ARdwp5z20jtC3+g==}
 
   '@koyori-app/openapi-vue-query@0.1.4':
     resolution: {integrity: sha512-qJnpQoyt7SLf0c+VKKGOaJPksf0yiSlSN0Ooac04nkJxJiWVX4lauUeSrlqyCxu6A2VKs94Tu6d/wu8N3tKhEw==}
@@ -8776,6 +8797,13 @@ snapshots:
       '@solid-primitives/refs': 1.1.4(solid-js@1.9.15)
       '@solid-primitives/utils': 6.4.1(solid-js@1.9.15)
       solid-js: 1.9.15
+
+  '@koyori-app/arc-vue@0.1.0-alpha.3(@koyori-app/arc@0.1.0-alpha.3)(vue@3.5.43(typescript@6.0.3))':
+    dependencies:
+      '@koyori-app/arc': 0.1.0-alpha.3
+      vue: 3.5.43(typescript@6.0.3)
+
+  '@koyori-app/arc@0.1.0-alpha.3': {}
 
   '@koyori-app/openapi-vue-query@0.1.4(@tanstack/vue-query@5.104.0(vue@3.5.43(typescript@6.0.3)))(openapi-fetch@0.17.0)(openapi-typescript-helpers@0.1.0)(vue@3.5.43(typescript@6.0.3))':
     dependencies:

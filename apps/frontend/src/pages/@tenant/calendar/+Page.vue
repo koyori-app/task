@@ -13,8 +13,8 @@ import type { TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
 import { Button, Dropdown, type DropdownItem } from '@koyori-app/ui-vue';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import type { components } from '@/generated/api';
-import { fetchClient } from '@/lib/api-vue-query';
 import { dailyLoadByMember } from '@/lib/calendar/load';
+import { fetchAllSchedule, SCHEDULE_PAGE_LIMIT, SCHEDULE_PATH } from '@/lib/calendar/schedule';
 import { addDays, clipSpan, dateInZone, taskSpan } from '@/lib/calendar/timeline';
 import {
   applyCalendarUrlState,
@@ -24,14 +24,8 @@ import {
 } from '@/lib/calendar/url-state';
 import { taskDetailHref, taskSeqKey } from '@/lib/task-display';
 
-type ScheduleResponse = components['schemas']['ScheduleResponse'];
-type Member = components['schemas']['UserSummary'];
 type ScheduleTask = components['schemas']['ScheduleTask'];
 type TaskResponse = components['schemas']['TaskResponse'];
-
-const SCHEDULE_PATH = '/v1/tenants/{tenant_id}/schedule' as const;
-/** API の上限。14 日なら実用上 1〜2 ページで済む */
-const SCHEDULE_PAGE_LIMIT = 500;
 
 const pageContext = usePageContext();
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
@@ -88,28 +82,7 @@ const scheduleQuery = useQuery({
         },
       ] as const,
   ),
-  // next_cursor を辿って全件にする。スプリント等は全ページ同じなので先頭ページのものを使う
-  queryFn: async ({ queryKey, signal }): Promise<ScheduleResponse> => {
-    const { path, query } = queryKey[2].params;
-    const fetchPage = async (cursor?: string) => {
-      const { data, error } = await fetchClient.GET(SCHEDULE_PATH, {
-        params: { path, query: { ...query, cursor } },
-        signal,
-      });
-      if (error) throw error;
-      return data;
-    };
-    const first = await fetchPage();
-    const tasks = [...first.tasks];
-    const members = new Map<string, Member>(first.members.map((m) => [m.id, m]));
-    for (let cursor = first.next_cursor; cursor;) {
-      const page = await fetchPage(cursor);
-      tasks.push(...page.tasks);
-      for (const member of page.members) members.set(member.id, member);
-      cursor = page.next_cursor;
-    }
-    return { ...first, tasks, members: [...members.values()], next_cursor: null };
-  },
+  queryFn: ({ queryKey, signal }) => fetchAllSchedule(queryKey[2].params, signal),
   enabled: computed(() => !!tenantId.value),
 });
 
