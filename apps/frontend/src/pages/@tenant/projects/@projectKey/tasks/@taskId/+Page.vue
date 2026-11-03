@@ -331,6 +331,7 @@ function openSimilarTask(seqId: number) {
     </template>
     <template #sidebar>
       <TaskComments
+        :task-id="taskId"
         :threads="threads"
         v-model:open-thread-id="activityThreadId"
         :activities="activities"

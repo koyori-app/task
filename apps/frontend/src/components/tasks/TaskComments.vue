@@ -13,6 +13,11 @@ import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
 import type { ActivityItem } from '@/lib/task-activity';
 
 const props = defineProps<{
+  /**
+   * 表示中のタスク。全画面の詳細はタスクを移っても作り直されないので、
+   * 移った時に前のタスクのスクロールの状態を持ち越さないために受け取る
+   */
+  taskId?: string;
   threads: CommentThread[];
   /** 本文の `<@利用者ID>` の印から引ける表示情報（コメント一覧 API の `mentions`） */
   mentions?: MentionTable;
@@ -197,6 +202,14 @@ watch([sections, openThread], () => void nextTick(syncScroll));
 watch([() => props.filter, openThreadId], () => {
   pinnedToBottom = true;
 });
+watch(
+  () => props.taskId,
+  () => {
+    pinnedToBottom = true;
+    distanceFromBottom = null;
+    void nextTick(syncScroll);
+  },
+);
 
 let resizeObserver: ResizeObserver | undefined;
 onMounted(() => {

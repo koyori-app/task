@@ -338,6 +338,7 @@ function onDeleteDialogCancel(event: Event) {
         </template>
         <template #sidebar>
           <TaskComments
+            :task-id="taskId"
             :threads="threads"
             v-model:open-thread-id="activityThreadId"
             :activities="activities"

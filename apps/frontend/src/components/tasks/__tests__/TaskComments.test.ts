@@ -575,6 +575,70 @@ describe('TaskComments', () => {
       }
     });
 
+    describe('タスクの切り替えとスクロール位置', () => {
+      // 単体テストの DOM にはレイアウトが無いので、溢れた列の寸法を与える
+      function overflowingFeed(wrapper: VueWrapper) {
+        const feed = wrapper.get('[data-activity-feed]');
+        const el = feed.element as HTMLElement;
+        Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 1000 });
+        Object.defineProperty(el, 'clientHeight', { configurable: true, value: 100 });
+        return { feed, el };
+      }
+
+      it('上へ読み進めた後に別のタスクへ切り替えたら、最新の位置へ移る', async () => {
+        const wrapper = mountComments({ taskId: 'a', threads: [thread('c-a', 'タスク A')] });
+        const { feed, el } = overflowingFeed(wrapper);
+        el.scrollTop = 0;
+        await feed.trigger('scroll');
+
+        await wrapper.setProps({ taskId: 'b', threads: [thread('c-b', 'タスク B')] });
+        await nextTick();
+
+        expect(el.scrollTop).toBe(1000);
+      });
+
+      it('以前の分を取っている途中で切り替えたら、前のタスクの位置を持ち越さない', async () => {
+        const wrapper = mountComments({
+          taskId: 'a',
+          activities: [activity('h1', '2026-08-19T00:00:00Z')],
+          hasMoreActivities: true,
+          onLoadMoreActivities: () => {},
+        });
+        const { feed, el } = overflowingFeed(wrapper);
+        el.scrollTop = 0;
+        await feed.trigger('scroll');
+        await wrapper
+          .findAll('button')
+          .find((b) => b.text() === '以前のアクティビティを見る')!
+          .trigger('click');
+
+        await wrapper.setProps({
+          taskId: 'b',
+          activities: [activity('h2', '2026-08-20T00:00:00Z')],
+        });
+        await nextTick();
+
+        expect(el.scrollTop).toBe(1000);
+      });
+
+      it('同じタスクで増えただけなら、上へ読み進めている位置を動かさない', async () => {
+        const wrapper = mountComments({ taskId: 'a', threads: [thread('c-1', '古いコメント')] });
+        const { feed, el } = overflowingFeed(wrapper);
+        el.scrollTop = 0;
+        await feed.trigger('scroll');
+
+        await wrapper.setProps({
+          threads: [
+            thread('c-1', '古いコメント'),
+            thread('c-2', '新しいコメント', { created_at: '2026-08-20T00:00:00Z' }),
+          ],
+        });
+        await nextTick();
+
+        expect(el.scrollTop).toBe(0);
+      });
+    });
+
     it('上へ溢れた分へスクロールできるよう、justify-end で下寄せしない', () => {
       const wrapper = mountComments();
       expect(wrapper.get('[data-activity-feed]').classes()).not.toContain('justify-end');

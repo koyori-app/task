@@ -30,6 +30,13 @@ describe('TaskComments の使い所', () => {
     expect(files).toContain('pages/@tenant/projects/@projectKey/tasks/@taskId/+Page.vue');
   });
 
+  it('どの使い所も :task-id を渡す（移った時にスクロールの状態を持ち越さない）', () => {
+    const missing = taskCommentsTags()
+      .filter(({ tag }) => !/\s:task-id="[^"]+"/.test(tag))
+      .map(({ file }) => file);
+    expect(missing).toEqual([]);
+  });
+
   it('どの使い所も :mention-tenant を渡す', () => {
     const missing = taskCommentsTags()
       .filter(({ tag }) => !/\s:mention-tenant="[^"]+"/.test(tag))
