@@ -34,7 +34,7 @@ type Priority = components['schemas']['TaskPriority'];
 type Status = components['schemas']['ProjectStatusResponse'];
 type LabelOption = components['schemas']['LabelResponse'];
 /** 担当者の候補。`assignable-users` が返すのはメンバー行ではなく利用者そのもの */
-type MemberOption = components['schemas']['UserSummary'];
+type MemberOption = components['schemas']['AssignableUserResponse'];
 type CreatedTask = components['schemas']['TaskDetailResponse'];
 
 /** 担当者に付ける役割。詳細から付けるときと同じ値にする（docs/features/tasks/1.core.md）。 */

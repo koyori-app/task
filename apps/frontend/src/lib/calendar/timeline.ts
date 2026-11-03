@@ -62,15 +62,18 @@ export type SpanSource = {
 
 /**
  * タスクの始点・終点（schedule API と同じ決め方）。
- * 終点 = Soft 締切 → Hard 締切 → 開始予定日、始点 = 開始予定日 → 終点。
+ * 開始予定日・Soft 締切・Hard 締切の日付のうち、最も早い日が始点、最も遅い日が終点。
+ * 開始予定日が締切より後に入っていても（サーバーは検証しない）逆向きのバーにしない。
  */
 export function taskSpan(task: SpanSource, timeZone: string): Span | null {
-  const deadline = task.soft_deadline ?? task.hard_deadline;
-  const end = deadline ? dateInZone(deadline, timeZone) : task.planned_start_on;
-  if (!end) return null;
-  const start = task.planned_start_on ?? end;
-  // 開始予定日が締切より後に入っていても（サーバーは検証しない）逆向きのバーにしない
-  return start <= end ? { start, end } : { start: end, end: start };
+  const dates = [
+    task.planned_start_on,
+    task.soft_deadline && dateInZone(task.soft_deadline, timeZone),
+    task.hard_deadline && dateInZone(task.hard_deadline, timeZone),
+  ]
+    .filter((date): date is string => !!date)
+    .sort();
+  return dates.length ? { start: dates[0]!, end: dates[dates.length - 1]! } : null;
 }
 
 export type ClippedSpan = {

@@ -60,6 +60,36 @@ describe('TaskAssigneePicker の候補の取得状態', () => {
   });
 });
 
+describe('TaskAssigneePicker の部署・チーム', () => {
+  const option = (wrapper: ReturnType<typeof mountPicker>, name: string) =>
+    pickerOption(pickerTrigger(wrapper.element, '担当者'), name);
+
+  it('部署を選ぶと、まだ担当でない属する全員を toggle で返す', async () => {
+    const team = [
+      { id: 'user-1', username: 'yupix', department: '開発' },
+      { id: 'user-2', username: 'sousuke', department: '開発' },
+      { id: 'user-3', username: 'kousuke', department: '開発' },
+      { id: 'user-4', username: 'alice', department: '営業' },
+    ];
+    const wrapper = mountPicker({ members: team, selected: [team[0]] });
+    await flushPromises();
+
+    option(wrapper, '部署「開発」の全員').click();
+    await flushPromises();
+
+    expect(wrapper.emitted('toggle')).toEqual([
+      ['user-2', true],
+      ['user-3', true],
+    ]);
+  });
+
+  it('部署・チームの無い候補だけなら行を出さない', () => {
+    const wrapper = mountPicker({ members });
+
+    expect(wrapper.text()).not.toContain('の全員');
+  });
+});
+
 // 担当者は一人ずつ保存してから再取得するので、selected は選んでから遅れて変わる。一覧は選んだ時に
 // 先に反映し、保存中に届く途中の値では差し替えない
 describe('TaskAssigneePicker の保存が遅れて反映される時', () => {

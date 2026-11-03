@@ -32,10 +32,11 @@ const MAX_RANGE_DAYS: i64 = 92;
 const DEFAULT_LIMIT: u64 = 200;
 const MAX_LIMIT: u64 = 500;
 
-// 開始予定日と締切（Soft → Hard）の日付のうち、早い方を始点・遅い方を終点にする。$1 はタイムゾーン。
+// 開始予定日・Soft 締切・Hard 締切の日付のうち、最も早い日を始点・最も遅い日を終点にする。$1 はタイムゾーン。
+// tasks の CHECK で Soft ≤ Hard なので、締切の早い方は Soft → Hard、遅い方は Hard → Soft で取れる。
 // 開始予定日が締切より後のタスクも許されているため、逆転したまま重なり判定すると両端の日から落ちる。
 // LEAST / GREATEST は NULL を無視するので、片方しか無ければ両端ともその日になる
-const END_DATE: &str = "GREATEST(tasks.planned_start_on, (COALESCE(tasks.soft_deadline, tasks.hard_deadline) AT TIME ZONE $1)::date)";
+const END_DATE: &str = "GREATEST(tasks.planned_start_on, (COALESCE(tasks.hard_deadline, tasks.soft_deadline) AT TIME ZONE $1)::date)";
 const START_DATE: &str = "LEAST(tasks.planned_start_on, (COALESCE(tasks.soft_deadline, tasks.hard_deadline) AT TIME ZONE $1)::date)";
 const NOT_DONE: &str = "NOT EXISTS (SELECT 1 FROM project_statuses s WHERE s.id = tasks.status_id AND s.is_done_state)";
 // 作業記録の合計。担当者以外の記録も含め、`time-logs/summary` の `actual_minutes` と同じ定義にする

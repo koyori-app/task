@@ -49,7 +49,13 @@ describe('taskSpan', () => {
     });
   });
 
-  it('両方あれば開始予定日〜Soft 締切。Hard より Soft を優先する', () => {
+  it('開始予定日と Soft 締切があれば開始予定日〜Soft 締切', () => {
+    expect(
+      taskSpan({ planned_start_on: '2026-10-14', soft_deadline: '2026-10-20T00:00:00Z' }, 'UTC'),
+    ).toEqual({ start: '2026-10-14', end: '2026-10-20' });
+  });
+
+  it('Soft と Hard の両方があれば Hard まで含める', () => {
     expect(
       taskSpan(
         {
@@ -59,7 +65,45 @@ describe('taskSpan', () => {
         },
         'UTC',
       ),
-    ).toEqual({ start: '2026-10-14', end: '2026-10-20' });
+    ).toEqual({ start: '2026-10-14', end: '2026-10-30' });
+  });
+
+  it('開始予定日が無ければ Soft 締切〜Hard 締切', () => {
+    expect(
+      taskSpan(
+        { soft_deadline: '2026-10-05T00:00:00Z', hard_deadline: '2026-10-20T00:00:00Z' },
+        'UTC',
+      ),
+    ).toEqual({ start: '2026-10-05', end: '2026-10-20' });
+  });
+
+  it('Hard 締切だけなら締切日の 1 日（点）', () => {
+    expect(taskSpan({ hard_deadline: '2026-10-22T00:00:00Z' }, 'UTC')).toEqual({
+      start: '2026-10-22',
+      end: '2026-10-22',
+    });
+  });
+
+  it('開始予定日が Hard 締切より後でも逆向きにしない', () => {
+    expect(
+      taskSpan(
+        {
+          planned_start_on: '2026-10-25',
+          soft_deadline: '2026-10-20T00:00:00Z',
+          hard_deadline: '2026-10-22T00:00:00Z',
+        },
+        'UTC',
+      ),
+    ).toEqual({ start: '2026-10-20', end: '2026-10-25' });
+  });
+
+  it('Hard 締切もタイムゾーンで日付に落とす', () => {
+    expect(
+      taskSpan(
+        { soft_deadline: '2026-10-05T00:00:00Z', hard_deadline: '2026-10-20T15:00:00Z' },
+        'Asia/Tokyo',
+      )?.end,
+    ).toBe('2026-10-21');
   });
 
   it('Soft が無ければ Hard を終点にする', () => {
