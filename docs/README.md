@@ -13,6 +13,7 @@ pnpm build && pnpm preview # 検索は build の索引を読むので preview �
 - ページは `features/` `frontend/` `development/` と `index.md`・`breadcrumbs.md`（`src/content.config.ts` の `pattern`）。階層がそのまま URL とサイドバーになる
 - `title` は必須で、本文に `# 見出し` は書かない（タイトルが H1 として出る）
 - `features/tasks/N.name.md` は番号を URL に出さないよう `slug` を、並びのために `sidebar.order` を書く
+- 図は ` ```mermaid ` で書く（`src/lib/mermaid-fence.ts` が描画用に変換する）。Mermaid で表せない図は `public/diagrams/` に SVG を置く
 - サイト内リンクは `/features/drive` の形で書く（相対の `.md` は解決されない）。`apps/backend/docs/` はサイト外なので GitHub の URL にする
 
 ## 公開
