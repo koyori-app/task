@@ -1,10 +1,7 @@
 ---
 title: 2段階認証（2FA）
 description: TOTP・リカバリーコード・テナント強制ポリシー
-icon: lucide:shield-check
 ---
-
-# 2段階認証（2FA）仕様書
 
 > ステータス: **Draft** / 作成日: 2026-05-27
 > **依存: なし（`users` + `sessions` 基盤を拡張。[OAuth 拡張](/features/auth-oauth) と独立）**

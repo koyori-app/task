@@ -1,4 +1,6 @@
-# KFM Phase 1 実装ノート（github profile）
+---
+title: "KFM Phase 1 実装ノート（github profile）"
+---
 
 task 本文（GitHub issue 形式）のレンダラ **KFM (Koyori Flavored Markdown)** の Phase 1 実装を記す。
 Phase 1 の実体は **github profile（複製レンダラ）** = GFM ＋ GitHub alerts ＋

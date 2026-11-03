@@ -3,8 +3,6 @@ title: OAuth ログイン × 2FA 統合（フォローアップ）
 description: feat/auth-oauth マージ後に oauth_callback へ half_authed を適用する
 ---
 
-# OAuth ログイン × 2FA（フォローアップ）
-
 > **ステータス**: Open / PR #45 では `establish_login_session` を OAuth から呼べるようエクスポート済み
 
 ## 背景

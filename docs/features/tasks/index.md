@@ -1,10 +1,7 @@
 ---
 title: タスク機能 概要
 description: タスク管理システムの全体像・機能依存関係・実装順序
-icon: lucide:layout-list
 ---
-
-# タスク機能 概要
 
 > 作成日: 2026-05-27
 

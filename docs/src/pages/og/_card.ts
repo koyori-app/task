@@ -1,0 +1,72 @@
+/**
+ * The site's social cards, 1200 × 630 PNGs rendered at build time: the logo
+ * over a hairline, then the page's section and title. `og/[...slug].ts`
+ * draws one per page and `og.png.ts` the site's own, with its description as
+ * the title. This file is the cards' look; edit it freely.
+ *
+ * `@cloudflare/nimbus-docs/og` does the rest: it loads the fonts, fits text
+ * to its lines by measuring it, and renders the PNG.
+ *
+ * The leading underscore keeps Astro from routing this file.
+ */
+import { createCardRenderer, type CardNode, type CardTypography } from "@cloudflare/nimbus-docs/og";
+import { root } from "astro:config/server";
+import { readFile } from "node:fs/promises";
+
+// The starter's light theme (src/styles/globals.css), in hex for Satori.
+const FOREGROUND = "#171717";
+const MUTED = "#696969";
+const BORDER = "#eaeaea";
+const BACKGROUND = "#ffffff";
+
+const WIDTH = 1200;
+const HEIGHT = 630;
+const LEFT = 80;
+const COLUMN = WIDTH - LEFT - 200;
+
+const TITLE: CardTypography = { fontFamily: "Noto Sans JP", fontWeight: 500, letterSpacing: "-0.025em", lineHeight: 1.1, color: FOREGROUND };
+const SECTION: CardTypography = { fontFamily: "Noto Sans JP", fontWeight: 400, lineHeight: 1.2, color: MUTED };
+
+// ページ名は日本語なので、Latin も持つ Noto Sans JP だけで描く。
+const font = (file: string) => new URL(`node_modules/@expo-google-fonts/noto-sans-jp/${file}`, root);
+const renderer = await createCardRenderer({
+  width: WIDTH,
+  height: HEIGHT,
+  fonts: [
+    { name: "Noto Sans JP", source: font("400Regular/NotoSansJP_400Regular.ttf"), weight: 400 },
+    { name: "Noto Sans JP", source: font("500Medium/NotoSansJP_500Medium.ttf"), weight: 500 },
+  ],
+  emoji: "strip",
+});
+
+type Style = Record<string, string | number>;
+const el = (type: string, style: Style, children?: CardNode | (CardNode | undefined)[] | string): CardNode => ({
+  type,
+  props: { style, children },
+});
+
+const logoSrc = `data:image/png;base64,${(await readFile(new URL("public/logo.png", root))).toString("base64")}`;
+const Logo = (size: number): CardNode => ({ type: "img", props: { src: logoSrc, width: size, height: size } });
+
+async function card({ section, title, sizes }: { section?: string; title: string; sizes: number[] }): Promise<CardNode> {
+  const heading = await renderer.fit(title, { width: COLUMN, sizes, lines: 3, style: TITLE });
+  const label = section ? await renderer.fit(section, { width: COLUMN, sizes: [26], lines: 1, style: SECTION }) : undefined;
+  return el("div", { width: WIDTH, height: HEIGHT, display: "flex", position: "relative", background: BACKGROUND }, [
+    el("div", { position: "absolute", left: LEFT, top: 72, display: "flex" }, Logo(56)),
+    el("div", { position: "absolute", left: LEFT, right: LEFT, top: 148, height: 0, borderTop: `1.5px solid ${BORDER}` }),
+    // Hung from the hairline rather than set on the bottom margin: X crops
+    // the card to 2:1 and covers its foot with the link's domain.
+    el("div", { position: "absolute", left: LEFT, top: 204, display: "flex", flexDirection: "column" }, [
+      label && el("div", { display: "flex", marginBottom: 18 }, label.node),
+      heading.node,
+    ]),
+  ]);
+}
+
+/** A page's card. */
+export const renderPageCard = async (input: { section?: string; title: string }) =>
+  renderer.png(await card({ ...input, sizes: [64, 56, 50, 44] }));
+
+/** The site's card: its description, or its title when it has none. */
+export const renderSiteCard = async (input: { title: string }) =>
+  renderer.png(await card({ ...input, sizes: [72, 64, 56, 50, 44] }));

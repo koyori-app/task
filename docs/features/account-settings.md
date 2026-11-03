@@ -1,13 +1,10 @@
 ---
 title: アカウント設定・プロフィール編集
 description: ログイン中ユーザーが自分のプロフィール・アクセストークンを管理する画面と API
-icon: lucide:user-cog
 ---
 
-# アカウント設定・プロフィール編集 仕様書
-
 > ステータス: **Draft** / 作成日: 2026-08-19
-> 依存: `users` テーブル（アバターのアップロードで `avatar_storage_key` 列を追加）、ストレージバックエンド（[ドライブ](./drive.md) §6）
+> 依存: `users` テーブル（アバターのアップロードで `avatar_storage_key` 列を追加）、ストレージバックエンド（[ドライブ](/features/drive) §6）
 
 ---
 
@@ -137,7 +134,7 @@ icon: lucide:user-cog
 | 入力チェック違反 | `400` |
 
 PAT で自分のプロフィールを書き換えられないことは、
-[個人アクセストークンの認可](../../apps/backend/docs/personal-access-tokens-authz.md) の
+[個人アクセストークンの認可](https://github.com/koyori-app/task/blob/main/apps/backend/docs/personal-access-tokens-authz.md) の
 「アカウント API は PAT 非対応」に沿う。
 
 ### `avatar_url` のスキーム制限
@@ -227,7 +224,7 @@ PAT で自分のプロフィールを書き換えられないことは、
 | 二要素認証・パスキーの管理 | 認証方法（§7）とは別タスク（TASK-188 / TASK-189） | セキュリティ画面にセクションを足す。API は既にある |
 | トークンのプロジェクト絞り込み | アクセストークン画面（§6）の対象外 | API（`project_ids`）は既にある。フォームに選択 UI を足す |
 
-画面上部のパンくずは実データから組まれるようになった（[breadcrumbs.md](../breadcrumbs.md)）。
+画面上部のパンくずは実データから組まれるようになった（[breadcrumbs.md](/breadcrumbs)）。
 設定系の画面は `プロフィール` のように一段で出る。`Account settings` に当たる中間の段は、
 その名で開ける画面が無いため置いていない。
 
@@ -257,7 +254,7 @@ PAT で自分のプロフィールを書き換えられないことは、
 ## 6. アクセストークン画面
 
 パーソナルアクセストークン（PAT）を発行・取り消しする画面。PAT 自体の認可設計は
-[個人アクセストークンの認可](../../apps/backend/docs/personal-access-tokens-authz.md) を正とする。
+[個人アクセストークンの認可](https://github.com/koyori-app/task/blob/main/apps/backend/docs/personal-access-tokens-authz.md) を正とする。
 
 | 項目 | 値 |
 |---|---|
@@ -376,7 +373,7 @@ backend と揃えてパスキーも数えるので、この画面は件数を見
 
 認証方法の下に、承認した Koyori Desktop（Device Token）の一覧と失効を出す
 （`apps/frontend/src/components/settings/DevicesSection.vue`）。Device Token の規則は
-[Bearer 認証・認可の「Desktop 認証」](../../apps/backend/docs/personal-access-tokens-authz.md) を正とする。
+[Bearer 認証・認可の「Desktop 認証」](https://github.com/koyori-app/task/blob/main/apps/backend/docs/personal-access-tokens-authz.md) を正とする。
 
 - **一覧**: `GET /v1/users/me/devices`。失効済み・期限切れを除いた端末を新しい順に返す。
   各行に端末名、末尾 4 文字だけの伏せ字、有効期限、最終使用を出す
@@ -428,5 +425,5 @@ Desktop が開いたクエリ（`port` / `code_challenge` / `state` / `name`）�
 
 対象がテナントに関わらない場合を 403 にしないのは、`users` がテナント横断の表だからである。
 403 と 404 を分けると、任意の UUID について利用者が実在するかを調べられてしまう。
-判定は [テナント / プロジェクト認可](../../apps/backend/docs/tenant-project-authz.md) の既存関数
+判定は [テナント / プロジェクト認可](https://github.com/koyori-app/task/blob/main/apps/backend/docs/tenant-project-authz.md) の既存関数
 （`is_tenant_owner` / `is_tenant_member` / `explicit_member_project_ids`）だけで行う。

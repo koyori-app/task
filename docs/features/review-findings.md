@@ -1,10 +1,7 @@
 ---
 title: レビュー指摘管理
 description: PR レビューの指摘を task で追跡し、GitHub には要約コメント 1 本と、マージ可でのレビュワー本人の Approve だけを置く仕組みと運用ルール
-icon: lucide:search-check
 ---
-
-# レビュー指摘管理 仕様書
 
 > ステータス: **Draft** / 作成日: 2026-08-26
 > 依存: GitHub 連携（`github_integrations`、1 プロジェクト = 1 リポジトリ）、GitHub App、PAT スコープ
