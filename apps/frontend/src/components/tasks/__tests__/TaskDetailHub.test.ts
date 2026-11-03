@@ -655,6 +655,33 @@ describe('TaskDetailHub の保存に失敗した下書き', () => {
     expect((titleInput(wrapper).element as HTMLInputElement).value).toBe(task.title);
   });
 
+  // 「クリア」は失う入力が無いので再開ボタンを出さない。前に成功した下書きで出してもいけない
+  it('説明の保存に成功したあと「クリア」で失敗しても、前の値で編集を再開させない', async () => {
+    const wrapper = mountHub();
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '説明を追加')!
+      .trigger('click');
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('成功した説明');
+    await textarea.trigger('blur');
+    await wrapper.setProps({ fieldErrors: {}, task: { ...task, description: '成功した説明' } });
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '成功した説明')!
+      .trigger('click');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'クリア')!
+      .trigger('click');
+    expect(wrapper.emitted('save:description')).toEqual([['成功した説明'], [null]]);
+
+    await wrapper.setProps({ fieldErrors: { description: FAILED } });
+    expect(wrapper.text()).toContain(FAILED);
+    expect(resumeButton(wrapper)).toBeUndefined();
+  });
+
   // 分割ビューのペインは別のタスクへ移っても同じインスタンスで、失敗表示も残りうる
   it('別のタスクへ移ったら、前のタスクの下書きを出さない', async () => {
     const wrapper = mountHub();

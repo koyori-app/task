@@ -437,9 +437,17 @@ const plannedStartAfterSoft = computed(() => {
 
 function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadline') {
   if (isFieldUpdating(field)) return;
+  // 空にする操作は失う入力が無い。前に成功した下書きで「編集を再開」を出さないよう捨てる
+  delete failedDrafts.value[field];
   if (field === 'planned_start_on') emit('save:planned_start_on', null);
   else if (field === 'soft_deadline') emit('save:soft_deadline', null);
   else emit('save:hard_deadline', null);
+  cancelEditing();
+}
+
+function clearDescription() {
+  delete failedDrafts.value.description;
+  emit('save:description', null);
   cancelEditing();
 }
 </script>
@@ -1049,10 +1057,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                   :disabled="isFieldUpdating('description')"
                   label="クリア"
                   @mousedown.prevent
-                  @click="
-                    emit('save:description', null);
-                    cancelEditing();
-                  "
+                  @click="clearDescription"
                 />
                 <Button
                   v-else-if="editingField !== 'description' && freshDescriptionHtml"
