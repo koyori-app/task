@@ -277,3 +277,52 @@ describe('TaskGroupedList の DnD: 落とす', () => {
     expect(highlighted()).toEqual([]);
   });
 });
+
+describe('TaskGroupedList の DnD: 保存中の行', () => {
+  function dropRow(rowEl: Element, target: Element) {
+    fire(rowEl, 'dragstart');
+    fire(target, 'dragover');
+    fire(target, 'drop');
+    return flushPromises();
+  }
+
+  it.each([
+    ['移した先の群', progress],
+    ['別の群', done],
+  ])('%s へもう一度落としても、重複せず保存も増えない', async (_where, target) => {
+    const { wrapper, onMoveStatus, section, row } = mountList();
+    await dropRow(row('task-1'), section(progress.id));
+
+    fire(row('task-1'), 'dragstart');
+    fire(section(target.id), 'dragover');
+    await nextTick();
+    expect(section(target.id).classList.contains('ring-2')).toBe(false);
+    fire(section(target.id), 'drop');
+    await flushPromises();
+
+    expect(wrapper.findAll('[data-dnd-task]').length).toBe(3);
+    expect(onMoveStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('保存していない行は、同じ群の別の行が保存中でも動かせる', async () => {
+    const { onMoveStatus, section, row } = mountList();
+    await dropRow(row('task-1'), section(progress.id));
+    await dropRow(row('task-3'), section(done.id));
+
+    expect(onMoveStatus).toHaveBeenCalledTimes(2);
+    expect(section(done.id).textContent).toContain('task task-3');
+  });
+
+  it('保存が確定して引き直されたら、同じ行をまた動かせる', async () => {
+    const { moved, onMoveStatus, section, row } = mountList();
+    onMoveStatus.mockResolvedValueOnce(undefined);
+    await dropRow(row('task-1'), section(progress.id));
+    // 正本は固定なので、保存に失敗したときと同じく元の群へ戻る
+    expect(section(todo.id).textContent).toContain('task task-1');
+
+    await dropRow(row('task-1'), section(done.id));
+
+    expect(onMoveStatus).toHaveBeenCalledTimes(2);
+    expect(onMoveStatus).toHaveBeenLastCalledWith(moved, done.id);
+  });
+});

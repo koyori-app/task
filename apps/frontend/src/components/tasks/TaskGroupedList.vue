@@ -138,8 +138,10 @@ function registerDndGroup(statusId: string, el: unknown) {
 function trackDropTarget(el: EventTarget | null) {
   if (!isDragState(dndState)) return;
   const statusId = statusIdAt(el);
-  const from = (dndState.draggedNode.data.value as TaskResponse).status_id;
-  dropTargetStatusId.value = statusId === from ? null : statusId;
+  const task = dndState.draggedNode.data.value as TaskResponse;
+  // 保存中の行は status_id が古く、その群にもう居ない。動かすと行が重複するので落とし先を持たせない
+  const saving = !dndValues.get(task.status_id)?.value.some((row) => row.id === task.id);
+  dropTargetStatusId.value = saving || statusId === task.status_id ? null : statusId;
 }
 
 function dropOn(el: EventTarget | null) {
