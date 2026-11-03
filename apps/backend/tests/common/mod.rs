@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     body::Body,
     extract::{Query, State},
     http::{Request, StatusCode, header},
@@ -59,7 +59,10 @@ use testcontainers_modules::{
         runners::SyncRunner,
     },
 };
-use tokio::{net::TcpListener, sync::OnceCell};
+use tokio::{
+    net::TcpListener,
+    sync::{OnceCell, watch},
+};
 use tower::ServiceExt;
 use url::Url;
 use uuid::Uuid;
@@ -604,6 +607,8 @@ pub struct TestApp {
     pub state: AppState,
     pub base_url: String,
     pub mock: MockOAuthHandle,
+    /// サーバーの停止を真似る。`true` を送ると SSE の応答が閉じる。
+    pub shutdown_tx: watch::Sender<bool>,
     sent_mails: Arc<Mutex<Vec<SentMail>>>,
     client: Client,
     router: Router,
@@ -757,9 +762,12 @@ impl TestApp {
         .await
         .expect("session store");
 
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let (router, _) = routes::create_routes().split_for_parts();
         let router = router
             .with_state(state.clone())
+            .layer(Extension(state.redis_client.clone()))
+            .layer(Extension(shutdown_rx))
             .layer(SessionLayer::new(session_store));
 
         let app_router = router.clone();
@@ -779,6 +787,7 @@ impl TestApp {
             state,
             base_url,
             mock,
+            shutdown_tx,
             sent_mails,
             client,
             router,
