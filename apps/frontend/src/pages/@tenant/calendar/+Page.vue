@@ -13,6 +13,12 @@ import type { TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
 import { Button, Dropdown, type DropdownItem } from '@koyori-app/ui-vue';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import type { components } from '@/generated/api';
+import {
+  matchesMembers,
+  memberDropdownItems,
+  membersAssignedTo,
+  toggled,
+} from '@/lib/calendar/filters';
 import { dailyLoadByMember } from '@/lib/calendar/load';
 import { fetchAllSchedule, SCHEDULE_PAGE_LIMIT, SCHEDULE_PATH } from '@/lib/calendar/schedule';
 import { addDays, clipSpan, dateInZone, taskSpan } from '@/lib/calendar/timeline';
@@ -96,8 +102,7 @@ const schedule = computed(() => {
     if (span && clipSpan(span, from.value, CALENDAR_DAYS)) return true;
     return dailyLoadByMember([task], timeZone, today).size > 0;
   });
-  const assigned = new Set(tasks.flatMap((task) => task.assignees.map((a) => a.user_id)));
-  return { ...data, tasks, members: data.members.filter((member) => assigned.has(member.id)) };
+  return { ...data, tasks, members: membersAssignedTo(tasks, data.members) };
 });
 
 const memberOptions = computed(() => schedule.value?.members ?? []);
@@ -115,9 +120,7 @@ const filtered = computed(() => {
   const byMember = (id: string) => !memberIds.value.length || memberIds.value.includes(id);
   return {
     tasks: data.tasks.filter(
-      (task) =>
-        byProject(task.project.id) &&
-        (!memberIds.value.length || task.assignees.some((a) => byMember(a.user_id))),
+      (task) => byProject(task.project.id) && matchesMembers(task, memberIds.value),
     ),
     members: data.members.filter((member) => byMember(member.id)),
     sprints: data.sprints.filter((sprint) => byProject(sprint.project_id)),
@@ -172,23 +175,13 @@ function onOverlayOpenChange(open: boolean) {
   selectedTaskId.value = next;
 }
 
-function toggled(list: string[], id: string) {
-  return list.includes(id) ? list.filter((v) => v !== id) : [...list, id];
-}
-
 function formatRangeDate(date: string) {
   const [year, month, day] = date.split('-');
   return `${year}/${Number(month)}/${Number(day)}`;
 }
 
-/** 絞り込みは checkbox。選んでもメニューは閉じないので、続けて複数を選べる */
 const memberItems = computed<DropdownItem[]>(() =>
-  memberOptions.value.map((member) => ({
-    value: member.id,
-    label: member.username,
-    kind: 'checkbox',
-    checked: memberIds.value.includes(member.id),
-  })),
+  memberDropdownItems(memberOptions.value, memberIds.value),
 );
 const projectItems = computed<DropdownItem[]>(() =>
   projectOptions.value.map((project) => ({

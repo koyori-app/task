@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import { taskSpan } from '@/lib/calendar/timeline';
 
-import { toGanttBars, type GanttSource } from '../tasks';
+import { UNASSIGNED_MEMBER } from '@/lib/calendar/filters';
+import {
+  applyCalendarUrlState,
+  parseCalendarUrlState,
+  type CalendarUrlState,
+} from '@/lib/calendar/url-state';
+
+import { toGanttBars, toGanttBarsFor, type GanttSource } from '../tasks';
 
 function task(over: Partial<GanttSource> & { id: string }): GanttSource {
   return { title: `課題 ${over.id}`, progress_pct: 0, ...over };
@@ -105,5 +112,101 @@ describe('toGanttBars', () => {
       expect(bars[0]!.start).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(bars[0]!.end).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     });
+  });
+});
+
+describe('toGanttBarsFor', () => {
+  type Row = GanttSource & { assignees: { user_id: string }[] };
+  const row = (id: string, userIds: string[], over: Partial<GanttSource> = {}): Row => ({
+    ...task({ id, planned_start_on: '2026-10-12', ...over }),
+    assignees: userIds.map((user_id) => ({ user_id })),
+  });
+  const rows: Row[] = [
+    row('a', ['alice']),
+    row('b', ['bob']),
+    row('ab', ['alice', 'bob']),
+    row('none', []),
+    // 期間が無い課題（担当ごとに数が変わることを見る）
+    row('a-nospan', ['alice'], { planned_start_on: null }),
+    row('none-nospan', [], { planned_start_on: null }),
+    row('b-nospan', ['bob'], { planned_start_on: null }),
+  ];
+  const ids = (memberIds: string[]) =>
+    toGanttBarsFor(rows, memberIds, 'UTC').bars.map((bar) => bar.id);
+
+  it('何も選ばなければ全件で、期間の無い数は全件の数', () => {
+    expect(ids([])).toEqual(['a', 'b', 'ab', 'none']);
+    expect(toGanttBarsFor(rows, [], 'UTC').skipped).toBe(3);
+  });
+
+  it('一人選べば、その者の課題だけが出る', () => {
+    expect(ids(['alice'])).toEqual(['a', 'ab']);
+  });
+
+  it('二人選べば、二人の課題が一つの並びに合わさる', () => {
+    const { bars } = toGanttBarsFor(rows, ['alice', 'bob'], 'UTC');
+    expect(bars.map((bar) => bar.id)).toEqual(['a', 'b', 'ab']);
+  });
+
+  it('二人が担当する課題は、どちらを選んでも出る', () => {
+    expect(ids(['alice'])).toContain('ab');
+    expect(ids(['bob'])).toContain('ab');
+  });
+
+  it('担当なしを選べば、担当の無い課題だけが出る', () => {
+    expect(ids([UNASSIGNED_MEMBER])).toEqual(['none']);
+  });
+
+  it('担当なしと一人を合わせて選べる', () => {
+    expect(ids([UNASSIGNED_MEMBER, 'bob'])).toEqual(['b', 'ab', 'none']);
+  });
+
+  it('誰かを選んだ時、担当の無い課題は出ない', () => {
+    expect(ids(['alice'])).not.toContain('none');
+  });
+
+  it('期間の無い課題の数は、絞った後の数', () => {
+    expect(toGanttBarsFor(rows, ['alice'], 'UTC').skipped).toBe(1);
+    expect(toGanttBarsFor(rows, ['alice', 'bob'], 'UTC').skipped).toBe(2);
+    expect(toGanttBarsFor(rows, [UNASSIGNED_MEMBER], 'UTC').skipped).toBe(1);
+    expect(toGanttBarsFor(rows, ['nobody'], 'UTC')).toEqual({ bars: [], skipped: 0 });
+  });
+});
+
+describe('担当者を URL に残す', () => {
+  const today = '2026-10-14';
+  const state = (memberIds: string[]): CalendarUrlState => ({
+    from: '2026-10-12',
+    memberIds,
+    projectIds: [],
+    selected: null,
+  });
+  const searchAll = (url: URL) => {
+    const out: Record<string, string[]> = {};
+    for (const [key, value] of url.searchParams) (out[key] ??= []).push(value);
+    return out;
+  };
+
+  it('member を並べて書き、読み戻すと同じ者が選ばれている', () => {
+    const url = applyCalendarUrlState(
+      new URL('https://example.test/acme/gantt'),
+      state(['u1', UNASSIGNED_MEMBER, 'u2']),
+      today,
+    );
+    expect(url.search).toBe('?member=u1&member=unassigned&member=u2');
+    expect(parseCalendarUrlState(searchAll(url), today).memberIds).toEqual([
+      'u1',
+      UNASSIGNED_MEMBER,
+      'u2',
+    ]);
+  });
+
+  it('全部外せば member の項が URL から消える', () => {
+    const url = applyCalendarUrlState(
+      new URL('https://example.test/acme/gantt?member=u1'),
+      state([]),
+      today,
+    );
+    expect(url.search).toBe('');
   });
 });
