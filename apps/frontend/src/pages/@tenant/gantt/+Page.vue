@@ -11,13 +11,24 @@ import '@koyori-app/arc-vue/style.css';
 import { popOverlayParent, pushOverlayParent } from '@/components/tasks/overlay-parent-stack';
 import TaskDetailOverlay from '@/components/tasks/TaskDetailOverlay.vue';
 import type { TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
-import { Button } from '@koyori-app/ui-vue';
+import { Button, Dropdown, type DropdownItem } from '@koyori-app/ui-vue';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import type { components } from '@/generated/api';
+import {
+  memberDropdownItems,
+  membersAssignedTo,
+  toggled,
+  UNASSIGNED_MEMBER,
+} from '@/lib/calendar/filters';
 import { fetchAllSchedule, SCHEDULE_PAGE_LIMIT, SCHEDULE_PATH } from '@/lib/calendar/schedule';
 import { addDays, dateInZone } from '@/lib/calendar/timeline';
-import { CALENDAR_DAYS, parseCalendarUrlState, shiftFrom } from '@/lib/calendar/url-state';
-import { toGanttBars } from '@/lib/gantt/tasks';
+import {
+  applyCalendarUrlState,
+  CALENDAR_DAYS,
+  parseCalendarUrlState,
+  shiftFrom,
+} from '@/lib/calendar/url-state';
+import { toGanttBarsFor } from '@/lib/gantt/tasks';
 import { taskDetailHref, taskSeqKey } from '@/lib/task-display';
 
 type ScheduleTask = components['schemas']['ScheduleTask'];
@@ -32,11 +43,24 @@ const {
   isError: isTenantResolveError,
 } = useResolvedTenantId(tenantDisplayId);
 
-// 表に出す期間はカレンダーと同じ決め方（今週の月曜から 2 週間、前後へ 2 週間ずつ動かす）
+// 表に出す期間と選んだ担当者は、カレンダーと同じ決め方と同じ URL の形（`from`・`member`）で持つ
 const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const today = dateInZone(new Date(), timeZone);
-const from = ref(parseCalendarUrlState({}, today).from);
+const initial = parseCalendarUrlState(pageContext.urlParsed?.searchAll, today);
+const from = ref(initial.from);
+const memberIds = ref<string[]>(initial.memberIds);
 const to = computed(() => addDays(from.value, CALENDAR_DAYS - 1));
+
+watch([from, memberIds], ([nextFrom, nextMembers]) => {
+  if (typeof window === 'undefined') return;
+  const url = applyCalendarUrlState(
+    new URL(window.location.href),
+    { from: nextFrom, memberIds: nextMembers, projectIds: [], selected: null },
+    today,
+  );
+  // history を汚さない（カレンダーと同じ）
+  window.history.replaceState(window.history.state, '', url);
+});
 
 const scheduleQuery = useQuery({
   queryKey: computed(
@@ -63,7 +87,22 @@ const scheduleQuery = useQuery({
 });
 
 const scheduleTasks = computed(() => scheduleQuery.data.value?.tasks ?? []);
-const gantt = computed(() => toGanttBars(scheduleTasks.value, timeZone));
+const gantt = computed(() => toGanttBarsFor(scheduleTasks.value, memberIds.value, timeZone));
+
+// 選び肢はカレンダーと同じく、見ている範囲の課題に担当として現れる者。
+// カレンダーには担当の無い課題を指す選び肢が無い（担当なしの行が常にある）ので、ガントだけ足す
+const memberItems = computed<DropdownItem[]>(() => [
+  {
+    value: UNASSIGNED_MEMBER,
+    label: '担当なし',
+    kind: 'checkbox',
+    checked: memberIds.value.includes(UNASSIGNED_MEMBER),
+  },
+  ...memberDropdownItems(
+    membersAssignedTo(scheduleTasks.value, scheduleQuery.data.value?.members ?? []),
+    memberIds.value,
+  ),
+]);
 const byId = computed(() => new Map(scheduleTasks.value.map((task) => [task.id, task])));
 
 // wasm を読めない時は、arc-vue の onMounted の失敗がここへ上がる。頁ごと落とさず、案内に替える
@@ -149,6 +188,22 @@ function formatRangeDate(date: string) {
       <span class="text-sm font-medium" aria-live="polite">
         {{ formatRangeDate(from) }} 〜 {{ formatRangeDate(to) }}
       </span>
+
+      <div class="ml-auto flex flex-wrap gap-2">
+        <Dropdown
+          variant="tertiary"
+          :label="memberIds.length ? `メンバー（${memberIds.length}）` : 'メンバー'"
+          :items="memberItems"
+          empty-message="候補がありません"
+          :on-select="(id: string) => (memberIds = toggled(memberIds, id))"
+        />
+        <Button
+          v-if="memberIds.length"
+          variant="ghost"
+          label="絞り込みを解除"
+          @click="memberIds = []"
+        />
+      </div>
     </div>
 
     <div v-if="isTenantResolving || scheduleQuery.isLoading.value" class="flex justify-center py-8">

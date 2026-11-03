@@ -1,3 +1,4 @@
+import { matchesMembers, UNASSIGNED_MEMBER } from '@/lib/calendar/filters';
 import { taskSpan, type SpanSource } from '@/lib/calendar/timeline';
 
 /** ガントに渡す棒。`@koyori-app/arc-vue` の `GanttTask` と同じ形（日付は `YYYY-MM-DD` のまま渡す） */
@@ -41,4 +42,20 @@ export function toGanttBars(
     });
   }
   return { bars, skipped: tasks.length - bars.length };
+}
+
+/**
+ * 選んだ担当者で課題を絞ってから棒にする。何も選ばなければ全件。
+ * 二人以上を選べば、その誰かが担当する課題を一つの並びに合わせる（担当者ごとに分けない）。
+ * `UNASSIGNED_MEMBER` を選べば担当の無い課題も入る。期間が無くて除いた数も、絞った後の数になる。
+ */
+export function toGanttBarsFor(
+  tasks: readonly (GanttSource & { assignees: readonly { user_id: string }[] })[],
+  memberIds: readonly string[],
+  timeZone: string,
+): { bars: GanttBar[]; skipped: number } {
+  return toGanttBars(
+    tasks.filter((task) => matchesMembers(task, memberIds, { unassigned: UNASSIGNED_MEMBER })),
+    timeZone,
+  );
 }
