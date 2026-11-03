@@ -1,4 +1,6 @@
-# pnpm の lockfile 構成
+---
+title: "pnpm の lockfile 構成"
+---
 
 ## 現在の構成
 
@@ -9,9 +11,11 @@ pnpm の既定値も true だが、既定に頼らないのは三つの理由に
 同じ file の `allowBuilds` が依存を一つひとつ書き出す流儀であり、それに揃う。
 workspace の一員（`apps/frontend`・`packages/*`）は個別の lockfile を持たない。
 
-例外は `e2e/` である。
+例外は `e2e/` と `docs/` である。
 e2e は `pnpm-workspace.yaml` の `packages` に載っていない独立したプロジェクトで、CI も `pnpm install --ignore-workspace` で入れている。
 そのため `e2e/pnpm-lock.yaml` はそのまま残している。
+`docs/` も `packages` に載せず、自前の `pnpm-workspace.yaml` と `pnpm-lock.yaml` を持つ。
+根の `overrides` が `vite` を vite-plus に差し替えるので、Astro が要る Vite に当てないためである。
 
 ## なぜ以前は割れていたのか
 

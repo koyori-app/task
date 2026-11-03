@@ -1,4 +1,6 @@
-# 共通レイアウトのパンくず
+---
+title: "共通レイアウトのパンくず"
+---
 
 パンくずの正本は `BreadcrumbSegment[]` で、各段は `name`、`href`、`current` を持つ。
 現在地にも URL を保持し、画面では現在地をリンクにせず `aria-current="page"` 付きの文字として描く。

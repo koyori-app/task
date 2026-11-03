@@ -1,10 +1,7 @@
 ---
 title: サービス管理者・監査ログ
 description: システム管理者フラグ・管理者専用 API・全操作の監査ログ
-icon: lucide:shield-alert
 ---
-
-# サービス管理者・監査ログ 仕様書
 
 > ステータス: **Draft** / 作成日: 2026-05-27
 > **依存: なし（`users` + `tenants` テーブルのみ使用）**

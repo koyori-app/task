@@ -1,10 +1,7 @@
 ---
 title: Drive 機能仕様
 description: Misskey ライクなドライブ機能の設計仕様書
-icon: lucide:hard-drive
 ---
-
-# Drive 機能仕様書
 
 > ステータス: **バックエンド実装済み／フロントエンド未実装（既知の差分あり）**
 > 作成日: 2026-05-26
@@ -185,7 +182,7 @@ pub drive_quota_bytes: Option<i64>, // NULL = システムデフォルト（DRIV
 
 ①は「ファイルの `tenant_id` に所属していること」を先に確認したうえで、プロジェクトの公開規則で判定する。
 ファイル ID だけで引ける配信経路があるため、プロジェクト所属だけを見るとテナント境界を越えられる。
-判定の詳細は [テナント / プロジェクト認可](../../apps/backend/docs/tenant-project-authz.md) を参照。
+判定の詳細は [テナント / プロジェクト認可](https://github.com/koyori-app/task/blob/main/apps/backend/docs/tenant-project-authz.md) を参照。
 テナントに所属しないプロジェクト限定の客分（Guest）は、プロジェクトメンバーであるだけでは
 Drive へアクセスできない。
 
@@ -413,7 +410,7 @@ pub trait StorageBackend: Send + Sync {
 `get_stream()` は object が無いとき `StorageError::NotFound` を返す（ローカル・S3 とも）。
 
 > 同じバックエンドにユーザーのアバター画像も置く（キーは `avatar-{uuid}.{ext}`、`drive_files` の行は作らない）。
-> 規則は [アカウント設定](./account-settings.md) の `POST /v1/auth/me/avatar` を正とする。
+> 規則は [アカウント設定](/features/account-settings) の `POST /v1/auth/me/avatar` を正とする。
 
 > **ストリーミング設計の理由**: 100MB ファイルを複数同時に全量バッファすると GByte 単位のメモリを消費しうる。`BoxStream` でチャンクを受け取り、ローカル実装は `BufWriter` へ順に書き込む。S3 実装は長さが未知（`None`）か 5MiB 以上なら multipart upload を使い、5MiB ごとに part を送るので 5MiB を超えて貯めない（途中で失敗したら abort）。単一 PUT（全量バッファ）は 5MiB 未満と分かっている本文だけ。アップロード API は長さ未知、本文更新 API は既知の長さを渡す。
 
@@ -788,7 +785,7 @@ Drive ファイル本体は削除しない。
 
 添付には由来 `source`（`manual` / `body`）があり、応答にも載る。本文から付いた `body` の行へ
 `POST` すると `manual` に昇格して `200 OK` を返す。`body` の行の `DELETE` は `409 Conflict`
-（本文を編集して参照を外す）。規則の全体は [タスク拡張 §4](./tasks/7.extensions.md#4-ファイル添付) を参照。
+（本文を編集して参照を外す）。規則の全体は [タスク拡張 §4](/features/tasks/extensions#4-ファイル添付) を参照。
 
 ### 8.5 本文からのタスク参照
 
@@ -842,7 +839,7 @@ Drive ファイル本体は削除しない。
 ```
 
 > 現在はページ・コンポーネントとも未実装。上記は
-> [`docs/frontend/url-spec.md`](../frontend/url-spec.md) に合わせた予定 URL。
+> [`docs/frontend/url-spec.md`](/frontend/url-spec) に合わせた予定 URL。
 
 ### 9.2 レイアウト
 
@@ -884,7 +881,7 @@ Drive ファイル本体は削除しない。
 ### 9.5 ドキュメント画面
 
 プロジェクトの「ドキュメント」（`/{tenant}/projects/{key}/docs`。URL は
-[url-spec](../frontend/url-spec.md)）は Drive の上に載せた画面で、専用のテーブル・API は持たない。
+[url-spec](/frontend/url-spec)）は Drive の上に載せた画面で、専用のテーブル・API は持たない。
 
 - 実体はプロジェクトのルートフォルダ直下の `.md` ファイル（MIME が `text/markdown` で名前が `.md` で
   終わるもの。一覧・詳細・`+data.ts` で同じ条件）。ルートフォルダは

@@ -1,4 +1,6 @@
-# フロントエンド URL 仕様書
+---
+title: "フロントエンド URL 仕様書"
+---
 
 > ステータス: **Draft**
 > 作成日: 2026-05-31
@@ -31,8 +33,8 @@
 | `/signup` | 新規登録 |
 | `/forgot-password` | パスワードリセット申請 |
 | `/reset-password` | パスワードリセット実行 |
-| `/desktop/authorize` | Koyori Desktop の承認（[仕様](../features/account-settings.md)）。未ログインならサインイン後に戻る |
-| `/invitations/accept?token=` | テナント招待の承諾（[仕様](../../apps/backend/docs/tenant-project-authz.md)）。未ログインならサインイン後に戻る |
+| `/desktop/authorize` | Koyori Desktop の承認（[仕様](/features/account-settings)）。未ログインならサインイン後に戻る |
+| `/invitations/accept?token=` | テナント招待の承諾（[仕様](https://github.com/koyori-app/task/blob/main/apps/backend/docs/tenant-project-authz.md)）。未ログインならサインイン後に戻る |
 
 ### アカウント設定（テナント外）
 
@@ -40,16 +42,16 @@
 
 | URL | 説明 |
 |-----|------|
-| `/settings/profile` | プロフィール編集（[仕様](../features/account-settings.md)） |
-| `/settings/security` | 認証方法と Koyori Desktop の端末（[仕様](../features/account-settings.md)） |
-| `/settings/tokens` | パーソナルアクセストークンの発行・取り消し（[仕様](../features/account-settings.md)） |
+| `/settings/profile` | プロフィール編集（[仕様](/features/account-settings)） |
+| `/settings/security` | 認証方法と Koyori Desktop の端末（[仕様](/features/account-settings)） |
+| `/settings/tokens` | パーソナルアクセストークンの発行・取り消し（[仕様](/features/account-settings)） |
 
 ### テナントスコープ
 
 | URL | 説明 |
 |-----|------|
 | `/{tenant}` | テナントホーム（プロジェクト一覧 or ダッシュボード） |
-| `/{tenant}/calendar` | テナントのタイムライン（[仕様](../features/tasks/11.schedule.md)）。`?from=YYYY-MM-DD`（起点の月曜。省略時は今週）、`?member=` / `?project=`（ID。繰り返し指定可）で絞り込み、`?selected=KEY-N`（詳細のオーバーレイで開いているタスク。タスク一覧と同じく replaceState で書き、履歴を汚さない） |
+| `/{tenant}/calendar` | テナントのタイムライン（[仕様](/features/tasks/schedule)）。`?from=YYYY-MM-DD`（起点の月曜。省略時は今週）、`?member=` / `?project=`（ID。繰り返し指定可）で絞り込み、`?selected=KEY-N`（詳細のオーバーレイで開いているタスク。タスク一覧と同じく replaceState で書き、履歴を汚さない） |
 | `/{tenant}/settings` | テナント設定 |
 | `/{tenant}/settings/members` | テナントメンバー管理 |
 | `/{tenant}/users/{user_id}` | 利用者のプロフィール（閲覧のみ） |
@@ -66,13 +68,13 @@
 | `/{tenant}/projects/{key}` | プロジェクトホーム（カンバン） |
 | `/{tenant}/projects/{key}/tasks` | タスク一覧（カンバン / リスト / テーブル切替） |
 | `/{tenant}/projects/{key}/tasks/{KEY-N}` | タスク詳細 |
-| `/{tenant}/projects/{key}/docs` | ドキュメント一覧（[仕様](../features/drive.md#95-ドキュメント画面)）。`?q=` でタイトル検索 |
+| `/{tenant}/projects/{key}/docs` | ドキュメント一覧（[仕様](/features/drive#95-ドキュメント画面)）。`?q=` でタイトル検索 |
 | `/{tenant}/projects/{key}/docs/{file_id}` | ドキュメント詳細。`{file_id}` は Drive ファイルの UUID。`?edit=1` で編集モード |
 | `/{tenant}/projects/{key}/milestones` | マイルストーン一覧 |
 | `/{tenant}/projects/{key}/labels` | ラベル管理 |
 | `/{tenant}/projects/{key}/members` | プロジェクトメンバー |
 | `/{tenant}/projects/{key}/settings` | プロジェクト設定 |
-| `/{tenant}/projects/{key}/reviews` | レビュー指摘（[仕様](../features/review-findings.md)）。`?pr=618` で PR を指定 |
+| `/{tenant}/projects/{key}/reviews` | レビュー指摘（[仕様](/features/review-findings)）。`?pr=618` で PR を指定 |
 
 ### 管理者（`is_admin = true` のユーザーのみ）
 

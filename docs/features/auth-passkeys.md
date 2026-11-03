@@ -1,10 +1,7 @@
 ---
 title: パスキー認証
 description: WebAuthn/FIDO2 によるパスワードレス認証・デバイス認証
-icon: lucide:fingerprint
 ---
-
-# パスキー認証 仕様書
 
 > ステータス: **Draft** / 作成日: 2026-05-27
 > **依存: なし（`users` 基盤を拡張。[OAuth 拡張](/features/auth-oauth) と独立）**

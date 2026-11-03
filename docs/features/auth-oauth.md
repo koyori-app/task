@@ -1,10 +1,7 @@
 ---
 title: OAuth 認証拡張
 description: GitHub・GitLab・汎用 OIDC による既存認証基盤への OAuth ログイン追加
-icon: lucide:key-round
 ---
-
-# OAuth 認証拡張 仕様書
 
 > ステータス: **Draft** / 作成日: 2026-05-27
 > **依存: なし（既存の `users` + `sessions` 基盤を拡張）**
