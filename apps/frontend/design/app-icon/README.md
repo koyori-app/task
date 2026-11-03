@@ -4,7 +4,7 @@
 1254×1254 の RGBA で、背景は透けています。
 仮の絵で、必要になったら清書します。
 
-ここから焼いた物は次の六つです。
+ここから焼いた物は次の八つです。
 
 | file                               | 寸法    | 性質   |
 | ---------------------------------- | ------- | ------ |
@@ -14,6 +14,8 @@
 | `public/pwa/icon-maskable-512.png` | 512×512 | 不透明 |
 | `public/favicon-16.png`            | 16×16   | 透け   |
 | `public/favicon-32.png`            | 32×32   | 透け   |
+| `docs/public/favicon.png`（`favicon-32.png`）  | 32×32   | 透け   |
+| `docs/public/logo.png`（`favicon-128.png`）    | 128×128 | 透け   |
 
 ## 焼き方
 
@@ -22,7 +24,7 @@ uv run --with pillow python apps/frontend/design/app-icon/build.py \
   apps/frontend/design/app-icon/source.png <出力の dir>
 ```
 
-出力の六つを、上の表の場所へ同じ名で置きます。
+出力を、上の表の場所へ置きます。`public/` は `apps/frontend/` の下で、同じ名です。`docs/public/` の二つは括弧内の出力を改名して置きます。
 
 ## 焼く時の決め
 

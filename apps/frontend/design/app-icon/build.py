@@ -57,7 +57,7 @@ for name, size in [("apple-touch-icon.png", 180), ("icon-192.png", 192), ("icon-
 maskable_scale = min(ICON_FRAC * 512 / max(art.size), SAFE_RADIUS * 512 * SAFE_MARGIN / r_art)
 bake(512, maskable_scale, BG, True).convert("RGB").save(OUT / "icon-maskable-512.png", optimize=True)
 
-for size in (16, 32):
+for size in (16, 32, 128):
     bake(size, size / max(art.size), (0, 0, 0, 0), False).save(OUT / f"favicon-{size}.png", optimize=True)
 
 print("solid box", solid, "art", art.size, "art center", ((solid[0] + solid[2]) / 2, (solid[1] + solid[3]) / 2))
