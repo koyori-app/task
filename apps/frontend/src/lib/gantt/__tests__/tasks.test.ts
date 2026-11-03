@@ -9,32 +9,42 @@ function task(over: Partial<GanttSource> & { id: string }): GanttSource {
 }
 
 describe('toGanttBars', () => {
-  it('棒の端はカレンダーの taskSpan と同じ', () => {
-    const tasks = [
-      task({ id: 'a', planned_start_on: '2026-10-12', soft_deadline: '2026-10-16T03:00:00Z' }),
-      task({ id: 'b', planned_start_on: '2026-10-14' }),
-      task({ id: 'c', hard_deadline: '2026-10-20T03:00:00Z' }),
-    ];
-    const { bars } = toGanttBars(tasks, 'Asia/Tokyo');
-    for (const [i, source] of tasks.entries()) {
-      const span = taskSpan(source, 'Asia/Tokyo')!;
-      expect([bars[i]!.start, bars[i]!.end]).toEqual([span.start, span.end]);
-    }
-  });
-
-  it('締切は soft が hard より先（hard ?? soft で組み直さない）', () => {
-    const { bars } = toGanttBars(
+  describe('棒の端はカレンダーの taskSpan と一致する', () => {
+    // 期待の日付は書かず、同じ課題を taskSpan に通した結果と比べる
+    const cases: [string, Partial<GanttSource>][] = [
       [
-        task({
-          id: 'a',
+        'soft が hard より後',
+        {
+          planned_start_on: '2026-10-10',
+          soft_deadline: '2026-10-20T03:00:00Z',
+          hard_deadline: '2026-10-14T03:00:00Z',
+        },
+      ],
+      [
+        'hard が soft より後',
+        {
           planned_start_on: '2026-10-10',
           soft_deadline: '2026-10-14T03:00:00Z',
           hard_deadline: '2026-10-20T03:00:00Z',
-        }),
+        },
       ],
-      'UTC',
-    );
-    expect(bars[0]).toMatchObject({ start: '2026-10-10', end: '2026-10-14' });
+      ['始まりだけ', { planned_start_on: '2026-10-14' }],
+      ['hard だけ', { hard_deadline: '2026-10-20T03:00:00Z' }],
+      [
+        '始まりが締切より後',
+        { planned_start_on: '2026-10-25', soft_deadline: '2026-10-14T03:00:00Z' },
+      ],
+    ];
+
+    it.each(cases)('%s', (_name, over) => {
+      for (const zone of ['UTC', 'Asia/Tokyo', 'America/Los_Angeles']) {
+        const source = task({ id: 'a', ...over });
+        const span = taskSpan(source, zone)!;
+        const { bars } = toGanttBars([source], zone);
+        expect(bars).toHaveLength(1);
+        expect([bars[0]!.start, bars[0]!.end]).toEqual([span.start, span.end]);
+      }
+    });
   });
 
   it('期間の無い課題は除き、除いた数を返す', () => {
