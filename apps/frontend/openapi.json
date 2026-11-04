@@ -9468,7 +9468,7 @@
       "put": {
         "tags": ["Tenant Members"],
         "summary": "テナントメンバーの権限・所属を変更",
-        "description": "どの欄も省略すれば変更しない。部署・役職・チームは前後の空白を除き、空なら未設定に戻す。",
+        "description": "どの欄も省略すれば変更しない。部署・役職・チームは前後の空白を除き、空なら未設定に戻す。所属行の無いオーナーには、本人だけが部署・役職・チームを送れる（role を付けた PUT と他の人の PUT は 404）。",
         "operationId": "update_member",
         "parameters": [
           {
@@ -24491,7 +24491,7 @@
           },
           "department": {
             "type": ["string", "null"],
-            "description": "このテナントでの部署。未設定・所属行の無いオーナー・読めない主体では null"
+            "description": "このテナントでの部署。未設定・読めない主体では null"
           },
           "id": {
             "type": "string",
@@ -24499,7 +24499,7 @@
           },
           "team": {
             "type": ["string", "null"],
-            "description": "このテナントでのチーム。未設定・所属行の無いオーナー・読めない主体では null"
+            "description": "このテナントでのチーム。未設定・読めない主体では null"
           },
           "username": {
             "type": "string"
@@ -29325,7 +29325,7 @@
       },
       "UpdateTenantMemberRequest": {
         "type": "object",
-        "description": "どの欄も省略（`None`）なら変更しない。部署・役職・チームは trim して空なら NULL に戻す。\n`role` を省略可にしているのは、所属だけを直す保存が古い `role` を送り返して、\n別の管理者による降格を巻き戻さないようにするため",
+        "description": "どの欄も省略（`None`）なら変更しない。部署・役職・チームは trim して空なら NULL に戻す。\n`role` を省略可にしているのは、所属だけを直す保存が古い `role` を送り返して、\n別の管理者による降格を巻き戻さないようにするため。\n所属行の無いオーナーには、本人だけが所属の 3 欄を送れる（`role` を付けると 404）",
         "properties": {
           "department": {
             "type": ["string", "null"]
@@ -29426,7 +29426,7 @@
           },
           "department": {
             "type": ["string", "null"],
-            "description": "このテナントでの部署。所属行の無いオーナー・客分では null"
+            "description": "このテナントでの部署。未設定・客分では null"
           },
           "id": {
             "type": "string",
@@ -29434,11 +29434,11 @@
           },
           "position": {
             "type": ["string", "null"],
-            "description": "このテナントでの役職。所属行の無いオーナー・客分では null"
+            "description": "このテナントでの役職。未設定・客分では null"
           },
           "team": {
             "type": ["string", "null"],
-            "description": "このテナントでのチーム。所属行の無いオーナー・客分では null"
+            "description": "このテナントでのチーム。未設定・客分では null"
           },
           "username": {
             "type": "string"

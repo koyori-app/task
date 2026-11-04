@@ -254,7 +254,48 @@ describe('TenantSettingsMembers', () => {
     expect(wrapper.get('dialog').attributes('open'), '保存後は閉じる').toBeUndefined();
   });
 
-  it('所属の編集ボタンは管理者にだけ出し、オーナー行には出さない', () => {
+  it('オーナー本人は自分の所属を保存でき、再読み込み後も表示される', async () => {
+    const wrapper = mountMembers(OWNER_ID);
+    await wrapper.get('button[aria-label="ownerの所属を編集"]').trigger('click');
+    expect(wrapper.get('dialog').attributes('open')).toBeDefined();
+    await wrapper.get('#org-profile-department').setValue('経営企画');
+    await wrapper.get('#org-profile-position').setValue('代表');
+    await wrapper.get('#org-profile-team').setValue('役員');
+    await wrapper.findAll('form').at(-1)!.trigger('submit');
+    await flushPromises();
+
+    expect(updateMutateAsync).toHaveBeenCalledTimes(1);
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_ID, user_id: OWNER_ID } },
+      body: { department: '経営企画', position: '代表', team: '役員' },
+    });
+    expect(wrapper.get('dialog').attributes('open'), '保存後は閉じる').toBeUndefined();
+
+    // 再読み込み: 保存した値が行に出て、編集欄にも戻る
+    wrapper.unmount();
+    const reloaded = mountMembers(OWNER_ID, [
+      {
+        ...member(OWNER_ID, 'owner', 'Admin'),
+        department: '経営企画',
+        position: '代表',
+        team: '役員',
+      },
+    ]);
+    expect(reloaded.text()).toContain('経営企画 · 代表 · 役員');
+    await reloaded.get('button[aria-label="ownerの所属を編集"]').trigger('click');
+    expect((reloaded.get('#org-profile-position').element as HTMLInputElement).value).toBe('代表');
+  });
+
+  it('オーナー本人でも自分のロール変更と除外の操作は出さない', () => {
+    const wrapper = mountMembers(OWNER_ID);
+    expect(wrapper.find('button[aria-label="ownerを外す"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="ownerのロール"]').exists()).toBe(false);
+    // 対照: 他のメンバーの操作は残っている
+    expect(wrapper.find('button[aria-label="memberを外す"]').exists()).toBe(true);
+    expect(wrapper.find('button[aria-label="memberの所属を編集"]').exists()).toBe(true);
+  });
+
+  it('所属の編集ボタンは管理者にだけ出し、他人のオーナー行には出さない', () => {
     const asAdmin = mountMembers();
     expect(asAdmin.find('button[aria-label="memberの所属を編集"]').exists()).toBe(true);
     expect(asAdmin.find('button[aria-label="ownerの所属を編集"]').exists()).toBe(false);

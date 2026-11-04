@@ -23,6 +23,7 @@ use entity::{
     project_members, projects, scopes::Scope, task_watchers, tasks, tenant_members, tenants, users,
 };
 use payload::project_members::*;
+use payload::tenant_members::OrgProfile;
 use service::access::assignable_user_ids;
 
 #[axum::debug_handler]
@@ -104,6 +105,14 @@ pub async fn list_assignable_users(
             Err(AppError::Forbidden | AppError::ForbiddenDetail(_)) => false,
             Err(error) => return Err(error),
         };
+    // オーナーの所属はテナントの行にある（`OrgProfile::resolve`）。読めない主体には引かない
+    let tenant = if can_read_org {
+        tenants::Entity::find_by_id(tenant_id)
+            .one(&state.db)
+            .await?
+    } else {
+        None
+    };
     let members: HashMap<Uuid, tenant_members::Model> = if can_read_org {
         tenant_members::Entity::find()
             .filter(tenant_members::Column::TenantId.eq(tenant_id))
@@ -119,8 +128,11 @@ pub async fn list_assignable_users(
     let users = users
         .into_iter()
         .map(|user| {
-            let member = members.get(&user.id);
-            AssignableUserResponse::from_parts(user, member)
+            let org = tenant
+                .as_ref()
+                .map(|tenant| OrgProfile::resolve(tenant, user.id, members.get(&user.id)))
+                .unwrap_or_default();
+            AssignableUserResponse::from_parts(user, org)
         })
         .collect();
     Ok(Json(users))

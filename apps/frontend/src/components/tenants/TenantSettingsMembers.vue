@@ -291,8 +291,16 @@ const editingMember = ref<TenantMemberResponse | null>(null);
 const orgDraft = ref<Record<OrgField, string>>({ department: '', position: '', team: '' });
 const orgError = ref<string | null>(null);
 
+/**
+ * 管理者がメンバーの所属を直せる。オーナーの所属を直せるのは本人だけで、
+ * ロール変更と除外は本人でも開かない（API も同じ）。
+ */
+function canEditOrg(member: TenantMemberResponse) {
+  return canManageMembers.value && (!isOwner(member) || isSelf(member));
+}
+
 function openOrgEditor(member: TenantMemberResponse) {
-  if (!canManageMembers.value || isOwner(member) || busy.value) return;
+  if (!canEditOrg(member) || busy.value) return;
   orgError.value = null;
   orgDraft.value = {
     department: member.department ?? '',
@@ -313,7 +321,7 @@ function onOrgEditorClose() {
  */
 async function onSaveOrg() {
   const member = editingMember.value;
-  if (!member || !canManageMembers.value || isOwner(member) || busy.value) return;
+  if (!member || !canEditOrg(member) || busy.value) return;
   orgError.value = null;
   busy.value = true;
   try {
@@ -543,6 +551,16 @@ async function onRemove(member: TenantMemberResponse) {
                 </span>
               </span>
 
+              <Button
+                v-if="canEditOrg(member)"
+                variant="ghost"
+                :disabled="busy"
+                class="shrink-0"
+                :ariaLabel="`${member.user.username}の所属を編集`"
+                label="所属を編集"
+                @click="openOrgEditor(member)"
+              />
+
               <span
                 v-if="isOwner(member)"
                 class="shrink-0 px-2.5 text-[13px] text-muted-foreground"
@@ -551,15 +569,6 @@ async function onRemove(member: TenantMemberResponse) {
               </span>
 
               <template v-else>
-                <Button
-                  v-if="canManageMembers"
-                  variant="ghost"
-                  :disabled="busy"
-                  class="shrink-0"
-                  :ariaLabel="`${member.user.username}の所属を編集`"
-                  label="所属を編集"
-                  @click="openOrgEditor(member)"
-                />
                 <Picker
                   :label="`${member.user.username}のロール`"
                   class="w-[110px] shrink-0"
