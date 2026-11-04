@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import LoadErrorState from '@/components/LoadErrorState.vue';
 import ReactionBar from '@/components/reactions/ReactionBar.vue';
 import type { ReactionController } from '@/composables/useReactions';
+import { useQueryClient } from '@tanstack/vue-query';
 import {
   CalendarClock,
   CalendarDays,
@@ -123,6 +125,15 @@ const props = defineProps<{
    */
   descriptionSource?: string | null;
 }>();
+
+const queryClient = useQueryClient();
+/** 取得元の query は呼び出し側にあるので、表示中のうち失敗しているものだけをやり直す */
+function retryFailed() {
+  void queryClient.refetchQueries({
+    type: 'active',
+    predicate: (query) => query.state.status === 'error',
+  });
+}
 
 const emit = defineEmits<{
   'update:statusId': [value: string];
@@ -422,12 +433,11 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
       <Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
     </div>
 
-    <div
+    <LoadErrorState
       v-else-if="error"
-      class="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive"
-    >
-      タスクの読み込みに失敗しました
-    </div>
+      message="タスクの読み込みに失敗しました"
+      @retry="retryFailed"
+    />
 
     <div v-else-if="notFound" class="rounded-lg border p-6 text-sm text-muted-foreground">
       タスクが見つかりません
