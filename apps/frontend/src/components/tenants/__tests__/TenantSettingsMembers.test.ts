@@ -89,6 +89,8 @@ function mountMembers(
           { queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
         ],
       ],
+      // BOT の欄は己の試験（TenantBotsSection.test.ts）で縛る。ここではメンバーの欄だけを見る
+      stubs: { TenantBotsSection: true },
     },
   });
   return wrapper;
