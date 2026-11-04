@@ -2,7 +2,7 @@
 title: パンくず
 description: 共通レイアウトのパンくずの段の組み立て、取得中と失敗時の表示、BreadcrumbList への変換
 updated: 2026-11-04
-slug: breadcrumbs
+slug: dev/frontend/breadcrumbs
 sidebar:
   order: 2
 ---

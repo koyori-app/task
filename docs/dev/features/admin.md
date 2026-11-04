@@ -4,7 +4,7 @@ description: テナントを横断するサービス管理者のフラグ、管�
 status: partial
 updated: 2026-11-04
 sidebar:
-  order: 2
+  order: 4
 ---
 
 ## 概要

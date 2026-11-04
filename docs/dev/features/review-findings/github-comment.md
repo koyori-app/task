@@ -3,7 +3,7 @@ title: 要約コメントと Approve
 description: レビュー指摘の要約を GitHub の PR にコメント 1 本で出し、マージ可になったらレビュワー本人の名義で Approve する
 status: implemented
 updated: 2026-11-04
-slug: features/review-findings/github-comment
+slug: dev/features/review-findings/github-comment
 sidebar:
   order: 1
 ---

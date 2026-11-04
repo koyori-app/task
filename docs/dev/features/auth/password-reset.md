@@ -4,7 +4,7 @@ description: 忘れたパスワードのリセットとログイン中のパス�
 status: implemented
 updated: 2026-11-04
 sidebar:
-  order: 6
+  order: 4
 ---
 
 ## 概要

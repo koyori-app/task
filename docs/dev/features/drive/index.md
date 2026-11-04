@@ -2,9 +2,9 @@
 title: Drive
 description: テナント単位のファイル管理スペース。アップロード、フォルダ、共有、クォータ、タスク添付、ドキュメント
 updated: 2026-11-04
-slug: features/drive
+slug: dev/features/drive
 sidebar:
-  order: 7
+  order: 6
   group:
     label: Drive
 ---

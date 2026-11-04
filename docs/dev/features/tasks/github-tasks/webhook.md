@@ -3,7 +3,7 @@ title: Git ホスティング連携の Webhook
 description: ホストの Webhook を受け、正規化して PR・コミット・ブランチのリンクとマージ時の自動完了へつなぐ処理
 status: partial
 updated: 2026-11-04
-slug: features/tasks/github-tasks/webhook
+slug: dev/features/tasks/github-tasks/webhook
 sidebar:
   order: 1
 ---

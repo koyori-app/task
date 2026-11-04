@@ -3,7 +3,7 @@ title: Drive のファイル
 description: Drive のファイルのアップロード・一覧・本文の更新と配信、タスクへの添付と本文からの参照
 status: partial
 updated: 2026-11-04
-slug: features/drive/files
+slug: dev/features/drive/files
 sidebar:
   order: 1
 ---

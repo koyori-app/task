@@ -3,7 +3,7 @@ title: Drive のクォータ
 description: テナントごとの Drive の容量の上限、使用量の計算、テナントオーナーによる設定
 status: partial
 updated: 2026-11-04
-slug: features/drive/quota
+slug: dev/features/drive/quota
 sidebar:
   order: 3
 ---

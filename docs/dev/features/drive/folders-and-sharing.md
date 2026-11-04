@@ -3,7 +3,7 @@ title: Drive のフォルダと共有
 description: Drive の階層フォルダ、プロジェクトフォルダの扱い、利用者指定と公開リンクによるフォルダ共有
 status: partial
 updated: 2026-11-04
-slug: features/drive/folders-and-sharing
+slug: dev/features/drive/folders-and-sharing
 sidebar:
   order: 2
 ---

@@ -4,7 +4,7 @@ description: GitHub・GitLab・Google・汎用 OIDC によるログインと新�
 status: implemented
 updated: 2026-11-04
 sidebar:
-  order: 4
+  order: 2
 ---
 
 ## 概要

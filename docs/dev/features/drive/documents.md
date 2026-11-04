@@ -3,7 +3,7 @@ title: ドキュメント
 description: プロジェクトのルートフォルダ直下の Markdown ファイルを読み書きする画面
 status: implemented
 updated: 2026-11-04
-slug: features/drive/documents
+slug: dev/features/drive/documents
 sidebar:
   order: 4
 ---

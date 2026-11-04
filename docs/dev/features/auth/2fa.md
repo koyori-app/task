@@ -4,7 +4,7 @@ description: TOTP・リカバリーコード・テナントによる 2FA の強�
 status: partial
 updated: 2026-11-04
 sidebar:
-  order: 3
+  order: 1
 ---
 
 ## 概要

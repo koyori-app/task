@@ -4,11 +4,11 @@ import { docsCollection, partialsCollection } from "@cloudflare/nimbus-docs/cont
 
 export const collections = {
   docs: defineCollection(
-    // 仕様書はコードのコメントから `docs/features/...` のパスで参照されるので、
+    // 仕様書はコードのコメントから `docs/dev/features/...` のパスで参照されるので、
     // src/content/docs へ移さず docs/ 直下を読む。
     docsCollection({
       base: "../..",
-      pattern: "{index.md,breadcrumbs.md,{features,frontend,development,dev}/**/*.md}",
+      pattern: "{index.md,dev/**/*.md}",
       // STYLE.md の frontmatter。値の範囲は scripts/lint-style.mjs の STATUS と揃える
       schemaFields: {
         status: z.enum(["implemented", "partial", "planned", "operational"]).optional(),

@@ -3,9 +3,9 @@ title: レビュー指摘管理
 description: PR レビューの指摘を task で追跡し、GitHub には要約コメント 1 本と、マージ可でのレビュワー本人の Approve だけを置く仕組みと運用ルール
 status: partial
 updated: 2026-11-04
-slug: features/review-findings
+slug: dev/features/review-findings
 sidebar:
-  order: 50
+  order: 5
 ---
 
 ## 概要

@@ -4,7 +4,7 @@ description: ログイン中の利用者が自分のプロフィール・アク�
 status: implemented
 updated: 2026-11-04
 sidebar:
-  order: 1
+  order: 3
 ---
 
 ## 概要
