@@ -563,6 +563,27 @@ describe('ReviewFindingsView', () => {
       expect((wrapper.get('#draft-title').element as HTMLInputElement).value).toBe('認可漏れ');
     });
 
+    it('戻るで下書きを破棄したあと起票欄を開き直しても、空なら確認なしで切り替わる', async () => {
+      window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=618');
+      const wrapper = await openComposer();
+      await wrapper.get('#draft-title').setValue('認可漏れ');
+      await flushPromises();
+
+      window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=617');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      await flushPromises();
+      bodyButton('破棄して戻る')!.click();
+      await flushPromises();
+      expect(document.body.querySelector('dialog[open]')).toBeNull();
+
+      bodyButton('指摘を起票')!.click();
+      await flushPromises();
+      await prButton(wrapper, 618).trigger('click');
+      await flushPromises();
+      expect(document.body.querySelector('dialog[open]')).toBeNull();
+      expect(prButton(wrapper, 618).attributes('aria-current')).toBe('true');
+    });
+
     it('下書きが無ければ確認なしで切り替わる', async () => {
       const wrapper = await openComposer();
       await prButton(wrapper, 617).trigger('click');

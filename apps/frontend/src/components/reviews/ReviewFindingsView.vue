@@ -248,6 +248,7 @@ function applyUrlState(state: ReviewFindingsUrlState, warnings: readonly string[
   urlRailCheckPending = true;
   checkUrlRailState();
   isComposerOpen.value = false;
+  composerDirty.value = false;
   transitionError.value = null;
 }
 
