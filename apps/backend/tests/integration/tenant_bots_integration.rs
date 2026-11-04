@@ -1,5 +1,6 @@
 use crate::common::{
-    TestApp, TestTenantProject, TestUser, execute_sql, insert_personal_token_for_test, json_body,
+    TestApp, TestTenantProject, TestUser, execute_sql, insert_passkey,
+    insert_personal_token_for_test, json_body,
 };
 use axum::http::StatusCode;
 use chrono::{Duration, Utc};
@@ -870,4 +871,73 @@ async fn tenant_bots_pat_is_exempt_from_tenant_2fa_but_human_pat_is_not() {
         "2FA の無い人の PAT",
     )
     .await;
+}
+
+/// 2FA を強制するテナントでは、2FA を満たさない Admin は BOT 管理の全ての口で 403。
+/// 2FA を満たせば通る。
+#[tokio::test]
+async fn tenant_bots_management_requires_tenant_2fa_of_admin() {
+    let (app, owner, tenant, bot) = fixture().await;
+    issue(&app, tenant.tenant_id, bot, vec!["read:task"], None).await;
+    let token_id = personal_tokens::Entity::find()
+        .filter(personal_tokens::Column::UserId.eq(bot))
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+    require_2fa(&app, tenant.tenant_id).await;
+    let bots = format!("/v1/tenants/{}/bots", tenant.tenant_id);
+    let one = format!("{bots}/{bot}");
+    let tokens = format!("{one}/tokens");
+    let token = format!("{tokens}/{token_id}");
+    let token_body = json!({"name": "ci", "scopes": ["read:task"], "project_ids": null, "expires_at": Utc::now() + Duration::days(30)});
+
+    assert_2fa_required(app.get_with_session(&bots).await, "一覧").await;
+    assert_2fa_required(
+        app.post_json_with_session(&bots, json!({"username": "late-bot", "role": "Member"}))
+            .await,
+        "作成",
+    )
+    .await;
+    assert_2fa_required(
+        app.patch_json_with_session(&one, json!({"is_suspended": true}))
+            .await,
+        "停止",
+    )
+    .await;
+    assert_2fa_required(app.get_with_session(&tokens).await, "PAT の一覧").await;
+    assert_2fa_required(
+        app.post_json_with_session(&tokens, token_body.clone())
+            .await,
+        "PAT の発行",
+    )
+    .await;
+    assert_2fa_required(app.delete_with_session(&token).await, "PAT の取り消し").await;
+
+    insert_passkey(&app.state.db, owner.id).await;
+    assert_eq!(app.get_with_session(&bots).await.status(), StatusCode::OK);
+    assert_eq!(
+        app.post_json_with_session(&bots, json!({"username": "late-bot", "role": "Member"}))
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(app.get_with_session(&tokens).await.status(), StatusCode::OK);
+    assert_eq!(
+        app.post_json_with_session(&tokens, token_body)
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        app.delete_with_session(&token).await.status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        app.patch_json_with_session(&one, json!({"is_suspended": true}))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
 }

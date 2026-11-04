@@ -15,6 +15,8 @@ use sea_orm::prelude::Uuid;
 
 async fn authorize(state: &AppState, auth: &AuthUser, tenant_id: Uuid) -> Result<(), AppError> {
     auth.require_session()?;
+    // tenant_members と同じく、所属とテナントの 2FA 強制を先に確かめる
+    auth.ensure_tenant_access(state, tenant_id, None).await?;
     require_tenant_admin(&state.db, tenant_id, auth.user_id).await
 }
 

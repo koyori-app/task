@@ -73,7 +73,8 @@ BOT の作成と PAT の発行は 2FA の強制を満たした人の Admin だ�
 | GET / POST | `/v1/tenants/{tenant_id}/bots/{bot_id}/tokens` | PAT のメタデータ一覧と発行 |
 | DELETE | `/v1/tenants/{tenant_id}/bots/{bot_id}/tokens/{token_id}` | PAT の取り消し |
 
-管理 API は人のセッションに限定する。
+管理 API は人のセッションに限定し、`tenant_members` と同じく `ensure_tenant_access` を通す。
+テナントが 2FA を強制していれば、2FA を満たさない Admin は全ての管理 API で 403（`2fa-setup-required`）になる。
 既存の Admin ロールにはメンバーを追加し昇格させる権限があるため、Admin の BOT に `write:tenant` を与えると、人への権限委任もできる。
 BOT の直接の PAT 発行拒否と、既存の Admin による委任の範囲は区別して扱う。
 書き込みと同じトランザクションで管理者の利用者行、テナント行、所属行を共有ロックし、権限確認の直後に降格される競合を防ぐ。
