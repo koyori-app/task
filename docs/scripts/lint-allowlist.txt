@@ -13,8 +13,6 @@ features/drive.md
 features/review-findings.md
 features/tasks/1.core.md
 features/tasks/10.webhooks.md
-features/tasks/11.schedule.md
-features/tasks/12.workload.md
 features/tasks/2.time-tracking.md
 features/tasks/3.sprints.md
 features/tasks/4.collaboration-clipboard.md
