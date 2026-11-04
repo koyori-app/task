@@ -1134,3 +1134,47 @@ async fn tenant_bots_assignable_users_carry_account_kind() {
     assert_eq!(kind_of(bot), Some(json!("bot")));
     assert_eq!(kind_of(owner.id), Some(json!("human")));
 }
+
+/// BOT は個人用プロジェクトを持たない。口は 404 を返し、行を作らない。人は今どおり作れる。
+#[tokio::test]
+async fn tenant_bots_cannot_create_personal_project() {
+    let (app, owner, tenant, bot) = fixture().await;
+    let personal = format!("/v1/tenants/{}/users/me/personal-project", tenant.tenant_id);
+    let personal_of = |user_id: Uuid| {
+        entity::projects::Entity::find()
+            .filter(entity::projects::Column::TenantId.eq(tenant.tenant_id))
+            .filter(entity::projects::Column::IsPersonal.eq(true))
+            .filter(entity::projects::Column::PersonalOwnerId.eq(user_id))
+            .count(&app.state.db)
+    };
+
+    let token = issue(&app, tenant.tenant_id, bot, vec!["read:project"], None).await;
+    assert_eq!(
+        app.get_with_bearer(&personal, &token).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        personal_of(bot).await.unwrap(),
+        0,
+        "BOT の個人用プロジェクトは作られない"
+    );
+
+    let human_token = insert_personal_token_for_test(
+        &app.state.db,
+        owner.id,
+        tenant.tenant_id,
+        &app.state.settings.personal_token_secret,
+        vec![Scope::ReadProject],
+        None,
+    )
+    .await;
+    assert_eq!(
+        app.get_with_bearer(&personal, &human_token).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        personal_of(owner.id).await.unwrap(),
+        1,
+        "人は今どおり作れる"
+    );
+}

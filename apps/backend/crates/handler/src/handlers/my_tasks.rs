@@ -82,6 +82,15 @@ pub(crate) async fn get_or_create_personal_project(
     tenant_id: Uuid,
     user_id: Uuid,
 ) -> Result<projects::Model, AppError> {
+    // BOT は個人用プロジェクトを持たない。持てば、その Admin として外の人を客分に招けてしまう。
+    // BOT には無い資源なので 404 にする（既に行が在っても見せない）
+    if users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .is_some_and(|user| user.is_bot())
+    {
+        return Err(AppError::NotFound);
+    }
     if let Some(existing) = projects::Entity::find()
         .filter(projects::Column::TenantId.eq(tenant_id))
         .filter(projects::Column::IsPersonal.eq(true))
