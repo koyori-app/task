@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ArrowLeft, AtSign, SendHorizontal } from '@lucide/vue';
+import { getActivePinia } from 'pinia';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue';
 
 import CommentEditor from '@/components/tasks/CommentEditor.vue';
@@ -117,8 +118,9 @@ const openThread = computed(() => props.threads.find((thread) => thread.id === o
  * 書きかけが警告なしに消える。既存スレッドを覗くだけ・返信をやめて一覧へ戻るだけの
  * 操作で起きるので、破棄の確認を出すより持ち分けるほうが素直。
  */
-const authStore = useAuthStore();
-const userId = computed(() => authStore.user?.id ?? null);
+// pinia の無い所（Storybook など）では利用者 ID 未取得扱い（メモリだけ）にする。
+const authStore = getActivePinia() ? useAuthStore() : null;
+const userId = computed(() => authStore?.user?.id ?? null);
 const newDraft = computed({
   get: () => getCommentDraft(userId.value, props.taskId, openThreadId.value),
   set: (value: string) => setCommentDraft(userId.value, props.taskId, openThreadId.value, value),
