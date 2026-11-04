@@ -29,6 +29,7 @@ pub mod password_reset;
 pub mod password_reset_delivery;
 pub mod password_reset_email_delivery;
 pub mod password_reset_log;
+pub mod reactions;
 pub mod reviews;
 pub mod smtp;
 pub mod storage;

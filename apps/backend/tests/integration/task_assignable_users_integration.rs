@@ -419,7 +419,7 @@ fn org_of(body: &serde_json::Value, user_id: Uuid) -> (serde_json::Value, serde_
     (user["department"].clone(), user["team"].clone())
 }
 
-/// 候補には、このテナントでの部署・チームが付く。所属行の無いオーナーと未設定の人は null。
+/// 候補には、このテナントでの部署・チームが付く。未設定の人は null（オーナーも未設定なら null）。
 /// 名前引きの経路も同じ形で返す。部署を見て担当者をまとめて選ぶ UI の入力になる。
 #[tokio::test]
 async fn assignable_users_carry_department_and_team() {
@@ -458,7 +458,7 @@ async fn assignable_users_carry_department_and_team() {
     );
     let null = (serde_json::Value::Null, serde_json::Value::Null);
     assert_eq!(org_of(&body, unset.id), null, "未設定の人は null");
-    assert_eq!(org_of(&body, owner.id), null, "所属行の無いオーナーは null");
+    assert_eq!(org_of(&body, owner.id), null, "未設定のオーナーは null");
 
     let resolved = app
         .get_with_session(&format!(
@@ -518,6 +518,14 @@ async fn assignable_users_hide_org_from_principals_who_cannot_read_profiles() {
         .await;
     assert_eq!(added.status(), StatusCode::CREATED);
     set_org(&app, tp.tenant_id, member.id, "開発部", "基盤").await;
+    // オーナーの所属はテナントの行にあるので、読めない主体からの隠し方も別に確かめる
+    let owner_org = app
+        .put_json_with_session(
+            &format!("{tenant_members_path}/{}", owner.id),
+            serde_json::json!({ "department": "経営企画", "team": "役員" }),
+        )
+        .await;
+    assert_eq!(owner_org.status(), StatusCode::OK);
     // 客分: テナントに所属行が無く、このプロジェクトに名指しされただけの人
     for user in [&member, &guest] {
         let named = app
@@ -535,10 +543,16 @@ async fn assignable_users_hide_org_from_principals_who_cannot_read_profiles() {
     let write_only = issue_token(&app, tp.tenant_id, "write-only", &["write:task"]).await;
     let list = app.get_with_bearer(&assignable_path, &write_only).await;
     assert_eq!(list.status(), StatusCode::OK, "候補そのものは読める");
+    let body = json_body(list).await;
     assert_eq!(
-        org_of(&json_body(list).await, member.id),
+        org_of(&body, member.id),
         null,
         "read:tenant の無い PAT には所属を見せない"
+    );
+    assert_eq!(
+        org_of(&body, owner.id),
+        null,
+        "オーナーの所属も read:tenant の無い PAT には見せない"
     );
 
     let read_only = issue_token(&app, tp.tenant_id, "read-only", &["read:task"]).await;

@@ -197,3 +197,29 @@ describe('SignInForm のパスワード変更の案内', () => {
     expect(second.text()).not.toContain(NOTICE);
   });
 });
+
+describe('SignInForm 2FA', () => {
+  it.each([
+    ['requires_2fa', { requires_2fa: true, requires_2fa_setup: false }],
+    ['requires_2fa_setup', { requires_2fa: false, requires_2fa_setup: true }],
+  ])('%s を受けたらログアウトせず /auth/2fa へ進む', async (_name, body) => {
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    const fetchMock = stubLogin(200, body);
+
+    await mountAndSubmit();
+
+    expect(assignSpy).toHaveBeenCalledWith('/auth/2fa');
+    const urls = fetchMock.mock.calls.map(([req]) => (typeof req === 'string' ? req : req.url));
+    expect(urls.some((u) => u.includes('/v1/auth/logout'))).toBe(false);
+    expect(document.body.textContent).not.toContain('サポートされていません');
+  });
+
+  it('2FA が要らない 200（両方 false）は通常どおり / へ進む', async () => {
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    stubLogin(200, { requires_2fa: false, requires_2fa_setup: false });
+
+    await mountAndSubmit();
+
+    expect(assignSpy).toHaveBeenCalledWith('/');
+  });
+});

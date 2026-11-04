@@ -2,8 +2,9 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
-import { nextTick } from 'vue';
+import { config, enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { QueryClient, useQuery, VueQueryPlugin } from '@tanstack/vue-query';
+import { defineComponent, nextTick } from 'vue';
 import type { components } from '@/generated/api';
 
 /*
@@ -21,12 +22,16 @@ import { PRIORITY_CONFIG } from '@/lib/task-display';
 
 enableAutoUnmount(afterEach);
 
+// 読み込み失敗の再試行（失敗した query の refetch）が QueryClient を使う
+config.global.plugins = [[VueQueryPlugin, { queryClient: new QueryClient() }]];
+
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 
 const task: TaskDetail = {
   assignees: [],
   created_at: '2026-07-16T00:00:00Z',
   custom_field_values: [],
+  reactions: [],
   id: 'task-id',
   is_archived: false,
   labels: [],
@@ -844,5 +849,36 @@ describe('TaskDetailHub の期限の表示', () => {
     const wrapper = mountWithStatus('status-progress');
     expect(buttonByText(wrapper, '4日超過').classes()).toContain('text-destructive');
     expect(buttonByText(wrapper, '3日超過').classes()).toContain('text-destructive');
+  });
+});
+
+describe('TaskDetailHub 読み込みの失敗', () => {
+  it('失敗を出し、再試行で表示中の失敗した query を取り直す', async () => {
+    let calls = 0;
+    const Host = defineComponent({
+      components: { TaskDetailHub },
+      setup() {
+        const q = useQuery({
+          queryKey: ['hub-retry'],
+          queryFn: () => {
+            calls += 1;
+            return Promise.reject(new Error('x'));
+          },
+          retry: false,
+        });
+        return { q };
+      },
+      template: '<TaskDetailHub :error="q.isError.value" />',
+    });
+    const wrapper = mount(Host, {
+      global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
+    });
+    await flushPromises();
+    expect(calls).toBe(1);
+    expect(wrapper.get('[data-testid="load-error"]').text()).toContain('読み込みに失敗しました');
+
+    await wrapper.get('[data-testid="load-error"] button').trigger('click');
+    await flushPromises();
+    expect(calls).toBe(2);
   });
 });

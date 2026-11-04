@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import LoadErrorState from '@/components/LoadErrorState.vue';
+import ReactionBar from '@/components/reactions/ReactionBar.vue';
+import type { ReactionController } from '@/composables/useReactions';
+import { useQueryClient } from '@tanstack/vue-query';
 import {
   CalendarClock,
   CalendarDays,
@@ -82,6 +86,10 @@ const props = defineProps<{
   membersState?: { loading?: boolean; error?: boolean; onRetry?: () => void };
   /** 担当者のプロフィール画面の URL。渡すと担当者名をリンクで並べる */
   profileHref?: (userId: string) => string;
+  /** ログイン中ユーザーの ID。押した人の一覧で「自分」を示す */
+  currentUserId?: string | null;
+  /** 絵文字リアクションの操作。渡さなければリアクションの UI を出さない */
+  reactionController?: ReactionController;
   projectLabels?: LabelOption[];
   projectLabelsLoading?: boolean;
   projectLabelsError?: boolean;
@@ -117,6 +125,15 @@ const props = defineProps<{
    */
   descriptionSource?: string | null;
 }>();
+
+const queryClient = useQueryClient();
+/** 取得元の query は呼び出し側にあるので、表示中のうち失敗しているものだけをやり直す */
+function retryFailed() {
+  void queryClient.refetchQueries({
+    type: 'active',
+    predicate: (query) => query.state.status === 'error',
+  });
+}
 
 const emit = defineEmits<{
   'update:statusId': [value: string];
@@ -416,12 +433,11 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
       <Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
     </div>
 
-    <div
+    <LoadErrorState
       v-else-if="error"
-      class="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive"
-    >
-      タスクの読み込みに失敗しました
-    </div>
+      message="タスクの読み込みに失敗しました"
+      @retry="retryFailed"
+    />
 
     <div v-else-if="notFound" class="rounded-lg border p-6 text-sm text-muted-foreground">
       タスクが見つかりません
@@ -1051,6 +1067,21 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 </p>
                 <p v-else class="text-sm text-muted-foreground">説明を追加</p>
               </button>
+              <!-- 概要へのリアクション。説明が空の間と編集中は出さない -->
+              <ReactionBar
+                v-if="reactionController && task.description && editingField !== 'description'"
+                class="mt-2"
+                :reactions="task.reactions"
+                can-react
+                always-show-add
+                :busy="reactionController.isBusy(null)"
+                :error="reactionController.errorFor(null)"
+                :fetch-users="(emoji) => reactionController!.fetchUsers(null, emoji)"
+                :profile-href="profileHref"
+                :current-user-id="currentUserId"
+                @toggle="reactionController.toggle(null, $event)"
+                @add="reactionController.toggle(null, $event)"
+              />
               <p v-if="fieldError('description')" class="mt-2 text-xs text-destructive">
                 {{ fieldError('description') }}
               </p>

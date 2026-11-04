@@ -103,6 +103,16 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::task_comments::update_comment))
                         .routes(routes!(crate::handlers::task_comments::delete_comment))
                         .routes(routes!(crate::handlers::task_comments::list_activities))
+                        .routes(routes!(crate::handlers::reactions::add_task_reaction))
+                        .routes(routes!(crate::handlers::reactions::remove_task_reaction))
+                        .routes(routes!(
+                            crate::handlers::reactions::list_task_reaction_users
+                        ))
+                        .routes(routes!(crate::handlers::reactions::add_comment_reaction))
+                        .routes(routes!(crate::handlers::reactions::remove_comment_reaction))
+                        .routes(routes!(
+                            crate::handlers::reactions::list_comment_reaction_users
+                        ))
                         .routes(routes!(crate::handlers::forge::get_task_forge))
                         .routes(routes!(crate::handlers::forge::link_task_pull_request))
                         .routes(routes!(crate::handlers::forge::unlink_task_pull_request))
