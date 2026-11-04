@@ -52,6 +52,9 @@ pub async fn create_tenant(
         owner_id: Set(auth.user_id),
         drive_quota_bytes: Set(None),
         require_2fa: Set(false),
+        owner_department: Set(None),
+        owner_position: Set(None),
+        owner_team: Set(None),
     };
     let model = tenant.insert(&state.db).await?;
     Ok((StatusCode::CREATED, Json(model.into())))

@@ -86,7 +86,7 @@ sidebar:
 [m20261020000000_tasks_title_trgm.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20261020000000_tasks_title_trgm.rs) が `pg_trgm` 拡張（`IF NOT EXISTS`）と GIN index `idx_tasks_title_trgm` を足す。判断は次のとおりである。
 
 - 対象は title のみである。description は index が大きくなる割に、重複判定・候補提示には title で足りる。description の全文検索は `search_vector` を残す
-- UNIQUE でない通常の index なので、起動時の SeaORM `sync()`（2.0.4）に消されない。CLAUDE.md の部分 UNIQUE index の既知の落とし穴には該当しない。`sync()` は拡張も index も作らないので、migration の適用漏れは補えない。migration の適用自体は e2e CI の起動（`e2e/scripts/start-backend.sh` が実 migration バイナリで適用してから backend を起動）で踏まれ、失敗すれば全ケースが落ちる
+- UNIQUE でない通常の index なので、起動時の SeaORM `sync()`（2.0.4）に消されない。AGENTS.md の部分 UNIQUE index の既知の落とし穴には該当しない。`sync()` は拡張も index も作らないので、migration の適用漏れは補えない。migration の適用自体は e2e CI の起動（`e2e/scripts/start-backend.sh` が実 migration バイナリで適用してから backend を起動）で踏まれ、失敗すれば全ケースが落ちる
 - `down` は index だけ落とす。拡張は `IF NOT EXISTS` で既存を流用した可能性があり、他の依存や別ロール所有だと `DROP EXTENSION` が失敗するため残す
 - 通常の `CREATE INDEX` は構築中 `tasks` への書き込みを待たせる。本番 compose の `depends_on` は新しい backend の起動を migration 完了まで待たせるだけで、更新デプロイ中は旧 backend とワーカーが動いたまま index が構築される。構築中の書き込み待ちは許容する（title のみの GIN で、本番は 478 行・4.3 MB なので 1 秒未満）。`CONCURRENTLY` は `MigrationTrait::use_transaction()` を `Some(false)` にすれば使えるが、失敗時の INVALID index の片付けが要るので、待ちが問題になる規模になるまで単純な `CREATE INDEX` を採る
 - ロケールを検査する。trigram は `lc_ctype` が `C` だと CJK を英数字とみなさず trigram を作らない。マイグレーション内で `SELECT array_length(show_trgm('日本語テスト'), 1)` を実行し、`NULL` か 0 ならエラーで止める。本番は `en_US.utf8` と確認済みで、検査は他環境（セルフホスト、手元の `TEST_DATABASE_URL`）向けに残す
@@ -103,7 +103,7 @@ sidebar:
 
 `service::tasks::find_similar`（`crates/service/src/tasks.rs`）が②③の両方を支える。引数は `project_id`、trim 済みで非空の `text`、`exclude_task_id`、`limit` である。戻りは `SimilarTask`（`id`、`seq_id`、`title`、`score`）の並びである。
 
-同じプロジェクトの削除されていない（`deleted_at IS NULL`）タスクのうち、`title % text` のものを `similarity(title, text)` の降順で返す。`exclude_task_id` があれば除く。`score` の同値で順序が揺れないよう、`search_tasks` と同じく id で固定する。プレースホルダは `$N` で書く（`?` を書かない。CLAUDE.md の既知の落とし穴）。
+同じプロジェクトの削除されていない（`deleted_at IS NULL`）タスクのうち、`title % text` のものを `similarity(title, text)` の降順で返す。`exclude_task_id` があれば除く。`score` の同値で順序が揺れないよう、`search_tasks` と同じく id で固定する。プレースホルダは `$N` で書く（`?` を書かない。AGENTS.md の既知の落とし穴）。
 
 ## API
 
