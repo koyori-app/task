@@ -16,6 +16,7 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
   default: (await import('@/components/markdown/__tests__/markdown-editor-stub')).default,
 }));
 
+import { ConfirmDialog } from '@koyori-app/ui-vue';
 import TaskDetailHub from '../TaskDetailHub.vue';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
 
@@ -844,5 +845,94 @@ describe('TaskDetailHub の期限の表示', () => {
     const wrapper = mountWithStatus('status-progress');
     expect(buttonByText(wrapper, '4日超過').classes()).toContain('text-destructive');
     expect(buttonByText(wrapper, '3日超過').classes()).toContain('text-destructive');
+  });
+});
+
+describe('TaskDetailHub 説明の編集', () => {
+  async function startEdit(description: string | null = '元の説明') {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: { ...task, description },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+    const opener = wrapper
+      .findAll('button')
+      .find((b) => b.text() === (description ?? '説明を追加'));
+    await opener!.trigger('click');
+    return wrapper;
+  }
+  const dialogs = (w: Awaited<ReturnType<typeof startEdit>>) => w.findAllComponents(ConfirmDialog);
+  const button = (w: Awaited<ReturnType<typeof startEdit>>, label: string) =>
+    w.findAll('button').find((b) => b.text() === label);
+
+  it('保存とキャンセルのボタンを出す', async () => {
+    const wrapper = await startEdit();
+    expect(button(wrapper, '保存')).toBeTruthy();
+    expect(button(wrapper, 'キャンセル')).toBeTruthy();
+  });
+
+  it('blur では保存せず編集を続ける', async () => {
+    const wrapper = await startEdit();
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('書きかけ');
+    await textarea.trigger('blur');
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(true);
+  });
+
+  it('保存ボタンで保存して閉じる', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('新しい説明');
+    await button(wrapper, '保存')!.trigger('click');
+    expect(wrapper.emitted('save:description')).toEqual([['新しい説明']]);
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+  });
+
+  it('変更ありの Esc は確認を出し、取りやめると編集が続く', async () => {
+    const wrapper = await startEdit();
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('書きかけ');
+    await textarea.trigger('keydown', { key: 'Escape' });
+    const confirm = dialogs(wrapper)[0]!;
+    expect(confirm.props('open')).toBe(true);
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(true);
+    (confirm.props('onCancel') as () => void)();
+    await nextTick();
+    expect(dialogs(wrapper)[0]!.props('open')).toBe(false);
+    expect((wrapper.get('textarea[aria-label="説明"]').element as HTMLTextAreaElement).value).toBe(
+      '書きかけ',
+    );
+  });
+
+  it('確認で破棄すると元に戻り、保存はしない', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('書きかけ');
+    await button(wrapper, 'キャンセル')!.trigger('click');
+    (dialogs(wrapper)[0]!.props('onConfirm') as () => void)();
+    await nextTick();
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    expect(wrapper.text()).toContain('元の説明');
+  });
+
+  it('変更が無ければ Esc もキャンセルも確認なしで閉じる', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').trigger('keydown', { key: 'Escape' });
+    expect(dialogs(wrapper)[0]!.props('open')).toBe(false);
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+  });
+
+  it('クリアは確認後にだけ空にして保存する', async () => {
+    const wrapper = await startEdit();
+    await button(wrapper, 'クリア')!.trigger('click');
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    const confirm = dialogs(wrapper)[1]!;
+    expect(confirm.props('open')).toBe(true);
+    (confirm.props('onConfirm') as () => void)();
+    await nextTick();
+    expect(wrapper.emitted('save:description')).toEqual([[null]]);
   });
 });
