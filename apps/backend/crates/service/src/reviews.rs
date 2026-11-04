@@ -3,6 +3,12 @@
 //! 仕様は `docs/features/review-findings.md`。ここに置くのは
 //! 「ラウンドの採番」「状態遷移の規則」「繰り延べ先タスクの作成・クローズ」。
 
+// 受け入れ条件（docs/features/review-findings/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// - 要約コメントの鮮度: 投稿時点の PR head が最新ラウンドの `head_sha` と違えば「マージ可」と書かれない（対照: 一致すれば可）。head が取れないときも「マージ可」と書かれない
+// - 代行の痕跡: 要約コメントの本文に「オーナー代行での棄却 n 件」が出る
+// - 拒否系: `rejected` の主体はその指摘を出した本人に限る
+// - 遷移表と重大度制約、`gate` の判定順
+
 use sea_orm::sea_query::{Expr, LockType};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult,

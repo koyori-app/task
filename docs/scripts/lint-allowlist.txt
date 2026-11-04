@@ -10,7 +10,6 @@ features/auth-oauth.md
 features/auth-passkeys.md
 features/auth-password-reset.md
 features/drive.md
-features/review-findings.md
 features/tasks/1.core.md
 features/tasks/2.time-tracking.md
 features/tasks/3.sprints.md
