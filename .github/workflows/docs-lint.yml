@@ -21,3 +21,5 @@ jobs:
           node-version: 22
       - name: docs/STYLE.md の規則を検査する
         run: node docs/scripts/lint-style.mjs
+      - name: 検査スクリプト自体のテスト
+        run: node --test docs/scripts/lint-style.test.mjs

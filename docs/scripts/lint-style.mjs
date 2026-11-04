@@ -104,7 +104,8 @@ function lint(file) {
     }
   }
 
-  let inCode = false;
+  // 開いているコードフェンス。同じ文字で開始時以上の長さの行だけが閉じる（```` の中の ``` は中身）
+  let fence = null;
   let sectionIdx = -1;
   let boldInSection = 0;
   let sectionLine = 0;
@@ -116,11 +117,19 @@ function lint(file) {
   for (let i = end + 1; i < lines.length; i++) {
     const line = lines[i];
     const no = i + 1;
-    if (/^\s*(```|~~~)/.test(line)) {
-      inCode = !inCode;
-      continue;
+    const fenceMark = line.match(/^\s*(`{3,}|~{3,})/);
+    if (fenceMark) {
+      const mark = fenceMark[1];
+      if (!fence) {
+        fence = mark;
+        continue;
+      }
+      if (mark[0] === fence[0] && mark.length >= fence.length) {
+        fence = null;
+        continue;
+      }
     }
-    if (inCode) continue;
+    if (fence) continue;
     const directive = line.match(/^<!--\s*lint-disable:\s*([\w, -]+)\s*-->$/);
     if (directive) {
       for (const r of directive[1].split(",")) disabled.add(r.trim());
