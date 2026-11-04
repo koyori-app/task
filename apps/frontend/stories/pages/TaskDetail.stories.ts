@@ -1481,7 +1481,11 @@ export const ReactionPickerInDialog: Story = {
 
     // 検索欄が空でも Esc はピッカーだけを閉じる（空の入力欄は Dialog の Esc の守りが効かない）
     const search = await openPicker();
-    await waitFor(() => expect(search).toHaveFocus());
+    // ホバーできない環境（VRT のヘッドレス Chromium も）では、キーボードを出さないようパネルに入る
+    const focused = window.matchMedia('(hover: none)').matches
+      ? canvas.getByRole('dialog', { name: '絵文字を選ぶ' })
+      : search;
+    await waitFor(() => expect(focused).toHaveFocus());
     await expect(pressEscape(search).defaultPrevented).toBe(true);
     await pickerClosed();
     await expect(add).toHaveFocus();

@@ -188,7 +188,11 @@ export const AddButtonOpensPicker: Story = {
     const add = canvas.getByRole('button', { name: 'リアクションを追加' });
     await userEvent.click(add);
     const search = await canvas.findByRole('searchbox', { name: '絵文字を検索' });
-    await waitFor(() => expect(search).toHaveFocus());
+    // ホバーできない環境（VRT のヘッドレス Chromium も）では、キーボードを出さないようパネルに入る
+    const focused = window.matchMedia('(hover: none)').matches
+      ? canvas.getByRole('dialog', { name: '絵文字を選ぶ' })
+      : search;
+    await waitFor(() => expect(focused).toHaveFocus());
     await canvas.findByRole('grid', { name: '絵文字' }, { timeout: 10000 });
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull());
