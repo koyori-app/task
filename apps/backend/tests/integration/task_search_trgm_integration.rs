@@ -1,5 +1,20 @@
 //! `GET /tasks/search` の日本語部分一致・表記ゆれ（pg_trgm）。
 //! apps/backend/docs/task-similarity-search.md §6① / §8①。
+//!
+//! テストケースの一覧（docs/dev/design/task-similarity-search.md から移した）:
+//! - 日本語の部分一致を先頭・中間・末尾で 1 本ずつ。「ログイン画面の修正」「認証ログイン画面」
+//!   「管理者ログイン」が `q=ログイン` でヒットする（導入前は 0 件。これが回帰ガード）。
+//!   2 文字（`q=画面`）もヒットする
+//! - `q=authentcation`（typo）で「authentication flow」がヒットする
+//! - highlight の panic 回帰。`q="a      b"`（空白連続）、title `a b`、description なしで 200 が返る
+//!   （修正前は panic。これが回帰ガード）。`q=authenticationxx` と title `authentication` は対照
+//!   （修正前も 0 件 200 で通るので回帰ガードにはならない）。`find_match_char_range` の単体テストは
+//!   handler の task_extensions.rs にある
+//! - tsvector のみ・ILIKE のみ・`<%` のみ・複数に一致する行を混在させ、`total` が重複計上されず、
+//!   `limit=2` で 2 ページ以上をめくっても重複・欠落がない
+//! - 順位。description に検索語が複数回出る行より、title に部分一致する行が上に来る
+//! - tsvector のみでヒットするケース（description だけに語がある）が引き続きヒットする。
+//!   description だけに「ログイン画面が崩れる」がある行も `q=ログイン` でヒットする
 
 use crate::common::{TestApp, TestTenantProject, create_status};
 use axum::http::StatusCode;

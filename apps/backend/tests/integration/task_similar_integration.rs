@@ -1,5 +1,15 @@
 //! `GET /tasks/similar`（類似タスク候補、pg_trgm）。
 //! apps/backend/docs/task-similarity-search.md §6②③ / §8②③。
+//!
+//! テストケースの一覧（docs/dev/design/task-similarity-search.md から移した）:
+//! - 同一プロジェクトの類似タイトルが score 降順で返る
+//! - `exclude_task_id` のタスクが除かれる。`deleted_at` 付きが除かれる
+//! - 別プロジェクトのタスクは返らない（同じテナントでも）
+//! - 非メンバーは 403、メンバーは 200（拒否系と成功系のセット）。別テナントの `project_id` を
+//!   組み合わせた URL は 404（`verify_project_in_tenant` の既存挙動）。`ReadTask` を持たない PAT は 403
+//! - `title` が空白のみは 400。255 文字（日本語、文字数で数える）は 200、256 文字は 400。
+//!   `limit=21` は 20 件に丸まる（境界越え）
+//! - 候補が 20 件を超えるとき 20 件で止まり、同点（同じ title）でも順序が安定する
 
 use crate::common::{TestApp, TestTenantProject, TestUser, create_status, json_body};
 use axum::http::StatusCode;
