@@ -10,12 +10,6 @@ features/auth-oauth.md
 features/auth-passkeys.md
 features/auth-password-reset.md
 features/drive.md
-features/review-findings.md
-features/tasks/10.webhooks.md
-features/tasks/7.extensions.md
-features/tasks/8.automation.md
-features/tasks/9.github-app.md
-features/tasks/9.github-tasks.md
 frontend/auth-forms.md
 frontend/kfm-phase1-implementation.md
 frontend/pwa.md

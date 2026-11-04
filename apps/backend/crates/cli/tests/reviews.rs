@@ -2,6 +2,11 @@
 //!
 //! ゲートとして使われるので、終了コードと「送信前に弾いたか」を軸に確かめる。
 
+// 受け入れ条件（docs/features/review-findings/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// - CLI の鮮度検査: 最新ラウンドの `head_sha` と照合対象の HEAD が違えば不成立。HEAD が決まらないときも不成立（`--no-head-check` を付けたときだけ通す）。判定は crates/cli/src/commands/reviews.rs の gate_failure の単体テストで見る
+// - CLI のリポジトリ検査: 連携の無いプロジェクトでは不成立（`--allow-unlinked` を付けたときだけ通す）。同じく gate_failure の単体テストで見る
+// - 指摘数の境界: 201 件は CLI の事前検証で弾く（crates/cli/src/commands/reviews.rs の単体テスト）
+
 mod common;
 
 use common::*;

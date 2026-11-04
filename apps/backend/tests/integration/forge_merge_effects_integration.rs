@@ -1,6 +1,17 @@
 //! マージ時の自動完了と確認済み操作（TASK-289、docs/features/tasks/9.github-tasks.md
 //! §5「マージ時副作用の独立処理」/ §8 `merge-effects/acknowledge` / §11）。
 
+// 受け入れ条件（docs/features/tasks/github-tasks/webhook.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// - `Closed { merged: true }`: イベントの本文から作ったマージ時点集合と、`created_at <= merged_at` の `manual` 行の `bool_or(closes)` が true のタスクだけ完了する / 既に完了のタスクは遷移しない / 全参照が `closes = false` のタスクは触らない / マージ後に追加した `manual` 行は過去のマージで完了させない
+// - マージ副作用の冪等性: 同じ PR の `Closed { merged: true }` を再送しても、並行に呼んでも（apply_merge_effects を tokio::join! で 2 本）、対象タスクの遷移は 1 回だけ
+// - 未適用表示: 連携前にマージ済みの PR を初めて観測すると `state = merged` にはなるがタスク完了は実行せず、`merge_effects_processed_at = NULL` のままになる
+// - 確認済み操作: リンク先タスクが 1 件も完了しないまま `merge_effects_processed_at` と `merge_effects_acknowledged_by` が設定され、リンク先タスクには `forge_merge_effects_acknowledged` が 1 行ずつ積まれ（`user_id` は操作者）、2 回目の実行では増えない。リンク先が 0 件の PR でも成功する。その後に元の `Closed { merged: true }` が届いても副作用は実行されない（対照として、確認済みにしていない PR では完了する）
+// - 確認済み操作の拒否: 処理済み・確認済みの PR は 409、`state` が `merged` でない PR も 409。別プロジェクトの `pull_request_id` は 404、編集権限が無い呼び出し元は 403（対照は 200）。パスのプロジェクトにだけ入れる利用者は、別プロジェクトのタスクにもリンクした PR を確認済みにできず 403（対照として、パスのプロジェクトのタスクだけにリンクした PR は 200、両方に入れる利用者は 200）
+// - マージによる自動完了の書き戻し: GitHub Issue から取り込んだタスクを `Closes` 付きの PR のマージで完了にすると `github_issue_links.pending_push` が立ち、書き戻しジョブが積まれる（対照として、参照だけで完了させないタスクには立たない）
+// - マージ後編集の先着: マージ時本文が `Closes ENG-42`、マージ後本文が `Closes ENG-43` のとき、新しい `Edited` を古い `Closed { merged: true }` より先に処理すると、現在表示用リンクと PR 行は編集後の内容になり、`merge_effects_processed_at` は NULL のままになる。後着した `Closed` は現在表示を巻き戻さず、イベント本文から ENG-42 だけを完了し、ENG-43 は完了しない
+// - `Closed` のリンクと副作用: マージ時点のイベント本文に `Closes KEY-N` が残っていれば完了する。`manual` はマージ時刻以前に作られた `closes = true` の行だけが完了判定に加わる
+// - 複数参照元: マージ時のイベントでは現在行ではなくイベント固有の集合を参照元ごとに集計する（現在行にだけある参照は完了しない）
+
 use crate::common::TestApp;
 use crate::forge_commit_links_integration::{
     Fixture, REPO_NAME, REPO_OWNER, insert_project, insert_status, insert_task, setup,
