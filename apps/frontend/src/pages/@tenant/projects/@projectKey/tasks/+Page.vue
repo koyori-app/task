@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadErrorState from '@/components/LoadErrorState.vue';
 import { Loader2, Search, Signal, SignalHigh, SignalLow, SignalMedium, X } from '@lucide/vue';
 import type { LucideIcon } from '@lucide/vue';
 import type {
@@ -123,6 +124,7 @@ const {
   isTenantNotFound,
   isResolving: isTenantResolving,
   isError: isTenantResolveError,
+  tenantsQuery,
 } = useResolvedTenantId(tenantDisplayId);
 const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
 const {
@@ -130,6 +132,7 @@ const {
   isProjectNotFound,
   isResolving: isProjectResolving,
   isError: isProjectResolveError,
+  projectsQuery,
 } = useResolvedProjectId(tenantId, projectKey);
 
 // ---- 分割ビュー: 選択タスクと詳細ペイン ----
@@ -567,6 +570,13 @@ const isError = computed(
   () => isTenantResolveError.value || isProjectResolveError.value || statusesQuery.isError.value,
 );
 
+/** 失敗した取得だけをやり直す（解決に失敗したテナント・プロジェクトも含む） */
+function retryFailed() {
+  if (isTenantResolveError.value) void tenantsQuery.refetch();
+  if (isProjectResolveError.value) void projectsQuery.refetch();
+  if (statusesQuery.isError.value) void statusesQuery.refetch();
+}
+
 /** 一覧本体（作成ボタンと作成ダイアログを含む分岐）が出ているか。T のショートカットとも共有する */
 const canCreate = computed(
   () =>
@@ -927,9 +937,11 @@ const columnItems = computed<DropdownItem[]>(() =>
       <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
     </div>
 
-    <div v-else-if="isError" class="flex justify-center py-8 text-sm text-destructive">
-      タスクの読み込みに失敗しました
-    </div>
+    <LoadErrorState
+      v-else-if="isError"
+      message="タスクの読み込みに失敗しました"
+      @retry="retryFailed"
+    />
 
     <div
       v-else-if="isTenantNotFound"

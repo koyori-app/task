@@ -126,6 +126,48 @@ async function editBody(wrapper: ReturnType<typeof mountDetail>, text: string) {
   await wrapper.get('textarea').setValue(text);
 }
 
+describe('DocumentDetail 読み込みの失敗', () => {
+  function failMeta(status: number) {
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: Request | string, init?: RequestInit) => {
+      if (
+        typeof input !== 'string' &&
+        new URL(input.url).pathname.endsWith('/drive/files/file-1') &&
+        input.method === 'GET'
+      ) {
+        return Response.json({ message: 'x' }, { status });
+      }
+      return original(input, init);
+    });
+    return original;
+  }
+
+  it('404 は「見つかりません」で、再試行は出さない', async () => {
+    failMeta(404);
+    const wrapper = mountDetail();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('ドキュメントが見つかりません');
+    expect(wrapper.find('[data-testid="load-error"]').exists()).toBe(false);
+  });
+
+  it('5xx は失敗として出し、再試行で取り直す', async () => {
+    const original = failMeta(500);
+    const wrapper = mountDetail();
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain('ドキュメントが見つかりません');
+    expect(wrapper.get('[data-testid="load-error"]').text()).toContain('読み込みに失敗しました');
+
+    vi.stubGlobal('fetch', original);
+    await wrapper.get('[data-testid="load-error"] button').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="load-error"]').exists()).toBe(false);
+    expect(wrapper.get('h1').text()).toBe('仕様');
+  });
+});
+
 describe('DocumentDetail 閲覧', () => {
   it('タイトルと関連タスクを出し、手動で結んだものに印を付ける', async () => {
     const wrapper = mountDetail();
@@ -501,7 +543,7 @@ describe('DocumentDetail の T ショートカット', () => {
     });
     const wrapper = mountDetail();
     await flushPromises();
-    expect(wrapper.text()).toContain('ドキュメントが見つかりません');
+    expect(wrapper.text()).toContain('ドキュメントの読み込みに失敗しました');
     pressT();
     await flushPromises();
     expect(createOpen(wrapper)).toBe(false);
