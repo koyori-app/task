@@ -27,6 +27,7 @@ pub mod project_statuses;
 pub mod project_task_counters;
 pub mod project_task_views;
 pub mod projects;
+pub mod reactions;
 pub mod recovery_codes;
 pub mod review_finding_transitions;
 pub mod review_findings;
