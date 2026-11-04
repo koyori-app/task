@@ -33,10 +33,10 @@ const EXPIRY_PRESETS = [
 ] as const;
 type BotExpiry = (typeof EXPIRY_PRESETS)[number]['key'];
 
+// BOT は Member 相当まで（Admin は選べない。lib/bot-roles.ts）
 const ROLE_ITEMS: { value: TenantRole; label: string }[] = [
   { value: 'Member', label: 'Member' },
   { value: 'Viewer', label: 'Viewer' },
-  { value: 'Admin', label: 'Admin' },
 ];
 
 const queryClient = useQueryClient();

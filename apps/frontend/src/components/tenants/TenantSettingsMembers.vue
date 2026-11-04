@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import UserAvatar from '@/components/UserAvatar.vue';
 import TenantBotsSection from '@/components/tenants/TenantBotsSection.vue';
+import { rolesForAccount } from '@/lib/bot-roles';
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhArrowClockwise, PhEnvelopeSimple, PhPaperPlaneTilt, PhX } from '@phosphor-icons/vue';
 import { computed, ref, useId } from 'vue';
@@ -574,7 +575,7 @@ async function onRemove(member: TenantMemberResponse) {
                   class="w-[110px] shrink-0"
                   :searchable="false"
                   :disabled="!canManageMembers || busy"
-                  :items="ROLES"
+                  :items="rolesForAccount(ROLES, member.user.account_kind)"
                   :selected-values="[member.role]"
                   :on-selection-change="
                     (values: string[]) => onRoleChange(member, values[0] as TenantRole)

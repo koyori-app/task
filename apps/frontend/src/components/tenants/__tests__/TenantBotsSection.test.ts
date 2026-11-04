@@ -51,6 +51,7 @@ vi.mock('@/lib/api-vue-query', () => ({
   fetchClient: { POST: mocks.post, PATCH: mocks.patch, DELETE: mocks.remove },
 }));
 import TenantBotsSection from '../TenantBotsSection.vue';
+import { accessibleText, pickerOptions, pickerTrigger } from '@/components/__tests__/picker';
 
 enableAutoUnmount(afterEach);
 
@@ -99,6 +100,14 @@ describe('テナントの BOT 管理', () => {
       }),
     );
     expect((wrapper.get('#bot-name').element as HTMLInputElement).value).toBe('');
+  });
+
+  it('BOT の役は Member と Viewer だけを選べる（Admin は出さない）', () => {
+    const { wrapper } = render();
+    const names = pickerOptions(pickerTrigger(wrapper.element, 'ロール')).map((option) =>
+      accessibleText(option),
+    );
+    expect(names).toEqual(['Member', 'Viewer']);
   });
 
   it('PAT は期限とスコープを持ち、発行値は閉じると消え、query の cache にも残らない', async () => {

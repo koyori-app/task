@@ -6,6 +6,7 @@ import UserAvatar from '@/components/UserAvatar.vue';
 import UserSelector from '@/components/users/UserSelector.vue';
 import { Button, Dialog, Field, Picker } from '@koyori-app/ui-vue';
 import { LIST_PROJECTS_PATH, apiClient, useMeQuery } from '@/lib/api-vue-query';
+import { rolesForAccount } from '@/lib/bot-roles';
 import type { components } from '@/generated/api';
 
 type ProjectMemberResponse = components['schemas']['ProjectMemberResponse'];
@@ -119,6 +120,19 @@ function errorStatus(e: unknown): number | undefined {
 
 const selectedUserId = ref<string | null>(null);
 const selectedRole = ref<ProjectRole>('Member');
+// 選んだ人が BOT なら Admin を選べない（選んであれば Member へ戻す）
+const addRoles = computed(() =>
+  rolesForAccount(
+    ROLES,
+    candidateUsers.value.find((user) => user.id === selectedUserId.value)?.account_kind,
+  ),
+);
+function selectUser(userId: string | null) {
+  selectedUserId.value = userId;
+  if (!addRoles.value.some((role) => role.value === selectedRole.value)) {
+    selectedRole.value = 'Member';
+  }
+}
 const addError = ref<string | null>(null);
 
 async function onAdd() {
@@ -264,14 +278,14 @@ async function confirmRemove() {
             search-label="テナントメンバーを検索"
             empty-text="追加できるテナントメンバーがいません。"
             no-match-text="一致するテナントメンバーがいません"
-            @update:model-value="(ids) => (selectedUserId = ids[0] ?? null)"
+            @update:model-value="(ids) => selectUser(ids[0] ?? null)"
           />
         </Field>
         <Field id="member-role" label="ロール" class="w-[140px]">
           <Picker
             label="ロール"
             :searchable="false"
-            :items="ROLES"
+            :items="addRoles"
             :selected-values="[selectedRole]"
             :on-selection-change="(values: string[]) => (selectedRole = values[0] as ProjectRole)"
           />
@@ -325,7 +339,7 @@ async function confirmRemove() {
             top-layer
             :searchable="false"
             :disabled="updateMutation.isPending.value"
-            :items="ROLES"
+            :items="rolesForAccount(ROLES, member.user.account_kind)"
             :selected-values="[member.role]"
             :on-selection-change="
               (values: string[]) => onRoleChange(member, values[0] as ProjectRole)
