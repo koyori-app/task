@@ -48,7 +48,7 @@ sidebar:
 ---
 ```
 
-`status` は仕様のページだけに付ける。使い方・セルフホストでは、無い機能は書かないことで伝える。
+`status` は仕様のページだけに付ける。使い方・セルフホストでは、無い機能は書かないことで伝える。 分割した仕様の親ページ（`features/<name>/index.md`）にも付ける。群の案内ページ（`features/tasks/index.md` など）には付けず、代わりに `sidebar.group.label` を書く。
 
 ### 仕様（`dev/features/`）の節
 
