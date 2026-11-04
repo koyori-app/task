@@ -1,6 +1,7 @@
 ---
 title: Git ホスティング連携
 description: PR・コミット・ブランチとタスクの自動リンクと、マージ時のタスクの自動完了（GitHub / GitLab / Forgejo）
+status: partial
 updated: 2026-11-04
 slug: features/tasks/github-tasks
 sidebar:
