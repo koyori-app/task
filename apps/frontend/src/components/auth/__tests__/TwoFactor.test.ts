@@ -113,17 +113,35 @@ describe('TwoFactor 検証（設定済み）', () => {
     expect(assignSpy).not.toHaveBeenCalled();
   });
 
-  it('試行回数の上限（429）では案内を出して送信を止める', async () => {
-    stubApi({
-      ...verifyEnabled,
-      'POST /v1/auth/2fa/verify': () => json({ message: 'too-many-requests' }, 429),
-    });
-    const wrapper = await mountPage();
+  it('試行回数の上限（429）では案内を出して一時的に送信を止め、時間が経てば再送信できる', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let status = 429;
+      const calls = stubApi({
+        ...verifyEnabled,
+        'POST /v1/auth/2fa/verify': () =>
+          status === 429
+            ? json({ message: 'too-many-requests' }, 429)
+            : json({ message: 'invalid-2fa-code' }, 401),
+      });
+      const wrapper = await mountPage();
 
-    await submitCode(wrapper, '000000');
+      await submitCode(wrapper, '000000');
 
-    expect(wrapper.text()).toContain('試行回数の上限');
-    expect(wrapper.find('button[type="submit"]').attributes('disabled')).toBeDefined();
+      expect(wrapper.text()).toContain('試行回数の上限');
+      expect(wrapper.find('button[type="submit"]').attributes('disabled')).toBeDefined();
+
+      status = 401;
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flushPromises();
+
+      expect(wrapper.find('button[type="submit"]').attributes('disabled')).toBeUndefined();
+      await submitCode(wrapper, '111111');
+      expect(calls.filter((c) => c.key === 'POST /v1/auth/2fa/verify')).toHaveLength(2);
+      expect(wrapper.text()).toContain('コードが正しくありません');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('セッション切れ（invalid-2fa-code 以外の 401）は再サインインを案内する', async () => {

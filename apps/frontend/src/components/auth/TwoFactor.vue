@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useQueryClient } from '@tanstack/vue-query';
-import { onMounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import { Button } from '@koyori-app/ui-vue';
 import RecoveryCodesPanel from '@/components/auth/RecoveryCodesPanel.vue';
 import TwoFactorSetupForm from '@/components/auth/TwoFactorSetupForm.vue';
@@ -31,6 +31,19 @@ const setupData = ref<{ otpauth_uri: string; qr_code_png: string } | null>(null)
 const recoveryCodes = ref<string[]>([]);
 const submitError = ref<string | null>(null);
 const locked = ref(false);
+// 429 後に送信を止める時間。制限そのものは backend（900 秒）が守るので、画面は連打を防ぐだけ
+const LOCK_MS = 30_000;
+let lockTimer: ReturnType<typeof setTimeout> | undefined;
+
+function lockBriefly() {
+  clearTimeout(lockTimer);
+  locked.value = true;
+  lockTimer = setTimeout(() => {
+    locked.value = false;
+  }, LOCK_MS);
+}
+
+onUnmounted(() => clearTimeout(lockTimer));
 
 function statusOf(e: unknown): number | undefined {
   return (e as { response?: { status?: number } }).response?.status;
@@ -57,7 +70,7 @@ async function finish() {
 function handleCodeFailure(e: unknown): 'handled' | 'recheck' {
   const status = statusOf(e);
   if (status === 429) {
-    locked.value = true;
+    lockBriefly();
     submitError.value = '試行回数の上限に達しました。しばらく待ってから、もう一度お試しください。';
     return 'handled';
   }
@@ -82,6 +95,7 @@ function handleCodeFailure(e: unknown): 'handled' | 'recheck' {
 async function init() {
   phase.value = 'loading';
   submitError.value = null;
+  clearTimeout(lockTimer);
   locked.value = false;
   try {
     const { response } = await fetchClient.GET('/v1/auth/me');
