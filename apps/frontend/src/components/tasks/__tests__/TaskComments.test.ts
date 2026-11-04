@@ -92,6 +92,17 @@ describe('TaskComments の下書き（タスクごと）', () => {
     expect((box(wrapper).element as HTMLTextAreaElement).value).toBe('A の下書き');
   });
 
+  it('別テナントの同じ表示用 ID（ENG-42）のタスクには下書きを出さない', async () => {
+    const first = mountComments({ tenantId: 't-a', projectId: 'p-a', taskId: 'ENG-42' });
+    await first.find('textarea').setValue('テナント A 向け');
+    first.unmount();
+    const other = mountComments({ tenantId: 't-b', projectId: 'p-b', taskId: 'ENG-42' });
+    expect((other.find('textarea').element as HTMLTextAreaElement).value).toBe('');
+    other.unmount();
+    const back = mountComments({ tenantId: 't-a', projectId: 'p-a', taskId: 'ENG-42' });
+    expect((back.find('textarea').element as HTMLTextAreaElement).value).toBe('テナント A 向け');
+  });
+
   it('開き直し（再マウント）でも同じタスクの下書きが戻る', async () => {
     const first = mountComments({ taskId: 'a' });
     await box(first).setValue('書きかけ');

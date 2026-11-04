@@ -25,6 +25,12 @@ const props = defineProps<{
    * 移った時に前のタスクのスクロールの状態を持ち越さないために受け取る
    */
   taskId?: string;
+  /**
+   * 下書きの置き場をテナントとプロジェクトで分けるための ID。taskId は `ENG-42` のような
+   * 表示用 ID で別テナントに同じ値があり得るので、これが無いと下書きが混ざる
+   */
+  tenantId?: string | null;
+  projectId?: string | null;
   threads: CommentThread[];
   /** 本文の `<@利用者ID>` の印から引ける表示情報（コメント一覧 API の `mentions`） */
   mentions?: MentionTable;
@@ -121,9 +127,14 @@ const openThread = computed(() => props.threads.find((thread) => thread.id === o
 // pinia の無い所（Storybook など）では利用者 ID 未取得扱い（メモリだけ）にする。
 const authStore = getActivePinia() ? useAuthStore() : null;
 const userId = computed(() => authStore?.user?.id ?? null);
+// 下書きのキー。taskId は表示用 ID で別テナントに同じ値があり得るので、テナントとプロジェクトで分ける
+const draftTaskKey = computed(() =>
+  [props.tenantId ?? '', props.projectId ?? '', props.taskId ?? ''].join('/'),
+);
 const newDraft = computed({
-  get: () => getCommentDraft(userId.value, props.taskId, openThreadId.value),
-  set: (value: string) => setCommentDraft(userId.value, props.taskId, openThreadId.value, value),
+  get: () => getCommentDraft(userId.value, draftTaskKey.value, openThreadId.value),
+  set: (value: string) =>
+    setCommentDraft(userId.value, draftTaskKey.value, openThreadId.value, value),
 });
 
 // 開いていたスレッドが消えた（削除・再取得で不在）ら一覧へ戻す
@@ -245,7 +256,7 @@ async function submitDraft() {
   // 押せるし、スレッドが消えれば watch が一覧へ戻すので、await の後に
   // openThreadId を読み直すと別の下書きを消すことになる
   const threadId = openThreadId.value;
-  const taskId = props.taskId;
+  const taskId = draftTaskKey.value;
   const uid = userId.value;
   const sent = getCommentDraft(uid, taskId, threadId);
   pinnedToBottom = true;

@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 
 /*
- * コメントの下書き置き場。キーは利用者 ID + タスク ID + スレッド ID（一覧は threadId = null）。
+ * コメントの下書き置き場。キーは利用者 ID + タスクのキー（テナント/プロジェクト/表示用 ID）+ スレッド ID（一覧は threadId = null）。
  * 利用者 ID を含めるのは、同じタブで別の利用者がログインしても前の人の下書きを出さないため。
  * 利用者 ID が未取得（null）の間は sessionStorage へ書かず、メモリだけに置く。
  * 明示的なログアウト（useAuthSession の logout）で resetCommentDrafts が全部消す。
@@ -75,7 +75,7 @@ export function clearCommentDraft(
   }
 }
 
-/** テスト用。メモリと sessionStorage の下書きをすべて消す */
+/** 明示的なログアウト（useAuthSession の logout）とテストで使う。メモリと sessionStorage の下書きをすべて消す */
 export function resetCommentDrafts() {
   memory.value = {};
   try {
