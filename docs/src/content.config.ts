@@ -8,7 +8,7 @@ export const collections = {
     // src/content/docs へ移さず docs/ 直下を読む。
     docsCollection({
       base: "../..",
-      pattern: "{index.md,breadcrumbs.md,{features,frontend,development}/**/*.md}",
+      pattern: "{index.md,breadcrumbs.md,{features,frontend,development,dev}/**/*.md}",
       // STYLE.md の frontmatter。値の範囲は scripts/lint-style.mjs の STATUS と揃える
       schemaFields: {
         status: z.enum(["implemented", "partial", "planned", "operational"]).optional(),
