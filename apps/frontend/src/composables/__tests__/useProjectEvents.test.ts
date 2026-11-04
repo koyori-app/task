@@ -105,6 +105,8 @@ describe('useProjectEvents', () => {
         '/v1/tenants/{tenant_id}/projects/{project_id}/tasks',
         '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}',
         '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/relations',
+        '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/comments',
+        '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/attachments',
         TASK_SEARCH_PATH,
         SCHEDULE_PATH,
         ACTIVITIES_PATH,

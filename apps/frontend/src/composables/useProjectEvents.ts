@@ -10,11 +10,18 @@ const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as
 const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
 const TASK_RELATIONS_PATH =
   '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/relations' as const;
+// コメントと添付はタスク本体とは別のクエリなので、個別に取り直す
+const TASK_COMMENTS_PATH =
+  '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/comments' as const;
+const TASK_ATTACHMENTS_PATH =
+  '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/attachments' as const;
 
 const INVALIDATED_PATHS = [
   LIST_TASKS_PATH,
   GET_TASK_PATH,
   TASK_RELATIONS_PATH,
+  TASK_COMMENTS_PATH,
+  TASK_ATTACHMENTS_PATH,
   TASK_SEARCH_PATH,
   SCHEDULE_PATH,
   ACTIVITIES_PATH,
