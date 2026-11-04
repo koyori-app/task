@@ -2,7 +2,7 @@
 import { usePageContext } from 'vike-vue/usePageContext';
 import { computed, ref } from 'vue';
 import { Button } from '@koyori-app/ui-vue';
-import { apiClient, useMeQuery } from '@/lib/api-vue-query';
+import { apiClient, isSessionRejected, useMeQuery } from '@/lib/api-vue-query';
 import { INVITATION_ACCEPT_RETURN } from '@/lib/invitation-accept';
 import { markNotice } from '@/lib/one-time-notice';
 
@@ -26,7 +26,9 @@ const previewStatus = computed(
 );
 
 const meQuery = useMeQuery();
-const signedOut = computed(() => meQuery.isError.value && !meQuery.isFetching.value);
+const signedOut = computed(
+  () => isSessionRejected(meQuery.error.value) && !meQuery.isFetching.value,
+);
 // API の照合と同じく大文字小文字は区別しない（`normalize_email`）
 const addressMatches = computed(
   () =>
@@ -110,9 +112,10 @@ async function accept() {
             で登録し、メールの確認を済ませてから、このリンクをもう一度開いてください。
           </p>
         </template>
-        <p v-else-if="!meQuery.isSuccess.value" class="text-muted-foreground text-sm">
-          読み込み中…
+        <p v-else-if="meQuery.isError.value && !meQuery.data.value" class="text-sm" role="alert">
+          サーバーに接続できませんでした。時間をおいてやり直してください。
         </p>
+        <p v-else-if="!meQuery.data.value" class="text-muted-foreground text-sm">読み込み中…</p>
         <template v-else-if="!addressMatches">
           <p class="text-sm" role="alert">
             いまは {{ meQuery.data.value!.email }} でログインしています。この招待は
