@@ -918,6 +918,23 @@ describe('TaskDetailHub 説明の編集', () => {
     expect(wrapper.text()).toContain('元の説明');
   });
 
+  it('変更ありのままタイトルの編集を始めると確認が出て、取りやめると説明の編集と内容が残る', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('書きかけ');
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === task.title)!
+      .trigger('click');
+    const confirm = dialogs(wrapper)[0]!;
+    expect(confirm.props('open')).toBe(true);
+    (confirm.props('onCancel') as () => void)();
+    await nextTick();
+    expect((wrapper.get('textarea[aria-label="説明"]').element as HTMLTextAreaElement).value).toBe(
+      '書きかけ',
+    );
+    expect(wrapper.emitted('save:title')).toBeUndefined();
+  });
+
   it('変更が無ければ Esc もキャンセルも確認なしで閉じる', async () => {
     const wrapper = await startEdit();
     await wrapper.get('textarea[aria-label="説明"]').trigger('keydown', { key: 'Escape' });

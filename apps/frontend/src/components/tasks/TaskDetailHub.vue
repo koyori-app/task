@@ -252,6 +252,13 @@ function fieldError(field: EditableField) {
 
 async function startEditing(field: EditableField) {
   if (!props.task || isFieldUpdating(field)) return;
+  // 説明に未保存の変更があるまま別項目へ移ると、共有の draftValue が上書きされて失われる。
+  // 切り替えを止めて破棄確認を出し、確認で破棄したときだけ続ける
+  if (editingField.value === 'description' && field !== 'description' && descriptionDirty.value) {
+    pendingField.value = field;
+    discardConfirmOpen.value = true;
+    return;
+  }
   editingField.value = field;
   switch (field) {
     case 'title':
@@ -350,6 +357,7 @@ function commitEditing(field: EditableField) {
 
 // 説明の編集: 破棄・全消去は確認を挟む。blur では保存も破棄もしない
 const discardConfirmOpen = ref(false);
+const pendingField = ref<EditableField | null>(null);
 const clearConfirmOpen = ref(false);
 
 const descriptionDirty = computed(
@@ -367,7 +375,15 @@ function requestCancelDescription() {
 
 function confirmDiscardDescription() {
   discardConfirmOpen.value = false;
+  const next = pendingField.value;
+  pendingField.value = null;
   cancelEditing();
+  if (next) void startEditing(next);
+}
+
+function cancelDiscardDescription() {
+  discardConfirmOpen.value = false;
+  pendingField.value = null;
 }
 
 function confirmClearDescription() {
@@ -1099,7 +1115,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 confirm-label="破棄する"
                 destructive
                 :on-confirm="confirmDiscardDescription"
-                :on-cancel="() => (discardConfirmOpen = false)"
+                :on-cancel="cancelDiscardDescription"
               />
               <ConfirmDialog
                 :open="clearConfirmOpen"
