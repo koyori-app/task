@@ -277,6 +277,10 @@ pub struct TaskDetailResponse {
     #[serde(default)]
     #[schema(value_type = HashMap<String, MentionedUser>)]
     pub mentions: MentionMap,
+    /// タスク本体への絵文字リアクション（最初に付いた順）。
+    #[serde(default)]
+    #[schema(required)]
+    pub reactions: Vec<crate::reactions::ReactionSummary>,
 }
 
 #[derive(Validate, Deserialize, ToSchema, serde::Serialize)]

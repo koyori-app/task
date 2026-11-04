@@ -329,8 +329,10 @@ const sampleComments = [
         updated_at: '2026-06-11T00:00:00Z',
         user: { id: 'user-2', name: 'sousuke', avatar_url: null },
         replies: [],
+        reactions: [],
       },
     ],
+    reactions: [],
   },
 ];
 
