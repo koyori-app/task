@@ -3,8 +3,8 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { computed, watch, type MaybeRefOrGetter, toValue } from 'vue';
 import { usePageContext } from 'vike-vue/usePageContext';
 import {
+  isSessionRejected,
   meQueryOptions,
-  queryErrorStatus,
   sessionExpired,
   useLogoutMutation,
   useMeQuery,
@@ -44,9 +44,9 @@ export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) 
   }
 
   const isSettledError = computed(() => meQuery.isError.value && !meQuery.isFetching.value);
-  // 401 だけがサインアウト。5xx・通信断はセッションを保ち、再試行を出す
+  // セッションの拒否（401 / 403）だけがサインアウト。5xx・通信断はセッションを保ち、再試行を出す
   const isUnauthorized = computed(
-    () => isSettledError.value && queryErrorStatus(meQuery.error?.value) === 401,
+    () => isSettledError.value && isSessionRejected(meQuery.error?.value),
   );
   const isTransientError = computed(() => isSettledError.value && !isUnauthorized.value);
 

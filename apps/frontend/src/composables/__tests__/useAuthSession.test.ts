@@ -353,6 +353,39 @@ describe('useAuthSession', () => {
     assignSpy.mockRestore();
   });
 
+  // 停止中や 2FA の途中のセッションは /me が 403 を返す。接続エラーと誤認して留めない
+  it('signs out instead of offering retry when /me is rejected with 403', async () => {
+    meQueryMockState.controlled = true;
+    meQueryMockState.isError.value = true;
+    meQueryMockState.error.value = { response: { status: 403 } };
+    meQueryMockState.isFetching.value = false;
+
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const authStore = useAuthStore();
+    authStore.setUser(mockUser);
+    let session!: ReturnType<typeof useAuthSession>;
+
+    mount(
+      defineComponent({
+        setup() {
+          session = useAuthSession({ guard: true });
+          return {};
+        },
+        template: '<div />',
+      }),
+      { global: { plugins: [[VueQueryPlugin, { queryClient }], pinia] } },
+    );
+
+    await flushPromises();
+
+    expect(authStore.user).toBeNull();
+    expect(assignSpy).toHaveBeenCalledWith('/signin');
+    expect(session.isTransientError.value).toBe(false);
+    assignSpy.mockRestore();
+  });
+
   it.each([
     ['500', { response: { status: 500 } }],
     ['network error', new TypeError('Failed to fetch')],

@@ -54,10 +54,19 @@ export function queryErrorStatus(error: unknown): number | undefined {
   return (error as { response?: Response } | null)?.response?.status;
 }
 
-/** /me の再試行。401 は確定なので再試行せず、5xx・通信断だけ 2 回まで。 */
+/**
+ * /v1/auth/me の失敗がセッションの拒否か（401: 未ログイン / 403: 停止中・2FA の途中）。
+ * 通信の失敗や 5xx はセッションの有無を示さない。
+ */
+export function isSessionRejected(error: unknown): boolean {
+  const status = queryErrorStatus(error);
+  return status === 401 || status === 403;
+}
+
+/** /me の再試行。拒否は確定なので再試行せず、5xx・通信断だけ 2 回まで。 */
 export const ME_RETRY_COUNT = 2;
 export function meRetry(failureCount: number, error: unknown): boolean {
-  return queryErrorStatus(error) !== 401 && failureCount < ME_RETRY_COUNT;
+  return !isSessionRejected(error) && failureCount < ME_RETRY_COUNT;
 }
 export const meRetryDelay = (attempt: number) => Math.min(1000 * 2 ** attempt, 10_000);
 

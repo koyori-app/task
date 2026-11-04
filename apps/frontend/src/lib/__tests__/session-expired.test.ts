@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import createFetchClient from 'openapi-fetch';
 import type { paths } from '@/generated/api';
 import {
+  isSessionRejected,
   meRetry,
   sessionExpired,
   sessionExpiredMiddleware,
@@ -60,10 +61,24 @@ describe('sessionExpiredMiddleware', () => {
 });
 
 describe('meRetry', () => {
-  it('retries 5xx and network errors twice, never 401', () => {
+  it('retries 5xx and network errors twice, never 401 or 403', () => {
     expect(meRetry(0, { response: { status: 500 } })).toBe(true);
     expect(meRetry(1, new TypeError('Failed to fetch'))).toBe(true);
     expect(meRetry(2, { response: { status: 500 } })).toBe(false);
     expect(meRetry(0, { response: { status: 401 } })).toBe(false);
+    expect(meRetry(0, { response: { status: 403 } })).toBe(false);
+  });
+});
+
+describe('isSessionRejected', () => {
+  it.each([
+    [{ response: { status: 401 } }, true],
+    [{ response: { status: 403 } }, true],
+    [{ response: { status: 429 } }, false],
+    [{ response: { status: 502 } }, false],
+    [new TypeError('Load failed'), false],
+    [null, false],
+  ])('%o -> %s', (error, expected) => {
+    expect(isSessionRejected(error)).toBe(expected);
   });
 });
