@@ -2378,7 +2378,7 @@
               }
             }
           },
-          "302": {
+          "307": {
             "description": "リダイレクト"
           },
           "400": {
@@ -2521,7 +2521,7 @@
           "204": {
             "description": "連携を解除しました"
           },
-          "302": {
+          "307": {
             "description": "リダイレクト"
           },
           "400": {
@@ -2698,7 +2698,7 @@
           }
         ],
         "responses": {
-          "302": {
+          "307": {
             "description": "リダイレクト"
           },
           "400": {
@@ -2847,7 +2847,7 @@
           }
         ],
         "responses": {
-          "302": {
+          "307": {
             "description": "リダイレクト"
           },
           "400": {
@@ -3487,7 +3487,7 @@
           "204": {
             "description": "パスワードを設定しました"
           },
-          "302": {
+          "307": {
             "description": "リダイレクト"
           },
           "400": {
@@ -16370,6 +16370,7 @@
           {
             "name": "priority",
             "in": "query",
+            "description": "優先度で絞り込む。`critical_fire` / `critical` / `high` / `medium` / `low` / `trivial` のいずれか。\n\nJSON の `priority`（`High` など）とは綴りが違う。このクエリは小文字の綴りだけを受け付け、\n`High` のような綴りや未知の値は 400 になる",
             "required": false,
             "schema": {
               "type": "string"
