@@ -244,10 +244,15 @@ pub async fn create_user(
     Valid(Json(payload)): Valid<Json<AdminCreateUserRequest>>,
 ) -> Result<(StatusCode, Json<UserResponse>), AppError> {
     let email = normalize_email(&payload.email);
+    if users::is_bot_email(&email) {
+        return Err(AppError::BadRequest);
+    }
     let password_hash = create_password_hash(&payload.password).map_err(auth_error_to_app)?;
     let user_id = Uuid::new_v4();
 
     let user = users::ActiveModel {
+        account_kind: Set("human".to_string()),
+        bot_tenant_id: Set(None),
         id: Set(user_id),
         username: Set(payload.username),
         bio: Set(Some(String::new())),
@@ -315,6 +320,9 @@ pub async fn update_user(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    if user.is_bot() {
+        return Err(AppError::Forbidden);
+    }
 
     if payload.is_admin == Some(false) && user.is_admin {
         ensure_not_last_admin(&state.db, id).await?;
@@ -411,6 +419,9 @@ pub async fn delete_user(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    if user.is_bot() {
+        return Err(AppError::Forbidden);
+    }
 
     if user.is_admin {
         ensure_not_last_admin(&state.db, id).await?;
@@ -459,6 +470,9 @@ pub async fn password_reset(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    if user.is_bot() {
+        return Err(AppError::Forbidden);
+    }
 
     let send_to = payload
         .send_to
@@ -521,12 +535,12 @@ pub async fn reset_2fa(
     Path(id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<StatusCode, AppError> {
-    if users::Entity::find_by_id(id)
+    let user = users::Entity::find_by_id(id)
         .one(&state.db)
         .await?
-        .is_none()
-    {
-        return Err(AppError::NotFound);
+        .ok_or(AppError::NotFound)?;
+    if user.is_bot() {
+        return Err(AppError::Forbidden);
     }
 
     reset_2fa_for_user(&state.db, id).await?;
@@ -565,12 +579,12 @@ pub async fn delete_passkey(
     Path((id, passkey_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, AppError> {
-    if users::Entity::find_by_id(id)
+    let user = users::Entity::find_by_id(id)
         .one(&state.db)
         .await?
-        .is_none()
-    {
-        return Err(AppError::NotFound);
+        .ok_or(AppError::NotFound)?;
+    if user.is_bot() {
+        return Err(AppError::Forbidden);
     }
 
     if !table_exists(&state.db, "passkeys").await? {
@@ -620,12 +634,12 @@ pub async fn delete_oauth(
     Path((id, provider)): Path<(Uuid, String)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, AppError> {
-    if users::Entity::find_by_id(id)
+    let user = users::Entity::find_by_id(id)
         .one(&state.db)
         .await?
-        .is_none()
-    {
-        return Err(AppError::NotFound);
+        .ok_or(AppError::NotFound)?;
+    if user.is_bot() {
+        return Err(AppError::Forbidden);
     }
 
     if !table_exists(&state.db, "oauth_connections").await? {

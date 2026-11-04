@@ -74,7 +74,7 @@ async fn passkeys_for_email_auth(
         .one(db)
         .await?;
 
-    let Some(user) = user.filter(|u| u.email_verified) else {
+    let Some(user) = user.filter(|u| u.email_verified && !u.is_bot()) else {
         return Ok(vec![]);
     };
 
@@ -371,7 +371,7 @@ pub async fn authentication_finish(
             return Err(AuthError::InvalidCredentials);
         }
 
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
 
@@ -410,7 +410,7 @@ pub async fn authentication_finish(
         return Err(AuthError::InvalidCredentials);
     }
 
-    if user.is_suspended {
+    if user.is_bot() || user.is_suspended {
         return Err(AuthError::Suspended);
     }
 

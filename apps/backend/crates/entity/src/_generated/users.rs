@@ -9,6 +9,9 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub username: String,
+    #[sea_orm(default_value = "human")]
+    pub account_kind: String,
+    pub bot_tenant_id: Option<Uuid>,
     #[sea_orm(column_type = "Text", nullable)]
     pub bio: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]

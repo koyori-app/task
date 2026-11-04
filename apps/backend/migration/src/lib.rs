@@ -1,3 +1,4 @@
+mod m20261104000000_tenant_bots;
 pub use sea_orm_migration::prelude::*;
 
 mod m20260520000000_initial_schema;
@@ -57,6 +58,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261017020000_forge_branch_links::Migration),
             Box::new(m20261020000000_tasks_title_trgm::Migration),
             Box::new(m20261021000000_tenant_members_org_profile::Migration),
+            Box::new(m20261104000000_tenant_bots::Migration),
         ]
     }
 }

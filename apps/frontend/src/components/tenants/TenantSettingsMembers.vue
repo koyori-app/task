@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import UserAvatar from '@/components/UserAvatar.vue';
+import TenantBotsSection from '@/components/tenants/TenantBotsSection.vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhArrowClockwise, PhEnvelopeSimple, PhPaperPlaneTilt, PhX } from '@phosphor-icons/vue';
 import { computed, ref, useId } from 'vue';
@@ -371,6 +372,7 @@ async function onRemove(member: TenantMemberResponse) {
       </div>
 
       <!-- 招待 -->
+      <TenantBotsSection v-if="canManageMembers" :key="tenant.id" :tenant-id="tenant.id" />
       <section v-if="canManageMembers" class="mb-7 rounded-[10px] border p-4">
         <h2 class="mb-3 text-sm font-semibold">人を招待する</h2>
         <form class="flex flex-wrap items-stretch gap-2" @submit.prevent="onInvite">
@@ -507,7 +509,7 @@ async function onRemove(member: TenantMemberResponse) {
               class="flex items-center gap-3 border-b px-3.5 py-2.5 last:border-b-0"
             >
               <UserAvatar
-                :user="{ name: member.user.username }"
+                :user="{ name: member.user.username, account_kind: member.user.account_kind }"
                 shape="lg"
                 class="text-white"
                 :style="{ background: avatarColor(member) }"

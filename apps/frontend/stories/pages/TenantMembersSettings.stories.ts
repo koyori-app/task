@@ -101,6 +101,7 @@ function mockFetch(overrides: MockOptions = {}) {
       const url = typeof req === 'string' ? req : req.url;
       const method = typeof req === 'string' ? 'GET' : req.method;
       const pathname = new URL(url, 'http://localhost').pathname;
+      if (method === 'GET' && pathname.endsWith('/bots')) return jsonResponse([]);
 
       if (/\/v1\/tenants\/?$/.test(pathname) && method === 'GET') {
         return jsonResponse([sampleTenant]);

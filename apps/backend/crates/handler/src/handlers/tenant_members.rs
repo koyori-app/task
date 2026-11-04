@@ -192,6 +192,9 @@ pub async fn add_member(
         .await?
         .ok_or(AppError::NotFound)?;
 
+    if user.is_bot() && user.bot_tenant_id != Some(tenant_id) {
+        return Err(AppError::Forbidden);
+    }
     // 二重追加は UNIQUE (tenant_id, user_id) に任せる。
     // 事前に引いてから INSERT すると、同時に 2 回追加されたときに 500 になる
     let member = match (tenant_members::ActiveModel {
@@ -291,6 +294,13 @@ pub async fn remove_member(
     require_tenant_admin(&state.db, tenant_id, auth.user_id).await?;
 
     let member = find_member(&state, tenant_id, user_id).await?;
+    let user = users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if user.is_bot() {
+        return Err(AppError::Forbidden);
+    }
 
     // プロジェクト側の「最後の Admin を残す」判定は、テナントに在籍している Admin だけを
     // 数える（`project_members::would_drop_last_admin`）。除名はその数え方の入力を変えるので、

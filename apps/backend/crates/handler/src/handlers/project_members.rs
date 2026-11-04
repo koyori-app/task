@@ -376,6 +376,9 @@ pub async fn add_member(
         .await?
         .ok_or(AppError::NotFound)?;
 
+    if user.is_bot() && user.bot_tenant_id != Some(tenant_id) {
+        return Err(AppError::Forbidden);
+    }
     // テナントに居るかは問わない。明示 ACE はテナント所属（継承）と独立に置ける
     // （apps/backend/docs/tenant-project-authz.md の「継承と明示」）。テナントに居ない人を
     // 招けば、その人はその場で project-only の客分になる。GitHub の outside collaborator

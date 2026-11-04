@@ -51,7 +51,11 @@ ValueLabel.props = ['value'];
 <template>
   <div class="flex items-start gap-2 px-2 py-1.5 text-xs" data-activity-history>
     <span class="flex h-5 w-6 shrink-0 items-center justify-center">
-      <UserAvatar :user="{ name: entry.actor }" size="sm" decorative />
+      <UserAvatar
+        :user="{ name: entry.actor, account_kind: entry.items[0]?.user?.account_kind }"
+        size="sm"
+        decorative
+      />
     </span>
     <div class="min-w-0 flex-1">
       <p class="flex h-5 items-center gap-1.5">

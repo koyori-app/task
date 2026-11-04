@@ -79,6 +79,7 @@ const candidateUsers = computed(() =>
   candidates.value.map((candidate) => ({
     id: candidate.user_id,
     username: candidate.user.username,
+    account_kind: candidate.user.account_kind,
     avatar_url: candidate.user.avatar_url ?? null,
   })),
 );

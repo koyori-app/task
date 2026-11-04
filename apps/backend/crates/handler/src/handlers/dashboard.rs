@@ -171,7 +171,7 @@ GROUP BY c.week_start, d.day ORDER BY d.day
     let recent = state
         .db
         .query_all_raw(sql(r#"
-SELECT a.id, a.event_type, a.payload, a.created_at, a.user_id, u.username,
+SELECT a.id, a.event_type, a.payload, a.created_at, a.user_id, u.username, u.account_kind,
        t.title, t.seq_id, p.key, p.name
 FROM task_activities a JOIN scoped t ON t.id = a.task_id
 JOIN projects p ON p.id = t.project_id LEFT JOIN users u ON u.id = a.user_id
@@ -182,6 +182,7 @@ ORDER BY a.created_at DESC, a.id DESC LIMIT 3
     for row in recent {
         let user_id: Option<Uuid> = row.try_get("", "user_id")?;
         let username: Option<String> = row.try_get("", "username")?;
+        let account_kind: Option<String> = row.try_get("", "account_kind")?;
         activities.push(DashboardActivity {
             activity: ActivityItem {
                 id: row.try_get("", "id")?,
@@ -192,6 +193,7 @@ ORDER BY a.created_at DESC, a.id DESC LIMIT 3
                     .with_timezone(&Utc),
                 user: user_id.map(|id| ActivityUser {
                     id,
+                    account_kind: account_kind.unwrap_or_else(|| "human".into()),
                     name: username.unwrap_or_else(|| "unknown".into()),
                 }),
             },
