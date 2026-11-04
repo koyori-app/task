@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, Loader2 } from '@lucide/vue';
+import { Loader2 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { keepPreviousData, useQuery } from '@tanstack/vue-query';
 import { navigate } from 'vike/client/router';
@@ -16,6 +16,8 @@ type MyTaskItem = components['schemas']['MyTaskItem'];
 
 const TASKS_PATH = '/v1/tenants/{tenant_id}/users/me/tasks' as const;
 const TASKS_PAGE_LIMIT = 50;
+
+const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 const pageContext = usePageContext();
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
@@ -51,7 +53,7 @@ function myTasksQueryKey(
     {
       params: {
         path: { tenant_id: resolvedTenantId },
-        query: { filter, limit, offset: queryOffset },
+        query: { filter, timezone, limit, offset: queryOffset },
       },
     },
   ] as const;
@@ -191,7 +193,6 @@ function priorityLabel(p: string) {
           :key="task.id"
           class="flex items-center gap-3 rounded-md border px-3 py-2"
         >
-          <Check class="h-4 w-4 text-muted-foreground" />
           <a
             :href="taskDetailHref(tenantDisplayId, task.project.key, task.seq_id)"
             class="flex-1 text-link hover:underline"
@@ -199,6 +200,17 @@ function priorityLabel(p: string) {
           >
             {{ task.title }}
           </a>
+          <span
+            class="inline-flex shrink-0 items-center gap-1.5 rounded bg-muted px-2 py-0.5 text-xs"
+            data-testid="task-status"
+          >
+            <span
+              class="size-2 rounded-full"
+              :style="{ backgroundColor: task.status.color }"
+              aria-hidden="true"
+            />
+            {{ task.status.name }}
+          </span>
           <span class="text-xs text-muted-foreground">{{ formatDeadline(task) }}</span>
           <span>{{ priorityLabel(task.priority) }}</span>
         </div>
@@ -217,7 +229,6 @@ function priorityLabel(p: string) {
           :key="task.id"
           class="flex items-center gap-3 rounded-md border px-3 py-2"
         >
-          <Check class="h-4 w-4 text-muted-foreground" />
           <a
             :href="taskDetailHref(tenantDisplayId, task.project.key, task.seq_id)"
             class="flex-1 text-link hover:underline"
@@ -225,6 +236,17 @@ function priorityLabel(p: string) {
           >
             {{ task.title }}
           </a>
+          <span
+            class="inline-flex shrink-0 items-center gap-1.5 rounded bg-muted px-2 py-0.5 text-xs"
+            data-testid="task-status"
+          >
+            <span
+              class="size-2 rounded-full"
+              :style="{ backgroundColor: task.status.color }"
+              aria-hidden="true"
+            />
+            {{ task.status.name }}
+          </span>
           <span class="rounded bg-muted px-2 py-0.5 text-xs">{{ task.project.key }}</span>
           <span class="text-xs text-muted-foreground">{{ formatDeadline(task) }}</span>
           <span>{{ priorityLabel(task.priority) }}</span>
