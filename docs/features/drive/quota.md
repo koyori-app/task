@@ -16,11 +16,11 @@ sidebar:
 
 ### 3 つの層
 
-有効クォータは、テナントの個別設定（無ければシステムの既定）にシステムの上限を掛けて決まる。システムの上限とシステムの既定は環境変数だけで決まる。
+有効クォータは、テナントの個別設定（無ければシステムの既定）にシステムの上限を掛けて決まる。システムの上限とシステムの既定は環境変数だけで決まる。環境変数は MB 単位で、起動時にバイトへ換算する（`DriveConfig::from_env`）。比較はすべてバイトで行う。
 
 ```mermaid
 flowchart TD
-  max["DRIVE_SYSTEM_MAX_QUOTA_MB<br/>システムの上限。設定時はこれを超えて設定不可"]
+  max["DRIVE_SYSTEM_MAX_QUOTA_MB<br/>システムの上限。設定時はバイトに換算した値を超えて設定不可"]
   tenant["tenants.drive_quota_bytes<br/>テナントの個別設定。テナントオーナーが変更可"]
   default_quota["DRIVE_DEFAULT_QUOTA_MB<br/>システムの既定。テナント未設定時に適用"]
   max -->|"上限として機能"| tenant
@@ -29,13 +29,13 @@ flowchart TD
 
 | 層 | 設定元 | 変更者 | 説明 |
 |---|---|---|---|
-| システムの上限 | `DRIVE_SYSTEM_MAX_QUOTA_MB` | サーバー管理者（環境変数） | テナントが設定できる上限。`0` は上限なし |
+| システムの上限 | `DRIVE_SYSTEM_MAX_QUOTA_MB` | サーバー管理者（環境変数） | テナントが設定できる上限。`system_max_bytes`（`DRIVE_SYSTEM_MAX_QUOTA_MB` × 1024 × 1024）に換算して使う。`0` は上限なし |
 | テナントの個別設定 | `tenants.drive_quota_bytes` | テナントオーナー（API） | テナント固有の有効クォータ。`NULL` は既定を適用する |
-| システムの既定 | `DRIVE_DEFAULT_QUOTA_MB` | サーバー管理者（環境変数） | テナントの個別設定が無いときの値。`0` は無制限 |
+| システムの既定 | `DRIVE_DEFAULT_QUOTA_MB` | サーバー管理者（環境変数） | テナントの個別設定が無いときの値。`DRIVE_DEFAULT_QUOTA_MB` × 1024 × 1024 のバイトに換算して使う。`0` は無制限 |
 
 ### 有効クォータの決定
 
-希望値は `tenants.drive_quota_bytes` で、`NULL` なら `DRIVE_DEFAULT_QUOTA_MB` である。希望値の `0` は無制限の指定である。システムの上限は `0` でなければ常に最後に適用する。
+希望値は `tenants.drive_quota_bytes` で、`NULL` なら `DRIVE_DEFAULT_QUOTA_MB` × 1024 × 1024 のバイト数である。希望値の `0` は無制限の指定である。システムの上限（`system_max_bytes`）は `0` でなければ常に最後に適用する。
 
 | 希望値 | システムの上限 | 有効クォータ |
 |---|---|---|
@@ -48,7 +48,7 @@ flowchart TD
 
 テナントオーナーが設定するときの検証は次のとおりである。
 
-- `DRIVE_SYSTEM_MAX_QUOTA_MB > 0` の場合、`quota_bytes` がそれを超えると `400 Bad Request` を返す
+- `DRIVE_SYSTEM_MAX_QUOTA_MB > 0` の場合、バイト単位の `quota_bytes` が `system_max_bytes`（`DRIVE_SYSTEM_MAX_QUOTA_MB` × 1024 × 1024）を超えると `400 Bad Request` を返す
 - 負の `quota_bytes` は `400 Bad Request` を返す
 - `0` は無制限の指定だが、システムの上限があれば適用される
 - `DRIVE_SYSTEM_MAX_QUOTA_MB = 0` の場合、非負の値を上限なく設定できる
@@ -65,7 +65,7 @@ flowchart TD
 
 ### システムの上限の引き下げ
 
-`DRIVE_SYSTEM_MAX_QUOTA_MB` を引き下げても、既存のテナントの `drive_quota_bytes` 自体は変更しない。起動時に個別設定の値がシステムの上限を超えるテナントを抽出し、`tenant_id`・`quota_bytes`・`system_max_bytes` とともに次の警告を出力する。
+`DRIVE_SYSTEM_MAX_QUOTA_MB` を引き下げても、既存のテナントの `drive_quota_bytes` 自体は変更しない。起動時に `drive_quota_bytes` が `system_max_bytes` を超えるテナントを抽出し、`tenant_id`・`quota_bytes`・`system_max_bytes` とともに次の警告を出力する。
 
 ```text
 WARN tenant drive quota exceeds system_max — update tenant quota or raise DRIVE_SYSTEM_MAX_QUOTA_MB
