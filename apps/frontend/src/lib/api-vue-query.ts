@@ -54,10 +54,11 @@ export function queryErrorStatus(error: unknown): number | undefined {
   return (error as { response?: Response } | null)?.response?.status;
 }
 
-/** /me の再試行。401 は確定なので再試行せず、5xx・通信断だけ 2 回まで。 */
+/** /me の再試行。401・403（半認証）は確定なので再試行せず、5xx・通信断だけ 2 回まで。 */
 export const ME_RETRY_COUNT = 2;
 export function meRetry(failureCount: number, error: unknown): boolean {
-  return queryErrorStatus(error) !== 401 && failureCount < ME_RETRY_COUNT;
+  const status = queryErrorStatus(error);
+  return status !== 401 && status !== 403 && failureCount < ME_RETRY_COUNT;
 }
 export const meRetryDelay = (attempt: number) => Math.min(1000 * 2 ** attempt, 10_000);
 
@@ -356,6 +357,18 @@ export function useUpdateFindingStateMutation() {
 
 export function useLoginMutation() {
   return apiClient.useMutation('post', '/v1/auth/login');
+}
+
+export function useTotpSetupMutation() {
+  return apiClient.useMutation('post', '/v1/auth/2fa/totp/setup');
+}
+
+export function useTotpVerifySetupMutation() {
+  return apiClient.useMutation('post', '/v1/auth/2fa/totp/verify-setup');
+}
+
+export function useVerifyTwoFactorMutation() {
+  return apiClient.useMutation('post', '/v1/auth/2fa/verify');
 }
 
 export function useRegisterMutation() {

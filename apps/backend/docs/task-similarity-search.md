@@ -84,7 +84,7 @@ CREATE INDEX idx_tasks_title_trgm ON tasks USING GIN (title gin_trgm_ops);
 ```
 
 - 対象は **title のみ**。description は index が大きくなる割に、重複判定・候補提示には title で足りる。description の全文検索は従来の `search_vector` を残す
-- UNIQUE でない通常の index なので、起動時の SeaORM `sync()`（2.0.4）に消されない（CLAUDE.md の部分 UNIQUE index の地雷には該当しない）。`sync()` は拡張も index も作らないので、migration の適用漏れは補えない。migration の適用自体は e2e CI の起動（`e2e/scripts/start-backend.sh` が実 migration バイナリで適用してから backend を起動）で踏まれ、失敗すれば全ケースが落ちる
+- UNIQUE でない通常の index なので、起動時の SeaORM `sync()`（2.0.4）に消されない（AGENTS.md の部分 UNIQUE index の地雷には該当しない）。`sync()` は拡張も index も作らないので、migration の適用漏れは補えない。migration の適用自体は e2e CI の起動（`e2e/scripts/start-backend.sh` が実 migration バイナリで適用してから backend を起動）で踏まれ、失敗すれば全ケースが落ちる
 - `down` は **index だけ** 落とす。拡張は `IF NOT EXISTS` で既存を流用した可能性があり、他の依存や別ロール所有だと `DROP EXTENSION` が失敗するため残す
 - 通常の `CREATE INDEX` は構築中 `tasks` への書き込みを待たせる。本番 compose の `depends_on` は **新しい** backend の起動を migration 完了まで待たせるだけで、更新デプロイ中は旧 backend とワーカーが動いたまま index が構築される。**構築中の書き込み待ちを許容する**（title のみの GIN で、本番は 478 行・4.3 MB なので 1 秒未満）。`CONCURRENTLY` は `MigrationTrait::use_transaction()` を `Some(false)` にすれば使えるが、失敗時の INVALID index の片付けが要るので、待ちが問題になる規模になるまで単純な `CREATE INDEX` を採る
 - **ロケール検査**: trigram は `lc_ctype` が `C` だと CJK を英数字とみなさず trigram を作らない。マイグレーション内で `SELECT array_length(show_trgm('日本語テスト'), 1)` を実行し、`NULL` か 0 ならエラーで止める。本番は `en_US.utf8` と確認済み（§2）。検査は他環境（セルフホスト、手元の `TEST_DATABASE_URL`）向けに残す
@@ -130,7 +130,7 @@ ORDER BY score DESC, id ASC
 LIMIT $4
 ```
 
-プレースホルダは `$N`（`?` を書かない。CLAUDE.md 地雷）。
+プレースホルダは `$N`（`?` を書かない。AGENTS.md 地雷）。
 
 ## 6. API
 

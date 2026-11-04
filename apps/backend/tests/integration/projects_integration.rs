@@ -90,6 +90,54 @@ fn unique_key(prefix: &str) -> String {
     )
 }
 
+/// `key` を省略した作成で自動生成キーが衝突したら、先頭 6 文字とランダムな 4 文字に作り直す。
+/// 修正前は UNIQUE 違反で中止されたトランザクションへ INSERT し直し、25P02 で 500 になる。
+/// 明示した `key` の重複は作り直さず 409 のまま。
+#[tokio::test]
+async fn create_project_regenerates_colliding_generated_key() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    login(&mut app, &user).await;
+    let tenant_id = insert_tenant(&app.state.db, user.id).await;
+    let url = format!("/v1/tenants/{tenant_id}/projects");
+    let name = unique_key("R");
+
+    let first = app
+        .post_json_with_session(&url, serde_json::json!({ "name": name }))
+        .await;
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let first: serde_json::Value = first.json().await.unwrap();
+    assert_eq!(first["key"], name.as_str());
+
+    let second = app
+        .post_json_with_session(&url, serde_json::json!({ "name": name }))
+        .await;
+    assert_eq!(second.status(), StatusCode::CREATED);
+    let second: serde_json::Value = second.json().await.unwrap();
+    let second_key = second["key"].as_str().unwrap();
+    assert_eq!(second_key.len(), 10, "{second_key}");
+    assert!(second_key.starts_with(&name[..6]), "{second_key}");
+
+    // 作り直した試行のトランザクションで既定ステータスまで確定している
+    let statuses: Vec<serde_json::Value> = app
+        .get_with_session(&format!(
+            "{url}/{}/statuses",
+            second["id"].as_str().unwrap()
+        ))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(statuses.len(), 4);
+
+    let explicit = app
+        .post_json_with_session(&url, serde_json::json!({ "name": name, "key": name }))
+        .await;
+    assert_eq!(explicit.status(), StatusCode::CONFLICT);
+
+    app.cleanup_user(user.id).await;
+}
+
 /// テナント `Admin` は共有プロジェクトを作成・更新・削除できる。作ったプロジェクトは継承で
 /// テナント全員に開く。`Member` の作成と `Viewer` の更新は従来どおり 403。
 #[tokio::test]

@@ -94,6 +94,8 @@ describe('useAuthSession', () => {
   });
 
   afterEach(() => {
+    // 戻り先はページの URL から作るので、テストが変えた場所を次のテストへ持ち越さない
+    window.history.replaceState(null, '', '/');
     queryClient.clear();
     meQueryMockState.controlled = false;
     meQueryMockState.data.value = null;
@@ -241,6 +243,36 @@ describe('useAuthSession', () => {
     await flushPromises();
 
     expect(assignSpy).toHaveBeenCalledWith('/signin');
+    assignSpy.mockRestore();
+  });
+
+  it('半認証（/me が 403）のときは /signin ではなく /auth/2fa へ進める', async () => {
+    fetchMock.mockImplementation(async (input: Request) => {
+      if (input.method.toUpperCase() === 'GET' && input.url.includes('/v1/auth/me')) {
+        return new Response(JSON.stringify({ message: 'forbidden' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+    window.history.replaceState(null, '', '/foo?x=1');
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+
+    mount(
+      defineComponent({
+        setup() {
+          useAuthSession({ guard: true });
+          return {};
+        },
+        template: '<div />',
+      }),
+      { global: { plugins: [[VueQueryPlugin, { queryClient }], createPinia()] } },
+    );
+    await flushPromises();
+
+    expect(assignSpy).toHaveBeenCalledWith('/auth/2fa?redirect_after=%2Ffoo%3Fx%3D1');
+    expect(assignSpy).not.toHaveBeenCalledWith('/signin');
     assignSpy.mockRestore();
   });
 

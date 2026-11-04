@@ -50,6 +50,8 @@ pub struct Model {
     #[sea_orm(has_many)]
     pub project_task_views: HasMany<super::project_task_views::Entity>,
     #[sea_orm(has_many)]
+    pub reactions: HasMany<super::reactions::Entity>,
+    #[sea_orm(has_many)]
     pub recovery_codes: HasMany<super::recovery_codes::Entity>,
     #[sea_orm(has_many)]
     pub sprints: HasMany<super::sprints::Entity>,

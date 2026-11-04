@@ -265,7 +265,7 @@ impl FromRequestParts<AppState> for AdminUser {
 
 操作が**成功した後**に INSERT する。失敗した操作（バリデーションエラー等）は記録しない。
 
-管理者操作では対象の更新と監査ログの INSERT は別のトランザクションなので、INSERT に失敗すると、操作は成立したまま応答が `500` になる。`user.profile.update` だけは更新と同じトランザクションで記録する。
+管理者操作では対象の更新と監査ログの INSERT は別のトランザクションなので、INSERT に失敗すると、操作は成立したまま応答が `500` になる。`user.profile.update` と `tenant.delete` だけは対象の更新・削除と同じトランザクションで記録する（`tenant.delete` は削除より前に INSERT する）。
 
 ---
 
@@ -345,7 +345,7 @@ impl FromRequestParts<AppState> for AdminUser {
 
 テナント強制削除は行を消して外部キーの CASCADE に任せる。Drive のストレージ実体は消さない（[Drive](/features/drive) §12）。
 
-> **既知の問題（実行は未確認）**: 現在の実装はテナントの行を消した後に、`tenant_id` へ同じ ID を入れて監査ログを挿入する。`audit_logs.tenant_id` には `tenants` への外部キーがあるので、この挿入は失敗して、削除が成立したまま `500` を返し、監査ログも残らない可能性がある。この経路の統合テストは無い。
+テナント削除の監査ログ（`tenant.delete`）は、削除と同じトランザクションで削除より前に INSERT する。`audit_logs.tenant_id` の外部キー（`ON DELETE SET NULL`）により、削除の確定後はこのログの `tenant_id` が NULL になる。消したテナントは `resource_id` と `metadata`（`tenant_id` / `tenant_display_id` / `tenant_name`）で追える。
 
 ### 7.3 監査ログ閲覧 API
 

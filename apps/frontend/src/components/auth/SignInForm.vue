@@ -7,9 +7,10 @@ import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
 import OAuthButtons from '@/components/auth/OAuthButtons.vue';
 import { Button, Field, Input, PasswordInput } from '@koyori-app/ui-vue';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { meQueryOptions, useLoginMutation, useLogoutMutation } from '@/lib/api-vue-query';
+import { meQueryOptions, useLoginMutation } from '@/lib/api-vue-query';
 import { arkMessage } from '@/lib/auth-validation';
 import { useRedirectAfter, withRedirectAfter } from '@/composables/useRedirectAfter';
+import { requiresTwoFactor, twoFactorPath } from '@/lib/two-factor';
 import { consumeNotice, PASSWORD_CHANGED_NOTICE } from '@/lib/one-time-notice';
 
 /**
@@ -30,7 +31,6 @@ const schema = type({
 const redirectAfter = useRedirectAfter();
 const queryClient = useQueryClient();
 const loginMutation = useLoginMutation();
-const logoutMutation = useLogoutMutation();
 const submitError = ref<string | null>(null);
 const unverifiedEmail = ref<string | null>(null);
 const submitAttempted = ref(false);
@@ -56,13 +56,9 @@ const form = useForm({
         },
       });
 
-      if (result && typeof result === 'object' && 'requires_2fa' in result) {
-        try {
-          await logoutMutation.mutateAsync({} as never);
-        } catch {
-          // logout failure: still show the same unsupported-2FA message
-        }
-        submitError.value = '二要素認証は現在サポートされていません。';
+      // 2FA が要るなら半認証のセッションのまま 2FA 画面へ進む（戻り先はそこで再検証する）
+      if (requiresTwoFactor(result)) {
+        window.location.assign(twoFactorPath(redirectAfter));
         return;
       }
 
