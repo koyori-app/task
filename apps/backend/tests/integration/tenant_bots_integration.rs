@@ -941,3 +941,25 @@ async fn tenant_bots_management_requires_tenant_2fa_of_admin() {
         StatusCode::NO_CONTENT
     );
 }
+
+/// 期限の上限は 365 日に 5 分の猶予を足した所まで。境い目の 1 秒は service の単体試験で縛り、
+/// ここでは口から猶予が効くことを確かめる。
+#[tokio::test]
+async fn tenant_bots_token_expiry_tolerates_client_clock_ahead_by_minutes() {
+    let (app, _owner, tenant, bot) = fixture().await;
+    let tokens = format!("/v1/tenants/{}/bots/{bot}/tokens", tenant.tenant_id);
+    let body = |expires_at: chrono::DateTime<Utc>| json!({"name": "ci", "scopes": ["read:task"], "project_ids": null, "expires_at": expires_at});
+    let year = Utc::now() + Duration::days(365);
+    assert_eq!(
+        app.post_json_with_session(&tokens, body(year + Duration::minutes(4)))
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        app.post_json_with_session(&tokens, body(year + Duration::minutes(6)))
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+}

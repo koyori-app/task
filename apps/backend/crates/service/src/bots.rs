@@ -1,5 +1,5 @@
 //! テナント BOT の所属と鍵の管理。
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use common::error::AppError;
 use entity::scopes::ScopeList;
 use entity::{audit_logs, personal_tokens, projects, tenant_members, tenants, users};
@@ -13,6 +13,15 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
     DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
 };
+
+/// BOT の PAT の期限の上限（発行から 365 日）に足す猶予。画面は端末の時計から「1 年」を作るので、
+/// 端末がサーバーより進んでいても上限で落とさない。
+const BOT_TOKEN_EXPIRY_SKEW: Duration = Duration::minutes(5);
+
+/// BOT の PAT の期限は必須で、今より後、かつ 365 日（と猶予）以内。
+fn bot_token_expiry_is_valid(expires_at: DateTime<Utc>, now: DateTime<Utc>) -> bool {
+    expires_at > now && expires_at <= now + Duration::days(365) + BOT_TOKEN_EXPIRY_SKEW
+}
 
 // 管理者の降格や停止が判定と書き込みの間へ割り込まないよう、同じ取引で行を押さえる。
 async fn require_admin<C: ConnectionTrait>(
@@ -247,10 +256,7 @@ pub async fn create_bot_token(
     actor_id: Uuid,
     payload: CreateBotTokenRequest,
 ) -> Result<CreatePersonalTokenResponse, AppError> {
-    let now = Utc::now();
-    if payload.expires_at <= now
-        || payload.expires_at > now + Duration::days(365)
-        || payload.name.trim().is_empty()
+    if !bot_token_expiry_is_valid(payload.expires_at, Utc::now()) || payload.name.trim().is_empty()
     {
         return Err(AppError::BadRequest);
     }
@@ -385,4 +391,23 @@ pub async fn revoke_all_tenant_tokens(
     }
     txn.commit().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn bot_token_expiry_allows_five_minutes_of_clock_skew_past_a_year() {
+        let now = Utc.with_ymd_and_hms(2026, 11, 5, 0, 0, 0).unwrap();
+        let limit = now + Duration::days(365) + Duration::minutes(5);
+        assert!(bot_token_expiry_is_valid(limit, now));
+        assert!(!bot_token_expiry_is_valid(
+            limit + Duration::seconds(1),
+            now
+        ));
+        assert!(bot_token_expiry_is_valid(now + Duration::seconds(1), now));
+        assert!(!bot_token_expiry_is_valid(now, now));
+    }
 }
