@@ -682,6 +682,63 @@ async fn follows_project_visibility_guest_scope_and_tokens() {
     );
 }
 
+/// カレンダーとガントが引く口。テナントオーナーでなくても、ロールに関わらず
+/// 自分に見えるプロジェクトの分だけが返る（TASK-444）
+#[tokio::test]
+async fn non_owner_roles_see_exactly_their_visible_projects() {
+    let mut app = TestApp::new().await;
+    let (owner, tp, todo, _) = setup(&mut app).await;
+    let t = tp.tenant_id;
+    // 明示 ACE で閉じたプロジェクト 2 つ: 片方は当人が入っていて、もう片方は入っていない
+    let joined = insert_extra_project(&app, t).await;
+    let joined_todo = status(&app, joined, false).await;
+    let closed = insert_extra_project(&app, t).await;
+    let closed_todo = status(&app, closed, false).await;
+    let insider = app.insert_user_default().await;
+    ensure_tenant_member_for_project(&app.state.db, closed, insider.id).await;
+    execute_sql(
+        &app.state.db,
+        "INSERT INTO project_members (id,project_id,user_id,role) VALUES ($1,$2,$3,'Member')",
+        vec![Uuid::new_v4().into(), closed.into(), insider.id.into()],
+    )
+    .await;
+    let open_task = task(&app, tp.project_id, todo, owner.id, Some(d(15)), None, None).await;
+    let joined_task = task(&app, joined, joined_todo, owner.id, Some(d(15)), None, None).await;
+    let closed_task = task(&app, closed, closed_todo, owner.id, Some(d(15)), None, None).await;
+
+    for role in ["Admin", "Member", "Viewer"] {
+        let user = app.insert_user_default().await;
+        execute_sql(
+            &app.state.db,
+            "INSERT INTO tenant_members (id,tenant_id,user_id,role) VALUES ($1,$2,$3,$4)",
+            vec![Uuid::new_v4().into(), t.into(), user.id.into(), role.into()],
+        )
+        .await;
+        execute_sql(
+            &app.state.db,
+            "INSERT INTO project_members (id,project_id,user_id,role) VALUES ($1,$2,$3,'Member')",
+            vec![Uuid::new_v4().into(), joined.into(), user.id.into()],
+        )
+        .await;
+        app.login_session_no_content(&user.email, &user.password)
+            .await;
+        let body = get(&app, t, RANGE).await;
+        assert_eq!(got(&body), set(&[open_task, joined_task]), "{role}");
+        assert!(!got(&body).contains(&closed_task.to_string()), "{role}");
+        // 見えないプロジェクトを指名しても、403 にも中身にもならず空で返る
+        let named = get(&app, t, &format!("{RANGE}&project_id={closed}")).await;
+        assert!(ids(&named).is_empty(), "{role}");
+    }
+
+    // 対照: オーナーは閉じたプロジェクトも見える（絞りすぎの確認ではなく、タスクが実在する証明）
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    assert_eq!(
+        got(&get(&app, t, RANGE).await),
+        set(&[open_task, joined_task, closed_task])
+    );
+}
+
 #[tokio::test]
 async fn cursor_pages_without_gaps_and_repeats_sprints_and_milestones() {
     let mut app = TestApp::new().await;

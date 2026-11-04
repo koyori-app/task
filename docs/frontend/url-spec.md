@@ -63,7 +63,7 @@ title: "フロントエンド URL 仕様書"
 | `/{tenant}` | テナントホーム（ダッシュボード） |
 | `/{tenant}/my-tasks` | 自分のタスク |
 | `/{tenant}/calendar` | テナントのタイムライン（[仕様](/features/tasks/schedule)）。`?from=YYYY-MM-DD`（起点の月曜。省略時は今週）、`?member=` / `?project=`（ID。繰り返し指定可）で絞り込み、`?selected=KEY-N`（詳細のオーバーレイで開いているタスク）を持つ。URL は replaceState で書き、履歴を増やさない |
-| `/{tenant}/gantt` | ガントチャート。サイドバーの入口は環境設定の `showExperiments` が有効なときだけ出る。URL からページを開くこと自体は設定に関係なくできる |
+| `/{tenant}/gantt` | ガントチャート。カレンダーと同じくサイドバーに入口があり、見える範囲もカレンダーと同じ（[仕様](/features/tasks/schedule)） |
 | `/{tenant}/settings` | テナント設定 |
 | `/{tenant}/settings/members` | テナントメンバー管理 |
 | `/{tenant}/users/{user_id}` | 利用者のプロフィール（閲覧のみ） |

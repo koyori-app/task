@@ -69,8 +69,9 @@ NTFS では「継承を無効にする」が明示の操作である。
 
 - 客分が入れるのは `project_members` に明示指定されたプロジェクトだけ。
   「メンバー未指定＝テナント全体に開放」の規則はテナントメンバー限りで、客分には開かない
-- テナント全体の口のうち**プロジェクト一覧（`GET /v1/tenants/{id}/projects`）と
-  My Tasks（`GET /v1/tenants/{id}/users/me/tasks`）だけは、客分には己が明示 member の
+- テナント全体の口のうち**プロジェクト一覧（`GET /v1/tenants/{id}/projects`）、
+  My Tasks（`GET /v1/tenants/{id}/users/me/tasks`）、スケジュール
+  （`GET /v1/tenants/{id}/schedule`）だけは、客分には己が明示 member の
   project の分に絞って返す**（公開 project は含めない）。当初は「従来どおり 403」を
   採っていたが覆した（#688 レビュー）: frontend の project 解決（URL の projectKey →
   UUID）とテナント選択直後の着地（My Tasks）がこの 2 つの一覧に依存しており、
@@ -99,6 +100,7 @@ NTFS では「継承を無効にする」が明示の操作である。
 | `GET /v1/tenants` | stores/tenant.ts（TenantSwitcher の一覧）・useResolvedTenantId（URL の display_id → UUID 解決） | 印付きで返す（membership=Guest。テナント設定の欄は null） |
 | `GET /v1/tenants/{id}/projects` | api-vue-query の useProjectsQuery（AppSidebar の NavProjects・useResolvedProjectId の projectKey → UUID 解決）、ProjectCreateForm / DeleteProjectDialog / ProjectSettingsView（cache 更新） | **己の明示 member の project に絞って 200** |
 | `GET /v1/tenants/{id}/users/me/tasks` | pages/@tenant/my-tasks（テナント選択直後の着地） | **己の project の分に絞って 200** |
+| `GET /v1/tenants/{id}/schedule` | pages/@tenant/calendar・pages/@tenant/gantt | **己の明示 member の project に絞って 200**。明示 member の project が無ければ 403 |
 | `GET /v1/tenants/{id}/members` | ProjectSettingsView の MembersSection | 403 のまま（MembersSection は 403 を「権限なし」表示で受け、画面は壊れない） |
 | `GET /v1/tenants/{id}/users/{user_id}` | pages/@tenant/users/@userId（タスクの担当者・コメント投稿者・メンバー一覧の名前から開く） | 403 のまま（画面は「閲覧できません」と出す） |
 | `GET /v1/tenants/{id}` | 呼び元なし（一覧で足りる） | 403 のまま |
@@ -204,7 +206,7 @@ NTFS では「継承を無効にする」が明示の操作である。
 
 ハンドラーは `AuthUser::ensure_tenant_access` だけを呼ぶ。
 これがセッション・PAT の双方を `has_tenant_access`（`extractors.rs`）に合流させる。
-例外はテナント一覧系の 2 口（プロジェクト一覧・My Tasks）で、こちらは
+例外はテナント一覧系の 3 口（プロジェクト一覧・My Tasks・スケジュール）で、こちらは
 `ensure_tenant_access_or_guest_scope` を呼ぶ — 通常判定に加えて客分を通し、
 絞り込み用の project id 集合を返す。
 
@@ -262,6 +264,7 @@ project 層のスコープ（`read:project` や `write:task` など）ではこ�
 | テナントの取得（`GET /v1/tenants/{id}`） | テナントに入れる人全員（客分は含まない） |
 | プロジェクト一覧（`GET /v1/tenants/{id}/projects`） | owner: 全件。member: 公開規則どおり。客分: 明示 member の分だけ |
 | My Tasks（`GET /v1/tenants/{id}/users/me/tasks`） | 所属者: 従来どおり。客分: 己の project の分に絞る |
+| スケジュール（`GET /v1/tenants/{id}/schedule`。カレンダーとガント） | owner: 個人プロジェクトを除く全件。member: 公開規則どおり（ロールは見ない。個人プロジェクトは除く）。客分: 明示 member の分だけ。PAT は `read:task` |
 | テナントの更新・削除 | オーナーのみ |
 | メンバー一覧の閲覧 | テナントに入れる人全員（客分は含まない） |
 | 利用者のプロフィール（`GET /v1/tenants/{id}/users/{user_id}`） | テナントに入れる人全員（客分は含まない）。対象はそのテナントのオーナー・メンバー・客分のいずれかで、それ以外は 404。返すのは id / username / bio / avatar_url と、このテナントでの department / position / team（所属行の無いオーナー・客分では null）だけ。PAT は `read:tenant` |
