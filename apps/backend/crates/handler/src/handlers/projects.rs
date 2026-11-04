@@ -99,8 +99,9 @@ pub async fn create_project(
             }
         }
     };
-    let txn = state.db.begin().await?;
-    let model = loop {
+    let (txn, model) = loop {
+        // UNIQUE 違反で Postgres がトランザクションを中止するので、試行ごとに張り直す
+        let txn = state.db.begin().await?;
         let project = projects::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(payload.name.clone()),
@@ -113,8 +114,9 @@ pub async fn create_project(
             personal_owner_id: Set(None),
         };
         match project.insert(&txn).await {
-            Ok(model) => break model,
+            Ok(model) => break (txn, model),
             Err(e) if explicit_key.is_none() && is_postgres_unique_violation(&e) => {
+                txn.rollback().await?;
                 let suffix = Uuid::new_v4().simple().to_string().to_ascii_uppercase();
                 let suffix = &suffix[..4];
                 let max_base = 10usize.saturating_sub(suffix.len()).max(2);

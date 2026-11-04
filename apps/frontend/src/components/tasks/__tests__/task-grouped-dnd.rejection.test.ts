@@ -1,8 +1,6 @@
 /**
  * DnD の保存口（onMoveStatus）が reject したときの試験。
- *
- * lib が呼ぶ onTransfer を捕らえて直に撃つ（task-grouped-dnd.test.ts と同じ vikunja 式）。
- * gesture は jsdom 系では再現できぬので、dragAndDrop をすり替えて config を受け取る。
+ * lib は差し替えず、行と群へ drag の event を直に撃つ（task-grouped-dnd.test.ts と同じ）。
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -14,20 +12,8 @@ import type { components } from '@/generated/api';
 
 type StatusResponse = components['schemas']['ProjectStatusResponse'];
 type TaskResponse = components['schemas']['TaskResponse'];
-type TransferHandler = (data: unknown) => void;
-
-const transferHandlers = vi.hoisted(() => [] as TransferHandler[]);
-
-vi.mock('@formkit/drag-and-drop/vue', () => ({
-  dragAndDrop: (config: { onTransfer?: TransferHandler }) => {
-    if (config.onTransfer) transferHandlers.push(config.onTransfer);
-  },
-}));
 
 enableAutoUnmount(afterEach);
-afterEach(() => {
-  transferHandlers.length = 0;
-});
 
 function status(id: string, name: string, position: number): StatusResponse {
   return {
@@ -89,7 +75,7 @@ describe('TaskGroupedList の DnD の保存口が reject したとき', () => {
       const onMoveStatus = vi.fn(async () => {
         throw new Error('save failed');
       });
-      mount(TaskGroupedList, {
+      const wrapper = mount(TaskGroupedList, {
         props: {
           groups: [group(todo, [moved]), group(done, [])],
           tenantId: 'tenant-1',
@@ -107,13 +93,10 @@ describe('TaskGroupedList の DnD の保存口が reject したとき', () => {
         attachTo: document.body,
       });
 
-      expect(transferHandlers.length).toBeGreaterThan(0);
-      const target = document.createElement('div');
-      target.dataset['dndStatusId'] = done.id;
-      transferHandlers[0]!({
-        targetParent: { el: target },
-        draggedNodes: [{ data: { value: moved } }],
-      });
+      const fire = (el: Element, type: string) =>
+        el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
+      fire(wrapper.get('[data-dnd-task]').element, 'dragstart');
+      fire(wrapper.get(`[data-dnd-status-id="${done.id}"]`).element, 'drop');
 
       await flushPromises();
       await new Promise((resolve) => setTimeout(resolve, 20));

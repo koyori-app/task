@@ -5,7 +5,7 @@ import { fetchClient, apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 
-const LIST_COMMENTS_PATH =
+export const LIST_COMMENTS_PATH =
   '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/comments' as const;
 const COMMENT_PATH =
   '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/comments/{cid}' as const;
@@ -20,7 +20,7 @@ export type MentionedUser = components['schemas']['MentionedUser'];
  * 拒まれた通りに表示する。message が取れない失敗（ネットワーク断など）は
  * 日本語の概要だけを出す。
  */
-function apiErrorMessage(error: unknown, summary: string): string {
+export function apiErrorMessage(error: unknown, summary: string): string {
   // apiClient.useMutation の reject は OpenApiVueQueryError で、解析済みの
   // エラーボディは .error に入る（.message はラッパーの定型文なので見ない）
   const body =

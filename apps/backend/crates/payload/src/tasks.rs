@@ -206,6 +206,10 @@ pub struct UpdateTaskRequest {
 #[into_params(parameter_in = Query)]
 pub struct ListTasksQuery {
     pub status_id: Option<Uuid>,
+    /// 優先度で絞り込む。`critical_fire` / `critical` / `high` / `medium` / `low` / `trivial` のいずれか。
+    ///
+    /// JSON の `priority`（`High` など）とは綴りが違う。このクエリは小文字の綴りだけを受け付け、
+    /// `High` のような綴りや未知の値は 400 になる
     pub priority: Option<String>,
     pub assignee_id: Option<Uuid>,
     /// 作成者のユーザー ID。指定するとその人が作ったタスクだけを返す
@@ -273,6 +277,10 @@ pub struct TaskDetailResponse {
     #[serde(default)]
     #[schema(value_type = HashMap<String, MentionedUser>)]
     pub mentions: MentionMap,
+    /// タスク本体への絵文字リアクション（最初に付いた順）。
+    #[serde(default)]
+    #[schema(required)]
+    pub reactions: Vec<crate::reactions::ReactionSummary>,
 }
 
 #[derive(Validate, Deserialize, ToSchema, serde::Serialize)]
