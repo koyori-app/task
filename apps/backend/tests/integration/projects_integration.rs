@@ -90,6 +90,58 @@ fn unique_key(prefix: &str) -> String {
     )
 }
 
+/// キーの一意はテナント内だけで、別テナントなら同じキーを指定できる。同じテナント内の重複は 409。
+/// 修正前は schema sync が `key` だけの UNIQUE を作るので、別テナントの作成が 409 で fail する。
+#[tokio::test]
+async fn explicit_project_key_is_unique_only_within_tenant() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    login(&mut app, &user).await;
+    let tenant_a = insert_tenant(&app.state.db, user.id).await;
+    let tenant_b = insert_tenant(&app.state.db, user.id).await;
+    let key = unique_key("K");
+
+    for tenant_id in [tenant_a, tenant_b] {
+        let response = app
+            .post_json_with_session(
+                &format!("/v1/tenants/{tenant_id}/projects"),
+                serde_json::json!({"name": "same key", "key": key}),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+
+    let duplicate = app
+        .post_json_with_session(
+            &format!("/v1/tenants/{tenant_a}/projects"),
+            serde_json::json!({"name": "duplicate", "key": key}),
+        )
+        .await;
+    assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+}
+
+/// 英数字のない名前に付く既定キー `PROJ` も、別テナントならそのまま使える。
+/// 修正前は schema sync が `key` だけの UNIQUE を作るので、別テナントの作成が 500 で fail する。
+#[tokio::test]
+async fn default_project_key_is_reused_in_another_tenant() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    login(&mut app, &user).await;
+
+    for _ in 0..2 {
+        let tenant_id = insert_tenant(&app.state.db, user.id).await;
+        let response = app
+            .post_json_with_session(
+                &format!("/v1/tenants/{tenant_id}/projects"),
+                serde_json::json!({"name": "日本語の名前"}),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let project: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(project["key"], "PROJ");
+    }
+}
+
 /// テナント `Admin` は共有プロジェクトを作成・更新・削除できる。作ったプロジェクトは継承で
 /// テナント全員に開く。`Member` の作成と `Viewer` の更新は従来どおり 403。
 #[tokio::test]
