@@ -220,7 +220,7 @@ impl IntoResponse for OAuthError {
         ("instance_url" = Option<String>, Query, description = "GitLab self-hosted インスタンス URL")
     ),
     responses(
-        (status = 302, description = "プロバイダー認可 URL へリダイレクト"),
+        (status = 307, description = "プロバイダー認可 URL へリダイレクト"),
         OAuthErrors,
     )
 )]
@@ -339,7 +339,7 @@ pub async fn oauth_start(
         ("state" = String, Query, description = "CSRF state")
     ),
     responses(
-        (status = 302, description = "フロントエンドへリダイレクト"),
+        (status = 307, description = "フロントエンドへリダイレクト"),
         OAuthErrors,
     )
 )]

@@ -35,6 +35,11 @@ jobs:
           - name: frontend
             context: .
             dockerfile: apps/frontend/Dockerfile
+            # ブラウザ側 Sentry の DSN はバンドルに埋め込むのでビルド時に渡す。
+            # リポジトリの Actions variables（secrets ではない。公開値）の FRONTEND_SENTRY_DSN。
+            # 未設定なら空になり、ブラウザ側は送信しない
+            build-args: |
+              PUBLIC_ENV__SENTRY_DSN=${{ vars.FRONTEND_SENTRY_DSN }}
 
     steps:
       - name: Checkout
@@ -69,6 +74,7 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           target: production
+          build-args: ${{ matrix.build-args }}
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

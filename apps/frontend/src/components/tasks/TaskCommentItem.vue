@@ -5,9 +5,12 @@ import { computed, nextTick, ref } from 'vue';
 import { Button, Dropdown } from '@koyori-app/ui-vue';
 import CommentBody from '@/components/tasks/CommentBody.vue';
 import CommentEditor from '@/components/tasks/CommentEditor.vue';
+import ReactionAddButton from '@/components/reactions/ReactionAddButton.vue';
+import ReactionBar from '@/components/reactions/ReactionBar.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import { timelineDateTime, timelineTime } from '@/lib/activity-timeline';
 import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
+import type { ReactionController } from '@/composables/useReactions';
 import type { CommentReply, CommentThread } from '@/composables/useTaskComments';
 
 const props = defineProps<{
@@ -48,6 +51,8 @@ const props = defineProps<{
   timeOnly?: boolean;
   /** 投稿者のプロフィール画面の URL。渡すと名前をリンクにする */
   profileHref?: (userId: string) => string;
+  /** 絵文字リアクションの操作。渡さなければリアクションの UI を出さない */
+  reactionController?: ReactionController;
 }>();
 
 const editing = ref(false);
@@ -55,7 +60,21 @@ const editDraft = ref('');
 const confirmingDelete = ref(false);
 const editorRef = ref<InstanceType<typeof CommentEditor> | null>(null);
 
+const reactionBarRef = ref<InstanceType<typeof ReactionBar> | null>(null);
+const hasReactions = computed(
+  () => !!props.reactionController && props.comment.reactions.length > 0,
+);
+/** 札が無い時の追加ボタンは ⋯ の左に出す（札がある時は札の行の末尾） */
+const showHeaderAddButton = computed(
+  () =>
+    !!props.reactionController &&
+    !props.comment.is_deleted &&
+    !editing.value &&
+    !hasReactions.value,
+);
+
 const menuItems = computed(() => [
+  ...(hasReactions.value ? [{ value: 'reactions', label: 'リアクションを見る' }] : []),
   ...(props.comment.user.id === props.currentUserId
     ? [{ value: 'edit', label: 'コメントを編集' }]
     : []),
@@ -66,6 +85,7 @@ const menuItems = computed(() => [
 
 function onMenuSelect(value: string) {
   if (value === 'edit') void startEditing();
+  else if (value === 'reactions') reactionBarRef.value?.openPeople();
   else openDeleteConfirm();
 }
 
@@ -124,7 +144,8 @@ async function confirmDelete() {
     <div class="flex min-w-0 flex-1 flex-col gap-0.5">
       <!-- 時刻はホバーの面にも載るので、4.5:1 を保てる text-secondary にする -->
       <header
-        class="flex min-h-6 flex-wrap items-center gap-x-1.5 pr-8 text-xs text-(--koyori-color-text-secondary)"
+        class="flex min-h-6 flex-wrap items-center gap-x-1.5 text-xs text-(--koyori-color-text-secondary)"
+        :class="showHeaderAddButton ? 'pr-16' : 'pr-8'"
       >
         <component
           :is="profileHref ? 'a' : 'span'"
@@ -149,10 +170,16 @@ async function confirmDelete() {
 
       <!-- 操作はメニューに集める。ホバーできない端末では常に出す -->
       <div
-        v-if="!comment.is_deleted && !editing && menuItems.length"
-        class="absolute top-0 right-0 focus-within:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/comment:opacity-100 [@media(hover:hover)]:focus-within:opacity-100"
+        v-if="!comment.is_deleted && !editing && (menuItems.length || showHeaderAddButton)"
+        class="absolute top-0 right-0 flex items-center focus-within:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/comment:opacity-100 [@media(hover:hover)]:focus-within:opacity-100"
       >
+        <ReactionAddButton
+          v-if="showHeaderAddButton && reactionController"
+          :disabled="reactionController.isBusy(comment.id)"
+          @select="reactionController.toggle(comment.id, $event)"
+        />
         <Dropdown
+          v-if="menuItems.length"
           top-layer
           variant="ghost"
           ariaLabel="コメントの操作"
@@ -201,6 +228,21 @@ async function confirmDelete() {
         :mentions="mentions"
         :current-user-id="currentUserId"
         :mention-tenant="mentionTenant"
+      />
+
+      <ReactionBar
+        v-if="reactionController && !comment.is_deleted && !editing"
+        ref="reactionBarRef"
+        class="mt-1"
+        :reactions="comment.reactions"
+        can-react
+        :busy="reactionController.isBusy(comment.id)"
+        :error="reactionController.errorFor(comment.id)"
+        :fetch-users="(emoji) => reactionController!.fetchUsers(comment.id, emoji)"
+        :profile-href="profileHref"
+        :current-user-id="currentUserId"
+        @toggle="reactionController.toggle(comment.id, $event)"
+        @add="reactionController.toggle(comment.id, $event)"
       />
 
       <div
