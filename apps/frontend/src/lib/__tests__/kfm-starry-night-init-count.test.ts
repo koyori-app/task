@@ -1,3 +1,4 @@
+// 文法初期化の回数の機械的な計数（N scope の描画で初期化 1 回。旧配線の factory 直挿しが N 回になる陽性対照つき）
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import upstreamRehypeStarryNight from 'rehype-starry-night';
 import { createRenderer, renderDescription } from '../markup-renderer';

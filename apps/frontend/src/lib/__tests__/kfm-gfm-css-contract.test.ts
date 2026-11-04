@@ -1,3 +1,4 @@
+// KFM のサイドカー CSS（remark-* / rehype-*）を scope の方式で全件分類し、ラッパーのクラスまたは各プラグインの出力の名前空間から逸脱しないことを固定する
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

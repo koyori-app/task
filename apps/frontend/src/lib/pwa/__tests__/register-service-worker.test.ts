@@ -1,3 +1,4 @@
+// service worker の登録が一度だけで、SSR と dev では走らないこと
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {

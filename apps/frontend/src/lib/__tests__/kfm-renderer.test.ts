@@ -1,3 +1,4 @@
+// GFM の基本、alerts の境界、サニタイズの基本、決定性、profile の fail-closed
 import type { Root } from 'mdast';
 import { describe, expect, it } from 'vitest';
 import { createRenderer, renderDescription } from '../markup-renderer';

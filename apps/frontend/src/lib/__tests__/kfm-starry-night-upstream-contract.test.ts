@@ -1,3 +1,4 @@
+// upstream 実体（theme.js の classes の値域、light/both/dark の CSS）と sanitize の許可、サイドカー style.css の契約の固定
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

@@ -1,3 +1,4 @@
+// style の禁止、class の完全一致、XSS の基本、カスタム要素の registry
 import DOMPurify from 'isomorphic-dompurify';
 import { describe, expect, it } from 'vitest';
 import { buildRegistry, createSanitizer } from '../markup-renderer/_sanitize';

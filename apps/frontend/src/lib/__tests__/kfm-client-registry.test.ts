@@ -1,3 +1,4 @@
+// SSR ガード（customElements 不在で no-op）、二重 define の安全性
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerKfmCustomElements } from '../markup-renderer/_client-registry';
 import type { KfmCustomElementDefinition } from '../markup-renderer/_client-registry';
