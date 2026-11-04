@@ -3,12 +3,12 @@ import { X } from '@lucide/vue';
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { getActivePinia } from 'pinia';
-import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import {
   Button,
+  ConfirmDialog,
   DatePicker,
   Dialog,
   Dropdown,
@@ -173,9 +173,9 @@ const similarTasks = computed(() =>
     : [],
 );
 
+// 重複を確かめるために押すので、ダイアログも入力も残したまま別タブで開く
 function openSimilarTask(seqId: number) {
-  void navigate(taskDetailHref(tenantDisplayId.value, props.projectKey, seqId));
-  onClose();
+  window.open(taskDetailHref(tenantDisplayId.value, props.projectKey, seqId), '_blank', 'noopener');
 }
 
 watch(
@@ -236,8 +236,40 @@ watch(
   },
 );
 
+/** 入力があるか（title / description が初期値と違う）。あれば閉じる前に確認する */
+const dirty = computed(
+  () => title.value !== (props.initialTitle ?? '') || description.value !== '',
+);
+const discardConfirmOpen = ref(false);
+
 function onClose() {
   if (createMutation.isPending.value) return;
+  if (dirty.value) {
+    discardConfirmOpen.value = true;
+    return;
+  }
+  closeDialog();
+}
+
+function cancelDiscard() {
+  discardConfirmOpen.value = false;
+}
+
+function confirmDiscard() {
+  discardConfirmOpen.value = false;
+  closeDialog();
+}
+
+// 日本語入力の変換中の Esc は変換の取り消しで、ダイアログを閉じる操作ではない。
+// koyori の Dialog は Esc を dialog の cancel で受けるので、keydown の既定動作を止めて cancel を起こさせない
+// （Firefox / Safari は変換確定の Esc でも keydown を流し、その場合 isComposing は false で keyCode が 229）
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && (event.isComposing || event.keyCode === 229)) {
+    event.preventDefault();
+  }
+}
+
+function closeDialog() {
   // 親が open を握っていない場合でも捨てられるよう、ここでも呼ぶ。
   // resetForm は冪等なので watch と二重に走っても問題ない
   resetForm();
@@ -353,7 +385,10 @@ async function submit(event: SubmitEvent) {
 </script>
 
 <template>
-  <div class="contents [--koyori-dialog-width:1040px] md:[--koyori-dialog-height:min(720px,90vh)]">
+  <div
+    class="contents [--koyori-dialog-width:1040px] md:[--koyori-dialog-height:min(720px,90vh)]"
+    @keydown="onKeydown"
+  >
     <!--
       左に本文（タイトル・説明）、右にプロパティを置く 2 列。説明を広く書けるよう
       ダイアログを大きく取り、狭い画面では縦に積んで全体をスクロールさせる。
@@ -640,5 +675,15 @@ async function submit(event: SubmitEvent) {
         </div>
       </HydrationSafeForm>
     </Dialog>
+    <ConfirmDialog
+      :open="discardConfirmOpen"
+      title="入力を破棄しますか？"
+      message="入力した内容は保存されていません。閉じると失われます。"
+      confirm-label="破棄する"
+      cancel-label="戻る"
+      destructive
+      :on-confirm="confirmDiscard"
+      :on-cancel="cancelDiscard"
+    />
   </div>
 </template>
