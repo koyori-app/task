@@ -103,4 +103,5 @@ cargo test --workspace --lib
 - コミットは Conventional Commits + 日本語（例: `fix(backend): …` / `refactor(workspace): …`）。1 関心 = 1 PR
 - PR 本文も日本語。「概要 / 変更内容 / 挙動の変化 / テスト」の構成
 - テーブル・API・認可規則・ロールなど概念を増減したら、仕様書（`docs/` と `apps/backend/docs/`、索引は後者の `README.md`）を同じ PR で追従させる。実装の変更は日本語の説明文・権限表・末尾の決定事項ログに取り残されやすい（#575 で実発生）
+- `docs/` のページを新しく書く・書き直すときは `docs/STYLE.md` の規則と雛形（`docs/_template-spec.md`・`docs/_template-guide.md`）に従い、`docs` で `pnpm lint:style` を通す。既存ページへの追記はそのページの形に合わせたうえで、本文に `§N` の参照・行末のコロン・`——`・造語（口・札・印・控え・旗・客分）を増やさない
 - 作業用の git worktree（`.claude/worktrees/` 配下）は、PR マージなど作業が終わったら `git worktree remove <path>` で消す（上げっぱなし禁止。Docker コンテナと同じ扱い）

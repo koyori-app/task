@@ -10,7 +10,8 @@
     "preview": "astro preview",
     "typecheck": "astro check",
     "lint:docs": "nimbus-docs lint",
-    "lint:docs:fix": "nimbus-docs lint --fix"
+    "lint:docs:fix": "nimbus-docs lint --fix",
+    "lint:style": "node scripts/lint-style.mjs"
   },
   "dependencies": {
     "@cloudflare/nimbus-docs": "^0.19.2",
