@@ -26,6 +26,8 @@ const isAuthPage = computed(() =>
     '/signin',
     '/signup',
     '/auth/reset-password',
+    // 半認証のセッションでも開けなければならない（ここで 2FA を終えるため）
+    '/auth/2fa',
     '/verify-email',
     '/desktop/authorize',
     '/invitations/accept',

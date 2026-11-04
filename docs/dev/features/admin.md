@@ -102,6 +102,8 @@ flowchart TD
 
 テナントの強制削除は行を消して外部キーの CASCADE に任せる。Drive のストレージの実体は消さない（[Drive の未実装と既知の制限](/dev/features/drive#未実装と既知の制限)）。
 
+監査ログ `tenant.delete` は、削除と同じトランザクションで削除より前に INSERT する。`audit_logs.tenant_id` の外部キーは `ON DELETE SET NULL` なので、削除の確定後はこのログの `tenant_id` が NULL になる。消したテナントは `resource_id` と `metadata`（`tenant_id` / `tenant_display_id` / `tenant_name`）で追う。
+
 ### 監査ログに記録するアクション
 
 管理者の操作と、本人によるプロフィール更新を記録する。
@@ -164,7 +166,7 @@ flowchart TD
 
 操作が成功した後に INSERT する。バリデーションエラーなどの失敗した操作は記録しない。
 
-管理者操作では対象の更新と監査ログの INSERT は別のトランザクションなので、INSERT に失敗すると、操作は成立したまま応答が `500` になる。`user.profile.update` だけは更新と同じトランザクションで記録する。
+管理者操作では対象の更新と監査ログの INSERT は別のトランザクションなので、INSERT に失敗すると、操作は成立したまま応答が `500` になる。`user.profile.update` と `tenant.delete` だけは対象の更新・削除と同じトランザクションで記録する。`tenant.delete` は削除より前に INSERT する。
 
 監査ログは追記専用である。更新・削除する API は無く、DB では `app_role` というロールが存在する環境に限り `UPDATE` / `DELETE` を剥奪する。`app_role` は外部プロビジョニング前提で、存在しない環境もある。
 
@@ -290,7 +292,6 @@ flowchart TD
 - 管理画面が無い。`/admin` 配下のページも、管理者用のコンポーネントも無い
 - 監査ログの保持期間によるアーカイブ・物理削除が無く、行は残り続ける
 - システム設定の `drive_default_quota_mb` / `drive_system_max_quota_mb` は保存されるだけである。Drive の有効クォータは環境変数 `DRIVE_DEFAULT_QUOTA_MB` / `DRIVE_SYSTEM_MAX_QUOTA_MB` だけで決まる（[Drive のクォータ](/dev/features/drive/quota#未実装と既知の制限)）
-- テナントの強制削除は、テナントの行を消した後に `tenant_id` へ同じ ID を入れて監査ログを挿入する。`audit_logs.tenant_id` には `tenants` への外部キーがあるので、この挿入は失敗して、削除が成立したまま `500` を返し、監査ログも残らない可能性がある。実行は確認しておらず、この経路の統合テストは無い
 
 ### 記録していないアクション
 
@@ -348,3 +349,4 @@ flowchart TD
 | 2026-11-04 | ジョブ管理画面を管理者に限る | ジョブのペイロードにメール認証トークンやメールアドレスが含まれる |
 | 2026-11-04 | 強制削除で `project_members` の行を消さない | 消すと、その人しか指定されていなかったプロジェクトがメンバー 0 件になり、テナント全体に開放されてしまう |
 | 2026-11-04 | `AdminUser` は有効な Bearer を `401` でなく `403` にする | Desktop は Device Token への `401` を失効とみなしてログアウトする |
+| 2026-11-04 | `tenant.delete` の監査ログを削除と同じトランザクションで、削除より前に INSERT する | 削除の後に同じ `tenant_id` で挿入すると外部キー違反で失敗し、削除が成立したまま `500` になってログも残らない。先に挿入すれば `ON DELETE SET NULL` で確定後に `tenant_id` が NULL になるだけで済む |

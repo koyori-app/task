@@ -315,6 +315,18 @@ export function useLoginMutation() {
   return apiClient.useMutation('post', '/v1/auth/login');
 }
 
+export function useTotpSetupMutation() {
+  return apiClient.useMutation('post', '/v1/auth/2fa/totp/setup');
+}
+
+export function useTotpVerifySetupMutation() {
+  return apiClient.useMutation('post', '/v1/auth/2fa/totp/verify-setup');
+}
+
+export function useVerifyTwoFactorMutation() {
+  return apiClient.useMutation('post', '/v1/auth/2fa/verify');
+}
+
 export function useRegisterMutation() {
   return apiClient.useMutation('post', '/v1/auth/register');
 }
