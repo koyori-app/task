@@ -1110,3 +1110,27 @@ async fn tenant_bots_member_bot_cannot_change_human_roles() {
         StatusCode::FORBIDDEN
     );
 }
+
+/// 担当者の候補の応答は、BOT に account_kind: bot を載せる（画面の札はこれから出る）。
+#[tokio::test]
+async fn tenant_bots_assignable_users_carry_account_kind() {
+    let (app, owner, tenant, bot) = fixture().await;
+    let res = app
+        .get_with_session(&format!(
+            "/v1/tenants/{}/projects/{}/assignable-users",
+            tenant.tenant_id, tenant.project_id
+        ))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let users = json_body(res).await;
+    let kind_of = |id: Uuid| {
+        users
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|user| user["id"] == id.to_string())
+            .map(|user| user["account_kind"].clone())
+    };
+    assert_eq!(kind_of(bot), Some(json!("bot")));
+    assert_eq!(kind_of(owner.id), Some(json!("human")));
+}
