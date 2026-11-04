@@ -4,6 +4,10 @@
 //! GitHub 固有の語彙（installation / sender / pusher 等）はここから外へ出さない。
 //! 変換後の型に無いフィールドは、ジョブにもタスク側の処理にも届かない。
 
+// 受け入れ条件（docs/features/tasks/github-tasks/webhook.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// - GitHub 受信エンドポイントの変換: `push` / `pull_request`（各 action）/ `create` / `delete` の実ペイロード（fixture）が正規化イベントになる
+// - `installation` 等のホスト固有フィールドが正規化イベントに漏れていない（構造体に無いので型で担保）
+
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 

@@ -18,7 +18,6 @@ features/tasks/4.collaboration-clipboard.md
 features/tasks/4.collaboration.md
 features/tasks/5.notifications.md
 features/tasks/6.custom-fields.md
-features/tasks/9.github-tasks.md
 features/tasks/index.md
 frontend/auth-forms.md
 frontend/kfm-phase1-implementation.md
