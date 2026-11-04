@@ -26,7 +26,7 @@ import {
   UserPlus,
   X,
 } from '@lucide/vue';
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import type { components } from '@/generated/api';
 import type { EditableField } from '@/components/tasks/editable-field';
@@ -365,6 +365,18 @@ function commitEditing(field: EditableField) {
 const discardConfirmOpen = ref(false);
 const pendingField = ref<EditableField | null>(null);
 const clearConfirmOpen = ref(false);
+
+// 子タスクへの移動などでは同じインスタンスのまま task だけが替わる。書きかけを持ち越すと
+// 移った先のタスクへ前のタスクの下書きが保存されるので、編集と確認を閉じる
+watch(
+  () => props.task?.id,
+  () => {
+    discardConfirmOpen.value = false;
+    pendingField.value = null;
+    clearConfirmOpen.value = false;
+    cancelEditing();
+  },
+);
 
 const descriptionDirty = computed(
   () => draftValue.value.trim() !== (props.task?.description ?? '').trim(),

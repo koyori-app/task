@@ -892,6 +892,15 @@ describe('TaskDetailHub 説明の編集', () => {
     expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
   });
 
+  it('編集中に別のタスクへ替わったら編集を閉じ、前の下書きを移った先へ保存しない', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('A の書きかけ');
+    await wrapper.setProps({ task: { ...task, id: 'task-b', description: 'B の説明' } });
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    expect(wrapper.text()).toContain('B の説明');
+  });
+
   it('変更ありの Esc は確認を出し、取りやめると編集が続く', async () => {
     const wrapper = await startEdit();
     const textarea = wrapper.get('textarea[aria-label="説明"]');
