@@ -185,29 +185,29 @@ describe('+Layout', () => {
     expect(wrapper.find('app-header-stub').exists()).toBe(false);
   });
 
-  // 停止中や 2FA の途中のセッションは /me が 403 を返す。接続エラーと誤認して留めない
-  it.each([401, 403])(
-    '/me が %i なら再試行せず /signin へ送り、接続エラーを出さない',
-    async (status) => {
-      vi.useFakeTimers({ toFake: ['setTimeout'] });
-      const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
-      const fetchMock = vi.fn(
-        async () =>
-          new Response(JSON.stringify({ message: 'rejected' }), {
-            status,
-            headers: { 'Content-Type': 'application/json' },
-          }),
-      );
-      vi.stubGlobal('fetch', fetchMock);
+  // 2FA の途中や停止中のセッションは /me が 403 を返す。接続エラーと誤認して留めない
+  it.each([
+    [401, '/signin'],
+    [403, expect.stringContaining('/auth/2fa')],
+  ])('/me が %i なら再試行せずに移動し、接続エラーを出さない', async (status, destination) => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ message: 'rejected' }), {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
 
-      const wrapper = mountLayout('/my-tasks');
-      await vi.advanceTimersByTimeAsync(10_000);
-      vi.useRealTimers();
+    const wrapper = mountLayout('/my-tasks');
+    await vi.advanceTimersByTimeAsync(10_000);
+    vi.useRealTimers();
 
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(assignSpy).toHaveBeenCalledWith('/signin');
-      expect(wrapper.text()).not.toContain('サーバーに接続できませんでした');
-      assignSpy.mockRestore();
-    },
-  );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(assignSpy).toHaveBeenCalledWith(destination);
+    expect(wrapper.text()).not.toContain('サーバーに接続できませんでした');
+    assignSpy.mockRestore();
+  });
 });

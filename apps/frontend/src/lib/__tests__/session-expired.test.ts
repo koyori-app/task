@@ -34,6 +34,7 @@ describe('sessionExpiredMiddleware', () => {
   afterEach(() => {
     vi.useRealTimers();
     assignSpy.mockRestore();
+    window.history.replaceState(null, '', '/');
   });
 
   it('shows the notice, then sends the user to /signin on an in-session 401', async () => {
@@ -57,6 +58,17 @@ describe('sessionExpiredMiddleware', () => {
   it('leaves /v1/auth/me to useAuthSession', async () => {
     await clientReturning(401, 'unauthorized').GET('/v1/auth/me');
     expect(sessionExpired.value).toBe(false);
+  });
+
+  // 2FA 画面は 401 を自分で「セッション切れ」として見せる。2 秒後に /signin へ飛ばさない
+  it('leaves a 401 on /auth/2fa to the page', async () => {
+    window.history.replaceState(null, '', '/auth/2fa');
+
+    await clientReturning(401, 'unauthorized').GET('/v1/tenants');
+    vi.advanceTimersByTime(SESSION_EXPIRED_REDIRECT_DELAY_MS);
+
+    expect(sessionExpired.value).toBe(false);
+    expect(assignSpy).not.toHaveBeenCalled();
   });
 });
 

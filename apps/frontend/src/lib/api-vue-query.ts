@@ -40,7 +40,8 @@ export const sessionExpiredMiddleware: Middleware = {
       .catch(() => null)) as { message?: unknown } | null;
     if (body?.message !== 'unauthorized') return undefined;
     if (typeof window === 'undefined' || sessionExpired.value) return undefined;
-    if (['/signin', '/signup'].includes(window.location.pathname)) return undefined;
+    // /auth/2fa は 401 を自分で「セッション切れ」として見せる
+    if (['/signin', '/signup', '/auth/2fa'].includes(window.location.pathname)) return undefined;
     sessionExpired.value = true;
     setTimeout(() => window.location.assign('/signin'), SESSION_EXPIRED_REDIRECT_DELAY_MS);
     return undefined;
@@ -365,6 +366,18 @@ export function useUpdateFindingStateMutation() {
 
 export function useLoginMutation() {
   return apiClient.useMutation('post', '/v1/auth/login');
+}
+
+export function useTotpSetupMutation() {
+  return apiClient.useMutation('post', '/v1/auth/2fa/totp/setup');
+}
+
+export function useTotpVerifySetupMutation() {
+  return apiClient.useMutation('post', '/v1/auth/2fa/totp/verify-setup');
+}
+
+export function useVerifyTwoFactorMutation() {
+  return apiClient.useMutation('post', '/v1/auth/2fa/verify');
 }
 
 export function useRegisterMutation() {

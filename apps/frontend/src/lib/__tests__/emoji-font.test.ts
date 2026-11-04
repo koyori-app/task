@@ -7,7 +7,10 @@ import {
   DEFAULT_EMOJI_FONT,
   EMOJI_FONT_LINK_ID,
   EMOJI_FONT_VAR,
+  EMOJI_NARROW_FAMILY,
+  EMOJI_NARROW_VAR,
   applyEmojiFont,
+  installNarrowEmojiFaces,
   emojiFontBootScript,
   emojiFontStackPrefix,
   emojiFontStylesheet,
@@ -83,11 +86,20 @@ describe('絵文字の字の選び肢', () => {
 
 describe('字の並び（tailwind.css）', () => {
   const SLOT = `var(${EMOJI_FONT_VAR},) `;
+  const NARROW_SLOT = `var(${EMOJI_NARROW_VAR},) `;
 
-  it('--font-sans は口を除けば Tailwind の既定と同じ（OS の既定で見た目が変わらない）', () => {
-    expect(themeValue(tailwindCss, '--font-sans')?.replace(SLOT, '')).toBe(
+  it('--font-sans は二つの口を除けば Tailwind の既定と同じ（OS の既定で見た目が変わらない）', () => {
+    expect(themeValue(tailwindCss, '--font-sans')?.replace(NARROW_SLOT, '').replace(SLOT, '')).toBe(
       themeValue(tailwindThemeCss, '--font-sans'),
     );
+  });
+
+  it('絵文字の範囲に絞った写しの口は、並びの頭、-apple-system の前にある（macOS の Safari で効かせる）', () => {
+    // -apple-system は己の中の Apple Color Emoji で絵文字を描くので、その前に置かないと届かない
+    expect(themeValue(tailwindCss, '--font-sans')).toMatch(
+      new RegExp(`^var\\(${EMOJI_NARROW_VAR},\\) -apple-system,`),
+    );
+    expect(tailwindCss.match(/var\(--koyori-emoji-narrow,\)/g)).toHaveLength(1);
   });
 
   it('等幅の並び（--font-mono）は定め直さず、絵文字の字の口も置かない（コードの数字を守る）', () => {
@@ -274,5 +286,193 @@ describe('Twemoji の組み直しの手順（scripts/fonts/build-twemoji.sh）',
     // Chromium と WebKit は並びの途中の VS16 を落として組むことがあり、この写しが無いと二つの絵に割れる
     expect(copies).toContain('2764 200D 1F525');
     expect(copies).toContain('1F3F3 200D 1F308');
+  });
+});
+
+/** FontFace と document.fonts の代わり（happy-dom には無い）。足した face を family と unicodeRange で残す */
+class FakeFontFace {
+  constructor(
+    public family: string,
+    public source: string,
+    public descriptors: { unicodeRange?: string } = {},
+  ) {}
+}
+function fakeFonts() {
+  const faces = new Set<FakeFontFace>();
+  return {
+    faces,
+    add: (face: FakeFontFace) => faces.add(face),
+    delete: (face: FakeFontFace) => faces.delete(face),
+    [Symbol.iterator]: () => faces.values(),
+  };
+}
+/** @font-face の規則の代わり。cssText と src と unicode-range だけを持つ */
+function fontFaceRule(src: string, range?: string) {
+  return {
+    cssText: `@font-face { src: ${src}; }`,
+    style: {
+      getPropertyValue: (name: string) =>
+        name === 'src' ? src : name === 'unicode-range' ? (range ?? '') : '',
+    },
+  };
+}
+
+describe('絵文字の範囲に絞った写し（installNarrowEmojiFaces）', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function setup() {
+    vi.stubGlobal('FontFace', FakeFontFace);
+    const fonts = fakeFonts();
+    const doc = { fonts } as unknown as Document;
+    return { doc, fonts };
+  }
+
+  it('ASCII と Latin-1 と ™ を除いた範囲の写しを、規則ごとに足す', () => {
+    const { doc, fonts } = setup();
+    const sheet = {
+      cssRules: [
+        fontFaceRule(
+          "url('/a.woff2') format('woff2')",
+          'U+23, U+2a, U+30-39, U+a9, U+ae, U+200d, U+2122, U+1f600-1f64f',
+        ),
+        { cssText: 'body { color: red; }' },
+        fontFaceRule("url('/b.woff2') format('woff2')", 'U+1f1e6-1f1ff'),
+      ],
+    } as unknown as CSSStyleSheet;
+
+    expect(installNarrowEmojiFaces(doc, sheet, EMOJI_NARROW_FAMILY)).toBe(2);
+    const added = [...fonts.faces];
+    expect(added.map((face) => face.family)).toEqual([EMOJI_NARROW_FAMILY, EMOJI_NARROW_FAMILY]);
+    expect(added.map((face) => face.source)).toEqual([
+      "url('/a.woff2') format('woff2')",
+      "url('/b.woff2') format('woff2')",
+    ]);
+    expect(added.map((face) => face.descriptors.unicodeRange)).toEqual([
+      'U+200d, U+1f600-1f64f',
+      'U+1f1e6-1f1ff',
+    ]);
+  });
+
+  it('範囲が書かれていない規則は全ての範囲から除き、除く字だけの規則は足さない', () => {
+    const { doc, fonts } = setup();
+    const sheet = {
+      cssRules: [
+        fontFaceRule("url('/c.woff2')"),
+        fontFaceRule("url('/d.woff2')", 'U+30-39, U+2122'),
+      ],
+    } as unknown as CSSStyleSheet;
+
+    expect(installNarrowEmojiFaces(doc, sheet, EMOJI_NARROW_FAMILY)).toBe(1);
+    expect([...fonts.faces][0]!.descriptors.unicodeRange).toBe('U+100-2121, U+2123-10ffff');
+  });
+
+  it('前に足した同じ名の写しを外してから足す（字を替えた時に古い写しが残らない）', () => {
+    const { doc, fonts } = setup();
+    const sheet = {
+      cssRules: [fontFaceRule("url('/e.woff2')", 'U+1f600')],
+    } as unknown as CSSStyleSheet;
+    const other = new FakeFontFace('Other', "url('/x.woff2')");
+    fonts.add(other);
+
+    installNarrowEmojiFaces(doc, sheet, EMOJI_NARROW_FAMILY);
+    installNarrowEmojiFaces(doc, sheet, EMOJI_NARROW_FAMILY);
+
+    expect([...fonts.faces].filter((face) => face.family === EMOJI_NARROW_FAMILY)).toHaveLength(1);
+    expect(fonts.faces.has(other)).toBe(true);
+  });
+
+  it('FontFace を持たない所では何もしない', () => {
+    const doc = { fonts: undefined } as unknown as Document;
+    expect(
+      installNarrowEmojiFaces(
+        doc,
+        { cssRules: [] } as unknown as CSSStyleSheet,
+        EMOJI_NARROW_FAMILY,
+      ),
+    ).toBe(0);
+  });
+
+  it('源（toString）だけで閉じている（描く前の script に埋めて走らせても動く）', () => {
+    const { doc, fonts } = setup();
+    const sheet = {
+      cssRules: [fontFaceRule("url('/f.woff2')", 'U+30-39, U+1f600')],
+    } as unknown as CSSStyleSheet;
+    const copied = runInThisContext(
+      `(${installNarrowEmojiFaces.toString()})`,
+    ) as typeof installNarrowEmojiFaces;
+
+    expect(copied(doc, sheet, EMOJI_NARROW_FAMILY)).toBe(1);
+    expect([...fonts.faces][0]!.descriptors.unicodeRange).toBe('U+1f600');
+  });
+});
+
+describe('絞った写しの口（applyEmojiFont と描く前の script）', () => {
+  afterEach(() => {
+    localStorage.clear();
+    document.documentElement.style.removeProperty(EMOJI_FONT_VAR);
+    document.documentElement.style.removeProperty(EMOJI_NARROW_VAR);
+    document.getElementById(EMOJI_FONT_LINK_ID)?.remove();
+  });
+
+  it('字を選ぶと、絞った写しの口に写しの名を置き、字の CSS を crossorigin 付きで読み込む', () => {
+    applyEmojiFont(document, 'noto');
+
+    expect(document.documentElement.style.getPropertyValue(EMOJI_NARROW_VAR)).toBe(
+      `'${EMOJI_NARROW_FAMILY}',`,
+    );
+    expect(document.getElementById(EMOJI_FONT_LINK_ID)?.getAttribute('crossorigin')).toBe(
+      'anonymous',
+    );
+  });
+
+  it('OS の既定に戻すと、絞った写しの口も外す', () => {
+    applyEmojiFont(document, 'twemoji');
+    applyEmojiFont(document, 'os');
+
+    expect(document.documentElement.style.getPropertyValue(EMOJI_NARROW_VAR)).toBe('');
+  });
+
+  it('描く前の script も、絞った写しの口を置き、字の CSS を crossorigin 付きで読み込む', () => {
+    localStorage.setItem('preferences', JSON.stringify({ values: { emojiFont: 'twemoji' } }));
+    runInThisContext(emojiFontBootScript('preferences'));
+
+    expect(document.documentElement.style.getPropertyValue(EMOJI_NARROW_VAR)).toBe(
+      `'${EMOJI_NARROW_FAMILY}',`,
+    );
+    expect(document.getElementById(EMOJI_FONT_LINK_ID)?.getAttribute('crossorigin')).toBe(
+      'anonymous',
+    );
+  });
+
+  it('描く前の script は、字の CSS を読み終えたら絞った写しを足す', () => {
+    vi.stubGlobal('FontFace', FakeFontFace);
+    const fonts = fakeFonts();
+    Object.defineProperty(document, 'fonts', { value: fonts, configurable: true });
+    try {
+      localStorage.setItem('preferences', JSON.stringify({ values: { emojiFont: 'twemoji' } }));
+      runInThisContext(emojiFontBootScript('preferences'));
+      const link = document.getElementById(EMOJI_FONT_LINK_ID)!;
+      Object.defineProperty(link, 'sheet', {
+        value: { cssRules: [fontFaceRule("url('/g.woff2')", 'U+30-39, U+1f600')] },
+        configurable: true,
+      });
+      link.dispatchEvent(new Event('load'));
+
+      const added = [...fonts.faces];
+      expect(added.map((face) => face.family)).toEqual([EMOJI_NARROW_FAMILY]);
+      expect(added[0]!.descriptors.unicodeRange).toBe('U+1f600');
+    } finally {
+      Reflect.deleteProperty(document, 'fonts');
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('OS の既定では、描く前の script は絞った写しの口を置かない', () => {
+    localStorage.setItem('preferences', JSON.stringify({ values: { emojiFont: 'os' } }));
+    runInThisContext(emojiFontBootScript('preferences'));
+
+    expect(document.documentElement.style.getPropertyValue(EMOJI_NARROW_VAR)).toBe('');
   });
 });

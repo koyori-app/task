@@ -1,12 +1,14 @@
 use chrono::{DateTime, Utc};
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use utoipa::ToSchema;
 use validator::Validate;
 
 use entity::task_comments;
 
 use crate::mentions::{MentionMap, MentionedUser};
+use crate::reactions::ReactionSummary;
 
 #[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
 pub struct TaskCommentResponse {
@@ -50,7 +52,7 @@ impl From<task_comments::Model> for TaskCommentResponse {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, serde::Deserialize, ToSchema)]
 pub struct CommentUser {
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
@@ -58,6 +60,21 @@ pub struct CommentUser {
     /// 画面でアイコンを出すために返す。未設定なら頭文字で描く
     #[schema(nullable)]
     pub avatar_url: Option<String>,
+}
+
+impl CommentUser {
+    /// id → (名前, アイコン) の表から作る。名前が引けない場合も表示は続けたいので `unknown` へ倒す。
+    pub fn from_lookup(map: &HashMap<Uuid, (String, Option<String>)>, user_id: Uuid) -> Self {
+        let (name, avatar_url) = map
+            .get(&user_id)
+            .cloned()
+            .unwrap_or_else(|| ("unknown".into(), None));
+        Self {
+            id: user_id,
+            name,
+            avatar_url,
+        }
+    }
 }
 
 #[derive(Serialize, ToSchema)]
@@ -72,6 +89,8 @@ pub struct CommentReply {
     #[schema(value_type = String, format = "date-time")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub is_deleted: bool,
+    /// 絵文字リアクション（最初に付いた順）。削除済みコメントは空
+    pub reactions: Vec<ReactionSummary>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -87,6 +106,8 @@ pub struct CommentThread {
     #[schema(value_type = String, format = "date-time")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub is_deleted: bool,
+    /// 絵文字リアクション（最初に付いた順）。削除済みコメントは空
+    pub reactions: Vec<ReactionSummary>,
 }
 
 #[derive(Serialize, ToSchema)]
