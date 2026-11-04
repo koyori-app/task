@@ -283,7 +283,14 @@ async fn week_is_monday_to_sunday_and_excludes_done() {
     week.sort();
     assert_eq!(week, vec!["monday", "sunday"]);
     add_task(&app, &user, &tp, done, "done today", Some(today), None).await;
-    assert!(titles(&app, &tp, "filter=today").await.is_empty());
+    // 期待は実行日の曜日から組む（月曜は "monday"、日曜は "sunday" が当日期限の未完了として
+    // 入り、それ以外の曜日は空）ので、どの曜日に走らせても通る。完了済みは常に出ない。
+    let expected_today: Vec<&str> = match today.weekday().num_days_from_monday() {
+        0 => vec!["monday"],
+        6 => vec!["sunday"],
+        _ => vec![],
+    };
+    assert_eq!(titles(&app, &tp, "filter=today").await, expected_today);
     // 対照: all には完了済みも出る
     assert!(
         titles(&app, &tp, "filter=all")
