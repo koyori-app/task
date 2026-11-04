@@ -39,7 +39,7 @@ URL は `/dev/features/...` のようにディレクトリをそのまま使う�
 
 ```yaml
 ---
-title: スケジュール                      # 2〜6 語の名詞句。「〜仕様書」「〜設計書」「（フォローアップ）」は付けない
+title: スケジュール                      # 1〜6 語の名詞句。「〜仕様書」「〜設計書」「（フォローアップ）」は付けない
 description: 期間に重なるタスク・スプリント・マイルストーンをテナント横断で返す API   # 1 文
 status: implemented                      # 仕様（dev/features/）だけ。implemented / partial / planned / operational
 updated: 2026-11-04                      # 本文を変えた日

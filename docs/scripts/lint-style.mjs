@@ -16,7 +16,7 @@ const STATUS = new Set(["implemented", "partial", "planned", "operational"]);
 const SPEC_SECTIONS = ["概要", "用語", "振る舞い", "データ", "API", "認可", "画面", "未実装と既知の制限", "決定の記録"];
 const BANNED = [
   [/札(?=[はをがにのへと、。）\s]|$)/u, "札 → メンションのチップ"],
-  [/印(?=[はをがにのへと、。）\s]|$)/u, "印 → メンションのマーカー"],
+  [/(?<![矢目刻封押検])印(?=[はをがにのへと、。）\s]|$)/u, "印 → メンションのマーカー"],
   [/控え/u, "控え → 保存した値"],
   [/正本/u, "正本 → 定義元"],
   [/防波堤/u, "防波堤 → 最後の制約"],
@@ -45,6 +45,7 @@ function walk(dir, out) {
 }
 
 function targets(argv) {
+  argv = argv.filter((a) => !a.startsWith("--"));
   if (argv.length) return argv.map((a) => resolve(a));
   const files = PUBLISHED_ROOT_FILES.map((f) => join(DOCS, f)).filter(existsSync);
   for (const d of PUBLISHED_DIRS) if (existsSync(join(DOCS, d))) walk(join(DOCS, d), files);
@@ -131,7 +132,8 @@ function lint(file) {
     if (h) {
       const [, hashes, title] = h;
       if (hashes.length === 1) add(no, "error", "heading", "本文に # 見出しを書かない（title が H1 になる）");
-      if (/^\d+(\.\d+)*\.?\s/.test(title)) add(no, "error", "heading", "見出しに番号を付けない");
+      // 「1. 概要」「2.1 データ」の形だけを番号とみなす。「1 人あたりの時間」のような数字始まりは通す
+      if (/^\d+(\.\d+)*\.\s|^\d+\.\d+\s/.test(title)) add(no, "error", "heading", "見出しに番号を付けない");
       if (hashes.length === 2) {
         flushBold();
         sectionLine = no;
