@@ -50,7 +50,7 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
 }));
 
 import CreateTaskDialog from '../CreateTaskDialog.vue';
-import { pickerOption } from '@/components/__tests__/picker';
+import { pickerOption, pickerTrigger } from '@/components/__tests__/picker';
 
 const statuses = [
   {
@@ -411,6 +411,61 @@ describe('CreateTaskDialog discard confirmation', () => {
     expect(confirmOpen()).toBe(false);
     expect(wrapper.emitted('update:open')).toBeUndefined();
     expect(getTitleInput().value).toBe('書きかけ');
+    wrapper.unmount();
+  });
+
+  const estimateInput = () =>
+    document.body.querySelector<HTMLInputElement>('input[name="estimated_minutes"]')!;
+
+  // タイトル・説明が空でも、他の項目に入力があれば捨てる前に確認する
+  it.each(closers)(
+    '見積もりだけ入力して %s で閉じようとすると確認し、戻ると値が残る',
+    async (name, close) => {
+      const wrapper = mountDialog(queryClient);
+      await nextTick();
+      await new DOMWrapper(estimateInput()).setValue('90');
+
+      close();
+      await nextTick();
+      expect(confirmOpen(), name).toBe(true);
+      expect(wrapper.emitted('update:open')).toBeUndefined();
+
+      clickButton('戻る');
+      await nextTick();
+
+      expect(confirmOpen()).toBe(false);
+      expect(estimateInput().value).toBe('90');
+      wrapper.unmount();
+    },
+  );
+
+  it('優先度だけ変えても確認し、破棄すると閉じる', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    pickerOption(pickerTrigger(document.body, '優先度'), '高').click();
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(true);
+
+    clickButton('破棄する');
+    await nextTick();
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it('ラベルだけ選んでも確認する', async () => {
+    const wrapper = mountDialog(queryClient, { labels });
+    await nextTick();
+    document.body.querySelector<HTMLButtonElement>('button[aria-label^="ラベル"]')!.click();
+    await nextTick();
+    menuItem('bug').click();
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(true);
     wrapper.unmount();
   });
 

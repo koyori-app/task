@@ -236,9 +236,22 @@ watch(
   },
 );
 
-/** 入力があるか（title / description が初期値と違う）。あれば閉じる前に確認する */
+/**
+ * 入力があるか。フォームの全項目を、開いた直後の値（title は initialTitle、他は resetForm が入れる値）と
+ * 比べる。項目を足したら resetForm とここを揃えること。あれば閉じる前に確認する
+ */
 const dirty = computed(
-  () => title.value !== (props.initialTitle ?? '') || description.value !== '',
+  () =>
+    title.value !== (props.initialTitle ?? '') ||
+    description.value !== '' ||
+    statusId.value !== defaultStatusId.value ||
+    plannedStartOn.value !== '' ||
+    softDeadline.value !== '' ||
+    hardDeadline.value !== '' ||
+    String(estimate.value) !== '' ||
+    priority.value !== 'Medium' ||
+    selectedLabelIds.value.length > 0 ||
+    selectedAssigneeIds.value.length > 0,
 );
 const discardConfirmOpen = ref(false);
 
