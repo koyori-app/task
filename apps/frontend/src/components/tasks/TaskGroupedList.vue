@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, shallowRef, watch, type Ref } from 'vue';
+import {
+  handleNodePointerdown,
+  isDragState,
+  isSynthDragState,
+  state as dndState,
+} from '@formkit/drag-and-drop';
 import { dragAndDrop } from '@formkit/drag-and-drop/vue';
-import { emitTransferAsStatusChange } from '@/components/tasks/task-grouped-dnd';
+import { useEventListener } from '@vueuse/core';
+import { canStartRowDrag, statusIdAt } from '@/components/tasks/task-grouped-dnd';
 import { PhCaretDown, PhPlus } from '@phosphor-icons/vue';
 import { CornerDownLeft } from '@lucide/vue';
 import { PhCalendarPlus, PhFlag, PhTag } from '@phosphor-icons/vue';
@@ -71,13 +78,20 @@ const emit = defineEmits<{
 }>();
 
 // ---- 群のあいだの DnD（@formkit/drag-and-drop） ----
-// 正本は親（query cache）である。lib には群ごとの鏡写しを渡し、
-// 群をまたいだ transfer だけを onMoveStatus として親へ流す。
+// 正本は親（query cache）である。lib には群ごとの鏡写しを渡す。
 // 群の中の並べ替えは保存先（タスクの順序欄が API に無い）ゆえ扱わぬ。
+//
+// lib に任せるのは掴むところ（ドラッグ像・長押し・自動スクロール）までで、行き先と確定は
+// ここで持つ。lib の transfer は行の上の dragover で即座に行を動かして確定する作りで、
+// 落とせるのが行の上に限られ、通っただけの群へ保存が飛ぶ。
 /** タッチで行を掴むまでの長押し時間。lib の既定（1 秒）では長すぎ、OS の長押しメニューに負ける */
 const TOUCH_DRAG_LONG_PRESS_MS = 300;
 const dndValues = new Map<string, Ref<TaskResponse[]>>();
 const dndRegistered = new Set<string>();
+/** ポインターのいる群。掴んだ行の元の群と群の外では null。強調に使う */
+const dropTargetStatusId = ref<string | null>(null);
+/** 落とされた群。lib の後始末が済む onDragend で確定する（取り消しでは入らない） */
+let droppedStatusId: string | null = null;
 
 function dndTasksOf(group: TaskGroup): TaskResponse[] {
   return dndValues.get(group.status.id)?.value ?? group.tasks;
@@ -93,36 +107,86 @@ function registerDndGroup(statusId: string, el: unknown) {
   dragAndDrop<TaskResponse>({
     parent: shallowRef(el),
     values,
-    group: 'task-grouped-list',
-    // 群の中の並べ替えは扱わぬ（タスクの手動順序を持つ欄が API に無い）。
-    // 見た目だけ動いて戻るのも紛らわしいゆえ、lib 段で止める。
+    // 群の中の並べ替えも群をまたぐ transfer も lib では起こさない。
     sortable: false,
+    dropZone: false,
     draggable: (child) => child.hasAttribute('data-dnd-task'),
     // タッチでは長押ししてから動かしたときだけ掴む。lib の既定は指が動いた瞬間に
     // 掴んで touchmove を preventDefault するので、行の上から始めたスクロールが
     // すべて drag になる（行がリストのほぼ全面を覆う）。マウスは native drag なので影響なし
     longPress: true,
     longPressDuration: TOUCH_DRAG_LONG_PRESS_MS,
-    onTransfer: (data) =>
-      emitTransferAsStatusChange(data, (task, statusId) => {
-        // 成否は親が表示する（行の下のエラー）。ここで reject を握らないと、
-        // lib の handler から出た Promise は誰にも待たれず unhandled rejection になる。
-        moveStatus(task, statusId).catch(() => {});
-      }),
+    // 掴めるかは押した場所で決める。lib の既定は行の中へのフォーカスで draggable を
+    // 切るが、行は tabindex を持ちボタンも並ぶので、未フォーカスの行は押した瞬間に
+    // 掴めなくなり、文字の選択が始まる（ブラウザを問わない）。
+    handleNodeFocus: () => {},
+    handleNodeBlur: () => {},
+    handleNodePointerdown: (data, state) => {
+      const canDrag = canStartRowDrag(data.e.target);
+      data.targetData.node.el.draggable = canDrag;
+      if (canDrag) handleNodePointerdown(data, state);
+    },
+    onDragend: ({ draggedNode }) => {
+      const statusId = droppedStatusId;
+      droppedStatusId = null;
+      dropTargetStatusId.value = null;
+      if (statusId) moveRow(draggedNode.data.value as TaskResponse, statusId);
+    },
   });
 }
 
+function trackDropTarget(el: EventTarget | null) {
+  if (!isDragState(dndState)) return;
+  const statusId = statusIdAt(el);
+  const task = dndState.draggedNode.data.value as TaskResponse;
+  // 保存中の行は status_id が古く、その群にもう居ない。動かすと行が重複するので落とし先を持たせない
+  const saving = !dndValues.get(task.status_id)?.value.some((row) => row.id === task.id);
+  dropTargetStatusId.value = saving || statusId === task.status_id ? null : statusId;
+}
+
+function dropOn(el: EventTarget | null) {
+  trackDropTarget(el);
+  droppedStatusId = dropTargetStatusId.value;
+}
+
+// 行とその親の handler が stopPropagation するので、window の capture で先に受ける。
+const CAPTURE = { capture: true };
+// native drag（マウス）。lib が dragenter を止めるのは行の上だけで、WebKit は止まっていない
+// 要素へ入った直後に離すと drop を出さない（Chromium と Firefox は出す）。
+useEventListener('dragenter', (e) => isDragState(dndState) && e.preventDefault(), CAPTURE);
+useEventListener('dragover', (e) => trackDropTarget(e.target), CAPTURE);
+useEventListener('drop', (e) => dropOn(e.target), CAPTURE);
+// lib の pointer drag（タッチ）。指の下の要素は target に出ないので座標から引く。
+useEventListener(
+  'pointermove',
+  (e) =>
+    isSynthDragState(dndState) && trackDropTarget(document.elementFromPoint(e.clientX, e.clientY)),
+  CAPTURE,
+);
+useEventListener(
+  'pointerup',
+  (e) => isSynthDragState(dndState) && dropOn(document.elementFromPoint(e.clientX, e.clientY)),
+  CAPTURE,
+);
+
+function moveRow(task: TaskResponse, statusId: string) {
+  const from = dndValues.get(task.status_id);
+  const to = dndValues.get(statusId);
+  if (from) from.value = from.value.filter((row) => row.id !== task.id);
+  if (to) to.value = [...to.value, task];
+  // 成否は親が表示する（行の下のエラー）。ここで reject を握らないと、
+  // lib の handler から出た Promise は誰にも待たれず unhandled rejection になる。
+  moveStatus(task, statusId).catch(() => {});
+}
+
 /**
- * lib は transfer の時点で DOM と鏡写しを先に動かしている。保存が失敗しても
- * 正本（props）は変わらないので下の watch は走らず、動いた行が残ってしまう。
- * そこで確定を待ってから、成否を問わず鏡写しを正本から引き直す。成功なら
- * 再取得の済んだ姿に、失敗なら元の姿になる。
+ * 落とした時点で鏡写しを先に動かす。保存が失敗しても正本（props）は変わらないので
+ * 下の watch は走らず、動いた行が残ってしまう。そこで確定を待ってから、成否を問わず
+ * 鏡写しを正本から引き直す。成功なら再取得の済んだ姿に、失敗なら元の姿になる。
  *
- * 引き直すのは、飛行中の移動がすべて確定したときだけにする。lib は 1 回の
- * ドラッグで transfer を 2 回出すことがあり（実測）、2 回目は親が送信中として
- * 何もせず即座に返す。その時点で引き直すと、再取得の前の姿へ一度戻ってから
- * 動き直す（二重に動く）。nextTick を挟むのも同じ理由で、再取得の結果が
- * props に届くのを待つため。
+ * 引き直すのは、飛行中の移動がすべて確定したときだけにする。別の行の保存が残って
+ * いるうちに引き直すと、その行が再取得の前の姿へ一度戻ってから動き直す（二重に動く）。
+ * nextTick を挟むのは、再取得の結果が props に届くのを待つため。
  */
 let movesInFlight = 0;
 /** 飛行中の移動が関わる群（移した元と先）。status id → 関わっている移動の数 */
@@ -317,8 +381,18 @@ async function commitAdding(statusId: string) {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4">
-    <section v-for="group in groups" :key="group.status.id">
+  <div class="flex flex-col">
+    <!-- 群どうしの余白も落とし先に含めるので、gap ではなく群の padding で空ける -->
+    <section
+      v-for="group in groups"
+      :key="group.status.id"
+      :data-dnd-status-id="group.status.id"
+      class="pb-4 last:pb-0"
+      :class="
+        dropTargetStatusId === group.status.id &&
+        'rounded-md bg-muted/40 ring-2 ring-ring/50 ring-inset'
+      "
+    >
       <div class="flex h-8 items-center gap-2">
         <Button
           type="button"
@@ -388,10 +462,7 @@ async function commitAdding(statusId: string) {
               />
             </div>
 
-            <div
-              :ref="(el) => registerDndGroup(group.status.id, el)"
-              :data-dnd-status-id="group.status.id"
-            >
+            <div :ref="(el) => registerDndGroup(group.status.id, el)">
               <template v-for="task in dndTasksOf(group)" :key="task.id">
                 <TaskGroupedRow
                   data-dnd-task

@@ -4,7 +4,7 @@
  * lib の既定では指が動いた瞬間に drag が始まり、touchmove を preventDefault して
  * スクロールを打ち消す。行がリストのほぼ全面を覆うので、スマホで一覧をスクロール
  * できなくなる。gesture は jsdom 系では再現できぬので、dragAndDrop をすり替えて
- * config を受け取る（task-grouped-dnd.rejection.test.ts と同じ）。
+ * config を受け取る。
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';

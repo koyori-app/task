@@ -26,6 +26,7 @@ pub mod password_reset;
 pub mod personal_tokens;
 pub mod project_members;
 pub mod projects;
+pub mod reactions;
 pub mod reviews;
 pub mod schedule;
 pub mod sprints;
