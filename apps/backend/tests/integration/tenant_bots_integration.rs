@@ -1,4 +1,6 @@
-use crate::common::{TestApp, TestTenantProject, TestUser, json_body};
+use crate::common::{
+    TestApp, TestTenantProject, TestUser, execute_sql, insert_personal_token_for_test, json_body,
+};
 use axum::http::StatusCode;
 use chrono::{Duration, Utc};
 use entity::scopes::Scope;
@@ -822,4 +824,50 @@ async fn tenant_bots_owner_bulk_revocation_also_records_token_audit() {
         .unwrap();
     assert_eq!(audit.actor_id, Some(owner.id));
     assert!(audit.metadata.unwrap().get("token_id").is_some());
+}
+
+async fn require_2fa(app: &TestApp, tenant_id: Uuid) {
+    execute_sql(
+        &app.state.db,
+        "UPDATE tenants SET require_2fa = true WHERE id = $1",
+        vec![tenant_id.into()],
+    )
+    .await;
+}
+
+async fn assert_2fa_required(res: reqwest::Response, what: &str) {
+    assert_eq!(res.status(), StatusCode::FORBIDDEN, "{what}");
+    assert_eq!(
+        json_body(res).await["message"],
+        "2fa-setup-required",
+        "{what}"
+    );
+}
+
+/// BOT は TOTP もパスキーも持てないので、2FA を強制するテナントでも BOT の PAT は業務の口を通る。
+/// 免除は BOT に限り、2FA を満たさない人の PAT は従来どおり止まる。
+#[tokio::test]
+async fn tenant_bots_pat_is_exempt_from_tenant_2fa_but_human_pat_is_not() {
+    let (app, owner, tenant, bot) = fixture().await;
+    let bot_token = issue(&app, tenant.tenant_id, bot, vec!["read:project"], None).await;
+    let human_token = insert_personal_token_for_test(
+        &app.state.db,
+        owner.id,
+        tenant.tenant_id,
+        &app.state.settings.personal_token_secret,
+        vec![Scope::ReadProject],
+        None,
+    )
+    .await;
+    require_2fa(&app, tenant.tenant_id).await;
+    let projects = format!("/v1/tenants/{}/projects", tenant.tenant_id);
+    assert_eq!(
+        app.get_with_bearer(&projects, &bot_token).await.status(),
+        StatusCode::OK
+    );
+    assert_2fa_required(
+        app.get_with_bearer(&projects, &human_token).await,
+        "2FA の無い人の PAT",
+    )
+    .await;
 }

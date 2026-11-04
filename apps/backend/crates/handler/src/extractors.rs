@@ -312,15 +312,30 @@ async fn has_tenant_access(
 
 /// テナントが 2FA を強制していれば、利用者が 2FA を満たすかを確かめる
 /// （docs/features/auth-2fa.md §9）。強制していないテナントでは DB を引かない。
+///
+/// BOT は強制の対象から外す。BOT は TOTP もパスキーも持てず（migration の制約と、登録が人の
+/// セッション限りであるため）、セッションにも入れない。2FA は人の対話のサインインを守る物で、
+/// BOT は PAT でしか入らない。BOT の PAT を発行できるのは 2FA を満たした人の Admin だけ
+/// （`handlers::bots`）なので、強制の意図は発行の所で保たれる。人の PAT は従来どおり止める。
 pub(crate) async fn ensure_tenant_2fa(
     state: &AppState,
     tenant: &tenants::Model,
     user_id: Uuid,
 ) -> Result<(), AppError> {
-    if tenant.require_2fa && !user_satisfies_2fa(&state.db, user_id).await? {
+    if !tenant.require_2fa || is_bot_user(state, user_id).await? {
+        return Ok(());
+    }
+    if !user_satisfies_2fa(&state.db, user_id).await? {
         return Err(AppError::ForbiddenDetail("2fa-setup-required".into()));
     }
     Ok(())
+}
+
+async fn is_bot_user(state: &AppState, user_id: Uuid) -> Result<bool, AppError> {
+    Ok(users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .is_some_and(|user| user.is_bot()))
 }
 
 /// `has_tenant_access` の所属判定（オーナー・テナントメンバー・客分）。
