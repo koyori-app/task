@@ -301,6 +301,9 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let api = router
         .merge(Scalar::with_url("/scalar", openapi.clone()))
         .with_state(state.clone())
+        // タスク変更の発行レイヤーと SSE の終了に使う
+        .layer(Extension(state.redis_client.clone()))
+        .layer(Extension(shutdown_rx.clone()))
         .layer(cors)
         .layer(middleware::from_fn_with_state(
             state.clone(),
