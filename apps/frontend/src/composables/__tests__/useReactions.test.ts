@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { defineComponent } from 'vue';
+import { defineComponent, ref } from 'vue';
 
 import type { components, paths } from '@/generated/api';
 
@@ -228,6 +228,90 @@ describe('useReactions', () => {
       'http://test.local/api/v1/tenants/t/projects/p/tasks/ENG-1/reactions/%F0%9F%91%8D/users',
       'http://test.local/api/v1/tenants/t/projects/p/tasks/ENG-1/comments/c-1/reactions/%F0%9F%91%8D/users',
     ]);
+  });
+
+  describe('同じペインで別のタスクへ切り替えた時', () => {
+    const taskId = ref('ENG-1');
+
+    function mountSwitchingHost() {
+      taskId.value = 'ENG-1';
+      const Host = defineComponent({
+        setup() {
+          reactions = useReactions({
+            tenantId: 't',
+            projectId: 'p',
+            taskId,
+            currentUser: ME,
+          });
+          return () => null;
+        },
+      });
+      mount(Host, { global: { plugins: [[VueQueryPlugin, { queryClient }]] } });
+    }
+
+    function holdResponses() {
+      let release = () => {};
+      control.hold = new Promise((resolve) => (release = resolve));
+      return release;
+    }
+
+    it('前のタスクの送信中でも次のタスクは押せる', async () => {
+      mountSwitchingHost();
+      const release = holdResponses();
+      const first = reactions.toggle(null, '👍');
+      await flushPromises();
+      expect(reactions.isBusy(null)).toBe(true);
+
+      taskId.value = 'ENG-2';
+      expect(reactions.isBusy(null)).toBe(false);
+      const second = reactions.toggle(null, '👍');
+      await flushPromises();
+      expect(requests.map((request) => request.url)).toEqual([
+        'http://test.local/api/v1/tenants/t/projects/p/tasks/ENG-1/reactions/%F0%9F%91%8D',
+        'http://test.local/api/v1/tenants/t/projects/p/tasks/ENG-2/reactions/%F0%9F%91%8D',
+      ]);
+
+      // 前のタスクへ戻れば、まだ送信中と分かる
+      taskId.value = 'ENG-1';
+      expect(reactions.isBusy(null)).toBe(true);
+      release();
+      await Promise.all([first, second]);
+      expect(reactions.isBusy(null)).toBe(false);
+    });
+
+    it('前のタスクの失敗を次のタスクに出さず、戻れば前のタスクに出す', async () => {
+      mountSwitchingHost();
+      control.reject = { status: 400, body: { message: 'reaction-limit-exceeded' } };
+      const release = holdResponses();
+      const pending = reactions.toggle(null, '👍');
+      await flushPromises();
+
+      taskId.value = 'ENG-2';
+      release();
+      await pending;
+      expect(reactions.errorFor(null)).toBeNull();
+
+      taskId.value = 'ENG-1';
+      expect(reactions.errorFor(null)).toBe('これ以上種類を増やせません');
+    });
+
+    it('コメントの状態もタスクごとに分ける', async () => {
+      mountSwitchingHost();
+      const release = holdResponses();
+      control.reject = { status: 400, body: { message: 'bad-request' } };
+      const pending = reactions.toggle('c-1', '👍');
+      await flushPromises();
+      expect(reactions.isBusy('c-1')).toBe(true);
+
+      taskId.value = 'ENG-2';
+      expect(reactions.isBusy('c-1')).toBe(false);
+      release();
+      await pending;
+      expect(reactions.errorFor('c-1')).toBeNull();
+
+      taskId.value = 'ENG-1';
+      expect(reactions.errorFor('c-1')).toBe('リアクションを送れませんでした');
+    });
   });
 
   it('全員の取得の失敗は呼び手へ伝える（一覧が文言を出す）', async () => {

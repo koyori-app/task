@@ -9,6 +9,7 @@ import type { CommentThread } from '@/composables/useTaskComments';
 import type { ReactionSummary } from '@/lib/reactions';
 
 import TaskCommentItem from '../TaskCommentItem.vue';
+import CommentEditorStub from './comment-editor-stub';
 
 const user = { id: 'u-1', name: '田中', avatar_url: null };
 const THUMBS: ReactionSummary = { emoji: '👍', count: 2, reacted: false, users: [user] };
@@ -42,7 +43,7 @@ function mountItem(
 ) {
   return mount(TaskCommentItem, {
     attachTo: document.body,
-    global: { stubs: { CommentEditor: true } },
+    global: { stubs: { CommentEditor: CommentEditorStub } },
     props: {
       comment: comment(),
       reactionController: controller(),

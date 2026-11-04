@@ -23,9 +23,6 @@ const COMMENT_REACTION_USERS_PATH =
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type CommentList = { comments: CommentThread[] };
 
-/** タスク本体を指す時の、対象ごとの状態の鍵 */
-const TASK_TARGET_KEY = 'task';
-
 function reactionErrorMessage(error: unknown): string {
   const summary = 'リアクションを送れませんでした';
   const message =
@@ -98,6 +95,14 @@ export function useReactions(params: UseReactionsParams) {
   }
 
   /**
+   * 送信中と失敗の鍵。ペインは作り直されずにタスクを移るので、タスクまで含めて分ける
+   * （前のタスクの送信中に次のタスクが押せなくなる、前のタスクの失敗が次のタスクに出る）。
+   */
+  function targetKey(path: ReturnType<typeof taskPath>, commentId: string | null) {
+    return JSON.stringify([path.tenant_id, path.project_id, path.id, commentId]);
+  }
+
+  /**
    * openapi-fetch がパスの値を encodeURIComponent するので、絵文字はそのまま渡す。
    * ここで掛けると二重になり、backend に `%F0...` の字のまま届く。
    */
@@ -116,13 +121,14 @@ export function useReactions(params: UseReactionsParams) {
   }
 
   async function toggle(commentId: string | null, emoji: string): Promise<void> {
-    const key = commentId ?? TASK_TARGET_KEY;
-    if (!tenantId.value || !projectId.value || !taskId.value || busyTargets.value.has(key)) return;
+    if (!tenantId.value || !projectId.value || !taskId.value) return;
+    // ペインの切替で unmount しても完走した結果を対象のキャッシュへ書けるよう、開始時点で固定する
+    const path = taskPath();
+    const key = targetKey(path, commentId);
+    if (busyTargets.value.has(key)) return;
 
     busyTargets.value.add(key);
     errors.value.delete(key);
-    // ペインの切替で unmount しても完走した結果を対象のキャッシュへ書けるよう、開始時点で固定する
-    const path = taskPath();
     const me = toValue(params.currentUser);
     const commentsKey = ['get', LIST_COMMENTS_PATH, { params: { path } }] as const;
     const taskKey = ['get', GET_TASK_PATH, { params: { path } }] as const;
@@ -182,8 +188,9 @@ export function useReactions(params: UseReactionsParams) {
   }
 
   return {
-    isBusy: (commentId: string | null) => busyTargets.value.has(commentId ?? TASK_TARGET_KEY),
-    errorFor: (commentId: string | null) => errors.value.get(commentId ?? TASK_TARGET_KEY) ?? null,
+    isBusy: (commentId: string | null) => busyTargets.value.has(targetKey(taskPath(), commentId)),
+    errorFor: (commentId: string | null) =>
+      errors.value.get(targetKey(taskPath(), commentId)) ?? null,
     toggle,
     fetchUsers,
   };
