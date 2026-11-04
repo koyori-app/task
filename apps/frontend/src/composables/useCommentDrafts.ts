@@ -4,7 +4,8 @@ import { ref } from 'vue';
  * コメントの下書き置き場。キーは利用者 ID + タスク ID + スレッド ID（一覧は threadId = null）。
  * 利用者 ID を含めるのは、同じタブで別の利用者がログインしても前の人の下書きを出さないため。
  * 利用者 ID が未取得（null）の間は sessionStorage へ書かず、メモリだけに置く。
- * ログアウト（auth store の clearUser）で resetCommentDrafts が全部消す。
+ * 明示的なログアウト（useAuthSession の logout）で resetCommentDrafts が全部消す。
+ * clearUser は /me の一時障害でも呼ばれるため、そこでは消さない（利用者の切り替えはキーの利用者 ID で防ぐ）。
  * コンポーネントの外（sessionStorage）にも書くので、別のタスクへ移って戻る・オーバーレイを
  * 閉じて開き直しても復元できる。sessionStorage が使えない環境（SSR・例外）ではメモリだけで動く。
  */

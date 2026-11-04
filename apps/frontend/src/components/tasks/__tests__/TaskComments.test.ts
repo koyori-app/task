@@ -113,15 +113,14 @@ describe('TaskComments の下書き（タスクごと）', () => {
     expect((box(back).element as HTMLTextAreaElement).value).toBe('A の書きかけ');
   });
 
-  it('ログアウト（clearUser）で下書きを全部消す', async () => {
+  it('clearUser（/me の一時障害でも呼ばれる）では下書きを消さない', async () => {
     const first = mountComments({ taskId: 'a' });
-    await box(first).setValue('消える');
+    await box(first).setValue('残る');
     first.unmount();
     useAuthStore().clearUser();
     signInAs('user-1');
     const second = mountComments({ taskId: 'a' });
-    expect((box(second).element as HTMLTextAreaElement).value).toBe('');
-    expect(window.sessionStorage.length).toBe(0);
+    expect((box(second).element as HTMLTextAreaElement).value).toBe('残る');
   });
 
   it('投稿に成功したら下書きを消す（再マウントしても戻らない）', async () => {

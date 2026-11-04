@@ -1,7 +1,6 @@
 import { type } from 'arktype';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { resetCommentDrafts } from '@/composables/useCommentDrafts';
 import type { components } from '@/generated/api';
 
 export const authUserSchema = type({
@@ -33,8 +32,6 @@ export const useAuthStore = defineStore(
 
     function clearUser() {
       user.value = null;
-      // 書きかけのコメントを次にログインする人へ持ち越さない
-      resetCommentDrafts();
     }
 
     return { user, setUser, clearUser };
