@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { nextTick } from 'vue';
 import TaskComments from '../TaskComments.vue';
+import { resetCommentDrafts } from '@/composables/useCommentDrafts';
 import { openMentionPickerSpy } from './comment-editor-stub';
 import type { CommentThread } from '@/composables/useTaskComments';
 import type { ActivityItem } from '@/lib/task-activity';
@@ -13,6 +14,7 @@ vi.mock('@/components/tasks/CommentEditor.vue', async () => ({
 }));
 
 enableAutoUnmount(afterEach);
+beforeEach(resetCommentDrafts);
 
 const user = { id: 'user-1', name: '田中太郎' };
 
@@ -56,6 +58,37 @@ function mountComments(props: Partial<InstanceType<typeof TaskComments>['$props'
     },
   });
 }
+
+describe('TaskComments の下書き（タスクごと）', () => {
+  const box = (w: VueWrapper) => w.get('textarea[aria-label="コメントを入力"]');
+
+  it('タスク A の下書きをタスク B の入力欄に出さず、A へ戻ると復元する', async () => {
+    const wrapper = mountComments({ taskId: 'a' });
+    await box(wrapper).setValue('A の下書き');
+    await wrapper.setProps({ taskId: 'b' });
+    expect((box(wrapper).element as HTMLTextAreaElement).value).toBe('');
+    await wrapper.setProps({ taskId: 'a' });
+    expect((box(wrapper).element as HTMLTextAreaElement).value).toBe('A の下書き');
+  });
+
+  it('開き直し（再マウント）でも同じタスクの下書きが戻る', async () => {
+    const first = mountComments({ taskId: 'a' });
+    await box(first).setValue('書きかけ');
+    first.unmount();
+    const second = mountComments({ taskId: 'a' });
+    expect((box(second).element as HTMLTextAreaElement).value).toBe('書きかけ');
+  });
+
+  it('投稿に成功したら下書きを消す（再マウントしても戻らない）', async () => {
+    const wrapper = mountComments({ taskId: 'a' });
+    await box(wrapper).setValue('送る');
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    wrapper.unmount();
+    const again = mountComments({ taskId: 'a' });
+    expect((box(again).element as HTMLTextAreaElement).value).toBe('');
+  });
+});
 
 describe('TaskComments', () => {
   it('スレッドと返信を素テキストで表示し、HTML はエスケープされたまま出す', async () => {

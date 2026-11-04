@@ -6,6 +6,11 @@ import CommentEditor from '@/components/tasks/CommentEditor.vue';
 import TaskActivityEntry from '@/components/tasks/TaskActivityEntry.vue';
 import TaskCommentItem from '@/components/tasks/TaskCommentItem.vue';
 import { Button, Skeleton, Spinner } from '@koyori-app/ui-vue';
+import {
+  clearCommentDraft,
+  getCommentDraft,
+  setCommentDraft,
+} from '@/composables/useCommentDrafts';
 import { useNow } from '@/composables/useNow';
 import type { CommentThread } from '@/composables/useTaskComments';
 import { buildTimeline, type ActivityFilter, type ActivityLookups } from '@/lib/activity-timeline';
@@ -111,14 +116,9 @@ const openThread = computed(() => props.threads.find((thread) => thread.id === o
  * 書きかけが警告なしに消える。既存スレッドを覗くだけ・返信をやめて一覧へ戻るだけの
  * 操作で起きるので、破棄の確認を出すより持ち分けるほうが素直。
  */
-const DRAFT_LIST_KEY = '';
-const drafts = ref<Record<string, string>>({});
-const draftKey = computed(() => openThreadId.value ?? DRAFT_LIST_KEY);
 const newDraft = computed({
-  get: () => drafts.value[draftKey.value] ?? '',
-  set: (value: string) => {
-    drafts.value = { ...drafts.value, [draftKey.value]: value };
-  },
+  get: () => getCommentDraft(props.taskId, openThreadId.value),
+  set: (value: string) => setCommentDraft(props.taskId, openThreadId.value, value),
 });
 
 // 開いていたスレッドが消えた（削除・再取得で不在）ら一覧へ戻す
@@ -240,8 +240,8 @@ async function submitDraft() {
   // 押せるし、スレッドが消えれば watch が一覧へ戻すので、await の後に
   // openThreadId を読み直すと別の下書きを消すことになる
   const threadId = openThreadId.value;
-  const key = threadId ?? DRAFT_LIST_KEY;
-  const sent = drafts.value[key] ?? '';
+  const taskId = props.taskId;
+  const sent = getCommentDraft(taskId, threadId);
   pinnedToBottom = true;
 
   const posted = threadId ? await props.onSubmit(body, threadId) : await props.onSubmit(body);
@@ -249,10 +249,8 @@ async function submitDraft() {
 
   // 送った内容がまだ置いてあるときだけ消す。一度離れて同じスレッドへ戻り、
   // 別の下書きを書き始めていたら、それは送信済みの本文ではないので残す
-  if (drafts.value[key] !== sent) return;
-  const rest = { ...drafts.value };
-  delete rest[key];
-  drafts.value = rest;
+  if (getCommentDraft(taskId, threadId) !== sent) return;
+  clearCommentDraft(taskId, threadId);
 }
 
 function showThread(threadId: string) {
