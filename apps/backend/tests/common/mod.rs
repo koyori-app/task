@@ -327,8 +327,16 @@ async fn ensure_schema(db: &DatabaseConnection) {
             let _ = db
                 .execute_unprepared("DROP INDEX IF EXISTS idx_sprints_active_per_project")
                 .await;
+            // 使い回す DB に残った旧形の projects の UNIQUE。本番は
+            // m20261105010000_projects_key_unique_per_tenant が消す
             let _ = db
-                .execute_unprepared("DROP INDEX IF EXISTS idx_projects_personal_owner")
+                .execute_unprepared(
+                    r#"
+DROP INDEX IF EXISTS idx_projects_personal_owner;
+DROP INDEX IF EXISTS "idx-projects-idx_projects_personal_owner";
+DROP INDEX IF EXISTS "idx-projects-projects_key_tenant_unique";
+"#,
+                )
                 .await;
             // 行の残った DB へ sync() が NOT NULL 列を既定値なしで足すと落ちるため、先に足しておく
             let _ = db
@@ -396,13 +404,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sprints_active_per_project
 
             db.execute_unprepared(
                 r#"
-DROP INDEX IF EXISTS idx_projects_personal_owner;
 ALTER TABLE projects
     ADD COLUMN IF NOT EXISTS is_personal BOOLEAN NOT NULL DEFAULT false,
     ADD COLUMN IF NOT EXISTS personal_owner_id UUID REFERENCES users(id) ON DELETE CASCADE;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal_owner
-    ON projects(tenant_id, personal_owner_id)
-    WHERE is_personal = true;
 "#,
             )
             .await
