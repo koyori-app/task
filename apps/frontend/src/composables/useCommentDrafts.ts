@@ -1,7 +1,10 @@
 import { ref } from 'vue';
 
 /*
- * コメントの下書き置き場。キーはタスク ID + スレッド ID（一覧は threadId = null）。
+ * コメントの下書き置き場。キーは利用者 ID + タスク ID + スレッド ID（一覧は threadId = null）。
+ * 利用者 ID を含めるのは、同じタブで別の利用者がログインしても前の人の下書きを出さないため。
+ * 利用者 ID が未取得（null）の間は sessionStorage へ書かず、メモリだけに置く。
+ * ログアウト（auth store の clearUser）で resetCommentDrafts が全部消す。
  * コンポーネントの外（sessionStorage）にも書くので、別のタスクへ移って戻る・オーバーレイを
  * 閉じて開き直しても復元できる。sessionStorage が使えない環境（SSR・例外）ではメモリだけで動く。
  */
@@ -11,8 +14,8 @@ const PREFIX = 'task:comment-draft:';
 // 読み書きの両方がここを通る。reactive なので、書いた下書きを読む computed が追従する
 const memory = ref<Record<string, string>>({});
 
-function keyOf(taskId: string | undefined, threadId: string | null) {
-  return `${PREFIX}${taskId ?? ''}:${threadId ?? ''}`;
+function keyOf(userId: string | null, taskId: string | undefined, threadId: string | null) {
+  return `${PREFIX}${userId ?? ''}:${taskId ?? ''}:${threadId ?? ''}`;
 }
 
 function storage(): Storage | null {
@@ -23,9 +26,14 @@ function storage(): Storage | null {
   }
 }
 
-export function getCommentDraft(taskId: string | undefined, threadId: string | null): string {
-  const key = keyOf(taskId, threadId);
+export function getCommentDraft(
+  userId: string | null,
+  taskId: string | undefined,
+  threadId: string | null,
+): string {
+  const key = keyOf(userId, taskId, threadId);
   if (key in memory.value) return memory.value[key] ?? '';
+  if (!userId) return '';
   try {
     return storage()?.getItem(key) ?? '';
   } catch {
@@ -34,12 +42,14 @@ export function getCommentDraft(taskId: string | undefined, threadId: string | n
 }
 
 export function setCommentDraft(
+  userId: string | null,
   taskId: string | undefined,
   threadId: string | null,
   value: string,
 ) {
-  const key = keyOf(taskId, threadId);
+  const key = keyOf(userId, taskId, threadId);
   memory.value = { ...memory.value, [key]: value };
+  if (!userId) return;
   try {
     if (value) storage()?.setItem(key, value);
     else storage()?.removeItem(key);
@@ -48,8 +58,12 @@ export function setCommentDraft(
   }
 }
 
-export function clearCommentDraft(taskId: string | undefined, threadId: string | null) {
-  const key = keyOf(taskId, threadId);
+export function clearCommentDraft(
+  userId: string | null,
+  taskId: string | undefined,
+  threadId: string | null,
+) {
+  const key = keyOf(userId, taskId, threadId);
   const rest = { ...memory.value };
   delete rest[key];
   memory.value = rest;

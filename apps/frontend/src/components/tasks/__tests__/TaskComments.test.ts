@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { nextTick } from 'vue';
+import { createPinia, setActivePinia } from 'pinia';
 import TaskComments from '../TaskComments.vue';
+import { useAuthStore } from '@/stores/auth';
 import { resetCommentDrafts } from '@/composables/useCommentDrafts';
 import { openMentionPickerSpy } from './comment-editor-stub';
 import type { CommentThread } from '@/composables/useTaskComments';
@@ -14,7 +16,25 @@ vi.mock('@/components/tasks/CommentEditor.vue', async () => ({
 }));
 
 enableAutoUnmount(afterEach);
-beforeEach(resetCommentDrafts);
+let pinia: ReturnType<typeof createPinia>;
+beforeEach(() => {
+  resetCommentDrafts();
+  pinia = createPinia();
+  setActivePinia(pinia);
+  signInAs('user-1');
+});
+
+function signInAs(id: string) {
+  useAuthStore().setUser({
+    id,
+    email: `${id}@example.com`,
+    username: id,
+    email_verified: true,
+    is_admin: false,
+    is_suspended: false,
+    totp_enabled: false,
+  });
+}
 
 const user = { id: 'user-1', name: '田中太郎' };
 
@@ -49,6 +69,7 @@ function activity(id: string, created_at: string, overrides: Partial<ActivityIte
 
 function mountComments(props: Partial<InstanceType<typeof TaskComments>['$props']> = {}) {
   return mount(TaskComments, {
+    global: { plugins: [pinia] },
     props: {
       threads: [],
       onSubmit: vi.fn(async () => true),
@@ -77,6 +98,30 @@ describe('TaskComments の下書き（タスクごと）', () => {
     first.unmount();
     const second = mountComments({ taskId: 'a' });
     expect((box(second).element as HTMLTextAreaElement).value).toBe('書きかけ');
+  });
+
+  it('利用者 A の下書きは同じタスクでも利用者 B の入力欄に復元しない', async () => {
+    const first = mountComments({ taskId: 'a' });
+    await box(first).setValue('A の書きかけ');
+    first.unmount();
+    signInAs('user-2');
+    const second = mountComments({ taskId: 'a' });
+    expect((box(second).element as HTMLTextAreaElement).value).toBe('');
+    second.unmount();
+    signInAs('user-1');
+    const back = mountComments({ taskId: 'a' });
+    expect((box(back).element as HTMLTextAreaElement).value).toBe('A の書きかけ');
+  });
+
+  it('ログアウト（clearUser）で下書きを全部消す', async () => {
+    const first = mountComments({ taskId: 'a' });
+    await box(first).setValue('消える');
+    first.unmount();
+    useAuthStore().clearUser();
+    signInAs('user-1');
+    const second = mountComments({ taskId: 'a' });
+    expect((box(second).element as HTMLTextAreaElement).value).toBe('');
+    expect(window.sessionStorage.length).toBe(0);
   });
 
   it('投稿に成功したら下書きを消す（再マウントしても戻らない）', async () => {

@@ -11,6 +11,7 @@ import {
   getCommentDraft,
   setCommentDraft,
 } from '@/composables/useCommentDrafts';
+import { useAuthStore } from '@/stores/auth';
 import { useNow } from '@/composables/useNow';
 import type { CommentThread } from '@/composables/useTaskComments';
 import { buildTimeline, type ActivityFilter, type ActivityLookups } from '@/lib/activity-timeline';
@@ -116,9 +117,11 @@ const openThread = computed(() => props.threads.find((thread) => thread.id === o
  * 書きかけが警告なしに消える。既存スレッドを覗くだけ・返信をやめて一覧へ戻るだけの
  * 操作で起きるので、破棄の確認を出すより持ち分けるほうが素直。
  */
+const authStore = useAuthStore();
+const userId = computed(() => authStore.user?.id ?? null);
 const newDraft = computed({
-  get: () => getCommentDraft(props.taskId, openThreadId.value),
-  set: (value: string) => setCommentDraft(props.taskId, openThreadId.value, value),
+  get: () => getCommentDraft(userId.value, props.taskId, openThreadId.value),
+  set: (value: string) => setCommentDraft(userId.value, props.taskId, openThreadId.value, value),
 });
 
 // 開いていたスレッドが消えた（削除・再取得で不在）ら一覧へ戻す
@@ -241,7 +244,8 @@ async function submitDraft() {
   // openThreadId を読み直すと別の下書きを消すことになる
   const threadId = openThreadId.value;
   const taskId = props.taskId;
-  const sent = getCommentDraft(taskId, threadId);
+  const uid = userId.value;
+  const sent = getCommentDraft(uid, taskId, threadId);
   pinnedToBottom = true;
 
   const posted = threadId ? await props.onSubmit(body, threadId) : await props.onSubmit(body);
@@ -249,8 +253,8 @@ async function submitDraft() {
 
   // 送った内容がまだ置いてあるときだけ消す。一度離れて同じスレッドへ戻り、
   // 別の下書きを書き始めていたら、それは送信済みの本文ではないので残す
-  if (getCommentDraft(taskId, threadId) !== sent) return;
-  clearCommentDraft(taskId, threadId);
+  if (getCommentDraft(uid, taskId, threadId) !== sent) return;
+  clearCommentDraft(uid, taskId, threadId);
 }
 
 function showThread(threadId: string) {
