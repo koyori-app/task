@@ -10,7 +10,7 @@ sidebar:
 
 ## 概要
 
-[Git ホスティング連携](/features/tasks/github-tasks)のうち、ホストの Webhook を受けてタスク側の処理へ渡す部分を書く。受信エンドポイントで署名検証と正規化を行い、受信記録とジョブ投入を 1 トランザクションで確定し、ジョブが PR・コミット・ブランチのリンクとマージ時の自動完了を処理する。実装済みのホストは GitHub である。列の定義と判断の理由は親ページの[データ](/features/tasks/github-tasks#データ)と[決定の記録](/features/tasks/github-tasks#決定の記録)の節に書く。
+[Git ホスティング連携](/dev/features/tasks/github-tasks)のうち、ホストの Webhook を受けてタスク側の処理へ渡す部分を書く。受信エンドポイントで署名検証と正規化を行い、受信記録とジョブ投入を 1 トランザクションで確定し、ジョブが PR・コミット・ブランチのリンクとマージ時の自動完了を処理する。実装済みのホストは GitHub である。列の定義と判断の理由は親ページの[データ](/dev/features/tasks/github-tasks#データ)と[決定の記録](/dev/features/tasks/github-tasks#決定の記録)の節に書く。
 
 ## 振る舞い
 
@@ -31,12 +31,12 @@ sidebar:
 | `BranchCreated` | `repo: ForgeRepo` / `branch` / `html_url` |
 | `BranchDeleted` | `repo: ForgeRepo` / `branch` |
 
-- `ForgeRepo` は[リポジトリの識別](/features/tasks/github-tasks#リポジトリの識別)の 4 列である。GitHub の `host_url` は `https://github.com` 固定である
+- `ForgeRepo` は[リポジトリの識別](/dev/features/tasks/github-tasks#リポジトリの識別)の 4 列である。GitHub の `host_url` は `https://github.com` 固定である
 - ホスト固有の語彙（GitHub の `installation`、GitLab の `object_kind` / `iid`、Forgejo の `X-Forgejo-Event`）は受信エンドポイントの外へ出さない
 - タグの `create` / `delete` は正規化しないので、ペイロードのままジョブに積まれ、受信のログだけを残す
 - 処理しない action（`labeled` 等）も受信時に正規化せず、ジョブを積んで受信のログだけを残す
 - `PullRequest` のイベントはホスト側の更新時刻 `updated_at` を必ず持つ。受信エンドポイントがペイロードから取り出して詰める。GitHub は `pull_request.updated_at` である
-- GitHub の `issues` イベントは[GitHub App 基盤](/features/tasks/github-app)のとおりで、正規化の対象外である
+- GitHub の `issues` イベントは[GitHub App 基盤](/dev/features/tasks/github-app)のとおりで、正規化の対象外である
 
 ### 切り詰められた push
 
@@ -52,7 +52,7 @@ sidebar:
 
 ### 登録
 
-GitHub は登録が要らない。App の webhook は App 側の設定 1 つで、インストール先リポジトリのイベントは自動で届く。必要な権限と購読イベントは [GitHub App 基盤](/features/tasks/github-app)の GitHub App の権限に書く。権限を増やした後は、既存インストールのオーナーが承認するまで新しいイベントは届かない。
+GitHub は登録が要らない。App の webhook は App 側の設定 1 つで、インストール先リポジトリのイベントは自動で届く。必要な権限と購読イベントは [GitHub App 基盤](/dev/features/tasks/github-app)の GitHub App の権限に書く。権限を増やした後は、既存インストールのオーナーが承認するまで新しいイベントは届かない。
 
 ### 冪等性
 
@@ -81,7 +81,7 @@ flowchart TD
 
 apalis のキューは同じ Postgres（`apalis.jobs`）なので、受信記録とジョブ投入を 1 つのトランザクションに入れられる。ジョブ投入後の失敗はキュー側の再試行に任せる。
 
-実体（`forge_pull_requests` / `forge_commits`）とリンク表の INSERT は常に UPSERT で行い、再送でも行が増えない。アクティビティ行は「そのタスクにとって初めてのリンク」のときだけ積み、判定は `task_activities.dedupe_key` の UNIQUE で行う（[アクティビティ](/features/tasks/github-tasks#アクティビティ)の小節）。
+実体（`forge_pull_requests` / `forge_commits`）とリンク表の INSERT は常に UPSERT で行い、再送でも行が増えない。アクティビティ行は「そのタスクにとって初めてのリンク」のときだけ積み、判定は `task_activities.dedupe_key` の UNIQUE で行う（[アクティビティ](/dev/features/tasks/github-tasks#アクティビティ)の小節）。
 
 `Closed { merged: true }` 時のタスク遷移は、タスクが既に done 系ステータス（`is_done_state = true`）の場合はスキップして二重遷移を防ぐ。
 
@@ -129,7 +129,7 @@ apalis のキューは同じ Postgres（`apalis.jobs`）なので、受信記録
 - 少なくとも `title` / `author_handle` / `state` / `head_sha` / `html_url` / `merged_at` / `host_updated_at` を UPSERT する
 - マージは取り消せないので、既存行が `merged` なら取得・ペイロードのスナップショットが `open` / `closed` でも戻さない
 - ここで確定する実効状態は現在表示用であり、マージ時のタスク完了の処理済み判定には使わない
-- PR 行が初めて `merged` になった処理では、同じトランザクションで `pr_merged` 通知を出す（[通知・ウォッチャー](/features/tasks/notifications)）
+- PR 行が初めて `merged` になった処理では、同じトランザクションで `pr_merged` 通知を出す（[通知・ウォッチャー](/dev/features/tasks/notifications)）
 
 適用対象になったすべての PR action で、そのスナップショットのタイトル・本文・head ブランチから `title` / `body` / `branch` のリンクを再構築する。
 
@@ -165,7 +165,7 @@ PR 行をロックし、`merge_effects_processed_at IS NULL` の場合だけ、�
 - 必須カスタムフィールドの検査は GitHub Issue の同期と同じく行わない
 - GitHub Issue から取り込んだタスク（`github_issue_links` がある）は、通常のタスク更新と同じく完了と同じトランザクションで書き戻しのフラグ（`pending_push`）を立て、ジョブがコミット後に書き戻しを積む。積めなくてもフラグが残るので書き戻しのスイープが拾う
 
-`Closed` が届く見込みが無い PR は、利用者が手で対応を終えた時点で[確認済みにする操作](/features/tasks/github-tasks#マージ時副作用の確認済み操作)（`POST .../merge-effects/acknowledge`）から `merge_effects_processed_at` を設定できる。以後この PR の副作用は NULL 判定で実行されないので、後から `Closed` が届いてもタスクを二重に完了させない。
+`Closed` が届く見込みが無い PR は、利用者が手で対応を終えた時点で[確認済みにする操作](/dev/features/tasks/github-tasks#マージ時副作用の確認済み操作)（`POST .../merge-effects/acknowledge`）から `merge_effects_processed_at` を設定できる。以後この PR の副作用は NULL 判定で実行されないので、後から `Closed` が届いてもタスクを二重に完了させない。
 
 ### PR のコミット集合の同期
 
@@ -199,7 +199,7 @@ PR 行をロックし、`merge_effects_processed_at IS NULL` の場合だけ、�
 - 手順 3 の中間表は PR 行と同じプロジェクト（webhook を受けた連携）の `forge_commits` 行に結ぶ
 - 手順 1〜2 のタスクへのリンクはリンク先タスクのプロジェクトの行に置くので、リンク先が別プロジェクトにあるコミットは実体が 2 行になる
 
-GitHub の「PR のコミット一覧」は 250 件が上限で、それを超える PR ではこの API から集合を確定できない。ページングを読み切っても 250 件で頭打ちになるので、`commits_complete = false` のままにして削除を行わず、[リポジトリセクション](/features/tasks/github-tasks#リポジトリセクション)に「コミット一覧は一部のみ」と出す。
+GitHub の「PR のコミット一覧」は 250 件が上限で、それを超える PR ではこの API から集合を確定できない。ページングを読み切っても 250 件で頭打ちになるので、`commits_complete = false` のままにして削除を行わず、[リポジトリセクション](/dev/features/tasks/github-tasks#リポジトリセクション)に「コミット一覧は一部のみ」と出す。
 
 条件はホストごとの件数ではなく「全ページを読み切れたときだけ削除する」という形で持つ。ホスト固有の上限（GitHub の 250 件）はホストごとの取得処理（`service::github::commits`）が `host_limit_reached` として返し、タスク側の処理はそのフラグだけを見る。
 
@@ -221,7 +221,7 @@ GitHub の「PR のコミット一覧」は 250 件が上限で、それを超�
 - 古い受信記録の掃除が無い。設計では掃除ジョブで 30 日分だけ残す。ホストの再送は長くても数時間で終わり、UNIQUE を保つのに必要なのは再送が届きうる期間だけである。`created_at` のインデックスは用意してあるが、今は行を消す処理が無い
 - ホストの上限を超える PR のコミット集合を確定できない。確定させる必要が出たら、上限のない `GET /repos/{owner}/{repo}/commits?sha={head_sha}` 側で base との差分を組む方針である
 - 連携開始時の過去分の取り込みが無い。必要になったら「open な PR と既定ブランチの直近 N コミット」を取り込む拡張を足す方針である
-- Automation の投入が無い。Automation は[自動化](/features/tasks/automation)のとおり存在せず、トリガー `pull_request_merged`（旧名 `github_pr_merged` も別名として受ける）の永続ジョブは、実装するときにマージ時副作用のトランザクションで積む設計である
+- Automation の投入が無い。Automation は[自動化](/dev/features/tasks/automation)のとおり存在せず、トリガー `pull_request_merged`（旧名 `github_pr_merged` も別名として受ける）の永続ジョブは、実装するときにマージ時副作用のトランザクションで積む設計である
 
 次の受け入れ条件はテストが無い。
 

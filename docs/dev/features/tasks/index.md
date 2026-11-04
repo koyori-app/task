@@ -16,19 +16,19 @@ sidebar:
 
 | # | 機能グループ | 内容 | 仕様 | 依存 | API | 画面 |
 |---|---|---|---|---|---|---|
-| 1 | コア | CRUD・ステータス・担当者・ラベル・マイルストーン・依存関係 | [tasks/core](/features/tasks/core) | なし | 実装済み | 一覧・詳細・設定は実装済み。カンバンとマイルストーン管理は未実装 |
-| 2 | 作業時間追跡 | タイマー・手動ログ | [tasks/time-tracking](/features/tasks/time-tracking) | 1 | 実装済み | 未実装（実績は山積みの計算にだけ使う） |
-| 3 | スプリント | イテレーション・バーンダウン | [tasks/sprints](/features/tasks/sprints) | 1 | 実装済み | 専用画面は未実装（カレンダーに帯だけ出す） |
-| 4 | コメント・アクティビティ | スレッド・変更履歴・@メンション | [tasks/collaboration](/features/tasks/collaboration) | 1 | 実装済み | 実装済み |
-| 5 | 通知・ウォッチャー | in-app・メール・購読 | [tasks/notifications](/features/tasks/notifications) | 1, 4 | 実装済み | 未実装 |
-| 6 | カスタムフィールド | プロジェクト固有属性 | [tasks/custom-fields](/features/tasks/custom-fields) | 1 | 実装済み | 定義の管理だけ実装済み。タスクごとの値の入力は未実装 |
-| 7 | 検索・バルク・ビュー・添付 | 全文検索・一括更新・保存フィルター・Drive 連携 | [tasks/extensions](/features/tasks/extensions) | 1, Drive | 実装済み | 検索・類似タスク・添付は実装済み。一括操作と保存済みビューは未実装 |
-| 8 | 自動化 | トリガーとアクションのエンジン | [tasks/automation](/features/tasks/automation) | 1, 4, 5 | 未実装 | 未実装 |
-| 9a | GitHub App 基盤 | インストール・認証情報管理・Webhook 受信インフラ | [tasks/github-app](/features/tasks/github-app) | なし | 実装済み | 実装済み |
-| 9b | Git ホスティングとタスクの連携 | PR・コミット・ブランチのリンク、マージ時の自動完了、コミットのアクティビティ表示。ホスト中立モデル | [tasks/github-tasks](/features/tasks/github-tasks) | 1, 9a, レビュー指摘 | 実装済み | 実装済み |
-| 10 | Webhook | 外部向けイベント送信。レビューイベント・Discord 形式を含む | [tasks/webhooks](/features/tasks/webhooks) | 1 | 実装済み | 実装済み |
-| 11 | スケジュール | 期間に重なるタスク・スプリント・マイルストーンの一括取得 | [tasks/schedule](/features/tasks/schedule) | 1, 3 | 実装済み | 実装済み |
-| 12 | 山積み・手動の山崩し | メンバー・日ごとの残工数の棒、開始予定日のドラッグ | [tasks/workload](/features/tasks/workload) | 1, 2, 11 | 実装済み | 実装済み |
+| 1 | コア | CRUD・ステータス・担当者・ラベル・マイルストーン・依存関係 | [tasks/core](/dev/features/tasks/core) | なし | 実装済み | 一覧・詳細・設定は実装済み。カンバンとマイルストーン管理は未実装 |
+| 2 | 作業時間追跡 | タイマー・手動ログ | [tasks/time-tracking](/dev/features/tasks/time-tracking) | 1 | 実装済み | 未実装（実績は山積みの計算にだけ使う） |
+| 3 | スプリント | イテレーション・バーンダウン | [tasks/sprints](/dev/features/tasks/sprints) | 1 | 実装済み | 専用画面は未実装（カレンダーに帯だけ出す） |
+| 4 | コメント・アクティビティ | スレッド・変更履歴・@メンション | [tasks/collaboration](/dev/features/tasks/collaboration) | 1 | 実装済み | 実装済み |
+| 5 | 通知・ウォッチャー | in-app・メール・購読 | [tasks/notifications](/dev/features/tasks/notifications) | 1, 4 | 実装済み | 未実装 |
+| 6 | カスタムフィールド | プロジェクト固有属性 | [tasks/custom-fields](/dev/features/tasks/custom-fields) | 1 | 実装済み | 定義の管理だけ実装済み。タスクごとの値の入力は未実装 |
+| 7 | 検索・バルク・ビュー・添付 | 全文検索・一括更新・保存フィルター・Drive 連携 | [tasks/extensions](/dev/features/tasks/extensions) | 1, Drive | 実装済み | 検索・類似タスク・添付は実装済み。一括操作と保存済みビューは未実装 |
+| 8 | 自動化 | トリガーとアクションのエンジン | [tasks/automation](/dev/features/tasks/automation) | 1, 4, 5 | 未実装 | 未実装 |
+| 9a | GitHub App 基盤 | インストール・認証情報管理・Webhook 受信インフラ | [tasks/github-app](/dev/features/tasks/github-app) | なし | 実装済み | 実装済み |
+| 9b | Git ホスティングとタスクの連携 | PR・コミット・ブランチのリンク、マージ時の自動完了、コミットのアクティビティ表示。ホスト中立モデル | [tasks/github-tasks](/dev/features/tasks/github-tasks) | 1, 9a, レビュー指摘 | 実装済み | 実装済み |
+| 10 | Webhook | 外部向けイベント送信。レビューイベント・Discord 形式を含む | [tasks/webhooks](/dev/features/tasks/webhooks) | 1 | 実装済み | 実装済み |
+| 11 | スケジュール | 期間に重なるタスク・スプリント・マイルストーンの一括取得 | [tasks/schedule](/dev/features/tasks/schedule) | 1, 3 | 実装済み | 実装済み |
+| 12 | 山積み・手動の山崩し | メンバー・日ごとの残工数の棒、開始予定日のドラッグ | [tasks/workload](/dev/features/tasks/workload) | 1, 2, 11 | 実装済み | 実装済み |
 
 ## 依存関係図
 

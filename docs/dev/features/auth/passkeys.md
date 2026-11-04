@@ -9,7 +9,7 @@ sidebar:
 
 ## 概要
 
-WebAuthn（FIDO2）を使い、Touch ID・Face ID・セキュリティキーなどをパスキーとして登録・使用できる。実装には [`webauthn-rs`](https://github.com/kanidm/webauthn-rs) を使う。パスキーは利用者の検証（生体または端末の PIN）を必須にして認証するので、「所持（デバイス）+ 生体または PIN」の多要素認証として扱う。パスキーのログインは[2 段階認証](/features/auth-2fa)の TOTP を免除し、パスワードなしの完全なログインとして機能する。既存のメール/パスワードや OAuth に追加で登録でき、代替の認証手段になる。
+WebAuthn（FIDO2）を使い、Touch ID・Face ID・セキュリティキーなどをパスキーとして登録・使用できる。実装には [`webauthn-rs`](https://github.com/kanidm/webauthn-rs) を使う。パスキーは利用者の検証（生体または端末の PIN）を必須にして認証するので、「所持（デバイス）+ 生体または PIN」の多要素認証として扱う。パスキーのログインは[2 段階認証](/dev/features/auth/2fa)の TOTP を免除し、パスワードなしの完全なログインとして機能する。既存のメール/パスワードや OAuth に追加で登録でき、代替の認証手段になる。
 
 ## 振る舞い
 
@@ -170,11 +170,11 @@ WebAuthn の設定と検証の規則は次のとおりである。
 |---|---|---|
 | 登録・一覧・名前の変更・削除 | ログイン中の本人（`CurrentUser`）。他人のパスキーの ID は `404`（`passkey-not-found`） | セッション専用。有効な Bearer と半認証のセッションは `403` |
 | 認証の開始と完了 | 誰でも | 認証不要 |
-| 強制削除（`DELETE /v1/admin/users/{id}/passkeys/{passkey_id}`） | サービス管理者（[サービス管理者の API](/features/admin#api)） | セッション専用 |
+| 強制削除（`DELETE /v1/admin/users/{id}/passkeys/{passkey_id}`） | サービス管理者（[サービス管理者の API](/dev/features/admin#api)） | セッション専用 |
 
 ## 画面
 
-フロントエンドがパスキーの API を使うのは 1 か所だけである。`/settings/security` の `AuthMethodsSection.vue` が `GET /v1/auth/passkeys` を呼び、最後の認証方法の注意書きを出すために件数を数える（[アカウント設定の画面](/features/account-settings#画面)）。
+フロントエンドがパスキーの API を使うのは 1 か所だけである。`/settings/security` の `AuthMethodsSection.vue` が `GET /v1/auth/passkeys` を呼び、最後の認証方法の注意書きを出すために件数を数える（[アカウント設定の画面](/dev/features/account-settings#画面)）。
 
 ## 未実装と既知の制限
 

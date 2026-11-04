@@ -19,7 +19,7 @@ KFM (Koyori Flavored Markdown) は、task の本文を描画するレンダラ�
 | タスク詳細（`tasks/@taskId/+data.ts` から `TaskDetailHub`） | サーバー | github | `task-<uuid>` | あり | あり | 100,000 |
 | 分割ビューとオーバーレイ（`TaskDetailPane`） | サーバー（内部エンドポイント） | github | `task-<uuid>` | あり | あり | 65,536 |
 | ドキュメント詳細（`docs/@fileId/+data.ts`、編集プレビューは内部エンドポイント） | サーバー | github | `doc-<file_id>` | あり | なし | 65,536 |
-| コメント（`CommentBody`。[コメントとアクティビティ](/features/tasks/collaboration)） | ブラウザ | comment | `comment-<id>` | なし | あり | 65,536 |
+| コメント（`CommentBody`。[コメントとアクティビティ](/dev/features/tasks/collaboration)） | ブラウザ | comment | `comment-<id>` | なし | あり | 65,536 |
 | レビュー指摘（`ReviewFindingBody`） | ブラウザ | comment | `finding-<id>` | あり | なし | なし |
 
 `comment` profile は github profile に `remark-breaks` を足したもので、空行を挟まない単一の改行を `<br>` として出す（GitHub のコメント欄の流儀）。

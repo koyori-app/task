@@ -46,7 +46,7 @@ sidebar:
 
 ### PR 承認用の連携
 
-`github_app` は、レビューが完了した PR をレビュワー本人の名義で Approve するための連携である（[レビュー指摘管理](/features/review-findings)の GitHub 要約コメント）。
+`github_app` は、レビューが完了した PR をレビュワー本人の名義で Approve するための連携である（[レビュー指摘管理](/dev/features/review-findings)の GitHub 要約コメント）。
 
 - ログイン中の利用者にだけ結べる。開始・コールバックとも `link_user_id` が無ければ拒み、これで利用者を作ったりログインしたりはしない
 - `list_providers` は `sign_in: false` で返し、サインイン画面（`OAuthButtons.vue`）には出さない
@@ -232,7 +232,7 @@ flowchart TD
 
 ### ログイン名の保存
 
-`provider_login` はログイン・連携のたびに `ProviderUserInfo.username` を小文字にして保存し直す。本人の識別には `provider_user_id` を使う。`provider_login` はコミット作者を Task の利用者に解決する用途（[Git ホスティングとタスクの連携](/features/tasks/github-tasks)のアクティビティ）と、レビュー画面の「自分が作成した PR」の判定（[レビュー指摘管理](/features/review-findings)の画面）に使う。
+`provider_login` はログイン・連携のたびに `ProviderUserInfo.username` を小文字にして保存し直す。本人の識別には `provider_user_id` を使う。`provider_login` はコミット作者を Task の利用者に解決する用途（[Git ホスティングとタスクの連携](/dev/features/tasks/github-tasks)のアクティビティ）と、レビュー画面の「自分が作成した PR」の判定（[レビュー指摘管理](/dev/features/review-findings)の画面）に使う。
 
 列を足す前からある接続は空のまま残るので、連携一覧（`GET /v1/auth/oauth/connections`）を開いたときに保存済みのアクセストークンでプロバイダーに問い合わせて補完する。補完の規則は次のとおりである。
 
@@ -292,7 +292,7 @@ flowchart TD
 
 連携一覧の `provider_email`・`instance_url`・`provider_login` は値があるときだけ含める。
 
-`POST /v1/auth/password` のパスワードは 8 文字以上で、成功は `204` である。既にパスワードが設定されている場合は `409 password-already-set` を返す。変更は `/v1/auth/password/change` を使う（[パスワードのリセットと変更](/features/auth-password-reset)のログイン中の変更）。
+`POST /v1/auth/password` のパスワードは 8 文字以上で、成功は `204` である。既にパスワードが設定されている場合は `409 password-already-set` を返す。変更は `/v1/auth/password/change` を使う（[パスワードのリセットと変更](/dev/features/auth/password-reset)のログイン中の変更）。
 
 ## 認可
 
@@ -307,7 +307,7 @@ flowchart TD
 
 サインイン画面はメールアドレスとパスワードの欄の下に、区切り線「または」と OAuth のボタンを並べる（`OAuthButtons`）。ボタンの文言は「{プロバイダー名} で続ける」で、self-hosted にはインスタンス URL の入力欄が付く。プロバイダーのエラーで戻ると（`?oauth_error=`）、「外部プロバイダーでの認証に失敗しました。もう一度お試しください。」を表示する。
 
-連携の一覧・追加・解除は `/settings/security` にまとめる。画面の定義元は[アカウント設定の画面](/features/account-settings#画面)である。連携の追加は既存の開始 URL（`GET /v1/auth/oauth/{provider}`）をそのまま使い、`redirect_after` にこの画面を指定して戻す。
+連携の一覧・追加・解除は `/settings/security` にまとめる。画面の定義元は[アカウント設定の画面](/dev/features/account-settings#画面)である。連携の追加は既存の開始 URL（`GET /v1/auth/oauth/{provider}`）をそのまま使い、`redirect_after` にこの画面を指定して戻す。
 
 | コンポーネント | ファイル |
 |---|---|

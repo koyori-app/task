@@ -9,7 +9,7 @@ sidebar:
 
 ## 概要
 
-パスワードを変える経路は、パスワードを忘れた利用者向けのリセットと、ログイン中の利用者向けの変更の 2 つである。どちらも完了後に、対象の利用者の既存のセッションと Device Token を無効化し、PAT を失効させる。TOTP の設定は変えないので、2FA が有効な利用者は新しいパスワードでログインしても 2FA を求められる。管理者が特定の利用者宛にリセットメールを送る操作は[サービス管理者の API](/features/admin#api) で定義し、このページのトークンの生成と保存を共有する。
+パスワードを変える経路は、パスワードを忘れた利用者向けのリセットと、ログイン中の利用者向けの変更の 2 つである。どちらも完了後に、対象の利用者の既存のセッションと Device Token を無効化し、PAT を失効させる。TOTP の設定は変えないので、2FA が有効な利用者は新しいパスワードでログインしても 2FA を求められる。管理者が特定の利用者宛にリセットメールを送る操作は[サービス管理者の API](/dev/features/admin#api) で定義し、このページのトークンの生成と保存を共有する。
 
 ## 振る舞い
 
@@ -81,7 +81,7 @@ flowchart TD
 
 他のセッションは `sessions_revoked_at` で次のリクエストのときに無効になる。
 
-OAuth のみで登録した利用者（`password_hash IS NULL`）はこのエンドポイントを使えず、`400` になる。パスワードを新規に設定するには `POST /v1/auth/password`（[OAuth ログインの API](/features/auth-oauth#api)）かパスワードリセットを使う。
+OAuth のみで登録した利用者（`password_hash IS NULL`）はこのエンドポイントを使えず、`400` になる。パスワードを新規に設定するには `POST /v1/auth/password`（[OAuth ログインの API](/dev/features/auth/oauth#api)）かパスワードリセットを使う。
 
 ### セッションの無効化
 
@@ -141,7 +141,7 @@ https://app.example.com/auth/reset-password?token={token}
 | 出所の確かでない OAuth の連携 | 完了時に、未確認の email の利用者の連携と、許可の一覧に無い instance の連携を外す |
 | メール爆撃 | `pw_reset:rl:{email}` で 60 秒に 1 回に制限する |
 | OAuth の利用者への誤ったパスワード変更 | `password_hash IS NULL` の場合、change エンドポイントは `400` を返す |
-| トークンのログ・キューへの漏洩 | リセットトークンは Redis のみに置く。Apalis の payload・構造化ログ・HTTP ログのクエリに載せない（運用は [password-reset-flow.md](https://github.com/koyori-app/task/blob/main/apps/backend/docs/password-reset-flow.md)） |
+| トークンのログ・キューへの漏洩 | リセットトークンは Redis のみに置く。Apalis の payload・構造化ログ・HTTP ログのクエリに載せない（運用は [パスワードリセットのフロー](/dev/design/password-reset-flow)） |
 
 ### 構造化ログ
 
@@ -188,7 +188,7 @@ enqueue の失敗は `warn!(user_id, error)` で記録し、外部の HTTP 応�
 |---|---|---|
 | リセットの要求・確認・完了 | 誰でも | 認証不要 |
 | ログイン中の変更 | ログイン中の本人 | セッション専用。有効な PAT・Device Token は `403` |
-| 特定の利用者宛のリセットメール | サービス管理者（[サービス管理者の API](/features/admin#api)） | セッション専用 |
+| 特定の利用者宛のリセットメール | サービス管理者（[サービス管理者の API](/dev/features/admin#api)） | セッション専用 |
 
 ## 画面
 
@@ -207,7 +207,7 @@ enqueue の失敗は `warn!(user_id, error)` で記録し、外部の HTTP 応�
 
 リンク先の画面は URL の `?token=` を読み取り、`POST /v1/auth/password-reset/verify` に `{"token":"..."}` を送ってトークンを確認する。有効なら新パスワードの入力フォームを表示する。
 
-パスワードの変更は、現在のパスワード・新しいパスワード・確認を入力する。規則の定義元は[アカウント設定の画面](/features/account-settings#画面)である。
+パスワードの変更は、現在のパスワード・新しいパスワード・確認を入力する。規則の定義元は[アカウント設定の画面](/dev/features/account-settings#画面)である。
 
 | コンポーネント | ファイル |
 |---|---|

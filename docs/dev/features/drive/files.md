@@ -10,7 +10,7 @@ sidebar:
 
 ## 概要
 
-テナントの利用者が Drive にファイルをアップロードし、一覧・更新・削除・ダウンロードする機能である。Markdown の本文に書いた `KEY-N` をタスクに結び付け、タスクへ手動で添付することもできる。アクセスの規則とストレージは[Drive の概要](/features/drive)に書き、判断の理由は [Drive の決定の記録](/features/drive#決定の記録)に集める。フォルダは[フォルダと共有](/features/drive/folders-and-sharing)、容量は[クォータ](/features/drive/quota)、プロジェクトのドキュメント画面は[ドキュメント](/features/drive/documents)に書く。
+テナントの利用者が Drive にファイルをアップロードし、一覧・更新・削除・ダウンロードする機能である。Markdown の本文に書いた `KEY-N` をタスクに結び付け、タスクへ手動で添付することもできる。アクセスの規則とストレージは[Drive の概要](/dev/features/drive)に書き、判断の理由は [Drive の決定の記録](/dev/features/drive#決定の記録)に集める。フォルダは[フォルダと共有](/dev/features/drive/folders-and-sharing)、容量は[クォータ](/dev/features/drive/quota)、プロジェクトのドキュメント画面は[ドキュメント](/dev/features/drive/documents)に書く。
 
 ## 振る舞い
 
@@ -93,7 +93,7 @@ S3 では次の順に処理する。
 
 ### 配信
 
-`GET /v1/drive/files/{id}/content` は本文を `200 OK` で返す。`?token={share_token}` を付けると公開リンクのトークンで配信する。誰が取得できるかは[Drive の認可](/features/drive#認可)の節に書く。
+`GET /v1/drive/files/{id}/content` は本文を `200 OK` で返す。`?token={share_token}` を付けると公開リンクのトークンで配信する。誰が取得できるかは[Drive の認可](/dev/features/drive#認可)の節に書く。
 
 - `Content-Type` を `mime_type` から設定する
 - `Content-Disposition: attachment` を常に設定し、ブラウザ上で同一オリジンのコンテンツとして実行させない
@@ -114,7 +114,7 @@ Drive のファイルは既存のタスクへ添付できる。添付は中間�
 - 本文から付いた `body` の行へ `POST` すると `manual` に昇格して `200 OK` を返す
 - `body` の行の `DELETE` は `409 Conflict` を返す。本文を編集して参照を外す
 
-規則の全体は[タスク拡張](/features/tasks/extensions)のファイル添付に書く。
+規則の全体は[タスク拡張](/dev/features/tasks/extensions)のファイル添付に書く。
 
 ### 本文からのタスク参照
 
@@ -189,7 +189,7 @@ Drive のファイルは既存のタスクへ添付できる。添付は中間�
 
 ## 認可
 
-アクセスの規則とエンドポイントごとのスコープは[Drive の認可](/features/drive#認可)の節に書く。このページに固有の規則は次のとおりである。
+アクセスの規則とエンドポイントごとのスコープは[Drive の認可](/dev/features/drive#認可)の節に書く。このページに固有の規則は次のとおりである。
 
 | 操作 | 誰が | スコープ |
 |---|---|---|
@@ -206,11 +206,11 @@ Drive のファイルは既存のタスクへ添付できる。添付は中間�
 - 画像のサムネイル生成が無い
 - ファイルの全文検索が無い
 - Drive のページ、ファイルブラウザ、クォータ、共有の画面が無い
-- 個別削除は DB の削除後のストレージエラーを無視する。孤児オブジェクトの扱いは[Drive の未実装と既知の制限](/features/drive#未実装と既知の制限)に書く
+- 個別削除は DB の削除後のストレージエラーを無視する。孤児オブジェクトの扱いは[Drive の未実装と既知の制限](/dev/features/drive#未実装と既知の制限)に書く
 
 ### ファイルブラウザの導入時の設計
 
-ページもコンポーネントもまだ無い。以下は導入時の設計で、URL は [URL 仕様](/frontend/url-spec)に合わせた予定のものである。
+ページもコンポーネントもまだ無い。以下は導入時の設計で、URL は [URL 仕様](/dev/frontend/url-spec)に合わせた予定のものである。
 
 | URL | 内容 |
 |---|---|

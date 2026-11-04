@@ -10,7 +10,7 @@ sidebar:
 
 ## 概要
 
-[GitHub App 基盤](/features/tasks/github-app)の上で、PR・コミット・ブランチとタスクを自動でリンクする機能である。コミットメッセージや PR のタイトル・本文、ブランチ名に `KEY-N`（プロジェクトキーと連番。例は `ENG-42`）を書くと自動リンクされ、`Closes ENG-42` を含む PR がマージされるとタスクが完了する。リンクされたコミットはタスクのアクティビティに並ぶ（TASK-140）。[コア](/features/tasks/core)、[GitHub App 基盤](/features/tasks/github-app)、[レビュー指摘](/features/review-findings)に依存する。Webhook の受信と処理は[Git ホスティング連携の Webhook](/features/tasks/github-tasks/webhook)に書く。
+[GitHub App 基盤](/dev/features/tasks/github-app)の上で、PR・コミット・ブランチとタスクを自動でリンクする機能である。コミットメッセージや PR のタイトル・本文、ブランチ名に `KEY-N`（プロジェクトキーと連番。例は `ENG-42`）を書くと自動リンクされ、`Closes ENG-42` を含む PR がマージされるとタスクが完了する。リンクされたコミットはタスクのアクティビティに並ぶ（TASK-140）。[コア](/dev/features/tasks/core)、[GitHub App 基盤](/dev/features/tasks/github-app)、[レビュー指摘](/dev/features/review-findings)に依存する。Webhook の受信と処理は[Git ホスティング連携の Webhook](/dev/features/tasks/github-tasks/webhook)に書く。
 
 ## 用語
 
@@ -53,9 +53,9 @@ flowchart LR
     reviews["reviews"] -. "自然キーで対応（FK は無い）" .-> pr
 ```
 
-- Issue はタスクの GitHub 側の写しである（1 対 1、[GitHub App 基盤のデータ](/features/tasks/github-app#データ)）。PR もタスクに結ぶので、Issue との対応はタスク経由で取れる
+- Issue はタスクの GitHub 側の写しである（1 対 1、[GitHub App 基盤のデータ](/dev/features/tasks/github-app#データ)）。PR もタスクに結ぶので、Issue との対応はタスク経由で取れる
 - Issue を取り込んでいないプロジェクトでも PR / コミットのリンクは使える
-- [レビュー指摘](/features/review-findings)のラウンド（`reviews`）は PR に付く。レビュー指摘、PR、タスクの順に辿れる。`reviews` は `repo_owner / repo_name / pr_number` の組を持ち、PR 行とは `(project_id, repo_owner, repo_name, pr_number)` で結ぶ
+- [レビュー指摘](/dev/features/review-findings)のラウンド（`reviews`）は PR に付く。レビュー指摘、PR、タスクの順に辿れる。`reviews` は `repo_owner / repo_name / pr_number` の組を持ち、PR 行とは `(project_id, repo_owner, repo_name, pr_number)` で結ぶ
 - `github_issue_links` / `github_integrations` は GitHub 専用の名前のままである。`forge_` で始まる表は連携表への FK を持たない
 
 ### タスクへの自動リンク
@@ -91,7 +91,7 @@ PR タイトル・PR 本文・コミットメッセージ・ブランチ名か�
 
 ### マージ時副作用の確認済み操作
 
-`state = merged` かつ `merge_effects_processed_at = NULL` の PR は、利用者が「確認済み」にできる。この操作はタスクを完了させず、`merge_effects_processed_at` を現在時刻、`merge_effects_acknowledged_by` を操作者にして未適用の表示を解消し、誰がいつ行ったかをリンク先タスクのアクティビティに残す。後から `Closed { merged: true }` が届いても、[マージ時副作用](/features/tasks/github-tasks/webhook#マージ時副作用)は `merge_effects_processed_at IS NULL` のときだけ動くので、タスクを二重に完了させない。
+`state = merged` かつ `merge_effects_processed_at = NULL` の PR は、利用者が「確認済み」にできる。この操作はタスクを完了させず、`merge_effects_processed_at` を現在時刻、`merge_effects_acknowledged_by` を操作者にして未適用の表示を解消し、誰がいつ行ったかをリンク先タスクのアクティビティに残す。後から `Closed { merged: true }` が届いても、[マージ時副作用](/dev/features/tasks/github-tasks/webhook#マージ時副作用)は `merge_effects_processed_at IS NULL` のときだけ動くので、タスクを二重に完了させない。
 
 ### CLI との合流
 
@@ -142,10 +142,10 @@ PR / MR の実体である。`UNIQUE (project_id, host, host_url, repo_owner, re
 | `head_sha` | VARCHAR(40) | NULLABLE | 最後に観測した head。表示用の補助で、`review summary` のゲートの根拠にしない |
 | `html_url` | VARCHAR | NOT NULL DEFAULT `''` | |
 | `merged_at` | TIMESTAMPTZ | NULLABLE | |
-| `host_updated_at` | TIMESTAMPTZ | NULLABLE | ホスト側で PR が最後に更新された時刻。ホスト側の更新時刻（GitHub / Forgejo の `pull_request.updated_at`、GitLab の `object_attributes.updated_at`）をそのまま入れる世代で、[PR イベント共通の前処理](/features/tasks/github-tasks/webhook#pr-イベント共通の前処理)で比較する |
+| `host_updated_at` | TIMESTAMPTZ | NULLABLE | ホスト側で PR が最後に更新された時刻。ホスト側の更新時刻（GitHub / Forgejo の `pull_request.updated_at`、GitLab の `object_attributes.updated_at`）をそのまま入れる世代で、[PR イベント共通の前処理](/dev/features/tasks/github-tasks/webhook#pr-イベント共通の前処理)で比較する |
 | `merge_effects_processed_at` | TIMESTAMPTZ | NULLABLE | `Closed { merged: true }` のマージ時副作用を完了した時刻。現在状態の世代とは独立に、NULL の間だけ処理する |
 | `merge_effects_acknowledged_by` | UUID | NULLABLE, FK→users SET NULL | 副作用を実行しないまま「確認済み」にした操作者。実際に副作用を処理した場合は NULL |
-| `commits_complete` | BOOLEAN | NOT NULL DEFAULT false | PR のコミット一覧を読み切れたか。false のあいだ[コミット集合の同期](/features/tasks/github-tasks/webhook#pr-のコミット集合の同期)の削除を行わず、画面の表示にも使う。同期が一度も走っていない行（`Opened` / `Synchronize` を受けていない PR）も既定の false のままである |
+| `commits_complete` | BOOLEAN | NOT NULL DEFAULT false | PR のコミット一覧を読み切れたか。false のあいだ[コミット集合の同期](/dev/features/tasks/github-tasks/webhook#pr-のコミット集合の同期)の削除を行わず、画面の表示にも使う。同期が一度も走っていない行（`Opened` / `Synchronize` を受けていない PR）も既定の false のままである |
 | `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
 
 `merge_effects_processed_at` と `merge_effects_acknowledged_by` の読み方は次のとおりである。
@@ -171,7 +171,7 @@ PR とタスクのリンクである。`PRIMARY KEY (pull_request_id, task_id, s
 - PR ↔ タスクが「リンクされている」は、行が 1 件以上あることである
 - 表示する現在のリンク集合は、残存行を `task_id` ごとにまとめたものである
 
-マージ時の自動完了はこの表の現在集合をそのまま集計しない。[マージ時副作用](/features/tasks/github-tasks/webhook#マージ時副作用)に書くマージ時点の集合を使う。
+マージ時の自動完了はこの表の現在集合をそのまま集計しない。[マージ時副作用](/dev/features/tasks/github-tasks/webhook#マージ時副作用)に書くマージ時点の集合を使う。
 
 ### forge_commits
 
@@ -254,7 +254,7 @@ webhook の受信記録である。`UNIQUE (host, host_url, delivery_id)` を張
 - コミットと PR は作者のホスト上のログイン名（`author_handle`）を `oauth_connections.provider_login` と照合する。大文字小文字を区別せず、`provider = host` かつ `instance_url IS NULL` の行を見る
 - 一致する接続がちょうど 1 件で、その利用者がリンク先タスクのプロジェクトに入れる人かテナントオーナーのときだけ `user_id` に入れる
 - 解決できなければ表示は `author_handle` / `author_name` に頼る
-- `provider_login` は OAuth でログイン・連携したときに保存する（[OAuth 認証](/features/auth-oauth)）ので、それより前の接続は次回ログインまで解決できず、過去のアクティビティも遡って埋めない
+- `provider_login` は OAuth でログイン・連携したときに保存する（[OAuth 認証](/dev/features/auth/oauth)）ので、それより前の接続は次回ログインまで解決できず、過去のアクティビティも遡って埋めない
 - `author_handle` は GitHub がコミットのメールアドレスから解決した値である。`user_id` は「ホストがそのアカウントに帰属させた」の意味にとどめ、通知や権限の根拠に使わない
 
 手で行う操作の履歴は次のとおりである。
@@ -341,7 +341,7 @@ webhook の受信記録である。`UNIQUE (host, host_url, delivery_id)` を張
 - `closes` は省略すると `false` である。`number` は 1 以上で、それ以外は 400 を返す
 - 成功すると 201 で、`GET /tasks/{id}/forge` の `pull_requests[]` と同じ形の PR を 1 件返す。`unresolved` も同じ集計と同じ `null` の条件である
 - リポジトリはプロジェクトの現在の連携先（`github_integrations`）で確定し、`repo` は受け取らない。連携が無ければ 409 `github-integration-missing` を返す。`host` は `github`、`host_url` は `https://github.com` である
-- ホストの PR 取得 API は認可を通ってから呼ぶ。引ければ[共通処理](/features/tasks/github-tasks/webhook#pr-イベント共通の前処理)（PR 行の UPSERT と `title` / `body` / `branch` 由来のリンクの再構築）をそのスナップショットで通してから `manual` 行を足す
+- ホストの PR 取得 API は認可を通ってから呼ぶ。引ければ[共通処理](/dev/features/tasks/github-tasks/webhook#pr-イベント共通の前処理)（PR 行の UPSERT と `title` / `body` / `branch` 由来のリンクの再構築）をそのスナップショットで通してから `manual` 行を足す
 - 引けなければ（404・障害・GitHub App 未設定）5xx にせず、PR 行が無ければ `state = unknown`、`html_url` は `https://github.com/{owner}/{repo}/pull/{number}` で作り、中身は次に届く PR イベントで埋める
 - 同じ PR を付け直すと `manual` 行の `closes` だけを更新する。履歴は増えない
 
@@ -396,11 +396,11 @@ webhook 経由のリンクはシステムが行うので権限検査を経ない
 - 連携の管理者へ元の `Closed { merged: true }` webhook の再配送を依頼できること
 - 「確認済みにする」操作（確認ダイアログ付き）。[確認済み操作](#マージ時副作用の確認済み操作)を実行する
 
-現在のリンク集合から完了対象を推測して一括適用する操作は置かない。再配送を受信できれば[マージ時副作用](/features/tasks/github-tasks/webhook#マージ時副作用)を通常どおり一度だけ処理し、表示も解消する。
+現在のリンク集合から完了対象を推測して一括適用する操作は置かない。再配送を受信できれば[マージ時副作用](/dev/features/tasks/github-tasks/webhook#マージ時副作用)を通常どおり一度だけ処理し、表示も解消する。
 
 ### 設定画面
 
-連携の管理はプロジェクト設定の「連携」セクションで行う（[GitHub App 基盤の画面](/features/tasks/github-app#画面)）。未連携のときの説明は「コミットや Pull Request をタスクに紐付けます。」の 1 行である。自動リンクの ON/OFF 設定は持たない。
+連携の管理はプロジェクト設定の「連携」セクションで行う（[GitHub App 基盤の画面](/dev/features/tasks/github-app#画面)）。未連携のときの説明は「コミットや Pull Request をタスクに紐付けます。」の 1 行である。自動リンクの ON/OFF 設定は持たない。
 
 ### コンポーネント
 
@@ -416,7 +416,7 @@ webhook 経由のリンクはシステムが行うので権限検査を経ない
 
 ### GitLab / Forgejo
 
-実装済みのホストは GitHub だけである。受信エンドポイント・連携フロー（`forge_integrations` を含む別仕様）が無く、表と処理はそのまま使える。足すときの差分の設計は次のとおりである。受信エンドポイントと登録の設計は [Webhook のページ](/features/tasks/github-tasks/webhook#未実装と既知の制限)に書く。
+実装済みのホストは GitHub だけである。受信エンドポイント・連携フロー（`forge_integrations` を含む別仕様）が無く、表と処理はそのまま使える。足すときの差分の設計は次のとおりである。受信エンドポイントと登録の設計は [Webhook のページ](/dev/features/tasks/github-tasks/webhook#未実装と既知の制限)に書く。
 
 | 違うもの | GitLab | Forgejo |
 |---|---|---|
@@ -472,7 +472,7 @@ webhook 経由のリンクはシステムが行うので権限検査を経ない
 
 ### ホストへのタスク URL コメント
 
-PR に投稿するコメントはレビュー指摘の要約コメント（[レビュー指摘の要約コメントと Approve](/features/review-findings/github-comment)）だけで、タスクへのリンクは投稿しない。設計では、PR 作成時に、リンクされたタスクへの URL をコメントとして PR に自動追加する。GitHub は権限 `pull_requests: write` が要る。
+PR に投稿するコメントはレビュー指摘の要約コメント（[レビュー指摘の要約コメントと Approve](/dev/features/review-findings/github-comment)）だけで、タスクへのリンクは投稿しない。設計では、PR 作成時に、リンクされたタスクへの URL をコメントとして PR に自動追加する。GitHub は権限 `pull_requests: write` が要る。
 
 ```markdown
 ---
@@ -498,7 +498,7 @@ PR 詳細 API の設計は次のとおりである。
 - `linked_tasks` は呼び出し元が閲覧できるプロジェクトのタスクだけ返す。隠した件数も返さない。件数だけでも他プロジェクトの作業量が漏れる
 - レビューラウンドは PR 行にぶら下げる（`reviews` の FK 付け替え後）ので、同じ境界に収まる
 
-現在の `ReviewedPullRequest`（[レビュー指摘の API](/features/review-findings#api)）は PR 行の `state` / `merged_at` / `merge_effects_processed_at` / `pull_request_id` を返す。`linked_tasks` はまだ無く、`ReviewResponse` に PR 行の情報は入っていない。設計は次のとおりである。
+現在の `ReviewedPullRequest`（[レビュー指摘の API](/dev/features/review-findings#api)）は PR 行の `state` / `merged_at` / `merge_effects_processed_at` / `pull_request_id` を返す。`linked_tasks` はまだ無く、`ReviewResponse` に PR 行の情報は入っていない。設計は次のとおりである。
 
 - `ReviewResponse` / `ReviewedPullRequest` が `pull_request_id` と `linked_tasks: [{ id, seq_id, key, title }]` を返す
 - `pr_number / repo_owner / repo_name / pr_title / pr_author` のフィールドは PR 行から取って同じ名前で返す（CLI の互換維持）
@@ -554,7 +554,7 @@ PR 詳細 API の設計は次のとおりである。
 | 2026-09-05 | PR 詳細 API を `/v1/tenants/{t}/projects/{p}/forge/pull-requests/{id}` へスコープし、PR 行の `project_id` 不一致は 404、`linked_tasks` は呼び出し元が読めるプロジェクトのタスクだけに絞る | レビュー指摘。`pull_request_id` だけを鍵にすると、id を知っているだけで別テナントのタスク名とレビュー内容が読める |
 | 2026-09-05 | webhook の重複排除を Redis の `SET NX` + TTL から、永続表 `forge_webhook_deliveries` への INSERT とジョブ投入を同一トランザクションで確定する形へ変更する | レビュー指摘。鍵を先に立てるとジョブ投入の失敗後にホストの再送が重複として 200 で捨てられ、正当なイベントが消える。揮発ストアでは「処理済み」と「鍵だけ立った」を区別できないので TTL では塞げない |
 | 2026-09-05 | アクティビティの初回判定を「現在のリンク行の有無」から `task_activities.dedupe_key` の UNIQUE へ変更する | レビュー指摘。リンク解除で全 `source` の行が消えるので、再リンクで同じ履歴がもう 1 本積まれる。並行処理でも事前確認どうしはすれ違うが UNIQUE はすれ違わない |
-| 2026-09-05 | PR 詳細 API の PAT スコープを `read:task` + `read:review` の両方必須に変更する | レビュー指摘。1 レスポンスでレビューラウンドを返すので、`read:task` だけの PAT がレビューを読め、[レビュー指摘の認可](/features/review-findings#認可)のスコープ分離を迂回する。レビュー専用の AI にタスク書き換え権限を渡さない分離を、逆向きでも崩さない |
+| 2026-09-05 | PR 詳細 API の PAT スコープを `read:task` + `read:review` の両方必須に変更する | レビュー指摘。1 レスポンスでレビューラウンドを返すので、`read:task` だけの PAT がレビューを読め、[レビュー指摘の認可](/dev/features/review-findings#認可)のスコープ分離を迂回する。レビュー専用の AI にタスク書き換え権限を渡さない分離を、逆向きでも崩さない |
 | 2026-09-06 | 受信記録の INSERT は署名検証を通した後に行う | 署名検証前だと、誰でも任意の `delivery_id` で永続表を増やせ、配信 ID を先取りされると正規のイベントが重複として捨てられる |
 | 2026-09-06 | `updated_at` が同値のイベントでペイロードをそのまま使わない | ホストの更新時刻は秒精度で、同じ秒に起きた別 action（本文編集とクローズなど）はどちらが後かをイベントからは決められない。適用すると同じ秒の古い `Edited` / `Synchronize` で古い内容へ戻り、捨てると同じ秒の別 action を取りこぼす。曖昧なイベントを推測で確定しない |
 | 2026-09-07 | PR イベントの適用条件に世代（`forge_pull_requests.host_updated_at` と正規化イベントの `updated_at`）を導入する。古いイベントは PR 行・リンク・状態を変更しない。`Opened` / `Synchronize` のコミット集合は世代に関係なく現在の一覧 API と同期する | レビュー指摘。配送順・実行順が保証されず、無条件 UPSERT だと `Closed { merged: true }` の後に古い `Edited` が走って `state` が `open` へ戻り、タイトルや `head_sha` も巻き戻る。並行する一覧取得・反映の直列化条件は同日追記 |

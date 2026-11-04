@@ -10,7 +10,7 @@ sidebar:
 
 ## 概要
 
-テナントが Drive に置ける容量を、システムの上限・テナントの個別設定・システムの既定の 3 層で決める機能である。テナントオーナーは API で個別の容量を変更できる。環境変数の一覧は [Drive の設定](/features/drive#設定)に書き、判断の理由は [Drive の決定の記録](/features/drive#決定の記録)に集める。
+テナントが Drive に置ける容量を、システムの上限・テナントの個別設定・システムの既定の 3 層で決める機能である。テナントオーナーは API で個別の容量を変更できる。環境変数の一覧は [Drive の設定](/dev/features/drive#設定)に書き、判断の理由は [Drive の決定の記録](/dev/features/drive#決定の記録)に集める。
 
 ## 振る舞い
 
@@ -106,6 +106,6 @@ WARN tenant drive quota exceeds system_max — update tenant quota or raise DRIV
 
 ## 未実装と既知の制限
 
-- 管理者のシステム設定の `system_settings.drive_default_quota_mb` / `drive_system_max_quota_mb` は `/v1/admin/system/settings` で変更できるが、有効クォータの計算（`DriveConfig`）は環境変数だけを読むので反映されない（[サービス管理者の API](/features/admin#api)）
+- 管理者のシステム設定の `system_settings.drive_default_quota_mb` / `drive_system_max_quota_mb` は `/v1/admin/system/settings` で変更できるが、有効クォータの計算（`DriveConfig`）は環境変数だけを読むので反映されない（[サービス管理者の API](/dev/features/admin#api)）
 - 超過テナントの一覧を管理者が確かめるエンドポイントと UI が無く、確認手段は起動時の警告だけである
 - クォータの画面が無い

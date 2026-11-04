@@ -6,7 +6,7 @@ sidebar:
   order: 5
 ---
 
-自己サービスのパスワードリセットとログイン中の変更の運用を記述する。仕様の定義元は[パスワードリセット・変更](/features/auth-password-reset)である。メール認証の同じ形の Apalis の使い方は[メール認証のフロー](/dev/design/email-verification-flow)に、管理者によるリセットは[サービス管理者・監査ログ](/features/admin)の管理者専用 API（監査ログ `user.password_reset`）に書く。
+自己サービスのパスワードリセットとログイン中の変更の運用を記述する。仕様の定義元は[パスワードリセット・変更](/dev/features/auth/password-reset)である。メール認証の同じ形の Apalis の使い方は[メール認証のフロー](/dev/design/email-verification-flow)に、管理者によるリセットは[サービス管理者・監査ログ](/dev/features/admin)の管理者専用 API（監査ログ `user.password_reset`）に書く。
 
 ## 運用 UI
 
@@ -151,7 +151,7 @@ POST /v1/auth/password-reset/complete   { "token": "...", "new_password": "..." 
 | Fragment（`#token=`） | フラグメントは HTTP リクエストに載らず Referer にも通常含まれない | ルーター・SSR・メールクライアントの `#` の扱いが課題になる。サーバー側ログ削減の恩恵は「初回ロードがフロントのみ」の前提と同じ形である |
 | 短寿命セッション交換 | メールリンクは opaque `code` のみ。フロントがすぐ `POST` で one-time token に交換する | 追加エンドポイントと Redis キーの設計が要る。メール URL のエントロピーは下げるが交換ステップが増える |
 
-移行時は既存メールの TTL・単回消費・Board 非登録の方針を維持し、このページと[パスワードリセット・変更](/features/auth-password-reset)のセキュリティを同時に更新する。
+移行時は既存メールの TTL・単回消費・Board 非登録の方針を維持し、このページと[パスワードリセット・変更](/dev/features/auth/password-reset)のセキュリティを同時に更新する。
 
 ## 決定の記録
 

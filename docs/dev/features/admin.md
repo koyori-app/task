@@ -84,7 +84,7 @@ flowchart TD
 
 - `send_to` は省略でき、値は `null` か省略である。本文の JSON 自体は必要である。省略時は利用者の登録メールアドレスに送信する
 - `send_to`（例: `support-relay@example.com`）を指定すると、その宛先に送信する。利用者がメールアドレスを削除・変更してしまった場合の救済に使う
-- 生成したリセットトークンは [パスワードのリセットと変更](/features/auth-password-reset)と同じ TTL（30 分）で有効である
+- 生成したリセットトークンは [パスワードのリセットと変更](/dev/features/auth/password-reset)と同じ TTL（30 分）で有効である
 - 送信先ごとのレート制限に当たると `409 Conflict` を返す
 - トークンは応答に含めない。応答は `{ "message": "..." }` だけである
 - 監査ログに `user.password_reset` と `metadata.reset_email` を記録する
@@ -100,7 +100,7 @@ flowchart TD
 
 ### テナントの強制削除
 
-テナントの強制削除は行を消して外部キーの CASCADE に任せる。Drive のストレージの実体は消さない（[Drive の未実装と既知の制限](/features/drive#未実装と既知の制限)）。
+テナントの強制削除は行を消して外部キーの CASCADE に任せる。Drive のストレージの実体は消さない（[Drive の未実装と既知の制限](/dev/features/drive#未実装と既知の制限)）。
 
 ### 監査ログに記録するアクション
 
@@ -283,13 +283,13 @@ flowchart TD
 
 ## 画面
 
-フロントエンドにあるのは、`GET /v1/auth/me` の応答に含まれる `is_admin` の型だけである。URL は [URL 仕様](/frontend/url-spec)に予定として載っている。
+フロントエンドにあるのは、`GET /v1/auth/me` の応答に含まれる `is_admin` の型だけである。URL は [URL 仕様](/dev/frontend/url-spec)に予定として載っている。
 
 ## 未実装と既知の制限
 
 - 管理画面が無い。`/admin` 配下のページも、管理者用のコンポーネントも無い
 - 監査ログの保持期間によるアーカイブ・物理削除が無く、行は残り続ける
-- システム設定の `drive_default_quota_mb` / `drive_system_max_quota_mb` は保存されるだけである。Drive の有効クォータは環境変数 `DRIVE_DEFAULT_QUOTA_MB` / `DRIVE_SYSTEM_MAX_QUOTA_MB` だけで決まる（[Drive のクォータ](/features/drive/quota#未実装と既知の制限)）
+- システム設定の `drive_default_quota_mb` / `drive_system_max_quota_mb` は保存されるだけである。Drive の有効クォータは環境変数 `DRIVE_DEFAULT_QUOTA_MB` / `DRIVE_SYSTEM_MAX_QUOTA_MB` だけで決まる（[Drive のクォータ](/dev/features/drive/quota#未実装と既知の制限)）
 - テナントの強制削除は、テナントの行を消した後に `tenant_id` へ同じ ID を入れて監査ログを挿入する。`audit_logs.tenant_id` には `tenants` への外部キーがあるので、この挿入は失敗して、削除が成立したまま `500` を返し、監査ログも残らない可能性がある。実行は確認しておらず、この経路の統合テストは無い
 
 ### 記録していないアクション

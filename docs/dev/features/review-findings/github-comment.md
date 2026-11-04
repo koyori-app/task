@@ -10,7 +10,7 @@ sidebar:
 
 ## 概要
 
-[レビュー指摘](/features/review-findings)の結果を GitHub の PR へ出す部分を書く。PR に置くのは bot の要約コメント 1 本と、マージ可になったときのレビュワー本人の Approve だけである。どちらも apalis のジョブが非同期に行い、失敗しても起票や状態遷移を巻き戻さない。判断の理由は親ページの[決定の記録](/features/review-findings#決定の記録)の節に書く。
+[レビュー指摘](/dev/features/review-findings)の結果を GitHub の PR へ出す部分を書く。PR に置くのは bot の要約コメント 1 本と、マージ可になったときのレビュワー本人の Approve だけである。どちらも apalis のジョブが非同期に行い、失敗しても起票や状態遷移を巻き戻さない。判断の理由は親ページの[決定の記録](/dev/features/review-findings#決定の記録)の節に書く。
 
 ## 振る舞い
 
@@ -45,13 +45,13 @@ sidebar:
 
 - 不一致なら「レビュー後に更新あり」としてマージ可を出さない
 - PR メタが取れないときもマージ可を出さない。件数表は出す
-- 取得した `head.sha` は確認時刻とセットでラウンドへキャッシュし（`pr_head_sha` / `pr_head_checked_at`。`pr_title` / `pr_author` と同じ流儀）、[画面](/features/review-findings#画面)が使う
+- 取得した `head.sha` は確認時刻とセットでラウンドへキャッシュし（`pr_head_sha` / `pr_head_checked_at`。`pr_title` / `pr_author` と同じ流儀）、[画面](/dev/features/review-findings#画面)が使う
 
 ### Approve
 
 マージ可になったら、最新ラウンドの作成者（レビュワー）本人の名義で PR を Approve する。本文は無い。条件は要約コメントが「マージ可」と書く条件と同一（`SummarySnapshot::merge_ready`）で、加えて PR が open であること。最新ラウンドの作成者にするのは、鮮度の照合と同じく「この commit を見た」と宣言した人と承認者を揃えるためである。
 
-- トークンは GitHub App のユーザー認可（連携の provider `github_app`。[OAuth 認証](/features/auth-oauth)）で得たものである。権限は「App の権限 ∩ 本人の権限」で、scope は無い。ログイン用の GitHub 連携（OAuth App、`read:user` / `user:email`）では承認できない
+- トークンは GitHub App のユーザー認可（連携の provider `github_app`。[OAuth 認証](/dev/features/auth/oauth)）で得たものである。権限は「App の権限 ∩ 本人の権限」で、scope は無い。ログイン用の GitHub 連携（OAuth App、`read:user` / `user:email`）では承認できない
 - レビュワーが連携していなければ承認しない。ログに残すだけである
 - トークンは既定で 8 時間で切れる。期限が近ければ使う前にリフレッシュトークンで更新し、回転した新しいトークンを保存し直す
 - 更新は連携の行をロックして直列にする。同じ利用者の更新が並ぶと、後の 1 本は先に無効になったリフレッシュトークンを使って失敗する

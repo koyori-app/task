@@ -9,7 +9,7 @@ sidebar:
 
 ## 概要
 
-ログイン中の利用者は、自分のプロフィール、パーソナルアクセストークン、認証方法、承認した Koyori Desktop の端末を管理できる。同じテナントに関わる人のプロフィールも見られる。編集対象は `users` の列のうち本人が持ち主である 3 つに限り、メールアドレス・管理者フラグ・凍結フラグ・2FA の有効状態はこの API では変更できない。`users` の内容を変更する API には、ほかに管理者専用の `PATCH /v1/admin/users/{id}` がある。アバターの保存は[ドライブのストレージバックエンド](/features/drive#ストレージバックエンド)に依存する。
+ログイン中の利用者は、自分のプロフィール、パーソナルアクセストークン、認証方法、承認した Koyori Desktop の端末を管理できる。同じテナントに関わる人のプロフィールも見られる。編集対象は `users` の列のうち本人が持ち主である 3 つに限り、メールアドレス・管理者フラグ・凍結フラグ・2FA の有効状態はこの API では変更できない。`users` の内容を変更する API には、ほかに管理者専用の `PATCH /v1/admin/users/{id}` がある。アバターの保存は[ドライブのストレージバックエンド](/dev/features/drive#ストレージバックエンド)に依存する。
 
 ## 振る舞い
 
@@ -27,7 +27,7 @@ sidebar:
 
 `users.username` に一意制約は無く、`PATCH /v1/auth/me` も重複を確認しない。既存の利用者と同じ `username` に変更でき、登録 API（`POST /v1/auth/register`）も同様に重複を許す。本人によるプロフィール更新は監査ログに記録し、ユーザー名の変更前後を追跡できる。
 
-メンションの宛先は username の一致では決めない。コメント・タスクの説明文のメンションはメンションのマーカー（`<@利用者ID>`）で利用者の ID を指す（[コメント・アクティビティ](/features/tasks/collaboration)の @メンション処理）。同名の利用者が同じプロジェクトにいても補完で選んだ一人にだけ届き、改名してもマーカーは切れない。画面上では、コメント・担当者・`AvatarGroup` の表示名が同じになる。
+メンションの宛先は username の一致では決めない。コメント・タスクの説明文のメンションはメンションのマーカー（`<@利用者ID>`）で利用者の ID を指す（[コメント・アクティビティ](/dev/features/tasks/collaboration)の @メンション処理）。同名の利用者が同じプロジェクトにいても補完で選んだ一人にだけ届き、改名してもマーカーは切れない。画面上では、コメント・担当者・`AvatarGroup` の表示名が同じになる。
 
 ### 省略と消去
 
@@ -89,13 +89,13 @@ sidebar:
 
 ### アクセストークン
 
-PAT 自体の認可設計の定義元は[個人アクセストークンの認可](https://github.com/koyori-app/task/blob/main/apps/backend/docs/personal-access-tokens-authz.md)である。`GET /v1/personal_tokens` は自分（`user_id`）のトークンのうち `revoked = false` のものを、名前の昇順（同名は `id` 順）で `PersonalTokenResponse` の配列として返す。平文トークン・ハッシュは含まず、1 件も持たない場合は空配列を返す。
+PAT 自体の認可設計の定義元は[個人アクセストークンの認可](/dev/design/personal-access-tokens-authz)である。`GET /v1/personal_tokens` は自分（`user_id`）のトークンのうち `revoked = false` のものを、名前の昇順（同名は `id` 順）で `PersonalTokenResponse` の配列として返す。平文トークン・ハッシュは含まず、1 件も持たない場合は空配列を返す。
 
 平文トークンは発行直後の応答でしか取得できない。`DELETE /v1/personal_tokens/{id}` は行を消さず `revoked` フラグを立て、冪等である。取り消したトークンは一覧に出なくなる。
 
 ### Koyori Desktop の端末
 
-Device Token の規則の定義元は [Bearer 認証・認可の「Desktop 認証」](https://github.com/koyori-app/task/blob/main/apps/backend/docs/personal-access-tokens-authz.md)である。
+Device Token の規則の定義元は [Bearer 認証・認可の「Desktop 認証」](/dev/design/personal-access-tokens-authz)である。
 
 - `GET /v1/users/me/devices` は、失効済み・期限切れと、パスワードの変更などで無効になった（`sessions_revoked_at` 以前に発行した）端末を除いて新しい順に返す
 - `DELETE /v1/users/me/devices/{id}` は `revoked_at` を立てるだけで行は残り、一覧からは消える。その端末は次の要求から `401` になる
@@ -155,7 +155,7 @@ Device Token の規則の定義元は [Bearer 認証・認可の「Desktop 認�
 | 端末の一覧・失効 | ログイン中の本人 | セッションと Device Token。PAT は `403`。Device Token で失効できるのはその端末自身だけで、別の端末を指定すると `403` |
 | 他の利用者のプロフィール | テナントのオーナー・テナントメンバー | PAT は `read:tenant` を要求する（メンバー一覧と同じ） |
 
-`GET /v1/auth/me` は Desktop の Device Token も通すが、更新は通さない。`CurrentUser` の拒否は次のとおりである。PAT で自分のプロフィールを書き換えられないことは、[個人アクセストークンの認可](https://github.com/koyori-app/task/blob/main/apps/backend/docs/personal-access-tokens-authz.md)の「アカウント API は PAT 非対応」に沿う。
+`GET /v1/auth/me` は Desktop の Device Token も通すが、更新は通さない。`CurrentUser` の拒否は次のとおりである。PAT で自分のプロフィールを書き換えられないことは、[個人アクセストークンの認可](/dev/design/personal-access-tokens-authz)の「アカウント API は PAT 非対応」に沿う。
 
 | 状態 | 応答 |
 |---|---|
@@ -166,7 +166,7 @@ Device Token の規則の定義元は [Bearer 認証・認可の「Desktop 認�
 | 凍結済みの利用者 | `403` |
 | 入力チェック違反 | `400` |
 
-他の利用者のプロフィールの結果は次のとおりである。閲覧者の判定はテナントの所属判定（`ensure_tenant_access`）を通し、対象者の判定は `tenant_members` の行と[テナント / プロジェクト認可](https://github.com/koyori-app/task/blob/main/apps/backend/docs/tenant-project-authz.md)の既存関数（`is_tenant_owner` / `explicit_member_project_ids`）で行う。
+他の利用者のプロフィールの結果は次のとおりである。閲覧者の判定はテナントの所属判定（`ensure_tenant_access`）を通し、対象者の判定は `tenant_members` の行と[テナント / プロジェクト認可](/dev/design/tenant-project-authz)の既存関数（`is_tenant_owner` / `explicit_member_project_ids`）で行う。
 
 | 状況 | 結果 |
 |---|---|
@@ -195,7 +195,7 @@ Device Token の規則の定義元は [Bearer 認証・認可の「Desktop 認�
 
 環境設定（`/settings/preferences`）と実験的機能の値はブラウザの localStorage に保存する。アカウントには保存しないので、ほかの端末や別のブラウザには引き継がれない。
 
-画面上部のパンくずは実データから組む（[パンくず](/breadcrumbs)）。設定系の画面は `プロフィール` のように一段で出し、`Account settings` に当たる中間の段は置かない。
+画面上部のパンくずは実データから組む（[パンくず](/dev/frontend/breadcrumbs)）。設定系の画面は `プロフィール` のように一段で出し、`Account settings` に当たる中間の段は置かない。
 
 フォームの挙動は次のとおりである。
 
@@ -234,7 +234,7 @@ Device Token の規則の定義元は [Bearer 認証・認可の「Desktop 認�
 
 ### セキュリティ
 
-パスワードと OAuth 連携を「サインインできる方法」としてまとめて管理する画面である。OAuth の認可フローと解除規則の定義元は [OAuth ログイン](/features/auth-oauth)である。
+パスワードと OAuth 連携を「サインインできる方法」としてまとめて管理する画面である。OAuth の認可フローと解除規則の定義元は [OAuth ログイン](/dev/features/auth/oauth)である。
 
 | 項目 | 値 |
 |---|---|
@@ -301,7 +301,7 @@ backend は「その連携がログイン用の最後の 1 件 かつ パスワ�
 | 言語 | `users` に列が無い | 同上。i18n の仕組み自体がまだ無い |
 | メールアドレスの変更 | 変更後の再確認の流れが無い（`email_verification` は新規登録用） | 変更要求、新アドレスへの確認メール、確認後の反映の経路を新設する |
 | 通知 / セッションの各画面 | 画面が無い | 通知は `/v1/users/me/notification-settings/{project_id}` が既にある |
-| 二要素認証・パスキーの管理 | 認証方法とは別タスク（TASK-188 / TASK-189）。[2 段階認証の未実装](/features/auth-2fa#未実装と既知の制限)、[パスキーの未実装](/features/auth-passkeys#未実装と既知の制限) | セキュリティ画面にセクションを足す。API は既にある |
+| 二要素認証・パスキーの管理 | 認証方法とは別タスク（TASK-188 / TASK-189）。[2 段階認証の未実装](/dev/features/auth/2fa#未実装と既知の制限)、[パスキーの未実装](/dev/features/auth/passkeys#未実装と既知の制限) | セキュリティ画面にセクションを足す。API は既にある |
 | トークンのプロジェクト絞り込み | アクセストークン画面の対象外 | API（`project_ids`）は既にある。フォームに選択 UI を足す |
 
 ほかの制限は次のとおりである。

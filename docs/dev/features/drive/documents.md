@@ -10,7 +10,7 @@ sidebar:
 
 ## 概要
 
-プロジェクトの「ドキュメント」は Drive の上に載せた画面で、専用の表・API は持たない。実体はプロジェクトのルートフォルダ直下の `.md` ファイルである。種類・ステータス・承認・版の履歴は持たない。ファイルの API は [Drive のファイル](/features/drive/files)、判断の理由は [Drive の決定の記録](/features/drive#決定の記録)に書く。
+プロジェクトの「ドキュメント」は Drive の上に載せた画面で、専用の表・API は持たない。実体はプロジェクトのルートフォルダ直下の `.md` ファイルである。種類・ステータス・承認・版の履歴は持たない。ファイルの API は [Drive のファイル](/dev/features/drive/files)、判断の理由は [Drive の決定の記録](/dev/features/drive#決定の記録)に書く。
 
 ## 振る舞い
 
@@ -34,7 +34,7 @@ sidebar:
 
 - 初回はサーバの `+data.ts`、編集中のプレビューと保存後は `POST /internal/render-description` で描画する
 - scope は `doc-<file_id>` で、本文の `KEY-N` はタスク詳細へのリンクになる
-- 関連タスクは [本文からのタスク参照](/features/drive/files#本文からのタスク参照)の `GET .../files/{id}/tasks` で取る
+- 関連タスクは [本文からのタスク参照](/dev/features/drive/files#本文からのタスク参照)の `GET .../files/{id}/tasks` で取る
 
 ### 保存
 
@@ -54,5 +54,5 @@ sidebar:
 
 | 項目 | 値 |
 |---|---|
-| URL | `/{tenant}/projects/{key}/docs`。詳細は [URL 仕様](/frontend/url-spec)に書く |
+| URL | `/{tenant}/projects/{key}/docs`。詳細は [URL 仕様](/dev/frontend/url-spec)に書く |
 | 検索 | `?q=` でタイトルを検索する |

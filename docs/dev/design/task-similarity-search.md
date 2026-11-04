@@ -8,7 +8,7 @@ sidebar:
 
 ## 目的
 
-次の 3 つを、PostgreSQL 同梱の `pg_trgm` による title の trigram 類似度 1 本で実現する。API の形と現在の振る舞いは[タスク拡張](/features/tasks/extensions)に書き、このページは設計の理由と比較を残す。
+次の 3 つを、PostgreSQL 同梱の `pg_trgm` による title の trigram 類似度 1 本で実現する。API の形と現在の振る舞いは[タスク拡張](/dev/features/tasks/extensions)に書き、このページは設計の理由と比較を残す。
 
 | # | 機能 | 入口 |
 |---|---|---|

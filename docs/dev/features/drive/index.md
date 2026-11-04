@@ -15,10 +15,10 @@ Drive は Misskey のドライブに倣った、テナント単位のファイ�
 
 | ページ | 内容 |
 |---|---|
-| [ファイル](/features/drive/files) | multipart のアップロード、一覧、メタデータ、名前・配置・本文の更新、削除、配信、タスク添付、Markdown 本文の `KEY-N` の自動結び付け |
-| [フォルダと共有](/features/drive/folders-and-sharing) | 階層フォルダ、`project_id` の継承・移動先の認可・プロジェクトルートの保護、利用者指定共有、公開リンク共有 |
-| [クォータ](/features/drive/quota) | 使用量の取得、テナントの個別クォータの設定、アップロード・本文の更新時の検証 |
-| [ドキュメント](/features/drive/documents) | プロジェクトのルートフォルダ直下の `.md` を読み書きする画面 |
+| [ファイル](/dev/features/drive/files) | multipart のアップロード、一覧、メタデータ、名前・配置・本文の更新、削除、配信、タスク添付、Markdown 本文の `KEY-N` の自動結び付け |
+| [フォルダと共有](/dev/features/drive/folders-and-sharing) | 階層フォルダ、`project_id` の継承・移動先の認可・プロジェクトルートの保護、利用者指定共有、公開リンク共有 |
+| [クォータ](/dev/features/drive/quota) | 使用量の取得、テナントの個別クォータの設定、アップロード・本文の更新時の検証 |
+| [ドキュメント](/dev/features/drive/documents) | プロジェクトのルートフォルダ直下の `.md` を読み書きする画面 |
 
 ## 振る舞い
 
@@ -30,7 +30,7 @@ S3 バックエンドでも S3 の直 URL はクライアントに渡さず、�
 
 ### ストレージバックエンド
 
-バックエンドは `StorageBackend` trait（`upload` / `delete` / `get_stream`）で抽象化する。同じバックエンドに利用者のアバター画像も置く。キーは `avatar-{uuid}.{ext}` で、`drive_files` の行は作らず、規則の定義元は[アカウント設定](/features/account-settings)のアバターのアップロードである。
+バックエンドは `StorageBackend` trait（`upload` / `delete` / `get_stream`）で抽象化する。同じバックエンドに利用者のアバター画像も置く。キーは `avatar-{uuid}.{ext}` で、`drive_files` の行は作らず、規則の定義元は[アカウント設定](/dev/features/account-settings)のアバターのアップロードである。
 
 - `upload` はストリームを受け取る。`content_length` の `None` は長さ未知で、`Some` なら書いた長さと食い違うと `SizeMismatch` になる
 - `get_stream` はプロキシ配信用のストリーミングダウンロードで、object が無いときはローカル・S3 とも `StorageError::NotFound` を返す
@@ -74,7 +74,7 @@ S3 バックエンドはクレート `object_store`（`AmazonS3Builder`）を使
 | 任意ファイルの上書き | ストレージキーは UUID v4 で生成する |
 | 超大型ファイルによる DoS | `RequestBodyLimitLayer` とストリーム中の実測値を `UPLOAD_MAX_SIZE_MB` から設定する |
 | パストラバーサル（ローカル） | ストレージキーは UUID のみを使う。元ファイル名はメタデータのみとする |
-| 共有トークンの総当たり | [公開共有のレートリミット](/features/drive/folders-and-sharing#公開共有のレートリミット)に書く |
+| 共有トークンの総当たり | [公開共有のレートリミット](/dev/features/drive/folders-and-sharing#公開共有のレートリミット)に書く |
 | 共有経由の過剰アクセス | `viewer` の共有では削除・アップロードの API を `403` で止める |
 
 ## 認可
@@ -88,7 +88,7 @@ S3 バックエンドはクレート `object_store`（`AmazonS3Builder`）を使
 | `project_id = NULL`（テナント一般ファイル） | テナント所属者、テナントオーナー、有効なフォルダ共有トークンの提示者 |
 | `project_id = <id>`（プロジェクトファイル） | そのプロジェクトに入れる人、テナントオーナー、フォルダ共有権限を持つ利用者とトークン |
 
-プロジェクトに入れるかは、ファイルの `tenant_id` に所属していることを先に確認したうえで、プロジェクトの公開規則で判定する。判定の詳細は[テナント / プロジェクト認可](https://github.com/koyori-app/task/blob/main/apps/backend/docs/tenant-project-authz.md)に書く。テナントに所属しないプロジェクト限定のゲストは、プロジェクトメンバーであるだけでは Drive へアクセスできない。
+プロジェクトに入れるかは、ファイルの `tenant_id` に所属していることを先に確認したうえで、プロジェクトの公開規則で判定する。判定の詳細は[テナント / プロジェクト認可](/dev/design/tenant-project-authz)に書く。テナントに所属しないプロジェクト限定のゲストは、プロジェクトメンバーであるだけでは Drive へアクセスできない。
 
 フォルダ共有は所属とは独立した明示的な付与なので、テナントから外しても失効しない。テナント一般ファイルの本文取得では利用者指定共有を見ず、テナント所属か共有トークンだけで判定する。プロジェクトファイルの本文は、セッションまたは PAT の認証と有効な利用者指定共有があれば、テナント外の受信者も取得できる。いずれも満たさない場合は `403 Forbidden` を返す。
 
@@ -122,7 +122,7 @@ Drive に関わるスコープは次のとおりである。
 
 `read_api` は `read:drive` を、`api` は `read:drive` / `write:drive` と、クォータ設定に要る `write:tenant` を包含する。いずれもスコープの要件を満たすだけであり、テナント所属・プロジェクト権限・オーナー限定の判定は別に行う。
 
-スコープは `apps/backend/crates/entity/src/scopes.rs` の `Scope` enum に定義する。包含関係は `Scope::implies` の網羅 match が一箇所で持ち、`has_scope` はそれを引くだけである。規則の一覧は [personal-access-tokens-authz.md](https://github.com/koyori-app/task/blob/main/apps/backend/docs/personal-access-tokens-authz.md) の「含意の規則」にある。
+スコープは `apps/backend/crates/entity/src/scopes.rs` の `Scope` enum に定義する。包含関係は `Scope::implies` の網羅 match が一箇所で持ち、`has_scope` はそれを引くだけである。規則の一覧は[個人アクセストークンの認可の含意の規則](/dev/design/personal-access-tokens-authz#含意の規則)にある。
 
 エンドポイントごとの必要なスコープは次のとおりである。
 

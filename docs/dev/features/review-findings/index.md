@@ -10,7 +10,7 @@ sidebar:
 
 ## 概要
 
-PR レビューの指摘を task 自身のデータとして管理する機能である。レビュワーは AI と人間のどちらもあり得て、全機能で両者を同格に扱う。AI は PAT + CLI、人間はセッション + Web UI が主経路で、モデル・権限規則は共通である。GitHub 側に置くのは bot の要約コメント 1 本と、マージ可になったときのレビュワー本人の Approve だけで、詳細は[要約コメントと Approve](/features/review-findings/github-comment) に書く。GitHub 連携（`github_integrations`、1 プロジェクト = 1 リポジトリ）、GitHub App、PAT スコープに依存し、連携が無くても起票・管理はできる。
+PR レビューの指摘を task 自身のデータとして管理する機能である。レビュワーは AI と人間のどちらもあり得て、全機能で両者を同格に扱う。AI は PAT + CLI、人間はセッション + Web UI が主経路で、モデル・権限規則は共通である。GitHub 側に置くのは bot の要約コメント 1 本と、マージ可になったときのレビュワー本人の Approve だけで、詳細は[要約コメントと Approve](/dev/features/review-findings/github-comment) に書く。GitHub 連携（`github_integrations`、1 プロジェクト = 1 リポジトリ）、GitHub App、PAT スコープに依存し、連携が無くても起票・管理はできる。
 
 ## 用語
 
@@ -262,7 +262,7 @@ task notifications settings --project TASK --email ""      # メールは受け�
 | `deferred_task_id` | 繰り延べ時に自動起票した通常タスクへのリンク（任意） |
 | `fixed_by` | 最後に `fixed` を宣言した利用者。差し戻し後も消さない。自分の修正の `verified` を止める判定に使う |
 
-定義は [m20260826000000_review_findings.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20260826000000_review_findings.rs) にある。PR の実体表 `forge_pull_requests` は[Git ホスティング連携のデータ](/features/tasks/github-tasks#データ)に書く。
+定義は [m20260826000000_review_findings.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20260826000000_review_findings.rs) にある。PR の実体表 `forge_pull_requests` は[Git ホスティング連携のデータ](/dev/features/tasks/github-tasks#データ)に書く。
 
 ## API
 
@@ -296,7 +296,7 @@ PR 単位の読み取りの規則は次のとおりである。
 - ラウンドの起票は、連携先のリポジトリが決まっていれば PR 行を `state = unknown` で用意する。既にあれば触らない。後から届いた webhook が同じ行に合流する
 - PR 番号は 1 以上の整数として検証する。実在確認まではしない。要約コメントの投稿時に判明し、投稿失敗は起票を巻き戻さない
 - 状態遷移後も要約更新ジョブを投入する
-- 起票と状態遷移は in-app 通知を作る（起票・遷移と同じトランザクション）。受信者の規則は[通知・ウォッチャー](/features/tasks/notifications)に書く
+- 起票と状態遷移は in-app 通知を作る（起票・遷移と同じトランザクション）。受信者の規則は[通知・ウォッチャー](/dev/features/tasks/notifications)に書く
 - 起票と状態遷移は Webhook イベント（`review.round_created` / `review.finding_changed`）も同じトランザクションで積む
 - 起票の上限は、指摘が 1 ラウンド 200 件、`summary` が 20000 文字、`title` が 1〜200 文字、`body` が 1〜20000 文字、`file` が 1000 文字、`line` が 1 以上である。遷移の `note` は 2000 文字まで
 - 409 は理由を本文（`message`）に入れる。High / Medium の繰り延べ・規則にない遷移・既定ステータスが無いの 3 つである。共通の `conflict` だけでは、CLI から使うレビュワーが「直すのか、取り下げるのか」を選べない
@@ -320,12 +320,12 @@ PR 単位の読み取りの規則は次のとおりである。
 
 スコープの規則は次のとおりである。
 
-- `write:review` は `read:review` を包含する。既存スコープの含意の規則は `apps/backend/docs/personal-access-tokens-authz.md` の「含意の規則」に書く
+- `write:review` は `read:review` を包含する。既存スコープの包含の規則は[個人アクセストークンの認可の含意の規則](/dev/design/personal-access-tokens-authz#含意の規則)に書く
 - `write:review` は繰り延べ経由で通常タスクの作成・クローズ・再オープンを伴う。`write:task` を渡さない分離の例外で、作られるのは指摘に紐づく 1 件だけで、本文も指摘の写しに限られる
 - `api` は全スコープを、`read_api` は `read:review` を含む read の全スコープを包含する
 - リソース束縛は既存の PAT 規則（テナント束縛 + `allowed_project_ids`）にそのまま乗る
 - セッションは既存どおり全スコープ相当である
-- 通知設定に関わる PAT の視界は `apps/backend/docs/personal-access-tokens-authz.md` に書く
+- 通知設定に関わる PAT の視界は[個人アクセストークンの認可](/dev/design/personal-access-tokens-authz)に書く
 
 ## 画面
 
@@ -389,7 +389,7 @@ PR 単位の読み取りの規則は次のとおりである。
 
 ### PR の指定
 
-読み取りの PR 選択に `host` / `host_url` / `pull_request_id` を足し、同名リポジトリ・同番 PR の候補が複数あるときに 409 で再指定を求める規則が無い。`reviews` がホストと PR 行への参照を持たないので、現在は `repo` + `pr` だけで対象が決まり、ホストは区別しない。CLI の `--host` / `--host-url` / `--pull-request-id` も無い。設計は[Git ホスティング連携のホストまで含めた PR の指定](/features/tasks/github-tasks#ホストまで含めた-pr-の指定)に書く。
+読み取りの PR 選択に `host` / `host_url` / `pull_request_id` を足し、同名リポジトリ・同番 PR の候補が複数あるときに 409 で再指定を求める規則が無い。`reviews` がホストと PR 行への参照を持たないので、現在は `repo` + `pr` だけで対象が決まり、ホストは区別しない。CLI の `--host` / `--host-url` / `--pull-request-id` も無い。設計は[Git ホスティング連携のホストまで含めた PR の指定](/dev/features/tasks/github-tasks#ホストまで含めた-pr-の指定)に書く。
 
 `reviews` は `pull_request_id` を持たない。`integration_id` / `repo_owner` / `repo_name` / `pr_number` / `pr_title` / `pr_author` を PR 行へ移して `(pull_request_id, round)` で採番する移行が残っており、レビュー側と PR 行は自然キーで結んでいる。`host` / `host_url` を含めた結合は GitLab 対応時に行う。
 
@@ -404,7 +404,7 @@ PR 単位の読み取りの規則は次のとおりである。
 | リポジトリ改名への追従 | ラウンドの保存値は owner / name の文字列で、`github_integrations` も数値の repository id を持たない。GitHub 側でリポジトリや org を改名して再連携すると、同じリポジトリなのに別リポジトリ扱いになり、旧ラウンドが一覧・集計の既定の視界から外れる。`repo` の絞り込みで読むことはできる。追従するには id 列の追加と連携フローの改修が要るので、別の変更として扱う |
 | ラウンドの取り消し（void） | 誤った PR 番号へ出したラウンドを消す手段は用意しない。ラウンドは「どの head を見た時点の判断か」の記録で、追記不可・削除不可がモデルの根幹である。誤投の実害は指摘を `rejected` へ落とせば消え、ラウンドそのものは「そういうレビューがあった」記録として残す |
 
-要約コメントと Approve の範囲外は[要約コメントと Approve の未実装と既知の制限](/features/review-findings/github-comment#未実装と既知の制限)に書く。
+要約コメントと Approve の範囲外は[要約コメントと Approve の未実装と既知の制限](/dev/features/review-findings/github-comment#未実装と既知の制限)に書く。
 
 ### テストが無い受け入れ条件
 
@@ -470,7 +470,7 @@ PR 単位の読み取りの規則は次のとおりである。
 | 2026-08-31 | ページを `<ReviewFindingsView :key="projectId">` で作り直す | vike-vue はクライアント遷移で同じ `+Page.vue` に解決される URL 間ではコンポーネントを patch するので、クエリの引数も選択中の PR も前のプロジェクトのまま残る |
 | 2026-09-01 | PR 一覧は可否を断定しない（`mergeable` を返さず、バッジは「未解決なし / N 件が未解決」） | 可否には鮮度と連携の有無も要る。一覧に `mergeable` を置くと、詳細パネルが「リポジトリ未確定」等へ落とした横で一覧だけ「マージ可」と出る矛盾が起きた |
 | 2026-09-01 | ラウンドは作成者の不在（`reviewer_left_tenant`）を返す | オーナー代行は画面（人間の主経路）から使えないと意味が半分になるが、在籍状態を返さないと画面が代行の条件を組めなかった。オーナーは `tenant_members` 行を持たないので、この判定では不在に数えない |
-| 2026-09-02 | PR を実体表（`forge_pull_requests`）へ切り出し、`reviews` は FK で参照する方針を [Git ホスティング連携](/features/tasks/github-tasks)側に置く | レビュー指摘、PR、タスクと辿る。PR 表はできたが、`reviews` の FK 付け替えは残っている |
+| 2026-09-02 | PR を実体表（`forge_pull_requests`）へ切り出し、`reviews` は FK で参照する方針を [Git ホスティング連携](/dev/features/tasks/github-tasks)側に置く | レビュー指摘、PR、タスクと辿る。PR 表はできたが、`reviews` の FK 付け替えは残っている |
 | 2026-09-07 | レビュー履歴の PR 選択に `host` / `host_url` / `pull_request_id` を追加し、`repo + pr` だけは候補が一意な場合に限定すると決める | GitHub と Forgejo の同名リポジトリ・同番 PR は API 409 / CLI 非 0 で再指定を要求する |
 | 2026-09-09 | `pull_request_id` は候補探索を省略するが、併記された `repo` / `host` / `host_url` は対象行との一致を検証し、不一致を API 400 / CLI 非 0 で拒否すると決める | Git ホスティング連携では不一致を拒否する一方、このページは他の指定を無視するように読めた |
 | 2026-09-22 | ラウンドの起票と指摘の状態遷移を in-app 通知にする。宛先は同じ PR の関係者（ラウンドの作成者・`fixed_by`・PR の作者）で、`review_round_any` を設定に入れた利用者はラウンドの起票だけを追加で受け取る。購読の既定は OFF にする。PR の作者への起票通知は要約ジョブが担う。通知の可視性は `notifications.project_id` で判定する | 既定にすると、PR を見ていないプロジェクト全員へ全ラウンドが流れる。起票時点では作者が分からず、`reviews.pr_author` を埋めるのがこのジョブである。レビュー通知はタスクに紐づかない |

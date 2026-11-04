@@ -9,7 +9,7 @@ sidebar:
 
 ## 概要
 
-2 段階認証は、メール/パスワードまたは OAuth のログインの後に TOTP（Time-based One-Time Password）を要求する仕組みである。実装には [`totp-rs`](https://github.com/constantoine/totp-rs) を使う。テナントオーナーはテナント全体に 2FA を強制でき、強制されたテナントでは 2FA を満たさない利用者のリソースへのアクセスを `403` で拒否する。パスキーのログインには TOTP を要求しない。パスキーは[パスキー認証](/features/auth-passkeys)、OAuth は [OAuth ログイン](/features/auth-oauth)の機能に依存する。
+2 段階認証は、メール/パスワードまたは OAuth のログインの後に TOTP（Time-based One-Time Password）を要求する仕組みである。実装には [`totp-rs`](https://github.com/constantoine/totp-rs) を使う。テナントオーナーはテナント全体に 2FA を強制でき、強制されたテナントでは 2FA を満たさない利用者のリソースへのアクセスを `403` で拒否する。パスキーのログインには TOTP を要求しない。パスキーは[パスキー認証](/dev/features/auth/passkeys)、OAuth は [OAuth ログイン](/dev/features/auth/oauth)の機能に依存する。
 
 ## 用語
 
@@ -136,7 +136,7 @@ stateDiagram-v2
 3. コードを検証する
 4. 同じトランザクションで `users.totp_enabled = false` にし、`totp_credentials` と `recovery_codes` の行を消す
 
-サービス管理者は `POST /v1/admin/users/{id}/reset-2fa` で同じ行を消せる。こちらは対象者のセッションも失効させる。規則は[サービス管理者の API](/features/admin#api) にある。
+サービス管理者は `POST /v1/admin/users/{id}/reset-2fa` で同じ行を消せる。こちらは対象者のセッションも失効させる。規則は[サービス管理者の API](/dev/features/admin#api) にある。
 
 ### テナントの強制
 
@@ -274,7 +274,7 @@ project にだけ参加しテナントに参加しないゲスト（project-only
 |---|---|
 | ログイン後の入力画面 | TOTP・リカバリーコードの入力。OAuth コールバックのリダイレクト先 `/auth/2fa` のページも無い |
 | セットアップ | QR の表示、初回コードの入力、リカバリーコードの表示 |
-| 管理 | `/settings/security` での再生成と無効化。この画面は今、パスワードと OAuth 連携と端末だけを扱う（[アカウント設定の画面](/features/account-settings#画面)） |
+| 管理 | `/settings/security` での再生成と無効化。この画面は今、パスワードと OAuth 連携と端末だけを扱う（[アカウント設定の画面](/dev/features/account-settings#画面)） |
 | テナントの強制 | `require_2fa` を切り替える設定項目 |
 
 このため次の制限がある。

@@ -34,10 +34,10 @@ sidebar:
 |-----|------|
 | `/signin` | サインイン |
 | `/signup` | 新規登録 |
-| `/auth/reset-password` | パスワードリセット。`?token=` が無ければ申請フォーム、あれば再設定フォームを出す（[パスワードリセットと変更](/features/auth-password-reset)）。メール内リンクもこの URL を指す |
+| `/auth/reset-password` | パスワードリセット。`?token=` が無ければ申請フォーム、あれば再設定フォームを出す（[パスワードリセットと変更](/dev/features/auth/password-reset)）。メール内リンクもこの URL を指す |
 | `/verify-email` | メールアドレスの確認。`?token=` はメール内リンクが付ける |
-| `/desktop/authorize` | Koyori Desktop の承認（[アカウント設定](/features/account-settings)）。`?port=&code_challenge=&state=&name=` を受ける。未ログインならサインイン後に戻る |
-| `/invitations/accept?token=` | テナント招待の承諾（[テナントとプロジェクトの認可](https://github.com/koyori-app/task/blob/main/apps/backend/docs/tenant-project-authz.md)）。未ログインならサインイン後に戻る |
+| `/desktop/authorize` | Koyori Desktop の承認（[アカウント設定](/dev/features/account-settings)）。`?port=&code_challenge=&state=&name=` を受ける。未ログインならサインイン後に戻る |
+| `/invitations/accept?token=` | テナント招待の承諾（[テナントとプロジェクトの認可](/dev/design/tenant-project-authz)）。未ログインならサインイン後に戻る |
 
 ### アカウント設定（テナント外）
 
@@ -45,9 +45,9 @@ sidebar:
 
 | URL | 説明 |
 |-----|------|
-| `/settings/profile` | プロフィール編集（[アカウント設定](/features/account-settings)） |
-| `/settings/security` | 認証方法と Koyori Desktop の端末（[アカウント設定](/features/account-settings)） |
-| `/settings/tokens` | パーソナルアクセストークンの発行と取り消し（[アカウント設定](/features/account-settings)） |
+| `/settings/profile` | プロフィール編集（[アカウント設定](/dev/features/account-settings)） |
+| `/settings/security` | 認証方法と Koyori Desktop の端末（[アカウント設定](/dev/features/account-settings)） |
+| `/settings/tokens` | パーソナルアクセストークンの発行と取り消し（[アカウント設定](/dev/features/account-settings)） |
 | `/settings/preferences` | 環境設定 |
 | `/settings/experiments` | 実験的機能の設定 |
 
@@ -63,7 +63,7 @@ sidebar:
 |-----|------|
 | `/{tenant}` | テナントホーム（ダッシュボード） |
 | `/{tenant}/my-tasks` | 自分のタスク |
-| `/{tenant}/calendar` | テナントのタイムライン（[スケジュール](/features/tasks/schedule)）。`?from=YYYY-MM-DD`（起点の月曜。省略時は今週）、`?member=` / `?project=`（ID。繰り返し指定可）で絞り込み、`?selected=KEY-N`（詳細のオーバーレイで開いているタスク）を持つ。URL は replaceState で書き、履歴を増やさない |
+| `/{tenant}/calendar` | テナントのタイムライン（[スケジュール](/dev/features/tasks/schedule)）。`?from=YYYY-MM-DD`（起点の月曜。省略時は今週）、`?member=` / `?project=`（ID。繰り返し指定可）で絞り込み、`?selected=KEY-N`（詳細のオーバーレイで開いているタスク）を持つ。URL は replaceState で書き、履歴を増やさない |
 | `/{tenant}/gantt` | ガントチャート。サイドバーの入口は環境設定の `showExperiments` が有効なときだけ出る。URL からページを開くこと自体は設定に関係なくできる |
 | `/{tenant}/settings` | テナント設定 |
 | `/{tenant}/settings/members` | テナントメンバー管理 |
@@ -78,11 +78,11 @@ sidebar:
 |-----|------|
 | `/{tenant}/projects/{key}/tasks` | タスク一覧。`?view=table`（既定は List）、`?page=`、`?q=`、`?label=`、`?sort=列:asc,列:desc`、`?selected=KEY-N`（分割ビューで選択中のタスク）を持ち、既定値は URL から省く。URL は replaceState で書く |
 | `/{tenant}/projects/{key}/tasks/{KEY-N}` | タスク詳細 |
-| `/{tenant}/projects/{key}/docs` | ドキュメント一覧（[Drive](/features/drive)のドキュメント画面）。`?q=` でタイトル検索 |
+| `/{tenant}/projects/{key}/docs` | ドキュメント一覧（[Drive](/dev/features/drive)のドキュメント画面）。`?q=` でタイトル検索 |
 | `/{tenant}/projects/{key}/docs/{file_id}` | ドキュメント詳細。`{file_id}` は Drive ファイルの UUID。`?edit=1` で編集モード |
 | `/{tenant}/projects/{key}/labels` | ラベル管理 |
 | `/{tenant}/projects/{key}/settings` | プロジェクト設定。メンバー管理もこの画面の節である |
-| `/{tenant}/projects/{key}/reviews` | [レビュー指摘](/features/review-findings)の画面。`?pr=618`、`?round=`、`?severity=`、`?state=`、`?finding=`、`?mine=1`、`?page=` を持つ |
+| `/{tenant}/projects/{key}/reviews` | [レビュー指摘](/dev/features/review-findings)の画面。`?pr=618`、`?round=`、`?severity=`、`?state=`、`?finding=`、`?mine=1`、`?page=` を持つ |
 
 ## ページファイル
 
@@ -147,12 +147,12 @@ URL を持たないファイルは次のとおりである。
 
 | URL | 予定していた内容 | 現状 |
 |-----|-----------------|------|
-| `/{tenant}/drive`、`/{tenant}/drive/{folder_id}` | ドライブのファイルブラウザ。フォルダの識別子は UUID | 画面は未実装（[Drive](/features/drive)）。API はある |
+| `/{tenant}/drive`、`/{tenant}/drive/{folder_id}` | ドライブのファイルブラウザ。フォルダの識別子は UUID | 画面は未実装（[Drive](/dev/features/drive)）。API はある |
 | `/{tenant}/projects` | プロジェクト一覧 | ページなし。プロジェクトへの入口はサイドバーである |
 | `/{tenant}/projects/{key}` | プロジェクトホーム | ページなし。プロジェクトの入口は `/tasks` である |
 | `/{tenant}/projects/{key}/milestones` | マイルストーン一覧 | ページなし |
 | `/{tenant}/projects/{key}/members` | プロジェクトメンバー | ページなし。`settings` の節で扱う |
-| `/admin`、`/admin/users`、`/admin/tenants`、`/admin/audit-logs` | 管理者画面（`is_admin = true` の利用者のみ） | 画面は未実装（[サービス管理者](/features/admin)） |
+| `/admin`、`/admin/users`、`/admin/tenants`、`/admin/audit-logs` | 管理者画面（`is_admin = true` の利用者のみ） | 画面は未実装（[サービス管理者](/dev/features/admin)） |
 
 テナント直下のルートと `/signin` などの固定ルートは同じ階層にある。`display_id` に予約語の検査は無いので、固定ルートと同じ名前のテナントを作ると、そのテナントのホームと固定ルートが同じ URL になる。
 
