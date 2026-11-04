@@ -12,16 +12,12 @@ features/auth-password-reset.md
 features/drive.md
 features/review-findings.md
 features/tasks/1.core.md
-features/tasks/10.webhooks.md
 features/tasks/2.time-tracking.md
 features/tasks/3.sprints.md
 features/tasks/4.collaboration-clipboard.md
 features/tasks/4.collaboration.md
 features/tasks/5.notifications.md
 features/tasks/6.custom-fields.md
-features/tasks/7.extensions.md
-features/tasks/8.automation.md
-features/tasks/9.github-app.md
 features/tasks/9.github-tasks.md
 features/tasks/index.md
 frontend/auth-forms.md
