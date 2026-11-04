@@ -1,6 +1,6 @@
-import createFetchClient from 'openapi-fetch';
+import createFetchClient, { type Middleware } from 'openapi-fetch';
 import { createClient } from '@koyori-app/openapi-vue-query';
-import { computed, toValue, type MaybeRefOrGetter } from 'vue';
+import { computed, ref, toValue, type MaybeRefOrGetter } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 import type { paths } from '@/generated/api';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
@@ -18,6 +18,48 @@ export const fetchClient = createFetchClient<paths>({
   fetch: (req: Request) => globalThis.fetch(req),
   credentials: 'include',
 });
+
+/** セッション切れを伝えてから /signin へ送るまでの待ち時間。 */
+export const SESSION_EXPIRED_REDIRECT_DELAY_MS = 2_000;
+
+/** 操作中の 401 でセッション切れを検知したか。レイアウトが「セッションが切れました」を出す。 */
+export const sessionExpired = ref(false);
+
+/**
+ * 操作中の API が「セッションが無い」401 を返したら、表示を出して /signin へ送る。
+ * ログイン失敗（invalid-credentials / invalid-2fa-code）や、/me 自身（useAuthSession が扱う）は
+ * 本文で区別して対象外にする。
+ */
+export const sessionExpiredMiddleware: Middleware = {
+  async onResponse({ request, response }) {
+    if (response.status !== 401) return undefined;
+    if (new URL(request.url).pathname.endsWith('/v1/auth/me')) return undefined;
+    const body = (await response
+      .clone()
+      .json()
+      .catch(() => null)) as { message?: unknown } | null;
+    if (body?.message !== 'unauthorized') return undefined;
+    if (typeof window === 'undefined' || sessionExpired.value) return undefined;
+    if (['/signin', '/signup'].includes(window.location.pathname)) return undefined;
+    sessionExpired.value = true;
+    setTimeout(() => window.location.assign('/signin'), SESSION_EXPIRED_REDIRECT_DELAY_MS);
+    return undefined;
+  },
+};
+
+fetchClient.use(sessionExpiredMiddleware);
+
+/** HTTP 状態。応答が無い（通信断）なら undefined。 */
+export function queryErrorStatus(error: unknown): number | undefined {
+  return (error as { response?: Response } | null)?.response?.status;
+}
+
+/** /me の再試行。401 は確定なので再試行せず、5xx・通信断だけ 2 回まで。 */
+export const ME_RETRY_COUNT = 2;
+export function meRetry(failureCount: number, error: unknown): boolean {
+  return queryErrorStatus(error) !== 401 && failureCount < ME_RETRY_COUNT;
+}
+export const meRetryDelay = (attempt: number) => Math.min(1000 * 2 ** attempt, 10_000);
 
 /** Typed TanStack Vue Query helpers for task OpenAPI paths. */
 export const apiClient = createClient<paths>(fetchClient);
@@ -154,7 +196,8 @@ export function useUserProfileQuery(
 export function useMeQuery(options?: { enabled?: MaybeRefOrGetter<boolean> }) {
   return apiClient.useQuery('get', '/v1/auth/me', undefined, {
     staleTime: AUTH_ME_STALE_TIME_MS,
-    retry: false,
+    retry: meRetry,
+    retryDelay: meRetryDelay,
     ...(options?.enabled !== undefined ? { enabled: options.enabled } : {}),
   });
 }

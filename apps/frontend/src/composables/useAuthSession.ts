@@ -2,7 +2,13 @@ import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { computed, watch, type MaybeRefOrGetter, toValue } from 'vue';
 import { usePageContext } from 'vike-vue/usePageContext';
-import { meQueryOptions, useLogoutMutation, useMeQuery } from '@/lib/api-vue-query';
+import {
+  meQueryOptions,
+  queryErrorStatus,
+  sessionExpired,
+  useLogoutMutation,
+  useMeQuery,
+} from '@/lib/api-vue-query';
 import { authUserSchema, useAuthStore } from '@/stores/auth';
 
 export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) {
@@ -38,11 +44,16 @@ export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) 
   }
 
   const isSettledError = computed(() => meQuery.isError.value && !meQuery.isFetching.value);
+  // 401 だけがサインアウト。5xx・通信断はセッションを保ち、再試行を出す
+  const isUnauthorized = computed(
+    () => isSettledError.value && queryErrorStatus(meQuery.error?.value) === 401,
+  );
+  const isTransientError = computed(() => isSettledError.value && !isUnauthorized.value);
 
   watch(
-    isSettledError,
-    (settled) => {
-      if (!settled) return;
+    isUnauthorized,
+    (unauthorized) => {
+      if (!unauthorized) return;
       authStore.clearUser();
       redirectToSignInIfNeeded();
     },
@@ -59,5 +70,9 @@ export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) 
     }
   }
 
-  return { meQuery, logout, logoutMutation };
+  function retryMe() {
+    void meQuery.refetch?.();
+  }
+
+  return { meQuery, logout, logoutMutation, isTransientError, retryMe, sessionExpired };
 }

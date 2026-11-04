@@ -4,7 +4,7 @@
 import AppSidebarSkeleton from '@/components/sidebar/AppSidebarSkeleton.vue';
 import AppBreadcrumbs from '@/components/AppBreadcrumbs.vue';
 import { useBreadcrumbs } from '@/composables/useBreadcrumbs';
-import { Button, Drawer } from '@koyori-app/ui-vue';
+import { Alert, Button, Drawer } from '@koyori-app/ui-vue';
 import { PhSidebarSimple } from '@phosphor-icons/vue';
 import { defaultDocument, useEventListener, useMediaQuery } from '@vueuse/core';
 import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
@@ -32,7 +32,7 @@ const isAuthPage = computed(() =>
   ].includes(pageContext.urlPathname),
 );
 
-const { meQuery, logout } = useAuthSession({
+const { meQuery, logout, isTransientError, retryMe, sessionExpired } = useAuthSession({
   guard: computed(() => !isAuthPage.value),
 });
 
@@ -74,6 +74,14 @@ const AppHeader = defineAsyncComponent(() => import('@/components/header/AppHead
   <ClientOnly v-if="isDev && TanStackDevtools">
     <component :is="TanStackDevtools" />
   </ClientOnly>
+  <!-- 一時的な失敗ではサインイン画面へ飛ばさず、今のセッションを保って再試行を出す -->
+  <div
+    v-if="!isAuthPage && (sessionExpired || isTransientError)"
+    class="fixed inset-x-0 top-0 z-50 p-2"
+  >
+    <Alert v-if="sessionExpired" message="セッションが切れました。サインイン画面へ移動します。" />
+    <Alert v-else message="サーバーに接続できませんでした。" :onRetry="retryMe" />
+  </div>
   <slot v-if="isAuthPage" />
   <div
     v-else-if="meQuery.isPending.value"
@@ -90,7 +98,7 @@ const AppHeader = defineAsyncComponent(() => import('@/components/header/AppHead
     テナントとアカウントは全幅のヘッダーに置く（サイドバーの上下ではなく）。
     1 段目をヘッダー、2 段目をサイドバー + 本文にし、スクロールは本文だけにする。
   -->
-  <div v-else-if="meQuery.isSuccess.value" class="flex h-svh flex-col overflow-hidden">
+  <div v-else-if="meQuery.data.value" class="flex h-svh flex-col overflow-hidden">
     <AppHeader />
     <div class="flex min-h-0 flex-1">
       <Drawer
