@@ -1,3 +1,10 @@
+// テストケースの一覧（docs/features/account-settings.md から移した）
+// - パスワードあり／なしの出し分け、初回設定に現在のパスワード欄を出さないこと、確認不一致で送信しないこと
+// - 現在のパスワード不一致の表示、変更後のサインイン画面への遷移
+// - 連携一覧と追加候補、self-hosted の URL 未入力での無効化、連携済みでも別インスタンスを開始できること、同一インスタンスを開始しないこと
+// - 成功通知がマーカーを根拠にすること（URL だけでは出ないこと）
+// - 確認を挟む解除と `instance_url` の付与、最後の認証方法の拒否表示
+
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
