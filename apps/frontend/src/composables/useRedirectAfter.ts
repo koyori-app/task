@@ -6,6 +6,10 @@ export const REDIRECT_AFTER_PARAM = 'redirect_after';
 /**
  * 戻り先として使ってよい値だけを返す。同一オリジンの相対パス（`/` 始まり）に限り、
  * `//host`・`/\host`・スキーム付き・制御文字入りは `/` にする（オープンリダイレクト対策）。
+ *
+ * OAuth 開始 API が受け付ける形にも揃える。backend の `sanitize_redirect_path`
+ * （auth-core `crates/auth-core/src/state.rs`）は `:`・`@`・`..`・`\`・`//` 始まりを 400 で拒否するので、
+ * ここで先に `/` へ落とす。パスワード経路と OAuth 経路で同じ値になり、OAuth だけ失敗することがない。
  */
 export function safeRedirectPath(value: string | null | undefined): string {
   if (typeof value !== 'string' || value === '') return '/';
@@ -13,6 +17,7 @@ export function safeRedirectPath(value: string | null | undefined): string {
   // ブラウザは URL からタブ・改行を取り除いてから解釈するので、`/\t/evil` が `//evil` になる
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f\\]/.test(value)) return '/';
+  if (value.includes(':') || value.includes('@') || value.includes('..')) return '/';
   return value;
 }
 

@@ -241,6 +241,35 @@ describe('SignInForm のパスワード変更の案内', () => {
       expect(url.searchParams.get('redirect_after')).toBe('/invitations/accept?token=abc');
     });
 
+    it('OAuth 開始に渡す戻り先は backend が拒否する形（@ : ..）を含まず / になる', async () => {
+      window.history.replaceState(
+        {},
+        '',
+        `/signin?redirect_after=${encodeURIComponent('/acme/projects/APP/tasks?q=alice@example.com')}`,
+      );
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (req: Request | string) => {
+          const url = typeof req === 'string' ? req : req.url;
+          if (new URL(url, 'http://localhost').pathname.endsWith('/v1/auth/oauth/providers')) {
+            return jsonResponse({
+              providers: [{ provider: 'github', requires_instance_url: false, sign_in: true }],
+            });
+          }
+          return jsonResponse({ message: 'not-found' }, 404);
+        }),
+      );
+      const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+      await mountForm();
+      await flushPromises();
+      [...document.body.querySelectorAll('button')]
+        .find((b) => b.textContent?.includes('GitHub'))!
+        .click();
+      const url = new URL(String(assignSpy.mock.calls[0]![0]), 'http://localhost');
+      expect(url.searchParams.get('redirect_after')).toBe('/');
+      expect(url.searchParams.get('error_redirect_after')).toBe('/signin');
+    });
+
     it('外部 URL は / にする', async () => {
       window.history.replaceState({}, '', '/signin?redirect_after=https%3A%2F%2Fevil.example');
       stubLogin(200, {});
