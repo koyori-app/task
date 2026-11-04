@@ -62,10 +62,11 @@ const headShaError = computed(() =>
 const hasPendingInput = computed(
   () => draft.value.title.trim() !== '' || draft.value.body.trim() !== '',
 );
-/** 捨てると失われる下書き（積んだ指摘、または入力中の指摘） */
+/** 捨てると失われる下書き（積んだ指摘、入力中の指摘、総評） */
 const hasDraft = computed(
   () =>
     staged.value.length > 0 ||
+    summary.value.trim() !== '' ||
     hasPendingInput.value ||
     draft.value.file.trim() !== '' ||
     draft.value.line.trim() !== '',

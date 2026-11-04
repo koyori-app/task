@@ -251,9 +251,28 @@ function applyUrlState(state: ReviewFindingsUrlState, warnings: readonly string[
   transitionError.value = null;
 }
 
+/** 下書きを抱えたまま「戻る」で離れようとした時の、復元待ちの URL 状態 */
+const pendingRestore = ref<{ state: ReviewFindingsUrlState; warnings: string[] } | null>(null);
+
 function restoreFromLocation() {
   const parsed = parseReviewFindingsUrlState(new URL(window.location.href).searchParams);
+  if (isComposerOpen.value && composerDirty.value) {
+    pendingRestore.value = { state: parsed.state, warnings: [...parsed.warnings] };
+    return;
+  }
   applyUrlState(parsed.state, parsed.warnings);
+}
+
+function confirmRestore() {
+  const next = pendingRestore.value;
+  pendingRestore.value = null;
+  if (next) applyUrlState(next.state, next.warnings);
+}
+
+/** やめる: ブラウザは既に前の URL へ動いているので、今の画面の URL を積み直して下書きを保つ */
+function cancelRestore() {
+  pendingRestore.value = null;
+  writeUrl('push');
 }
 
 onMounted(() => window.addEventListener('popstate', restoreFromLocation));
@@ -373,7 +392,8 @@ function setStateFilter(value: unknown) {
 }
 
 function selectPr(pr: number) {
-  if (isComposerOpen.value && composerDirty.value && pr !== selectedPr.value) {
+  if (pr === selectedPr.value) return;
+  if (isComposerOpen.value && composerDirty.value) {
     pendingPr.value = pr;
     return;
   }
@@ -1033,6 +1053,15 @@ async function onRoundCreated() {
       destructive
       :on-confirm="confirmSelectPr"
       :on-cancel="() => (pendingPr = null)"
+    />
+    <ConfirmDialog
+      :open="pendingRestore !== null"
+      title="下書きを破棄しますか？"
+      message="起票中の下書きは、履歴を戻ると失われます。"
+      confirm-label="破棄して戻る"
+      destructive
+      :on-confirm="confirmRestore"
+      :on-cancel="cancelRestore"
     />
   </div>
 </template>

@@ -282,6 +282,20 @@ describe('ReviewRoundComposer', () => {
     expect(wrapper.emitted('cancel')).toHaveLength(1);
   });
 
+  it('総評だけ書いた場合のキャンセルも確認する', async () => {
+    stubFetch();
+    const wrapper = mountComposer();
+    await flushPromises();
+
+    await wrapper.find('#composer-summary').setValue('総評だけ');
+    bodyButton('キャンセル')!.click();
+    await flushPromises();
+    expect(wrapper.emitted('cancel')).toBeUndefined();
+    expect(document.body.querySelector('dialog[open]')?.textContent).toContain(
+      '下書きを破棄しますか？',
+    );
+  });
+
   it('下書きが無いときのキャンセルは確認なしで閉じる', async () => {
     stubFetch();
     const wrapper = mountComposer();

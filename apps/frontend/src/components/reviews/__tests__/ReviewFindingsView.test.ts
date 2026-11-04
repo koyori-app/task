@@ -530,6 +530,39 @@ describe('ReviewFindingsView', () => {
       expect(prButton(wrapper, 617).attributes('aria-current')).toBe('true');
     });
 
+    it('選択中の PR の再クリックは何もせず、下書きが残る', async () => {
+      const wrapper = await openComposer();
+      await wrapper.get('#draft-title').setValue('認可漏れ');
+      await flushPromises();
+
+      await prButton(wrapper, 618).trigger('click');
+      await flushPromises();
+      expect(document.body.querySelector('dialog[open]')).toBeNull();
+      expect((wrapper.get('#draft-title').element as HTMLInputElement).value).toBe('認可漏れ');
+    });
+
+    it('履歴を戻ると確認し、やめると今の URL に戻って下書きが残る', async () => {
+      window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=618');
+      const wrapper = await openComposer();
+      await wrapper.get('#draft-title').setValue('認可漏れ');
+      await flushPromises();
+
+      window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=617');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      await flushPromises();
+      expect(document.body.querySelector('dialog[open]')?.textContent).toContain(
+        '下書きを破棄しますか？',
+      );
+      const dismiss = [
+        ...document.body.querySelectorAll<HTMLButtonElement>('dialog[open] button'),
+      ].find((b) => b.textContent?.includes('キャンセル'));
+      dismiss!.click();
+      await flushPromises();
+      expect(new URL(window.location.href).searchParams.get('pr')).toBe('618');
+      expect(prButton(wrapper, 618).attributes('aria-current')).toBe('true');
+      expect((wrapper.get('#draft-title').element as HTMLInputElement).value).toBe('認可漏れ');
+    });
+
     it('下書きが無ければ確認なしで切り替わる', async () => {
       const wrapper = await openComposer();
       await prButton(wrapper, 617).trigger('click');
