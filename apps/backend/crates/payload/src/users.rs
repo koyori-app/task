@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
+use crate::tenant_members::OrgProfile;
+
 /// Public user profile — excludes password_hash, sessions_revoked_at, and other secrets.
 #[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
 pub struct UserResponse {
@@ -44,30 +46,27 @@ pub struct UserProfileResponse {
     pub bio: Option<String>,
     #[schema(nullable)]
     pub avatar_url: Option<String>,
-    /// このテナントでの部署。所属行の無いオーナー・客分では null
+    /// このテナントでの部署。未設定・客分では null
     #[schema(nullable)]
     pub department: Option<String>,
-    /// このテナントでの役職。所属行の無いオーナー・客分では null
+    /// このテナントでの役職。未設定・客分では null
     #[schema(nullable)]
     pub position: Option<String>,
-    /// このテナントでのチーム。所属行の無いオーナー・客分では null
+    /// このテナントでのチーム。未設定・客分では null
     #[schema(nullable)]
     pub team: Option<String>,
 }
 
 impl UserProfileResponse {
-    pub fn from_parts(
-        user: entity::users::Model,
-        member: Option<&entity::tenant_members::Model>,
-    ) -> Self {
+    pub fn from_parts(user: entity::users::Model, org: OrgProfile) -> Self {
         Self {
             id: user.id,
             username: user.username,
             bio: user.bio,
             avatar_url: user.avatar_url,
-            department: member.and_then(|m| m.department.clone()),
-            position: member.and_then(|m| m.position.clone()),
-            team: member.and_then(|m| m.team.clone()),
+            department: org.department,
+            position: org.position,
+            team: org.team,
         }
     }
 }

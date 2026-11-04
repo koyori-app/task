@@ -32,6 +32,7 @@ function thread(id: string, created_at: string): CommentThread {
     updated_at: created_at,
     user: tanaka,
     replies: [],
+    reactions: [],
   } as CommentThread;
 }
 

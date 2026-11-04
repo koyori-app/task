@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ReactionBar from '@/components/reactions/ReactionBar.vue';
+import type { ReactionController } from '@/composables/useReactions';
 import {
   CalendarClock,
   CalendarDays,
@@ -83,6 +85,10 @@ const props = defineProps<{
   membersState?: { loading?: boolean; error?: boolean; onRetry?: () => void };
   /** 担当者のプロフィール画面の URL。渡すと担当者名をリンクで並べる */
   profileHref?: (userId: string) => string;
+  /** ログイン中ユーザーの ID。押した人の一覧で「自分」を示す */
+  currentUserId?: string | null;
+  /** 絵文字リアクションの操作。渡さなければリアクションの UI を出さない */
+  reactionController?: ReactionController;
   projectLabels?: LabelOption[];
   projectLabelsLoading?: boolean;
   projectLabelsError?: boolean;
@@ -1125,6 +1131,21 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 destructive
                 :on-confirm="confirmClearDescription"
                 :on-cancel="() => (clearConfirmOpen = false)"
+              />
+              <!-- 概要へのリアクション。説明が空の間と編集中は出さない -->
+              <ReactionBar
+                v-if="reactionController && task.description && editingField !== 'description'"
+                class="mt-2"
+                :reactions="task.reactions"
+                can-react
+                always-show-add
+                :busy="reactionController.isBusy(null)"
+                :error="reactionController.errorFor(null)"
+                :fetch-users="(emoji) => reactionController!.fetchUsers(null, emoji)"
+                :profile-href="profileHref"
+                :current-user-id="currentUserId"
+                @toggle="reactionController.toggle(null, $event)"
+                @add="reactionController.toggle(null, $event)"
               />
               <p v-if="fieldError('description')" class="mt-2 text-xs text-destructive">
                 {{ fieldError('description') }}
