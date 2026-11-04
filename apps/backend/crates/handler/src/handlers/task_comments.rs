@@ -34,19 +34,6 @@ struct ActivityCursor {
     id: Uuid,
 }
 
-/// コメントの投稿者。名前が引けない場合も表示は続けたいので `unknown` へ倒す。
-fn comment_user(map: &HashMap<Uuid, (String, Option<String>)>, user_id: Uuid) -> CommentUser {
-    let (name, avatar_url) = map
-        .get(&user_id)
-        .cloned()
-        .unwrap_or_else(|| ("unknown".into(), None));
-    CommentUser {
-        id: user_id,
-        name,
-        avatar_url,
-    }
-}
-
 fn comment_body(model: &task_comments::Model) -> Option<String> {
     if model.deleted_at.is_some() {
         None
@@ -112,6 +99,17 @@ pub async fn list_comments(
     )
     .await?;
 
+    // リアクションもタスク単位で一度に引く（コメントごとに引くと N+1 になる）
+    let mut reactions =
+        service::reactions::summaries_for_comments(&state.db, task.id, auth.user_id).await?;
+    // 削除済みコメントのリアクションは見せない（本文と同じ扱い）
+    let mut reactions_of = |comment: &task_comments::Model| {
+        reactions
+            .remove(&comment.id)
+            .filter(|_| comment.deleted_at.is_none())
+            .unwrap_or_default()
+    };
+
     let mut top_level: Vec<task_comments::Model> = Vec::new();
     let mut replies_by_parent: HashMap<Uuid, Vec<task_comments::Model>> = HashMap::new();
 
@@ -138,21 +136,23 @@ pub async fn list_comments(
                 .into_iter()
                 .map(|reply| CommentReply {
                     id: reply.id,
-                    user: comment_user(&users_map, reply.user_id),
+                    user: CommentUser::from_lookup(&users_map, reply.user_id),
                     body: comment_body(&reply),
                     created_at: reply.created_at.with_timezone(&Utc),
                     updated_at: reply.updated_at.with_timezone(&Utc),
                     is_deleted: reply.deleted_at.is_some(),
+                    reactions: reactions_of(&reply),
                 })
                 .collect();
             CommentThread {
                 id: parent.id,
-                user: comment_user(&users_map, parent.user_id),
+                user: CommentUser::from_lookup(&users_map, parent.user_id),
                 body: comment_body(&parent),
                 replies,
                 created_at: parent.created_at.with_timezone(&Utc),
                 updated_at: parent.updated_at.with_timezone(&Utc),
                 is_deleted: parent.deleted_at.is_some(),
+                reactions: reactions_of(&parent),
             }
         })
         .collect();
