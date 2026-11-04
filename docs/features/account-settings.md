@@ -415,7 +415,7 @@ Desktop が開いたクエリ（`port` / `code_challenge` / `state` / `name`）�
 ### 返す項目
 
 `id` / `username` / `bio` / `avatar_url` / `department` / `position` / `team` の 7 項目だけ。
-部署・役職・チームはこのテナントでの値で、所属行の無いオーナー・客分では null。画面は値のあるものだけを username の下に出す。
+部署・役職・チームはこのテナントでの値で、未設定・客分では null。画面は値のあるものだけを username の下に出す。
 メールアドレス・管理者フラグ・凍結フラグ・2FA の有効状態・`has_password` は返さない。
 自分自身を指定しても同じ形で返す（画面は自分のときだけ「プロフィールを編集」を出す）。
 

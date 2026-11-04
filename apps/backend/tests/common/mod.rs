@@ -893,6 +893,9 @@ impl TestApp {
             owner_id: Set(owner_id),
             drive_quota_bytes: Set(None),
             require_2fa: Set(false),
+            owner_department: Set(None),
+            owner_position: Set(None),
+            owner_team: Set(None),
         }
         .insert(&self.state.db)
         .await
@@ -1433,6 +1436,9 @@ pub async fn insert_tenant(db: &DatabaseConnection, owner_id: Uuid) -> Uuid {
         owner_id: Set(owner_id),
         drive_quota_bytes: Set(None),
         require_2fa: Set(false),
+        owner_department: Set(None),
+        owner_position: Set(None),
+        owner_team: Set(None),
     }
     .insert(db)
     .await
