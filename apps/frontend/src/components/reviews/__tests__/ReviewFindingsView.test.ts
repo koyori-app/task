@@ -489,6 +489,56 @@ describe('ReviewFindingsView', () => {
     expect(wrapper.get('[data-testid="url-warning"]').text()).toContain('urgent');
   });
 
+  describe('起票中の下書きがあるときの PR 切替', () => {
+    async function openComposer() {
+      stubFetch({ findings: [finding()], prNumbers: [617, 618] });
+      const wrapper = mountView();
+      await flushPromises();
+      bodyButton('指摘を起票')!.click();
+      await flushPromises();
+      return wrapper;
+    }
+    const prButton = (wrapper: ReturnType<typeof mountView>, n: number) =>
+      wrapper
+        .findAll('nav[aria-label="レビューのある PR"] button')
+        .find((button) => button.text().includes(`#${n}`))!;
+
+    it('下書きがあれば確認し、やめると下書きが残る', async () => {
+      const wrapper = await openComposer();
+      await wrapper.get('#draft-title').setValue('認可漏れ');
+      await flushPromises();
+
+      await prButton(wrapper, 617).trigger('click');
+      await flushPromises();
+      expect(document.body.querySelector('dialog[open]')?.textContent).toContain(
+        '下書きを破棄しますか？',
+      );
+      expect(prButton(wrapper, 618).attributes('aria-current')).toBe('true');
+
+      const dismiss = [
+        ...document.body.querySelectorAll<HTMLButtonElement>('dialog[open] button'),
+      ].find((b) => b.textContent?.includes('キャンセル'));
+      dismiss!.click();
+      await flushPromises();
+      expect(prButton(wrapper, 618).attributes('aria-current')).toBe('true');
+      expect((wrapper.get('#draft-title').element as HTMLInputElement).value).toBe('認可漏れ');
+
+      await prButton(wrapper, 617).trigger('click');
+      await flushPromises();
+      bodyButton('破棄して移動')!.click();
+      await flushPromises();
+      expect(prButton(wrapper, 617).attributes('aria-current')).toBe('true');
+    });
+
+    it('下書きが無ければ確認なしで切り替わる', async () => {
+      const wrapper = await openComposer();
+      await prButton(wrapper, 617).trigger('click');
+      await flushPromises();
+      expect(document.body.querySelector('dialog[open]')).toBeNull();
+      expect(prButton(wrapper, 617).attributes('aria-current')).toBe('true');
+    });
+  });
+
   it('PR の選び直しを履歴へ積み、戻る・進むの popstate で URL を正本にする', async () => {
     window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=617');
     const pushSpy = vi.spyOn(window.history, 'pushState');
