@@ -19,6 +19,12 @@ pub struct Model {
     pub owner_id: Uuid,
     pub drive_quota_bytes: Option<i64>,
     pub require_2fa: bool,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub owner_department: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub owner_position: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub owner_team: Option<String>,
     #[sea_orm(has_many)]
     pub audit_logs: HasMany<super::audit_logs::Entity>,
     #[sea_orm(has_many)]
