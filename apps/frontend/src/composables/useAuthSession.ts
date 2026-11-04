@@ -9,6 +9,7 @@ import {
   useLogoutMutation,
   useMeQuery,
 } from '@/lib/api-vue-query';
+import { signInUrlForCurrentPage } from '@/composables/useRedirectAfter';
 import { authUserSchema, useAuthStore } from '@/stores/auth';
 
 export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) {
@@ -39,7 +40,7 @@ export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) 
     if (!toValue(options?.guard)) return;
     const pathname = pageContext.urlPathname;
     if (!['/signin', '/signup'].includes(pathname)) {
-      window.location.assign('/signin');
+      window.location.assign(signInUrlForCurrentPage());
     }
   }
 

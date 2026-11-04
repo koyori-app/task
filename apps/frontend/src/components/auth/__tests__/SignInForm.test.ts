@@ -196,4 +196,57 @@ describe('SignInForm のパスワード変更の案内', () => {
 
     expect(second.text()).not.toContain(NOTICE);
   });
+
+  describe('redirect_after', () => {
+    afterEach(() => window.history.replaceState({}, '', '/'));
+
+    it('パスワードでサインインすると redirect_after へ戻る', async () => {
+      window.history.replaceState(
+        {},
+        '',
+        '/signin?redirect_after=%2Ft%2Fx%2Ftasks%2FP-1%3Ffoo%3D1',
+      );
+      stubLogin(200, {});
+      const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+      await mountAndSubmit();
+      expect(assignSpy).toHaveBeenCalledWith('/t/x/tasks/P-1?foo=1');
+    });
+
+    it('OAuth の redirect_after にも同じ値が渡る', async () => {
+      window.history.replaceState(
+        {},
+        '',
+        '/signin?redirect_after=%2Finvitations%2Faccept%3Ftoken%3Dabc',
+      );
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (req: Request | string) => {
+          const url = typeof req === 'string' ? req : req.url;
+          if (new URL(url, 'http://localhost').pathname.endsWith('/v1/auth/oauth/providers')) {
+            return jsonResponse({
+              providers: [{ provider: 'github', requires_instance_url: false, sign_in: true }],
+            });
+          }
+          return jsonResponse({ message: 'not-found' }, 404);
+        }),
+      );
+      const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+      await mountForm();
+      await flushPromises();
+      const button = [...document.body.querySelectorAll('button')].find((b) =>
+        b.textContent?.includes('GitHub'),
+      );
+      button!.click();
+      const url = new URL(String(assignSpy.mock.calls[0]![0]), 'http://localhost');
+      expect(url.searchParams.get('redirect_after')).toBe('/invitations/accept?token=abc');
+    });
+
+    it('外部 URL は / にする', async () => {
+      window.history.replaceState({}, '', '/signin?redirect_after=https%3A%2F%2Fevil.example');
+      stubLogin(200, {});
+      const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+      await mountAndSubmit();
+      expect(assignSpy).toHaveBeenCalledWith('/');
+    });
+  });
 });

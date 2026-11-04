@@ -153,6 +153,36 @@ describe('useAuthSession', () => {
     assignSpy.mockRestore();
   });
 
+  it('ガードは元の URL（path + search + hash）を redirect_after に載せてサインインへ送る', async () => {
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    window.history.replaceState({}, '', '/t/x/projects/P/tasks/P-1?foo=1#c');
+    meQueryMockState.controlled = true;
+    meQueryMockState.isError.value = true;
+    meQueryMockState.error.value = { response: { status: 401 } };
+    try {
+      mount(
+        defineComponent({
+          setup() {
+            useAuthSession({ guard: true });
+            return {};
+          },
+          template: '<div />',
+        }),
+        { global: { plugins: [[VueQueryPlugin, { queryClient }], createPinia()] } },
+      );
+      await flushPromises();
+      expect(assignSpy).toHaveBeenCalledWith(
+        '/signin?redirect_after=' + encodeURIComponent('/t/x/projects/P/tasks/P-1?foo=1#c'),
+      );
+    } finally {
+      meQueryMockState.controlled = false;
+      meQueryMockState.isError.value = false;
+      meQueryMockState.error.value = null;
+      window.history.replaceState({}, '', '/');
+      assignSpy.mockRestore();
+    }
+  });
+
   it('does not fetch /me when guard is false', async () => {
     const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
 

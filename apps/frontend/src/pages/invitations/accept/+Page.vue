@@ -3,8 +3,7 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import { computed, ref } from 'vue';
 import { Button } from '@koyori-app/ui-vue';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
-import { INVITATION_ACCEPT_RETURN } from '@/lib/invitation-accept';
-import { markNotice } from '@/lib/one-time-notice';
+import { currentLocationPath, signInUrl } from '@/composables/useRedirectAfter';
 
 // 認証ガードの外に置く（+Layout の isAuthPage）。未登録の受け手にも招待の中身を見せ、
 // 未ログインならこの URL を覚えてサインインへ送る（戻ってくると承諾できる）
@@ -38,8 +37,7 @@ const acceptMutation = apiClient.useMutation('post', '/v1/invitations/accept');
 const acceptError = ref<string | null>(null);
 
 function signIn() {
-  markNotice(INVITATION_ACCEPT_RETURN, `${window.location.pathname}${window.location.search}`);
-  window.location.assign('/signin');
+  window.location.assign(signInUrl(currentLocationPath()));
 }
 
 async function accept() {
