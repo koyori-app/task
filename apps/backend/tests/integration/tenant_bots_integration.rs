@@ -21,7 +21,7 @@ async fn fixture() -> (TestApp, TestUser, TestTenantProject, Uuid) {
     let res = app
         .post_json_with_session(
             &format!("/v1/tenants/{}/bots", tenant.tenant_id),
-            json!({"username": "delivery-bot", "role": "Admin"}),
+            json!({"username": "delivery-bot", "role": "Member"}),
         )
         .await;
     assert_eq!(res.status(), StatusCode::CREATED);
@@ -46,6 +46,18 @@ async fn issue(
 #[tokio::test]
 async fn tenant_bots_identity_bounds_admin_only_and_self_minting() {
     let (mut app, owner, tenant, bot) = fixture().await;
+    // BOT は口からは Admin になれないが、鍵を増やせぬ守りは役に依らぬことを確かめるため、
+    // DB で直に Admin にしてから撃つ（Member のままでは発行の口の役の検めで先に止まる）
+    let mut bot_member: tenant_members::ActiveModel = tenant_members::Entity::find()
+        .filter(tenant_members::Column::TenantId.eq(tenant.tenant_id))
+        .filter(tenant_members::Column::UserId.eq(bot))
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
+    bot_member.role = Set(entity::tenant_members::TenantRole::Admin);
+    bot_member.update(&app.state.db).await.unwrap();
     let token = issue(
         &app,
         tenant.tenant_id,
@@ -961,5 +973,140 @@ async fn tenant_bots_token_expiry_tolerates_client_clock_ahead_by_minutes() {
             .await
             .status(),
         StatusCode::BAD_REQUEST
+    );
+}
+
+async fn assert_role_too_strong(res: reqwest::Response, what: &str) {
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "{what}");
+    assert_eq!(
+        json_body(res).await["message"],
+        "bot-role-too-strong",
+        "{what}"
+    );
+}
+
+/// BOT の役は Member 相当まで。作成、テナントとプロジェクトのメンバーの追加と役の変更で
+/// Admin を渡すと 400。Member と Viewer は通り、人の役の扱いは変わらない。
+#[tokio::test]
+async fn tenant_bots_role_is_capped_at_member() {
+    let (app, _owner, tenant, bot) = fixture().await;
+    let bots = format!("/v1/tenants/{}/bots", tenant.tenant_id);
+    let members = format!("/v1/tenants/{}/members", tenant.tenant_id);
+    let project_members = format!(
+        "/v1/tenants/{}/projects/{}/members",
+        tenant.tenant_id, tenant.project_id
+    );
+
+    assert_role_too_strong(
+        app.post_json_with_session(&bots, json!({"username": "admin-bot", "role": "Admin"}))
+            .await,
+        "Admin の BOT を作る",
+    )
+    .await;
+    assert_eq!(
+        app.post_json_with_session(&bots, json!({"username": "viewer-bot", "role": "Viewer"}))
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+
+    assert_role_too_strong(
+        app.put_json_with_session(&format!("{members}/{bot}"), json!({"role": "Admin"}))
+            .await,
+        "BOT をテナントの Admin へ上げる",
+    )
+    .await;
+    assert_role_too_strong(
+        app.post_json_with_session(&members, json!({"user_id": bot, "role": "Admin"}))
+            .await,
+        "BOT を Admin でテナントへ加える",
+    )
+    .await;
+    assert_eq!(
+        app.put_json_with_session(&format!("{members}/{bot}"), json!({"role": "Viewer"}))
+            .await
+            .status(),
+        StatusCode::OK
+    );
+
+    assert_role_too_strong(
+        app.post_json_with_session(&project_members, json!({"user_id": bot, "role": "Admin"}))
+            .await,
+        "BOT を Admin でプロジェクトへ加える",
+    )
+    .await;
+    assert_eq!(
+        app.post_json_with_session(&project_members, json!({"user_id": bot, "role": "Member"}))
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+    assert_role_too_strong(
+        app.put_json_with_session(
+            &format!("{project_members}/{bot}"),
+            json!({"role": "Admin"}),
+        )
+        .await,
+        "BOT をプロジェクトの Admin へ上げる",
+    )
+    .await;
+
+    // 人の役の扱いは変わらない
+    let human = app.insert_user_default().await;
+    assert_eq!(
+        app.post_json_with_session(&members, json!({"user_id": human.id, "role": "Member"}))
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        app.put_json_with_session(&format!("{members}/{}", human.id), json!({"role": "Admin"}))
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        app.post_json_with_session(
+            &project_members,
+            json!({"user_id": human.id, "role": "Admin"})
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+}
+
+/// BOT は Admin になれないので、広い scope の PAT でも人の役を変えられない。
+#[tokio::test]
+async fn tenant_bots_member_bot_cannot_change_human_roles() {
+    let (app, _owner, tenant, bot) = fixture().await;
+    let human = app.insert_user_default().await;
+    let members = format!("/v1/tenants/{}/members", tenant.tenant_id);
+    assert_eq!(
+        app.post_json_with_session(&members, json!({"user_id": human.id, "role": "Member"}))
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+    let token = issue(&app, tenant.tenant_id, bot, vec!["api"], None).await;
+    assert_eq!(
+        app.put_json_with_bearer(
+            &format!("{members}/{}", human.id),
+            json!({"role": "Admin"}),
+            &token
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.post_json_with_bearer(
+            &members,
+            json!({"user_id": app.insert_user_default().await.id, "role": "Admin"}),
+            &token
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
     );
 }

@@ -148,6 +148,9 @@ pub async fn create_bot(
     if payload.username.trim().is_empty() {
         return Err(AppError::BadRequest);
     }
+    if !payload.role.allowed_for_bot() {
+        return Err(AppError::BadRequestDetail("bot-role-too-strong".into()));
+    }
     let txn = db.begin().await?;
     require_admin(&txn, tenant_id, actor_id).await?;
     let id = Uuid::new_v4();

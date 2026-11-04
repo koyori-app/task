@@ -391,6 +391,9 @@ pub async fn add_member(
     if user.is_bot() && user.bot_tenant_id != Some(tenant_id) {
         return Err(AppError::Forbidden);
     }
+    if user.is_bot() && !payload.role.allowed_for_bot() {
+        return Err(AppError::BadRequestDetail("bot-role-too-strong".into()));
+    }
     // テナントに居るかは問わない。明示 ACE はテナント所属（継承）と独立に置ける
     // （apps/backend/docs/tenant-project-authz.md の「継承と明示」）。テナントに居ない人を
     // 招けば、その人はその場で project-only の客分になる。GitHub の outside collaborator
@@ -464,6 +467,9 @@ pub async fn update_member(
         .one(&txn)
         .await?
         .ok_or_else(|| anyhow::anyhow!("project member {member_user_id} has no user row"))?;
+    if user.is_bot() && !payload.role.allowed_for_bot() {
+        return Err(AppError::BadRequestDetail("bot-role-too-strong".into()));
+    }
     let mut active: project_members::ActiveModel = current.into();
     active.role = Set(payload.role);
     let updated = active.update(&txn).await?;

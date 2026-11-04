@@ -243,6 +243,9 @@ pub async fn add_member(
     if user.is_bot() && user.bot_tenant_id != Some(tenant_id) {
         return Err(AppError::Forbidden);
     }
+    if user.is_bot() && !payload.role.allowed_for_bot() {
+        return Err(AppError::BadRequestDetail("bot-role-too-strong".into()));
+    }
     // 二重追加は UNIQUE (tenant_id, user_id) に任せる。
     // 事前に引いてから INSERT すると、同時に 2 回追加されたときに 500 になる
     let member = match (tenant_members::ActiveModel {
@@ -304,6 +307,14 @@ pub async fn update_member(
         .one(&state.db)
         .await?
         .ok_or_else(|| anyhow::anyhow!("tenant member {user_id} has no user row"))?;
+    if user.is_bot()
+        && payload
+            .role
+            .as_ref()
+            .is_some_and(|role| !role.allowed_for_bot())
+    {
+        return Err(AppError::BadRequestDetail("bot-role-too-strong".into()));
+    }
     let mut active: tenant_members::ActiveModel = member.into();
     if let Some(role) = payload.role {
         active.role = Set(role);

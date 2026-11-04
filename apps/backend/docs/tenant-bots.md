@@ -75,8 +75,13 @@ BOT の作成と PAT の発行は 2FA の強制を満たした人の Admin だ�
 
 管理 API は人のセッションに限定し、`tenant_members` と同じく `ensure_tenant_access` を通す。
 テナントが 2FA を強制していれば、2FA を満たさない Admin は全ての管理 API で 403（`2fa-setup-required`）になる。
-既存の Admin ロールにはメンバーを追加し昇格させる権限があるため、Admin の BOT に `write:tenant` を与えると、人への権限委任もできる。
-BOT の直接の PAT 発行拒否と、既存の Admin による委任の範囲は区別して扱う。
+BOT の役割は Member 相当まで（`TenantRole` と `ProjectRole` の `allowed_for_bot`）に縛る。
+BOT の作成、テナントとプロジェクトのメンバーの追加と役割の変更で、BOT に Admin を渡すと 400（`bot-role-too-strong`）で断る。
+誰が頼んでも通らない願いの誤りなので、403 ではなく 400 にした。
+役割は `tenant_members` と `project_members` に、BOT の印は `users` にあり、CHECK 制約は他の表を見られないので、DB の制約では持たない。
+Admin の役割にはメンバーを追加し昇格させる力があるため、BOT が Admin になれれば、その PAT から人へ権限を委ねられる。この縛りでその道を塞ぐ。
+自動化に Admin の力が要るようになったら、この上限を緩める余地を残す。
+BOT の個人用プロジェクト（My Tasks）では、他の利用者と同じく BOT 自身が Admin になる。BOT しか入らないので、人への力は生まない。
 書き込みと同じトランザクションで管理者の利用者行、テナント行、所属行を共有ロックし、権限確認の直後に降格される競合を防ぐ。
 PAT の発行と停止は同じ BOT 行を排他ロックする。
 発行時は必須の期限を現在より後、365 日以内に制限する。
