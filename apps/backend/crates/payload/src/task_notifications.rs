@@ -29,7 +29,7 @@ pub struct WatcherListResponse {
 }
 
 // 通知の応答 DTO は CLI（`task notifications`）が読むので `Deserialize` を付ける。
-// 設定更新は CLI が送るので `Serialize` も要る（CLAUDE.md の DTO 規則）。
+// 設定更新は CLI が送るので `Serialize` も要る（AGENTS.md の DTO 規則）。
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct NotificationTaskSummary {
     #[schema(value_type = String, format = "uuid")]

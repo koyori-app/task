@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { nextTick } from 'vue';
 import TaskComments from '../TaskComments.vue';
 import { openMentionPickerSpy } from './comment-editor-stub';
 import type { CommentThread } from '@/composables/useTaskComments';
+import type { ActivityItem } from '@/lib/task-activity';
 
 // 実物の入力欄は CodeMirror で happy-dom では起動できない。配線だけを見る代役に替える
 // （札・候補・IME の実物の挙動は stories/components/CommentEditor.stories.ts が実ブラウザで見る）
@@ -23,8 +25,25 @@ function thread(id: string, body: string | null, overrides: Partial<CommentThrea
     updated_at: '2026-08-19T00:00:00Z',
     user,
     replies: [],
+    reactions: [],
     ...overrides,
   } satisfies CommentThread;
+}
+
+/** コメントの操作はメニューの中にある。パネルは閉じていても DOM に残る */
+function menuItems(wrapper: VueWrapper, label: string) {
+  return wrapper.findAll('[role="menuitem"]').filter((item) => item.text() === label);
+}
+
+function activity(id: string, created_at: string, overrides: Partial<ActivityItem> = {}) {
+  return {
+    id,
+    created_at,
+    event_type: 'status_changed',
+    payload: { from: 'Todo', to: 'Done' },
+    user,
+    ...overrides,
+  } as ActivityItem;
 }
 
 function mountComments(props: Partial<InstanceType<typeof TaskComments>['$props']> = {}) {
@@ -52,6 +71,7 @@ describe('TaskComments', () => {
               created_at: '2026-08-19T01:00:00Z',
               updated_at: '2026-08-19T01:00:00Z',
               user,
+              reactions: [],
             },
           ],
         }),
@@ -92,7 +112,7 @@ describe('TaskComments', () => {
 
   it('コメントが無いときは空メッセージを出す', () => {
     const wrapper = mountComments();
-    expect(wrapper.text()).toContain('コメントはまだありません');
+    expect(wrapper.text()).toContain('アクティビティはまだありません');
   });
 
   it('一覧の読み込み失敗はリスト位置でエラー表示しつつ、投稿フォームは出したままにする', async () => {
@@ -241,7 +261,7 @@ describe('TaskComments', () => {
       onUpdate,
     });
 
-    await wrapper.get('button[aria-label="コメントを編集"]').trigger('click');
+    await menuItems(wrapper, 'コメントを編集')[0]!.trigger('click');
     const editArea = wrapper.get('textarea[aria-label="コメントを編集"]');
     expect((editArea.element as HTMLTextAreaElement).value).toBe('元の本文');
     await editArea.setValue('直した本文');
@@ -258,7 +278,7 @@ describe('TaskComments', () => {
     const onDelete = vi.fn(async () => true);
     const wrapper = mountComments({ threads: [thread('c-1', '消すコメント')], onDelete });
 
-    await wrapper.get('button[aria-label="コメントを削除"]').trigger('click');
+    await menuItems(wrapper, 'コメントを削除')[0]!.trigger('click');
     expect(onDelete).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain('このコメントを削除しますか？');
 
@@ -275,7 +295,7 @@ describe('TaskComments', () => {
     const onDelete = vi.fn(async () => false);
     const wrapper = mountComments({ threads: [thread('c-1', '消せないコメント')], onDelete });
 
-    await wrapper.get('button[aria-label="コメントを削除"]').trigger('click');
+    await menuItems(wrapper, 'コメントを削除')[0]!.trigger('click');
     const confirmButton = wrapper.findAll('button').find((button) => button.text() === '削除する');
     await confirmButton!.trigger('click');
     await flushPromises();
@@ -301,7 +321,7 @@ describe('TaskComments', () => {
     await replyOpenButton!.trigger('click');
     expect(wrapper.find('button[aria-label="コメント一覧へ戻る"]').exists()).toBe(true);
 
-    await wrapper.get('button[aria-label="コメントを削除"]').trigger('click');
+    await menuItems(wrapper, 'コメントを削除')[0]!.trigger('click');
     const confirmButton = wrapper.findAll('button').find((button) => button.text() === '削除する');
     await confirmButton!.trigger('click');
     await flushPromises();
@@ -317,8 +337,7 @@ describe('TaskComments', () => {
 
     expect(wrapper.text()).toContain('削除されたコメント');
     expect(wrapper.text()).not.toContain('(編集済み)');
-    expect(wrapper.find('button[aria-label="コメントを編集"]').exists()).toBe(false);
-    expect(wrapper.find('button[aria-label="コメントを削除"]').exists()).toBe(false);
+    expect(wrapper.find('[role="menuitem"]').exists()).toBe(false);
   });
 
   it('削除済みでも updated_at が異なっていても (編集済み) は出さない', () => {
@@ -357,10 +376,10 @@ describe('TaskComments', () => {
       currentUserId: user.id,
     });
 
-    const editButtons = wrapper.findAll('button[aria-label="コメントを編集"]');
+    const editButtons = menuItems(wrapper, 'コメントを編集');
     expect(editButtons).toHaveLength(1);
     // 削除ボタンはテナントオーナーも許されるため全コメントに出る
-    expect(wrapper.findAll('button[aria-label="コメントを削除"]')).toHaveLength(2);
+    expect(menuItems(wrapper, 'コメントを削除')).toHaveLength(2);
   });
 
   it('返信の失敗はスレッド表示の中に出す', async () => {
@@ -402,44 +421,260 @@ describe('TaskComments', () => {
 
   // 消費側はコメントと履歴を別の query で取っていて「片方が落ちてももう片方は読める」形。
   // 表示側で入れ子にすると、コメントの GET が失敗しただけで取れている履歴まで消える
-  it('コメント一覧が失敗しても履歴は出し続ける', async () => {
+  it('コメント一覧が失敗しても履歴は出し続ける', () => {
     const wrapper = mountComments({
       listError: true,
       onRetry: vi.fn(),
+      activities: [activity('h1', '2026-08-19T00:00:00Z')],
     });
 
     expect(wrapper.text()).toContain('コメントを読み込めませんでした');
-    expect(wrapper.find('[data-activity]').exists()).toBe(false);
+    expect(wrapper.find('[data-activity-history]').text()).toContain('Done');
+  });
 
-    const withSlot = mount(TaskComments, {
-      props: {
-        threads: [],
-        listError: true,
-        onRetry: vi.fn(),
-        onSubmit: vi.fn(async () => true),
-        onUpdate: vi.fn(async () => true),
-        onDelete: vi.fn(async () => true),
-      },
-      slots: { 'before-list': '<p data-activity>ステータスを変更しました</p>' },
+  it('履歴が失敗してもコメントと入力欄は出し続け、履歴だけ再試行できる', async () => {
+    const onRetryActivities = vi.fn();
+    const wrapper = mountComments({
+      threads: [thread('c-1', 'コメント')],
+      activitiesError: true,
+      onRetryActivities,
     });
 
-    expect(withSlot.text()).toContain('ステータスを変更しました');
-    expect(withSlot.text()).toContain('コメントを読み込めませんでした');
+    expect(wrapper.text()).toContain('履歴を読み込めませんでした');
+    expect(wrapper.find('[data-task-comment]').exists()).toBe(true);
+    expect(wrapper.find('form').exists()).toBe(true);
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '再試行')!
+      .trigger('click');
+    expect(onRetryActivities).toHaveBeenCalledTimes(1);
   });
 
   it('コメント一覧の読み込み中でも履歴は出す', () => {
-    const wrapper = mount(TaskComments, {
-      props: {
-        threads: [],
-        loading: true,
-        onSubmit: vi.fn(async () => true),
-        onUpdate: vi.fn(async () => true),
-        onDelete: vi.fn(async () => true),
-      },
-      slots: { 'before-list': '<p data-activity>タスクを作成しました</p>' },
+    const wrapper = mountComments({
+      loading: true,
+      activities: [activity('h1', '2026-08-19T00:00:00Z')],
     });
 
-    expect(wrapper.text()).toContain('タスクを作成しました');
+    expect(wrapper.find('[data-activity-history]').exists()).toBe(true);
+    expect(wrapper.findAll('[data-activity-skeleton]')).toHaveLength(1);
+  });
+
+  it('両方の読み込み中は骨組みを出し、空のメッセージは出さない', () => {
+    const wrapper = mountComments({ loading: true, activitiesLoading: true });
+
+    expect(wrapper.findAll('[data-activity-skeleton]')).toHaveLength(3);
+    expect(wrapper.text()).not.toContain('まだありません');
+  });
+
+  describe('タイムライン', () => {
+    const entries = (wrapper: VueWrapper) =>
+      wrapper
+        .findAll('[data-activity-history], [data-task-comment]')
+        .map((entry) => (entry.attributes('data-comment-id') ? 'comment' : 'history'));
+
+    it('履歴とコメントを古い順に混ぜ、投稿の履歴を重ねない', () => {
+      const wrapper = mountComments({
+        threads: [thread('c-1', 'コメント', { created_at: '2026-08-19T01:00:00Z' })],
+        activities: [
+          activity('h2', '2026-08-19T02:00:00Z'),
+          activity('added', '2026-08-19T01:00:00Z', { event_type: 'comment_added', payload: {} }),
+          activity('h1', '2026-08-19T00:00:00Z'),
+        ],
+      });
+
+      expect(entries(wrapper)).toEqual(['history', 'comment', 'history']);
+      expect(wrapper.text()).not.toContain('コメントしました');
+    });
+
+    it('絞り込みに応じて出す物を変える', async () => {
+      const wrapper = mountComments({
+        threads: [thread('c-1', 'コメント', { created_at: '2026-08-19T01:00:00Z' })],
+        activities: [activity('h1', '2026-08-19T00:00:00Z')],
+        filter: 'comments',
+      });
+      expect(entries(wrapper)).toEqual(['comment']);
+
+      await wrapper.setProps({ filter: 'history' });
+      expect(entries(wrapper)).toEqual(['history']);
+    });
+
+    it('絞り込みの結果が空なら、その種類の空メッセージを出す', async () => {
+      const wrapper = mountComments({ filter: 'comments' });
+      expect(wrapper.text()).toContain('コメントはまだありません');
+
+      await wrapper.setProps({ filter: 'history' });
+      expect(wrapper.text()).toContain('履歴はありません');
+    });
+
+    it('絞り込みを変えたらスレッドから一覧へ戻す', async () => {
+      const wrapper = mountComments({ threads: [thread('c-1', 'コメント')] });
+      await wrapper
+        .findAll('button')
+        .find((button) => button.text() === '返信')!
+        .trigger('click');
+      expect(wrapper.find('button[aria-label="コメント一覧へ戻る"]').exists()).toBe(true);
+
+      await wrapper.setProps({ filter: 'comments' });
+      expect(wrapper.find('button[aria-label="コメント一覧へ戻る"]').exists()).toBe(false);
+    });
+
+    it('続きの履歴があるあいだは、上端に導線を出して古いコメントを隠す', async () => {
+      const onLoadMoreActivities = vi.fn();
+      const wrapper = mountComments({
+        threads: [
+          thread('old', '古いコメント', { created_at: '2026-08-18T00:00:00Z' }),
+          thread('new', '新しいコメント', { created_at: '2026-08-20T00:00:00Z' }),
+        ],
+        activities: [activity('h1', '2026-08-19T00:00:00Z')],
+        hasMoreActivities: true,
+        onLoadMoreActivities,
+      });
+      expect(wrapper.text()).not.toContain('古いコメント');
+
+      const button = wrapper
+        .findAll('button')
+        .find((b) => b.text() === '以前のアクティビティを見る')!;
+      // 導線は最初のエントリーより前にある
+      const first = wrapper.find('[data-activity-section]').element;
+      expect(
+        button.element.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      await button.trigger('click');
+      expect(onLoadMoreActivities).toHaveBeenCalledTimes(1);
+
+      await wrapper.setProps({ hasMoreActivities: false });
+      expect(wrapper.text()).toContain('古いコメント');
+      expect(wrapper.text()).not.toContain('以前のアクティビティを見る');
+    });
+
+    it('続きの取得中は導線を押せない', () => {
+      const wrapper = mountComments({
+        activities: [activity('h1', '2026-08-19T00:00:00Z')],
+        hasMoreActivities: true,
+        activitiesFetchingMore: true,
+        onLoadMoreActivities: () => {},
+      });
+      const button = wrapper.findAll('button').find((b) => b.text() === '読み込み中…');
+      expect(button!.attributes('disabled')).toBeDefined();
+    });
+
+    it('開いたまま日付が変わると見出しも進む', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date(2026, 7, 19, 23, 59));
+        const wrapper = mountComments({
+          activities: [activity('h1', new Date(2026, 7, 19, 10, 0).toISOString())],
+        });
+        expect(wrapper.find('[data-activity-section] h3').text()).toBe('今日');
+
+        // useNow の間隔（30 秒）を越えて日付をまたぐ
+        vi.advanceTimersByTime(120_000);
+        await nextTick();
+        expect(wrapper.find('[data-activity-section] h3').text()).toBe('昨日');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    describe('タスクの切り替えとスクロール位置', () => {
+      // 単体テストの DOM にはレイアウトが無いので、溢れた列の寸法を与える
+      function overflowingFeed(wrapper: VueWrapper) {
+        const feed = wrapper.get('[data-activity-feed]');
+        const el = feed.element as HTMLElement;
+        Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 1000 });
+        Object.defineProperty(el, 'clientHeight', { configurable: true, value: 100 });
+        return { feed, el };
+      }
+
+      it('上へ読み進めた後に別のタスクへ切り替えたら、最新の位置へ移る', async () => {
+        const wrapper = mountComments({ taskId: 'a', threads: [thread('c-a', 'タスク A')] });
+        const { feed, el } = overflowingFeed(wrapper);
+        el.scrollTop = 0;
+        await feed.trigger('scroll');
+
+        await wrapper.setProps({ taskId: 'b', threads: [thread('c-b', 'タスク B')] });
+        await nextTick();
+
+        expect(el.scrollTop).toBe(1000);
+      });
+
+      it('以前の分を取っている途中で切り替えたら、前のタスクの位置を持ち越さない', async () => {
+        const wrapper = mountComments({
+          taskId: 'a',
+          activities: [activity('h1', '2026-08-19T00:00:00Z')],
+          hasMoreActivities: true,
+          onLoadMoreActivities: () => {},
+        });
+        const { feed, el } = overflowingFeed(wrapper);
+        el.scrollTop = 0;
+        await feed.trigger('scroll');
+        await wrapper
+          .findAll('button')
+          .find((b) => b.text() === '以前のアクティビティを見る')!
+          .trigger('click');
+
+        await wrapper.setProps({
+          taskId: 'b',
+          activities: [activity('h2', '2026-08-20T00:00:00Z')],
+        });
+        await nextTick();
+
+        expect(el.scrollTop).toBe(1000);
+      });
+
+      it('同じタスクで増えただけなら、上へ読み進めている位置を動かさない', async () => {
+        const wrapper = mountComments({ taskId: 'a', threads: [thread('c-1', '古いコメント')] });
+        const { feed, el } = overflowingFeed(wrapper);
+        el.scrollTop = 0;
+        await feed.trigger('scroll');
+
+        await wrapper.setProps({
+          threads: [
+            thread('c-1', '古いコメント'),
+            thread('c-2', '新しいコメント', { created_at: '2026-08-20T00:00:00Z' }),
+          ],
+        });
+        await nextTick();
+
+        expect(el.scrollTop).toBe(0);
+      });
+    });
+
+    it('上へ溢れた分へスクロールできるよう、justify-end で下寄せしない', () => {
+      const wrapper = mountComments();
+      expect(wrapper.get('[data-activity-feed]').classes()).not.toContain('justify-end');
+      expect(wrapper.get('[data-activity-feed] > div').classes()).toContain('mt-auto');
+    });
+  });
+
+  describe('入力欄', () => {
+    const toolbar = (wrapper: VueWrapper) =>
+      wrapper.get('button[aria-label="コメントする"]').element.parentElement as HTMLElement;
+
+    it('ふだんは操作を隠し、フォーカスで出し、離れたら隠す', async () => {
+      const wrapper = mountComments();
+      expect(toolbar(wrapper).style.display).toBe('none');
+
+      await wrapper.get('form').trigger('focusin');
+      expect(toolbar(wrapper).style.display).not.toBe('none');
+
+      await wrapper.get('form').trigger('focusout', { relatedTarget: null });
+      expect(toolbar(wrapper).style.display).toBe('none');
+    });
+
+    it('下書きがあれば離れても操作を出したままにする', async () => {
+      const wrapper = mountComments();
+      await wrapper.get('textarea').setValue('書きかけ');
+      await wrapper.get('form').trigger('focusout', { relatedTarget: null });
+      expect(toolbar(wrapper).style.display).not.toBe('none');
+    });
+
+    it('押せない操作を置かない', () => {
+      const wrapper = mountComments();
+      expect(wrapper.find('button[aria-label="追加"]').exists()).toBe(false);
+      expect(wrapper.find('button[aria-label="ファイルを添付"]').exists()).toBe(false);
+    });
   });
 
   // 入力欄は一覧とスレッドで 1 つを共有するので、単一の下書きだと
@@ -573,6 +808,7 @@ describe('TaskComments のメンション', () => {
               created_at: '2026-08-19T01:00:00Z',
               updated_at: '2026-08-19T01:00:00Z',
               user,
+              reactions: [],
             },
           ],
         }),

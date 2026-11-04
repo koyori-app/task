@@ -340,6 +340,9 @@ mod tests {
             owner_id: Uuid::new_v4(),
             drive_quota_bytes: None,
             require_2fa: false,
+            owner_department: None,
+            owner_position: None,
+            owner_team: None,
         }
     }
 

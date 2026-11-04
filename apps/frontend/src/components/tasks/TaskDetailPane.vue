@@ -2,7 +2,7 @@
 import { X } from '@lucide/vue';
 import { computed, ref } from 'vue';
 
-import TaskActivityFeed from '@/components/tasks/TaskActivityFeed.vue';
+import TaskActivityFilter from '@/components/tasks/TaskActivityFilter.vue';
 import TaskAttachments from '@/components/tasks/TaskAttachments.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
@@ -10,9 +10,11 @@ import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
 import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
 import { Button } from '@koyori-app/ui-vue';
+import type { ActivityFilter, ActivityLookups } from '@/lib/activity-timeline';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
 import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
 import { useTaskActivities } from '@/composables/useTaskActivities';
+import { useReactions } from '@/composables/useReactions';
 import { useTaskComments } from '@/composables/useTaskComments';
 import { useRenderedDescription } from '@/composables/useRenderedDescription';
 import { useTaskDetail } from '@/composables/useTaskDetail';
@@ -173,6 +175,15 @@ const {
 const membersQuery = useAssignableUsersQuery(tenantId, projectId);
 const members = computed(() => membersQuery.data.value ?? []);
 
+// 列の見出しの絞り込み。スレッドの中は絞り込まないので、開いている間は出さない
+const activityFilter = ref<ActivityFilter>('all');
+const activityThreadId = ref<string | null>(null);
+const activityLookups = computed<ActivityLookups>(() => ({
+  statuses: statuses.value,
+  members: members.value,
+  labels: projectLabels.value,
+}));
+
 // 候補の取得状態はピッカーへ渡す（取得中・失敗を「候補 0 人」と混ぜない）
 const membersState = computed(() => ({
   loading: membersQuery.isLoading.value,
@@ -200,6 +211,15 @@ const assigneeError = computed(() => {
 
 const meQuery = useMeQuery();
 const currentUserId = computed(() => meQuery.data.value?.id ?? null);
+const reactionController = useReactions({
+  tenantId,
+  projectId,
+  taskId: () => props.taskId,
+  currentUser: computed(() => {
+    const me = meQuery.data.value;
+    return me ? { id: me.id, name: me.username, avatar_url: me.avatar_url ?? null } : null;
+  }),
+});
 /**
  * 説明の KFM 描画。詳細ページは server data hook が HTML を渡してくれるが、
  * このペインは選択がクライアント操作なので data hook が追従できない。描画は
@@ -251,6 +271,8 @@ function onDeleteDialogCancel(event: Event) {
     -->
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <TaskDetailHub
+        :reaction-controller="reactionController"
+        :current-user-id="currentUserId"
         :layout="layout"
         :profile-href="profileHref"
         :task="displayTask"
@@ -323,9 +345,24 @@ function onDeleteDialogCancel(event: Event) {
             :project-key="projectKey"
           />
         </template>
+        <template #sidebar-actions>
+          <TaskActivityFilter v-if="!activityThreadId" v-model="activityFilter" />
+        </template>
         <template #sidebar>
           <TaskComments
+            :reaction-controller="reactionController"
+            :task-id="taskId"
             :threads="threads"
+            v-model:open-thread-id="activityThreadId"
+            :activities="activities"
+            :activities-loading="activitiesLoading"
+            :activities-error="activitiesError"
+            :on-retry-activities="refetchActivities"
+            :has-more-activities="hasMoreActivities"
+            :activities-fetching-more="activitiesFetchingMore"
+            :on-load-more-activities="loadMoreActivities"
+            :filter="activityFilter"
+            :lookups="activityLookups"
             :mentions="mentions"
             :mention-candidates="members"
             :loading="commentsLoading"
@@ -351,17 +388,6 @@ function onDeleteDialogCancel(event: Event) {
             :on-clear-update-error="clearUpdateError"
             :on-clear-delete-error="clearDeleteError"
           >
-            <template #before-list>
-              <TaskActivityFeed
-                :activities="activities"
-                :loading="activitiesLoading"
-                :error="activitiesError"
-                :on-retry="refetchActivities"
-                :has-more="hasMoreActivities"
-                :fetching-more="activitiesFetchingMore"
-                :on-load-more="loadMoreActivities"
-              />
-            </template>
           </TaskComments>
         </template>
         <template #header-actions>

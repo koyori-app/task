@@ -1,22 +1,24 @@
 <script setup lang="ts">
-import {
-  ArrowLeft,
-  AtSign,
-  ChevronDown,
-  Loader2,
-  Paperclip,
-  Plus,
-  SendHorizontal,
-} from '@lucide/vue';
-import { computed, ref, useTemplateRef, watch } from 'vue';
+import { ArrowLeft, AtSign, SendHorizontal } from '@lucide/vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue';
 
 import CommentEditor from '@/components/tasks/CommentEditor.vue';
+import TaskActivityEntry from '@/components/tasks/TaskActivityEntry.vue';
 import TaskCommentItem from '@/components/tasks/TaskCommentItem.vue';
-import { Button, Spinner } from '@koyori-app/ui-vue';
+import { Button, Skeleton, Spinner } from '@koyori-app/ui-vue';
+import { useNow } from '@/composables/useNow';
+import type { ReactionController } from '@/composables/useReactions';
 import type { CommentThread } from '@/composables/useTaskComments';
+import { buildTimeline, type ActivityFilter, type ActivityLookups } from '@/lib/activity-timeline';
 import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
+import type { ActivityItem } from '@/lib/task-activity';
 
 const props = defineProps<{
+  /**
+   * 表示中のタスク。全画面の詳細はタスクを移っても作り直されないので、
+   * 移った時に前のタスクのスクロールの状態を持ち越さないために受け取る
+   */
+  taskId?: string;
   threads: CommentThread[];
   /** 本文の `<@利用者ID>` の印から引ける表示情報（コメント一覧 API の `mentions`） */
   mentions?: MentionTable;
@@ -31,12 +33,30 @@ const props = defineProps<{
   listError?: boolean;
   /** 一覧の再試行（listError 表示の「再試行」から呼ぶ） */
   onRetry?: () => void;
+  /**
+   * 操作履歴。コメントと別の口で取るので、片方が落ちてももう片方は読み書きできる。
+   * 取得の状態もコメントと別に持つ。
+   */
+  activities?: readonly ActivityItem[];
+  activitiesLoading?: boolean;
+  activitiesError?: boolean;
+  onRetryActivities?: () => void;
+  /** まだ取れていない履歴があるか */
+  hasMoreActivities?: boolean;
+  activitiesFetchingMore?: boolean;
+  onLoadMoreActivities?: () => void;
+  /** 列の見出しの絞り込み（TaskActivityFilter） */
+  filter?: ActivityFilter;
+  /** 履歴の ID や名前から、名前と色を引く表 */
+  lookups?: ActivityLookups;
   /** ログイン中ユーザーの ID。編集ボタンの出し分けに使う（TaskCommentItem 参照） */
   currentUserId?: string | null;
   /** 投稿者のプロフィール画面の URL（TaskCommentItem 参照） */
   profileHref?: (userId: string) => string;
   /** 本文の札をプロフィールへの link にするテナント（表示用 id。CommentBody 参照） */
   mentionTenant?: string;
+  /** 絵文字リアクションの操作。渡さなければリアクションの UI を出さない */
+  reactionController?: ReactionController;
   /** 投稿（新規・返信共通）の進行中 */
   submitPending?: boolean;
   /** 新規投稿の失敗。新規投稿フォームの直下に出す */
@@ -84,7 +104,7 @@ const props = defineProps<{
  */
 const composer = useTemplateRef<InstanceType<typeof CommentEditor>>('composer');
 
-const openThreadId = ref<string | null>(null);
+const openThreadId = defineModel<string | null>('openThreadId', { default: null });
 const openThread = computed(() => props.threads.find((thread) => thread.id === openThreadId.value));
 
 /**
@@ -114,6 +134,104 @@ watch(
   },
 );
 
+// 絞り込みを変えたらスレッドから一覧へ戻す（スレッドの中は絞り込まない）
+watch(
+  () => props.filter,
+  () => {
+    if (openThreadId.value) backToList();
+  },
+);
+
+const now = useNow();
+const sections = computed(() =>
+  buildTimeline({
+    threads: props.threads,
+    activities: props.activities ?? [],
+    hasMoreActivities: props.hasMoreActivities,
+    filter: props.filter,
+    now: now.value,
+  }),
+);
+const showsComments = computed(() => props.filter !== 'history');
+const showsHistory = computed(() => props.filter !== 'comments');
+const skeletonRows = computed(() => {
+  const pending =
+    Number(showsComments.value && !!props.loading) +
+    Number(showsHistory.value && !!props.activitiesLoading);
+  return pending === 2 ? 3 : pending;
+});
+const emptyMessage = computed(() => {
+  if (skeletonRows.value || props.listError || props.activitiesError || sections.value.length) {
+    return null;
+  }
+  if (props.filter === 'comments') return 'コメントはまだありません';
+  if (props.filter === 'history') return '履歴はありません';
+  return 'アクティビティはまだありません';
+});
+
+/**
+ * 新しい物が入力欄の隣に来るので、開いた時と増えた時は下端を保つ。
+ * 上へ読み進めている間は動かさず、以前の分を足した時は読んでいた位置を保つ。
+ * 本文の描画は後から高さが変わるので、中身の高さの変化で合わせ直す。
+ */
+const feed = useTemplateRef<HTMLElement>('feed');
+const feedContent = useTemplateRef<HTMLElement>('feedContent');
+let pinnedToBottom = true;
+let distanceFromBottom: number | null = null;
+
+function syncScroll() {
+  const el = feed.value;
+  if (!el) return;
+  if (distanceFromBottom !== null) {
+    el.scrollTop = el.scrollHeight - distanceFromBottom;
+    distanceFromBottom = null;
+  } else if (pinnedToBottom) {
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
+function onFeedScroll() {
+  const el = feed.value;
+  if (el) pinnedToBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+}
+
+function loadMore() {
+  const el = feed.value;
+  if (el) distanceFromBottom = el.scrollHeight - el.scrollTop;
+  props.onLoadMoreActivities?.();
+}
+
+watch([sections, openThread], () => void nextTick(syncScroll));
+watch([() => props.filter, openThreadId], () => {
+  pinnedToBottom = true;
+});
+watch(
+  () => props.taskId,
+  () => {
+    pinnedToBottom = true;
+    distanceFromBottom = null;
+    void nextTick(syncScroll);
+  },
+);
+
+let resizeObserver: ResizeObserver | undefined;
+onMounted(() => {
+  syncScroll();
+  if (typeof ResizeObserver === 'undefined' || !feedContent.value) return;
+  resizeObserver = new ResizeObserver(syncScroll);
+  resizeObserver.observe(feedContent.value);
+});
+onBeforeUnmount(() => resizeObserver?.disconnect());
+
+/** 入力欄はふだん 1 行にして一覧の場所を空ける。書いている間と下書きがある間は広げる */
+const composerFocused = ref(false);
+const composerExpanded = computed(() => composerFocused.value || !!newDraft.value.trim());
+
+function onComposerFocusOut(event: FocusEvent) {
+  const form = event.currentTarget as HTMLElement;
+  if (!form.contains(event.relatedTarget as Node | null)) composerFocused.value = false;
+}
+
 /**
  * 下端の入力欄。一覧では新規コメント、スレッドを開いているときはそのスレッドへの返信。
  * 入力欄を 1 つに保つことで、書いている途中に場所を見失わない。
@@ -127,6 +245,7 @@ async function submitDraft() {
   const threadId = openThreadId.value;
   const key = threadId ?? DRAFT_LIST_KEY;
   const sent = drafts.value[key] ?? '';
+  pinnedToBottom = true;
 
   const posted = threadId ? await props.onSubmit(body, threadId) : await props.onSubmit(body);
   if (!posted) return;
@@ -163,8 +282,8 @@ async function deleteThread(threadId: string) {
       アクティビティ列にそのまま収まる形にする（枠で囲わない・見出しは列側が持つ）。
       一覧は伸びる領域として上に、入力欄は列の下端に貼り付ける。
     -->
-    <!-- スレッドを開いているときは、列の頭に戻る導線を出す（参照） -->
-    <div v-if="openThread" class="-mx-4 flex items-center gap-2 border-b px-4 pb-2">
+    <!-- スレッドを開いているときは、列の頭に戻る導線を出す -->
+    <div v-if="openThread" class="-mx-4 flex items-center gap-1 px-2 pb-1">
       <Button type="button" variant="ghost" ariaLabel="コメント一覧へ戻る" @click="backToList">
         <template #icon><ArrowLeft class="size-4" aria-hidden="true" /></template>
       </Button>
@@ -172,143 +291,193 @@ async function deleteThread(threadId: string) {
     </div>
 
     <!--
-      履歴とコメントを同じスクロール領域に入れ、少ないときは下端へ寄せる（参照）。
-      帯は薄いグレーにして、コメントだけ白いカードで浮かせる。
-      下寄せは justify-end にしない。Chromium では上にはみ出した分へスクロールできなくなる。
+      少ないときは下端へ寄せる。justify-end は上へ溢れた分へスクロールできないブラウザーがあるので、
+      中身の margin-top: auto で寄せる。
     -->
     <div
-      class="-mx-4 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto bg-muted/30 px-4 py-3 [&>:first-child]:mt-auto"
+      ref="feed"
+      class="-mx-4 flex min-h-0 flex-1 flex-col overflow-y-auto p-2"
+      data-activity-feed
+      @scroll.passive="onFeedScroll"
     >
-      <!--
-        履歴（before-list）はコメントの取得状態の外に置く。消費側はコメントと履歴を
-        別の query で取っていて「片方が落ちてももう片方は読める」形なのに、ここで
-        入れ子にすると表示側で連動し、コメントの GET が失敗しただけで取れている履歴と
-        その再試行導線まで消える。
-      -->
-      <slot v-if="!openThread" name="before-list" />
+      <div ref="feedContent" class="mt-auto flex flex-col gap-0.5">
+        <!-- スレッド表示。列ごと切り替える -->
+        <template v-if="openThread">
+          <TaskCommentItem
+            :comment="openThread"
+            :current-user-id="currentUserId"
+            :mentions="mentions"
+            :mention-candidates="mentionCandidates"
+            :profile-href="profileHref"
+            :mention-tenant="mentionTenant"
+            :reaction-controller="reactionController"
+            :updating="updatingCommentId === openThread.id"
+            :deleting="deletingCommentId === openThread.id"
+            :update-error="updateErrorCommentId === openThread.id ? updateError : null"
+            :delete-error="deleteErrorCommentId === openThread.id ? deleteError : null"
+            :on-update="(body) => onUpdate(openThread!.id, body)"
+            :on-delete="() => deleteThread(openThread!.id)"
+            :on-clear-update-error="onClearUpdateError"
+            :on-clear-delete-error="onClearDeleteError"
+          />
 
-      <!-- 以下はコメント側の状態。読めないことと書けないことは連動させない
-           （GET と POST は backend でも独立で、投稿フォームは下に残す） -->
-      <div v-if="loading" class="flex justify-center py-6">
-        <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" aria-hidden="true" />
-      </div>
-
-      <div v-else-if="listError" class="flex items-center gap-2">
-        <p class="text-sm text-destructive">コメントを読み込めませんでした</p>
-        <Button v-if="onRetry" type="button" variant="tertiary" label="再試行" @click="onRetry" />
-      </div>
-
-      <p v-else-if="!threads.length" class="text-sm text-muted-foreground">
-        コメントはまだありません
-      </p>
-
-      <!-- スレッド表示。参照どおり列ごと切り替える -->
-      <template v-else-if="openThread">
-        <div class="flex flex-col gap-3">
-          <div class="rounded-lg border bg-background p-3">
-            <TaskCommentItem
-              :comment="openThread"
-              :current-user-id="currentUserId"
-              :mentions="mentions"
-              :mention-candidates="mentionCandidates"
-              :profile-href="profileHref"
-              :mention-tenant="mentionTenant"
-              :updating="updatingCommentId === openThread.id"
-              :deleting="deletingCommentId === openThread.id"
-              :update-error="updateErrorCommentId === openThread.id ? updateError : null"
-              :delete-error="deleteErrorCommentId === openThread.id ? deleteError : null"
-              :on-update="(body) => onUpdate(openThread!.id, body)"
-              :on-delete="() => deleteThread(openThread!.id)"
-              :on-clear-update-error="onClearUpdateError"
-              :on-clear-delete-error="onClearDeleteError"
-            />
-          </div>
-
-          <div v-if="openThread.replies.length" class="flex items-center gap-3">
+          <div v-if="openThread.replies.length" class="flex items-center gap-2 px-2 pt-2 pb-1">
             <span class="shrink-0 text-xs text-muted-foreground">
               {{ openThread.replies.length }}件の返信
             </span>
             <span class="h-px flex-1 bg-border" aria-hidden="true" />
           </div>
 
-          <div
+          <TaskCommentItem
             v-for="reply in openThread.replies"
             :key="reply.id"
-            class="rounded-lg border bg-background p-3"
-          >
-            <TaskCommentItem
-              :comment="reply"
-              :current-user-id="currentUserId"
-              :mentions="mentions"
-              :mention-candidates="mentionCandidates"
-              :profile-href="profileHref"
-              :mention-tenant="mentionTenant"
-              :updating="updatingCommentId === reply.id"
-              :deleting="deletingCommentId === reply.id"
-              :update-error="updateErrorCommentId === reply.id ? updateError : null"
-              :delete-error="deleteErrorCommentId === reply.id ? deleteError : null"
-              :on-update="(body) => onUpdate(reply.id, body)"
-              :on-delete="() => onDelete(reply.id)"
-              :on-clear-update-error="onClearUpdateError"
-              :on-clear-delete-error="onClearDeleteError"
-            />
-          </div>
+            :comment="reply"
+            :current-user-id="currentUserId"
+            :mentions="mentions"
+            :mention-candidates="mentionCandidates"
+            :profile-href="profileHref"
+            :mention-tenant="mentionTenant"
+            :reaction-controller="reactionController"
+            :updating="updatingCommentId === reply.id"
+            :deleting="deletingCommentId === reply.id"
+            :update-error="updateErrorCommentId === reply.id ? updateError : null"
+            :delete-error="deleteErrorCommentId === reply.id ? deleteError : null"
+            :on-update="(body) => onUpdate(reply.id, body)"
+            :on-delete="() => onDelete(reply.id)"
+            :on-clear-update-error="onClearUpdateError"
+            :on-clear-delete-error="onClearDeleteError"
+          />
 
           <p
             v-if="replyError && replyErrorThreadId === openThread.id"
-            class="text-xs text-destructive"
+            class="px-2 text-xs text-destructive"
           >
             {{ replyError }}
           </p>
-        </div>
-      </template>
+        </template>
 
-      <!-- 一覧。返信は展開せず「N件の返信」だけ出す -->
-      <ul v-else class="flex flex-col gap-3">
-        <li v-for="thread in threads" :key="thread.id" class="rounded-lg border bg-background">
-          <div class="p-3">
-            <TaskCommentItem
-              :comment="thread"
-              :current-user-id="currentUserId"
-              :mentions="mentions"
-              :mention-candidates="mentionCandidates"
-              :profile-href="profileHref"
-              :mention-tenant="mentionTenant"
-              :updating="updatingCommentId === thread.id"
-              :deleting="deletingCommentId === thread.id"
-              :update-error="updateErrorCommentId === thread.id ? updateError : null"
-              :delete-error="deleteErrorCommentId === thread.id ? deleteError : null"
-              :on-update="(body) => onUpdate(thread.id, body)"
-              :on-delete="() => deleteThread(thread.id)"
-              :on-clear-update-error="onClearUpdateError"
-              :on-clear-delete-error="onClearDeleteError"
+        <template v-else>
+          <!-- 取得の失敗はそれぞれの口の分だけ倒す。読めているほうは出し続ける -->
+          <div
+            v-if="showsHistory && activitiesError"
+            class="flex items-center justify-between gap-2 px-2 py-1"
+          >
+            <p class="text-xs text-destructive">履歴を読み込めませんでした</p>
+            <Button
+              v-if="onRetryActivities"
+              type="button"
+              variant="tertiary"
+              label="再試行"
+              @click="onRetryActivities"
+            />
+          </div>
+          <div
+            v-if="showsComments && listError"
+            class="flex items-center justify-between gap-2 px-2 py-1"
+          >
+            <p class="text-xs text-destructive">コメントを読み込めませんでした</p>
+            <Button
+              v-if="onRetry"
+              type="button"
+              variant="tertiary"
+              label="再試行"
+              @click="onRetry"
             />
           </div>
 
-          <!--
-                削除済みスレッドには返信できない（backend の create_comment が 400 で弾く）が、
-                既にある返信は残るので、返信があるときは開く導線を残す。ここを隠すと
-                返信がデータ上は生きているのに読むことも消すこともできなくなる。
-              -->
-          <div
-            v-if="!thread.is_deleted || thread.replies.length"
-            class="flex items-center justify-end border-t px-3 py-1.5"
-          >
+          <div v-if="showsHistory && hasMoreActivities && onLoadMoreActivities" class="flex px-2">
             <Button
               type="button"
               variant="ghost"
-              :label="thread.replies.length ? `${thread.replies.length}件の返信` : '返信'"
-              @click="showThread(thread.id)"
+              :disabled="activitiesFetchingMore"
+              :label="activitiesFetchingMore ? '読み込み中…' : '以前のアクティビティを見る'"
+              @click="loadMore"
             />
           </div>
-        </li>
-      </ul>
+
+          <section
+            v-for="section in sections"
+            :key="section.key"
+            :aria-label="section.label"
+            data-activity-section
+          >
+            <div class="flex items-center gap-2 px-2 pt-3 pb-1">
+              <h3 class="shrink-0 text-xs font-normal text-muted-foreground">
+                {{ section.label }}
+              </h3>
+              <span class="h-px flex-1 bg-border" aria-hidden="true" />
+            </div>
+            <ol class="flex flex-col gap-0.5">
+              <li v-for="entry in section.entries" :key="entry.id">
+                <TaskActivityEntry
+                  v-if="entry.kind === 'history'"
+                  :entry="entry"
+                  :lookups="lookups"
+                />
+                <TaskCommentItem
+                  v-else
+                  time-only
+                  :comment="entry.thread"
+                  :current-user-id="currentUserId"
+                  :mentions="mentions"
+                  :mention-candidates="mentionCandidates"
+                  :profile-href="profileHref"
+                  :mention-tenant="mentionTenant"
+                  :reaction-controller="reactionController"
+                  :updating="updatingCommentId === entry.thread.id"
+                  :deleting="deletingCommentId === entry.thread.id"
+                  :update-error="updateErrorCommentId === entry.thread.id ? updateError : null"
+                  :delete-error="deleteErrorCommentId === entry.thread.id ? deleteError : null"
+                  :on-update="(body) => onUpdate(entry.thread.id, body)"
+                  :on-delete="() => deleteThread(entry.thread.id)"
+                  :on-clear-update-error="onClearUpdateError"
+                  :on-clear-delete-error="onClearDeleteError"
+                >
+                  <!--
+                    削除済みスレッドには返信できない（backend の create_comment が 400 で弾く）が、
+                    既にある返信は残るので、返信があるときは開く導線を残す。ここを隠すと
+                    返信がデータ上は生きているのに読むことも消すこともできなくなる。
+                  -->
+                  <template v-if="!entry.thread.is_deleted || entry.thread.replies.length" #footer>
+                    <button
+                      type="button"
+                      class="-ml-1 inline-flex h-6 w-fit touch-manipulation items-center rounded-md px-1 text-xs font-medium text-link select-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:bg-(--koyori-color-surface-active)"
+                      @click="showThread(entry.thread.id)"
+                    >
+                      {{
+                        entry.thread.replies.length
+                          ? `${entry.thread.replies.length}件の返信`
+                          : '返信'
+                      }}
+                    </button>
+                  </template>
+                </TaskCommentItem>
+              </li>
+            </ol>
+          </section>
+
+          <template v-if="skeletonRows">
+            <p class="sr-only" role="status">読み込み中</p>
+            <div
+              v-for="row in skeletonRows"
+              :key="row"
+              class="flex items-start gap-2 px-2 py-2"
+              data-activity-skeleton
+              aria-hidden="true"
+            >
+              <Skeleton width="24px" height="24px" radius="50%" />
+              <Skeleton class="min-w-0 flex-1" :lines="2" />
+            </div>
+          </template>
+
+          <p v-if="emptyMessage" class="px-2 py-1 text-sm text-muted-foreground">
+            {{ emptyMessage }}
+          </p>
+        </template>
+      </div>
     </div>
 
-    <!--
-      入力欄（参照）。下端に貼り付けた薄い背景の帯の中に、白い入力枠を置く。
-      枠の中は本文 → 操作行（追加・種別・添付・メンション・送信）の順。
-    -->
+    <!-- 入力欄。下端に貼り付ける。押せない操作は置かない -->
     <p
       v-if="openThread?.is_deleted"
       class="-mx-4 mt-auto shrink-0 border-t bg-background px-4 py-3 text-sm text-muted-foreground"
@@ -319,32 +488,24 @@ async function deleteThread(threadId: string) {
       v-else
       class="-mx-4 mt-auto shrink-0 border-t bg-background px-4 py-3"
       @submit.prevent="submitDraft"
+      @focusin="composerFocused = true"
+      @focusout="onComposerFocusOut"
     >
-      <div class="rounded-lg border bg-background focus-within:ring-1 focus-within:ring-ring">
+      <div
+        class="rounded-lg border border-input bg-background focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ring"
+      >
         <CommentEditor
           ref="composer"
           v-model="newDraft"
           bare
-          min-height-class="min-h-14"
+          :min-height-class="composerExpanded ? 'min-h-14' : 'min-h-9'"
           :disabled="submitPending"
           :aria-label="openThread ? '返信を入力' : 'コメントを入力'"
           :placeholder="openThread ? '返信を入力…' : 'コメントを入力…'"
           :candidates="mentionCandidates"
           :mentions="mentions"
         />
-        <div class="flex items-center gap-1 px-2 pb-2">
-          <Button type="button" variant="ghost" ariaLabel="追加" disabled>
-            <template #icon><Plus class="size-4" aria-hidden="true" /></template>
-          </Button>
-          <span
-            class="inline-flex h-7 items-center gap-1 rounded-md bg-muted px-2 text-xs text-muted-foreground"
-          >
-            コメント
-            <ChevronDown class="size-3" aria-hidden="true" />
-          </span>
-          <Button type="button" variant="ghost" ariaLabel="ファイルを添付" disabled>
-            <template #icon><Paperclip class="size-4" aria-hidden="true" /></template>
-          </Button>
+        <div v-show="composerExpanded" class="flex items-center justify-between gap-1 p-0.5">
           <Button
             type="button"
             variant="ghost"
@@ -356,7 +517,6 @@ async function deleteThread(threadId: string) {
           </Button>
           <Button
             type="submit"
-            class="ml-auto"
             :ariaLabel="submitPending ? '送信中' : openThread ? '返信する' : 'コメントする'"
             :disabled="submitPending || !newDraft.trim()"
           >

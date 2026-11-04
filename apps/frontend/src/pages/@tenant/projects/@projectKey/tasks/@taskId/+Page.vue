@@ -4,7 +4,7 @@ import { navigate } from 'vike/client/router';
 import { useData } from 'vike-vue/useData';
 import { usePageContext } from 'vike-vue/usePageContext';
 
-import TaskActivityFeed from '@/components/tasks/TaskActivityFeed.vue';
+import TaskActivityFilter from '@/components/tasks/TaskActivityFilter.vue';
 import TaskAttachments from '@/components/tasks/TaskAttachments.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
@@ -12,9 +12,11 @@ import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
 import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
 import { Button } from '@koyori-app/ui-vue';
+import type { ActivityFilter, ActivityLookups } from '@/lib/activity-timeline';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
 import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
 import { useTaskActivities } from '@/composables/useTaskActivities';
+import { useReactions } from '@/composables/useReactions';
 import { useTaskComments } from '@/composables/useTaskComments';
 import { useTaskDetail } from '@/composables/useTaskDetail';
 import { useSimilarTasks } from '@/composables/useSimilarTasks';
@@ -141,6 +143,15 @@ const {
 const membersQuery = useAssignableUsersQuery(tenantId, projectId);
 const members = computed(() => membersQuery.data.value ?? []);
 
+// 列の見出しの絞り込み。スレッドの中は絞り込まないので、開いている間は出さない
+const activityFilter = ref<ActivityFilter>('all');
+const activityThreadId = ref<string | null>(null);
+const activityLookups = computed<ActivityLookups>(() => ({
+  statuses: statuses.value,
+  members: members.value,
+  labels: projectLabels.value,
+}));
+
 // 候補の取得状態はピッカーへ渡す（取得中・失敗を「候補 0 人」と混ぜない）
 const membersState = computed(() => ({
   loading: membersQuery.isLoading.value,
@@ -184,6 +195,15 @@ const {
 // 同じ query key で /v1/auth/me を取得済みのため追加リクエストにはならない
 const meQuery = useMeQuery();
 const currentUserId = computed(() => meQuery.data.value?.id ?? null);
+const reactionController = useReactions({
+  tenantId,
+  projectId,
+  taskId,
+  currentUser: computed(() => {
+    const me = meQuery.data.value;
+    return me ? { id: me.id, name: me.username, avatar_url: me.avatar_url ?? null } : null;
+  }),
+});
 
 function openDeleteDialog() {
   deleteError.value = null;
@@ -214,6 +234,8 @@ function openSimilarTask(seqId: number) {
 
 <template>
   <TaskDetailHub
+    :reaction-controller="reactionController"
+    :current-user-id="currentUserId"
     :task="displayTask"
     :profile-href="profileHref"
     :description-html="data?.descriptionHtml ?? null"
@@ -316,9 +338,24 @@ function openSimilarTask(seqId: number) {
       </dialog>
     </template>
     <!-- モックに合わせ、コメント（アクティビティ）は右の欄に置く -->
+    <template #sidebar-actions>
+      <TaskActivityFilter v-if="!activityThreadId" v-model="activityFilter" />
+    </template>
     <template #sidebar>
       <TaskComments
+        :reaction-controller="reactionController"
+        :task-id="taskId"
         :threads="threads"
+        v-model:open-thread-id="activityThreadId"
+        :activities="activities"
+        :activities-loading="activitiesLoading"
+        :activities-error="activitiesError"
+        :on-retry-activities="refetchActivities"
+        :has-more-activities="hasMoreActivities"
+        :activities-fetching-more="activitiesFetchingMore"
+        :on-load-more-activities="loadMoreActivities"
+        :filter="activityFilter"
+        :lookups="activityLookups"
         :mentions="mentions"
         :mention-candidates="members"
         :loading="commentsLoading"
@@ -344,17 +381,6 @@ function openSimilarTask(seqId: number) {
         :on-clear-update-error="clearUpdateError"
         :on-clear-delete-error="clearDeleteError"
       >
-        <template #before-list>
-          <TaskActivityFeed
-            :activities="activities"
-            :loading="activitiesLoading"
-            :error="activitiesError"
-            :on-retry="refetchActivities"
-            :has-more="hasMoreActivities"
-            :fetching-more="activitiesFetchingMore"
-            :on-load-more="loadMoreActivities"
-          />
-        </template>
       </TaskComments>
     </template>
     <template #footer>
