@@ -1,3 +1,6 @@
+// テストケースの一覧（docs/features/drive.md から移した）
+// - アップロード上限ちょうど・超過の判定
+//
 // Drive の行を作るテストは、backfill のテスト（`drive_project_id_backfill_integration`）と
 // 同じ鍵で直列化する（理由は `drive_upload_acl_integration` の冒頭を参照）。
 //

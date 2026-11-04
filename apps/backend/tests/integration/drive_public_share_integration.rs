@@ -1,3 +1,6 @@
+// テストケースの一覧（docs/features/drive.md から移した）
+// - 正規 URL、二重 prefix の排除、不明・期限切れトークン、IP × トークン指紋のレートリミット
+//
 // Drive の行を作るテストは、backfill のテスト（`drive_project_id_backfill_integration`）が
 // 実行前に `TRUNCATE drive_files, drive_folders CASCADE` を流すのと同じ鍵で直列化する。
 // backfill の SQL はテナントを跨いで全行を見るので、あちらは Drive を空にしてからでないと

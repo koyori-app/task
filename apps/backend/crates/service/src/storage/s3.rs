@@ -1,3 +1,6 @@
+// テストケースの一覧（docs/features/drive.md から移した）
+// - S3 の長さ未知のアップロードが multipart になること
+//
 //! S3 互換ストレージバックエンド（AWS S3 / MinIO 等）。
 
 use std::env;

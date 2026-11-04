@@ -1,3 +1,6 @@
+// テストケースの一覧（docs/features/drive.md から移した）
+// - プロジェクトへのアップロード認可、フィールドの順序と `file` の重複
+//
 // Drive の行を作るテストは、backfill のテスト（`drive_project_id_backfill_integration`）が
 // 実行前に `TRUNCATE drive_files, drive_folders CASCADE` を流すのと同じ鍵で直列化する。
 // backfill の SQL はテナントを跨いで全行を見るので、あちらは Drive を空にしてからでないと

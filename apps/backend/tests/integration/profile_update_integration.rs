@@ -1,3 +1,6 @@
+// テストケースの一覧（docs/features/account-settings.md から移した）
+// - 更新と永続化、省略項目を壊さないこと、`clear_avatar_url`、空 PATCH、スキーム拒否、長さ制限、未ログイン拒否、Bearer 拒否
+
 use crate::common::TestApp;
 use axum::http::StatusCode;
 use entity::audit_logs;

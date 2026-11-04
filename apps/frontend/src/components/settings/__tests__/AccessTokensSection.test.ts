@@ -1,3 +1,7 @@
+// テストケースの一覧（docs/features/account-settings.md から移した）
+// - 一覧表示（伏せ字・スコープ数・期限・最終使用）、発行リクエストの内容（90 日既定・無期限）
+// - 名前とスコープの入力チェック、403 の表示、取り消しの確認ダイアログと失敗時の表示、オーナーのテナントが無い場合の無効化
+
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
