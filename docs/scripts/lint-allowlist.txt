@@ -1,9 +1,1 @@
 # TASK-442 で新しい形へ移していないページ。書き直した PR でその行を消す
-breadcrumbs.md
-development/database-migrations.md
-development/pnpm-lockfile.md
-frontend/auth-forms.md
-frontend/kfm-phase1-implementation.md
-frontend/pwa.md
-frontend/url-spec.md
-index.md

@@ -1,3 +1,4 @@
+// PWA の配信のヘッダーと manifest（サーバーのアプリ全体を通した確認）
 import { describe, expect, it, vi } from 'vitest';
 
 // server/settings/env.ts validates APP_URL when the module loads.

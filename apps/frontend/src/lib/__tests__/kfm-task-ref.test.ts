@@ -1,3 +1,4 @@
+// タスク参照の自動リンク（マッチの境界、除外ノード、tenant の検証、テナント別のキャッシュ分離）
 import { describe, expect, it } from 'vitest';
 import { renderDescription } from '../markup-renderer';
 
