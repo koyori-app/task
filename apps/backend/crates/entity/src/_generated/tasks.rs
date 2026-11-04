@@ -77,6 +77,8 @@ pub struct Model {
     )]
     pub sprints: HasOne<super::sprints::Entity>,
     #[sea_orm(has_many)]
+    pub reactions: HasMany<super::reactions::Entity>,
+    #[sea_orm(has_many)]
     pub task_activities: HasMany<super::task_activities::Entity>,
     #[sea_orm(has_many)]
     pub task_assignees: HasMany<super::task_assignees::Entity>,

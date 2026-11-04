@@ -606,16 +606,19 @@ async fn build_task_detail_response(
     state: &AppState,
     project_id: Uuid,
     task: tasks::Model,
+    viewer_id: Uuid,
 ) -> Result<TaskDetailResponse, AppError> {
     let custom_field_values = load_task_custom_field_values(&state.db, project_id, task.id).await?;
     // 説明文の印（`<@利用者ID>`）から id → 表示情報を引く（コメントの `mentions` と同じ形）
     let mentions =
         service::mentions::resolve_in_bodies(&state.db, project_id, task.description.as_deref())
             .await?;
+    let reactions = service::reactions::summaries_for_task(&state.db, task.id, viewer_id).await?;
     Ok(TaskDetailResponse {
         task: build_task_response(&state.db, task).await?,
         custom_field_values,
         mentions,
+        reactions,
     })
 }
 
@@ -957,7 +960,7 @@ pub async fn create_task(
     txn.commit().await?;
     Ok((
         StatusCode::CREATED,
-        Json(build_task_detail_response(&state, project_id, model).await?),
+        Json(build_task_detail_response(&state, project_id, model, auth.user_id).await?),
     ))
 }
 
@@ -987,7 +990,7 @@ pub async fn get_task(
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     Ok(Json(
-        build_task_detail_response(&state, project_id, task).await?,
+        build_task_detail_response(&state, project_id, task, auth.user_id).await?,
     ))
 }
 
@@ -1330,7 +1333,7 @@ pub async fn update_task(
         crate::handlers::github::enqueue_issue_push(&state, task_id).await;
     }
     Ok(Json(
-        build_task_detail_response(&state, project_id, updated).await?,
+        build_task_detail_response(&state, project_id, updated, auth.user_id).await?,
     ))
 }
 

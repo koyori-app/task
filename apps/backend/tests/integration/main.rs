@@ -44,6 +44,7 @@ mod profile_update_integration;
 mod project_guest_access_integration;
 mod project_members_integration;
 mod projects_integration;
+mod reactions_integration;
 mod register_integration;
 mod review_notifications_integration;
 mod review_summary_integration;

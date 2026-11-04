@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 このプロジェクト固有の知見。
 

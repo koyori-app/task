@@ -585,6 +585,9 @@ async fn oauth_callback_requires_2fa_setup_for_every_membership_form() {
             owner_id: Set(owner.id),
             drive_quota_bytes: Set(None),
             require_2fa: Set(true),
+            owner_department: Set(None),
+            owner_position: Set(None),
+            owner_team: Set(None),
         }
         .insert(&app.state.db)
         .await

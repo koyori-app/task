@@ -120,6 +120,15 @@ NTFS では「継承を無効にする」が明示の操作である。
 `UNIQUE (tenant_id, user_id)` と `user_id` 単独の索引を張る。
 前者の索引は先頭列が `tenant_id` なので、`user_id` だけで引く経路（ログインごとに通る 2FA 強制の判定、テナント一覧）には効かない。
 
+### オーナーの所属
+
+オーナーは `tenant_members` に行を持たないので、部署・役職・チームは `tenants` の `owner_department` / `owner_position` / `owner_team`（`TEXT` NULL。形式は上の 3 列と同じ）に持つ。
+行を足さないのは、`tenant_members` の行が所属の判定そのものだからである。足すとオーナーが通知の宛先（`project_accessible_user_ids`）に入り、`would_drop_last_admin` の「在籍 Admin」にも数えられる。
+
+読むときは `OrgProfile::resolve` を通す。所属行があれば行、無ければオーナーはテナントの行、それ以外は未設定である。
+オーナーにも実在の行があるとき（メンバー追加 API で足せる）は行が勝ち、テナントの列は読まれない。
+オーナーの付け替えの API は無い。作るなら、前のオーナーの所属を引き継がないように 3 列を空に戻す。
+
 ### ロール
 
 | ロール | 現在の意味 |
@@ -264,15 +273,16 @@ project 層のスコープ（`read:project` や `write:task` など）ではこ�
 | My Tasks（`GET /v1/tenants/{id}/users/me/tasks`） | 所属者: 従来どおり。客分: 己の project の分に絞る |
 | テナントの更新・削除 | オーナーのみ |
 | メンバー一覧の閲覧 | テナントに入れる人全員（客分は含まない） |
-| 利用者のプロフィール（`GET /v1/tenants/{id}/users/{user_id}`） | テナントに入れる人全員（客分は含まない）。対象はそのテナントのオーナー・メンバー・客分のいずれかで、それ以外は 404。返すのは id / username / bio / avatar_url と、このテナントでの department / position / team（所属行の無いオーナー・客分では null）だけ。PAT は `read:tenant` |
+| 利用者のプロフィール（`GET /v1/tenants/{id}/users/{user_id}`） | テナントに入れる人全員（客分は含まない）。対象はそのテナントのオーナー・メンバー・客分のいずれかで、それ以外は 404。返すのは id / username / bio / avatar_url と、このテナントでの department / position / team（未設定・客分では null）だけ。PAT は `read:tenant` |
 | メンバーの追加・ロールと所属（部署・役職・チーム）の変更・削除 | オーナー + テナント `Admin` |
+| 所属行の無いオーナーの所属の変更 | オーナー本人のみ。ロールの変更と削除はオーナー本人でもできない |
 | 招待の発行・一覧・再送・取り消し（`/v1/tenants/{id}/invitations`） | オーナー + テナント `Admin`。PAT は一覧に `read:tenant`、それ以外に `write:tenant` |
 | 招待の中身を見る（`POST /v1/invitations/preview`） | トークンを持つ人（ログイン不要） |
 | 招待の承諾（`POST /v1/invitations/accept`） | 招待先のアドレスでログインしている本人（セッションのみ） |
 | プロジェクトの作成 | オーナー + テナント `Admin` |
 | プロジェクトの更新・削除 | オーナー + そのプロジェクトに入れるテナント `Admin`（個人プロジェクトはオーナーのみ）。削除はセッション専用 |
 | プロジェクトメンバーの管理・Webhook の管理 | オーナー + プロジェクト `Admin` + そのプロジェクトに入れるテナント `Admin`（個人プロジェクトはテナント `Admin` を通さない） |
-| 担当者候補の一覧（`GET .../assignable-users`） | プロジェクトに入れる人。PAT は `write:task`。返すのは id / username / avatar_url と、このテナントでの department / team。department / team は未設定・所属行の無いオーナーでは null で、プロフィールを読めない主体（客分、`read:tenant` の無い PAT、プロジェクト限定の PAT）には全員 null で返す |
+| 担当者候補の一覧（`GET .../assignable-users`） | プロジェクトに入れる人。PAT は `write:task`。返すのは id / username / avatar_url と、このテナントでの department / team。department / team は未設定なら null で、プロフィールを読めない主体（客分、`read:tenant` の無い PAT、プロジェクト限定の PAT）には全員 null で返す |
 | 担当者候補の名前引き（`GET .../assignable-users?username=`） | 同上。ただし PAT は `read:task` でもよい |
 
 一覧と取得で条件を揃えているのは、一覧に出るのに開けないテナントを作らないため（#572）。
@@ -297,13 +307,15 @@ project 層のスコープ（`read:project` や `write:task` など）ではこ�
 `user`（`UserSummary`: id / username / avatar_url）を同梱する。メンバー管理 UI（#317）が
 ID とは別にユーザー名・アバターを引けるようにするためで、メールアドレス等は含めない。
 `TenantMemberResponse` はこのテナントでの `department` / `position` / `team` も返す。
-オーナーの合成行（`from_owner`）では null。
+オーナーの合成行（`from_owner`）では `tenants` の列の値（「オーナーの所属」）を返す。
 
 `PUT /v1/tenants/{id}/members/{user_id}`（`UpdateTenantMemberRequest`）は全欄省略可で、
 省略した欄（`None`）は変更しない。`role` を省略可にしているのは、所属だけを直す保存が
 古い `role` を送り返して、別の管理者による降格を巻き戻さないため。部署・役職・チームは
-前後の空白を除き、空文字なら NULL に戻す。所属行の無いオーナーへの PUT は 404。
-実在の行があるオーナーは、他のメンバーと同様に更新できる。UI ではオーナーの編集操作を出さない。
+前後の空白を除き、空文字なら NULL に戻す。
+所属行の無いオーナーへの PUT は、本人が部署・役職・チームだけを送る場合に限り `tenants` の列を更新する。
+`role` を付けた PUT と本人以外の PUT は 404 で、何も保存しない。
+実在の行があるオーナーは、他のメンバーと同様に更新できる。UI では本人にだけ所属の編集を出し、ロール変更と除外は出さない。
 
 ## 守っている不変条件
 
@@ -380,3 +392,4 @@ ID とは別にユーザー名・アバターを引けるようにするため�
 | 2026-10-21 | 会社での情報（部署・役職・チーム）は `users` ではなく `tenant_members` に持ち、テナント `Admin` / オーナーが編集する。本人による編集は未対応（TASK-334） |
 | 2026-10-25 | テナント `Admin` に共有プロジェクトの作成と、入れる共有プロジェクトの更新・削除・メンバー管理・Webhook 管理を許す（TASK-372）。作成者を ACE に入れる案と継承フラグを足す案は退けた。見える範囲は変えず、個人プロジェクトは対象外 |
 | 2026-11-02 | 担当者候補に部署・チームを載せ、担当者欄でまとめて選べるようにする（TASK-396）。担当者の API とデータモデルは変えず、フロントが利用者 ID に開いて送る。候補の一覧はプロフィールより広い主体が通るので、部署・チームはプロフィールを読める主体にだけ返し、候補そのものは従来どおり返す |
+| 2026-11-04 | オーナー本人が自分の部署・役職・チームを設定できるようにし、`tenants` の列に保存する（TASK-443）。`tenant_members` に行を足す案は、通知の宛先と在籍 Admin の数え方が変わるので退けた。他の人によるオーナーの所属の編集は開かない |
