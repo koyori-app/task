@@ -45,7 +45,7 @@ function onSelect(emoji: string) {
   >
     <SmilePlus :size="16" aria-hidden="true" />
   </button>
-  <AnchoredPanel v-if="open" :anchor="buttonRef" dismiss-on-focus-out @dismiss="close(false)">
+  <AnchoredPanel v-if="open" :anchor="buttonRef" light-dismiss @dismiss="close(false)">
     <EmojiPicker :selected="selected" @select="onSelect" @close="close(true)" />
   </AnchoredPanel>
 </template>

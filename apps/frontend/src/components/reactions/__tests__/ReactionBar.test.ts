@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ReactionSummary, ReactionUser } from '@/lib/reactions';
 
+import ReactionAddButton from '../ReactionAddButton.vue';
 import ReactionBar from '../ReactionBar.vue';
 import ReactionPeopleCard from '../ReactionPeopleCard.vue';
 import ReactionPeoplePanel from '../ReactionPeoplePanel.vue';
@@ -78,6 +79,21 @@ describe('ReactionBar', () => {
     const wrapper = mountBar(props);
     await chip(wrapper, '👍').trigger('click');
     expect(wrapper.emitted('toggle')).toBeUndefined();
+  });
+
+  it('押している絵文字をピッカーで選び直すと、札が持つ値で toggle を出す', async () => {
+    const wrapper = mountBar({
+      reactions: [{ emoji: '❤', count: 1, reacted: true, users: users(1) }],
+    });
+    wrapper.findComponent(ReactionAddButton).vm.$emit('select', '❤️');
+    expect(wrapper.emitted('toggle')).toEqual([['❤']]);
+    expect(wrapper.emitted('add')).toBeUndefined();
+  });
+
+  it('押していない絵文字をピッカーで選ぶと add を出す', async () => {
+    const wrapper = mountBar();
+    wrapper.findComponent(ReactionAddButton).vm.$emit('select', '🎉');
+    expect(wrapper.emitted('add')).toEqual([['🎉']]);
   });
 
   it('ホバーして 400ms 待つとカードが出て、離れると消える', async () => {

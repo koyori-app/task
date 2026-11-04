@@ -211,6 +211,25 @@ describe('ReactionAddButton', () => {
     expect(document.activeElement).toBe(wrapper.get('[aria-haspopup]').element);
   });
 
+  it('dialog の背景を押した 1 回目はピッカーだけを閉じ、dialog へ届けない', async () => {
+    const dialog = document.createElement('dialog');
+    document.body.append(dialog);
+    const reachedDialog = vi.fn();
+    dialog.addEventListener('pointerdown', reachedDialog);
+    const wrapper = mountButton();
+    await wrapper.get('button').trigger('click');
+    await flushPromises();
+
+    dialog.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await flushPromises();
+    expect(wrapper.findComponent(EmojiPicker).exists()).toBe(false);
+    expect(reachedDialog).not.toHaveBeenCalled();
+
+    // 閉じた後は普通に届く
+    dialog.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(reachedDialog).toHaveBeenCalledTimes(1);
+  });
+
   it('外側を押すと閉じる（フォーカスは奪わない）', async () => {
     const wrapper = mountButton();
     await wrapper.get('button').trigger('click');

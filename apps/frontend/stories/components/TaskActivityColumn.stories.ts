@@ -31,6 +31,7 @@ function comment(id: string, created_at: string, body: string): CommentThread {
     updated_at: created_at,
     user: tanaka,
     replies: [],
+    reactions: [],
   } as CommentThread;
 }
 

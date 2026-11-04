@@ -51,11 +51,14 @@ function onToggle(emoji: string) {
   if (props.canReact && !props.busy) emit('toggle', emoji);
 }
 
-/** 押している絵文字をピッカーで選び直したら外す（札を押すのと同じ） */
+/**
+ * 押している絵文字をピッカーで選び直したら外す（札を押すのと同じ）。外すのは札が持つ値で送る
+ * （backend は異体字セレクタの有無が違えば別の絵文字として数える）。
+ */
 function onPick(emoji: string) {
   if (props.busy) return;
-  const isSelected = selected.value.some((item) => emojiKey(item) === emojiKey(emoji));
-  if (isSelected) emit('toggle', emoji);
+  const mine = selected.value.find((item) => emojiKey(item) === emojiKey(emoji));
+  if (mine) emit('toggle', mine);
   else emit('add', emoji);
 }
 
@@ -217,12 +220,7 @@ onBeforeUnmount(() => {
       <ReactionAddButton v-if="canReact" :selected="selected" :disabled="busy" @select="onPick" />
     </div>
     <p v-if="error" role="alert" class="mt-1 text-xs text-destructive">{{ error }}</p>
-    <AnchoredPanel
-      v-if="panel"
-      :anchor="panel.anchor"
-      dismiss-on-focus-out
-      @dismiss="closePanel(false)"
-    >
+    <AnchoredPanel v-if="panel" :anchor="panel.anchor" light-dismiss @dismiss="closePanel(false)">
       <ReactionPeoplePanel
         :reactions="reactions"
         :initial-emoji="panel.emoji"

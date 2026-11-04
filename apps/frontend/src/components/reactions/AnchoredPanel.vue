@@ -10,10 +10,13 @@ import { placeAnchored } from '@/lib/anchored-position';
 const props = withDefaults(
   defineProps<{
     anchor: HTMLElement | null;
-    /** フォーカスが外へ移ったら閉じる（ピッカーと全員の一覧）。カードは Bar が自分で閉じる */
-    dismissOnFocusOut?: boolean;
+    /**
+     * 操作の中心になるパネル（ピッカーと全員の一覧）。フォーカスが外へ移ったら閉じ、
+     * 外側の 1 押しはパネルを閉じるだけに使う。見るだけのカードは Bar が自分で閉じる。
+     */
+    lightDismiss?: boolean;
   }>(),
-  { dismissOnFocusOut: false },
+  { lightDismiss: false },
 );
 
 const emit = defineEmits<{ dismiss: [] }>();
@@ -40,7 +43,11 @@ function isInside(target: EventTarget | null) {
 }
 
 function onPointerDownOutside(event: PointerEvent) {
-  if (!isInside(event.target)) emit('dismiss');
+  if (isInside(event.target)) return;
+  // 背景を押した時の target は dialog 自身で、Koyori の Dialog はそれで閉じる。
+  // 器ごと閉じないよう、1 押し目はパネルを閉じるだけにして dialog へ届けない
+  if (props.lightDismiss && event.target instanceof HTMLDialogElement) event.stopPropagation();
+  emit('dismiss');
 }
 
 function onScroll(event: Event) {
@@ -50,7 +57,7 @@ function onScroll(event: Event) {
 
 function onFocusOut(event: FocusEvent) {
   // relatedTarget が無いのは窓自体からフォーカスが外れた時。戻れば続きができるので閉じない
-  if (props.dismissOnFocusOut && event.relatedTarget && !isInside(event.relatedTarget)) {
+  if (props.lightDismiss && event.relatedTarget && !isInside(event.relatedTarget)) {
     emit('dismiss');
   }
 }
