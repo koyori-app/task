@@ -90,7 +90,7 @@ const AppHeader = defineAsyncComponent(() => import('@/components/header/AppHead
     読み込み中…
   </div>
   <EmailNotVerified
-    v-else-if="meQuery.isSuccess.value && !isEmailVerified"
+    v-else-if="meQuery.data.value && !isEmailVerified"
     :email="meQuery.data.value!.email"
     @logout="logout"
   />
