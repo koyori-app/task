@@ -1,3 +1,6 @@
+// テストケースの一覧（docs/features/drive.md から移した）
+// - 深い階層・移動済みルート、冪等性、異なるプロジェクトや循環の検出
+
 use crate::common::{TestApp, insert_extra_project};
 use entity::{drive_files, drive_folders};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait};

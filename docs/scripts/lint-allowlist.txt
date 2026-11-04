@@ -2,14 +2,6 @@
 breadcrumbs.md
 development/database-migrations.md
 development/pnpm-lockfile.md
-features/account-settings.md
-features/admin.md
-features/auth-2fa-oauth-followup.md
-features/auth-2fa.md
-features/auth-oauth.md
-features/auth-passkeys.md
-features/auth-password-reset.md
-features/drive.md
 features/review-findings.md
 features/tasks/1.core.md
 features/tasks/10.webhooks.md

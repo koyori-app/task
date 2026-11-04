@@ -1,3 +1,6 @@
+// テストケースの一覧（docs/features/drive.md から移した）
+// - 本文更新・配信、空本文、MIME、クォータ、並行更新、認可・共有トークン、配信ヘッダー、ETag・`If-Match` / `If-None-Match`
+//
 // Drive の行を作るテストは、backfill のテスト（`drive_project_id_backfill_integration`）が
 // 実行前に `TRUNCATE drive_files, drive_folders CASCADE` を流すのと同じ鍵で直列化する。
 // backfill の SQL はテナントを跨いで全行を見るので、あちらは Drive を空にしてからでないと

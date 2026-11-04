@@ -1,3 +1,6 @@
+// テストケースの一覧（docs/features/drive.md から移した）
+// - Markdown 本文からのタスク参照
+//
 //! Drive の Markdown 本文の `KEY-N` を task_attachments（source = body）へ結び付ける
 //! （TASK-277、docs/features/drive.md §8.5）。
 //!
