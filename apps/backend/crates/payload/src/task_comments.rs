@@ -52,6 +52,8 @@ impl From<task_comments::Model> for TaskCommentResponse {
 
 #[derive(Serialize, ToSchema)]
 pub struct CommentUser {
+    #[schema(required = false)]
+    pub account_kind: String,
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
     pub name: String,
@@ -99,6 +101,8 @@ pub struct CommentListResponse {
 
 #[derive(Serialize, ToSchema)]
 pub struct ActivityUser {
+    #[schema(required = false)]
+    pub account_kind: String,
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
     pub name: String,

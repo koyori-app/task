@@ -144,6 +144,9 @@ pub async fn create_invitation(
 ) -> Result<(StatusCode, Json<TenantInvitationResponse>), AppError> {
     require_invitation_admin(&state, &auth, tenant_id, Scope::WriteTenant).await?;
     let email = normalize_email(&payload.email);
+    if users::is_bot_email(&email) {
+        return Err(AppError::Forbidden);
+    }
     if is_member_email(&state.db, tenant_id, &email).await? {
         return Err(AppError::ConflictDetail("already-member".into()));
     }
@@ -201,6 +204,9 @@ pub async fn resend_invitation(
 ) -> Result<Json<TenantInvitationResponse>, AppError> {
     require_invitation_admin(&state, &auth, tenant_id, Scope::WriteTenant).await?;
     let invitation = find_invitation(&state, tenant_id, invitation_id).await?;
+    if users::is_bot_email(&invitation.email) {
+        return Err(AppError::Forbidden);
+    }
     // 招待の後にメンバー追加 API で入った人の招待は残っている。送っても承諾は already-member になる
     if is_member_email(&state.db, tenant_id, &invitation.email).await? {
         return Err(AppError::ConflictDetail("already-member".into()));

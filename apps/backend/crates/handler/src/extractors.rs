@@ -43,6 +43,9 @@ async fn user_from_session(session: &Session, state: &AppState) -> Result<users:
         .await?
         .ok_or(AuthError::Unauthorized)?;
 
+    if user.is_bot() {
+        return Err(AuthError::Forbidden);
+    }
     if let Some(revoked_at) = user.sessions_revoked_at
         && issued_at_ms < revoked_at.timestamp_millis()
     {
@@ -417,6 +420,9 @@ impl FromRequestParts<AppState> for AuthUser {
             if user.is_suspended {
                 return Err(AuthError::Suspended);
             }
+            if user.is_bot() && user.bot_tenant_id != Some(record.tenant_id) {
+                return Err(AuthError::Forbidden);
+            }
             Ok(AuthUser {
                 user_id: record.user_id,
                 username: user.username,
@@ -444,7 +450,7 @@ impl FromRequestParts<AppState> for AuthUser {
                 return Err(AuthError::Forbidden);
             }
             let user = user_from_session(&session, state).await?;
-            if user.is_suspended {
+            if user.is_bot() || user.is_suspended {
                 return Err(AuthError::Suspended);
             }
             Ok(AuthUser {
@@ -463,7 +469,7 @@ async fn device_token_user(state: &AppState, token: &str) -> Result<AuthUser, Au
         .one(&state.db)
         .await?
         .ok_or(AuthError::Unauthorized)?;
-    if user.is_suspended {
+    if user.is_bot() || user.is_suspended {
         return Err(AuthError::Suspended);
     }
     // 交換中に全失効された場合も、コードの承認時刻を基準に端末を落とす。
@@ -510,7 +516,7 @@ impl FromRequestParts<AppState> for HalfAuthedUser {
             .await?
             .ok_or(AuthError::Unauthorized)?;
         // Suspend before session-revocation so admin suspend still returns 403 on 2FA verify.
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
         if let Some(revoked_at) = user.sessions_revoked_at
@@ -539,7 +545,7 @@ impl FromRequestParts<AppState> for LoggedInUser {
         }
         let session = session_from_parts(parts, state).await?;
         let user = user_from_session(&session, state).await?;
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
         Ok(LoggedInUser { user_id: user.id })
@@ -570,7 +576,7 @@ impl FromRequestParts<AppState> for AdminUser {
             return Err(AuthError::Forbidden);
         }
         let user = user_from_session(&session, state).await?;
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
         if !user.is_admin {
@@ -610,7 +616,7 @@ impl FromRequestParts<AppState> for CurrentUser {
             return Err(AuthError::Forbidden);
         }
         let user = user_from_session(&session, state).await?;
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
         Ok(CurrentUser(user))

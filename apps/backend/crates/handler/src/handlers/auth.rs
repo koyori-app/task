@@ -60,6 +60,9 @@ pub async fn login(
 ) -> Result<impl IntoResponse, AuthError> {
     let LoginRequest { email, password } = payload;
     let email = normalize_email(&email);
+    if entity::users::is_bot_email(&email) {
+        return Err(AuthError::Forbidden);
+    }
 
     let user = users::Entity::find()
         .filter(users::Column::Email.eq(&email))
@@ -114,6 +117,9 @@ pub async fn register(
         password,
     } = payload;
     let email = normalize_email(&email);
+    if entity::users::is_bot_email(&email) {
+        return Err(AuthError::Forbidden);
+    }
 
     service::system_settings::ensure_system_settings_row(&state.db).await?;
 
@@ -141,6 +147,8 @@ pub async fn register(
     let password_hash = create_password_hash(&password)?;
 
     let user = users::ActiveModel {
+        account_kind: Set("human".to_string()),
+        bot_tenant_id: Set(None),
         id: Set(Uuid::new_v4()),
         username: Set(username),
         bio: Set(Some(String::new())),
@@ -233,6 +241,9 @@ pub async fn verify_email(
             ))
         })?;
 
+    if user.is_bot() {
+        return Err(AuthError::Forbidden);
+    }
     if user.email_verified {
         return Ok(Json("Email already verified".to_string()));
     }
@@ -275,6 +286,9 @@ pub async fn resend_verification_email(
         .await?
         .ok_or(AuthError::UserNotFound)?;
 
+    if user.is_bot() {
+        return Err(AuthError::Forbidden);
+    }
     if user.email_verified {
         return Err(AuthError::EmailAlreadyVerified);
     }

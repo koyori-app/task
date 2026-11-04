@@ -842,6 +842,8 @@ impl TestApp {
         let password_hash = create_password_hash(&password).expect("password hash");
 
         users::ActiveModel {
+            account_kind: Set("human".to_string()),
+            bot_tenant_id: Set(None),
             id: Set(id),
             username: Set(format!("test_{}", &id.to_string()[..8])),
             bio: Set(Some(String::new())),
@@ -1265,6 +1267,8 @@ pub async fn insert_user(db: &DatabaseConnection, is_admin: bool, is_suspended: 
     let password_hash = create_password_hash(&password).expect("password hash");
 
     users::ActiveModel {
+        account_kind: Set("human".to_string()),
+        bot_tenant_id: Set(None),
         id: Set(id),
         username: Set(format!("test_{}", &id.to_string()[..8])),
         bio: Set(Some(String::new())),
@@ -1304,6 +1308,8 @@ pub async fn insert_passkey_user(
     };
 
     users::ActiveModel {
+        account_kind: Set("human".to_string()),
+        bot_tenant_id: Set(None),
         id: Set(id),
         username: Set(format!("test_{}", &id.to_string()[..8])),
         bio: Set(Some(String::new())),

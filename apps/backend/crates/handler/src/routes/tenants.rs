@@ -5,6 +5,12 @@ use crate::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::<AppState>::new()
+        .routes(routes!(crate::handlers::bots::list_bots))
+        .routes(routes!(crate::handlers::bots::create_bot))
+        .routes(routes!(crate::handlers::bots::update_bot))
+        .routes(routes!(crate::handlers::bots::list_bot_tokens))
+        .routes(routes!(crate::handlers::bots::create_bot_token))
+        .routes(routes!(crate::handlers::bots::revoke_bot_token))
         .routes(routes!(crate::handlers::tenants::list_tenants))
         .routes(routes!(crate::handlers::tenants::create_tenant))
         .routes(routes!(crate::handlers::tenants::get_tenant))
