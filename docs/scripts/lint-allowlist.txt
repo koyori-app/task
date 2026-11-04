@@ -1,7 +1,4 @@
 # TASK-442 で新しい形へ移していないページ。書き直した PR でその行を消す
-breadcrumbs.md
-development/database-migrations.md
-development/pnpm-lockfile.md
 features/account-settings.md
 features/admin.md
 features/auth-2fa-oauth-followup.md
@@ -24,8 +21,3 @@ features/tasks/8.automation.md
 features/tasks/9.github-app.md
 features/tasks/9.github-tasks.md
 features/tasks/index.md
-frontend/auth-forms.md
-frontend/kfm-phase1-implementation.md
-frontend/pwa.md
-frontend/url-spec.md
-index.md
