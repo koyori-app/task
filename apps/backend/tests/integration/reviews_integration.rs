@@ -1,4 +1,4 @@
-// 受け入れ条件（docs/features/review-findings/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// 受け入れ条件（docs/dev/features/review-findings/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
 // - 正常系: 一括起票、一覧、fixed、verified が通る
 // - 指摘ゼロのラウンド、同一 PR への 2 ラウンド目（R2 として新しいラウンドになる）
 // - ラウンドの採番: 同じ PR へ同時にラウンドを確定しても `round` が重複しない

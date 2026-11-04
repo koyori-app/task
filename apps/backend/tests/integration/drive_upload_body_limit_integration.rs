@@ -1,4 +1,4 @@
-// テストケースの一覧（docs/features/drive.md から移した）
+// テストケースの一覧（docs/dev/features/drive/index.md から移した）
 // - アップロード上限ちょうど・超過の判定
 //
 // Drive の行を作るテストは、backfill のテスト（`drive_project_id_backfill_integration`）と

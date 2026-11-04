@@ -1,4 +1,4 @@
-// テストケースの一覧（docs/features/drive.md から移した）
+// テストケースの一覧（docs/dev/features/drive/index.md から移した）
 // - OpenAPI 全体の prefix 重複検出
 
 use axum::http::{HeaderValue, header};

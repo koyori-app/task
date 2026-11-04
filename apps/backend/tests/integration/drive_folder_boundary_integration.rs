@@ -1,4 +1,4 @@
-// テストケースの一覧（docs/features/drive.md から移した）
+// テストケースの一覧（docs/dev/features/drive/index.md から移した）
 // - 作成・移動・削除のプロジェクト境界、配下同期、ルート保護、ロック待ち後の再認可
 //
 // Drive の行を作るテストは、backfill のテスト（`drive_project_id_backfill_integration`）が

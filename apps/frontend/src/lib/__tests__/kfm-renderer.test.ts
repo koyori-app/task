@@ -416,7 +416,7 @@ describe('renderDescription (脚注 fn-* / fnref-* id の scope)', () => {
 describe('renderDescription (ユーザーリンクの現状契約)', () => {
   it('リンクは target を持たない (rel 硬化を Phase 1 で行わない前提条件の固定)', async () => {
     // 仕様: target="_blank" を出さないため reverse tabnabbing 経路が無く、rel 硬化は
-    // 行わない (docs/frontend/kfm-phase1-implementation.md)。target を導入する変更は
+    // 行わない (docs/dev/frontend/kfm-phase1-implementation.md)。target を導入する変更は
     // ここで赤くなり、rel="noopener noreferrer" の同時導入を強制する。
     const html = await renderDescription('[リンク](https://example.com/) と https://example.org/');
     expect(html).toContain('<a href="https://example.com/">');

@@ -1,4 +1,4 @@
-// テストケースの一覧（docs/features/account-settings.md から移した）
+// テストケースの一覧（docs/dev/features/account-settings.md から移した）
 // - 他人のプロフィール: 返す項目が 7 つだけでメールを含まないこと、オーナー・ゲスト・自分を対象に開けること
 // - テナントに関わらない人と存在しない UUID が同じ 404 になること、テナント外の人とゲストの閲覧が 403 になること
 // - PAT の `read:tenant` と `read:task` の対照、未ログイン拒否

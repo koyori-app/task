@@ -3,9 +3,9 @@
 //! レビュー指摘の一覧・状態は task 側が権威で、GitHub には**マーカー付きの
 //! コメント 1 本**だけを置く。2 回目以降は同じコメントを編集して更新する。
 //! マージ可になったら、レビュワー本人のトークンで、レビューした commit を本文なしで
-//! Approve する（インライン投稿はしない。仕様 `docs/features/review-findings.md` §7）。
+//! Approve する（インライン投稿はしない。仕様 `docs/dev/features/review-findings/github-comment.md`）。
 
-// 受け入れ条件（docs/features/review-findings/github-comment.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// 受け入れ条件（docs/dev/features/review-findings/github-comment.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
 // - 要約コメントの持ち主: それぞれのコメントを自分のマーカーで見分ける（プロジェクトごとにマーカーが違う）
 // - マーカーの先取り: 作成者が自分でないコメントは自分のものとみなさない
 

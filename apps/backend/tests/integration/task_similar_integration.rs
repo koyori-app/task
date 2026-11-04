@@ -1,5 +1,5 @@
 //! `GET /tasks/similar`（類似タスク候補、pg_trgm）。
-//! apps/backend/docs/task-similarity-search.md §6②③ / §8②③。
+//! docs/dev/design/task-similarity-search.md の「②③ `GET /tasks/similar`」。
 //!
 //! テストケースの一覧（docs/dev/design/task-similarity-search.md から移した）:
 //! - 同一プロジェクトの類似タイトルが score 降順で返る

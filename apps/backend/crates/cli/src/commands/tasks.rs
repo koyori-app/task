@@ -317,7 +317,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
     Ok(0)
 }
 
-/// タスクと PR の連携（docs/features/tasks/9.github-tasks.md §8）。
+/// タスクと PR の連携（docs/dev/features/tasks/github-tasks/index.md の「API」）。
 async fn run_pull_requests(
     context: &Context,
     command: TaskPrCommand,

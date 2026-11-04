@@ -9,7 +9,7 @@ import { apiClient } from '@/lib/api-vue-query';
 
 /**
  * マージ済みなのに自動完了を行っていない PR の印と、確認済みにする操作
- * （docs/features/tasks/9.github-tasks.md §9）。
+ * （docs/dev/features/tasks/github-tasks/index.md の「画面」）。
  *
  * マージ時のイベントを受け取れていない PR だけに出る。現在のリンクはマージ後の編集で
  * 変わりうるので、ここから一括で完了させる操作は置かない。

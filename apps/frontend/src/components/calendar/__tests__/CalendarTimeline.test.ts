@@ -1,4 +1,4 @@
-// 山の表示と手動の山崩し（docs/features/tasks/12.workload.md）のテスト。次を確かめる。
+// 山の表示と手動の山崩し（docs/dev/features/tasks/12.workload.md）のテスト。次を確かめる。
 // - 超過の棒が警告色になる
 // - 絞り込み後も山が変わらない
 // - 点はドラッグできない

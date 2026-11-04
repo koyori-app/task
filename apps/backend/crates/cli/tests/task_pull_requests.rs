@@ -1,4 +1,4 @@
-//! タスクと PR の連携（`tasks pr`）。仕様は `docs/features/tasks/9.github-tasks.md` §8。
+//! タスクと PR の連携（`tasks pr`）。仕様は `docs/dev/features/tasks/github-tasks/index.md` の「API」。
 
 mod common;
 

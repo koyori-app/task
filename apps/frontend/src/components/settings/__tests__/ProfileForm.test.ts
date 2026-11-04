@@ -1,4 +1,4 @@
-// テストケースの一覧（docs/features/account-settings.md から移した）
+// テストケースの一覧（docs/dev/features/account-settings.md から移した）
 // - 空欄が `clear_avatar_url` になること、URL の送信、前後の空白を取り除くこと
 // - 不正スキームとユーザー名長を送信前に止めること、失敗時（400 / それ以外）の表示
 // - 保存後に編集を再開すると保存済み表示が消えること

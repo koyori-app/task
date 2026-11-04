@@ -1,4 +1,4 @@
-//! 通知のコマンド。仕様は `docs/features/tasks/5.notifications.md` §4。
+//! 通知のコマンド。仕様は `docs/dev/features/tasks/5.notifications.md` の「API」。
 //!
 //! 種別の綴りは `common::notifications::KNOWN_EVENT_TYPES` をそのまま使う。
 //! CLI 側に写しを置くと、サーバーが受け付ける集合と黙って食い違う。

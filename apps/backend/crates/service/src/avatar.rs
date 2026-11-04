@@ -1,4 +1,4 @@
-// テストケースの一覧（docs/features/account-settings.md から移した）
+// テストケースの一覧（docs/dev/features/account-settings.md から移した）
 // - 先頭バイトでの形式判定（4 形式・不正・空・途中で切れた RIFF）、配信キーの形式
 //
 //! アップロードしたユーザーアバターの形式判定・ストレージキー・後片付け。

@@ -1,4 +1,4 @@
-// 山の計算規則（docs/features/tasks/12.workload.md）のテスト。次を確かめる。
+// 山の計算規則（docs/dev/features/tasks/12.workload.md）のテスト。次を確かめる。
 //
 // 見積をそのまま積む最初の規則との違いを 1 ケースずつ。
 // - 積む量: estimated_minutes ではなく残工数

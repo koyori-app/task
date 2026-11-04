@@ -52,7 +52,7 @@ pub async fn is_project_member<C: ConnectionTrait>(
 /// この行は継承（在籍）が前提の付随物にすぎない。除名の後まで効かせると、
 /// テナントを去った人がそのテナントの Inbox に客分として入り続け、テナント一覧に
 /// Guest として出て、2FA 強制の対象にもなる。客分の判定はすべてここを通し、
-/// 個人プロジェクトを外す（apps/backend/docs/tenant-project-authz.md の「除名が消すもの」）
+/// 個人プロジェクトを外す（docs/dev/design/tenant-project-authz.md の「除名が消すもの」）
 pub async fn is_shared_project_explicit_member<C: ConnectionTrait>(
     db: &C,
     project_id: Uuid,

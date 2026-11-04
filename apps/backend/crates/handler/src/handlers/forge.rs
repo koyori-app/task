@@ -1,4 +1,4 @@
-//! タスクに結ばれた PR / コミット / ブランチ（docs/features/tasks/9.github-tasks.md §8）。
+//! タスクに結ばれた PR / コミット / ブランチ（docs/dev/features/tasks/github-tasks/index.md の「API」）。
 
 use axum::{
     Json,

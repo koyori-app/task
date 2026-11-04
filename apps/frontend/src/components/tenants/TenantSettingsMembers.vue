@@ -28,7 +28,7 @@ const INVITATION_RESEND_PATH =
 
 /**
  * ロールを見ているのは今のところテナントメンバー管理 API だけで、Viewer と Member に
- * 書き込みの差は無い（`apps/backend/docs/tenant-project-authz.md`）。読み取り専用が
+ * 書き込みの差は無い（`docs/dev/design/tenant-project-authz.md`）。読み取り専用が
  * 全経路で効くまでは、権限が絞られたと誤解させない書き方にしておく。
  */
 const ROLES: { value: TenantRole; label: string; description: string }[] = [

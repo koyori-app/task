@@ -1,5 +1,5 @@
 //! Koyori Desktop の認証（Authorization Code + PKCE → Device Token）と端末管理。
-//! 規則は apps/backend/docs/personal-access-tokens-authz.md の「Desktop 認証」。
+//! 規則は docs/dev/design/personal-access-tokens-authz.md の「Desktop 認証」。
 //!
 //! テストケースの一覧（docs/dev/design/personal-access-tokens-authz.md から移した）:
 //! - 発行、交換、Bearer で通知一覧が 200。code の再利用・verifier 不一致・TTL 超過は 401

@@ -1,4 +1,4 @@
-// テストケースの一覧（docs/features/drive.md から移した）
+// テストケースの一覧（docs/dev/features/drive/index.md から移した）
 // - 正規 URL、二重 prefix の排除、不明・期限切れトークン、IP × トークン指紋のレートリミット
 //
 // Drive の行を作るテストは、backfill のテスト（`drive_project_id_backfill_integration`）が

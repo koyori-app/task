@@ -1,5 +1,5 @@
 //! `GET /tasks/search` の日本語部分一致・表記ゆれ（pg_trgm）。
-//! apps/backend/docs/task-similarity-search.md §6① / §8①。
+//! docs/dev/design/task-similarity-search.md の「① `GET /tasks/search`」。
 //!
 //! テストケースの一覧（docs/dev/design/task-similarity-search.md から移した）:
 //! - 日本語の部分一致を先頭・中間・末尾で 1 本ずつ。「ログイン画面の修正」「認証ログイン画面」

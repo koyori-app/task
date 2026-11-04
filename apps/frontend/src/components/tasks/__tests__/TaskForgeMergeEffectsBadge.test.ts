@@ -1,4 +1,4 @@
-// 受け入れ条件（docs/features/tasks/github-tasks/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// 受け入れ条件（docs/dev/features/tasks/github-tasks/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
 // - 未適用表示: `state = merged` かつ `merge_effects_processed_at = NULL` の PR に「マージ済み（自動完了は未適用）」が表示され、ダイアログで再配送の依頼を案内する
 // - 確認済み操作: 確認ダイアログを経て PR 行のプロジェクトのエンドポイントへ送る。処理済みの PR には出さない
 

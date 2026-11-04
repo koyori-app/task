@@ -9,7 +9,7 @@ import { fetchClient } from '@/lib/api-vue-query';
 import { httpUrl } from '@/lib/task-activity';
 
 /**
- * リポジトリセクションの Branches 一覧（docs/features/tasks/9.github-tasks.md §9）。
+ * リポジトリセクションの Branches 一覧（docs/dev/features/tasks/github-tasks/index.md の「画面」）。
  * ブランチ名の `KEY-N` で結ばれたブランチを並べ、リンクを外せる。
  */
 const FORGE_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge' as const;

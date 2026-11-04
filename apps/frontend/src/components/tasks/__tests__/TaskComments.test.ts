@@ -1,4 +1,4 @@
-// テストケースの一覧（docs/features/account-settings.md から移した）
+// テストケースの一覧（docs/dev/features/account-settings.md から移した）
 // - `profileHref` を渡したときだけ投稿者がプロフィールへのリンクになること
 
 import { afterEach, describe, expect, it, vi } from 'vitest';

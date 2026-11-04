@@ -1,4 +1,4 @@
-// テストケースの一覧（docs/features/drive.md から移した）
+// テストケースの一覧（docs/dev/features/drive/index.md から移した）
 // - 本文更新・配信、空本文、MIME、クォータ、並行更新、認可・共有トークン、配信ヘッダー、ETag・`If-Match` / `If-None-Match`
 //
 // Drive の行を作るテストは、backfill のテスト（`drive_project_id_backfill_integration`）が

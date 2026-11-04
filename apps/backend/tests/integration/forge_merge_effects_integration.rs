@@ -1,7 +1,7 @@
-//! マージ時の自動完了と確認済み操作（TASK-289、docs/features/tasks/9.github-tasks.md
-//! §5「マージ時副作用の独立処理」/ §8 `merge-effects/acknowledge` / §11）。
+//! マージ時の自動完了と確認済み操作（TASK-289、docs/dev/features/tasks/github-tasks/webhook.md
+//! の「マージ時副作用」、docs/dev/features/tasks/github-tasks/index.md の `merge-effects/acknowledge`）。
 
-// 受け入れ条件（docs/features/tasks/github-tasks/webhook.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// 受け入れ条件（docs/dev/features/tasks/github-tasks/webhook.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
 // - `Closed { merged: true }`: イベントの本文から作ったマージ時点集合と、`created_at <= merged_at` の `manual` 行の `bool_or(closes)` が true のタスクだけ完了する / 既に完了のタスクは遷移しない / 全参照が `closes = false` のタスクは触らない / マージ後に追加した `manual` 行は過去のマージで完了させない
 // - マージ副作用の冪等性: 同じ PR の `Closed { merged: true }` を再送しても、並行に呼んでも（apply_merge_effects を tokio::join! で 2 本）、対象タスクの遷移は 1 回だけ
 // - 未適用表示: 連携前にマージ済みの PR を初めて観測すると `state = merged` にはなるがタスク完了は実行せず、`merge_effects_processed_at = NULL` のままになる

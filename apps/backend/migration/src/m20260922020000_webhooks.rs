@@ -6,7 +6,7 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // 外部向け Webhook（docs/features/tasks/10.webhooks.md）。
+        // 外部向け Webhook（docs/dev/features/tasks/10.webhooks.md）。
         // secret は平文で持たない（auth_core::crypto::encrypt_token で暗号化した値）
         manager
             .get_connection()

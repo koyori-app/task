@@ -1,7 +1,7 @@
 //! コミットメッセージ・PR タイトル・ブランチ名からの `KEY-N` 抽出と解決
-//! （docs/features/tasks/9.github-tasks.md §4）。
+//! （docs/dev/features/tasks/github-tasks/index.md の「タスクへの自動リンク」）。
 
-// 受け入れ条件（docs/features/tasks/github-tasks/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// 受け入れ条件（docs/dev/features/tasks/github-tasks/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
 // - `TASK-140` / `task-140` / `[TASK-140]` / `feat/TASK-140-foo` / 複数キー / 別プロジェクト混在
 // - `TASK-1400` が `TASK-140` に誤マッチしない
 // - `SHA256-1` のような偽陽性の扱い（KEY として解決できなければ捨てるだけなので許容。解決時に捨てる部分は forge_commit_links_integration.rs の push_links_each_reference_within_the_tenant）

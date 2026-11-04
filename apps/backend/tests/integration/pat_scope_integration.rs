@@ -25,7 +25,7 @@ use uuid::Uuid;
 
 /// PAT のスコープ判定（`api` / `read_api` / 動詞ごとのスコープ）の固定。
 ///
-/// ここで固定する契約（apps/backend/docs/personal-access-tokens-authz.md の含意の規則）:
+/// ここで固定する契約（docs/dev/design/personal-access-tokens-authz.md の含意の規則）:
 /// 1. `api` は tenant 層の口（テナント取得 = `read:tenant`）も project 層の読み書きも通る
 /// 2. `read_api` は読みの口だけ通り、書き込みの口（プロジェクト作成 = `write:project`）は 403
 /// 3. `read:tenant` だけの鍵は tenant 層の読みを通り、project 層の口は 403

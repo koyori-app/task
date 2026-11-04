@@ -1,7 +1,7 @@
-//! PR のコミット集合の同期とブランチのリンク（TASK-291、docs/features/tasks/9.github-tasks.md
-//! §5「PR のコミット集合の同期」/ `BranchCreated` / `BranchDeleted`、§8 の `DELETE .../forge/branches/{link_id}`）。
+//! PR のコミット集合の同期とブランチのリンク（TASK-291、docs/dev/features/tasks/github-tasks/webhook.md
+//! の「PR のコミット集合の同期」/ `BranchCreated` / `BranchDeleted`、docs/dev/features/tasks/github-tasks/index.md の `DELETE .../forge/branches/{link_id}`）。
 
-// 受け入れ条件（docs/features/tasks/github-tasks/webhook.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// 受け入れ条件（docs/dev/features/tasks/github-tasks/webhook.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
 // - 配送順の逆転: 古い `Synchronize` でもコミット一覧 API は呼ばれ、コミット集合だけは現在一覧に同期する
 // - コミット集合の同期: `Opened` だけで（`Push` を受けずに）PR のコミットが中間表に入る / force-push で一覧から外れたコミットは中間表の行が消え、`forge_commits` と `forge_commit_links` とアクティビティは残る / 同じコミットが 2 つの PR のコミット一覧に出たとき両方の PR に結ばれ、片方の同期が他方の行を消さない
 // - 取得の不完全さ: モックは既定ページサイズ（30）と `per_page` の最大（100）の両方を越える件数を返す（境界ちょうどにするとページングの欠落を隠す）。全ページを読み切ると中間表が一覧と一致し `commits_complete = true` になる / 2 ページ目が 5xx を返したときは 1 ページ目に無い既存の行が消えず `commits_complete = false` のまま / ホストの上限（250 件）に達した一覧では削除を行わない / `commits_complete = false` の状態から次の同期で読み切れたら削除まで進む

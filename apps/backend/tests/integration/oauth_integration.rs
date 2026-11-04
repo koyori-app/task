@@ -1,4 +1,4 @@
-// テストケースの一覧（docs/features/account-settings.md と docs/features/auth-2fa-oauth-followup.md から移した）
+// テストケースの一覧（docs/dev/features/account-settings.md と docs/dev/features/auth/2fa.md から移した）
 // - `has_password` の反転、初回パスワード設定が一度きりであること、パスワードを得たあとに最後の連携を解除できること
 // - `oauth_callback_requires_2fa_setup_for_every_membership_form`: リダイレクト先と、半認証のあいだ `/v1/auth/me` が 403 になること
 

@@ -537,7 +537,7 @@ async fn mention_notifies_tenant_owner_non_member() {
 // ---------------------------------------------------------------------------
 // PAT からの通知 API（TASK-225）。CLI は PAT で叩くので、視界を
 // 「PAT のテナントのプロジェクト ∩ allowed_project_ids」に絞れているかを固定する。
-// 規則は docs/features/tasks/5.notifications.md §4。
+// 規則は docs/dev/features/tasks/5.notifications.md の「API」。
 // ---------------------------------------------------------------------------
 
 /// 通知を 1 件直に挿す（どの経路で作られたかは視界の判定に関係しない）。
@@ -975,7 +975,7 @@ async fn pat_separates_task_and_review_notification_permissions() {
 }
 
 // ---------------------------------------------------------------------------
-// カーソル・catch-up・kind・Retention。規則は docs/features/tasks/5.notifications.md §4 / §1.2。
+// カーソル・catch-up・kind・Retention。規則は docs/dev/features/tasks/5.notifications.md の「API」と「保持期間」。
 // ---------------------------------------------------------------------------
 
 /// 作成時刻と種別を指定して通知を直に挿す。同時刻の行を作ってカーソルのタイブレーカーを試す。

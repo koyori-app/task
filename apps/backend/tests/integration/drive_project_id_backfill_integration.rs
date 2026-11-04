@@ -1,4 +1,4 @@
-// テストケースの一覧（docs/features/drive.md から移した）
+// テストケースの一覧（docs/dev/features/drive/index.md から移した）
 // - 深い階層・移動済みルート、冪等性、異なるプロジェクトや循環の検出
 
 use crate::common::{TestApp, insert_extra_project};

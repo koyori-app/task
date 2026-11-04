@@ -1,7 +1,7 @@
 //! pull_request webhook → PR とタスクのリンク、`GET /tasks/{id}/forge`
-//! （TASK-220、docs/features/tasks/9.github-tasks.md §5「PRイベント共通の前処理」/ §8）。
+//! （TASK-220、docs/dev/features/tasks/github-tasks/webhook.md の「PR イベント共通の前処理」と docs/dev/features/tasks/github-tasks/index.md の「API」）。
 
-// 受け入れ条件（docs/features/tasks/github-tasks/webhook.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// 受け入れ条件（docs/dev/features/tasks/github-tasks/webhook.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
 // - アクティビティの冪等: タイトルと本文の両方に `KEY-N` があっても 1 行
 // - `Closed { merged: true }` の初回観測: `Opened` を受信していない open PR に対し、最初に届いた `Closed` だけで PR 実体（`state` / `merged_at`）とタイトル由来のリンクが作成される
 // - 共通スナップショット: 各 action を `Opened` なしの最初のイベントとして受信しても、PR 行が作成または最新スナップショットで更新され、タイトルの `KEY-N` が直ちにリンクされる（`Synchronize` / `Closed { merged: false }` を含む）

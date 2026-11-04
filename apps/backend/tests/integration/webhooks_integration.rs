@@ -13,7 +13,7 @@ use tokio::sync::Notify;
 use wiremock::matchers::{header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-// 外部向け Webhook（TASK-227）の統合テスト。仕様は docs/features/tasks/10.webhooks.md。
+// 外部向け Webhook（TASK-227）の統合テスト。仕様は docs/dev/features/tasks/10.webhooks.md。
 
 const SECRET: &str = "0123456789abcdef-secret";
 

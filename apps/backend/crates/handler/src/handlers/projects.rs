@@ -195,7 +195,7 @@ pub async fn list_projects(
     auth.require_scope(Scope::ReadProject)?;
     // project-only の客分には、明示 member の project だけに絞って返す（公開 project は
     // 含めぬ）。frontend の project 解決（projectKey→UUID）がこの一覧に依存するため、
-    // 403 ではなく絞って開く（apps/backend/docs/tenant-project-authz.md）
+    // 403 ではなく絞って開く（docs/dev/design/tenant-project-authz.md）
     if let Some(guest_project_ids) = auth
         .ensure_tenant_access_or_guest_scope(&state, tenant_id)
         .await?

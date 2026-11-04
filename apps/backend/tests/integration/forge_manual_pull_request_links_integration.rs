@@ -1,6 +1,6 @@
-//! PR の手動リンク・解除（TASK-288、docs/features/tasks/9.github-tasks.md §8）。
+//! PR の手動リンク・解除（TASK-288、docs/dev/features/tasks/github-tasks/index.md の「API」）。
 
-// 受け入れ条件（docs/features/tasks/github-tasks/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// 受け入れ条件（docs/dev/features/tasks/github-tasks/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
 // - アクティビティの冪等: リンクを外してから本文の `KEY-N` で再リンクしても `forge_pull_request_linked` は増えない
 // - 手動リンクの共存: アクティビティは `(pull_request_id, task_id)` として初回の 1 回だけ積まれる
 // - API: 手動リンクの 201 / 連携なし 409 / メンバー外 403 / 他プロジェクトのタスク 404

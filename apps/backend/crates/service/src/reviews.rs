@@ -1,9 +1,9 @@
 //! レビューラウンドと指摘の業務ロジック。
 //!
-//! 仕様は `docs/features/review-findings.md`。ここに置くのは
+//! 仕様は `docs/dev/features/review-findings/index.md`。ここに置くのは
 //! 「ラウンドの採番」「状態遷移の規則」「繰り延べ先タスクの作成・クローズ」。
 
-// 受け入れ条件（docs/features/review-findings/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// 受け入れ条件（docs/dev/features/review-findings/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
 // - 要約コメントの鮮度: 投稿時点の PR head が最新ラウンドの `head_sha` と違えば「マージ可」と書かれない（対照: 一致すれば可）。head が取れないときも「マージ可」と書かれない
 // - 代行の痕跡: 要約コメントの本文に「オーナー代行での棄却 n 件」が出る
 // - 拒否系: `rejected` の主体はその指摘を出した本人に限る
@@ -1078,7 +1078,7 @@ pub async fn reviewed_pull_requests<C: ConnectionTrait>(
     Ok(out)
 }
 
-/// ラウンドを作る PR の行を `state = unknown` で用意する（docs/features/tasks/9.github-tasks.md §6）。
+/// ラウンドを作る PR の行を `state = unknown` で用意する（docs/dev/features/tasks/github-tasks/index.md の「CLI との合流」）。
 ///
 /// 既に行があれば触らない。後から届いた webhook が同じ行へ合流する。
 /// 連携の無いプロジェクトのラウンドはリポジトリが決まらないので作らない。

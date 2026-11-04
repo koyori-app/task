@@ -1,4 +1,4 @@
-// テストケースの一覧（docs/features/drive.md から移した）
+// テストケースの一覧（docs/dev/features/drive/index.md から移した）
 // - 複数ファイルの使用量集計
 //
 // Drive の行を作るテストは、backfill のテスト（`drive_project_id_backfill_integration`）が
