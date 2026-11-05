@@ -1,5 +1,5 @@
 //! push で届いたコミットをタスクへリンクし、アクティビティに積む
-//! （docs/features/tasks/9.github-tasks.md §5 の `Push`）。
+//! （docs/dev/features/tasks/github-tasks/webhook.md の `Push`）。
 //!
 //! 同じ push を再送・再試行で何度処理しても行が増えないよう、実体とリンクは UPSERT、
 //! アクティビティは `dedupe_key` の UNIQUE で 1 回だけ積む。途中で失敗しても

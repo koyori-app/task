@@ -1,7 +1,7 @@
 use sea_orm_migration::prelude::*;
 
 /// 通知一覧のカーソル（`created_at DESC, id DESC`）の並び順の索引
-/// （`docs/features/tasks/5.notifications.md`）。
+/// （`docs/dev/features/tasks/5.notifications.md`）。
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 

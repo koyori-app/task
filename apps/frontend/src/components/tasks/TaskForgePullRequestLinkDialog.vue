@@ -10,7 +10,7 @@ import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import { apiClient } from '@/lib/api-vue-query';
 
 /**
- * タスクに PR を手でリンクするダイアログ（docs/features/tasks/9.github-tasks.md §8 / §9）。
+ * タスクに PR を手でリンクするダイアログ（docs/dev/features/tasks/github-tasks/index.md の「API」と「画面」）。
  * リポジトリはプロジェクトの連携先で決まるので、表示するだけで選ばせない。
  * 開くたびに `v-if` でマウントし直すこと（フォームの初期化のため）。
  */

@@ -1,5 +1,5 @@
 // build した物が Chromium で install の条件を満たすかを機械で確かめる（TASK-297）。
-// 手順は docs/frontend/pwa.md の「確かめ方」。
+// 手順は docs/dev/frontend/pwa.md の「確かめ方」。
 //
 //   node scripts/pwa-installability.mjs http://127.0.0.1:<port>/
 //

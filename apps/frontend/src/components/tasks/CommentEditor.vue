@@ -19,7 +19,7 @@ import {
  * 印を `@今の名` の札（widget）に置き換えて描き、札は一塊として扱う（caret は札の中に入らず、
  * Backspace / Delete は札を丸ごと消す）。送る本文は文書そのものなので、送る時の変換は無い。
  * コピー・切り取りは、`text/plain` に `@今の名`、`text/html` に札の要素（id と版を持つ）を載せ、貼り付けでは
- * その印が在る時だけ `<@id>` に戻す（形式: docs/features/tasks/4.collaboration-clipboard.md）。
+ * その印が在る時だけ `<@id>` に戻す（形式: docs/dev/features/tasks/4.collaboration-clipboard.md）。
  *
  * `@` を打つと候補（`candidates`。担当者候補と同じ集合）が出る。選ぶと、打った `@検索語` が印に替わる。
  * 手で打った `@name`（候補から選ばなかった物）は素の文字のままで、メンションにはならない。

@@ -24285,6 +24285,15 @@
             }
           },
           {
+            "name": "timezone",
+            "in": "query",
+            "description": "IANA timezone used for \"today\" / \"week\". Defaults to UTC.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,

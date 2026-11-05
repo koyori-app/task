@@ -1,7 +1,7 @@
 //! 終了コード付きのエラー。
 //!
 //! CLI はマージ前ゲート（`review summary`）と CI から使われるので、失敗の理由を
-//! 終了コードで区別できることが仕様の一部になっている（`docs/features/review-findings.md` §6）。
+//! 終了コードで区別できることが仕様の一部になっている（`docs/dev/features/review-findings/index.md` の「CLI」）。
 
 use serde_json::json;
 

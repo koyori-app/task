@@ -1,6 +1,6 @@
 /**
  * 招待の承諾画面（`/invitations/accept`）。
- * 規則は apps/backend/docs/tenant-project-authz.md の「招待」。
+ * 規則は docs/dev/design/tenant-project-authz.md の「招待」。
  */
 
 /** サインイン後にこの画面へ戻すための印（`lib/one-time-notice.ts`）。値は戻り先のパス。 */

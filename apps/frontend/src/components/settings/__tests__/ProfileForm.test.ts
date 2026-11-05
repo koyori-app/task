@@ -1,3 +1,10 @@
+// テストケースの一覧（docs/dev/features/account-settings.md から移した）
+// - 空欄が `clear_avatar_url` になること、URL の送信、前後の空白を取り除くこと
+// - 不正スキームとユーザー名長を送信前に止めること、失敗時（400 / それ以外）の表示
+// - 保存後に編集を再開すると保存済み表示が消えること
+// - 画像アップロードの成功で表示・URL 欄・認証ストアが更新されること、その後の保存で `avatar_url` を送り直さないこと
+// - 2 MiB 超を送る前に止めること（ちょうどは送る）、413 / 400 / それ以外の表示
+
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';

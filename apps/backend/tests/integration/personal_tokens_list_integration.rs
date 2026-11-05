@@ -1,3 +1,6 @@
+// テストケースの一覧（docs/dev/features/account-settings.md から移した）
+// - 一覧が自分の有効なトークンだけを名前順で返すこと、平文・ハッシュを含まないこと、取り消しで一覧から消えること、空一覧、未ログイン拒否、Bearer 拒否
+
 use crate::common::{TestApp, insert_tenant};
 use axum::http::StatusCode;
 use entity::scopes::Scope;

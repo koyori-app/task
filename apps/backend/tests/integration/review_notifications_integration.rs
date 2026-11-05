@@ -8,7 +8,7 @@ use sea_orm::{
 // レビュー通知（TASK-224）の統合テスト。
 //
 // 「誰に届いて、誰に届かないか」を固定する。受信者の規則は
-// docs/features/tasks/5.notifications.md §3 の「レビュー通知の受信者」。
+// docs/dev/features/tasks/5.notifications.md の「レビュー通知の受信者」。
 
 struct Fixture {
     app: TestApp,

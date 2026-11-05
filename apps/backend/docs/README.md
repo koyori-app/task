@@ -1,15 +1,6 @@
 # Backend ドキュメント
 
-バックエンドの設計・要件ドキュメント。
-
-| ドキュメント | 内容 | ステータス |
-|-------------|------|-----------|
-| [tenant-bots.md](./tenant-bots.md) | テナント BOT の認証、管理 API、メールと履歴 | 実装済み |
-| [tenant-project-authz.md](./tenant-project-authz.md) | テナント / プロジェクト認可（`tenant_members`、メール招待、公開規則、不変条件） | 実装済み |
-| [personal-access-tokens-authz.md](./personal-access-tokens-authz.md) | Bearer 認証・認可（PAT の 2 層モデルとテナント/プロジェクト束縛、Koyori Desktop の Device Token） | 未実装 |
-| [project-events.md](./project-events.md) | タスク変更のリアルタイム通知（SSE の `/events`、Redis pub/sub、認可と発行の契機） | 実装済み |
-| [redis-trust-boundary.md](./redis-trust-boundary.md) | Redis 信頼境界（セッション・WebAuthn チャレンジ） | 運用ガイド |
-| [task-similarity-search.md](./task-similarity-search.md) | タスクの曖昧検索・類似タスク候補（pg_trgm による title の trigram 類似度、`GET /tasks/similar`） | 設計中 |
+設計の記録は [docs/dev/design/](../../../docs/dev/design/) に移った。
 
 ## 開発環境セットアップ
 

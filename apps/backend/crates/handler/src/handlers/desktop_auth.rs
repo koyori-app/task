@@ -1,5 +1,5 @@
 //! Koyori Desktop の認証（Authorization Code + PKCE、loopback）と端末管理。
-//! 規則は apps/backend/docs/personal-access-tokens-authz.md の「Desktop 認証」。
+//! 規則は docs/dev/design/personal-access-tokens-authz.md の「Desktop 認証」。
 //! code / token / code_verifier はログに出さない。
 
 use axum::{

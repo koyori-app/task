@@ -1,3 +1,4 @@
+// 表を渡す描画が必ずテナントも渡すことをソースから確認する
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

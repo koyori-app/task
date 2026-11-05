@@ -1,4 +1,4 @@
-//! プロジェクトのイベント（Redis pub/sub）。規則は apps/backend/docs/project-events.md。
+//! プロジェクトのイベント（Redis pub/sub）。規則は docs/dev/design/project-events.md。
 
 use std::future::ready;
 

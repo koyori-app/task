@@ -9,6 +9,7 @@ pub mod auth;
 pub mod avatar;
 pub mod bootstrap_admin;
 pub mod custom_fields;
+pub mod deadline_filter;
 pub mod desktop_auth;
 pub mod drive;
 pub mod drive_task_links;

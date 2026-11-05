@@ -289,7 +289,7 @@ async fn verify_project_in_tenant(
 ///
 /// project にだけ参加しテナントに参加しない客分（project-only guest）は、
 /// 名指しされたプロジェクトの中だけ通る。名指しの無いテナント全体の口は従来どおり 403
-/// （apps/backend/docs/tenant-project-authz.md の「所属の 3 層」）。
+/// （docs/dev/design/tenant-project-authz.md の「継承と明示」）。
 /// 一覧系 2 口（プロジェクト一覧・My Tasks）の客分への絞り込み開放は
 /// `ensure_tenant_access_or_guest_scope` が別途担う。
 ///
@@ -311,7 +311,7 @@ async fn has_tenant_access(
 }
 
 /// テナントが 2FA を強制していれば、利用者が 2FA を満たすかを確かめる
-/// （docs/features/auth-2fa.md §9）。強制していないテナントでは DB を引かない。
+/// （docs/dev/features/auth/2fa.md の「リクエストごとの判定」）。強制していないテナントでは DB を引かない。
 ///
 /// BOT は強制の対象から外す。BOT は TOTP もパスキーも持てず（migration の制約と、登録が人の
 /// セッション限りであるため）、セッションにも入れない。2FA は人の対話のサインインを守る物で、

@@ -1,5 +1,5 @@
 //! テナントの 2FA 強制（`tenants.require_2fa`）は、強制前から持っている資格情報にも及ぶ。
-//! 規則は docs/features/auth-2fa.md の「テナント強制ポリシー」。
+//! 規則は docs/dev/features/auth/2fa.md の「テナントの強制」。
 //!
 //! 修正前はログイン時（`establish_login_session`）にしか判定が無く、強制前に得た
 //! 本認証セッション・PAT・Device Token で 2FA 未設定の利用者がテナントを読み書きできた。

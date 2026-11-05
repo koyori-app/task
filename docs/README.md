@@ -10,11 +10,13 @@ pnpm dev                  # http://localhost:4321/
 pnpm build && pnpm preview # 検索は build の索引を読むので preview で確かめる
 ```
 
-- ページは `features/` `frontend/` `development/` と `index.md`・`breadcrumbs.md`（`src/content.config.ts` の `pattern`）。階層がそのまま URL とサイドバーになる
+- ページは `dev/` の下と `index.md`（`src/content.config.ts` の `pattern`）。階層がそのまま URL とサイドバーになる
 - `title` は必須で、本文に `# 見出し` は書かない（タイトルが H1 として出る）
-- `features/tasks/N.name.md` は番号を URL に出さないよう `slug` を、並びのために `sidebar.order` を書く
+- `dev/features/tasks/N.name.md` は番号を URL に出さないよう `slug` を、並びのために `sidebar.order` を書く
 - 図は ` ```mermaid ` で書く（`src/lib/mermaid-fence.ts` が描画用に変換する）。Mermaid で表せない図は `public/diagrams/` に SVG を置く
-- サイト内リンクは `/features/drive` の形で書く（相対の `.md` は解決されない）。`apps/backend/docs/` はサイト外なので GitHub の URL にする
+- サイト内リンクは `/dev/features/drive` の形で書く（相対の `.md` は解決されない）
+- 旧 URL からの転送は `public/_redirects` に書く
+- 書き方の規則は `STYLE.md`、新しいページの雛形は `_template-spec.md`（仕様）と `_template-guide.md`（手順）。`pnpm lint:style` で機械的に見られる規則を検査する（CI の `docs-lint` と同じ）
 
 ## 公開
 

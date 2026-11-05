@@ -33,7 +33,7 @@ async fn user_has_active_2fa(db: &DatabaseConnection, user_id: Uuid) -> Result<b
 }
 
 /// テナントの 2FA 強制（`require_2fa`）を満たすか。TOTP が有効か、パスキーを登録済みなら満たす
-/// （パスキー自体が MFA。docs/features/auth-2fa.md §9）。
+/// （パスキー自体が MFA。docs/dev/features/auth/2fa.md の「テナントの強制」）。
 /// テナントの所属判定と強制の有効化で使うので、handler の `AppError` で返す。
 pub async fn user_satisfies_2fa(db: &DatabaseConnection, user_id: Uuid) -> Result<bool, AppError> {
     if user_has_active_2fa(db, user_id)
@@ -80,7 +80,7 @@ pub async fn user_in_require_2fa_tenant(
     }
     // project-only の客分として関わるテナントも対象に含める。残った project_members の
     // 行が実アクセス権（客分）になった以上、ここから漏れると require_2fa テナントの
-    // project を 2FA 無しで読み書きできてしまう（docs/features/auth-2fa.md）。
+    // project を 2FA 無しで読み書きできてしまう（docs/dev/features/auth/2fa.md）。
     // 客分テナントの列挙は access::guest_tenant_ids を再利用する（同じ SQL を増やさない）
     let guest_ids = crate::access::guest_tenant_ids(db, user_id)
         .await

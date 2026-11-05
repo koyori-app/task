@@ -1,3 +1,10 @@
+// 山の表示と手動の山崩し（docs/dev/features/tasks/12.workload.md）のテスト。次を確かめる。
+// - 超過の棒が警告色になる
+// - 絞り込み後も山が変わらない
+// - 点はドラッグできない
+// - 締切より後へドロップすると送信しない
+// - 403 で元に戻る
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';

@@ -380,7 +380,7 @@ pub async fn remove_member(
 
     // 除名が消すのはテナント所属（継承）だけ。`project_members` の行はプロジェクト単位の
     // 明示 ACE であり、NTFS / NFSv4 の ACL と同じく継承元と独立して残る
-    // （apps/backend/docs/tenant-project-authz.md の「継承と明示」）。残った行の持ち主は
+    // （docs/dev/design/tenant-project-authz.md の「継承と明示」）。残った行の持ち主は
     // project-only の客分になり、名指しされたプロジェクトの中だけ引き続き入れる。
     // 副次的に、その人しか指定されていなかったプロジェクトがメンバー 0 人になって
     // 「メンバー未指定＝テナント全体に開放」へ戻ることも防ぎ、再参加時は元の割り当てが戻る。

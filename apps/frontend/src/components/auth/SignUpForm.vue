@@ -8,6 +8,7 @@ import PasswordStrengthBar from '@/components/auth/PasswordStrengthBar.vue';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import { Button, Field, Input, PasswordInput } from '@koyori-app/ui-vue';
 import { usePasswordStrength } from '@/composables/usePasswordStrength';
+import { useRedirectAfter, withRedirectAfter } from '@/composables/useRedirectAfter';
 import { useRegisterMutation } from '@/lib/api-vue-query';
 import { arkMessage } from '@/lib/auth-validation';
 
@@ -17,6 +18,7 @@ const schema = type({
   password: 'string >= 8',
 });
 
+const redirectAfter = useRedirectAfter();
 const registerMutation = useRegisterMutation();
 const submitError = ref<string | null>(null);
 const registeredEmail = ref<string | null>(null);
@@ -50,7 +52,7 @@ const form = useForm({
   <EmailNotVerified
     v-if="registeredEmail"
     :email="registeredEmail"
-    back-href="/signin"
+    :back-href="withRedirectAfter('/signin', redirectAfter)"
     reset-href="/auth/reset-password"
   />
   <div v-else class="flex flex-col gap-6">
@@ -169,10 +171,17 @@ const form = useForm({
               />
             </template>
           </form.Subscribe>
-          <OAuthButtons redirect-after="/" error-redirect-after="/signup" />
+          <OAuthButtons
+            :redirect-after="redirectAfter"
+            :error-redirect-after="withRedirectAfter('/signup', redirectAfter)"
+          />
           <p class="text-muted-foreground text-center text-sm">
             すでにアカウントをお持ちですか？
-            <a href="/signin" class="underline underline-offset-4">サインイン</a>
+            <a
+              :href="withRedirectAfter('/signin', redirectAfter)"
+              class="underline underline-offset-4"
+              >サインイン</a
+            >
           </p>
         </div>
       </HydrationSafeForm>

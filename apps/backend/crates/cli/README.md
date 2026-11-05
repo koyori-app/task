@@ -3,7 +3,7 @@
 `task` コマンド。Rust の単一バイナリで、実行にランタイムの用意は要らない。
 
 主なユースケースは AI レビュワーと CI からの `task review submit` / `task review summary`
-（マージ前ゲート）。コマンドの仕様は `docs/features/review-findings.md` §6 が正。
+（マージ前ゲート）。コマンドの仕様は `docs/dev/features/review-findings/index.md` の「CLI」が正。
 
 ## 導入
 
@@ -155,7 +155,7 @@ task tasks update TASK-181 --clear-sprint --archive
 ### PR との連携
 
 タスクに結ばれた PR を一覧し、PR 番号で手動リンク・解除する
-（仕様は `docs/features/tasks/9.github-tasks.md` §8）。
+（仕様は `docs/dev/features/tasks/github-tasks/index.md` の「API」）。
 
 ```bash
 task tasks pr list TASK-181                 # 連携リポジトリと、リンク済み PR（番号・状態・closes・リンク元・タイトル）

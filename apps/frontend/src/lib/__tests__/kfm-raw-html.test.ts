@@ -1,3 +1,4 @@
+// 生の HTML を文字で出すこと（入力ごとの出力、tag と属性が増えないこと）
 import type { Paragraph, Root } from 'mdast';
 import remarkParse from 'remark-parse';
 import { unified } from 'unified';

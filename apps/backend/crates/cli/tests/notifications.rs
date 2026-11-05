@@ -1,4 +1,4 @@
-//! 通知のコマンド。仕様は `docs/features/tasks/5.notifications.md` §4。
+//! 通知のコマンド。仕様は `docs/dev/features/tasks/5.notifications.md` の「API」。
 //!
 //! 送る内容（絞り込みの query、設定の PUT 本文）と、送る前に弾く入力を軸に確かめる。
 
