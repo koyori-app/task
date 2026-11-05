@@ -1,3 +1,18 @@
+// テストケースの一覧と置き場所（docs/dev/design/personal-access-tokens-authz.md から移した）:
+// - `ScopeList::has_scope`: `api` は全スコープを通過、不足スコープは 403（entity::scopes の tests とこのファイル）
+// - `ScopeList::has_scope`: `read_api` は read の全スコープを通過し、write は通過しない（両向きを固定）
+//   （entity::scopes の tests）
+// - `ScopeList::has_scope`: `write:<資源>` は同じ資源の `read:<資源>` を通過し、逆向きは通過しない。
+//   対はスコープ名から導いて全件を回す（entity::scopes の tests）
+// - 移行: 旧 `admin:tenant` は `api` に、旧 `admin:project` は project 層の `write:*` になり、
+//   テナント層のエンドポイントを通らない（このファイル）
+// - `require_scope`: Session は常に OK、PAT は不足で 403（このファイル）
+// - PAT が別テナントの path を呼ぶと 403（drive_file_content_integration.rs）
+// - `allowed_project_ids` 外の project は 403、`NULL` ならテナント内任意 project は OK（このファイル）
+// - 失効 / 期限切れ / ハッシュ不一致は 401（personal_token_identity_integration.rs と
+//   pat_tenant_membership_integration.rs）
+// - PAT 作成: 他人の `tenant_id` は 403（personal_tokens_create_auth_integration.rs）
+// - Device Token は desktop_auth_integration.rs の冒頭に書く
 use crate::common::TestApp;
 use axum::http::StatusCode;
 use entity::scopes::Scope;
@@ -10,7 +25,7 @@ use uuid::Uuid;
 
 /// PAT のスコープ判定（`api` / `read_api` / 動詞ごとのスコープ）の固定。
 ///
-/// ここで固定する契約（apps/backend/docs/personal-access-tokens-authz.md の含意の規則）:
+/// ここで固定する契約（docs/dev/design/personal-access-tokens-authz.md の含意の規則）:
 /// 1. `api` は tenant 層の口（テナント取得 = `read:tenant`）も project 層の読み書きも通る
 /// 2. `read_api` は読みの口だけ通り、書き込みの口（プロジェクト作成 = `write:project`）は 403
 /// 3. `read:tenant` だけの鍵は tenant 層の読みを通り、project 層の口は 403

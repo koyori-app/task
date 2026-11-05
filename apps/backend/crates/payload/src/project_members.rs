@@ -4,9 +4,10 @@ use utoipa::ToSchema;
 use validator::Validate;
 
 use crate::or_unknown::OrUnknown;
+use crate::tenant_members::OrgProfile;
 use crate::users::UserSummary;
 use entity::project_members::{self, ProjectRole};
-use entity::{tenant_members, users};
+use entity::users;
 
 /// 担当者候補。`UserSummary` に、このテナントでの部署・チームを足したもの。
 ///
@@ -19,22 +20,22 @@ pub struct AssignableUserResponse {
     pub username: String,
     #[schema(nullable)]
     pub avatar_url: Option<String>,
-    /// このテナントでの部署。未設定・所属行の無いオーナー・読めない主体では null
+    /// このテナントでの部署。未設定・読めない主体では null
     #[schema(nullable)]
     pub department: Option<String>,
-    /// このテナントでのチーム。未設定・所属行の無いオーナー・読めない主体では null
+    /// このテナントでのチーム。未設定・読めない主体では null
     #[schema(nullable)]
     pub team: Option<String>,
 }
 
 impl AssignableUserResponse {
-    pub fn from_parts(user: users::Model, member: Option<&tenant_members::Model>) -> Self {
+    pub fn from_parts(user: users::Model, org: OrgProfile) -> Self {
         Self {
             id: user.id,
             username: user.username,
             avatar_url: user.avatar_url,
-            department: member.and_then(|m| m.department.clone()),
-            team: member.and_then(|m| m.team.clone()),
+            department: org.department,
+            team: org.team,
         }
     }
 }

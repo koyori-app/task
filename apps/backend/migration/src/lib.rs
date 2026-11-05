@@ -25,6 +25,9 @@ mod m20261017010000_github_issue_links_state;
 mod m20261017020000_forge_branch_links;
 mod m20261020000000_tasks_title_trgm;
 mod m20261021000000_tenant_members_org_profile;
+mod m20261104000000_tenants_owner_org_profile;
+mod m20261105000000_reactions;
+mod m20261105010000_projects_key_unique_per_tenant;
 
 pub struct Migrator;
 
@@ -57,6 +60,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20261017020000_forge_branch_links::Migration),
             Box::new(m20261020000000_tasks_title_trgm::Migration),
             Box::new(m20261021000000_tenant_members_org_profile::Migration),
+            Box::new(m20261104000000_tenants_owner_org_profile::Migration),
+            Box::new(m20261105000000_reactions::Migration),
+            Box::new(m20261105010000_projects_key_unique_per_tenant::Migration),
         ]
     }
 }

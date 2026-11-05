@@ -1,3 +1,10 @@
+//! schedule API の統合テスト。
+//!
+//! 山積み（docs/dev/features/tasks/12.workload.md）のために次を確かめる。
+//! - 2 人の作業記録を持つタスクの `logged_minutes` が合計になる
+//! - 記録の無いタスクの `logged_minutes` が 0 である
+//! - 担当者でない人の記録も `logged_minutes` に含む
+
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicI32, Ordering};
 

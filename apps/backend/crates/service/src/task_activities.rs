@@ -29,7 +29,7 @@ pub async fn record_activity<C: ConnectionTrait>(
 }
 
 /// 連携由来の出来事を、同じ `dedupe_key` につき 1 回だけ積む
-/// （docs/features/tasks/9.github-tasks.md §2「アクティビティ」）。
+/// （docs/dev/features/tasks/github-tasks/index.md の「アクティビティ」）。
 ///
 /// 既存行を数えて判定しない。並行する 2 つの処理の事前確認はすれ違うが、UNIQUE はすれ違わない。
 pub async fn record_activity_once<C: ConnectionTrait>(
@@ -91,7 +91,7 @@ pub async fn task_label_entries<C: ConnectionTrait>(
 }
 
 /// 前後スナップショットの差分から label_added / label_removed を 1 ラベルにつき
-/// 1 件ずつ記録する（docs/features/tasks/4.collaboration.md の event_type 定義に対応）。
+/// 1 件ずつ記録する（docs/dev/features/tasks/4.collaboration.md の event_type 定義に対応）。
 /// 集合に変化が無ければ何も記録しない。
 pub async fn record_label_diff<C: ConnectionTrait>(
     db: &C,

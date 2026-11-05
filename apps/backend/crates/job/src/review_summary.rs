@@ -2,7 +2,7 @@
 //!
 //! ラウンドの起票時と指摘の状態遷移時に投入される。GitHub には
 //! マーカー付きのコメント 1 本だけを置き、以後は同じコメントを編集する
-//! （仕様 `docs/features/review-findings.md` §7）。
+//! （仕様 `docs/dev/features/review-findings/github-comment.md`）。
 //!
 //! 失敗はベストエフォート: 投稿・編集に失敗しても API 側の起票・遷移は
 //! 巻き戻さない。GitHub 連携の無いプロジェクトでは何もしない。

@@ -5,7 +5,7 @@ use sea_orm_migration::sea_orm::{ConnectionTrait, Statement};
 pub struct Migration;
 
 /// タスク検索の部分一致・表記ゆれ用に pg_trgm と title の trigram index を足す
-/// （apps/backend/docs/task-similarity-search.md §4）。
+/// （docs/dev/design/task-similarity-search.md の「DB」）。
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {

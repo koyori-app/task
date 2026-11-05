@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { usePageContext } from 'vike-vue/usePageContext';
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { Button } from '@koyori-app/ui-vue';
-import { useCreateDesktopAuthCodeMutation, useMeQuery } from '@/lib/api-vue-query';
 import {
-  DESKTOP_AUTHORIZE_RETURN,
-  desktopCallbackUrl,
-  parseDesktopAuthorizeQuery,
-} from '@/lib/desktop-authorize';
-import { markNotice } from '@/lib/one-time-notice';
+  isSessionRejected,
+  useCreateDesktopAuthCodeMutation,
+  useMeQuery,
+} from '@/lib/api-vue-query';
+import { currentLocationPath, signInUrl } from '@/composables/useRedirectAfter';
+import { desktopCallbackUrl, parseDesktopAuthorizeQuery } from '@/lib/desktop-authorize';
 
 // 認証ガードの外に置き（+Layout の isAuthPage）、未ログインならこの URL を覚えて
 // サインインへ送る。ガードに任せるとクエリが落ちて Desktop からやり直しになる
@@ -24,12 +24,15 @@ const createCode = useCreateDesktopAuthCodeMutation();
 const submitError = ref<string | null>(null);
 const done = ref(false);
 
+const meLoadFailed = computed(
+  () => meQuery.isError.value && !meQuery.data.value && !isSessionRejected(meQuery.error.value),
+);
+
 watch(
-  () => meQuery.isError.value && !meQuery.isFetching.value,
+  () => isSessionRejected(meQuery.error.value) && !meQuery.isFetching.value,
   (signedOut) => {
     if (!signedOut || !request) return;
-    markNotice(DESKTOP_AUTHORIZE_RETURN, `${window.location.pathname}${window.location.search}`);
-    window.location.assign('/signin');
+    window.location.assign(signInUrl(currentLocationPath()));
   },
   { immediate: true },
 );
@@ -58,7 +61,10 @@ async function approve() {
         <h1 class="text-xl font-bold">リンクが正しくありません</h1>
         <p class="text-muted-foreground text-sm">Koyori Desktop からやり直してください。</p>
       </template>
-      <p v-else-if="!meQuery.isSuccess.value" class="text-muted-foreground text-sm">読み込み中…</p>
+      <p v-else-if="meLoadFailed" class="text-sm" role="alert">
+        サーバーに接続できませんでした。時間をおいてやり直してください。
+      </p>
+      <p v-else-if="!meQuery.data.value" class="text-muted-foreground text-sm">読み込み中…</p>
       <p v-else-if="done" class="text-muted-foreground text-sm">
         Koyori Desktop に戻っています。このタブは閉じてかまいません。
       </p>

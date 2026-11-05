@@ -1,3 +1,8 @@
+// 似ているタスクのテストケース（docs/dev/design/task-similarity-search.md から移した）:
+// - 入力後に候補が描画される。空入力では問い合わせない
+// - 候補クリックで遷移（表示用 tenant ID の URL）してダイアログが閉じる
+// - 入力消去の後から旧応答が到着しても表示しない（1 ケース。閉じる・タスク切替は同じ key の仕組みなので重ねない）
+// - 取得失敗でも作成ボタンが押せる
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ref, nextTick } from 'vue';
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils';
@@ -50,7 +55,7 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
 }));
 
 import CreateTaskDialog from '../CreateTaskDialog.vue';
-import { pickerOption } from '@/components/__tests__/picker';
+import { pickerOption, pickerTrigger } from '@/components/__tests__/picker';
 
 const statuses = [
   {
@@ -161,6 +166,18 @@ function getDialog() {
   const dialog = document.body.querySelector('dialog');
   if (!dialog) throw new Error('dialog not found');
   return dialog;
+}
+
+function findButton(label: string) {
+  return [...document.body.querySelectorAll('button')].find(
+    (b) => b.textContent?.trim() === label || b.getAttribute('aria-label') === label,
+  );
+}
+
+function clickButton(label: string) {
+  const button = findButton(label);
+  if (!button) throw new Error(`button "${label}" not found`);
+  button.click();
 }
 
 /** Esc は dialog の cancel として届く */
@@ -343,8 +360,182 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
 
     pressEscape();
     await nextTick();
+    clickButton('破棄する');
+    await nextTick();
 
     expect(getTitleInput().value).toBe('');
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog discard confirmation', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  // 閉じた Dialog も DOM に残るので、ボタンの有無ではなく dialog の open で見る
+  const confirmOpen = () => !!findButton('破棄する')?.closest('dialog[open]');
+
+  const closers: [string, () => void][] = [
+    ['Esc', () => pressEscape()],
+    [
+      '背景クリック',
+      () => getDialog().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })),
+    ],
+    ['× ボタン', () => clickButton('閉じる')],
+    ['取り消す', () => clickButton('取り消す')],
+  ];
+
+  it.each(closers)('タイトルがあるとき %s は確認を出し、戻ると入力が残る', async (name, close) => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('書きかけ');
+
+    close();
+    await nextTick();
+    expect(confirmOpen(), name).toBe(true);
+    expect(wrapper.emitted('update:open')).toBeUndefined();
+
+    clickButton('戻る');
+    await nextTick();
+
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')).toBeUndefined();
+    expect(getTitleInput().value).toBe('書きかけ');
+    wrapper.unmount();
+  });
+
+  const estimateInput = () =>
+    document.body.querySelector<HTMLInputElement>('input[name="estimated_minutes"]')!;
+
+  // タイトル・説明が空でも、他の項目に入力があれば捨てる前に確認する
+  it.each(closers)(
+    '見積もりだけ入力して %s で閉じようとすると確認し、戻ると値が残る',
+    async (name, close) => {
+      const wrapper = mountDialog(queryClient);
+      await nextTick();
+      await new DOMWrapper(estimateInput()).setValue('90');
+
+      close();
+      await nextTick();
+      expect(confirmOpen(), name).toBe(true);
+      expect(wrapper.emitted('update:open')).toBeUndefined();
+
+      clickButton('戻る');
+      await nextTick();
+
+      expect(confirmOpen()).toBe(false);
+      expect(estimateInput().value).toBe('90');
+      wrapper.unmount();
+    },
+  );
+
+  it('優先度だけ変えても確認し、破棄すると閉じる', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    pickerOption(pickerTrigger(document.body, '優先度'), '高').click();
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(true);
+
+    clickButton('破棄する');
+    await nextTick();
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it('ラベルだけ選んでも確認する', async () => {
+    const wrapper = mountDialog(queryClient, { labels });
+    await nextTick();
+    document.body.querySelector<HTMLButtonElement>('button[aria-label^="ラベル"]')!.click();
+    await nextTick();
+    menuItem('bug').click();
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('説明だけでも確認を出す', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(document.body.querySelector('textarea') as HTMLTextAreaElement).setValue(
+      '説明',
+    );
+
+    pressEscape();
+    await nextTick();
+
+    expect(confirmOpen()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('入力が無ければ確認せずに閉じる', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it('initialTitle のままなら確認せずに閉じ、書き換えたら確認する', async () => {
+    const wrapper = mountDialog(queryClient, { initialTitle: '選択範囲' });
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+
+    document.body.innerHTML = '';
+    const second = mountDialog(queryClient, { initialTitle: '選択範囲' });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('選択範囲に追記');
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(true);
+    second.unmount();
+  });
+
+  it('日本語入力の変換中の Esc は既定動作を止めて閉じさせない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    const composing = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      isComposing: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    getTitleInput().dispatchEvent(composing);
+    expect(composing.defaultPrevented).toBe(true);
+
+    const plain = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    getTitleInput().dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(false);
     wrapper.unmount();
   });
 });
@@ -1166,11 +1357,13 @@ describe('CreateTaskDialog similar tasks', () => {
     wrapper.unmount();
   });
 
-  it('候補を押すと表示用のテナント ID の詳細へ遷移し、ダイアログを閉じる', async () => {
+  it('候補を押すと別タブで詳細を開き、ダイアログも入力も残す', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => json({ tasks: [similarHit] })),
     );
+    const open = vi.fn();
+    vi.stubGlobal('open', open);
     const wrapper = mountDialog(queryClient);
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('ログイン画面');
@@ -1184,8 +1377,10 @@ describe('CreateTaskDialog similar tasks', () => {
     link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
     await nextTick();
 
-    expect(navigate).toHaveBeenCalledWith('/acme/projects/PROJ/tasks/PROJ-7');
-    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    expect(open).toHaveBeenCalledWith('/acme/projects/PROJ/tasks/PROJ-7', '_blank', 'noopener');
+    expect(navigate).not.toHaveBeenCalled();
+    expect(wrapper.emitted('update:open')).toBeUndefined();
+    expect(getTitleInput().value).toBe('ログイン画面');
     wrapper.unmount();
   });
 

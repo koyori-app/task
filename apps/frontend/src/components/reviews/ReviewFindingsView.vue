@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadErrorState from '@/components/LoadErrorState.vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import {
   PhCaretLeft,
@@ -8,7 +9,7 @@ import {
   PhWarningCircle,
 } from '@phosphor-icons/vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Button, Field, Input, Picker } from '@koyori-app/ui-vue';
+import { Button, ConfirmDialog, Field, Input, Picker } from '@koyori-app/ui-vue';
 import ReviewFindingBody from '@/components/reviews/ReviewFindingBody.vue';
 import ReviewRoundComposer from '@/components/reviews/ReviewRoundComposer.vue';
 import {
@@ -89,6 +90,9 @@ const mineOnly = ref(initialUrlState.mine);
 const prPage = ref<number | null>(initialUrlState.page);
 const urlWarnings = ref([...(props.initialUrlWarnings ?? [])]);
 const isComposerOpen = ref(false);
+/** 起票欄に捨てると失われる下書きがあるか（別 PR を選ぶ前に確認する） */
+const composerDirty = ref(false);
+const pendingPr = ref<number | null>(null);
 const transitionError = ref<string | null>(null);
 
 const prsQuery = useReviewedPullRequestsQuery(props.tenantId, props.projectId);
@@ -245,12 +249,32 @@ function applyUrlState(state: ReviewFindingsUrlState, warnings: readonly string[
   urlRailCheckPending = true;
   checkUrlRailState();
   isComposerOpen.value = false;
+  composerDirty.value = false;
   transitionError.value = null;
 }
 
+/** 下書きを抱えたまま「戻る」で離れようとした時の、復元待ちの URL 状態 */
+const pendingRestore = ref<{ state: ReviewFindingsUrlState; warnings: string[] } | null>(null);
+
 function restoreFromLocation() {
   const parsed = parseReviewFindingsUrlState(new URL(window.location.href).searchParams);
+  if (isComposerOpen.value && composerDirty.value) {
+    pendingRestore.value = { state: parsed.state, warnings: [...parsed.warnings] };
+    return;
+  }
   applyUrlState(parsed.state, parsed.warnings);
+}
+
+function confirmRestore() {
+  const next = pendingRestore.value;
+  pendingRestore.value = null;
+  if (next) applyUrlState(next.state, next.warnings);
+}
+
+/** やめる: ブラウザは既に前の URL へ動いているので、今の画面の URL を積み直して下書きを保つ */
+function cancelRestore() {
+  pendingRestore.value = null;
+  writeUrl('push');
 }
 
 onMounted(() => window.addEventListener('popstate', restoreFromLocation));
@@ -370,6 +394,22 @@ function setStateFilter(value: unknown) {
 }
 
 function selectPr(pr: number) {
+  if (pr === selectedPr.value) return;
+  if (isComposerOpen.value && composerDirty.value) {
+    pendingPr.value = pr;
+    return;
+  }
+  doSelectPr(pr);
+}
+
+function confirmSelectPr() {
+  const pr = pendingPr.value;
+  pendingPr.value = null;
+  if (pr != null) doSelectPr(pr);
+}
+
+function doSelectPr(pr: number) {
+  composerDirty.value = false;
   // 選んだ PR が載っているページを URL に残す（page が無いと、戻ったときにその PR のページへ飛ぶ）
   prPage.value = currentPage.value;
   selectedPr.value = pr;
@@ -500,6 +540,7 @@ async function transition(finding: ReviewFinding, to: FindingState) {
 
 async function onRoundCreated() {
   isComposerOpen.value = false;
+  composerDirty.value = false;
   await invalidateAll();
 }
 </script>
@@ -863,7 +904,8 @@ async function onRoundCreated() {
               :pr-number="selectedPr"
               :next-round="rounds.length + 1"
               @created="onRoundCreated"
-              @cancel="isComposerOpen = false"
+              @cancel="((isComposerOpen = false), (composerDirty = false))"
+              @dirty-change="(dirty: boolean) => (composerDirty = dirty)"
             />
 
             <p v-if="transitionError" role="alert" class="text-destructive text-sm">
@@ -906,6 +948,11 @@ async function onRoundCreated() {
             <p v-if="findingsQuery.isPending.value" class="text-muted-foreground text-sm">
               読み込み中…
             </p>
+            <LoadErrorState
+              v-else-if="findingsQuery.isError.value"
+              message="指摘の読み込みに失敗しました"
+              @retry="findingsQuery.refetch()"
+            />
             <p v-else-if="findings.length === 0" class="text-muted-foreground text-sm">
               {{ hasFilters ? '条件に合う指摘はありません。' : '指摘はありません。' }}
             </p>
@@ -1004,5 +1051,24 @@ async function onRoundCreated() {
         </div>
       </div>
     </template>
+
+    <ConfirmDialog
+      :open="pendingPr !== null"
+      title="下書きを破棄しますか？"
+      message="起票中の下書きは、別の PR を選ぶと失われます。"
+      confirm-label="破棄して移動"
+      destructive
+      :on-confirm="confirmSelectPr"
+      :on-cancel="() => (pendingPr = null)"
+    />
+    <ConfirmDialog
+      :open="pendingRestore !== null"
+      title="下書きを破棄しますか？"
+      message="起票中の下書きは、履歴を戻ると失われます。"
+      confirm-label="破棄して戻る"
+      destructive
+      :on-confirm="confirmRestore"
+      :on-cancel="cancelRestore"
+    />
   </div>
 </template>

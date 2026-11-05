@@ -99,8 +99,9 @@ pub async fn create_project(
             }
         }
     };
-    let txn = state.db.begin().await?;
-    let model = loop {
+    let (txn, model) = loop {
+        // UNIQUE 違反で Postgres がトランザクションを中止するので、試行ごとに張り直す
+        let txn = state.db.begin().await?;
         let project = projects::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(payload.name.clone()),
@@ -113,8 +114,9 @@ pub async fn create_project(
             personal_owner_id: Set(None),
         };
         match project.insert(&txn).await {
-            Ok(model) => break model,
+            Ok(model) => break (txn, model),
             Err(e) if explicit_key.is_none() && is_postgres_unique_violation(&e) => {
+                txn.rollback().await?;
                 let suffix = Uuid::new_v4().simple().to_string().to_ascii_uppercase();
                 let suffix = &suffix[..4];
                 let max_base = 10usize.saturating_sub(suffix.len()).max(2);
@@ -195,7 +197,7 @@ pub async fn list_projects(
     auth.require_scope(Scope::ReadProject)?;
     // project-only の客分には、明示 member の project だけに絞って返す（公開 project は
     // 含めぬ）。frontend の project 解決（projectKey→UUID）がこの一覧に依存するため、
-    // 403 ではなく絞って開く（apps/backend/docs/tenant-project-authz.md）
+    // 403 ではなく絞って開く（docs/dev/design/tenant-project-authz.md）
     if let Some(guest_project_ids) = auth
         .ensure_tenant_access_or_guest_scope(&state, tenant_id)
         .await?

@@ -44,6 +44,8 @@ type MockState = {
   findings: Finding[];
   blocking?: number;
   prsStatus?: number;
+  /** 指摘一覧の応答を失敗させる（再試行の試験では呼び出しごとに変えられる） */
+  findingsStatus?: number;
   patchStatus?: number;
   patchMessage?: string;
   /** 集計の gate。既定は未解決があれば blocked、無ければ ready */
@@ -180,6 +182,7 @@ function stubFetch(state: MockState) {
       ]);
     }
     if (req.method === 'GET' && pathname.endsWith('/review-findings')) {
+      if (state.findingsStatus) return jsonResponse({ message: 'error' }, state.findingsStatus);
       return jsonResponse(state.findings);
     }
     if (req.method === 'PATCH' && pathname.includes('/review-findings/')) {
@@ -243,6 +246,24 @@ afterEach(() => {
 });
 
 describe('ReviewFindingsView', () => {
+  it('指摘の取得に失敗したら「指摘はありません」ではなく失敗と再試行を出し、再試行で取り直す', async () => {
+    const state: MockState = { findings: [finding()], findingsStatus: 500 };
+    stubFetch(state);
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain('指摘はありません。');
+    expect(wrapper.find('[data-testid="finding-list"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="load-error"]').text()).toContain('読み込みに失敗しました');
+
+    state.findingsStatus = undefined;
+    await wrapper.get('[data-testid="load-error"] button').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="load-error"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="finding-list"]').text()).toContain('認可が抜けている');
+  });
+
   it('指摘とマージ判定を表示する', async () => {
     stubFetch({ findings: [finding()] });
     const wrapper = mountView();
@@ -487,6 +508,110 @@ describe('ReviewFindingsView', () => {
     await flushPromises();
 
     expect(wrapper.get('[data-testid="url-warning"]').text()).toContain('urgent');
+  });
+
+  describe('起票中の下書きがあるときの PR 切替', () => {
+    async function openComposer() {
+      stubFetch({ findings: [finding()], prNumbers: [617, 618] });
+      const wrapper = mountView();
+      await flushPromises();
+      bodyButton('指摘を起票')!.click();
+      await flushPromises();
+      return wrapper;
+    }
+    const prButton = (wrapper: ReturnType<typeof mountView>, n: number) =>
+      wrapper
+        .findAll('nav[aria-label="レビューのある PR"] button')
+        .find((button) => button.text().includes(`#${n}`))!;
+
+    it('下書きがあれば確認し、やめると下書きが残る', async () => {
+      const wrapper = await openComposer();
+      await wrapper.get('#draft-title').setValue('認可漏れ');
+      await flushPromises();
+
+      await prButton(wrapper, 617).trigger('click');
+      await flushPromises();
+      expect(document.body.querySelector('dialog[open]')?.textContent).toContain(
+        '下書きを破棄しますか？',
+      );
+      expect(prButton(wrapper, 618).attributes('aria-current')).toBe('true');
+
+      const dismiss = [
+        ...document.body.querySelectorAll<HTMLButtonElement>('dialog[open] button'),
+      ].find((b) => b.textContent?.includes('キャンセル'));
+      dismiss!.click();
+      await flushPromises();
+      expect(prButton(wrapper, 618).attributes('aria-current')).toBe('true');
+      expect((wrapper.get('#draft-title').element as HTMLInputElement).value).toBe('認可漏れ');
+
+      await prButton(wrapper, 617).trigger('click');
+      await flushPromises();
+      bodyButton('破棄して移動')!.click();
+      await flushPromises();
+      expect(prButton(wrapper, 617).attributes('aria-current')).toBe('true');
+    });
+
+    it('選択中の PR の再クリックは何もせず、下書きが残る', async () => {
+      const wrapper = await openComposer();
+      await wrapper.get('#draft-title').setValue('認可漏れ');
+      await flushPromises();
+
+      await prButton(wrapper, 618).trigger('click');
+      await flushPromises();
+      expect(document.body.querySelector('dialog[open]')).toBeNull();
+      expect((wrapper.get('#draft-title').element as HTMLInputElement).value).toBe('認可漏れ');
+    });
+
+    it('履歴を戻ると確認し、やめると今の URL に戻って下書きが残る', async () => {
+      window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=618');
+      const wrapper = await openComposer();
+      await wrapper.get('#draft-title').setValue('認可漏れ');
+      await flushPromises();
+
+      window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=617');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      await flushPromises();
+      expect(document.body.querySelector('dialog[open]')?.textContent).toContain(
+        '下書きを破棄しますか？',
+      );
+      const dismiss = [
+        ...document.body.querySelectorAll<HTMLButtonElement>('dialog[open] button'),
+      ].find((b) => b.textContent?.includes('キャンセル'));
+      dismiss!.click();
+      await flushPromises();
+      expect(new URL(window.location.href).searchParams.get('pr')).toBe('618');
+      expect(prButton(wrapper, 618).attributes('aria-current')).toBe('true');
+      expect((wrapper.get('#draft-title').element as HTMLInputElement).value).toBe('認可漏れ');
+    });
+
+    it('戻るで下書きを破棄したあと起票欄を開き直しても、空なら確認なしで切り替わる', async () => {
+      window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=618');
+      const wrapper = await openComposer();
+      await wrapper.get('#draft-title').setValue('認可漏れ');
+      await flushPromises();
+
+      window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=617');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      await flushPromises();
+      bodyButton('破棄して戻る')!.click();
+      await flushPromises();
+      expect(document.body.querySelector('dialog[open]')).toBeNull();
+
+      bodyButton('指摘を起票')!.click();
+      await flushPromises();
+      await prButton(wrapper, 618).trigger('click');
+      await flushPromises();
+      expect(document.body.querySelector('dialog[open]')).toBeNull();
+      expect(prButton(wrapper, 618).attributes('aria-current')).toBe('true');
+    });
+
+    it('下書きが無ければ確認なしで切り替わる', async () => {
+      const wrapper = await openComposer();
+      await prButton(wrapper, 617).trigger('click');
+      await flushPromises();
+      expect(document.body.querySelector('dialog[open]')).toBeNull();
+      expect(prButton(wrapper, 617).attributes('aria-current')).toBe('true');
+    });
   });
 
   it('PR の選び直しを履歴へ積み、戻る・進むの popstate で URL を正本にする', async () => {

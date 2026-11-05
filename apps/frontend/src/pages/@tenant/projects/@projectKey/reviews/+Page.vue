@@ -56,7 +56,10 @@ const isLoading = computed(
   () => isTenantResolving.value || isProjectResolving.value || meQuery.isPending.value,
 );
 const isError = computed(
-  () => isTenantResolveError.value || isProjectError.value || meQuery.isError.value,
+  () =>
+    isTenantResolveError.value ||
+    isProjectError.value ||
+    (meQuery.isError.value && !meQuery.data.value),
 );
 const isNotFound = computed(() => isTenantNotFound.value || isProjectNotFound.value);
 </script>

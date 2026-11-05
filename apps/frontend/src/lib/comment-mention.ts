@@ -174,7 +174,7 @@ export function filterCandidates(
 }
 
 /**
- * クリップボードの形式（仕様: docs/features/tasks/4.collaboration-clipboard.md）。
+ * クリップボードの形式（仕様: docs/dev/features/tasks/4.collaboration-clipboard.md）。
  *
  * コピー・切り取りでは `text/plain` に `@今の名` を、`text/html` に札の要素を載せる。
  * 札の要素は `<span data-task-mention="1" data-user-id="…">@名</span>`。task の外のアプリは

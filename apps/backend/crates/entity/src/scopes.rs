@@ -96,7 +96,7 @@ impl std::fmt::Display for Scope {
 }
 
 /// スコープの動詞。`api` / `read_api` はこれを単位に効く
-/// （apps/backend/docs/personal-access-tokens-authz.md の含意の規則）。
+/// （docs/dev/design/personal-access-tokens-authz.md の含意の規則）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScopeVerb {
     Read,

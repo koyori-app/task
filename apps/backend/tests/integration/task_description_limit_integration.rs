@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 // タスク説明文の長さ上限（`payload::tasks::MAX_DESCRIPTION_LEN`）の統合テスト。
 // 超過は作成・更新とも 400。上限ちょうどと日本語（バイトではなく文字で数える）は通る。
 // 本文を送らない更新は、上限前に保存された長い本文が残っていても通る。
-// 値は仕様（docs/features/tasks/1.core.md）の 100,000 文字を直に書いて固定する。
+// 値は仕様（docs/dev/features/tasks/1.core.md）の 100,000 文字を直に書いて固定する。
 const MAX: usize = 100_000;
 
 struct Fx {

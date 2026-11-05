@@ -1,4 +1,4 @@
-//! レビュー指摘のコマンド。仕様は `docs/features/review-findings.md` §6 が正。
+//! レビュー指摘のコマンド。仕様は `docs/dev/features/review-findings/index.md` の「CLI」 が正。
 //!
 //! 送信前の検証をここで持つのは、AI が生成した JSON の取り違え（severity の綴り、
 //! 必須項目の欠落）をサーバーの検証に任せきりにすると、どこを直せばよいかの

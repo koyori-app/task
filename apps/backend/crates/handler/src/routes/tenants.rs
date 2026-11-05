@@ -1,3 +1,4 @@
+use axum::middleware;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -79,6 +80,12 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::project_members::remove_member)),
                 )
                 .nest(
+                    "/{project_id}/events",
+                    OpenApiRouter::<AppState>::new().routes(routes!(
+                        crate::handlers::project_events::stream_project_events
+                    )),
+                )
+                .nest(
                     "/{project_id}/tasks",
                     OpenApiRouter::<AppState>::new()
                         .routes(routes!(crate::handlers::tasks::list_tasks))
@@ -103,6 +110,16 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::task_comments::update_comment))
                         .routes(routes!(crate::handlers::task_comments::delete_comment))
                         .routes(routes!(crate::handlers::task_comments::list_activities))
+                        .routes(routes!(crate::handlers::reactions::add_task_reaction))
+                        .routes(routes!(crate::handlers::reactions::remove_task_reaction))
+                        .routes(routes!(
+                            crate::handlers::reactions::list_task_reaction_users
+                        ))
+                        .routes(routes!(crate::handlers::reactions::add_comment_reaction))
+                        .routes(routes!(crate::handlers::reactions::remove_comment_reaction))
+                        .routes(routes!(
+                            crate::handlers::reactions::list_comment_reaction_users
+                        ))
                         .routes(routes!(crate::handlers::forge::get_task_forge))
                         .routes(routes!(crate::handlers::forge::link_task_pull_request))
                         .routes(routes!(crate::handlers::forge::unlink_task_pull_request))
@@ -122,7 +139,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
                             crate::handlers::task_extensions::list_task_attachments
                         ))
                         .routes(routes!(crate::handlers::task_extensions::attach_task_file))
-                        .routes(routes!(crate::handlers::task_extensions::detach_task_file)),
+                        .routes(routes!(crate::handlers::task_extensions::detach_task_file))
+                        // レイヤーは router の state を読めないので、Redis は Extension で受ける
+                        .layer(middleware::from_fn(
+                            crate::middlewares::project_events::publish_tasks_changed,
+                        )),
                 )
                 .nest(
                     "/{project_id}/forge",

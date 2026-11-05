@@ -2,9 +2,8 @@
 import { usePageContext } from 'vike-vue/usePageContext';
 import { computed, ref } from 'vue';
 import { Button } from '@koyori-app/ui-vue';
-import { apiClient, useMeQuery } from '@/lib/api-vue-query';
-import { INVITATION_ACCEPT_RETURN } from '@/lib/invitation-accept';
-import { markNotice } from '@/lib/one-time-notice';
+import { apiClient, isSessionRejected, useMeQuery } from '@/lib/api-vue-query';
+import { currentLocationPath, signInUrl } from '@/composables/useRedirectAfter';
 
 // 認証ガードの外に置く（+Layout の isAuthPage）。未登録の受け手にも招待の中身を見せ、
 // 未ログインならこの URL を覚えてサインインへ送る（戻ってくると承諾できる）
@@ -26,7 +25,9 @@ const previewStatus = computed(
 );
 
 const meQuery = useMeQuery();
-const signedOut = computed(() => meQuery.isError.value && !meQuery.isFetching.value);
+const signedOut = computed(
+  () => isSessionRejected(meQuery.error.value) && !meQuery.isFetching.value,
+);
 // API の照合と同じく大文字小文字は区別しない（`normalize_email`）
 const addressMatches = computed(
   () =>
@@ -38,8 +39,7 @@ const acceptMutation = apiClient.useMutation('post', '/v1/invitations/accept');
 const acceptError = ref<string | null>(null);
 
 function signIn() {
-  markNotice(INVITATION_ACCEPT_RETURN, `${window.location.pathname}${window.location.search}`);
-  window.location.assign('/signin');
+  window.location.assign(signInUrl(currentLocationPath()));
 }
 
 async function accept() {
@@ -110,9 +110,10 @@ async function accept() {
             で登録し、メールの確認を済ませてから、このリンクをもう一度開いてください。
           </p>
         </template>
-        <p v-else-if="!meQuery.isSuccess.value" class="text-muted-foreground text-sm">
-          読み込み中…
+        <p v-else-if="meQuery.isError.value && !meQuery.data.value" class="text-sm" role="alert">
+          サーバーに接続できませんでした。時間をおいてやり直してください。
         </p>
+        <p v-else-if="!meQuery.data.value" class="text-muted-foreground text-sm">読み込み中…</p>
         <template v-else-if="!addressMatches">
           <p class="text-sm" role="alert">
             いまは {{ meQuery.data.value!.email }} でログインしています。この招待は

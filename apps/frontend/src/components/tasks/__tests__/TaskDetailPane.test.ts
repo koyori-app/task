@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { computed, nextTick, ref } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import type { components } from '@/generated/api';
 
@@ -10,6 +11,7 @@ const task: TaskDetail = {
   assignees: [],
   created_at: '2026-07-16T00:00:00Z',
   custom_field_values: [],
+  reactions: [],
   id: 'task-id',
   is_archived: false,
   labels: [],
@@ -83,6 +85,11 @@ enableAutoUnmount(afterEach);
 
 /** 説明の KFM 描画はサーバへ投げる。宛先はここだけで持つ。 */
 const RENDER_DESCRIPTION_PATH = '/internal/render-description';
+
+beforeEach(() => {
+  // コメント欄が auth store（下書きの持ち主）を読む
+  setActivePinia(createPinia());
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();

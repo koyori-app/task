@@ -606,16 +606,19 @@ async fn build_task_detail_response(
     state: &AppState,
     project_id: Uuid,
     task: tasks::Model,
+    viewer_id: Uuid,
 ) -> Result<TaskDetailResponse, AppError> {
     let custom_field_values = load_task_custom_field_values(&state.db, project_id, task.id).await?;
     // 説明文の印（`<@利用者ID>`）から id → 表示情報を引く（コメントの `mentions` と同じ形）
     let mentions =
         service::mentions::resolve_in_bodies(&state.db, project_id, task.description.as_deref())
             .await?;
+    let reactions = service::reactions::summaries_for_task(&state.db, task.id, viewer_id).await?;
     Ok(TaskDetailResponse {
         task: build_task_response(&state.db, task).await?,
         custom_field_values,
         mentions,
+        reactions,
     })
 }
 
@@ -798,166 +801,17 @@ pub async fn create_task(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
 
-    if let (Some(s), Some(h)) = (payload.soft_deadline, payload.hard_deadline)
-        && s >= h
-    {
-        return Err(AppError::BadRequest);
-    }
-
-    let txn = state.db.begin().await?;
-    let status = project_statuses::Entity::find_by_id(payload.status_id)
-        .filter(project_statuses::Column::ProjectId.eq(project_id))
-        .one(&txn)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    // parent_task_id / milestone_id が同一プロジェクトに属することを検証
-    if let Some(pid) = payload.parent_task_id {
-        tasks::Entity::find_by_id(pid)
-            .filter(tasks::Column::ProjectId.eq(project_id))
-            .filter(tasks::Column::DeletedAt.is_null())
-            .one(&txn)
-            .await?
-            .ok_or(AppError::NotFound)?;
-    }
-    if let Some(mid) = payload.milestone_id {
-        milestones::Entity::find_by_id(mid)
-            .filter(milestones::Column::ProjectId.eq(project_id))
-            .one(&txn)
-            .await?
-            .ok_or(AppError::NotFound)?;
-    }
-    if let Some(sid) = payload.sprint_id {
-        let sprint = sprints::Entity::find_by_id(sid)
-            .filter(sprints::Column::ProjectId.eq(project_id))
-            .lock(LockType::Update)
-            .one(&txn)
-            .await?
-            .ok_or(AppError::NotFound)?;
-        if sprint.status == sprints::SprintStatus::Completed {
-            return Err(AppError::Conflict);
-        }
-    }
-
-    let seq_id = service::tasks::next_seq_id(&txn, project_id).await?;
-
-    let model = tasks::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        project_id: Set(project_id),
-        seq_id: Set(seq_id),
-        title: Set(payload.title),
-        description: Set(payload.description),
-        status_id: Set(payload.status_id),
-        priority: Set(payload.priority.unwrap_or(tasks::TaskPriority::Medium)),
-        progress_pct: Set(payload.progress_pct.unwrap_or(0)),
-        parent_task_id: Set(payload.parent_task_id),
-        milestone_id: Set(payload.milestone_id),
-        sprint_id: Set(payload.sprint_id),
-        soft_deadline: Set(payload.soft_deadline.map(Into::into)),
-        hard_deadline: Set(payload.hard_deadline.map(Into::into)),
-        planned_start_on: Set(payload.planned_start_on),
-        estimated_minutes: Set(payload.estimated_minutes),
-        is_archived: Set(false),
-        created_by: Set(auth.user_id),
-        created_at: Set(chrono::Utc::now().into()),
-        updated_at: Set(chrono::Utc::now().into()),
-        completed_at: Set(status.is_done_state.then(|| chrono::Utc::now().into())),
-        deleted_at: Set(None),
-    }
-    .insert(&txn)
-    .await?;
-
-    for a in &payload.assignees {
-        require_project_access(&txn, tenant_id, project_id, a.user_id).await?;
-        task_assignees::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            task_id: Set(model.id),
-            user_id: Set(a.user_id),
-            role: Set(a.role.clone()),
-            assigned_at: Set(chrono::Utc::now().into()),
-        }
-        .insert(&txn)
-        .await?;
-        notify_assigned(&txn, project_id, model.id, a.user_id, auth.user_id, &a.role).await?;
-    }
-    let unique_label_ids: Vec<Uuid> = {
-        let mut v = payload.label_ids.clone();
-        v.sort();
-        v.dedup();
-        v
-    };
-    if !unique_label_ids.is_empty() {
-        let labels_in_project = labels::Entity::find()
-            .filter(labels::Column::Id.is_in(unique_label_ids.clone()))
-            .filter(labels::Column::ProjectId.eq(project_id))
-            .all(&txn)
-            .await?;
-        if labels_in_project.len() != unique_label_ids.len() {
-            return Err(AppError::BadRequest);
-        }
-    }
-    for lid in &unique_label_ids {
-        task_labels::ActiveModel {
-            task_id: Set(model.id),
-            label_id: Set(*lid),
-        }
-        .insert(&txn)
-        .await?;
-    }
-
-    if status.is_done_state {
-        ensure_required_custom_fields(
-            &txn,
-            project_id,
-            model.id,
-            Some(&payload.custom_field_values),
-        )
-        .await?;
-    }
-    upsert_task_custom_field_values(&txn, project_id, model.id, &payload.custom_field_values)
-        .await?;
-
-    // 説明文のメンション。宛先の境はコメントと同じ（`service::mentions`）。自分自身は通知しない
-    if let Some(description) = model.description.as_deref() {
-        let mentioned = extract_mentions(&txn, description, project_id).await?;
-        notify_description_mentioned(&txn, project_id, model.id, &mentioned, auth.user_id).await?;
-    }
-
-    record_activity(
-        &txn,
-        model.id,
-        Some(auth.user_id),
-        "task_created",
-        serde_json::json!({}),
-    )
-    .await?;
-    service::webhooks::emit(
-        &txn,
+    let ctx = service::tasks::CreateTaskContext {
+        tenant_id,
         project_id,
-        auth.user_id,
-        service::webhooks::EVENT_TASK_CREATED,
-        serde_json::json!({
-            "task": {
-                "id": model.id,
-                "seq_id": model.seq_id,
-                "title": &model.title,
-                "priority": model.priority.to_value(),
-                "status": &status.name,
-                "assignees": payload
-                    .assignees
-                    .iter()
-                    .map(|a| serde_json::json!({ "user_id": a.user_id, "role": a.role }))
-                    .collect::<Vec<_>>(),
-                "hard_deadline": model.hard_deadline,
-                "created_by": model.created_by,
-            },
-        }),
-    )
-    .await?;
+        actor_id: auth.user_id,
+    };
+    let txn = state.db.begin().await?;
+    let model = service::tasks::create_task_in_txn(&txn, &ctx, payload).await?;
     txn.commit().await?;
     Ok((
         StatusCode::CREATED,
-        Json(build_task_detail_response(&state, project_id, model).await?),
+        Json(build_task_detail_response(&state, project_id, model, auth.user_id).await?),
     ))
 }
 
@@ -987,7 +841,7 @@ pub async fn get_task(
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     Ok(Json(
-        build_task_detail_response(&state, project_id, task).await?,
+        build_task_detail_response(&state, project_id, task, auth.user_id).await?,
     ))
 }
 
@@ -1330,7 +1184,7 @@ pub async fn update_task(
         crate::handlers::github::enqueue_issue_push(&state, task_id).await;
     }
     Ok(Json(
-        build_task_detail_response(&state, project_id, updated).await?,
+        build_task_detail_response(&state, project_id, updated, auth.user_id).await?,
     ))
 }
 

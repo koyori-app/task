@@ -10,6 +10,7 @@ use sea_orm::{
     prelude::Uuid,
 };
 
+use crate::drive::is_tenant_owner;
 use common::error::AppError;
 use entity::{project_members, projects, tenant_members, tenants};
 
@@ -52,7 +53,7 @@ pub async fn is_project_member<C: ConnectionTrait>(
 /// この行は継承（在籍）が前提の付随物にすぎない。除名の後まで効かせると、
 /// テナントを去った人がそのテナントの Inbox に客分として入り続け、テナント一覧に
 /// Guest として出て、2FA 強制の対象にもなる。客分の判定はすべてここを通し、
-/// 個人プロジェクトを外す（apps/backend/docs/tenant-project-authz.md の「除名が消すもの」）
+/// 個人プロジェクトを外す（docs/dev/design/tenant-project-authz.md の「除名が消すもの」）
 pub async fn is_shared_project_explicit_member<C: ConnectionTrait>(
     db: &C,
     project_id: Uuid,
@@ -337,4 +338,27 @@ pub async fn project_accessible_user_ids<C: ConnectionTrait>(
     }
 
     Ok(tenant_member_ids)
+}
+
+/// **指定した利用者**がそのプロジェクトに入れるかを確認する。
+///
+/// リクエスト元自身の認可は `AuthUser::ensure_tenant_access` が同じ判定を含んでいるので、
+/// ここを重ねて呼ぶ必要はない。担当者の追加など、自分以外を検証するときだけ使う。
+pub async fn require_project_access<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+    project_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    if is_tenant_owner(db, tenant_id, user_id).await? {
+        return Ok(());
+    }
+    if !is_tenant_member(db, tenant_id, user_id).await? {
+        return Err(AppError::Forbidden);
+    }
+    if project_is_open_or_member(db, project_id, user_id).await? {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
 }
