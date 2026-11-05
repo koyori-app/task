@@ -61,6 +61,20 @@ test("~~~ で開いたフェンスは ``` では閉じない", () => {
   assert.equal(status, 0, out);
 });
 
+test("``` の中の ```ts は後ろに文字があるので閉じフェンスにしない", () => {
+  const { status, out } = lint(`${frontmatter}
+## 書き方
+
+\`\`\`
+\`\`\`ts
+key:
+\`\`\`
+
+本文の続き。
+`);
+  assert.equal(status, 0, out);
+});
+
 test("フェンスの外の規則違反はこれまでどおり error になる", () => {
   const { status, out } = lint(`${frontmatter}
 ## 1. 番号付きの見出し
