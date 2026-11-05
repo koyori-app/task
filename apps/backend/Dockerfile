@@ -69,6 +69,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
+# anyhow のエラーにスタックトレースを記録する。Sentry へ送るスタックトレースの元になる
+ENV RUST_LIB_BACKTRACE=1
+
 # root では動かさない
 RUN useradd --system --create-home --uid 10001 app
 WORKDIR /app

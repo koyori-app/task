@@ -993,6 +993,7 @@ dependencies = [
 name = "backend"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "apalis",
  "apalis-board",
  "apalis-postgres",
@@ -1015,6 +1016,7 @@ dependencies = [
  "libc",
  "redis",
  "redis_pool",
+ "regex",
  "reqwest 0.13.5",
  "sea-orm",
  "sentry",
@@ -1498,6 +1500,7 @@ dependencies = [
  "redis_pool",
  "regex",
  "sea-orm",
+ "sentry",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -2574,6 +2577,7 @@ dependencies = [
  "rand 0.10.3",
  "reqwest 0.13.5",
  "sea-orm",
+ "sentry",
  "serde",
  "serde_json",
  "service",
@@ -3250,11 +3254,13 @@ dependencies = [
  "redis",
  "reqwest 0.13.5",
  "sea-orm",
+ "sentry",
  "serde",
  "serde_json",
  "service",
  "sqlx 0.8.6",
  "tokio",
+ "tower",
  "tracing",
  "uuid",
  "workspace-hack",
@@ -5453,6 +5459,7 @@ dependencies = [
  "native-tls",
  "reqwest 0.13.5",
  "sentry-actix",
+ "sentry-anyhow",
  "sentry-backtrace",
  "sentry-contexts",
  "sentry-core",
@@ -5474,6 +5481,17 @@ dependencies = [
  "actix-web",
  "bytes",
  "futures-util",
+ "sentry-core",
+]
+
+[[package]]
+name = "sentry-anyhow"
+version = "0.48.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8f73466a403f4da78c7e576049d6044b31d2b16dfcc26b51705f318ed74b804"
+dependencies = [
+ "anyhow",
+ "sentry-backtrace",
  "sentry-core",
 ]
 
