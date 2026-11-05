@@ -54,6 +54,7 @@ import {
 } from '@koyori-app/ui-vue';
 import TaskDetailPane, { type TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
+import TaskListSortMenu from '@/components/tasks/TaskListSortMenu.vue';
 import TaskTitleLink from '@/components/tasks/TaskTitleLink.vue';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
@@ -145,6 +146,8 @@ const overlayParentStack = ref<string[]>([]);
 
 // 広い画面でのみ inline 分割を出す。狭い画面は従来どおり詳細ページへ遷移させる。
 const canInline = useMediaQuery('(min-width: 1024px)');
+// Table と検索結果の列を畳む幅。サイドバーをドロワーに替える境目（+Layout.vue）に揃える
+const isNarrow = useMediaQuery('(max-width: 768px)');
 // Table 表示だけが右ペインを出す。List 表示の詳細はオーバーレイ（overlayTaskSeqKey）。
 const showDetail = computed(() => canInline.value && !!selectedTaskId.value && !isListView.value);
 
@@ -678,15 +681,24 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
     cell: ({ row }) => {
       const task = row.original;
       const pc = PRIORITY_CONFIG[task.priority];
-      return h('div', { class: 'flex items-center gap-2 min-w-0' }, [
-        h(pc.icon, { class: 'size-4 shrink-0', style: { color: pc.color } }),
-        h(TaskTitleLink, {
-          tenantDisplayId: tenantDisplayId.value,
-          projectKey: projectKey.value,
-          seqId: task.seq_id,
-          title: task.title,
-          onSelect: onSelectRow,
-        }),
+      const link = h(TaskTitleLink, {
+        tenantDisplayId: tenantDisplayId.value,
+        projectKey: projectKey.value,
+        seqId: task.seq_id,
+        title: task.title,
+        lines: isNarrow.value ? 2 : 1,
+        onSelect: onSelectRow,
+      });
+      const icon = h(pc.icon, { class: 'size-4 shrink-0', style: { color: pc.color } });
+      if (!isNarrow.value)
+        return h('div', { class: 'flex items-center gap-2 min-w-0' }, [icon, link]);
+      // 狭い幅は ID の列を畳み、タイトルの下へ移す
+      return h('div', { class: 'min-w-0 py-1' }, [
+        link,
+        h('div', { class: 'mt-0.5 flex items-center gap-1.5' }, [
+          h('span', { class: 'font-mono text-xs text-muted-foreground' }, taskKey(task)),
+          icon,
+        ]),
       ]);
     },
   },
@@ -865,13 +877,21 @@ const TASK_COLUMN_WIDTHS: Record<string, string> = {
 };
 
 const taskListColumns = computed<DataListColumn[]>(() =>
-  table.getVisibleLeafColumns().map((column) => ({
-    id: column.id,
-    label: String(column.columnDef.header ?? column.id),
-    sortable: column.getCanSort(),
-    width: TASK_COLUMN_WIDTHS[column.id],
-  })),
+  table
+    .getVisibleLeafColumns()
+    .filter((column) => !isCollapsedColumn(column.id))
+    .map((column) => ({
+      id: column.id,
+      label: String(column.columnDef.header ?? column.id),
+      sortable: column.getCanSort(),
+      width: isNarrow.value && column.id === 'select' ? '3rem' : TASK_COLUMN_WIDTHS[column.id],
+    })),
 );
+
+/** 狭い幅の Table は ID の列を畳む（ID はタイトルの下へ移る） */
+function isCollapsedColumn(columnId: string) {
+  return isNarrow.value && columnId === 'key';
+}
 
 const taskListSort = computed<DataListProps['sort']>(() => {
   const current = sorting.value[0];
@@ -904,6 +924,8 @@ const SEARCH_COLUMNS: DataListColumn[] = [
   { id: 'title', label: 'タイトル' },
   { id: 'highlight', label: '一致箇所' },
 ];
+/** 狭い幅の検索結果は列を 1 つにして、一致箇所と ID をタイトルの下へ積む */
+const NARROW_SEARCH_COLUMNS: DataListColumn[] = [{ id: 'title', label: 'タイトル' }];
 
 /** ラベルでの絞り込み。「すべて」は value を空にして選択なしに戻す */
 const labelFilterItems = computed<DropdownItem[]>(() => [
@@ -960,11 +982,11 @@ const columnItems = computed<DropdownItem[]>(() =>
     <!-- 一覧（左）＋ 詳細ペイン（右）の分割ビュー。詳細が閉じているときは一覧だけ -->
     <template v-else-if="canCreate">
       <DefineTaskList>
-        <div ref="taskListEl" class="flex h-full min-h-0 flex-col gap-3">
-          <!-- サーバー側検索ツールバー -->
-          <div class="flex items-center gap-2">
+        <div ref="taskListEl" class="@container flex h-full min-h-0 flex-col gap-3">
+          <!-- サーバー側検索ツールバー。狭い幅は検索と操作の 2 段に分ける -->
+          <div class="flex flex-wrap items-center gap-2 @3xl:flex-nowrap">
             <form
-              class="flex w-full max-w-md items-center gap-2"
+              class="flex w-full items-center gap-2 @3xl:max-w-md"
               role="search"
               @submit.prevent="submitSearch"
             >
@@ -990,9 +1012,11 @@ const columnItems = computed<DropdownItem[]>(() =>
                   </Button>
                 </template>
               </Input>
+              <!-- 入力すると検索が走り、狭い幅ではキーボードの確定でも送れるので畳む -->
               <Button
                 type="submit"
                 variant="tertiary"
+                class="@max-3xl:hidden"
                 :disabled="!searchInput.trim()"
                 :label="taskSearchQuery.isFetching.value && isSearchActive ? '検索中…' : '検索'"
               >
@@ -1002,7 +1026,7 @@ const columnItems = computed<DropdownItem[]>(() =>
                 </template>
               </Button>
             </form>
-            <Button class="ml-auto" label="新規タスク" @click="isCreateDialogOpen = true" />
+            <Button class="@3xl:ml-auto" label="新規タスク" @click="isCreateDialogOpen = true" />
             <!-- ラベル取得失敗はタスク一覧をブロックせず、ツールバー内で再試行を出す -->
             <div
               v-if="!isSearchActive && labelsQuery.isError.value && !projectLabels.length"
@@ -1019,8 +1043,16 @@ const columnItems = computed<DropdownItem[]>(() =>
               :items="labelFilterItems"
               :on-select="(value: string) => (selectedLabelId = value || null)"
             />
+            <TaskListSortMenu
+              v-if="!isSearchActive && isListView"
+              class="@3xl:hidden"
+              :sorting="sorting"
+              @update:sorting="onListSortingChange"
+            />
+            <!-- 列を並べない狭い幅の List では意味がない -->
             <Dropdown
               v-if="!isSearchActive"
+              :class="isListView && '@max-3xl:hidden'"
               variant="tertiary"
               label="列"
               :items="columnItems"
@@ -1110,8 +1142,9 @@ const columnItems = computed<DropdownItem[]>(() =>
                 id="task-search-results"
                 label="検索結果"
                 tabindex="-1"
+                :class="isNarrow && '[--koyori-data-list-min-width:0]'"
                 :heading-level="2"
-                :columns="SEARCH_COLUMNS"
+                :columns="isNarrow ? NARROW_SEARCH_COLUMNS : SEARCH_COLUMNS"
                 :count="taskSearchQuery.data.value?.total ?? 0"
                 :status="taskSearchQuery.data.value?.tasks.length ? 'ready' : 'empty'"
                 message="検索結果がありません"
@@ -1121,21 +1154,40 @@ const columnItems = computed<DropdownItem[]>(() =>
                   :key="task.id"
                   :class="isRowActive(task.seq_id) && 'bg-muted'"
                 >
-                  <td class="font-mono text-xs text-muted-foreground">
-                    {{ projectKey }}-{{ task.seq_id }}
-                  </td>
-                  <td>
+                  <!-- highlight は backend の ilike/tsvector/no-match 全経路で動的文字列を
+                     html_escape 済み。唯一 backend が付与する <em> のみ HTML として描画する。 -->
+                  <td v-if="isNarrow" class="py-1">
                     <TaskTitleLink
                       :tenant-display-id="tenantDisplayId"
                       :project-key="projectKey"
                       :seq-id="task.seq_id"
                       :title="task.title"
+                      lines="all"
                       @select="onSelectRow"
                     />
+                    <p
+                      class="mt-1 text-xs break-words text-muted-foreground"
+                      v-html="task.highlight"
+                    />
+                    <p class="mt-0.5 font-mono text-xs text-muted-foreground">
+                      {{ projectKey }}-{{ task.seq_id }}
+                    </p>
                   </td>
-                  <!-- highlight は backend の ilike/tsvector/no-match 全経路で動的文字列を
-                     html_escape 済み。唯一 backend が付与する <em> のみ HTML として描画する。 -->
-                  <td class="truncate text-xs text-muted-foreground" v-html="task.highlight" />
+                  <template v-else>
+                    <td class="font-mono text-xs text-muted-foreground">
+                      {{ projectKey }}-{{ task.seq_id }}
+                    </td>
+                    <td>
+                      <TaskTitleLink
+                        :tenant-display-id="tenantDisplayId"
+                        :project-key="projectKey"
+                        :seq-id="task.seq_id"
+                        :title="task.title"
+                        @select="onSelectRow"
+                      />
+                    </td>
+                    <td class="truncate text-xs text-muted-foreground" v-html="task.highlight" />
+                  </template>
                 </DataListRow>
               </DataList>
               <div class="text-xs text-muted-foreground">
@@ -1147,6 +1199,7 @@ const columnItems = computed<DropdownItem[]>(() =>
             <!-- List 表示: ステータスごとに並べる（既定） -->
             <TaskGroupedList
               v-else-if="isListView"
+              :project-key="projectKey"
               :groups="taskGroups"
               :tenant-id="tenantId"
               :project-id="projectId"
@@ -1184,7 +1237,11 @@ const columnItems = computed<DropdownItem[]>(() =>
               id="task-table"
               label="タスク一覧"
               tabindex="-1"
-              class="[--koyori-data-list-min-width:64rem]"
+              :class="
+                isNarrow
+                  ? '[--koyori-data-list-min-width:60.5rem]'
+                  : '[--koyori-data-list-min-width:64rem]'
+              "
               :heading-level="2"
               :columns="taskListColumns"
               :count="fetchedTaskTotal ?? undefined"
@@ -1200,7 +1257,12 @@ const columnItems = computed<DropdownItem[]>(() =>
                 :selected="row.getIsSelected()"
                 :class="isRowActive(row.original.seq_id) && 'bg-muted'"
               >
-                <td v-for="cell in row.getVisibleCells()" :key="cell.id">
+                <td
+                  v-for="cell in row
+                    .getVisibleCells()
+                    .filter((c) => !isCollapsedColumn(c.column.id))"
+                  :key="cell.id"
+                >
                   <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
                 </td>
               </DataListRow>

@@ -107,6 +107,7 @@ function mountList() {
   const onMoveStatus = vi.fn(() => new Promise<void>(() => {}));
   const wrapper = mount(TaskGroupedList, {
     props: {
+      projectKey: 'TEST',
       groups: [
         groupFixture(todo, [moved, taskFixture('task-2', todo.id)]),
         groupFixture(progress, [taskFixture('task-3', progress.id)]),
