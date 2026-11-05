@@ -1,4 +1,14 @@
-# テナント BOT の認証と管理
+---
+title: テナント BOT の認証と管理
+description: BOT の認証の拒否、メールの停止、管理 API、役割の上限について、判断の理由を残すページ
+updated: 2026-11-05
+sidebar:
+  order: 8
+---
+
+## 概要
+
+テナントが持つ BOT アカウントの認証と管理の設計と、判断の理由を記述する。現在の振る舞いと API の定義元は[テナントの BOT アカウント](/dev/features/tenant-bots)の仕様である。
 
 ## データモデル
 
@@ -14,17 +24,17 @@ BOT のメールは UUID から作る `@bots.task.invalid` のアドレスとす
 
 ## メール用途の棚卸し
 
-| 用途 | 実装 | BOT の扱い |
+| 用途 | 経路（呼ぶ順） | BOT の扱い |
 | --- | --- | --- |
-| 通知、割り当て、コメント、メンション、レビュー | `service::notifications` → `job::notification_email::send_one` | 利用者種別で送信待ちを破棄し、SMTP の直前でも専用アドレスを除外 |
-| 新規登録と認証メールの再送 | `handlers::auth::{register,resend_verification_email}` → `job::verification_email` | 専用ドメインの登録を拒否し、BOT には再送しない。最後に SMTP でも除外 |
+| 通知、割り当て、コメント、メンション、レビュー | `service::notifications`、`job::notification_email::send_one` | 利用者種別で送信待ちを破棄し、SMTP の直前でも専用アドレスを除外 |
+| 新規登録と認証メールの再送 | `handlers::auth::{register,resend_verification_email}`、`job::verification_email` | 専用ドメインの登録を拒否し、BOT には再送しない。最後に SMTP でも除外 |
 | メールの本人確認 | `handlers::auth::verify_email` | BOT のトークンを受け付けず、認証済みに変更しない |
-| 登録済みアドレスへの案内 | `job::already_registered_email` → `service::already_registered_email_delivery` | SMTP の直前で除外 |
-| パスワードの再設定 | `handlers::password_reset` → `job::password_reset_email` | BOT は要求時に送信を予約せず、トークン検証と完了も拒否 |
-| システム管理者の再設定と宛先の上書き | `handlers::admin_users::password_reset` → `service::password_reset_delivery` | BOT はメールの予約前に拒否。宛先を人の実アドレスへ変えた場合も拒否 |
+| 登録済みアドレスへの案内 | `job::already_registered_email`、`service::already_registered_email_delivery` | SMTP の直前で除外 |
+| パスワードの再設定 | `handlers::password_reset`、`job::password_reset_email` | BOT は要求時に送信を予約せず、トークン検証と完了も拒否 |
+| システム管理者の再設定と宛先の上書き | `handlers::admin_users::password_reset`、`service::password_reset_delivery` | BOT はメールの予約前に拒否。宛先を人の実アドレスへ変えた場合も拒否 |
 | 再設定の本文生成の二系統 | `service::{password_reset_delivery,password_reset_email_delivery}` | 両方とも共通の SMTP 判定で除外 |
-| テナントへの招待と再送 | `handlers::tenant_invitations` → `job::tenant_invitation_email` → `service::tenant_invitations::send_invitation_email` | BOT のアドレスへの招待を拒否し、古いジョブも SMTP の直前で除外 |
-| OAuth 初回登録時の確認 | `handlers::oauth::create_oauth_user_and_connection` → `job::verification_email` | BOT 専用ドメインは人として保存できず、SMTP でも除外 |
+| テナントへの招待と再送 | `handlers::tenant_invitations`、`job::tenant_invitation_email`、`service::tenant_invitations::send_invitation_email` | BOT のアドレスへの招待を拒否し、古いジョブも SMTP の直前で除外 |
+| OAuth 初回登録時の確認 | `handlers::oauth::create_oauth_user_and_connection`、`job::verification_email` | BOT 専用ドメインは人として保存できず、SMTP でも除外 |
 | デスクトップ通知 | 端末トークンと通知 API | メール送信ではない。BOT の端末認証は拒否 |
 
 `SmtpClient::send_email` の除外は実 SMTP と試験用 Capture の分岐より前に置く。
@@ -59,7 +69,7 @@ BOT に対する Device Token とブラウザーのセッションは、保存�
 ## テナントの 2FA 強制
 
 BOT はテナントの 2FA の強制（`require_2fa`）の対象から外す。
-BOT は TOTP もパスキーも持てず、セッションにも入れないので、強制の下では PAT で業務の口を使えなくなるため。
+BOT は TOTP もパスキーも持てず、セッションにも入れないので、強制の下では PAT で業務のエンドポイントを使えなくなるため。
 2FA は人の対話のサインインを守る物で、BOT は PAT でしか入らない。
 BOT の作成と PAT の発行は 2FA の強制を満たした人の Admin だけができるので、強制の意図は発行の所で保つ。
 免除は BOT に限り、2FA を満たさない人の PAT は従来どおり 403 になる。
@@ -78,11 +88,11 @@ BOT の作成と PAT の発行は 2FA の強制を満たした人の Admin だ�
 BOT の役割は Member 相当まで（`TenantRole` と `ProjectRole` の `allowed_for_bot`）に縛る。
 BOT の作成、テナントとプロジェクトのメンバーの追加と役割の変更で、BOT に Admin を渡すと 400（`bot-role-too-strong`）で断る。
 誰が頼んでも通らない願いの誤りなので、403 ではなく 400 にした。
-役割は `tenant_members` と `project_members` に、BOT の印は `users` にあり、CHECK 制約は他の表を見られないので、DB の制約では持たない。
+役割は `tenant_members` と `project_members` に、BOT の種別は `users` にあり、CHECK 制約は他の表を見られないので、DB の制約では持たない。
 Admin の役割にはメンバーを追加し昇格させる力があるため、BOT が Admin になれれば、その PAT から人へ権限を委ねられる。この縛りでその道を塞ぐ。
 自動化に Admin の力が要るようになったら、この上限を緩める余地を残す。
-BOT は個人用プロジェクト（My Tasks の Inbox）を持たない。個人用プロジェクトでは持ち主が Admin になり、テナントの外の人を客分として加えられるため。
-個人用プロジェクトを作る、引く口（`GET /v1/tenants/{tenant_id}/users/me/personal-project`）は、BOT には 404 を返し、行を作らない。BOT には無い資源なので、400 ではなく 404 にした。
+BOT は個人用プロジェクト（My Tasks の Inbox）を持たない。個人用プロジェクトでは持ち主が Admin になり、テナントの外の人をゲストとして加えられるため。
+個人用プロジェクトを作る、引くエンドポイント（`GET /v1/tenants/{tenant_id}/users/me/personal-project`）は、BOT には 404 を返し、行を作らない。BOT には無い資源なので、400 ではなく 404 にした。
 書き込みと同じトランザクションで管理者の利用者行、テナント行、所属行を共有ロックし、権限確認の直後に降格される競合を防ぐ。
 PAT の発行と停止は同じ BOT 行を排他ロックする。
 発行時は必須の期限を現在より後、365 日以内に制限する。
