@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/vue';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { App } from 'vue';
 import {
   buildTracePropagationTargets,
   parseTracesSampleRate,
@@ -8,9 +9,12 @@ import {
 
 vi.mock('@sentry/vue', () => ({
   init: vi.fn(),
+  isInitialized: vi.fn(() => false),
   browserTracingIntegration: vi.fn(() => ({ name: 'BrowserTracing' })),
   replayIntegration: vi.fn(() => ({ name: 'Replay' })),
 }));
+
+const app = {} as App;
 
 const matches = (targets: RegExp[], url: string) => targets.some((target) => target.test(url));
 
@@ -59,7 +63,14 @@ describe('sentryBrowserConfig', () => {
 
   it('does not initialize outside production', () => {
     vi.stubEnv('PROD', false);
-    sentryBrowserConfig();
+    sentryBrowserConfig(app);
+    expect(Sentry.init).not.toHaveBeenCalled();
+  });
+
+  it('does not initialize twice', () => {
+    vi.stubEnv('PROD', true);
+    vi.mocked(Sentry.isInitialized).mockReturnValueOnce(true);
+    sentryBrowserConfig(app);
     expect(Sentry.init).not.toHaveBeenCalled();
   });
 
@@ -67,9 +78,10 @@ describe('sentryBrowserConfig', () => {
     vi.stubEnv('PROD', true);
     vi.stubEnv('PUBLIC_ENV__SENTRY_TRACES_SAMPLE_RATE', '0.5');
     vi.stubEnv('PUBLIC_ENV__SENTRY_ENVIRONMENT', 'staging');
-    sentryBrowserConfig();
+    sentryBrowserConfig(app);
 
     const options = vi.mocked(Sentry.init).mock.calls[0]?.[0];
+    expect(options?.app).toBe(app);
     expect(Sentry.browserTracingIntegration).toHaveBeenCalledOnce();
     expect(options?.integrations).toContainEqual({ name: 'BrowserTracing' });
     expect(options?.tracesSampleRate).toBe(0.5);

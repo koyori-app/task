@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/vue';
-import { getCurrentInstance } from 'vue';
+import type { App } from 'vue';
 
 const DEFAULT_TRACES_SAMPLE_RATE = 0.1;
 
@@ -25,12 +25,13 @@ export const buildTracePropagationTargets = (apiBase: string | undefined): RegEx
   return targets;
 };
 
-export const sentryBrowserConfig = () => {
-  if (import.meta.env.PROD) {
+export const sentryBrowserConfig = (app: App) => {
+  // Replay は多重に起動すると SDK が例外を投げるので、init は 1 度だけにする
+  if (import.meta.env.PROD && !Sentry.isInitialized()) {
     // `release` は渡さない。sentryVitePlugin が自身の release.name を SENTRY_RELEASE として
     // バンドルへ注入し、SDK がそれを既定値に使うので、sourcemap の release と必ず一致する。
     Sentry.init({
-      app: getCurrentInstance()?.appContext.app,
+      app,
       dsn: import.meta.env.PUBLIC_ENV__SENTRY_DSN,
       environment: import.meta.env.PUBLIC_ENV__SENTRY_ENVIRONMENT || import.meta.env.MODE,
       // browserTracingIntegration が無いと fetch / XHR に trace ヘッダが付かない
