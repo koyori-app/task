@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadErrorState from '@/components/LoadErrorState.vue';
 import { ChevronLeft, ChevronRight, Loader2 } from '@lucide/vue';
 import { computed, onErrorCaptured, ref, watch } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
@@ -41,6 +42,7 @@ const {
   isTenantNotFound,
   isResolving: isTenantResolving,
   isError: isTenantResolveError,
+  tenantsQuery,
 } = useResolvedTenantId(tenantDisplayId);
 
 // 表に出す期間と選んだ担当者は、カレンダーと同じ決め方と同じ URL の形（`from`・`member`）で持つ
@@ -164,6 +166,11 @@ function formatRangeDate(date: string) {
   const [year, month, day] = date.split('-');
   return `${year}/${Number(month)}/${Number(day)}`;
 }
+
+function retryFailed() {
+  if (isTenantResolveError.value) void tenantsQuery.refetch();
+  if (scheduleQuery.isError.value) void scheduleQuery.refetch();
+}
 </script>
 
 <template>
@@ -210,12 +217,11 @@ function formatRangeDate(date: string) {
       <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" aria-label="読み込み中" />
     </div>
 
-    <p
+    <LoadErrorState
       v-else-if="isTenantResolveError || scheduleQuery.isError.value"
-      class="py-8 text-center text-sm text-destructive"
-    >
-      予定の読み込みに失敗しました
-    </p>
+      message="予定の読み込みに失敗しました"
+      @retry="retryFailed"
+    />
 
     <p v-else-if="isTenantNotFound" class="py-8 text-center text-sm text-muted-foreground">
       テナントが見つかりません

@@ -178,7 +178,8 @@ export const ApiError: Story = {
   beforeEach: mockFetch({ rejectLabels: true }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.findByText('Failed to fetch labels')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('ラベルの読み込みに失敗しました')).resolves.toBeInTheDocument();
+    await expect(canvas.findByRole('button', { name: '再試行' })).resolves.toBeInTheDocument();
   },
 };
 

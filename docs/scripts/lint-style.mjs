@@ -124,7 +124,8 @@ function lint(file) {
         fence = mark;
         continue;
       }
-      if (mark[0] === fence[0] && mark.length >= fence.length) {
+      // 閉じフェンスの後ろに置けるのは空白だけ（``` の中の ```ts は中身）
+      if (mark[0] === fence[0] && mark.length >= fence.length && /^\s*(`{3,}|~{3,})\s*$/.test(line)) {
         fence = null;
         continue;
       }
