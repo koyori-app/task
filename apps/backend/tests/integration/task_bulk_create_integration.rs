@@ -116,6 +116,13 @@ async fn creates_in_order_with_activities_and_webhooks() {
         .await
         .unwrap();
     assert_eq!(deliveries, 2);
+
+    // 届かない宛先の配信を残すと、他のテストの掃き出しが送信の timeout を待つ
+    entity::webhooks::Entity::delete_many()
+        .filter(entity::webhooks::Column::ProjectId.eq(fx.tp.project_id))
+        .exec(&fx.app.state.db)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -318,17 +325,6 @@ async fn concurrent_with_single_create_has_unique_seq_ids() {
         .await;
     assert_eq!(r.status(), StatusCode::OK);
 
-    // カウンター行が無い初回の採番は INSERT 同士が競合する（既存の挙動。単体作成も同じ）ので、
-    // 先に 1 件作って行を用意してから同時実行を試す。
-    let seed = fx
-        .app
-        .post_json_with_session(
-            &fx.base,
-            json!({"title": "seed", "status_id": fx.status_id}),
-        )
-        .await;
-    assert_eq!(seed.status(), StatusCode::CREATED);
-
     let mut handles = Vec::new();
     for round in 0..4 {
         let client = fx.app.session_client();
@@ -388,15 +384,6 @@ async fn bulk_create_does_not_deadlock_with_sprint_complete() {
         "/v1/tenants/{}/projects/{}",
         fx.tp.tenant_id, fx.tp.project_id
     );
-    // カウンター行を用意しておく（初回採番の競合は既存の挙動）。
-    let seed = fx
-        .app
-        .post_json_with_session(
-            &fx.base,
-            json!({"title": "seed", "status_id": fx.status_id}),
-        )
-        .await;
-    assert_eq!(seed.status(), StatusCode::CREATED);
 
     for round in 0..8 {
         let mut ids = Vec::new();
