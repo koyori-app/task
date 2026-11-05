@@ -2,8 +2,9 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
-import { nextTick } from 'vue';
+import { config, enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { QueryClient, useQuery, VueQueryPlugin } from '@tanstack/vue-query';
+import { defineComponent, nextTick } from 'vue';
 import type { components } from '@/generated/api';
 
 /*
@@ -21,6 +22,9 @@ import TaskDetailHub from '../TaskDetailHub.vue';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
 
 enableAutoUnmount(afterEach);
+
+// 読み込み失敗の再試行（失敗した query の refetch）が QueryClient を使う
+config.global.plugins = [[VueQueryPlugin, { queryClient: new QueryClient() }]];
 
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 
@@ -545,6 +549,176 @@ describe('TaskDetailHub', () => {
   });
 });
 
+/*
+ * 保存は emit した直後に編集器を閉じ、失敗は親が fieldErrors で返す。以前は失敗すると
+ * 入力した下書きがどこにも残らず、書き直すしかなかった（TASK-250）。
+ */
+describe('TaskDetailHub の保存に失敗した下書き', () => {
+  const FAILED = '更新に失敗しました';
+
+  function mountHub() {
+    return mount(TaskDetailHub, {
+      props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id },
+    });
+  }
+
+  function resumeButton(wrapper: ReturnType<typeof mountHub>) {
+    return wrapper.findAll('button').find((button) => button.text() === '編集を再開');
+  }
+
+  async function resume(wrapper: ReturnType<typeof mountHub>) {
+    const button = resumeButton(wrapper);
+    expect(button, '「編集を再開」が無い').toBeDefined();
+    await button!.trigger('click');
+  }
+
+  function titleInput(wrapper: ReturnType<typeof mountHub>) {
+    return wrapper.get('input[aria-label="タイトル"]');
+  }
+
+  async function saveTitle(wrapper: ReturnType<typeof mountHub>, value: string) {
+    await wrapper.get('h1').trigger('click');
+    await titleInput(wrapper).setValue(value);
+    await titleInput(wrapper).trigger('blur');
+  }
+
+  it('タイトルの保存に失敗したら、編集を再開すると入力した値が入っている', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '書きかけのタイトル');
+    expect(wrapper.emitted('save:title')).toEqual([['書きかけのタイトル']]);
+    expect(wrapper.find('input[aria-label="タイトル"]').exists()).toBe(false);
+
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('書きかけのタイトル');
+  });
+
+  it('説明の保存に失敗したら、編集を再開すると入力した値が入っている', async () => {
+    const wrapper = mountHub();
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '説明を追加')!
+      .trigger('click');
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('書きかけの説明');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '保存')!
+      .trigger('click');
+    expect(wrapper.emitted('save:description')).toEqual([['書きかけの説明']]);
+
+    await wrapper.setProps({ fieldErrors: { description: FAILED } });
+    await resume(wrapper);
+
+    const reopened = wrapper.get('textarea[aria-label="説明"]');
+    expect((reopened.element as HTMLTextAreaElement).value).toBe('書きかけの説明');
+  });
+
+  it('保存し直しも失敗したら、新しく入力した値から再開できる', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '一度目');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+    await titleInput(wrapper).setValue('二度目');
+    await titleInput(wrapper).trigger('blur');
+
+    // 親は保存を始めると失敗表示を消し、また失敗すると立て直す
+    await wrapper.setProps({ fieldErrors: {} });
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('二度目');
+  });
+
+  it('保存し直して成功したら下書きは捨て、次に開くと task の値が入っている', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '一度目');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+    await titleInput(wrapper).setValue('二度目');
+    await titleInput(wrapper).trigger('blur');
+    expect(wrapper.emitted('save:title')).toEqual([['一度目'], ['二度目']]);
+
+    await wrapper.setProps({ fieldErrors: {}, task: { ...task, title: '二度目' } });
+    expect(resumeButton(wrapper)).toBeUndefined();
+    expect(wrapper.text()).not.toContain(FAILED);
+
+    await wrapper.get('h1').trigger('click');
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('二度目');
+  });
+
+  it('Esc で取り消したら下書きを残さない', async () => {
+    const wrapper = mountHub();
+    await wrapper.get('h1').trigger('click');
+    await titleInput(wrapper).setValue('取り消す');
+    await titleInput(wrapper).trigger('keydown', { key: 'Escape' });
+
+    expect(wrapper.emitted('save:title')).toBeUndefined();
+    expect(wrapper.find('input[aria-label="タイトル"]').exists()).toBe(false);
+    expect(resumeButton(wrapper)).toBeUndefined();
+    expect(wrapper.text()).not.toContain(FAILED);
+  });
+
+  it('失敗後に再開した編集を Esc で取り消したら、その下書きも捨てる', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '書きかけ');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+    await titleInput(wrapper).trigger('keydown', { key: 'Escape' });
+
+    expect(resumeButton(wrapper)).toBeUndefined();
+    await wrapper.get('h1').trigger('click');
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe(task.title);
+  });
+
+  // 「クリア」は失う入力が無いので再開ボタンを出さない。前に成功した下書きで出してもいけない
+  it('説明の保存に成功したあと「クリア」で失敗しても、前の値で編集を再開させない', async () => {
+    const wrapper = mountHub();
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '説明を追加')!
+      .trigger('click');
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('成功した説明');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '保存')!
+      .trigger('click');
+    await wrapper.setProps({ fieldErrors: {}, task: { ...task, description: '成功した説明' } });
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '成功した説明')!
+      .trigger('click');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'クリア')!
+      .trigger('click');
+    // クリアは確認を挟む
+    (wrapper.findAllComponents(ConfirmDialog)[1]!.props('onConfirm') as () => void)();
+    await nextTick();
+    expect(wrapper.emitted('save:description')).toEqual([['成功した説明'], [null]]);
+
+    await wrapper.setProps({ fieldErrors: { description: FAILED } });
+    expect(wrapper.text()).toContain(FAILED);
+    expect(resumeButton(wrapper)).toBeUndefined();
+  });
+
+  // 分割ビューのペインは別のタスクへ移っても同じインスタンスで、失敗表示も残りうる
+  it('別のタスクへ移ったら、前のタスクの下書きを出さない', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '前のタスクの下書き');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+
+    await wrapper.setProps({ task: { ...task, id: 'other-task', title: '別のタスク' } });
+
+    expect(resumeButton(wrapper)).toBeUndefined();
+    await wrapper.get('h1').trigger('click');
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('別のタスク');
+  });
+});
+
 describe('TaskDetailHub description KFM 表示', () => {
   const RENDERED_HTML = '<h1 id="user-content-task-uuid-h">見出し</h1><p><strong>強調</strong></p>';
 
@@ -961,5 +1135,36 @@ describe('TaskDetailHub 説明の編集', () => {
     (confirm.props('onConfirm') as () => void)();
     await nextTick();
     expect(wrapper.emitted('save:description')).toEqual([[null]]);
+  });
+});
+
+describe('TaskDetailHub 読み込みの失敗', () => {
+  it('失敗を出し、再試行で表示中の失敗した query を取り直す', async () => {
+    let calls = 0;
+    const Host = defineComponent({
+      components: { TaskDetailHub },
+      setup() {
+        const q = useQuery({
+          queryKey: ['hub-retry'],
+          queryFn: () => {
+            calls += 1;
+            return Promise.reject(new Error('x'));
+          },
+          retry: false,
+        });
+        return { q };
+      },
+      template: '<TaskDetailHub :error="q.isError.value" />',
+    });
+    const wrapper = mount(Host, {
+      global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
+    });
+    await flushPromises();
+    expect(calls).toBe(1);
+    expect(wrapper.get('[data-testid="load-error"]').text()).toContain('読み込みに失敗しました');
+
+    await wrapper.get('[data-testid="load-error"] button').trigger('click');
+    await flushPromises();
+    expect(calls).toBe(2);
   });
 });

@@ -104,13 +104,13 @@ varchar の enum 列や JSON のドメイン型列を新しく追加したら、
 backend は起動時に SeaORM の schema sync（`get_schema_registry("entity::*").sync`）を無条件に実行する。
 sync は、エンティティの `unique` / `unique_key` と列の組が一致しない UNIQUE インデックスを `DROP CONSTRAINT` で消そうとする。実体がインデックスだと Postgres が `42704` を返し、backend は起動しない。
 
-この衝突を避けるため、マイグレーション適用後、sync の前に次の四つのインデックスを削除する。削除は `apps/backend/docker/run-migration.sh`、`e2e/scripts/start-backend.sh`、統合テストのハーネスのそれぞれで行う（ハーネスは後ろ二つだけを削除し、`idx_sprints_active_per_project` は sync の後に作り直す）。
+この衝突を避けるため、マイグレーション適用後、sync の前に次の二つのインデックスを削除する。削除は `apps/backend/docker/run-migration.sh` と `e2e/scripts/start-backend.sh` で行う（統合テストのハーネスは `idx_sprints_active_per_project` だけを削除し、sync の後に作り直す）。
 
-- `projects_key_tenant_unique`
 - `labels_project_name_unique`
 - `idx_sprints_active_per_project`
-- `idx_projects_personal_owner`
 
 `idx_sprints_active_per_project`（`sprints(project_id) WHERE status = 'active'`）は、エンティティに対応する `unique_key` が無いので sync でも作られない。したがって Compose で動かす環境にこの部分 UNIQUE インデックスは残らず、「プロジェクトで有効なスプリントは一つ」という規則はスプリント開始のハンドラーの確認だけで守っている。
+
+エンティティの 1 列に付けられる `unique_key` は 1 つだけなので、同じ列を含む複合 UNIQUE を二つは表せない。複合の列の一部にだけ `unique_key` を付けると、sync はその列だけの狭い UNIQUE を作る。`projects` はエンティティで `(tenant_id, key)`（`projects_key_tenant_unique`）を表し、「テナントとユーザーごとに個人プロジェクトは一つ」という規則は `get_or_create_personal_project` のアドバイザリロックで守っている。
 
 これらの理由から、部分 UNIQUE インデックス（`CREATE UNIQUE INDEX ... WHERE`）をマイグレーションに足さない。NULL を除外したいだけなら列の UNIQUE 制約で足りる（NULL 同士は重複扱いされない）ので、エンティティにも `#[sea_orm(unique)]` を付けて揃える。

@@ -5,7 +5,7 @@
 # ステージを省略すると最後の production になるので、開発用は target を明示すること。
 #
 # ── 起動手順（配布用イメージでも同じ）─────────────────────────────
-#   1. /app/run-migration.sh   … migration up + UNIQUE INDEX 4 件の DROP
+#   1. /app/run-migration.sh   … migration up + UNIQUE INDEX 2 件の DROP
 #   2. /app/backend            … サーバー起動（既定の CMD）
 #
 # 手順 1 を飛ばして /app/migration up だけで済ませると backend は起動しない。

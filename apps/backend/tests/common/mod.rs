@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     body::Body,
     extract::{Query, State},
     http::{Request, StatusCode, header},
@@ -59,7 +59,10 @@ use testcontainers_modules::{
         runners::SyncRunner,
     },
 };
-use tokio::{net::TcpListener, sync::OnceCell};
+use tokio::{
+    net::TcpListener,
+    sync::{OnceCell, watch},
+};
 use tower::ServiceExt;
 use url::Url;
 use uuid::Uuid;
@@ -324,8 +327,16 @@ async fn ensure_schema(db: &DatabaseConnection) {
             let _ = db
                 .execute_unprepared("DROP INDEX IF EXISTS idx_sprints_active_per_project")
                 .await;
+            // 使い回す DB に残った旧形の projects の UNIQUE。本番は
+            // m20261105010000_projects_key_unique_per_tenant が消す
             let _ = db
-                .execute_unprepared("DROP INDEX IF EXISTS idx_projects_personal_owner")
+                .execute_unprepared(
+                    r#"
+DROP INDEX IF EXISTS idx_projects_personal_owner;
+DROP INDEX IF EXISTS "idx-projects-idx_projects_personal_owner";
+DROP INDEX IF EXISTS "idx-projects-projects_key_tenant_unique";
+"#,
+                )
                 .await;
             // 行の残った DB へ sync() が NOT NULL 列を既定値なしで足すと落ちるため、先に足しておく
             let _ = db
@@ -393,13 +404,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sprints_active_per_project
 
             db.execute_unprepared(
                 r#"
-DROP INDEX IF EXISTS idx_projects_personal_owner;
 ALTER TABLE projects
     ADD COLUMN IF NOT EXISTS is_personal BOOLEAN NOT NULL DEFAULT false,
     ADD COLUMN IF NOT EXISTS personal_owner_id UUID REFERENCES users(id) ON DELETE CASCADE;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal_owner
-    ON projects(tenant_id, personal_owner_id)
-    WHERE is_personal = true;
 "#,
             )
             .await
@@ -604,6 +611,8 @@ pub struct TestApp {
     pub state: AppState,
     pub base_url: String,
     pub mock: MockOAuthHandle,
+    /// サーバーの停止を真似る。`true` を送ると SSE の応答が閉じる。
+    pub shutdown_tx: watch::Sender<bool>,
     sent_mails: Arc<Mutex<Vec<SentMail>>>,
     client: Client,
     router: Router,
@@ -757,9 +766,12 @@ impl TestApp {
         .await
         .expect("session store");
 
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let (router, _) = routes::create_routes().split_for_parts();
         let router = router
             .with_state(state.clone())
+            .layer(Extension(state.redis_client.clone()))
+            .layer(Extension(shutdown_rx))
             .layer(SessionLayer::new(session_store));
 
         let app_router = router.clone();
@@ -779,6 +791,7 @@ impl TestApp {
             state,
             base_url,
             mock,
+            shutdown_tx,
             sent_mails,
             client,
             router,
