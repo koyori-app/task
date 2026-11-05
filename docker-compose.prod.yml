@@ -59,6 +59,10 @@ services:
       # セッション Cookie に Secure と SameSite=None を付ける（server.rs）。
       # 無いと Secure 無しで発行され、HTTP で届いたリクエストで平文のまま流れる
       RUST_ENV: production
+      # Sentry へのエラー送信（任意）。空なら Sentry を初期化しない（main.rs）。
+      # backend 用の Sentry プロジェクト（Platform: Rust）の DSN を入れる。
+      # frontend の DSN はビルド時に埋め込むので、ここではなく publish-images.yml 側で渡す
+      SENTRY_DSN: ${SENTRY_DSN:-}
       # frontend が SSR サーバ経由でプロキシするので、ブラウザから直接叩く CORS は本来不要。
       # 将来 backend を直接公開したときのために本番オリジンを入れておく
       ALLOW_ORIGIN: ${APP_ORIGIN:?set APP_ORIGIN}

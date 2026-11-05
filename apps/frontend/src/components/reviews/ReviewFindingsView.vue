@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadErrorState from '@/components/LoadErrorState.vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import {
   PhCaretLeft,
@@ -906,6 +907,11 @@ async function onRoundCreated() {
             <p v-if="findingsQuery.isPending.value" class="text-muted-foreground text-sm">
               読み込み中…
             </p>
+            <LoadErrorState
+              v-else-if="findingsQuery.isError.value"
+              message="指摘の読み込みに失敗しました"
+              @retry="findingsQuery.refetch()"
+            />
             <p v-else-if="findings.length === 0" class="text-muted-foreground text-sm">
               {{ hasFilters ? '条件に合う指摘はありません。' : '指摘はありません。' }}
             </p>
