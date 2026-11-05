@@ -1,5 +1,5 @@
 //! Drive の Markdown 本文に書かれた `KEY-N` を `task_attachments`（`source = 'body'`）へ
-//! 結び付ける（docs/features/drive.md §8.5）。
+//! 結び付ける（docs/dev/features/drive/files.md の「本文からのタスク参照」）。
 
 use std::collections::{HashMap, HashSet};
 

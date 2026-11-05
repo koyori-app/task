@@ -1,4 +1,4 @@
-//! マージ時副作用の確認済み操作（docs/features/tasks/9.github-tasks.md §8 / §9）。
+//! マージ時副作用の確認済み操作（docs/dev/features/tasks/github-tasks/index.md の「API」と「画面」）。
 
 use axum::{
     extract::{Path, State},

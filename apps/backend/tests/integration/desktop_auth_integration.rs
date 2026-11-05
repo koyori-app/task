@@ -1,5 +1,13 @@
 //! Koyori Desktop の認証（Authorization Code + PKCE → Device Token）と端末管理。
-//! 規則は apps/backend/docs/personal-access-tokens-authz.md の「Desktop 認証」。
+//! 規則は docs/dev/design/personal-access-tokens-authz.md の「Desktop 認証」。
+//!
+//! テストケースの一覧（docs/dev/design/personal-access-tokens-authz.md から移した）:
+//! - 発行、交換、Bearer で通知一覧が 200。code の再利用・verifier 不一致・TTL 超過は 401
+//! - 2FA 途中のセッション・PAT・Device Token での発行は 403。PAT 管理・テナント作成は 403
+//! - `GET /v1/auth/me` は Device Token で 200、PAT で 403。`PATCH /v1/auth/me` は Device Token・PAT で 403、
+//!   無効なトークンで 401
+//! - 失効後・`sessions_revoked_at` 更新後・期限切れは 401。他人の端末の失効は 404。
+//!   交換のエンドポイントは上限を越えると 429
 
 use crate::common::{TestApp, TestUser, insert_tenant};
 use axum::http::StatusCode;

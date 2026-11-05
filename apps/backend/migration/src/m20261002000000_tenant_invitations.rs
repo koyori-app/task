@@ -6,7 +6,7 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // テナントへのメール招待（apps/backend/docs/tenant-project-authz.md の「招待」）。
+        // テナントへのメール招待（docs/dev/design/tenant-project-authz.md の「招待」）。
         // 承諾・取り消しで行を消すので、行があること = 保留中。同じ宛先への再招待は
         // (tenant_id, email) の UNIQUE で同じ行を作り直す。
         // トークンは保存しない。招待 id と世代（generation）からサーバーの鍵で導くので

@@ -1,4 +1,4 @@
-//! 受信口が作る正規化イベント（docs/features/tasks/9.github-tasks.md §5）。
+//! 受信口が作る正規化イベント（docs/dev/features/tasks/github-tasks/webhook.md）。
 //! タスク側の処理はこの型だけを見て、どのホストから来たかで分岐しない。
 
 use chrono::{DateTime, Utc};

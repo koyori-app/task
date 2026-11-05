@@ -1,5 +1,5 @@
-//! マージ時の副作用（docs/features/tasks/9.github-tasks.md §5「マージ時副作用の独立処理」）と、
-//! 副作用を実行しないまま確認済みにする操作（§8 `merge-effects/acknowledge`）。
+//! マージ時の副作用（docs/dev/features/tasks/github-tasks/webhook.md の「マージ時副作用」）と、
+//! 副作用を実行しないまま確認済みにする操作（docs/dev/features/tasks/github-tasks/index.md の `merge-effects/acknowledge`）。
 //!
 //! どちらも PR 行をロックして `merge_effects_processed_at IS NULL` を確かめてから列を設定するので、
 //! 再送・並行ジョブ・確認済み操作のどの組み合わせでも副作用は一度だけになる。

@@ -1,3 +1,4 @@
+// コードブロックの枠（情報文字列の解釈、行分割、sanitize の許可、コピーボタン）
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createRenderer, renderDescription } from '../markup-renderer';
 import { createSanitizer } from '../markup-renderer/_sanitize';

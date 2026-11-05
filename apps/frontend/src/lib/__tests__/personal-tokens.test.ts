@@ -1,3 +1,6 @@
+// テストケースの一覧（docs/dev/features/account-settings.md から移した）
+// - 有効期限プリセットの計算、伏せ字、期限・最終使用の表示文言（境界値込み）
+
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';

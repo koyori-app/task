@@ -1,5 +1,15 @@
 //! pull_request webhook → PR とタスクのリンク、`GET /tasks/{id}/forge`
-//! （TASK-220、docs/features/tasks/9.github-tasks.md §5「PRイベント共通の前処理」/ §8）。
+//! （TASK-220、docs/dev/features/tasks/github-tasks/webhook.md の「PR イベント共通の前処理」と docs/dev/features/tasks/github-tasks/index.md の「API」）。
+
+// 受け入れ条件（docs/dev/features/tasks/github-tasks/webhook.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// - アクティビティの冪等: タイトルと本文の両方に `KEY-N` があっても 1 行
+// - `Closed { merged: true }` の初回観測: `Opened` を受信していない open PR に対し、最初に届いた `Closed` だけで PR 実体（`state` / `merged_at`）とタイトル由来のリンクが作成される
+// - 共通スナップショット: 各 action を `Opened` なしの最初のイベントとして受信しても、PR 行が作成または最新スナップショットで更新され、タイトルの `KEY-N` が直ちにリンクされる（`Synchronize` / `Closed { merged: false }` を含む）
+// - 配送順の逆転: `Closed { merged: true }` を処理した後に古い `updated_at` の `Edited` が届いても、`state` が `merged` のまま・`title` が巻き戻らない・リンクが再構築されない。対照として、新しい `updated_at` のイベントはペイロードどおり適用される
+// - 同じ秒のイベント: 同一 `updated_at` の `Edited` は PR 取得 API の現在のスナップショットと一致する。同値のときだけ PR 取得 API（GitHub は `GET /repos/{owner}/{repo}/pulls/{number}`）が呼ばれ、`>` と `<` では呼ばれない。PR 取得 API が 5xx を返したときは PR 行が変わらずジョブが再試行される
+// - `Edited`: 本文から `KEY-N` を消すと `body` 由来のリンクが消え、`manual` は残る
+// - 複数参照元: タイトルと本文の両方に同じ `KEY-N` があると `source` 違いの 2 行になり、本文から消しても `title` 由来が残る
+// - 手動リンクの共存: `manual` の行があるタスクが本文にも書かれ、その後本文から消えても `manual` は残る
 
 use crate::common::TestApp;
 use crate::forge_commit_links_integration::{

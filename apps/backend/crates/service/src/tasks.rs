@@ -239,7 +239,7 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
     Ok(model)
 }
 
-/// 類似タスク候補の 1 件（apps/backend/docs/task-similarity-search.md §5）。
+/// 類似タスク候補の 1 件（docs/dev/design/task-similarity-search.md の「service」）。
 #[derive(Debug, FromQueryResult)]
 pub struct SimilarTask {
     pub id: Uuid,

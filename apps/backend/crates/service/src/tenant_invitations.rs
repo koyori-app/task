@@ -1,4 +1,4 @@
-//! テナントへのメール招待（apps/backend/docs/tenant-project-authz.md の「招待」）。
+//! テナントへのメール招待（docs/dev/design/tenant-project-authz.md の「招待」）。
 //!
 //! トークンは保存しない。招待 id と世代（`generation`）からサーバーの鍵で導く
 //! （`{招待 id}.{HMAC}`）。同じ世代なら何度作っても同じ値なので、送信ジョブの再試行が

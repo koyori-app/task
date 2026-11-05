@@ -1,3 +1,8 @@
+// 似ているタスクのテストケース（docs/dev/design/task-similarity-search.md から移した）:
+// - 入力後に候補が描画される。空入力では問い合わせない
+// - 候補クリックで遷移（表示用 tenant ID の URL）してダイアログが閉じる
+// - 入力消去の後から旧応答が到着しても表示しない（1 ケース。閉じる・タスク切替は同じ key の仕組みなので重ねない）
+// - 取得失敗でも作成ボタンが押せる
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ref, nextTick } from 'vue';
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils';

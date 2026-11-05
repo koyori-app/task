@@ -17,7 +17,7 @@ import TaskForgeBranches from './TaskForgeBranches.vue';
 
 /**
  * タスク詳細の「リポジトリ」セクション。タスクに結ばれた PR とコミットを並べる
- * （docs/features/tasks/9.github-tasks.md §9）。
+ * （docs/dev/features/tasks/github-tasks/index.md の「画面」）。
  */
 const FORGE_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge' as const;
 const UNLINK_PATH =

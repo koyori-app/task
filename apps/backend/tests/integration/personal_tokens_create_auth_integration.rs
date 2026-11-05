@@ -2,7 +2,7 @@ use crate::common::{TestApp, TestUser, insert_tenant};
 use axum::http::StatusCode;
 use entity::project_members::ProjectRole;
 use entity::tenant_members::TenantRole;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait};
 use uuid::Uuid;
 
 /// tenant_members に指定ロールで一行挿す。
@@ -42,6 +42,85 @@ async fn try_create_token(app: &mut TestApp, user: &TestUser, tenant_id: Uuid) -
         )
         .await;
     res.status()
+}
+
+/// テナントの 2FA を強制にする（強制前に取った session は残したまま）。
+async fn enforce_2fa(db: &DatabaseConnection, tenant_id: Uuid) {
+    let tenant = entity::tenants::Entity::find_by_id(tenant_id)
+        .one(db)
+        .await
+        .expect("find tenant")
+        .expect("tenant exists");
+    let mut active: entity::tenants::ActiveModel = tenant.into();
+    active.require_2fa = Set(true);
+    active.update(db).await.expect("enforce 2fa");
+}
+
+fn token_body(tenant_id: Uuid) -> serde_json::Value {
+    serde_json::json!({
+        "name": "boundary-check",
+        "tenant_id": tenant_id,
+        "scopes": ["read:task"],
+    })
+}
+
+/// 2FA を強制するテナントでは、2FA を設定していない Admin は強制前に取った session でも
+/// 鍵を作れない（メンバー管理の口と同じく 403 の 2fa-setup-required）。修正前は 201 で通っていた。
+#[tokio::test]
+async fn admin_without_2fa_cannot_create_token_when_tenant_requires_2fa() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user_default().await;
+    let admin = app.insert_user_default().await;
+    let tenant_id = insert_tenant(&app.state.db, owner.id).await;
+    insert_tenant_member(&app.state.db, tenant_id, admin.id, TenantRole::Admin).await;
+
+    // 強制の前に本認証の session を取る
+    app.reset_session_client();
+    app.login_session_no_content(&admin.email, &admin.password)
+        .await;
+    enforce_2fa(&app.state.db, tenant_id).await;
+
+    let res = app
+        .post_json_with_session("/v1/personal_tokens", token_body(tenant_id))
+        .await;
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "強制の下で 2FA が無ければ 403"
+    );
+    let body: serde_json::Value = res.json().await.expect("error body");
+    assert_eq!(body["message"], "2fa-setup-required", "理由を名指しする");
+}
+
+/// 対照: 2FA を設定済みの Admin は、強制するテナントでも鍵を作れる。
+#[tokio::test]
+async fn admin_with_2fa_can_create_token_when_tenant_requires_2fa() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user_default().await;
+    let admin = app.insert_user_default().await;
+    let tenant_id = insert_tenant(&app.state.db, owner.id).await;
+    insert_tenant_member(&app.state.db, tenant_id, admin.id, TenantRole::Admin).await;
+    let admin_2fa = app.enable_2fa(&admin).await;
+    enforce_2fa(&app.state.db, tenant_id).await;
+
+    app.reset_session_client();
+    app.login_half_authed(&admin).await;
+    let verified = app
+        .post_json_with_session(
+            "/v1/auth/2fa/verify",
+            serde_json::json!({ "recovery_code": admin_2fa.recovery_codes[0] }),
+        )
+        .await;
+    assert_eq!(
+        verified.status(),
+        StatusCode::NO_CONTENT,
+        "2FA 検証で本認証になる"
+    );
+
+    let res = app
+        .post_json_with_session("/v1/personal_tokens", token_body(tenant_id))
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED, "2FA 済みなら 201");
 }
 
 /// 主は鍵を作れる。

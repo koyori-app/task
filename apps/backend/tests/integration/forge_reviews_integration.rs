@@ -1,5 +1,8 @@
-//! レビューと PR 行の結線（TASK-264、docs/features/tasks/9.github-tasks.md §6 / §8、
-//! docs/features/review-findings.md §5）。PR の状態、未解決件数、`pr_merged` 通知。
+//! レビューと PR 行の結線（TASK-264、docs/dev/features/tasks/github-tasks/index.md の「CLI との合流」と「API」、
+//! docs/dev/features/review-findings/index.md の「API」）。PR の状態、未解決件数、`pr_merged` 通知。
+
+// 受け入れ条件（docs/dev/features/tasks/github-tasks/webhook.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// - 配送順の逆転: `host_updated_at` が `NULL` の既存行（`review submit` だけで作られた行）に最初のイベントが届いたときも適用される
 
 use crate::common::{TestApp, ensure_tenant_member_for_project, json_body};
 use crate::forge_commit_links_integration::{Fixture, insert_task, setup};

@@ -389,7 +389,7 @@ pub async fn add_member(
         .ok_or(AppError::NotFound)?;
 
     // テナントに居るかは問わない。明示 ACE はテナント所属（継承）と独立に置ける
-    // （apps/backend/docs/tenant-project-authz.md の「継承と明示」）。テナントに居ない人を
+    // （docs/dev/design/tenant-project-authz.md の「継承と明示」）。テナントに居ない人を
     // 招けば、その人はその場で project-only の客分になる。GitHub の outside collaborator
     // と同じ形で、招けるのはプロジェクト Admin・オーナー・入れるテナント Admin だけ（`require_project_admin`）。
     // テナント側で客分の招待を締める旗は別 Issue で扱う。

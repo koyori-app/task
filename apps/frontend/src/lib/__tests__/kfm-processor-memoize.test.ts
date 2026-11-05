@@ -1,3 +1,4 @@
+// processor の構築回数の機械的な計数（既定 prefix は memoize、scope 付きは都度構築だが初期化回数とは独立）
 import { describe, expect, it } from 'vitest';
 import { createRenderer } from '../markup-renderer';
 import { gfmSanitizeSchema, remarkGfm } from '../remark-gfm';
