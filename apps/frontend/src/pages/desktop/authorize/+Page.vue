@@ -7,12 +7,8 @@ import {
   useCreateDesktopAuthCodeMutation,
   useMeQuery,
 } from '@/lib/api-vue-query';
-import {
-  DESKTOP_AUTHORIZE_RETURN,
-  desktopCallbackUrl,
-  parseDesktopAuthorizeQuery,
-} from '@/lib/desktop-authorize';
-import { markNotice } from '@/lib/one-time-notice';
+import { currentLocationPath, signInUrl } from '@/composables/useRedirectAfter';
+import { desktopCallbackUrl, parseDesktopAuthorizeQuery } from '@/lib/desktop-authorize';
 
 // 認証ガードの外に置き（+Layout の isAuthPage）、未ログインならこの URL を覚えて
 // サインインへ送る。ガードに任せるとクエリが落ちて Desktop からやり直しになる
@@ -36,8 +32,7 @@ watch(
   () => isSessionRejected(meQuery.error.value) && !meQuery.isFetching.value,
   (signedOut) => {
     if (!signedOut || !request) return;
-    markNotice(DESKTOP_AUTHORIZE_RETURN, `${window.location.pathname}${window.location.search}`);
-    window.location.assign('/signin');
+    window.location.assign(signInUrl(currentLocationPath()));
   },
   { immediate: true },
 );

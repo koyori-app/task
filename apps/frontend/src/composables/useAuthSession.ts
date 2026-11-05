@@ -6,10 +6,12 @@ import { resetCommentDrafts } from '@/composables/useCommentDrafts';
 import {
   isSessionRejected,
   meQueryOptions,
+  queryErrorStatus,
   sessionExpired,
   useLogoutMutation,
   useMeQuery,
 } from '@/lib/api-vue-query';
+import { currentLocationPath, signInUrlForCurrentPage } from '@/composables/useRedirectAfter';
 import { twoFactorPath } from '@/lib/two-factor';
 import { authUserSchema, useAuthStore } from '@/stores/auth';
 
@@ -41,13 +43,12 @@ export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) 
     if (!toValue(options?.guard)) return;
     const pathname = pageContext.urlPathname;
     if (!['/signin', '/signup'].includes(pathname)) {
-      // 半認証（2FA 待ち）のセッションは /auth/me が 403 になる。サインインへ戻さず 2FA 画面へ進める
-      const status = (meQuery.error?.value as { response?: { status?: number } } | null)?.response
-        ?.status;
+      // 半認証（2FA 待ち）のセッションは /auth/me が 403 になる。サインインへ戻さず 2FA 画面へ進める。
+      // どちらも今のページを戻り先として持ち越す
       window.location.assign(
-        status === 403
-          ? twoFactorPath(`${window.location.pathname}${window.location.search}`)
-          : '/signin',
+        queryErrorStatus(meQuery.error?.value) === 403
+          ? twoFactorPath(currentLocationPath())
+          : signInUrlForCurrentPage(),
       );
     }
   }
