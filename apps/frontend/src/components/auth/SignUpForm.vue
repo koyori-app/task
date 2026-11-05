@@ -52,7 +52,7 @@ const form = useForm({
   <EmailNotVerified
     v-if="registeredEmail"
     :email="registeredEmail"
-    back-href="/signin"
+    :back-href="withRedirectAfter('/signin', redirectAfter)"
     reset-href="/auth/reset-password"
   />
   <div v-else class="flex flex-col gap-6">

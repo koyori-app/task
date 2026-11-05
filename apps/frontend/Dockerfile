@@ -24,6 +24,11 @@ RUN --mount=type=cache,target=/pnpm-store \
 WORKDIR /repo/apps/frontend
 # openapi.json（コミット済み）→ 型生成 → ビルド
 RUN pnpm run openapi:generate
+# ブラウザ側 Sentry の DSN（sentry.browser.config.ts の import.meta.env.PUBLIC_ENV__SENTRY_DSN）。
+# vike build がバンドルへ埋め込む値なので、実行時の環境変数では変えられない。
+# ブラウザに配る前提の公開値なのでイメージに入ってよい。未指定なら空（送信しない）。
+# install のレイヤーキャッシュを崩さないよう、build の直前で宣言する
+ARG PUBLIC_ENV__SENTRY_DSN=
 RUN pnpm run build
 
 ########## runtime ##########

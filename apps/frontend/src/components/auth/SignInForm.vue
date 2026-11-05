@@ -88,7 +88,7 @@ function handleSubmit() {
   <EmailNotVerified
     v-if="unverifiedEmail"
     :email="unverifiedEmail"
-    back-href="/signin"
+    :back-href="withRedirectAfter('/signin', redirectAfter)"
     reset-href="/auth/reset-password"
   />
   <div v-else class="flex flex-col gap-6">

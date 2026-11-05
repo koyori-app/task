@@ -200,6 +200,20 @@ describe('SignInForm のパスワード変更の案内', () => {
   describe('redirect_after', () => {
     afterEach(() => window.history.replaceState({}, '', '/'));
 
+    it('メール未認証の案内からサインインへ戻るリンクも redirect_after を持ち越す', async () => {
+      window.history.replaceState(
+        {},
+        '',
+        '/signin?redirect_after=%2Finvitations%2Faccept%3Ftoken%3Dabc',
+      );
+      stubLogin(403, { message: 'email-not-verified' });
+      const wrapper = await mountAndSubmit();
+      const back = wrapper.findAll('a').find((a) => a.text().includes('サインインページへ戻る'));
+      expect(back!.attributes('href')).toBe(
+        '/signin?redirect_after=%2Finvitations%2Faccept%3Ftoken%3Dabc',
+      );
+    });
+
     it('パスワードでサインインすると redirect_after へ戻る', async () => {
       window.history.replaceState(
         {},
