@@ -2,6 +2,7 @@ import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { computed, watch, type MaybeRefOrGetter, toValue } from 'vue';
 import { usePageContext } from 'vike-vue/usePageContext';
+import { resetCommentDrafts } from '@/composables/useCommentDrafts';
 import {
   isSessionRejected,
   meQueryOptions,
@@ -73,6 +74,8 @@ export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) 
       await logoutMutation.mutateAsync({} as never);
     } finally {
       authStore.clearUser();
+      // 明示的なログアウトだけ下書きを消す。clearUser はセッション切れ（/me の 401 / 403）でも呼ばれるので、そちらでは消さない
+      resetCommentDrafts();
       await queryClient.invalidateQueries({ queryKey: meQueryOptions().queryKey });
       window.location.assign('/signin');
     }
