@@ -209,6 +209,23 @@ pub enum TasksCommand {
         #[command(flatten)]
         fields: TaskFieldArgs,
     },
+    /// Create many tasks at once from a JSON array (all or none)
+    ///
+    /// Each element takes the same names and values as `tasks create`: title, description,
+    /// priority, status, labels, assignees, parent, soft_deadline, hard_deadline,
+    /// planned_start, estimate, progress, milestone, sprint. Every name is resolved before
+    /// anything is sent; the first one that cannot be resolved stops the command with
+    /// `tasks[i]: ...` (i is 0-based).
+    BulkCreate {
+        /// Project key or UUID
+        #[arg(long)]
+        project: String,
+        /// JSON file with an array of tasks, or - for stdin
+        file: String,
+        /// Status name for elements without `status` (default: the project's default status)
+        #[arg(long)]
+        status: Option<String>,
+    },
     /// Show a task
     Show {
         /// Task ref (KEY-N or UUID)

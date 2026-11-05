@@ -7,7 +7,8 @@ use payload::projects::ProjectResponse;
 use payload::task_comments::{CreateCommentRequest, TaskCommentResponse};
 use payload::task_extensions::SearchTasksResponse;
 use payload::tasks::{
-    AssigneeInput, CreateTaskRequest, TaskDetailResponse, TaskListResponse, UpdateTaskRequest,
+    AssigneeInput, BulkCreateTasksRequest, BulkCreateTasksResponse, CreateTaskRequest,
+    TaskDetailResponse, TaskListResponse, UpdateTaskRequest,
 };
 use sea_orm::ActiveEnum;
 use serde_json::json;
@@ -19,8 +20,10 @@ use crate::cli::{TaskClearArgs, TaskFieldArgs, TaskPrCommand, TasksCommand};
 use crate::error::{CliError, Result};
 use crate::output::{OutputOptions, print};
 use crate::resolve::{
-    TaskRef, default_status_id, find_done_status_id, parse_task_ref, resolve_label_id,
-    resolve_milestone_id, resolve_project, resolve_sprint_id, resolve_status_id, resolve_user_id,
+    TaskRef, default_status_id, find_done_status_id, list_labels, list_milestones, list_sprints,
+    list_statuses, parse_task_ref, pick_default_status, pick_label_id, pick_milestone_id,
+    pick_sprint_id, pick_status_by_name, resolve_label_id, resolve_milestone_id, resolve_project,
+    resolve_sprint_id, resolve_status_id, resolve_user_id,
 };
 
 /// タスクの担当者に付く役割。API は自由文字列だが、画面と統合テストはこの綴りを使う。
@@ -197,6 +200,32 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 .post(&borrow(&tasks_path(api, project.id)), &body)
                 .await?;
             print(&task_for_display(created), output);
+        }
+        TasksCommand::BulkCreate {
+            project,
+            file,
+            status,
+        } => {
+            // ファイルの読み取りと形の確認は API を叩く前に済ませる
+            let items = parse_bulk_items(crate::commands::reviews::read_json_input(&file)?)?;
+            let prepared = items
+                .into_iter()
+                .enumerate()
+                .map(|(i, item)| prepare_bulk_item(i, item, status.as_deref()))
+                .collect::<Result<Vec<_>>>()?;
+            let api = &context.connect().await?;
+            let project = resolve_project(api, &project).await?;
+            let body = resolve_bulk_request(api, &project, prepared).await?;
+            let created: BulkCreateTasksResponse = api
+                .post(&borrow(&bulk_create_path(api, project.id)), &body)
+                .await?;
+            if output.json {
+                print(&created, output);
+            } else {
+                for line in bulk_created_lines(&project, &created) {
+                    println!("{line}");
+                }
+            }
         }
         TasksCommand::Show {
             task_ref,
@@ -571,10 +600,280 @@ impl TaskClearArgs {
     }
 }
 
+/// `tasks bulk-create` の JSON の 1 要素。`tasks create` のフラグと同じ名前・値。
+/// `description_file` は持たない。綴りの誤りは黙って捨てず、送信前に断る。
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BulkItem {
+    title: String,
+    description: Option<String>,
+    priority: Option<String>,
+    status: Option<String>,
+    #[serde(default)]
+    labels: Vec<String>,
+    #[serde(default)]
+    assignees: Vec<String>,
+    parent: Option<String>,
+    soft_deadline: Option<String>,
+    hard_deadline: Option<String>,
+    planned_start: Option<NaiveDate>,
+    estimate: Option<i32>,
+    progress: Option<i16>,
+    milestone: Option<String>,
+    sprint: Option<String>,
+}
+
+/// 名前の解決より前にできる検査を終えた要素。
+struct PreparedItem {
+    index: usize,
+    title: String,
+    description: Option<String>,
+    priority: Option<TaskPriority>,
+    /// 要素の `status`、無ければ `--status`。どちらも無ければ None（プロジェクト既定）
+    status: Option<String>,
+    fields: TaskFieldArgs,
+}
+
+/// 失敗を `tasks[i]: …` の位置つきにする。終了コードは検証エラー（2）に揃える。
+fn at_item(index: usize, err: CliError) -> CliError {
+    CliError::validation(format!("tasks[{index}]: {}", err.message))
+}
+
+/// 要素の `status` を優先し、無いときだけ `--status` を使う。
+fn effective_status(item: Option<&str>, default: Option<&str>) -> Option<String> {
+    item.or(default).map(str::to_string)
+}
+
+fn parse_bulk_items(value: serde_json::Value) -> Result<Vec<BulkItem>> {
+    let serde_json::Value::Array(values) = value else {
+        return Err(CliError::validation(
+            "The file must be a JSON array of tasks",
+        ));
+    };
+    let max = payload::tasks::BULK_CREATE_MAX_TASKS as usize;
+    if values.is_empty() {
+        return Err(CliError::validation("The file has no tasks"));
+    }
+    if values.len() > max {
+        return Err(CliError::validation(format!(
+            "Too many tasks: {} (at most {max} at once)",
+            values.len()
+        )));
+    }
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(i, value)| {
+            serde_json::from_value(value)
+                .map_err(|err| at_item(i, CliError::validation(err.to_string())))
+        })
+        .collect()
+}
+
+fn prepare_bulk_item(
+    index: usize,
+    item: BulkItem,
+    default_status: Option<&str>,
+) -> Result<PreparedItem> {
+    let priority = item
+        .priority
+        .as_deref()
+        .map(parse_priority)
+        .transpose()
+        .map_err(|err| at_item(index, err))?;
+    Ok(PreparedItem {
+        index,
+        title: item.title,
+        description: item.description,
+        priority,
+        status: effective_status(item.status.as_deref(), default_status),
+        fields: TaskFieldArgs {
+            soft_deadline: item.soft_deadline,
+            hard_deadline: item.hard_deadline,
+            planned_start: item.planned_start,
+            estimate: item.estimate,
+            progress: item.progress,
+            parent: item.parent,
+            milestone: item.milestone,
+            sprint: item.sprint,
+            labels: item.labels,
+            add_labels: vec![],
+            remove_labels: vec![],
+            assignees: item.assignees,
+        },
+    })
+}
+
+/// 全要素を ID に直して送る本文にする。1 つでも解決できなければそこで止まる
+/// （API は叩かない）。状態・ラベル等の一覧はプロジェクト単位で 1 回だけ取る。
+async fn resolve_bulk_request(
+    api: &ApiClient,
+    project: &ProjectResponse,
+    items: Vec<PreparedItem>,
+) -> Result<BulkCreateTasksRequest> {
+    let mut resolver = FieldResolver::new(api, project);
+    let mut statuses = None;
+    let mut tasks = Vec::with_capacity(items.len());
+    for item in items {
+        let index = item.index;
+        let request = resolve_bulk_item(&mut resolver, &mut statuses, item)
+            .await
+            .map_err(|err| at_item(index, err))?;
+        tasks.push(request);
+    }
+    Ok(BulkCreateTasksRequest { tasks })
+}
+
+async fn resolve_bulk_item(
+    resolver: &mut FieldResolver<'_>,
+    statuses: &mut Option<Vec<payload::statuses::ProjectStatusResponse>>,
+    item: PreparedItem,
+) -> Result<CreateTaskRequest> {
+    if statuses.is_none() {
+        *statuses = Some(list_statuses(resolver.api, resolver.project.id).await?);
+    }
+    let known = statuses.as_deref().unwrap_or_default();
+    let status_id = match &item.status {
+        Some(name) => pick_status_by_name(known, name)?,
+        None => pick_default_status(known)?,
+    };
+    let mut resolved = resolve_fields_with(resolver, &item.fields).await?;
+    check_deadline_order(resolved.soft_deadline, resolved.hard_deadline)?;
+    Ok(CreateTaskRequest {
+        title: item.title,
+        description: item.description,
+        status_id,
+        priority: item.priority,
+        progress_pct: resolved.progress_pct,
+        parent_task_id: resolved.parent_task_id,
+        milestone_id: resolved.milestone_id,
+        sprint_id: resolved.sprint_id,
+        soft_deadline: resolved.soft_deadline,
+        hard_deadline: resolved.hard_deadline,
+        planned_start_on: resolved.planned_start_on,
+        estimated_minutes: resolved.estimated_minutes,
+        assignees: resolved.assignees.take().unwrap_or_default(),
+        label_ids: resolved.set_label_ids.take().unwrap_or_default(),
+        custom_field_values: vec![],
+    })
+}
+
+fn bulk_create_path(api: &ApiClient, project_id: Uuid) -> Vec<String> {
+    let mut segments = tasks_path(api, project_id);
+    segments.push("bulk-create".into());
+    segments
+}
+
+/// `KEY-N  title` を入力順に。
+fn bulk_created_lines(project: &ProjectResponse, created: &BulkCreateTasksResponse) -> Vec<String> {
+    created
+        .tasks
+        .iter()
+        .map(|detail| {
+            format!(
+                "{}-{}  {}",
+                project.key, detail.task.seq_id, detail.task.title
+            )
+        })
+        .collect()
+}
+
 /// 名前で渡された値を ID に直す。API を呼ぶ前に範囲の検証も済ませる。
 async fn resolve_fields(
     api: &ApiClient,
     project: &ProjectResponse,
+    fields: &TaskFieldArgs,
+) -> Result<ResolvedFields> {
+    resolve_fields_with(&mut FieldResolver::new(api, project), fields).await
+}
+
+/// プロジェクトごとの参照先（ラベル・マイルストーン・スプリント・担当者・親）を
+/// 一度引いたら使い回す引き手。一括作成が要素ごとに一覧を取り直さないためのもの。
+struct FieldResolver<'a> {
+    api: &'a ApiClient,
+    project: &'a ProjectResponse,
+    labels: Option<Vec<payload::labels::LabelResponse>>,
+    milestones: Option<Vec<payload::milestones::MilestoneResponse>>,
+    sprints: Option<Vec<payload::sprints::SprintResponse>>,
+    users: std::collections::HashMap<String, Uuid>,
+    parents: std::collections::HashMap<String, Uuid>,
+}
+
+impl<'a> FieldResolver<'a> {
+    fn new(api: &'a ApiClient, project: &'a ProjectResponse) -> Self {
+        Self {
+            api,
+            project,
+            labels: None,
+            milestones: None,
+            sprints: None,
+            users: Default::default(),
+            parents: Default::default(),
+        }
+    }
+
+    async fn label(&mut self, name: &str) -> Result<Uuid> {
+        // UUID は一覧を取らずにそのまま使う（単体の解決と同じ）
+        if let Ok(uuid) = Uuid::parse_str(name) {
+            return Ok(uuid);
+        }
+        if self.labels.is_none() {
+            self.labels = Some(list_labels(self.api, self.project.id).await?);
+        }
+        pick_label_id(self.labels.as_deref().unwrap_or_default(), name)
+    }
+
+    async fn milestone(&mut self, name: &str) -> Result<Uuid> {
+        // UUID は一覧を取らずにそのまま使う（単体の解決と同じ）
+        if let Ok(uuid) = Uuid::parse_str(name) {
+            return Ok(uuid);
+        }
+        if self.milestones.is_none() {
+            self.milestones = Some(list_milestones(self.api, self.project.id).await?);
+        }
+        pick_milestone_id(self.milestones.as_deref().unwrap_or_default(), name)
+    }
+
+    async fn sprint(&mut self, name: &str) -> Result<Uuid> {
+        // UUID は一覧を取らずにそのまま使う（単体の解決と同じ）
+        if let Ok(uuid) = Uuid::parse_str(name) {
+            return Ok(uuid);
+        }
+        if self.sprints.is_none() {
+            self.sprints = Some(list_sprints(self.api, self.project.id).await?);
+        }
+        pick_sprint_id(self.sprints.as_deref().unwrap_or_default(), name)
+    }
+
+    async fn user(&mut self, name: &str) -> Result<Uuid> {
+        if let Some(id) = self.users.get(name) {
+            return Ok(*id);
+        }
+        let id = resolve_user_id(self.api, self.project.id, name).await?;
+        self.users.insert(name.to_string(), id);
+        Ok(id)
+    }
+
+    async fn parent(&mut self, reference: &str) -> Result<Uuid> {
+        if let Some(id) = self.parents.get(reference) {
+            return Ok(*id);
+        }
+        let id = resolve_parent_task_id(self.api, self.project, reference).await?;
+        self.parents.insert(reference.to_string(), id);
+        Ok(id)
+    }
+
+    async fn labels(&mut self, names: &[String]) -> Result<Vec<Uuid>> {
+        let mut ids = Vec::with_capacity(names.len());
+        for name in names {
+            ids.push(self.label(name).await?);
+        }
+        Ok(ids)
+    }
+}
+
+async fn resolve_fields_with(
+    resolver: &mut FieldResolver<'_>,
     fields: &TaskFieldArgs,
 ) -> Result<ResolvedFields> {
     if let Some(progress) = fields.progress
@@ -610,24 +909,24 @@ async fn resolve_fields(
     };
 
     if let Some(reference) = &fields.parent {
-        resolved.parent_task_id = Some(resolve_parent_task_id(api, project, reference).await?);
+        resolved.parent_task_id = Some(resolver.parent(reference).await?);
     }
     if let Some(name) = &fields.milestone {
-        resolved.milestone_id = Some(resolve_milestone_id(api, project.id, name).await?);
+        resolved.milestone_id = Some(resolver.milestone(name).await?);
     }
     if let Some(name) = &fields.sprint {
-        resolved.sprint_id = Some(resolve_sprint_id(api, project.id, name).await?);
+        resolved.sprint_id = Some(resolver.sprint(name).await?);
     }
     if !fields.labels.is_empty() {
-        resolved.set_label_ids = Some(resolve_labels(api, project.id, &fields.labels).await?);
+        resolved.set_label_ids = Some(resolver.labels(&fields.labels).await?);
     }
-    resolved.add_label_ids = resolve_labels(api, project.id, &fields.add_labels).await?;
-    resolved.remove_label_ids = resolve_labels(api, project.id, &fields.remove_labels).await?;
+    resolved.add_label_ids = resolver.labels(&fields.add_labels).await?;
+    resolved.remove_label_ids = resolver.labels(&fields.remove_labels).await?;
     if !fields.assignees.is_empty() {
         let mut assignees = Vec::with_capacity(fields.assignees.len());
         let mut seen = std::collections::HashSet::new();
         for name in &fields.assignees {
-            let user_id = resolve_user_id(api, project.id, name).await?;
+            let user_id = resolver.user(name).await?;
             if !seen.insert(user_id) {
                 continue;
             }
@@ -639,14 +938,6 @@ async fn resolve_fields(
         resolved.assignees = Some(assignees);
     }
     Ok(resolved)
-}
-
-async fn resolve_labels(api: &ApiClient, project_id: Uuid, names: &[String]) -> Result<Vec<Uuid>> {
-    let mut ids = Vec::with_capacity(names.len());
-    for name in names {
-        ids.push(resolve_label_id(api, project_id, name).await?);
-    }
-    Ok(ids)
 }
 
 /// 親タスクは `KEY-N` でも指せる。API は UUID を要求するので詳細を 1 度引く。
@@ -911,6 +1202,82 @@ fn tasks_for_display(mut list: TaskListResponse) -> TaskListResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bulk_items(json: serde_json::Value) -> Result<Vec<BulkItem>> {
+        parse_bulk_items(json)
+    }
+
+    #[test]
+    fn bulk_status_prefers_the_element_then_the_flag_then_the_project_default() {
+        assert_eq!(
+            effective_status(Some("Doing"), Some("Todo")).as_deref(),
+            Some("Doing")
+        );
+        assert_eq!(
+            effective_status(None, Some("Todo")).as_deref(),
+            Some("Todo")
+        );
+        assert_eq!(effective_status(None, None), None);
+
+        let items = bulk_items(json!([{"title": "a"}, {"title": "b", "status": "Doing"}])).unwrap();
+        let statuses: Vec<_> = items
+            .into_iter()
+            .enumerate()
+            .map(|(i, item)| prepare_bulk_item(i, item, Some("Todo")).unwrap().status)
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![Some("Todo".to_string()), Some("Doing".to_string())]
+        );
+    }
+
+    #[test]
+    fn bulk_failure_is_reported_at_the_failing_element_with_the_validation_exit_code() {
+        let items = bulk_items(json!([
+            {"title": "ok", "priority": "high"},
+            {"title": "bad", "priority": "urgent-ish"},
+            {"title": "never reached", "priority": "nope"}
+        ]))
+        .unwrap();
+        let err = items
+            .into_iter()
+            .enumerate()
+            .map(|(i, item)| prepare_bulk_item(i, item, None))
+            .collect::<Result<Vec<_>>>()
+            .map(|_| ())
+            .unwrap_err();
+        assert!(err.message.starts_with("tasks[1]: "), "{}", err.message);
+        assert_eq!(err.exit_code, 2);
+    }
+
+    #[test]
+    fn at_item_turns_any_failure_into_a_positioned_validation_error() {
+        let err = at_item(3, CliError::not_found("Label not found: x"));
+        assert_eq!(err.message, "tasks[3]: Label not found: x");
+        assert_eq!(err.exit_code, 2);
+    }
+
+    #[test]
+    fn bulk_input_must_be_a_non_empty_array_within_the_limit() {
+        assert!(bulk_items(json!({"title": "a"})).is_err());
+        assert!(bulk_items(json!([])).is_err());
+        let many: Vec<_> = (0..101).map(|_| json!({"title": "a"})).collect();
+        assert!(bulk_items(json!(many)).is_err());
+        let max: Vec<_> = (0..100).map(|_| json!({"title": "a"})).collect();
+        assert_eq!(bulk_items(json!(max)).unwrap().len(), 100);
+    }
+
+    #[test]
+    fn bulk_elements_reject_unknown_keys_at_their_position() {
+        // `description_file` は持たない。綴りの誤りも黙って捨てない
+        let err = bulk_items(json!([
+            {"title": "a"},
+            {"title": "b", "description_file": "x.md"}
+        ]))
+        .unwrap_err();
+        assert!(err.message.starts_with("tasks[1]: "), "{}", err.message);
+        assert_eq!(err.exit_code, 2);
+    }
 
     /// 追加した項目を「何も指定していない」状態にした更新本文。
     /// 既存の 4 項目だけを見るテストは、これを通して組み立てる。
