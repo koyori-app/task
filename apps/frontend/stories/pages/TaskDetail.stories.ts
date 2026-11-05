@@ -953,7 +953,8 @@ export const DescriptionEdit: Story = {
     // keyboard で直接打つ
     await user.keyboard('{Control>}a{/Control}');
     await user.keyboard('更新後の説明');
-    await user.tab();
+    // blur では保存されない。「保存」ボタンで確定する
+    await user.click(canvas.getByRole('button', { name: '保存' }));
 
     await expect(canvas.findByText('更新後の説明')).resolves.toBeInTheDocument();
     const puts = (DescriptionEdit as { puts?: unknown[] }).puts ?? [];
@@ -1075,6 +1076,8 @@ export const DescriptionEditEscape: Story = {
     await user.keyboard('{Control>}a{/Control}');
     await user.keyboard('捨てられるはずの下書き');
     await user.keyboard('{Escape}');
+    // 変更ありの Escape は破棄の確認を挟む。確認で「破棄する」を押して破棄する
+    await user.click(await screen.findByRole('button', { name: '破棄する' }));
 
     // 編集器が閉じ、元の本文が戻る
     await expect(
@@ -1106,6 +1109,8 @@ export const DescriptionClear: Story = {
 
     await user.click(canvas.getByText('OIDC フローとセッション管理を実装する。'));
     await user.click(await canvas.findByRole('button', { name: 'クリア' }));
+    // クリアは確認を挟む。確認で「消す」を押して実行する
+    await user.click(await screen.findByRole('button', { name: '消す' }));
 
     await expect(canvas.findByText('説明を追加')).resolves.toBeInTheDocument();
     const puts = (DescriptionClear as { puts?: unknown[] }).puts ?? [];

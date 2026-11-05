@@ -4,6 +4,7 @@ import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import { createTestApiClient } from '@/lib/api-vue-query';
+import { resetCommentDrafts } from '@/composables/useCommentDrafts';
 import { useAuthSession } from '../useAuthSession';
 import { useAuthStore } from '@/stores/auth';
 
@@ -94,6 +95,8 @@ describe('useAuthSession', () => {
   });
 
   afterEach(() => {
+    // 戻り先はページの URL から作るので、テストが変えた場所を次のテストへ持ち越さない
+    window.history.replaceState(null, '', '/');
     queryClient.clear();
     meQueryMockState.controlled = false;
     meQueryMockState.data.value = null;
@@ -153,6 +156,36 @@ describe('useAuthSession', () => {
     assignSpy.mockRestore();
   });
 
+  it('ガードは元の URL（path + search + hash）を redirect_after に載せてサインインへ送る', async () => {
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    window.history.replaceState({}, '', '/t/x/projects/P/tasks/P-1?foo=1#c');
+    meQueryMockState.controlled = true;
+    meQueryMockState.isError.value = true;
+    meQueryMockState.error.value = { response: { status: 401 } };
+    try {
+      mount(
+        defineComponent({
+          setup() {
+            useAuthSession({ guard: true });
+            return {};
+          },
+          template: '<div />',
+        }),
+        { global: { plugins: [[VueQueryPlugin, { queryClient }], createPinia()] } },
+      );
+      await flushPromises();
+      expect(assignSpy).toHaveBeenCalledWith(
+        '/signin?redirect_after=' + encodeURIComponent('/t/x/projects/P/tasks/P-1?foo=1#c'),
+      );
+    } finally {
+      meQueryMockState.controlled = false;
+      meQueryMockState.isError.value = false;
+      meQueryMockState.error.value = null;
+      window.history.replaceState({}, '', '/');
+      assignSpy.mockRestore();
+    }
+  });
+
   it('does not fetch /me when guard is false', async () => {
     const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
 
@@ -176,6 +209,57 @@ describe('useAuthSession', () => {
     const meCalls = fetchMock.mock.calls.filter((call) => call[0].url.includes('/v1/auth/me'));
     expect(meCalls).toHaveLength(0);
     expect(assignSpy).not.toHaveBeenCalled();
+    assignSpy.mockRestore();
+  });
+
+  function mountSession(opts?: { guard?: boolean }) {
+    let session!: ReturnType<typeof useAuthSession>;
+    mount(
+      defineComponent({
+        setup() {
+          session = useAuthSession(opts);
+          return {};
+        },
+        template: '<div />',
+      }),
+      { global: { plugins: [[VueQueryPlugin, { queryClient }], createPinia()] } },
+    );
+    return session;
+  }
+
+  it('/me が 401 で clearUser が呼ばれてもコメントの下書きは残る', async () => {
+    resetCommentDrafts();
+    window.sessionStorage.setItem('task:comment-draft:u:t:list', 'x');
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ message: 'unauthorized' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    mountSession({ guard: true });
+    await flushPromises();
+    expect(assignSpy).toHaveBeenCalledWith('/signin'); // 認証エラー経路（clearUser）を通った
+    expect(window.sessionStorage.getItem('task:comment-draft:u:t:list')).toBe('x');
+    assignSpy.mockRestore();
+  });
+
+  it('明示的なログアウトではコメントの下書きを消す', async () => {
+    window.sessionStorage.setItem('task:comment-draft:u:t:list', 'x');
+    fetchMock.mockImplementation(async (input: Request) =>
+      input.method.toUpperCase() === 'GET'
+        ? new Response(JSON.stringify(mockUser), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        : new Response(null, { status: 204 }),
+    );
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    const session = mountSession();
+    await flushPromises();
+    await session.logout();
+    expect(window.sessionStorage.getItem('task:comment-draft:u:t:list')).toBeNull();
     assignSpy.mockRestore();
   });
 

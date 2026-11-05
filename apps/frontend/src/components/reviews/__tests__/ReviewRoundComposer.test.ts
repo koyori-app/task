@@ -210,4 +210,100 @@ describe('ReviewRoundComposer', () => {
     expect(wrapper.text()).toContain('レビューを起票する権限がありません。');
     expect(wrapper.emitted('created')).toBeUndefined();
   });
+
+  // 入力欄に書いただけで「下書きに追加」を押さずに確定すると、その指摘は黙って捨てられる
+  it('入力欄に未追加の内容があると確定できず、理由を出す', async () => {
+    const posted = stubFetch();
+    const wrapper = mountComposer();
+    await flushPromises();
+
+    await wrapper.find('#composer-head').setValue(HEAD_SHA);
+    await wrapper.find('#draft-title').setValue('認可漏れ');
+    await wrapper.find('#draft-body').setValue('本文');
+    await flushPromises();
+
+    expect(bodyButton('確定')?.disabled).toBe(true);
+    expect(wrapper.text()).toContain('下書きに追加');
+    expect(wrapper.get('[role="alert"]').text()).toContain('まだ下書きに追加されていません');
+
+    // 下書きに追加すれば確定できる
+    bodyButton('下書きに追加')!.click();
+    await flushPromises();
+    expect(bodyButton('確定')?.disabled).toBe(false);
+    bodyButton('確定')!.click();
+    await flushPromises();
+    expect(posted).toHaveLength(1);
+  });
+
+  it('入力欄が空なら指摘 0 件でも確定できる（承認として使える）', async () => {
+    const posted = stubFetch();
+    const wrapper = mountComposer();
+    await flushPromises();
+
+    await wrapper.find('#composer-head').setValue(HEAD_SHA);
+    await flushPromises();
+    expect(bodyButton('確定')?.disabled).toBe(false);
+    bodyButton('確定')!.click();
+    await flushPromises();
+    expect(posted).toHaveLength(1);
+  });
+
+  it('下書きがあるときのキャンセルは確認し、やめると下書きが残る', async () => {
+    stubFetch();
+    const wrapper = mountComposer();
+    await flushPromises();
+
+    await wrapper.find('#draft-title').setValue('認可漏れ');
+    await wrapper.find('#draft-body').setValue('本文');
+    bodyButton('下書きに追加')!.click();
+    await flushPromises();
+
+    bodyButton('キャンセル')!.click();
+    await flushPromises();
+    expect(wrapper.emitted('cancel')).toBeUndefined();
+    expect(document.body.querySelector('dialog[open]')?.textContent).toContain(
+      '下書きを破棄しますか？',
+    );
+
+    // 確認でやめると、下書きは残る
+    const dismiss = [
+      ...document.body.querySelectorAll<HTMLButtonElement>('dialog[open] button'),
+    ].find((b) => b.textContent?.includes('キャンセル'));
+    dismiss!.click();
+    await flushPromises();
+    expect(wrapper.emitted('cancel')).toBeUndefined();
+    expect(wrapper.get('[data-testid="staged-list"]').text()).toContain('認可漏れ');
+
+    // 破棄すると閉じる
+    bodyButton('キャンセル')!.click();
+    await flushPromises();
+    bodyButton('破棄する')!.click();
+    await flushPromises();
+    expect(wrapper.emitted('cancel')).toHaveLength(1);
+  });
+
+  it('総評だけ書いた場合のキャンセルも確認する', async () => {
+    stubFetch();
+    const wrapper = mountComposer();
+    await flushPromises();
+
+    await wrapper.find('#composer-summary').setValue('総評だけ');
+    bodyButton('キャンセル')!.click();
+    await flushPromises();
+    expect(wrapper.emitted('cancel')).toBeUndefined();
+    expect(document.body.querySelector('dialog[open]')?.textContent).toContain(
+      '下書きを破棄しますか？',
+    );
+  });
+
+  it('下書きが無いときのキャンセルは確認なしで閉じる', async () => {
+    stubFetch();
+    const wrapper = mountComposer();
+    await flushPromises();
+
+    bodyButton('キャンセル')!.click();
+    await flushPromises();
+    expect(wrapper.emitted('cancel')).toHaveLength(1);
+    expect(document.body.querySelector('dialog[open]')).toBeNull();
+  });
 });

@@ -1,10 +1,13 @@
 // テストケースの一覧（docs/dev/features/account-settings.md から移した）
 // - `profileHref` を渡したときだけ投稿者がプロフィールへのリンクになること
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { nextTick } from 'vue';
+import { createPinia, setActivePinia } from 'pinia';
 import TaskComments from '../TaskComments.vue';
+import { useAuthStore } from '@/stores/auth';
+import { resetCommentDrafts } from '@/composables/useCommentDrafts';
 import { openMentionPickerSpy } from './comment-editor-stub';
 import type { CommentThread } from '@/composables/useTaskComments';
 import type { ActivityItem } from '@/lib/task-activity';
@@ -16,6 +19,25 @@ vi.mock('@/components/tasks/CommentEditor.vue', async () => ({
 }));
 
 enableAutoUnmount(afterEach);
+let pinia: ReturnType<typeof createPinia>;
+beforeEach(() => {
+  resetCommentDrafts();
+  pinia = createPinia();
+  setActivePinia(pinia);
+  signInAs('user-1');
+});
+
+function signInAs(id: string) {
+  useAuthStore().setUser({
+    id,
+    email: `${id}@example.com`,
+    username: id,
+    email_verified: true,
+    is_admin: false,
+    is_suspended: false,
+    totp_enabled: false,
+  });
+}
 
 const user = { id: 'user-1', name: '田中太郎' };
 
@@ -51,6 +73,7 @@ function activity(id: string, created_at: string, overrides: Partial<ActivityIte
 
 function mountComments(props: Partial<InstanceType<typeof TaskComments>['$props']> = {}) {
   return mount(TaskComments, {
+    global: { plugins: [pinia] },
     props: {
       threads: [],
       onSubmit: vi.fn(async () => true),
@@ -60,6 +83,71 @@ function mountComments(props: Partial<InstanceType<typeof TaskComments>['$props'
     },
   });
 }
+
+describe('TaskComments の下書き（タスクごと）', () => {
+  const box = (w: VueWrapper) => w.get('textarea[aria-label="コメントを入力"]');
+
+  it('タスク A の下書きをタスク B の入力欄に出さず、A へ戻ると復元する', async () => {
+    const wrapper = mountComments({ taskId: 'a' });
+    await box(wrapper).setValue('A の下書き');
+    await wrapper.setProps({ taskId: 'b' });
+    expect((box(wrapper).element as HTMLTextAreaElement).value).toBe('');
+    await wrapper.setProps({ taskId: 'a' });
+    expect((box(wrapper).element as HTMLTextAreaElement).value).toBe('A の下書き');
+  });
+
+  it('別テナントの同じ表示用 ID（ENG-42）のタスクには下書きを出さない', async () => {
+    const first = mountComments({ tenantId: 't-a', projectId: 'p-a', taskId: 'ENG-42' });
+    await first.find('textarea').setValue('テナント A 向け');
+    first.unmount();
+    const other = mountComments({ tenantId: 't-b', projectId: 'p-b', taskId: 'ENG-42' });
+    expect((other.find('textarea').element as HTMLTextAreaElement).value).toBe('');
+    other.unmount();
+    const back = mountComments({ tenantId: 't-a', projectId: 'p-a', taskId: 'ENG-42' });
+    expect((back.find('textarea').element as HTMLTextAreaElement).value).toBe('テナント A 向け');
+  });
+
+  it('開き直し（再マウント）でも同じタスクの下書きが戻る', async () => {
+    const first = mountComments({ taskId: 'a' });
+    await box(first).setValue('書きかけ');
+    first.unmount();
+    const second = mountComments({ taskId: 'a' });
+    expect((box(second).element as HTMLTextAreaElement).value).toBe('書きかけ');
+  });
+
+  it('利用者 A の下書きは同じタスクでも利用者 B の入力欄に復元しない', async () => {
+    const first = mountComments({ taskId: 'a' });
+    await box(first).setValue('A の書きかけ');
+    first.unmount();
+    signInAs('user-2');
+    const second = mountComments({ taskId: 'a' });
+    expect((box(second).element as HTMLTextAreaElement).value).toBe('');
+    second.unmount();
+    signInAs('user-1');
+    const back = mountComments({ taskId: 'a' });
+    expect((box(back).element as HTMLTextAreaElement).value).toBe('A の書きかけ');
+  });
+
+  it('clearUser（/me の一時障害でも呼ばれる）では下書きを消さない', async () => {
+    const first = mountComments({ taskId: 'a' });
+    await box(first).setValue('残る');
+    first.unmount();
+    useAuthStore().clearUser();
+    signInAs('user-1');
+    const second = mountComments({ taskId: 'a' });
+    expect((box(second).element as HTMLTextAreaElement).value).toBe('残る');
+  });
+
+  it('投稿に成功したら下書きを消す（再マウントしても戻らない）', async () => {
+    const wrapper = mountComments({ taskId: 'a' });
+    await box(wrapper).setValue('送る');
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    wrapper.unmount();
+    const again = mountComments({ taskId: 'a' });
+    expect((box(again).element as HTMLTextAreaElement).value).toBe('');
+  });
+});
 
 describe('TaskComments', () => {
   it('スレッドと返信を素テキストで表示し、HTML はエスケープされたまま出す', async () => {

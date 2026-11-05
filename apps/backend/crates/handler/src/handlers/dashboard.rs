@@ -58,13 +58,9 @@ pub async fn get_dashboard(
         .ensure_tenant_access_or_guest_scope(&state, tenant_id)
         .await?;
     let filter = q.filter.as_deref().unwrap_or("today");
-    let predicate = match filter {
-        "today" => "due_date = c.today",
-        "week" => "due_date >= c.week_start AND due_date < c.week_start + 7",
-        "overdue" => "due_date < c.today",
-        "all" => "TRUE",
-        _ => return Err(AppError::BadRequest),
-    };
+    let predicate =
+        service::deadline_filter::predicate(filter, "due_date", "c.today", "c.week_start")
+            .ok_or(AppError::BadRequest)?;
     let timezone = q.timezone.as_deref().unwrap_or("UTC");
     if timezone.len() > 100 || !service::timezone::exists(&state.db, timezone).await? {
         return Err(AppError::BadRequest);
