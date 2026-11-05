@@ -14,6 +14,7 @@ import type { ActivityFilter, ActivityLookups } from '@/lib/activity-timeline';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
 import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
 import { useTaskActivities } from '@/composables/useTaskActivities';
+import { useReactions } from '@/composables/useReactions';
 import { useTaskComments } from '@/composables/useTaskComments';
 import { useRenderedDescription } from '@/composables/useRenderedDescription';
 import { useTaskDetail } from '@/composables/useTaskDetail';
@@ -210,6 +211,15 @@ const assigneeError = computed(() => {
 
 const meQuery = useMeQuery();
 const currentUserId = computed(() => meQuery.data.value?.id ?? null);
+const reactionController = useReactions({
+  tenantId,
+  projectId,
+  taskId: () => props.taskId,
+  currentUser: computed(() => {
+    const me = meQuery.data.value;
+    return me ? { id: me.id, name: me.username, avatar_url: me.avatar_url ?? null } : null;
+  }),
+});
 /**
  * 説明の KFM 描画。詳細ページは server data hook が HTML を渡してくれるが、
  * このペインは選択がクライアント操作なので data hook が追従できない。描画は
@@ -261,6 +271,8 @@ function onDeleteDialogCancel(event: Event) {
     -->
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <TaskDetailHub
+        :reaction-controller="reactionController"
+        :current-user-id="currentUserId"
         :layout="layout"
         :profile-href="profileHref"
         :task="displayTask"
@@ -338,7 +350,10 @@ function onDeleteDialogCancel(event: Event) {
         </template>
         <template #sidebar>
           <TaskComments
+            :reaction-controller="reactionController"
             :task-id="taskId"
+            :tenant-id="tenantId"
+            :project-id="projectId"
             :threads="threads"
             v-model:open-thread-id="activityThreadId"
             :activities="activities"

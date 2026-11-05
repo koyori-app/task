@@ -1,4 +1,4 @@
-//! PR のコミット集合の同期（docs/features/tasks/9.github-tasks.md §5「PR のコミット集合の同期」）。
+//! PR のコミット集合の同期（docs/dev/features/tasks/github-tasks/webhook.md の「PR のコミット集合の同期」）。
 //!
 //! `Opened` / `Synchronize` のたびにホストのコミット一覧を読み、`forge_pull_request_commits` を
 //! その一覧と一致させる。一覧を読み切れなかったときは追加だけ行い、削除はしない

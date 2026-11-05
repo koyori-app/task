@@ -3,7 +3,7 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
-/// PR ↔ コミットの中間表とブランチのリンク（docs/features/tasks/9.github-tasks.md §2 / §3 の残り）。
+/// PR ↔ コミットの中間表とブランチのリンク（docs/dev/features/tasks/github-tasks/index.md の「データ」の残り）。
 /// `reviews` の FK 付け替えはこのマイグレーションでも行わない。
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

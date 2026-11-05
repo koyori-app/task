@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { ArrowLeft, AtSign, SendHorizontal } from '@lucide/vue';
+import { getActivePinia } from 'pinia';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue';
 
 import CommentEditor from '@/components/tasks/CommentEditor.vue';
 import TaskActivityEntry from '@/components/tasks/TaskActivityEntry.vue';
 import TaskCommentItem from '@/components/tasks/TaskCommentItem.vue';
 import { Button, Skeleton, Spinner } from '@koyori-app/ui-vue';
+import {
+  clearCommentDraft,
+  getCommentDraft,
+  setCommentDraft,
+} from '@/composables/useCommentDrafts';
+import { useAuthStore } from '@/stores/auth';
 import { useNow } from '@/composables/useNow';
+import type { ReactionController } from '@/composables/useReactions';
 import type { CommentThread } from '@/composables/useTaskComments';
 import { buildTimeline, type ActivityFilter, type ActivityLookups } from '@/lib/activity-timeline';
 import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
@@ -18,6 +26,12 @@ const props = defineProps<{
    * 移った時に前のタスクのスクロールの状態を持ち越さないために受け取る
    */
   taskId?: string;
+  /**
+   * 下書きの置き場をテナントとプロジェクトで分けるための ID。taskId は `ENG-42` のような
+   * 表示用 ID で別テナントに同じ値があり得るので、これが無いと下書きが混ざる
+   */
+  tenantId?: string | null;
+  projectId?: string | null;
   threads: CommentThread[];
   /** 本文の `<@利用者ID>` の印から引ける表示情報（コメント一覧 API の `mentions`） */
   mentions?: MentionTable;
@@ -54,6 +68,8 @@ const props = defineProps<{
   profileHref?: (userId: string) => string;
   /** 本文の札をプロフィールへの link にするテナント（表示用 id。CommentBody 参照） */
   mentionTenant?: string;
+  /** 絵文字リアクションの操作。渡さなければリアクションの UI を出さない */
+  reactionController?: ReactionController;
   /** 投稿（新規・返信共通）の進行中 */
   submitPending?: boolean;
   /** 新規投稿の失敗。新規投稿フォームの直下に出す */
@@ -111,14 +127,17 @@ const openThread = computed(() => props.threads.find((thread) => thread.id === o
  * 書きかけが警告なしに消える。既存スレッドを覗くだけ・返信をやめて一覧へ戻るだけの
  * 操作で起きるので、破棄の確認を出すより持ち分けるほうが素直。
  */
-const DRAFT_LIST_KEY = '';
-const drafts = ref<Record<string, string>>({});
-const draftKey = computed(() => openThreadId.value ?? DRAFT_LIST_KEY);
+// pinia の無い所（Storybook など）では利用者 ID 未取得扱い（メモリだけ）にする。
+const authStore = getActivePinia() ? useAuthStore() : null;
+const userId = computed(() => authStore?.user?.id ?? null);
+// 下書きのキー。taskId は表示用 ID で別テナントに同じ値があり得るので、テナントとプロジェクトで分ける
+const draftTaskKey = computed(() =>
+  [props.tenantId ?? '', props.projectId ?? '', props.taskId ?? ''].join('/'),
+);
 const newDraft = computed({
-  get: () => drafts.value[draftKey.value] ?? '',
-  set: (value: string) => {
-    drafts.value = { ...drafts.value, [draftKey.value]: value };
-  },
+  get: () => getCommentDraft(userId.value, draftTaskKey.value, openThreadId.value),
+  set: (value: string) =>
+    setCommentDraft(userId.value, draftTaskKey.value, openThreadId.value, value),
 });
 
 // 開いていたスレッドが消えた（削除・再取得で不在）ら一覧へ戻す
@@ -240,8 +259,9 @@ async function submitDraft() {
   // 押せるし、スレッドが消えれば watch が一覧へ戻すので、await の後に
   // openThreadId を読み直すと別の下書きを消すことになる
   const threadId = openThreadId.value;
-  const key = threadId ?? DRAFT_LIST_KEY;
-  const sent = drafts.value[key] ?? '';
+  const taskId = draftTaskKey.value;
+  const uid = userId.value;
+  const sent = getCommentDraft(uid, taskId, threadId);
   pinnedToBottom = true;
 
   const posted = threadId ? await props.onSubmit(body, threadId) : await props.onSubmit(body);
@@ -249,10 +269,8 @@ async function submitDraft() {
 
   // 送った内容がまだ置いてあるときだけ消す。一度離れて同じスレッドへ戻り、
   // 別の下書きを書き始めていたら、それは送信済みの本文ではないので残す
-  if (drafts.value[key] !== sent) return;
-  const rest = { ...drafts.value };
-  delete rest[key];
-  drafts.value = rest;
+  if (getCommentDraft(uid, taskId, threadId) !== sent) return;
+  clearCommentDraft(uid, taskId, threadId);
 }
 
 function showThread(threadId: string) {
@@ -307,6 +325,7 @@ async function deleteThread(threadId: string) {
             :mention-candidates="mentionCandidates"
             :profile-href="profileHref"
             :mention-tenant="mentionTenant"
+            :reaction-controller="reactionController"
             :updating="updatingCommentId === openThread.id"
             :deleting="deletingCommentId === openThread.id"
             :update-error="updateErrorCommentId === openThread.id ? updateError : null"
@@ -333,6 +352,7 @@ async function deleteThread(threadId: string) {
             :mention-candidates="mentionCandidates"
             :profile-href="profileHref"
             :mention-tenant="mentionTenant"
+            :reaction-controller="reactionController"
             :updating="updatingCommentId === reply.id"
             :deleting="deletingCommentId === reply.id"
             :update-error="updateErrorCommentId === reply.id ? updateError : null"
@@ -418,6 +438,7 @@ async function deleteThread(threadId: string) {
                   :mention-candidates="mentionCandidates"
                   :profile-href="profileHref"
                   :mention-tenant="mentionTenant"
+                  :reaction-controller="reactionController"
                   :updating="updatingCommentId === entry.thread.id"
                   :deleting="deletingCommentId === entry.thread.id"
                   :update-error="updateErrorCommentId === entry.thread.id ? updateError : null"

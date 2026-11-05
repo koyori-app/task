@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import LoadErrorState from '@/components/LoadErrorState.vue';
 import { ListPlus, Loader2, Pencil, RefreshCw } from '@lucide/vue';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
+import { OpenApiVueQueryError } from '@koyori-app/openapi-vue-query';
 import { refDebounced } from '@vueuse/core';
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue';
 
@@ -61,6 +63,10 @@ const props = defineProps<{
 
 const queryClient = useQueryClient();
 
+function isNotFoundError(error: unknown) {
+  return error instanceof OpenApiVueQueryError && error.response?.status === 404;
+}
+
 const rootQuery = useQuery(
   computed(() => projectRootFoldersQueryOptions(props.tenantId, props.projectId)),
 );
@@ -85,6 +91,13 @@ const isLoading = computed(
 const isError = computed(
   () => rootQuery.isError.value || metaQuery.isError.value || contentQuery.isError.value,
 );
+// 404 だけを「見つかりません」にし、5xx・通信断は失敗（再試行つき）として分ける
+const isMetaNotFound = computed(() => isNotFoundError(metaQuery.error.value));
+function retryFailed() {
+  if (rootQuery.isError.value) void rootQuery.refetch();
+  if (metaQuery.isError.value) void metaQuery.refetch();
+  if (contentQuery.isError.value) void contentQuery.refetch();
+}
 const rootId = computed(() => rootQuery.data.value?.[0]?.id ?? null);
 // プロジェクトのドキュメント置き場の直下に無いファイルと、.md 以外のファイルはこの画面では扱わない
 // （URL には任意のファイル ID を入れられる。一覧も同じ isDocumentFile で絞る）。置き場が無い
@@ -393,8 +406,13 @@ function taskHref(task: { seq_key: string; project: { key: string } }) {
     <div v-if="isLoading" class="flex justify-center py-16">
       <Loader2 class="size-6 animate-spin text-muted-foreground" aria-label="読み込み中" />
     </div>
+    <LoadErrorState
+      v-else-if="isError && !isMetaNotFound"
+      message="ドキュメントの読み込みに失敗しました"
+      @retry="retryFailed"
+    />
     <p
-      v-else-if="isError || isNotFound"
+      v-else-if="isMetaNotFound || isNotFound"
       role="alert"
       class="py-16 text-center text-sm text-muted-foreground"
     >

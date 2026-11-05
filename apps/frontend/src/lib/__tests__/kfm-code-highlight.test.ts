@@ -1,3 +1,4 @@
+// 着色の境界仕様（言語別の pl-*、style 属性の禁止、未知言語のフォールバック、注入ペイロードの封じ込め、sanitize との整合）
 import { describe, expect, it } from 'vitest';
 import { renderDescription } from '../markup-renderer';
 import { starryNightSanitizeSchema } from '../rehype-starry-night';

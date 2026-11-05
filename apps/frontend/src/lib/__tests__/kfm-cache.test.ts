@@ -1,3 +1,4 @@
+// djb2 の衝突ペアの実衝突を示す full-text キーの検証、fingerprint の分離
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

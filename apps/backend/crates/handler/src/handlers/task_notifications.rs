@@ -54,7 +54,7 @@ async fn accessible_project_ids(
         .into_iter()
         .map(|m| m.tenant_id)
         .collect();
-    // 2FA を強制するテナントは、本人が 2FA を満たすまで外す（docs/features/auth-2fa.md §9。
+    // 2FA を強制するテナントは、本人が 2FA を満たすまで外す（docs/dev/features/auth/2fa.md の「テナントの強制」。
     // テナントの口の `has_tenant_access` と同じ規則）
     let enforcing_tenant_ids: HashSet<Uuid> = tenants::Entity::find()
         .filter(
@@ -130,7 +130,7 @@ const PAT_REVIEW_NOTIFICATION_TYPES: [&str; 2] =
 /// 認証方式ごとの通知の視界を出す。
 ///
 /// セッションと Device Token は本人が入れるプロジェクトすべて（Device Token はテナントに
-/// 束縛しない。apps/backend/docs/personal-access-tokens-authz.md の Desktop 認証）。
+/// 束縛しない。docs/dev/design/personal-access-tokens-authz.md の Desktop 認証）。
 /// PAT は「PAT のテナントのプロジェクト ∩ `allowed_project_ids`」まで絞る（バインドは
 /// 所属の証明ではないので、所属判定込みの `accessible_project_ids` との積を取る）。
 async fn notification_scope_for(

@@ -1,3 +1,4 @@
+// story fixture の drift 検査、孤立した rendered/*.html の検出
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

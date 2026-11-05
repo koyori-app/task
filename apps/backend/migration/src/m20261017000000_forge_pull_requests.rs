@@ -3,7 +3,7 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
-/// PR とタスクのリンク（docs/features/tasks/9.github-tasks.md §2 / §3 のうち PR 分）。
+/// PR とタスクのリンク（docs/dev/features/tasks/github-tasks/index.md の「データ」のうち PR 分）。
 /// `reviews` の FK 付け替え（§3 の後半）はこのマイグレーションでは行わない。
 /// `forge_pull_request_commits` / `forge_branch_links` はコミット集合の同期・ブランチのリンクで足す。
 #[async_trait::async_trait]

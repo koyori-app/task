@@ -1,4 +1,4 @@
-//! ブランチ名の `KEY-N` によるタスクとのリンク（docs/features/tasks/9.github-tasks.md §5 の
+//! ブランチ名の `KEY-N` によるタスクとのリンク（docs/dev/features/tasks/github-tasks/webhook.md の
 //! `BranchCreated` / `BranchDeleted`）。アクティビティは積まない。
 
 use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait, Statement, prelude::Uuid};

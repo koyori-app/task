@@ -1,3 +1,4 @@
+// config の層のキー単位の上書き
 import { describe, expect, it } from 'vitest';
 import type { KfmContentConfig, KfmProfile } from '../markup-renderer';
 import { resolveContentConfig } from '../markup-renderer';

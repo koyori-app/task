@@ -1,4 +1,4 @@
-//! 外部向け Webhook（docs/features/tasks/10.webhooks.md）。
+//! 外部向け Webhook（docs/dev/features/tasks/10.webhooks.md）。
 //!
 //! イベントの発火点は [`emit`] で `webhook_deliveries` に 1 行ずつ積むだけ（outbox）。
 //! 送信は `job::webhook_delivery` の掃き出しループが行う。

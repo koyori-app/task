@@ -1,3 +1,4 @@
+// PWA の配信のヘッダーと manifest
 import { Elysia } from 'elysia';
 import { describe, expect, it } from 'vitest';
 

@@ -1,5 +1,5 @@
 //! Koyori Desktop の認証（Authorization Code + PKCE、loopback）。
-//! 規則は apps/backend/docs/personal-access-tokens-authz.md の「Desktop 認証」。
+//! 規則は docs/dev/design/personal-access-tokens-authz.md の「Desktop 認証」。
 
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 use base64::Engine;

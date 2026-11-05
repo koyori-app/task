@@ -11,7 +11,7 @@ use uuid::Uuid;
 ///
 /// `has_tenant_access`（handler/src/extractors.rs）は tenants.owner_id の一致（オーナー近道）
 /// → tenant_members の行存在の順で所属を判定する。オーナーは tenant_members に行を持たない
-/// 設計（apps/backend/docs/tenant-project-authz.md）のため、owner_id が本人以外を指した時点で
+/// 設計（docs/dev/design/tenant-project-authz.md）のため、owner_id が本人以外を指した時点で
 /// 行の無い利用者は両方の判定から外れ、バインド先テナントの全 API が 403 になる。
 ///
 /// ここで固定する契約:

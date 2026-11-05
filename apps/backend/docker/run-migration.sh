@@ -10,8 +10,6 @@ set -euo pipefail
 /app/migration up
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
-DROP INDEX IF EXISTS projects_key_tenant_unique;
 DROP INDEX IF EXISTS labels_project_name_unique;
 DROP INDEX IF EXISTS idx_sprints_active_per_project;
-DROP INDEX IF EXISTS idx_projects_personal_owner;
 SQL

@@ -7,10 +7,10 @@ import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
 import OAuthButtons from '@/components/auth/OAuthButtons.vue';
 import { Button, Field, Input, PasswordInput } from '@koyori-app/ui-vue';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { meQueryOptions, useLoginMutation, useLogoutMutation } from '@/lib/api-vue-query';
+import { meQueryOptions, useLoginMutation } from '@/lib/api-vue-query';
 import { arkMessage } from '@/lib/auth-validation';
-import { DESKTOP_AUTHORIZE_RETURN, desktopAuthorizeReturnPath } from '@/lib/desktop-authorize';
-import { INVITATION_ACCEPT_RETURN, invitationAcceptReturnPath } from '@/lib/invitation-accept';
+import { useRedirectAfter, withRedirectAfter } from '@/composables/useRedirectAfter';
+import { requiresTwoFactor, twoFactorPath } from '@/lib/two-factor';
 import { consumeNotice, PASSWORD_CHANGED_NOTICE } from '@/lib/one-time-notice';
 
 /**
@@ -28,9 +28,9 @@ const schema = type({
   password: 'string >= 8',
 });
 
+const redirectAfter = useRedirectAfter();
 const queryClient = useQueryClient();
 const loginMutation = useLoginMutation();
-const logoutMutation = useLogoutMutation();
 const submitError = ref<string | null>(null);
 const unverifiedEmail = ref<string | null>(null);
 const submitAttempted = ref(false);
@@ -56,21 +56,15 @@ const form = useForm({
         },
       });
 
-      if (result && typeof result === 'object' && 'requires_2fa' in result) {
-        try {
-          await logoutMutation.mutateAsync({} as never);
-        } catch {
-          // logout failure: still show the same unsupported-2FA message
-        }
-        submitError.value = '二要素認証は現在サポートされていません。';
+      // 2FA が要るなら半認証のセッションのまま 2FA 画面へ進む（戻り先はそこで再検証する）
+      if (requiresTwoFactor(result)) {
+        window.location.assign(twoFactorPath(redirectAfter));
         return;
       }
 
       await queryClient.invalidateQueries({ queryKey: meQueryOptions().queryKey });
-      // Desktop の承認画面・招待の承諾画面から来たならそこへ戻す。印は両方とも消費する
-      const desktopReturn = desktopAuthorizeReturnPath(consumeNotice(DESKTOP_AUTHORIZE_RETURN));
-      const invitationReturn = invitationAcceptReturnPath(consumeNotice(INVITATION_ACCEPT_RETURN));
-      window.location.assign(desktopReturn ?? invitationReturn ?? '/');
+      // 戻り先（共有された URL・招待の承諾・Desktop 承認）は redirect_after で 1 か所に持つ
+      window.location.assign(redirectAfter);
     } catch (e) {
       // 403 はメール未認証以外（CSRF 拒否・凍結など）でも返るため、
       // ステータスだけでなくエラーボディの message で判定する
@@ -94,7 +88,7 @@ function handleSubmit() {
   <EmailNotVerified
     v-if="unverifiedEmail"
     :email="unverifiedEmail"
-    back-href="/signin"
+    :back-href="withRedirectAfter('/signin', redirectAfter)"
     reset-href="/auth/reset-password"
   />
   <div v-else class="flex flex-col gap-6">
@@ -188,10 +182,17 @@ function handleSubmit() {
               />
             </template>
           </form.Subscribe>
-          <OAuthButtons redirect-after="/" error-redirect-after="/signin" />
+          <OAuthButtons
+            :redirect-after="redirectAfter"
+            :error-redirect-after="withRedirectAfter('/signin', redirectAfter)"
+          />
           <p class="text-muted-foreground text-center text-sm">
             アカウントをお持ちでない方は
-            <a href="/signup" class="underline underline-offset-4">新規登録</a>
+            <a
+              :href="withRedirectAfter('/signup', redirectAfter)"
+              class="underline underline-offset-4"
+              >新規登録</a
+            >
           </p>
         </div>
       </HydrationSafeForm>
