@@ -147,7 +147,7 @@ services:
       # ブラウザに配る URL のベース。空なら S3_ENDPOINT/S3_BUCKET
       S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-}
       # 1 ファイルの上限（MB。0 にすると中身のあるアップロードを全部拒否する）と、
-      # テナントの Drive 容量の既定値・システム上限（MB。システム上限だけ 0 で上限なし）
+      # テナントの Drive 容量の既定値・システム上限（MB。既定値の 0 はシステム上限まで、システム上限の 0 は天井なし）
       UPLOAD_MAX_SIZE_MB: ${UPLOAD_MAX_SIZE_MB:-100}
       DRIVE_DEFAULT_QUOTA_MB: ${DRIVE_DEFAULT_QUOTA_MB:-10240}
       DRIVE_SYSTEM_MAX_QUOTA_MB: ${DRIVE_SYSTEM_MAX_QUOTA_MB:-51200}
