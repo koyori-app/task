@@ -231,6 +231,15 @@ pub async fn oauth_start(
     session: Session<SessionRedisPool>,
     State(state): State<AppState>,
 ) -> Result<Redirect, OAuthError> {
+    if let Some(auth) = optional_auth.0.as_ref() {
+        let user = users::Entity::find_by_id(auth.user_id)
+            .one(&state.db)
+            .await?
+            .ok_or(OAuthError::Unauthorized)?;
+        if user.is_bot() {
+            return Err(OAuthError::Unauthorized);
+        }
+    }
     let settings = &state.oauth_settings;
 
     if !settings.is_provider_configured(&provider) {
@@ -727,6 +736,13 @@ async fn resolve_user_and_connection(
             return Err(OAuthError::ConnectionExists);
         }
         let user_id = conn.user_id;
+        let user = users::Entity::find_by_id(user_id)
+            .one(&state.db)
+            .await?
+            .ok_or(OAuthError::Unauthorized)?;
+        if user.is_bot() {
+            return Err(OAuthError::Unauthorized);
+        }
         update_connection_tokens(state, conn, provider_info, token).await?;
         return Ok(user_id);
     }
@@ -875,6 +891,13 @@ async fn insert_connection_txn(
     provider_info: &ProviderUserInfo,
     token: &TokenResponse,
 ) -> Result<(), OAuthError> {
+    let user = users::Entity::find_by_id(user_id)
+        .one(db)
+        .await?
+        .ok_or(OAuthError::Unauthorized)?;
+    if user.is_bot() {
+        return Err(OAuthError::Unauthorized);
+    }
     let access_token_enc = encrypt_token(&state.oauth_settings.encryption_key, &token.access_token)
         .map_err(OAuthError::Internal)?;
     let refresh_token_enc = match &token.refresh_token {
@@ -1081,6 +1104,9 @@ async fn create_oauth_user_and_connection(
         .map(|e| normalize_email(e))
         .unwrap_or_else(|| format!("{user_id}@oauth.local"));
 
+    if users::is_bot_email(&email) {
+        return Err(OAuthError::Unauthorized);
+    }
     let access_token_enc = encrypt_token(&state.oauth_settings.encryption_key, &token.access_token)
         .map_err(OAuthError::Internal)?;
     let refresh_token_enc = match &token.refresh_token {

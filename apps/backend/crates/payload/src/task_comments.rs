@@ -54,6 +54,8 @@ impl From<task_comments::Model> for TaskCommentResponse {
 
 #[derive(Serialize, serde::Deserialize, ToSchema)]
 pub struct CommentUser {
+    #[schema(required = false)]
+    pub account_kind: String,
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
     pub name: String,
@@ -63,13 +65,18 @@ pub struct CommentUser {
 }
 
 impl CommentUser {
-    /// id → (名前, アイコン) の表から作る。名前が引けない場合も表示は続けたいので `unknown` へ倒す。
-    pub fn from_lookup(map: &HashMap<Uuid, (String, Option<String>)>, user_id: Uuid) -> Self {
-        let (name, avatar_url) = map
+    /// id → (名前, アイコン, 利用者の種別) の表から作る。名前が引けない場合も表示は続けたいので
+    /// `unknown` へ倒す（種別は人として扱う）。
+    pub fn from_lookup(
+        map: &HashMap<Uuid, (String, Option<String>, String)>,
+        user_id: Uuid,
+    ) -> Self {
+        let (name, avatar_url, account_kind) = map
             .get(&user_id)
             .cloned()
-            .unwrap_or_else(|| ("unknown".into(), None));
+            .unwrap_or_else(|| ("unknown".into(), None, "human".into()));
         Self {
+            account_kind,
             id: user_id,
             name,
             avatar_url,
@@ -120,6 +127,8 @@ pub struct CommentListResponse {
 
 #[derive(Serialize, ToSchema)]
 pub struct ActivityUser {
+    #[schema(required = false)]
+    pub account_kind: String,
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
     pub name: String,

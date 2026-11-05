@@ -45,6 +45,7 @@ export type UserAvatarSize = keyof typeof USER_AVATAR_SIZES;
 
 /** アバターに要る利用者の情報。名は `name`（表示名）か `username` のどちらでもよい。 */
 export interface UserAvatarUser {
+  account_kind?: string;
   id?: string;
   name?: string | null;
   username?: string | null;

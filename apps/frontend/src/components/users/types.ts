@@ -2,6 +2,7 @@
 export type SelectableUser = {
   id: string;
   username: string;
+  account_kind?: string;
   avatar_url?: string | null;
   department?: string | null;
   team?: string | null;

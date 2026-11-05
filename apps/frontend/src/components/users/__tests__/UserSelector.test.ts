@@ -43,6 +43,19 @@ describe('UserSelector の並びと絞り込み', () => {
     expect(names()).toEqual(['kousuke', 'sousuke']);
   });
 
+  it('BOT は名を変えずに「BOT アカウント」を添え、人には添えない', () => {
+    const { names, option } = mountSelector({
+      users: [
+        ...users,
+        { id: 'b1', username: 'release-bot', account_kind: 'bot', avatar_url: null },
+      ],
+    });
+
+    expect(names()).toContain('release-bot');
+    expect(option('release-bot').textContent).toContain('BOT アカウント');
+    expect(option('yupix').textContent).not.toContain('BOT');
+  });
+
   it('当たらぬ時は呼び手の文を出す', async () => {
     const { wrapper, names } = mountSelector({ noMatchText: '一致する利用者がいません' });
 

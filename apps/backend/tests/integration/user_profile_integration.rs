@@ -110,6 +110,7 @@ async fn tenant_members_can_view_profiles_of_people_in_the_tenant() {
     assert_eq!(
         sorted_keys(&body),
         vec![
+            "account_kind",
             "avatar_url",
             "bio",
             "department",

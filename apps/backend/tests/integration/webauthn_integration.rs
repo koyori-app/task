@@ -13,7 +13,7 @@ use webauthn_authenticator_rs::prelude::WebauthnAuthenticator;
 use webauthn_authenticator_rs::softtoken::SoftToken;
 use webauthn_rs::prelude::{CreationChallengeResponse, RequestChallengeResponse};
 
-fn webauthn_origin(app_url: &str) -> Url {
+pub(super) fn webauthn_origin(app_url: &str) -> Url {
     let parsed = Url::parse(app_url.trim()).expect("app url");
     let origin = format!(
         "{}://{}{}",
@@ -24,7 +24,7 @@ fn webauthn_origin(app_url: &str) -> Url {
     Url::parse(&origin).expect("origin url")
 }
 
-async fn soft_register_finish(
+pub(super) async fn soft_register_finish(
     app: &TestApp,
     wa: &mut WebauthnAuthenticator<SoftToken>,
     name: &str,
