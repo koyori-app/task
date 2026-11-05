@@ -15,6 +15,7 @@ import { tags } from '@lezer/highlight';
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue';
 
 import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
+import { isImeKeydown } from '@/lib/ime-keydown-guard';
 import {
   mentionExtensions,
   nameTableOf,
@@ -245,7 +246,8 @@ function extensions(): Extension[] {
         return false;
       },
       keydown: (event) => {
-        emit('keydown', event);
+        // 変換中のキーは全体のガード（ime-keydown-guard）がここだけ通すので、呼び出し側へ渡さない
+        if (!isImeKeydown(event)) emit('keydown', event);
         return false;
       },
     }),
