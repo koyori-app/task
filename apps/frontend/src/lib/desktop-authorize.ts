@@ -2,7 +2,7 @@ import { codePointLength } from '@/lib/code-points';
 
 /**
  * Koyori Desktop の承認画面（`/desktop/authorize`）のクエリ検証。
- * 規則は apps/backend/docs/personal-access-tokens-authz.md の「Desktop 認証」。
+ * 規則は docs/dev/design/personal-access-tokens-authz.md の「Desktop 認証」。
  */
 
 export type DesktopAuthorizeRequest = {

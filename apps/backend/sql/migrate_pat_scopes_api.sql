@@ -1,4 +1,4 @@
--- PAT のスコープを api / read_api 方式へ移す（TASK-199。apps/backend/docs/personal-access-tokens-authz.md）。
+-- PAT のスコープを api / read_api 方式へ移す（TASK-199。docs/dev/design/personal-access-tokens-authz.md）。
 --
 -- admin:tenant  → api（どちらも全スコープを満たす）
 -- admin:project → project 層の write:* 6 個（write は対の read を含む）。

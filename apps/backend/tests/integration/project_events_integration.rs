@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::common::{TestApp, TestTenantProject, TestUser, insert_extra_project, json_body};
 
 // タスクの変更を購読者へ合図する `/events` の統合テスト。
-// 規則は apps/backend/docs/project-events.md。
+// 規則は docs/dev/design/project-events.md。
 
 const EVENT_TIMEOUT: Duration = Duration::from_secs(5);
 /// 「合図が来ない」を確かめる待ち時間。Redis の配信は同じ機械の中で数ミリ秒で済む。

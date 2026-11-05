@@ -1,4 +1,4 @@
-//! 外部向け Webhook の管理 API（docs/features/tasks/10.webhooks.md §6）。
+//! 外部向け Webhook の管理 API（docs/dev/features/tasks/10.webhooks.md の「API」）。
 //!
 //! 一覧は `read:project`、配信履歴と変更は `write:project` + プロジェクト Admin
 //! （またはテナントオーナー・そのプロジェクトに入れるテナント Admin。`require_project_admin`）。

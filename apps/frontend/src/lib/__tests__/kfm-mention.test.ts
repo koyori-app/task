@@ -1,3 +1,4 @@
+// メンションのチップ（マーカーの形、除外ノード、状態、link、アバター）
 import { describe, expect, it } from 'vitest';
 import type { MentionTable } from '../comment-mention';
 import { renderDescription } from '../markup-renderer';

@@ -37,7 +37,7 @@ type LabelOption = components['schemas']['LabelResponse'];
 type MemberOption = components['schemas']['AssignableUserResponse'];
 type CreatedTask = components['schemas']['TaskDetailResponse'];
 
-/** 担当者に付ける役割。詳細から付けるときと同じ値にする（docs/features/tasks/1.core.md）。 */
+/** 担当者に付ける役割。詳細から付けるときと同じ値にする（docs/dev/features/tasks/1.core.md）。 */
 const ASSIGNEE_ROLE = 'primary';
 
 /**

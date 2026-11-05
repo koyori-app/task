@@ -1,4 +1,9 @@
-//! push webhook → コミットのリンクとアクティビティ（TASK-140、docs/features/tasks/9.github-tasks.md §5）。
+//! push webhook → コミットのリンクとアクティビティ（TASK-140、docs/dev/features/tasks/github-tasks/webhook.md）。
+
+// 受け入れ条件（docs/dev/features/tasks/github-tasks/webhook.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// - webhook: `Push` で 1 コミット / 複数コミット / `KEY-N` 無し / 同じ delivery の再送（行が増えない・アクティビティが増えない）/ 別テナントのキー（リンクされない）
+// - 署名検証: 署名が不正なリクエストは 403 で、`forge_webhook_deliveries` の行もジョブも作られない。その後に同じ `delivery_id` の正当なイベントが届いたら初回として処理される
+// - アクティビティの冪等: 手で行う操作の履歴は `dedupe_key` が NULL のままで、同じ操作を 2 回すれば 2 行積まれる
 
 use crate::common::{TestApp, TestTenantProject};
 use apalis::prelude::Data;

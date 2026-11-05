@@ -5,7 +5,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, prelude::Uuid};
 // 通知メール（TASK-226）の統合テスト。
 //
 // 「email_events に入っている種別だけが送信待ちになり、掃き出しが 1 回だけ送る」ことを
-// 固定する。仕様は docs/features/tasks/5.notifications.md §3。
+// 固定する。仕様は docs/dev/features/tasks/5.notifications.md の「メール送信」。
 
 struct Fixture {
     app: TestApp,

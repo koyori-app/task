@@ -1,3 +1,9 @@
+// テストケースの一覧（docs/dev/features/account-settings.md から移した）
+// - アップロードで `avatar_url` と `avatar_storage_key` が入ること、認証なしの配信（`Content-Type` / `Cache-Control`）
+// - 2 MiB ちょうどは通り超えると 413、画像でない・空のバイト列の 400
+// - 再アップロード・`clear_avatar_url`・外部 URL への変更・管理者の利用者削除で旧画像が 404 になること（アバター以外の更新では残る対照込み）
+// - Bearer 拒否、不正なキー形式・存在しないキーの 404
+//
 //! アバター画像のアップロード（POST /v1/auth/me/avatar）と配信（GET /v1/avatars/{key}）。
 
 use crate::common::{TestApp, TestUser};

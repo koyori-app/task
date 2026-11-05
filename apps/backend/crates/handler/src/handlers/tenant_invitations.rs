@@ -1,4 +1,4 @@
-//! テナントへのメール招待（apps/backend/docs/tenant-project-authz.md の「招待」）。
+//! テナントへのメール招待（docs/dev/design/tenant-project-authz.md の「招待」）。
 //!
 //! 発行・一覧・取り消し・再送はメンバー管理と同じくオーナーとテナント Admin に許す。
 //! 承諾は招待先のアドレスでログインしている本人だけ（セッション必須）。

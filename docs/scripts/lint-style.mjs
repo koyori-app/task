@@ -77,7 +77,6 @@ function lint(file) {
   const text = readFileSync(file, "utf8");
   const lines = text.split("\n");
   const findings = [];
-  const isSpec = (/^(dev\/)?features\/.+\.md$/.test(rel) && !rel.endsWith("/index.md")) || rel === "_template-spec.md";
   const relaxed = allowlist.has(rel);
   // `<!-- lint-disable: rule1, rule2 -->` の行以降、そのファイルではその規則を見ない（STYLE.md の言い換え表などに使う）
   const disabled = new Set();
@@ -88,6 +87,9 @@ function lint(file) {
   };
 
   const { fm, end } = parseFrontmatter(lines);
+  // features/ 配下は仕様。ディレクトリの index.md は、status を持てば分割した仕様の親ページ、無ければ群の案内ページとみなす
+  const inFeatures = /^(dev\/)?features\/.+\.md$/.test(rel);
+  const isSpec = rel === "_template-spec.md" || (inFeatures && (!rel.endsWith("/index.md") || Boolean(fm?.status)));
   if (!fm) {
     add(1, "error", "frontmatter", "frontmatter（--- で囲んだ title などの欄）が無い");
   } else {
@@ -97,8 +99,8 @@ function lint(file) {
     if (isSpec) {
       if (!fm.status) add(1, "error", "frontmatter", "仕様のページには status が要る");
       else if (!STATUS.has(fm.status)) add(1, "error", "frontmatter", `status は ${[...STATUS].join(" / ")} のいずれか`);
-    } else if (fm.status) {
-      add(1, "error", "frontmatter", "status は仕様（dev/features/）のページだけに付ける");
+    } else if (fm.status && !inFeatures) {
+      add(1, "error", "frontmatter", "status は仕様（features/）のページだけに付ける");
     }
   }
 

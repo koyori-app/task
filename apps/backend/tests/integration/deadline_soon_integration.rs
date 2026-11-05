@@ -11,7 +11,7 @@ use crate::common::{TestApp, TestUser, ensure_tenant_member_for_project};
 use crate::forge_commit_links_integration::job_state;
 
 // 期限の近いタスクの通知（`deadline_soon`、TASK-263）の統合テスト。
-// 仕様は docs/features/tasks/5.notifications.md の通知種別の表。
+// 仕様は docs/dev/features/tasks/5.notifications.md の通知種別の表。
 // `send_once` は DB 全体を走査するので、件数は宛先ごとに数える（他のテストのタスクに左右されない）。
 
 static SEQ: AtomicI32 = AtomicI32::new(1);

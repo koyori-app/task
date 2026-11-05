@@ -1,3 +1,19 @@
+// 山の計算規則（docs/dev/features/tasks/12.workload.md）のテスト。次を確かめる。
+//
+// 見積をそのまま積む最初の規則との違いを 1 ケースずつ。
+// - 積む量: estimated_minutes ではなく残工数
+// - 期間: 開始予定日〜Soft 締切ではなく、今日〜Soft 締切に切り詰める
+// - 過去の日: 積まない
+// - 締切超過: 積まないのではなく、今日に全部積む
+// - 担当者: primary だけに全額ではなく、全担当者で均等に割る
+//
+// 個別の規則。
+// - 残工数 0 は積まれない
+// - 締切超過は今日に全部積む
+// - 担当者 2 人で半分になる
+// - primary と assignee が同額になる
+// - 開始予定日の無いタスクは積まれない
+
 import { describe, expect, it } from 'vitest';
 
 import { dailyLoadByMember, isOverCapacity, weekdaysBetween, type LoadSource } from '../load';

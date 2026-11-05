@@ -1,3 +1,4 @@
+// mermaid の story fixture（rendered/mermaid-*.html）の drift 検査
 import { describe, expect, it } from 'vitest';
 import { KFM_MERMAID_STORY_INPUTS } from '../kfm-story-fixtures/inputs-mermaid';
 import { renderDescription } from '../markup-renderer';

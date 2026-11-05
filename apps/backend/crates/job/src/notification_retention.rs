@@ -1,4 +1,4 @@
-//! 保持期間を過ぎた通知を消す掃除ループ（`docs/features/tasks/5.notifications.md`）。
+//! 保持期間を過ぎた通知を消す掃除ループ（`docs/dev/features/tasks/5.notifications.md`）。
 //!
 //! 期間は `NOTIFICATION_RETENTION_DAYS`（既定 90 日）。メール送信待ちの行
 //! （[`notification_email::pending_condition`]）は残す。消すと送る前に通知ごと消える。

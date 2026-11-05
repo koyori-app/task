@@ -7,7 +7,7 @@
  * - `@` を打つと候補が出て、選ぶと打った `@検索語` が印に替わる。手で打った `@name` は素の文字
  * - IME の変換中は候補を確定しない（変換中の Enter は IME の確定に使われる）
  * - コピー・切り取りは `text/plain` に `@今の名`、`text/html` に札の要素（id と版）を載せ、
- *   貼り付けではその印がある時だけ `<@id>` に戻す（形式: docs/features/tasks/4.collaboration-clipboard.md）
+ *   貼り付けではその印がある時だけ `<@id>` に戻す（形式: docs/dev/features/tasks/4.collaboration-clipboard.md）
  */
 import {
   acceptCompletion,

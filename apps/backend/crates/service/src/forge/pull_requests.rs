@@ -1,4 +1,4 @@
-//! PR イベントの共通処理（docs/features/tasks/9.github-tasks.md §5「PRイベント共通の前処理」）。
+//! PR イベントの共通処理（docs/dev/features/tasks/github-tasks/webhook.md の「PR イベント共通の前処理」）。
 //!
 //! どの action でも、適用するスナップショットを世代（ホスト側の更新時刻）で決め、PR 行の UPSERT と
 //! `title` / `body` / `branch` 由来のリンク集合の再構築を 1 トランザクションで行う。

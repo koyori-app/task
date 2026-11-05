@@ -1,3 +1,4 @@
+// mermaid フェンスの変換（remark 層）と custom element（client 層、mermaid の mock）の契約の固定（strict 固定、.dark のテーマ切り替え、SVG 挿入前の検査、error のフォールバック）
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { renderDescription } from '../markup-renderer';
 import { createKfmMermaidElement, KFM_MERMAID_TAG } from '../remark-kfm-mermaid/element';

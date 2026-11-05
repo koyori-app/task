@@ -76,7 +76,7 @@ pub async fn enqueue(
 }
 
 /// 受信記録とジョブ投入を 1 トランザクションで確定する
-/// （docs/features/tasks/9.github-tasks.md §5「冪等性設計」）。
+/// （docs/dev/features/tasks/github-tasks/webhook.md の「冪等性」）。
 ///
 /// 同じ配信の受信記録がすでにあれば何も積まず `false` を返す（ホストの再送）。
 /// ジョブ投入に失敗したら受信記録ごとロールバックするので、再送は初回として処理される。

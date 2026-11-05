@@ -13,7 +13,7 @@ use service::tenant_invitations::{
 use uuid::Uuid;
 
 // テナントへのメール招待（TASK-184）の統合テスト。
-// 仕様は apps/backend/docs/tenant-project-authz.md の「招待」。
+// 仕様は docs/dev/design/tenant-project-authz.md の「招待」。
 
 fn job_state(app: &TestApp) -> job::JobState {
     job::JobState {

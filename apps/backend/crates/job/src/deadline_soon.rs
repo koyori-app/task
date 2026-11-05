@@ -1,5 +1,5 @@
 //! 期限の近いタスクを担当者とウォッチャーへ知らせるバッチ（`deadline_soon`。
-//! `docs/features/tasks/5.notifications.md`）。
+//! `docs/dev/features/tasks/5.notifications.md`）。
 //!
 //! 仮締め（`soft_deadline`）と Deadline（`hard_deadline`）を別々に見て、24 時間以内に
 //! 入ったものを `payload.kind = "soft" | "hard"` の通知にする。同じ宛先・タスク・kind・期限の
