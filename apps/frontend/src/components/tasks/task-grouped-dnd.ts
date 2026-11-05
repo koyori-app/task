@@ -1,27 +1,12 @@
-import type { components } from '@/generated/api';
+/** 押しても行を掴まない場所。入力欄は文字の選択に、行の中に開く一覧は項目の選択に使う。 */
+const NOT_DRAG_SOURCE = 'input, textarea, select, [contenteditable="true"], [popover]';
 
-type TaskResponse = components['schemas']['TaskResponse'];
+export function canStartRowDrag(target: EventTarget | null): boolean {
+  return !(target instanceof Element && target.closest(NOT_DRAG_SOURCE));
+}
 
-/** onTransfer から要る分だけ。lib の型へ依存を広げぬ。 */
-export type DndTransferLike = {
-  targetParent: { el: HTMLElement };
-  draggedNodes: Array<{ data: { value: TaskResponse } }>;
-};
-
-/**
- * 群をまたぐ transfer を update:status へ写す。
- *
- * 移した先の群は container の data-dnd-status-id で判ずる。
- * 同じ status への transfer と、印の無い container への transfer は流さぬ
- * （lib の座標判定が揺れた時に、無駄な PATCH を打たぬため）。
- */
-export function emitTransferAsStatusChange(
-  data: DndTransferLike,
-  emitStatus: (task: TaskResponse, statusId: string) => void,
-): void {
-  const targetStatusId = data.targetParent.el.dataset['dndStatusId'];
-  const moved = data.draggedNodes[0]?.data.value;
-  if (moved && targetStatusId && moved.status_id !== targetStatusId) {
-    emitStatus(moved, targetStatusId);
-  }
+/** その要素が属する群の status id。群の外なら null。見出しも空の群も余白も群の内。 */
+export function statusIdAt(el: EventTarget | null): string | null {
+  if (!(el instanceof Element)) return null;
+  return el.closest<HTMLElement>('[data-dnd-status-id]')?.dataset['dndStatusId'] ?? null;
 }

@@ -3,7 +3,14 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { computed, watch, type MaybeRefOrGetter, toValue } from 'vue';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { resetCommentDrafts } from '@/composables/useCommentDrafts';
-import { meQueryOptions, useLogoutMutation, useMeQuery } from '@/lib/api-vue-query';
+import {
+  isSessionRejected,
+  meQueryOptions,
+  sessionExpired,
+  useLogoutMutation,
+  useMeQuery,
+} from '@/lib/api-vue-query';
+import { twoFactorPath } from '@/lib/two-factor';
 import { authUserSchema, useAuthStore } from '@/stores/auth';
 
 export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) {
@@ -34,16 +41,28 @@ export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) 
     if (!toValue(options?.guard)) return;
     const pathname = pageContext.urlPathname;
     if (!['/signin', '/signup'].includes(pathname)) {
-      window.location.assign('/signin');
+      // 半認証（2FA 待ち）のセッションは /auth/me が 403 になる。サインインへ戻さず 2FA 画面へ進める
+      const status = (meQuery.error?.value as { response?: { status?: number } } | null)?.response
+        ?.status;
+      window.location.assign(
+        status === 403
+          ? twoFactorPath(`${window.location.pathname}${window.location.search}`)
+          : '/signin',
+      );
     }
   }
 
   const isSettledError = computed(() => meQuery.isError.value && !meQuery.isFetching.value);
+  // セッションの拒否（401 / 403）だけがサインアウト。5xx・通信断はセッションを保ち、再試行を出す
+  const isUnauthorized = computed(
+    () => isSettledError.value && isSessionRejected(meQuery.error?.value),
+  );
+  const isTransientError = computed(() => isSettledError.value && !isUnauthorized.value);
 
   watch(
-    isSettledError,
-    (settled) => {
-      if (!settled) return;
+    isUnauthorized,
+    (unauthorized) => {
+      if (!unauthorized) return;
       authStore.clearUser();
       redirectToSignInIfNeeded();
     },
@@ -55,12 +74,16 @@ export function useAuthSession(options?: { guard?: MaybeRefOrGetter<boolean> }) 
       await logoutMutation.mutateAsync({} as never);
     } finally {
       authStore.clearUser();
-      // 明示的なログアウトだけ下書きを消す。clearUser は /me の一時障害でも呼ばれるので、そちらでは消さない
+      // 明示的なログアウトだけ下書きを消す。clearUser はセッション切れ（/me の 401 / 403）でも呼ばれるので、そちらでは消さない
       resetCommentDrafts();
       await queryClient.invalidateQueries({ queryKey: meQueryOptions().queryKey });
       window.location.assign('/signin');
     }
   }
 
-  return { meQuery, logout, logoutMutation };
+  function retryMe() {
+    void meQuery.refetch?.();
+  }
+
+  return { meQuery, logout, logoutMutation, isTransientError, retryMe, sessionExpired };
 }

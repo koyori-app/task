@@ -49,10 +49,13 @@ const PRE_AUTH_PATHS = [
   '/desktop/authorize',
 ];
 
-function mountLayout(urlPathname: string) {
-  const queryClient = new QueryClient({
+function newQueryClient() {
+  return new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+}
+
+function mountLayout(urlPathname: string, queryClient = newQueryClient()) {
   return mount(Layout, {
     slots: { default: () => h('div', 'ページ本体') },
     global: {
@@ -144,5 +147,67 @@ describe('+Layout', () => {
       const toggle = wrapper.get('button[aria-label="サイドバーを開閉"]');
       expect(toggle.attributes('aria-expanded')).toBe('false');
     });
+  });
+
+  it('メール未認証の案内は、/me の再取得が失敗しても維持する', async () => {
+    const unverified = { ...mockUser, email_verified: false };
+    let fail = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        fail
+          ? new Response(JSON.stringify({ message: 'boom' }), {
+              status: 500,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          : new Response(JSON.stringify(unverified), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+      ),
+    );
+    const queryClient = newQueryClient();
+    const wrapper = mountLayout('/my-tasks', queryClient);
+    await flushPromises();
+    expect(wrapper.text()).toContain(unverified.email);
+    expect(wrapper.find('app-header-stub').exists()).toBe(false);
+
+    // 再試行の待ち（指数バックオフ）を飛ばして、最終的な失敗まで進める
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    fail = true;
+    void queryClient.refetchQueries({ queryKey: ['get', '/v1/auth/me'] });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await flushPromises();
+    vi.useRealTimers();
+
+    expect(queryClient.getQueryState(['get', '/v1/auth/me'])?.status).toBe('error');
+    expect(wrapper.text()).toContain(unverified.email);
+    expect(wrapper.find('app-header-stub').exists()).toBe(false);
+  });
+
+  // 2FA の途中や停止中のセッションは /me が 403 を返す。接続エラーと誤認して留めない
+  it.each([
+    [401, '/signin'],
+    [403, expect.stringContaining('/auth/2fa')],
+  ])('/me が %i なら再試行せずに移動し、接続エラーを出さない', async (status, destination) => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ message: 'rejected' }), {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const wrapper = mountLayout('/my-tasks');
+    await vi.advanceTimersByTimeAsync(10_000);
+    vi.useRealTimers();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(assignSpy).toHaveBeenCalledWith(destination);
+    expect(wrapper.text()).not.toContain('サーバーに接続できませんでした');
+    assignSpy.mockRestore();
   });
 });

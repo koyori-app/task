@@ -55,17 +55,64 @@ fn org_profile_value(value: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
+async fn find_member_row(
+    state: &AppState,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Result<Option<tenant_members::Model>, AppError> {
+    Ok(tenant_members::Entity::find()
+        .filter(tenant_members::Column::TenantId.eq(tenant_id))
+        .filter(tenant_members::Column::UserId.eq(user_id))
+        .one(&state.db)
+        .await?)
+}
+
 async fn find_member(
     state: &AppState,
     tenant_id: Uuid,
     user_id: Uuid,
 ) -> Result<tenant_members::Model, AppError> {
-    tenant_members::Entity::find()
-        .filter(tenant_members::Column::TenantId.eq(tenant_id))
-        .filter(tenant_members::Column::UserId.eq(user_id))
-        .one(&state.db)
+    find_member_row(state, tenant_id, user_id)
         .await?
         .ok_or(AppError::NotFound)
+}
+
+/// 所属行の無いオーナー本人が、自分の所属をテナントの行へ保存する。
+///
+/// `tenant_members` に行を足すと、通知の宛先や「最後の Admin」の数え方までオーナーを
+/// メンバーとして扱い始めるので足さない（apps/backend/docs/tenant-project-authz.md）。
+/// 開くのは本人の所属だけで、他の人がオーナーの所属を変える口にも、オーナーのロールを
+/// 変える口にもしない。どちらも行の無い相手への PUT として従来どおり 404 にする
+async fn update_owner_org_profile(
+    state: &AppState,
+    actor_id: Uuid,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    payload: UpdateTenantMemberRequest,
+) -> Result<TenantMemberResponse, AppError> {
+    let tenant = tenants::Entity::find_by_id(tenant_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if user_id != tenant.owner_id || actor_id != tenant.owner_id || payload.role.is_some() {
+        return Err(AppError::NotFound);
+    }
+    let user = users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("tenant {tenant_id} has no owner row"))?;
+    let mut active: tenants::ActiveModel = tenant.into();
+    if let Some(department) = payload.department {
+        active.owner_department = Set(org_profile_value(&department));
+    }
+    if let Some(position) = payload.position {
+        active.owner_position = Set(org_profile_value(&position));
+    }
+    if let Some(team) = payload.team {
+        active.owner_team = Set(org_profile_value(&team));
+    }
+    let updated = active.update(&state.db).await?;
+    Ok(TenantMemberResponse::from_owner(&updated, user))
 }
 
 #[axum::debug_handler]
@@ -101,8 +148,8 @@ pub async fn list_members(
     let mut response = attach_users(&state, members).await?;
 
     // owner は認可上 tenant_members に行を持たないが、メンバー管理画面では
-    // 常に表示できる必要がある。実在するメンバー行とは区別して read-only の
-    // synthetic row を返し、PUT/DELETE の対象にはしない（UI 側でも操作を隠す）。
+    // 常に表示できる必要がある。実在するメンバー行とは区別して synthetic row を返す。
+    // ロール変更と削除の対象にはせず、本人が所属を直す PUT だけを受ける（`update_owner_org_profile`）。
     if !response
         .iter()
         .any(|member| member.user_id == tenant.owner_id)
@@ -111,7 +158,7 @@ pub async fn list_members(
             .one(&state.db)
             .await?
             .ok_or_else(|| anyhow::anyhow!("tenant {} has no owner row", tenant_id))?;
-        response.insert(0, TenantMemberResponse::from_owner(tenant_id, owner));
+        response.insert(0, TenantMemberResponse::from_owner(&tenant, owner));
     }
 
     Ok(Json(response))
@@ -141,15 +188,14 @@ pub async fn get_user_profile(
     auth.require_scope(Scope::ReadTenant)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
 
-    // 部署・役職・チームは所属行に付く。所属行の無いオーナー・客分では null
-    let member = tenant_members::Entity::find()
-        .filter(tenant_members::Column::TenantId.eq(tenant_id))
-        .filter(tenant_members::Column::UserId.eq(user_id))
+    let tenant = tenants::Entity::find_by_id(tenant_id)
         .one(&state.db)
-        .await?;
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let member = find_member_row(&state, tenant_id, user_id).await?;
     // users はテナント横断の表なので、テナントに関わらない人は 403 ではなく 404 にして存在を明かさない
     let visible = member.is_some()
-        || is_tenant_owner(&state.db, tenant_id, user_id).await?
+        || user_id == tenant.owner_id
         || !explicit_member_project_ids(&state.db, tenant_id, user_id)
             .await?
             .is_empty();
@@ -160,7 +206,9 @@ pub async fn get_user_profile(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
-    Ok(Json(UserProfileResponse::from_parts(user, member.as_ref())))
+    // 部署・役職・チームはメンバーなら所属行、オーナーならテナントの行。客分では null
+    let org = OrgProfile::resolve(&tenant, user_id, member.as_ref());
+    Ok(Json(UserProfileResponse::from_parts(user, org)))
 }
 
 #[axum::debug_handler]
@@ -223,7 +271,7 @@ pub async fn add_member(
     path = "/{user_id}",
     tag = "Tenant Members",
     summary = "テナントメンバーの権限・所属を変更",
-    description = "どの欄も省略すれば変更しない。部署・役職・チームは前後の空白を除き、空なら未設定に戻す。",
+    description = "どの欄も省略すれば変更しない。部署・役職・チームは前後の空白を除き、空なら未設定に戻す。所属行の無いオーナーには、本人だけが部署・役職・チームを送れる（role を付けた PUT と他の人の PUT は 404）。",
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
         ("user_id" = Uuid, Path, description = "ユーザーID"),
@@ -244,7 +292,11 @@ pub async fn update_member(
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     require_tenant_admin(&state.db, tenant_id, auth.user_id).await?;
 
-    let member = find_member(&state, tenant_id, user_id).await?;
+    let Some(member) = find_member_row(&state, tenant_id, user_id).await? else {
+        let owner =
+            update_owner_org_profile(&state, auth.user_id, tenant_id, user_id, payload).await?;
+        return Ok(Json(owner));
+    };
     let user = users::Entity::find_by_id(user_id)
         .one(&state.db)
         .await?

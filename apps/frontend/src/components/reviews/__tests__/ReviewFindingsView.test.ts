@@ -44,6 +44,8 @@ type MockState = {
   findings: Finding[];
   blocking?: number;
   prsStatus?: number;
+  /** 指摘一覧の応答を失敗させる（再試行の試験では呼び出しごとに変えられる） */
+  findingsStatus?: number;
   patchStatus?: number;
   patchMessage?: string;
   /** 集計の gate。既定は未解決があれば blocked、無ければ ready */
@@ -180,6 +182,7 @@ function stubFetch(state: MockState) {
       ]);
     }
     if (req.method === 'GET' && pathname.endsWith('/review-findings')) {
+      if (state.findingsStatus) return jsonResponse({ message: 'error' }, state.findingsStatus);
       return jsonResponse(state.findings);
     }
     if (req.method === 'PATCH' && pathname.includes('/review-findings/')) {
@@ -243,6 +246,24 @@ afterEach(() => {
 });
 
 describe('ReviewFindingsView', () => {
+  it('指摘の取得に失敗したら「指摘はありません」ではなく失敗と再試行を出し、再試行で取り直す', async () => {
+    const state: MockState = { findings: [finding()], findingsStatus: 500 };
+    stubFetch(state);
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain('指摘はありません。');
+    expect(wrapper.find('[data-testid="finding-list"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="load-error"]').text()).toContain('読み込みに失敗しました');
+
+    state.findingsStatus = undefined;
+    await wrapper.get('[data-testid="load-error"] button').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="load-error"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="finding-list"]').text()).toContain('認可が抜けている');
+  });
+
   it('指摘とマージ判定を表示する', async () => {
     stubFetch({ findings: [finding()] });
     const wrapper = mountView();

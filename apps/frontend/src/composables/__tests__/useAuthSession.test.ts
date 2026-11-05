@@ -24,6 +24,7 @@ const { mockPagePathname, meQueryMockState } = vi.hoisted(() => ({
     controlled: false,
     data: { value: null as Record<string, unknown> | null },
     isError: { value: false },
+    error: { value: null as unknown },
     isFetching: { value: false },
   },
 }));
@@ -64,6 +65,7 @@ vi.mock('@/lib/api-vue-query', async (importOriginal) => {
         return {
           data: meQueryMockState.data,
           isError: meQueryMockState.isError,
+          error: meQueryMockState.error,
           isFetching: meQueryMockState.isFetching,
         };
       }
@@ -97,6 +99,7 @@ describe('useAuthSession', () => {
     meQueryMockState.controlled = false;
     meQueryMockState.data.value = null;
     meQueryMockState.isError.value = false;
+    meQueryMockState.error.value = null;
     meQueryMockState.isFetching.value = false;
   });
 
@@ -192,13 +195,13 @@ describe('useAuthSession', () => {
     return session;
   }
 
-  it('/me が 500 で clearUser が呼ばれてもコメントの下書きは残る', async () => {
+  it('/me が 401 で clearUser が呼ばれてもコメントの下書きは残る', async () => {
     resetCommentDrafts();
     window.sessionStorage.setItem('task:comment-draft:u:t:list', 'x');
     fetchMock.mockImplementation(
       async () =>
-        new Response(JSON.stringify({ message: 'boom' }), {
-          status: 500,
+        new Response(JSON.stringify({ message: 'unauthorized' }), {
+          status: 401,
           headers: { 'Content-Type': 'application/json' },
         }),
     );
@@ -260,6 +263,36 @@ describe('useAuthSession', () => {
     await flushPromises();
 
     expect(assignSpy).toHaveBeenCalledWith('/signin');
+    assignSpy.mockRestore();
+  });
+
+  it('半認証（/me が 403）のときは /signin ではなく /auth/2fa へ進める', async () => {
+    fetchMock.mockImplementation(async (input: Request) => {
+      if (input.method.toUpperCase() === 'GET' && input.url.includes('/v1/auth/me')) {
+        return new Response(JSON.stringify({ message: 'forbidden' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+    window.history.replaceState(null, '', '/foo?x=1');
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+
+    mount(
+      defineComponent({
+        setup() {
+          useAuthSession({ guard: true });
+          return {};
+        },
+        template: '<div />',
+      }),
+      { global: { plugins: [[VueQueryPlugin, { queryClient }], createPinia()] } },
+    );
+    await flushPromises();
+
+    expect(assignSpy).toHaveBeenCalledWith('/auth/2fa?redirect_after=%2Ffoo%3Fx%3D1');
+    expect(assignSpy).not.toHaveBeenCalledWith('/signin');
     assignSpy.mockRestore();
   });
 
@@ -371,6 +404,7 @@ describe('useAuthSession', () => {
   it('clears user and redirects when me query error is settled', async () => {
     meQueryMockState.controlled = true;
     meQueryMockState.isError.value = true;
+    meQueryMockState.error.value = { response: { status: 401 } };
     meQueryMockState.isFetching.value = false;
 
     const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
@@ -398,6 +432,74 @@ describe('useAuthSession', () => {
 
     expect(authStore.user).toBeNull();
     expect(assignSpy).toHaveBeenCalledWith('/signin');
+    assignSpy.mockRestore();
+  });
+
+  // 2FA の途中や停止中のセッションは /me が 403 を返す。接続エラーと誤認して留めない
+  it('leaves the page instead of offering retry when /me is rejected with 403', async () => {
+    meQueryMockState.controlled = true;
+    meQueryMockState.isError.value = true;
+    meQueryMockState.error.value = { response: { status: 403 } };
+    meQueryMockState.isFetching.value = false;
+
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const authStore = useAuthStore();
+    authStore.setUser(mockUser);
+    let session!: ReturnType<typeof useAuthSession>;
+
+    mount(
+      defineComponent({
+        setup() {
+          session = useAuthSession({ guard: true });
+          return {};
+        },
+        template: '<div />',
+      }),
+      { global: { plugins: [[VueQueryPlugin, { queryClient }], pinia] } },
+    );
+
+    await flushPromises();
+
+    expect(authStore.user).toBeNull();
+    expect(assignSpy).toHaveBeenCalledWith(expect.stringContaining('/auth/2fa'));
+    expect(session.isTransientError.value).toBe(false);
+    assignSpy.mockRestore();
+  });
+
+  it.each([
+    ['500', { response: { status: 500 } }],
+    ['network error', new TypeError('Failed to fetch')],
+  ])('keeps the session and offers retry on %s', async (_name, error) => {
+    meQueryMockState.controlled = true;
+    meQueryMockState.isError.value = true;
+    meQueryMockState.isFetching.value = false;
+    meQueryMockState.error.value = error;
+
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const authStore = useAuthStore();
+    authStore.setUser(mockUser);
+    let session!: ReturnType<typeof useAuthSession>;
+
+    mount(
+      defineComponent({
+        setup() {
+          session = useAuthSession({ guard: true });
+          return {};
+        },
+        template: '<div />',
+      }),
+      { global: { plugins: [[VueQueryPlugin, { queryClient }], pinia] } },
+    );
+
+    await flushPromises();
+
+    expect(authStore.user).toEqual(mockUser);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(session.isTransientError.value).toBe(true);
     assignSpy.mockRestore();
   });
 });

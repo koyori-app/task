@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadErrorState from '@/components/LoadErrorState.vue';
 import { Check, Loader2 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { keepPreviousData, useQuery } from '@tanstack/vue-query';
@@ -24,6 +25,7 @@ const {
   isTenantNotFound,
   isResolving: isTenantResolving,
   isError: isTenantResolveError,
+  tenantsQuery,
 } = useResolvedTenantId(tenantDisplayId);
 
 const tabs: { key: FilterTab; label: string }[] = [
@@ -147,6 +149,11 @@ function priorityLabel(p: string) {
   };
   return map[p] ?? p;
 }
+
+function retryFailed() {
+  if (isTenantResolveError.value) void tenantsQuery.refetch();
+  if (tasksQuery.isError.value) void tasksQuery.refetch();
+}
 </script>
 
 <template>
@@ -170,12 +177,11 @@ function priorityLabel(p: string) {
       <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
     </div>
 
-    <p
+    <LoadErrorState
       v-else-if="isTenantResolveError || tasksQuery.isError.value"
-      class="py-8 text-center text-sm text-destructive"
-    >
-      タスクの読み込みに失敗しました
-    </p>
+      message="タスクの読み込みに失敗しました"
+      @retry="retryFailed"
+    />
 
     <p v-else-if="isTenantNotFound" class="py-8 text-center text-sm text-muted-foreground">
       テナントが見つかりません

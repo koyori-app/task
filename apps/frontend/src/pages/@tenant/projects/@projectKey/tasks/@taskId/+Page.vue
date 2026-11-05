@@ -16,6 +16,7 @@ import type { ActivityFilter, ActivityLookups } from '@/lib/activity-timeline';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
 import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
 import { useTaskActivities } from '@/composables/useTaskActivities';
+import { useReactions } from '@/composables/useReactions';
 import { useTaskComments } from '@/composables/useTaskComments';
 import { useTaskDetail } from '@/composables/useTaskDetail';
 import { useSimilarTasks } from '@/composables/useSimilarTasks';
@@ -194,6 +195,15 @@ const {
 // 同じ query key で /v1/auth/me を取得済みのため追加リクエストにはならない
 const meQuery = useMeQuery();
 const currentUserId = computed(() => meQuery.data.value?.id ?? null);
+const reactionController = useReactions({
+  tenantId,
+  projectId,
+  taskId,
+  currentUser: computed(() => {
+    const me = meQuery.data.value;
+    return me ? { id: me.id, name: me.username, avatar_url: me.avatar_url ?? null } : null;
+  }),
+});
 
 function openDeleteDialog() {
   deleteError.value = null;
@@ -224,6 +234,8 @@ function openSimilarTask(seqId: number) {
 
 <template>
   <TaskDetailHub
+    :reaction-controller="reactionController"
+    :current-user-id="currentUserId"
     :task="displayTask"
     :profile-href="profileHref"
     :description-html="data?.descriptionHtml ?? null"
@@ -331,6 +343,7 @@ function openSimilarTask(seqId: number) {
     </template>
     <template #sidebar>
       <TaskComments
+        :reaction-controller="reactionController"
         :task-id="taskId"
         :tenant-id="tenantId"
         :project-id="projectId"

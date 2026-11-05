@@ -47,6 +47,7 @@ function thread(id: string, body: string | null, overrides: Partial<CommentThrea
     updated_at: '2026-08-19T00:00:00Z',
     user,
     replies: [],
+    reactions: [],
     ...overrides,
   } satisfies CommentThread;
 }
@@ -158,6 +159,7 @@ describe('TaskComments', () => {
               created_at: '2026-08-19T01:00:00Z',
               updated_at: '2026-08-19T01:00:00Z',
               user,
+              reactions: [],
             },
           ],
         }),
@@ -894,6 +896,7 @@ describe('TaskComments のメンション', () => {
               created_at: '2026-08-19T01:00:00Z',
               updated_at: '2026-08-19T01:00:00Z',
               user,
+              reactions: [],
             },
           ],
         }),

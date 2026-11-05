@@ -463,7 +463,7 @@ pub enum SprintsCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum NotificationsCommand {
-    /// List my notifications (unread first, newest first)
+    /// List my notifications (newest first; read state does not affect the order)
     List {
         /// Only unread notifications
         #[arg(long)]
@@ -517,7 +517,7 @@ pub enum ReviewCommand {
         /// Repository to read (default: the current integration; "" for rounds recorded before it)
         #[arg(long, value_name = "owner/name")]
         repo: Option<String>,
-        /// Filter by state (open,fixed,verified,deferred,rejected)
+        /// Filter by state (open,fixing,fixed,verified,deferred,rejected)
         #[arg(long, value_name = "states")]
         state: Option<String>,
         /// Filter by severity (high,medium,low,nit)
@@ -543,7 +543,7 @@ pub enum ReviewCommand {
         /// Project key or UUID
         #[arg(long)]
         project: String,
-        /// New state (open,fixed,verified,deferred,rejected)
+        /// New state (open,fixing,fixed,verified,deferred,rejected)
         #[arg(long)]
         state: String,
         /// Why the state changed (kept in the history)

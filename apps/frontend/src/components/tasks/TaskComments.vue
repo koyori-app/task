@@ -14,6 +14,7 @@ import {
 } from '@/composables/useCommentDrafts';
 import { useAuthStore } from '@/stores/auth';
 import { useNow } from '@/composables/useNow';
+import type { ReactionController } from '@/composables/useReactions';
 import type { CommentThread } from '@/composables/useTaskComments';
 import { buildTimeline, type ActivityFilter, type ActivityLookups } from '@/lib/activity-timeline';
 import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
@@ -67,6 +68,8 @@ const props = defineProps<{
   profileHref?: (userId: string) => string;
   /** 本文の札をプロフィールへの link にするテナント（表示用 id。CommentBody 参照） */
   mentionTenant?: string;
+  /** 絵文字リアクションの操作。渡さなければリアクションの UI を出さない */
+  reactionController?: ReactionController;
   /** 投稿（新規・返信共通）の進行中 */
   submitPending?: boolean;
   /** 新規投稿の失敗。新規投稿フォームの直下に出す */
@@ -322,6 +325,7 @@ async function deleteThread(threadId: string) {
             :mention-candidates="mentionCandidates"
             :profile-href="profileHref"
             :mention-tenant="mentionTenant"
+            :reaction-controller="reactionController"
             :updating="updatingCommentId === openThread.id"
             :deleting="deletingCommentId === openThread.id"
             :update-error="updateErrorCommentId === openThread.id ? updateError : null"
@@ -348,6 +352,7 @@ async function deleteThread(threadId: string) {
             :mention-candidates="mentionCandidates"
             :profile-href="profileHref"
             :mention-tenant="mentionTenant"
+            :reaction-controller="reactionController"
             :updating="updatingCommentId === reply.id"
             :deleting="deletingCommentId === reply.id"
             :update-error="updateErrorCommentId === reply.id ? updateError : null"
@@ -433,6 +438,7 @@ async function deleteThread(threadId: string) {
                   :mention-candidates="mentionCandidates"
                   :profile-href="profileHref"
                   :mention-tenant="mentionTenant"
+                  :reaction-controller="reactionController"
                   :updating="updatingCommentId === entry.thread.id"
                   :deleting="deletingCommentId === entry.thread.id"
                   :update-error="updateErrorCommentId === entry.thread.id ? updateError : null"
