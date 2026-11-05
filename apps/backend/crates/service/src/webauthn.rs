@@ -52,6 +52,9 @@ mod tests {
         assert_eq!(resolve_rp_id(None, &origin), Some("task.example.com"));
         assert_eq!(resolve_rp_id(Some(""), &origin), Some("task.example.com"));
         assert_eq!(resolve_rp_id(Some("  "), &origin), Some("task.example.com"));
-        assert_eq!(resolve_rp_id(Some("example.com"), &origin), Some("example.com"));
+        assert_eq!(
+            resolve_rp_id(Some("example.com"), &origin),
+            Some("example.com")
+        );
     }
 }
