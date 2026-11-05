@@ -49,6 +49,20 @@ pub async fn next_seq_id<C: ConnectionTrait>(
     })
 }
 
+/// 採番カウンター行を、番号を進めずに `FOR UPDATE` でロックする。
+/// 一括作成が sprint をまとめてロックする前に呼び、単体作成と同じ
+/// 「カウンター → sprint」の順に揃えるためのもの。行がまだ無ければ何もロックしない。
+pub async fn lock_task_counter<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+) -> Result<(), sea_orm::DbErr> {
+    project_task_counters::Entity::find_by_id(project_id)
+        .lock(LockType::Update)
+        .one(db)
+        .await?;
+    Ok(())
+}
+
 /// 単体作成の本体の文脈（認可済みのテナント・プロジェクト・実行者）。
 pub struct CreateTaskContext {
     pub tenant_id: Uuid,

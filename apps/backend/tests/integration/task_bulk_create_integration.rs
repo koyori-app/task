@@ -378,3 +378,80 @@ async fn concurrent_with_single_create_has_unique_seq_ids() {
     seqs.dedup();
     assert_eq!(seqs.len(), total, "seq_id が重複した");
 }
+
+/// sprint を [B, A]（UUID は A < B）の順で含む一括作成と、A を完了して未完了を B へ移す
+/// 処理を同時に流しても、どちらも 5xx（デッドロック）にならない。
+#[tokio::test]
+async fn bulk_create_does_not_deadlock_with_sprint_complete() {
+    let fx = setup().await;
+    let path = format!(
+        "/v1/tenants/{}/projects/{}",
+        fx.tp.tenant_id, fx.tp.project_id
+    );
+    // カウンター行を用意しておく（初回採番の競合は既存の挙動）。
+    let seed = fx
+        .app
+        .post_json_with_session(
+            &fx.base,
+            json!({"title": "seed", "status_id": fx.status_id}),
+        )
+        .await;
+    assert_eq!(seed.status(), StatusCode::CREATED);
+
+    for round in 0..8 {
+        let mut ids = Vec::new();
+        for n in 0..2 {
+            let r = fx
+                .app
+                .post_json_with_session(
+                    &format!("{path}/sprints"),
+                    json!({"name": format!("r{round}-{n}"), "start_date": "2026-09-01", "end_date": "2026-09-14"}),
+                )
+                .await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+            let v: Value = r.json().await.unwrap();
+            ids.push(v["id"].as_str().unwrap().to_string());
+        }
+        ids.sort();
+        let (a, b) = (ids[0].clone(), ids[1].clone());
+        let r = fx
+            .app
+            .post_json_with_session(&format!("{path}/sprints/{a}/start"), json!({}))
+            .await;
+        assert_eq!(r.status(), StatusCode::OK);
+
+        let bulk_client = fx.app.session_client();
+        let bulk_url = format!("{}{}/bulk-create", fx.app.base_url(), fx.base);
+        let tasks: Vec<Value> = [&b, &a]
+            .iter()
+            .map(|sid| json!({"title": "x", "status_id": fx.status_id, "sprint_id": sid}))
+            .collect();
+        let complete_client = fx.app.session_client();
+        let complete_url = format!("{}{}/sprints/{a}/complete", fx.app.base_url(), path);
+        let bulk = tokio::spawn(async move {
+            bulk_client
+                .post(bulk_url)
+                .json(&json!({ "tasks": tasks }))
+                .send()
+                .await
+                .unwrap()
+                .status()
+        });
+        let complete = tokio::spawn(async move {
+            complete_client
+                .post(complete_url)
+                .json(&json!({"move_incomplete_to_sprint_id": b}))
+                .send()
+                .await
+                .unwrap()
+                .status()
+        });
+        for h in [bulk, complete] {
+            let status = tokio::time::timeout(std::time::Duration::from_secs(30), h)
+                .await
+                .expect("deadlock?")
+                .unwrap();
+            assert!(!status.is_server_error(), "round {round}: {status}");
+        }
+    }
+}

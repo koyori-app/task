@@ -850,6 +850,21 @@ pub async fn bulk_create_tasks(
         actor_id: auth.user_id,
     };
     let txn = state.db.begin().await?;
+    // ロック順は単体作成と同じ「カウンター → sprint」。sprint は UUID 昇順でまとめて取り、
+    // スプリント完了処理（UUID 昇順）と逆順にならないようにする。
+    service::tasks::lock_task_counter(&txn, project_id).await?;
+    let mut sprint_ids: Vec<Uuid> = payload.tasks.iter().filter_map(|t| t.sprint_id).collect();
+    sprint_ids.sort();
+    sprint_ids.dedup();
+    if !sprint_ids.is_empty() {
+        entity::sprints::Entity::find()
+            .filter(entity::sprints::Column::ProjectId.eq(project_id))
+            .filter(entity::sprints::Column::Id.is_in(sprint_ids))
+            .order_by_asc(entity::sprints::Column::Id)
+            .lock(sea_orm::sea_query::LockType::Update)
+            .all(&txn)
+            .await?;
+    }
     let mut models = Vec::with_capacity(payload.tasks.len());
     for (i, item) in payload.tasks.into_iter().enumerate() {
         let model = service::tasks::create_task_in_txn(&txn, &ctx, item)
