@@ -13,6 +13,8 @@ pub struct ListMyTasksQuery {
     #[serde(default = "default_include_personal")]
     pub include_personal: bool,
     pub project_id: Option<Uuid>,
+    /// IANA timezone used for "today" / "week". Defaults to UTC.
+    pub timezone: Option<String>,
     #[serde(default = "default_limit")]
     pub limit: u64,
     #[serde(default)]
