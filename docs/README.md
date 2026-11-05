@@ -15,6 +15,7 @@ pnpm build && pnpm preview # 検索は build の索引を読むので preview �
 - `features/tasks/N.name.md` は番号を URL に出さないよう `slug` を、並びのために `sidebar.order` を書く
 - 図は ` ```mermaid ` で書く（`src/lib/mermaid-fence.ts` が描画用に変換する）。Mermaid で表せない図は `public/diagrams/` に SVG を置く
 - サイト内リンクは `/features/drive` の形で書く（相対の `.md` は解決されない）。`apps/backend/docs/` はサイト外なので GitHub の URL にする
+- 書き方の規則は `STYLE.md`、新しいページの雛形は `_template-spec.md`（仕様）と `_template-guide.md`（手順）。`pnpm lint:style` で機械的に見られる規則を検査する（CI の `docs-lint` と同じ）
 
 ## 公開
 
