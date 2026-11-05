@@ -91,7 +91,7 @@ cargo test --workspace --lib
 - **SeaORM の生 SQL に `?` プレースホルダを書かない。** `Statement::from_sql_and_values` は SQL を無変換で sqlx に渡すため、Postgres では実行時構文エラーになる。`common::db` のヘルパー（`table_exists` / `column_exists` / `execute_bound` / `query_one_bool`）か `$N` 直書きを使う。この類のバグは過去に3箇所で見つかっている（#272 / #277）
 - **`#[utoipa::path]` の path は nest 位置からの相対パス。** routes 側で同じパスを `.nest()` すると二重連結された URL に登録されて 404 になる（#277 / #678 で実発生）。既存ハンドラーの登録方法に合わせること。二重連結そのものは `routes/mod.rs` の `openapi_paths_are_mounted_once_under_v1` が落とす（`/v1/` の回数と隣接する同一セグメントを見る）が、重複しない形の間違った絶対パスは通るので、登録方法を合わせる原則は残る
 - **apalis のジョブペイロードは Postgres（apalis.jobs）に平文で永続化される。** トークン等の機微情報を載せない（Redis のみに保持する）。job クレートの「シリアライズ後キー集合」固定テストが回帰ガード。再送競合は `issued_at` 世代（Unix ミリ秒）を process 時に生成し、`email_verification::store_token` の世代比較（Lua）で後勝ち解決する
-- **部分 UNIQUE インデックス（`CREATE UNIQUE INDEX ... WHERE`）をマイグレーションで足さない。** 起動時とテストハーネスの SeaORM `sync()` が、entity の `unique` / `unique_key` と列の組が一致しない UNIQUE インデックスを `DROP CONSTRAINT` で消そうとして落ち、バックエンドが起動しない（#721 で実発生）。NULL を除外したいだけなら列の UNIQUE 制約で足りる（NULL 同士は重複扱いされない）ので、entity にも `#[sea_orm(unique)]` を付けて揃える。entity の 1 列に付けられる `unique_key` は 1 つだけなので、既存の複合 UNIQUE に入っている列を含む 2 つ目の複合 UNIQUE も表せず、こちらは制約なのでエラーにならず黙って DROP される（`oauth_connections.provider_login` はアプリ側で一意に保っている）
+- **部分 UNIQUE インデックス（`CREATE UNIQUE INDEX ... WHERE`）をマイグレーションで足さない。** 起動時とテストハーネスの SeaORM `sync()` が、entity の `unique` / `unique_key` と列の組が一致しない UNIQUE インデックスを `DROP CONSTRAINT` で消そうとして落ち、バックエンドが起動しない（#721 で実発生）。NULL を除外したいだけなら列の UNIQUE 制約で足りる（NULL 同士は重複扱いされない）ので、entity にも `#[sea_orm(unique)]` を付けて揃える。entity の 1 列に付けられる `unique_key` は 1 つだけなので、既存の複合 UNIQUE に入っている列を含む 2 つ目の複合 UNIQUE も表せず、こちらは制約なのでエラーにならず黙って DROP される（`oauth_connections.provider_login` と `projects` の個人プロジェクトの持ち主はアプリ側で一意に保っている）。複合の列の一部にだけ `unique_key` を付けると、sync はその列だけの狭い UNIQUE を作る（`projects.key` が全テナントで一意になっていた）
 - **ワーカーに `AppState` を渡さない**（job → handler の循環になる）。必要な依存は `JobState` にフィールドを足す
 
 ## テスト・PR の流儀
@@ -103,4 +103,5 @@ cargo test --workspace --lib
 - コミットは Conventional Commits + 日本語（例: `fix(backend): …` / `refactor(workspace): …`）。1 関心 = 1 PR
 - PR 本文も日本語。「概要 / 変更内容 / 挙動の変化 / テスト」の構成
 - テーブル・API・認可規則・ロールなど概念を増減したら、仕様書（`docs/` と `apps/backend/docs/`、索引は後者の `README.md`）を同じ PR で追従させる。実装の変更は日本語の説明文・権限表・末尾の決定事項ログに取り残されやすい（#575 で実発生）
+- `docs/` のページを新しく書く・書き直すときは `docs/STYLE.md` の規則と雛形（`docs/_template-spec.md`・`docs/_template-guide.md`）に従い、`docs` で `pnpm lint:style` を通す。既存ページへの追記はそのページの形に合わせたうえで、本文に `§N` の参照・行末のコロン・`——`・造語（口・札・印・控え・旗・客分）を増やさない
 - 作業用の git worktree（`.claude/worktrees/` 配下）は、PR マージなど作業が終わったら `git worktree remove <path>` で消す（上げっぱなし禁止。Docker コンテナと同じ扱い）

@@ -345,6 +345,8 @@ function openSimilarTask(seqId: number) {
       <TaskComments
         :reaction-controller="reactionController"
         :task-id="taskId"
+        :tenant-id="tenantId"
+        :project-id="projectId"
         :threads="threads"
         v-model:open-thread-id="activityThreadId"
         :activities="activities"

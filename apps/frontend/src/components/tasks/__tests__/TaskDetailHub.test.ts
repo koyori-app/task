@@ -17,6 +17,7 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
   default: (await import('@/components/markdown/__tests__/markdown-editor-stub')).default,
 }));
 
+import { ConfirmDialog } from '@koyori-app/ui-vue';
 import TaskDetailHub from '../TaskDetailHub.vue';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
 
@@ -548,6 +549,176 @@ describe('TaskDetailHub', () => {
   });
 });
 
+/*
+ * 保存は emit した直後に編集器を閉じ、失敗は親が fieldErrors で返す。以前は失敗すると
+ * 入力した下書きがどこにも残らず、書き直すしかなかった（TASK-250）。
+ */
+describe('TaskDetailHub の保存に失敗した下書き', () => {
+  const FAILED = '更新に失敗しました';
+
+  function mountHub() {
+    return mount(TaskDetailHub, {
+      props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id },
+    });
+  }
+
+  function resumeButton(wrapper: ReturnType<typeof mountHub>) {
+    return wrapper.findAll('button').find((button) => button.text() === '編集を再開');
+  }
+
+  async function resume(wrapper: ReturnType<typeof mountHub>) {
+    const button = resumeButton(wrapper);
+    expect(button, '「編集を再開」が無い').toBeDefined();
+    await button!.trigger('click');
+  }
+
+  function titleInput(wrapper: ReturnType<typeof mountHub>) {
+    return wrapper.get('input[aria-label="タイトル"]');
+  }
+
+  async function saveTitle(wrapper: ReturnType<typeof mountHub>, value: string) {
+    await wrapper.get('h1').trigger('click');
+    await titleInput(wrapper).setValue(value);
+    await titleInput(wrapper).trigger('blur');
+  }
+
+  it('タイトルの保存に失敗したら、編集を再開すると入力した値が入っている', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '書きかけのタイトル');
+    expect(wrapper.emitted('save:title')).toEqual([['書きかけのタイトル']]);
+    expect(wrapper.find('input[aria-label="タイトル"]').exists()).toBe(false);
+
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('書きかけのタイトル');
+  });
+
+  it('説明の保存に失敗したら、編集を再開すると入力した値が入っている', async () => {
+    const wrapper = mountHub();
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '説明を追加')!
+      .trigger('click');
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('書きかけの説明');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '保存')!
+      .trigger('click');
+    expect(wrapper.emitted('save:description')).toEqual([['書きかけの説明']]);
+
+    await wrapper.setProps({ fieldErrors: { description: FAILED } });
+    await resume(wrapper);
+
+    const reopened = wrapper.get('textarea[aria-label="説明"]');
+    expect((reopened.element as HTMLTextAreaElement).value).toBe('書きかけの説明');
+  });
+
+  it('保存し直しも失敗したら、新しく入力した値から再開できる', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '一度目');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+    await titleInput(wrapper).setValue('二度目');
+    await titleInput(wrapper).trigger('blur');
+
+    // 親は保存を始めると失敗表示を消し、また失敗すると立て直す
+    await wrapper.setProps({ fieldErrors: {} });
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('二度目');
+  });
+
+  it('保存し直して成功したら下書きは捨て、次に開くと task の値が入っている', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '一度目');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+    await titleInput(wrapper).setValue('二度目');
+    await titleInput(wrapper).trigger('blur');
+    expect(wrapper.emitted('save:title')).toEqual([['一度目'], ['二度目']]);
+
+    await wrapper.setProps({ fieldErrors: {}, task: { ...task, title: '二度目' } });
+    expect(resumeButton(wrapper)).toBeUndefined();
+    expect(wrapper.text()).not.toContain(FAILED);
+
+    await wrapper.get('h1').trigger('click');
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('二度目');
+  });
+
+  it('Esc で取り消したら下書きを残さない', async () => {
+    const wrapper = mountHub();
+    await wrapper.get('h1').trigger('click');
+    await titleInput(wrapper).setValue('取り消す');
+    await titleInput(wrapper).trigger('keydown', { key: 'Escape' });
+
+    expect(wrapper.emitted('save:title')).toBeUndefined();
+    expect(wrapper.find('input[aria-label="タイトル"]').exists()).toBe(false);
+    expect(resumeButton(wrapper)).toBeUndefined();
+    expect(wrapper.text()).not.toContain(FAILED);
+  });
+
+  it('失敗後に再開した編集を Esc で取り消したら、その下書きも捨てる', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '書きかけ');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+    await titleInput(wrapper).trigger('keydown', { key: 'Escape' });
+
+    expect(resumeButton(wrapper)).toBeUndefined();
+    await wrapper.get('h1').trigger('click');
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe(task.title);
+  });
+
+  // 「クリア」は失う入力が無いので再開ボタンを出さない。前に成功した下書きで出してもいけない
+  it('説明の保存に成功したあと「クリア」で失敗しても、前の値で編集を再開させない', async () => {
+    const wrapper = mountHub();
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '説明を追加')!
+      .trigger('click');
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('成功した説明');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '保存')!
+      .trigger('click');
+    await wrapper.setProps({ fieldErrors: {}, task: { ...task, description: '成功した説明' } });
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '成功した説明')!
+      .trigger('click');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'クリア')!
+      .trigger('click');
+    // クリアは確認を挟む
+    (wrapper.findAllComponents(ConfirmDialog)[1]!.props('onConfirm') as () => void)();
+    await nextTick();
+    expect(wrapper.emitted('save:description')).toEqual([['成功した説明'], [null]]);
+
+    await wrapper.setProps({ fieldErrors: { description: FAILED } });
+    expect(wrapper.text()).toContain(FAILED);
+    expect(resumeButton(wrapper)).toBeUndefined();
+  });
+
+  // 分割ビューのペインは別のタスクへ移っても同じインスタンスで、失敗表示も残りうる
+  it('別のタスクへ移ったら、前のタスクの下書きを出さない', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '前のタスクの下書き');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+
+    await wrapper.setProps({ task: { ...task, id: 'other-task', title: '別のタスク' } });
+
+    expect(resumeButton(wrapper)).toBeUndefined();
+    await wrapper.get('h1').trigger('click');
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('別のタスク');
+  });
+});
+
 describe('TaskDetailHub description KFM 表示', () => {
   const RENDERED_HTML = '<h1 id="user-content-task-uuid-h">見出し</h1><p><strong>強調</strong></p>';
 
@@ -849,6 +1020,121 @@ describe('TaskDetailHub の期限の表示', () => {
     const wrapper = mountWithStatus('status-progress');
     expect(buttonByText(wrapper, '4日超過').classes()).toContain('text-destructive');
     expect(buttonByText(wrapper, '3日超過').classes()).toContain('text-destructive');
+  });
+});
+
+describe('TaskDetailHub 説明の編集', () => {
+  async function startEdit(description: string | null = '元の説明') {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: { ...task, description },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+    const opener = wrapper
+      .findAll('button')
+      .find((b) => b.text() === (description ?? '説明を追加'));
+    await opener!.trigger('click');
+    return wrapper;
+  }
+  const dialogs = (w: Awaited<ReturnType<typeof startEdit>>) => w.findAllComponents(ConfirmDialog);
+  const button = (w: Awaited<ReturnType<typeof startEdit>>, label: string) =>
+    w.findAll('button').find((b) => b.text() === label);
+
+  it('保存とキャンセルのボタンを出す', async () => {
+    const wrapper = await startEdit();
+    expect(button(wrapper, '保存')).toBeTruthy();
+    expect(button(wrapper, 'キャンセル')).toBeTruthy();
+  });
+
+  it('blur では保存せず編集を続ける', async () => {
+    const wrapper = await startEdit();
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('書きかけ');
+    await textarea.trigger('blur');
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(true);
+  });
+
+  it('保存ボタンで保存して閉じる', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('新しい説明');
+    await button(wrapper, '保存')!.trigger('click');
+    expect(wrapper.emitted('save:description')).toEqual([['新しい説明']]);
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+  });
+
+  it('編集中に別のタスクへ替わったら編集を閉じ、前の下書きを移った先へ保存しない', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('A の書きかけ');
+    await wrapper.setProps({ task: { ...task, id: 'task-b', description: 'B の説明' } });
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    expect(wrapper.text()).toContain('B の説明');
+  });
+
+  it('変更ありの Esc は確認を出し、取りやめると編集が続く', async () => {
+    const wrapper = await startEdit();
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('書きかけ');
+    await textarea.trigger('keydown', { key: 'Escape' });
+    const confirm = dialogs(wrapper)[0]!;
+    expect(confirm.props('open')).toBe(true);
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(true);
+    (confirm.props('onCancel') as () => void)();
+    await nextTick();
+    expect(dialogs(wrapper)[0]!.props('open')).toBe(false);
+    expect((wrapper.get('textarea[aria-label="説明"]').element as HTMLTextAreaElement).value).toBe(
+      '書きかけ',
+    );
+  });
+
+  it('確認で破棄すると元に戻り、保存はしない', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('書きかけ');
+    await button(wrapper, 'キャンセル')!.trigger('click');
+    (dialogs(wrapper)[0]!.props('onConfirm') as () => void)();
+    await nextTick();
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    expect(wrapper.text()).toContain('元の説明');
+  });
+
+  it('変更ありのままタイトルの編集を始めると確認が出て、取りやめると説明の編集と内容が残る', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('書きかけ');
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === task.title)!
+      .trigger('click');
+    const confirm = dialogs(wrapper)[0]!;
+    expect(confirm.props('open')).toBe(true);
+    (confirm.props('onCancel') as () => void)();
+    await nextTick();
+    expect((wrapper.get('textarea[aria-label="説明"]').element as HTMLTextAreaElement).value).toBe(
+      '書きかけ',
+    );
+    expect(wrapper.emitted('save:title')).toBeUndefined();
+  });
+
+  it('変更が無ければ Esc もキャンセルも確認なしで閉じる', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').trigger('keydown', { key: 'Escape' });
+    expect(dialogs(wrapper)[0]!.props('open')).toBe(false);
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+  });
+
+  it('クリアは確認後にだけ空にして保存する', async () => {
+    const wrapper = await startEdit();
+    await button(wrapper, 'クリア')!.trigger('click');
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    const confirm = dialogs(wrapper)[1]!;
+    expect(confirm.props('open')).toBe(true);
+    (confirm.props('onConfirm') as () => void)();
+    await nextTick();
+    expect(wrapper.emitted('save:description')).toEqual([[null]]);
   });
 });
 
