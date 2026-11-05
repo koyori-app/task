@@ -634,9 +634,13 @@ struct PreparedItem {
     fields: TaskFieldArgs,
 }
 
-/// 失敗を `tasks[i]: …` の位置つきにする。終了コードは検証エラー（2）に揃える。
+/// 失敗を `tasks[i]: …` の位置つきにする。名前が見つからない（5）は投入 JSON の誤りなので 2 に
+/// 揃え、認証・権限・通信の失敗は元の終了コードを残す（再試行してよい失敗を入力の誤りと混ぜない）。
 fn at_item(index: usize, err: CliError) -> CliError {
-    CliError::validation(format!("tasks[{index}]: {}", err.message))
+    CliError {
+        message: format!("tasks[{index}]: {}", err.message),
+        exit_code: if err.exit_code == 5 { 2 } else { err.exit_code },
+    }
 }
 
 /// 要素の `status` を優先し、無いときだけ `--status` を使う。
@@ -1251,10 +1255,14 @@ mod tests {
     }
 
     #[test]
-    fn at_item_turns_any_failure_into_a_positioned_validation_error() {
+    fn at_item_positions_the_failure_and_keeps_auth_and_transport_exit_codes() {
         let err = at_item(3, CliError::not_found("Label not found: x"));
         assert_eq!(err.message, "tasks[3]: Label not found: x");
         assert_eq!(err.exit_code, 2);
+        assert_eq!(at_item(0, CliError::validation("x")).exit_code, 2);
+        assert_eq!(at_item(0, CliError::http(401, "")).exit_code, 3);
+        assert_eq!(at_item(0, CliError::http(403, "")).exit_code, 4);
+        assert_eq!(at_item(0, CliError::http(500, "")).exit_code, 1);
     }
 
     #[test]
