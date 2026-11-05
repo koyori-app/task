@@ -10,6 +10,7 @@ use sea_orm::{
     prelude::Uuid,
 };
 
+use crate::drive::is_tenant_owner;
 use common::error::AppError;
 use entity::{project_members, projects, tenant_members, tenants};
 
@@ -337,4 +338,27 @@ pub async fn project_accessible_user_ids<C: ConnectionTrait>(
     }
 
     Ok(tenant_member_ids)
+}
+
+/// **指定した利用者**がそのプロジェクトに入れるかを確認する。
+///
+/// リクエスト元自身の認可は `AuthUser::ensure_tenant_access` が同じ判定を含んでいるので、
+/// ここを重ねて呼ぶ必要はない。担当者の追加など、自分以外を検証するときだけ使う。
+pub async fn require_project_access<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+    project_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    if is_tenant_owner(db, tenant_id, user_id).await? {
+        return Ok(());
+    }
+    if !is_tenant_member(db, tenant_id, user_id).await? {
+        return Err(AppError::Forbidden);
+    }
+    if project_is_open_or_member(db, project_id, user_id).await? {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
 }
