@@ -32,20 +32,14 @@ ARG PUBLIC_ENV__SENTRY_DSN=
 RUN pnpm run build
 
 # 実行時に要る node_modules 。SSR の依存は vite.config.ts の ssr.noExternal で dist/server に
-# 同梱してあり、外部に残しているのは isomorphic-dompurify（jsdom が __dirname 相対でファイルを
-# 読むため同梱できない）だけ。その閉包だけをここで作り、ワークスペース全体の node_modules
-# （devDependencies 込みで 900 MB 超）はイメージに入れない。版は package.json の指定に合わせる。
-# 外部に残すパッケージを増やしたら、ここの dependencies にも足すこと。
-RUN --mount=type=cache,target=/root/.npm \
-    mkdir -p /runtime-deps \
-    && node -e ' \
-        const pkg = require("./package.json"); \
-        const deps = {}; \
-        for (const name of ["isomorphic-dompurify"]) deps[name] = pkg.dependencies[name]; \
-        require("fs").writeFileSync("/runtime-deps/package.json", JSON.stringify({ name: "frontend-runtime-deps", private: true, dependencies: deps })); \
-    ' \
-    && cd /runtime-deps \
-    && npm install --omit=dev --no-audit --no-fund --ignore-scripts
+# 同梱してあり、外部に残しているのは ssr.external の 2 つだけ:
+# - isomorphic-dompurify（jsdom が __dirname 相対でファイルを読むため同梱できない）
+# - @wooorm/starry-night（実行時に vscode-oniguruma の onig.wasm を node_modules から読む）
+# その閉包だけを、pnpm が lockfile どおりに入れた node_modules から写す（版を解き直さない）。
+# ワークスペース全体の node_modules（devDependencies 込みで 900 MB 超）はイメージに入れない。
+# 外部に残すパッケージを増やしたら、ここの引数と runtime の確かめにも足すこと。
+RUN node scripts/collect-runtime-deps.mjs /runtime-deps/node_modules \
+    isomorphic-dompurify @wooorm/starry-night
 
 ########## runtime ##########
 # 実行は Bun。e2e（e2e/playwright.config.ts）も `bun ./dist/server/index.mjs` で
@@ -59,6 +53,15 @@ COPY --from=builder --chown=bun:bun /runtime-deps/node_modules ./node_modules
 COPY --from=builder --chown=bun:bun /repo/apps/frontend/dist ./dist
 COPY --from=builder --chown=bun:bun /repo/apps/frontend/server/public ./server/public
 COPY --from=builder --chown=bun:bun /repo/apps/frontend/package.json ./package.json
+
+# 外部に残した依存が、このイメージの node_modules だけで動くことをビルド時に確かめる
+# （e2e は全部入りの node_modules で動くので、ここの欠落を拾えない）。
+# starry-night の初期化は onig.wasm を読み、dompurify の初期化は jsdom を起こす。
+RUN bun -e 'const { createStarryNight, common } = await import("@wooorm/starry-night"); \
+    const sn = await createStarryNight(common); \
+    if (!sn.flagToScope("ts")) throw new Error("starry-night: ts の文法が無い"); \
+    const purify = (await import("isomorphic-dompurify")).default; \
+    if (purify.sanitize("<b onclick=x>ok</b>") !== "<b>ok</b>") throw new Error("dompurify: 期待と違う出力");'
 
 # bun イメージに同梱の非 root ユーザー
 USER bun

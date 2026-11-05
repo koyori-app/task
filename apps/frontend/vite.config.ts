@@ -185,8 +185,9 @@ export default defineConfig({
     // （apps/frontend/Dockerfile）。@zxcvbn-ts は以前から同梱していた
     noExternal: true,
     // jsdom は __dirname 相対で default-stylesheet.css 等を読むので同梱できない。
-    // isomorphic-dompurify ごと外部に残し、Dockerfile がその閉包だけを node_modules に置く
-    external: ['isomorphic-dompurify'],
+    // isomorphic-dompurify ごと外部に残し、Dockerfile がその閉包だけを node_modules に置く。
+    // starry-night は実行時に vscode-oniguruma の onig.wasm を node_modules から読むので、同じく外部に残す
+    external: ['isomorphic-dompurify', '@wooorm/starry-night'],
   },
   build: {
     sourcemap: buildEnv.ANALYZE || process.env.NODE_ENV !== 'production',
