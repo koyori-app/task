@@ -20,13 +20,47 @@ const APALIS_TRACE_TARGET_PREFIX: &str = "apalis::layers::tracing";
 
 const FILTERED: &str = "[Filtered]";
 
-static EMAIL_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}").unwrap());
+/// 名前にこれを含むキーの値は機微として扱う（`set-cookie` は `cookie` に含まれる）
+const SENSITIVE_KEYS: &str = "token|secret|password|passwd|authorization|cookie|api[_-]?key|access[_-]?key|private[_-]?key|credential|session";
 
-/// メールのリンクや OAuth のコールバックに載る資格（`?token=...` `&code=...` など）
-static CREDENTIAL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)([?&](?:code|state)|\b(?:[a-z]+_)?token|\bpassword|\bsecret)=[^&\s"']+"#)
-        .unwrap()
+static SENSITIVE_KEY_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!("(?i){SENSITIVE_KEYS}")).unwrap());
+
+/// 文字列の中の機微な値を伏せる規則。上から順に適用する。
+static TEXT_SCRUBBERS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
+    let rule = |pattern: String, replacement: String| (Regex::new(&pattern).unwrap(), replacement);
+    vec![
+        // JSON の本文や Rust の Debug 表示: `"access_token":"..."` `token: "..."` `token="..."`
+        rule(
+            format!(r#"(?i)("?[\w-]*(?:{SENSITIVE_KEYS})[\w-]*"?\s*[:=]\s*)"(?:[^"\\]|\\.)*""#),
+            format!(r#"${{1}}"{FILTERED}""#),
+        ),
+        // 文字列に埋め込まれてエスケープされた JSON: `\"access_token\":\"...\"`
+        rule(
+            format!(
+                r#"(?i)(\\"[\w-]*(?:{SENSITIVE_KEYS})[\w-]*\\"\s*:\s*)\\"(?:[^"\\]|\\[^"])*\\""#
+            ),
+            format!(r#"${{1}}\"{FILTERED}\""#),
+        ),
+        // ヘッダー行は値の形が決まらない（GitHub の `Authorization: token ...` など）ので行末まで
+        rule(
+            r"(?i)\b(proxy-authorization|authorization|set-cookie|cookie)\s*:[^\r\n]*".to_owned(),
+            format!("$1: {FILTERED}"),
+        ),
+        rule(
+            r"(?i)\b(bearer|basic)\s+[A-Za-z0-9\-._~+/]+=*".to_owned(),
+            format!("$1 {FILTERED}"),
+        ),
+        // メールのリンクや OAuth のコールバックに載る資格（`?token=...` `&code=...` など）
+        rule(
+            format!(r#"(?i)([?&](?:code|state)|[\w-]*(?:{SENSITIVE_KEYS})[\w-]*)=[^&\s"']+"#),
+            format!("$1={FILTERED}"),
+        ),
+        rule(
+            r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}".to_owned(),
+            FILTERED.to_owned(),
+        ),
+    ]
 });
 
 /// DSN が設定されているときの Sentry の設定。未設定・空なら `None`（初期化せず、何も送らない）。
@@ -65,13 +99,18 @@ pub fn client_options(
     }))
 }
 
+/// Sentry を初期化済みか。未初期化なら送り先が無いので、レイヤーを積まずコストをなくす。
+fn is_enabled() -> bool {
+    sentry::Hub::current().client().is_some()
+}
+
 /// tracing の error をイベントに、warn / info をブレッドクラムにする。
-/// Sentry を初期化していなければ、送り先が無いので何もしない。
-pub fn tracing_layer<S>() -> SentryLayer<S>
+/// Sentry を初期化していなければ `None`（レイヤーを積まない）。
+pub fn tracing_layer<S>() -> Option<SentryLayer<S>>
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
 {
-    sentry::integrations::tracing::layer().event_filter(event_filter)
+    is_enabled().then(|| sentry::integrations::tracing::layer().event_filter(event_filter))
 }
 
 fn event_filter(metadata: &Metadata<'_>) -> EventFilter {
@@ -86,7 +125,11 @@ fn event_filter(metadata: &Metadata<'_>) -> EventFilter {
 
 /// リクエストごとの Hub・トランザクションを張る。外側から順に
 /// `NewSentryLayer` → `SentryHttpLayer` → `scrub_request`。
+/// Sentry を初期化していなければ何も足さない。
 pub fn with_request_tracking(router: Router) -> Router {
+    if !is_enabled() {
+        return router;
+    }
     router.layer(
         ServiceBuilder::new()
             .layer(NewSentryLayer::<Request<Body>>::new_from_top())
@@ -96,9 +139,16 @@ pub fn with_request_tracking(router: Router) -> Router {
 }
 
 fn scrub_text(text: &str) -> Option<String> {
-    let scrubbed = EMAIL_PATTERN.replace_all(text, FILTERED);
-    let scrubbed = CREDENTIAL_PATTERN.replace_all(&scrubbed, format!("$1={FILTERED}"));
-    (scrubbed != text).then(|| scrubbed.into_owned())
+    let mut scrubbed = Cow::Borrowed(text);
+    for (pattern, replacement) in TEXT_SCRUBBERS.iter() {
+        if let Cow::Owned(replaced) = pattern.replace_all(&scrubbed, replacement.as_str()) {
+            scrubbed = Cow::Owned(replaced);
+        }
+    }
+    match scrubbed {
+        Cow::Owned(replaced) if replaced != text => Some(replaced),
+        _ => None,
+    }
 }
 
 fn scrub_string(text: &mut String) {
@@ -111,8 +161,19 @@ fn scrub_value(value: &mut Value) {
     match value {
         Value::String(text) => scrub_string(text),
         Value::Array(items) => items.iter_mut().for_each(scrub_value),
-        Value::Object(map) => map.values_mut().for_each(scrub_value),
+        Value::Object(map) => scrub_fields(map.iter_mut()),
         _ => {}
+    }
+}
+
+/// キーが機微なら値を形によらず丸ごと伏せ、それ以外は値の中を見る
+fn scrub_fields<'a>(fields: impl Iterator<Item = (&'a String, &'a mut Value)>) {
+    for (key, value) in fields {
+        if SENSITIVE_KEY_PATTERN.is_match(key) {
+            *value = Value::String(FILTERED.to_owned());
+        } else {
+            scrub_value(value);
+        }
     }
 }
 
@@ -120,7 +181,7 @@ fn scrub_breadcrumb(breadcrumb: &mut Breadcrumb) {
     if let Some(message) = breadcrumb.message.as_mut() {
         scrub_string(message);
     }
-    breadcrumb.data.values_mut().for_each(scrub_value);
+    scrub_fields(breadcrumb.data.iter_mut());
 }
 
 /// ログのメッセージやフィールドに混ざったメールアドレスと資格を伏せる。
@@ -138,11 +199,17 @@ fn scrub_event(event: &mut Event<'static>) {
             scrub_string(value);
         }
     }
-    event.tags.values_mut().for_each(scrub_string);
-    event.extra.values_mut().for_each(scrub_value);
+    for (key, value) in event.tags.iter_mut() {
+        if SENSITIVE_KEY_PATTERN.is_match(key) {
+            *value = FILTERED.to_owned();
+        } else {
+            scrub_string(value);
+        }
+    }
+    scrub_fields(event.extra.iter_mut());
     for context in event.contexts.values_mut() {
         if let Context::Other(fields) = context {
-            fields.values_mut().for_each(scrub_value);
+            scrub_fields(fields.iter_mut());
         }
     }
     event
@@ -215,13 +282,67 @@ mod tests {
     }
 
     #[test]
-    fn layer_without_client_is_a_no_op() {
-        assert!(sentry::Hub::current().client().is_none());
-        let subscriber = tracing_subscriber::registry().with(tracing_layer());
-        tracing::subscriber::with_default(subscriber, || {
-            tracing::error!("not sent anywhere");
-            tracing::info_span!("span").in_scope(|| tracing::warn!("not sent anywhere"));
+    fn tracing_layer_is_added_only_with_a_client() {
+        assert!(tracing_layer::<tracing_subscriber::Registry>().is_none());
+        sentry::test::with_captured_events(|| {
+            assert!(tracing_layer::<tracing_subscriber::Registry>().is_some());
         });
+    }
+
+    #[test]
+    fn request_tracking_passes_through_without_a_client() {
+        let outer = sentry::Hub::current();
+        assert!(outer.client().is_none());
+        let router = with_request_tracking(Router::new().route(
+            "/ok",
+            get(move || {
+                let outer = outer.clone();
+                async move {
+                    // レイヤーが積まれていれば、リクエストごとの別の Hub になる
+                    assert!(Arc::ptr_eq(&outer, &sentry::Hub::current()));
+                    StatusCode::NO_CONTENT
+                }
+            }),
+        ));
+
+        let request = Request::builder().uri("/ok").body(Body::empty()).unwrap();
+        let response = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(router.oneshot(request))
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[test]
+    fn request_tracking_binds_a_request_hub_with_a_client() {
+        let events = sentry::test::with_captured_events(|| {
+            let outer = sentry::Hub::current();
+            let router = with_request_tracking(Router::new().route(
+                "/hub",
+                get(move || {
+                    let outer = outer.clone();
+                    async move {
+                        if Arc::ptr_eq(&outer, &sentry::Hub::current()) {
+                            StatusCode::CONFLICT
+                        } else {
+                            StatusCode::NO_CONTENT
+                        }
+                    }
+                }),
+            ));
+            let request = Request::builder().uri("/hub").body(Body::empty()).unwrap();
+            let response = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(router.oneshot(request))
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        });
+        assert!(events.is_empty());
     }
 
     #[test]
@@ -281,6 +402,126 @@ mod tests {
             assert!(!scrubbed.contains(secret), "{scrubbed}");
         }
         assert_eq!(scrub_text("status code 500"), None);
+    }
+
+    /// `SECRET` が伏せられ、機微でない部分が残ることを確かめる
+    fn assert_scrubbed(text: &str, kept: &str) {
+        let scrubbed = scrub_text(text).unwrap_or_else(|| panic!("not scrubbed: {text}"));
+        assert!(!scrubbed.contains("SECRET"), "{scrubbed}");
+        assert!(scrubbed.contains(FILTERED), "{scrubbed}");
+        assert!(scrubbed.contains(kept), "{scrubbed}");
+    }
+
+    #[test]
+    fn scrub_text_hides_json_bodies() {
+        assert_scrubbed(
+            r#"github: {"login":"octocat","access_token":"SECRET"}"#,
+            r#""login":"octocat""#,
+        );
+        assert_scrubbed(
+            r#"{"Client_Secret" : "SEC\"RET SECRET", "id": 1}"#,
+            r#""id": 1"#,
+        );
+        assert_scrubbed(r#"{"x-api-key":"SECRET"}"#, "x-api-key");
+        assert_scrubbed(r#"{"private_key":"SECRET"}"#, "private_key");
+        assert_scrubbed(r#"{"session_id":"SECRET"}"#, "session_id");
+    }
+
+    #[test]
+    fn scrub_text_hides_escaped_json_and_debug_output() {
+        assert_scrubbed(
+            r#"body: "{\"refresh_token\":\"SECRET\",\"login\":\"octocat\"}""#,
+            r#"\"login\":\"octocat\""#,
+        );
+        assert_scrubbed(
+            r#"Credentials { password: "SECRET", login: "octocat" }"#,
+            "octocat",
+        );
+    }
+
+    #[test]
+    fn scrub_text_hides_authorization_schemes() {
+        assert_scrubbed("sent with Bearer SECRET.abc-_~+/== failed", "failed");
+        assert_scrubbed("basic U0VDUkVUSECRET== rejected", "rejected");
+        assert_scrubbed("Authorization: token SECRET\nAccept: json", "Accept: json");
+        assert_scrubbed("Proxy-Authorization: Digest SECRET", "Proxy-Authorization");
+    }
+
+    #[test]
+    fn scrub_text_hides_cookie_headers() {
+        assert_scrubbed(
+            "Cookie: session=SECRET; other=SECRET\r\nAccept: json",
+            "Accept: json",
+        );
+        assert_scrubbed(
+            "set-cookie: session=SECRET; Path=/; HttpOnly\nserver: x",
+            "server: x",
+        );
+    }
+
+    #[test]
+    fn scrub_text_hides_key_value_pairs() {
+        assert_scrubbed("https://a.test/cb?code=SECRET&state=SECRET&x=1", "x=1");
+        assert_scrubbed("token=SECRET next", "next");
+        assert_scrubbed("api_key=SECRET next", "next");
+        assert_scrubbed("session=SECRET next", "next");
+    }
+
+    #[test]
+    fn scrub_text_keeps_ordinary_messages() {
+        for text in [
+            "status code 500",
+            "connection refused: tcp connect error",
+            r#"{"login":"octocat","id":1}"#,
+        ] {
+            assert_eq!(scrub_text(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn scrub_fields_hides_whole_values_under_sensitive_keys() {
+        let mut value = serde_json::json!({
+            "token": "SECRET",
+            "Authorization": ["SECRET"],
+            "SET-COOKIE": { "value": "SECRET" },
+            "api_key": 12345,
+            "nested": { "list": [{ "refresh_token": "SECRET", "login": "octocat" }] },
+            "count": 3,
+        });
+
+        scrub_value(&mut value);
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "token": FILTERED,
+                "Authorization": FILTERED,
+                "SET-COOKIE": FILTERED,
+                "api_key": FILTERED,
+                "nested": { "list": [{ "refresh_token": FILTERED, "login": "octocat" }] },
+                "count": 3,
+            })
+        );
+    }
+
+    #[test]
+    fn scrub_covers_top_level_fields_of_events_and_breadcrumbs() {
+        let mut event = Event::default();
+        event.tags.insert("session".into(), "SECRET".into());
+        event.extra.insert("token".into(), "SECRET".into());
+        event.contexts.insert(
+            "Rust Tracing Fields".into(),
+            Context::Other(Map::from_iter([("password".to_owned(), "SECRET".into())])),
+        );
+        event.breadcrumbs.values.push(Breadcrumb {
+            data: Map::from_iter([("cookie".to_owned(), "SECRET".into())]),
+            ..Default::default()
+        });
+
+        scrub_event(&mut event);
+
+        let rendered = serde_json::to_string(&event).unwrap();
+        assert!(!rendered.contains("SECRET"), "{rendered}");
     }
 
     #[test]
