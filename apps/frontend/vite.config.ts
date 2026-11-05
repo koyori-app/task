@@ -191,6 +191,7 @@ export default defineConfig({
         plugins: [vue()],
         resolve: {
           alias: {
+            '@/sentry.browser.config': path.resolve(dirname, 'sentry.browser.config.ts'),
             '#': path.resolve(dirname, 'server'),
             '@': path.resolve(dirname, 'src'),
           },
