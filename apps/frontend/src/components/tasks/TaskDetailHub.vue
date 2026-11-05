@@ -37,6 +37,7 @@ import TaskPropertyRow from '@/components/tasks/TaskPropertyRow.vue';
 import {
   AvatarGroup,
   Button,
+  ConfirmDialog,
   Dropdown,
   Input,
   type DropdownItem,
@@ -295,6 +296,13 @@ const resumableDateField = computed(() =>
 
 async function startEditing(field: EditableField) {
   if (!props.task || isFieldUpdating(field)) return;
+  // 説明に未保存の変更があるまま別項目へ移ると、共有の draftValue が上書きされて失われる。
+  // 切り替えを止めて破棄確認を出し、確認で破棄したときだけ続ける
+  if (editingField.value === 'description' && field !== 'description' && descriptionDirty.value) {
+    pendingField.value = field;
+    discardConfirmOpen.value = true;
+    return;
+  }
   editingField.value = field;
   switch (field) {
     case 'title':
@@ -396,10 +404,59 @@ function commitEditing(field: EditableField) {
   cancelEditing();
 }
 
+// 説明の編集: 破棄・全消去は確認を挟む。blur では保存も破棄もしない
+const discardConfirmOpen = ref(false);
+const pendingField = ref<EditableField | null>(null);
+const clearConfirmOpen = ref(false);
+
+// 子タスクへの移動などでは同じインスタンスのまま task だけが替わる。書きかけを持ち越すと
+// 移った先のタスクへ前のタスクの下書きが保存されるので、編集と確認を閉じる
+watch(
+  () => props.task?.id,
+  () => {
+    discardConfirmOpen.value = false;
+    pendingField.value = null;
+    clearConfirmOpen.value = false;
+    cancelEditing();
+  },
+);
+
+const descriptionDirty = computed(
+  () => draftValue.value.trim() !== (props.task?.description ?? '').trim(),
+);
+
+/** 変更があれば確認を出し、無ければそのまま閉じる（Esc と「キャンセル」共通） */
+function requestCancelDescription() {
+  if (descriptionDirty.value) {
+    discardConfirmOpen.value = true;
+    return;
+  }
+  cancelEditing();
+}
+
+function confirmDiscardDescription() {
+  discardConfirmOpen.value = false;
+  const next = pendingField.value;
+  pendingField.value = null;
+  cancelEditing();
+  if (next) void startEditing(next);
+}
+
+function cancelDiscardDescription() {
+  discardConfirmOpen.value = false;
+  pendingField.value = null;
+}
+
+function confirmClearDescription() {
+  clearConfirmOpen.value = false;
+  clearDescription();
+}
+
 function onEditKeydown(event: KeyboardEvent, field: EditableField) {
   if (event.key === 'Escape') {
     event.preventDefault();
-    cancelEditing();
+    if (field === 'description') requestCancelDescription();
+    else cancelEditing();
     return;
   }
   if (event.key === 'Enter' && field !== 'description') {
@@ -1074,7 +1131,7 @@ function clearDescription() {
                   :disabled="isFieldUpdating('description')"
                   label="クリア"
                   @mousedown.prevent
-                  @click="clearDescription"
+                  @click="clearConfirmOpen = true"
                 />
                 <Button
                   v-else-if="editingField !== 'description' && freshDescriptionHtml"
@@ -1100,7 +1157,6 @@ function clearDescription() {
                 :mentions="task.mentions"
                 @keydown="onEditKeydown($event, 'description')"
                 @submit="commitEditing('description')"
-                @blur="commitEditing('description')"
               />
               <!--
               KFM 表示は非対話の div にする: 描画 HTML はリンク等の対話要素を含みうるため、
@@ -1128,6 +1184,39 @@ function clearDescription() {
                 </p>
                 <p v-else class="text-sm text-muted-foreground">説明を追加</p>
               </button>
+              <div v-if="editingField === 'description'" class="mt-2 flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="tertiary"
+                  :disabled="isFieldUpdating('description')"
+                  label="キャンセル"
+                  @click="requestCancelDescription"
+                />
+                <Button
+                  type="button"
+                  :disabled="isFieldUpdating('description')"
+                  label="保存"
+                  @click="commitEditing('description')"
+                />
+              </div>
+              <ConfirmDialog
+                :open="discardConfirmOpen"
+                title="編集を破棄しますか？"
+                message="説明の変更は保存されていません。破棄すると元に戻せません。"
+                confirm-label="破棄する"
+                destructive
+                :on-confirm="confirmDiscardDescription"
+                :on-cancel="cancelDiscardDescription"
+              />
+              <ConfirmDialog
+                :open="clearConfirmOpen"
+                title="説明を消しますか？"
+                message="説明をすべて消して保存します。この操作は取り消せません。"
+                confirm-label="消す"
+                destructive
+                :on-confirm="confirmClearDescription"
+                :on-cancel="() => (clearConfirmOpen = false)"
+              />
               <!-- 概要へのリアクション。説明が空の間と編集中は出さない -->
               <ReactionBar
                 v-if="reactionController && task.description && editingField !== 'description'"

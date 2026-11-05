@@ -17,6 +17,7 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
   default: (await import('@/components/markdown/__tests__/markdown-editor-stub')).default,
 }));
 
+import { ConfirmDialog } from '@koyori-app/ui-vue';
 import TaskDetailHub from '../TaskDetailHub.vue';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
 
@@ -601,7 +602,10 @@ describe('TaskDetailHub の保存に失敗した下書き', () => {
       .trigger('click');
     const textarea = wrapper.get('textarea[aria-label="説明"]');
     await textarea.setValue('書きかけの説明');
-    await textarea.trigger('blur');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '保存')!
+      .trigger('click');
     expect(wrapper.emitted('save:description')).toEqual([['書きかけの説明']]);
 
     await wrapper.setProps({ fieldErrors: { description: FAILED } });
@@ -677,7 +681,10 @@ describe('TaskDetailHub の保存に失敗した下書き', () => {
       .trigger('click');
     const textarea = wrapper.get('textarea[aria-label="説明"]');
     await textarea.setValue('成功した説明');
-    await textarea.trigger('blur');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '保存')!
+      .trigger('click');
     await wrapper.setProps({ fieldErrors: {}, task: { ...task, description: '成功した説明' } });
 
     await wrapper
@@ -688,6 +695,9 @@ describe('TaskDetailHub の保存に失敗した下書き', () => {
       .findAll('button')
       .find((button) => button.text() === 'クリア')!
       .trigger('click');
+    // クリアは確認を挟む
+    (wrapper.findAllComponents(ConfirmDialog)[1]!.props('onConfirm') as () => void)();
+    await nextTick();
     expect(wrapper.emitted('save:description')).toEqual([['成功した説明'], [null]]);
 
     await wrapper.setProps({ fieldErrors: { description: FAILED } });
@@ -1010,6 +1020,121 @@ describe('TaskDetailHub の期限の表示', () => {
     const wrapper = mountWithStatus('status-progress');
     expect(buttonByText(wrapper, '4日超過').classes()).toContain('text-destructive');
     expect(buttonByText(wrapper, '3日超過').classes()).toContain('text-destructive');
+  });
+});
+
+describe('TaskDetailHub 説明の編集', () => {
+  async function startEdit(description: string | null = '元の説明') {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: { ...task, description },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+    const opener = wrapper
+      .findAll('button')
+      .find((b) => b.text() === (description ?? '説明を追加'));
+    await opener!.trigger('click');
+    return wrapper;
+  }
+  const dialogs = (w: Awaited<ReturnType<typeof startEdit>>) => w.findAllComponents(ConfirmDialog);
+  const button = (w: Awaited<ReturnType<typeof startEdit>>, label: string) =>
+    w.findAll('button').find((b) => b.text() === label);
+
+  it('保存とキャンセルのボタンを出す', async () => {
+    const wrapper = await startEdit();
+    expect(button(wrapper, '保存')).toBeTruthy();
+    expect(button(wrapper, 'キャンセル')).toBeTruthy();
+  });
+
+  it('blur では保存せず編集を続ける', async () => {
+    const wrapper = await startEdit();
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('書きかけ');
+    await textarea.trigger('blur');
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(true);
+  });
+
+  it('保存ボタンで保存して閉じる', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('新しい説明');
+    await button(wrapper, '保存')!.trigger('click');
+    expect(wrapper.emitted('save:description')).toEqual([['新しい説明']]);
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+  });
+
+  it('編集中に別のタスクへ替わったら編集を閉じ、前の下書きを移った先へ保存しない', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('A の書きかけ');
+    await wrapper.setProps({ task: { ...task, id: 'task-b', description: 'B の説明' } });
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    expect(wrapper.text()).toContain('B の説明');
+  });
+
+  it('変更ありの Esc は確認を出し、取りやめると編集が続く', async () => {
+    const wrapper = await startEdit();
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('書きかけ');
+    await textarea.trigger('keydown', { key: 'Escape' });
+    const confirm = dialogs(wrapper)[0]!;
+    expect(confirm.props('open')).toBe(true);
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(true);
+    (confirm.props('onCancel') as () => void)();
+    await nextTick();
+    expect(dialogs(wrapper)[0]!.props('open')).toBe(false);
+    expect((wrapper.get('textarea[aria-label="説明"]').element as HTMLTextAreaElement).value).toBe(
+      '書きかけ',
+    );
+  });
+
+  it('確認で破棄すると元に戻り、保存はしない', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('書きかけ');
+    await button(wrapper, 'キャンセル')!.trigger('click');
+    (dialogs(wrapper)[0]!.props('onConfirm') as () => void)();
+    await nextTick();
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    expect(wrapper.text()).toContain('元の説明');
+  });
+
+  it('変更ありのままタイトルの編集を始めると確認が出て、取りやめると説明の編集と内容が残る', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('書きかけ');
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === task.title)!
+      .trigger('click');
+    const confirm = dialogs(wrapper)[0]!;
+    expect(confirm.props('open')).toBe(true);
+    (confirm.props('onCancel') as () => void)();
+    await nextTick();
+    expect((wrapper.get('textarea[aria-label="説明"]').element as HTMLTextAreaElement).value).toBe(
+      '書きかけ',
+    );
+    expect(wrapper.emitted('save:title')).toBeUndefined();
+  });
+
+  it('変更が無ければ Esc もキャンセルも確認なしで閉じる', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').trigger('keydown', { key: 'Escape' });
+    expect(dialogs(wrapper)[0]!.props('open')).toBe(false);
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+  });
+
+  it('クリアは確認後にだけ空にして保存する', async () => {
+    const wrapper = await startEdit();
+    await button(wrapper, 'クリア')!.trigger('click');
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    const confirm = dialogs(wrapper)[1]!;
+    expect(confirm.props('open')).toBe(true);
+    (confirm.props('onConfirm') as () => void)();
+    await nextTick();
+    expect(wrapper.emitted('save:description')).toEqual([[null]]);
   });
 });
 
