@@ -126,6 +126,20 @@ function getBundleVisualizerPlugins() {
 
 // More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
 
+// SSR の依存を dist/server に同梱すると、tr46 の require('punycode/')（npm の punycode を指す書き方）が
+// バンドル後に node:punycode/ になり、bun が「そんな組み込みは無い」と落ちる。
+// 組み込みの node:punycode で同じ API が使えるので、出力の文字列だけ直す。
+function punycodeBuiltinPlugin() {
+  return {
+    name: 'punycode-builtin',
+    renderChunk(code: string) {
+      return code.includes('"node:punycode/"')
+        ? code.replaceAll('"node:punycode/"', '"node:punycode"')
+        : null;
+    },
+  };
+}
+
 export default defineConfig({
   // Standalone build UI (vite build). Embedded client uses +onCreateApp inject.
   plugins: [
@@ -135,6 +149,7 @@ export default defineConfig({
     ...(buildEnv.VUE_DEVTOOLS ? [VueDevTools({ appendTo: /\/src\/pages\/\+Layout\.vue/ })] : []),
     ...(buildEnv.VITE_INSPECT ? [Inspect({ build: false })] : []),
     vike(),
+    punycodeBuiltinPlugin(),
     ...(sentryPlugin ? [sentryPlugin] : []),
     tailwindcss(),
     vue(),
@@ -166,7 +181,12 @@ export default defineConfig({
     allowedHosts: ['localhost', '127.0.0.1', ...(coderAllowedHost ? [coderAllowedHost] : [])],
   },
   ssr: {
-    noExternal: ['@zxcvbn-ts/core', '@zxcvbn-ts/language-common', '@zxcvbn-ts/language-ja'],
+    // SSR の依存を dist/server に同梱し、配布イメージに node_modules を積まずに済ませる
+    // （apps/frontend/Dockerfile）。@zxcvbn-ts は以前から同梱していた
+    noExternal: true,
+    // jsdom は __dirname 相対で default-stylesheet.css 等を読むので同梱できない。
+    // isomorphic-dompurify ごと外部に残し、Dockerfile がその閉包だけを node_modules に置く
+    external: ['isomorphic-dompurify'],
   },
   build: {
     sourcemap: buildEnv.ANALYZE || process.env.NODE_ENV !== 'production',

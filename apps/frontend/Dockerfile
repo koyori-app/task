@@ -31,6 +31,22 @@ RUN pnpm run openapi:generate
 ARG PUBLIC_ENV__SENTRY_DSN=
 RUN pnpm run build
 
+# 実行時に要る node_modules 。SSR の依存は vite.config.ts の ssr.noExternal で dist/server に
+# 同梱してあり、外部に残しているのは isomorphic-dompurify（jsdom が __dirname 相対でファイルを
+# 読むため同梱できない）だけ。その閉包だけをここで作り、ワークスペース全体の node_modules
+# （devDependencies 込みで 900 MB 超）はイメージに入れない。版は package.json の指定に合わせる。
+# 外部に残すパッケージを増やしたら、ここの dependencies にも足すこと。
+RUN --mount=type=cache,target=/root/.npm \
+    mkdir -p /runtime-deps \
+    && node -e ' \
+        const pkg = require("./package.json"); \
+        const deps = {}; \
+        for (const name of ["isomorphic-dompurify"]) deps[name] = pkg.dependencies[name]; \
+        require("fs").writeFileSync("/runtime-deps/package.json", JSON.stringify({ name: "frontend-runtime-deps", private: true, dependencies: deps })); \
+    ' \
+    && cd /runtime-deps \
+    && npm install --omit=dev --no-audit --no-fund --ignore-scripts
+
 ########## runtime ##########
 # 実行は Bun。e2e（e2e/playwright.config.ts）も `bun ./dist/server/index.mjs` で
 # 起動しており、SSR は Elysia なので実行環境をそちらに揃える。
@@ -38,10 +54,8 @@ RUN pnpm run build
 FROM oven/bun:1-slim AS runtime
 WORKDIR /repo/apps/frontend
 
-# pnpm の node_modules は /repo/node_modules（.pnpm ストア）への相対 symlink 構成なので両方コピーする
-COPY --from=builder --chown=bun:bun /repo/node_modules /repo/node_modules
-COPY --from=builder --chown=bun:bun /repo/package.json /repo/pnpm-workspace.yaml /repo/
-COPY --from=builder --chown=bun:bun /repo/apps/frontend/node_modules ./node_modules
+# dist/server に SSR の依存を同梱してあるので、node_modules は builder で作った外部分だけ
+COPY --from=builder --chown=bun:bun /runtime-deps/node_modules ./node_modules
 COPY --from=builder --chown=bun:bun /repo/apps/frontend/dist ./dist
 COPY --from=builder --chown=bun:bun /repo/apps/frontend/server/public ./server/public
 COPY --from=builder --chown=bun:bun /repo/apps/frontend/package.json ./package.json
