@@ -200,21 +200,11 @@ describe('AppSidebar のプロジェクト作成導線', () => {
 });
 
 /**
- * ガントは arc が alpha なので、環境設定の「実験的機能を表示する」を入れた人にだけ出す。
- * 全員に出すと、横の導きが写る頁の数だけ VRT の基準が動く。
+ * ガントの入口は誰にでも出す。環境設定（端末ごと・既定で無効）に頼ると、設定を入れていない人には
+ * 入口が無く、テナントのオーナーしか見られないように見えていた（TASK-444）。
  */
 describe('AppSidebar のガントの導き', () => {
-  it('既定（実験的機能を表示しない）では出さない', async () => {
-    mountSidebar(vi.fn());
-    await flushPromises();
-
-    const nav = document.body.querySelector('nav[aria-label="ナビゲーション"]')!;
-    expect(nav.querySelector('a[href="/acme/gantt"]')).toBeNull();
-    expect(nav.textContent).not.toContain('ガント');
-  });
-
-  it('実験的機能を表示するなら、カレンダーのすぐ下に出す', async () => {
-    seedSettings({ preferences: { showExperiments: true } });
+  it('環境設定に手を付けていない人にも、カレンダーのすぐ下に出す', async () => {
     mountSidebar(vi.fn());
     await flushPromises();
 
@@ -224,8 +214,15 @@ describe('AppSidebar のガントの導き', () => {
     expect(hrefs.indexOf('/acme/gantt')).toBe(hrefs.indexOf('/acme/calendar') + 1);
   });
 
+  it('「実験的機能を表示する」を切っていても出す', async () => {
+    seedSettings({ preferences: { showExperiments: false } });
+    mountSidebar(vi.fn());
+    await flushPromises();
+
+    expect(findLink('/acme/gantt').textContent?.trim()).toBe('ガント');
+  });
+
   it('ガントの頁にいる間は現在地として強調する', async () => {
-    seedSettings({ preferences: { showExperiments: true } });
     pageContextStub.urlPathname = '/acme/gantt';
     mountSidebar(vi.fn());
     await flushPromises();
