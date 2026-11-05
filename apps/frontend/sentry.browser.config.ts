@@ -25,13 +25,39 @@ export const buildTracePropagationTargets = (apiBase: string | undefined): RegEx
   return targets;
 };
 
+/**
+ * vike-vue はクライアント遷移のたびに `app.config.errorHandler` を代入し直すので、
+ * SDK が init で付けたハンドラーは初回の遷移で失われる。代入のたびに SDK のラッパーで
+ * 包み直し、遷移中の描画エラーも含めて常に捕捉する。init の `attachErrorHandler` は切ること
+ * （残すと SDK の代入がここを通って二重に包まれる）。
+ */
+export const keepSentryErrorHandler = (app: App) => {
+  const wrap = (errorHandler: App['config']['errorHandler']) => {
+    const target = { config: { errorHandler }, mixin: () => {} };
+    Sentry.attachErrorHandler(target);
+    return target.config.errorHandler;
+  };
+
+  let wrapped = wrap(app.config.errorHandler);
+  Object.defineProperty(app.config, 'errorHandler', {
+    configurable: true,
+    enumerable: true,
+    get: () => wrapped,
+    set: (errorHandler: App['config']['errorHandler']) => {
+      wrapped = wrap(errorHandler);
+    },
+  });
+};
+
 export const sentryBrowserConfig = (app: App) => {
   // Replay は多重に起動すると SDK が例外を投げるので、init は 1 度だけにする
   if (import.meta.env.PROD && !Sentry.isInitialized()) {
     // `release` は渡さない。sentryVitePlugin が自身の release.name を SENTRY_RELEASE として
     // バンドルへ注入し、SDK がそれを既定値に使うので、sourcemap の release と必ず一致する。
+    keepSentryErrorHandler(app);
     Sentry.init({
       app,
+      attachErrorHandler: false,
       dsn: import.meta.env.PUBLIC_ENV__SENTRY_DSN,
       environment: import.meta.env.PUBLIC_ENV__SENTRY_ENVIRONMENT || import.meta.env.MODE,
       // browserTracingIntegration が無いと fetch / XHR に trace ヘッダが付かない

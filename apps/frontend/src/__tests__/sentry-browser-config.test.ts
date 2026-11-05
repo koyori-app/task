@@ -9,12 +9,13 @@ import {
 
 vi.mock('@sentry/vue', () => ({
   init: vi.fn(),
+  attachErrorHandler: vi.fn(),
   isInitialized: vi.fn(() => false),
   browserTracingIntegration: vi.fn(() => ({ name: 'BrowserTracing' })),
   replayIntegration: vi.fn(() => ({ name: 'Replay' })),
 }));
 
-const app = {} as App;
+const app = { config: {} } as App;
 
 const matches = (targets: RegExp[], url: string) => targets.some((target) => target.test(url));
 
@@ -82,6 +83,7 @@ describe('sentryBrowserConfig', () => {
 
     const options = vi.mocked(Sentry.init).mock.calls[0]?.[0];
     expect(options?.app).toBe(app);
+    expect(options).toHaveProperty('attachErrorHandler', false);
     expect(Sentry.browserTracingIntegration).toHaveBeenCalledOnce();
     expect(options?.integrations).toContainEqual({ name: 'BrowserTracing' });
     expect(options?.tracesSampleRate).toBe(0.5);
