@@ -21,6 +21,7 @@ pub mod oauth;
 pub mod passkeys;
 pub mod password_reset;
 pub mod personal_tokens;
+pub mod project_events;
 pub mod project_members;
 pub mod projects;
 pub mod reactions;

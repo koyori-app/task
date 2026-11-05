@@ -102,6 +102,15 @@ pub(crate) async fn get_or_create_personal_project(
     loop {
         let txn = state.db.begin().await?;
 
+        // entity の 1 列に unique_key は 1 つだけで、tenant_id は (tenant_id, key) に使うため
+        // (tenant_id, personal_owner_id) の UNIQUE を持てない。作成を直列化して 2 つ作らせない
+        common::db::execute_bound(
+            &txn,
+            "SELECT pg_advisory_xact_lock(hashtext(?))",
+            vec![format!("personal_project:{tenant_id}:{user_id}").into()],
+        )
+        .await?;
+
         // txn 内で再確認（並行リクエストが先に作成した場合に対応）
         if let Some(existing) = projects::Entity::find()
             .filter(projects::Column::TenantId.eq(tenant_id))
@@ -131,16 +140,6 @@ pub(crate) async fn get_or_create_personal_project(
             Ok(model) => model,
             Err(e) if is_postgres_unique_violation(&e) => {
                 txn.rollback().await?;
-                // 並行リクエストが同時に personal project を作成した可能性を確認
-                if let Some(existing) = projects::Entity::find()
-                    .filter(projects::Column::TenantId.eq(tenant_id))
-                    .filter(projects::Column::IsPersonal.eq(true))
-                    .filter(projects::Column::PersonalOwnerId.eq(user_id))
-                    .one(&state.db)
-                    .await?
-                {
-                    return Ok(existing);
-                }
                 // key 衝突: 新しい key と新しい txn で再試行
                 let suffix = Uuid::new_v4().simple().to_string().to_ascii_uppercase();
                 key = format!("ME{}", &suffix[..4]);

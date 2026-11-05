@@ -1,6 +1,10 @@
-use crate::common::{TestApp, TestTenantProject, TestUser, create_status, execute_sql};
+use crate::common::{
+    TestApp, TestTenantProject, TestUser, create_status, execute_sql, insert_tenant,
+};
 use axum::http::StatusCode;
 use chrono::{Datelike, Duration, FixedOffset, NaiveDate, Utc};
+use entity::projects;
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use uuid::Uuid;
 
 async fn setup(app: &mut TestApp) -> (TestUser, TestTenantProject) {
@@ -41,6 +45,44 @@ async fn personal_project_is_idempotent() {
         .parse()
         .unwrap();
     assert_eq!(first, second);
+}
+
+/// 同時の要求でも個人プロジェクトは 1 つだけ作られる。既定のキーがテナント内で埋まっていると
+/// 要求ごとに別のキーへ作り直すので、(tenant_id, key) の UNIQUE では止まらない。
+#[tokio::test]
+async fn personal_project_is_created_once_under_concurrent_requests() {
+    let mut app = TestApp::new().await;
+    let (user, tp) = setup(&mut app).await;
+    // 既定のキーはユーザーごとに決まるので、別テナントで作って知る
+    let other_tenant = insert_tenant(&app.state.db, user.id).await;
+    let default_key = app
+        .get_with_session(&format!("{}/personal-project", my_tasks_base(other_tenant)))
+        .await
+        .json::<serde_json::Value>()
+        .await
+        .unwrap()["key"]
+        .clone();
+    let occupied = app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/projects", tp.tenant_id),
+            serde_json::json!({"name": "occupied", "key": default_key}),
+        )
+        .await;
+    assert_eq!(occupied.status(), StatusCode::CREATED);
+
+    let url = format!("{}/personal-project", my_tasks_base(tp.tenant_id));
+    let responses = futures::future::join_all((0..5).map(|_| app.get_with_session(&url))).await;
+    for response in responses {
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let personal = projects::Entity::find()
+        .filter(projects::Column::TenantId.eq(tp.tenant_id))
+        .filter(projects::Column::IsPersonal.eq(true))
+        .count(&app.state.db)
+        .await
+        .unwrap();
+    assert_eq!(personal, 1);
 }
 
 #[tokio::test]
