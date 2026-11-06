@@ -3,13 +3,14 @@ import { Sidebar } from '@koyori-app/ui-vue';
 import { usePreference } from '@/composables/useLocalSettings';
 import { useRouteAlignedTenantId } from '@/composables/useRouteAlignedTenantId';
 import { useTenantStore } from '@/stores/tenant';
-import { useProjectsQuery } from '@/lib/api-vue-query';
+import { useMeQuery, useProjectsQuery } from '@/lib/api-vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { navigate } from 'vike/client/router';
 import { computed, watch } from 'vue';
 
 import { Calendar, ChartGantt, House, ListTodo } from '@lucide/vue';
 import NavMain from '@/components/sidebar/NavMain.vue';
+import NavAdmin from '@/components/sidebar/NavAdmin.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
 import { shouldCloseSidebarOnNavigate } from '@/components/sidebar/sidebar-navigation';
 
@@ -25,6 +26,7 @@ const emit = defineEmits<{
 }>();
 
 const pageContext = usePageContext();
+const meQuery = useMeQuery();
 const tenantStore = useTenantStore();
 
 const routeTenantSlug = computed(() => {
@@ -49,6 +51,7 @@ const routeAlignedTenantId = useRouteAlignedTenantId(
 );
 
 const projectsQuery = useProjectsQuery(routeAlignedTenantId);
+const isAdmin = computed(() => meQuery.data.value?.is_admin === true);
 
 const navProjects = computed(() => projectsQuery.data.value ?? []);
 
@@ -136,5 +139,6 @@ function closeOnNavigate(event: MouseEvent) {
       @retry="retryProjects"
       @create="onCreateProject"
     />
+    <NavAdmin v-if="isAdmin" :current-path="pageContext.urlPathname" />
   </Sidebar>
 </template>

@@ -532,3 +532,51 @@ export function createTestApiClient(fetchImpl: (input: Request) => Promise<Respo
     }),
   );
 }
+
+// ---- 管理者（認証復旧・一般登録ポリシー） ----
+
+export function useAdminUsersQuery() {
+  return apiClient.useQuery('get', '/v1/admin/users', undefined, { retry: false });
+}
+
+/** 利用者ごとにページを開き直すので、id は ref にしない。 */
+export function useAdminAuthMethodsQuery(id: string) {
+  return apiClient.useQuery(
+    'get',
+    '/v1/admin/users/{id}/auth-methods',
+    { params: { path: { id } } },
+    { retry: false },
+  );
+}
+
+export function useAdminCreateUserMutation() {
+  return apiClient.useMutation('post', '/v1/admin/users');
+}
+
+export function useAdminUpdateUserMutation() {
+  return apiClient.useMutation('patch', '/v1/admin/users/{id}');
+}
+
+export function useAdminPasswordResetMutation() {
+  return apiClient.useMutation('post', '/v1/admin/users/{id}/password-reset');
+}
+
+export function useAdminReset2faMutation() {
+  return apiClient.useMutation('post', '/v1/admin/users/{id}/reset-2fa');
+}
+
+export function useAdminDeletePasskeyMutation() {
+  return apiClient.useMutation('delete', '/v1/admin/users/{id}/passkeys/{passkey_id}');
+}
+
+export function useAdminDisconnectOAuthMutation() {
+  return apiClient.useMutation('delete', '/v1/admin/users/{id}/oauth/{provider}');
+}
+
+export function useAdminSystemSettingsQuery() {
+  return apiClient.useQuery('get', '/v1/admin/system/settings', undefined, { retry: false });
+}
+
+export function useAdminUpdateSystemSettingsMutation() {
+  return apiClient.useMutation('patch', '/v1/admin/system/settings');
+}
