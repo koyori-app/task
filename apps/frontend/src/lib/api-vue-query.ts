@@ -380,6 +380,14 @@ export function useVerifyTwoFactorMutation() {
   return apiClient.useMutation('post', '/v1/auth/2fa/verify');
 }
 
+export function useDeleteTotpMutation() {
+  return apiClient.useMutation('delete', '/v1/auth/2fa/totp');
+}
+
+export function useRegenerateRecoveryCodesMutation() {
+  return apiClient.useMutation('post', '/v1/auth/2fa/recovery-codes/regenerate');
+}
+
 export function useRegisterMutation() {
   return apiClient.useMutation('post', '/v1/auth/register');
 }
