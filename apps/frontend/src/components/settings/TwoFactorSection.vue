@@ -94,6 +94,7 @@ async function onSetupSubmit(code: string) {
   try {
     const result = await verifySetupMutation.mutateAsync({ body: { code } });
     recoveryCodes.value = result.recovery_codes;
+    verifySetupMutation.reset();
     setupData.value = null;
     mode.value = 'recovery';
   } catch (e) {
@@ -121,10 +122,13 @@ async function onRegenerate(input: { code: string } | { recovery_code: string })
   try {
     const result = await regenerateMutation.mutateAsync({ body: { code: input.code } });
     recoveryCodes.value = result.recovery_codes;
+    regenerateMutation.reset();
     mode.value = 'recovery';
   } catch (e) {
     fail(e);
+    return;
   }
+  await refetchMe();
 }
 </script>
 

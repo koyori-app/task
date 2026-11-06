@@ -373,7 +373,7 @@ export function useTotpSetupMutation() {
 }
 
 export function useTotpVerifySetupMutation() {
-  return apiClient.useMutation('post', '/v1/auth/2fa/totp/verify-setup');
+  return apiClient.useMutation('post', '/v1/auth/2fa/totp/verify-setup', { gcTime: 0 }); // リカバリーコードを返す。キャッシュに残さない
 }
 
 export function useVerifyTwoFactorMutation() {
@@ -385,7 +385,9 @@ export function useDeleteTotpMutation() {
 }
 
 export function useRegenerateRecoveryCodesMutation() {
-  return apiClient.useMutation('post', '/v1/auth/2fa/recovery-codes/regenerate');
+  return apiClient.useMutation('post', '/v1/auth/2fa/recovery-codes/regenerate', {
+    gcTime: 0, // リカバリーコードを返す。キャッシュに残さない
+  });
 }
 
 export function useRegisterMutation() {

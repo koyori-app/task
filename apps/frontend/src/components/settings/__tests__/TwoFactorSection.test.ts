@@ -54,10 +54,12 @@ function user(totp: boolean): components['schemas']['UserResponse'] {
 }
 
 /** 実画面では親が /me を購読している。キャッシュに載せて、再取得の回数を数える。 */
+let lastClient: QueryClient;
 function mountSection(totp: boolean) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  lastClient = queryClient;
   void queryClient.prefetchQuery(meQueryOptions());
   return mount(TwoFactorSection, {
     props: { user: user(totp) },
@@ -77,6 +79,14 @@ async function submitCode(w: ReturnType<typeof mountSection>, code: string) {
   await w.find('input[name="code"]').setValue(code);
   await w.find('form').trigger('submit');
   await flushPromises();
+}
+
+/** mutation キャッシュのどこかにコードが残っていないか。 */
+function mutationCacheHolds(code: string) {
+  return lastClient
+    .getMutationCache()
+    .getAll()
+    .some((m) => JSON.stringify(m.state.data ?? null).includes(code));
 }
 
 enableAutoUnmount(afterEach);
@@ -109,6 +119,7 @@ describe('TwoFactorSection 有効化', () => {
     await w.find('input[type="checkbox"], [role="checkbox"]').trigger('click');
     await click(w, '続ける');
     expect(w.text()).not.toContain(CODES[0]);
+    expect(mutationCacheHolds(CODES[0])).toBe(false);
   });
 
   it('不正なコードは誤り表示のみで、リカバリーコードも状態変更も出さない', async () => {
@@ -193,10 +204,11 @@ describe('TwoFactorSection 無効化', () => {
 });
 
 describe('TwoFactorSection 再生成', () => {
-  it('TOTP のみ受け付け、新しいコードを表示して /me を取り直さずに閉じる', async () => {
+  it('TOTP のみ受け付け、新しいコードを表示し、/me を取り直し、mutation キャッシュにコードを残さない', async () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem');
     const calls = stubApi({
       'POST /v1/auth/2fa/recovery-codes/regenerate': () => json({ recovery_codes: CODES }),
+      [ME]: () => json(user(true)),
     });
     const w = mountSection(true);
     await click(w, 'リカバリーコードを再生成');
@@ -205,6 +217,11 @@ describe('TwoFactorSection 再生成', () => {
     expect(calls.find((c) => c.key.includes('regenerate'))?.body).toEqual({ code: '123456' });
     expect(w.find('[data-testid="recovery-codes"]').text()).toContain(CODES[1]);
     expect(setItem).not.toHaveBeenCalled();
+    expect(meCalls(calls)).toBe(1);
+    expect(mutationCacheHolds(CODES[1])).toBe(false);
+    w.unmount();
+    await flushPromises();
+    expect(mutationCacheHolds(CODES[1])).toBe(false);
   });
 
   it('不正な TOTP ではコードを表示しない', async () => {
