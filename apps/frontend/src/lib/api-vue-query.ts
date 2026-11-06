@@ -539,13 +539,24 @@ export function useAdminUsersQuery() {
   return apiClient.useQuery('get', '/v1/admin/users', undefined, { retry: false });
 }
 
-/** 利用者ごとにページを開き直すので、id は ref にしない。 */
-export function useAdminAuthMethodsQuery(id: string) {
-  return apiClient.useQuery(
-    'get',
-    '/v1/admin/users/{id}/auth-methods',
-    { params: { path: { id } } },
-    { retry: false },
+/** id が変わったらキーも取得先も追従する（前の利用者の認証方法を残さない）。 */
+export function useAdminAuthMethodsQuery(id: MaybeRefOrGetter<string>) {
+  return useQuery(
+    computed(() => {
+      const params = { params: { path: { id: toValue(id) } } };
+      return {
+        queryKey: ['get', '/v1/admin/users/{id}/auth-methods', params],
+        queryFn: async ({ signal }: { signal: AbortSignal }) => {
+          const { data, error } = await fetchClient.GET('/v1/admin/users/{id}/auth-methods', {
+            ...params,
+            signal,
+          });
+          if (error) throw error;
+          return data!;
+        },
+        retry: false,
+      };
+    }),
   );
 }
 

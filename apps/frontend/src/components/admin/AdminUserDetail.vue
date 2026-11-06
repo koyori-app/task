@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { Button, ConfirmDialog, Skeleton } from '@koyori-app/ui-vue';
 import {
   queryErrorStatus,
@@ -18,7 +18,7 @@ const props = defineProps<{ userId: string }>();
 
 const meQuery = useMeQuery();
 const usersQuery = useAdminUsersQuery();
-const authMethodsQuery = useAdminAuthMethodsQuery(props.userId);
+const authMethodsQuery = useAdminAuthMethodsQuery(() => props.userId);
 const updateUser = useAdminUpdateUserMutation();
 const passwordReset = useAdminPasswordResetMutation();
 const reset2fa = useAdminReset2faMutation();
@@ -43,6 +43,16 @@ type Pending = {
   run: () => Promise<unknown>;
 };
 const pending = ref<Pending | null>(null);
+
+// 対象が変わったら、前の対象の確認待ち・通知・エラーを持ち越さない
+watch(
+  () => props.userId,
+  () => {
+    pending.value = null;
+    flash.value = '';
+    error.value = '';
+  },
+);
 
 async function confirm() {
   const action = pending.value;

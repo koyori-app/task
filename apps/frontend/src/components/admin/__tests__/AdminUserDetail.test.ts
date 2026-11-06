@@ -16,6 +16,7 @@ vi.mock('vike-vue/usePageContext', () => ({
 
 const ME = '00000000-0000-0000-0000-00000000000a';
 const TARGET = '00000000-0000-0000-0000-00000000000b';
+const OTHER = '00000000-0000-0000-0000-00000000000d';
 const PASSKEY = '00000000-0000-0000-0000-00000000000c';
 
 const json = (data: unknown, status = 200) =>
@@ -46,9 +47,19 @@ function stubFetch(opts: { me?: { is_admin: boolean }; failWith?: number } = {})
         return json(userRow(ME, { is_admin: opts.me?.is_admin ?? true }));
       }
       if (req.method === 'GET' && key.endsWith('/v1/admin/users')) {
-        return json([userRow(ME), userRow(TARGET)]);
+        return json([
+          userRow(ME),
+          userRow(TARGET),
+          { ...userRow(OTHER), username: 'bob', email: 'bob@example.com' },
+        ]);
       }
       if (req.method === 'GET' && key.endsWith('/auth-methods')) {
+        if (key.includes(OTHER)) {
+          return json({
+            passkeys: [],
+            oauth: [{ provider: 'gitlab', created_at: '2026-09-01T00:00:00Z' }],
+          });
+        }
         return json({
           passkeys: [{ id: PASSKEY, name: 'YubiKey', created_at: '2026-09-01T00:00:00Z' }],
           oauth: [
@@ -160,6 +171,37 @@ describe('AdminUserDetail の確認ダイアログ', () => {
     await click('パスワードリセットメールを送る');
     await click('送信する');
     expect(document.body.textContent).toContain('短時間に送りすぎています');
+  });
+});
+
+describe('対象ユーザーの切り替え', () => {
+  it('userId が変わったら前の対象の認証方法を残さず、新しい対象の ID と provider で解除する', async () => {
+    const calls = stubFetch();
+    const wrapper = mountDetail();
+    await flushPromises();
+    expect(document.body.textContent).toContain('YubiKey');
+
+    await wrapper.setProps({ userId: OTHER });
+    await flushPromises();
+    expect(document.body.textContent).toContain('bob@example.com');
+    expect(document.body.textContent).not.toContain('YubiKey');
+    expect(document.body.textContent).not.toContain('github');
+
+    await click('解除');
+    expect(document.body.textContent).toContain('bob（bob@example.com）');
+    await click('解除する');
+    expect(calls).toEqual([`DELETE /v1/admin/users/${OTHER}/oauth/gitlab`]);
+  });
+
+  it('確認待ちのダイアログは対象が変わると閉じる', async () => {
+    const calls = stubFetch();
+    const wrapper = mountDetail();
+    await flushPromises();
+    await click('2FA をリセット');
+    await wrapper.setProps({ userId: OTHER });
+    await flushPromises();
+    expect(button('リセットする')).toBeUndefined();
+    expect(calls).toEqual([]);
   });
 });
 
