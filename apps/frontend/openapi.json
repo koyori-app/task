@@ -1042,6 +1042,18 @@
         "tags": ["Admin Users"],
         "summary": "ユーザー強制削除",
         "operationId": "delete_user",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "対象ユーザーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "削除完了"
@@ -1124,6 +1136,18 @@
         "tags": ["Admin Users"],
         "summary": "ユーザー更新（is_admin / is_suspended）",
         "operationId": "update_user",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "対象ユーザーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -1225,6 +1249,18 @@
         "tags": ["Admin Users"],
         "summary": "対象ユーザーの認証方法（パスキー・OAuth 連携）",
         "operationId": "get_auth_methods",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "対象ユーザーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "秘密値を含まない認証方法の一覧",
@@ -1316,6 +1352,27 @@
         "tags": ["Admin Users"],
         "summary": "OAuth 連携強制解除",
         "operationId": "delete_oauth",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "対象ユーザーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "path",
+            "description": "OAuth プロバイダー名",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "解除完了"
@@ -1400,6 +1457,28 @@
         "tags": ["Admin Users"],
         "summary": "パスキー強制削除",
         "operationId": "delete_admin_user_passkey",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "対象ユーザーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "passkey_id",
+            "in": "path",
+            "description": "パスキーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "削除完了"
@@ -1484,6 +1563,18 @@
         "tags": ["Admin Users"],
         "summary": "パスワードリセットリンク生成・送信",
         "operationId": "password_reset",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "対象ユーザーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -1585,6 +1676,18 @@
         "tags": ["Admin Users"],
         "summary": "2FA 強制リセット",
         "operationId": "reset_2fa",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "対象ユーザーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "2FA リセット完了"

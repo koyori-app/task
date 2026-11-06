@@ -293,6 +293,7 @@ pub async fn create_user(
     patch,
     path = "/{id}",
     tag = "Admin Users",
+    params(("id" = Uuid, Path, description = "対象ユーザーの ID")),
     summary = "ユーザー更新（is_admin / is_suspended）",
     request_body = AdminUpdateUserRequest,
     responses(
@@ -391,6 +392,7 @@ pub async fn update_user(
     delete,
     path = "/{id}",
     tag = "Admin Users",
+    params(("id" = Uuid, Path, description = "対象ユーザーの ID")),
     summary = "ユーザー強制削除",
     responses(
         (status = 204, description = "削除完了"),
@@ -441,6 +443,7 @@ pub async fn delete_user(
     get,
     path = "/{id}/auth-methods",
     tag = "Admin Users",
+    params(("id" = Uuid, Path, description = "対象ユーザーの ID")),
     summary = "対象ユーザーの認証方法（パスキー・OAuth 連携）",
     responses(
         (status = 200, description = "秘密値を含まない認証方法の一覧", body = AdminAuthMethodsResponse),
@@ -494,6 +497,7 @@ pub async fn get_auth_methods(
     post,
     path = "/{id}/password-reset",
     tag = "Admin Users",
+    params(("id" = Uuid, Path, description = "対象ユーザーの ID")),
     summary = "パスワードリセットリンク生成・送信",
     request_body = AdminPasswordResetRequest,
     responses(
@@ -562,6 +566,7 @@ pub async fn password_reset(
     post,
     path = "/{id}/reset-2fa",
     tag = "Admin Users",
+    params(("id" = Uuid, Path, description = "対象ユーザーの ID")),
     summary = "2FA 強制リセット",
     responses(
         (status = 204, description = "2FA リセット完了"),
@@ -606,6 +611,7 @@ pub async fn reset_2fa(
     // passkeys::delete_passkey と関数名が同じなため operationId を明示して重複を避ける
     operation_id = "delete_admin_user_passkey",
     tag = "Admin Users",
+    params(("id" = Uuid, Path, description = "対象ユーザーの ID"), ("passkey_id" = Uuid, Path, description = "パスキーの ID")),
     summary = "パスキー強制削除",
     responses(
         (status = 204, description = "削除完了"),
@@ -661,6 +667,7 @@ pub async fn delete_passkey(
     delete,
     path = "/{id}/oauth/{provider}",
     tag = "Admin Users",
+    params(("id" = Uuid, Path, description = "対象ユーザーの ID"), ("provider" = String, Path, description = "OAuth プロバイダー名")),
     summary = "OAuth 連携強制解除",
     responses(
         (status = 204, description = "解除完了"),
