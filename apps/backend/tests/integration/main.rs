@@ -3,6 +3,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod admin_auth_methods_integration;
 mod admin_tenants_integration;
 mod admin_users_integration;
 mod apalis_supervise_integration;

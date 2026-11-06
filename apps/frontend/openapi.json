@@ -1220,6 +1220,97 @@
         }
       }
     },
+    "/v1/admin/users/{id}/auth-methods": {
+      "get": {
+        "tags": ["Admin Users"],
+        "summary": "対象ユーザーの認証方法（パスキー・OAuth 連携）",
+        "operationId": "get_auth_methods",
+        "responses": {
+          "200": {
+            "description": "秘密値を含まない認証方法の一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAuthMethodsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/users/{id}/oauth/{provider}": {
       "delete": {
         "tags": ["Admin Users"],
@@ -24737,6 +24828,24 @@
           }
         }
       },
+      "AdminAuthMethodsResponse": {
+        "type": "object",
+        "required": ["passkeys", "oauth"],
+        "properties": {
+          "oauth": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminOAuthItem"
+            }
+          },
+          "passkeys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminPasskeyItem"
+            }
+          }
+        }
+      },
       "AdminCreateUserRequest": {
         "type": "object",
         "required": ["username", "email", "password"],
@@ -24754,6 +24863,48 @@
             "type": "string"
           },
           "username": {
+            "type": "string"
+          }
+        }
+      },
+      "AdminOAuthItem": {
+        "type": "object",
+        "description": "管理者に見せる OAuth 連携の情報。トークン・provider_user_id は含めない。",
+        "required": ["provider", "created_at"],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "instance_url": {
+            "type": ["string", "null"]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "provider_email": {
+            "type": ["string", "null"]
+          },
+          "provider_login": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "AdminPasskeyItem": {
+        "type": "object",
+        "description": "管理者に見せるパスキーの情報。公開鍵・credential_id・sign_count は含めない。",
+        "required": ["id", "name", "created_at"],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_used_at": {
+            "type": ["string", "null"]
+          },
+          "name": {
             "type": "string"
           }
         }
