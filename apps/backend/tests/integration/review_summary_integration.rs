@@ -1199,7 +1199,8 @@ async fn review_once_and_run_summary(
     scenario(mock_server, findings, link, Scenario::default()).await
 }
 
-type ReviewsFn = Box<dyn Fn(&str) -> serde_json::Value>;
+/// (取り消しの目印, 呼び出しの Bearer トークン) から GET reviews の応答を作る
+type ReviewsFn = Box<dyn Fn(&str, &str) -> serde_json::Value + Send + Sync>;
 
 /// [`review_once_and_run_summary`] に足す設定。
 #[derive(Default)]
@@ -1255,11 +1256,20 @@ async fn scenario(
     link_integration(&app, tp.project_id, reviewer.id).await;
     let marker = service::github::pr_comments::summary_marker(tp.project_id);
     mount_mocks(mock_server, false, &marker).await;
-    if let Some(reviews) = &opts.reviews {
+    if let Some(reviews) = opts.reviews {
         let revoke_marker = service::github::pr_comments::revoke_marker(tp.project_id);
         Mock::given(method("GET"))
             .and(path(reviews_api_path()))
-            .respond_with(ResponseTemplate::new(200).set_body_json(reviews(&revoke_marker)))
+            .respond_with(move |req: &wiremock::Request| {
+                let token = req
+                    .headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.strip_prefix("Bearer "))
+                    .unwrap_or_default()
+                    .to_string();
+                ResponseTemplate::new(200).set_body_json(reviews(&revoke_marker, &token))
+            })
             .with_priority(1)
             .mount(mock_server)
             .await;
@@ -1644,7 +1654,7 @@ fn high() -> serde_json::Value {
 
 fn approved_only() -> Scenario {
     Scenario {
-        reviews: Some(Box::new(|_| {
+        reviews: Some(Box::new(|_, _| {
             serde_json::json!([review_json(REVIEWER_GITHUB_ID, "APPROVED", None)])
         })),
         ..Default::default()
@@ -1693,7 +1703,7 @@ async fn an_already_revoked_approval_is_not_revoked_twice() {
         serde_json::json!([]),
         LINKED,
         Scenario {
-            reviews: Some(Box::new(|marker| {
+            reviews: Some(Box::new(|marker, _| {
                 serde_json::json!([
                     review_json(REVIEWER_GITHUB_ID, "APPROVED", None),
                     review_json(REVIEWER_GITHUB_ID, "CHANGES_REQUESTED", Some(marker)),
@@ -1805,7 +1815,7 @@ async fn nothing_is_revoked_without_a_live_approval_or_a_fresh_open_pr() {
             serde_json::json!([]),
             link,
             Scenario {
-                reviews: Some(Box::new(move |_| reviews.clone())),
+                reviews: Some(Box::new(move |_, _| reviews.clone())),
                 second_round: Some((high(), false)),
             },
         )
@@ -1908,7 +1918,7 @@ async fn review_with_reviews(mock_server: &MockServer, reviews: Vec<serde_json::
         serde_json::json!([]),
         LINKED,
         Scenario {
-            reviews: Some(Box::new(move |marker| {
+            reviews: Some(Box::new(move |marker, _| {
                 // PROJECT は呼び出し側が書いた仮の目印。実際のプロジェクトの目印に置き換える
                 let text = serde_json::to_string(&reviews)
                     .expect("json")
@@ -1919,4 +1929,102 @@ async fn review_with_reviews(mock_server: &MockServer, reviews: Vec<serde_json::
         },
     )
     .await;
+}
+
+/// 他のレビュワーの承認を取り消していた場合、マージ可に戻ったら両方に APPROVE が出る
+/// （取り消された人は承認し直し）。取り消されていない人には出さない。
+#[serial_test::serial]
+#[tokio::test]
+async fn every_revoked_reviewer_is_approved_again_when_merge_ready() {
+    for (case, a_reviews, expected) in [
+        (
+            "A は取り消されている",
+            Box::new(|marker: &str| {
+                serde_json::json!([
+                    review_json(REVIEWER_GITHUB_ID, "APPROVED", None),
+                    review_json(REVIEWER_GITHUB_ID, "CHANGES_REQUESTED", Some(marker)),
+                ])
+            }) as Box<dyn Fn(&str) -> serde_json::Value + Send + Sync>,
+            vec![
+                format!("Bearer {OTHER_TOKEN}"),
+                format!("Bearer {REVIEWER_TOKEN}"),
+            ],
+        ),
+        (
+            "A の最後は承認のまま",
+            Box::new(|_: &str| {
+                serde_json::json!([review_json(REVIEWER_GITHUB_ID, "APPROVED", None)])
+            }),
+            vec![format!("Bearer {OTHER_TOKEN}")],
+        ),
+        (
+            "A に決定が無い",
+            Box::new(|_: &str| serde_json::json!([])),
+            vec![format!("Bearer {OTHER_TOKEN}")],
+        ),
+    ] {
+        let mock_server = MockServer::start().await;
+        scenario(
+            &mock_server,
+            serde_json::json!([]),
+            LINKED,
+            Scenario {
+                reviews: Some(Box::new(move |marker, token| {
+                    if token == REVIEWER_TOKEN {
+                        a_reviews(marker)
+                    } else {
+                        serde_json::json!([])
+                    }
+                })),
+                // 最新ラウンド（B）は指摘なし
+                second_round: Some((serde_json::json!([]), true)),
+            },
+        )
+        .await;
+
+        let posted = approvals(&mock_server).await;
+        assert!(
+            posted.iter().all(|(b, _)| b["event"] == "APPROVE"),
+            "{case}"
+        );
+        let mut tokens: Vec<String> = posted.into_iter().map(|(_, t)| t).collect();
+        tokens.sort();
+        let mut expected = expected;
+        expected.sort();
+        assert_eq!(tokens, expected, "{case}");
+    }
+}
+
+/// レビューが上限（500 件）を超えて最後の決定が分からないときは、取り消さない。
+#[serial_test::serial]
+#[tokio::test]
+async fn a_review_list_cut_off_by_the_page_limit_is_not_revoked() {
+    let mock_server = MockServer::start().await;
+    for page in 1..=5 {
+        let mut items: Vec<serde_json::Value> = (0..100)
+            .map(|i| review_json(100 + i, "COMMENTED", None))
+            .collect();
+        if page == 1 {
+            items[0] = review_json(REVIEWER_GITHUB_ID, "APPROVED", None);
+        }
+        Mock::given(method("GET"))
+            .and(path(reviews_api_path()))
+            .and(query_param("page", page.to_string()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(items))
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+    }
+    scenario(
+        &mock_server,
+        serde_json::json!([]),
+        LINKED,
+        Scenario {
+            second_round: Some((high(), false)),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    assert!(approvals(&mock_server).await.is_empty());
 }

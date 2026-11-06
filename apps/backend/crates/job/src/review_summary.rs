@@ -524,7 +524,27 @@ async fn update_summary(
         snapshot.latest_head_sha.as_deref(),
         snapshot.latest_reviewer_id,
     ) {
-        approve_as_reviewer(job, state, integration, commit_sha, reviewer_id).await;
+        approve_as_reviewer(job, state, integration, commit_sha, reviewer_id, false).await;
+        // 前に取り消した他のレビュワーの承認も戻す。残すと、その人の変更要求が
+        // 保護ブランチでマージを止め続ける。取り消されていない人は承認しない
+        match service::reviews::reviewer_ids_at_head(
+            &state.db,
+            job.project_id,
+            repo,
+            job.pr_number,
+            commit_sha,
+        )
+        .await
+        {
+            Ok(ids) => {
+                for other in ids.into_iter().filter(|id| *id != reviewer_id) {
+                    approve_as_reviewer(job, state, integration, commit_sha, other, true).await;
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, project_id = %job.project_id, pr = job.pr_number, "load reviewers failed; skipping approval restoration");
+            }
+        }
     } else if let (true, Some(true), Some(commit_sha)) = (
         pr_is_open,
         snapshot.head_is_fresh(),
@@ -536,7 +556,8 @@ async fn update_summary(
     Ok(())
 }
 
-/// 最新ラウンドのレビュワー本人の名義で、PR を `commit_sha` に対して Approve する。
+/// レビュワー本人の名義で、PR を `commit_sha` に対して Approve する。
+/// `only_after_revoke` は、task が取り消した承認の承認し直し専用。
 ///
 /// 本人の承認なので、GitHub の規則（PR 作者は自分の PR を承認できない・write 権限が要る・
 /// Code Owners）がそのまま効く。bot 名義では task のゲートの写しになり、空のラウンド
@@ -551,6 +572,7 @@ async fn approve_as_reviewer(
     integration: &github_integrations::Model,
     commit_sha: &str,
     reviewer_id: Uuid,
+    only_after_revoke: bool,
 ) {
     let token = match service::oauth::github_app::github_app_user_token(
         &state.db,
@@ -581,6 +603,7 @@ async fn approve_as_reviewer(
             commit_sha,
             approver_id: token.github_user_id,
             revoke_marker: &service::github::pr_comments::revoke_marker(job.project_id),
+            only_after_revoke,
         },
     )
     .await
@@ -668,6 +691,9 @@ async fn revoke_approvals(
                 tracing::info!(project_id = %job.project_id, pr = job.pr_number, commit_sha, %reviewer_id, "approval revoked");
             }
             Ok(RevokeOutcome::NotApproved) => {}
+            Ok(RevokeOutcome::Truncated) => {
+                tracing::warn!(project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "too many reviews to find the last decision; skipping approval revocation");
+            }
             Ok(RevokeOutcome::Unprocessable(body)) => {
                 tracing::info!(project_id = %job.project_id, pr = job.pr_number, %reviewer_id, body, "GitHub declined the revocation");
             }

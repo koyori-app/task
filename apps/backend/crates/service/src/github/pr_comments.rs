@@ -110,6 +110,8 @@ struct ReviewScan {
     any_approved_or_dismissed: bool,
     /// 最後の決定。COMMENTED などは無視する
     last: Option<Decision>,
+    /// 上限までに一覧の終わりに届かなかった。`last` はその先にある決定を見落としている
+    truncated: bool,
 }
 
 impl ReviewScan {
@@ -145,6 +147,11 @@ impl ReviewScan {
     }
 }
 
+/// 満杯のページで上限に達した（その先にまだ続きがありうる）。
+fn is_cut_off(page: u32, fetched: usize) -> bool {
+    page == MAX_SEARCH_PAGES && fetched as u32 >= PER_PAGE
+}
+
 /// 本人の同じ commit へのレビューを全ページ（上限あり）辿って走査する。
 async fn scan_reviews(
     http: &Client,
@@ -169,6 +176,7 @@ async fn scan_reviews(
         if (reviews.len() as u32) < PER_PAGE {
             break;
         }
+        scan.truncated = is_cut_off(page, reviews.len());
     }
     Ok(scan)
 }
@@ -364,6 +372,9 @@ pub struct ApproveTarget<'a> {
     pub approver_id: i64,
     /// 取り消しの目印（[`revoke_marker`]）。task が取り消した後なら承認し直す
     pub revoke_marker: &'a str,
+    /// true なら、最後の決定が task の取り消しのときだけ承認する（承認し直し専用。
+    /// 取り消されていない人を新しく承認しない）。それ以外は `AlreadyApproved` を返す
+    pub only_after_revoke: bool,
 }
 
 /// [`approve_pull_request`] の結果。
@@ -394,12 +405,15 @@ pub async fn approve_pull_request(
         commit_sha,
         approver_id,
         revoke_marker,
+        only_after_revoke,
     } = *target;
     let url = format!("{}/repos/{owner}/{repo}/pulls/{number}/reviews", api_base());
 
     let scan = scan_reviews(http, token, &url, commit_sha, approver_id, revoke_marker).await?;
-    let revoked_by_task = scan.last == Some(Decision::ChangesRequested { by_task: true });
-    if scan.any_approved_or_dismissed && !revoked_by_task {
+    // 打ち切られたときは最後の決定が分からないので、目印による承認し直しはしない
+    let revoked_by_task =
+        !scan.truncated && scan.last == Some(Decision::ChangesRequested { by_task: true });
+    if !revoked_by_task && (scan.any_approved_or_dismissed || only_after_revoke) {
         return Ok(ApproveOutcome::AlreadyApproved);
     }
 
@@ -444,6 +458,8 @@ pub enum RevokeOutcome {
     Revoked,
     /// 最後の決定が承認ではない（無い・取り下げ済み・人の変更要求・取り消し済み）
     NotApproved,
+    /// レビューが多く、一覧の終わりまで読めなかった。最後の決定が分からないので何もしない
+    Truncated,
     /// GitHub が受け付けなかった（422）
     Unprocessable(String),
 }
@@ -468,6 +484,9 @@ pub async fn revoke_approval(
     let url = format!("{}/repos/{owner}/{repo}/pulls/{number}/reviews", api_base());
 
     let scan = scan_reviews(http, token, &url, commit_sha, approver_id, revoke_marker).await?;
+    if scan.truncated {
+        return Ok(RevokeOutcome::Truncated);
+    }
     if scan.last != Some(Decision::Approved) {
         return Ok(RevokeOutcome::NotApproved);
     }
@@ -631,6 +650,14 @@ mod tests {
             human.last,
             Some(Decision::ChangesRequested { by_task: false })
         );
+    }
+
+    /// 上限のページが満杯のままのときだけ、打ち切られたと見なす。
+    #[test]
+    fn a_scan_is_cut_off_only_when_the_last_allowed_page_is_full() {
+        assert!(is_cut_off(MAX_SEARCH_PAGES, PER_PAGE as usize));
+        assert!(!is_cut_off(MAX_SEARCH_PAGES, PER_PAGE as usize - 1));
+        assert!(!is_cut_off(MAX_SEARCH_PAGES - 1, PER_PAGE as usize));
     }
 
     #[test]
