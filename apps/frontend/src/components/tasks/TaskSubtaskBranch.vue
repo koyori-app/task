@@ -16,6 +16,8 @@ type ProjectMember = { id: string; username: string; avatar_url?: string | null 
 
 const props = defineProps<{
   parentTask: TaskResponse;
+  /** タスク ID（`KEY-N`）を組み立てるプロジェクトキー */
+  projectKey: string;
   filters?: TaskSubtaskFilters;
   tenantId: string | null | undefined;
   projectId: string | null | undefined;
@@ -74,13 +76,13 @@ function createSubtask(title: string) {
   <div class="ml-5 border-l border-border/70 bg-muted/10" data-subtask-branch>
     <div
       v-if="subtasks.loading.value"
-      class="flex min-w-[42rem] items-center gap-2 px-3 py-2 text-sm text-muted-foreground"
+      class="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground"
     >
       <Loader2 class="size-4 animate-spin" aria-hidden="true" />
       サブタスクを読み込み中…
     </div>
 
-    <div v-else-if="subtasks.error.value" class="flex min-w-[42rem] items-center gap-2 px-3 py-2">
+    <div v-else-if="subtasks.error.value" class="flex items-center gap-2 px-3 py-2">
       <p class="text-sm text-destructive">サブタスクを読み込めませんでした</p>
       <Button type="button" variant="tertiary" label="再試行" @click="subtasks.refetch">
         <template #icon><RotateCcw class="size-3.5" aria-hidden="true" /></template>
@@ -93,6 +95,7 @@ function createSubtask(title: string) {
         v-for="subtask in subtasks.subtasks.value"
         :key="subtask.id"
         class="last:border-b-0"
+        :project-key="projectKey"
         :task="subtask"
         :statuses="statuses"
         :project-labels="projectLabels"
@@ -112,7 +115,7 @@ function createSubtask(title: string) {
         @toggle:label="(labelId, checked) => emit('toggle:label', subtask, labelId, checked)"
       />
 
-      <div v-if="!parentTask.parent_task_id" class="min-w-[42rem] px-3 py-1.5">
+      <div v-if="!parentTask.parent_task_id" class="px-3 py-1.5">
         <!-- 空なら展開した時点で作成欄を出す。既存の子があるときは明示操作で開く。 -->
         <TaskSubtaskComposer
           v-if="adding || !subtasks.subtasks.value.length"

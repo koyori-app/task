@@ -567,7 +567,7 @@ pub async fn bulk_update_tasks(
     Ok(Json(BulkUpdateResponse { updated, failed }))
 }
 
-fn bulk_error_reason(err: &AppError) -> String {
+pub(crate) fn bulk_error_reason(err: &AppError) -> String {
     match err {
         AppError::NotFound => "not-found".into(),
         AppError::Forbidden => "forbidden".into(),

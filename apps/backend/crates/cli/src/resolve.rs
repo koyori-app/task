@@ -188,11 +188,18 @@ pub async fn resolve_label_id(api: &ApiClient, project_id: Uuid, name: &str) -> 
     if let Ok(uuid) = Uuid::parse_str(name) {
         return Ok(uuid);
     }
-    let labels = list_labels(api, project_id).await?;
+    pick_label_id(&list_labels(api, project_id).await?, name)
+}
+
+/// 取得済みの一覧から名前で引く（一括作成が一覧を使い回すための入口）。
+pub fn pick_label_id(items: &[LabelResponse], name: &str) -> Result<Uuid> {
+    if let Ok(uuid) = Uuid::parse_str(name) {
+        return Ok(uuid);
+    }
     pick_named_id(
         "Label",
         name,
-        labels.iter().map(|item| (item.id, item.name.as_str())),
+        items.iter().map(|item| (item.id, item.name.as_str())),
     )
 }
 
@@ -204,11 +211,18 @@ pub async fn resolve_milestone_id(api: &ApiClient, project_id: Uuid, name: &str)
     if let Ok(uuid) = Uuid::parse_str(name) {
         return Ok(uuid);
     }
-    let milestones = list_milestones(api, project_id).await?;
+    pick_milestone_id(&list_milestones(api, project_id).await?, name)
+}
+
+/// 取得済みの一覧から名前で引く（一括作成が一覧を使い回すための入口）。
+pub fn pick_milestone_id(items: &[MilestoneResponse], name: &str) -> Result<Uuid> {
+    if let Ok(uuid) = Uuid::parse_str(name) {
+        return Ok(uuid);
+    }
     pick_named_id(
         "Milestone",
         name,
-        milestones.iter().map(|item| (item.id, item.name.as_str())),
+        items.iter().map(|item| (item.id, item.name.as_str())),
     )
 }
 
@@ -220,11 +234,18 @@ pub async fn resolve_sprint_id(api: &ApiClient, project_id: Uuid, name: &str) ->
     if let Ok(uuid) = Uuid::parse_str(name) {
         return Ok(uuid);
     }
-    let sprints = list_sprints(api, project_id).await?;
+    pick_sprint_id(&list_sprints(api, project_id).await?, name)
+}
+
+/// 取得済みの一覧から名前で引く（一括作成が一覧を使い回すための入口）。
+pub fn pick_sprint_id(items: &[SprintResponse], name: &str) -> Result<Uuid> {
+    if let Ok(uuid) = Uuid::parse_str(name) {
+        return Ok(uuid);
+    }
     pick_named_id(
         "Sprint",
         name,
-        sprints.iter().map(|item| (item.id, item.name.as_str())),
+        items.iter().map(|item| (item.id, item.name.as_str())),
     )
 }
 
@@ -271,7 +292,7 @@ pub async fn resolve_user_id(api: &ApiClient, project_id: Uuid, name: &str) -> R
     ))
 }
 
-fn pick_status_by_name(statuses: &[ProjectStatusResponse], name: &str) -> Result<Uuid> {
+pub fn pick_status_by_name(statuses: &[ProjectStatusResponse], name: &str) -> Result<Uuid> {
     if let Ok(uuid) = Uuid::parse_str(name) {
         return Ok(uuid);
     }
@@ -301,7 +322,7 @@ fn pick_done_status(statuses: &[ProjectStatusResponse]) -> Result<Uuid> {
         .ok_or_else(|| CliError::not_found("No done status found for project"))
 }
 
-fn pick_default_status(statuses: &[ProjectStatusResponse]) -> Result<Uuid> {
+pub fn pick_default_status(statuses: &[ProjectStatusResponse]) -> Result<Uuid> {
     statuses
         .iter()
         .find(|status| status.is_default)

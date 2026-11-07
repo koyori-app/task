@@ -45,7 +45,8 @@ function onSelect(value: string) {
     <template #trigger>
       <span class="flex max-w-45 items-center gap-2 text-left">
         <UserAvatar :user="avatarUser" size="md" shape="md" />
-        <span class="truncate font-medium">{{ user.name }}</span>
+        <!-- 狭い幅では右端で切れるのでアバターだけにする。名前は Dropdown の label で読ませる -->
+        <span class="truncate font-medium max-md:hidden">{{ user.name }}</span>
       </span>
     </template>
   </Dropdown>

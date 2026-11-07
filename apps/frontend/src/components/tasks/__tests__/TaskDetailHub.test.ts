@@ -167,6 +167,14 @@ describe('TaskDetailHub', () => {
     ).toBe(true);
   });
 
+  // TASK-484: スペースのない URL が右端で切れた。flex の子は min-w-0 が無いと折り返さない
+  it('タイトルは幅に収まらなくても折り返す', () => {
+    const classes = mountWithPriorityMenu().get('h1').classes();
+
+    expect(classes).toContain('min-w-0');
+    expect(classes).toContain('break-words');
+  });
+
   /** happy-dom の既定に clipboard があるとは限らないので、都度 stub を据える */
   function stubClipboard(writeText: (text: string) => Promise<void>) {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });

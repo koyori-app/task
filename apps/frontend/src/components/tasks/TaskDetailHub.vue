@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import LoadErrorState from '@/components/LoadErrorState.vue';
 import ReactionBar from '@/components/reactions/ReactionBar.vue';
+import { copyTaskIdLabel, useCopyTaskId } from '@/composables/useCopyTaskId';
 import type { ReactionController } from '@/composables/useReactions';
 import { useQueryClient } from '@tanstack/vue-query';
 import {
@@ -28,7 +29,7 @@ import {
   UserPlus,
   X,
 } from '@lucide/vue';
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import type { components } from '@/generated/api';
 import type { EditableField } from '@/components/tasks/editable-field';
@@ -150,43 +151,7 @@ const emit = defineEmits<{
   'delete-request': [];
 }>();
 
-/** コピー結果を出しておく時間（ミリ秒） */
-const COPY_RESET_MS = 2000;
-
-/** タスク ID のコピー結果。非 secure context では clipboard が無いので失敗も示す */
-const copyState = ref<'idle' | 'copied' | 'error'>('idle');
-let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
-/** コピー操作の世代。連続して押したとき、最後の操作だけが表示とタイマーを持つ */
-let copyRequest = 0;
-
-function clearCopyReset() {
-  if (copyResetTimer) {
-    clearTimeout(copyResetTimer);
-    copyResetTimer = undefined;
-  }
-}
-
-async function copyTaskId(seqKey: string) {
-  const request = ++copyRequest;
-  // 実行中は前の結果を出したままにする（新しい操作の結果が出る前に消さない）
-  clearCopyReset();
-
-  let result: 'copied' | 'error';
-  try {
-    await navigator.clipboard.writeText(seqKey);
-    result = 'copied';
-  } catch {
-    result = 'error';
-  }
-
-  // 遅れて返ってきた古い操作は、新しい操作の表示もタイマーも触らない
-  if (request !== copyRequest) return;
-  clearCopyReset();
-  copyState.value = result;
-  copyResetTimer = setTimeout(() => (copyState.value = 'idle'), COPY_RESET_MS);
-}
-
-onBeforeUnmount(clearCopyReset);
+const { copyState, copyTaskId } = useCopyTaskId();
 
 const resolvedStatus = computed(() =>
   props.statuses.find((status) => status.id === props.statusId),
@@ -576,13 +541,7 @@ function clearDescription() {
                 variant="ghost"
                 class="mr-1"
                 :label="taskSeqKey(projectKey, task.seq_id)"
-                :ariaLabel="
-                  copyState === 'copied'
-                    ? 'タスクIDをコピーしました'
-                    : copyState === 'error'
-                      ? 'タスクIDをコピーできませんでした'
-                      : `タスクID ${taskSeqKey(projectKey, task.seq_id)} をコピー`
-                "
+                :ariaLabel="copyTaskIdLabel(copyState, taskSeqKey(projectKey, task.seq_id))"
                 @click="copyTaskId(taskSeqKey(projectKey, task.seq_id))"
               >
                 <template #icon>
@@ -646,7 +605,10 @@ function clearDescription() {
                 :disabled="isFieldUpdating('title')"
                 @click="startEditing('title')"
               >
-                <h1 class="text-2xl font-semibold tracking-tight">{{ task.title }}</h1>
+                <!-- flex の子は min-w-0 が無いと縮まず、スペースのない URL が折り返さない -->
+                <h1 class="min-w-0 text-2xl font-semibold tracking-tight break-words">
+                  {{ task.title }}
+                </h1>
                 <Pencil
                   class="mt-1.5 size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
                   aria-hidden="true"
