@@ -1178,3 +1178,42 @@ async fn tenant_bots_cannot_create_personal_project() {
         "人は今どおり作れる"
     );
 }
+
+/// BOT の PAT は持ち主のテナントでだけ通る。API では作れない形だが、別のテナントに縛った
+/// BOT の PAT が在っても認証で断る（所属を見ないエンドポイントでも通さない）。
+#[tokio::test]
+async fn tenant_bots_pat_bound_to_foreign_tenant_is_rejected_at_authentication() {
+    let (app, owner, tenant, bot) = fixture().await;
+    let foreign = app.insert_tenant_project(owner.id).await;
+    let secret = app.state.settings.personal_token_secret.clone();
+    let own = insert_personal_token_for_test(
+        &app.state.db,
+        bot,
+        tenant.tenant_id,
+        &secret,
+        vec![Scope::ReadProject],
+        None,
+    )
+    .await;
+    assert_eq!(
+        app.get_with_bearer("/v1/personal_tokens/me", &own)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    let foreign_token = insert_personal_token_for_test(
+        &app.state.db,
+        bot,
+        foreign.tenant_id,
+        &secret,
+        vec![Scope::ReadProject],
+        None,
+    )
+    .await;
+    assert_eq!(
+        app.get_with_bearer("/v1/personal_tokens/me", &foreign_token)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+}
