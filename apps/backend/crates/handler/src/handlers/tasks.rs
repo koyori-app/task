@@ -817,6 +817,78 @@ pub async fn create_task(
 
 #[axum::debug_handler]
 #[utoipa::path(
+    post,
+    path = "/bulk-create",
+    tag = "Tasks",
+    summary = "タスク一括作成",
+    description = "1〜100 件を 1 トランザクションで作成する。1 件でも失敗したら全件ロールバックし、\
+        400 で `tasks[i]: 理由` を返す。検証・通知・アクティビティ・Webhook は単体作成と同じで件数分出る。\
+        同一リクエスト内のタスクは互いに参照できない。",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+    ),
+    request_body = BulkCreateTasksRequest,
+    responses(
+        (status = 201, description = "作成されたタスク（入力と同じ順）", body = BulkCreateTasksResponse),
+        CrudErrors,
+    )
+)]
+pub async fn bulk_create_tasks(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+    Valid(Json(payload)): Valid<Json<BulkCreateTasksRequest>>,
+) -> Result<(StatusCode, Json<BulkCreateTasksResponse>), AppError> {
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
+
+    let ctx = service::tasks::CreateTaskContext {
+        tenant_id,
+        project_id,
+        actor_id: auth.user_id,
+    };
+    let txn = state.db.begin().await?;
+    // ロック順は単体作成と同じ「カウンター → sprint」。sprint は UUID 昇順でまとめて取り、
+    // スプリント完了処理（UUID 昇順）と逆順にならないようにする。
+    service::tasks::lock_task_counter(&txn, project_id).await?;
+    let mut sprint_ids: Vec<Uuid> = payload.tasks.iter().filter_map(|t| t.sprint_id).collect();
+    sprint_ids.sort();
+    sprint_ids.dedup();
+    if !sprint_ids.is_empty() {
+        entity::sprints::Entity::find()
+            .filter(entity::sprints::Column::ProjectId.eq(project_id))
+            .filter(entity::sprints::Column::Id.is_in(sprint_ids))
+            .order_by_asc(entity::sprints::Column::Id)
+            .lock(sea_orm::sea_query::LockType::Update)
+            .all(&txn)
+            .await?;
+    }
+    let mut models = Vec::with_capacity(payload.tasks.len());
+    for (i, item) in payload.tasks.into_iter().enumerate() {
+        let model = service::tasks::create_task_in_txn(&txn, &ctx, item)
+            .await
+            .map_err(|e| match e {
+                AppError::Internal(_) => e,
+                other => AppError::BadRequestDetail(format!(
+                    "tasks[{i}]: {}",
+                    crate::handlers::task_extensions::bulk_error_reason(&other)
+                )),
+            })?;
+        models.push(model);
+    }
+    txn.commit().await?;
+
+    let mut tasks = Vec::with_capacity(models.len());
+    for model in models {
+        tasks.push(build_task_detail_response(&state, project_id, model, auth.user_id).await?);
+    }
+    Ok((StatusCode::CREATED, Json(BulkCreateTasksResponse { tasks })))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
     get,
     path = "/{id}",
     tag = "Tasks",

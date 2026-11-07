@@ -26,27 +26,34 @@ pub async fn next_seq_id<C: ConnectionTrait>(
     db: &C,
     project_id: Uuid,
 ) -> Result<i32, sea_orm::DbErr> {
-    let existing = project_task_counters::Entity::find_by_id(project_id)
+    let counter = lock_task_counter(db, project_id).await?;
+    let new_seq = counter.last_seq + 1;
+    let mut active: project_task_counters::ActiveModel = counter.into();
+    active.last_seq = Set(new_seq);
+    Ok(active.update(db).await?.last_seq)
+}
+
+/// 採番カウンター行を、番号を進めずに `FOR UPDATE` でロックして返す。
+/// 行が無ければ 0 で作ってからロックするので、プロジェクトで最初の作成同士も
+/// INSERT の衝突にならず、ここで直列化される。
+/// 一括作成は sprint をまとめてロックする前に呼び、単体作成と同じ
+/// 「カウンター → sprint」の順に揃える。
+pub async fn lock_task_counter<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+) -> Result<project_task_counters::Model, sea_orm::DbErr> {
+    crate::db::execute_bound(
+        db,
+        "INSERT INTO project_task_counters (project_id, last_seq) VALUES ($1, 0) \
+         ON CONFLICT (project_id) DO NOTHING",
+        vec![project_id.into()],
+    )
+    .await?;
+    project_task_counters::Entity::find_by_id(project_id)
         .lock(LockType::Update)
         .one(db)
-        .await?;
-    Ok(match existing {
-        Some(c) => {
-            let new_seq = c.last_seq + 1;
-            let mut active: project_task_counters::ActiveModel = c.into();
-            active.last_seq = Set(new_seq);
-            active.update(db).await?.last_seq
-        }
-        None => {
-            project_task_counters::ActiveModel {
-                project_id: Set(project_id),
-                last_seq: Set(1),
-            }
-            .insert(db)
-            .await?
-            .last_seq
-        }
-    })
+        .await?
+        .ok_or_else(|| DbErr::RecordNotFound("project_task_counters".to_string()))
 }
 
 /// 単体作成の本体の文脈（認可済みのテナント・プロジェクト・実行者）。
