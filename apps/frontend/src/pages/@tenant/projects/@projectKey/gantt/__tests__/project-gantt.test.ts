@@ -1,9 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ref } from 'vue';
+import { type Ref, ref } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 
-const { GET } = vi.hoisted(() => ({ GET: vi.fn() }));
+const { GET, project } = vi.hoisted(() => ({
+  GET: vi.fn(),
+  // プロジェクトの id の解き方を試験ごとに決め、解けた後の値を試験から動かす
+  project: {
+    initialId: 'p-eng' as string | null,
+    initialNotFound: false,
+    projectId: null as Ref<string | null> | null,
+    isProjectNotFound: null as Ref<boolean> | null,
+  },
+}));
 vi.mock('vike/client/router', () => ({ navigate: vi.fn() }));
 vi.mock('vike-vue/usePageContext', () => ({
   usePageContext: () => ({
@@ -20,12 +29,16 @@ vi.mock('@/composables/useResolvedTenantId', () => ({
   }),
 }));
 vi.mock('@/composables/useResolvedProjectId', () => ({
-  useResolvedProjectId: () => ({
-    projectId: ref('p-eng'),
-    isProjectNotFound: ref(false),
-    isResolving: ref(false),
-    isError: ref(false),
-  }),
+  useResolvedProjectId: () => {
+    project.projectId = ref(project.initialId);
+    project.isProjectNotFound = ref(project.initialNotFound);
+    return {
+      projectId: project.projectId,
+      isProjectNotFound: project.isProjectNotFound,
+      isResolving: ref(false),
+      isError: ref(false),
+    };
+  },
 }));
 vi.mock('@/lib/api-vue-query', () => ({ fetchClient: { GET } }));
 // 棒は wasm と canvas で描くので、渡された課題だけを見る代役にする
@@ -51,6 +64,8 @@ import Page from '../+Page.vue';
 enableAutoUnmount(afterEach);
 afterEach(() => {
   GET.mockReset();
+  project.initialId = 'p-eng';
+  project.initialNotFound = false;
   window.history.replaceState(null, '', '/');
 });
 
@@ -107,5 +122,34 @@ describe('プロジェクトのガント', () => {
     }
     const bars = wrapper.getComponent({ name: 'GanttChart' }).props('tasks') as { id: string }[];
     expect(bars.map((bar) => bar.id)).toEqual(['t-eng']);
+  });
+
+  it('プロジェクトの id が解けるまでは予定を引かず、解けたら project_id 付きで一度だけ引く', async () => {
+    project.initialId = null;
+    const wrapper = mountPage();
+    await flushPromises();
+
+    // 解ける前に引けば project_id の無い要求になり、テナント全体の予定が返る
+    expect(GET).not.toHaveBeenCalled();
+    expect(wrapper.findComponent({ name: 'GanttChart' }).exists()).toBe(false);
+
+    project.projectId!.value = 'p-eng';
+    await flushPromises();
+
+    expect(GET).toHaveBeenCalledTimes(1);
+    expect(GET.mock.calls[0]![1].params.query.project_id).toEqual(['p-eng']);
+    const bars = wrapper.getComponent({ name: 'GanttChart' }).props('tasks') as { id: string }[];
+    expect(bars.map((bar) => bar.id)).toEqual(['t-eng']);
+  });
+
+  it('プロジェクトが見つからない時は予定を引かず、見つからない旨を出す', async () => {
+    project.initialId = null;
+    project.initialNotFound = true;
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(GET).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain('プロジェクトが見つかりません');
+    expect(wrapper.findComponent({ name: 'GanttChart' }).exists()).toBe(false);
   });
 });
