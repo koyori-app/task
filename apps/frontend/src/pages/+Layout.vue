@@ -9,6 +9,7 @@ import { PhSidebarSimple } from '@phosphor-icons/vue';
 import { defaultDocument, useEventListener, useMediaQuery } from '@vueuse/core';
 import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
 import { useAuthSession } from '@/composables/useAuthSession';
+import { AUTH_PAGE_PATHS } from '@/lib/auth-pages';
 import { ClientOnly } from 'vike-vue/ClientOnly';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { computed, defineAsyncComponent, ref } from 'vue';
@@ -21,18 +22,7 @@ const isDev = import.meta.env.DEV;
 const pageContext = usePageContext();
 const breadcrumbs = useBreadcrumbs(() => pageContext);
 // サインイン前に開くページ。認証ガードを外さないと /signin へ飛ばされる
-const isAuthPage = computed(() =>
-  [
-    '/signin',
-    '/signup',
-    '/auth/reset-password',
-    // 半認証のセッションでも開けなければならない（ここで 2FA を終えるため）
-    '/auth/2fa',
-    '/verify-email',
-    '/desktop/authorize',
-    '/invitations/accept',
-  ].includes(pageContext.urlPathname),
-);
+const isAuthPage = computed(() => AUTH_PAGE_PATHS.includes(pageContext.urlPathname));
 
 const { meQuery, logout, isTransientError, retryMe, sessionExpired } = useAuthSession({
   guard: computed(() => !isAuthPage.value),

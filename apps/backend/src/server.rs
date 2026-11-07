@@ -8,22 +8,20 @@ use apalis_board::axum::{
 };
 use axum::{
     Extension, Router,
-    body::Body,
-    http::{HeaderValue, Method, Request},
+    http::{HeaderValue, Method},
     middleware,
     response::Redirect,
     routing::get,
 };
 use axum_session::{SameSite, SessionConfig, SessionLayer, SessionStore};
 use axum_session_redispool::SessionRedisPool;
-use sentry::integrations::tower::NewSentryLayer;
 use tokio::sync::watch;
-use tower::ServiceBuilder;
 use tower_http::cors::{AllowHeaders, CorsLayer};
 use tracing::{info, warn};
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa_scalar::{Scalar, Servable};
 
+use crate::observability;
 use handler::AppState;
 use handler::middlewares::logging::logging_middleware;
 use job::{
@@ -32,6 +30,7 @@ use job::{
         self, MAX_RETRIES as ALREADY_REGISTERED_MAX_RETRIES, QUEUE_NAME as ALREADY_REGISTERED_QUEUE,
     },
     deadline_soon,
+    failure_report::JobFailureReportLayer,
     github_issue_sync::{self, QUEUE_NAME as GITHUB_ISSUE_SYNC_QUEUE},
     github_webhook::{self, QUEUE_NAME as GITHUB_WEBHOOK_QUEUE},
     notification_email, notification_retention,
@@ -63,6 +62,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .with(log_filter)
         .with(tracing_subscriber::fmt::layer())
         .with(board_tracing)
+        .with(observability::tracing_layer())
         .init();
 
     let is_prod = std::env::var("RUST_ENV").unwrap_or_default() == "production";
@@ -131,6 +131,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
             let worker = WorkerBuilder::new(ctx.name())
                 .backend(email_worker_storage.clone())
                 .retry(RetryPolicy::retries(MAX_RETRIES))
+                .layer(JobFailureReportLayer::new(QUEUE_NAME))
                 .enable_tracing()
                 .concurrency(email_worker_concurrency)
                 .data(email_worker_state.clone())
@@ -149,6 +150,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
             let worker = WorkerBuilder::new(ctx.name())
                 .backend(pw_reset_worker_storage.clone())
                 .retry(RetryPolicy::retries(PW_RESET_MAX_RETRIES))
+                .layer(JobFailureReportLayer::new(PW_RESET_QUEUE))
                 .enable_tracing()
                 .concurrency(pw_reset_worker_concurrency)
                 .data(pw_reset_worker_state.clone())
@@ -168,6 +170,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
             let worker = WorkerBuilder::new(ctx.name())
                 .backend(already_registered_worker_storage.clone())
                 .retry(RetryPolicy::retries(ALREADY_REGISTERED_MAX_RETRIES))
+                .layer(JobFailureReportLayer::new(ALREADY_REGISTERED_QUEUE))
                 .enable_tracing()
                 .concurrency(already_registered_worker_concurrency)
                 .data(already_registered_worker_state.clone())
@@ -185,6 +188,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
             let worker = WorkerBuilder::new(ctx.name())
                 .backend(tenant_invitation_worker_storage.clone())
                 .retry(RetryPolicy::retries(TENANT_INVITATION_MAX_RETRIES))
+                .layer(JobFailureReportLayer::new(TENANT_INVITATION_QUEUE))
                 .enable_tracing()
                 .data(tenant_invitation_worker_state.clone())
                 .build(tenant_invitation_email::process);
@@ -202,6 +206,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
             let worker = WorkerBuilder::new(ctx.name())
                 .backend(github_worker_storage.clone())
                 .retry(RetryPolicy::retries(github_webhook::MAX_RETRIES))
+                .layer(JobFailureReportLayer::new(GITHUB_WEBHOOK_QUEUE))
                 .enable_tracing()
                 .concurrency(github_worker_concurrency)
                 .data(github_worker_state.clone())
@@ -220,6 +225,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
             let worker = WorkerBuilder::new(ctx.name())
                 .backend(review_summary_worker_storage.clone())
                 .retry(RetryPolicy::retries(REVIEW_SUMMARY_MAX_RETRIES))
+                .layer(JobFailureReportLayer::new(REVIEW_SUMMARY_QUEUE))
                 .enable_tracing()
                 .concurrency(review_summary_worker_concurrency)
                 .data(review_summary_worker_state.clone())
@@ -239,6 +245,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
             let worker = WorkerBuilder::new(ctx.name())
                 .backend(issue_sync_worker_storage.clone())
                 .retry(RetryPolicy::retries(github_issue_sync::MAX_RETRIES))
+                .layer(JobFailureReportLayer::new(GITHUB_ISSUE_SYNC_QUEUE))
                 .enable_tracing()
                 .concurrency(issue_sync_worker_concurrency)
                 .data(issue_sync_worker_state.clone())
@@ -298,20 +305,21 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         shutdown_rx.clone(),
     ));
 
-    let api = router
-        .merge(Scalar::with_url("/scalar", openapi.clone()))
-        .with_state(state.clone())
-        // タスク変更の発行レイヤーと SSE の終了に使う
-        .layer(Extension(state.redis_client.clone()))
-        .layer(Extension(shutdown_rx.clone()))
-        .layer(cors)
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            handler::middlewares::csrf::csrf_origin_check,
-        ))
-        .layer(middleware::from_fn(logging_middleware))
-        .layer(SessionLayer::new(session_store.clone()))
-        .layer(ServiceBuilder::new().layer(NewSentryLayer::<Request<Body>>::new_from_top()));
+    let api = observability::with_request_tracking(
+        router
+            .merge(Scalar::with_url("/scalar", openapi.clone()))
+            .with_state(state.clone())
+            // タスク変更の発行レイヤーと SSE の終了に使う
+            .layer(Extension(state.redis_client.clone()))
+            .layer(Extension(shutdown_rx.clone()))
+            .layer(cors)
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                handler::middlewares::csrf::csrf_origin_check,
+            ))
+            .layer(middleware::from_fn(logging_middleware))
+            .layer(SessionLayer::new(session_store.clone())),
+    );
 
     // apalis-board の UI はビルド時に API=/api/v1・静的ファイル=/ 直下を前提とする。
     // /jobs にネストすると JS/WASM が 404 になり真っ白になる。

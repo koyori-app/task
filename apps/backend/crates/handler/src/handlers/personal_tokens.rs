@@ -266,6 +266,10 @@ pub async fn create_personal_token(
     Valid(Json(payload)): Valid<Json<CreatePersonalTokenRequest>>,
 ) -> Result<(StatusCode, Json<CreatePersonalTokenResponse>), AppError> {
     auth.require_session()?;
+    // tenant_members と同じく、PAT を結び付けるテナントの所属と 2FA の強制を先に確かめる。
+    // 強制の前に取った本認証のセッションでも、2FA を満たさなければ発行できない
+    auth.ensure_tenant_access(&state, payload.tenant_id, None)
+        .await?;
     // 発行はオーナーとテナント Admin に許す。PAT は発行者本人として動き
     // （user_id は発行者に固定）、得られる力は発行者の持つ力を超えぬため、
     // 主に閉じても守れる物が増えない（docs/personal-access-tokens-authz.md）。

@@ -33,6 +33,17 @@ pub struct Settings {
     pub database_url: String,
     pub redis_url: String,
     pub sentry_dsn: Option<String>,
+    /// Sentry のパフォーマンス計測でトランザクションを送る割合（0.0〜1.0）。
+    /// 未設定・空なら 0.0（送らない）。値は [`Settings::traces_sample_rate`] で読む。
+    #[serde(default, deserialize_with = "deserialize_optional_f32")]
+    #[validate(range(
+        min = 0.0,
+        max = 1.0,
+        message = "sentry_traces_sample_rate must be between 0.0 and 1.0"
+    ))]
+    pub sentry_traces_sample_rate: Option<f32>,
+    /// 実行環境の名前（`RUST_ENV`。例: `production`）。Sentry の environment に渡す。
+    pub rust_env: Option<String>,
     #[serde(default = "default_allow_origin")]
     pub allow_origin: String,
     /// HTTP サーバーの bind アドレス（例: `127.0.0.1:3400`）
@@ -111,6 +122,10 @@ pub struct Settings {
 }
 
 impl Settings {
+    pub fn traces_sample_rate(&self) -> f32 {
+        self.sentry_traces_sample_rate.unwrap_or(0.0)
+    }
+
     pub fn github_app_enabled(&self) -> bool {
         self.github_app.is_some()
     }
@@ -119,6 +134,18 @@ impl Settings {
         self.github_app
             .as_ref()
             .ok_or(crate::error::AppError::NotFound)
+    }
+}
+
+/// docker-compose の `${VAR:-}` は未設定を空文字で渡すので、空は未設定として読む。
+fn deserialize_optional_f32<'de, D>(deserializer: D) -> Result<Option<f32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    match raw.as_deref().map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(value) => value.parse().map(Some).map_err(serde::de::Error::custom),
     }
 }
 
@@ -269,6 +296,8 @@ mod tests {
             database_url: String::new(),
             redis_url: String::new(),
             sentry_dsn: None,
+            sentry_traces_sample_rate: None,
+            rust_env: None,
             allow_origin: String::new(),
             listen_addr: default_listen_addr(),
             smtp_host: String::new(),
@@ -312,6 +341,43 @@ mod tests {
 
     fn test_github_private_key() -> String {
         "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy0AHB7MbzgZryNTg3nX3W\nnQ4H+Yh6zpt+o0f+4v6mK8b0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n\n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n\n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n\n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n0n\nAgMBAAECggEABdummy\n-----END RSA PRIVATE KEY-----".into()
+    }
+
+    #[test]
+    fn traces_sample_rate_defaults_to_zero() {
+        let settings = base_settings("http://localhost:3000");
+        assert_eq!(settings.traces_sample_rate(), 0.0);
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn traces_sample_rate_must_be_a_ratio() {
+        let mut settings = base_settings("http://localhost:3000");
+        settings.sentry_traces_sample_rate = Some(0.25);
+        assert_eq!(settings.traces_sample_rate(), 0.25);
+        assert!(settings.validate().is_ok());
+        settings.sentry_traces_sample_rate = Some(1.5);
+        assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn traces_sample_rate_reads_empty_as_unset() {
+        #[derive(Deserialize)]
+        struct Rate {
+            #[serde(default, deserialize_with = "deserialize_optional_f32")]
+            rate: Option<f32>,
+        }
+        let read = |value: &str| {
+            Config::builder()
+                .set_override("rate", value)
+                .unwrap()
+                .build()
+                .unwrap()
+                .try_deserialize::<Rate>()
+        };
+        assert_eq!(read("").unwrap().rate, None);
+        assert_eq!(read("0.5").unwrap().rate, Some(0.5));
+        assert!(read("often").is_err());
     }
 
     #[test]

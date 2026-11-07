@@ -2,6 +2,7 @@
 
 pub mod already_registered_email;
 pub mod deadline_soon;
+pub mod failure_report;
 pub mod github_issue_sync;
 pub mod github_webhook;
 pub mod notification_email;

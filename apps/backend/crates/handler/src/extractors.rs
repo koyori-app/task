@@ -18,6 +18,7 @@ use crate::auth_helpers::{
     explicit_member_project_ids, is_shared_project_explicit_member, is_tenant_member,
     project_is_open_or_member,
 };
+use crate::middlewares::sentry_context;
 use crate::{AppState, error::AppError};
 use service::auth::{
     AuthError, DEVICE_TOKEN_PREFIX, authenticate_device_token, authenticate_personal_token,
@@ -174,6 +175,7 @@ impl AuthUser {
         if tenant.owner_id != self.user_id {
             return Err(AppError::Forbidden);
         }
+        sentry_context::set_tenant(tenant_id);
         Ok(tenant)
     }
 
@@ -260,6 +262,7 @@ impl AuthUser {
                     return Err(AppError::ForbiddenDetail(detail));
                 }
                 self.ensure_tenant_2fa(state, tenant_id).await?;
+                sentry_context::set_tenant(tenant_id);
                 Ok(Some(ids))
             }
             Err(e) => Err(e),
@@ -307,7 +310,9 @@ async fn has_tenant_access(
         .ok_or(AppError::NotFound)?;
     // 2FA は所属が決まった後に見る（無関係な利用者へテナントの強制設定を漏らさない）
     has_tenant_membership(state, &tenant, user_id, project_id).await?;
-    ensure_tenant_2fa(state, &tenant, user_id).await
+    ensure_tenant_2fa(state, &tenant, user_id).await?;
+    sentry_context::set_tenant(tenant_id);
+    Ok(())
 }
 
 /// テナントが 2FA を強制していれば、利用者が 2FA を満たすかを確かめる
@@ -417,63 +422,70 @@ impl FromRequestParts<AppState> for AuthUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        if let Some(token) = bearer_token_from_parts(parts)
-            && token.starts_with(DEVICE_TOKEN_PREFIX)
-        {
-            device_token_user(state, &token).await
-        } else if let Some(token) = bearer_token_from_parts(parts) {
-            let record = authenticate_personal_token(
-                &state.db,
-                &state.settings.personal_token_secret,
-                &token,
-            )
-            .await?;
-            let user = users::Entity::find_by_id(record.user_id)
-                .one(&state.db)
-                .await?
-                .ok_or(AuthError::Unauthorized)?;
-            if user.is_suspended {
-                return Err(AuthError::Suspended);
-            }
-            if user.is_bot() && user.bot_tenant_id != Some(record.tenant_id) {
-                return Err(AuthError::Forbidden);
-            }
-            Ok(AuthUser {
-                user_id: record.user_id,
-                username: user.username,
-                method: AuthMethod::PersonalToken {
-                    token_id: record.id,
-                    token_name: record.name,
-                    tenant_id: record.tenant_id,
-                    allowed_project_ids: match record.allowed_project_ids.as_ref() {
-                        None => None,
-                        Some(v) => {
-                            entity::personal_tokens::parse_allowed_project_ids(v).map_err(|e| {
-                                AuthError::Internal(anyhow::anyhow!(
-                                    "allowed_project_ids parse error: {e}"
-                                ))
-                            })?
-                        }
-                    },
-                    scopes: record.scopes,
-                    expires_at: record.expires_at,
-                },
-            })
-        } else {
-            let session = session_from_parts(parts, state).await?;
-            if session_is_half_authed(&session) {
-                return Err(AuthError::Forbidden);
-            }
-            let user = user_from_session(&session, state).await?;
-            if user.is_bot() || user.is_suspended {
-                return Err(AuthError::Suspended);
-            }
-            Ok(AuthUser {
-                user_id: user.id,
-                username: user.username,
-                method: AuthMethod::Session,
-            })
+        let auth = authenticate(parts, state).await?;
+        sentry_context::set_user(auth.user_id);
+        // 他の認証方式のテナントは、アクセスを確かめる時点（`has_tenant_access` など）で載せる
+        if let AuthMethod::PersonalToken { tenant_id, .. } = &auth.method {
+            sentry_context::set_tenant(*tenant_id);
         }
+        Ok(auth)
+    }
+}
+
+async fn authenticate(parts: &mut Parts, state: &AppState) -> Result<AuthUser, AuthError> {
+    if let Some(token) = bearer_token_from_parts(parts)
+        && token.starts_with(DEVICE_TOKEN_PREFIX)
+    {
+        device_token_user(state, &token).await
+    } else if let Some(token) = bearer_token_from_parts(parts) {
+        let record =
+            authenticate_personal_token(&state.db, &state.settings.personal_token_secret, &token)
+                .await?;
+        let user = users::Entity::find_by_id(record.user_id)
+            .one(&state.db)
+            .await?
+            .ok_or(AuthError::Unauthorized)?;
+        if user.is_suspended {
+            return Err(AuthError::Suspended);
+        }
+        if user.is_bot() && user.bot_tenant_id != Some(record.tenant_id) {
+            return Err(AuthError::Forbidden);
+        }
+        Ok(AuthUser {
+            user_id: record.user_id,
+            username: user.username,
+            method: AuthMethod::PersonalToken {
+                token_id: record.id,
+                token_name: record.name,
+                tenant_id: record.tenant_id,
+                allowed_project_ids: match record.allowed_project_ids.as_ref() {
+                    None => None,
+                    Some(v) => {
+                        entity::personal_tokens::parse_allowed_project_ids(v).map_err(|e| {
+                            AuthError::Internal(anyhow::anyhow!(
+                                "allowed_project_ids parse error: {e}"
+                            ))
+                        })?
+                    }
+                },
+                scopes: record.scopes,
+                expires_at: record.expires_at,
+            },
+        })
+    } else {
+        let session = session_from_parts(parts, state).await?;
+        if session_is_half_authed(&session) {
+            return Err(AuthError::Forbidden);
+        }
+        let user = user_from_session(&session, state).await?;
+        if user.is_bot() || user.is_suspended {
+            return Err(AuthError::Suspended);
+        }
+        Ok(AuthUser {
+            user_id: user.id,
+            username: user.username,
+            method: AuthMethod::Session,
+        })
     }
 }
 
@@ -539,6 +551,7 @@ impl FromRequestParts<AppState> for HalfAuthedUser {
         {
             return Err(AuthError::Unauthorized);
         }
+        sentry_context::set_user(user.id);
         Ok(HalfAuthedUser { user_id: user.id })
     }
 }
@@ -563,6 +576,7 @@ impl FromRequestParts<AppState> for LoggedInUser {
         if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
+        sentry_context::set_user(user.id);
         Ok(LoggedInUser { user_id: user.id })
     }
 }
@@ -597,6 +611,7 @@ impl FromRequestParts<AppState> for AdminUser {
         if !user.is_admin {
             return Err(AuthError::Forbidden);
         }
+        sentry_context::set_user(user.id);
         Ok(AdminUser { user_id: user.id })
     }
 }
@@ -634,6 +649,7 @@ impl FromRequestParts<AppState> for CurrentUser {
         if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
+        sentry_context::set_user(user.id);
         Ok(CurrentUser(user))
     }
 }
