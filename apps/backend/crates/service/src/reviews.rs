@@ -924,6 +924,25 @@ pub async fn latest_head_sha<C: ConnectionTrait>(
     Ok(latest)
 }
 
+/// `head_sha` に対するラウンドを出したレビュワー（重複なし）。
+/// マージ可でなくなったとき、承認を取り消す対象を決めるのに使う。
+pub async fn reviewer_ids_at_head<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    repo: &RepoRef,
+    pr_number: i32,
+    head_sha: &str,
+) -> Result<Vec<Uuid>, sea_orm::DbErr> {
+    scoped_rounds(project_id, repo, pr_number)
+        .filter(reviews::Column::HeadSha.eq(head_sha))
+        .select_only()
+        .column(reviews::Column::ReviewerId)
+        .distinct()
+        .into_tuple()
+        .all(db)
+        .await
+}
+
 /// 要約ジョブが最後に GitHub で確かめた head と、その時刻。
 ///
 /// 画面はこれと最新ラウンドの `head_sha` を比べて「レビューが古い」を出す。

@@ -3,6 +3,8 @@
 // - リポジトリの同定: 要約コメントは保存したリポジトリが現在の連携先と違えば投稿しない
 // - 要約コメント: 連携なしプロジェクトでは投稿だけスキップして起票は成功する
 // - Approve: マージ可の PR は、レビュワー本人のトークンで、レビューした commit を指定して 1 回だけ承認される（対照: High / Medium の未解決・レビュー後の push・閉じた PR では承認しない）。レビュワーが連携していなければ承認しない（bot でも承認しない）。トークンの期限が切れていれば更新してから承認し、回転したトークンを保存し直す。同じ commit への本人の承認が既にあれば、2 ページ目にあっても承認し直さない。承認が通らなくても（422 / 403）要約コメントは出て、ジョブは成功する
+// - 承認の取り消し: 承認済みの PR に同じ head で High のラウンドが出ると、承認者のトークンで REQUEST_CHANGES が 1 回だけ出る（commit_id と目印付き）。承認者が前のラウンドの作成者で、High を出したのが別の人でも取り消す。取り消し済みなら重ねて出さない。head が違う・閉じた PR・承認していない・取り下げ済み・連携なしでは取り消さない。403 / 422 でも要約コメントは出てジョブは成功する
+// - 承認し直し: 目印付きの取り消しが最後の決定なら、マージ可に戻ったとき承認し直す。人が取り下げた承認・人の変更要求の後は承認し直さない
 // - マーカーの先取り: 第三者が同じマーカーを含むコメントを先に投稿していても、それを要約コメントと誤認せず、自分のコメントを新規に作成する
 // - 要約コメントの合流: 連続した状態遷移でも更新ジョブは 1 本に合流し、コメントは 1 本のまま最新の件数・マージ可否になる
 // - 要約コメントの直列化: 同じ PR の更新ジョブが走っている間、後続のジョブは投稿せずに積み直す（古い状態での上書きを起こさない）
@@ -1194,6 +1196,54 @@ async fn review_once_and_run_summary(
     findings: serde_json::Value,
     link: Option<ReviewerLink>,
 ) -> Option<oauth_connections::Model> {
+    scenario(mock_server, findings, link, Scenario::default()).await
+}
+
+/// (取り消しの目印, 呼び出しの Bearer トークン) から GET reviews の応答を作る
+type ReviewsFn = Box<dyn Fn(&str, &str) -> serde_json::Value + Send + Sync>;
+
+/// [`review_once_and_run_summary`] に足す設定。
+#[derive(Default)]
+struct Scenario {
+    /// 目印（取り消しのレビューに付く）を受け取って、GET reviews の応答を差し替える
+    reviews: Option<ReviewsFn>,
+    /// 同じ head への 2 本目のラウンド。`by_other` なら別のレビュワー（連携済み）が出す
+    second_round: Option<(serde_json::Value, bool)>,
+}
+
+const OTHER_GITHUB_ID: i64 = 9002;
+const OTHER_TOKEN: &str = "ghu_other_token";
+
+async fn link_reviewer(app: &TestApp, user_id: Uuid, github_id: i64, token: &str) {
+    let enc = |plain: &str| {
+        auth_core::crypto::encrypt_token(TEST_OAUTH_ENCRYPTION_KEY, plain).expect("encrypt")
+    };
+    oauth_connections::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        user_id: Set(user_id),
+        provider: Set(service::oauth::GITHUB_APP_PROVIDER.into()),
+        provider_user_id: Set(github_id.to_string()),
+        provider_login: Set(Some(format!("reviewer-{github_id}"))),
+        access_token_enc: Set(Some(enc(token))),
+        refresh_token_enc: Set(Some(enc(REVIEWER_REFRESH_TOKEN))),
+        token_expires_at: Set(Some(
+            (chrono::Utc::now() + chrono::Duration::hours(8)).into(),
+        )),
+        created_at: Set(chrono::Utc::now().into()),
+        updated_at: Set(chrono::Utc::now().into()),
+        ..Default::default()
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert github_app connection");
+}
+
+async fn scenario(
+    mock_server: &MockServer,
+    findings: serde_json::Value,
+    link: Option<ReviewerLink>,
+    opts: Scenario,
+) -> Option<oauth_connections::Model> {
     // SAFETY: 呼び出し元のテストは serial で、他テストとの並列実行を防いでいる。
     unsafe {
         std::env::set_var("GITHUB_API_BASE_URL", mock_server.uri());
@@ -1206,29 +1256,40 @@ async fn review_once_and_run_summary(
     link_integration(&app, tp.project_id, reviewer.id).await;
     let marker = service::github::pr_comments::summary_marker(tp.project_id);
     mount_mocks(mock_server, false, &marker).await;
+    if let Some(reviews) = opts.reviews {
+        let revoke_marker = service::github::pr_comments::revoke_marker(tp.project_id);
+        Mock::given(method("GET"))
+            .and(path(reviews_api_path()))
+            .respond_with(move |req: &wiremock::Request| {
+                let token = req
+                    .headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.strip_prefix("Bearer "))
+                    .unwrap_or_default()
+                    .to_string();
+                ResponseTemplate::new(200).set_body_json(reviews(&revoke_marker, &token))
+            })
+            .with_priority(1)
+            .mount(mock_server)
+            .await;
+    }
 
     if let Some(link) = link {
-        let encrypt = |plain: &str| {
-            auth_core::crypto::encrypt_token(TEST_OAUTH_ENCRYPTION_KEY, plain).expect("encrypt")
-        };
-        oauth_connections::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            user_id: Set(reviewer.id),
-            provider: Set(service::oauth::GITHUB_APP_PROVIDER.into()),
-            provider_user_id: Set(REVIEWER_GITHUB_ID.to_string()),
-            provider_login: Set(Some("reviewer".into())),
-            access_token_enc: Set(Some(encrypt(REVIEWER_TOKEN))),
-            refresh_token_enc: Set(Some(encrypt(REVIEWER_REFRESH_TOKEN))),
-            token_expires_at: Set(Some(
+        link_reviewer(&app, reviewer.id, REVIEWER_GITHUB_ID, REVIEWER_TOKEN).await;
+        if link.expires_in_secs != 8 * 60 * 60 {
+            let conn = oauth_connections::Entity::find()
+                .filter(oauth_connections::Column::UserId.eq(reviewer.id))
+                .one(&app.state.db)
+                .await
+                .expect("load")
+                .expect("connection");
+            let mut active: oauth_connections::ActiveModel = conn.into();
+            active.token_expires_at = Set(Some(
                 (chrono::Utc::now() + chrono::Duration::seconds(link.expires_in_secs)).into(),
-            )),
-            created_at: Set(chrono::Utc::now().into()),
-            updated_at: Set(chrono::Utc::now().into()),
-            ..Default::default()
+            ));
+            active.update(&app.state.db).await.expect("set expiry");
         }
-        .insert(&app.state.db)
-        .await
-        .expect("insert github_app connection");
     }
 
     app.reset_session_client();
@@ -1250,6 +1311,72 @@ async fn review_once_and_run_summary(
         .await;
     assert_eq!(res.status(), StatusCode::CREATED);
 
+    let mut other_id = None;
+    if let Some((findings2, by_other)) = opts.second_round {
+        if by_other {
+            let other = app.insert_user_default().await;
+            link_reviewer(&app, other.id, OTHER_GITHUB_ID, OTHER_TOKEN).await;
+            let now = chrono::Utc::now();
+            let review = entity::reviews::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                project_id: Set(tp.project_id),
+                integration_id: Set(None),
+                repo_owner: Set(REPO_OWNER.into()),
+                repo_name: Set(REPO_NAME.into()),
+                pr_number: Set(PR_NUMBER),
+                round: Set(2),
+                head_sha: Set(REVIEWED_HEAD.into()),
+                reviewer_id: Set(other.id),
+                summary: Set("別の人の総評".into()),
+                pr_title: Set(None),
+                pr_author: Set(None),
+                pr_head_sha: Set(None),
+                pr_head_checked_at: Set(None),
+                summary_comment_id: Set(None),
+                created_at: Set(now.into()),
+            }
+            .insert(&app.state.db)
+            .await
+            .expect("insert second round");
+            for f in findings2.as_array().expect("findings") {
+                entity::review_findings::ActiveModel {
+                    id: Set(Uuid::new_v4()),
+                    review_id: Set(review.id),
+                    severity: Set(entity::review_findings::FindingSeverity::High),
+                    title: Set(f["title"].as_str().unwrap_or("t").into()),
+                    body: Set("本文".into()),
+                    file: Set(None),
+                    line: Set(None),
+                    state: Set(entity::review_findings::FindingState::Open),
+                    deferred_task_id: Set(None),
+                    fixed_by: Set(None),
+                    created_at: Set(now.into()),
+                    updated_at: Set(now.into()),
+                }
+                .insert(&app.state.db)
+                .await
+                .expect("insert second finding");
+            }
+            other_id = Some(other.id);
+        } else {
+            let res = app
+                .post_json_with_session(
+                    &format!(
+                        "/v1/tenants/{}/projects/{}/reviews",
+                        tp.tenant_id, tp.project_id
+                    ),
+                    serde_json::json!({
+                        "pr_number": PR_NUMBER,
+                        "head_sha": REVIEWED_HEAD,
+                        "summary": "2 本目",
+                        "findings": findings2,
+                    }),
+                )
+                .await;
+            assert_eq!(res.status(), StatusCode::CREATED);
+        }
+    }
+
     job::review_summary::process(
         job::ReviewSummaryJob {
             project_id: tp.project_id,
@@ -1269,6 +1396,10 @@ async fn review_once_and_run_summary(
         .await
         .expect("load github_app connection");
     app.cleanup_user(reviewer.id).await;
+    // 別のレビュワーのラウンドは、プロジェクトごと消えた後でないと消せない
+    if let Some(id) = other_id {
+        app.cleanup_user(id).await;
+    }
     connection
 }
 
@@ -1504,4 +1635,396 @@ async fn a_rejected_approval_still_posts_the_summary_comment() {
                 .collect();
         assert_eq!(comments.len(), 1, "{status} でも要約コメントは出ている");
     }
+}
+
+// ── 承認の取り消しと承認し直し ────────────────────────────────────────────
+
+fn review_json(id: i64, state: &str, body: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "user": { "id": id, "login": "reviewer", "type": "User" },
+        "commit_id": REVIEWED_HEAD,
+        "state": state,
+        "body": body,
+    })
+}
+
+fn high() -> serde_json::Value {
+    serde_json::json!([{ "severity": "high", "title": "競合", "body": "本文" }])
+}
+
+fn approved_only() -> Scenario {
+    Scenario {
+        reviews: Some(Box::new(|_, _| {
+            serde_json::json!([review_json(REVIEWER_GITHUB_ID, "APPROVED", None)])
+        })),
+        ..Default::default()
+    }
+}
+
+/// 承認済みの PR に同じ head で High のラウンドが出たら、承認者のトークンで
+/// REQUEST_CHANGES を 1 回だけ出す。目印と commit_id を付ける。
+#[serial_test::serial]
+#[tokio::test]
+async fn a_new_blocking_round_revokes_the_approval() {
+    let mock_server = MockServer::start().await;
+    scenario(
+        &mock_server,
+        serde_json::json!([]),
+        LINKED,
+        Scenario {
+            second_round: Some((high(), false)),
+            ..approved_only()
+        },
+    )
+    .await;
+
+    let posted = approvals(&mock_server).await;
+    assert_eq!(posted.len(), 1);
+    let (body, auth) = &posted[0];
+    assert_eq!(auth, &format!("Bearer {REVIEWER_TOKEN}"));
+    assert_eq!(body["event"], "REQUEST_CHANGES");
+    assert_eq!(body["commit_id"], REVIEWED_HEAD);
+    assert!(
+        body["body"]
+            .as_str()
+            .expect("body")
+            .contains("<!-- koyori-approval-revoked:"),
+        "目印を入れる"
+    );
+}
+
+/// 取り消し済み（最後の決定が目印付きの REQUEST_CHANGES）なら、ジョブが再び走っても重ねて出さない。
+#[serial_test::serial]
+#[tokio::test]
+async fn an_already_revoked_approval_is_not_revoked_twice() {
+    let mock_server = MockServer::start().await;
+    scenario(
+        &mock_server,
+        serde_json::json!([]),
+        LINKED,
+        Scenario {
+            reviews: Some(Box::new(|marker, _| {
+                serde_json::json!([
+                    review_json(REVIEWER_GITHUB_ID, "APPROVED", None),
+                    review_json(REVIEWER_GITHUB_ID, "CHANGES_REQUESTED", Some(marker)),
+                    review_json(REVIEWER_GITHUB_ID, "COMMENTED", None),
+                ])
+            })),
+            second_round: Some((high(), false)),
+        },
+    )
+    .await;
+
+    assert!(approvals(&mock_server).await.is_empty());
+}
+
+/// 承認したのが前のラウンドの作成者で、High を出したのが別の人でも、前の承認者の承認を取り消す。
+#[serial_test::serial]
+#[tokio::test]
+async fn the_earlier_approver_is_revoked_when_someone_else_adds_a_blocking_round() {
+    let mock_server = MockServer::start().await;
+    scenario(
+        &mock_server,
+        serde_json::json!([]),
+        LINKED,
+        Scenario {
+            second_round: Some((high(), true)),
+            ..approved_only()
+        },
+    )
+    .await;
+
+    let posted = approvals(&mock_server).await;
+    assert_eq!(posted.len(), 1, "承認していない別の人には出さない");
+    assert_eq!(posted[0].1, format!("Bearer {REVIEWER_TOKEN}"));
+    assert_eq!(posted[0].0["event"], "REQUEST_CHANGES");
+    assert_ne!(posted[0].1, format!("Bearer {OTHER_TOKEN}"));
+}
+
+/// 取り消さない場合: 承認していない・取り下げ済み・人の変更要求・連携なし・head が違う・閉じた PR。
+#[serial_test::serial]
+#[tokio::test]
+async fn nothing_is_revoked_without_a_live_approval_or_a_fresh_open_pr() {
+    let human_cr = || review_json(REVIEWER_GITHUB_ID, "CHANGES_REQUESTED", Some("直して"));
+    for (case, reviews, link, head, state) in [
+        (
+            "承認していない",
+            serde_json::json!([]),
+            LINKED,
+            REVIEWED_HEAD,
+            "open",
+        ),
+        (
+            "人が取り下げた",
+            serde_json::json!([
+                review_json(REVIEWER_GITHUB_ID, "APPROVED", None),
+                review_json(REVIEWER_GITHUB_ID, "DISMISSED", None)
+            ]),
+            LINKED,
+            REVIEWED_HEAD,
+            "open",
+        ),
+        (
+            "人の変更要求",
+            serde_json::json!([
+                review_json(REVIEWER_GITHUB_ID, "APPROVED", None),
+                human_cr()
+            ]),
+            LINKED,
+            REVIEWED_HEAD,
+            "open",
+        ),
+        (
+            "連携なし",
+            serde_json::json!([review_json(REVIEWER_GITHUB_ID, "APPROVED", None)]),
+            None,
+            REVIEWED_HEAD,
+            "open",
+        ),
+        (
+            "head が違う",
+            serde_json::json!([review_json(REVIEWER_GITHUB_ID, "APPROVED", None)]),
+            LINKED,
+            "0000000000000000000000000000000000000000",
+            "open",
+        ),
+        (
+            "閉じた PR",
+            serde_json::json!([review_json(REVIEWER_GITHUB_ID, "APPROVED", None)]),
+            LINKED,
+            REVIEWED_HEAD,
+            "closed",
+        ),
+    ] {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/repos/{REPO_OWNER}/{REPO_NAME}/pulls/{PR_NUMBER}"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "title": "feat: レビュー指摘管理",
+                "user": { "login": "yupix" },
+                "head": { "sha": head },
+                "state": state
+            })))
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+        scenario(
+            &mock_server,
+            serde_json::json!([]),
+            link,
+            Scenario {
+                reviews: Some(Box::new(move |_, _| reviews.clone())),
+                second_round: Some((high(), false)),
+            },
+        )
+        .await;
+        assert!(approvals(&mock_server).await.is_empty(), "{case}");
+    }
+}
+
+/// 取り消しが 403 / 422 でも要約コメントは出て、ジョブは成功する。
+#[serial_test::serial]
+#[tokio::test]
+async fn a_rejected_revocation_still_posts_the_summary_comment() {
+    for status in [422, 403] {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(reviews_api_path()))
+            .respond_with(
+                ResponseTemplate::new(status).set_body_json(serde_json::json!({
+                    "message": "nope"
+                })),
+            )
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+        scenario(
+            &mock_server,
+            serde_json::json!([]),
+            LINKED,
+            Scenario {
+                second_round: Some((high(), false)),
+                ..approved_only()
+            },
+        )
+        .await;
+
+        assert_eq!(
+            approvals(&mock_server).await.len(),
+            1,
+            "取り消しは試みている"
+        );
+        let comments = bodies_of(&mock_server, wiremock::http::Method::POST)
+            .await
+            .into_iter()
+            .filter(|b| b.get("body").is_some() && b.get("event").is_none())
+            .count();
+        assert_eq!(comments, 1, "{status} でも要約コメントは出ている");
+    }
+}
+
+/// 取り消した後にマージ可へ戻ったら承認し直す。人が取り下げた承認・人の変更要求の後は承認し直さない。
+#[serial_test::serial]
+#[tokio::test]
+async fn approval_is_restored_only_after_our_own_revocation() {
+    let human_cr = || review_json(REVIEWER_GITHUB_ID, "CHANGES_REQUESTED", Some("直して"));
+    for (case, restored, reviews) in [
+        (
+            "取り消した後",
+            true,
+            vec![
+                review_json(REVIEWER_GITHUB_ID, "APPROVED", None),
+                review_json(
+                    REVIEWER_GITHUB_ID,
+                    "CHANGES_REQUESTED",
+                    Some("<!-- koyori-approval-revoked:PROJECT -->"),
+                ),
+            ],
+        ),
+        (
+            "人が取り下げた",
+            false,
+            vec![
+                review_json(REVIEWER_GITHUB_ID, "APPROVED", None),
+                review_json(REVIEWER_GITHUB_ID, "DISMISSED", None),
+            ],
+        ),
+        (
+            "人の変更要求",
+            false,
+            vec![
+                review_json(REVIEWER_GITHUB_ID, "APPROVED", None),
+                human_cr(),
+            ],
+        ),
+    ] {
+        let mock_server = MockServer::start().await;
+        review_with_reviews(&mock_server, reviews).await;
+        let posted = approvals(&mock_server).await;
+        if restored {
+            assert_eq!(posted.len(), 1, "{case}");
+            assert_eq!(posted[0].0["event"], "APPROVE", "{case}");
+        } else {
+            assert!(posted.is_empty(), "{case}");
+        }
+    }
+}
+
+async fn review_with_reviews(mock_server: &MockServer, reviews: Vec<serde_json::Value>) {
+    scenario(
+        mock_server,
+        serde_json::json!([]),
+        LINKED,
+        Scenario {
+            reviews: Some(Box::new(move |marker, _| {
+                // PROJECT は呼び出し側が書いた仮の目印。実際のプロジェクトの目印に置き換える
+                let text = serde_json::to_string(&reviews)
+                    .expect("json")
+                    .replace("<!-- koyori-approval-revoked:PROJECT -->", marker);
+                serde_json::from_str(&text).expect("json")
+            })),
+            ..Default::default()
+        },
+    )
+    .await;
+}
+
+/// 他のレビュワーの承認を取り消していた場合、マージ可に戻ったら両方に APPROVE が出る
+/// （取り消された人は承認し直し）。取り消されていない人には出さない。
+#[serial_test::serial]
+#[tokio::test]
+async fn every_revoked_reviewer_is_approved_again_when_merge_ready() {
+    for (case, a_reviews, expected) in [
+        (
+            "A は取り消されている",
+            Box::new(|marker: &str| {
+                serde_json::json!([
+                    review_json(REVIEWER_GITHUB_ID, "APPROVED", None),
+                    review_json(REVIEWER_GITHUB_ID, "CHANGES_REQUESTED", Some(marker)),
+                ])
+            }) as Box<dyn Fn(&str) -> serde_json::Value + Send + Sync>,
+            vec![
+                format!("Bearer {OTHER_TOKEN}"),
+                format!("Bearer {REVIEWER_TOKEN}"),
+            ],
+        ),
+        (
+            "A の最後は承認のまま",
+            Box::new(|_: &str| {
+                serde_json::json!([review_json(REVIEWER_GITHUB_ID, "APPROVED", None)])
+            }),
+            vec![format!("Bearer {OTHER_TOKEN}")],
+        ),
+        (
+            "A に決定が無い",
+            Box::new(|_: &str| serde_json::json!([])),
+            vec![format!("Bearer {OTHER_TOKEN}")],
+        ),
+    ] {
+        let mock_server = MockServer::start().await;
+        scenario(
+            &mock_server,
+            serde_json::json!([]),
+            LINKED,
+            Scenario {
+                reviews: Some(Box::new(move |marker, token| {
+                    if token == REVIEWER_TOKEN {
+                        a_reviews(marker)
+                    } else {
+                        serde_json::json!([])
+                    }
+                })),
+                // 最新ラウンド（B）は指摘なし
+                second_round: Some((serde_json::json!([]), true)),
+            },
+        )
+        .await;
+
+        let posted = approvals(&mock_server).await;
+        assert!(
+            posted.iter().all(|(b, _)| b["event"] == "APPROVE"),
+            "{case}"
+        );
+        let mut tokens: Vec<String> = posted.into_iter().map(|(_, t)| t).collect();
+        tokens.sort();
+        let mut expected = expected;
+        expected.sort();
+        assert_eq!(tokens, expected, "{case}");
+    }
+}
+
+/// レビューが上限（500 件）を超えて最後の決定が分からないときは、取り消さない。
+#[serial_test::serial]
+#[tokio::test]
+async fn a_review_list_cut_off_by_the_page_limit_is_not_revoked() {
+    let mock_server = MockServer::start().await;
+    for page in 1..=5 {
+        let mut items: Vec<serde_json::Value> = (0..100)
+            .map(|i| review_json(100 + i, "COMMENTED", None))
+            .collect();
+        if page == 1 {
+            items[0] = review_json(REVIEWER_GITHUB_ID, "APPROVED", None);
+        }
+        Mock::given(method("GET"))
+            .and(path(reviews_api_path()))
+            .and(query_param("page", page.to_string()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(items))
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+    }
+    scenario(
+        &mock_server,
+        serde_json::json!([]),
+        LINKED,
+        Scenario {
+            second_round: Some((high(), false)),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    assert!(approvals(&mock_server).await.is_empty());
 }
