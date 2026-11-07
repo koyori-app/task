@@ -1,12 +1,27 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+
 import { taskDetailHref, taskSeqKey } from '@/lib/task-display';
 
-const props = defineProps<{
-  tenantDisplayId: string;
-  projectKey: string;
-  seqId: number;
-  title: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    tenantDisplayId: string;
+    projectKey: string;
+    seqId: number;
+    title: string;
+    /** 何行まで出すか。既定は 1 行で省略する */
+    lines?: 1 | 2 | 'all';
+  }>(),
+  { lines: 1 },
+);
+
+// inline のままだと truncate が効かず、列の外へはみ出して隣の列に重なる。
+// line-clamp は display を自前で持ち、block と並べると block が勝って行数が止まらない
+const lineClass = computed(() => {
+  if (props.lines === 'all') return 'block break-words';
+  if (props.lines === 2) return 'line-clamp-2 break-words';
+  return 'block truncate';
+});
 
 const emit = defineEmits<{
   select: [seqId: number];
@@ -34,7 +49,8 @@ function onPlainClick(event: MouseEvent) {
   <a
     :href="taskDetailHref(tenantDisplayId, projectKey, seqId)"
     :data-task-seq-key="taskSeqKey(projectKey, seqId)"
-    class="truncate text-sm text-link hover:underline"
+    class="text-sm text-link hover:underline"
+    :class="lineClass"
     @click="onPlainClick"
   >
     <!--

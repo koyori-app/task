@@ -38,6 +38,7 @@ const parentTask = {
 function mountBranch(pending: Record<string, 'status_id' | undefined>) {
   return mount(TaskSubtaskBranch, {
     props: {
+      projectKey: 'TEST',
       parentTask,
       tenantId: 'tenant-id',
       projectId: 'project-id',

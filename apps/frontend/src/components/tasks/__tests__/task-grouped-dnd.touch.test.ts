@@ -76,6 +76,7 @@ describe('TaskGroupedList の DnD（タッチ）', () => {
   it('長押ししてから動かしたときだけ掴む（指を滑らせたらスクロールに任せる）', () => {
     mount(TaskGroupedList, {
       props: {
+        projectKey: 'TEST',
         groups: [todoGroup],
         tenantId: 'tenant-1',
         projectId: 'project-1',

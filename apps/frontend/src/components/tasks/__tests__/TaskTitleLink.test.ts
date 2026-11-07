@@ -19,6 +19,23 @@ function mountLink(props: Record<string, unknown> = {}) {
 }
 
 describe('TaskTitleLink', () => {
+  // inline のままだと truncate が効かず、検索結果でタイトルが隣の列に重なった（TASK-484）
+  it('block にして、既定は 1 行で省略する', () => {
+    const classes = mountLink().get('a').classes();
+    expect(classes).toContain('block');
+    expect(classes).toContain('truncate');
+  });
+
+  it('lines で 2 行までと全文を選べる', () => {
+    const two = mountLink({ lines: 2 }).get('a').classes();
+    expect(two).toContain('line-clamp-2');
+    // block と並べると line-clamp の display が負けて、行数が止まらない
+    expect(two).not.toContain('block');
+    const all = mountLink({ lines: 'all' }).get('a').classes();
+    expect(all).toContain('break-words');
+    expect(all).not.toContain('truncate');
+  });
+
   it('href は詳細ページ（ディープリンク・新しいタブで開ける）', () => {
     const wrapper = mountLink();
     expect(wrapper.get('a').attributes('href')).toBe('/acme/projects/ENG/tasks/ENG-42');

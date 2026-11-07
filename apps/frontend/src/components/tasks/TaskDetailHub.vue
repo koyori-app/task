@@ -646,7 +646,10 @@ function clearDescription() {
                 :disabled="isFieldUpdating('title')"
                 @click="startEditing('title')"
               >
-                <h1 class="text-2xl font-semibold tracking-tight">{{ task.title }}</h1>
+                <!-- flex の子は min-w-0 が無いと縮まず、スペースのない URL が折り返さない -->
+                <h1 class="min-w-0 text-2xl font-semibold tracking-tight break-words">
+                  {{ task.title }}
+                </h1>
                 <Pencil
                   class="mt-1.5 size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
                   aria-hidden="true"
