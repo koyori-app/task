@@ -158,6 +158,19 @@ describe('TaskGroupedRow のタイトルと補足', () => {
     expect(title.element.nextElementSibling).toBe(wrapper.get('[data-row-labels]').element);
   });
 
+  it('広い幅の 2 段目の ID を押してもコピーだけで、行を選択しない', async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const wrapper = mountWith({ seq_id: 7 });
+
+    await wrapper.get('[data-row-labels] [data-task-id-copy]').trigger('click');
+
+    expect(wrapper.emitted('select')).toBeUndefined();
+    expect(wrapper.emitted('open')).toBeUndefined();
+    expect(writeText).toHaveBeenCalledWith('TEST-7');
+    delete (navigator as { clipboard?: unknown }).clipboard;
+  });
+
   it('行の最小幅を持たず、列は一覧の幅が足りるときだけ並べる', () => {
     const grid = mountWith({}).get('[aria-label="タスク「親タスク」を選択"]');
 
@@ -183,12 +196,15 @@ describe('TaskGroupedRow のタイトルと補足', () => {
     expect(mountWith({ labels: [] }).get('[data-row-summary]').text()).not.toContain('·');
   });
 
-  it('狭い幅の 2 段目は表示だけで、押せるものを置かない', () => {
+  it('狭い幅の 2 段目で押せるのは ID のコピーだけで、スマホの幅では隠す', () => {
     const summary = mountWith({ labels, soft_deadline: '2026-06-20T00:00:00Z' }).get(
       '[data-row-summary]',
     );
+    const controls = summary.findAll('button, a, input');
 
-    expect(summary.findAll('button, a, input')).toHaveLength(0);
+    expect(controls).toHaveLength(1);
+    expect(controls[0]?.attributes('data-task-id-copy')).toBeDefined();
+    expect(controls[0]?.classes()).toContain('max-[769px]:hidden');
   });
 
   it('狭い幅の開閉の矢印は丸の下に積み、選択しても丸とタイトルを動かさない', () => {

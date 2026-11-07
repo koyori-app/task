@@ -21,6 +21,7 @@ import type { components } from '@/generated/api';
 import type { TaskRowField } from '@/composables/useTaskRowMutations';
 import { TASK_ROW_GRID } from '@/components/tasks/task-grouped-columns';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
+import TaskIdCopyButton from '@/components/tasks/TaskIdCopyButton.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 
 type TaskResponse = components['schemas']['TaskResponse'];
@@ -294,7 +295,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
 
           <!-- 広い幅の 2 段目。担当・期限・優先度は右の列にある -->
           <div class="mt-1 hidden flex-wrap items-center gap-1 @3xl:flex" data-row-labels>
-            <span class="mr-2 font-mono text-xs text-muted-foreground">{{ seqKey }}</span>
+            <TaskIdCopyButton class="mr-1" :project-key="projectKey" :seq-id="task.seq_id" />
             <span
               v-for="label in task.labels"
               :key="label.id"
@@ -336,7 +337,13 @@ function selectFromKeyboard(event: KeyboardEvent) {
             data-row-summary
           >
             <div class="flex min-w-0 flex-1 items-center gap-1.5">
-              <span class="shrink-0 font-mono">{{ seqKey }}</span>
+              <!-- 画面が広くサイドバーで一覧だけ狭いときは、ここでもコピーできる。スマホは文字だけ -->
+              <span class="shrink-0 font-mono min-[769px]:hidden">{{ seqKey }}</span>
+              <TaskIdCopyButton
+                class="max-[769px]:hidden"
+                :project-key="projectKey"
+                :seq-id="task.seq_id"
+              />
               <template v-if="firstLabel">
                 <span aria-hidden="true">·</span>
                 <span
