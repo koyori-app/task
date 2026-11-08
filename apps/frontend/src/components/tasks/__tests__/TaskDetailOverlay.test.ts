@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
 
-// 器の中身は自前で API を叩くので、下書きの入力欄と閉じるボタンだけの代役にする（契約は本物と同じ）
+// 器の中身は自前で API を叩くので、下書きの入力欄だけの代役にする。
+// 読み込み中などペインが × を描かない状態と同じく、代役は × を描かない
+const paneProps = vi.hoisted(() => ({ last: null as Record<string, unknown> | null }));
 vi.mock('@/components/tasks/TaskDetailPane.vue', async () => {
   const { defineComponent, h } = await import('vue');
   return {
@@ -9,19 +11,10 @@ vi.mock('@/components/tasks/TaskDetailPane.vue', async () => {
       name: 'TaskDetailPane',
       props: { showCloseButton: { type: Boolean, default: true } },
       emits: ['close'],
-      setup:
-        (props, { emit }) =>
-        () =>
-          h('div', [
-            h('textarea', { id: 'draft' }),
-            props.showCloseButton
-              ? h('button', {
-                  'aria-label': '詳細を閉じる',
-                  type: 'button',
-                  onClick: () => emit('close'),
-                })
-              : null,
-          ]),
+      setup: (props) => () => {
+        paneProps.last = { ...props };
+        return h('div', [h('textarea', { id: 'draft' })]);
+      },
     }),
   };
 });
@@ -78,10 +71,25 @@ describe('TaskDetailOverlay', () => {
     expect(wrapper.emitted('update:open')).toEqual([[false]]);
   });
 
-  it('ペインの閉じるボタンを出す（器の Dialog は × を描かない）', () => {
+  it('閉じるボタンは器が描く（ペインが何も描かなくても、読み込み中でも出る）', () => {
     mountOverlay();
 
-    expect(document.querySelector('button[aria-label="詳細を閉じる"]')).not.toBeNull();
+    expect(document.querySelectorAll('button[aria-label="詳細を閉じる"]')).toHaveLength(1);
+  });
+
+  it('ペインには showCloseButton: false を渡し、× を二重にしない', () => {
+    mountOverlay();
+
+    expect(paneProps.last).toMatchObject({ showCloseButton: false });
+  });
+
+  it('閉じている間は閉じるボタンを描かない', () => {
+    mount(TaskDetailOverlay, {
+      props: { open: false, tenantDisplayId: 'acme', projectKey: 'ENG', taskId: 'ENG-1' },
+      attachTo: document.body,
+    });
+
+    expect(document.querySelector('button[aria-label="詳細を閉じる"]')).toBeNull();
   });
 
   it('閉じるボタンのクリックで update:open false を emit する', () => {

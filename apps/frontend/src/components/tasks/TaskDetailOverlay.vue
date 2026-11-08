@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Dialog } from '@koyori-app/ui-vue';
+import { X } from '@lucide/vue';
+import { Button, Dialog } from '@koyori-app/ui-vue';
 import TaskDetailPane, { type TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
 import {
   shouldKeepOverlayOnEscape,
@@ -54,9 +55,27 @@ function onClose() {
         koyori の Dialog は閉じても DOM に残る（退場アニメーションも無い）。閉じている間に
         ペインが動き続けないよう、v-if で中身を外す
       -->
+      <!--
+        閉じるボタンは器が描く。ペインの header は読み込み中・失敗・見つからない時には出ないので、
+        そこに置くと削除済み・権限の無いタスクを開いたときに閉じる手段が Esc と背景だけになる。
+        Hub の header 右端の pr-12 がこの置き場で、header の高さ（h-12）に縦位置を揃える。
+        dialog 自体が位置指定の基準になる。明示操作なので、下書きがあっても 1 回で閉じる
+      -->
+      <div v-if="open" class="absolute top-0 right-2 z-10 flex h-12 items-center">
+        <Button
+          type="button"
+          variant="ghost"
+          ariaLabel="詳細を閉じる"
+          title="閉じる"
+          @click="emit('update:open', false)"
+        >
+          <template #icon><X class="size-4" /></template>
+        </Button>
+      </div>
       <TaskDetailPane
         v-if="open"
         layout="page"
+        :show-close-button="false"
         :tenant-display-id="tenantDisplayId"
         :project-key="projectKey"
         :task-id="taskId"
