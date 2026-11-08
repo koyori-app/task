@@ -13,6 +13,7 @@ coder templates push task -d coder
 | イメージ（`build/Dockerfile`） | Rust（rustfmt / clippy）、cargo-nextest、cargo-hakari、mold、Node、pnpm（corepack）、ripgrep、gh、jq、psql、Docker（compose / buildx）、Tailscale |
 | ホーム（初回起動時に `main.tf` の `startup_script` が入れる） | Claude Code、Codex、Cursor CLI（`cursor-agent`）、T3 Code（`t3`）、Paradev（`superset` / `paradev`） |
 | ホーム（`git-clone` モジュールが入れる） | リポジトリ（`~/works/task`）。既にあれば何もしない |
+| ホーム（起動時に `startup_script` が入れる） | Claude Code / Codex の共通設定とスキル（`yupix/ai-skill` を `~/ai-skill` に clone し、`install.sh` でリンクを張る） |
 
 ホーム（`/home/coder`）と Docker のデータはボリュームに残り、ワークスペースを止めても消えない。
 それ以外はイメージを作り直すと元に戻る。

@@ -62,6 +62,10 @@ resource "coder_agent" "main" {
     setsid nohup t3 serve --no-browser --lan >/tmp/t3-serve.log 2>&1 < /dev/null &
     cd ~
 
+    # Claude Code / Codex の共通設定とスキル（Mac と同じもの）
+    [ -d ~/ai-skill ] || git clone -q git@github.com:yupix/ai-skill.git ~/ai-skill
+    ~/ai-skill/install.sh
+
     # superset auth login 済み（または SUPERSET_API_KEY あり）なら、このワークスペースを Paradev のホストとして起動する
     if superset auth whoami >/dev/null 2>&1; then
       superset start --daemon --auto-update || echo "Paradev のホストを起動できなかった"
