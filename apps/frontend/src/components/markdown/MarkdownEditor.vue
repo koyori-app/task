@@ -20,6 +20,7 @@ import {
   mentionExtensions,
   nameTableOf,
   openMentionPicker as openPicker,
+  resolveMentionAutocompleteTooltipParent,
   setMentionNames,
 } from '@/lib/comment-mention-extensions';
 
@@ -76,6 +77,7 @@ const host = useTemplateRef<HTMLDivElement>('host');
 const view = ref<EditorView | null>(null);
 /** 直近に自分が emit した値。v-model の往復で state を作り直さないための照合用 */
 let lastEmitted: string | null = null;
+let mentionTooltipParent: HTMLElement | null = null;
 /**
  * 破棄中フラグ。EditorView.destroy() はフォーカス中の DOM を外すため blur が飛ぶ。
  * これを素通しすると、呼び出し側が「blur = 確定」にしている場合に
@@ -139,6 +141,12 @@ const theme = EditorView.theme({
     backgroundColor: 'color-mix(in oklab, var(--primary) 25%, transparent)',
   },
   '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--foreground)' },
+  // 候補の箱は編集器の外（body か dialog）に置くので、器の字の大きさ（text-base、md 以上は text-sm）を
+  // 引き継がない。編集器の中に置いていた時と同じ大きさを、ここで与える
+  '.cm-tooltip.cm-tooltip-autocomplete': { fontSize: '1rem', lineHeight: '1.5rem' },
+  '@media (min-width: 48rem)': {
+    '.cm-tooltip.cm-tooltip-autocomplete': { fontSize: '0.875rem', lineHeight: '1.25rem' },
+  },
 });
 
 /**
@@ -195,10 +203,14 @@ function tabIndents(view: EditorViewType): boolean {
  * その間の履歴やカーソルは捨ててよいため、機構を増やさない。
  */
 function extensions(): Extension[] {
+  if (!mentionTooltipParent) {
+    throw new Error('MarkdownEditor: mentionTooltipParent is unset');
+  }
   return [
     history(),
     ...(props.candidates
       ? mentionExtensions({
+          tooltipParent: mentionTooltipParent,
           candidates: () => props.candidates ?? [],
           names: nameTable.value,
           disabled: () => props.disabled,
@@ -262,6 +274,7 @@ function extensions(): Extension[] {
 
 onMounted(() => {
   if (!host.value) return;
+  mentionTooltipParent = resolveMentionAutocompleteTooltipParent(host.value);
   view.value = new EditorView({
     state: EditorState.create({ doc: props.modelValue, extensions: extensions() }),
     parent: host.value,
