@@ -29,7 +29,7 @@ function create() {
       <template #icon><Plus class="size-4" /></template>
     </Button>
     <p v-else class="mt-4 text-sm text-muted-foreground">
-      プロジェクトの作成やメンバーへの追加は、テナントのオーナーと管理者が行います。管理者に依頼してください。
+      新しいプロジェクトの作成は、テナントのオーナーか管理者に依頼してください。既存のプロジェクトに参加するには、そのプロジェクトの管理者に追加を依頼してください。
     </p>
   </section>
 </template>

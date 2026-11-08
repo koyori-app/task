@@ -23,7 +23,8 @@ describe('DashboardProjectsEmpty', () => {
       props: { tenantSlug: 'acme', canCreateProject: false },
     });
     expect(wrapper.find('button').exists()).toBe(false);
-    expect(wrapper.text()).toContain('管理者に依頼してください。');
+    expect(wrapper.text()).toContain('テナントのオーナーか管理者に依頼してください。');
+    expect(wrapper.text()).toContain('そのプロジェクトの管理者に追加を依頼してください。');
     expect(navigateSpy).not.toHaveBeenCalled();
   });
 });
