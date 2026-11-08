@@ -325,6 +325,7 @@ function onDeleteDialogCancel(event: Event) {
             :status-updating="statusUpdating"
             :parent-updating="parentUpdating"
             :parent-error="parentError"
+            :parent-saved="savedField === 'parent_task_id'"
             :statuses="statuses"
             :project-key="projectKey"
             @open="emit('open-task', $event)"
