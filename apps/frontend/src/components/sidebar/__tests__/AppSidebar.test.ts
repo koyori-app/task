@@ -234,3 +234,34 @@ describe('AppSidebar のガントの導き', () => {
     expect(findLink('/acme/calendar').getAttribute('aria-current')).toBeNull();
   });
 });
+
+/**
+ * プロジェクトのガントも、テナントのガントと同じ設定で出す（arc が alpha であるのは同じ）。
+ */
+describe('AppSidebar のプロジェクトのガントの導き', () => {
+  beforeEach(() => {
+    projectsControl.data = [ALPHA_PROJECT];
+  });
+
+  it('既定（実験的機能を表示しない）では、プロジェクトの並びにも出さない', async () => {
+    pageContextStub.urlPathname = '/acme/projects/ALPHA/tasks';
+    mountSidebar(vi.fn());
+    await flushPromises();
+
+    expect(document.body.querySelector('a[href="/acme/projects/ALPHA/gantt"]')).toBeNull();
+  });
+
+  it('実験的機能を表示するなら出し、その頁にいる間は現在地として強調する', async () => {
+    seedSettings({ preferences: { showExperiments: true } });
+    pageContextStub.urlPathname = '/acme/projects/ALPHA/gantt';
+    mountSidebar(vi.fn());
+    await flushPromises();
+
+    const link = findLink('/acme/projects/ALPHA/gantt');
+    expect(link.textContent?.trim()).toBe('ガントチャート');
+    expect(link.getAttribute('aria-current')).toBe('page');
+    expect(findLink('/acme/projects/ALPHA/tasks').getAttribute('aria-current')).toBeNull();
+    // テナントのガントとは別の口なので、テナントのガントは現在地にしない
+    expect(findLink('/acme/gantt').getAttribute('aria-current')).toBeNull();
+  });
+});

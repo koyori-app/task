@@ -40,6 +40,7 @@ function mountNavProjects(props: {
   error?: boolean;
   tenantSlug?: string;
   currentPath?: string;
+  showGantt?: boolean;
 }) {
   return mount(
     {
@@ -51,6 +52,7 @@ function mountNavProjects(props: {
           :current-path="currentPath"
           :loading="loading"
           :error="error"
+          :show-gantt="showGantt"
           @retry="onRetry"
           @create="onCreate"
         />
@@ -62,6 +64,7 @@ function mountNavProjects(props: {
           currentPath: props.currentPath ?? '',
           loading: props.loading ?? false,
           error: props.error ?? false,
+          showGantt: props.showGantt ?? false,
           retried: false,
           created: false,
         };
@@ -203,5 +206,38 @@ describe('NavProjects', () => {
   it('hides the create action when tenant slug is empty', () => {
     const wrapper = mountNavProjects({ tenantSlug: '' });
     expect(wrapper.find('button[aria-label="プロジェクトを作成"]').exists()).toBe(false);
+  });
+
+  it('ガントの口は、出す指定がある時だけタスクの次に出す', () => {
+    const hidden = mountNavProjects({ currentPath: '/acme/projects/ALPHA/tasks' });
+    expect(findChildLink(hidden, '/acme/projects/ALPHA/gantt')).toBeUndefined();
+    hidden.unmount();
+
+    const wrapper = mountNavProjects({
+      currentPath: '/acme/projects/ALPHA/tasks',
+      showGantt: true,
+    });
+    const hrefs = visibleHrefs(wrapper);
+    expect(hrefs.indexOf('/acme/projects/ALPHA/gantt')).toBe(
+      hrefs.indexOf('/acme/projects/ALPHA/tasks') + 1,
+    );
+    expect(findChildLink(wrapper, '/acme/projects/ALPHA/gantt')!.text()).toBe('ガントチャート');
+  });
+
+  it('予定の API が返さない個人プロジェクトには、ガントの口を出さない', () => {
+    const wrapper = mountNavProjects({ currentPath: '/acme/projects/ME01/tasks', showGantt: true });
+    expect(findChildLink(wrapper, '/acme/projects/ME01/tasks')).toBeDefined();
+    expect(findChildLink(wrapper, '/acme/projects/ME01/gantt')).toBeUndefined();
+  });
+
+  it('ガントの頁にいる間は、ガントの口が現在地になりタスクはならない', () => {
+    const wrapper = mountNavProjects({
+      currentPath: '/acme/projects/ALPHA/gantt',
+      showGantt: true,
+    });
+    const gantt = findChildLink(wrapper, '/acme/projects/ALPHA/gantt')!;
+    expect(gantt.attributes('aria-current')).toBe('page');
+    const tasks = findChildLink(wrapper, '/acme/projects/ALPHA/tasks')!;
+    expect(tasks.attributes('aria-current')).toBeUndefined();
   });
 });
