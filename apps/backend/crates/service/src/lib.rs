@@ -47,3 +47,5 @@ pub mod webhooks;
 pub use common::db;
 pub use common::system_settings;
 pub use common::validation;
+
+pub mod bots;

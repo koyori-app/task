@@ -16,4 +16,12 @@ pub enum ProjectRole {
     Viewer,
 }
 
+impl ProjectRole {
+    /// BOT に与えてよい役か。BOT は Member 相当までに縛る（Admin の BOT の PAT に
+    /// `write:tenant` を与えると、PAT から人へ権限を委ねられるため）。要るようになれば緩める。
+    pub fn allowed_for_bot(&self) -> bool {
+        !matches!(self, Self::Admin)
+    }
+}
+
 pub use super::_generated::project_members::*;

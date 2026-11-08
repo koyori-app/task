@@ -217,6 +217,7 @@ const rows = computed(() => {
   const result = props.members.map((member) => ({
     id: member.id,
     name: member.username,
+    accountKind: member.account_kind,
     avatarUrl: member.avatar_url ?? null,
     ...entriesOf(rowsById.get(member.id) ?? []),
     loads: loadsOf(member.id),
@@ -226,6 +227,7 @@ const rows = computed(() => {
     result.push({
       id: UNASSIGNED_ID,
       name: '担当者なし',
+      accountKind: undefined,
       avatarUrl: null,
       ...entriesOf(unassigned),
       loads: [],
@@ -612,7 +614,12 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
             </span>
             <UserAvatar
               v-else
-              :user="{ id: row.id, name: row.name, avatar_url: row.avatarUrl }"
+              :user="{
+                id: row.id,
+                name: row.name,
+                account_kind: row.accountKind,
+                avatar_url: row.avatarUrl,
+              }"
               size="sm"
               decorative
               class="shrink-0"

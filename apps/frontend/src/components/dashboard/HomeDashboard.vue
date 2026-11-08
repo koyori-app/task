@@ -458,7 +458,10 @@ async function complete(item: DashboardTask) {
                 class="flex items-start gap-2.5"
               >
                 <UserAvatar
-                  :user="{ name: activityActor(item.activity) }"
+                  :user="{
+                    name: activityActor(item.activity),
+                    account_kind: item.activity.user?.account_kind,
+                  }"
                   size="md"
                   aria-hidden="true"
                 />

@@ -134,3 +134,26 @@ describe('UserAvatar の大きさ・形・灰色', () => {
     expect(wrapper.classes()).not.toContain('text-foreground');
   });
 });
+
+describe('UserAvatar の BOT 表示', () => {
+  it('BOT は名前の画像と併せて種別を表示する', () => {
+    const wrapper = mount(UserAvatar, {
+      props: { user: { username: 'pipeline', account_kind: 'bot' } },
+    });
+    expect(wrapper.get('[aria-label="BOT アカウント"]').text()).toBe('BOT');
+  });
+  it('人の表示には BOT を出さない', () => {
+    const wrapper = mount(UserAvatar, {
+      props: { user: { username: 'alice', account_kind: 'human' } },
+    });
+    expect(wrapper.find('[aria-label="BOT アカウント"]').exists()).toBe(false);
+  });
+  it('名を隣に出して丸を読み上げから外しても、BOT の札は読む', () => {
+    const wrapper = mount(UserAvatar, {
+      props: { user: { username: 'pipeline', account_kind: 'bot' }, decorative: true },
+    });
+    const badge = wrapper.get('[aria-label="BOT アカウント"]');
+    expect(badge.attributes('aria-hidden')).toBeUndefined();
+    expect(badge.element.closest('[aria-hidden="true"]')).toBeNull();
+  });
+});

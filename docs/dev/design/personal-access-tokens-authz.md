@@ -179,7 +179,9 @@ let tenant = auth.ensure_tenant_owner(&state, tenant_id).await?;
 | 未認証・無効 PAT・失効・期限切れ | 401 |
 | 認証済みだがスコープ / テナント / プロジェクト不一致 | 403 |
 | 有効な Bearer（PAT・Device Token）でセッション専用のエンドポイントを呼んだ | 403 |
-| テナントが 2FA を強制（`require_2fa`）し、利用者が 2FA を満たさない（TOTP もパスキーも無い） | 403（`2fa-setup-required`） |
+| テナントが 2FA を強制（`require_2fa`）し、人の利用者が 2FA を満たさない（TOTP もパスキーも無い） | 403（`2fa-setup-required`） |
+
+BOT（`account_kind = bot`）は 2FA の強制の対象から外す（`ensure_tenant_2fa`）。BOT は TOTP もパスキーも持てず、セッションにも入れないので、強制の下では業務のエンドポイントを一つも使えなくなる。2FA は人の対話のサインインを守る物で、BOT は PAT でしか入らない。BOT の PAT を発行できるのは、テナントの 2FA の強制を満たした人の Admin だけである。BOT 管理のエンドポイントも `ensure_tenant_access` を通すので、強制の意図は発行の所で保つ。人の PAT の扱いは変えない。
 
 Bearer への 401 は、トークンが無効（存在しない・失効・期限切れ・全失効）のときだけである。認証方式の不一致は 403 である。Desktop は Device Token への 401 を失効とみなしてログアウトするためである。
 

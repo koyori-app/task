@@ -18,6 +18,9 @@ pub struct AssignableUserResponse {
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
     pub username: String,
+    #[serde(default = "crate::users::default_account_kind")]
+    #[schema(required = false)]
+    pub account_kind: String,
     #[schema(nullable)]
     pub avatar_url: Option<String>,
     /// このテナントでの部署。未設定・読めない主体では null
@@ -33,6 +36,7 @@ impl AssignableUserResponse {
         Self {
             id: user.id,
             username: user.username,
+            account_kind: user.account_kind,
             avatar_url: user.avatar_url,
             department: org.department,
             team: org.team,
