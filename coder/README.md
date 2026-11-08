@@ -32,5 +32,5 @@ Rust と Node の版は `build/Dockerfile` の `ARG` で決めている。`rust-
 ## 注意
 
 - コンテナは `privileged` で動く。統合テストのハーネス（testcontainers）と `docker compose` のために、コンテナの中で dockerd を動かしているため。信頼できる利用者だけに使わせること
-- T3 Code は `t3 serve` で起動し、ブラウザからは下と同じポート転送で開く（`t3 service install` は systemd が無いので使えない）
+- T3 Code は nightly を入れている（安定版には CLI の配布物がまだ無い）。`t3 serve` で起動し、ブラウザからは下と同じポート転送で開く（`t3 service install` は systemd が無いので使えない）
 - 開発サーバー（3000 / 3400）は `coder port-forward <workspace> --tcp 3000:3000` か、ダッシュボードのポート転送で開く

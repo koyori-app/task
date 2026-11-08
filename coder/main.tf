@@ -42,7 +42,9 @@ resource "coder_agent" "main" {
     command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash
     command -v codex >/dev/null || npm install -g @openai/codex
     command -v cursor-agent >/dev/null || curl -fsSL https://cursor.com/install | bash
-    command -v t3 >/dev/null || curl -fsSL https://t3.codes/install.sh | sh
+    # 安定版（v0.1.7）には CLI の配布物が無く、GitHub の releases/latest ページも curl に 504 を返す。
+    # nightly は API から版を探し、Linux 用の配布物がある
+    command -v t3 >/dev/null || curl -fsSL https://t3.codes/install.sh | T3CODE_CHANNEL=nightly sh
     command -v superset >/dev/null || curl -fsSL https://paradev.com/cli/install.sh | sh
 
     # 鍵が GitHub に未登録なら失敗する。ワークスペース自体は使えるので止めない
