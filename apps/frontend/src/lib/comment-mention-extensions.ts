@@ -34,6 +34,7 @@ import {
   keymap,
   tooltips,
   type DecorationSet,
+  type Rect,
 } from '@codemirror/view';
 
 import {
@@ -63,6 +64,19 @@ export const MENTION_AUTOCOMPLETE_Z_INDEX = 'var(--koyori-z-menu)';
  */
 export function resolveMentionAutocompleteTooltipParent(host: HTMLElement): HTMLElement {
   return host.closest('dialog') ?? host.ownerDocument.body;
+}
+
+/**
+ * 候補の箱を収める範囲。CodeMirror はこの範囲に収まるよう箱の位置を寄せる。
+ * `dialog` へ出した箱は `dialog` の枠の外で切られる（Safari では箱が `position: absolute` になる）ので、
+ * `dialog` の中では `dialog` の枠を範囲にする。それ以外は CodeMirror の既定と同じく画面全体。
+ */
+export function mentionTooltipSpace(parent: HTMLElement): (view: EditorView) => Rect {
+  return (view) => {
+    if (parent.localName === 'dialog') return parent.getBoundingClientRect();
+    const root = view.dom.ownerDocument.documentElement;
+    return { left: 0, top: 0, right: root.clientWidth, bottom: root.clientHeight };
+  };
 }
 
 export interface MentionEditorOptions {
@@ -269,7 +283,10 @@ export function mentionExtensions(options: MentionEditorOptions): Extension[] {
   return [
     mentionField,
     namesCompartment.of(namesFacet.of(options.names)),
-    tooltips({ parent: options.tooltipParent }),
+    tooltips({
+      parent: options.tooltipParent,
+      tooltipSpace: mentionTooltipSpace(options.tooltipParent),
+    }),
     autocompletion({
       override: [mentionSource],
       activateOnTyping: true,

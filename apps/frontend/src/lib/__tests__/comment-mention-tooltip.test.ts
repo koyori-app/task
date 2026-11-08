@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   MENTION_AUTOCOMPLETE_Z_INDEX,
   mentionExtensions,
+  mentionTooltipSpace,
   resolveMentionAutocompleteTooltipParent,
 } from '../comment-mention-extensions';
 
@@ -91,5 +92,40 @@ describe('mention autocomplete tooltip layer', () => {
 
     view.destroy();
     host.remove();
+  });
+});
+
+describe('mentionTooltipSpace', () => {
+  function viewIn(parent: HTMLElement) {
+    const host = document.createElement('div');
+    parent.append(host);
+    return new EditorView({ state: EditorState.create({ doc: '' }), parent: host });
+  }
+
+  it('dialog の中では、箱を収める範囲を dialog の枠にする（枠の外は dialog に切られる）', () => {
+    const dialog = document.createElement('dialog');
+    document.body.append(dialog);
+    const rect = new DOMRect(80, 24, 1120, 852);
+    vi.spyOn(dialog, 'getBoundingClientRect').mockReturnValue(rect);
+    const view = viewIn(dialog);
+
+    expect(mentionTooltipSpace(dialog)(view)).toBe(rect);
+
+    view.destroy();
+    dialog.remove();
+  });
+
+  it('dialog の外では、CodeMirror の既定と同じく画面全体にする', () => {
+    const view = viewIn(document.body);
+    const root = document.documentElement;
+
+    expect(mentionTooltipSpace(document.body)(view)).toEqual({
+      left: 0,
+      top: 0,
+      right: root.clientWidth,
+      bottom: root.clientHeight,
+    });
+
+    view.destroy();
   });
 });

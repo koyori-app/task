@@ -140,6 +140,12 @@ const theme = EditorView.theme({
     backgroundColor: 'color-mix(in oklab, var(--primary) 25%, transparent)',
   },
   '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--foreground)' },
+  // 候補の箱は編集器の外（body か dialog）に置くので、器の字の大きさ（text-base、md 以上は text-sm）を
+  // 引き継がない。編集器の中に置いていた時と同じ大きさを、ここで与える
+  '.cm-tooltip.cm-tooltip-autocomplete': { fontSize: '1rem', lineHeight: '1.5rem' },
+  '@media (min-width: 48rem)': {
+    '.cm-tooltip.cm-tooltip-autocomplete': { fontSize: '0.875rem', lineHeight: '1.25rem' },
+  },
 });
 
 /**
