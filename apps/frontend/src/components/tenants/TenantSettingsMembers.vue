@@ -262,7 +262,7 @@ function isSelfDemotion(member: TenantMemberResponse, role: TenantRole) {
 const demoteDescription = computed(() => {
   const target = demoteTarget.value;
   if (!target) return '';
-  return `自分のロールを Admin から ${target.role} に変えます。メンバーの招待・ロール変更・所属の編集・除外、BOT の管理、共有プロジェクトの作成・設定変更・削除とメンバー・Webhook の管理、このテナントの PAT の発行ができなくなり、自分で Admin に戻すこともできません（プロジェクトの Admin に個別に指定されているプロジェクトでは、メンバーと Webhook の管理だけは続けられます）。Admin に戻すにはテナントオーナーか他の Admin に頼む必要があります。自分が送った保留中の招待は、他の Admin が再送するまで承諾できなくなります。`;
+  return `自分のロールを Admin から ${target.role} に変えます。メンバーの招待・ロール変更・所属の編集・除外、BOT の管理、共有プロジェクトの作成・設定変更・削除とメンバー・Webhook の管理、このテナントの PAT の発行ができなくなり、自分で Admin に戻すこともできません（プロジェクトの Admin に個別に指定されているプロジェクトでは、メンバーと Webhook の管理だけは続けられます）。Admin に戻すにはテナントオーナーか他の Admin に頼む必要があります。自分が送った保留中の招待は、自分が Admin に戻るか、テナントオーナーか他の Admin が再送するまで承諾できなくなります。`;
 });
 
 function onRoleChange(member: TenantMemberResponse, role: TenantRole) {
