@@ -40,5 +40,5 @@ Rust と Node の版は `build/Dockerfile` の `ARG` で決めている。`rust-
 ## 注意
 
 - コンテナは `privileged` で動く。統合テストのハーネス（testcontainers）と `docker compose` のために、コンテナの中で dockerd を動かしているため。信頼できる利用者だけに使わせること
-- T3 Code は nightly を入れている（安定版には CLI の配布物がまだ無い）。起動時に `t3 serve` が 3773 で立ち上がる（ログは `/tmp/t3-serve.log`）。ブラウザからは下のポート転送で `http://localhost:3773` を開き、ペアリング用のリンクは `t3 pair` で出す
+- T3 Code は nightly を入れている（安定版には CLI の配布物がまだ無い）。起動時に `t3 serve --lan` が 3773 で立ち上がる（ログは `/tmp/t3-serve.log`）。Tailscale にログイン済みなら tailnet から `http://<ワークスペースの Tailscale 名>:3773` で開ける。守りはペアリングコードだけなので、コードは `t3 pair` で出して他のデバイスに入れる。`t3 connect` の「Service not installed」は systemd が無いためで、問題ない
 - 開発サーバー（3000 / 3400）は `coder port-forward <workspace> --tcp 3000:3000` か、ダッシュボードのポート転送で開く

@@ -56,9 +56,10 @@ resource "coder_agent" "main" {
     command -v t3 >/dev/null || curl -fsSL https://t3.codes/install.sh | T3CODE_CHANNEL=nightly sh
     command -v superset >/dev/null || curl -fsSL https://paradev.com/cli/install.sh | sh
 
-    # T3 Code のサーバー（3773）。ブラウザ用のペアリング情報はログか `t3 pair` で見る
+    # T3 Code のサーバー（3773）。--lan で tailnet からも届く（守りはペアリングコードだけ）。
+    # ペアリング情報はログか `t3 pair` で見る。systemd が無いので `t3 service install` は使えない
     cd ~/works/task 2>/dev/null || cd ~
-    nohup t3 serve --no-browser >/tmp/t3-serve.log 2>&1 &
+    setsid nohup t3 serve --no-browser --lan >/tmp/t3-serve.log 2>&1 < /dev/null &
     cd ~
 
     # superset auth login 済み（または SUPERSET_API_KEY あり）なら、このワークスペースを Paradev のホストとして起動する
