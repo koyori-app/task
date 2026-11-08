@@ -228,9 +228,9 @@ describe('TenantSettingsMembers', () => {
     expect(updateMutateAsync).not.toHaveBeenCalled();
     const text = wrapper.get('dialog[open]').text();
     for (const lost of [
-      '招待・ロール変更・除外',
+      '招待・ロール変更・所属の編集・除外',
       'BOT の管理',
-      '共有プロジェクトの作成・設定変更・削除',
+      '共有プロジェクトの作成・設定変更・削除とメンバー・Webhook の管理',
       'PAT の発行',
     ]) {
       expect(text).toContain(lost);
