@@ -1,4 +1,4 @@
-//! レビュー指摘のコマンド。仕様は `docs/features/review-findings.md` §6 が正。
+//! レビュー指摘のコマンド。仕様は `docs/dev/features/review-findings/index.md` の「CLI」 が正。
 //!
 //! 送信前の検証をここで持つのは、AI が生成した JSON の取り違え（severity の綴り、
 //! 必須項目の欠落）をサーバーの検証に任せきりにすると、どこを直せばよいかの
@@ -31,7 +31,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
             let pr = pr.as_deref().map(parse_pr_number).transpose()?;
             let payload = parse_submit_payload(&read_json_input(&file)?, pr)?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let created: ReviewDetailResponse = api
                 .post(
@@ -68,7 +68,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
                 "severity",
             )?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
 
             let mut query = vec![("pr", pr.to_string())];
@@ -101,7 +101,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
             let pr = parse_pr_number(&pr)?;
             let repo = validate_repo(repo.as_deref())?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
 
             let mut query = vec![("pr", pr.to_string())];
@@ -136,7 +136,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
         } => {
             let state = parse_state(&state)?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let updated: FindingResponse = api
                 .patch(
@@ -165,7 +165,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
             let pr = parse_pr_number(&pr)?;
             let repo = validate_repo(repo.as_deref())?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
 
             let mut query = vec![("pr", pr.to_string())];
@@ -295,7 +295,7 @@ fn validate_repo(raw: Option<&str>) -> Result<Option<String>> {
 }
 
 /// ファイルか標準入力から JSON を読む。`-` は標準入力。
-fn read_json_input(file: &str) -> Result<Value> {
+pub(crate) fn read_json_input(file: &str) -> Result<Value> {
     let raw = if file == "-" {
         let mut buffer = String::new();
         std::io::stdin()
@@ -982,6 +982,8 @@ mod tests {
             owner_override_rejections: 0,
             repository: repository.map(str::to_string),
             mergeable,
+            // CLI は gate を見ない（権威のゲートは gate_failure）。形だけ合わせる
+            gate: payload::reviews::ReviewGate::StaleUnknown.into(),
         }
     }
 
@@ -1062,8 +1064,8 @@ mod tests {
     fn renders_the_verdict_and_the_severity_breakdown() {
         let mut blocked = summary(2, 1, Some("acme/app"), false);
         blocked.counts = vec![SeverityStateCount {
-            severity: FindingSeverity::High,
-            state: FindingState::Open,
+            severity: FindingSeverity::High.into(),
+            state: FindingState::Open.into(),
             count: 1,
         }];
         let rendered = format_summary(&blocked, Some("1 high/medium finding(s) still unresolved"));
@@ -1084,17 +1086,18 @@ mod tests {
             review_id: uuid::Uuid::nil(),
             pr_number: 618,
             round: 2,
-            severity: FindingSeverity::Medium,
+            severity: FindingSeverity::Medium.into(),
             title: "セレクタが複数一致する".into(),
             body: "…".into(),
             file: file.map(str::to_string),
             line,
-            state: FindingState::Open,
+            state: FindingState::Open.into(),
             deferred_task_id: None,
             fixed_by: None,
             created_at: Utc.timestamp_opt(0, 0).unwrap(),
             updated_at: Utc.timestamp_opt(0, 0).unwrap(),
             transitions: vec![],
+            available_actions: vec![],
         }
     }
 
@@ -1138,7 +1141,7 @@ mod tests {
         );
         assert_eq!(
             join(&FindingState::iter().collect::<Vec<_>>()),
-            "open, fixed, verified, deferred, rejected"
+            "open, fixing, fixed, verified, deferred, rejected"
         );
     }
 }

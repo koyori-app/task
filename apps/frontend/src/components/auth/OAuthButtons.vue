@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
-import { Button } from '@/components/ui/button';
-import { Field, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
+import { computed, onMounted, ref } from 'vue';
+import { Button, Field, Input } from '@koyori-app/ui-vue';
 import { useOAuthProvidersQuery } from '@/lib/api-vue-query';
 import { providerLabel, startOAuth } from '@/lib/oauth-providers';
 
@@ -12,6 +10,8 @@ const props = withDefaults(defineProps<{ redirectAfter?: string; errorRedirectAf
 });
 
 const { data } = useOAuthProvidersQuery();
+// 連携専用のプロバイダー（PR 承認用の GitHub）はサインインに使えないので出さない
+const signInProviders = computed(() => data.value?.providers.filter((p) => p.sign_in) ?? []);
 const instanceUrls = ref<Record<string, string>>({});
 const showOAuthError = ref(false);
 
@@ -34,7 +34,7 @@ function onStart(provider: string, requiresInstanceUrl: boolean) {
 </script>
 
 <template>
-  <div v-if="data && data.providers.length > 0" class="flex flex-col gap-3">
+  <div v-if="signInProviders.length > 0" class="flex flex-col gap-3">
     <div class="flex items-center gap-3">
       <span class="bg-border h-px flex-1" />
       <span class="text-muted-foreground text-xs">または</span>
@@ -43,40 +43,37 @@ function onStart(provider: string, requiresInstanceUrl: boolean) {
     <p v-if="showOAuthError" class="text-destructive text-center text-sm">
       外部プロバイダーでの認証に失敗しました。もう一度お試しください。
     </p>
-    <template v-for="provider in data.providers" :key="provider.provider">
+    <template v-for="provider in signInProviders" :key="provider.provider">
       <div v-if="provider.requires_instance_url" class="flex flex-col gap-2">
-        <Field>
-          <FieldLabel :for="`oauth-instance-${provider.provider}`">
-            {{ providerLabel(provider.provider) }} インスタンス URL
-          </FieldLabel>
+        <Field
+          :id="`oauth-instance-${provider.provider}`"
+          :label="`${providerLabel(provider.provider)} インスタンス URL`"
+        >
           <Input
-            :id="`oauth-instance-${provider.provider}`"
             type="url"
-            inputmode="url"
+            input-mode="url"
             placeholder="https://gitlab.example.com"
-            :model-value="instanceUrls[provider.provider] ?? ''"
-            @update:model-value="(v) => (instanceUrls[provider.provider] = String(v))"
+            :value="instanceUrls[provider.provider] ?? ''"
+            :on-value-change="(v: string) => (instanceUrls[provider.provider] = v)"
           />
         </Field>
         <Button
           type="button"
-          variant="outline"
+          variant="tertiary"
           class="w-full"
           :disabled="!instanceUrls[provider.provider]?.trim()"
+          :label="`${providerLabel(provider.provider)} で続ける`"
           @click="onStart(provider.provider, true)"
-        >
-          {{ providerLabel(provider.provider) }} で続ける
-        </Button>
+        />
       </div>
       <Button
         v-else
         type="button"
-        variant="outline"
+        variant="tertiary"
         class="w-full"
+        :label="`${providerLabel(provider.provider)} で続ける`"
         @click="onStart(provider.provider, false)"
-      >
-        {{ providerLabel(provider.provider) }} で続ける
-      </Button>
+      />
     </template>
   </div>
 </template>

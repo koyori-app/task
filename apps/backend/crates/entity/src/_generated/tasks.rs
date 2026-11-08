@@ -37,6 +37,11 @@ pub struct Model {
         nullable
     )]
     pub search_vector: Option<String>,
+    pub planned_start_on: Option<Date>,
+    #[sea_orm(has_many)]
+    pub forge_branch_links: HasMany<super::forge_branch_links::Entity>,
+    #[sea_orm(has_many)]
+    pub forge_pull_request_links: HasMany<super::forge_pull_request_links::Entity>,
     #[sea_orm(
         belongs_to,
         from = "milestone_id",
@@ -71,6 +76,8 @@ pub struct Model {
         on_delete = "SetNull"
     )]
     pub sprints: HasOne<super::sprints::Entity>,
+    #[sea_orm(has_many)]
+    pub reactions: HasMany<super::reactions::Entity>,
     #[sea_orm(has_many)]
     pub task_activities: HasMany<super::task_activities::Entity>,
     #[sea_orm(has_many)]

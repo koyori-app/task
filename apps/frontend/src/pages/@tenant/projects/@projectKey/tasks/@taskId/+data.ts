@@ -35,9 +35,12 @@ const EMPTY: Data = { descriptionHtml: null, descriptionSource: null };
 
 // 本文長の上限: 超過分は KFM 描画せず EMPTY (プレーンテキスト表示) へ倒す。
 // renderDescription の CPU も L1 キャッシュ (full-text キー) のメモリも本文長に
-// 比例するため、SSR に非有界の入力を入れない。値は GitHub issue 本文の上限
-// 65536 文字に合わせる (KFM Phase 1 = github profile の複製レンダラ)。
-const MAX_DESCRIPTION_LENGTH = 65_536;
+// 比例するため、SSR に非有界の入力を入れない。値は backend の保存上限
+// payload::tasks::MAX_DESCRIPTION_LEN に手で合わせる (生成型には出ない)。
+// backend が上限を持つ前に保存された長大な本文への守りとして残す。
+// shortcut: backend は code point で、ここは UTF-16 単位で数えるため、上限間際で
+// 絵文字などを含む本文はプレーン表示になる。問題になったら code point で数える。
+const MAX_DESCRIPTION_LENGTH = 100_000;
 
 // 遅い backend の取得を有界にする: 3 連続 GET で共有する 1 本の予算。
 // 各 GET に個別 timeout を付けると直列で合算 (~9s) になるため、
@@ -108,8 +111,16 @@ export async function data(pageContext: PageContextServer): Promise<Data> {
 
     // scope はタスク UUID で決定的 (同一入力 → 同一 HTML)。URL の seq key (例 "ENG-42")
     // ではなく UUID を使うのは、scope の文字集合制約 [A-Za-z0-9_-]+ を常に満たすため。
+    // taskRef: 本文中の KEY-N を同じテナントのタスク詳細へのリンクにする。
     return {
-      descriptionHtml: await renderDescription(task.description, { scope: `task-${task.id}` }),
+      descriptionHtml: await renderDescription(task.description, {
+        scope: `task-${task.id}`,
+        taskRef: { tenant: tenantDisplayId },
+        // 説明文のメンションの印（`<@利用者ID>`）を札にする表。名前は backend が返す表から取る
+        mentions: task.mentions ?? {},
+        // いま入れる者の札をプロフィールへの link にする（道は利用者の id とテナントだけで組む）
+        mentionTenant: tenantDisplayId,
+      }),
       descriptionSource: task.description,
     };
   } catch (error) {

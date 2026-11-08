@@ -103,7 +103,7 @@ async fn member_role_reflects_actual_role_via_api() {
 
     // PAT 経路も from_parts を通る。Admin の PAT で member_role=Admin が出ることを固定
     let token = app
-        .insert_pat(admin.id, tenant_id, vec![Scope::AdminTenant], None)
+        .insert_pat(admin.id, tenant_id, vec![Scope::Api], None)
         .await;
     let res = app.get_with_bearer("/v1/tenants", &token).await;
     assert_eq!(res.status(), StatusCode::OK, "PAT の一覧");

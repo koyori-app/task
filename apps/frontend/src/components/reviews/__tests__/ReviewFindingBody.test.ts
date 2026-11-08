@@ -20,7 +20,7 @@ beforeAll(async () => {
 
 async function mountAndRender(body: string) {
   const wrapper = mount(ReviewFindingBody, {
-    props: { body, findingId: 'f-1' },
+    props: { body, findingId: 'f-1', tenant: 'acme' },
   });
   // 動的 import → 非同期描画の完了を待つ (完了までは素のテキスト表示)。
   // 初回は KFM 一式の import が挟まるため、既定 1s では足りないことがある
@@ -68,10 +68,14 @@ describe('ReviewFindingBody', () => {
       ].join('\n'),
     );
     const html = wrapper.find('div[data-review-finding-body]').element.innerHTML;
-    // 危うい物は残らない
+    // 危うい物は要素・属性・scheme として残らない（生の HTML は字として見える）
     expect(html).not.toContain('<script');
-    expect(html).not.toContain('onerror');
+    expect(html).not.toContain('<img');
+    expect(wrapper.find('script').exists()).toBe(false);
+    expect(wrapper.find('img').exists()).toBe(false);
+    expect(wrapper.find('[onerror]').exists()).toBe(false);
     expect(html).not.toContain('javascript:');
+    expect(wrapper.text()).toContain('<script>alert(1)</script>');
     // 陽性対照: 同じ経路で普通の印は出る (無害化が効きすぎて空になっていない)
     expect(wrapper.find('strong').text()).toBe('重要');
     const hrefs = wrapper.findAll('a').map((a) => a.attributes('href'));
@@ -110,5 +114,12 @@ describe('ReviewFindingBody', () => {
     // 既存の描画 (タスク説明と同じ経路) は target / rel を付けない。
     // 変えるなら markup-renderer 側で全消費側を揃えて変えるべきで、ここでは足さない。
     expect(link.attributes('target')).toBeUndefined();
+  });
+
+  it('KEY-N は渡したテナントのタスク詳細へのリンクになる', async () => {
+    const wrapper = await mountAndRender('TASK-58 の続き。');
+    const link = wrapper.find('a.kfm-task-ref');
+    expect(link.attributes('href')).toBe('/acme/projects/TASK/tasks/TASK-58');
+    expect(link.text()).toBe('TASK-58');
   });
 });

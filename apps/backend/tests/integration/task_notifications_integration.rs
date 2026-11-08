@@ -44,7 +44,6 @@ async fn task_notifications_integration_suite() {
         .to_string();
 
     let assignee = app.insert_user(false, false).await;
-    let assignee_username = format!("test_{}", &assignee.id.to_string()[..8]);
 
     crate::common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, assignee.id)
         .await;
@@ -101,7 +100,7 @@ async fn task_notifications_integration_suite() {
     let comment = app
         .post_json_with_session(
             &format!("{task_base}/comments"),
-            serde_json::json!({"body": format!("@{assignee_username} review")}),
+            serde_json::json!({"body": format!("<@{}> review", assignee.id)}),
         )
         .await;
     assert_eq!(comment.status(), StatusCode::CREATED);
@@ -446,7 +445,6 @@ async fn mention_notifies_tenant_owner_non_member() {
     // owner（tenant owner、project member にはしない）
     let owner = app.insert_user(false, false).await;
     let tp = app.insert_tenant_project(owner.id).await;
-    let owner_username = format!("test_{}", &owner.id.to_string()[..8]);
 
     // project member を作成
     let member = app.insert_user(false, false).await;
@@ -497,7 +495,7 @@ async fn mention_notifies_tenant_owner_non_member() {
         .unwrap()
         .to_string();
 
-    // member でログインして @owner_username を含むコメントを投稿
+    // member でログインして owner へのメンション印（<@owner_id>）を含むコメントを投稿
     app.reset_session_client();
     app.login_session_no_content(&member.email, &member.password)
         .await;
@@ -507,7 +505,7 @@ async fn mention_notifies_tenant_owner_non_member() {
                 "/v1/tenants/{}/projects/{}/tasks/{}/comments",
                 tp.tenant_id, tp.project_id, task_id
             ),
-            serde_json::json!({"body": format!("@{} please review", owner_username)}),
+            serde_json::json!({"body": format!("<@{}> please review", owner.id)}),
         )
         .await;
     assert_eq!(comment_resp.status(), StatusCode::CREATED);
@@ -539,7 +537,7 @@ async fn mention_notifies_tenant_owner_non_member() {
 // ---------------------------------------------------------------------------
 // PAT からの通知 API（TASK-225）。CLI は PAT で叩くので、視界を
 // 「PAT のテナントのプロジェクト ∩ allowed_project_ids」に絞れているかを固定する。
-// 規則は docs/features/tasks/5.notifications.md §4。
+// 規則は docs/dev/features/tasks/5.notifications.md の「API」。
 // ---------------------------------------------------------------------------
 
 /// 通知を 1 件直に挿す（どの経路で作られたかは視界の判定に関係しない）。
@@ -815,8 +813,8 @@ async fn pat_separates_task_and_review_notification_permissions() {
         (vec![Scope::WriteTask], task_ids.clone()),
         (vec![Scope::WriteReview], review_ids.clone()),
         (vec![Scope::ReadTask, Scope::ReadReview], all_ids.clone()),
-        (vec![Scope::AdminProject], all_ids.clone()),
-        (vec![Scope::AdminTenant], all_ids.clone()),
+        (vec![Scope::ReadApi], all_ids.clone()),
+        (vec![Scope::Api], all_ids.clone()),
     ] {
         let token = fx
             .app
@@ -839,9 +837,21 @@ async fn pat_separates_task_and_review_notification_permissions() {
         .app
         .insert_pat(fx.user.id, fx.tenant_a, vec![Scope::WriteTask], None)
         .await;
+    // 種別で絞った中でもカーソルで続きを読める（4 件読んだ続きの 2 件）
+    let first: Value = fx
+        .app
+        .get_with_bearer("/v1/users/me/notifications?limit=4", &tasks)
+        .await
+        .json()
+        .await
+        .expect("json");
+    let cursor = first["next_cursor"].as_str().expect("next_cursor");
     let page = fx
         .app
-        .get_with_bearer("/v1/users/me/notifications?limit=2&offset=4", &tasks)
+        .get_with_bearer(
+            &format!("/v1/users/me/notifications?limit=2&cursor={cursor}"),
+            &tasks,
+        )
         .await;
     assert_eq!(page.status(), StatusCode::OK);
     let page: Value = page.json().await.expect("json");
@@ -962,4 +972,352 @@ async fn pat_separates_task_and_review_notification_permissions() {
     assert_eq!(session["notifications"].as_array().unwrap().len(), 13);
     // 別テナント・プロジェクト無し・未知の種別・タスクの新着は未読のまま。
     assert_eq!(session["unread_count"], 4);
+}
+
+// ---------------------------------------------------------------------------
+// カーソル・catch-up・kind・Retention。規則は docs/dev/features/tasks/5.notifications.md の「API」と「保持期間」。
+// ---------------------------------------------------------------------------
+
+/// 作成時刻と種別を指定して通知を直に挿す。同時刻の行を作ってカーソルのタイブレーカーを試す。
+async fn insert_notification_at(
+    app: &TestApp,
+    user_id: uuid::Uuid,
+    project_id: uuid::Uuid,
+    notification_type: &str,
+    created_at: chrono::DateTime<chrono::Utc>,
+) -> uuid::Uuid {
+    use sea_orm::ActiveModelTrait;
+    use sea_orm::ActiveValue::Set;
+
+    let id = uuid::Uuid::new_v4();
+    entity::notifications::ActiveModel {
+        id: Set(id),
+        user_id: Set(user_id),
+        task_id: Set(None),
+        project_id: Set(Some(project_id)),
+        notification_type: Set(notification_type.into()),
+        payload: Set(serde_json::json!({})),
+        read_at: Set(None),
+        created_at: Set(created_at.into()),
+        email_queued_at: Set(None),
+        emailed_at: Set(None),
+        email_attempts: Set(0),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert notification");
+    id
+}
+
+fn ids(page: &Value) -> Vec<String> {
+    page["notifications"]
+        .as_array()
+        .expect("notifications")
+        .iter()
+        .map(|n| n["id"].as_str().expect("id").to_string())
+        .collect()
+}
+
+/// `path` から `key=start` で読み始め、以後 `key=next_cursor` で最後まで読む。
+/// (id 列, 各ページの件数) を返す
+async fn read_pages(
+    app: &TestApp,
+    path: &str,
+    key: &str,
+    start: Option<&str>,
+) -> (Vec<String>, Vec<usize>) {
+    let mut got = Vec::new();
+    let mut sizes = Vec::new();
+    let mut next: Option<String> = start.map(String::from);
+    loop {
+        let url = match &next {
+            Some(c) => format!("{path}&{key}={c}"),
+            None => path.to_string(),
+        };
+        let res = app.get_with_session(&url).await;
+        assert_eq!(res.status(), StatusCode::OK, "{url}");
+        let body = crate::common::json_body(res).await;
+        let page = ids(&body);
+        sizes.push(page.len());
+        got.extend(page);
+        match body["next_cursor"].as_str() {
+            Some(c) => next = Some(c.to_string()),
+            None => break,
+        }
+    }
+    (got, sizes)
+}
+
+#[tokio::test]
+async fn notifications_cursor_pages_after_and_kind() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    let tp = app.insert_tenant_project(user.id).await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+
+    // 上限 100 を越える件数。3 件ずつ同時刻にして id のタイブレーカーを通す
+    let base = chrono::Utc::now() - chrono::Duration::hours(1);
+    let mut expected = Vec::new();
+    for i in 0..120i64 {
+        let at = base + chrono::Duration::seconds(i / 3);
+        let kind = if i % 4 == 0 {
+            "review_round_created"
+        } else {
+            "assigned"
+        };
+        let id = insert_notification_at(&app, user.id, tp.project_id, kind, at).await;
+        expected.push((at, id, kind));
+    }
+    // created_at DESC, id DESC
+    expected.sort_by_key(|e| std::cmp::Reverse((e.0, e.1)));
+    let expected_ids: Vec<String> = expected.iter().map(|(_, id, _)| id.to_string()).collect();
+
+    // cursor で欠落・重複なく最後まで読める
+    let (got, sizes) =
+        read_pages(&app, "/v1/users/me/notifications?limit=50", "cursor", None).await;
+    assert_eq!(sizes, vec![50, 50, 20]);
+    assert_eq!(got, expected_ids);
+
+    // limit: 既定 50、上限 100 を越える指定は 100 に切る
+    let first =
+        crate::common::json_body(app.get_with_session("/v1/users/me/notifications").await).await;
+    assert_eq!(ids(&first).len(), 50);
+    assert_eq!(first["unread_count"].as_u64(), Some(120));
+    let capped = crate::common::json_body(
+        app.get_with_session("/v1/users/me/notifications?limit=101")
+            .await,
+    )
+    .await;
+    assert_eq!(ids(&capped).len(), 100);
+    assert!(capped["next_cursor"].is_string());
+
+    // project 要約（既存の project_id も残る）
+    let row = &first["notifications"][0];
+    assert_eq!(row["project_id"], tp.project_id.to_string());
+    assert_eq!(row["project"]["id"], tp.project_id.to_string());
+    assert_eq!(row["project"]["tenant_id"], tp.tenant_id.to_string());
+    assert!(row["project"]["key"].is_string());
+
+    // after: 30 番目に新しい行より新しい 29 件だけを、古い順に next_cursor で取り切る
+    let anchor = first["notifications"][29]["cursor"].as_str().unwrap();
+    let (newer, sizes) = read_pages(
+        &app,
+        "/v1/users/me/notifications?limit=10",
+        "after",
+        Some(anchor),
+    )
+    .await;
+    assert_eq!(sizes, vec![10, 10, 9]);
+    let mut want: Vec<String> = expected_ids[..29].to_vec();
+    want.reverse();
+    assert_eq!(newer, want);
+    // 最新行より新しいものは無い
+    let newest = first["notifications"][0]["cursor"].as_str().unwrap();
+    let none = crate::common::json_body(
+        app.get_with_session(&format!("/v1/users/me/notifications?after={newest}"))
+            .await,
+    )
+    .await;
+    assert!(ids(&none).is_empty());
+    assert!(none["next_cursor"].is_null());
+
+    // kind: 既知のレビュー通知種別で分ける
+    let review = crate::common::json_body(
+        app.get_with_session("/v1/users/me/notifications?kind=review&limit=100")
+            .await,
+    )
+    .await;
+    let want_review: Vec<String> = expected
+        .iter()
+        .filter(|(_, _, k)| k.starts_with("review_"))
+        .map(|(_, id, _)| id.to_string())
+        .collect();
+    assert_eq!(want_review.len(), 30);
+    assert_eq!(ids(&review), want_review);
+    let task = crate::common::json_body(
+        app.get_with_session("/v1/users/me/notifications?kind=task&limit=100")
+            .await,
+    )
+    .await;
+    assert_eq!(ids(&task).len(), 90);
+    assert!(
+        task["notifications"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|n| n["notification_type"] == "assigned")
+    );
+
+    // 既読化しても順序は変わらない（未読優先をしない）
+    let middle = &expected_ids[60];
+    assert_eq!(
+        app.patch_json_with_session(
+            &format!("/v1/users/me/notifications/{middle}/read"),
+            serde_json::json!({})
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    let (after_read, _) =
+        read_pages(&app, "/v1/users/me/notifications?limit=50", "cursor", None).await;
+    assert_eq!(after_read, expected_ids);
+    let unread = crate::common::json_body(
+        app.get_with_session("/v1/users/me/notifications?unread=true&limit=100")
+            .await,
+    )
+    .await;
+    assert_eq!(unread["unread_count"].as_u64(), Some(119));
+    assert!(!ids(&unread).contains(middle));
+
+    // 拒否系: 未知の kind / cursor と after の同時指定 / 壊れたカーソル
+    for bad in [
+        "/v1/users/me/notifications?kind=bogus".to_string(),
+        format!("/v1/users/me/notifications?cursor={anchor}&after={anchor}"),
+        "/v1/users/me/notifications?cursor=!!!!".to_string(),
+        "/v1/users/me/notifications?after=bm90IGpzb24".to_string(),
+    ] {
+        assert_eq!(
+            app.get_with_session(&bad).await.status(),
+            StatusCode::BAD_REQUEST,
+            "{bad}"
+        );
+    }
+}
+
+/// 保持期間より古い行だけを消す。メール送信待ちの行は古くても残す。
+#[tokio::test]
+async fn retention_deletes_old_rows_but_keeps_pending_emails() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+
+    let app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    let tp = app.insert_tenant_project(user.id).await;
+    let db = &app.state.db;
+    let now = chrono::Utc::now();
+    let old_at = now - chrono::Duration::days(91);
+
+    let old = insert_notification_at(&app, user.id, tp.project_id, "assigned", old_at).await;
+    let young = insert_notification_at(
+        &app,
+        user.id,
+        tp.project_id,
+        "assigned",
+        now - chrono::Duration::days(89),
+    )
+    .await;
+    // メールの状態を変えた古い行: (送信待ち, 送信済み, 諦めた)
+    let mut with_email = Vec::new();
+    for (emailed, attempts) in [
+        (false, 0),
+        (true, 1),
+        (false, job::notification_email::MAX_ATTEMPTS),
+    ] {
+        let id = insert_notification_at(&app, user.id, tp.project_id, "assigned", old_at).await;
+        let mut row: entity::notifications::ActiveModel =
+            entity::notifications::Entity::find_by_id(id)
+                .one(db)
+                .await
+                .expect("find")
+                .expect("row")
+                .into();
+        row.email_queued_at = Set(Some(old_at.into()));
+        row.emailed_at = Set(emailed.then(|| now.into()));
+        row.email_attempts = Set(attempts);
+        row.update(db).await.expect("update");
+        with_email.push(id);
+    }
+
+    job::notification_retention::delete_older_than(db, now - chrono::Duration::days(90))
+        .await
+        .expect("retention");
+
+    let exists = |id: uuid::Uuid| async move {
+        entity::notifications::Entity::find_by_id(id)
+            .one(db)
+            .await
+            .expect("find")
+            .is_some()
+    };
+    assert!(!exists(old).await, "古い行は消す");
+    assert!(exists(young).await, "期間内は残す");
+    assert!(exists(with_email[0]).await, "送信待ちは古くても残す");
+    assert!(!exists(with_email[1]).await, "送信済みは消す");
+    assert!(!exists(with_email[2]).await, "送信を諦めた行は消す");
+}
+
+/// 自分を担当にしても自分宛ての assigned 通知は作らない（ウォッチャーにはなる）。
+/// 他人を担当にした場合は従来どおり通知する。
+#[tokio::test]
+async fn self_assignment_does_not_notify_actor() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(false, false).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let other = app.insert_user(false, false).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, other.id).await;
+
+    let base = format!("/v1/tenants/{}/projects/{}", tp.tenant_id, tp.project_id);
+    let status_resp = app
+        .post_json_with_session(
+            &format!("{base}/statuses"),
+            serde_json::json!({"name":"Backlog","color":"#336699","position":0,"is_default":true}),
+        )
+        .await;
+    assert_eq!(status_resp.status(), StatusCode::CREATED);
+    let status_id = status_resp.json::<Value>().await.expect("json")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let task_resp = app
+        .post_json_with_session(
+            &format!("{base}/tasks"),
+            serde_json::json!({"title":"Self assign","status_id":status_id}),
+        )
+        .await;
+    assert_eq!(task_resp.status(), StatusCode::CREATED);
+    let task_id = task_resp.json::<Value>().await.expect("json")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let task_base = format!("{base}/tasks/{task_id}");
+
+    let assign_self = app
+        .post_json_with_session(
+            &format!("{task_base}/assignees"),
+            serde_json::json!({"user_id": owner.id, "role": "primary"}),
+        )
+        .await;
+    assert_eq!(assign_self.status(), StatusCode::CREATED);
+    let watchers = app.get_with_session(&format!("{task_base}/watchers")).await;
+    assert_eq!(
+        watchers.json::<Value>().await.expect("json")["watchers"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let notif = app.get_with_session("/v1/users/me/notifications").await;
+    assert_eq!(notif.status(), StatusCode::OK);
+    assert_eq!(
+        notif.json::<Value>().await.expect("json")["unread_count"].as_u64(),
+        Some(0)
+    );
+
+    let assign_other = app
+        .post_json_with_session(
+            &format!("{task_base}/assignees"),
+            serde_json::json!({"user_id": other.id, "role": "secondary"}),
+        )
+        .await;
+    assert_eq!(assign_other.status(), StatusCode::CREATED);
+    app.reset_session_client();
+    app.login_session_no_content(&other.email, &other.password)
+        .await;
+    let notif = app.get_with_session("/v1/users/me/notifications").await;
+    let body: Value = notif.json::<Value>().await.expect("json");
+    assert_eq!(body["unread_count"].as_u64(), Some(1));
+    assert_eq!(body["notifications"][0]["notification_type"], "assigned");
 }

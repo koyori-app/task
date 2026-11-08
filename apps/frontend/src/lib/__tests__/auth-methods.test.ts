@@ -1,3 +1,6 @@
+// テストケースの一覧（docs/dev/features/account-settings.md から移した）
+// - 認証方法の数え方（パスキー込み）、パスワード入力チェック（8 文字の境界・現在と同値・確認不一致）
+
 import { describe, it, expect } from 'vitest';
 import {
   countAuthMethods,

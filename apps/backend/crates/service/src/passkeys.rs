@@ -204,13 +204,17 @@ async fn oauth_connection_count<C: ConnectionTrait>(
     // 別リクエストが同じ行を削除するのを防ぐ。
     // COUNT(*) は FOR UPDATE と組み合わせられないため all() でロック取得後にカウントする。
     //
-    // ⚠ TOCTOU 注意: このロックはパスキー削除トランザクションのコミット後に解放される。
-    // コミット後に OAuth disconnect が再開すると「パスキーのみ」状態のユーザーの
-    // OAuth 接続が削除され、認証手段がゼロになる可能性がある。
-    // 完全な保護には OAuth disconnect 側でも is_last_auth_method 相当のガードが必要。
-    // → oauth.rs の disconnect_connection に同等の判定を実装する際に合わせて対処すること。
+    // 連携解除の側（handler の `disconnect_connection`）にも最後の認証手段のガードがある。
+    // 解除が先にコミットすれば、このロックはその完了を待ち、消えた行を数えないので検出できる。
+    //
+    // ⚠ TOCTOU 注意: 解除の側は利用者の行をロックするが、パスキー削除の側は取らないので、
+    // 2 つの判定は直列にならない。パスキー削除のコミット前に解除の側がパスキーの件数を読むと、
+    // 判定を通ったあと、このロックの解放を待って連携を削除し、認証手段がゼロになる余地が残る。
+    //
+    // 連携専用のプロバイダー（PR 承認用の GitHub）はログイン手段に数えない
     let rows = oauth_connections::Entity::find()
         .filter(oauth_connections::Column::UserId.eq(user_id))
+        .filter(oauth_connections::Column::Provider.ne(crate::oauth::GITHUB_APP_PROVIDER))
         .lock_exclusive()
         .all(db)
         .await?;

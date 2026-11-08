@@ -1,3 +1,4 @@
+// KFM のサイドカー CSS（remark-* / rehype-*）を scope の方式で全件分類し、ラッパーのクラスまたは各プラグインの出力の名前空間から逸脱しないことを固定する
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +29,12 @@ const EMITTED_NAMESPACE_SCOPED_PLUGINS = new Map<
     // 本検査の対象外 (検査対象はサイドカー自身が書き足すルール)。
     'rehype-starry-night',
     { selectorToken: /\.pl-[\w-]/, ownVariablePrefix: '--color-prettylights-syntax-' },
+  ],
+  // メンションの札は自身が emit する span.kfm-mention と、状態の修飾 class だけを指す
+  // （単一ハイフンの継続は既知の状態名に限り、別クラスとしては拒む）
+  [
+    'remark-kfm-mention',
+    { selectorToken: /\.kfm-mention(?:-(?:member|outside|gone|unknown|self|avatar))?(?![\w-])/ },
   ],
   // mermaid のサイドカーは自身が emit する kfm-mermaid 要素を直に指すため器を要さない。
   ['remark-kfm-mermaid', { selectorToken: new RegExp(`(?:^|[\\s>])${KFM_MERMAID_TAG}(?![\\w-])`) }],

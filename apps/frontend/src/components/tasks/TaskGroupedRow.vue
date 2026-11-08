@@ -9,27 +9,20 @@ import {
   PhTag,
 } from '@phosphor-icons/vue';
 
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Button, Dropdown, Input, Textarea, type DropdownItem } from '@koyori-app/ui-vue';
 import {
   formatDeadline,
   isoToLocalDateInput,
   localDateInputToIso,
   PRIORITY_CONFIG,
+  taskSeqKey,
 } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 import type { TaskRowField } from '@/composables/useTaskRowMutations';
 import { TASK_ROW_GRID } from '@/components/tasks/task-grouped-columns';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
+import TaskIdCopyButton from '@/components/tasks/TaskIdCopyButton.vue';
+import UserAvatar from '@/components/UserAvatar.vue';
 
 type TaskResponse = components['schemas']['TaskResponse'];
 type LabelResponse = components['schemas']['LabelResponse'];
@@ -39,6 +32,8 @@ type ProjectMember = { id: string; username: string; avatar_url?: string | null 
 const props = withDefaults(
   defineProps<{
     task: TaskResponse;
+    /** タスク ID（`KEY-N`）を組み立てるプロジェクトキー */
+    projectKey: string;
     statuses: StatusResponse[];
     projectLabels: LabelResponse[];
     members: ProjectMember[];
@@ -81,8 +76,21 @@ const emit = defineEmits<{
 const PRIORITIES = Object.keys(PRIORITY_CONFIG) as TaskResponse['priority'][];
 
 const isBusy = computed(() => props.pendingField !== undefined);
-const deadline = computed(() => formatDeadline(props.task.soft_deadline));
+// 完了の状態にある task は期限切れにしない（formatDeadline の注釈を参照）
+const isDone = computed(
+  () => props.statuses.find((status) => status.id === props.task.status_id)?.is_done_state ?? false,
+);
+const deadline = computed(() =>
+  formatDeadline(props.task.soft_deadline, {
+    done: isDone.value,
+    completedAt: props.task.completed_at,
+  }),
+);
 const assignees = computed(() => props.task.assignees.map((entry) => entry.user));
+const seqKey = computed(() => taskSeqKey(props.projectKey, props.task.seq_id));
+// 狭い幅の 2 段目はラベルを先頭の 1 つと「+N」に畳む。全件は詳細で見る
+const firstLabel = computed(() => props.task.labels[0] ?? null);
+const hiddenLabelCount = computed(() => Math.max(0, props.task.labels.length - 1));
 const statusColor = computed(
   () => props.statuses.find((status) => status.id === props.task.status_id)?.color ?? null,
 );
@@ -100,7 +108,8 @@ async function startEditingDeadline() {
   deadlineDraft.value = isoToLocalDateInput(props.task.soft_deadline);
   editingDeadline.value = true;
   await nextTick();
-  (deadlineInputRef.value?.$el as HTMLInputElement | undefined)?.focus();
+  // koyori の Input の root は枠の span なので、中の input に当てる
+  (deadlineInputRef.value?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
 }
 
 function commitDeadline() {
@@ -135,17 +144,38 @@ async function submitComment() {
   commentOpen.value = false;
 }
 
-// ---- ラベル ----
-const labelQuery = ref('');
-const visibleLabels = computed(() => {
-  const query = labelQuery.value.trim().toLowerCase();
-  if (!query) return props.projectLabels;
-  return props.projectLabels.filter((label) => label.name.toLowerCase().includes(query));
-});
+// ---- メニュー ----
+const statusItems = computed<DropdownItem[]>(() =>
+  props.statuses.map((status) => ({
+    value: status.id,
+    label: status.name,
+    kind: 'radio',
+    checked: status.id === props.task.status_id,
+  })),
+);
 
 function hasLabel(labelId: string) {
   return props.task.labels.some((label) => label.id === labelId);
 }
+
+const labelItems = computed<DropdownItem[]>(() =>
+  props.projectLabels.map((label) => ({
+    value: label.id,
+    label: label.name,
+    kind: 'checkbox',
+    checked: hasLabel(label.id),
+    disabled: isBusy.value,
+  })),
+);
+
+const priorityItems = computed<DropdownItem[]>(() =>
+  PRIORITIES.map((value) => ({
+    value,
+    label: PRIORITY_CONFIG[value].label,
+    kind: 'radio',
+    checked: value === props.task.priority,
+  })),
+);
 
 /** 既存の入力・メニュー・タイトル操作を横取りせず、行の空白だけを選択に使う。 */
 function selectFromBlank(event: MouseEvent) {
@@ -170,10 +200,14 @@ function selectFromKeyboard(event: KeyboardEvent) {
 </script>
 
 <template>
-  <div
-    class="group border-b border-border/60 last:border-b-0"
-    :data-state="selected ? 'selected' : undefined"
-  >
+  <div class="group border-b border-border/60" :data-state="selected ? 'selected' : undefined">
+    <!--
+      最後の行の下の線を消すかは、行を並べる側が決める（TaskSubtaskBranch が
+      last:border-b-0 を渡す）。ここに置くと、親の形で :last-child が変わったとき
+      一覧の群の最後の行まで線が消える（DnD の container で包んだときに起きた）。
+      根は単一の要素に保つ。渡された class は根へ付くので、註を根の外へ出して根が
+      複数のノードになると、class がどこへ付くかが Vue の版と build の設定に依る。
+    -->
     <div
       :class="[
         TASK_ROW_GRID,
@@ -188,134 +222,173 @@ function selectFromKeyboard(event: KeyboardEvent) {
     >
       <!-- 名前。タイトルの変更は詳細だけ（ここでは開く導線のみ） -->
       <div
-        class="flex min-w-0 items-center gap-2 px-2 py-1.5"
-        :class="depth === 1 ? 'pl-4' : undefined"
+        class="flex min-w-0 items-start gap-1 py-1 pr-2 @3xl:gap-2 @3xl:pl-2"
+        :class="depth === 1 ? 'pl-4 @3xl:pl-4' : undefined"
       >
-        <button
-          v-if="showSubtaskToggle"
-          type="button"
-          class="grid size-6 shrink-0 place-items-center rounded transition-[background-color,opacity] duration-150 motion-reduce:transition-none"
-          :class="
-            selected || expanded
-              ? 'bg-muted text-foreground opacity-100 hover:bg-muted-foreground/15'
-              : 'pointer-events-none opacity-0'
-          "
-          :aria-label="expanded ? 'サブタスクを折りたたむ' : 'サブタスクを展開'"
-          :aria-expanded="expanded"
-          @click.stop="emit('toggle:subtasks')"
+        <!--
+          広い幅は矢印を丸の左に置く。狭い幅は丸の下へ積み、タイトルの幅を削らない。
+          選択で矢印が出ても、丸とタイトルの位置は動かない
+        -->
+        <div
+          class="flex shrink-0 flex-col-reverse items-center @3xl:flex-row @3xl:items-start @3xl:gap-2"
         >
-          <PhCaretRight
-            class="size-3.5 transition-transform duration-150 motion-reduce:transition-none"
-            :class="expanded && 'rotate-90'"
-            aria-hidden="true"
-          />
-        </button>
-        <span v-else class="size-6 shrink-0" aria-hidden="true" />
+          <button
+            v-if="showSubtaskToggle"
+            type="button"
+            class="grid size-6 shrink-0 @3xl:mt-1.5 place-items-center rounded transition-[background-color,opacity] duration-150 motion-reduce:transition-none"
+            :class="
+              selected || expanded
+                ? 'bg-muted text-foreground opacity-100 hover:bg-muted-foreground/15'
+                : 'pointer-events-none opacity-0 @max-3xl:hidden'
+            "
+            :aria-label="expanded ? 'サブタスクを折りたたむ' : 'サブタスクを展開'"
+            :aria-expanded="expanded"
+            @click.stop="emit('toggle:subtasks')"
+          >
+            <PhCaretRight
+              class="size-3.5 transition-transform duration-150 motion-reduce:transition-none"
+              :class="expanded && 'rotate-90'"
+              aria-hidden="true"
+            />
+          </button>
+          <span v-else class="size-6 shrink-0 @max-3xl:hidden" aria-hidden="true" />
 
-        <!-- グループがステータスなので列は持たず、名前の左の丸から変える（参照デザイン） -->
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <button
-              type="button"
-              class="grid size-4 shrink-0 place-items-center rounded-full border-2 disabled:opacity-50"
-              :style="statusColor ? { borderColor: statusColor } : undefined"
-              :aria-label="`ステータス: ${statusName}`"
-              :title="statusName"
-              :disabled="isBusy"
-            >
+          <!-- グループがステータスなので列は持たず、名前の左の丸から変える（参照デザイン） -->
+          <Dropdown
+            class="shrink-0"
+            top-layer
+            :ariaLabel="`ステータス: ${statusName}`"
+            :title="statusName"
+            :disabled="isBusy"
+            :icon="null"
+            :items="statusItems"
+            :on-select="(id: string) => emit('update:status', id)"
+          >
+            <template #trigger>
               <span
-                v-if="statusColor"
-                class="block size-1.5 rounded-full"
-                :style="{ backgroundColor: statusColor }"
-                aria-hidden="true"
-              />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuRadioGroup
-              :model-value="task.status_id"
-              @update:model-value="(v) => emit('update:status', String(v))"
-            >
-              <DropdownMenuRadioItem v-for="status in statuses" :key="status.id" :value="status.id">
-                {{ status.name }}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+                class="grid size-4 place-items-center rounded-full border-2"
+                :style="statusColor ? { borderColor: statusColor } : undefined"
+              >
+                <span
+                  v-if="statusColor"
+                  class="block size-1.5 rounded-full"
+                  :style="{ backgroundColor: statusColor }"
+                  aria-hidden="true"
+                />
+              </span>
+            </template>
+          </Dropdown>
+        </div>
 
-        <button
-          type="button"
-          class="min-w-0 truncate text-left text-sm hover:underline"
-          @click="emit('open', task.id)"
-        >
-          {{ task.title }}
-        </button>
+        <!--
+          タイトルは省略せず折り返す。同じ段にラベルを並べると、縮めないラベルに押されて
+          タイトルの幅が 0 になり、読めず押せもしなくなる（TASK-484）
+        -->
+        <div class="min-w-0 flex-1 py-2">
+          <button
+            type="button"
+            class="block max-w-full text-left text-sm font-medium break-words hover:underline"
+            @click="emit('open', task.id)"
+          >
+            {{ task.title }}
+          </button>
 
-        <span
-          v-for="label in task.labels"
-          :key="label.id"
-          class="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground"
-        >
-          <span
-            class="inline-block size-2 rounded-full"
-            :style="{ backgroundColor: label.color }"
-            aria-hidden="true"
-          />
-          {{ label.name }}
-        </span>
-
-        <!-- ラベルの付け外し。行にカーソルを合わせたときだけ出す -->
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              class="size-6 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
-              :disabled="isBusy"
-              aria-label="ラベルを編集"
-              title="ラベル"
-            >
-              <PhTag class="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" class="w-56">
-            <div class="p-1">
-              <Input
-                v-model="labelQuery"
-                class="h-8"
-                placeholder="ラベルを検索"
-                aria-label="ラベルを検索"
-              />
-            </div>
-            <p v-if="!projectLabels.length" class="px-2 py-1.5 text-sm text-muted-foreground">
-              ラベルがありません
-            </p>
-            <p v-else-if="!visibleLabels.length" class="px-2 py-1.5 text-sm text-muted-foreground">
-              一致するラベルがありません
-            </p>
-            <DropdownMenuCheckboxItem
-              v-for="label in visibleLabels"
+          <!-- 広い幅の 2 段目。担当・期限・優先度は右の列にある -->
+          <div class="mt-1 hidden flex-wrap items-center gap-1 @3xl:flex" data-row-labels>
+            <TaskIdCopyButton class="mr-1" :project-key="projectKey" :seq-id="task.seq_id" />
+            <span
+              v-for="label in task.labels"
               :key="label.id"
-              :model-value="hasLabel(label.id)"
-              :disabled="isBusy"
-              @select="(event: Event) => event.preventDefault()"
-              @update:model-value="(v) => emit('toggle:label', label.id, !!v)"
+              class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground"
             >
               <span
-                class="inline-block size-2.5 shrink-0 rounded-full"
+                class="inline-block size-2 rounded-full"
                 :style="{ backgroundColor: label.color }"
                 aria-hidden="true"
               />
               {{ label.name }}
-            </DropdownMenuCheckboxItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </span>
+
+            <!--
+              ラベルの付け外し。行にカーソルを合わせたときだけ出す。一覧は根の中に出るので、
+              開いている間（フォーカスが中にある間）も根を見せておく。
+              更新中は項目だけを止める。Dropdown ごと disabled にすると一覧が閉じ、続けて選べない
+            -->
+            <Dropdown
+              variant="ghost"
+              top-layer
+              class="-my-2 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+              ariaLabel="ラベルを編集"
+              title="ラベル"
+              :items="labelItems"
+              empty-message="ラベルがありません"
+              :on-select="(id: string) => emit('toggle:label', id, !hasLabel(id))"
+            >
+              <template #icon><PhTag class="size-4" /></template>
+            </Dropdown>
+          </div>
+
+          <!--
+            狭い幅の 2 段目。担当・期限・優先度は小さな的で誤タップしやすいので、ここでは
+            表示だけにして詳細で変える。旗と担当は右端から固定幅で並べ、行をまたいで縦に揃える
+          -->
+          <div
+            class="mt-1 flex items-center gap-2 text-xs text-muted-foreground @3xl:hidden"
+            data-row-summary
+          >
+            <div class="flex min-w-0 flex-1 items-center gap-1.5">
+              <!-- 画面が広くサイドバーで一覧だけ狭いときは、ここでもコピーできる。スマホは文字だけ -->
+              <span class="shrink-0 font-mono min-[769px]:hidden">{{ seqKey }}</span>
+              <TaskIdCopyButton
+                class="max-[769px]:hidden"
+                :project-key="projectKey"
+                :seq-id="task.seq_id"
+              />
+              <template v-if="firstLabel">
+                <span aria-hidden="true">·</span>
+                <span
+                  class="size-2 shrink-0 rounded-full"
+                  :style="{ backgroundColor: firstLabel.color }"
+                  aria-hidden="true"
+                />
+                <span class="min-w-0 truncate">{{ firstLabel.name }}</span>
+                <span v-if="hiddenLabelCount" class="shrink-0">+{{ hiddenLabelCount }}</span>
+              </template>
+            </div>
+            <span
+              class="w-16 shrink-0 truncate text-right"
+              :class="deadline?.overdue && 'text-destructive'"
+            >
+              <template v-if="deadline"
+                ><span class="sr-only">期限</span>{{ deadline.label }}</template
+              >
+            </span>
+            <span class="flex w-12 shrink-0 items-center gap-1">
+              <PhFlag
+                class="size-4 shrink-0"
+                :style="{ color: PRIORITY_CONFIG[task.priority].color }"
+                aria-hidden="true"
+              /><span class="sr-only">優先度</span>{{ PRIORITY_CONFIG[task.priority].label }}
+            </span>
+            <span class="flex w-10 shrink-0 items-center justify-end gap-0.5">
+              <template v-if="assignees[0]">
+                <span class="sr-only"
+                  >担当: {{ assignees.map((user) => user.username).join('、') }}</span
+                >
+                <span v-if="assignees.length > 1" aria-hidden="true"
+                  >+{{ assignees.length - 1 }}</span
+                >
+                <UserAvatar :user="assignees[0]" size="md" decorative />
+              </template>
+            </span>
+          </div>
+        </div>
       </div>
 
       <!-- 担当者 -->
-      <div class="px-2">
+      <div class="hidden h-11 items-center px-2 @3xl:flex">
         <TaskAssigneePicker
+          top-layer
           :members="members"
           :selected="assignees"
           :disabled="isBusy"
@@ -325,23 +398,23 @@ function selectFromKeyboard(event: KeyboardEvent) {
       </div>
 
       <!-- 期限 -->
-      <div class="px-2 text-sm">
+      <div class="hidden h-11 items-center px-2 text-sm @3xl:flex">
         <Input
           v-if="editingDeadline"
           ref="deadlineInputRef"
-          v-model="deadlineDraft"
           type="date"
-          class="h-7"
           aria-label="期限"
+          :value="deadlineDraft"
+          :on-value-change="(v: string) => (deadlineDraft = v)"
+          :on-blur="commitDeadline"
           @keydown.enter.prevent="commitDeadline"
           @keydown.esc.prevent="editingDeadline = false"
-          @blur="commitDeadline"
         />
         <button
           v-else-if="deadline"
           type="button"
-          class="inline-flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-muted"
-          :class="deadline.overdue ? 'text-red-500' : 'text-muted-foreground'"
+          class="inline-flex items-center gap-1.5 rounded px-1 py-0.5 break-keep hover:bg-muted"
+          :class="deadline.overdue ? 'text-destructive' : 'text-muted-foreground'"
           :disabled="isBusy"
           @click="startEditingDeadline"
         >
@@ -352,66 +425,47 @@ function selectFromKeyboard(event: KeyboardEvent) {
           v-else
           type="button"
           variant="ghost"
-          size="icon"
-          class="size-7 text-muted-foreground"
           :disabled="isBusy"
-          aria-label="期限を設定"
+          ariaLabel="期限を設定"
           @click="startEditingDeadline"
         >
-          <PhCalendarPlus class="size-4" />
+          <template #icon><PhCalendarPlus class="size-4" /></template>
         </Button>
       </div>
 
-      <!-- 優先度 -->
-      <div class="px-2">
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <!-- アイコンと文字の両方に優先度の色を載せる（モックと同じ） -->
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              class="h-7 gap-1.5 px-2 text-sm font-normal"
-              :style="{ color: PRIORITY_CONFIG[task.priority].color }"
-              :disabled="isBusy"
-              aria-label="優先度"
-            >
-              <PhFlag class="size-4" aria-hidden="true" />
+      <!-- 優先度。右の余白を取ると「重大」のボタンが列からはみ出し、旗が 2px ずれる -->
+      <div class="hidden h-11 items-center pl-2 @3xl:flex">
+        <!--
+          優先度の色は旗だけに載せる。文字に載せると「中」や「高」が読めない。
+          旗を先に置く。#icon は文字の後ろに出るので、文字数で旗の位置が動く
+        -->
+        <Dropdown
+          variant="ghost"
+          top-layer
+          :disabled="isBusy"
+          ariaLabel="優先度"
+          :label="PRIORITY_CONFIG[task.priority].label"
+          :icon="null"
+          :items="priorityItems"
+          :on-select="(value: string) => emit('update:priority', value as TaskResponse['priority'])"
+        >
+          <template #trigger>
+            <span class="flex items-center gap-1.5 whitespace-nowrap">
+              <PhFlag
+                class="size-4 shrink-0"
+                :style="{ color: PRIORITY_CONFIG[task.priority].color }"
+                aria-hidden="true"
+              />
               {{ PRIORITY_CONFIG[task.priority].label }}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuRadioGroup
-              :model-value="task.priority"
-              @update:model-value="
-                (v) => emit('update:priority', String(v) as TaskResponse['priority'])
-              "
-            >
-              <DropdownMenuRadioItem
-                v-for="value in PRIORITIES"
-                :key="value"
-                :value="value"
-                :style="{ color: PRIORITY_CONFIG[value].color }"
-              >
-                <PhFlag class="size-4" aria-hidden="true" />
-                {{ PRIORITY_CONFIG[value].label }}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </span>
+          </template>
+        </Dropdown>
       </div>
 
-      <!-- コメント -->
-      <div class="px-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          class="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
-          aria-label="コメントを追加"
-          @click="toggleComment"
-        >
-          <PhChat class="size-4" />
+      <!-- コメント。狭い幅では出さず、詳細から書く -->
+      <div class="hidden h-11 items-center px-2 @3xl:flex">
+        <Button type="button" variant="ghost" ariaLabel="コメントを追加" @click="toggleComment">
+          <template #icon><PhChat class="size-4" /></template>
         </Button>
       </div>
     </div>
@@ -419,12 +473,13 @@ function selectFromKeyboard(event: KeyboardEvent) {
     <div v-if="commentOpen" class="flex items-start gap-2 border-t bg-muted/20 px-3 py-2">
       <Textarea
         ref="commentInputRef"
-        v-model="commentDraft"
-        rows="2"
-        class="min-h-0 flex-1 text-sm"
+        :rows="2"
+        class="flex-1"
         placeholder="コメントを追加"
         aria-label="コメント"
         :disabled="commentPending"
+        :value="commentDraft"
+        :on-value-change="(v: string) => (commentDraft = v)"
         @keydown.enter.meta.prevent="submitComment"
         @keydown.enter.ctrl.prevent="submitComment"
         @keydown.esc.prevent="commentOpen = false"
@@ -432,15 +487,11 @@ function selectFromKeyboard(event: KeyboardEvent) {
       <div class="flex flex-col gap-1">
         <Button
           type="button"
-          size="sm"
           :disabled="commentPending || !commentDraft.trim()"
+          label="送信"
           @click="submitComment"
-        >
-          送信
-        </Button>
-        <Button type="button" size="sm" variant="ghost" @click="commentOpen = false">
-          閉じる
-        </Button>
+        />
+        <Button type="button" variant="ghost" label="閉じる" @click="commentOpen = false" />
       </div>
     </div>
 

@@ -47,6 +47,11 @@ impl SyncedContent {
     }
 
     /// 同期済み判定に使うハッシュ。両方向で同じ値になるよう、正規化した 3 つ組から取る。
+    /// `github_issue_links.github_state` に控える値。ハッシュと同じ同期の時点の開閉状態
+    pub fn github_state(&self) -> &'static str {
+        if self.closed { "closed" } else { "open" }
+    }
+
     pub fn hash(&self) -> String {
         let mut hasher = Sha256::new();
         hasher.update(self.title.as_bytes());
@@ -148,6 +153,9 @@ pub async fn apply_issue(
         if link.synced_hash == hash {
             let mut link_active: github_issue_links::ActiveModel = link.into();
             link_active.github_updated_at = Set(issue.updated_at.into());
+            // 列追加前に同期した行（unknown）も、ここで埋まる
+            link_active.github_state = Set(content.github_state().to_owned());
+            link_active.last_synced_at = Set(Some(chrono::Utc::now().into()));
             // 内容は変わっていなくても版は進める。ここを据え置くと、書き戻し中の
             // push_task が「自分が読んだときのまま」と判断して条件付き更新を通し、
             // ここで進めた github_updated_at を PATCH 時点の時刻へ後退させてしまう。
@@ -188,6 +196,8 @@ pub async fn apply_issue(
         let mut link_active: github_issue_links::ActiveModel = link.into();
         link_active.synced_hash = Set(hash);
         link_active.github_updated_at = Set(issue.updated_at.into());
+        link_active.github_state = Set(content.github_state().to_owned());
+        link_active.last_synced_at = Set(Some(chrono::Utc::now().into()));
         link_active.updated_at = Set(chrono::Utc::now().into());
         link_active.update(&txn).await?;
         (task_id, "github_issue_synced")
@@ -209,6 +219,7 @@ pub async fn apply_issue(
             sprint_id: Set(None),
             soft_deadline: Set(None),
             hard_deadline: Set(None),
+            planned_start_on: Set(None),
             estimated_minutes: Set(None),
             is_archived: Set(false),
             created_by: Set(integration.created_by),
@@ -230,6 +241,8 @@ pub async fn apply_issue(
             github_updated_at: Set(issue.updated_at.into()),
             pending_push: Set(false),
             updated_at: Set(now.into()),
+            github_state: Set(content.github_state().to_owned()),
+            last_synced_at: Set(Some(now.into())),
         }
         .insert(&txn)
         .await?;
@@ -386,6 +399,16 @@ pub async fn push_task(
         return Ok(());
     };
 
+    // 説明文のメンションの印（`<@利用者ID>`）は GitHub では読めぬ id になるので、
+    // 他の外へ出る口と同じく `@今の名` に戻してから書き戻す
+    let mut task = task;
+    if let Some(description) = task.description.take() {
+        task.description = Some(
+            crate::mentions::plain_body(db, task.project_id, &description)
+                .await
+                .map_err(|e| anyhow::anyhow!("resolving mentions for task {task_id}: {e:?}"))?,
+        );
+    }
     let content = SyncedContent::from_task(&task, status.is_done_state);
     let hash = content.hash();
     if link.synced_hash == hash {
@@ -429,10 +452,21 @@ pub async fn push_task(
     // pending_push を残し、スイープが最新状態を再度書き戻せるようにする。
     github_issue_links::Entity::update_many()
         .col_expr(github_issue_links::Column::SyncedHash, Expr::value(hash))
+        // 書き戻した開閉状態がそのまま GitHub 側の状態になる。跳ね返りの webhook は
+        // ウォーターマークで捨てられるので、ここで控えないと古い状態が残る
+        .col_expr(
+            github_issue_links::Column::GithubState,
+            Expr::value(content.github_state()),
+        )
         .col_expr(github_issue_links::Column::PendingPush, Expr::value(false))
         .col_expr(
             github_issue_links::Column::GithubUpdatedAt,
             Expr::value(watermark),
+        )
+        // 版（updated_at）と違い、GitHub と実際に揃えたときだけ進める
+        .col_expr(
+            github_issue_links::Column::LastSyncedAt,
+            Expr::value(chrono::Utc::now()),
         )
         .col_expr(
             github_issue_links::Column::UpdatedAt,

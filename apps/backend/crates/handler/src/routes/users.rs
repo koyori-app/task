@@ -19,4 +19,6 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(
             crate::handlers::task_notifications::update_notification_settings
         ))
+        .routes(routes!(crate::handlers::desktop_auth::list_devices))
+        .routes(routes!(crate::handlers::desktop_auth::revoke_device))
 }

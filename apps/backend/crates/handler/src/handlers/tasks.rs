@@ -33,9 +33,12 @@ use service::custom_fields::{
     ensure_required_custom_fields, load_task_custom_field_values, upsert_task_custom_field_values,
 };
 use service::db::is_postgres_unique_violation;
-use service::notifications::{notify_assigned, notify_status_changed};
+use service::notifications::{
+    notify_assigned, notify_description_mentioned, notify_status_changed,
+};
 use service::task_activities::{
-    priority_label, record_activity, record_label_diff, status_name, task_label_entries,
+    extract_mentions, priority_label, record_activity, record_label_diff, status_name,
+    task_label_entries,
 };
 use service::task_responses::{build_task_response, build_task_responses};
 
@@ -96,7 +99,7 @@ async fn record_task_field_activities<C: ConnectionTrait>(
             serde_json::json!({ "from": from, "to": to }),
         )
         .await?;
-        notify_status_changed(db, project_id, task_id, user_id, &from, &to).await?;
+        notify_status_changed(db, project_id, task_id, Some(user_id), &from, &to).await?;
     }
     if let Some(new_priority) = payload.priority
         && new_priority != before.priority
@@ -152,6 +155,27 @@ async fn record_task_field_activities<C: ConnectionTrait>(
                     "field": "hard_deadline",
                     "from": before_hard,
                     "to": new_hard,
+                }),
+            )
+            .await?;
+        }
+    }
+    if payload.clear_planned_start_on || payload.planned_start_on.is_some() {
+        let new_start = if payload.clear_planned_start_on {
+            None
+        } else {
+            payload.planned_start_on.or(before.planned_start_on)
+        };
+        if new_start != before.planned_start_on {
+            // deadline_changed に相乗りすると画面が「期限を変更」と表示するので別の種別にする
+            record_activity(
+                db,
+                task_id,
+                Some(user_id),
+                "planned_start_changed",
+                serde_json::json!({
+                    "from": before.planned_start_on,
+                    "to": new_start,
                 }),
             )
             .await?;
@@ -371,6 +395,14 @@ fn priority_rank(priority: tasks::TaskPriority) -> i32 {
     }
 }
 
+/// 応答はサーバー自身が行から作るので、優先度は既知の値に限る。
+fn response_priority_rank(task: &TaskResponse) -> Result<i32, AppError> {
+    let priority = task.priority.known().copied().ok_or_else(|| {
+        anyhow::anyhow!("task {} has a priority this server does not know", task.id)
+    })?;
+    Ok(priority_rank(priority))
+}
+
 impl TaskSort {
     /// 知らない値は既定（作成日の新しい順）に倒す。既存の挙動を変えない
     fn parse(raw: Option<&str>) -> Self {
@@ -414,11 +446,11 @@ impl TaskSort {
                 id: task.id,
             },
             Self::PriorityAsc => TaskCursor::PriorityAsc {
-                priority_rank: priority_rank(task.priority),
+                priority_rank: response_priority_rank(task)?,
                 id: task.id,
             },
             Self::PriorityDesc => TaskCursor::PriorityDesc {
-                priority_rank: priority_rank(task.priority),
+                priority_rank: response_priority_rank(task)?,
                 id: task.id,
             },
             Self::DeadlineAsc => TaskCursor::DeadlineAsc {
@@ -574,11 +606,19 @@ async fn build_task_detail_response(
     state: &AppState,
     project_id: Uuid,
     task: tasks::Model,
+    viewer_id: Uuid,
 ) -> Result<TaskDetailResponse, AppError> {
     let custom_field_values = load_task_custom_field_values(&state.db, project_id, task.id).await?;
+    // 説明文の印（`<@利用者ID>`）から id → 表示情報を引く（コメントの `mentions` と同じ形）
+    let mentions =
+        service::mentions::resolve_in_bodies(&state.db, project_id, task.description.as_deref())
+            .await?;
+    let reactions = service::reactions::summaries_for_task(&state.db, task.id, viewer_id).await?;
     Ok(TaskDetailResponse {
         task: build_task_response(&state.db, task).await?,
         custom_field_values,
+        mentions,
+        reactions,
     })
 }
 
@@ -630,6 +670,20 @@ pub async fn list_tasks(
     }
     if let Some(pid) = q.parent_task_id {
         query = query.filter(tasks::Column::ParentTaskId.eq(pid));
+    }
+    if let Some(uid) = q.created_by {
+        query = query.filter(tasks::Column::CreatedBy.eq(uid));
+    }
+    if let (Some(from), Some(to)) = (q.planned_start_from, q.planned_start_to)
+        && from > to
+    {
+        return Err(AppError::BadRequest);
+    }
+    if let Some(from) = q.planned_start_from {
+        query = query.filter(tasks::Column::PlannedStartOn.gte(from));
+    }
+    if let Some(to) = q.planned_start_to {
+        query = query.filter(tasks::Column::PlannedStartOn.lte(to));
     }
     if let Some(uid) = q.assignee_id {
         query = query.filter(Expr::cust_with_values(
@@ -747,137 +801,90 @@ pub async fn create_task(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
 
-    if let (Some(s), Some(h)) = (payload.soft_deadline, payload.hard_deadline)
-        && s >= h
-    {
-        return Err(AppError::BadRequest);
-    }
-
-    let txn = state.db.begin().await?;
-    let status = project_statuses::Entity::find_by_id(payload.status_id)
-        .filter(project_statuses::Column::ProjectId.eq(project_id))
-        .one(&txn)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    // parent_task_id / milestone_id が同一プロジェクトに属することを検証
-    if let Some(pid) = payload.parent_task_id {
-        tasks::Entity::find_by_id(pid)
-            .filter(tasks::Column::ProjectId.eq(project_id))
-            .filter(tasks::Column::DeletedAt.is_null())
-            .one(&txn)
-            .await?
-            .ok_or(AppError::NotFound)?;
-    }
-    if let Some(mid) = payload.milestone_id {
-        milestones::Entity::find_by_id(mid)
-            .filter(milestones::Column::ProjectId.eq(project_id))
-            .one(&txn)
-            .await?
-            .ok_or(AppError::NotFound)?;
-    }
-    if let Some(sid) = payload.sprint_id {
-        let sprint = sprints::Entity::find_by_id(sid)
-            .filter(sprints::Column::ProjectId.eq(project_id))
-            .lock(LockType::Update)
-            .one(&txn)
-            .await?
-            .ok_or(AppError::NotFound)?;
-        if sprint.status == sprints::SprintStatus::Completed {
-            return Err(AppError::Conflict);
-        }
-    }
-
-    let seq_id = service::tasks::next_seq_id(&txn, project_id).await?;
-
-    let model = tasks::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        project_id: Set(project_id),
-        seq_id: Set(seq_id),
-        title: Set(payload.title),
-        description: Set(payload.description),
-        status_id: Set(payload.status_id),
-        priority: Set(payload.priority.unwrap_or(tasks::TaskPriority::Medium)),
-        progress_pct: Set(payload.progress_pct.unwrap_or(0)),
-        parent_task_id: Set(payload.parent_task_id),
-        milestone_id: Set(payload.milestone_id),
-        sprint_id: Set(payload.sprint_id),
-        soft_deadline: Set(payload.soft_deadline.map(Into::into)),
-        hard_deadline: Set(payload.hard_deadline.map(Into::into)),
-        estimated_minutes: Set(payload.estimated_minutes),
-        is_archived: Set(false),
-        created_by: Set(auth.user_id),
-        created_at: Set(chrono::Utc::now().into()),
-        updated_at: Set(chrono::Utc::now().into()),
-        completed_at: Set(status.is_done_state.then(|| chrono::Utc::now().into())),
-        deleted_at: Set(None),
-    }
-    .insert(&txn)
-    .await?;
-
-    for a in &payload.assignees {
-        require_project_access(&txn, tenant_id, project_id, a.user_id).await?;
-        task_assignees::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            task_id: Set(model.id),
-            user_id: Set(a.user_id),
-            role: Set(a.role.clone()),
-            assigned_at: Set(chrono::Utc::now().into()),
-        }
-        .insert(&txn)
-        .await?;
-        notify_assigned(&txn, project_id, model.id, a.user_id, auth.user_id, &a.role).await?;
-    }
-    let unique_label_ids: Vec<Uuid> = {
-        let mut v = payload.label_ids.clone();
-        v.sort();
-        v.dedup();
-        v
+    let ctx = service::tasks::CreateTaskContext {
+        tenant_id,
+        project_id,
+        actor_id: auth.user_id,
     };
-    if !unique_label_ids.is_empty() {
-        let labels_in_project = labels::Entity::find()
-            .filter(labels::Column::Id.is_in(unique_label_ids.clone()))
-            .filter(labels::Column::ProjectId.eq(project_id))
-            .all(&txn)
-            .await?;
-        if labels_in_project.len() != unique_label_ids.len() {
-            return Err(AppError::BadRequest);
-        }
-    }
-    for lid in &unique_label_ids {
-        task_labels::ActiveModel {
-            task_id: Set(model.id),
-            label_id: Set(*lid),
-        }
-        .insert(&txn)
-        .await?;
-    }
-
-    if status.is_done_state {
-        ensure_required_custom_fields(
-            &txn,
-            project_id,
-            model.id,
-            Some(&payload.custom_field_values),
-        )
-        .await?;
-    }
-    upsert_task_custom_field_values(&txn, project_id, model.id, &payload.custom_field_values)
-        .await?;
-
-    record_activity(
-        &txn,
-        model.id,
-        Some(auth.user_id),
-        "task_created",
-        serde_json::json!({}),
-    )
-    .await?;
+    let txn = state.db.begin().await?;
+    let model = service::tasks::create_task_in_txn(&txn, &ctx, payload).await?;
     txn.commit().await?;
     Ok((
         StatusCode::CREATED,
-        Json(build_task_detail_response(&state, project_id, model).await?),
+        Json(build_task_detail_response(&state, project_id, model, auth.user_id).await?),
     ))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    post,
+    path = "/bulk-create",
+    tag = "Tasks",
+    summary = "タスク一括作成",
+    description = "1〜100 件を 1 トランザクションで作成する。1 件でも失敗したら全件ロールバックし、\
+        400 で `tasks[i]: 理由` を返す。検証・通知・アクティビティ・Webhook は単体作成と同じで件数分出る。\
+        同一リクエスト内のタスクは互いに参照できない。",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+    ),
+    request_body = BulkCreateTasksRequest,
+    responses(
+        (status = 201, description = "作成されたタスク（入力と同じ順）", body = BulkCreateTasksResponse),
+        CrudErrors,
+    )
+)]
+pub async fn bulk_create_tasks(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+    Valid(Json(payload)): Valid<Json<BulkCreateTasksRequest>>,
+) -> Result<(StatusCode, Json<BulkCreateTasksResponse>), AppError> {
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
+
+    let ctx = service::tasks::CreateTaskContext {
+        tenant_id,
+        project_id,
+        actor_id: auth.user_id,
+    };
+    let txn = state.db.begin().await?;
+    // ロック順は単体作成と同じ「カウンター → sprint」。sprint は UUID 昇順でまとめて取り、
+    // スプリント完了処理（UUID 昇順）と逆順にならないようにする。
+    service::tasks::lock_task_counter(&txn, project_id).await?;
+    let mut sprint_ids: Vec<Uuid> = payload.tasks.iter().filter_map(|t| t.sprint_id).collect();
+    sprint_ids.sort();
+    sprint_ids.dedup();
+    if !sprint_ids.is_empty() {
+        entity::sprints::Entity::find()
+            .filter(entity::sprints::Column::ProjectId.eq(project_id))
+            .filter(entity::sprints::Column::Id.is_in(sprint_ids))
+            .order_by_asc(entity::sprints::Column::Id)
+            .lock(sea_orm::sea_query::LockType::Update)
+            .all(&txn)
+            .await?;
+    }
+    let mut models = Vec::with_capacity(payload.tasks.len());
+    for (i, item) in payload.tasks.into_iter().enumerate() {
+        let model = service::tasks::create_task_in_txn(&txn, &ctx, item)
+            .await
+            .map_err(|e| match e {
+                AppError::Internal(_) => e,
+                other => AppError::BadRequestDetail(format!(
+                    "tasks[{i}]: {}",
+                    crate::handlers::task_extensions::bulk_error_reason(&other)
+                )),
+            })?;
+        models.push(model);
+    }
+    txn.commit().await?;
+
+    let mut tasks = Vec::with_capacity(models.len());
+    for model in models {
+        tasks.push(build_task_detail_response(&state, project_id, model, auth.user_id).await?);
+    }
+    Ok((StatusCode::CREATED, Json(BulkCreateTasksResponse { tasks })))
 }
 
 #[axum::debug_handler]
@@ -906,7 +913,7 @@ pub async fn get_task(
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     Ok(Json(
-        build_task_detail_response(&state, project_id, task).await?,
+        build_task_detail_response(&state, project_id, task, auth.user_id).await?,
     ))
 }
 
@@ -1048,6 +1055,11 @@ pub async fn update_task(
         active.hard_deadline = Set(None);
     } else if let Some(v) = payload.hard_deadline {
         active.hard_deadline = Set(Some(v.into()));
+    }
+    if payload.clear_planned_start_on {
+        active.planned_start_on = Set(None);
+    } else if let Some(v) = payload.planned_start_on {
+        active.planned_start_on = Set(Some(v));
     }
 
     let effective_soft = if payload.clear_soft_deadline {
@@ -1210,6 +1222,22 @@ pub async fn update_task(
         }
     }
 
+    // 説明文のメンション。編集では、編集前に無く新しく増えた印の者だけに通知する
+    if !payload.clear_description
+        && let Some(ref description) = payload.description
+    {
+        let old_mentioned = match task_snapshot.description.as_deref() {
+            Some(old) => extract_mentions(&txn, old, project_id).await?,
+            None => vec![],
+        };
+        let added: Vec<Uuid> = extract_mentions(&txn, description, project_id)
+            .await?
+            .into_iter()
+            .filter(|id| !old_mentioned.contains(id))
+            .collect();
+        notify_description_mentioned(&txn, project_id, task_id, &added, auth.user_id).await?;
+    }
+
     record_task_field_activities(
         &txn,
         task_id,
@@ -1228,7 +1256,7 @@ pub async fn update_task(
         crate::handlers::github::enqueue_issue_push(&state, task_id).await;
     }
     Ok(Json(
-        build_task_detail_response(&state, project_id, updated).await?,
+        build_task_detail_response(&state, project_id, updated, auth.user_id).await?,
     ))
 }
 

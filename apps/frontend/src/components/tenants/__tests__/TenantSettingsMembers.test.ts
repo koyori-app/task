@@ -1,25 +1,42 @@
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { createPinia } from 'pinia';
-import { defineComponent } from 'vue';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { membersData, meData, updateMutateAsync, deleteMutateAsync } = vi.hoisted(() => ({
+const {
+  membersData,
+  invitationsData,
+  meData,
+  updateMutateAsync,
+  deleteMutateAsync,
+  inviteMutateAsync,
+  resendMutateAsync,
+  revokeMutateAsync,
+} = vi.hoisted(() => ({
   membersData: { value: [] as unknown[] },
+  invitationsData: { value: [] as unknown[] },
   meData: { value: null as unknown },
   updateMutateAsync: vi.fn(),
   deleteMutateAsync: vi.fn(),
+  inviteMutateAsync: vi.fn(),
+  resendMutateAsync: vi.fn(),
+  revokeMutateAsync: vi.fn(),
 }));
 
 vi.mock('@/lib/api-vue-query', () => ({
   apiClient: {
-    useQuery: () => ({
-      data: membersData,
+    useQuery: (_method: string, path: string) => ({
+      data: path.endsWith('/invitations') ? invitationsData : membersData,
       isPending: { value: false },
       isError: { value: false },
     }),
-    useMutation: (method: string) => ({
-      mutateAsync: method === 'delete' ? deleteMutateAsync : updateMutateAsync,
+    useMutation: (method: string, path: string) => ({
+      mutateAsync: path.includes('/invitations')
+        ? ({ post: path.endsWith('/resend') ? resendMutateAsync : inviteMutateAsync }[method] ??
+          revokeMutateAsync)
+        : method === 'delete'
+          ? deleteMutateAsync
+          : updateMutateAsync,
       isPending: { value: false },
     }),
   },
@@ -43,27 +60,27 @@ function member(userId: string, username: string, role: 'Admin' | 'Member'): Ten
     user_id: userId,
     role,
     user: { id: userId, username, avatar_url: null },
+    department: null,
+    position: null,
+    team: null,
   };
 }
-
-const PassThrough = defineComponent({ template: '<div><slot /></div>' });
-const ButtonStub = defineComponent({
-  inheritAttrs: false,
-  template: '<button v-bind="$attrs"><slot /></button>',
-});
 
 let wrapper: VueWrapper;
 
 /** 操作するのは Admin 本人。オーナーは別人なので、自分の行にも除名ボタンの条件が効く。 */
-function mountMembers() {
-  membersData.value = [
+function mountMembers(
+  asUserId = ADMIN_ID,
+  rows = [
     member(OWNER_ID, 'owner', 'Admin'),
     member(ADMIN_ID, 'admin', 'Admin'),
     member(MEMBER_ID, 'member', 'Member'),
-  ];
-  meData.value = { id: ADMIN_ID, username: 'admin', avatar_url: null };
+  ],
+) {
+  membersData.value = rows;
+  meData.value = { id: asUserId, username: 'me', avatar_url: null };
   wrapper = mount(TenantSettingsMembers, {
-    props: { tenant: { id: TENANT_ID, name: 'Alpha', owner_id: OWNER_ID } },
+    props: { tenant: { id: TENANT_ID, display_id: 'alpha', name: 'Alpha', owner_id: OWNER_ID } },
     global: {
       plugins: [
         createPinia(),
@@ -72,13 +89,6 @@ function mountMembers() {
           { queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
         ],
       ],
-      stubs: {
-        Button: ButtonStub,
-        Select: PassThrough,
-        SelectContent: PassThrough,
-        SelectItem: PassThrough,
-        SelectTrigger: PassThrough,
-      },
     },
   });
   return wrapper;
@@ -86,8 +96,12 @@ function mountMembers() {
 
 describe('TenantSettingsMembers', () => {
   beforeEach(() => {
+    invitationsData.value = [];
     updateMutateAsync.mockReset().mockResolvedValue(undefined);
     deleteMutateAsync.mockReset().mockResolvedValue(undefined);
+    inviteMutateAsync.mockReset().mockResolvedValue(undefined);
+    resendMutateAsync.mockReset().mockResolvedValue(undefined);
+    revokeMutateAsync.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -131,5 +145,162 @@ describe('TenantSettingsMembers', () => {
     finish();
     await flushPromises();
     expect(deleteMutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('メールアドレスとロールで招待を送り、入力を空にする', async () => {
+    const wrapper = mountMembers();
+
+    const submit = wrapper.get('form button[type="submit"]');
+    expect(submit.attributes('disabled'), '形の崩れたアドレスでは送れない').toBeDefined();
+
+    await wrapper.get('input[type="email"]').setValue(' new@example.com ');
+    expect(submit.attributes('disabled')).toBeUndefined();
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+
+    expect(inviteMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_ID } },
+      body: { email: 'new@example.com', role: 'Member' },
+    });
+    // Picker も読み上げ用の role=status を持つので、知らせの段落に絞る
+    expect(wrapper.get('p[role="status"]').text()).toContain('new@example.com に招待を送りました');
+    expect((wrapper.get('input[type="email"]').element as HTMLInputElement).value).toBe('');
+  });
+
+  it('既にメンバーのアドレスは理由を出し、入力を残す', async () => {
+    inviteMutateAsync.mockRejectedValue({ response: { status: 409 } });
+    const wrapper = mountMembers();
+
+    await wrapper.get('input[type="email"]').setValue('member@example.com');
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('既にメンバーです');
+    expect((wrapper.get('input[type="email"]').element as HTMLInputElement).value).toBe(
+      'member@example.com',
+    );
+  });
+
+  it('保留中の招待を期限つきで並べ、再送と取り消しを対応する口へ送る', async () => {
+    invitationsData.value = [
+      {
+        id: 'inv-live',
+        tenant_id: TENANT_ID,
+        email: 'live@example.com',
+        role: 'Member',
+        expires_at: '2999-01-01T00:00:00Z',
+        created_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'inv-expired',
+        tenant_id: TENANT_ID,
+        email: 'expired@example.com',
+        role: 'Viewer',
+        expires_at: '2000-01-01T00:00:00Z',
+        created_at: '2000-01-01T00:00:00Z',
+      },
+    ];
+    const wrapper = mountMembers();
+
+    const rows = wrapper.findAll('li').filter((li) => li.text().includes('@example.com'));
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.text()).not.toContain('期限切れ');
+    expect(rows[1]!.text()).toContain('期限切れ');
+
+    await wrapper.get('button[aria-label="expired@example.comへ招待を送り直す"]').trigger('click');
+    await flushPromises();
+    expect(resendMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_ID, invitation_id: 'inv-expired' } },
+    });
+
+    await wrapper.get('button[aria-label="live@example.comへの招待を取り消す"]').trigger('click');
+    await flushPromises();
+    expect(revokeMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_ID, invitation_id: 'inv-live' } },
+    });
+  });
+
+  it('管理者でなければ招待の欄を出さない', () => {
+    const wrapper = mountMembers(MEMBER_ID);
+    expect(wrapper.find('input[type="email"]').exists()).toBe(false);
+  });
+
+  it('所属をダイアログから保存すると、部署・役職・チームだけを送る（role は送らない）', async () => {
+    const wrapper = mountMembers(ADMIN_ID, [
+      member(OWNER_ID, 'owner', 'Admin'),
+      member(ADMIN_ID, 'admin', 'Admin'),
+      { ...member(MEMBER_ID, 'member', 'Member'), department: '開発部', team: '基盤' },
+    ]);
+    expect(wrapper.text()).toContain('開発部 · 基盤');
+
+    await wrapper.get('button[aria-label="memberの所属を編集"]').trigger('click');
+    expect(wrapper.get('dialog').attributes('open')).toBeDefined();
+    expect((wrapper.get('#org-profile-department').element as HTMLInputElement).value).toBe(
+      '開発部',
+    );
+    expect(wrapper.get('#org-profile-department').attributes('maxlength')).toBe('100');
+    await wrapper.get('#org-profile-position').setValue('課長');
+    await wrapper.get('#org-profile-team').setValue('');
+    await wrapper.findAll('form').at(-1)!.trigger('submit');
+    await flushPromises();
+
+    expect(updateMutateAsync).toHaveBeenCalledTimes(1);
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_ID, user_id: MEMBER_ID } },
+      body: { department: '開発部', position: '課長', team: '' },
+    });
+    expect(wrapper.get('dialog').attributes('open'), '保存後は閉じる').toBeUndefined();
+  });
+
+  it('オーナー本人は自分の所属を保存でき、再読み込み後も表示される', async () => {
+    const wrapper = mountMembers(OWNER_ID);
+    await wrapper.get('button[aria-label="ownerの所属を編集"]').trigger('click');
+    expect(wrapper.get('dialog').attributes('open')).toBeDefined();
+    await wrapper.get('#org-profile-department').setValue('経営企画');
+    await wrapper.get('#org-profile-position').setValue('代表');
+    await wrapper.get('#org-profile-team').setValue('役員');
+    await wrapper.findAll('form').at(-1)!.trigger('submit');
+    await flushPromises();
+
+    expect(updateMutateAsync).toHaveBeenCalledTimes(1);
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_ID, user_id: OWNER_ID } },
+      body: { department: '経営企画', position: '代表', team: '役員' },
+    });
+    expect(wrapper.get('dialog').attributes('open'), '保存後は閉じる').toBeUndefined();
+
+    // 再読み込み: 保存した値が行に出て、編集欄にも戻る
+    wrapper.unmount();
+    const reloaded = mountMembers(OWNER_ID, [
+      {
+        ...member(OWNER_ID, 'owner', 'Admin'),
+        department: '経営企画',
+        position: '代表',
+        team: '役員',
+      },
+    ]);
+    expect(reloaded.text()).toContain('経営企画 · 代表 · 役員');
+    await reloaded.get('button[aria-label="ownerの所属を編集"]').trigger('click');
+    expect((reloaded.get('#org-profile-position').element as HTMLInputElement).value).toBe('代表');
+  });
+
+  it('オーナー本人でも自分のロール変更と除外の操作は出さない', () => {
+    const wrapper = mountMembers(OWNER_ID);
+    expect(wrapper.find('button[aria-label="ownerを外す"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="ownerのロール"]').exists()).toBe(false);
+    // 対照: 他のメンバーの操作は残っている
+    expect(wrapper.find('button[aria-label="memberを外す"]').exists()).toBe(true);
+    expect(wrapper.find('button[aria-label="memberの所属を編集"]').exists()).toBe(true);
+  });
+
+  it('所属の編集ボタンは管理者にだけ出し、他人のオーナー行には出さない', () => {
+    const asAdmin = mountMembers();
+    expect(asAdmin.find('button[aria-label="memberの所属を編集"]').exists()).toBe(true);
+    expect(asAdmin.find('button[aria-label="ownerの所属を編集"]').exists()).toBe(false);
+    asAdmin.unmount();
+
+    const asMember = mountMembers(MEMBER_ID);
+    expect(asMember.find('button[aria-label="memberの所属を編集"]').exists()).toBe(false);
+    expect(asMember.find('button[aria-label="adminの所属を編集"]').exists()).toBe(false);
   });
 });

@@ -6,6 +6,42 @@ use validator::Validate;
 use crate::users::UserSummary;
 use entity::project_members::ProjectRole;
 use entity::tenant_members::{self, TenantRole};
+use entity::tenants;
+
+/// このテナント（会社）での部署・役職・チーム。
+///
+/// 持ち場は 2 つある。メンバーは `tenant_members` の行、そこに行の無いオーナーは
+/// `tenants` の行。読む側はどちらを見るかを [`OrgProfile::resolve`] に任せる
+#[derive(Debug, Clone, Default)]
+pub struct OrgProfile {
+    pub department: Option<String>,
+    pub position: Option<String>,
+    pub team: Option<String>,
+}
+
+impl OrgProfile {
+    /// その人のこのテナントでの所属。所属行があれば行（オーナーでも）、無ければオーナーは
+    /// テナントの行、それ以外（客分など）は未設定
+    pub fn resolve(
+        tenant: &tenants::Model,
+        user_id: Uuid,
+        member: Option<&tenant_members::Model>,
+    ) -> Self {
+        match member {
+            Some(member) => Self {
+                department: member.department.clone(),
+                position: member.position.clone(),
+                team: member.team.clone(),
+            },
+            None if user_id == tenant.owner_id => Self {
+                department: tenant.owner_department.clone(),
+                position: tenant.owner_position.clone(),
+                team: tenant.owner_team.clone(),
+            },
+            None => Self::default(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct TenantMemberResponse {
@@ -18,6 +54,15 @@ pub struct TenantMemberResponse {
     pub role: TenantRole,
     /// 表示用のユーザー情報。メンバー管理 UI が名前・アバターを引けるように同梱する
     pub user: UserSummary,
+    /// このテナント（会社）での部署
+    #[schema(nullable)]
+    pub department: Option<String>,
+    /// このテナント（会社）での役職
+    #[schema(nullable)]
+    pub position: Option<String>,
+    /// このテナント（会社）でのチーム
+    #[schema(nullable)]
+    pub team: Option<String>,
 }
 
 impl TenantMemberResponse {
@@ -28,17 +73,25 @@ impl TenantMemberResponse {
             user_id: member.user_id,
             role: member.role,
             user: user.into(),
+            department: member.department,
+            position: member.position,
+            team: member.team,
         }
     }
 
     /// テナント owner は `tenant_members` に行を持たないため、一覧表示用に合成する。
-    pub fn from_owner(tenant_id: Uuid, user: entity::users::Model) -> Self {
+    /// 所属はテナントの行から取る。
+    pub fn from_owner(tenant: &tenants::Model, user: entity::users::Model) -> Self {
+        let org = OrgProfile::resolve(tenant, user.id, None);
         Self {
             id: user.id,
-            tenant_id,
+            tenant_id: tenant.id,
             user_id: user.id,
             role: TenantRole::Admin,
             user: user.into(),
+            department: org.department,
+            position: org.position,
+            team: org.team,
         }
     }
 }
@@ -51,8 +104,18 @@ pub struct AddTenantMemberRequest {
 }
 
 #[derive(Validate, Debug, Deserialize, ToSchema)]
+/// どの欄も省略（`None`）なら変更しない。部署・役職・チームは trim して空なら NULL に戻す。
+/// `role` を省略可にしているのは、所属だけを直す保存が古い `role` を送り返して、
+/// 別の管理者による降格を巻き戻さないようにするため。
+/// 所属行の無いオーナーには、本人だけが所属の 3 欄を送れる（`role` を付けると 404）
 pub struct UpdateTenantMemberRequest {
-    pub role: TenantRole,
+    pub role: Option<TenantRole>,
+    #[validate(length(max = 100))]
+    pub department: Option<String>,
+    #[validate(length(max = 100))]
+    pub position: Option<String>,
+    #[validate(length(max = 100))]
+    pub team: Option<String>,
 }
 
 /// その人が持つ、プロジェクト単位の明示 ACE。

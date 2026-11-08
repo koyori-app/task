@@ -14,10 +14,52 @@ pub fn content_url(file_id: Uuid) -> String {
     format!("/v1/drive/files/{file_id}/content")
 }
 
-#[derive(Debug, Deserialize, IntoParams)]
+/// ファイル本文の ETag（ダブルクォート込み）。応答の `etag` と `ETag` ヘッダーの両方に使う。
+///
+/// `content_hash` を持たない既存行は `updated_at`（Unix ミリ秒）とサイズで代替する。
+/// 本文更新で `updated_at` が変わるので、`If-Match` の楽観ロックにはこれで足りる。
+pub fn file_etag(model: &drive_files::Model) -> String {
+    match &model.content_hash {
+        Some(hash) => format!("\"sha256:{hash}\""),
+        None => format!(
+            "\"ts:{}-{}\"",
+            model.updated_at.timestamp_millis(),
+            model.size
+        ),
+    }
+}
+
+/// `If-Match` / `If-None-Match` の 1 行が現在の ETag に一致するか。
+///
+/// `*` は常に一致。カンマ区切りの複数指定はどれか 1 つの一致で一致とする。
+/// 弱い ETag（`W/"..."`）は `W/` を外して比べる（弱い比較）。本文の ETag は内容のハッシュ
+/// （導入前の行は updated_at + size）なので弱い一致で十分で、Cloudflare などの中継が
+/// 圧縮時に強い ETag を弱くして返しても、それをそのまま `If-Match` に戻した保存を 412 にしない（TASK-336）。
+pub fn etag_matches(header_value: &str, current: &str) -> bool {
+    let value = header_value.trim();
+    value == "*"
+        || value.split(',').any(|tag| {
+            let tag = tag.trim();
+            tag.strip_prefix("W/").unwrap_or(tag) == current
+        })
+}
+
+/// ファイル名の部分一致検索（`q`）の最大文字数。
+pub const MAX_NAME_QUERY_LEN: u64 = 200;
+
+#[derive(Debug, Deserialize, Validate, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ListFilesQuery {
+    /// 省略時はドライブ直下（フォルダ無し）のファイル
     pub folder_id: Option<Uuid>,
+    /// MIME タイプの前方一致。`text/markdown` は `text/markdown` で始まる MIME（`text/markdown; charset=…` など）にも一致し、`text/` は text 全体
+    pub mime_type: Option<String>,
+    /// ファイル名の部分一致（大文字小文字を区別しない）。200 文字まで
+    #[validate(length(max = MAX_NAME_QUERY_LEN))]
+    pub q: Option<String>,
+    #[serde(default)]
+    #[param(inline)]
+    pub sort: DriveFileSort,
     #[param(minimum = 1, maximum = 200)]
     #[serde(default = "default_list_limit")]
     pub limit: u32,
@@ -27,6 +69,16 @@ pub struct ListFilesQuery {
 
 fn default_list_limit() -> u32 {
     DEFAULT_LIST_LIMIT
+}
+
+/// ファイル一覧の並び順。既定は作成日時の新しい順。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DriveFileSort {
+    #[default]
+    CreatedAtDesc,
+    NameAsc,
+    UpdatedAtDesc,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -43,10 +95,16 @@ pub struct DriveFileResponse {
     pub created_at: DateTime<Utc>,
     #[schema(value_type = String, format = "date-time")]
     pub updated_at: DateTime<Utc>,
+    /// 本文の ETag（ダブルクォート込み）。`PUT .../content` の `If-Match` にそのまま渡す
+    #[schema(
+        example = "\"sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae\""
+    )]
+    pub etag: String,
 }
 
 impl From<drive_files::Model> for DriveFileResponse {
     fn from(model: drive_files::Model) -> Self {
+        let etag = file_etag(&model);
         Self {
             id: model.id,
             name: model.name,
@@ -56,6 +114,7 @@ impl From<drive_files::Model> for DriveFileResponse {
             folder_id: model.folder_id,
             created_at: model.created_at.with_timezone(&Utc),
             updated_at: model.updated_at.with_timezone(&Utc),
+            etag,
         }
     }
 }
@@ -74,6 +133,25 @@ pub struct UpdateFileRequest {
     #[serde(default, deserialize_with = "crate::nullable::deserialize_some")]
     #[schema(value_type = String, format = "uuid", nullable)]
     pub folder_id: Option<Option<Uuid>>,
+}
+
+/// ファイルに結び付いたタスク 1 件（`GET .../drive/files/{id}/tasks`）。
+#[derive(Serialize, ToSchema)]
+pub struct DriveFileTaskLink {
+    #[schema(value_type = String, format = "uuid")]
+    pub task_id: Uuid,
+    pub seq_key: String,
+    pub title: String,
+    pub project: crate::my_tasks::MyTaskProjectInfo,
+    pub status: crate::my_tasks::MyTaskStatusInfo,
+    /// 結び付きの由来。`manual`（手動添付）または `body`（本文から抽出）
+    #[schema(example = "body")]
+    pub source: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct DriveFileTasksResponse {
+    pub tasks: Vec<DriveFileTaskLink>,
 }
 
 /// ドライブファイルの本文差し替えリクエスト。
@@ -104,4 +182,43 @@ pub struct UpdateQuotaRequest {
 #[into_params(parameter_in = Query)]
 pub struct ContentQuery {
     pub token: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::etag_matches;
+
+    const CURRENT: &str = "\"sha256:abc\"";
+
+    #[test]
+    fn exact_match_only() {
+        assert!(etag_matches("\"sha256:abc\"", CURRENT));
+        assert!(!etag_matches("\"sha256:abd\"", CURRENT));
+        // クォート無しは別の値として扱う
+        assert!(!etag_matches("sha256:abc", CURRENT));
+    }
+
+    #[test]
+    fn wildcard_matches_any() {
+        assert!(etag_matches("*", CURRENT));
+        assert!(etag_matches("  *  ", CURRENT));
+    }
+
+    #[test]
+    fn list_with_whitespace() {
+        assert!(etag_matches("\"x\", \"sha256:abc\"", CURRENT));
+        assert!(etag_matches("\"x\",\"sha256:abc\" ", CURRENT));
+        assert!(etag_matches("  \"sha256:abc\"  ,\"y\"", CURRENT));
+        assert!(!etag_matches("\"x\", \"y\"", CURRENT));
+        assert!(!etag_matches("", CURRENT));
+    }
+
+    #[test]
+    fn weak_etag_matches_by_weak_comparison() {
+        assert!(etag_matches("W/\"sha256:abc\"", CURRENT));
+        assert!(etag_matches("\"x\", W/\"sha256:abc\"", CURRENT));
+        assert!(!etag_matches("W/\"sha256:abd\"", CURRENT));
+        // `W/` は先頭だけ。途中にあるものは別の値
+        assert!(!etag_matches("\"W/sha256:abc\"", CURRENT));
+    }
 }

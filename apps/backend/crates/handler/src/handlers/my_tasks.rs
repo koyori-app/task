@@ -2,11 +2,10 @@ use axum::{
     Json,
     extract::{Path, Query, State},
 };
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait, EntityTrait,
-    JoinType, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, RelationTrait,
-    TransactionTrait, prelude::Uuid,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, TransactionTrait, prelude::Uuid,
 };
 
 use crate::AppState;
@@ -103,6 +102,15 @@ pub(crate) async fn get_or_create_personal_project(
     loop {
         let txn = state.db.begin().await?;
 
+        // entity の 1 列に unique_key は 1 つだけで、tenant_id は (tenant_id, key) に使うため
+        // (tenant_id, personal_owner_id) の UNIQUE を持てない。作成を直列化して 2 つ作らせない
+        common::db::execute_bound(
+            &txn,
+            "SELECT pg_advisory_xact_lock(hashtext(?))",
+            vec![format!("personal_project:{tenant_id}:{user_id}").into()],
+        )
+        .await?;
+
         // txn 内で再確認（並行リクエストが先に作成した場合に対応）
         if let Some(existing) = projects::Entity::find()
             .filter(projects::Column::TenantId.eq(tenant_id))
@@ -132,16 +140,6 @@ pub(crate) async fn get_or_create_personal_project(
             Ok(model) => model,
             Err(e) if is_postgres_unique_violation(&e) => {
                 txn.rollback().await?;
-                // 並行リクエストが同時に personal project を作成した可能性を確認
-                if let Some(existing) = projects::Entity::find()
-                    .filter(projects::Column::TenantId.eq(tenant_id))
-                    .filter(projects::Column::IsPersonal.eq(true))
-                    .filter(projects::Column::PersonalOwnerId.eq(user_id))
-                    .one(&state.db)
-                    .await?
-                {
-                    return Ok(existing);
-                }
                 // key 衝突: 新しい key と新しい txn で再試行
                 let suffix = Uuid::new_v4().simple().to_string().to_ascii_uppercase();
                 key = format!("ME{}", &suffix[..4]);
@@ -171,50 +169,40 @@ pub(crate) async fn get_or_create_personal_project(
     }
 }
 
+const DUE_NOT_DONE: &str = "EXISTS (
+    SELECT 1 FROM project_statuses
+    WHERE project_statuses.id = tasks.status_id
+      AND project_statuses.is_done_state = false
+)";
+
+/// 期限の判定はホーム（dashboard）と同じ `service::deadline_filter` を使う。
+/// 今日・今週・期限超過は完了済みを除く。
 fn apply_my_tasks_filter(
-    mut query: sea_orm::Select<tasks::Entity>,
+    query: sea_orm::Select<tasks::Entity>,
     filter: &str,
+    timezone: &str,
 ) -> Result<sea_orm::Select<tasks::Entity>, AppError> {
-    let today: NaiveDate = Utc::now().date_naive();
+    use service::deadline_filter as df;
     match filter {
         "all" => Ok(query),
-        "today" => {
-            query = query.filter(
-                Condition::any()
-                    .add(sea_orm::sea_query::Expr::cust_with_values(
-                        "tasks.soft_deadline IS NOT NULL AND tasks.soft_deadline::date = $1::date",
-                        vec![sea_orm::Value::from(today)],
-                    ))
-                    .add(sea_orm::sea_query::Expr::cust_with_values(
-                        "tasks.hard_deadline IS NOT NULL AND tasks.hard_deadline::date = $1::date",
-                        vec![sea_orm::Value::from(today)],
-                    )),
-            );
-            Ok(query)
-        }
-        "week" => {
-            let end = today + Duration::days(7);
-            query = query.filter(
-                Condition::any()
-                    .add(sea_orm::sea_query::Expr::cust_with_values(
-                        "tasks.soft_deadline IS NOT NULL AND tasks.soft_deadline::date BETWEEN $1::date AND $2::date",
-                        vec![sea_orm::Value::from(today), sea_orm::Value::from(end)],
-                    ))
-                    .add(sea_orm::sea_query::Expr::cust_with_values(
-                        "tasks.hard_deadline IS NOT NULL AND tasks.hard_deadline::date BETWEEN $1::date AND $2::date",
-                        vec![sea_orm::Value::from(today), sea_orm::Value::from(end)],
-                    )),
-            );
-            Ok(query)
-        }
         "no_due_date" => Ok(query
             .filter(tasks::Column::SoftDeadline.is_null())
             .filter(tasks::Column::HardDeadline.is_null())),
-        "overdue" => Ok(query
-            .join(JoinType::InnerJoin, tasks::Relation::ProjectStatuses.def())
-            .filter(tasks::Column::HardDeadline.is_not_null())
-            .filter(tasks::Column::HardDeadline.lt(Utc::now()))
-            .filter(project_statuses::Column::IsDoneState.eq(false))),
+        "today" | "week" | "overdue" => {
+            let predicate = df::predicate(
+                filter,
+                &df::due_date_sql("tasks"),
+                &df::today_sql("$1"),
+                &df::week_start_sql("$1"),
+            )
+            .ok_or(AppError::BadRequest)?;
+            Ok(query
+                .filter(sea_orm::sea_query::Expr::cust(DUE_NOT_DONE))
+                .filter(sea_orm::sea_query::Expr::cust_with_values(
+                    predicate,
+                    vec![sea_orm::Value::from(timezone)],
+                )))
+        }
         _ => Err(AppError::BadRequest),
     }
 }
@@ -233,10 +221,12 @@ pub(crate) fn build_my_task_item(
             id: status.id,
             name: status.name.clone(),
             color: status.color.clone(),
+            is_done_state: status.is_done_state,
         },
-        priority: task.priority,
+        priority: task.priority.into(),
         soft_deadline: task.soft_deadline.map(|dt| dt.with_timezone(&Utc)),
         hard_deadline: task.hard_deadline.map(|dt| dt.with_timezone(&Utc)),
+        planned_start_on: task.planned_start_on,
         project: MyTaskProjectInfo {
             id: project.id,
             name: project.name.clone(),
@@ -336,12 +326,22 @@ pub async fn list_my_tasks(
         query = query.filter(tasks::Column::ProjectId.eq(project_id));
     }
 
-    query = apply_my_tasks_filter(query, &q.filter)?;
+    let timezone = q.timezone.as_deref().unwrap_or("UTC");
+    if timezone.len() > 100 || !service::timezone::exists(&state.db, timezone).await? {
+        return Err(AppError::BadRequest);
+    }
+    query = apply_my_tasks_filter(query, &q.filter, timezone)?;
 
     let limit = std::cmp::min(q.limit, 200);
     let total = query.clone().count(&state.db).await?;
     let task_rows = query
+        .order_by_with_nulls(
+            sea_orm::sea_query::Expr::cust(service::deadline_filter::due_date_sql("tasks")),
+            sea_orm::Order::Asc,
+            sea_orm::sea_query::NullOrdering::Last,
+        )
         .order_by_desc(tasks::Column::CreatedAt)
+        .order_by_asc(tasks::Column::Id)
         .offset(q.offset)
         .limit(limit)
         .all(&state.db)

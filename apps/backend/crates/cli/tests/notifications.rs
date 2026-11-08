@@ -1,4 +1,4 @@
-//! 通知のコマンド。仕様は `docs/features/tasks/5.notifications.md` §4。
+//! 通知のコマンド。仕様は `docs/dev/features/tasks/5.notifications.md` の「API」。
 //!
 //! 送る内容（絞り込みの query、設定の PUT 本文）と、送る前に弾く入力を軸に確かめる。
 
@@ -28,6 +28,7 @@ fn notification_json(notification_type: &str, payload: serde_json::Value) -> ser
         "project_id": PROJECT_ID,
         "task": null,
         "payload": payload,
+        "cursor": "MjAyNi0wMS0wMVQwMDowMDowMFo",
         "read_at": null,
         "created_at": "2026-01-01T00:00:00Z",
     })
@@ -42,6 +43,7 @@ async fn list_sends_the_unread_filter_and_the_limit() {
         .and(query_param("limit", "10"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "unread_count": 1,
+            "next_cursor": null,
             "notifications": [notification_json(
                 "review_round_created",
                 json!({
@@ -94,6 +96,7 @@ async fn read_marks_one_notification() {
             "project_id": PROJECT_ID,
             "task": { "id": "22222222-2222-4222-8222-222222222222", "seq_id": 7, "title": "Golden task" },
             "payload": { "assigned_by": "yupix", "role": "primary" },
+            "cursor": "MjAyNi0wMS0wMVQwMDowMDowMFo",
             "read_at": "2026-01-02T00:00:00Z",
             "created_at": "2026-01-01T00:00:00Z",
         })))

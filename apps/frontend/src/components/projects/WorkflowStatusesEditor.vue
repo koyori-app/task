@@ -3,17 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhArrowDown, PhArrowUp, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { computed, ref, watch } from 'vue';
 
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import { Button, Checkbox, ConfirmDialog, Input } from '@koyori-app/ui-vue';
 import type { components } from '@/generated/api';
 import { apiClient } from '@/lib/api-vue-query';
 
@@ -197,7 +187,8 @@ function requestDelete(status: ProjectStatus) {
 
 async function confirmDelete() {
   const target = deleteTarget.value;
-  if (!target) return;
+  // ConfirmDialog の確定ボタンは無効にできないので、二重送信はここで止める
+  if (!target || isMutating.value) return;
   const migrationTarget = statuses.value.find((status) => status.is_default);
   await run('ステータスを削除できませんでした', () =>
     deleteMutation.mutateAsync({
@@ -210,13 +201,9 @@ async function confirmDelete() {
   if (!operationError.value) deleteTarget.value = null;
 }
 
-function handleDeleteDialogOpen(open: boolean) {
-  if (!open && isMutating.value) return;
-  if (!open) deleteTarget.value = null;
-}
-
-function preventDeleteDialogClose(event: Event) {
-  if (isMutating.value) event.preventDefault();
+function closeDeleteDialog() {
+  if (isMutating.value) return;
+  deleteTarget.value = null;
 }
 
 async function moveStatus(index: number, offset: -1 | 1) {
@@ -257,12 +244,11 @@ async function moveStatus(index: number, offset: -1 | 1) {
       ステータスを読み込めませんでした
       <Button
         type="button"
-        variant="outline"
-        size="sm"
+        variant="tertiary"
         class="ml-3"
+        label="再試行"
         @click="statusesQuery.refetch()"
-        >再試行</Button
-      >
+      />
     </div>
     <div v-else>
       <p
@@ -283,98 +269,88 @@ async function moveStatus(index: number, offset: -1 | 1) {
       <ul v-else aria-label="ステータス一覧" class="mb-4 space-y-2">
         <li v-for="(status, index) in statuses" :key="status.id" class="rounded-lg border p-3">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div class="flex min-w-0 flex-1 items-center gap-2">
-              <Input
+            <!-- 名前欄を潰さず、右の Checkbox 群を折り返させるため min-w-0 を付けない -->
+            <div class="flex flex-1 items-center gap-2">
+              <!-- 色は koyori に無いので素の input -->
+              <input
                 :aria-label="`${status.name}の色`"
                 type="color"
-                class="h-9 w-12 shrink-0 cursor-pointer p-1"
-                :model-value="drafts[status.id]?.color ?? status.color"
-                @update:model-value="
-                  (value) => {
-                    if (drafts[status.id]) drafts[status.id]!.color = String(value);
+                class="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-input bg-transparent p-1"
+                :value="drafts[status.id]?.color ?? status.color"
+                @input="
+                  (event) => {
+                    if (drafts[status.id])
+                      drafts[status.id]!.color = (event.target as HTMLInputElement).value;
                   }
                 "
               />
               <Input
                 :aria-label="`${status.name}の名前`"
-                :model-value="drafts[status.id]?.name ?? status.name"
-                @update:model-value="
-                  (value) => {
-                    if (drafts[status.id]) drafts[status.id]!.name = String(value);
+                :value="drafts[status.id]?.name ?? status.name"
+                :on-value-change="
+                  (value: string) => {
+                    if (drafts[status.id]) drafts[status.id]!.name = value;
                   }
                 "
               />
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
+                variant="tertiary"
                 :disabled="isMutating"
-                :aria-label="`${status.name}を保存`"
+                :ariaLabel="`${status.name}を保存`"
+                label="保存"
                 @click="saveStatus(status)"
-              >
-                保存
-              </Button>
+              />
             </div>
 
             <div class="flex flex-wrap items-center gap-3">
-              <label class="flex cursor-pointer items-center gap-1.5 text-xs">
-                <Checkbox
-                  :model-value="status.is_default"
-                  :disabled="isMutating"
-                  @update:model-value="setUniqueFlag(status, 'is_default')"
-                />
-                Default
-              </label>
-              <label class="flex cursor-pointer items-center gap-1.5 text-xs">
-                <Checkbox
-                  :model-value="status.is_done_state"
-                  :disabled="isMutating"
-                  @update:model-value="toggleDoneState(status)"
-                />
-                Done state
-              </label>
-              <label
+              <Checkbox
+                label="Default"
+                :checked="status.is_default"
+                :disabled="isMutating"
+                :on-checked-change="() => setUniqueFlag(status, 'is_default')"
+              />
+              <Checkbox
+                label="Done state"
+                :checked="status.is_done_state"
+                :disabled="isMutating"
+                :on-checked-change="() => toggleDoneState(status)"
+              />
+              <Checkbox
                 v-if="status.is_done_state"
-                class="flex cursor-pointer items-center gap-1.5 text-xs"
-              >
-                <Checkbox
-                  :model-value="defaultDoneId === status.id"
-                  :disabled="isMutating"
-                  @update:model-value="setUniqueFlag(status, 'is_default_done')"
-                />
-                既定の完了
-              </label>
+                label="既定の完了"
+                :checked="defaultDoneId === status.id"
+                :disabled="isMutating"
+                :on-checked-change="() => setUniqueFlag(status, 'is_default_done')"
+              />
               <div class="flex">
                 <Button
                   type="button"
-                  size="icon"
                   variant="ghost"
                   :disabled="index === 0 || isMutating"
-                  :aria-label="`${status.name}を上へ`"
+                  :ariaLabel="`${status.name}を上へ`"
                   @click="moveStatus(Number(index), -1)"
                 >
-                  <PhArrowUp class="size-4" />
+                  <template #icon><PhArrowUp class="size-4" /></template>
                 </Button>
                 <Button
                   type="button"
-                  size="icon"
                   variant="ghost"
                   :disabled="index === statuses.length - 1 || isMutating"
-                  :aria-label="`${status.name}を下へ`"
+                  :ariaLabel="`${status.name}を下へ`"
                   @click="moveStatus(Number(index), 1)"
                 >
-                  <PhArrowDown class="size-4" />
+                  <template #icon><PhArrowDown class="size-4" /></template>
                 </Button>
                 <Button
                   type="button"
-                  size="icon"
                   variant="ghost"
-                  class="text-destructive"
+                  class="enabled:text-(--koyori-color-danger)"
                   :disabled="isMutating"
-                  :aria-label="`${status.name}を削除`"
+                  :ariaLabel="`${status.name}を削除`"
                   @click="requestDelete(status)"
                 >
-                  <PhTrash class="size-4" />
+                  <template #icon><PhTrash class="size-4" /></template>
                 </Button>
               </div>
             </div>
@@ -385,38 +361,33 @@ async function moveStatus(index: number, offset: -1 | 1) {
       <form class="rounded-lg border border-dashed p-3" @submit.prevent="createStatus">
         <p class="mb-2 text-sm font-medium">ステータスを追加</p>
         <div class="flex flex-col gap-2 sm:flex-row">
-          <Input
+          <input
             v-model="newColor"
             aria-label="新しいステータスの色"
             type="color"
-            class="h-9 w-12 shrink-0 cursor-pointer p-1"
+            class="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-input bg-transparent p-1"
           />
-          <Input v-model="newName" aria-label="新しいステータス名" placeholder="例: レビュー中" />
-          <Button type="submit" :disabled="isMutating"> <PhPlus class="size-4" />追加 </Button>
+          <Input
+            aria-label="新しいステータス名"
+            placeholder="例: レビュー中"
+            :value="newName"
+            :on-value-change="(v: string) => (newName = v)"
+          />
+          <Button type="submit" :disabled="isMutating" label="追加">
+            <template #icon><PhPlus class="size-4" /></template>
+          </Button>
         </div>
       </form>
     </div>
   </section>
 
-  <Dialog :open="!!deleteTarget" @update:open="handleDeleteDialogOpen">
-    <DialogContent
-      :show-close-button="false"
-      @cancel="preventDeleteDialogClose"
-      @escape-key-down="preventDeleteDialogClose"
-      @pointer-down-outside="preventDeleteDialogClose"
-    >
-      <DialogHeader>
-        <DialogTitle>ステータスを削除しますか？</DialogTitle>
-        <DialogDescription>
-          「{{ deleteTarget?.name }}」を削除します。この操作は取り消せません。
-        </DialogDescription>
-      </DialogHeader>
-      <DialogFooter>
-        <Button type="button" variant="outline" @click="deleteTarget = null">キャンセル</Button>
-        <Button type="button" variant="destructive" :disabled="isMutating" @click="confirmDelete"
-          >削除する</Button
-        >
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+  <ConfirmDialog
+    :open="!!deleteTarget"
+    title="ステータスを削除しますか？"
+    :message="`「${deleteTarget?.name}」を削除します。この操作は取り消せません。`"
+    confirm-label="削除する"
+    destructive
+    :on-confirm="confirmDelete"
+    :on-cancel="closeDeleteDialog"
+  />
 </template>

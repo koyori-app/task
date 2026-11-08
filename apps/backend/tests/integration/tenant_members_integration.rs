@@ -539,10 +539,10 @@ async fn removed_member_pat_loses_tenant_read_access() {
 
     // alice のトークンはテナント T にバインドされ、プロジェクト制限は無い
     let alice_pat = app
-        .insert_pat(alice.id, tp.tenant_id, vec![Scope::AdminTenant], None)
+        .insert_pat(alice.id, tp.tenant_id, vec![Scope::Api], None)
         .await;
     let owner_pat = app
-        .insert_pat(owner.id, tp.tenant_id, vec![Scope::AdminTenant], None)
+        .insert_pat(owner.id, tp.tenant_id, vec![Scope::Api], None)
         .await;
 
     // メンバーで居るあいだは読める（過剰に拒否していないこと）
@@ -670,16 +670,19 @@ async fn removed_tenant_member_does_not_hold_last_project_admin_slot() {
         );
     }
 
-    // alice をプロジェクト唯一の Admin にする
-    assert_eq!(
-        app.post_json_with_session(
-            &project_members_path,
-            serde_json::json!({ "user_id": alice.id, "role": "Admin" }),
-        )
-        .await
-        .status(),
-        StatusCode::CREATED
-    );
+    // bob を Viewer、alice をプロジェクト唯一の Admin にする。他のメンバー（bob）が残るので、
+    // 最後の 1 行を外して継承へ戻す例外には当たらない
+    for (user, role) in [(&bob, "Viewer"), (&alice, "Admin")] {
+        assert_eq!(
+            app.post_json_with_session(
+                &project_members_path,
+                serde_json::json!({ "user_id": user.id, "role": role }),
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+    }
 
     // テナントに居るあいだは最後の Admin として守られる（過剰に許可していないこと）
     assert_eq!(
@@ -715,6 +718,14 @@ async fn removed_tenant_member_does_not_hold_last_project_admin_slot() {
             .status(),
         StatusCode::NO_CONTENT,
         "テナントに居ない Admin は最後の Admin として数えない"
+    );
+
+    // 残った bob の行も外し、メンバー未指定（継承）に戻す
+    assert_eq!(
+        app.delete_with_session(&format!("{project_members_path}/{}", bob.id))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
     );
 
     // 後始末が済んだので、メンバー未指定に戻ったプロジェクトはテナントメンバーに開放される
@@ -1008,4 +1019,403 @@ async fn removed_member_gets_no_guest_access_to_own_inbox() {
     // 個人プロジェクトが作った drive_folders が bob を参照するので、先にテナントごと消す
     app.cleanup_user(owner.id).await;
     app.cleanup_user(bob.id).await;
+}
+
+/// メンバー一覧から、その人の行を探す。
+fn member_row(members: &Value, user_id: Uuid) -> &Value {
+    members
+        .as_array()
+        .expect("members must be an array")
+        .iter()
+        .find(|m| m["user_id"] == user_id.to_string())
+        .expect("member row")
+}
+
+/// 部署・役職・チーム（TASK-334）。テナント Admin が PUT で付け、メンバー一覧とプロフィールに出る。
+#[tokio::test]
+async fn tenant_admin_edits_member_org_profile() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let admin = app.insert_user(false, false).await;
+    let plain = app.insert_user(false, false).await;
+    let target = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let members_path = format!("/v1/tenants/{}/members", tp.tenant_id);
+    let target_path = format!("{members_path}/{}", target.id);
+    let profile_path = format!("/v1/tenants/{}/users/{}", tp.tenant_id, target.id);
+
+    app.reset_session_client();
+    app.login_session(&owner.email, &owner.password).await;
+    for (user, role) in [(&admin, "Admin"), (&plain, "Member"), (&target, "Admin")] {
+        let res = app
+            .post_json_with_session(
+                &members_path,
+                serde_json::json!({ "user_id": user.id, "role": role }),
+            )
+            .await;
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let body: Value = res.json().await.expect("created json");
+        assert!(body["department"].is_null(), "追加直後は未設定");
+    }
+
+    app.reset_session_client();
+    app.login_session(&admin.email, &admin.password).await;
+
+    // 3 欄を入れる。前後の空白は落とす
+    let res = app
+        .put_json_with_session(
+            &target_path,
+            serde_json::json!({ "department": " 開発部 ", "position": "課長", "team": "基盤" }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("updated json");
+    assert_eq!(body["department"], "開発部");
+    assert_eq!(body["position"], "課長");
+    assert_eq!(body["team"], "基盤");
+    assert_eq!(body["role"], "Admin", "role を省けば変わらない");
+
+    let members: Value = app
+        .get_with_session(&members_path)
+        .await
+        .json()
+        .await
+        .expect("members json");
+    let row = member_row(&members, target.id);
+    assert_eq!(row["department"], "開発部");
+    assert_eq!(row["position"], "課長");
+    assert_eq!(row["team"], "基盤");
+    let profile: Value = app
+        .get_with_session(&profile_path)
+        .await
+        .json()
+        .await
+        .expect("profile json");
+    assert_eq!(profile["department"], "開発部");
+    assert_eq!(profile["position"], "課長");
+    assert_eq!(profile["team"], "基盤");
+
+    // role だけの PUT（降格）で 3 欄は消えない
+    let res = app
+        .put_json_with_session(&target_path, serde_json::json!({ "role": "Member" }))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("updated json");
+    assert_eq!(body["role"], "Member");
+    assert_eq!(body["department"], "開発部");
+    assert_eq!(body["team"], "基盤");
+
+    // 降格の後に所属だけを保存しても、role は Member のまま（古い role で巻き戻さない）
+    let res = app
+        .put_json_with_session(
+            &target_path,
+            serde_json::json!({ "department": "", "position": "部長", "team": "基盤" }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("updated json");
+    assert_eq!(body["role"], "Member");
+    assert!(body["department"].is_null(), "空文字は NULL に戻す");
+    assert_eq!(body["position"], "部長");
+
+    // 100 文字までは通り、101 文字は弾く（文字数で数える）
+    let res = app
+        .put_json_with_session(
+            &target_path,
+            serde_json::json!({ "team": "あ".repeat(100) }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = app
+        .put_json_with_session(
+            &target_path,
+            serde_json::json!({ "team": "あ".repeat(101) }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let profile: Value = app
+        .get_with_session(&profile_path)
+        .await
+        .json()
+        .await
+        .expect("profile json");
+    assert_eq!(profile["team"], "あ".repeat(100), "弾いた PUT は保存しない");
+
+    // 一般メンバーは所属を変えられない
+    app.reset_session_client();
+    app.login_session(&plain.email, &plain.password).await;
+    let res = app
+        .put_json_with_session(&target_path, serde_json::json!({ "department": "営業部" }))
+        .await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let profile: Value = app
+        .get_with_session(&profile_path)
+        .await
+        .json()
+        .await
+        .expect("profile json");
+    assert!(profile["department"].is_null(), "拒否した PUT は保存しない");
+
+    app.cleanup_user(admin.id).await;
+    app.cleanup_user(plain.id).await;
+    app.cleanup_user(target.id).await;
+    app.cleanup_user(owner.id).await;
+}
+
+/// オーナー本人が自分の所属を保存できる（TASK-443）。保存先はテナントの行で、`tenant_members` に
+/// 行は増えない。開くのは本人の所属だけで、ロール変更・削除・他の人による編集は従来どおり通らない。
+#[tokio::test]
+async fn owner_sets_own_org_profile_without_member_row() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let admin = app.insert_user(false, false).await;
+    let plain = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let other_tenant = app.insert_tenant_project(owner.id).await;
+    let members_path = format!("/v1/tenants/{}/members", tp.tenant_id);
+    let owner_path = format!("{members_path}/{}", owner.id);
+    let profile_path = format!("/v1/tenants/{}/users/{}", tp.tenant_id, owner.id);
+    let assignable_path = format!(
+        "/v1/tenants/{}/projects/{}/assignable-users",
+        tp.tenant_id, tp.project_id
+    );
+
+    app.reset_session_client();
+    app.login_session(&owner.email, &owner.password).await;
+    for (user, role) in [(&admin, "Admin"), (&plain, "Member")] {
+        assert_eq!(
+            app.post_json_with_session(
+                &members_path,
+                serde_json::json!({ "user_id": user.id, "role": role }),
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+    }
+
+    // 保存前は一覧の合成行もプロフィールも null
+    let members: Value = app
+        .get_with_session(&members_path)
+        .await
+        .json()
+        .await
+        .expect("members json");
+    assert!(member_row(&members, owner.id)["department"].is_null());
+
+    // 本人の保存は通り、前後の空白を落として返す
+    let res = app
+        .put_json_with_session(
+            &owner_path,
+            serde_json::json!({ "department": " 経営企画 ", "position": "代表", "team": "役員" }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("updated json");
+    assert_eq!(body["user_id"], owner.id.to_string());
+    assert_eq!(body["role"], "Admin");
+    assert_eq!(body["department"], "経営企画");
+    assert_eq!(body["position"], "代表");
+    assert_eq!(body["team"], "役員");
+
+    // 再取得でも一覧・プロフィール・担当者候補に出る
+    let members: Value = app
+        .get_with_session(&members_path)
+        .await
+        .json()
+        .await
+        .expect("members json");
+    let row = member_row(&members, owner.id);
+    assert_eq!(row["department"], "経営企画");
+    assert_eq!(row["position"], "代表");
+    assert_eq!(row["team"], "役員");
+    let profile: Value = app
+        .get_with_session(&profile_path)
+        .await
+        .json()
+        .await
+        .expect("profile json");
+    assert_eq!(profile["department"], "経営企画");
+    assert_eq!(profile["position"], "代表");
+    assert_eq!(profile["team"], "役員");
+    let assignable: Value = app
+        .get_with_session(&assignable_path)
+        .await
+        .json()
+        .await
+        .expect("assignable json");
+    let candidate = assignable
+        .as_array()
+        .expect("candidates")
+        .iter()
+        .find(|user| user["id"] == owner.id.to_string())
+        .expect("owner candidate");
+    assert_eq!(candidate["department"], "経営企画");
+    assert_eq!(candidate["team"], "役員");
+
+    // 別テナントの所属には波及しない
+    let other_profile: Value = app
+        .get_with_session(&format!(
+            "/v1/tenants/{}/users/{}",
+            other_tenant.tenant_id, owner.id
+        ))
+        .await
+        .json()
+        .await
+        .expect("profile json");
+    assert!(other_profile["department"].is_null());
+
+    // 省いた欄は変えず、空文字は未設定に戻す
+    let res = app
+        .put_json_with_session(&owner_path, serde_json::json!({ "team": "" }))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("updated json");
+    assert_eq!(body["department"], "経営企画");
+    assert!(body["team"].is_null(), "空文字は NULL に戻す");
+    let res = app
+        .put_json_with_session(&owner_path, serde_json::json!({}))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK, "何も送らなければ何も変えない");
+    let res = app
+        .put_json_with_session(
+            &owner_path,
+            serde_json::json!({ "position": "あ".repeat(101) }),
+        )
+        .await;
+    assert_eq!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "上限はメンバーと同じ"
+    );
+
+    // オーナー本人でもロールは変えられず、所属を添えても一緒に保存されない
+    for body in [
+        serde_json::json!({ "role": "Member" }),
+        serde_json::json!({ "role": "Admin", "department": "巻き戻し" }),
+    ] {
+        assert_eq!(
+            app.put_json_with_session(&owner_path, body).await.status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+    // 行が無いオーナーは外せない
+    assert_eq!(
+        app.delete_with_session(&owner_path).await.status(),
+        StatusCode::NOT_FOUND
+    );
+
+    // 所属の保存でオーナーが `tenant_members` に入ると、通知の宛先などが変わってしまう
+    assert!(
+        !service::access::is_tenant_member(&app.state.db, tp.tenant_id, owner.id)
+            .await
+            .expect("is_tenant_member"),
+        "オーナーの行を足さない"
+    );
+
+    // テナント Admin はオーナーの所属を変えられない。行の無い相手への PUT と同じ 404
+    app.reset_session_client();
+    app.login_session(&admin.email, &admin.password).await;
+    assert_eq!(
+        app.put_json_with_session(&owner_path, serde_json::json!({ "department": "乗っ取り" }))
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        app.delete_with_session(&owner_path).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    // 対照: 同じ Admin が自分の所属を直すのは従来どおり通る
+    assert_eq!(
+        app.put_json_with_session(
+            &format!("{members_path}/{}", admin.id),
+            serde_json::json!({ "department": "総務" }),
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+
+    // 一般メンバーは読めるが、変えられない
+    app.reset_session_client();
+    app.login_session(&plain.email, &plain.password).await;
+    assert_eq!(
+        app.put_json_with_session(&owner_path, serde_json::json!({ "department": "乗っ取り" }))
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let profile: Value = app
+        .get_with_session(&profile_path)
+        .await
+        .json()
+        .await
+        .expect("profile json");
+    assert_eq!(
+        profile["department"], "経営企画",
+        "拒否した PUT は保存しない"
+    );
+    assert_eq!(profile["position"], "代表");
+
+    app.cleanup_user(admin.id).await;
+    app.cleanup_user(plain.id).await;
+    app.cleanup_user(owner.id).await;
+}
+
+/// `tenant_members` に実在の行があるオーナーは、他のメンバーと同じに行で所属を持つ。
+#[tokio::test]
+async fn owner_org_profile_follows_member_row() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let with_row = app.insert_tenant_project(owner.id).await;
+
+    app.reset_session_client();
+    app.login_session(&owner.email, &owner.password).await;
+
+    // 実在の行があるオーナー: 他のメンバーと同じに更新でき、一覧とプロフィールに出る
+    let members_path = format!("/v1/tenants/{}/members", with_row.tenant_id);
+    assert_eq!(
+        app.post_json_with_session(
+            &members_path,
+            serde_json::json!({ "user_id": owner.id, "role": "Admin" }),
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+    let res = app
+        .put_json_with_session(
+            &format!("{members_path}/{}", owner.id),
+            serde_json::json!({ "department": "経営企画", "position": "代表", "team": "役員" }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let members: Value = app
+        .get_with_session(&members_path)
+        .await
+        .json()
+        .await
+        .expect("members json");
+    let row = member_row(&members, owner.id);
+    assert_eq!(row["department"], "経営企画");
+    assert_eq!(row["position"], "代表");
+    assert_eq!(row["team"], "役員");
+    let profile: Value = app
+        .get_with_session(&format!(
+            "/v1/tenants/{}/users/{}",
+            with_row.tenant_id, owner.id
+        ))
+        .await
+        .json()
+        .await
+        .expect("profile json");
+    assert_eq!(profile["department"], "経営企画");
+    assert_eq!(profile["position"], "代表");
+    assert_eq!(profile["team"], "役員");
+
+    app.cleanup_user(owner.id).await;
 }

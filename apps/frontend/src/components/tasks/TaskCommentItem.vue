@@ -1,18 +1,25 @@
 <script setup lang="ts">
-import { Loader2, Pencil, Trash2 } from '@lucide/vue';
-import { nextTick, ref } from 'vue';
-import type { ComponentPublicInstance } from 'vue';
+import { Ellipsis, Loader2 } from '@lucide/vue';
+import { computed, nextTick, ref } from 'vue';
 
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { avatarInitials } from '@/lib/initials';
-import { formatTaskDate } from '@/lib/task-display';
+import { Button, Dropdown } from '@koyori-app/ui-vue';
+import CommentBody from '@/components/tasks/CommentBody.vue';
+import CommentEditor from '@/components/tasks/CommentEditor.vue';
+import ReactionAddButton from '@/components/reactions/ReactionAddButton.vue';
+import ReactionBar from '@/components/reactions/ReactionBar.vue';
+import UserAvatar from '@/components/UserAvatar.vue';
+import { timelineDateTime, timelineTime } from '@/lib/activity-timeline';
+import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
+import type { ReactionController } from '@/composables/useReactions';
 import type { CommentReply, CommentThread } from '@/composables/useTaskComments';
 
 const props = defineProps<{
   /** スレッド先頭・返信のどちらも同じ形で表示する */
   comment: CommentThread | CommentReply;
+  /** 本文の `<@利用者ID>` の印から引ける表示情報 */
+  mentions?: MentionTable;
+  /** 編集で `@` を打った時に出す候補 */
+  mentionCandidates?: readonly MentionCandidate[];
   /** このコメントの更新リクエストが進行中 */
   updating?: boolean;
   /** このコメントの削除リクエストが進行中 */
@@ -26,6 +33,8 @@ const props = defineProps<{
    * 可否は backend が判定し、拒否されたら deleteError を拒まれた通りに表示する。
    */
   currentUserId?: string | null;
+  /** 本文の札をプロフィールへの link にするテナント（表示用 id。CommentBody 参照） */
+  mentionTenant?: string;
   /** このコメントの更新失敗メッセージ（対象コメントの中に出す） */
   updateError?: string | null;
   /** このコメントの削除失敗メッセージ（対象コメントの中に出す） */
@@ -38,12 +47,47 @@ const props = defineProps<{
   onClearUpdateError?: () => void;
   /** 削除確認を開閉するときに前回の失敗表示を消す（返信の onClearReplyError と同型） */
   onClearDeleteError?: () => void;
+  /** 日付の見出しの下に並ぶときは時刻だけを出す */
+  timeOnly?: boolean;
+  /** 投稿者のプロフィール画面の URL。渡すと名前をリンクにする */
+  profileHref?: (userId: string) => string;
+  /** 絵文字リアクションの操作。渡さなければリアクションの UI を出さない */
+  reactionController?: ReactionController;
 }>();
 
 const editing = ref(false);
 const editDraft = ref('');
 const confirmingDelete = ref(false);
-const editControlRef = ref<HTMLElement | ComponentPublicInstance | null>(null);
+const editorRef = ref<InstanceType<typeof CommentEditor> | null>(null);
+
+const reactionBarRef = ref<InstanceType<typeof ReactionBar> | null>(null);
+const hasReactions = computed(
+  () => !!props.reactionController && props.comment.reactions.length > 0,
+);
+/** 札が無い時の追加ボタンは ⋯ の左に出す（札がある時は札の行の末尾） */
+const showHeaderAddButton = computed(
+  () =>
+    !!props.reactionController &&
+    !props.comment.is_deleted &&
+    !editing.value &&
+    !hasReactions.value,
+);
+
+const menuItems = computed(() => [
+  ...(hasReactions.value ? [{ value: 'reactions', label: 'リアクションを見る' }] : []),
+  ...(props.comment.user.id === props.currentUserId
+    ? [{ value: 'edit', label: 'コメントを編集' }]
+    : []),
+  ...(confirmingDelete.value
+    ? []
+    : [{ value: 'delete', label: 'コメントを削除', destructive: true }]),
+]);
+
+function onMenuSelect(value: string) {
+  if (value === 'edit') void startEditing();
+  else if (value === 'reactions') reactionBarRef.value?.openPeople();
+  else openDeleteConfirm();
+}
 
 async function startEditing() {
   if (props.updating || props.deleting) return;
@@ -52,10 +96,7 @@ async function startEditing() {
   editing.value = true;
   closeDeleteConfirm();
   await nextTick();
-  const control = editControlRef.value;
-  const element =
-    control instanceof HTMLElement ? control : (control?.$el as HTMLElement | undefined);
-  element?.focus();
+  editorRef.value?.focus();
 }
 
 function cancelEditing() {
@@ -91,123 +132,146 @@ async function confirmDelete() {
 </script>
 
 <template>
-  <article class="flex flex-col gap-1" data-task-comment :data-comment-id="comment.id">
-    <header class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-      <!-- 投稿者のアイコン。avatar_url が無いユーザーは頭文字で描く -->
-      <Avatar class="size-6">
-        <AvatarImage
-          v-if="comment.user.avatar_url"
-          :src="comment.user.avatar_url"
-          :alt="comment.user.name"
+  <article
+    class="group/comment relative flex items-start gap-2 rounded-lg p-2"
+    :class="!editing && 'hover:bg-accent'"
+    data-task-comment
+    :data-comment-id="comment.id"
+  >
+    <!-- 投稿者のアイコン。avatar_url が無いユーザーは頭文字で描く。名前は隣に字で出す -->
+    <UserAvatar :user="comment.user" size="md" decorative />
+
+    <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+      <!-- 時刻はホバーの面にも載るので、4.5:1 を保てる text-secondary にする -->
+      <header
+        class="flex min-h-6 flex-wrap items-center gap-x-1.5 text-xs text-(--koyori-color-text-secondary)"
+        :class="showHeaderAddButton ? 'pr-16' : 'pr-8'"
+      >
+        <component
+          :is="profileHref ? 'a' : 'span'"
+          :href="profileHref?.(comment.user.id)"
+          class="text-sm font-medium text-foreground"
+          :class="profileHref && 'hover:underline'"
+          data-comment-author
+          >{{ comment.user.name }}</component
+        >
+        <time :datetime="comment.created_at" :title="timelineDateTime(comment.created_at)">{{
+          timeOnly ? timelineTime(comment.created_at) : timelineDateTime(comment.created_at)
+        }}</time>
+        <!-- backend が作成時に created_at と updated_at へ同一の now を入れるため、
+             不一致は「編集された」と等価（create_comment の now 一回化とペア） -->
+        <span v-if="!comment.is_deleted && comment.updated_at !== comment.created_at">
+          (編集済み)
+        </span>
+        <span v-if="updating || deleting" class="inline-flex items-center">
+          <Loader2 class="size-3 animate-spin" aria-hidden="true" />
+        </span>
+      </header>
+
+      <!-- 操作はメニューに集める。ホバーできない端末では常に出す -->
+      <div
+        v-if="!comment.is_deleted && !editing && (menuItems.length || showHeaderAddButton)"
+        class="absolute top-0 right-0 flex items-center focus-within:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/comment:opacity-100 [@media(hover:hover)]:focus-within:opacity-100"
+      >
+        <ReactionAddButton
+          v-if="showHeaderAddButton && reactionController"
+          :disabled="reactionController.isBusy(comment.id)"
+          @select="reactionController.toggle(comment.id, $event)"
         />
-        <AvatarFallback class="bg-muted text-[10px] text-muted-foreground">
-          {{ avatarInitials(comment.user.name) }}
-        </AvatarFallback>
-      </Avatar>
-      <span class="font-medium text-foreground">{{ comment.user.name }}</span>
-      <span>{{ formatTaskDate(comment.created_at) }}</span>
-      <!-- backend が作成時に created_at と updated_at へ同一の now を入れるため、
-           不一致は「編集された」と等価（create_comment の now 一回化とペア） -->
-      <span v-if="!comment.is_deleted && comment.updated_at !== comment.created_at">
-        (編集済み)
-      </span>
-      <span v-if="updating || deleting" class="inline-flex items-center">
-        <Loader2 class="size-3 animate-spin" aria-hidden="true" />
-      </span>
-      <span v-if="!comment.is_deleted && !editing" class="ml-auto inline-flex items-center gap-1">
-        <Button
-          v-if="comment.user.id === currentUserId"
-          type="button"
+        <Dropdown
+          v-if="menuItems.length"
+          top-layer
           variant="ghost"
-          size="icon"
-          class="size-6"
-          aria-label="コメントを編集"
+          ariaLabel="コメントの操作"
           :disabled="updating || deleting"
-          @click="startEditing"
+          :items="menuItems"
+          :on-select="onMenuSelect"
         >
-          <Pencil class="size-3.5" aria-hidden="true" />
-        </Button>
-        <Button
-          v-if="!confirmingDelete"
-          type="button"
-          variant="ghost"
-          size="icon"
-          class="size-6"
-          aria-label="コメントを削除"
-          :disabled="updating || deleting"
-          @click="openDeleteConfirm"
-        >
-          <Trash2 class="size-3.5" aria-hidden="true" />
-        </Button>
-      </span>
-    </header>
-
-    <p v-if="comment.is_deleted" class="text-sm text-muted-foreground italic">削除されたコメント</p>
-
-    <div v-else-if="editing" class="flex flex-col gap-2">
-      <Textarea
-        v-model="editDraft"
-        ref="editControlRef"
-        class="min-h-20 text-sm"
-        :disabled="updating"
-        aria-label="コメントを編集"
-      />
-      <div class="flex justify-end gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          class="h-7 px-2"
-          :disabled="updating"
-          @click="cancelEditing"
-        >
-          キャンセル
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          class="h-7 px-2"
-          :disabled="updating || !editDraft.trim()"
-          @click="commitEditing"
-        >
-          {{ updating ? '保存中…' : '保存' }}
-        </Button>
+          <template #icon><Ellipsis class="size-4" aria-hidden="true" /></template>
+        </Dropdown>
       </div>
-    </div>
 
-    <!-- コメント本文は素テキスト表示（whitespace-pre-wrap）。v-html は使わない -->
-    <p v-else class="whitespace-pre-wrap text-sm leading-relaxed">{{ comment.body }}</p>
+      <p v-if="comment.is_deleted" class="text-sm text-muted-foreground">削除されたコメント</p>
 
-    <div
-      v-if="confirmingDelete && !comment.is_deleted && !editing"
-      class="flex items-center justify-end gap-2 text-xs"
-    >
-      <span class="text-muted-foreground">このコメントを削除しますか？</span>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        class="h-7 px-2"
-        :disabled="deleting"
-        @click="closeDeleteConfirm"
+      <div v-else-if="editing" class="flex flex-col gap-2">
+        <CommentEditor
+          v-model="editDraft"
+          ref="editorRef"
+          min-height-class="min-h-20"
+          :disabled="updating"
+          aria-label="コメントを編集"
+          :candidates="mentionCandidates"
+          :mentions="mentions"
+        />
+        <div class="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="tertiary"
+            :disabled="updating"
+            label="キャンセル"
+            @click="cancelEditing"
+          />
+          <Button
+            type="button"
+            :disabled="updating || !editDraft.trim()"
+            :label="updating ? '保存中…' : '保存'"
+            @click="commitEditing"
+          />
+        </div>
+      </div>
+
+      <!-- CommentBody が KFM 描画と sanitize の唯一の境界になる。 -->
+      <CommentBody
+        v-else
+        :body="comment.body ?? ''"
+        :comment-id="comment.id"
+        :mentions="mentions"
+        :current-user-id="currentUserId"
+        :mention-tenant="mentionTenant"
+      />
+
+      <ReactionBar
+        v-if="reactionController && !comment.is_deleted && !editing"
+        ref="reactionBarRef"
+        class="mt-1"
+        :reactions="comment.reactions"
+        can-react
+        :busy="reactionController.isBusy(comment.id)"
+        :error="reactionController.errorFor(comment.id)"
+        :fetch-users="(emoji) => reactionController!.fetchUsers(comment.id, emoji)"
+        :profile-href="profileHref"
+        :current-user-id="currentUserId"
+        @toggle="reactionController.toggle(comment.id, $event)"
+        @add="reactionController.toggle(comment.id, $event)"
+      />
+
+      <div
+        v-if="confirmingDelete && !comment.is_deleted && !editing"
+        class="flex items-center justify-end gap-2 text-xs"
       >
-        キャンセル
-      </Button>
-      <Button
-        type="button"
-        variant="destructive"
-        size="sm"
-        class="h-7 px-2"
-        :disabled="deleting"
-        @click="confirmDelete"
-      >
-        {{ deleting ? '削除中…' : '削除する' }}
-      </Button>
-    </div>
+        <span class="text-muted-foreground">このコメントを削除しますか？</span>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="deleting"
+          label="キャンセル"
+          @click="closeDeleteConfirm"
+        />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="deleting"
+          :label="deleting ? '削除中…' : '削除する'"
+          @click="confirmDelete"
+        />
+      </div>
 
-    <!-- 失敗は失敗したコメントの中に出す。一覧末尾にまとめると、どの操作が
+      <!-- 失敗は失敗したコメントの中に出す。一覧末尾にまとめると、どの操作が
          失敗したのか分からない -->
-    <p v-if="updateError" class="text-xs text-destructive">{{ updateError }}</p>
-    <p v-if="deleteError" class="text-xs text-destructive">{{ deleteError }}</p>
+      <p v-if="updateError" class="text-xs text-destructive">{{ updateError }}</p>
+      <p v-if="deleteError" class="text-xs text-destructive">{{ deleteError }}</p>
+
+      <slot name="footer" />
+    </div>
   </article>
 </template>

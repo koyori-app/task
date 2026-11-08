@@ -20,20 +20,22 @@ use crate::error::{ServerError, internal_server_error};
 use crate::extractors::{AuthUser, CurrentUser, OptionalAuthUser};
 use crate::openapi::OAuthErrors;
 use auth_core::client::{TokenResponse, exchange_code};
-use auth_core::crypto::encrypt_token;
+use auth_core::crypto::{decrypt_token, encrypt_token};
 use auth_core::pkce::{generate_pkce_pair, generate_state};
 use auth_core::provider::{ProviderUserInfo, build_authorize_url};
 use auth_core::state::{
     build_frontend_oauth_error_redirect, build_frontend_redirect, sanitize_redirect_path,
 };
 use auth_core::url_guard::normalize_instance_url;
-use entity::{oauth_connections, users};
+use entity::{oauth_connections, system_settings, users};
+use job::{VerificationEmailJob, verification_email};
 use service::auth::{AuthError, create_password_hash};
 use service::db::{is_postgres_unique_violation, with_transaction};
 use service::email::normalize_email;
 use service::login_session::establish_login_session;
 use service::oauth::{
-    OAuthStatePayload, consume_state, get_credentials, resolve_provider, store_state,
+    GITHUB_APP_PROVIDER, OAuthSettings, OAuthStatePayload, consume_state, get_credentials,
+    resolve_provider, store_state,
 };
 use service::passkeys::count_user_passkeys;
 
@@ -72,6 +74,10 @@ pub enum OAuthError {
     AccountSuspended,
     #[error("security violation")]
     SecurityViolation,
+    #[error("instance not allowed")]
+    InstanceNotAllowed,
+    #[error("registration disabled")]
+    RegistrationDisabled,
 }
 
 impl From<sea_orm::DbErr> for OAuthError {
@@ -173,6 +179,20 @@ impl IntoResponse for OAuthError {
                 }),
             )
                 .into_response(),
+            OAuthError::InstanceNotAllowed => (
+                StatusCode::BAD_REQUEST,
+                Json(ServerError {
+                    message: "oauth-instance-not-allowed".into(),
+                }),
+            )
+                .into_response(),
+            OAuthError::RegistrationDisabled => (
+                StatusCode::FORBIDDEN,
+                Json(ServerError {
+                    message: "registration-disabled".into(),
+                }),
+            )
+                .into_response(),
             OAuthError::SecurityViolation => {
                 warn!("oauth security validation failed");
                 (
@@ -200,7 +220,7 @@ impl IntoResponse for OAuthError {
         ("instance_url" = Option<String>, Query, description = "GitLab self-hosted インスタンス URL")
     ),
     responses(
-        (status = 302, description = "プロバイダー認可 URL へリダイレクト"),
+        (status = 307, description = "プロバイダー認可 URL へリダイレクト"),
         OAuthErrors,
     )
 )]
@@ -216,17 +236,23 @@ pub async fn oauth_start(
     if !settings.is_provider_configured(&provider) {
         return Err(OAuthError::ProviderNotConfigured);
     }
+    // 連携専用のプロバイダーは、ログイン中の利用者にしか結べない（ここで利用者を作らない）
+    if !OAuthSettings::is_sign_in_provider(&provider) && optional_auth.0.is_none() {
+        return Err(OAuthError::Unauthorized);
+    }
 
     let instance_url = match provider.as_str() {
-        "gitlab_selfhosted" => Some(
-            normalize_instance_url(
-                query
-                    .instance_url
-                    .as_deref()
-                    .ok_or(OAuthError::BadRequest)?,
-            )
-            .map_err(OAuthError::Internal)?,
-        ),
+        "gitlab_selfhosted" => {
+            let raw = query
+                .instance_url
+                .as_deref()
+                .ok_or(OAuthError::BadRequest)?;
+            // 運用者の許可の一覧に在る instance だけを受ける。一覧の形（正規化した URL）で控える
+            let instance = settings
+                .gitlab_selfhosted_instance(raw)
+                .ok_or(OAuthError::InstanceNotAllowed)?;
+            Some(normalize_instance_url(&instance.url).map_err(OAuthError::Internal)?)
+        }
         _ => None,
     };
 
@@ -236,7 +262,8 @@ pub async fn oauth_start(
         .endpoints(&state.http_client)
         .await
         .map_err(OAuthError::Internal)?;
-    let credentials = get_credentials(&provider, settings).map_err(OAuthError::Internal)?;
+    let credentials = get_credentials(&provider, settings, instance_url.as_deref())
+        .map_err(OAuthError::Internal)?;
 
     let pkce = generate_pkce_pair();
     let oauth_state = generate_state();
@@ -303,7 +330,7 @@ pub async fn oauth_start(
         ("state" = String, Query, description = "CSRF state")
     ),
     responses(
-        (status = 302, description = "フロントエンドへリダイレクト"),
+        (status = 307, description = "フロントエンドへリダイレクト"),
         OAuthErrors,
     )
 )]
@@ -372,6 +399,10 @@ pub async fn oauth_callback(
     if payload.provider != provider {
         return Err(OAuthError::InvalidState);
     }
+    // 開始時に弾いているが、state を作った後にログアウトされても利用者を作らない
+    if !OAuthSettings::is_sign_in_provider(&provider) && payload.link_user_id.is_none() {
+        return Err(OAuthError::InvalidState);
+    }
 
     if let Some(link_user_id) = payload.link_user_id {
         let session_user_id: Option<Uuid> = session.get("user_id");
@@ -381,13 +412,22 @@ pub async fn oauth_callback(
     }
 
     let instance_url = payload.instance_url.as_deref();
+    // 開始の後に許可の一覧から外れた instance とも、トークンの交換をしない（client secret を送らぬ）
+    if provider == "gitlab_selfhosted"
+        && instance_url
+            .and_then(|url| settings.gitlab_selfhosted_instance(url))
+            .is_none()
+    {
+        return Err(OAuthError::InstanceNotAllowed);
+    }
     let provider_impl =
         resolve_provider(&provider, settings, instance_url).map_err(OAuthError::Internal)?;
     let endpoints = provider_impl
         .endpoints(&state.http_client)
         .await
         .map_err(OAuthError::Internal)?;
-    let credentials = get_credentials(&provider, settings).map_err(OAuthError::Internal)?;
+    let credentials =
+        get_credentials(&provider, settings, instance_url).map_err(OAuthError::Internal)?;
     let redirect_uri = settings.callback_url(&provider);
 
     let token = exchange_code(
@@ -461,12 +501,13 @@ pub async fn oauth_callback(
 }
 
 /// discovery で列挙する OAuth プロバイダー slug と、self-hosted インスタンス URL 入力の要否。
-const OAUTH_PROVIDER_SLUGS: [(&str, bool); 5] = [
+const OAUTH_PROVIDER_SLUGS: [(&str, bool); 6] = [
     ("github", false),
     ("gitlab", false),
     ("gitlab_selfhosted", true),
     ("google", false),
     ("oidc", false),
+    (GITHUB_APP_PROVIDER, false),
 ];
 
 #[axum::debug_handler]
@@ -489,6 +530,7 @@ pub async fn list_providers(State(state): State<AppState>) -> Json<OAuthProvider
                 provider: (*slug).to_string(),
                 connection_provider: settings.db_provider_key(slug)?,
                 requires_instance_url: *requires_instance_url,
+                sign_in: OAuthSettings::is_sign_in_provider(slug),
             })
         })
         .collect();
@@ -515,13 +557,21 @@ pub async fn list_connections(
         .filter(oauth_connections::Column::UserId.eq(user.id))
         .all(&state.db)
         .await?;
+    // 接続ごとの問い合わせは並べる（1 件が遅くても他を待たせない）
+    let rows = futures::future::try_join_all(
+        rows.into_iter()
+            .map(|row| backfill_provider_login(&state, row)),
+    )
+    .await?;
 
     let connections = rows
         .into_iter()
         .map(|row| OAuthConnectionItem {
+            sign_in: OAuthSettings::is_sign_in_provider(&row.provider),
             provider: row.provider,
             provider_email: row.provider_email,
             instance_url: row.instance_url,
+            provider_login: row.provider_login,
             connected_at: row.created_at.to_rfc3339(),
         })
         .collect();
@@ -581,16 +631,21 @@ pub async fn disconnect_connection(
                 .await?
                 .ok_or(OAuthError::ConnectionNotFound)?;
 
-            let connection_count = oauth_connections::Entity::find()
-                .filter(oauth_connections::Column::UserId.eq(auth.user_id))
-                .count(txn)
-                .await?;
+            // 連携専用のプロバイダーはログイン手段に数えない（それだけ残るとログインできない）。
+            // 解除してもログイン手段は減らないので、最後の手段の検査はログイン用の連携だけにかける
+            if connection.provider != GITHUB_APP_PROVIDER {
+                let connection_count = oauth_connections::Entity::find()
+                    .filter(oauth_connections::Column::UserId.eq(auth.user_id))
+                    .filter(oauth_connections::Column::Provider.ne(GITHUB_APP_PROVIDER))
+                    .count(txn)
+                    .await?;
 
-            let passkey_count = count_user_passkeys(txn, auth.user_id)
-                .await
-                .map_err(|e| OAuthError::Internal(e.into()))?;
-            if connection_count <= 1 && user.password_hash.is_none() && passkey_count == 0 {
-                return Err(OAuthError::LastAuthMethod);
+                let passkey_count = count_user_passkeys(txn, auth.user_id)
+                    .await
+                    .map_err(|e| OAuthError::Internal(e.into()))?;
+                if connection_count <= 1 && user.password_hash.is_none() && passkey_count == 0 {
+                    return Err(OAuthError::LastAuthMethod);
+                }
             }
 
             oauth_connections::Entity::delete_by_id(connection.id)
@@ -696,6 +751,11 @@ async fn resolve_user_and_connection(
         return Ok(link_user_id);
     }
 
+    // 新しい利用者を作るのは、登録が開いておる時だけ（既存の利用者のログインと連携は上で済んでおる）
+    if !user_registration_enabled(&state.db).await? {
+        return Err(OAuthError::RegistrationDisabled);
+    }
+
     if let Some(email) = provider_info.email.as_deref() {
         let normalized = normalize_email(email);
         if users::Entity::find()
@@ -717,6 +777,33 @@ async fn resolve_user_and_connection(
         token,
     )
     .await
+}
+
+/// 管理画面の「新規登録を受け付ける」（`system_settings.user_registration_enabled`）。
+async fn user_registration_enabled(db: &sea_orm::DatabaseConnection) -> Result<bool, OAuthError> {
+    common::system_settings::ensure_system_settings_row(db).await?;
+    let settings = system_settings::Entity::find()
+        .filter(system_settings::Column::Singleton.eq(true))
+        .one(db)
+        .await?
+        .ok_or_else(|| {
+            OAuthError::Internal(anyhow::anyhow!(
+                "system_settings singleton row missing after ensure"
+            ))
+        })?;
+    Ok(settings.user_registration_enabled)
+}
+
+/// provider が知らせる email の確認済みの印を、そのまま採ってよいか。
+///
+/// `gitlab_selfhosted` の instance は運用者の外に在りうるゆえ、その印は採らず、通常の確認
+/// mail で確かめる。他の provider は、その provider 自身（または運用者が設定した OIDC の
+/// issuer）が確かめた印を採る。
+fn provider_email_verified(provider_slug: &str, provider_info: &ProviderUserInfo) -> bool {
+    match provider_slug {
+        "gitlab_selfhosted" => false,
+        _ => provider_info.email_verified.unwrap_or(false),
+    }
 }
 
 async fn find_connection(
@@ -868,6 +955,76 @@ async fn release_provider_login(
     Ok(())
 }
 
+/// ログイン名を控える前（`m20260911010000_oauth_provider_login`）からある接続は
+/// `provider_login` が空のまま残る。保存済みのアクセストークンでプロバイダーに問い合わせて補完する。
+///
+/// トークンの期限切れ・失効・通信の失敗では補完できないので、空のまま返して一覧は止めない
+/// （画面は再連携を案内する）。届かないホストで一覧が待たされないよう、問い合わせは
+/// [`BACKFILL_TIMEOUT`] で打ち切る。DB の失敗は伝播する。
+/// ponytail: 補完できない接続は一覧を開くたびに問い合わせ直す。件数が問題になったら試した時刻を控える
+async fn backfill_provider_login(
+    state: &AppState,
+    mut row: oauth_connections::Model,
+) -> Result<oauth_connections::Model, OAuthError> {
+    if row.provider_login.is_some() || row.token_expires_at.is_some_and(|at| at <= Utc::now()) {
+        return Ok(row);
+    }
+    let Some(access_token_enc) = row.access_token_enc.clone() else {
+        return Ok(row);
+    };
+    // 汎用 OIDC の接続（`oidc:{issuer}`）など、slug から引けないものは対象外
+    let Ok(provider) = resolve_provider(
+        &row.provider,
+        &state.oauth_settings,
+        row.instance_url.as_deref(),
+    ) else {
+        return Ok(row);
+    };
+    let info = tokio::time::timeout(BACKFILL_TIMEOUT, async {
+        let access_token = decrypt_token(&state.oauth_settings.encryption_key, &access_token_enc)?;
+        let endpoints = provider.endpoints(&state.http_client).await?;
+        provider
+            .fetch_user_info(&state.http_client, &endpoints, &access_token)
+            .await
+    })
+    .await;
+    let login = match info {
+        Ok(Ok(info)) => provider_login(&info),
+        Ok(Err(error)) => {
+            warn!(connection_id = %row.id, provider = %row.provider, error = %error, "could not backfill provider login");
+            None
+        }
+        Err(_) => {
+            warn!(connection_id = %row.id, provider = %row.provider, "provider login backfill timed out");
+            None
+        }
+    };
+    let Some(login) = login else {
+        return Ok(row);
+    };
+    release_provider_login(
+        &state.db,
+        &row.provider,
+        row.instance_url.as_deref(),
+        &login,
+        Some(row.id),
+    )
+    .await?;
+    oauth_connections::Entity::update_many()
+        .col_expr(
+            oauth_connections::Column::ProviderLogin,
+            sea_orm::sea_query::Expr::value(Some(login.clone())),
+        )
+        .filter(oauth_connections::Column::Id.eq(row.id))
+        .exec(&state.db)
+        .await?;
+    row.provider_login = Some(login);
+    Ok(row)
+}
+
+/// 補完の問い合わせ 1 件にかける上限。
+const BACKFILL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
 async fn update_connection_tokens(
     state: &AppState,
     conn: oauth_connections::Model,
@@ -910,7 +1067,7 @@ async fn update_connection_tokens(
 
 async fn create_oauth_user_and_connection(
     state: &AppState,
-    _provider_slug: &str,
+    provider_slug: &str,
     db_provider: &str,
     instance_url: Option<&str>,
     provider_info: &ProviderUserInfo,
@@ -935,6 +1092,9 @@ async fn create_oauth_user_and_connection(
     };
     let now = Utc::now();
     let login = provider_login(provider_info);
+    let email_verified = provider_email_verified(provider_slug, provider_info);
+    // 確認 mail を送る先。provider が email を知らせぬ時の仮の宛先には送らない
+    let verify_email_to = (!email_verified && provider_info.email.is_some()).then(|| email.clone());
 
     let user = users::ActiveModel {
         id: Set(user_id),
@@ -942,7 +1102,7 @@ async fn create_oauth_user_and_connection(
         bio: Set(Some(String::new())),
         avatar_url: Set(provider_info.avatar_url.clone()),
         email: Set(email.clone()),
-        email_verified: Set(provider_info.email_verified.unwrap_or(false)),
+        email_verified: Set(email_verified),
         password_hash: Set(None),
         is_admin: Set(false),
         is_suspended: Set(false),
@@ -966,7 +1126,7 @@ async fn create_oauth_user_and_connection(
     let provider = db_provider.to_string();
     let instance_url = instance_url.map(str::to_string);
 
-    with_transaction::<Uuid, OAuthError, _>(&state.db, |txn| {
+    let user_id = with_transaction::<Uuid, OAuthError, _>(&state.db, |txn| {
         Box::pin(async move {
             if let Err(e) = users::Entity::insert(user).exec(txn).await {
                 if is_postgres_unique_violation(&e) {
@@ -993,7 +1153,21 @@ async fn create_oauth_user_and_connection(
             Ok(user_id)
         })
     })
-    .await
+    .await?;
+
+    // 確認済みでない email は、password の登録と同じ確認 mail の流れに載せる。送れずとも
+    // 利用者は作れておるゆえ止めない（再送の口から送り直せる）
+    if let Some(email) = verify_email_to
+        && let Err(e) = verification_email::enqueue(
+            state.verification_email_storage.as_ref(),
+            VerificationEmailJob::new(user_id, email),
+        )
+        .await
+    {
+        warn!(user_id = %user_id, error = ?e, "oauth verification email enqueue failed");
+    }
+
+    Ok(user_id)
 }
 
 async fn derive_unique_username(

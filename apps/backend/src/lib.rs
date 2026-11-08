@@ -4,6 +4,7 @@
 //! 統合テスト・export_openapi からの既存パス（`backend::handlers` 等）互換のため
 //! 再エクスポートを維持する。
 
+pub mod observability;
 pub mod server;
 
 pub use common::{error, settings};

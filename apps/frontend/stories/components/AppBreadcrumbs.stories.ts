@@ -61,8 +61,10 @@ export const NarrowLongNames: Story = {
     const list = within(canvasElement).getByRole('list');
     await expect(getComputedStyle(list).overflowX).toBe('auto');
     await expect(list.scrollWidth).toBeGreaterThan(list.clientWidth);
-    const current = canvasElement.querySelector('[aria-current="page"]')!;
-    await expect(current.getAttribute('title')).toBe(current.textContent);
+    // 切り詰めずに全文を出す（横スクロールで読める）
+    await expect(canvasElement.querySelector('[aria-current="page"]')?.textContent).toBe(
+      '非常に長いタスク名でもレイアウトが崩れず全文を確認できる',
+    );
   },
 };
 

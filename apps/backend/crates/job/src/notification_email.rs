@@ -13,7 +13,7 @@ use std::time::Duration;
 use sea_orm::{
     ActiveModelTrait,
     ActiveValue::Set,
-    ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
     TransactionTrait,
     sea_query::{LockBehavior, LockType},
 };
@@ -34,10 +34,15 @@ const BATCH_SIZE: u64 = 50;
 
 /// まだ送信対象の行（未送信・待ち・試行回数に余りがある）。
 fn pending() -> sea_orm::Select<notifications::Entity> {
-    notifications::Entity::find()
-        .filter(notifications::Column::EmailQueuedAt.is_not_null())
-        .filter(notifications::Column::EmailedAt.is_null())
-        .filter(notifications::Column::EmailAttempts.lt(MAX_ATTEMPTS))
+    notifications::Entity::find().filter(pending_condition())
+}
+
+/// 送信待ちの条件。保持期間の掃除（`notification_retention`）はこれに当たる行を残す。
+pub fn pending_condition() -> Condition {
+    Condition::all()
+        .add(notifications::Column::EmailQueuedAt.is_not_null())
+        .add(notifications::Column::EmailedAt.is_null())
+        .add(notifications::Column::EmailAttempts.lt(MAX_ATTEMPTS))
 }
 
 /// 再試行待ちも pending のまま残し、期限の来た行だけ送信する。

@@ -1,3 +1,7 @@
+// テストケースの一覧（docs/dev/features/account-settings.md と docs/dev/features/auth/2fa.md から移した）
+// - `has_password` の反転、初回パスワード設定が一度きりであること、パスワードを得たあとに最後の連携を解除できること
+// - `oauth_callback_requires_2fa_setup_for_every_membership_form`: リダイレクト先と、半認証のあいだ `/v1/auth/me` が 403 になること
+
 use crate::common::{MockGitLabUser, TestApp, is_redirect};
 use axum::http::StatusCode;
 use entity::{oauth_connections, project_members, projects, tenants, users};
@@ -57,6 +61,21 @@ async fn oauth_start_callback_flow_issues_session() {
         .parse()
         .expect("uuid parse");
     assert_eq!(app.count_connections_for_user(user_id).await, 1);
+
+    // 連携一覧はホスト上のユーザー名を小文字で返す（レビュー画面の「自分の PR」判定に使う）
+    let connections: serde_json::Value = app
+        .client()
+        .get(format!("{}/v1/auth/oauth/connections", app.base_url()))
+        .send()
+        .await
+        .expect("connections request")
+        .json()
+        .await
+        .expect("connections json");
+    assert_eq!(
+        connections["connections"][0]["provider_login"].as_str(),
+        Some(format!("oauth_user_{unique}").to_lowercase().as_str())
+    );
 
     app.cleanup_user(user_id).await;
 }
@@ -361,6 +380,110 @@ async fn oauth_providers_lists_only_configured() {
         Some("gitlab_selfhosted"),
         "connection_provider must be present for matching against connections"
     );
+    assert_eq!(selfhosted["sign_in"].as_bool(), Some(true));
+
+    // PR 承認用の GitHub 連携は一覧に出るが、サインインには使えない
+    let github_app = providers
+        .iter()
+        .find(|p| p["provider"] == "github_app")
+        .expect("github_app present");
+    assert_eq!(github_app["sign_in"].as_bool(), Some(false));
+}
+
+/// PR 承認用の GitHub 連携は、ログイン中の利用者にしか結べない（これで利用者を作らない）。
+#[tokio::test]
+async fn github_app_link_requires_a_signed_in_user() {
+    let mut app = TestApp::new().await;
+
+    let anonymous = app.get("/v1/auth/oauth/github_app").await;
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+    // 対照: ログイン中なら GitHub の認可画面へ送る
+    let user = app.insert_user_default().await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+    let start = app.get_with_session("/v1/auth/oauth/github_app").await;
+    assert!(is_redirect(start.status()), "status: {}", start.status());
+    let location = start
+        .headers()
+        .get("location")
+        .expect("authorize redirect")
+        .to_str()
+        .expect("authorize url");
+    assert!(
+        location.contains("/login/oauth/authorize"),
+        "unexpected authorize url: {location}"
+    );
+
+    app.cleanup_user(user.id).await;
+}
+
+/// PR 承認用の連携はログイン手段に数えない。それだけ残るとログインできなくなるので、
+/// 最後のログイン用の連携は解除できない（対照: 承認用の連携そのものは解除できる）。
+#[tokio::test]
+async fn a_github_app_link_is_not_counted_as_a_sign_in_method() {
+    let app = TestApp::new().await;
+    let unique = uuid::Uuid::new_v4();
+    app.set_mock_user(MockGitLabUser {
+        id: 400_003,
+        username: format!("approver_{unique}"),
+        email: Some(format!("approver-{unique}@example.com")),
+    });
+    let start = app.oauth_start(false).await;
+    let callback = app.follow_oauth_start(start).await;
+    assert!(is_redirect(callback.status()), "oauth callback redirect");
+    let me: serde_json::Value = app.get_me().await.json().await.expect("me json");
+    let user_id: uuid::Uuid = me["id"].as_str().expect("user id").parse().expect("uuid");
+
+    oauth_connections::ActiveModel {
+        id: Set(uuid::Uuid::new_v4()),
+        user_id: Set(user_id),
+        provider: Set("github_app".into()),
+        provider_user_id: Set("9002".into()),
+        created_at: Set(chrono::Utc::now().into()),
+        updated_at: Set(chrono::Utc::now().into()),
+        ..Default::default()
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert github_app connection");
+
+    // 連携一覧は連携ごとにログイン手段かを返す（GitHub App の設定の有無に左右されない）
+    let listed: serde_json::Value = app
+        .get_with_session("/v1/auth/oauth/connections")
+        .await
+        .json()
+        .await
+        .expect("connections json");
+    let sign_in_of = |provider: &str| {
+        listed["connections"]
+            .as_array()
+            .expect("connections")
+            .iter()
+            .find(|c| c["provider"] == provider)
+            .unwrap_or_else(|| panic!("{provider} listed"))["sign_in"]
+            .as_bool()
+    };
+    assert_eq!(sign_in_of("gitlab_selfhosted"), Some(true));
+    assert_eq!(sign_in_of("github_app"), Some(false));
+
+    let blocked = app
+        .delete_with_session(&format!(
+            "/v1/auth/oauth/connections/gitlab_selfhosted?instance_url={}",
+            urlencoding::encode(app.instance_url())
+        ))
+        .await;
+    assert_eq!(blocked.status(), StatusCode::FORBIDDEN);
+    let body = blocked.text().await.expect("body");
+    assert!(body.contains("oauth-last-auth-method"), "{body}");
+
+    let unlinked = app
+        .delete_with_session("/v1/auth/oauth/connections/github_app")
+        .await;
+    assert_eq!(unlinked.status(), StatusCode::NO_CONTENT);
+    assert_eq!(app.count_connections_for_user(user_id).await, 1);
+
+    app.cleanup_user(user_id).await;
 }
 
 #[tokio::test]
@@ -466,6 +589,9 @@ async fn oauth_callback_requires_2fa_setup_for_every_membership_form() {
             owner_id: Set(owner.id),
             drive_quota_bytes: Set(None),
             require_2fa: Set(true),
+            owner_department: Set(None),
+            owner_position: Set(None),
+            owner_team: Set(None),
         }
         .insert(&app.state.db)
         .await
@@ -509,6 +635,9 @@ async fn oauth_callback_requires_2fa_setup_for_every_membership_form() {
                 tenant_id: Set(tenant_id),
                 user_id: Set(user_id),
                 role: Set(entity::tenant_members::TenantRole::Member),
+                department: Set(None),
+                position: Set(None),
+                team: Set(None),
             }
             .insert(&app.state.db)
             .await
@@ -537,4 +666,72 @@ async fn oauth_callback_requires_2fa_setup_for_every_membership_form() {
         app.cleanup_user(user_id).await;
         app.cleanup_user(owner.id).await;
     }
+}
+
+async fn list_connections(app: &TestApp) -> serde_json::Value {
+    let res = app
+        .client()
+        .get(format!("{}/v1/auth/oauth/connections", app.base_url()))
+        .send()
+        .await
+        .expect("connections request");
+    assert_eq!(res.status(), StatusCode::OK);
+    res.json().await.expect("connections json")
+}
+
+/// ログイン名を控える前からある接続は、連携一覧を開いたときに保存済みのトークンで補完する。
+/// トークンが使えない接続は空のまま返し、一覧そのものは止めない（画面が再連携を案内する）。
+#[tokio::test]
+async fn connections_backfill_provider_login_from_stored_token() {
+    let mut app = TestApp::new().await;
+    let unique = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+    app.set_mock_user(MockGitLabUser {
+        id: (uuid::Uuid::new_v4().as_u128() % 1_000_000_000 + 3_000_000_000) as i64,
+        username: format!("Backfill_{unique}"),
+        email: Some(format!("backfill-{unique}@example.com")),
+    });
+    let user_id = login_via_oauth(&mut app).await;
+    let expected = format!("backfill_{unique}");
+
+    // provider_login を控える前に連携した状態へ戻す
+    let clear_login = |access_token_enc: Option<String>| {
+        let db = app.state.db.clone();
+        async move {
+            let mut update = oauth_connections::Entity::update_many()
+                .col_expr(
+                    oauth_connections::Column::ProviderLogin,
+                    sea_orm::sea_query::Expr::value(Option::<String>::None),
+                )
+                .filter(oauth_connections::Column::UserId.eq(user_id));
+            if let Some(enc) = access_token_enc {
+                update = update.col_expr(
+                    oauth_connections::Column::AccessTokenEnc,
+                    sea_orm::sea_query::Expr::value(Some(enc)),
+                );
+            }
+            update.exec(&db).await.expect("clear provider login");
+        }
+    };
+    clear_login(None).await;
+    assert_eq!(provider_login_of(&app, user_id).await, None);
+
+    let body = list_connections(&app).await;
+    assert_eq!(
+        body["connections"][0]["provider_login"].as_str(),
+        Some(expected.as_str()),
+        "保存済みのトークンで問い合わせて小文字で補完する"
+    );
+    assert_eq!(
+        provider_login_of(&app, user_id).await.as_deref(),
+        Some(expected.as_str()),
+        "補完した名前は接続に控える"
+    );
+
+    // 復号できないトークン（鍵の入れ替えなど）は補完できない。一覧は 200 のまま空で返す
+    clear_login(Some("not-a-valid-ciphertext".into())).await;
+    let body = list_connections(&app).await;
+    assert!(body["connections"][0]["provider_login"].is_null());
+    assert_eq!(provider_login_of(&app, user_id).await, None);
+
+    app.cleanup_user(user_id).await;
 }

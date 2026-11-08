@@ -142,7 +142,7 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
     // メンバー 0 件になり、テナント全体に開放されてしまう（#568）。
     // 残った行は project-only の客分の名指しに当たるが、この削除は PAT を revoke し
     // users の行を墓標化するため、削除済み利用者がそこから入ることはない
-    // （客分の定めは apps/backend/docs/tenant-project-authz.md の「所属の 3 層」）。
+    // （客分の定めは docs/dev/design/tenant-project-authz.md の「継承と明示」）。
     // users の行は墓標として残す方式なので、FK の ON DELETE CASCADE は発火しない
     if table_exists(db, "tenant_members").await? {
         tenant_members::Entity::delete_many()
@@ -252,6 +252,7 @@ pub async fn create_user(
         username: Set(payload.username),
         bio: Set(Some(String::new())),
         avatar_url: Set(None),
+        avatar_storage_key: Set(None),
         email: Set(email),
         email_verified: Set(payload.email_verified),
         password_hash: Set(Some(password_hash)),
@@ -416,6 +417,9 @@ pub async fn delete_user(
     }
 
     delete_user_cascade(&state.db, id).await?;
+    if let Some(key) = &user.avatar_storage_key {
+        service::avatar::delete_avatar_object(state.storage.as_ref(), key).await;
+    }
 
     record_audit(
         &state.db,

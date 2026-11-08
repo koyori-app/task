@@ -19,7 +19,7 @@ pub async fn run(
     command: ProjectsCommand,
     output: OutputOptions,
 ) -> Result<i32> {
-    let api = &context.connect()?;
+    let api = &context.connect().await?;
     match command {
         ProjectsCommand::List => {
             let projects = list_projects(api).await?;

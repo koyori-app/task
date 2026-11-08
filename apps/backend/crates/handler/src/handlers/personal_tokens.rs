@@ -12,10 +12,10 @@ use sea_orm::{
 };
 
 use crate::AppState;
+use crate::auth_helpers::require_tenant_admin;
 use crate::auth_helpers::require_tenant_owner;
 use crate::error::AppError;
 use crate::extractors::{AuthMethod, AuthUser};
-use crate::handlers::tenant_members::require_tenant_admin;
 use crate::openapi::{CrudErrors, PersonalTokenAuthErrors, SessionAuthErrors};
 use entity::scopes::ScopeList;
 use entity::{
@@ -102,7 +102,7 @@ pub async fn get_current_personal_token(
         user_id: auth.user_id,
         username: auth.username,
         tenant_id,
-        scopes,
+        scopes: scopes.0.into_iter().map(Into::into).collect(),
         allowed_project_ids,
         expires_at: expires_at.map(|value| value.with_timezone(&chrono::Utc)),
     }))
@@ -149,7 +149,7 @@ mod identity_tests {
 
         assert_eq!(identity.name, "review-bot");
         assert_eq!(identity.username, "automation");
-        assert!(identity.scopes.0.is_empty());
+        assert!(identity.scopes.is_empty());
         assert_eq!(identity.allowed_project_ids, Some(projects));
         assert!(identity.expires_at.is_some());
     }
@@ -175,7 +175,7 @@ mod identity_tests {
             .await
             .expect("PAT identity");
 
-        assert_eq!(identity.scopes.0, vec![Scope::ReadTask]);
+        assert_eq!(identity.scopes, vec![Scope::ReadTask]);
         assert_eq!(identity.allowed_project_ids, None);
     }
 
@@ -254,10 +254,14 @@ pub async fn create_personal_token(
     Valid(Json(payload)): Valid<Json<CreatePersonalTokenRequest>>,
 ) -> Result<(StatusCode, Json<CreatePersonalTokenResponse>), AppError> {
     auth.require_session()?;
+    // tenant_members と同じく、PAT を結び付けるテナントの所属と 2FA の強制を先に確かめる。
+    // 強制の前に取った本認証のセッションでも、2FA を満たさなければ発行できない
+    auth.ensure_tenant_access(&state, payload.tenant_id, None)
+        .await?;
     // 発行はオーナーとテナント Admin に許す。PAT は発行者本人として動き
     // （user_id は発行者に固定）、得られる力は発行者の持つ力を超えぬため、
     // 主に閉じても守れる物が増えない（docs/personal-access-tokens-authz.md）。
-    require_tenant_admin(&state, payload.tenant_id, auth.user_id).await?;
+    require_tenant_admin(&state.db, payload.tenant_id, auth.user_id).await?;
 
     if let Some(ref project_ids) = payload.project_ids {
         validate_project_ids(&state, payload.tenant_id, project_ids).await?;

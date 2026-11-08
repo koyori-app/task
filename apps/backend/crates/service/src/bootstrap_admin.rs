@@ -8,9 +8,14 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::email::normalize_email;
-use entity::{audit_logs, users};
+use entity::{audit_logs, oauth_connections, users};
 
 /// `BOOTSTRAP_ADMIN_EMAIL` 設定時、管理者が 0 人なら対象ユーザーを昇格する。
+///
+/// 昇格するのは、email が確認済み（`email_verified`）で、その確認の出所が確かな利用者だけ。
+/// `gitlab_selfhosted` の連携を持つ利用者は、確認の印を運用者の外の instance から受け取った
+/// ことがありうるゆえ昇格しない（password の登録の確認 mail・GitHub・gitlab.com・Google・
+/// 運用者の OIDC で確かめた email はこれに当たらぬ）。条件を満たさねば何もせず、警告を残す。
 pub async fn bootstrap_admin_email(
     db: &DatabaseConnection,
     email: &str,
@@ -35,6 +40,11 @@ pub async fn bootstrap_admin_email(
         return Ok(());
     };
 
+    if let Some(reason) = bootstrap_ineligibility(db, &user).await? {
+        tracing::warn!(user_id = %user.id, "bootstrap skipped: {reason}");
+        return Ok(());
+    }
+
     let mut active: users::ActiveModel = user.clone().into();
     active.is_admin = Set(true);
     active.update(db).await?;
@@ -56,4 +66,25 @@ pub async fn bootstrap_admin_email(
 
     tracing::info!(user_id = %user.id, "bootstrap: promoted user to admin");
     Ok(())
+}
+
+/// 管理者に昇格させてはならぬ訳。昇格してよければ `None`。
+pub async fn bootstrap_ineligibility(
+    db: &DatabaseConnection,
+    user: &users::Model,
+) -> Result<Option<&'static str>, sea_orm::DbErr> {
+    if !user.email_verified {
+        return Ok(Some("the email of the matching user is not verified"));
+    }
+    let selfhosted_connections = oauth_connections::Entity::find()
+        .filter(oauth_connections::Column::UserId.eq(user.id))
+        .filter(oauth_connections::Column::Provider.eq("gitlab_selfhosted"))
+        .count(db)
+        .await?;
+    if selfhosted_connections > 0 {
+        return Ok(Some(
+            "the matching user has a gitlab_selfhosted connection; verify the email through a password sign-up or another provider",
+        ));
+    }
+    Ok(None)
 }

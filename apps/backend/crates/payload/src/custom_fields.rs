@@ -5,6 +5,7 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::or_unknown::OrUnknown;
 use entity::project_custom_fields;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -68,7 +69,8 @@ pub struct CustomFieldDefinitionSummary {
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
     pub name: String,
-    pub field_type: project_custom_fields::CustomFieldType,
+    #[schema(inline)]
+    pub field_type: OrUnknown<project_custom_fields::CustomFieldType>,
     pub is_required: bool,
     pub position: i16,
 }
@@ -78,7 +80,7 @@ impl From<&project_custom_fields::Model> for CustomFieldDefinitionSummary {
         Self {
             id: field.id,
             name: field.name.clone(),
-            field_type: field.field_type,
+            field_type: field.field_type.into(),
             is_required: field.is_required,
             position: field.position,
         }

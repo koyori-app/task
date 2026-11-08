@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
+use crate::tenant_members::OrgProfile;
+
 /// Public user profile — excludes password_hash, sessions_revoked_at, and other secrets.
 #[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
 pub struct UserResponse {
@@ -32,6 +34,41 @@ pub struct UserSummary {
     pub username: String,
     #[schema(nullable)]
     pub avatar_url: Option<String>,
+}
+
+/// 他の利用者に見せるプロフィール。`UserResponse` からメール等の本人向け項目を落としたもの
+#[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
+pub struct UserProfileResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    pub username: String,
+    #[schema(nullable)]
+    pub bio: Option<String>,
+    #[schema(nullable)]
+    pub avatar_url: Option<String>,
+    /// このテナントでの部署。未設定・客分では null
+    #[schema(nullable)]
+    pub department: Option<String>,
+    /// このテナントでの役職。未設定・客分では null
+    #[schema(nullable)]
+    pub position: Option<String>,
+    /// このテナントでのチーム。未設定・客分では null
+    #[schema(nullable)]
+    pub team: Option<String>,
+}
+
+impl UserProfileResponse {
+    pub fn from_parts(user: entity::users::Model, org: OrgProfile) -> Self {
+        Self {
+            id: user.id,
+            username: user.username,
+            bio: user.bio,
+            avatar_url: user.avatar_url,
+            department: org.department,
+            position: org.position,
+            team: org.team,
+        }
+    }
 }
 
 impl From<entity::users::Model> for UserSummary {

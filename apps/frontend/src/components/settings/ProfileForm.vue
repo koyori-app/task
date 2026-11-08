@@ -2,15 +2,12 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { useForm } from '@tanstack/vue-form';
 import { computed, ref } from 'vue';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Button } from '@/components/ui/button';
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
+import UserAvatar from '@/components/UserAvatar.vue';
+import { Button, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { meQueryOptions, useUpdateProfileMutation } from '@/lib/api-vue-query';
 import { codePointLength } from '@/lib/code-points';
-import { avatarInitials } from '@/lib/initials';
+import { useAuthStore } from '@/stores/auth';
 import type { components } from '@/generated/api';
 
 const props = defineProps<{ user: components['schemas']['UserResponse'] }>();
@@ -19,6 +16,10 @@ const USERNAME_MIN = 3;
 const USERNAME_MAX = 255;
 const BIO_MAX = 1000;
 const AVATAR_URL_MAX = 2048;
+/** backend の `AVATAR_MAX_BYTES` と同じ上限。超える画像は送る前に止める。 */
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const AVATAR_TOO_LARGE = '画像は 2 MiB 以下にしてください。';
+const apiBase = (import.meta.env.VITE_API_BASE ?? '/api').replace(/\/$/, '');
 
 /** backend の `validate_avatar_url` と同じ判定。ずれると保存時まで気づけない。 */
 function isHttpsUrl(value: string) {
@@ -49,16 +50,20 @@ function validateAvatarUrl(raw: string) {
 }
 
 const queryClient = useQueryClient();
+const authStore = useAuthStore();
 const updateProfile = useUpdateProfileMutation();
 const submitError = ref<string | null>(null);
 const saved = ref(false);
-const initialAvatarUrl = props.user.avatar_url ?? '';
+// アップロードで avatar_url が変わったら差し替える（未変更判定と検証の除外に使う）
+const initialAvatarUrl = ref(props.user.avatar_url ?? '');
+const avatarFileInput = ref<HTMLInputElement | null>(null);
+const uploading = ref(false);
 
 const form = useForm({
   defaultValues: {
     username: props.user.username,
     bio: props.user.bio ?? '',
-    avatarUrl: initialAvatarUrl,
+    avatarUrl: initialAvatarUrl.value,
   },
   onSubmit: async ({ value }) => {
     submitError.value = null;
@@ -70,7 +75,7 @@ const form = useForm({
         body: {
           username,
           bio: value.bio,
-          ...(value.avatarUrl === initialAvatarUrl
+          ...(value.avatarUrl === initialAvatarUrl.value
             ? {}
             : avatarUrl === ''
               ? { clear_avatar_url: true }
@@ -89,11 +94,59 @@ const form = useForm({
   },
 });
 
-const avatarFallback = computed(() => avatarInitials(props.user.username));
-
 function resetSubmitFeedback() {
   saved.value = false;
   submitError.value = null;
+}
+
+/** 現在値（保存済みの値）なら、http の旧データや自サーバーの URL でもプレビューする。 */
+function canPreviewAvatar(value: string) {
+  return (
+    value !== '' && (value === initialAvatarUrl.value || validateAvatarUrl(value) === undefined)
+  );
+}
+
+async function uploadAvatar(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  // 同じファイルを選び直しても change が発火するよう空に戻す
+  input.value = '';
+  if (!file) return;
+  resetSubmitFeedback();
+  if (file.size > AVATAR_MAX_BYTES) {
+    submitError.value = AVATAR_TOO_LARGE;
+    return;
+  }
+
+  uploading.value = true;
+  try {
+    const body = new FormData();
+    body.append('file', file);
+    const res = await fetch(`${apiBase}/v1/auth/me/avatar`, {
+      method: 'POST',
+      body,
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      submitError.value =
+        res.status === 413
+          ? AVATAR_TOO_LARGE
+          : res.status === 400
+            ? 'PNG・JPEG・GIF・WebP の画像を選んでください。'
+            : 'アップロードできませんでした。時間をおいて再度お試しください。';
+      return;
+    }
+    const updated = (await res.json()) as components['schemas']['UserResponse'];
+    initialAvatarUrl.value = updated.avatar_url ?? '';
+    form.setFieldValue('avatarUrl', initialAvatarUrl.value);
+    queryClient.setQueryData(meQueryOptions().queryKey, updated);
+    authStore.setUser(updated);
+    saved.value = true;
+  } catch {
+    submitError.value = 'アップロードできませんでした。時間をおいて再度お試しください。';
+  } finally {
+    uploading.value = false;
+  }
 }
 </script>
 
@@ -103,7 +156,7 @@ function resetSubmitFeedback() {
     @submit="() => form.handleSubmit()"
     @input="resetSubmitFeedback"
   >
-    <FieldGroup>
+    <div class="flex flex-col gap-6">
       <form.Field
         name="avatarUrl"
         :validators="{
@@ -114,50 +167,60 @@ function resetSubmitFeedback() {
         }"
       >
         <template #default="{ field }">
-          <Field>
-            <FieldLabel :for="field.name">アバター</FieldLabel>
+          <Field
+            :id="field.name"
+            label="アバター"
+            description="画像（PNG・JPEG・GIF・WebP、2 MiB まで）をアップロードするか、画像の URL を指定します。"
+            :error="field.state.meta.errors.length ? field.state.meta.errors[0] : ''"
+          >
             <div class="flex items-center gap-4">
-              <Avatar class="size-14 rounded-lg">
-                <AvatarImage
-                  v-if="validateAvatarUrl(field.state.value) === undefined && field.state.value"
-                  :src="field.state.value.trim()"
-                  :alt="user.username"
-                />
-                <AvatarFallback class="rounded-lg">{{ avatarFallback }}</AvatarFallback>
-              </Avatar>
+              <UserAvatar
+                :user="{
+                  name: user.username,
+                  avatar_url: canPreviewAvatar(field.state.value) ? field.state.value.trim() : null,
+                }"
+                size="2xl"
+                shape="lg"
+              />
               <div class="flex flex-1 flex-col gap-2">
                 <Input
-                  :id="field.name"
                   :name="field.name"
                   type="url"
-                  inputmode="url"
+                  input-mode="url"
                   placeholder="https://example.com/avatar.png"
-                  :model-value="field.state.value"
-                  @blur="field.handleBlur"
-                  @update:model-value="(v) => field.handleChange(String(v))"
+                  :value="field.state.value"
+                  :on-value-change="field.handleChange"
+                  :on-blur="field.handleBlur"
                 />
-                <div>
+                <div class="flex gap-2">
+                  <input
+                    ref="avatarFileInput"
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp"
+                    class="hidden"
+                    data-testid="avatar-file-input"
+                    @change="uploadAvatar"
+                  />
                   <Button
                     type="button"
-                    variant="outline"
-                    size="sm"
+                    variant="tertiary"
+                    :disabled="uploading"
+                    :label="uploading ? 'アップロード中…' : '画像を選ぶ'"
+                    @click="avatarFileInput?.click()"
+                  />
+                  <Button
+                    type="button"
+                    variant="tertiary"
                     :disabled="!field.state.value"
+                    label="削除"
                     @click="
                       field.handleChange('');
                       resetSubmitFeedback();
                     "
-                  >
-                    削除
-                  </Button>
+                  />
                 </div>
               </div>
             </div>
-            <FieldDescription>
-              画像の URL を指定します。ファイルのアップロードには未対応です。
-            </FieldDescription>
-            <FieldError class="min-h-[1.25rem]">
-              {{ field.state.meta.errors.length ? field.state.meta.errors[0] : '' }}
-            </FieldError>
           </Field>
         </template>
       </form.Field>
@@ -170,19 +233,18 @@ function resetSubmitFeedback() {
         }"
       >
         <template #default="{ field }">
-          <Field>
-            <FieldLabel :for="field.name">ユーザー名</FieldLabel>
+          <Field
+            :id="field.name"
+            label="ユーザー名"
+            :error="field.state.meta.errors.length ? field.state.meta.errors[0] : ''"
+          >
             <Input
-              :id="field.name"
               :name="field.name"
               autocomplete="username"
-              :model-value="field.state.value"
-              @blur="field.handleBlur"
-              @update:model-value="(v) => field.handleChange(String(v))"
+              :value="field.state.value"
+              :on-value-change="field.handleChange"
+              :on-blur="field.handleBlur"
             />
-            <FieldError class="min-h-[1.25rem]">
-              {{ field.state.meta.errors.length ? field.state.meta.errors[0] : '' }}
-            </FieldError>
           </Field>
         </template>
       </form.Field>
@@ -195,19 +257,18 @@ function resetSubmitFeedback() {
         }"
       >
         <template #default="{ field }">
-          <Field>
-            <FieldLabel :for="field.name">自己紹介</FieldLabel>
+          <Field
+            :id="field.name"
+            label="自己紹介"
+            :error="field.state.meta.errors.length ? field.state.meta.errors[0] : ''"
+          >
             <Textarea
-              :id="field.name"
               :name="field.name"
-              rows="4"
-              :model-value="field.state.value"
-              @blur="field.handleBlur"
-              @update:model-value="(v) => field.handleChange(String(v))"
+              :rows="4"
+              :value="field.state.value"
+              :on-value-change="field.handleChange"
+              :on-blur="field.handleBlur"
             />
-            <FieldError class="min-h-[1.25rem]">
-              {{ field.state.meta.errors.length ? field.state.meta.errors[0] : '' }}
-            </FieldError>
           </Field>
         </template>
       </form.Field>
@@ -217,15 +278,15 @@ function resetSubmitFeedback() {
 
       <form.Subscribe>
         <template #default="{ canSubmit, isSubmitting }">
-          <Field>
-            <div>
-              <Button type="submit" :disabled="!canSubmit || isSubmitting || !isHydrated">
-                {{ isSubmitting ? '保存中…' : '変更を保存' }}
-              </Button>
-            </div>
-          </Field>
+          <div>
+            <Button
+              type="submit"
+              :disabled="!canSubmit || isSubmitting || !isHydrated"
+              :label="isSubmitting ? '保存中…' : '変更を保存'"
+            />
+          </div>
         </template>
       </form.Subscribe>
-    </FieldGroup>
+    </div>
   </HydrationSafeForm>
 </template>

@@ -4,21 +4,27 @@ import { navigate } from 'vike/client/router';
 import { useData } from 'vike-vue/useData';
 import { usePageContext } from 'vike-vue/usePageContext';
 
-import TaskActivityFeed from '@/components/tasks/TaskActivityFeed.vue';
+import TaskActivityFilter from '@/components/tasks/TaskActivityFilter.vue';
+import TaskAttachments from '@/components/tasks/TaskAttachments.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
+import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
+import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
+import type { ActivityFilter, ActivityLookups } from '@/lib/activity-timeline';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
 import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
 import { useTaskActivities } from '@/composables/useTaskActivities';
+import { useReactions } from '@/composables/useReactions';
 import { useTaskComments } from '@/composables/useTaskComments';
 import { useTaskDetail } from '@/composables/useTaskDetail';
+import { useSimilarTasks } from '@/composables/useSimilarTasks';
 import { useMeQuery } from '@/lib/api-vue-query';
 import type { Data } from './+data';
 import { refreshTaskDescription } from './task-description-navigation';
 import type { components } from '@/generated/api';
-import { taskDetailHref } from '@/lib/task-display';
+import { taskDetailHref, userProfileHref } from '@/lib/task-display';
 
 type TaskResponse = components['schemas']['TaskResponse'];
 
@@ -36,6 +42,7 @@ const navigateAfterDelete = inject<(href: string) => void>('navigateAfterDelete'
 });
 
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
+const profileHref = (userId: string) => userProfileHref(tenantDisplayId.value, userId);
 const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
 const taskId = computed(() => String(pageContext.routeParams.taskId ?? ''));
 
@@ -60,8 +67,11 @@ const {
   priorityError,
   labelsUpdating,
   labelsError,
+  parentUpdating,
+  parentError,
   fieldUpdating,
   fieldErrors,
+  savedField,
   isLoading,
   isNotFound,
   isError,
@@ -70,9 +80,11 @@ const {
   onSaveTitle,
   onSaveDescription,
   onSaveProgressPct,
+  onSavePlannedStartOn,
   onSaveSoftDeadline,
   onSaveHardDeadline,
   onSaveLabels,
+  onChangeParent,
   deleteError,
   deletePending,
   confirmDelete,
@@ -105,6 +117,7 @@ const {
 // 倒し、タスク詳細本体には影響させない
 const {
   threads,
+  mentions,
   commentsLoading,
   commentsError,
   refetchComments,
@@ -129,6 +142,15 @@ const {
 // 担当者の割り当て（詳細でも一覧の行と同じ口を使う）
 const membersQuery = useAssignableUsersQuery(tenantId, projectId);
 const members = computed(() => membersQuery.data.value ?? []);
+
+// 列の見出しの絞り込み。スレッドの中は絞り込まないので、開いている間は出さない
+const activityFilter = ref<ActivityFilter>('all');
+const activityThreadId = ref<string | null>(null);
+const activityLookups = computed<ActivityLookups>(() => ({
+  statuses: statuses.value,
+  members: members.value,
+  labels: projectLabels.value,
+}));
 
 // 候補の取得状態はピッカーへ渡す（取得中・失敗を「候補 0 人」と混ぜない）
 const membersState = computed(() => ({
@@ -173,6 +195,15 @@ const {
 // 同じ query key で /v1/auth/me を取得済みのため追加リクエストにはならない
 const meQuery = useMeQuery();
 const currentUserId = computed(() => meQuery.data.value?.id ?? null);
+const reactionController = useReactions({
+  tenantId,
+  projectId,
+  taskId,
+  currentUser: computed(() => {
+    const me = meQuery.data.value;
+    return me ? { id: me.id, name: me.username, avatar_url: me.avatar_url ?? null } : null;
+  }),
+});
 
 function openDeleteDialog() {
   deleteError.value = null;
@@ -188,11 +219,25 @@ function onDeleteDialogCancel(event: Event) {
 function openRelatedTask(task: TaskResponse) {
   void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, task.seq_id));
 }
+
+const similarQuery = useSimilarTasks({
+  tenantId,
+  projectId,
+  title: () => displayTask.value?.title ?? '',
+  excludeTaskId: () => displayTask.value?.id,
+});
+
+function openSimilarTask(seqId: number) {
+  void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, seqId));
+}
 </script>
 
 <template>
   <TaskDetailHub
+    :reaction-controller="reactionController"
+    :current-user-id="currentUserId"
     :task="displayTask"
+    :profile-href="profileHref"
     :description-html="data?.descriptionHtml ?? null"
     :description-source="data?.descriptionSource ?? null"
     :project-key="projectKey"
@@ -209,6 +254,7 @@ function openRelatedTask(task: TaskResponse) {
     :labels-error="labelsError"
     :field-updating="fieldUpdating"
     :field-errors="fieldErrors"
+    :saved-field="savedField"
     :loading="isLoading"
     :not-found="isNotFound"
     :error="isError"
@@ -217,6 +263,7 @@ function openRelatedTask(task: TaskResponse) {
     @save:title="onSaveTitle"
     @save:description="onSaveDescription"
     @save:progress_pct="onSaveProgressPct"
+    @save:planned_start_on="onSavePlannedStartOn"
     @save:soft_deadline="onSaveSoftDeadline"
     @save:hard_deadline="onSaveHardDeadline"
     @save:label_ids="onSaveLabels"
@@ -229,6 +276,7 @@ function openRelatedTask(task: TaskResponse) {
     @delete-request="openDeleteDialog"
   >
     <template v-if="displayTask" #main>
+      <TaskAttachments :tenant-id="tenantId" :project-id="projectId" :task-id="taskId" />
       <TaskSubtaskPanel
         :tenant-id="tenantId"
         :project-id="projectId"
@@ -237,9 +285,26 @@ function openRelatedTask(task: TaskResponse) {
         :parent-task-id="displayTask.parent_task_id ?? null"
         :status-id="selectedStatusId"
         :status-updating="statusUpdating"
+        :parent-updating="parentUpdating"
+        :parent-error="parentError"
         :statuses="statuses"
         :project-key="projectKey"
         @open="openRelatedTask"
+        @change-parent="onChangeParent"
+      />
+      <SimilarTasksList
+        class="border-t pt-5"
+        :tasks="similarQuery.data.value?.tasks ?? []"
+        :tenant-display-id="tenantDisplayId"
+        :project-key="projectKey"
+        @select="openSimilarTask"
+      />
+      <TaskForgeSection
+        :tenant-id="tenantId"
+        :project-id="projectId"
+        :task-id="taskId"
+        :tenant-display-id="tenantDisplayId"
+        :project-key="projectKey"
       />
     </template>
     <template #header-actions>
@@ -257,31 +322,50 @@ function openRelatedTask(task: TaskResponse) {
         <div class="flex justify-end gap-2">
           <Button
             type="button"
-            variant="outline"
+            variant="tertiary"
             :disabled="deletePending"
+            label="キャンセル"
             @click="closeDeleteDialog"
-          >
-            キャンセル
-          </Button>
+          />
           <Button
             type="button"
-            variant="destructive"
+            variant="danger"
             :disabled="deletePending"
+            :label="deletePending ? '削除中…' : '削除する'"
             @click="confirmDelete"
-          >
-            {{ deletePending ? '削除中…' : '削除する' }}
-          </Button>
+          />
         </div>
       </dialog>
     </template>
     <!-- モックに合わせ、コメント（アクティビティ）は右の欄に置く -->
+    <template #sidebar-actions>
+      <TaskActivityFilter v-if="!activityThreadId" v-model="activityFilter" />
+    </template>
     <template #sidebar>
       <TaskComments
+        :reaction-controller="reactionController"
+        :task-id="taskId"
+        :tenant-id="tenantId"
+        :project-id="projectId"
         :threads="threads"
+        v-model:open-thread-id="activityThreadId"
+        :activities="activities"
+        :activities-loading="activitiesLoading"
+        :activities-error="activitiesError"
+        :on-retry-activities="refetchActivities"
+        :has-more-activities="hasMoreActivities"
+        :activities-fetching-more="activitiesFetchingMore"
+        :on-load-more-activities="loadMoreActivities"
+        :filter="activityFilter"
+        :lookups="activityLookups"
+        :mentions="mentions"
+        :mention-candidates="members"
         :loading="commentsLoading"
         :list-error="commentsError"
         :on-retry="refetchComments"
         :current-user-id="currentUserId"
+        :profile-href="profileHref"
+        :mention-tenant="tenantDisplayId"
         :submit-pending="submitPending"
         :submit-error="submitError"
         :reply-error="replyError"
@@ -299,17 +383,6 @@ function openRelatedTask(task: TaskResponse) {
         :on-clear-update-error="clearUpdateError"
         :on-clear-delete-error="clearDeleteError"
       >
-        <template #before-list>
-          <TaskActivityFeed
-            :activities="activities"
-            :loading="activitiesLoading"
-            :error="activitiesError"
-            :on-retry="refetchActivities"
-            :has-more="hasMoreActivities"
-            :fetching-more="activitiesFetchingMore"
-            :on-load-more="loadMoreActivities"
-          />
-        </template>
       </TaskComments>
     </template>
     <template #footer>

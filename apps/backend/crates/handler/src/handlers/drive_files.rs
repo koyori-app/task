@@ -4,31 +4,44 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use axum::{
     Json,
     body::Body,
-    extract::{Multipart, Path, Query, State},
-    http::{StatusCode, header},
+    extract::{
+        Path, Query, State,
+        multipart::{Multipart, MultipartError},
+    },
+    http::{HeaderMap, HeaderName, StatusCode, header},
     response::Response,
 };
 use axum_valid::Valid;
 use bytes::Bytes;
 use chrono::Utc;
-use futures::{SinkExt, channel::mpsc as fmpsc};
+use futures::{SinkExt, StreamExt, channel::mpsc as fmpsc};
 use sea_orm::prelude::Uuid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait,
     QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
 };
+use sha2::{Digest, Sha256};
 
+use super::client_key;
 use crate::AppState;
 use crate::error::{AppError, ServerError};
 use crate::extractors::{AuthUser, OptionalAuthUser};
 use crate::openapi::CrudErrors;
-use entity::{drive_files, drive_folder_shares, drive_folders, scopes::Scope, tenants};
+use entity::{
+    drive_files, drive_folder_shares, drive_folders, project_statuses, projects, scopes::Scope,
+    task_attachments, tasks, tenants,
+};
 use payload::drive_files::*;
+use payload::my_tasks::{MyTaskProjectInfo, MyTaskStatusInfo};
+use service::access::visible_project_ids;
 use service::drive::{
     can_access_project, current_storage_type, effective_quota, guess_mime, is_editable_mime,
     is_tenant_owner, lock_tenant_drive, source_mime_override, tenant_used_bytes,
+    try_acquire_public_share_request,
 };
+use service::drive_task_links::{is_markdown, sync_body_links, unlink_body_outside_project};
 use service::storage::{ByteStream, StorageError};
+use std::collections::{HashMap, HashSet};
 
 const MAX_LIST_LIMIT: u32 = 200;
 
@@ -145,6 +158,8 @@ async fn can_access_file_content(
         return Err(AppError::Forbidden);
     };
     auth_user.require_scope(Scope::ReadDrive)?;
+    // プロジェクトファイルの枝は所属判定（ensure_tenant_access）を通らずに通すので、2FA 強制をここで見る
+    auth_user.ensure_tenant_2fa(state, file.tenant_id).await?;
 
     // この経路は URL に tenant_id を含まず、ファイル ID だけで引く。テナントレベルファイル
     // （project_id が NULL）を無条件に許可すると、ID を知る第三者に内容が渡るため、
@@ -154,6 +169,10 @@ async fn can_access_file_content(
             .ensure_tenant_access(state, file.tenant_id, None)
             .await;
     };
+
+    // PAT の束縛だけをファイル自身の tenant_id / project_id で突き合わせる。所属判定まで
+    // 足すと、テナント外の受信者にも効くユーザー指定共有の経路が塞がる。
+    auth_user.ensure_token_binding(file.tenant_id, Some(project_id))?;
 
     if is_tenant_owner(&state.db, file.tenant_id, auth_user.user_id).await? {
         return Ok(());
@@ -242,7 +261,7 @@ pub async fn list_files(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(tenant_id): Path<Uuid>,
-    Query(query): Query<ListFilesQuery>,
+    Valid(Query(query)): Valid<Query<ListFilesQuery>>,
 ) -> Result<Json<ListFilesResponse>, AppError> {
     auth.require_scope(Scope::ReadDrive)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
@@ -261,14 +280,29 @@ pub async fn list_files(
         }
     }
 
-    let mut selector = drive_files::Entity::find()
-        .filter(drive_files::Column::TenantId.eq(tenant_id))
-        .order_by_desc(drive_files::Column::CreatedAt);
+    let mut selector =
+        drive_files::Entity::find().filter(drive_files::Column::TenantId.eq(tenant_id));
 
     selector = match query.folder_id {
         Some(folder_id) => selector.filter(drive_files::Column::FolderId.eq(folder_id)),
         None => selector.filter(drive_files::Column::FolderId.is_null()),
     };
+    if let Some(mime_type) = &query.mime_type {
+        selector = selector.filter(
+            drive_files::Column::MimeType.like(format!("{}%", common::db::escape_like(mime_type))),
+        );
+    }
+    if let Some(q) = &query.q {
+        selector = selector
+            .filter(drive_files::Column::Name.ilike(format!("%{}%", common::db::escape_like(q))));
+    }
+    selector = match query.sort {
+        DriveFileSort::CreatedAtDesc => selector.order_by_desc(drive_files::Column::CreatedAt),
+        DriveFileSort::NameAsc => selector.order_by_asc(drive_files::Column::Name),
+        DriveFileSort::UpdatedAtDesc => selector.order_by_desc(drive_files::Column::UpdatedAt),
+    }
+    // 同値の行でページの境界が揺れないよう、最後に id で順序を固定する
+    .order_by_asc(drive_files::Column::Id);
 
     let total = selector.clone().count(&state.db).await?;
     let files = selector
@@ -310,206 +344,297 @@ pub async fn upload_file(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    // 'name' と 'folder_id' は 'file' フィールドより前に送ること（ストリーミング設計の前提）。
-    let mut display_name: Option<String> = None;
-    let mut folder_id: Option<Uuid> = None;
+    // フィールドの順序は問わない。'file' はストリームのままストレージへ流し、
+    // DB への挿入は全フィールドを読み終えてから行う。
+    // ストレージへ書いたキーは、以降のどこで失敗しても最後にまとめて消す
+    let mut uploaded_key: Option<String> = None;
 
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?
-    {
-        match field.name() {
-            Some("file") => {
-                let original_filename = field.file_name().map(str::to_string);
-                let content_type = field.content_type().map(str::to_string);
+    let result: Result<drive_files::Model, AppError> = async {
+        let mut display_name: Option<String> = None;
+        let mut folder_id: Option<Uuid> = None;
+        // (file_id, 元のファイル名, 申告された Content-Type, 流した時点の MIME, サイズ, SHA-256, Markdown の本文)
+        let mut uploaded = None;
 
-                let name = display_name
-                    .or_else(|| original_filename.clone())
-                    .ok_or(AppError::BadRequest)?;
-                // ソースコード拡張子はクライアント申告より上書き表を優先する。
-                // ブラウザは .ts を video/mp2t のように申告することがあり、
-                // それを保存すると本文編集エンドポイントが弾いてしまう。
-                let mime_source = original_filename.as_deref().unwrap_or(name.as_str());
-                let mime_type = source_mime_override(mime_source)
-                    .map(str::to_string)
-                    .or(content_type)
-                    .unwrap_or_else(|| guess_mime(mime_source));
+        while let Some(field) = multipart
+            .next_field()
+            .await
+            .map_err(multipart_to_app_error)?
+        {
+            match field.name() {
+                Some("file") => {
+                    if uploaded.is_some() {
+                        return Err(AppError::BadRequest); // 'file' は 1 つだけ
+                    }
+                    let original_filename = field.file_name().map(str::to_string);
+                    let content_type = field.content_type().map(str::to_string);
 
-                // クォータ事前チェック（既に上限に達していれば即拒否）
-                let used = tenant_used_bytes(&state.db, tenant_id).await?;
-                if let Some(q) = effective_quota(&tenant, &state.drive_config)
-                    && used >= q
-                {
-                    return Err(AppError::ContentTooLarge);
-                }
+                    // ファイル名が無ければ、ここまでに届いた 'name' で推定する
+                    // （確定は全フィールドを読んだ後。後ろの 'name' で変わりうる）
+                    let mime_source = original_filename
+                        .clone()
+                        .or_else(|| display_name.clone())
+                        .unwrap_or_default();
+                    let mime_type = resolve_upload_mime(&mime_source, content_type.clone());
 
-                // 本文を流す前に落とすための先読み。確定値は下の txn 内で取り直す
-                // （アップロード中にフォルダが移動すると、ここで読んだ project_id は古い）
-                if let Some(fid) = folder_id {
-                    let folder = load_folder_in_tenant(&state, tenant_id, fid).await?;
-                    // プロジェクトフォルダへの書き込みはオーナーかメンバーのみ
-                    // （共有受信者は読み取り専用。authorize_file_write と同方針）。
-                    if let Some(project_id) = folder.project_id
-                        && !is_tenant_owner(&state.db, tenant_id, auth.user_id).await?
-                        && !can_access_project(&state.db, tenant_id, project_id, auth.user_id)
-                            .await?
+                    // クォータ事前チェック（既に上限に達していれば即拒否）
+                    let used = tenant_used_bytes(&state.db, tenant_id).await?;
+                    if let Some(q) = effective_quota(&tenant, &state.drive_config)
+                        && used >= q
                     {
-                        return Err(AppError::Forbidden);
+                        return Err(AppError::ContentTooLarge);
                     }
-                }
 
-                // Field<'a> は 'static でないため stream::unfold 不可。
-                // mpsc channel の Receiver は 'static なので ByteStream として使える。
-                // tokio::join! で pump と upload を同タスク内で並行実行する。
-                let byte_count = Arc::new(AtomicU64::new(0));
-                let counter = byte_count.clone();
-                let max_bytes = state.drive_config.upload_max_bytes;
-
-                let (mut tx, rx) = fmpsc::channel::<Result<Bytes, StorageError>>(8);
-                let byte_stream: ByteStream = Box::pin(rx);
-
-                let pump = async move {
-                    let mut field = field;
-                    loop {
-                        match field.chunk().await {
-                            Ok(Some(bytes)) => {
-                                let new_count = counter
-                                    .fetch_add(bytes.len() as u64, Ordering::Relaxed)
-                                    + bytes.len() as u64;
-                                if new_count > max_bytes {
-                                    // 上限超過: エラーを送ってストリームを早期終了
-                                    let _ = tx
-                                        .send(Err(StorageError::Other(
-                                            "upload size limit exceeded".into(),
-                                        )))
-                                        .await;
-                                    return;
-                                }
-                                if tx.send(Ok(bytes)).await.is_err() {
-                                    return;
-                                }
-                            }
-                            Ok(None) => break,
-                            Err(e) => {
-                                let _ = tx.send(Err(StorageError::Other(e.to_string()))).await;
-                                return;
-                            }
-                        }
-                    }
-                };
-
-                let file_id = Uuid::new_v4();
-                let storage_key = file_id.to_string();
-
-                let (upload_result, _) = tokio::join!(
-                    state
-                        .storage
-                        .upload(&storage_key, byte_stream, 0, &mime_type),
-                    pump
-                );
-
-                let actual_size = byte_count.load(Ordering::Relaxed);
-
-                // サイズチェックを upload_result より先に行う。
-                // 早期中断時は upload_result がエラーになるが、
-                // actual_size > max_bytes の判定で正確な 413 を返す。
-                if actual_size == 0 {
-                    let _ = state.storage.delete(&storage_key).await;
-                    return Err(AppError::BadRequest);
-                }
-                if actual_size > max_bytes {
-                    let _ = state.storage.delete(&storage_key).await;
-                    return Err(AppError::ContentTooLarge);
-                }
-
-                upload_result.map_err(storage_to_app_error)?;
-                // テナント行を FOR UPDATE でロックしてクォータ確定チェックと INSERT をアトミックに実行。
-                // 並行アップロードが同時にクォータチェックを通過してしまう競合を防ぐ。
-                let now = Utc::now();
-                let result: Result<drive_files::Model, AppError> = async {
-                    let txn = state.db.begin().await?;
-                    // 階層の読みと挿入を直列化する。ロックの外で読むと、アップロード中に
-                    // フォルダが別プロジェクトへ移動していても古い project_id で入り、
-                    // 配下の同期が終わった後の行として残ってしまう
-                    lock_tenant_drive(&txn, tenant_id).await?;
-                    let folder_project_id = if let Some(fid) = folder_id {
-                        let folder = load_folder_in_tenant_conn(&txn, tenant_id, fid).await?;
+                    // 本文を流す前に落とすための先読み（'folder_id' が先に届いたときだけ）。
+                    // 確定値は下の txn 内で取り直す
+                    // （アップロード中にフォルダが移動すると、ここで読んだ project_id は古い）
+                    if let Some(fid) = folder_id {
+                        let folder = load_folder_in_tenant(&state, tenant_id, fid).await?;
+                        // プロジェクトフォルダへの書き込みはオーナーかメンバーのみ
+                        // （共有受信者は読み取り専用。authorize_file_write と同方針）。
                         if let Some(project_id) = folder.project_id
-                            && !is_tenant_owner(&txn, tenant_id, auth.user_id).await?
-                            && !can_access_project(&txn, tenant_id, project_id, auth.user_id)
+                            && !is_tenant_owner(&state.db, tenant_id, auth.user_id).await?
+                            && !can_access_project(&state.db, tenant_id, project_id, auth.user_id)
                                 .await?
                         {
                             return Err(AppError::Forbidden);
                         }
-                        folder.project_id
-                    } else {
-                        None
+                    }
+
+                    // Field<'a> は 'static でないため stream::unfold 不可。
+                    // mpsc channel の Receiver は 'static なので ByteStream として使える。
+                    // tokio::join! で pump と upload を同タスク内で並行実行する。
+                    let byte_count = Arc::new(AtomicU64::new(0));
+                    let counter = byte_count.clone();
+                    let max_bytes = state.drive_config.upload_max_bytes;
+
+                    let (mut tx, rx) = fmpsc::channel::<Result<Bytes, StorageError>>(8);
+                    let byte_stream: ByteStream = Box::pin(rx);
+
+                    // 本文の SHA-256 も流しながら計算する。途中で打ち切った場合は Ok(None)、
+                    // multipart の読み取りに失敗した場合はそのエラーを返す。
+                    // Markdown は保存後にタスク参照を抜き出すので本文も手元に残す
+                    // （上限は upload_max_bytes。本文更新 API も同じ大きさをメモリに載せる）
+                    let keep_body = is_markdown(&mime_type);
+                    let pump = async move {
+                        let mut field = field;
+                        let mut hasher = Sha256::new();
+                        let mut body = Vec::new();
+                        loop {
+                            match field.chunk().await {
+                                Ok(Some(bytes)) => {
+                                    let new_count = counter
+                                        .fetch_add(bytes.len() as u64, Ordering::Relaxed)
+                                        + bytes.len() as u64;
+                                    if new_count > max_bytes {
+                                        // 上限超過: エラーを送ってストリームを早期終了
+                                        // （S3 の multipart はこの Err で abort する）
+                                        let _ = tx
+                                            .send(Err(StorageError::Other(
+                                                "upload size limit exceeded".into(),
+                                            )))
+                                            .await;
+                                        return Ok(None);
+                                    }
+                                    hasher.update(&bytes);
+                                    if keep_body {
+                                        body.extend_from_slice(&bytes);
+                                    }
+                                    if tx.send(Ok(bytes)).await.is_err() {
+                                        return Ok(None);
+                                    }
+                                }
+                                Ok(None) => break,
+                                Err(e) => {
+                                    // Display は上位メッセージだけなので、source まで出る Debug で残す
+                                    let _ =
+                                        tx.send(Err(StorageError::Other(format!("{e:?}")))).await;
+                                    return Err(e);
+                                }
+                            }
+                        }
+                        Ok(Some((hex::encode(hasher.finalize()), body)))
                     };
-                    let tenant_q = tenants::Entity::find_by_id(tenant_id)
-                        .lock_exclusive()
-                        .one(&txn)
-                        .await?
-                        .ok_or(AppError::NotFound)?;
-                    let used_now = tenant_used_bytes(&txn, tenant_id).await?;
-                    if let Some(q) = effective_quota(&tenant_q, &state.drive_config)
-                        && used_now.saturating_add(actual_size as i64) > q
-                    {
+
+                    let file_id = Uuid::new_v4();
+                    let storage_key = file_id.to_string();
+                    uploaded_key = Some(storage_key.clone());
+
+                    // 長さは最後まで読むまで分からない（S3 は multipart で流す）
+                    let (upload_result, pumped) = tokio::join!(
+                        state
+                            .storage
+                            .upload(&storage_key, byte_stream, None, &mime_type),
+                        pump
+                    );
+
+                    let actual_size = byte_count.load(Ordering::Relaxed);
+
+                    let pumped = match pumped {
+                        Ok(pumped) => pumped,
+                        // 本文の上限超過はストレージ側のエラー（500）より先に 413 で返す
+                        Err(e) if is_body_limit_error(&e) => {
+                            return Err(AppError::ContentTooLarge);
+                        }
+                        // それ以外は従来どおり下のサイズ・ストレージ判定に任せる（空本文の 400 など）
+                        Err(_) => None,
+                    };
+
+                    // サイズチェックを upload_result より先に行う。
+                    // 早期中断時は upload_result がエラーになるが、
+                    // actual_size > max_bytes の判定で正確な 413 を返す。
+                    if actual_size == 0 {
+                        return Err(AppError::BadRequest);
+                    }
+                    if actual_size > max_bytes {
                         return Err(AppError::ContentTooLarge);
                     }
-                    let model = drive_files::ActiveModel {
-                        id: Set(file_id),
-                        name: Set(name),
-                        size: Set(actual_size as i64),
-                        mime_type: Set(mime_type),
-                        storage_type: Set(current_storage_type()),
-                        storage_key: Set(storage_key.clone()),
-                        tenant_id: Set(tenant_id),
-                        project_id: Set(folder_project_id),
-                        uploader_id: Set(auth.user_id),
-                        folder_id: Set(folder_id),
-                        created_at: Set(now.into()),
-                        updated_at: Set(now.into()),
+
+                    upload_result.map_err(storage_to_app_error)?;
+                    let Some((content_hash, body)) = pumped else {
+                        // ストレージ側が成功したのに本文を最後まで読めていない（通常は起きない）
+                        return Err(AppError::Internal(anyhow::anyhow!(
+                            "upload stream ended before the multipart field was fully read"
+                        )));
                     };
-                    let saved = model.insert(&txn).await?;
-                    txn.commit().await?;
-                    Ok(saved)
+                    uploaded = Some((
+                        file_id,
+                        original_filename,
+                        content_type,
+                        mime_type,
+                        actual_size,
+                        content_hash,
+                        body,
+                    ));
                 }
-                .await;
-                match result {
-                    Ok(saved) => {
-                        return Ok((StatusCode::CREATED, Json(saved.into())));
+                Some("name") => {
+                    let text = field
+                        .text()
+                        .await
+                        .map_err(|e| AppError::Internal(e.into()))?;
+                    if !text.is_empty() {
+                        display_name = Some(text);
                     }
-                    Err(e) => {
-                        let _ = state.storage.delete(&storage_key).await;
-                        return Err(e);
+                }
+                Some("folder_id") => {
+                    let text = field
+                        .text()
+                        .await
+                        .map_err(|e| AppError::Internal(e.into()))?;
+                    if !text.is_empty() {
+                        folder_id =
+                            Some(Uuid::parse_str(text.trim()).map_err(|_| AppError::BadRequest)?);
                     }
                 }
+                _ => {}
             }
-            Some("name") => {
-                let text = field
-                    .text()
-                    .await
-                    .map_err(|e| AppError::Internal(e.into()))?;
-                if !text.is_empty() {
-                    display_name = Some(text);
-                }
+        }
+
+        let Some((
+            file_id,
+            original_filename,
+            content_type,
+            streamed_mime,
+            actual_size,
+            content_hash,
+            body,
+        )) = uploaded
+        else {
+            return Err(AppError::BadRequest); // 'file' フィールドなし
+        };
+        // 'file' の時点と同じ規則で、全フィールドを読んだ後の値から決め直す。
+        // ストレージ側の Content-Type は流した時点の推定のまま（配信は DB の mime_type を使う）
+        let mime_type = resolve_upload_mime(
+            original_filename
+                .as_deref()
+                .or(display_name.as_deref())
+                .unwrap_or_default(),
+            content_type,
+        );
+        let name = display_name
+            .or(original_filename)
+            .ok_or(AppError::BadRequest)?;
+        // 流した時点では Markdown と分からず本文を残していなければ、ストレージから読み戻す
+        // （大きさは upload_max_bytes 以内と確かめてある）
+        let body = if is_markdown(&mime_type) && !is_markdown(&streamed_mime) {
+            let mut stream = state
+                .storage
+                .get_stream(&file_id.to_string())
+                .await
+                .map_err(storage_to_app_error)?;
+            let mut body = Vec::with_capacity(actual_size as usize);
+            while let Some(chunk) = stream.next().await {
+                body.extend_from_slice(&chunk.map_err(storage_to_app_error)?);
             }
-            Some("folder_id") => {
-                let text = field
-                    .text()
-                    .await
-                    .map_err(|e| AppError::Internal(e.into()))?;
-                if !text.is_empty() {
-                    folder_id =
-                        Some(Uuid::parse_str(text.trim()).map_err(|_| AppError::BadRequest)?);
-                }
+            body
+        } else {
+            body
+        };
+
+        // テナント行を FOR UPDATE でロックしてクォータ確定チェックと INSERT をアトミックに実行。
+        // 並行アップロードが同時にクォータチェックを通過してしまう競合を防ぐ。
+        let now = Utc::now();
+        let txn = state.db.begin().await?;
+        // 階層の読みと挿入を直列化する。ロックの外で読むと、アップロード中に
+        // フォルダが別プロジェクトへ移動していても古い project_id で入り、
+        // 配下の同期が終わった後の行として残ってしまう
+        lock_tenant_drive(&txn, tenant_id).await?;
+        let folder_project_id = if let Some(fid) = folder_id {
+            let folder = load_folder_in_tenant_conn(&txn, tenant_id, fid).await?;
+            if let Some(project_id) = folder.project_id
+                && !is_tenant_owner(&txn, tenant_id, auth.user_id).await?
+                && !can_access_project(&txn, tenant_id, project_id, auth.user_id).await?
+            {
+                return Err(AppError::Forbidden);
             }
-            _ => {}
+            folder.project_id
+        } else {
+            None
+        };
+        let tenant_q = tenants::Entity::find_by_id(tenant_id)
+            .lock_exclusive()
+            .one(&txn)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        let used_now = tenant_used_bytes(&txn, tenant_id).await?;
+        if let Some(q) = effective_quota(&tenant_q, &state.drive_config)
+            && used_now.saturating_add(actual_size as i64) > q
+        {
+            return Err(AppError::ContentTooLarge);
+        }
+        let model = drive_files::ActiveModel {
+            id: Set(file_id),
+            name: Set(name),
+            size: Set(actual_size as i64),
+            mime_type: Set(mime_type),
+            storage_type: Set(current_storage_type()),
+            storage_key: Set(file_id.to_string()),
+            tenant_id: Set(tenant_id),
+            project_id: Set(folder_project_id),
+            uploader_id: Set(auth.user_id),
+            folder_id: Set(folder_id),
+            created_at: Set(now.into()),
+            updated_at: Set(now.into()),
+            content_hash: Set(Some(content_hash)),
+        };
+        let saved = model.insert(&txn).await?;
+        // 結び付けは task_attachments への書き込み。手動添付と同じく write:task が無ければ触れない
+        if auth.require_scope(Scope::WriteTask).is_ok() {
+            sync_body_links(&txn, &saved, auth.user_id, &String::from_utf8_lossy(&body)).await?;
+        }
+        txn.commit().await?;
+        Ok(saved)
+    }
+    .await;
+
+    match result {
+        Ok(saved) => Ok((StatusCode::CREATED, Json(saved.into()))),
+        Err(e) => {
+            if let Some(key) = &uploaded_key {
+                let _ = state.storage.delete(key).await;
+            }
+            Err(e)
         }
     }
-
-    Err(AppError::BadRequest) // 'file' フィールドなし
 }
 
 #[axum::debug_handler]
@@ -537,6 +662,97 @@ pub async fn get_file(
     let file = load_tenant_file(&state, tenant_id, id).await?;
     authorize_file_access(&state, &file, &auth).await?;
     Ok(Json(file.into()))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    get,
+    path = "/files/{id}/tasks",
+    tag = "Drive Files",
+    summary = "ドライブファイルに結び付いたタスク一覧",
+    description = "手動の添付と本文から抽出した参照の両方を返す。呼び出し側が入れないプロジェクトのタスクは含めない",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("id" = Uuid, Path, description = "ファイルID"),
+    ),
+    responses(
+        (status = 200, description = "結び付いたタスク", body = DriveFileTasksResponse),
+        CrudErrors,
+    )
+)]
+pub async fn list_file_tasks(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<DriveFileTasksResponse>, AppError> {
+    // タスクの題・状態を返すので、タスク側の添付一覧（read:task）の絞りも越えさせない
+    auth.require_scope(Scope::ReadDrive)?;
+    auth.require_scope(Scope::ReadTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, None).await?;
+    let file = load_tenant_file(&state, tenant_id, id).await?;
+    authorize_file_access(&state, &file, &auth).await?;
+
+    let links: Vec<(String, tasks::Model)> = task_attachments::Entity::find()
+        .filter(task_attachments::Column::DriveFileId.eq(file.id))
+        .order_by_desc(task_attachments::Column::CreatedAt)
+        .find_also_related(tasks::Entity)
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .filter_map(|(link, task)| Some((link.source, task?)))
+        .filter(|(_, task)| task.deleted_at.is_none())
+        .collect();
+
+    let project_ids: HashSet<Uuid> = links.iter().map(|(_, t)| t.project_id).collect();
+    let projects: HashMap<Uuid, projects::Model> = projects::Entity::find()
+        .filter(projects::Column::Id.is_in(project_ids.iter().copied()))
+        .filter(projects::Column::TenantId.eq(tenant_id))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|p| (p.id, p))
+        .collect();
+    let visible: HashSet<Uuid> = if is_tenant_owner(&state.db, tenant_id, auth.user_id).await? {
+        projects.keys().copied().collect()
+    } else {
+        visible_project_ids(&state.db, projects.keys().copied().collect(), auth.user_id).await?
+    };
+    let statuses: HashMap<Uuid, project_statuses::Model> = project_statuses::Entity::find()
+        .filter(project_statuses::Column::Id.is_in(links.iter().map(|(_, t)| t.status_id)))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|s| (s.id, s))
+        .collect();
+
+    let tasks = links
+        .into_iter()
+        .filter(|(_, task)| visible.contains(&task.project_id))
+        .filter_map(|(source, task)| {
+            let project = projects.get(&task.project_id)?;
+            let status = statuses.get(&task.status_id)?;
+            Some(DriveFileTaskLink {
+                task_id: task.id,
+                seq_key: format!("{}-{}", project.key, task.seq_id),
+                title: task.title,
+                project: MyTaskProjectInfo {
+                    id: project.id,
+                    name: project.name.clone(),
+                    key: project.key.clone(),
+                    is_personal: project.is_personal,
+                },
+                status: MyTaskStatusInfo {
+                    id: status.id,
+                    name: status.name.clone(),
+                    color: status.color.clone(),
+                    is_done_state: status.is_done_state,
+                },
+                source,
+            })
+        })
+        .collect();
+
+    Ok(Json(DriveFileTasksResponse { tasks }))
 }
 
 #[axum::debug_handler]
@@ -604,6 +820,11 @@ pub async fn update_file(
 
     active.updated_at = Set(Utc::now().into());
     let updated = active.update(&txn).await?;
+    // 別プロジェクトから移ってきたファイルの、移動元のタスクへの body 行を外す（§8.5）
+    if let Some(project_id) = updated.project_id {
+        unlink_body_outside_project(&txn, drive_files::Column::Id.eq(updated.id), project_id)
+            .await?;
+    }
     txn.commit().await?;
     Ok(Json(updated.into()))
 }
@@ -617,6 +838,10 @@ pub async fn update_file(
     params(
         ("tenant_id" = Uuid, Path, description = "テナントID"),
         ("id" = Uuid, Path, description = "ファイルID"),
+        (
+            "If-Match" = Option<String>, Header,
+            description = "現在の ETag（`etag` の値をそのまま。カンマ区切りで複数可、`*` は常に一致、`W/` 付きの弱い ETag は `W/` を外して比べる）。一致しなければ 412。省略時は無条件に上書きする"
+        ),
     ),
     request_body = UpdateFileContentRequest,
     responses(
@@ -624,6 +849,11 @@ pub async fn update_file(
         (
             status = 400,
             description = "テキストとして編集できない MIME タイプです",
+            body = ServerError
+        ),
+        (
+            status = 412,
+            description = "If-Match が現在の ETag と一致しません（他の更新が先に入っています）",
             body = ServerError
         ),
         (
@@ -638,6 +868,7 @@ pub async fn update_file_content(
     State(state): State<AppState>,
     auth: AuthUser,
     Path((tenant_id, id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
     Json(payload): Json<UpdateFileContentRequest>,
 ) -> Result<Json<DriveFileResponse>, AppError> {
     auth.require_scope(Scope::WriteDrive)?;
@@ -654,7 +885,10 @@ pub async fn update_file_content(
     }
 
     let bytes = Bytes::from(payload.content.into_bytes());
+    // 参照の抽出用（Bytes の複製は参照カウントだけ）
+    let body = bytes.clone();
     let new_size = bytes.len() as u64;
+    let content_hash = hex::encode(Sha256::digest(&bytes));
     if new_size > state.drive_config.upload_max_bytes {
         return Err(AppError::ContentTooLarge);
     }
@@ -671,7 +905,7 @@ pub async fn update_file_content(
     }));
     state
         .storage
-        .upload(&new_storage_key, stream, new_size, &mime_type)
+        .upload(&new_storage_key, stream, Some(new_size), &mime_type)
         .await
         .map_err(storage_to_app_error)?;
 
@@ -699,6 +933,11 @@ pub async fn update_file_content(
         // 本文とストレージキーを差し替えられる（窓はロック待ちではなくアップロード完走ぶん）。
         // ここで弾いた場合はアップロード済みの新キーが下の Err 枝で消える
         authorize_file_write(&txn, &locked, &auth).await?;
+        // ロック後の値と比べる。ロック前に比べると、同じ ETag を持った並行更新が
+        // 両方とも通って後勝ちになる
+        if header_matches(&headers, header::IF_MATCH, &file_etag(&locked)) == Some(false) {
+            return Err(AppError::PreconditionFailed);
+        }
         let old_storage_key = locked.storage_key.clone();
         let used_now = tenant_used_bytes(&txn, tenant_id).await?;
         // 差し替え後の使用量 = 現在の合計 − ロック時点の旧サイズ + 新サイズ
@@ -715,8 +954,13 @@ pub async fn update_file_content(
         active.size = Set(new_size as i64);
         active.storage_key = Set(new_key_for_update);
         active.storage_type = Set(current_storage_type());
+        active.content_hash = Set(Some(content_hash));
         active.updated_at = Set(Utc::now().into());
         let saved = active.update(&txn).await?;
+        // アップロードと同じく write:task が無ければ既存の行にも触れない
+        if auth.require_scope(Scope::WriteTask).is_ok() {
+            sync_body_links(&txn, &saved, auth.user_id, &String::from_utf8_lossy(&body)).await?;
+        }
         txn.commit().await?;
         Ok((saved, old_storage_key))
     }
@@ -787,9 +1031,31 @@ pub async fn delete_file(
     params(
         ("id" = Uuid, Path, description = "ファイルID"),
         ContentQuery,
+        (
+            "If-None-Match" = Option<String>, Header,
+            description = "手元の ETag（カンマ区切りで複数可、`*` は常に一致）。一致すれば 304 を本文なしで返す"
+        ),
     ),
     responses(
-        (status = 200, description = "ファイルバイナリ"),
+        (
+            status = 200,
+            description = "ファイルバイナリ",
+            headers(
+                ("ETag" = String, description = "本文の ETag（応答 JSON の `etag` と同じ値）"),
+                ("Last-Modified" = String, description = "updated_at（RFC 7231 形式）"),
+            )
+        ),
+        (
+            status = 304,
+            description = "If-None-Match が現在の ETag と一致した（本文なし）",
+            headers(("ETag" = String, description = "本文の ETag"))
+        ),
+        (
+            status = 429,
+            description = "同じ接続元から同じ共有トークンへの（`token` 付きの）リクエストが多すぎます（60 秒 120 回）",
+            body = ServerError,
+            headers(("Retry-After" = u64, description = "再試行できるまでの秒数"))
+        ),
         CrudErrors,
     )
 )]
@@ -798,13 +1064,35 @@ pub async fn get_file_content(
     auth: OptionalAuthUser,
     Path(id): Path<Uuid>,
     Query(query): Query<ContentQuery>,
+    headers: HeaderMap,
 ) -> Result<Response, AppError> {
+    // 共有トークンの枝（can_access_file_content と同じ判定）だけ数える。認証済みの経路は対象外
+    if let Some(token) = query.token.as_deref().filter(|t| !t.is_empty()) {
+        try_acquire_public_share_request(&state.redis_client, &client_key(&headers), token).await?;
+    }
     let file = drive_files::Entity::find_by_id(id)
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
 
     can_access_file_content(&state, &file, &auth, query.token.as_deref()).await?;
+
+    let etag = file_etag(&file);
+    let last_modified = file
+        .updated_at
+        .with_timezone(&Utc)
+        .format("%a, %d %b %Y %H:%M:%S GMT")
+        .to_string();
+    let response = Response::builder()
+        .header(header::ETAG, etag.as_str())
+        .header(header::LAST_MODIFIED, last_modified);
+
+    if header_matches(&headers, header::IF_NONE_MATCH, &etag) == Some(true) {
+        return response
+            .status(StatusCode::NOT_MODIFIED)
+            .body(Body::empty())
+            .map_err(|e| AppError::Internal(e.into()));
+    }
 
     let stream = state
         .storage
@@ -817,7 +1105,7 @@ pub async fn get_file_content(
     // inline で返すとブラウザが API と同一オリジンで内容を実行してしまうため、常に attachment で配信する。
     let disposition = format!("attachment; filename=\"{}\"", sanitize_filename(&file.name));
 
-    Response::builder()
+    response
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, file.mime_type.as_str())
         .header(header::CONTENT_DISPOSITION, disposition)
@@ -879,7 +1167,7 @@ pub async fn update_drive_quota(
     Path(tenant_id): Path<Uuid>,
     Json(payload): Json<UpdateQuotaRequest>,
 ) -> Result<Json<DriveUsageResponse>, AppError> {
-    auth.require_scope(Scope::AdminTenant)?;
+    auth.require_scope(Scope::WriteTenant)?;
     let tenant = auth.ensure_tenant_owner(&state, tenant_id).await?;
 
     if let Some(quota_bytes) = payload.quota_bytes {
@@ -918,6 +1206,47 @@ fn sanitize_filename(name: &str) -> String {
             }
         })
         .collect()
+}
+
+/// 条件付きリクエストのヘッダーを評価する。ヘッダーが無ければ `None`、
+/// あれば（複数行ならどれか 1 行が）現在の ETag に一致するか。
+/// UTF-8 として読めない値は一致しない扱い。
+fn header_matches(headers: &HeaderMap, name: HeaderName, etag: &str) -> Option<bool> {
+    let mut values = headers.get_all(name).iter().peekable();
+    values.peek()?;
+    Some(values.any(|v| v.to_str().is_ok_and(|s| etag_matches(s, etag))))
+}
+
+/// 本文の上限超過は 413。それ以外は従来どおり 500 だが、ログに source まで残す
+fn multipart_to_app_error(err: MultipartError) -> AppError {
+    if is_body_limit_error(&err) {
+        AppError::ContentTooLarge
+    } else {
+        AppError::Internal(err.into())
+    }
+}
+
+/// `MultipartError::status()` は 1 段しか剥がさず、`RequestBodyLimitLayer` 側の上限
+/// （`axum::Error` に二重に包まれる）を 500 と判定するので、source を辿って探す
+fn is_body_limit_error(err: &MultipartError) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = source {
+        if e.is::<http_body_util::LengthLimitError>() {
+            return true;
+        }
+        source = e.source();
+    }
+    false
+}
+
+/// アップロードの MIME。ソースコード拡張子はクライアント申告より上書き表を優先する。
+/// ブラウザは .ts を video/mp2t のように申告することがあり、
+/// それを保存すると本文編集エンドポイントが弾いてしまう。
+fn resolve_upload_mime(source: &str, content_type: Option<String>) -> String {
+    source_mime_override(source)
+        .map(str::to_string)
+        .or(content_type)
+        .unwrap_or_else(|| guess_mime(source))
 }
 
 fn storage_to_app_error(err: StorageError) -> AppError {

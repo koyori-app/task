@@ -21,12 +21,18 @@ pub struct Model {
     pub is_suspended: bool,
     pub sessions_revoked_at: Option<DateTimeWithTimeZone>,
     pub totp_enabled: bool,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub avatar_storage_key: Option<String>,
     #[sea_orm(has_many)]
     pub audit_logs: HasMany<super::audit_logs::Entity>,
+    #[sea_orm(has_many)]
+    pub device_tokens: HasMany<super::device_tokens::Entity>,
     #[sea_orm(has_many)]
     pub drive_files: HasMany<super::drive_files::Entity>,
     #[sea_orm(has_many)]
     pub drive_folders: HasMany<super::drive_folders::Entity>,
+    #[sea_orm(has_many)]
+    pub forge_pull_requests: HasMany<super::forge_pull_requests::Entity>,
     #[sea_orm(has_many)]
     pub github_integrations: HasMany<super::github_integrations::Entity>,
     #[sea_orm(has_many)]
@@ -43,6 +49,8 @@ pub struct Model {
     pub project_members: HasMany<super::project_members::Entity>,
     #[sea_orm(has_many)]
     pub project_task_views: HasMany<super::project_task_views::Entity>,
+    #[sea_orm(has_many)]
+    pub reactions: HasMany<super::reactions::Entity>,
     #[sea_orm(has_many)]
     pub recovery_codes: HasMany<super::recovery_codes::Entity>,
     #[sea_orm(has_many)]

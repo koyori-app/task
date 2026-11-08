@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { Check, Loader2 } from '@lucide/vue';
+import LoadErrorState from '@/components/LoadErrorState.vue';
+import { Loader2 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { keepPreviousData, useQuery } from '@tanstack/vue-query';
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 
-import { Button } from '@/components/ui/button';
+import { Button, Spinner } from '@koyori-app/ui-vue';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import type { components } from '@/generated/api';
 import { fetchClient } from '@/lib/api-vue-query';
@@ -17,6 +18,8 @@ type MyTaskItem = components['schemas']['MyTaskItem'];
 const TASKS_PATH = '/v1/tenants/{tenant_id}/users/me/tasks' as const;
 const TASKS_PAGE_LIMIT = 50;
 
+const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
 const pageContext = usePageContext();
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
 const {
@@ -24,6 +27,7 @@ const {
   isTenantNotFound,
   isResolving: isTenantResolving,
   isError: isTenantResolveError,
+  tenantsQuery,
 } = useResolvedTenantId(tenantDisplayId);
 
 const tabs: { key: FilterTab; label: string }[] = [
@@ -51,7 +55,7 @@ function myTasksQueryKey(
     {
       params: {
         path: { tenant_id: resolvedTenantId },
-        query: { filter, limit, offset: queryOffset },
+        query: { filter, timezone, limit, offset: queryOffset },
       },
     },
   ] as const;
@@ -147,6 +151,11 @@ function priorityLabel(p: string) {
   };
   return map[p] ?? p;
 }
+
+function retryFailed() {
+  if (isTenantResolveError.value) void tenantsQuery.refetch();
+  if (tasksQuery.isError.value) void tasksQuery.refetch();
+}
 </script>
 
 <template>
@@ -160,24 +169,21 @@ function priorityLabel(p: string) {
       <Button
         v-for="tab in tabs"
         :key="tab.key"
-        size="sm"
-        :variant="activeFilter === tab.key ? 'default' : 'outline'"
+        :variant="activeFilter === tab.key ? 'primary' : 'tertiary'"
+        :label="tab.label"
         @click="activeFilter = tab.key"
-      >
-        {{ tab.label }}
-      </Button>
+      />
     </div>
 
     <div v-if="isTenantResolving || tasksQuery.isLoading.value" class="flex justify-center py-8">
       <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
     </div>
 
-    <p
+    <LoadErrorState
       v-else-if="isTenantResolveError || tasksQuery.isError.value"
-      class="py-8 text-center text-sm text-destructive"
-    >
-      タスクの読み込みに失敗しました
-    </p>
+      message="タスクの読み込みに失敗しました"
+      @retry="retryFailed"
+    />
 
     <p v-else-if="isTenantNotFound" class="py-8 text-center text-sm text-muted-foreground">
       テナントが見つかりません
@@ -193,14 +199,24 @@ function priorityLabel(p: string) {
           :key="task.id"
           class="flex items-center gap-3 rounded-md border px-3 py-2"
         >
-          <Check class="h-4 w-4 text-muted-foreground" />
           <a
             :href="taskDetailHref(tenantDisplayId, task.project.key, task.seq_id)"
-            class="flex-1 text-primary hover:underline"
+            class="flex-1 text-link hover:underline"
             @click="navigateToTask(task, $event)"
           >
             {{ task.title }}
           </a>
+          <span
+            class="inline-flex shrink-0 items-center gap-1.5 rounded bg-muted px-2 py-0.5 text-xs"
+            data-testid="task-status"
+          >
+            <span
+              class="size-2 rounded-full"
+              :style="{ backgroundColor: task.status.color }"
+              aria-hidden="true"
+            />
+            {{ task.status.name }}
+          </span>
           <span class="text-xs text-muted-foreground">{{ formatDeadline(task) }}</span>
           <span>{{ priorityLabel(task.priority) }}</span>
         </div>
@@ -219,14 +235,24 @@ function priorityLabel(p: string) {
           :key="task.id"
           class="flex items-center gap-3 rounded-md border px-3 py-2"
         >
-          <Check class="h-4 w-4 text-muted-foreground" />
           <a
             :href="taskDetailHref(tenantDisplayId, task.project.key, task.seq_id)"
-            class="flex-1 text-primary hover:underline"
+            class="flex-1 text-link hover:underline"
             @click="navigateToTask(task, $event)"
           >
             {{ task.title }}
           </a>
+          <span
+            class="inline-flex shrink-0 items-center gap-1.5 rounded bg-muted px-2 py-0.5 text-xs"
+            data-testid="task-status"
+          >
+            <span
+              class="size-2 rounded-full"
+              :style="{ backgroundColor: task.status.color }"
+              aria-hidden="true"
+            />
+            {{ task.status.name }}
+          </span>
           <span class="rounded bg-muted px-2 py-0.5 text-xs">{{ task.project.key }}</span>
           <span class="text-xs text-muted-foreground">{{ formatDeadline(task) }}</span>
           <span>{{ priorityLabel(task.priority) }}</span>
@@ -238,9 +264,13 @@ function priorityLabel(p: string) {
       </p>
 
       <div v-if="hasMoreTasks" class="flex justify-center pt-2">
-        <Button variant="outline" :disabled="tasksQuery.isFetching.value" @click="loadMore">
-          <Loader2 v-if="tasksQuery.isFetching.value" class="mr-2 h-4 w-4 animate-spin" />
-          もっと見る
+        <Button
+          variant="tertiary"
+          :disabled="tasksQuery.isFetching.value"
+          :label="tasksQuery.isFetching.value ? '読み込み中…' : 'もっと見る'"
+          @click="loadMore"
+        >
+          <template #icon><Spinner v-if="tasksQuery.isFetching.value" hide-label /></template>
         </Button>
       </div>
     </template>

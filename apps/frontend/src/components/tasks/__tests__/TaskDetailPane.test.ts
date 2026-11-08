@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { computed, nextTick, ref } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import type { components } from '@/generated/api';
 
@@ -10,6 +11,7 @@ const task: TaskDetail = {
   assignees: [],
   created_at: '2026-07-16T00:00:00Z',
   custom_field_values: [],
+  reactions: [],
   id: 'task-id',
   is_archived: false,
   labels: [],
@@ -25,6 +27,12 @@ const task: TaskDetail = {
 };
 
 const confirmDelete = vi.fn();
+const onChangeParent = vi.fn();
+// 既定は未解決（他のテストで取得を走らせない）。似ているタスクのテストだけ値を入れる
+const resolvedIds = {
+  tenantId: ref<string | undefined>(undefined),
+  projectId: ref<string | undefined>(undefined),
+};
 // useTaskDetail に渡された引数を捕捉し、onAfterDelete などの配線を検証する。
 let capturedParams: {
   tenantDisplayId: () => string;
@@ -37,6 +45,8 @@ vi.mock('@/composables/useTaskDetail', () => ({
   useTaskDetail: vi.fn((params) => {
     capturedParams = params;
     return {
+      tenantId: resolvedIds.tenantId,
+      projectId: resolvedIds.projectId,
       displayTask: computed(() => task),
       statuses: computed(() => []),
       projectLabels: computed(() => []),
@@ -45,8 +55,12 @@ vi.mock('@/composables/useTaskDetail', () => ({
       statusError: ref(null),
       labelsUpdating: computed(() => false),
       labelsError: ref(null),
+      parentUpdating: computed(() => false),
+      parentError: ref(null),
+      onChangeParent,
       fieldUpdating: computed(() => ({})),
       fieldErrors: ref({}),
+      savedField: ref(null),
       isLoading: computed(() => false),
       isNotFound: computed(() => false),
       isError: computed(() => false),
@@ -65,11 +79,17 @@ vi.mock('@/composables/useTaskDetail', () => ({
 }));
 
 import TaskDetailPane from '../TaskDetailPane.vue';
+import TaskSubtaskPanel from '../TaskSubtaskPanel.vue';
 
 enableAutoUnmount(afterEach);
 
 /** 説明の KFM 描画はサーバへ投げる。宛先はここだけで持つ。 */
 const RENDER_DESCRIPTION_PATH = '/internal/render-description';
+
+beforeEach(() => {
+  // コメント欄が auth store（下書きの持ち主）を読む
+  setActivePinia(createPinia());
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -94,6 +114,8 @@ describe('TaskDetailPane', () => {
     confirmDelete.mockReset();
     capturedParams = null;
     task.description = null;
+    resolvedIds.tenantId.value = undefined;
+    resolvedIds.projectId.value = undefined;
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
@@ -116,6 +138,14 @@ describe('TaskDetailPane', () => {
     const wrapper = mountPane();
     await wrapper.get('button[aria-label="詳細を閉じる"]').trigger('click');
     expect(wrapper.emitted('close')).toBeTruthy();
+  });
+
+  // オーバーレイもこのペインを描くので、ここの配線で右ペインとオーバーレイの両方を見る
+  it('サブタスク欄からの親の変更を useTaskDetail へ渡す', () => {
+    onChangeParent.mockReset();
+    const wrapper = mountPane();
+    wrapper.getComponent(TaskSubtaskPanel).vm.$emit('change-parent', 'parent-id');
+    expect(onChangeParent).toHaveBeenCalledWith('parent-id');
   });
 
   /*
@@ -144,13 +174,16 @@ describe('TaskDetailPane', () => {
       // 記法がそのまま見えていたのが直したい症状
       expect(rendered.text()).not.toContain('# 見出し');
 
-      // 描画元はタスク UUID と本文。scope の組み立てはサーバ側に閉じる。
+      // 描画元は本文と、詳細ページの +data.ts と同じ組み立ての scope（task-<UUID>）・テナント。
       // ペインはコメント・履歴・担当者も取りに行くので、順番ではなく宛先で拾う
       const call = fetchMock.mock.calls.find(([input]) => input === RENDER_DESCRIPTION_PATH);
       expect(call).toBeTruthy();
       expect(JSON.parse(call![1]!.body as string)).toEqual({
-        taskId: 'task-id',
+        scope: 'task-task-id',
+        tenant: 'acme',
         description: '# 見出し',
+        // 説明文のメンションの表（このタスクには印が無いので空）
+        mentions: {},
       });
     });
 
@@ -166,6 +199,133 @@ describe('TaskDetailPane', () => {
 
       expect(wrapper.find('[data-task-description-html]').exists()).toBe(false);
       expect(wrapper.text()).toContain('# 見出し');
+    });
+  });
+
+  /*
+   * 説明の KEY-N は v-html の素のリンクなので、そのままだとオーバーレイの上でも詳細ページへ
+   * 遷移していた（TASK-303）。器（オーバーレイ・分割ビュー）の中で開けるよう横取りする。
+   */
+  describe('説明の KEY-N のクリック', () => {
+    async function mountWithTaskRef(href: string) {
+      task.description = 'ENG-7 を見る';
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(
+          async () =>
+            new Response(
+              JSON.stringify({ html: `<p><a href="${href}" class="kfm-task-ref">ENG-7</a></p>` }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } },
+            ),
+        ),
+      );
+      const wrapper = mount(TaskDetailPane, {
+        props: { tenantDisplayId: 'acme', projectKey: 'ENG', taskId: 'ENG-42' },
+        global: { plugins: [[VueQueryPlugin, { queryClient }]] },
+        attachTo: document.body,
+      });
+      await flushPromises();
+      return { wrapper, link: wrapper.get('a.kfm-task-ref').element };
+    }
+
+    /** vike のリンク横取りは document の click なので、そこまで届いたかも見る */
+    function click(link: Element, init: MouseEventInit = {}) {
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true, ...init });
+      const reachedDocument = vi.fn();
+      document.addEventListener('click', reachedDocument);
+      link.dispatchEvent(event);
+      document.removeEventListener('click', reachedDocument);
+      return { event, reachedDocument };
+    }
+
+    it('左クリックは遷移させず open-task-ref を emit する', async () => {
+      const { wrapper, link } = await mountWithTaskRef('/acme/projects/ENG/tasks/ENG-7');
+      const { event, reachedDocument } = click(link);
+      expect(event.defaultPrevented).toBe(true);
+      expect(reachedDocument).not.toHaveBeenCalled();
+      expect(wrapper.emitted('open-task-ref')).toEqual([
+        [{ projectKey: 'ENG', seqKey: 'ENG-7', href: '/acme/projects/ENG/tasks/ENG-7' }],
+      ]);
+    });
+
+    it('別プロジェクトの KEY-N もプロジェクトを添えて渡す（扱いは器が決める）', async () => {
+      const { wrapper, link } = await mountWithTaskRef('/acme/projects/OPS/tasks/OPS-3');
+      click(link);
+      expect(wrapper.emitted('open-task-ref')?.[0]?.[0]).toMatchObject({
+        projectKey: 'OPS',
+        seqKey: 'OPS-3',
+      });
+    });
+
+    it.each([
+      ['Cmd', { metaKey: true }],
+      ['Ctrl', { ctrlKey: true }],
+      ['Shift', { shiftKey: true }],
+      ['中クリック', { button: 1 }],
+    ])('%s 付きは横取りしない（新しいタブはブラウザの既定）', async (_, init) => {
+      const { wrapper, link } = await mountWithTaskRef('/acme/projects/ENG/tasks/ENG-7');
+      const { event, reachedDocument } = click(link, init);
+      expect(event.defaultPrevented).toBe(false);
+      expect(reachedDocument).toHaveBeenCalled();
+      expect(wrapper.emitted('open-task-ref')).toBeUndefined();
+    });
+  });
+
+  describe('似ているタスク', () => {
+    const similarRequests: URL[] = [];
+
+    function mountWithSimilar(tasks: unknown[]) {
+      resolvedIds.tenantId.value = 'tenant-uuid';
+      resolvedIds.projectId.value = 'project-uuid';
+      similarRequests.length = 0;
+      // ペインはコメント・履歴・添付なども取りに行く。似ているタスク以外は 404 で各欄の失敗表示に倒す
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = new URL(input instanceof Request ? input.url : String(input), 'http://x');
+          const similar = url.pathname.endsWith('/tasks/similar');
+          if (similar) similarRequests.push(url);
+          return new Response(JSON.stringify(similar ? { tasks } : { message: 'not-found' }), {
+            status: similar ? 200 : 404,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }),
+      );
+      return mount(TaskDetailPane, {
+        props: { tenantDisplayId: 'acme', projectKey: 'ENG', taskId: 'ENG-42' },
+        global: { plugins: [[VueQueryPlugin, { queryClient }]] },
+        attachTo: document.body,
+      });
+    }
+
+    it('現在のタイトルで自分を除いて問い合わせ、0 件なら欄ごと出さない', async () => {
+      const wrapper = mountWithSimilar([]);
+      await vi.waitFor(() => expect(similarRequests).toHaveLength(1));
+      await flushPromises();
+
+      expect(similarRequests[0]?.searchParams.get('title')).toBe('ペイン用タスク');
+      expect(similarRequests[0]?.searchParams.get('exclude_task_id')).toBe('task-id');
+      expect(wrapper.find('[data-similar-tasks]').exists()).toBe(false);
+    });
+
+    it('候補の左クリックは遷移させず open-task-ref を emit する', async () => {
+      const wrapper = mountWithSimilar([
+        { id: 'task-7', seq_id: 7, title: '似ているペイン用タスク', score: 0.6 },
+      ]);
+      await vi.waitFor(() => expect(wrapper.find('[data-similar-tasks] a').exists()).toBe(true));
+
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+      const reachedDocument = vi.fn();
+      document.addEventListener('click', reachedDocument);
+      wrapper.get('[data-similar-tasks] a').element.dispatchEvent(event);
+      document.removeEventListener('click', reachedDocument);
+
+      expect(event.defaultPrevented).toBe(true);
+      // vike のリンク横取り（document の click）まで届くと詳細ページへ遷移してしまう
+      expect(reachedDocument).not.toHaveBeenCalled();
+      expect(wrapper.emitted('open-task-ref')).toEqual([
+        [{ projectKey: 'ENG', seqKey: 'ENG-7', href: '/acme/projects/ENG/tasks/ENG-7' }],
+      ]);
     });
   });
 

@@ -1,9 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import {
-  closeSidebarForProgrammaticNavigate,
-  shouldCloseSidebarOnNavigate,
-} from '../sidebar-navigation';
+import { shouldCloseSidebarOnNavigate } from '../sidebar-navigation';
 
 /** サイドバーのナビを組んで、指定要素を click の target にしたイベントを作る */
 function clickOn(selector: string, init: MouseEventInit = {}) {
@@ -29,62 +26,35 @@ afterEach(() => {
 });
 
 describe('shouldCloseSidebarOnNavigate', () => {
-  it('モバイルでリンクを押したら閉じる', () => {
-    expect(shouldCloseSidebarOnNavigate(clickOn('#my-tasks'), true)).toBe(true);
+  it('リンクを押したら閉じる', () => {
+    expect(shouldCloseSidebarOnNavigate(clickOn('#my-tasks'))).toBe(true);
   });
 
   it('リンクの中の要素を押しても閉じる', () => {
-    expect(shouldCloseSidebarOnNavigate(clickOn('#link-label'), true)).toBe(true);
-  });
-
-  // デスクトップのサイドバーは常設で、ページと重ならない
-  it('デスクトップでは閉じない', () => {
-    expect(shouldCloseSidebarOnNavigate(clickOn('#my-tasks'), false)).toBe(false);
+    expect(shouldCloseSidebarOnNavigate(clickOn('#link-label'))).toBe(true);
   });
 
   // プロジェクト行は展開のトグルで、ページは動かない
   it('リンクでない操作（行の展開・再試行）では閉じない', () => {
-    expect(shouldCloseSidebarOnNavigate(clickOn('#project-row'), true)).toBe(false);
-    expect(shouldCloseSidebarOnNavigate(clickOn('#retry'), true)).toBe(false);
+    expect(shouldCloseSidebarOnNavigate(clickOn('#project-row'))).toBe(false);
+    expect(shouldCloseSidebarOnNavigate(clickOn('#retry'))).toBe(false);
   });
 
   it('ナビの余白を押しても閉じない', () => {
-    expect(shouldCloseSidebarOnNavigate(clickOn('#sidebar-content'), true)).toBe(false);
+    expect(shouldCloseSidebarOnNavigate(clickOn('#sidebar-content'))).toBe(false);
   });
 
   it.each([
     ['metaKey', { metaKey: true }],
     ['altKey', { altKey: true }],
   ])('修飾キー付き（%s）は別タブで開くだけなので閉じない', (_label, init) => {
-    expect(shouldCloseSidebarOnNavigate(clickOn('#my-tasks', init), true)).toBe(false);
+    expect(shouldCloseSidebarOnNavigate(clickOn('#my-tasks', init))).toBe(false);
   });
 
   it.each([
     ['中クリック', 1],
     ['右クリック', 2],
   ])('%s では閉じない', (_label, button) => {
-    expect(shouldCloseSidebarOnNavigate(clickOn('#my-tasks', { button }), true)).toBe(false);
-  });
-});
-
-/**
- * 「プロジェクトを作成」は <button> から navigate を呼ぶ。リンクを踏まないので
- * イベント委譲（closest('a')）では拾えず、遷移しても作成画面がサイドバーに覆われていた。
- */
-describe('closeSidebarForProgrammaticNavigate', () => {
-  it('モバイルなら閉じる', () => {
-    const setOpenMobile = vi.fn();
-
-    closeSidebarForProgrammaticNavigate(true, setOpenMobile);
-
-    expect(setOpenMobile).toHaveBeenCalledWith(false);
-  });
-
-  it('デスクトップでは触らない', () => {
-    const setOpenMobile = vi.fn();
-
-    closeSidebarForProgrammaticNavigate(false, setOpenMobile);
-
-    expect(setOpenMobile).not.toHaveBeenCalled();
+    expect(shouldCloseSidebarOnNavigate(clickOn('#my-tasks', { button }))).toBe(false);
   });
 });

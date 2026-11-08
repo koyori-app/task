@@ -26,6 +26,7 @@ type Connection = {
   provider_email: string | null;
   instance_url: string | null;
   connected_at: string;
+  sign_in: boolean;
 };
 
 const githubConnection: Connection = {
@@ -33,6 +34,7 @@ const githubConnection: Connection = {
   provider_email: 'm@example.com',
   instance_url: null,
   connected_at: '2026-04-02T09:30:00Z',
+  sign_in: true,
 };
 
 const selfHostedConnection: Connection = {
@@ -40,15 +42,27 @@ const selfHostedConnection: Connection = {
   provider_email: 'dev@example.com',
   instance_url: INSTANCE_URL,
   connected_at: '2026-06-18T12:00:00Z',
+  sign_in: true,
 };
 
 const allProviders = [
-  { provider: 'github', connection_provider: 'github', requires_instance_url: false },
-  { provider: 'google', connection_provider: 'google', requires_instance_url: false },
+  {
+    provider: 'github',
+    connection_provider: 'github',
+    requires_instance_url: false,
+    sign_in: true,
+  },
+  {
+    provider: 'google',
+    connection_provider: 'google',
+    requires_instance_url: false,
+    sign_in: true,
+  },
   {
     provider: 'gitlab_selfhosted',
     connection_provider: 'gitlab_selfhosted',
     requires_instance_url: true,
+    sign_in: true,
   },
 ];
 

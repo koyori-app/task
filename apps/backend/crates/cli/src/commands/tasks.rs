@@ -2,11 +2,13 @@
 
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
 use entity::tasks::TaskPriority;
+use payload::forge::{LinkTaskPullRequestRequest, TaskForgePullRequest, TaskForgeResponse};
 use payload::projects::ProjectResponse;
 use payload::task_comments::{CreateCommentRequest, TaskCommentResponse};
 use payload::task_extensions::SearchTasksResponse;
 use payload::tasks::{
-    AssigneeInput, CreateTaskRequest, TaskDetailResponse, TaskListResponse, UpdateTaskRequest,
+    AssigneeInput, BulkCreateTasksRequest, BulkCreateTasksResponse, CreateTaskRequest,
+    TaskDetailResponse, TaskListResponse, UpdateTaskRequest,
 };
 use sea_orm::ActiveEnum;
 use serde_json::json;
@@ -14,12 +16,14 @@ use uuid::Uuid;
 
 use crate::Context;
 use crate::api::ApiClient;
-use crate::cli::{TaskClearArgs, TaskFieldArgs, TasksCommand};
+use crate::cli::{TaskClearArgs, TaskFieldArgs, TaskPrCommand, TasksCommand};
 use crate::error::{CliError, Result};
 use crate::output::{OutputOptions, print};
 use crate::resolve::{
-    TaskRef, default_status_id, find_done_status_id, parse_task_ref, resolve_label_id,
-    resolve_milestone_id, resolve_project, resolve_sprint_id, resolve_status_id, resolve_user_id,
+    TaskRef, default_status_id, find_done_status_id, list_labels, list_milestones, list_sprints,
+    list_statuses, parse_task_ref, pick_default_status, pick_label_id, pick_milestone_id,
+    pick_sprint_id, pick_status_by_name, resolve_label_id, resolve_milestone_id, resolve_project,
+    resolve_sprint_id, resolve_status_id, resolve_user_id,
 };
 
 /// タスクの担当者に付く役割。API は自由文字列だが、画面と統合テストはこの綴りを使う。
@@ -42,6 +46,8 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             milestone,
             sprint,
             parent,
+            planned_start_from,
+            planned_start_to,
             archived,
             sort,
             limit,
@@ -54,7 +60,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let limit = check_limit(limit, MAX_LIST_LIMIT)?;
             let offset = offset_for(page, limit)?;
 
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
 
             let mut query: Vec<(&str, String)> = vec![
@@ -94,10 +100,17 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 let id = resolve_parent_task_id(api, &project, reference).await?;
                 query.push(("parent_task_id", id.to_string()));
             }
+            if let Some(date) = planned_start_from {
+                query.push(("planned_start_from", date.to_string()));
+            }
+            if let Some(date) = planned_start_to {
+                query.push(("planned_start_to", date.to_string()));
+            }
 
             let tasks: TaskListResponse = api
                 .get(&borrow(&tasks_path(api, project.id)), &query)
                 .await?;
+            let tasks = tasks_for_display(tasks);
             if output.json {
                 print(&tasks, output);
             } else {
@@ -118,7 +131,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let limit = check_limit(limit, MAX_SEARCH_LIMIT)?;
             let offset = offset_for(page, limit)?;
 
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let mut segments = tasks_path(api, project.id);
             segments.push("search".into());
@@ -151,7 +164,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             // 本文の読み取りは API を叩く前に済ませる（ファイルが無いときに
             // タスクを作ってから落ちるのを避ける）
             let description = resolve_body(description, description_file, "description")?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let status_id = match status {
                 Some(status) => resolve_status_id(api, project.id, &status).await?,
@@ -176,6 +189,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 sprint_id: resolved.sprint_id,
                 soft_deadline: resolved.soft_deadline,
                 hard_deadline: resolved.hard_deadline,
+                planned_start_on: resolved.planned_start_on,
                 estimated_minutes: resolved.estimated_minutes,
                 assignees: resolved.assignees.take().unwrap_or_default(),
                 label_ids: resolved.set_label_ids.take().unwrap_or_default(),
@@ -185,16 +199,46 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let created: TaskDetailResponse = api
                 .post(&borrow(&tasks_path(api, project.id)), &body)
                 .await?;
-            print(&created, output);
+            print(&task_for_display(created), output);
         }
-        TasksCommand::Show { task_ref, project } => {
+        TasksCommand::BulkCreate {
+            project,
+            file,
+            status,
+        } => {
+            // ファイルの読み取りと形の確認は API を叩く前に済ませる
+            let items = parse_bulk_items(crate::commands::reviews::read_json_input(&file)?)?;
+            let prepared = items
+                .into_iter()
+                .enumerate()
+                .map(|(i, item)| prepare_bulk_item(i, item, status.as_deref()))
+                .collect::<Result<Vec<_>>>()?;
+            let api = &context.connect().await?;
+            let project = resolve_project(api, &project).await?;
+            let body = resolve_bulk_request(api, &project, prepared).await?;
+            let created: BulkCreateTasksResponse = api
+                .post(&borrow(&bulk_create_path(api, project.id)), &body)
+                .await?;
+            if output.json {
+                print(&created, output);
+            } else {
+                for line in bulk_created_lines(&project, &created) {
+                    println!("{line}");
+                }
+            }
+        }
+        TasksCommand::Show {
+            task_ref,
+            project,
+            raw,
+        } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let task: TaskDetailResponse = api
                 .get(&borrow(&task_path(api, project.id, &task_id)), &[])
                 .await?;
-            print(&task, output);
+            print(&task_for_show(task, raw), output);
         }
         TasksCommand::Update {
             task_ref,
@@ -212,7 +256,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let priority = priority.as_deref().map(parse_priority).transpose()?;
             let description = resolve_body(description, description_file, "description")?;
             let target = check_task_target(&task_ref, project.as_deref())?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let status_id = match status {
                 Some(status) => Some(resolve_status_id(api, project.id, &status).await?),
@@ -238,18 +282,18 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let updated: TaskDetailResponse = api
                 .put(&borrow(&task_path(api, project.id, &task_id)), &body)
                 .await?;
-            print(&updated, output);
+            print(&task_for_display(updated), output);
         }
         TasksCommand::Complete { task_ref, project } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let status_id = find_done_status_id(api, project.id).await?;
             let body = done_request(status_id);
             let updated: TaskDetailResponse = api
                 .put(&borrow(&task_path(api, project.id, &task_id)), &body)
                 .await?;
-            print(&updated, output);
+            print(&task_for_display(updated), output);
         }
         TasksCommand::Comment {
             task_ref,
@@ -270,7 +314,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 return Err(CliError::validation("Comment body is required"));
             }
             let target = check_task_target(&task_ref, project.as_deref())?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let mut segments = task_path(api, project.id, &task_id);
             segments.push("comments".into());
@@ -283,11 +327,11 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                     },
                 )
                 .await?;
-            print(&comment, output);
+            print(&comment_for_display(comment), output);
         }
         TasksCommand::Delete { task_ref, project } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
-            let api = &context.connect()?;
+            let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             api.delete(&borrow(&task_path(api, project.id, &task_id)))
                 .await?;
@@ -297,8 +341,162 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 println!("Deleted {task_id}");
             }
         }
+        TasksCommand::Pr { command } => run_pull_requests(context, command, output).await?,
     }
     Ok(0)
+}
+
+/// タスクと PR の連携（docs/dev/features/tasks/github-tasks/index.md の「API」）。
+async fn run_pull_requests(
+    context: &Context,
+    command: TaskPrCommand,
+    output: OutputOptions,
+) -> Result<()> {
+    match command {
+        TaskPrCommand::List { task_ref, project } => {
+            let target = check_task_target(&task_ref, project.as_deref())?;
+            let api = &context.connect().await?;
+            let (project, task_id) = resolve_task_target(api, target).await?;
+            let forge = task_forge(api, project.id, &task_id).await?;
+            if output.json {
+                print(&forge, output);
+            } else {
+                print_task_forge(&forge);
+            }
+        }
+        TaskPrCommand::Link {
+            task_ref,
+            number,
+            closes,
+            project,
+        } => {
+            let target = check_task_target(&task_ref, project.as_deref())?;
+            let api = &context.connect().await?;
+            let (project, task_id) = resolve_task_target(api, target).await?;
+            let mut segments = task_forge_path(api, project.id, &task_id);
+            segments.push("pull-requests".into());
+            let linked: TaskForgePullRequest = api
+                .post(
+                    &borrow(&segments),
+                    &LinkTaskPullRequestRequest { number, closes },
+                )
+                .await?;
+            if output.json {
+                print(&linked, output);
+            } else {
+                println!("{}", format_pull_request(&linked));
+            }
+        }
+        TaskPrCommand::Unlink {
+            task_ref,
+            number,
+            project,
+        } => {
+            let target = check_task_target(&task_ref, project.as_deref())?;
+            let api = &context.connect().await?;
+            let (project, task_id) = resolve_task_target(api, target).await?;
+            // API は PR の ID で外すので、一覧から番号で引く
+            let forge = task_forge(api, project.id, &task_id).await?;
+            let pull_request = pick_linked_pull_request(&forge, number, &task_ref)?;
+            let mut segments = task_forge_path(api, project.id, &task_id);
+            segments.extend(["pull-requests".into(), pull_request.id.to_string()]);
+            api.delete(&borrow(&segments)).await?;
+            if output.json {
+                print(&json!({ "unlinked": pull_request.id }), output);
+            } else {
+                println!("Unlinked {}", pull_request_name(pull_request));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn task_forge_path(api: &ApiClient, project_id: Uuid, task_id: &str) -> Vec<String> {
+    let mut segments = task_path(api, project_id, task_id);
+    segments.push("forge".into());
+    segments
+}
+
+async fn task_forge(api: &ApiClient, project_id: Uuid, task_id: &str) -> Result<TaskForgeResponse> {
+    api.get(&borrow(&task_forge_path(api, project_id, task_id)), &[])
+        .await
+}
+
+/// 外す PR を番号で選ぶ。連携先の付け替えや、別プロジェクトのリポジトリの PR が `KEY-N` で
+/// 結ばれることで、同じ番号が複数並びうる。リンクと同じく現在の連携先のものを優先する。
+fn pick_linked_pull_request<'a>(
+    forge: &'a TaskForgeResponse,
+    number: i32,
+    task_ref: &str,
+) -> Result<&'a TaskForgePullRequest> {
+    let matches: Vec<_> = forge
+        .pull_requests
+        .iter()
+        .filter(|pr| pr.number == number)
+        .collect();
+    let in_current: Vec<_> = matches
+        .iter()
+        .copied()
+        .filter(|pr| {
+            forge.repository.as_ref().is_some_and(|repo| {
+                (
+                    &repo.host,
+                    &repo.host_url,
+                    &repo.repo_owner,
+                    &repo.repo_name,
+                ) == (&pr.host, &pr.host_url, &pr.repo_owner, &pr.repo_name)
+            })
+        })
+        .collect();
+    match (matches.as_slice(), in_current.as_slice()) {
+        ([only], _) | (_, [only]) => Ok(only),
+        ([], _) => Err(CliError::not_found(format!(
+            "Pull request #{number} is not linked to {task_ref}"
+        ))),
+        _ => Err(CliError::validation(format!(
+            "Several pull requests #{number} are linked to {task_ref} ({}); unlink it from the web UI",
+            matches
+                .iter()
+                .map(|pr| pull_request_name(pr))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
+fn print_task_forge(forge: &TaskForgeResponse) {
+    match &forge.repository {
+        Some(repo) => println!(
+            "Repository: {}/{} ({})",
+            repo.repo_owner, repo.repo_name, repo.html_url
+        ),
+        None => println!("Repository: none (this project is not connected to GitHub)"),
+    }
+    if forge.pull_requests.is_empty() {
+        println!("No linked pull requests");
+    }
+    for pull_request in &forge.pull_requests {
+        println!("{}", format_pull_request(pull_request));
+    }
+}
+
+/// `{owner}/{name}#{番号}\t{状態}\t{closes|-}\t{リンク元}\t{タイトル}`
+fn format_pull_request(pull_request: &TaskForgePullRequest) -> String {
+    format!(
+        "{}\t{}\t{}\t{}\t{}",
+        pull_request_name(pull_request),
+        pull_request.state,
+        if pull_request.closes { "closes" } else { "-" },
+        pull_request.sources.join(","),
+        pull_request.title,
+    )
+}
+
+fn pull_request_name(pull_request: &TaskForgePullRequest) -> String {
+    format!(
+        "{}/{}#{}",
+        pull_request.repo_owner, pull_request.repo_name, pull_request.number
+    )
 }
 
 /// 状態だけを完了へ動かす更新本文（`tasks complete` と `my complete` が共有する）。
@@ -348,6 +546,8 @@ fn update_request(fields: UpdateFields) -> UpdateTaskRequest {
         clear_soft_deadline: clears.clear_soft_deadline,
         hard_deadline: resolved.hard_deadline,
         clear_hard_deadline: clears.clear_hard_deadline,
+        planned_start_on: resolved.planned_start_on,
+        clear_planned_start_on: clears.clear_planned_start,
         estimated_minutes: resolved.estimated_minutes,
         clear_estimated_minutes: clears.clear_estimate,
         is_archived: fields.is_archived,
@@ -364,6 +564,7 @@ fn update_request(fields: UpdateFields) -> UpdateTaskRequest {
 struct ResolvedFields {
     soft_deadline: Option<DateTime<Utc>>,
     hard_deadline: Option<DateTime<Utc>>,
+    planned_start_on: Option<NaiveDate>,
     estimated_minutes: Option<i32>,
     progress_pct: Option<i16>,
     parent_task_id: Option<Uuid>,
@@ -389,6 +590,7 @@ impl TaskClearArgs {
             clear_description: false,
             clear_soft_deadline: false,
             clear_hard_deadline: false,
+            clear_planned_start: false,
             clear_estimate: false,
             clear_parent: false,
             clear_milestone: false,
@@ -398,10 +600,284 @@ impl TaskClearArgs {
     }
 }
 
+/// `tasks bulk-create` の JSON の 1 要素。`tasks create` のフラグと同じ名前・値。
+/// `description_file` は持たない。綴りの誤りは黙って捨てず、送信前に断る。
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BulkItem {
+    title: String,
+    description: Option<String>,
+    priority: Option<String>,
+    status: Option<String>,
+    #[serde(default)]
+    labels: Vec<String>,
+    #[serde(default)]
+    assignees: Vec<String>,
+    parent: Option<String>,
+    soft_deadline: Option<String>,
+    hard_deadline: Option<String>,
+    planned_start: Option<NaiveDate>,
+    estimate: Option<i32>,
+    progress: Option<i16>,
+    milestone: Option<String>,
+    sprint: Option<String>,
+}
+
+/// 名前の解決より前にできる検査を終えた要素。
+struct PreparedItem {
+    index: usize,
+    title: String,
+    description: Option<String>,
+    priority: Option<TaskPriority>,
+    /// 要素の `status`、無ければ `--status`。どちらも無ければ None（プロジェクト既定）
+    status: Option<String>,
+    fields: TaskFieldArgs,
+}
+
+/// 失敗を `tasks[i]: …` の位置つきにする。名前が見つからない（5）は投入 JSON の誤りなので 2 に
+/// 揃え、認証・権限・通信の失敗は元の終了コードを残す（再試行してよい失敗を入力の誤りと混ぜない）。
+fn at_item(index: usize, err: CliError) -> CliError {
+    CliError {
+        message: format!("tasks[{index}]: {}", err.message),
+        exit_code: if err.exit_code == 5 { 2 } else { err.exit_code },
+    }
+}
+
+/// 要素の `status` を優先し、無いときだけ `--status` を使う。
+fn effective_status(item: Option<&str>, default: Option<&str>) -> Option<String> {
+    item.or(default).map(str::to_string)
+}
+
+fn parse_bulk_items(value: serde_json::Value) -> Result<Vec<BulkItem>> {
+    let serde_json::Value::Array(values) = value else {
+        return Err(CliError::validation(
+            "The file must be a JSON array of tasks",
+        ));
+    };
+    let max = payload::tasks::BULK_CREATE_MAX_TASKS as usize;
+    if values.is_empty() {
+        return Err(CliError::validation("The file has no tasks"));
+    }
+    if values.len() > max {
+        return Err(CliError::validation(format!(
+            "Too many tasks: {} (at most {max} at once)",
+            values.len()
+        )));
+    }
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(i, value)| {
+            serde_json::from_value(value)
+                .map_err(|err| at_item(i, CliError::validation(err.to_string())))
+        })
+        .collect()
+}
+
+fn prepare_bulk_item(
+    index: usize,
+    item: BulkItem,
+    default_status: Option<&str>,
+) -> Result<PreparedItem> {
+    let priority = item
+        .priority
+        .as_deref()
+        .map(parse_priority)
+        .transpose()
+        .map_err(|err| at_item(index, err))?;
+    Ok(PreparedItem {
+        index,
+        title: item.title,
+        description: item.description,
+        priority,
+        status: effective_status(item.status.as_deref(), default_status),
+        fields: TaskFieldArgs {
+            soft_deadline: item.soft_deadline,
+            hard_deadline: item.hard_deadline,
+            planned_start: item.planned_start,
+            estimate: item.estimate,
+            progress: item.progress,
+            parent: item.parent,
+            milestone: item.milestone,
+            sprint: item.sprint,
+            labels: item.labels,
+            add_labels: vec![],
+            remove_labels: vec![],
+            assignees: item.assignees,
+        },
+    })
+}
+
+/// 全要素を ID に直して送る本文にする。1 つでも解決できなければそこで止まる
+/// （API は叩かない）。状態・ラベル等の一覧はプロジェクト単位で 1 回だけ取る。
+async fn resolve_bulk_request(
+    api: &ApiClient,
+    project: &ProjectResponse,
+    items: Vec<PreparedItem>,
+) -> Result<BulkCreateTasksRequest> {
+    let mut resolver = FieldResolver::new(api, project);
+    let mut statuses = None;
+    let mut tasks = Vec::with_capacity(items.len());
+    for item in items {
+        let index = item.index;
+        let request = resolve_bulk_item(&mut resolver, &mut statuses, item)
+            .await
+            .map_err(|err| at_item(index, err))?;
+        tasks.push(request);
+    }
+    Ok(BulkCreateTasksRequest { tasks })
+}
+
+async fn resolve_bulk_item(
+    resolver: &mut FieldResolver<'_>,
+    statuses: &mut Option<Vec<payload::statuses::ProjectStatusResponse>>,
+    item: PreparedItem,
+) -> Result<CreateTaskRequest> {
+    if statuses.is_none() {
+        *statuses = Some(list_statuses(resolver.api, resolver.project.id).await?);
+    }
+    let known = statuses.as_deref().unwrap_or_default();
+    let status_id = match &item.status {
+        Some(name) => pick_status_by_name(known, name)?,
+        None => pick_default_status(known)?,
+    };
+    let mut resolved = resolve_fields_with(resolver, &item.fields).await?;
+    check_deadline_order(resolved.soft_deadline, resolved.hard_deadline)?;
+    Ok(CreateTaskRequest {
+        title: item.title,
+        description: item.description,
+        status_id,
+        priority: item.priority,
+        progress_pct: resolved.progress_pct,
+        parent_task_id: resolved.parent_task_id,
+        milestone_id: resolved.milestone_id,
+        sprint_id: resolved.sprint_id,
+        soft_deadline: resolved.soft_deadline,
+        hard_deadline: resolved.hard_deadline,
+        planned_start_on: resolved.planned_start_on,
+        estimated_minutes: resolved.estimated_minutes,
+        assignees: resolved.assignees.take().unwrap_or_default(),
+        label_ids: resolved.set_label_ids.take().unwrap_or_default(),
+        custom_field_values: vec![],
+    })
+}
+
+fn bulk_create_path(api: &ApiClient, project_id: Uuid) -> Vec<String> {
+    let mut segments = tasks_path(api, project_id);
+    segments.push("bulk-create".into());
+    segments
+}
+
+/// `KEY-N  title` を入力順に。
+fn bulk_created_lines(project: &ProjectResponse, created: &BulkCreateTasksResponse) -> Vec<String> {
+    created
+        .tasks
+        .iter()
+        .map(|detail| {
+            format!(
+                "{}-{}  {}",
+                project.key, detail.task.seq_id, detail.task.title
+            )
+        })
+        .collect()
+}
+
 /// 名前で渡された値を ID に直す。API を呼ぶ前に範囲の検証も済ませる。
 async fn resolve_fields(
     api: &ApiClient,
     project: &ProjectResponse,
+    fields: &TaskFieldArgs,
+) -> Result<ResolvedFields> {
+    resolve_fields_with(&mut FieldResolver::new(api, project), fields).await
+}
+
+/// プロジェクトごとの参照先（ラベル・マイルストーン・スプリント・担当者・親）を
+/// 一度引いたら使い回す引き手。一括作成が要素ごとに一覧を取り直さないためのもの。
+struct FieldResolver<'a> {
+    api: &'a ApiClient,
+    project: &'a ProjectResponse,
+    labels: Option<Vec<payload::labels::LabelResponse>>,
+    milestones: Option<Vec<payload::milestones::MilestoneResponse>>,
+    sprints: Option<Vec<payload::sprints::SprintResponse>>,
+    users: std::collections::HashMap<String, Uuid>,
+    parents: std::collections::HashMap<String, Uuid>,
+}
+
+impl<'a> FieldResolver<'a> {
+    fn new(api: &'a ApiClient, project: &'a ProjectResponse) -> Self {
+        Self {
+            api,
+            project,
+            labels: None,
+            milestones: None,
+            sprints: None,
+            users: Default::default(),
+            parents: Default::default(),
+        }
+    }
+
+    async fn label(&mut self, name: &str) -> Result<Uuid> {
+        // UUID は一覧を取らずにそのまま使う（単体の解決と同じ）
+        if let Ok(uuid) = Uuid::parse_str(name) {
+            return Ok(uuid);
+        }
+        if self.labels.is_none() {
+            self.labels = Some(list_labels(self.api, self.project.id).await?);
+        }
+        pick_label_id(self.labels.as_deref().unwrap_or_default(), name)
+    }
+
+    async fn milestone(&mut self, name: &str) -> Result<Uuid> {
+        // UUID は一覧を取らずにそのまま使う（単体の解決と同じ）
+        if let Ok(uuid) = Uuid::parse_str(name) {
+            return Ok(uuid);
+        }
+        if self.milestones.is_none() {
+            self.milestones = Some(list_milestones(self.api, self.project.id).await?);
+        }
+        pick_milestone_id(self.milestones.as_deref().unwrap_or_default(), name)
+    }
+
+    async fn sprint(&mut self, name: &str) -> Result<Uuid> {
+        // UUID は一覧を取らずにそのまま使う（単体の解決と同じ）
+        if let Ok(uuid) = Uuid::parse_str(name) {
+            return Ok(uuid);
+        }
+        if self.sprints.is_none() {
+            self.sprints = Some(list_sprints(self.api, self.project.id).await?);
+        }
+        pick_sprint_id(self.sprints.as_deref().unwrap_or_default(), name)
+    }
+
+    async fn user(&mut self, name: &str) -> Result<Uuid> {
+        if let Some(id) = self.users.get(name) {
+            return Ok(*id);
+        }
+        let id = resolve_user_id(self.api, self.project.id, name).await?;
+        self.users.insert(name.to_string(), id);
+        Ok(id)
+    }
+
+    async fn parent(&mut self, reference: &str) -> Result<Uuid> {
+        if let Some(id) = self.parents.get(reference) {
+            return Ok(*id);
+        }
+        let id = resolve_parent_task_id(self.api, self.project, reference).await?;
+        self.parents.insert(reference.to_string(), id);
+        Ok(id)
+    }
+
+    async fn labels(&mut self, names: &[String]) -> Result<Vec<Uuid>> {
+        let mut ids = Vec::with_capacity(names.len());
+        for name in names {
+            ids.push(self.label(name).await?);
+        }
+        Ok(ids)
+    }
+}
+
+async fn resolve_fields_with(
+    resolver: &mut FieldResolver<'_>,
     fields: &TaskFieldArgs,
 ) -> Result<ResolvedFields> {
     if let Some(progress) = fields.progress
@@ -430,30 +906,31 @@ async fn resolve_fields(
             .as_deref()
             .map(|raw| parse_deadline("--hard-deadline", raw))
             .transpose()?,
+        planned_start_on: fields.planned_start,
         estimated_minutes: fields.estimate,
         progress_pct: fields.progress,
         ..ResolvedFields::default()
     };
 
     if let Some(reference) = &fields.parent {
-        resolved.parent_task_id = Some(resolve_parent_task_id(api, project, reference).await?);
+        resolved.parent_task_id = Some(resolver.parent(reference).await?);
     }
     if let Some(name) = &fields.milestone {
-        resolved.milestone_id = Some(resolve_milestone_id(api, project.id, name).await?);
+        resolved.milestone_id = Some(resolver.milestone(name).await?);
     }
     if let Some(name) = &fields.sprint {
-        resolved.sprint_id = Some(resolve_sprint_id(api, project.id, name).await?);
+        resolved.sprint_id = Some(resolver.sprint(name).await?);
     }
     if !fields.labels.is_empty() {
-        resolved.set_label_ids = Some(resolve_labels(api, project.id, &fields.labels).await?);
+        resolved.set_label_ids = Some(resolver.labels(&fields.labels).await?);
     }
-    resolved.add_label_ids = resolve_labels(api, project.id, &fields.add_labels).await?;
-    resolved.remove_label_ids = resolve_labels(api, project.id, &fields.remove_labels).await?;
+    resolved.add_label_ids = resolver.labels(&fields.add_labels).await?;
+    resolved.remove_label_ids = resolver.labels(&fields.remove_labels).await?;
     if !fields.assignees.is_empty() {
         let mut assignees = Vec::with_capacity(fields.assignees.len());
         let mut seen = std::collections::HashSet::new();
         for name in &fields.assignees {
-            let user_id = resolve_user_id(api, project.id, name).await?;
+            let user_id = resolver.user(name).await?;
             if !seen.insert(user_id) {
                 continue;
             }
@@ -465,14 +942,6 @@ async fn resolve_fields(
         resolved.assignees = Some(assignees);
     }
     Ok(resolved)
-}
-
-async fn resolve_labels(api: &ApiClient, project_id: Uuid, names: &[String]) -> Result<Vec<Uuid>> {
-    let mut ids = Vec::with_capacity(names.len());
-    for name in names {
-        ids.push(resolve_label_id(api, project_id, name).await?);
-    }
-    Ok(ids)
 }
 
 /// 親タスクは `KEY-N` でも指せる。API は UUID を要求するので詳細を 1 度引く。
@@ -694,9 +1163,129 @@ async fn resolve_task_target(
     Ok((resolve_project(api, &project_key).await?, task_id))
 }
 
+/// 作成したコメントを人に見せる形にする。本文のメンション印（`<@利用者ID>`）は id を含むので、
+/// 利用者の画面の外へ出す口は `@今の名` に戻してから出す（`payload::mentions::to_plain`）。
+fn comment_for_display(mut comment: TaskCommentResponse) -> TaskCommentResponse {
+    comment.body = payload::mentions::to_plain(&comment.body, &comment.mentions);
+    comment
+}
+
+/// 作成・取得・更新したタスクを人に見せる形にする。説明文のメンション印は `@今の名` に戻す
+/// （コメントと同じ `payload::mentions::to_plain`）。
+fn task_for_display(mut detail: TaskDetailResponse) -> TaskDetailResponse {
+    detail.task.description = detail
+        .task
+        .description
+        .map(|body| payload::mentions::to_plain(&body, &detail.mentions));
+    detail
+}
+
+/// `tasks show` の出す形。既定は `@今の名` に戻す。`--raw` なら保存されたままの本文（印を含む）を出す。
+/// 印のままの本文は、書き換えて `tasks update` へ戻しても、メンションが名の文字に落ちぬ。
+/// `--json` でも同じに従う（`mentions` の表はどちらでも載る）。
+fn task_for_show(detail: TaskDetailResponse, raw: bool) -> TaskDetailResponse {
+    if raw {
+        detail
+    } else {
+        task_for_display(detail)
+    }
+}
+
+/// 一覧は説明文の `mentions` の表を持たぬので、印は id を出さぬ定型の句に落とす。
+fn tasks_for_display(mut list: TaskListResponse) -> TaskListResponse {
+    let none = payload::mentions::MentionMap::new();
+    for task in &mut list.tasks {
+        task.description = task
+            .description
+            .take()
+            .map(|body| payload::mentions::to_plain(&body, &none));
+    }
+    list
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bulk_items(json: serde_json::Value) -> Result<Vec<BulkItem>> {
+        parse_bulk_items(json)
+    }
+
+    #[test]
+    fn bulk_status_prefers_the_element_then_the_flag_then_the_project_default() {
+        assert_eq!(
+            effective_status(Some("Doing"), Some("Todo")).as_deref(),
+            Some("Doing")
+        );
+        assert_eq!(
+            effective_status(None, Some("Todo")).as_deref(),
+            Some("Todo")
+        );
+        assert_eq!(effective_status(None, None), None);
+
+        let items = bulk_items(json!([{"title": "a"}, {"title": "b", "status": "Doing"}])).unwrap();
+        let statuses: Vec<_> = items
+            .into_iter()
+            .enumerate()
+            .map(|(i, item)| prepare_bulk_item(i, item, Some("Todo")).unwrap().status)
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![Some("Todo".to_string()), Some("Doing".to_string())]
+        );
+    }
+
+    #[test]
+    fn bulk_failure_is_reported_at_the_failing_element_with_the_validation_exit_code() {
+        let items = bulk_items(json!([
+            {"title": "ok", "priority": "high"},
+            {"title": "bad", "priority": "urgent-ish"},
+            {"title": "never reached", "priority": "nope"}
+        ]))
+        .unwrap();
+        let err = items
+            .into_iter()
+            .enumerate()
+            .map(|(i, item)| prepare_bulk_item(i, item, None))
+            .collect::<Result<Vec<_>>>()
+            .map(|_| ())
+            .unwrap_err();
+        assert!(err.message.starts_with("tasks[1]: "), "{}", err.message);
+        assert_eq!(err.exit_code, 2);
+    }
+
+    #[test]
+    fn at_item_positions_the_failure_and_keeps_auth_and_transport_exit_codes() {
+        let err = at_item(3, CliError::not_found("Label not found: x"));
+        assert_eq!(err.message, "tasks[3]: Label not found: x");
+        assert_eq!(err.exit_code, 2);
+        assert_eq!(at_item(0, CliError::validation("x")).exit_code, 2);
+        assert_eq!(at_item(0, CliError::http(401, "")).exit_code, 3);
+        assert_eq!(at_item(0, CliError::http(403, "")).exit_code, 4);
+        assert_eq!(at_item(0, CliError::http(500, "")).exit_code, 1);
+    }
+
+    #[test]
+    fn bulk_input_must_be_a_non_empty_array_within_the_limit() {
+        assert!(bulk_items(json!({"title": "a"})).is_err());
+        assert!(bulk_items(json!([])).is_err());
+        let many: Vec<_> = (0..101).map(|_| json!({"title": "a"})).collect();
+        assert!(bulk_items(json!(many)).is_err());
+        let max: Vec<_> = (0..100).map(|_| json!({"title": "a"})).collect();
+        assert_eq!(bulk_items(json!(max)).unwrap().len(), 100);
+    }
+
+    #[test]
+    fn bulk_elements_reject_unknown_keys_at_their_position() {
+        // `description_file` は持たない。綴りの誤りも黙って捨てない
+        let err = bulk_items(json!([
+            {"title": "a"},
+            {"title": "b", "description_file": "x.md"}
+        ]))
+        .unwrap_err();
+        assert!(err.message.starts_with("tasks[1]: "), "{}", err.message);
+        assert_eq!(err.exit_code, 2);
+    }
 
     /// 追加した項目を「何も指定していない」状態にした更新本文。
     /// 既存の 4 項目だけを見るテストは、これを通して組み立てる。
@@ -994,5 +1583,242 @@ mod tests {
 
     fn uuid(n: u128) -> Uuid {
         Uuid::from_u128(n)
+    }
+
+    #[test]
+    fn comment_output_has_names_instead_of_mention_markers() {
+        use payload::mentions::{MentionStatus, MentionedUser};
+        let alice = Uuid::new_v4();
+        let ghost = Uuid::new_v4();
+        let comment = TaskCommentResponse {
+            id: Uuid::new_v4(),
+            task_id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            body: format!("<@{alice}> と <@{ghost}> へ"),
+            mentions: [(
+                alice,
+                MentionedUser {
+                    status: MentionStatus::Member.into(),
+                    name: Some("alice".into()),
+                    avatar_url: None,
+                },
+            )]
+            .into(),
+            parent_comment_id: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            deleted_at: None,
+        };
+
+        let shown = comment_for_display(comment);
+
+        assert_eq!(shown.body, "@alice と @（不明な利用者） へ");
+        let out = crate::output::render(&shown, crate::output::OutputOptions::new(true));
+        assert!(!out.contains("<@"), "{out}");
+    }
+
+    fn task_detail_with(
+        description: &str,
+        mentions: serde_json::Value,
+    ) -> payload::tasks::TaskDetailResponse {
+        serde_json::from_value(json!({
+            "id": "22222222-2222-4222-8222-222222222222",
+            "project_id": "11111111-1111-4111-8111-111111111111",
+            "seq_id": 7,
+            "title": "Golden task",
+            "description": description,
+            "status_id": "33333333-3333-4333-8333-333333333333",
+            "priority": "Medium",
+            "progress_pct": 0,
+            "parent_task_id": null,
+            "milestone_id": null,
+            "sprint_id": null,
+            "soft_deadline": null,
+            "hard_deadline": null,
+            "planned_start_on": null,
+            "estimated_minutes": null,
+            "is_archived": false,
+            "created_by": null,
+            "assignees": [],
+            "labels": [],
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "completed_at": null,
+            "deleted_at": null,
+            "custom_field_values": [],
+            "mentions": mentions,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn task_output_has_names_instead_of_description_mention_markers() {
+        let alice = Uuid::new_v4();
+        let former = Uuid::new_v4();
+        let stranger = Uuid::new_v4();
+        let detail = task_detail_with(
+            &format!("<@{alice}> と <@{former}> と <@{stranger}> へ"),
+            json!({
+                alice.to_string(): { "status": "member", "name": "alice", "avatar_url": null },
+                // 外れた者でも名前が引ければ名で出る。引けぬ者は定型の句
+                former.to_string(): { "status": "outside", "name": "former", "avatar_url": null },
+                stranger.to_string(): { "status": "outside", "name": null, "avatar_url": null },
+            }),
+        );
+
+        let shown = task_for_display(detail);
+
+        assert_eq!(
+            shown.task.description.as_deref(),
+            Some("@alice と @former と @（このプロジェクトの外の利用者） へ")
+        );
+        // 出力に印が残らぬこと（`mentions` の表は id → 名前の対応として残るが、本文には id が出ない）
+        let out = crate::output::render(&shown, crate::output::OutputOptions::new(true));
+        assert!(!out.contains("<@"), "{out}");
+    }
+
+    #[test]
+    fn task_show_raw_keeps_markers_and_default_shows_names() {
+        let alice = Uuid::new_v4();
+        let body = format!("<@{alice}> へ確認");
+        let table = json!({
+            alice.to_string(): { "status": "member", "name": "alice", "avatar_url": null },
+        });
+
+        let raw = task_for_show(task_detail_with(&body, table.clone()), true);
+        assert_eq!(raw.task.description.as_deref(), Some(body.as_str()));
+        let out = crate::output::render(&raw, crate::output::OutputOptions::new(true));
+        assert!(out.contains(&format!("<@{alice}>")), "{out}");
+
+        let shown = task_for_show(task_detail_with(&body, table), false);
+        assert_eq!(shown.task.description.as_deref(), Some("@alice へ確認"));
+    }
+
+    #[test]
+    fn task_list_output_never_shows_a_description_marker_or_id() {
+        let alice = Uuid::new_v4();
+        let one = task_detail_with(&format!("<@{alice}> 確認"), json!({}));
+        let list = TaskListResponse {
+            tasks: vec![one.task],
+            total: 1,
+            next_cursor: None,
+        };
+
+        let shown = tasks_for_display(list);
+
+        // 一覧は表を持たぬので、名は出さず定型の句に落とす（id は出ない）
+        assert_eq!(
+            shown.tasks[0].description.as_deref(),
+            Some("@（不明な利用者） 確認")
+        );
+    }
+
+    fn linked_pull_request(id: u128, repo: &str, number: i32) -> serde_json::Value {
+        let (owner, name) = repo.split_once('/').unwrap();
+        json!({
+            "id": uuid(id),
+            "project_id": uuid(100),
+            "host": "github",
+            "host_url": "https://github.com",
+            "repo_owner": owner,
+            "repo_name": name,
+            "number": number,
+            "title": "t",
+            "author_handle": "",
+            "state": "open",
+            "html_url": format!("https://github.com/{repo}/pull/{number}"),
+            "merged_at": null,
+            "merge_effects_processed_at": null,
+            "commits_complete": false,
+            "sources": ["manual"],
+            "closes": false,
+            "unresolved": null,
+        })
+    }
+
+    fn forge_with(
+        repository: Option<&str>,
+        pull_requests: Vec<serde_json::Value>,
+    ) -> TaskForgeResponse {
+        let repository = repository.map(|repo| {
+            let (owner, name) = repo.split_once('/').unwrap();
+            json!({
+                "host": "github",
+                "host_url": "https://github.com",
+                "repo_owner": owner,
+                "repo_name": name,
+                "html_url": format!("https://github.com/{repo}"),
+            })
+        });
+        serde_json::from_value(json!({
+            "pull_requests": pull_requests,
+            "commits": [],
+            "branches": [],
+            "repository": repository,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn unlink_picks_the_linked_pull_request_with_that_number() {
+        let forge = forge_with(
+            Some("acme/app"),
+            vec![
+                linked_pull_request(1, "acme/app", 87),
+                linked_pull_request(2, "acme/app", 88),
+            ],
+        );
+        assert_eq!(
+            pick_linked_pull_request(&forge, 88, "APP-7").unwrap().id,
+            uuid(2)
+        );
+
+        let err = pick_linked_pull_request(&forge, 99, "APP-7").unwrap_err();
+        assert_eq!(err.exit_code, 5);
+        assert!(
+            err.message.contains("#99 is not linked to APP-7"),
+            "{}",
+            err.message
+        );
+    }
+
+    /// 同じ番号が別リポジトリにもあれば、リンクと同じく現在の連携先を選ぶ。
+    /// 選べなければ黙って片方を外さず、候補を並べて断る。
+    #[test]
+    fn unlink_prefers_the_current_repository_and_refuses_to_guess_otherwise() {
+        let both = || {
+            vec![
+                linked_pull_request(1, "acme/old", 12),
+                linked_pull_request(2, "acme/app", 12),
+            ]
+        };
+        let current = forge_with(Some("acme/app"), both());
+        assert_eq!(
+            pick_linked_pull_request(&current, 12, "APP-7").unwrap().id,
+            uuid(2)
+        );
+
+        for repository in [None, Some("acme/other")] {
+            let err =
+                pick_linked_pull_request(&forge_with(repository, both()), 12, "APP-7").unwrap_err();
+            assert_eq!(err.exit_code, 2, "{repository:?}");
+            assert!(
+                err.message.contains("acme/old#12, acme/app#12"),
+                "{}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn shows_a_linked_pull_request_on_one_line() {
+        let mut pull_request: TaskForgePullRequest =
+            serde_json::from_value(linked_pull_request(1, "acme/app", 87)).unwrap();
+        pull_request.closes = true;
+        pull_request.sources = vec!["body".into(), "manual".into()];
+        assert_eq!(
+            format_pull_request(&pull_request),
+            "acme/app#87\topen\tcloses\tbody,manual\tt"
+        );
     }
 }

@@ -1,3 +1,4 @@
+// mermaid フェンスの変換（remark 層）と custom element（client 層、mermaid の mock）の契約の固定（strict 固定、.dark のテーマ切り替え、SVG 挿入前の検査、error のフォールバック）
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { renderDescription } from '../markup-renderer';
 import { createKfmMermaidElement, KFM_MERMAID_TAG } from '../remark-kfm-mermaid/element';
@@ -63,8 +64,12 @@ describe('remark-kfm-mermaid (SSR / remark 層)', () => {
 
   it('markdown 直書きの生 <kfm-mermaid> (属性付き) は不活性化される (フェンス経由のみが正規経路)', async () => {
     const html = await renderDescription('<kfm-mermaid onclick="pwn()">hi</kfm-mermaid>');
+    // 要素にならず、属性は効かず、書いた字が見える
+    const doc = new DOMParser().parseFromString(html, 'text/html');
     expect(html).not.toContain('<kfm-mermaid');
-    expect(html).not.toContain('onclick');
+    expect(doc.querySelector('kfm-mermaid')).toBeNull();
+    expect(doc.querySelector('[onclick]')).toBeNull();
+    expect(doc.body.textContent).toBe('<kfm-mermaid onclick="pwn()">hi</kfm-mermaid>');
   });
 });
 

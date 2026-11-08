@@ -2,21 +2,30 @@
 import { X } from '@lucide/vue';
 import { computed, ref } from 'vue';
 
-import TaskActivityFeed from '@/components/tasks/TaskActivityFeed.vue';
+import TaskActivityFilter from '@/components/tasks/TaskActivityFilter.vue';
+import TaskAttachments from '@/components/tasks/TaskAttachments.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
+import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
+import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
+import type { ActivityFilter, ActivityLookups } from '@/lib/activity-timeline';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
 import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
 import { useTaskActivities } from '@/composables/useTaskActivities';
+import { useReactions } from '@/composables/useReactions';
 import { useTaskComments } from '@/composables/useTaskComments';
 import { useRenderedDescription } from '@/composables/useRenderedDescription';
 import { useTaskDetail } from '@/composables/useTaskDetail';
+import { useSimilarTasks } from '@/composables/useSimilarTasks';
 import { useMeQuery } from '@/lib/api-vue-query';
+import { taskDetailHref, taskSeqKey, userProfileHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 
 type TaskResponse = components['schemas']['TaskResponse'];
+/** 説明の KEY-N リンク（remark-kfm-task-ref）が指すタスク */
+export type TaskRefLink = { projectKey: string; seqKey: string; href: string };
 
 const props = withDefaults(
   defineProps<{
@@ -37,10 +46,32 @@ const props = withDefaults(
   { layout: 'pane', showCloseButton: true },
 );
 
+const profileHref = (userId: string) => userProfileHref(props.tenantDisplayId, userId);
+
 const emit = defineEmits<{
   close: [];
   'open-task': [task: TaskResponse];
+  'open-task-ref': [ref: TaskRefLink];
 }>();
+
+/**
+ * 説明の KEY-N（v-html の素のリンク）を、ページ遷移させず器の側で開かせる。
+ * 修飾キー付き・中クリック（新しいタブ）はブラウザの既定に任せる。
+ */
+function onTaskRefClick(event: MouseEvent) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+    return;
+  const href = (event.target as Element | null)?.closest?.('a.kfm-task-ref')?.getAttribute('href');
+  // href は /{tenant}/projects/{KEY}/tasks/{KEY-N}
+  const [, tenant, projects, projectKey, tasks, seqKey] = href?.split('/') ?? [];
+  if (!href || tenant !== props.tenantDisplayId || projects !== 'projects' || tasks !== 'tasks')
+    return;
+  if (!projectKey || !seqKey) return;
+  // vike は document の click でリンクを横取りし defaultPrevented を見ないので、伝播も止める
+  event.preventDefault();
+  event.stopPropagation();
+  emit('open-task-ref', { projectKey, seqKey, href });
+}
 
 const deleteDialogRef = ref<HTMLDialogElement | null>(null);
 
@@ -63,8 +94,11 @@ const {
   priorityError,
   labelsUpdating,
   labelsError,
+  parentUpdating,
+  parentError,
   fieldUpdating,
   fieldErrors,
+  savedField,
   isLoading,
   isNotFound,
   isError,
@@ -73,9 +107,11 @@ const {
   onSaveTitle,
   onSaveDescription,
   onSaveProgressPct,
+  onSavePlannedStartOn,
   onSaveSoftDeadline,
   onSaveHardDeadline,
   onSaveLabels,
+  onChangeParent,
   deleteError,
   deletePending,
   confirmDelete,
@@ -94,6 +130,7 @@ const {
 // オーバーレイでも本文と同じ画面でやり取りできるようにする
 const {
   threads,
+  mentions,
   commentsLoading,
   commentsError,
   refetchComments,
@@ -138,6 +175,15 @@ const {
 const membersQuery = useAssignableUsersQuery(tenantId, projectId);
 const members = computed(() => membersQuery.data.value ?? []);
 
+// 列の見出しの絞り込み。スレッドの中は絞り込まないので、開いている間は出さない
+const activityFilter = ref<ActivityFilter>('all');
+const activityThreadId = ref<string | null>(null);
+const activityLookups = computed<ActivityLookups>(() => ({
+  statuses: statuses.value,
+  members: members.value,
+  labels: projectLabels.value,
+}));
+
 // 候補の取得状態はピッカーへ渡す（取得中・失敗を「候補 0 人」と混ぜない）
 const membersState = computed(() => ({
   loading: membersQuery.isLoading.value,
@@ -165,6 +211,15 @@ const assigneeError = computed(() => {
 
 const meQuery = useMeQuery();
 const currentUserId = computed(() => meQuery.data.value?.id ?? null);
+const reactionController = useReactions({
+  tenantId,
+  projectId,
+  taskId: () => props.taskId,
+  currentUser: computed(() => {
+    const me = meQuery.data.value;
+    return me ? { id: me.id, name: me.username, avatar_url: me.avatar_url ?? null } : null;
+  }),
+});
 /**
  * 説明の KFM 描画。詳細ページは server data hook が HTML を渡してくれるが、
  * このペインは選択がクライアント操作なので data hook が追従できない。描画は
@@ -174,9 +229,27 @@ const currentUserId = computed(() => meQuery.data.value?.id ?? null);
  * 取得中・失敗時は html が null のまま = Hub がプレーン表示へ倒す。
  */
 const renderedDescription = useRenderedDescription(
+  () => props.tenantDisplayId,
   () => displayTask.value?.id,
   () => displayTask.value?.description,
+  () => displayTask.value?.mentions,
 );
+
+const similarQuery = useSimilarTasks({
+  tenantId,
+  projectId,
+  title: () => displayTask.value?.title ?? '',
+  excludeTaskId: () => displayTask.value?.id,
+});
+
+// 候補はペイン内で切り替える（説明の KEY-N と同じ経路）。`open-task` は TaskResponse 全体を要るので使えない
+function openSimilarTask(seqId: number) {
+  emit('open-task-ref', {
+    projectKey: props.projectKey,
+    seqKey: taskSeqKey(props.projectKey, seqId),
+    href: taskDetailHref(props.tenantDisplayId, props.projectKey, seqId),
+  });
+}
 
 function openDeleteDialog() {
   deleteError.value = null;
@@ -191,14 +264,17 @@ function onDeleteDialogCancel(event: Event) {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col">
+  <div class="flex h-full min-h-0 flex-col" @click="onTaskRefClick">
     <!--
       横の余白はここで付けない。アクティビティ列の境界線と入力欄の帯を
       器の端まで通すため、余白は本文・列のそれぞれが持つ（TaskDetailHub）。
     -->
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <TaskDetailHub
+        :reaction-controller="reactionController"
+        :current-user-id="currentUserId"
         :layout="layout"
+        :profile-href="profileHref"
         :task="displayTask"
         :project-key="projectKey"
         :statuses="statuses"
@@ -214,6 +290,7 @@ function onDeleteDialogCancel(event: Event) {
         :labels-error="labelsError"
         :field-updating="fieldUpdating"
         :field-errors="fieldErrors"
+        :saved-field="savedField"
         :description-html="renderedDescription.data.value?.html ?? null"
         :description-source="renderedDescription.data.value?.source ?? null"
         :loading="isLoading"
@@ -224,6 +301,7 @@ function onDeleteDialogCancel(event: Event) {
         @save:title="onSaveTitle"
         @save:description="onSaveDescription"
         @save:progress_pct="onSaveProgressPct"
+        @save:planned_start_on="onSavePlannedStartOn"
         @save:soft_deadline="onSaveSoftDeadline"
         @save:hard_deadline="onSaveHardDeadline"
         @save:label_ids="onSaveLabels"
@@ -236,6 +314,7 @@ function onDeleteDialogCancel(event: Event) {
         @delete-request="openDeleteDialog"
       >
         <template v-if="displayTask" #main>
+          <TaskAttachments :tenant-id="tenantId" :project-id="projectId" :task-id="taskId" />
           <TaskSubtaskPanel
             :tenant-id="tenantId"
             :project-id="projectId"
@@ -244,18 +323,56 @@ function onDeleteDialogCancel(event: Event) {
             :parent-task-id="displayTask.parent_task_id ?? null"
             :status-id="selectedStatusId"
             :status-updating="statusUpdating"
+            :parent-updating="parentUpdating"
+            :parent-error="parentError"
             :statuses="statuses"
             :project-key="projectKey"
             @open="emit('open-task', $event)"
+            @change-parent="onChangeParent"
           />
+          <SimilarTasksList
+            class="border-t pt-5"
+            :tasks="similarQuery.data.value?.tasks ?? []"
+            :tenant-display-id="tenantDisplayId"
+            :project-key="projectKey"
+            @select="openSimilarTask"
+          />
+          <TaskForgeSection
+            :tenant-id="tenantId"
+            :project-id="projectId"
+            :task-id="taskId"
+            :tenant-display-id="tenantDisplayId"
+            :project-key="projectKey"
+          />
+        </template>
+        <template #sidebar-actions>
+          <TaskActivityFilter v-if="!activityThreadId" v-model="activityFilter" />
         </template>
         <template #sidebar>
           <TaskComments
+            :reaction-controller="reactionController"
+            :task-id="taskId"
+            :tenant-id="tenantId"
+            :project-id="projectId"
             :threads="threads"
+            v-model:open-thread-id="activityThreadId"
+            :activities="activities"
+            :activities-loading="activitiesLoading"
+            :activities-error="activitiesError"
+            :on-retry-activities="refetchActivities"
+            :has-more-activities="hasMoreActivities"
+            :activities-fetching-more="activitiesFetchingMore"
+            :on-load-more-activities="loadMoreActivities"
+            :filter="activityFilter"
+            :lookups="activityLookups"
+            :mentions="mentions"
+            :mention-candidates="members"
             :loading="commentsLoading"
             :list-error="commentsError"
             :on-retry="refetchComments"
             :current-user-id="currentUserId"
+            :profile-href="profileHref"
+            :mention-tenant="tenantDisplayId"
             :submit-pending="submitPending"
             :submit-error="submitError"
             :reply-error="replyError"
@@ -273,17 +390,6 @@ function onDeleteDialogCancel(event: Event) {
             :on-clear-update-error="clearUpdateError"
             :on-clear-delete-error="clearDeleteError"
           >
-            <template #before-list>
-              <TaskActivityFeed
-                :activities="activities"
-                :loading="activitiesLoading"
-                :error="activitiesError"
-                :on-retry="refetchActivities"
-                :has-more="hasMoreActivities"
-                :fetching-more="activitiesFetchingMore"
-                :on-load-more="loadMoreActivities"
-              />
-            </template>
           </TaskComments>
         </template>
         <template #header-actions>
@@ -291,13 +397,11 @@ function onDeleteDialogCancel(event: Event) {
             v-if="showCloseButton"
             type="button"
             variant="ghost"
-            size="icon"
-            class="size-8"
-            aria-label="詳細を閉じる"
+            ariaLabel="詳細を閉じる"
             title="閉じる"
             @click="emit('close')"
           >
-            <X class="size-4" />
+            <template #icon><X class="size-4" /></template>
           </Button>
           <dialog
             ref="deleteDialogRef"
@@ -315,20 +419,18 @@ function onDeleteDialogCancel(event: Event) {
             <div class="flex justify-end gap-2">
               <Button
                 type="button"
-                variant="outline"
+                variant="tertiary"
                 :disabled="deletePending"
+                label="キャンセル"
                 @click="closeDeleteDialog"
-              >
-                キャンセル
-              </Button>
+              />
               <Button
                 type="button"
-                variant="destructive"
+                variant="danger"
                 :disabled="deletePending"
+                :label="deletePending ? '削除中…' : '削除する'"
                 @click="confirmDelete"
-              >
-                {{ deletePending ? '削除中…' : '削除する' }}
-              </Button>
+              />
             </div>
           </dialog>
         </template>

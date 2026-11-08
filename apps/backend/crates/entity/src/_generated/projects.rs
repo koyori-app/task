@@ -11,21 +11,24 @@ pub struct Model {
     pub name: String,
     #[sea_orm(column_type = "Text")]
     pub description: String,
-    #[sea_orm(unique_key = "idx_projects_personal_owner")]
+    #[sea_orm(unique_key = "projects_key_tenant_unique")]
     pub tenant_id: Uuid,
     pub icon_emoji: Option<String>,
     pub icon_url: Option<String>,
     #[sea_orm(unique_key = "projects_key_tenant_unique")]
     pub key: String,
     pub is_personal: bool,
-    #[sea_orm(unique_key = "idx_projects_personal_owner")]
     pub personal_owner_id: Option<Uuid>,
     #[sea_orm(has_many)]
     pub drive_files: HasMany<super::drive_files::Entity>,
     #[sea_orm(has_many)]
     pub drive_folders: HasMany<super::drive_folders::Entity>,
     #[sea_orm(has_many)]
+    pub forge_branch_links: HasMany<super::forge_branch_links::Entity>,
+    #[sea_orm(has_many)]
     pub forge_commits: HasMany<super::forge_commits::Entity>,
+    #[sea_orm(has_many)]
+    pub forge_pull_requests: HasMany<super::forge_pull_requests::Entity>,
     #[sea_orm(has_one)]
     pub github_integrations: HasOne<super::github_integrations::Entity>,
     #[sea_orm(has_many)]

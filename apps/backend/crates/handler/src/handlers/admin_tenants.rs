@@ -5,7 +5,7 @@ use axum::{
 };
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, prelude::Uuid};
 
-use sea_orm::{ConnectionTrait, Statement};
+use sea_orm::{ConnectionTrait, Statement, TransactionTrait};
 
 use common::db::table_exists;
 use entity::{projects, tenants};
@@ -93,19 +93,28 @@ pub async fn delete_tenant(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    tenants::Entity::delete_by_id(id).exec(&state.db).await?;
-
+    // 監査ログを削除より先に書き、同じトランザクションで確定する。
+    // 削除後に消したテナントの ID を `audit_logs.tenant_id`（外部キー）へ入れると違反になる。
+    // 先に書いておけば、削除時に外部キー（ON DELETE SET NULL）がログの tenant_id を NULL にする。
+    // 削除後も追えるよう、テナントの識別情報は metadata に残す。
+    let txn = state.db.begin().await?;
     record_audit(
-        &state.db,
+        &txn,
         admin.user_id,
         "tenant.delete",
         "tenant",
         &id.to_string(),
         Some(id),
-        Some(serde_json::json!({ "tenant_name": tenant.name })),
+        Some(serde_json::json!({
+            "tenant_id": id,
+            "tenant_display_id": tenant.display_id,
+            "tenant_name": tenant.name,
+        })),
         &headers,
     )
     .await?;
+    tenants::Entity::delete_by_id(id).exec(&txn).await?;
+    txn.commit().await?;
 
     Ok(StatusCode::NO_CONTENT)
 }

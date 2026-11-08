@@ -7,7 +7,7 @@ import AppBreadcrumbs from '@/components/AppBreadcrumbs.vue';
 import { useBreadcrumbs } from '@/composables/useBreadcrumbs';
 import { GET_TASK_PATH } from '@/composables/useTaskDetail';
 import { TASK_RELATIONS_PATH } from '@/composables/useTaskSubtasks';
-import { projectsQueryOptions } from '@/lib/api-vue-query';
+import { driveFileQueryOptions, projectsQueryOptions } from '@/lib/api-vue-query';
 import type { TenantUuid } from '@/lib/api-ids';
 import { toBreadcrumbList } from '@/lib/breadcrumbs';
 
@@ -75,9 +75,7 @@ describe('共通パンくず', () => {
     const view = setup({ parent: hasParent });
     const names = ['ホーム', project.name, ...(hasParent ? [parent.title] : []), task.title];
     expect(view.state.segments.map((segment) => segment.name)).toEqual(names);
-    expect(
-      view.wrapper.findAll('[data-slot="breadcrumb-item"]').map((item) => item.text()),
-    ).toEqual(names);
+    expect(view.wrapper.findAll('nav li').map((item) => item.text())).toEqual(names);
     expect(view.wrapper.get('nav').attributes('aria-label')).toBe('パンくず');
     expect(view.wrapper.find('nav > ol').exists()).toBe(true);
     expect(view.wrapper.get('[aria-current="page"]').element.tagName).toBe('SPAN');
@@ -99,6 +97,30 @@ describe('共通パンくず', () => {
       links.map((link) => `https://task.example${link}`),
     );
     expect(view.wrapper.find('script').exists()).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('ドキュメント詳細は プロジェクト > ドキュメント > タイトル（.md を落とす）', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const view = setup();
+    view.route.urlPathname = '/acme/projects/ENG/docs/file-1';
+    view.route.routeParams = { tenant: 'acme', projectKey: 'ENG', fileId: 'file-1' } as never;
+    await nextTick();
+    expect(view.state.loading).toBe(true);
+
+    view.client.setQueryData(driveFileQueryOptions(tenant.id as TenantUuid, 'file-1').queryKey, {
+      id: 'file-1',
+      name: '設計メモ.md',
+    } as never);
+    await nextTick();
+    expect(view.state.segments.map((segment) => segment.name)).toEqual([
+      'ホーム',
+      project.name,
+      'ドキュメント',
+      '設計メモ',
+    ]);
+    expect(view.state.segments[2]?.href).toBe('/acme/projects/ENG/docs');
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -225,15 +247,14 @@ describe('共通パンくず', () => {
     expect(view.state.segments).toEqual([]);
   });
 
-  it('長い名前は title で全文を読め、狭い画面では一列を横スクロールできる', async () => {
+  it('長い名前も全文を出し、狭い画面では一列を横スクロールできる', async () => {
     const view = setup();
     const title = '長い名前</script>\n"'.repeat(40);
     view.client.setQueryData(queryKey(GET_TASK_PATH), { ...task, title });
     await nextTick();
-    expect(view.wrapper.get('[aria-current="page"]').attributes('title')).toBe(title);
-    expect(view.wrapper.get('[aria-current="page"]').classes()).toContain('truncate');
-    expect(view.wrapper.get('ol').classes()).toEqual(
-      expect.arrayContaining(['overflow-x-auto', 'flex-nowrap']),
+    expect(view.wrapper.get('[aria-current="page"]').element.textContent).toBe(title);
+    expect(view.wrapper.get('nav').classes()).toEqual(
+      expect.arrayContaining(['[&_ol]:overflow-x-auto', '[&_ol]:flex-nowrap', '[&_li]:shrink-0']),
     );
     expect(view.wrapper.find('script').exists()).toBe(false);
     expect(

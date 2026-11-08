@@ -329,8 +329,10 @@ const sampleComments = [
         updated_at: '2026-06-11T00:00:00Z',
         user: { id: 'user-2', name: 'sousuke', avatar_url: null },
         replies: [],
+        reactions: [],
       },
     ],
+    reactions: [],
   },
 ];
 
@@ -400,6 +402,9 @@ function sortStoryTasks(tasks: SortableStoryTask[], sort: string | null) {
   });
 }
 
+/** `taskUpdateDelayMs` を付けた PUT tasks/{id} の応答が返ったか（story が保存中かを知るため） */
+let taskUpdateSettled = true;
+
 function createMockFetch(
   overrides: {
     projects?: typeof sampleProjects;
@@ -412,9 +417,21 @@ function createMockFetch(
     rejectLabels?: boolean;
     hang?: boolean;
     comments?: unknown[];
+    /** PUT tasks/{id} で送られた status_id を覚え、以後の一覧に反映する（実 API と同じく） */
+    persistTaskStatus?: boolean;
+    /** PUT tasks/{id} を失敗させる。reject は 500、network は fetch 自体の失敗 */
+    taskUpdate?: 'reject' | 'network';
+    /** PUT tasks/{id} の応答を遅らせる（保存中に別の取得を返させるため） */
+    taskUpdateDelayMs?: number;
+    /** ステータスごとの一覧の応答を遅らせる（status id → ms） */
+    statusListDelayMs?: Record<string, number>;
   } = {},
 ) {
+  // module の変数なので、前の story が保存中のまま終わると false が残る。
+  // mock を作るたびに「保存は済んでいる」へ戻し、次の story の前提を誤って満たさない。
+  taskUpdateSettled = true;
   const original = globalThis.fetch;
+  const savedStatusIds = new Map<string, string>();
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
     const url = typeof req === 'string' ? req : req.url;
     const method = typeof req === 'string' ? 'GET' : req.method;
@@ -478,6 +495,25 @@ function createMockFetch(
         blocked_by: [],
       });
     }
+    const updateMatch =
+      method === 'PUT'
+        ? new URL(url, 'http://localhost').pathname.match(/\/tasks\/([^/]+)$/)
+        : null;
+    if (updateMatch && overrides.taskUpdateDelayMs) {
+      taskUpdateSettled = false;
+      await new Promise((resolve) => setTimeout(resolve, overrides.taskUpdateDelayMs));
+      taskUpdateSettled = true;
+    }
+    if (updateMatch && overrides.taskUpdate === 'network') {
+      throw new TypeError('Failed to fetch');
+    }
+    if (updateMatch && overrides.taskUpdate === 'reject') {
+      return jsonResponse({ message: 'server error' }, 500);
+    }
+    if (updateMatch && overrides.persistTaskStatus && typeof req !== 'string') {
+      const body = (await req.clone().json()) as { status_id?: string };
+      if (body.status_id) savedStatusIds.set(updateMatch[1]!, body.status_id);
+    }
     // List 表示はステータスごとに問い合わせる。件数（total）もその絞り込みで返す
     const query = new URL(url, 'http://localhost').searchParams;
     const statusFilter = query.get('status_id');
@@ -494,9 +530,13 @@ function createMockFetch(
       return jsonResponse({ tasks: children, total: children.length, next_cursor: null });
     }
     if (statusFilter && url.includes('/tasks')) {
-      const all = (overrides.tasks ?? sampleTasks).tasks as Array<
-        SortableStoryTask & { status_id: string; labels: Array<{ id: string }> }
-      >;
+      const listDelay = overrides.statusListDelayMs?.[statusFilter];
+      if (listDelay) await new Promise((resolve) => setTimeout(resolve, listDelay));
+      const all = (
+        (overrides.tasks ?? sampleTasks).tasks as Array<
+          SortableStoryTask & { id: string; status_id: string; labels: Array<{ id: string }> }
+        >
+      ).map((task) => ({ ...task, status_id: savedStatusIds.get(task.id) ?? task.status_id }));
       const filtered = all.filter(
         (task) =>
           task.status_id === statusFilter &&
@@ -514,7 +554,10 @@ function createMockFetch(
     // 単体タスク詳細（分割ビューのペインが叩く）: /tasks/{seqKey}
     const detailMatch = url.match(/\/tasks\/([^/?]+)(?:\?|$)/);
     if (detailMatch) {
-      const list = (overrides.tasks ?? sampleTasks).tasks as Array<{ seq_id: number }>;
+      // サブタスクは一覧に出ないが、詳細から開けるので探索対象に入れる
+      const list = [...(overrides.tasks ?? sampleTasks).tasks, sampleSubtask] as Array<{
+        seq_id: number;
+      }>;
       const found = list.find(
         (t) => `${mockContext.routeParams.projectKey}-${t.seq_id}` === detailMatch[1],
       );
@@ -624,6 +667,10 @@ function createProjectSwitchMockFetch(): ProjectSwitchMock {
     if (url.includes('/tasks')) {
       return jsonResponse(sampleTasks);
     }
+    // 担当者候補は利用者の配列。プロジェクト系の受け口に落とすと、名の無い候補になる
+    if (url.includes('/assignable-users')) {
+      return jsonResponse(sampleMembers.map((member) => member.user));
+    }
     // 残ったプロジェクト系だけを最後に受ける
     if (url.includes('/v1/tenants/') && url.includes('/projects')) {
       return jsonResponse(sampleProjects);
@@ -675,6 +722,10 @@ function createLabelFilterMockFetch(): LabelFilterMock {
     }
     if (url.includes('/tasks')) {
       return jsonResponse(sampleTasks);
+    }
+    // 担当者候補は利用者の配列。プロジェクト系の受け口に落とすと、名の無い候補になる
+    if (url.includes('/assignable-users')) {
+      return jsonResponse(sampleMembers.map((member) => member.user));
     }
     // 残ったプロジェクト系だけを最後に受ける
     if (url.includes('/v1/tenants/') && url.includes('/projects')) {
@@ -896,6 +947,412 @@ export const ListView: Story = {
   },
 };
 
+export const ListViewRowBorders: Story = {
+  name: 'List 表示の行の線',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    // 行を DnD の container で包んだとき、群の最後の行がその container の :last-child
+    // になり、行の根の last:border-b-0 の対象になって下の線が消えた。どの群の最後の
+    // 行も、ほかの行と同じく下に線を持つ。
+    const rows = () => [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')];
+    await waitFor(() => expect(rows().length).toBe(6));
+    const widths = rows().map(
+      (row) => `${row.textContent?.trim().slice(0, 8)}: ${getComputedStyle(row).borderBottomWidth}`,
+    );
+    await expect(widths).toEqual(
+      rows().map((row) => `${row.textContent?.trim().slice(0, 8)}: 1px`),
+    );
+  },
+};
+
+export const ListViewDnd: Story = {
+  name: 'List 表示の DnD',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: () => createMockFetch({ persistTaskStatus: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByRole('tab', { name: 'List' })).resolves.toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await waitFor(() =>
+      expect(
+        [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')].some((row) =>
+          row.textContent?.includes('OAuth 対応を実装する'),
+        ),
+      ).toBe(true),
+    );
+
+    // @formkit/drag-and-drop は mouse には native HTML5 drag を使う
+    // （node に draggable=true を付ける）。story から実の mouse は動かせないので、
+    // DragEvent の列を dataTransfer 込みで直に撃つ。
+    const fireDrag = (steps: Array<[HTMLElement, string]>) => {
+      const dataTransfer = new DataTransfer();
+      for (const [el, type] of steps) {
+        // sort の判定は event の座標を見る。的の中心を撃つ。
+        const rect = el.getBoundingClientRect();
+        el.dispatchEvent(
+          new DragEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer,
+            clientX: rect.x + rect.width / 2,
+            clientY: rect.y + rect.height / 2,
+          }),
+        );
+      }
+    };
+    const rowsOf = (container: HTMLElement) => [
+      ...container.querySelectorAll<HTMLElement>('[data-dnd-task]'),
+    ];
+
+    // 受け入れ 3（TASK-239）: 群の中の drag では順序が変わらぬ。
+    // 移動の前に、二行在る In Progress の中で試す（mock の再取得と競らぬ順）。
+    const progressToggle = await canvas.findByRole('button', { name: 'In Progress を折りたたむ' });
+    const progress = progressToggle.closest<HTMLElement>('[data-dnd-status-id]');
+    if (!progress) throw new Error('progress container not found');
+    await waitFor(() => expect(rowsOf(progress).length).toBeGreaterThan(1));
+    const before = rowsOf(progress).map((row) => row.textContent?.slice(0, 24));
+    const inRows = rowsOf(progress);
+    const dragged = inRows[inRows.length - 1]!;
+    const over = inRows[0]!;
+    // 生の sort は「中点を跨ぐ dragover の列」で初めて起きる（実測）。
+    // 弱い列では sortable の壊れを検出できぬゆえ、跨ぎの二連で撃つ。
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const dt = new DataTransfer();
+    const fireAt = (el: HTMLElement, type: string, yRatio: number) => {
+      const rect = el.getBoundingClientRect();
+      el.dispatchEvent(
+        new DragEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer: dt,
+          clientX: rect.x + 20,
+          clientY: rect.y + rect.height * yRatio,
+        }),
+      );
+    };
+    fireAt(dragged, 'dragstart', 0.5);
+    await sleep(30);
+    fireAt(over, 'dragover', 0.75);
+    await sleep(30);
+    fireAt(over, 'dragover', 0.2);
+    await sleep(30);
+    fireAt(over, 'drop', 0.2);
+    fireAt(dragged, 'dragend', 0.2);
+    await sleep(400);
+    await expect(rowsOf(progress).map((row) => row.textContent?.slice(0, 24))).toEqual(before);
+
+    // 群をまたぐ移動: In Progress の「OAuth 対応を実装する」を In Review へ。
+    const source = [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')].find((row) =>
+      row.textContent?.includes('OAuth 対応を実装する'),
+    );
+    if (!source) throw new Error('source row not found');
+    const reviewToggle = await canvas.findByRole('button', { name: 'In Review を折りたたむ' });
+    const target = reviewToggle.closest<HTMLElement>('[data-dnd-status-id]');
+    if (!target) throw new Error('target container not found');
+    // 保存の確定後に表示を正本から引き直す。成功のときに一度元の群へ戻ってから
+    // 動き直す（二重に動く）と見苦しいので、元の群へ戻ったことが一度でもあれば記録する。
+    const bounce = watchRowReturn(progress, 'OAuth 対応を実装する');
+
+    fireDrag([
+      [source, 'dragstart'],
+      [target, 'dragenter'],
+      [target, 'dragover'],
+      [target, 'drop'],
+      [source, 'dragend'],
+    ]);
+    await waitFor(() => expect(target.textContent).toContain('OAuth 対応を実装する'));
+
+    // 受け入れ 1・2（TASK-239）: 移動は既存の PUT tasks/{id} { status_id } で保存される。
+    // 行は保存の確定を待たず先に動くので、上の検めだけでは保存の配線が切れても緑になる。
+    const findPut = () => findTaskPut(globalThis.fetch, 'task-1');
+    await waitFor(() => expect(findPut()).toBeTruthy());
+    await expect(findPut()!.clone().json()).resolves.toEqual({ status_id: 's-review' });
+
+    // 確定と再取得が済んでも、行は移った先に留まり、元の群へ戻らない。
+    await sleep(800);
+    await expect(target.textContent).toContain('OAuth 対応を実装する');
+    await expect(bounce.stop()).toBe(false);
+  },
+};
+
+/** fetch mock に届いた PUT tasks/{id} を探す。 */
+function findTaskPut(fetchMock: typeof globalThis.fetch, taskId: string) {
+  return (fetchMock as unknown as { mock: { calls: [Request | string][] } }).mock.calls
+    .map(([req]) => req)
+    .filter((req): req is Request => typeof req !== 'string')
+    .find((req) => req.method === 'PUT' && new URL(req.url).pathname.endsWith(`/tasks/${taskId}`));
+}
+
+/** `container` に `title` の行が（いったん消えたあと）戻ってきたかを見張る。 */
+function watchRowReturn(container: HTMLElement, title: string) {
+  let left = false;
+  let returned = false;
+  const has = () =>
+    [...container.querySelectorAll<HTMLElement>('[data-dnd-task]')].some((row) =>
+      row.textContent?.includes(title),
+    );
+  const observer = new MutationObserver(() => {
+    if (!has()) left = true;
+    else if (left) returned = true;
+  });
+  observer.observe(container, { childList: true, subtree: true });
+  return {
+    stop() {
+      observer.disconnect();
+      return returned;
+    },
+  };
+}
+
+/**
+ * In Progress の「OAuth 対応を実装する」を In Review へ DnD で移す。
+ * mouse 経路は native HTML5 drag ゆえ DragEvent を dataTransfer 込みで直に撃つ（上の story と同じ）。
+ */
+async function dragOauthToReview(
+  canvasElement: HTMLElement,
+  { waitForAllGroups = true }: { waitForAllGroups?: boolean } = {},
+) {
+  const canvas = within(canvasElement);
+  await waitFor(() =>
+    expect(
+      [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')].some((row) =>
+        row.textContent?.includes('OAuth 対応を実装する'),
+      ),
+    ).toBe(true),
+  );
+  const containerOf = async (name: string) => {
+    const toggle = await canvas.findByRole('button', { name: `${name} を折りたたむ` });
+    const container = toggle.closest<HTMLElement>('[data-dnd-status-id]');
+    if (!container) throw new Error(`${name} container not found`);
+    return container;
+  };
+  const progress = await containerOf('In Progress');
+  const review = await containerOf('In Review');
+  // 群ごとの取得が揃うまで待つ。後から届いた群の取得は鏡写しを正本から引き直すので、
+  // 揃う前に撃つと、失敗とは無関係に行が戻って見えてしまう（直す前の木で実測）。
+  const rowCount = (el: HTMLElement) => el.querySelectorAll('[data-dnd-task]').length;
+  const backlog = await containerOf('Backlog');
+  const done = await containerOf('Done');
+  if (waitForAllGroups) {
+    await waitFor(() =>
+      expect([backlog, progress, review, done].map(rowCount)).toEqual([2, 2, 1, 1]),
+    );
+  }
+  const row = [...progress.querySelectorAll<HTMLElement>('[data-dnd-task]')].find((el) =>
+    el.textContent?.includes('OAuth 対応を実装する'),
+  );
+  if (!row) throw new Error('source row not found');
+
+  const dataTransfer = new DataTransfer();
+  for (const [el, type] of [
+    [row, 'dragstart'],
+    [review, 'dragenter'],
+    [review, 'dragover'],
+    [review, 'drop'],
+    [row, 'dragend'],
+  ] as const) {
+    const rect = el.getBoundingClientRect();
+    el.dispatchEvent(
+      new DragEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer,
+        clientX: rect.x + rect.width / 2,
+        clientY: rect.y + rect.height / 2,
+      }),
+    );
+  }
+  return { progress, review, done };
+}
+
+/** PUT が失敗したとき、DnD で動いた行が元の群へ戻ることを確かめる。 */
+async function expectFailedMoveIsRolledBack(canvasElement: HTMLElement) {
+  const { progress, review } = await dragOauthToReview(canvasElement);
+  // 保存の確定を待たず先に動かすので、まず移った先に見える。
+  await waitFor(() => expect(review.textContent).toContain('OAuth 対応を実装する'));
+  await waitFor(() => expect(findTaskPut(globalThis.fetch, 'task-1')).toBeTruthy());
+
+  // 保存が失敗したので、正本（元の群）の姿へ戻る。
+  await waitFor(() => expect(progress.textContent).toContain('OAuth 対応を実装する'));
+  await expect(review.textContent).not.toContain('OAuth 対応を実装する');
+  // 戻ったあとで、もう一度動き直さない。
+  const bounce = watchRowReturn(review, 'OAuth 対応を実装する');
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  await expect(review.textContent).not.toContain('OAuth 対応を実装する');
+  await expect(progress.textContent).toContain('OAuth 対応を実装する');
+  bounce.stop();
+}
+
+export const ListViewDndRejectedUpdate: Story = {
+  name: 'List 表示の DnD（API が保存を拒んだら戻す）',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: () => createMockFetch({ taskUpdate: 'reject' }),
+  play: async ({ canvasElement }) => {
+    await expectFailedMoveIsRolledBack(canvasElement);
+  },
+};
+
+export const ListViewDndNetworkFailure: Story = {
+  name: 'List 表示の DnD（通信に失敗したら戻す）',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: () => createMockFetch({ taskUpdate: 'network' }),
+  play: async ({ canvasElement }) => {
+    await expectFailedMoveIsRolledBack(canvasElement);
+  },
+};
+
+/** `container` から `title` の行が一度でも消えたかを見張る。 */
+function watchRowLeave(container: HTMLElement, title: string) {
+  let left = false;
+  const observer = new MutationObserver(() => {
+    const present = [...container.querySelectorAll<HTMLElement>('[data-dnd-task]')].some((row) =>
+      row.textContent?.includes(title),
+    );
+    if (!present) left = true;
+  });
+  observer.observe(container, { childList: true, subtree: true });
+  return {
+    stop() {
+      observer.disconnect();
+      return left;
+    },
+  };
+}
+
+export const ListViewDndRefetchDuringSave: Story = {
+  name: 'List 表示の DnD（保存中に一覧の取得が届いても行は動かない）',
+  decorators: [storyDecorator(listContext)],
+  // PUT を 2 秒止め、そのあいだに Done の一覧（0.8 秒遅らせる）が届く形を作る。
+  beforeEach: () =>
+    createMockFetch({
+      persistTaskStatus: true,
+      taskUpdateDelayMs: 2000,
+      statusListDelayMs: { 's-done': 800 },
+    }),
+  play: async ({ canvasElement }) => {
+    // 群の取得が揃うのを待たずに撃つ（揃う前の取得を保存中に届かせる）。
+    const { review, done } = await dragOauthToReview(canvasElement, { waitForAllGroups: false });
+    await waitFor(() => expect(review.textContent).toContain('OAuth 対応を実装する'));
+
+    // 条件が揃っているか: 撃った時点で Done はまだ空で、保存が済む前に Done が届く。
+    await expect(done.querySelectorAll('[data-dnd-task]').length).toBe(0);
+    const left = watchRowLeave(review, 'OAuth 対応を実装する');
+    await waitFor(() => expect(done.querySelectorAll('[data-dnd-task]').length).toBe(1));
+    await expect(taskUpdateSettled, 'Done が届いた時点で保存はまだ済んでいない').toBe(false);
+
+    // 保存が済み、再取得が終わるまで、移した行は移った先から一度も消えない。
+    await waitFor(() => expect(taskUpdateSettled).toBe(true), { timeout: 5000 });
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await expect(review.textContent).toContain('OAuth 対応を実装する');
+    await expect(left.stop(), '移した行が保存中に移った先から消えた').toBe(false);
+  },
+};
+
+/** 実レイアウトで `el` の中心に当たる要素。ここに撃てば、そこが本当に落とせる場所か分かる。 */
+function hitAt(el: Element) {
+  el.scrollIntoView({ block: 'center' });
+  const { x, y, width, height } = el.getBoundingClientRect();
+  const clientX = x + width / 2;
+  const clientY = y + height / 2;
+  const hit = document.elementFromPoint(clientX, clientY);
+  if (!hit) throw new Error('hit target not found');
+  return { hit, clientX, clientY };
+}
+
+export const ListViewDndWholeGroup: Story = {
+  name: 'List 表示の DnD（群のどこへでも落とせて、落としたときだけ保存する）',
+  decorators: [storyDecorator(listContext)],
+  // In Review を空にする（行が無い群へも落とせることを見る）
+  beforeEach: () =>
+    createMockFetch({
+      persistTaskStatus: true,
+      tasks: {
+        tasks: sampleTasks.tasks.filter((task) => task.status_id !== 's-review'),
+        total: sampleTasks.tasks.length - 1,
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const rows = () => [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')];
+    await waitFor(() => expect(rows().length).toBe(5));
+    const rowOf = (title: string) => rows().find((row) => row.textContent?.includes(title))!;
+    const sectionOf = async (name: string) =>
+      (await canvas.findByRole('button', { name: `${name} を折りたたむ` })).closest<HTMLElement>(
+        '[data-dnd-status-id]',
+      )!;
+    const statusPuts = () =>
+      (globalThis.fetch as unknown as { mock: { calls: [Request | string][] } }).mock.calls
+        .map(([req]) => req)
+        .filter((req): req is Request => typeof req !== 'string' && req.method === 'PUT');
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    // 押して行にフォーカスが移っても掴めるまま。lib の既定はここで draggable を切り、
+    // 未フォーカスの行は初回の押下でドラッグにならなかった。
+    const oauth = rowOf('OAuth 対応を実装する');
+    const pressed = oauth.querySelector<HTMLElement>('[tabindex="0"]')!;
+    pressed.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse' }));
+    pressed.focus();
+    await expect(oauth.draggable).toBe(true);
+    pressed.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'mouse' }));
+
+    // マウス（native drag）。途中の群を通っても保存せず、空の群の文言の上へ落とせる。
+    const review = await sectionOf('In Review');
+    const dataTransfer = new DataTransfer();
+    const fire = (el: Element, type: string, clientX = 0, clientY = 0) =>
+      el.dispatchEvent(
+        new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer, clientX, clientY }),
+      );
+    fire(oauth, 'dragstart');
+    fire(rowOf('タスク一覧 API の実装'), 'dragover');
+    await sleep(50);
+    await expect(statusPuts()).toHaveLength(0);
+    await expect(rowOf('OAuth 対応を実装する').closest('section')).not.toBe(review);
+
+    const emptyText = within(review).getByText('タスクはありません');
+    const { hit: overEmpty, clientX, clientY } = hitAt(emptyText);
+    await expect(review.contains(overEmpty)).toBe(true);
+    // 要素へ入る dragenter を止める。止めないと WebKit は入った直後の drop を出さない。
+    await expect(fire(overEmpty, 'dragenter', clientX, clientY)).toBe(false);
+    fire(overEmpty, 'dragover', clientX, clientY);
+    await waitFor(() => expect(review.className).toContain('ring-2'));
+    fire(overEmpty, 'drop', clientX, clientY);
+    fire(oauth, 'dragend');
+    await waitFor(() => expect(review.textContent).toContain('OAuth 対応を実装する'));
+    await waitFor(() => expect(statusPuts()).toHaveLength(1));
+    await expect(statusPuts()[0]!.clone().json()).resolves.toEqual({ status_id: 's-review' });
+    await expect(review.className).not.toContain('ring-2');
+
+    // タッチ（lib の pointer drag）。長押しのあと群の見出しの上で離す。
+    const done = await sectionOf('Done');
+    const notify = rowOf('通知メール送信機能');
+    const touch = (type: string, x = 0, y = 0) =>
+      notify.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerType: 'touch',
+          clientX: x,
+          clientY: y,
+        }),
+      );
+    const toggle = await canvas.findByRole('button', { name: 'Done を折りたたむ' });
+    const heading = hitAt(toggle.parentElement!);
+    await expect(done.contains(heading.hit)).toBe(true);
+    touch('pointerdown');
+    await sleep(350);
+    touch('pointermove', heading.clientX, heading.clientY);
+    touch('pointermove', heading.clientX, heading.clientY);
+    await waitFor(() => expect(done.className).toContain('ring-2'));
+    touch('pointerup', heading.clientX, heading.clientY);
+    await waitFor(() => expect(statusPuts()).toHaveLength(2));
+    await expect(statusPuts()[1]!.clone().json()).resolves.toEqual({ status_id: 's-done' });
+    await waitFor(() => expect(done.textContent).toContain('通知メール送信機能'));
+  },
+};
+
 export const ListViewSubtasks: Story = {
   name: 'List 表示のサブタスク展開',
   decorators: [storyDecorator(listContext)],
@@ -940,10 +1397,10 @@ export const ListViewDetailOverlay: Story = {
     await user.click(await canvas.findByRole('button', { name: 'OAuth 対応を実装する' }));
 
     const dialog = await screen.findByRole('dialog');
-    // 履歴は箇条書き、コメントはカードで並ぶ
-    await expect(
-      within(dialog).findByText(/ステータスを In Progress に変更しました/),
-    ).resolves.toBeInTheDocument();
+    // 履歴とコメントを 1 本に並べる
+    await waitFor(() =>
+      expect(dialog.querySelector('[data-activity-feed]')?.textContent).toContain('In Progress'),
+    );
     await expect(
       within(dialog).findByText('ここは PKCE の検証を先に入れたほうがよさそうです。'),
     ).resolves.toBeInTheDocument();
@@ -956,6 +1413,39 @@ export const ListViewDetailOverlay: Story = {
     await expect(
       within(dialog).getByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).toBeInTheDocument();
+  },
+};
+
+export const ListViewOverlaySubtaskBack: Story = {
+  name: 'List 表示の詳細オーバーレイ（サブタスクから Esc で親へ戻る）',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    // 開くタスクが変わるとオーバーレイは作り直されるので、毎回 dialog を引き直す
+    // Esc は dialog の cancel として届く。user-event の keydown は合成なので、ブラウザは cancel を起こさない
+    const pressEscape = () =>
+      screen.getByRole('dialog').dispatchEvent(new Event('cancel', { cancelable: true }));
+    const expectOverlayHeading = (name: string) =>
+      waitFor(() =>
+        expect(
+          within(screen.getByRole('dialog')).getByRole('heading', { name }),
+        ).toBeInTheDocument(),
+      );
+
+    await user.click(await canvas.findByRole('button', { name: 'OAuth 対応を実装する' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(await within(dialog).findByRole('button', { name: /PKCE の検証を追加する/ }));
+    await expectOverlayHeading('PKCE の検証を追加する');
+
+    // 子で Esc → 閉じずに親へ戻る
+    pressEscape();
+    await expectOverlayHeading('OAuth 対応を実装する');
+
+    // 親で Esc → 閉じる
+    pressEscape();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   },
 };
 
@@ -1004,22 +1494,35 @@ export const Sorting: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const user = userEvent.setup();
-    const titleHeader = await canvas.findByRole('button', { name: /タイトル/ });
-    await user.click(titleHeader);
+    const titleHeader = await canvas.findByRole('columnheader', { name: 'タイトル' });
+    const sortButton = within(titleHeader).getByRole('button', { name: 'タイトル' });
+    await expect(titleHeader).toHaveAttribute('aria-sort', 'none');
+
+    // 見出しのボタンは 昇順 → 降順 → 解除 と進む
+    await user.click(sortButton);
+    await expect(titleHeader).toHaveAttribute('aria-sort', 'ascending');
+    await user.click(sortButton);
+    await expect(titleHeader).toHaveAttribute('aria-sort', 'descending');
+    await user.click(sortButton);
+    await expect(titleHeader).toHaveAttribute('aria-sort', 'none');
+    // 並べ替えられない列（ラベル）は見出しがボタンにならない
+    const labelsHeader = canvas.getByRole('columnheader', { name: 'ラベル' });
+    await expect(labelsHeader).not.toHaveAttribute('aria-sort');
+    await expect(within(labelsHeader).queryByRole('button')).not.toBeInTheDocument();
     await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
   },
 };
 
 export const RowSelection: Story = {
-  name: '行選択（Select all で全行選択）',
+  name: '行選択（すべて選択で全行選択）',
   beforeEach: mockFetch,
   parameters: {
     docs: {
       description: {
         story:
-          '壊れたら: header の Select all を押しても選択件数の行が動かない' +
+          '壊れたら: すべて選択を押しても選択件数の行が動かない' +
           '（getIsAllPageRowsSelected / getFilteredSelectedRowModel の配線切れ）。' +
-          '押した先の状態（n / total 件選択と各行の checkbox）まで見る。',
+          '一部選択の途中状態（indeterminate）と、押した先の状態（n / total 件選択と各行の checkbox）まで見る。',
       },
     },
   },
@@ -1028,33 +1531,43 @@ export const RowSelection: Story = {
     const user = userEvent.setup();
     await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
 
-    // 押す前: 描画された行数はフィクスチャの全件、選択は 0
-    const rowCount = canvasElement.querySelectorAll('tbody tr').length;
+    // 押す前: 描画された行数はフィクスチャの全件、選択は 0。
+    // すべて選択は一覧の外（選択件数の横）にあるので、一覧の中の checkbox は行の分だけ
+    const list = canvas.getByRole('table', { name: 'タスク一覧' });
+    const rowBoxes = within(list).getAllByRole('checkbox');
+    const rowCount = rowBoxes.length;
     await expect(rowCount).toBe(sampleTasks.total);
+    await expect(within(list).getAllByRole('row')).toHaveLength(rowCount + 1);
     await expect(
       canvas.findByText(new RegExp(`0 / ${sampleTasks.total} 件選択`)),
     ).resolves.toBeInTheDocument();
+    const selectAll = canvas.getByRole('checkbox', { name: 'すべて選択' });
+    await expect(selectAll).not.toBeChecked();
+    await expect(selectAll).not.toBePartiallyChecked();
 
-    // header の Select all を押す（toggleAllPageRowsSelected →
-    // getIsAllPageRowsSelected / getFilteredSelectedRowModel を踏む）。
-    // ariaLabel は accessible name に出ておらず findByRole では引けぬ
-    // （既存の RowAccessibility も querySelector で取っておる）ため、
-    // thead の checkbox を構造で取る。
-    const selectAll = canvasElement.querySelector('thead [role="checkbox"]');
-    if (!(selectAll instanceof HTMLElement)) {
-      throw new Error('Select all checkbox not found');
-    }
+    // 1 行だけ選ぶと、すべて選択は途中状態（indeterminate）になり、行に選択の印が付く
+    await user.click(canvas.getByRole('checkbox', { name: 'ENG-1 を選択' }));
+    await expect(
+      canvas.findByText(new RegExp(`1 / ${sampleTasks.total} 件選択`)),
+    ).resolves.toBeInTheDocument();
+    await expect(selectAll).toBePartiallyChecked();
+    await expect(canvas.getByRole('row', { name: /OAuth 対応を実装する/ })).toHaveAttribute(
+      'data-selected',
+      'true',
+    );
+
+    // すべて選択を押す（toggleAllPageRowsSelected →
+    // getIsAllPageRowsSelected / getFilteredSelectedRowModel を踏む）
     await user.click(selectAll);
 
-    // 押した先: 選択件数の行が行数と一致し、header と各行の checkbox が選択状態
+    // 押した先: 選択件数の行が行数と一致し、すべて選択と各行の checkbox が選択状態
     await expect(
       canvas.findByText(new RegExp(`${rowCount} / ${sampleTasks.total} 件選択`)),
     ).resolves.toBeInTheDocument();
-    await expect(selectAll).toHaveAttribute('aria-checked', 'true');
-    const rowBoxes = [...canvasElement.querySelectorAll('tbody [role="checkbox"]')];
-    await expect(rowBoxes).toHaveLength(rowCount);
+    await expect(selectAll).toBeChecked();
+    await expect(selectAll).not.toBePartiallyChecked();
     for (const box of rowBoxes) {
-      await expect(box).toHaveAttribute('aria-checked', 'true');
+      await expect(box).toBeChecked();
     }
   },
 };
@@ -1076,7 +1589,9 @@ export const ColumnVisibility: Story = {
     const canvas = within(canvasElement);
     const user = userEvent.setup();
     // 押す前: 優先度のヘッダが出ている
-    await expect(canvas.findByRole('button', { name: '優先度' })).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByRole('columnheader', { name: '優先度' }),
+    ).resolves.toBeInTheDocument();
 
     // 列のドロップダウンを開く
     await user.click(await canvas.findByRole('button', { name: '列' }));
@@ -1093,9 +1608,15 @@ export const ColumnVisibility: Story = {
     // 押した先: その列のヘッダが現に消える（getVisibleCells の帰結）。
     // 他の列（タイトル）は残る——過剰に消えていないことの対照
     await waitFor(() =>
-      expect(canvas.queryByRole('button', { name: '優先度' })).not.toBeInTheDocument(),
+      expect(canvas.queryByRole('columnheader', { name: '優先度' })).not.toBeInTheDocument(),
     );
-    await expect(canvas.findByRole('button', { name: /タイトル/ })).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByRole('columnheader', { name: 'タイトル' }),
+    ).resolves.toBeInTheDocument();
+    // checkbox なのでメニューは開いたまま。続けて別の列も切り替えられる
+    await expect(menu.getByRole('menu', { name: '列' })).toBeVisible();
+    await expect(priorityItem).toHaveAttribute('aria-checked', 'false');
+    await expect(priorityItem).toHaveFocus();
   },
 };
 
@@ -1246,10 +1767,7 @@ export const RowAccessibility: Story = {
     await expect(taskRow).not.toHaveAttribute('role');
     await expect(taskRow).not.toHaveAttribute('tabindex');
     await expect(taskLink).toHaveAttribute('href', '/tenant-123/projects/ENG/tasks/ENG-1');
-    const rowCheckbox = taskRow.querySelector('[role="checkbox"]');
-    if (!(rowCheckbox instanceof HTMLElement)) {
-      throw new Error('row checkbox not found');
-    }
+    const rowCheckbox = within(taskRow).getByRole('checkbox', { name: 'ENG-1 を選択' });
     rowCheckbox.focus();
     rowCheckbox.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
     await expect(rowCheckbox).toHaveFocus();
@@ -1261,5 +1779,45 @@ export const RowAccessibility: Story = {
       canvas.findByRole('button', { name: '詳細を閉じる' }),
     ).resolves.toBeInTheDocument();
     await expect(new URLSearchParams(window.location.search).get('selected')).toBe('ENG-1');
+  },
+};
+
+export const SplitPaneResize: Story = {
+  name: '一覧と詳細の境界をキーボードで動かす',
+  beforeEach() {
+    localStorage.removeItem('tasks-split-view');
+    const restoreFetch = mockFetch();
+    return () => {
+      restoreFetch();
+      localStorage.removeItem('tasks-split-view');
+    };
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    const titleCell = await canvas.findByText('OAuth 対応を実装する');
+    // 詳細が閉じている間は分割しない
+    await expect(canvas.queryByRole('separator')).not.toBeInTheDocument();
+    const taskLink = titleCell.closest('a');
+    if (!(taskLink instanceof HTMLAnchorElement)) {
+      throw new Error('task link not found');
+    }
+    await userEvent.click(taskLink);
+
+    const handle = await canvas.findByRole('separator', { name: 'タスク一覧と詳細' });
+    await expect(handle).toHaveAttribute('aria-controls', 'task-list-pane');
+    // 幅を測るまでは操作を受けない
+    await waitFor(() => expect(handle).not.toHaveAttribute('aria-disabled'));
+    const valueNow = () => Number(handle.getAttribute('aria-valuenow'));
+    const start = valueNow();
+    await expect(start).toBeGreaterThan(0);
+
+    handle.focus();
+    await userEvent.keyboard('{ArrowRight}');
+    await waitFor(() => expect(valueNow()).toBe(start + 10));
+    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}');
+    await waitFor(() => expect(valueNow()).toBe(start - 10));
+    // 動かした幅は次に開いたときのために残す
+    await expect(localStorage.getItem('tasks-split-view')).toBe(String(start - 10));
   },
 };

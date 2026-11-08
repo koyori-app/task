@@ -38,7 +38,6 @@ const requestUrl = computed(() => {
 
 const {
   tenantId,
-  tenantOwnerId,
   isTenantNotFound,
   isResolving: isTenantResolving,
   isError: isTenantResolveError,
@@ -57,7 +56,10 @@ const isLoading = computed(
   () => isTenantResolving.value || isProjectResolving.value || meQuery.isPending.value,
 );
 const isError = computed(
-  () => isTenantResolveError.value || isProjectError.value || meQuery.isError.value,
+  () =>
+    isTenantResolveError.value ||
+    isProjectError.value ||
+    (meQuery.isError.value && !meQuery.data.value),
 );
 const isNotFound = computed(() => isTenantNotFound.value || isProjectNotFound.value);
 </script>
@@ -92,7 +94,6 @@ const isNotFound = computed(() => isTenantNotFound.value || isProjectNotFound.va
       :project-id="projectId"
       :project-key="projectKey"
       :viewer-id="meQuery.data.value.id"
-      :tenant-owner-id="tenantOwnerId"
       :initial-url-state="initialUrl.state"
       :initial-url-warnings="initialUrl.warnings"
       :request-url="requestUrl"

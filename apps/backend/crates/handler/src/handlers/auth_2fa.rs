@@ -25,7 +25,7 @@ use crate::{
 use payload::auth_2fa::*;
 use payload::tenants::TenantResponse;
 use service::auth::AuthError;
-use service::login_session::user_in_require_2fa_tenant;
+use service::login_session::{user_in_require_2fa_tenant, user_satisfies_2fa};
 use service::totp::{
     self, clear_2fa_attempts, decrypt_totp_secret, encrypt_totp_secret, generate_recovery_codes,
     generate_totp_secret_base32, hash_recovery_code, normalize_recovery_code, otpauth_uri,
@@ -72,7 +72,7 @@ async fn verify_user_totp_or_recovery(
     code: Option<&str>,
     recovery_code: Option<&str>,
 ) -> Result<(), AuthError> {
-    totp::check_2fa_lockout(&state.redis_client, user_id).await?;
+    let attempt = totp::reserve_2fa_attempt(&state.redis_client, user_id).await?;
 
     if let Some(recovery) = recovery_code {
         let normalized = normalize_recovery_code(recovery);
@@ -114,8 +114,7 @@ async fn verify_user_totp_or_recovery(
         }
 
         txn.rollback().await?;
-        totp::record_2fa_failure(&state.redis_client, user_id).await?;
-        return Err(AuthError::InvalidTwoFactorCode);
+        return Err(attempt.failure());
     }
 
     let code = code.ok_or(AuthError::InvalidTwoFactorCode)?;
@@ -140,8 +139,7 @@ async fn verify_user_totp_or_recovery(
         clear_2fa_attempts(&state.redis_client, user_id).await?;
         Ok(())
     } else {
-        totp::record_2fa_failure(&state.redis_client, user_id).await?;
-        Err(AuthError::InvalidTwoFactorCode)
+        Err(attempt.failure())
     }
 }
 
@@ -227,7 +225,7 @@ pub async fn totp_verify_setup(
         return Err(AuthError::TwoFactorAlreadyEnabled);
     }
 
-    totp::check_2fa_lockout(&state.redis_client, user.user_id).await?;
+    let attempt = totp::reserve_2fa_attempt(&state.redis_client, user.user_id).await?;
 
     let secret = decrypt_totp_secret(&cred.secret_enc, &state.settings.totp_encryption_key)?;
     if !verify_totp_code(
@@ -236,8 +234,7 @@ pub async fn totp_verify_setup(
         &user_model.email,
         payload.code.trim(),
     )? {
-        totp::record_2fa_failure(&state.redis_client, user.user_id).await?;
-        return Err(AuthError::InvalidTwoFactorCode);
+        return Err(attempt.failure());
     }
 
     let codes = generate_recovery_codes();
@@ -421,7 +418,14 @@ pub async fn set_tenant_require_2fa(
     Valid(Json(payload)): Valid<Json<Require2faPolicyRequest>>,
 ) -> Result<Json<TenantResponse>, AppError> {
     auth.require_session()?;
-    let tenant = auth.ensure_tenant_owner(&state, tenant_id).await?;
+    // 無効化は 2FA の無いオーナーの救済経路なので、オーナー専用の口の 2FA 判定を省く
+    let tenant = auth
+        .ensure_tenant_owner_skipping_2fa(&state, tenant_id)
+        .await?;
+    // 2FA を満たさない本人が有効にすると、自分もテナントの口から締め出される
+    if payload.enabled && !user_satisfies_2fa(&state.db, auth.user_id).await? {
+        return Err(AppError::ForbiddenDetail("2fa-setup-required".into()));
+    }
 
     let mut active: tenants::ActiveModel = tenant.into();
     active.require_2fa = Set(payload.enabled);

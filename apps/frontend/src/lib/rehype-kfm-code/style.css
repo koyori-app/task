@@ -150,7 +150,7 @@ kfm-code .kfm-code-copy:hover {
 
 /* 成功 (check 表示中) は穏やかに色付けて状態が分かるようにする */
 kfm-code[data-kfm-code-copy='copied'] .kfm-code-copy {
-  color: var(--primary);
+  color: var(--link);
 }
 
 /* 失敗 (x 表示中) は destructive で示す */

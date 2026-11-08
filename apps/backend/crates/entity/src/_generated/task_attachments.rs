@@ -14,6 +14,7 @@ pub struct Model {
     pub drive_file_id: Uuid,
     pub created_by: Uuid,
     pub created_at: DateTimeWithTimeZone,
+    pub source: String,
     #[sea_orm(
         belongs_to,
         from = "drive_file_id",

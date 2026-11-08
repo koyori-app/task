@@ -12,6 +12,7 @@ pnpm create vike@latest --vue --tailwindcss --hono --sentry --storybook
   - [SSR](#ssr)
   - [HTML Streaming](#html-streaming)
 - [Sentry Browser / Error Tracking & Performance Monitoring](#sentry-browser--error-tracking--performance-monitoring)
+- [Bundled third-party assets](#bundled-third-party-assets)
 
 ## Vike
 
@@ -57,3 +58,7 @@ This app is integrated with [Sentry](https://sentry.io) for error tracking.
 1. Build & Start the app `pnpm build && pnpm preview`.
 2. open Testpage in browser: http://localhost:3000/sentry.
 3. check your [Sentry Dashboard](https://sentry.io) for new Errors.
+
+## Bundled third-party assets
+
+- Emoji font in `public/fonts/twemoji/`: [Twemoji](https://github.com/jdecked/twemoji) graphics (Copyright Twitter, Inc. and other contributors, maintained by jdecked), licensed under [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/), rebuilt into a COLRv0 font by `scripts/fonts/build-twemoji.sh`.

@@ -1,14 +1,21 @@
 //! アプリ設定から GitHub App クライアントを組み立てる。
 
 use common::settings::GithubAppSettings;
+use entity::github_integrations;
 use forge_github::{GithubApp, GithubAppCredentials, GithubAppOAuthCredentials};
 use reqwest::Client;
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, prelude::Uuid};
+
+use crate::forge::events::ForgeRepo;
+use crate::forge::pull_requests::PullRequestSnapshot;
 
 /// GitHub API に送る User-Agent。
 const USER_AGENT: &str = "task-backend";
 
 /// GitHub REST API の既定のベース URL。
 const DEFAULT_API_BASE: &str = "https://api.github.com";
+/// GitHub のユーザー認可（authorize / access_token）の既定のベース URL。
+const DEFAULT_OAUTH_BASE: &str = "https://github.com";
 
 /// GitHub のベース URL を差し替えてよい宛先。
 ///
@@ -58,10 +65,18 @@ pub(super) fn loopback_base_override(var: &str) -> Option<String> {
 /// 既定は `https://api.github.com`。`GITHUB_API_BASE_URL` は**ループバック宛てのときだけ**
 /// 採る（統合テストがモックサーバーを向けるための口で、それ以外の用途は無い）。
 /// ここを素の環境変数で読むと、この URL へ載る installation token が任意のホストへ渡る。
-pub(super) fn api_base() -> String {
+pub(crate) fn api_base() -> String {
     loopback_base_override("GITHUB_API_BASE_URL")
         .map(|base| base.trim_end_matches('/').to_string())
         .unwrap_or_else(|| DEFAULT_API_BASE.to_string())
+}
+
+/// GitHub のユーザー認可のベース URL。差し替えの規則は [`api_base`] と同じ
+/// （`GITHUB_OAUTH_BASE_URL` はループバック宛てのときだけ採る）。
+pub(crate) fn oauth_base() -> String {
+    loopback_base_override("GITHUB_OAUTH_BASE_URL")
+        .map(|base| base.trim_end_matches('/').to_string())
+        .unwrap_or_else(|| DEFAULT_OAUTH_BASE.to_string())
 }
 
 /// 設定から [`GithubApp`] を作る。
@@ -92,6 +107,36 @@ pub fn github_app(http: &Client, settings: &GithubAppSettings) -> GithubApp {
         Some(base) => app.with_oauth_base(base),
         None => app,
     }
+}
+
+/// PR の現在のスナップショットを取り直す（`GET /repos/{owner}/{repo}/pulls/{number}`）。
+///
+/// 更新時刻が同じ webhook のどちらが後か決められないときに使う。取れなければエラーを返し、
+/// 呼び出し側（ジョブ）は推測で確定せずに再試行する。
+pub async fn fetch_pull_request(
+    db: &DatabaseConnection,
+    http: &Client,
+    settings: &GithubAppSettings,
+    project_id: Uuid,
+    repo: &ForgeRepo,
+    number: i32,
+) -> Result<PullRequestSnapshot, anyhow::Error> {
+    let integration = github_integrations::Entity::find()
+        .filter(github_integrations::Column::ProjectId.eq(project_id))
+        .one(db)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("project {project_id} has no github integration"))?;
+    let token =
+        super::sync::installation_token(http, settings, integration.installation_id).await?;
+    let url = format!(
+        "{}/repos/{}/{}/pulls/{number}",
+        api_base(),
+        repo.repo_owner,
+        repo.repo_name
+    );
+    let pr: super::webhook_events::GithubPullRequest =
+        super::commits::get_json(http, &token, &url, "get pull request").await?;
+    Ok(pr.into_snapshot())
 }
 
 #[cfg(test)]

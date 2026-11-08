@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import MembersSection from '../MembersSection.vue';
-import { Select } from '@/components/ui/select';
+import { pickerOption, pickerTrigger } from '@/components/__tests__/picker';
 import type { components } from '@/generated/api';
 
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -38,6 +38,9 @@ function tenantMember(
     user_id: userId,
     role: 'Member',
     user: user(userId, username),
+    department: null,
+    position: null,
+    team: null,
   };
 }
 
@@ -163,8 +166,12 @@ describe('MembersSection', () => {
     const list = wrapper.get('[data-testid="member-list"]');
     expect(list.text()).toContain('alice');
     expect(list.text()).toContain('bob');
-    expect(list.text()).toContain('管理者');
-    expect(list.text()).toContain('メンバー');
+    expect(pickerTrigger(list.element, 'alice のロール').getAttribute('aria-label')).toBe(
+      'alice のロール: 管理者',
+    );
+    expect(pickerTrigger(list.element, 'bob のロール').getAttribute('aria-label')).toBe(
+      'bob のロール: メンバー',
+    );
   });
 
   it('403 のときは管理者専用であることを表示し、追加フォームを出さない', async () => {
@@ -173,7 +180,7 @@ describe('MembersSection', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain(
-      'メンバーを管理できるのは、テナントオーナーとこのプロジェクトの管理者だけです。',
+      'メンバーを管理できるのは、テナントオーナー・テナント管理者とこのプロジェクトの管理者だけです。',
     );
     expect(wrapper.find('#member-candidate').exists()).toBe(false);
   });
@@ -186,12 +193,7 @@ describe('MembersSection', () => {
     const wrapper = mountSection();
     await flushPromises();
 
-    // reka-ui の Select はポインタ操作を jsdom で再現しづらいため、モデル更新で選択する
-    const candidateSelect = wrapper
-      .findAllComponents(Select)
-      .find((s) => s.find('#member-candidate').exists());
-    if (!candidateSelect) throw new Error('candidate select not found');
-    candidateSelect.vm.$emit('update:modelValue', BOB_ID);
+    pickerOption(wrapper.get('#member-candidate').element, 'bob').click();
     await flushPromises();
 
     clickBodyButton('追加');
@@ -243,11 +245,10 @@ describe('MembersSection', () => {
       .querySelector<HTMLButtonElement>('button[aria-label="メンバー「alice」を削除"]')
       ?.click();
     await flushPromises();
-    expect(document.body.textContent).toContain('以後この設定画面は開けなくなります');
-
-    // 警告を足すときに要素を並べない（DialogDescription が指せる要素は 1 つだけ）。
-    // 文言と違って画面上の見た目が変わらないので、数で固定する
-    expect(document.body.querySelectorAll('[data-slot="dialog-description"]')).toHaveLength(1);
+    // 警告は説明（aria-describedby が指す要素）に入れる。本文に並べると開いたときに読み上げられない
+    const dialog = document.body.querySelector('dialog[open]')!;
+    const description = document.getElementById(dialog.getAttribute('aria-describedby') ?? '');
+    expect(description?.textContent).toContain('以後この設定画面は開けなくなります');
 
     // 他人を外すときは出さない
     clickBodyButton('キャンセル');
@@ -286,11 +287,7 @@ describe('MembersSection', () => {
     const wrapper = mountSection();
     await flushPromises();
 
-    const roleSelect = wrapper
-      .findAllComponents(Select)
-      .find((s) => s.find('[aria-label="alice のロール"]').exists());
-    if (!roleSelect) throw new Error('role select not found');
-    roleSelect.vm.$emit('update:modelValue', 'Member');
+    pickerOption(pickerTrigger(wrapper.element, 'alice のロール'), 'メンバー').click();
     await flushPromises();
 
     expect(putRequests).toHaveLength(1);
@@ -298,9 +295,11 @@ describe('MembersSection', () => {
     expect(wrapper.text()).toContain('最後の管理者「alice」は降格できません。');
 
     // 行の表示は元のロールへ戻る（サーバーが拒否したのに画面だけ「メンバー」に
-    // 見えると、実際の権限と食い違う）。Select をローカル state へ書き換えると
+    // 見えると、実際の権限と食い違う）。Picker をローカル state へ書き換えると
     // ここで落ちる
-    expect(wrapper.get('[aria-label="alice のロール"]').text()).toBe('管理者');
+    expect(pickerTrigger(wrapper.element, 'alice のロール').getAttribute('aria-label')).toBe(
+      'alice のロール: 管理者',
+    );
   });
 
   it('ロール変更に成功すると PUT を送り、表示が新しいロールになる', async () => {
@@ -311,16 +310,14 @@ describe('MembersSection', () => {
     const wrapper = mountSection();
     await flushPromises();
 
-    const roleSelect = wrapper
-      .findAllComponents(Select)
-      .find((s) => s.find('[aria-label="bob のロール"]').exists());
-    if (!roleSelect) throw new Error('role select not found');
-    roleSelect.vm.$emit('update:modelValue', 'Member');
+    pickerOption(pickerTrigger(wrapper.element, 'bob のロール'), 'メンバー').click();
     await flushPromises();
 
     expect(putRequests).toHaveLength(1);
     expect(putRequests[0].path.endsWith(`/members/${BOB_ID}`)).toBe(true);
-    expect(wrapper.get('[data-testid="member-list"]').text()).toContain('メンバー');
+    expect(pickerTrigger(wrapper.element, 'bob のロール').getAttribute('aria-label')).toBe(
+      'bob のロール: メンバー',
+    );
   });
 
   it('削除は確認ダイアログを経て DELETE を送り、一覧から消す', async () => {
@@ -368,8 +365,9 @@ describe('MembersSection', () => {
   });
 
   it('削除の 409 は最後の管理者であることを伝え、一覧は残る', async () => {
+    // 単独メンバーは外せる（継承へ戻る）ので、409 になるのは他のメンバーが残るとき
     stubFetch({
-      members: [projectMember(ALICE_ID, 'alice', 'Admin')],
+      members: [projectMember(ALICE_ID, 'alice', 'Admin'), projectMember(BOB_ID, 'bob', 'Viewer')],
       tenantMembers: [],
       deleteStatus: 409,
     });

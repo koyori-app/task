@@ -10,20 +10,19 @@ import {
   PhTextbox,
   PhUsers,
   PhWarning,
+  PhWebhooksLogo,
 } from '@phosphor-icons/vue';
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { computed, ref, watch, type Component } from 'vue';
-import { Button } from '@/components/ui/button';
-import { Field, FieldError, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { Button, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import DeleteProjectDialog from '@/components/sidebar/DeleteProjectDialog.vue';
 import CustomFieldsSection from '@/components/projects/CustomFieldsSection.vue';
 import EmojiIconPicker from '@/components/projects/EmojiIconPicker.vue';
 import IntegrationsSection from '@/components/projects/IntegrationsSection.vue';
 import LabelsSection from '@/components/projects/LabelsSection.vue';
 import MembersSection from '@/components/projects/MembersSection.vue';
+import WebhooksSection from '@/components/projects/WebhooksSection.vue';
 import WorkflowStatusesEditor from '@/components/projects/WorkflowStatusesEditor.vue';
 import { apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
@@ -41,6 +40,7 @@ type SettingsSection =
   | 'labels'
   | 'fields'
   | 'integrations'
+  | 'webhooks'
   | 'danger';
 
 const props = defineProps<{
@@ -73,6 +73,7 @@ const sections: {
   { key: 'labels', label: 'ラベル', icon: PhTag },
   { key: 'fields', label: 'カスタムフィールド', icon: PhTextbox },
   { key: 'integrations', label: '連携', icon: PhPlugsConnected },
+  { key: 'webhooks', label: 'Webhook', icon: PhWebhooksLogo },
   { key: 'danger', label: '削除', icon: PhWarning, danger: true },
 ];
 
@@ -210,21 +211,22 @@ function onDeleted() {
             <div class="min-w-0 flex-1">
               <form.Field name="name">
                 <template #default="{ field }">
-                  <Field>
-                    <FieldLabel :for="field.name">名前</FieldLabel>
+                  <Field
+                    :id="field.name"
+                    label="名前"
+                    description="サイドバーとパンくずに表示されます。"
+                    :error="
+                      field.state.meta.isTouched && field.state.meta.errors.length
+                        ? '名前は必須です'
+                        : ''
+                    "
+                  >
                     <Input
-                      :id="field.name"
                       placeholder="プロジェクト名"
-                      :model-value="field.state.value"
-                      @blur="field.handleBlur"
-                      @update:model-value="(v) => field.handleChange(String(v))"
+                      :value="field.state.value"
+                      :on-value-change="field.handleChange"
+                      :on-blur="field.handleBlur"
                     />
-                    <p class="text-xs text-muted-foreground">
-                      サイドバーとパンくずに表示されます。
-                    </p>
-                    <FieldError v-if="field.state.meta.isTouched && field.state.meta.errors.length"
-                      >名前は必須です</FieldError
-                    >
                   </Field>
                 </template>
               </form.Field>
@@ -232,34 +234,24 @@ function onDeleted() {
           </div>
 
           <div class="mb-5 max-w-[220px]">
-            <Field>
-              <FieldLabel for="project-key-readonly">キー</FieldLabel>
-              <Input
-                id="project-key-readonly"
-                class="font-mono"
-                :model-value="project.key"
-                disabled
-                aria-describedby="project-key-fixed-help"
-              />
-              <p id="project-key-fixed-help" class="text-xs text-muted-foreground">
-                タスク番号（例:
-                <span class="font-mono">{{ project.key + '-1' }}</span
-                >）の基準のため変更できません
-              </p>
+            <Field
+              id="project-key-readonly"
+              label="キー"
+              :description="`タスク番号（例: ${project.key + '-1'}）の基準のため変更できません`"
+            >
+              <Input class="[&_input]:font-mono" :value="project.key" disabled />
             </Field>
           </div>
 
           <div class="mb-5">
             <form.Field name="description">
               <template #default="{ field }">
-                <Field>
-                  <FieldLabel :for="field.name">説明</FieldLabel>
+                <Field :id="field.name" label="説明">
                   <Textarea
-                    :id="field.name"
-                    rows="3"
+                    :rows="3"
                     placeholder="このプロジェクトは何のためのものですか？"
-                    :model-value="field.state.value"
-                    @update:model-value="(v) => field.handleChange(String(v))"
+                    :value="field.state.value"
+                    :on-value-change="field.handleChange"
                   />
                 </Field>
               </template>
@@ -276,9 +268,11 @@ function onDeleted() {
           <div class="border-t pt-4">
             <form.Subscribe>
               <template #default="{ canSubmit, isSubmitting }">
-                <Button type="submit" :disabled="!canSubmit || isSubmitting || isPending">
-                  {{ isSubmitting ? '保存中…' : '変更を保存' }}
-                </Button>
+                <Button
+                  type="submit"
+                  :disabled="!canSubmit || isSubmitting || isPending"
+                  :label="isSubmitting ? '保存中…' : '変更を保存'"
+                />
               </template>
             </form.Subscribe>
           </div>
@@ -319,6 +313,13 @@ function onDeleted() {
           :project-id="project.id"
         />
 
+        <!-- Webhook -->
+        <WebhooksSection
+          v-else-if="activeSection === 'webhooks'"
+          :tenant-id="tenantId"
+          :project-id="project.id"
+        />
+
         <!-- 削除 -->
         <div v-else-if="activeSection === 'danger'">
           <h2 class="mb-5 border-b pb-4 text-xl font-semibold text-destructive">削除</h2>
@@ -332,12 +333,12 @@ function onDeleted() {
               </div>
               <Button
                 type="button"
-                variant="destructive"
+                variant="danger"
                 class="shrink-0"
-                aria-label="プロジェクトを削除"
+                ariaLabel="プロジェクトを削除"
+                label="削除"
                 @click="isDeleteOpen = true"
-                >削除</Button
-              >
+              />
             </div>
           </div>
         </div>

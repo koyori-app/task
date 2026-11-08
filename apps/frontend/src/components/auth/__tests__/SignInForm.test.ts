@@ -57,6 +57,13 @@ afterEach(() => {
 });
 
 describe('SignInForm', () => {
+  it('中身のない画像の面を出さない', async () => {
+    stubLogin(200, {});
+    const wrapper = await mountForm();
+
+    expect(wrapper.find('img').exists()).toBe(false);
+  });
+
   it('メール形式のエラーは、フォーカスを外さなくても入力を直した時点で消える', async () => {
     stubLogin(200, {});
     const wrapper = await mountForm();
@@ -188,5 +195,127 @@ describe('SignInForm のパスワード変更の案内', () => {
     const second = await mountForm();
 
     expect(second.text()).not.toContain(NOTICE);
+  });
+
+  describe('redirect_after', () => {
+    afterEach(() => window.history.replaceState({}, '', '/'));
+
+    it('メール未認証の案内からサインインへ戻るリンクも redirect_after を持ち越す', async () => {
+      window.history.replaceState(
+        {},
+        '',
+        '/signin?redirect_after=%2Finvitations%2Faccept%3Ftoken%3Dabc',
+      );
+      stubLogin(403, { message: 'email-not-verified' });
+      const wrapper = await mountAndSubmit();
+      const back = wrapper.findAll('a').find((a) => a.text().includes('サインインページへ戻る'));
+      expect(back!.attributes('href')).toBe(
+        '/signin?redirect_after=%2Finvitations%2Faccept%3Ftoken%3Dabc',
+      );
+    });
+
+    it('パスワードでサインインすると redirect_after へ戻る', async () => {
+      window.history.replaceState(
+        {},
+        '',
+        '/signin?redirect_after=%2Ft%2Fx%2Ftasks%2FP-1%3Ffoo%3D1',
+      );
+      stubLogin(200, {});
+      const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+      await mountAndSubmit();
+      expect(assignSpy).toHaveBeenCalledWith('/t/x/tasks/P-1?foo=1');
+    });
+
+    it('OAuth の redirect_after にも同じ値が渡る', async () => {
+      window.history.replaceState(
+        {},
+        '',
+        '/signin?redirect_after=%2Finvitations%2Faccept%3Ftoken%3Dabc',
+      );
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (req: Request | string) => {
+          const url = typeof req === 'string' ? req : req.url;
+          if (new URL(url, 'http://localhost').pathname.endsWith('/v1/auth/oauth/providers')) {
+            return jsonResponse({
+              providers: [{ provider: 'github', requires_instance_url: false, sign_in: true }],
+            });
+          }
+          return jsonResponse({ message: 'not-found' }, 404);
+        }),
+      );
+      const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+      await mountForm();
+      await flushPromises();
+      const button = [...document.body.querySelectorAll('button')].find((b) =>
+        b.textContent?.includes('GitHub'),
+      );
+      button!.click();
+      const url = new URL(String(assignSpy.mock.calls[0]![0]), 'http://localhost');
+      expect(url.searchParams.get('redirect_after')).toBe('/invitations/accept?token=abc');
+    });
+
+    it('OAuth 開始に渡す戻り先は backend が拒否する形（@ : ..）を含まず / になる', async () => {
+      window.history.replaceState(
+        {},
+        '',
+        `/signin?redirect_after=${encodeURIComponent('/acme/projects/APP/tasks?q=alice@example.com')}`,
+      );
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (req: Request | string) => {
+          const url = typeof req === 'string' ? req : req.url;
+          if (new URL(url, 'http://localhost').pathname.endsWith('/v1/auth/oauth/providers')) {
+            return jsonResponse({
+              providers: [{ provider: 'github', requires_instance_url: false, sign_in: true }],
+            });
+          }
+          return jsonResponse({ message: 'not-found' }, 404);
+        }),
+      );
+      const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+      await mountForm();
+      await flushPromises();
+      [...document.body.querySelectorAll('button')]
+        .find((b) => b.textContent?.includes('GitHub'))!
+        .click();
+      const url = new URL(String(assignSpy.mock.calls[0]![0]), 'http://localhost');
+      expect(url.searchParams.get('redirect_after')).toBe('/');
+      expect(url.searchParams.get('error_redirect_after')).toBe('/signin');
+    });
+
+    it('外部 URL は / にする', async () => {
+      window.history.replaceState({}, '', '/signin?redirect_after=https%3A%2F%2Fevil.example');
+      stubLogin(200, {});
+      const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+      await mountAndSubmit();
+      expect(assignSpy).toHaveBeenCalledWith('/');
+    });
+  });
+});
+
+describe('SignInForm 2FA', () => {
+  it.each([
+    ['requires_2fa', { requires_2fa: true, requires_2fa_setup: false }],
+    ['requires_2fa_setup', { requires_2fa: false, requires_2fa_setup: true }],
+  ])('%s を受けたらログアウトせず /auth/2fa へ進む', async (_name, body) => {
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    const fetchMock = stubLogin(200, body);
+
+    await mountAndSubmit();
+
+    expect(assignSpy).toHaveBeenCalledWith('/auth/2fa');
+    const urls = fetchMock.mock.calls.map(([req]) => (typeof req === 'string' ? req : req.url));
+    expect(urls.some((u) => u.includes('/v1/auth/logout'))).toBe(false);
+    expect(document.body.textContent).not.toContain('サポートされていません');
+  });
+
+  it('2FA が要らない 200（両方 false）は通常どおり / へ進む', async () => {
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    stubLogin(200, { requires_2fa: false, requires_2fa_setup: false });
+
+    await mountAndSubmit();
+
+    expect(assignSpy).toHaveBeenCalledWith('/');
   });
 });

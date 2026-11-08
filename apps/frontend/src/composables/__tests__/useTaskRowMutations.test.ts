@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { defineComponent } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
-import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
+import { VueQueryPlugin, QueryClient, useQuery } from '@tanstack/vue-query';
 import type { paths } from '@/generated/api';
 import { useTaskRowMutations } from '../useTaskRowMutations';
 import { useTaskActivities } from '../useTaskActivities';
@@ -22,7 +22,9 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
     /** 保留中の POST を全部通す。1 件だけ持つと、2 本目で 1 本目を取り落とす */
     held: (() => void)[];
     rejectPost: boolean;
-  } = { holdPost: false, held: [], rejectPost: false };
+    /** この利用者を担当者に足す POST だけ失敗させる */
+    rejectAssigneeId: string | null;
+  } = { holdPost: false, held: [], rejectPost: false, rejectAssigneeId: null };
 
   const requestLog: { method: string; url: string; body?: unknown }[] = [];
 
@@ -45,6 +47,9 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
       });
     }
     if (control.rejectPost) return jsonResponse({ message: 'boom' }, 500);
+    if ((entry.body as { user_id?: string } | undefined)?.user_id === control.rejectAssigneeId) {
+      return jsonResponse({ message: 'boom' }, 409);
+    }
 
     if (url.endsWith('/comments')) {
       return jsonResponse({ id: 'c-new' }, 201);
@@ -108,6 +113,7 @@ describe('useTaskRowMutations', () => {
     control.holdPost = false;
     control.held = [];
     control.rejectPost = false;
+    control.rejectAssigneeId = null;
     requestLog.length = 0;
   });
 
@@ -144,6 +150,66 @@ describe('useTaskRowMutations', () => {
       'A のコメント',
       'B のコメント',
     ]);
+  });
+
+  // 部署・チームを選ぶと UserSelector は 1 度に複数の toggle を出す。担当者の口は 1 人ずつなので、
+  // 送信中の変更を落とすと先頭の 1 人しか入らない
+  describe('担当者をまとめて変える', () => {
+    const task = { id: 'task-1', assignees: [] } as never;
+    const assigneePosts = () =>
+      requestLog.filter((entry) => entry.method === 'POST' && entry.url.endsWith('/assignees'));
+    const postedIds = () =>
+      assigneePosts().map((entry) => (entry.body as { user_id: string }).user_id);
+
+    it('同時に来た変更を落とさず、1 人ずつ順に送る', async () => {
+      mountHost();
+      control.holdPost = true;
+
+      const first = mutations.toggleAssignee(task, 'user-1', true);
+      void mutations.toggleAssignee(task, 'user-2', true);
+      void mutations.toggleAssignee(task, 'user-3', true);
+      expect(mutations.pending.value['task-1']).toBe('assignees');
+
+      // 1 人目が終わるまで 2 人目を送らない
+      await vi.waitFor(() => expect(control.held).toHaveLength(1));
+      expect(postedIds()).toEqual(['user-1']);
+
+      control.holdPost = false;
+      for (const release of control.held) release();
+      await first;
+
+      expect(postedIds()).toEqual(['user-1', 'user-2', 'user-3']);
+      expect(mutations.pending.value['task-1']).toBeUndefined();
+      expect(mutations.errors.value['task-1']).toBeUndefined();
+    });
+
+    it('途中の 1 人が失敗しても残りを送り、失敗を出して取り直す', async () => {
+      mountHost();
+      await flushPromises();
+      control.rejectAssigneeId = 'user-2';
+      const activitiesBefore = activityRequests().length;
+
+      const first = mutations.toggleAssignee(task, 'user-1', true);
+      void mutations.toggleAssignee(task, 'user-2', true);
+      void mutations.toggleAssignee(task, 'user-3', true);
+      await first;
+      await flushPromises();
+
+      expect(postedIds()).toEqual(['user-1', 'user-2', 'user-3']);
+      expect(mutations.errors.value['task-1']).toBe('更新に失敗しました');
+      // 通った人は保存済みなので、取り直さないと画面が保存の前に戻ったままになる
+      expect(activityRequests().length).toBeGreaterThan(activitiesBefore);
+      expect(mutations.pending.value['task-1']).toBeUndefined();
+    });
+
+    it('送り終えた後の変更は次の送信になる（前の送信に紛れない）', async () => {
+      mountHost();
+
+      await mutations.toggleAssignee(task, 'user-1', true);
+      await mutations.toggleAssignee(task, 'user-2', true);
+
+      expect(postedIds()).toEqual(['user-1', 'user-2']);
+    });
   });
 
   it('同じタスクへの二重送信は落とす', async () => {
@@ -188,6 +254,29 @@ describe('useTaskRowMutations', () => {
     await flushPromises();
 
     expect(activityRequests().length).toBeGreaterThan(before);
+  });
+
+  // カレンダーはオーバーレイで詳細を開いたまま裏に残るので、帯（schedule）も取り直す
+  it('更新のあとにカレンダーの予定を取り直す', async () => {
+    const scheduleFetch = vi.fn(async () => ({ tasks: [] }));
+    const Calendar = defineComponent({
+      setup() {
+        useQuery({
+          queryKey: ['get', '/v1/tenants/{tenant_id}/schedule', { params: {} }],
+          queryFn: scheduleFetch,
+        });
+        return () => null;
+      },
+    });
+    mount(Calendar, { global: { plugins: [[VueQueryPlugin, { queryClient }]] } });
+    mountHost();
+    await flushPromises();
+    expect(scheduleFetch).toHaveBeenCalledTimes(1);
+
+    await mutations.setSoftDeadline({ id: 'task-1' } as never, '2026-10-20T00:00:00Z');
+    await flushPromises();
+
+    expect(scheduleFetch).toHaveBeenCalledTimes(2);
   });
 
   // 行と詳細（useTaskComments）が同じコメント一覧へ書くので、行から投稿したときも

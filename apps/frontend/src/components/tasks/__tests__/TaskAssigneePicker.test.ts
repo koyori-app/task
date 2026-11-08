@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { DOMWrapper, enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
+import { pickerOption, pickerTrigger } from '@/components/__tests__/picker';
 
 enableAutoUnmount(afterEach);
 
@@ -10,21 +11,10 @@ const members = [
   { id: 'user-2', username: 'sousuke', avatar_url: null },
 ];
 
-/**
- * メニューの中身はトリガーを押さないと描画されないので、
- * DropdownMenuContent を素の div に差し替えて中を読む。
- */
+/** 候補の一覧（Picker）は閉じていても hidden のまま DOM にあるので、開かずに読む。 */
 function mountPicker(props: Record<string, unknown>) {
   return mount(TaskAssigneePicker, {
     props: { members: [], selected: [], ...props },
-    global: {
-      stubs: {
-        DropdownMenu: { template: '<div><slot /></div>' },
-        DropdownMenuTrigger: { template: '<div><slot /></div>' },
-        DropdownMenuContent: { template: '<div><slot /></div>' },
-        DropdownMenuCheckboxItem: { template: '<div><slot /></div>' },
-      },
-    },
   });
 }
 
@@ -67,5 +57,108 @@ describe('TaskAssigneePicker の候補の取得状態', () => {
 
     expect(wrapper.text()).not.toContain('yupix');
     expect(wrapper.text()).toContain('sousuke');
+  });
+});
+
+describe('TaskAssigneePicker の部署・チーム', () => {
+  const option = (wrapper: ReturnType<typeof mountPicker>, name: string) =>
+    pickerOption(pickerTrigger(wrapper.element, '担当者'), name);
+
+  it('部署を選ぶと、まだ担当でない属する全員を toggle で返す', async () => {
+    const team = [
+      { id: 'user-1', username: 'yupix', department: '開発' },
+      { id: 'user-2', username: 'sousuke', department: '開発' },
+      { id: 'user-3', username: 'kousuke', department: '開発' },
+      { id: 'user-4', username: 'alice', department: '営業' },
+    ];
+    const wrapper = mountPicker({ members: team, selected: [team[0]] });
+    await flushPromises();
+
+    option(wrapper, '部署「開発」の全員').click();
+    await flushPromises();
+
+    expect(wrapper.emitted('toggle')).toEqual([
+      ['user-2', true],
+      ['user-3', true],
+    ]);
+  });
+
+  it('部署・チームの無い候補だけなら行を出さない', () => {
+    const wrapper = mountPicker({ members });
+
+    expect(wrapper.text()).not.toContain('の全員');
+  });
+});
+
+// 担当者は一人ずつ保存してから再取得するので、selected は選んでから遅れて変わる。一覧は選んだ時に
+// 先に反映し、保存中に届く途中の値では差し替えない
+describe('TaskAssigneePicker の保存が遅れて反映される時', () => {
+  const optionOf = (wrapper: ReturnType<typeof mountPicker>, id: string) =>
+    new DOMWrapper(
+      pickerOption(
+        pickerTrigger(wrapper.element, '担当者'),
+        members.find((m) => m.id === id)!.username,
+      ),
+    );
+
+  it('選んだ時に一覧へ先に反映し、遅れて届いた同じ中身でも選んだままにする', async () => {
+    const wrapper = mountPicker({ members, selected: [members[0]] });
+    await flushPromises();
+
+    await optionOf(wrapper, 'user-2').trigger('click');
+    expect(wrapper.emitted('toggle')).toEqual([['user-2', true]]);
+    expect(optionOf(wrapper, 'user-2').attributes('aria-selected')).toBe('true');
+
+    await wrapper.setProps({ selected: [members[0], members[1]] });
+    await flushPromises();
+    expect(optionOf(wrapper, 'user-2').attributes('aria-selected')).toBe('true');
+    expect(optionOf(wrapper, 'user-1').attributes('aria-selected')).toBe('true');
+  });
+
+  it('保存中に届いた値では突き合わせず、保存が終わってから突き合わせる', async () => {
+    const wrapper = mountPicker({ members, selected: [members[0]] });
+    await flushPromises();
+
+    await optionOf(wrapper, 'user-2').trigger('click');
+    // 保存中（disabled）に、途中の値（まだ足していない）が届く
+    await wrapper.setProps({ disabled: true, selected: [{ ...members[0] }] });
+    await flushPromises();
+    expect(optionOf(wrapper, 'user-2').attributes('aria-selected')).toBe('true');
+
+    // 保存が終わり、足した値が届く
+    await wrapper.setProps({ selected: [members[0], members[1]] });
+    await wrapper.setProps({ disabled: false });
+    await flushPromises();
+    expect(optionOf(wrapper, 'user-2').attributes('aria-selected')).toBe('true');
+  });
+
+  it('保存が失敗すれば、保存が終わった時に一覧も呼び手の選択へ戻る', async () => {
+    const wrapper = mountPicker({ members, selected: [members[0]] });
+    await flushPromises();
+
+    await optionOf(wrapper, 'user-2').trigger('click');
+    await wrapper.setProps({ disabled: true });
+    await flushPromises();
+    expect(optionOf(wrapper, 'user-2').attributes('aria-selected')).toBe('true');
+
+    // 失敗では再取得せず、呼び手の選択は変わらないまま保存が終わる
+    await wrapper.setProps({ disabled: false });
+    await flushPromises();
+    expect(optionOf(wrapper, 'user-2').attributes('aria-selected')).toBe('false');
+    expect(optionOf(wrapper, 'user-1').attributes('aria-selected')).toBe('true');
+  });
+
+  it('保存中でない時に呼び手の選択が違う中身で届けば、一覧も呼び手に従う', async () => {
+    const wrapper = mountPicker({ members, selected: [members[0]] });
+    await flushPromises();
+
+    await optionOf(wrapper, 'user-2').trigger('click');
+    expect(optionOf(wrapper, 'user-2').attributes('aria-selected')).toBe('true');
+
+    // 再取得で、保存の前と同じ中身の配列が届く
+    await wrapper.setProps({ selected: [{ ...members[0] }] });
+    await flushPromises();
+    expect(optionOf(wrapper, 'user-1').attributes('aria-selected')).toBe('true');
+    expect(optionOf(wrapper, 'user-2').attributes('aria-selected')).toBe('false');
   });
 });

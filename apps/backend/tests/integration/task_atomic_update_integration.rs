@@ -192,3 +192,94 @@ async fn task_update_commits_or_rolls_back_fields_labels_and_assignees_together(
     assert_eq!(cleared["labels"].as_array().unwrap().len(), 1);
     assert_eq!(cleared["labels"][0]["id"], labels[0]);
 }
+
+async fn put_planned_start(app: &TestApp, task_path: &str, body: Value) -> Value {
+    let response = app.put_json_with_session(task_path, body).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    response.json::<Value>().await.unwrap()["planned_start_on"].clone()
+}
+
+/// 開始予定日の変更・解除。解除と値を同時に送ると `clear_soft_deadline` と同じく解除が勝つ。
+/// 締切との前後関係は検証しない（締切より後の開始予定日も通る）。
+#[tokio::test]
+async fn task_update_sets_and_clears_planned_start_on() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(true, false).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let project_path = format!("/v1/tenants/{}/projects/{}", tp.tenant_id, tp.project_id);
+    let response = app
+        .post_json_with_session(
+            &format!("{project_path}/statuses"),
+            json!({ "name": "Todo", "color": "#336699", "position": 0, "is_default": true }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let status: Value = response.json().await.unwrap();
+    let response = app
+        .post_json_with_session(
+            &format!("{project_path}/tasks"),
+            json!({
+                "title": "t", "status_id": status["id"],
+                "soft_deadline": "2026-09-01T00:00:00Z", "planned_start_on": "2026-08-20",
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created: Value = response.json().await.unwrap();
+    assert_eq!(created["planned_start_on"], "2026-08-20");
+    let task_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let path = format!("{project_path}/tasks/{task_id}");
+
+    for (body, expected) in [
+        // 締切（9/1）より後でも通る
+        (
+            json!({ "planned_start_on": "2026-09-10" }),
+            json!("2026-09-10"),
+        ),
+        // 触らない更新では残る
+        (json!({ "title": "renamed" }), json!("2026-09-10")),
+        // 同じ値の再指定は履歴を増やさない
+        (
+            json!({ "planned_start_on": "2026-09-10" }),
+            json!("2026-09-10"),
+        ),
+        // 解除と値の同時指定は解除が勝つ
+        (
+            json!({ "planned_start_on": "2026-09-20", "clear_planned_start_on": true }),
+            Value::Null,
+        ),
+        (
+            json!({ "planned_start_on": "2026-09-30" }),
+            json!("2026-09-30"),
+        ),
+        (json!({ "clear_planned_start_on": true }), Value::Null),
+    ] {
+        assert_eq!(
+            put_planned_start(&app, &path, body.clone()).await,
+            expected,
+            "{body}"
+        );
+    }
+
+    let state = snapshot(&app, task_id).await;
+    let mut changes: Vec<&Value> = state["activities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|a| a["event_type"] == "planned_start_changed")
+        .collect();
+    // snapshot は id（ランダム UUID）順なので記録順に並べ直す
+    changes.sort_by_key(|a| a["created_at"].as_str().unwrap().to_string());
+    let payloads: Vec<&Value> = changes.iter().map(|a| &a["payload"]).collect();
+    assert_eq!(
+        payloads,
+        [
+            &json!({ "from": "2026-08-20", "to": "2026-09-10" }),
+            &json!({ "from": "2026-09-10", "to": null }),
+            &json!({ "from": null, "to": "2026-09-30" }),
+            &json!({ "from": "2026-09-30", "to": null }),
+        ]
+    );
+}

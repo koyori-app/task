@@ -1,14 +1,18 @@
 <script setup lang="ts">
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb';
+import { Breadcrumb } from '@koyori-app/ui-vue';
+import { computed } from 'vue';
+
 import type { BreadcrumbState } from '@/lib/breadcrumbs';
 
-defineProps<BreadcrumbState>();
+const props = defineProps<BreadcrumbState>();
+
+/** 現在地（最後の段）はリンクにしない */
+const items = computed(() =>
+  props.segments.map((segment) => ({
+    label: segment.name,
+    href: segment.current ? undefined : segment.href,
+  })),
+);
 </script>
 
 <template>
@@ -26,29 +30,15 @@ defineProps<BreadcrumbState>();
         class="h-4 flex-1 animate-pulse rounded bg-muted"
       />
     </div>
-    <Breadcrumb v-else-if="segments.length" aria-label="パンくず" class="min-w-0 max-w-full">
-      <BreadcrumbList class="flex-nowrap gap-1 overflow-x-auto whitespace-nowrap sm:gap-2.5">
-        <template v-for="(segment, index) in segments" :key="segment.href">
-          <BreadcrumbSeparator v-if="index" class="shrink-0" />
-          <BreadcrumbItem class="min-w-0 shrink-0">
-            <span
-              v-if="segment.current"
-              aria-current="page"
-              :title="segment.name"
-              class="block max-w-40 truncate text-foreground sm:max-w-64"
-              >{{ segment.name }}</span
-            >
-            <BreadcrumbLink
-              v-else
-              :href="segment.href"
-              :title="segment.name"
-              class="block max-w-40 truncate sm:max-w-64"
-            >
-              {{ segment.name }}
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-        </template>
-      </BreadcrumbList>
-    </Breadcrumb>
+    <!--
+      koyori は折り返すが、ヘッダーの高さを保つため一列に並べ、狭い画面では横にスクロールさせる。
+      段が縮んで字が重ならぬよう、段は縮めない。
+    -->
+    <Breadcrumb
+      v-else-if="segments.length"
+      label="パンくず"
+      :items="items"
+      class="min-w-0 max-w-full [&_li]:shrink-0 [&_ol]:flex-nowrap [&_ol]:overflow-x-auto [&_ol]:whitespace-nowrap"
+    />
   </div>
 </template>

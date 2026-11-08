@@ -1937,7 +1937,7 @@ async fn github_http_integration_suite() {
             StatusCode::UNAUTHORIZED
         );
         let pat = app
-            .insert_pat(user.id, a.tenant_id, vec![Scope::AdminTenant], None)
+            .insert_pat(user.id, a.tenant_id, vec![Scope::Api], None)
             .await;
         assert_eq!(
             app.get_with_bearer(&installations_path(&e), &pat)

@@ -176,28 +176,77 @@ fn restrict_permissions(_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// API を呼ぶのに必要な 3 点。
+/// tenant_id をどこで明示したか。403 の案内で、どれを外せばよいかを出し分ける。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TenantSource {
+    Env,
+    Config,
+}
+
+impl TenantSource {
+    /// 403 だけでは束縛の食い違いと断定できないので、条件付きの文にする。
+    /// env は config に勝つので、env 由来に `config unset` を勧めても解消しない
+    pub fn forbidden_hint(self) -> &'static str {
+        match self {
+            Self::Env => {
+                "tenant_id is set by TASK_TENANT; if the token belongs to another tenant, unset it"
+            }
+            Self::Config => {
+                "tenant_id is set in config; if the token belongs to another tenant, run `task config unset tenant_id`"
+            }
+        }
+    }
+}
+
+/// API を呼ぶのに必要な設定。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
     pub api_url: String,
     pub token: String,
-    pub tenant_id: String,
+    /// 明示された tenant_id と由来。無ければトークンの束縛先を `/me` から引く
+    pub tenant: Option<(String, TenantSource)>,
 }
 
 /// 環境変数を設定ファイルより優先して解決する。
+///
+/// `TASK_API_URL` と `TASK_TOKEN` は組で扱う。項目ごとに上書きすると、config の
+/// トークンが env の別インスタンスへ送られる。両方が env にあれば config は読まない。
+/// `TASK_TENANT` は送り先を変えないので単独で効く。
 pub fn resolve_runtime_with(
     store: &ConfigStore,
     env: impl Fn(&str) -> Option<String>,
 ) -> Result<RuntimeConfig> {
-    let file = store.load()?;
-    let api_url = env("TASK_API_URL").or(file.api_url);
-    let token = env("TASK_TOKEN").or(file.token);
-    let tenant_id = env("TASK_TENANT").or(file.tenant_id);
+    // 空文字は未設定として扱う（`TASK_TOKEN=` で外したつもりの値を拾わない）
+    let var = |key: &str| env(key).filter(|value| !value.is_empty());
+    let (api_url, token, file_tenant) = match (var("TASK_API_URL"), var("TASK_TOKEN")) {
+        // config は tenant_id も含めて読まない。env のトークンは別テナントのことが多く、
+        // config の tenant_id を残すと毎回 403 になる。壊れた config でも止めない
+        (Some(api_url), Some(token)) => (Some(api_url), Some(token), None),
+        (None, None) => {
+            let file = store.load()?;
+            (file.api_url, file.token, file.tenant_id)
+        }
+        (api_url, _) => {
+            let (set, unset) = if api_url.is_some() {
+                ("TASK_API_URL", "TASK_TOKEN")
+            } else {
+                ("TASK_TOKEN", "TASK_API_URL")
+            };
+            return Err(CliError::validation(format!(
+                "{set} is set without {unset}; the API URL and token must come from the same place. \
+                 Set {unset} too, or unset {set} and keep both api_url and token in {}.",
+                store.path().display(),
+            )));
+        }
+    };
+    let tenant = match var("TASK_TENANT") {
+        Some(id) => Some((id, TenantSource::Env)),
+        None => file_tenant.map(|id| (id, TenantSource::Config)),
+    };
 
     let missing: Vec<&str> = [
         api_url.is_none().then_some("api_url (TASK_API_URL)"),
         token.is_none().then_some("token (TASK_TOKEN)"),
-        tenant_id.is_none().then_some("tenant_id (TASK_TENANT)"),
     ]
     .into_iter()
     .flatten()
@@ -205,7 +254,7 @@ pub fn resolve_runtime_with(
 
     if !missing.is_empty() {
         return Err(CliError::validation(format!(
-            "Missing required configuration: {}. Set env vars or {}.",
+            "Missing required configuration: {}. Set both TASK_API_URL and TASK_TOKEN, or both api_url and token in {}.",
             missing.join(", "),
             store.path().display(),
         )));
@@ -215,39 +264,7 @@ pub fn resolve_runtime_with(
         // 末尾の `/` を落とさないとパスを繋いだ URL が `//v1/...` になる
         api_url: api_url.unwrap().trim_end_matches('/').to_string(),
         token: token.unwrap(),
-        tenant_id: tenant_id.unwrap(),
-    })
-}
-
-/// `auth whoami` 用。鍵と API の URL だけで `personal_tokens/me` を叩ける。
-pub fn resolve_token_runtime_with(
-    store: &ConfigStore,
-    env: impl Fn(&str) -> Option<String>,
-) -> Result<RuntimeConfig> {
-    let file = store.load()?;
-    let api_url = env("TASK_API_URL").or(file.api_url);
-    let token = env("TASK_TOKEN").or(file.token);
-
-    let missing: Vec<&str> = [
-        api_url.is_none().then_some("api_url (TASK_API_URL)"),
-        token.is_none().then_some("token (TASK_TOKEN)"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-
-    if !missing.is_empty() {
-        return Err(CliError::validation(format!(
-            "Missing required configuration: {}. Set env vars or {}.",
-            missing.join(", "),
-            store.path().display(),
-        )));
-    }
-
-    Ok(RuntimeConfig {
-        api_url: api_url.unwrap().trim_end_matches('/').to_string(),
-        token: token.unwrap(),
-        tenant_id: String::new(),
+        tenant,
     })
 }
 
@@ -500,14 +517,12 @@ mod tests {
             RuntimeConfig {
                 api_url: "https://api.invalid".into(),
                 token: "env-token".into(),
-                tenant_id: "env-tenant".into(),
+                tenant: Some(("env-tenant".into(), TenantSource::Env)),
             }
         );
     }
 
-    #[test]
-    fn falls_back_to_the_file_when_only_part_of_the_environment_is_set() {
-        let (_home, store) = store();
+    fn save_complete_file(store: &ConfigStore) {
         store
             .save(&TaskConfig {
                 api_url: Some("https://file.invalid".into()),
@@ -515,15 +530,91 @@ mod tests {
                 tenant_id: Some("file-tenant".into()),
             })
             .unwrap();
+    }
 
-        let resolved = resolve_runtime_with(&store, |key| {
-            (key == "TASK_TOKEN").then(|| "env-token".to_string())
-        })
+    /// 片側だけを config で補うと、config のトークンが env の別インスタンスへ飛ぶ。
+    /// config が完全でも止める。
+    #[test]
+    fn rejects_the_url_or_the_token_set_alone_in_the_environment() {
+        let (_home, store) = store();
+        save_complete_file(&store);
+
+        for (set, unset) in [
+            ("TASK_API_URL", "TASK_TOKEN"),
+            ("TASK_TOKEN", "TASK_API_URL"),
+        ] {
+            let err = resolve_runtime_with(&store, env_of(&[(set, "env-value")])).unwrap_err();
+
+            assert_eq!(err.exit_code, 2, "{set}");
+            assert!(
+                err.message
+                    .starts_with(&format!("{set} is set without {unset};")),
+                "{}",
+                err.message
+            );
+            assert!(
+                err.message.contains(&store.path().display().to_string()),
+                "{}",
+                err.message
+            );
+        }
+    }
+
+    /// `TASK_TENANT` は送り先を変えないので、URL とトークンが config でも単独で効く。
+    #[test]
+    fn takes_the_tenant_alone_from_the_environment() {
+        let (_home, store) = store();
+        save_complete_file(&store);
+
+        let resolved =
+            resolve_runtime_with(&store, env_of(&[("TASK_TENANT", "env-tenant")])).unwrap();
+
+        assert_eq!(
+            resolved,
+            RuntimeConfig {
+                api_url: "https://file.invalid".into(),
+                token: "file-token".into(),
+                tenant: Some(("env-tenant".into(), TenantSource::Env)),
+            }
+        );
+    }
+
+    #[test]
+    fn treats_an_empty_variable_as_unset_in_the_runtime_settings() {
+        let (_home, store) = store();
+        save_complete_file(&store);
+
+        let resolved = resolve_runtime_with(
+            &store,
+            env_of(&[
+                ("TASK_API_URL", ""),
+                ("TASK_TOKEN", ""),
+                ("TASK_TENANT", ""),
+            ]),
+        )
         .unwrap();
+        assert_eq!(
+            resolved,
+            RuntimeConfig {
+                api_url: "https://file.invalid".into(),
+                token: "file-token".into(),
+                tenant: Some(("file-tenant".into(), TenantSource::Config)),
+            }
+        );
 
-        assert_eq!(resolved.api_url, "https://file.invalid");
-        assert_eq!(resolved.token, "env-token");
-        assert_eq!(resolved.tenant_id, "file-tenant");
+        // 片方が空なら、もう片方だけが渡された状態
+        let err = resolve_runtime_with(
+            &store,
+            env_of(&[("TASK_API_URL", "https://api.invalid"), ("TASK_TOKEN", "")]),
+        )
+        .unwrap_err();
+        assert_eq!(err.exit_code, 2);
+        assert!(
+            err.message
+                .starts_with("TASK_API_URL is set without TASK_TOKEN;"),
+            "{}",
+            err.message
+        );
     }
 
     #[test]
@@ -532,17 +623,15 @@ mod tests {
         let err = resolve_runtime_with(&store, |_| None).unwrap_err();
 
         assert_eq!(err.exit_code, 2);
-        for expected in [
-            "api_url (TASK_API_URL)",
-            "token (TASK_TOKEN)",
-            "tenant_id (TASK_TENANT)",
-        ] {
+        for expected in ["api_url (TASK_API_URL)", "token (TASK_TOKEN)"] {
             assert!(err.message.contains(expected), "{}", err.message);
         }
+        // tenant_id は任意（トークンから引く）なので不足として挙げない
+        assert!(!err.message.contains("tenant_id"), "{}", err.message);
     }
 
     #[test]
-    fn resolves_token_runtime_without_tenant_id() {
+    fn resolves_without_tenant_id() {
         let (_home, store) = store();
         store
             .save(&TaskConfig {
@@ -552,14 +641,14 @@ mod tests {
             })
             .unwrap();
 
-        let resolved = resolve_token_runtime_with(&store, |_| None).unwrap();
+        let resolved = resolve_runtime_with(&store, |_| None).unwrap();
 
         assert_eq!(
             resolved,
             RuntimeConfig {
                 api_url: "https://api.invalid".into(),
                 token: "token-1".into(),
-                tenant_id: String::new(),
+                tenant: None,
             }
         );
     }

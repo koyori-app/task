@@ -6,8 +6,8 @@
 use entity::{notifications, projects, tasks, tenants};
 
 use common::notifications::{
-    TYPE_ASSIGNED, TYPE_COMMENT_ADDED, TYPE_MENTIONED, TYPE_REVIEW_FINDING_CHANGED,
-    TYPE_REVIEW_ROUND_CREATED, TYPE_STATUS_CHANGED,
+    TYPE_ASSIGNED, TYPE_COMMENT_ADDED, TYPE_DEADLINE_SOON, TYPE_MENTIONED, TYPE_PR_MERGED,
+    TYPE_REVIEW_FINDING_CHANGED, TYPE_REVIEW_ROUND_CREATED, TYPE_STATUS_CHANGED,
 };
 
 /// 件名に載せるタスクタイトルの長さ。長い件名はクライアント側で切られるので、
@@ -20,7 +20,7 @@ pub struct Mail {
     pub html: String,
 }
 
-fn escape(value: &str) -> String {
+pub(crate) fn escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -37,24 +37,22 @@ fn truncate(value: &str) -> String {
 }
 
 /// payload の文字列フィールド。無ければ空文字（本題は出す）。
-fn field<'a>(notification: &'a notifications::Model, key: &str) -> &'a str {
-    notification
-        .payload
+fn field<'a>(payload: &'a serde_json::Value, key: &str) -> &'a str {
+    payload
         .get(key)
         .and_then(serde_json::Value::as_str)
         .unwrap_or("")
 }
 
-fn number(notification: &notifications::Model, key: &str) -> i64 {
-    notification
-        .payload
+fn number(payload: &serde_json::Value, key: &str) -> i64 {
+    payload
         .get(key)
         .and_then(serde_json::Value::as_i64)
         .unwrap_or(0)
 }
 
-fn severity_counts(notification: &notifications::Model) -> String {
-    let counts = notification.payload.get("counts");
+fn severity_counts(payload: &serde_json::Value) -> String {
+    let counts = payload.get("counts");
     let count = |key: &str| {
         counts
             .and_then(|c| c.get(key))
@@ -96,7 +94,14 @@ fn link(
             "{base}/{}/projects/{}/reviews?pr={}",
             tenant.display_id,
             project.key,
-            number(notification, "pr_number")
+            number(&notification.payload, "pr_number")
+        )),
+        // レビュワー宛ての `pr_merged` はタスクに結ばれていない。レビュー画面のその PR へ
+        TYPE_PR_MERGED if task.is_none() => Some(format!(
+            "{base}/{}/projects/{}/reviews?pr={}",
+            tenant.display_id,
+            project.key,
+            number(&notification.payload, "number")
         )),
         _ => task.map(|task| {
             format!(
@@ -109,82 +114,125 @@ fn link(
 
 /// 件名と本文 1 行目。未知の種別は種別名と payload をそのまま出す
 /// （送らないより、何が起きたかを伝える方がよい）。
-fn subject_and_line(
-    notification: &notifications::Model,
+///
+/// Webhook の Discord 整形（`service::webhooks::discord_message`）もレビュー系の要約に使う。
+pub fn subject_and_line(
+    notification_type: &str,
+    payload: &serde_json::Value,
     task: Option<&tasks::Model>,
 ) -> (String, String) {
     let label = task_label(task);
-    match notification.notification_type.as_str() {
+    match notification_type {
         TYPE_ASSIGNED => (
             format!("[Koyori] {label} の担当になりました"),
             format!(
                 "{} があなたを {label} の担当（{}）に追加しました。",
-                field(notification, "assigned_by"),
-                field(notification, "role")
+                field(payload, "assigned_by"),
+                field(payload, "role")
             ),
         ),
-        TYPE_MENTIONED => (
-            format!("[Koyori] {label} でメンションされました"),
-            format!(
-                "{} が {label} のコメントであなたにメンションしました。",
-                field(notification, "author")
-            ),
-        ),
+        TYPE_MENTIONED => {
+            // 説明文のメンションは `source` を持つ（コメントのメンションは `comment_id`）
+            let place = if payload.get("source").and_then(|v| v.as_str())
+                == Some(crate::notifications::PAYLOAD_SOURCE_TASK_DESCRIPTION)
+            {
+                "の説明文"
+            } else {
+                "のコメント"
+            };
+            (
+                format!("[Koyori] {label} でメンションされました"),
+                format!(
+                    "{} が {label} {place}であなたにメンションしました。",
+                    field(payload, "author")
+                ),
+            )
+        }
         TYPE_COMMENT_ADDED => (
             format!("[Koyori] {label} にコメントが追加されました"),
             format!(
                 "{} が {label} にコメントしました。",
-                field(notification, "author")
+                field(payload, "author")
             ),
         ),
         TYPE_STATUS_CHANGED => (
             format!(
                 "[Koyori] {label} のステータスが {} → {}",
-                field(notification, "from"),
-                field(notification, "to")
+                field(payload, "from"),
+                field(payload, "to")
             ),
             format!(
                 "{} が {label} のステータスを {} から {} へ変更しました。",
-                field(notification, "changed_by"),
-                field(notification, "from"),
-                field(notification, "to")
+                field(payload, "changed_by"),
+                field(payload, "from"),
+                field(payload, "to")
             ),
         ),
+        TYPE_DEADLINE_SOON => {
+            let which = match field(payload, "kind") {
+                "soft" => "の仮締めは",
+                "hard" => "の Deadline は",
+                _ => "の期限は",
+            };
+            // payload は RFC 3339 の UTC。読める形にするだけで時差は足さない（宛先の時間帯を持っていない）
+            let raw = field(payload, "deadline");
+            let deadline = chrono::DateTime::parse_from_rfc3339(raw)
+                .map(|d| {
+                    d.with_timezone(&chrono::Utc)
+                        .format("%Y-%m-%d %H:%M UTC")
+                        .to_string()
+                })
+                .unwrap_or_else(|_| raw.to_string());
+            (
+                format!("[Koyori] {label} の期限が近づいています"),
+                format!("{label} {which} {deadline} です。"),
+            )
+        }
         TYPE_REVIEW_ROUND_CREATED => (
             format!(
                 "[Koyori] PR #{} のレビュー R{}（{}）",
-                number(notification, "pr_number"),
-                number(notification, "round"),
-                severity_counts(notification)
+                number(payload, "pr_number"),
+                number(payload, "round"),
+                severity_counts(payload)
             ),
             format!(
                 "{} が PR #{} のレビュー R{} を起票しました。\n{}",
-                field(notification, "reviewer"),
-                number(notification, "pr_number"),
-                number(notification, "round"),
-                field(notification, "summary_excerpt")
+                field(payload, "reviewer"),
+                number(payload, "pr_number"),
+                number(payload, "round"),
+                field(payload, "summary_excerpt")
             ),
         ),
         TYPE_REVIEW_FINDING_CHANGED => (
             format!(
                 "[Koyori] 指摘「{}」が {} → {}",
-                truncate(field(notification, "title")),
-                field(notification, "from"),
-                field(notification, "to")
+                truncate(field(payload, "title")),
+                field(payload, "from"),
+                field(payload, "to")
             ),
             format!(
                 "{} が PR #{} の指摘「{}」を {} から {} へ変更しました。",
-                field(notification, "actor"),
-                number(notification, "pr_number"),
-                truncate(field(notification, "title")),
-                field(notification, "from"),
-                field(notification, "to")
+                field(payload, "actor"),
+                number(payload, "pr_number"),
+                truncate(field(payload, "title")),
+                field(payload, "from"),
+                field(payload, "to")
             ),
         ),
-        other => (
-            format!("[Koyori] {other}"),
-            format!("{other}: {}", notification.payload),
+        TYPE_PR_MERGED => (
+            format!(
+                "[Koyori] PR #{} がマージされました",
+                number(payload, "number")
+            ),
+            format!(
+                "{}/{} の PR #{}「{}」がマージされました。",
+                field(payload, "repo_owner"),
+                field(payload, "repo_name"),
+                number(payload, "number"),
+                truncate(field(payload, "title"))
+            ),
         ),
+        other => (format!("[Koyori] {other}"), format!("{other}: {payload}")),
     }
 }
 
@@ -195,7 +243,8 @@ pub fn render(
     tenant: &tenants::Model,
     app_url: &str,
 ) -> Mail {
-    let (subject, line) = subject_and_line(notification, task);
+    let (subject, line) =
+        subject_and_line(&notification.notification_type, &notification.payload, task);
     let url = link(notification, task, project, tenant, app_url);
 
     let text = match &url {
@@ -253,6 +302,7 @@ mod tests {
             milestone_id: None,
             soft_deadline: None,
             hard_deadline: None,
+            planned_start_on: None,
             estimated_minutes: None,
             is_archived: false,
             created_by: Uuid::new_v4(),
@@ -290,6 +340,9 @@ mod tests {
             owner_id: Uuid::new_v4(),
             drive_quota_bytes: None,
             require_2fa: false,
+            owner_department: None,
+            owner_position: None,
+            owner_team: None,
         }
     }
 
@@ -334,6 +387,75 @@ mod tests {
         assert!(mail.text.contains("/projects/KOY/reviews?pr=618"));
     }
 
+    /// レビュワー宛て（タスク無し）の `pr_merged` はレビュー画面のその PR へ、タスク宛てはタスクへ。
+    #[test]
+    fn pr_merged_links_to_review_or_task() {
+        let payload = serde_json::json!({
+            "number": 87, "title": "feat: OAuth", "html_url": "https://github.com/acme/api/pull/87",
+            "repo_owner": "acme", "repo_name": "api",
+        });
+        let mail = render(
+            &notification(TYPE_PR_MERGED, payload.clone()),
+            None,
+            &project(),
+            &tenant(),
+            "http://localhost:3000",
+        );
+        assert_eq!(mail.subject, "[Koyori] PR #87 がマージされました");
+        assert!(mail.text.contains("acme/api の PR #87「feat: OAuth」"));
+        assert!(mail.text.contains("/projects/KOY/reviews?pr=87"));
+
+        let mail = render(
+            &notification(TYPE_PR_MERGED, payload),
+            Some(&task("t")),
+            &project(),
+            &tenant(),
+            "http://localhost:3000",
+        );
+        assert!(
+            mail.text.contains("/projects/KOY/tasks/KOY-"),
+            "{}",
+            mail.text
+        );
+    }
+
+    /// 期限の通知は kind を日本語にし、期限を UTC の読める形で出す（生の payload を出さない）。
+    #[test]
+    fn deadline_soon_names_kind_and_deadline() {
+        let task = task("OAuth 対応");
+        let mail = render(
+            &notification(
+                TYPE_DEADLINE_SOON,
+                serde_json::json!({"kind": "hard", "deadline": "2026-11-02T03:04:05.123456Z"}),
+            ),
+            Some(&task),
+            &project(),
+            &tenant(),
+            "http://localhost:3000",
+        );
+        assert_eq!(
+            mail.subject,
+            "[Koyori] #12 OAuth 対応 の期限が近づいています"
+        );
+        assert!(
+            mail.text
+                .starts_with("#12 OAuth 対応 の Deadline は 2026-11-02 03:04 UTC です。\n"),
+            "text: {}",
+            mail.text
+        );
+        assert!(mail.text.contains("/projects/KOY/tasks/KOY-12"));
+
+        let (_, line) = subject_and_line(
+            TYPE_DEADLINE_SOON,
+            &serde_json::json!({"kind": "soft", "deadline": "2026-11-02T03:04:05Z"}),
+            Some(&task),
+        );
+        assert_eq!(
+            line,
+            "#12 OAuth 対応 の仮締めは 2026-11-02 03:04 UTC です。"
+        );
+    }
+
     /// payload が空でも、種別ごとの件名は出して落ちない。
     #[test]
     fn empty_payload_does_not_panic() {
@@ -342,8 +464,10 @@ mod tests {
             TYPE_MENTIONED,
             TYPE_COMMENT_ADDED,
             TYPE_STATUS_CHANGED,
+            TYPE_DEADLINE_SOON,
             TYPE_REVIEW_ROUND_CREATED,
             TYPE_REVIEW_FINDING_CHANGED,
+            TYPE_PR_MERGED,
             "unknown_type",
         ] {
             let mail = render(
