@@ -27,11 +27,14 @@ Rust と Node の版は `build/Dockerfile` の `ARG` で決めている。`rust-
    ```bash
    echo -n "<トークン>" | coder secret create claude-token --env CLAUDE_CODE_OAUTH_TOKEN
    ```
-3. `superset auth login` のあと `superset start --daemon --auto-update` を実行する。次回の起動からは自動で Paradev のホストとして立ち上がる
+3. Paradev は `superset auth login` のあと `superset start --daemon --auto-update` を実行する。次回の起動からは自動でホストとして立ち上がる。Paradev の API キー（`sk_live_…`）をユーザーシークレットで渡しておけば、ログインなしで最初から自動起動する
+   ```bash
+   echo -n "<API キー>" | coder secret create paradev-key --env SUPERSET_API_KEY
+   ```
 4. コミットに署名するなら GPG 鍵を取り込む
 
 ## 注意
 
 - コンテナは `privileged` で動く。統合テストのハーネス（testcontainers）と `docker compose` のために、コンテナの中で dockerd を動かしているため。信頼できる利用者だけに使わせること
-- T3 Code は nightly を入れている（安定版には CLI の配布物がまだ無い）。`t3 serve` で起動し、ブラウザからは下と同じポート転送で開く（`t3 service install` は systemd が無いので使えない）
+- T3 Code は nightly を入れている（安定版には CLI の配布物がまだ無い）。起動時に `t3 serve` が 3773 で立ち上がる（ログは `/tmp/t3-serve.log`）。ブラウザからは下のポート転送で `http://localhost:3773` を開き、ペアリング用のリンクは `t3 pair` で出す
 - 開発サーバー（3000 / 3400）は `coder port-forward <workspace> --tcp 3000:3000` か、ダッシュボードのポート転送で開く
