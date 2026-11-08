@@ -8,6 +8,7 @@
 - `apps/frontend` — Vike + Vue 3 (Pinia + TanStack Query)。`openapi.json` から API 型を生成
   - UI 部品は `@koyori-app/ui-vue`（koyori-app/ui）。新しい部品は向こうに足す
 - `docs` — 仕様書サイト（Nimbus）。ワークスペースは別で、手順は `docs/README.md`
+- `coder` — 開発用ワークスペースの Coder テンプレート（Docker）。手順は `coder/README.md`
 
 ### backend ワークスペース（依存は一方向・逆流禁止）
 
