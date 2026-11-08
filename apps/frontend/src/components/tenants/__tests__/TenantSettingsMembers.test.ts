@@ -44,7 +44,12 @@ vi.mock('@/lib/api-vue-query', () => ({
 }));
 
 import TenantSettingsMembers from '../TenantSettingsMembers.vue';
-import { accessibleText, pickerOptions, pickerTrigger } from '@/components/__tests__/picker';
+import {
+  accessibleText,
+  pickerOption,
+  pickerOptions,
+  pickerTrigger,
+} from '@/components/__tests__/picker';
 import type { components } from '@/generated/api';
 
 type TenantMemberResponse = components['schemas']['TenantMemberResponse'];
@@ -102,6 +107,13 @@ function mountMembers(
   return wrapper;
 }
 
+function actionButton(label: string) {
+  return wrapper
+    .get('dialog[open]')
+    .findAll('button')
+    .find((b) => b.text().trim() === label)!;
+}
+
 describe('TenantSettingsMembers', () => {
   beforeEach(() => {
     invitationsData.value = [];
@@ -146,6 +158,9 @@ describe('TenantSettingsMembers', () => {
     expect(other.attributes('disabled')).toBeUndefined();
     await other.trigger('click');
     await flushPromises();
+    expect(deleteMutateAsync).not.toHaveBeenCalled();
+    await actionButton('外す').trigger('click');
+    await flushPromises();
     expect(deleteMutateAsync).toHaveBeenCalledWith({
       params: { path: { tenant_id: TENANT_ID, user_id: MEMBER_ID } },
     });
@@ -163,12 +178,77 @@ describe('TenantSettingsMembers', () => {
 
     const other = wrapper.get('button[aria-label="memberを外す"]');
     await other.trigger('click');
-    await other.trigger('click');
+    await actionButton('外す').trigger('click');
+    await actionButton('外しています…').trigger('click');
+    expect(wrapper.find('dialog[open]').exists()).toBe(true);
     expect(deleteMutateAsync).toHaveBeenCalledTimes(1);
 
     finish();
     await flushPromises();
+    expect(wrapper.find('dialog[open]').exists()).toBe(false);
     expect(deleteMutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('除外は確認を経てから DELETE を送り、キャンセルすれば送らない', async () => {
+    mountMembers();
+    const remove = wrapper.get('button[aria-label="memberを外す"]');
+    await remove.trigger('click');
+    expect(deleteMutateAsync).not.toHaveBeenCalled();
+    expect(wrapper.get('dialog[open]').text()).toContain('「member」をこのテナントから外します');
+    await actionButton('キャンセル').trigger('click');
+    expect(deleteMutateAsync).not.toHaveBeenCalled();
+    expect(wrapper.find('dialog[open]').exists()).toBe(false);
+    await remove.trigger('click');
+    await actionButton('外す').trigger('click');
+    await flushPromises();
+    expect(deleteMutateAsync).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('dialog[open]').exists()).toBe(false);
+  });
+
+  it('除外に失敗したら理由をダイアログに出し、閉じない', async () => {
+    deleteMutateAsync.mockRejectedValue(new Error('failed'));
+    mountMembers();
+    await wrapper.get('button[aria-label="memberを外す"]').trigger('click');
+    await actionButton('外す').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('dialog[open] [role="alert"]').text()).toContain(
+      'メンバーを外せませんでした',
+    );
+  });
+
+  it('自分を Admin から降格するときは失う操作を説明して確認する', async () => {
+    mountMembers();
+    const select = async () => {
+      pickerOption(pickerTrigger(wrapper.element, 'adminのロール'), 'Member').click();
+      await flushPromises();
+    };
+    await select();
+    expect(updateMutateAsync).not.toHaveBeenCalled();
+    expect(wrapper.get('dialog[open]').text()).toContain('招待・ロール変更・除外ができなくなり');
+    await actionButton('キャンセル').trigger('click');
+    expect(updateMutateAsync).not.toHaveBeenCalled();
+    expect(pickerTrigger(wrapper.element, 'adminのロール').getAttribute('aria-label')).toBe(
+      'adminのロール: Admin',
+    );
+    await select();
+    await actionButton('変更する').trigger('click');
+    await flushPromises();
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_ID, user_id: ADMIN_ID } },
+      body: { role: 'Member' },
+    });
+    expect(wrapper.find('dialog[open]').exists()).toBe(false);
+  });
+
+  it('他人のロール変更は確認なしで送る', async () => {
+    mountMembers();
+    pickerOption(pickerTrigger(wrapper.element, 'memberのロール'), 'Viewer').click();
+    await flushPromises();
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_ID, user_id: MEMBER_ID } },
+      body: { role: 'Viewer' },
+    });
+    expect(wrapper.find('dialog[open]').exists()).toBe(false);
   });
 
   it('メールアドレスとロールで招待を送り、入力を空にする', async () => {
