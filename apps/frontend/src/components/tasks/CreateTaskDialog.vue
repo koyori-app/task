@@ -79,6 +79,8 @@ const props = defineProps<{
   membersError?: boolean;
   /** 開いたときのタイトルの初期値（ドキュメントの選択範囲から作るとき等） */
   initialTitle?: string;
+  /** 開いたときの担当者の初期値（ホームから作るときは自分）。候補（members）に無い ID は無視する */
+  initialAssigneeIds?: string[];
 }>();
 
 const emit = defineEmits<{
@@ -99,7 +101,18 @@ const hardDeadline = ref('');
 const estimate = ref<string | number>('');
 const priority = ref<Priority>('Medium');
 const selectedLabelIds = ref<string[]>([]);
-const selectedAssigneeIds = ref<string[]>([]);
+const initialAssigneeIds = computed(() => {
+  const ids = props.initialAssigneeIds ?? [];
+  if (!props.members) return ids;
+  const known = new Set(props.members.map((user) => user.id));
+  return ids.filter((id) => known.has(id));
+});
+const selectedAssigneeIds = ref<string[]>([...initialAssigneeIds.value]);
+
+/** 並びに依らず同じ ID の集合か */
+function sameIds(a: string[], b: string[]) {
+  return a.length === b.length && a.every((id) => b.includes(id));
+}
 const validationMessage = ref<string | null>(null);
 // 文字列（YYYY-MM-DD）同士の比較で足りる。サーバーは前後関係を検証しない
 const plannedStartAfterSoft = computed(
@@ -193,6 +206,7 @@ watch(
   () => props.open,
   (open) => {
     if (open && props.initialTitle) title.value = props.initialTitle;
+    if (open) selectedAssigneeIds.value = [...initialAssigneeIds.value];
   },
   { immediate: true },
 );
@@ -238,7 +252,7 @@ watch(
 
 /**
  * 入力があるか。フォームの全項目を、開いた直後の値（title は initialTitle、他は resetForm が入れる値）と
- * 比べる。項目を足したら resetForm とここを揃えること。あれば閉じる前に確認する
+ * 比べる（担当者は initialAssigneeIds との差）。項目を足したら resetForm とここを揃えること。あれば閉じる前に確認する
  */
 const dirty = computed(
   () =>
@@ -251,7 +265,7 @@ const dirty = computed(
     String(estimate.value) !== '' ||
     priority.value !== 'Medium' ||
     selectedLabelIds.value.length > 0 ||
-    selectedAssigneeIds.value.length > 0,
+    !sameIds(selectedAssigneeIds.value, initialAssigneeIds.value),
 );
 const discardConfirmOpen = ref(false);
 
@@ -316,7 +330,7 @@ function resetForm() {
   estimate.value = '';
   priority.value = 'Medium';
   selectedLabelIds.value = [];
-  selectedAssigneeIds.value = [];
+  selectedAssigneeIds.value = [...initialAssigneeIds.value];
   validationMessage.value = null;
   requestError.value = null;
   successMessage.value = null;

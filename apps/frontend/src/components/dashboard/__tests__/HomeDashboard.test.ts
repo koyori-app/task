@@ -229,6 +229,38 @@ describe('HomeDashboard', () => {
     ).toBeDefined();
   });
 
+  it('作成したタスクへのリンクを出して一覧を再取得し、作成画面を開き直すと消す', async () => {
+    const { wrapper, fetch } = setup((req) => respond(req, fixture()));
+    await flushPromises();
+    expect(wrapper.find('[role="status"] a').exists()).toBe(false);
+    const dashboardCalls = () =>
+      fetch.mock.calls.filter(([req]) => req.url.includes('/dashboard')).length;
+    const before = dashboardCalls();
+
+    wrapper
+      .getComponent({ name: 'DashboardCreateTask' })
+      .vm.$emit('created', { id: 'new', seq_id: 12 }, project);
+    await flushPromises();
+
+    const link = wrapper.get('[role="status"] a');
+    expect(link.attributes('href')).toBe('/acme/projects/KOY/tasks/KOY-12');
+    expect(link.text()).toBe('KOY-12');
+    expect(wrapper.get('[role="status"]').text()).toContain('を作成しました');
+    expect(dashboardCalls()).toBeGreaterThan(before);
+
+    pressT();
+    await flushPromises();
+    expect(wrapper.find('[role="status"] a').exists()).toBe(false);
+  });
+
+  it('現在のユーザーを作成画面へ渡す', async () => {
+    const { wrapper } = setup((req) => respond(req, fixture()));
+    await flushPromises();
+    expect(wrapper.getComponent({ name: 'DashboardCreateTask' }).props('currentUserId')).toBe(
+      'user',
+    );
+  });
+
   it('T でタスク作成モーダルを開く', async () => {
     const { wrapper } = setup((req) => respond(req, fixture()));
     await flushPromises();

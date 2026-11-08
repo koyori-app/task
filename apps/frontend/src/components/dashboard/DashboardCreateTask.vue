@@ -11,12 +11,18 @@ import {
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
 import { Button, Dialog } from '@koyori-app/ui-vue';
 
+type CreatedTask = components['schemas']['TaskDetailResponse'];
 const props = defineProps<{
   open: boolean;
   tenantId: TenantUuid;
   projects: components['schemas']['ProjectResponse'][];
+  /** 担当者の初期値にする利用者（ホームでは自分） */
+  currentUserId?: string | null;
 }>();
-const emit = defineEmits<{ 'update:open': [open: boolean]; created: [] }>();
+const emit = defineEmits<{
+  'update:open': [open: boolean];
+  created: [task: CreatedTask, project: components['schemas']['ProjectResponse']];
+}>();
 const selectedId = ref('');
 const editing = ref(false);
 const project = computed(() => props.projects.find((p) => p.id === selectedId.value));
@@ -67,6 +73,12 @@ watch(
 function close() {
   emit('update:open', false);
 }
+// close() で selectedId が空になるので、先にプロジェクトを捕まえる
+function onCreated(task: CreatedTask) {
+  const created = project.value;
+  close();
+  if (created) emit('created', task, created);
+}
 </script>
 
 <template>
@@ -115,12 +127,10 @@ function close() {
     :members="members.data.value"
     :members-loading="members.isLoading.value"
     :members-error="members.isError.value && !members.data.value"
+    :initial-assignee-ids="currentUserId ? [currentUserId] : []"
     @update:open="emit('update:open', $event)"
     @retry-labels="labels.refetch()"
     @retry-members="members.refetch()"
-    @created="
-      close();
-      emit('created');
-    "
+    @created="onCreated"
   />
 </template>

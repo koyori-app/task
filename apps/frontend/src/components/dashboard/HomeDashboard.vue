@@ -15,7 +15,7 @@ import {
 import type { components } from '@/generated/api';
 import type { TenantUuid } from '@/lib/api-ids';
 import { fetchClient, useMeQuery } from '@/lib/api-vue-query';
-import { taskDetailHref, taskListHref, PRIORITY_CONFIG } from '@/lib/task-display';
+import { taskDetailHref, taskListHref, taskSeqKey, PRIORITY_CONFIG } from '@/lib/task-display';
 import { activityActor, activityText, relativeTime } from '@/lib/task-activity';
 import { useNow } from '@/composables/useNow';
 import { useHydrated } from '@/composables/useHydrated';
@@ -42,6 +42,7 @@ const pageSize = 5;
 const createOpen = ref(false);
 const pending = ref<string[]>([]);
 const mutationError = ref('');
+const createdTask = ref<{ key: string; href: string } | null>(null);
 const now = useNow();
 const hydrated = useHydrated();
 const me = useMeQuery();
@@ -164,6 +165,19 @@ function deadline(task: DashboardTask['task']) {
     overdue: !!date && date < today.value,
   };
 }
+function onCreated(
+  task: components['schemas']['TaskDetailResponse'],
+  project: components['schemas']['ProjectResponse'],
+) {
+  createdTask.value = {
+    key: taskSeqKey(project.key, task.seq_id),
+    href: taskDetailHref(props.tenantSlug, project.key, task.seq_id),
+  };
+  void refresh();
+}
+watch(createOpen, (open) => {
+  if (open) createdTask.value = null;
+});
 async function refresh() {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: ['get', DASHBOARD_PATH] }),
@@ -301,6 +315,12 @@ async function complete(item: DashboardTask) {
           </div>
           <p v-if="mutationError" role="alert" class="mt-3 text-xs text-destructive">
             {{ mutationError }}
+          </p>
+          <p v-if="createdTask" role="status" class="mt-3 text-xs text-muted-foreground">
+            <a :href="createdTask.href" class="font-medium text-foreground hover:underline">{{
+              createdTask.key
+            }}</a>
+            を作成しました
           </p>
           <p
             v-if="query.isPlaceholderData.value"
@@ -542,7 +562,8 @@ async function complete(item: DashboardTask) {
         v-model:open="createOpen"
         :tenant-id="tenantId"
         :projects="data.projects.map((p) => p.project)"
-        @created="refresh"
+        :current-user-id="me.data.value?.id"
+        @created="onCreated"
       />
     </template>
   </div>
