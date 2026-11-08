@@ -452,7 +452,7 @@ async fn update_summary(
         review_findings_url(&state.db, &base, job.project_id, job.pr_number).await?
     };
 
-    let snapshot = service::reviews::summary_snapshot(
+    let mut snapshot = service::reviews::summary_snapshot(
         &state.db,
         job.project_id,
         repo,
@@ -470,6 +470,18 @@ async fn update_summary(
             "no round for the linked repository; skipping review summary"
         );
         return Ok(());
+    }
+
+    // 指摘が片付いて今の head を見たラウンドがあっても、前の head で task が承認を
+    // 取り消した人の変更要求は GitHub に残る（push で取り下げられるのは承認だけ）。
+    // その人が今の head にラウンドを出すまではマージ可にしない
+    if let (true, true, Some(commit_sha)) = (
+        pr_is_open,
+        snapshot.clean_and_fresh(),
+        snapshot.latest_head_sha.clone(),
+    ) {
+        snapshot.awaiting_rereview =
+            awaiting_rereview(job, state, integration, repo, &token, &commit_sha).await?;
     }
 
     // マーカーはプロジェクトごと。同じリポジトリを見る別プロジェクトのコメントと
@@ -545,15 +557,75 @@ async fn update_summary(
                 tracing::warn!(error = %e, project_id = %job.project_id, pr = job.pr_number, "load reviewers failed; skipping approval restoration");
             }
         }
-    } else if let (true, Some(true), Some(commit_sha)) = (
+    } else if let (true, true, Some(true), Some(commit_sha)) = (
         pr_is_open,
+        snapshot.blocking > 0,
         snapshot.head_is_fresh(),
         snapshot.latest_head_sha.as_deref(),
     ) {
-        // head が違うときは何もしない（push 後の古い承認は branch protection に任せる）
+        // head が違うときは何もしない（push 後の古い承認は branch protection に任せる）。
+        // 再レビュー待ちだけのときも取り消さない（取り消しの本文は未解決の指摘を理由にしている）
         revoke_approvals(job, state, integration, repo, &snapshot, commit_sha).await;
     }
     Ok(())
+}
+
+/// task が承認を取り消したまま（最後の決定が目印付きの `REQUEST_CHANGES`）で、
+/// `commit_sha` にラウンドを出していない人の GitHub login を返す。
+///
+/// その人の変更要求は、本人が承認で上書きするまで保護ブランチでマージを止める。
+/// 新しい head を見ていない人を代わりに承認はしないので、再レビューを待つ。
+/// 今の head にラウンドを出した人は、マージ可になれば承認し直す（`approve_as_reviewer`）。
+///
+/// レビュー一覧の取得失敗や打ち切りはベストエフォートで、待ちなしとして扱い warn に残す。
+async fn awaiting_rereview(
+    job: &ReviewSummaryJob,
+    state: &JobState,
+    integration: &github_integrations::Model,
+    repo: &service::reviews::RepoRef,
+    app_token: &str,
+    commit_sha: &str,
+) -> Result<Vec<String>, BoxDynError> {
+    let marker = service::github::pr_comments::revoke_marker(job.project_id);
+    let revoked = match service::github::pr_comments::revoked_reviewers(
+        &state.http_client,
+        app_token,
+        &integration.repo_owner,
+        &integration.repo_name,
+        job.pr_number,
+        &marker,
+    )
+    .await
+    {
+        Ok(Some(revoked)) => revoked,
+        Ok(None) => {
+            tracing::warn!(project_id = %job.project_id, pr = job.pr_number, "too many reviews to find revoked reviewers; not waiting for re-review");
+            return Ok(Vec::new());
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, project_id = %job.project_id, pr = job.pr_number, "list reviews failed; not waiting for re-review");
+            return Ok(Vec::new());
+        }
+    };
+    if revoked.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let reviewers = service::reviews::reviewer_ids_at_head(
+        &state.db,
+        job.project_id,
+        repo,
+        job.pr_number,
+        commit_sha,
+    )
+    .await?;
+    let reviewed_here =
+        service::oauth::github_app::github_app_user_ids(&state.db, &reviewers).await?;
+    Ok(revoked
+        .into_iter()
+        .filter(|r| !reviewed_here.contains(&r.github_user_id))
+        .map(|r| r.login)
+        .collect())
 }
 
 /// レビュワー本人の名義で、PR を `commit_sha` に対して Approve する。

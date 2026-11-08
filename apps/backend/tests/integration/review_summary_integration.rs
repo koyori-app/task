@@ -1209,6 +1209,9 @@ struct Scenario {
     reviews: Option<ReviewsFn>,
     /// 同じ head への 2 本目のラウンド。`by_other` なら別のレビュワー（連携済み）が出す
     second_round: Option<(serde_json::Value, bool)>,
+    /// 1 本目のラウンドがレビューした commit（既定は今の head の `REVIEWED_HEAD`）。
+    /// 前の head を見た人のラウンドを作るのに使う
+    first_head: Option<&'static str>,
 }
 
 const OTHER_GITHUB_ID: i64 = 9002;
@@ -1303,7 +1306,7 @@ async fn scenario(
             ),
             serde_json::json!({
                 "pr_number": PR_NUMBER,
-                "head_sha": REVIEWED_HEAD,
+                "head_sha": opts.first_head.unwrap_or(REVIEWED_HEAD),
                 "summary": "総評",
                 "findings": findings,
             }),
@@ -1711,6 +1714,7 @@ async fn an_already_revoked_approval_is_not_revoked_twice() {
                 ])
             })),
             second_round: Some((high(), false)),
+            ..Default::default()
         },
     )
     .await;
@@ -1817,6 +1821,7 @@ async fn nothing_is_revoked_without_a_live_approval_or_a_fresh_open_pr() {
             Scenario {
                 reviews: Some(Box::new(move |_, _| reviews.clone())),
                 second_round: Some((high(), false)),
+                ..Default::default()
             },
         )
         .await;
@@ -1978,6 +1983,7 @@ async fn every_revoked_reviewer_is_approved_again_when_merge_ready() {
                 })),
                 // 最新ラウンド（B）は指摘なし
                 second_round: Some((serde_json::json!([]), true)),
+                ..Default::default()
             },
         )
         .await;
@@ -1993,6 +1999,145 @@ async fn every_revoked_reviewer_is_approved_again_when_merge_ready() {
         expected.sort();
         assert_eq!(tokens, expected, "{case}");
     }
+}
+
+/// 前の head（push 前）を指す commit。
+const OLD_HEAD: &str = "1111111111111111111111111111111111111111";
+
+fn review_on(id: i64, commit: &str, state: &str, body: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "user": { "id": id, "login": "reviewer-a", "type": "User" },
+        "commit_id": commit,
+        "state": state,
+        "body": body,
+    })
+}
+
+/// 投稿した要約コメントの本文（新規投稿の POST）。
+async fn summary_comment_body(mock_server: &MockServer) -> String {
+    let comments: Vec<String> = bodies_of(mock_server, wiremock::http::Method::POST)
+        .await
+        .into_iter()
+        .filter(|b| b.get("event").is_none())
+        .filter_map(|b| b.get("body").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    assert_eq!(comments.len(), 1, "要約コメントは 1 件");
+    comments.into_iter().next().expect("comment")
+}
+
+/// A が前の head（h1）で承認し、task がそれを取り消した後、push された h2 を B だけが
+/// レビューしてマージ可になった場合。A の変更要求は GitHub に残ってマージを止めるので、
+/// task も「マージ可」にせず A の再レビューを待つ。h2 を見ていない A を承認しない。
+/// A の最後の決定が人の変更要求なら task の取り消しではないので待たない（対照）。
+#[serial_test::serial]
+#[tokio::test]
+async fn a_reviewer_revoked_on_an_older_head_must_review_the_new_head() {
+    for (case, a_last_body, waits) in [
+        (
+            "task が取り消した",
+            Some("<!-- koyori-approval-revoked:PROJECT -->"),
+            true,
+        ),
+        ("人の変更要求", Some("直して"), false),
+    ] {
+        let mock_server = MockServer::start().await;
+        scenario(
+            &mock_server,
+            serde_json::json!([]),
+            LINKED,
+            Scenario {
+                reviews: Some(Box::new(move |marker, _| {
+                    serde_json::json!([
+                        review_on(REVIEWER_GITHUB_ID, OLD_HEAD, "APPROVED", None),
+                        review_on(
+                            REVIEWER_GITHUB_ID,
+                            OLD_HEAD,
+                            "CHANGES_REQUESTED",
+                            a_last_body
+                                .map(|b| b
+                                    .replace("<!-- koyori-approval-revoked:PROJECT -->", marker))
+                                .as_deref(),
+                        ),
+                    ])
+                })),
+                // B が h2（今の head）を指摘なしでレビューした
+                second_round: Some((serde_json::json!([]), true)),
+                first_head: Some(OLD_HEAD),
+            },
+        )
+        .await;
+
+        let posted = approvals(&mock_server).await;
+        let body = summary_comment_body(&mock_server).await;
+        if waits {
+            assert!(
+                posted
+                    .iter()
+                    .all(|(_, t)| t != &format!("Bearer {REVIEWER_TOKEN}")),
+                "{case}: h2 を見ていない A を承認しない"
+            );
+            assert!(
+                posted.is_empty(),
+                "{case}: マージ可でないので B も承認しない"
+            );
+            assert!(!body.contains("マージ可"), "{case}: {body}");
+            assert!(body.contains("再レビュー待ち"), "{case}: {body}");
+            assert!(body.contains("`reviewer-a`"), "{case}: {body}");
+        } else {
+            assert_eq!(
+                posted,
+                vec![(
+                    serde_json::json!({ "event": "APPROVE", "commit_id": REVIEWED_HEAD }),
+                    format!("Bearer {OTHER_TOKEN}"),
+                )],
+                "{case}: 最新ラウンドの B だけを承認する"
+            );
+            assert!(body.contains("マージ可"), "{case}: {body}");
+        }
+    }
+}
+
+/// 前の head で task に取り消された A が、今の head にマージ可のラウンドを出したら、
+/// A の名義で今の head を承認して変更要求を上書きする。
+#[serial_test::serial]
+#[tokio::test]
+async fn a_revoked_reviewer_is_approved_after_reviewing_the_new_head() {
+    let mock_server = MockServer::start().await;
+    scenario(
+        &mock_server,
+        serde_json::json!([]),
+        LINKED,
+        Scenario {
+            reviews: Some(Box::new(|marker, _| {
+                serde_json::json!([
+                    review_on(REVIEWER_GITHUB_ID, OLD_HEAD, "APPROVED", None),
+                    review_on(
+                        REVIEWER_GITHUB_ID,
+                        OLD_HEAD,
+                        "CHANGES_REQUESTED",
+                        Some(marker)
+                    ),
+                ])
+            })),
+            // A 自身が h2 を指摘なしでレビューした
+            second_round: Some((serde_json::json!([]), false)),
+            first_head: Some(OLD_HEAD),
+        },
+    )
+    .await;
+
+    assert_eq!(
+        approvals(&mock_server).await,
+        vec![(
+            serde_json::json!({ "event": "APPROVE", "commit_id": REVIEWED_HEAD }),
+            format!("Bearer {REVIEWER_TOKEN}"),
+        )]
+    );
+    assert!(
+        summary_comment_body(&mock_server)
+            .await
+            .contains("マージ可")
+    );
 }
 
 /// レビューが上限（500 件）を超えて最後の決定が分からないときは、取り消さない。
