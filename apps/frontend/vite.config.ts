@@ -209,6 +209,10 @@ export default defineConfig({
     },
     projects: [
       {
+        // vitest 5 から inline の project は root の設定を受け継ぐ（extends の既定が true になった）。
+        // unit は happy-dom で組むため、root の vike や tailwind の plugin を持ち込まず、これまでどおり
+        // 自前の plugin と alias だけで組む
+        extends: false,
         plugins: [vue()],
         resolve: {
           alias: {
