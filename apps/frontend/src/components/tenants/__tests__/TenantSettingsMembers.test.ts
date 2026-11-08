@@ -108,10 +108,12 @@ function mountMembers(
 }
 
 function actionButton(label: string) {
-  return wrapper
+  const button = wrapper
     .get('dialog[open]')
     .findAll('button')
-    .find((b) => b.text().trim() === label)!;
+    .find((b) => b.text().trim() === label);
+  if (!button) throw new Error(`button "${label}" not found`);
+  return button;
 }
 
 describe('TenantSettingsMembers', () => {
@@ -224,7 +226,15 @@ describe('TenantSettingsMembers', () => {
     };
     await select();
     expect(updateMutateAsync).not.toHaveBeenCalled();
-    expect(wrapper.get('dialog[open]').text()).toContain('招待・ロール変更・除外ができなくなり');
+    const text = wrapper.get('dialog[open]').text();
+    for (const lost of [
+      '招待・ロール変更・除外',
+      'BOT の管理',
+      '共有プロジェクトの作成・設定変更・削除',
+      'PAT の発行',
+    ]) {
+      expect(text).toContain(lost);
+    }
     await actionButton('キャンセル').trigger('click');
     expect(updateMutateAsync).not.toHaveBeenCalled();
     expect(pickerTrigger(wrapper.element, 'adminのロール').getAttribute('aria-label')).toBe(
