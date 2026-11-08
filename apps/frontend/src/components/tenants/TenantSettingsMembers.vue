@@ -699,7 +699,9 @@ async function confirmRemove() {
           :description="removeDescription"
           :on-close="onRemoveClose"
         >
-          <p v-if="removeError" role="alert" class="text-sm text-destructive">{{ removeError }}</p>
+          <p v-if="removeError && removeTarget" role="alert" class="text-sm text-destructive">
+            {{ removeError }}
+          </p>
           <template #actions>
             <Button
               type="button"
@@ -723,7 +725,9 @@ async function confirmRemove() {
           :description="demoteDescription"
           :on-close="onDemoteClose"
         >
-          <p v-if="roleError" role="alert" class="text-sm text-destructive">{{ roleError }}</p>
+          <p v-if="roleError && demoteTarget" role="alert" class="text-sm text-destructive">
+            {{ roleError }}
+          </p>
           <template #actions>
             <Button
               type="button"

@@ -263,6 +263,18 @@ describe('TenantSettingsMembers', () => {
     expect(wrapper.find('dialog[open]').exists()).toBe(false);
   });
 
+  it('他人のロール変更の失敗は一覧に 1 回だけ出し、閉じたダイアログには描かない', async () => {
+    updateMutateAsync.mockRejectedValue(new Error('failed'));
+    mountMembers();
+    pickerOption(pickerTrigger(wrapper.element, 'memberのロール'), 'Viewer').click();
+    await flushPromises();
+    const alerts = wrapper
+      .findAll('[role="alert"]')
+      .filter((alert) => alert.text().includes('ロールを変更できませんでした'));
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.element.closest('dialog')).toBeNull();
+  });
+
   it('メールアドレスとロールで招待を送り、入力を空にする', async () => {
     const wrapper = mountMembers();
 
