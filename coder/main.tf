@@ -38,6 +38,15 @@ resource "coder_agent" "main" {
     # 統合テストのハーネス（testcontainers）と docker compose が使う。コンテナは privileged
     sudo sh -c 'nohup dockerd >/var/log/dockerd.log 2>&1 &'
 
+    # Tailscale。ログイン状態はホームに残すので、1 度 tailscale up すれば次回から自動でつながる。
+    # TS_AUTHKEY（ユーザーシークレット）があれば未ログインのときに自動でログインする
+    mkdir -p ~/.local/share/tailscale
+    sudo sh -c 'nohup tailscaled --state=/home/coder/.local/share/tailscale/tailscaled.state >/tmp/tailscaled.log 2>&1 &'
+    if [ -n "$${TS_AUTHKEY:-}" ]; then
+      for i in $(seq 10); do tailscale status >/dev/null 2>&1 && break; sleep 1; done
+      tailscale status >/dev/null 2>&1 || sudo tailscale up --auth-key="$TS_AUTHKEY" --hostname="$(hostname)" || echo "Tailscale にログインできなかった"
+    fi
+
     # 自己更新するツールはホームのボリュームに入れる（イメージに入れるとボリュームに隠れる）
     command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash
     command -v codex >/dev/null || npm install -g @openai/codex

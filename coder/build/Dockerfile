@@ -20,6 +20,13 @@ RUN apt-get update \
         docker.io docker-compose-v2 docker-buildx \
     && rm -rf /var/lib/apt/lists/*
 
+# Tailscale（公式の apt リポジトリ）。状態は起動スクリプトがホームに置く
+RUN curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg -o /usr/share/keyrings/tailscale-archive-keyring.gpg \
+    && curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.tailscale-keyring.list -o /etc/apt/sources.list.d/tailscale.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends tailscale \
+    && rm -rf /var/lib/apt/lists/*
+
 # 起動スクリプトが非対話で clone できるよう、GitHub のホスト鍵（公式 API が公開しているもの）を登録する
 RUN curl -fsSL https://api.github.com/meta | jq -r '.ssh_keys[] | "github.com \(.)"' > /etc/ssh/ssh_known_hosts
 
