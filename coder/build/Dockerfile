@@ -50,6 +50,12 @@ ENV RUSTUP_HOME=/opt/rustup \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     LANG=C.UTF-8
 
+# Python と uv（uv は必要な版の Python も自分で入れられる）
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-venv python3-pip \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin INSTALLER_NO_MODIFY_PATH=1 sh
+
 USER coder
 WORKDIR /home/coder
 
