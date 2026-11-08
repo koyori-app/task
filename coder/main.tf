@@ -47,10 +47,6 @@ resource "coder_agent" "main" {
     command -v t3 >/dev/null || curl -fsSL https://t3.codes/install.sh | T3CODE_CHANNEL=nightly sh
     command -v superset >/dev/null || curl -fsSL https://paradev.com/cli/install.sh | sh
 
-    # 鍵が GitHub に未登録なら失敗する。ワークスペース自体は使えるので止めない
-    [ -d ~/works/task ] || git clone git@github.com:koyori-app/task.git ~/works/task \
-      || echo "clone に失敗した。Coder の SSH 公開鍵を GitHub に登録してから手で clone する"
-
     # superset auth login 済みなら、このワークスペースを Paradev のホストとして起動する
     if superset auth whoami >/dev/null 2>&1; then
       superset start --daemon --auto-update || echo "Paradev のホストを起動できなかった"
@@ -88,6 +84,17 @@ resource "coder_agent" "main" {
     interval     = 60
     timeout      = 1
   }
+}
+
+# See https://registry.coder.com/modules/coder/git-clone
+# Coder の SSH 鍵（coder gitssh）で認証する。鍵が GitHub に未登録なら失敗する
+module "git-clone" {
+  count    = data.coder_workspace.me.start_count
+  source   = "registry.coder.com/coder/git-clone/coder"
+  version  = "2.0.5"
+  agent_id = coder_agent.main.id
+  url      = "git@github.com:koyori-app/task.git"
+  base_dir = "~/works"
 }
 
 resource "docker_image" "main" {
