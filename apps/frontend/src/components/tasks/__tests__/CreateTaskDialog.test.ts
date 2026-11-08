@@ -1532,4 +1532,56 @@ describe('CreateTaskDialog initialAssigneeIds', () => {
     expect(assigneeTrigger().textContent).toContain('yupix');
     wrapper.unmount();
   });
+
+  it('候補が未取得の間は初期担当者を入れず、送信でも assignees を送らない', async () => {
+    const wrapper = mountDialog(queryClient, { initialAssigneeIds: ['user-1'] });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('候補の取得前');
+
+    await submit();
+
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('候補が後から届くと初期担当者が入り、確認せずに閉じる', async () => {
+    const wrapper = mountDialog(queryClient, {
+      membersLoading: true,
+      initialAssigneeIds: ['user-1'],
+    });
+    await nextTick();
+
+    await wrapper.setProps({ members, membersLoading: false });
+    await nextTick();
+    expect(assigneeTrigger().textContent).toContain('yupix');
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it('候補が届いたあとに外した担当者は、候補が再取得されても入れ直さない', async () => {
+    // 候補が届く前は担当者の欄が出ず、利用者が触れない。触れるのは届いたあとなので、
+    // 触ったあとに候補の配列が差し替わる（再取得）場合で上書きされないことを確かめる
+    const wrapper = mountDialog(queryClient, {
+      membersLoading: true,
+      initialAssigneeIds: ['user-1'],
+    });
+    await wrapper.setProps({ members, membersLoading: false });
+    await nextTick();
+    pickerOption(assigneeTrigger(), 'yupix').click();
+    await nextTick();
+    expect(assigneeTrigger().textContent).not.toContain('yupix');
+
+    await wrapper.setProps({ members: members.map((user) => ({ ...user })) });
+    await nextTick();
+
+    expect(assigneeTrigger().textContent).not.toContain('yupix');
+    await new DOMWrapper(getTitleInput()).setValue('外したまま');
+    await submit();
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
+    wrapper.unmount();
+  });
 });
