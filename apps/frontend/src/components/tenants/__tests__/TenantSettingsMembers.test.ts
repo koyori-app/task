@@ -232,6 +232,8 @@ describe('TenantSettingsMembers', () => {
       'BOT の管理',
       '共有プロジェクトの作成・設定変更・削除とメンバー・Webhook の管理',
       'PAT の発行',
+      'メンバーと Webhook の管理だけは続けられます',
+      '他の Admin が再送するまで承諾できなくなります',
     ]) {
       expect(text).toContain(lost);
     }
