@@ -13,7 +13,7 @@ describe('DashboardProjectsEmpty', () => {
     const wrapper = mount(DashboardProjectsEmpty, {
       props: { tenantSlug: 'acme', canCreateProject: true },
     });
-    expect(wrapper.get('button').text()).toBe('最初のプロジェクトを作成');
+    expect(wrapper.get('button').text()).toBe('プロジェクトを作成');
     await wrapper.get('button').trigger('click');
     expect(navigateSpy).toHaveBeenCalledWith('/acme/projects/new');
   });
@@ -23,7 +23,7 @@ describe('DashboardProjectsEmpty', () => {
       props: { tenantSlug: 'acme', canCreateProject: false },
     });
     expect(wrapper.find('button').exists()).toBe(false);
-    expect(wrapper.text()).toContain('管理者に最初のプロジェクトの作成を依頼してください。');
+    expect(wrapper.text()).toContain('管理者に依頼してください。');
     expect(navigateSpy).not.toHaveBeenCalled();
   });
 });

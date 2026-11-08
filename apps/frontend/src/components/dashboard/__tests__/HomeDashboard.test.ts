@@ -79,7 +79,7 @@ const createOpen = (wrapper: ReturnType<typeof setup>['wrapper']) =>
   wrapper.getComponent({ name: 'DashboardCreateTask' }).props('open');
 
 describe('HomeDashboard', () => {
-  it.each([true, undefined])(
+  it.each([true, false, undefined])(
     'プロジェクトが 0 件なら権限 %s に応じた初回案内を出す',
     async (canCreateProject) => {
       const { wrapper } = setup((req) => respond(req, { ...fixture(), projects: [] }), {
