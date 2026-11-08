@@ -20,6 +20,9 @@ RUN apt-get update \
         docker.io docker-compose-v2 docker-buildx \
     && rm -rf /var/lib/apt/lists/*
 
+# 起動スクリプトが非対話で clone できるよう、GitHub のホスト鍵（公式 API が公開しているもの）を登録する
+RUN curl -fsSL https://api.github.com/meta | jq -r '.ssh_keys[] | "github.com \(.)"' > /etc/ssh/ssh_known_hosts
+
 # pnpm は corepack が package.json の packageManager の版を使う
 RUN arch="$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" \
     && curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${arch}.tar.xz" \
