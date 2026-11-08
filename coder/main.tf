@@ -66,6 +66,11 @@ resource "coder_agent" "main" {
     [ -d ~/ai-skill ] || git clone -q git@github.com:yupix/ai-skill.git ~/ai-skill
     ~/ai-skill/install.sh
 
+    # Paradev はホストの id を /etc/machine-id から作る。コンテナのものは起動ごとに変わる（空）ので、
+    # ホームに 1 度だけ作った値を置き直し、id が変わらないようにする
+    [ -s ~/.local/share/machine-id ] || tr -d - < /proc/sys/kernel/random/uuid > ~/.local/share/machine-id
+    sudo cp ~/.local/share/machine-id /etc/machine-id
+
     # superset auth login 済み（または SUPERSET_API_KEY あり）なら、このワークスペースを Paradev のホストとして起動する
     if superset auth whoami >/dev/null 2>&1; then
       superset start --daemon --auto-update || echo "Paradev のホストを起動できなかった"
