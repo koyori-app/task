@@ -786,3 +786,222 @@ async fn cursor_pages_without_gaps_and_repeats_sprints_and_milestones() {
     assert_eq!(ids(&exact).len(), 3);
     assert!(exact["next_cursor"].is_null());
 }
+
+fn unscheduled_url(tenant: Uuid, query: &str) -> String {
+    format!("/v1/tenants/{tenant}/schedule/unscheduled?{query}")
+}
+async fn get_unscheduled(app: &TestApp, tenant: Uuid, query: &str) -> Value {
+    let res = app.get_with_session(&unscheduled_url(tenant, query)).await;
+    if res.status() != StatusCode::OK {
+        panic!(
+            "unscheduled: {} {}",
+            res.status(),
+            res.text().await.unwrap()
+        );
+    }
+    res.json().await.unwrap()
+}
+
+#[tokio::test]
+async fn unscheduled_returns_only_tasks_without_any_date() {
+    let mut app = TestApp::new().await;
+    let (user, tp, todo, done) = setup(&mut app).await;
+    let t = tp.tenant_id;
+    let p = tp.project_id;
+    let bare = task(&app, p, todo, user.id, None, None, None).await;
+    let bare2 = task(&app, p, todo, user.id, None, None, None).await;
+    task(&app, p, todo, user.id, Some(d(15)), None, None).await;
+    task(&app, p, todo, user.id, None, Some(at(15)), None).await;
+    task(&app, p, todo, user.id, None, None, Some(at(15))).await;
+    let bare_done = task(&app, p, done, user.id, None, None, None).await;
+    let archived = task(&app, p, todo, user.id, None, None, None).await;
+    execute_sql(
+        &app.state.db,
+        "UPDATE tasks SET is_archived = true WHERE id = $1",
+        vec![archived.into()],
+    )
+    .await;
+    let deleted = task(&app, p, todo, user.id, None, None, None).await;
+    execute_sql(
+        &app.state.db,
+        "UPDATE tasks SET deleted_at = now() WHERE id = $1",
+        vec![deleted.into()],
+    )
+    .await;
+    assign(&app, bare, user.id, "assignee").await;
+
+    // 既定では完了を除く
+    let body = get_unscheduled(&app, t, "").await;
+    assert_eq!(got(&body), set(&[bare, bare2]));
+    assert_eq!(body["total"], 2);
+    assert_members_match_assignees(&body);
+    // include_done=true で完了も入る
+    let with_done = get_unscheduled(&app, t, "include_done=true").await;
+    assert_eq!(got(&with_done), set(&[bare, bare2, bare_done]));
+    assert_eq!(with_done["total"], 3);
+    // 担当者で絞る
+    let mine = get_unscheduled(&app, t, &format!("user_id={}", user.id)).await;
+    assert_eq!(got(&mine), set(&[bare]));
+    assert_eq!(mine["total"], 1);
+    // 期間を持つものは予定の側に出る（対照）
+    assert!(!got(&get(&app, t, RANGE).await).contains(&bare.to_string()));
+}
+
+#[tokio::test]
+async fn unscheduled_follows_project_visibility_and_project_filter() {
+    let mut app = TestApp::new().await;
+    let (owner, tp, todo, _) = setup(&mut app).await;
+    let t = tp.tenant_id;
+    let viewer = app.insert_user_default().await;
+    let guest = app.insert_user_default().await;
+    let outsider = app.insert_user_default().await;
+    app.insert_tenant_project(outsider.id).await;
+    execute_sql(
+        &app.state.db,
+        "INSERT INTO tenant_members (id,tenant_id,user_id,role) VALUES ($1,$2,$3,'Member')",
+        vec![Uuid::new_v4().into(), t.into(), viewer.id.into()],
+    )
+    .await;
+    // 公開のもう一つのプロジェクト（プロジェクトの絞りで混ざらぬことを見る）
+    let other = insert_extra_project(&app, t).await;
+    let other_todo = status(&app, other, false).await;
+    // メンバー指定のあるプロジェクト（viewer は非メンバー、guest は明示メンバー）
+    let restricted = insert_extra_project(&app, t).await;
+    let restricted_todo = status(&app, restricted, false).await;
+    // guest はテナントのメンバーでなく、このプロジェクトの明示メンバーだけ（客分）
+    execute_sql(
+        &app.state.db,
+        "INSERT INTO project_members (id,project_id,user_id,role) VALUES ($1,$2,$3,'Member')",
+        vec![Uuid::new_v4().into(), restricted.into(), guest.id.into()],
+    )
+    .await;
+    // viewer の個人プロジェクト
+    let personal = insert_extra_project(&app, t).await;
+    let personal_todo = status(&app, personal, false).await;
+    execute_sql(
+        &app.state.db,
+        "UPDATE projects SET is_personal = true, personal_owner_id = $1 WHERE id = $2",
+        vec![viewer.id.into(), personal.into()],
+    )
+    .await;
+    let public_task = task(&app, tp.project_id, todo, owner.id, None, None, None).await;
+    let other_task = task(&app, other, other_todo, owner.id, None, None, None).await;
+    let restricted_task = task(
+        &app,
+        restricted,
+        restricted_todo,
+        owner.id,
+        None,
+        None,
+        None,
+    )
+    .await;
+    let personal_task = task(&app, personal, personal_todo, viewer.id, None, None, None).await;
+
+    // オーナー: 個人でないプロジェクトの全部
+    let by_owner = get_unscheduled(&app, t, "").await;
+    assert_eq!(
+        got(&by_owner),
+        set(&[public_task, other_task, restricted_task])
+    );
+    assert_eq!(by_owner["total"], 3);
+    // プロジェクトのガント: 指名したプロジェクトの課題だけ。他のプロジェクトは混ざらぬ
+    let scoped = get_unscheduled(&app, t, &format!("project_id={}", tp.project_id)).await;
+    assert_eq!(got(&scoped), set(&[public_task]));
+    assert_eq!(scoped["total"], 1);
+
+    // テナントメンバー: 公開プロジェクトだけ。自分の個人プロジェクトも返らない
+    app.login_session_no_content(&viewer.email, &viewer.password)
+        .await;
+    let by_viewer = get_unscheduled(&app, t, "").await;
+    assert_eq!(got(&by_viewer), set(&[public_task, other_task]));
+    assert!(!got(&by_viewer).contains(&personal_task.to_string()));
+    // 見えないプロジェクトを指名しても返らない（件数も 0）
+    let named = get_unscheduled(&app, t, &format!("project_id={restricted}")).await;
+    assert!(ids(&named).is_empty());
+    assert_eq!(named["total"], 0);
+
+    // 客分: 明示メンバーのプロジェクトだけ
+    app.login_session_no_content(&guest.email, &guest.password)
+        .await;
+    assert_eq!(
+        got(&get_unscheduled(&app, t, "").await),
+        set(&[restricted_task])
+    );
+
+    // 別テナントのユーザーは 403
+    app.login_session_no_content(&outsider.email, &outsider.password)
+        .await;
+    assert_eq!(
+        app.get_with_session(&unscheduled_url(t, "")).await.status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // PAT: read:task が要る。プロジェクト束縛付きは予定と同じく 403
+    let no_task = app
+        .insert_pat(viewer.id, t, vec![Scope::ReadProject], None)
+        .await;
+    assert_eq!(
+        app.get_with_bearer(&unscheduled_url(t, ""), &no_task)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let read_task = app
+        .insert_pat(viewer.id, t, vec![Scope::ReadTask], None)
+        .await;
+    let res = app
+        .get_with_bearer(&unscheduled_url(t, ""), &read_task)
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        got(&res.json::<Value>().await.unwrap()),
+        set(&[public_task, other_task])
+    );
+    let bound = app
+        .insert_pat(
+            viewer.id,
+            t,
+            vec![Scope::ReadTask],
+            Some(vec![tp.project_id]),
+        )
+        .await;
+    assert_eq!(
+        app.get_with_bearer(&unscheduled_url(t, ""), &bound)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn unscheduled_cursor_pages_without_gaps() {
+    let mut app = TestApp::new().await;
+    let (user, tp, todo, _) = setup(&mut app).await;
+    let t = tp.tenant_id;
+    let mut all = Vec::new();
+    for _ in 0..5 {
+        all.push(task(&app, tp.project_id, todo, user.id, None, None, None).await);
+    }
+    let mut seen = Vec::new();
+    let mut query = "limit=2".to_owned();
+    loop {
+        let page = get_unscheduled(&app, t, &query).await;
+        assert_eq!(page["total"], 5);
+        assert!(page["tasks"].as_array().unwrap().len() <= 2);
+        seen.extend(ids(&page));
+        match page["next_cursor"].as_str() {
+            Some(c) => query = format!("limit=2&cursor={c}"),
+            None => break,
+        }
+    }
+    assert_eq!(seen.len(), 5, "重複か欠けがある");
+    assert_eq!(seen.into_iter().collect::<HashSet<_>>(), set(&all));
+    // 範囲外の limit は 400
+    assert_eq!(
+        app.get_with_session(&unscheduled_url(t, "limit=0"))
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+}

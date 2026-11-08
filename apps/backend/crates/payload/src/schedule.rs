@@ -103,3 +103,34 @@ pub struct ScheduleResponse {
     #[schema(nullable)]
     pub next_cursor: Option<String>,
 }
+
+#[derive(Debug, Deserialize, Serialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct UnscheduledQuery {
+    /// プロジェクトで絞る（繰り返し指定可）。見えないプロジェクトは無視する
+    #[serde(default)]
+    #[param(value_type = Option<Vec<String>>, explode)]
+    pub project_id: Vec<Uuid>,
+    /// 担当者で絞る（繰り返し指定可）
+    #[serde(default)]
+    #[param(value_type = Option<Vec<String>>, explode)]
+    pub user_id: Vec<Uuid>,
+    /// 完了ステータスのタスクを含めるか。既定 false
+    pub include_done: Option<bool>,
+    /// 前ページの `next_cursor`
+    pub cursor: Option<String>,
+    /// タスクの件数。既定 200、上限 500
+    pub limit: Option<u64>,
+}
+
+/// 開始予定日も締切も持たないタスク。予定（`/schedule`）は期間に重なるものだけを返すので、こちらで引く
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct UnscheduledResponse {
+    /// 絞りに合う件数（全ページの合計）
+    pub total: u64,
+    pub tasks: Vec<ScheduleTask>,
+    /// このページの `tasks` の担当者
+    pub members: Vec<UserSummary>,
+    #[schema(nullable)]
+    pub next_cursor: Option<String>,
+}
