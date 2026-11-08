@@ -44,7 +44,7 @@ resource "coder_agent" "main" {
     sudo sh -c 'nohup tailscaled --state=/home/coder/.local/share/tailscale/tailscaled.state >/tmp/tailscaled.log 2>&1 &'
     if [ -n "$${TS_AUTHKEY:-}" ]; then
       for i in $(seq 10); do tailscale status >/dev/null 2>&1 && break; sleep 1; done
-      tailscale status >/dev/null 2>&1 || sudo tailscale up --auth-key="$TS_AUTHKEY" --hostname="$(hostname)" || echo "Tailscale にログインできなかった"
+      tailscale status >/dev/null 2>&1 || sudo tailscale up --auth-key="$TS_AUTHKEY" || echo "Tailscale にログインできなかった"
     fi
 
     # 自己更新するツールはホームのボリュームに入れる（イメージに入れるとボリュームに隠れる）
