@@ -105,7 +105,7 @@ services:
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
       GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:-}
       GITHUB_TOKEN_ENCRYPTION_KEY: ${GITHUB_TOKEN_ENCRYPTION_KEY:-}
-      # GitHub App のインストール後に戻る設定画面の URL のベース。空なら相対パス（同一オリジン）になる
+      # GitHub App のインストール後に戻る設定画面の URL のベース。空なら EMAIL_VERIFICATION_APP_URL（APP_ORIGIN）を使う
       GITHUB_APP_FRONTEND_BASE_URL: ${GITHUB_APP_FRONTEND_BASE_URL:-}
       # ログイン用の OAuth（任意）。1 つでも有効にするなら OAUTH_ENCRYPTION_KEY が必須。
       # 未設定なら list_providers が空を返し、サインイン画面にボタンが出ないだけで起動はする。
