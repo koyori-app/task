@@ -1,13 +1,27 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
 
-// 器の中身は自前で API を叩くので、下書きの入力欄だけの代役にする
+// 器の中身は自前で API を叩くので、下書きの入力欄と閉じるボタンだけの代役にする（契約は本物と同じ）
 vi.mock('@/components/tasks/TaskDetailPane.vue', async () => {
   const { defineComponent, h } = await import('vue');
   return {
     default: defineComponent({
       name: 'TaskDetailPane',
-      setup: () => () => h('textarea', { id: 'draft' }),
+      props: { showCloseButton: { type: Boolean, default: true } },
+      emits: ['close'],
+      setup:
+        (props, { emit }) =>
+        () =>
+          h('div', [
+            h('textarea', { id: 'draft' }),
+            props.showCloseButton
+              ? h('button', {
+                  'aria-label': '詳細を閉じる',
+                  type: 'button',
+                  onClick: () => emit('close'),
+                })
+              : null,
+          ]),
     }),
   };
 });
@@ -61,6 +75,30 @@ describe('TaskDetailOverlay', () => {
 
     draft().blur();
     backdrop.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    expect(wrapper.emitted('update:open')).toEqual([[false]]);
+  });
+
+  it('ペインの閉じるボタンを出す（器の Dialog は × を描かない）', () => {
+    mountOverlay();
+
+    expect(document.querySelector('button[aria-label="詳細を閉じる"]')).not.toBeNull();
+  });
+
+  it('閉じるボタンのクリックで update:open false を emit する', () => {
+    const wrapper = mountOverlay();
+
+    document.querySelector<HTMLButtonElement>('button[aria-label="詳細を閉じる"]')!.click();
+
+    expect(wrapper.emitted('update:open')).toEqual([[false]]);
+  });
+
+  it('下書きがあっても閉じるボタンでは閉じる（背景ガードは明示操作に効かない）', () => {
+    const wrapper = mountOverlay();
+    draft().value = '書きかけ';
+    draft().focus();
+
+    document.querySelector<HTMLButtonElement>('button[aria-label="詳細を閉じる"]')!.click();
+
     expect(wrapper.emitted('update:open')).toEqual([[false]]);
   });
 });

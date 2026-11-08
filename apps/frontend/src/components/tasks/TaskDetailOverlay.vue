@@ -57,7 +57,6 @@ function onClose() {
       <TaskDetailPane
         v-if="open"
         layout="page"
-        :show-close-button="false"
         :tenant-display-id="tenantDisplayId"
         :project-key="projectKey"
         :task-id="taskId"
