@@ -49,17 +49,20 @@ function fixture(): components['schemas']['DashboardResponse'] {
     activities: [],
   };
 }
-function setup(handler: (request: Request) => Response | Promise<Response>) {
+function setup(
+  handler: (request: Request) => Response | Promise<Response>,
+  props?: { canCreateProject?: boolean },
+) {
   const fetch = vi.fn(handler);
   vi.stubGlobal('fetch', fetch);
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   const wrapper = mount(HomeDashboard, {
-    props: { tenantId: tenant, tenantSlug: 'acme' },
+    props: { tenantId: tenant, tenantSlug: 'acme', ...props },
     global: {
       plugins: [createPinia(), [VueQueryPlugin, { queryClient: client }]],
-      stubs: { DashboardCreateTask: true },
+      stubs: { DashboardCreateTask: true, DashboardProjectsEmpty: true },
     },
   });
   return { wrapper, fetch, client };
@@ -76,6 +79,26 @@ const createOpen = (wrapper: ReturnType<typeof setup>['wrapper']) =>
   wrapper.getComponent({ name: 'DashboardCreateTask' }).props('open');
 
 describe('HomeDashboard', () => {
+  it.each([true, undefined])(
+    'プロジェクトが 0 件なら権限 %s に応じた初回案内を出す',
+    async (canCreateProject) => {
+      const { wrapper } = setup((req) => respond(req, { ...fixture(), projects: [] }), {
+        canCreateProject,
+      });
+      await flushPromises();
+      expect(wrapper.getComponent({ name: 'DashboardProjectsEmpty' }).props()).toEqual({
+        tenantSlug: 'acme',
+        canCreateProject: !!canCreateProject,
+      });
+    },
+  );
+
+  it('プロジェクトがあれば初回の案内を出さない', async () => {
+    const { wrapper } = setup((req) => respond(req, fixture()));
+    await flushPromises();
+    expect(wrapper.findComponent({ name: 'DashboardProjectsEmpty' }).exists()).toBe(false);
+  });
+
   it('サーバーの集計件数を表示し、表示中の行だけで数え直さない', async () => {
     const data = fixture();
     const { wrapper, fetch } = setup((req) => respond(req, data));
