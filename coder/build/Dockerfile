@@ -3,7 +3,7 @@
 # /home/coder はワークスペースごとのボリュームで覆われるので、ここで入れるものは
 # /home/coder の外に置く。自己更新するツール（Claude Code / Codex / Cursor CLI / T3 Code / Paradev）は
 # main.tf の startup_script がホームへ入れる。
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 # rust-toolchain.toml と合わせる。ずれても rustup がリポジトリの指定版を自動で取得する
 ARG RUST_VERSION=1.95.0
