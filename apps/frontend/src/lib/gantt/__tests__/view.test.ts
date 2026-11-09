@@ -60,15 +60,15 @@ describe('chartBackend', () => {
 
 describe('fitDayWidth', () => {
   it('広い画面は箱の幅いっぱいに広げ、下限は割らない', () => {
-    // 3 週で 692px の箱なら (692 - 20) / 21 = 32
-    expect(fitDayWidth(692, 'day', false)).toBe(32);
+    // 3 週で 700px の箱なら (700 - 28) / 21 = 32
+    expect(fitDayWidth(700, 'day', false)).toBe(32);
     expect(fitDayWidth(1000, 'day', false)).toBe(46);
     expect(fitDayWidth(300, 'day', false)).toBe(30);
   });
 
   it('狭い画面は箱に収めるのを先にする', () => {
-    // 1 週で 343px の箱なら (343 - 20) / 7 = 46
-    expect(fitDayWidth(343, 'day', true)).toBe(46);
+    // 1 週で 343px の箱なら (343 - 28) / 7 = 45
+    expect(fitDayWidth(343, 'day', true)).toBe(45);
   });
 
   it('箱の幅が測れる前は下限の幅', () => {

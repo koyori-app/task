@@ -40,6 +40,8 @@ export const GANTT_PALETTE: PaletteOverrides = {
   WarnStroke: 'var(--koyori-color-danger)',
   HardDeadline: 'var(--koyori-color-danger)',
   Note: 'var(--koyori-color-text-muted)',
+  // 添えの字の下の帯。今日の線と格子を字の所だけ隠すので、図の地と同じ色にする
+  NoteBg: 'var(--koyori-color-surface)',
   Today: 'var(--koyori-color-text)',
   ProgressLine: 'var(--koyori-color-warning)',
 };

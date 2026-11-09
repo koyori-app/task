@@ -42,12 +42,18 @@ export function pxPerDay(scale: GanttScale): number {
 }
 
 /**
+ * arc が日の左右に残す余白（px）。題の列を消した図の左の余白（棒の高さの半分。広い画面の
+ * 棒 16px で 8、狭い画面の棒 12px で 6 だが、大きい方で数える）と、右の余白 20 の和。
+ */
+export const CHART_CHROME_X = 8 + 20;
+
+/**
  * 図の箱の幅に範囲の日を割った一日の幅。広い画面は下限を割らず、余れば広げて右の空きを無くす。
- * 狭い画面は箱に収めるのを先にする。20 は arc が図の右に残す余白。
+ * 狭い画面は箱に収めるのを先にする。`CHART_CHROME_X` は arc が図の左右に残す余白。
  */
 export function fitDayWidth(boxWidth: number, scale: GanttScale, compact: boolean): number {
   if (!boxWidth) return pxPerDay(scale);
-  const fit = Math.floor((boxWidth - 20) / viewDays(scale, compact));
+  const fit = Math.floor((boxWidth - CHART_CHROME_X) / viewDays(scale, compact));
   return compact ? Math.max(2, fit) : Math.max(pxPerDay(scale), fit);
 }
 

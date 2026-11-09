@@ -16,8 +16,10 @@ import { viewTo } from '../view';
 const TZ = 'Asia/Tokyo';
 const FROM = '2026-11-09';
 const TODAY = '2026-11-11';
+/** 題の列を消した arc の図の左の余白（棒の高さ 16px の半分）。日の x はここから数える */
+const LEFT = 8;
 /** canvas の色の番号（arc の `canvas.rs`） */
-const PROGRESS_LINE_COLOR = 22;
+const PROGRESS_LINE_COLOR = 23;
 
 function task(over: Partial<GanttSource> & { id: string; seq_key: string }): GanttSource {
   return {
@@ -154,13 +156,13 @@ describe('ガントの図（本物の wasm）', () => {
     expect(points).not.toBeNull();
     const todayX = points[0]![0];
     // 今日は範囲の 3 日目の頭
-    expect(todayX).toBe(2 * 32);
+    expect(todayX).toBe(LEFT + 2 * 32);
     const bendAt = (row: number) => points.find(([, y]) => y === rowMid(row))?.[0] ?? null;
     // 行の順は late、done、ahead、stalled、future
     expect(bendAt(0)).toBeLessThan(todayX);
     expect(bendAt(1)).toBeNull();
     expect(bendAt(2)).toBeGreaterThan(todayX);
-    expect(bendAt(3)).toBe(1 * 32);
+    expect(bendAt(3)).toBe(LEFT + 1 * 32);
     expect(bendAt(4)).toBeNull();
   });
 
@@ -187,7 +189,7 @@ describe('ガントの図（本物の wasm）', () => {
             .StrokePolyline,
       )
       .find((line) => line?.dash === '4,3');
-    expect(today?.points[0]![0]).toBe(2 * 32);
+    expect(today?.points[0]![0]).toBe(LEFT + 2 * 32);
   });
 
   it('棒と厳守の菱形と、目安を過ぎた行の赤い縁と字を描く', () => {
@@ -210,6 +212,9 @@ describe('ガントの図（本物の wasm）', () => {
     const { svg } = render({ layout });
     expect(svg).toContain('class="hard-deadline"');
     expect(svg).toContain('>目安 11/10 を過ぎた</text>');
+    // 字の下に地の色の帯を敷き、今日の線の後に描く
+    expect(svg).toContain('class="note-bg"');
+    expect(svg.indexOf('class="note-bg"')).toBeGreaterThan(svg.indexOf('stroke-dasharray="4,3"'));
     // 赤い縁（warn の縁の色の番号は 19）
     const { buffer } = render({ layout });
     expect(
