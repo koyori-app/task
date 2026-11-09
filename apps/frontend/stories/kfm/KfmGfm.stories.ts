@@ -15,6 +15,7 @@ import taskListHtml from '@/lib/kfm-story-fixtures/rendered/gfm-task-list.html?r
 // (本番消費側と同じ二点契約。単一ソース = content-class.ts)
 import { KFM_CONTENT_CLASS } from '@/lib/remark-gfm/content-class';
 import '@/lib/remark-gfm/style.css';
+import '@/lib/rehype-kfm-link-favicon/style.css';
 
 /*
  * KFM (md レンダリング) の GFM story 群。
@@ -25,6 +26,20 @@ import '@/lib/remark-gfm/style.css';
  */
 
 type KfmStoryArgs = { html: string };
+
+// 外部リンクの先頭の favicon: 字の大きさ (1em) の正方形で、画像が実際に読めている。
+// Storybook には backend が無いので、画像は .storybook/static の固定ファイルが返る
+const expectFaviconLoaded = async (canvasElement: HTMLElement) => {
+  const favicon = canvasElement.querySelector<HTMLImageElement>(
+    'a[href^="https://"] > img.kfm-link-favicon',
+  );
+  await expect(favicon).not.toBeNull();
+  if (favicon === null) return;
+  await favicon.decode();
+  await expect(favicon.naturalWidth).toBeGreaterThan(0);
+  const box = favicon.getBoundingClientRect();
+  await expect(Math.round(box.width)).toBe(Math.round(box.height));
+};
 
 const kfmRender = (args: KfmStoryArgs) => ({
   setup: () => ({ args }),
@@ -189,7 +204,7 @@ export const StrikeAutolink: Story = {
     docs: {
       description: {
         story:
-          '壊れたら: ~~文~~ が del にならず素のチルダが見える (play で del を固定)、または裸 URL が a にならずリンク色/下線が消えると絵が変わる (CSS サイドカー欠落でも VRT が拾う)。',
+          '壊れたら: ~~文~~ が del にならず素のチルダが見える (play で del を固定)、または裸 URL が a にならずリンク色/下線が消えると絵が変わる (CSS サイドカー欠落でも VRT が拾う)。外部リンクの先頭の favicon (img.kfm-link-favicon) が 1em の正方形で出ない・読めないと play が落ちる (画像は .storybook/static の固定ファイル)。',
       },
     },
   },
@@ -205,6 +220,7 @@ export const StrikeAutolink: Story = {
     // リンク色の実効 (#0969da)。旧検査 not.toBe('') は computed color が常に非空文字列の
     // ため何も検証していなかった (空振り)
     await expect(style?.color).toBe('rgb(9, 105, 218)');
+    await expectFaviconLoaded(canvasElement);
   },
 };
 
@@ -256,6 +272,7 @@ export const StrikeAutolinkDark: Story = {
     await expect(style?.textDecoration).toContain('underline');
     // ダークリンク色の実効 (#4493f8)。ライト色 rgb(9, 105, 218) のままなら .dark 上書きの喪失
     await expect(style?.color).toBe('rgb(68, 147, 248)');
+    await expectFaviconLoaded(canvasElement);
   },
 };
 

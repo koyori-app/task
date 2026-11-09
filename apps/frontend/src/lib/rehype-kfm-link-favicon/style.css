@@ -1,0 +1,15 @@
+/*
+ * 外部リンクの先頭の favicon (rehype-kfm-link-favicon が emit する img.kfm-link-favicon)。
+ * 字の大きさに合わせた正方形を字の中ほどに置く。取れなかった時は backend が汎用アイコンを返すので、
+ * ここに失敗時の形は要らない。
+ * レンダラは CSS を import しない — 消費側 (v-html するページ・story) が明示 import する。
+ */
+.kfm-link-favicon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 0.25em;
+  vertical-align: -0.125em;
+  border-radius: 2px;
+  object-fit: contain;
+}

@@ -1,6 +1,7 @@
 // タスク参照の自動リンク（マッチの境界、除外ノード、tenant の検証、テナント別のキャッシュ分離）
 import { describe, expect, it } from 'vitest';
 import { renderDescription } from '../markup-renderer';
+import { favicon } from './kfm-favicon-html';
 
 // tenant null = taskRef を渡さない
 const render = (text: string, tenant: string | null = 'acme') =>
@@ -53,13 +54,13 @@ describe('remark-kfm-task-ref (KEY-N の自動リンク)', () => {
 
   it('autolink 済みの URL 内と明示リンク内はリンク化しない', async () => {
     expect(await render('https://example.com/TASK-58')).toBe(
-      '<p><a href="https://example.com/TASK-58">https://example.com/TASK-58</a></p>',
+      `<p><a href="https://example.com/TASK-58">${favicon('example.com')}https://example.com/TASK-58</a></p>`,
     );
     expect(await render('[TASK-58](https://example.com)')).toBe(
-      '<p><a href="https://example.com">TASK-58</a></p>',
+      `<p><a href="https://example.com">${favicon('example.com')}TASK-58</a></p>`,
     );
     expect(await render('[TASK-58]\n\n[TASK-58]: https://example.com')).toBe(
-      '<p><a href="https://example.com">TASK-58</a></p>',
+      `<p><a href="https://example.com">${favicon('example.com')}TASK-58</a></p>`,
     );
   });
 

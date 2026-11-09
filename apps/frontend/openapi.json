@@ -4729,6 +4729,58 @@
         }
       }
     },
+    "/v1/favicons/{host}": {
+      "get": {
+        "tags": ["Tasks"],
+        "summary": "リンク先サイトの favicon を配信",
+        "description": "認証を必須にする理由: host は誰でも列挙できる値で、無認証だと誰でもこのサーバーを\n「任意ホストへの GET」の踏み台にできる。`<img>` は same-origin（`/api` プロキシ経由）なので\nCookie が付き、ログイン中の画面からは問題なく読める。\n`Cache-Control` を `private` にするのは、認証付きの応答を共有キャッシュに置かせないため。\n取れない時は 404 ではなく 200 で汎用アイコンを返す（404 はブラウザがキャッシュしにくく、\n閲覧のたびに再要求になる）。",
+        "operationId": "get_favicon",
+        "parameters": [
+          {
+            "name": "host",
+            "in": "path",
+            "description": "小文字のホスト名（ドット必須、253 文字以下）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "favicon。取れないときは汎用アイコン（image/svg+xml）",
+            "content": {
+              "image/x-icon": {},
+              "image/png": {},
+              "image/jpeg": {},
+              "image/gif": {},
+              "image/webp": {},
+              "image/svg+xml": {}
+            }
+          },
+          "401": {
+            "description": "未認証",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "host の形式が不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/github/callback": {
       "get": {
         "tags": ["GitHub"],

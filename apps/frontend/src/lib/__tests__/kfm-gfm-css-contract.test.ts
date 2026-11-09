@@ -38,6 +38,8 @@ const EMITTED_NAMESPACE_SCOPED_PLUGINS = new Map<
   ],
   // mermaid のサイドカーは自身が emit する kfm-mermaid 要素を直に指すため器を要さない。
   ['remark-kfm-mermaid', { selectorToken: new RegExp(`(?:^|[\\s>])${KFM_MERMAID_TAG}(?![\\w-])`) }],
+  // 外部リンクの favicon は自身が emit する img.kfm-link-favicon だけを指す
+  ['rehype-kfm-link-favicon', { selectorToken: /\.kfm-link-favicon(?![\w-])/ }],
   [
     // kfm-code のサイドカーも自身が emit する kfm-code 要素と行 span (.pl-line) を直に指す。
     // theme ブリッジ (:root / .dark) は --kfm-code-* の宣言のみ許す
