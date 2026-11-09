@@ -13,7 +13,7 @@ const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? '
     <div>
       <h1 class="text-2xl font-semibold tracking-tight">ガント</h1>
       <p class="text-sm text-muted-foreground">
-        このプロジェクトのタスクの予定を棒で見る（2 週間）
+        このプロジェクトのタスクを、予定開始から目安の期限までの棒と、厳守の期限の菱形で見る
       </p>
     </div>
     <ScheduleGantt :project-key="projectKey" />

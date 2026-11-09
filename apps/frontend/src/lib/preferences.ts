@@ -19,6 +19,12 @@ export const PREFERENCE_TABLE = {
     choices: EMOJI_FONT_CHOICES,
     default: DEFAULT_EMOJI_FONT,
   },
+  ganttProgressLine: {
+    name: 'ガントに稲妻線を出す',
+    description:
+      'ガントに、今日の時点の進みを結ぶ線を出します。ガントの切り替えで変えた時も、ここに覚えます。',
+    default: false,
+  },
 } as const satisfies SettingTable;
 
 export type PreferenceKey = keyof typeof PREFERENCE_TABLE;

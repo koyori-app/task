@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type Ref, ref } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
+import { createPinia } from 'pinia';
 
 const { GET, project } = vi.hoisted(() => ({
   GET: vi.fn(),
@@ -90,14 +91,27 @@ const TASKS = [
   scheduleTask('t-ops', { id: 'p-ops', key: 'OPS' }),
 ];
 
+/** 期間の無い課題（開始予定日も締切も無い）。プロジェクトの絞りが数にも効くかを見る */
+const UNSCHEDULED = [
+  { ...scheduleTask('u-eng', { id: 'p-eng', key: 'ENG' }), soft_deadline: null },
+  { ...scheduleTask('u-ops-1', { id: 'p-ops', key: 'OPS' }), soft_deadline: null },
+  { ...scheduleTask('u-ops-2', { id: 'p-ops', key: 'OPS' }), soft_deadline: null },
+];
+
 function mountPage() {
   // 本物の API と同じく、project_id があればそのプロジェクトの課題だけを返す
   GET.mockImplementation(
-    async (_path: string, { params }: { params: { query: { project_id?: string[] } } }) => {
+    async (path: string, { params }: { params: { query: { project_id?: string[] } } }) => {
       const wanted = params.query.project_id;
+      const scope = <T extends { project: { id: string } }>(list: T[]) =>
+        wanted ? list.filter((task) => wanted.includes(task.project.id)) : list;
+      if (path.endsWith('/schedule/unscheduled')) {
+        const tasks = scope(UNSCHEDULED);
+        return { data: { total: tasks.length, tasks, members: [], next_cursor: null } };
+      }
       return {
         data: {
-          tasks: wanted ? TASKS.filter((task) => wanted.includes(task.project.id)) : TASKS,
+          tasks: scope(TASKS),
           members: [],
           sprints: [],
           milestones: [],
@@ -108,7 +122,9 @@ function mountPage() {
     },
   );
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return mount(Page, { global: { plugins: [[VueQueryPlugin, { queryClient }]] } });
+  return mount(Page, {
+    global: { plugins: [[VueQueryPlugin, { queryClient }], createPinia()] },
+  });
 }
 
 describe('プロジェクトのガント', () => {
@@ -122,6 +138,8 @@ describe('プロジェクトのガント', () => {
     }
     const bars = wrapper.getComponent({ name: 'GanttChart' }).props('tasks') as { id: string }[];
     expect(bars.map((bar) => bar.id)).toEqual(['t-eng']);
+    // 期間なしの数も、そのプロジェクトの分だけ
+    expect(wrapper.get('[data-testid="gantt-unscheduled"]').text()).toBe('期間なし 1 件');
   });
 
   it('プロジェクトの id が解けるまでは予定を引かず、解けたら project_id 付きで一度だけ引く', async () => {
@@ -136,8 +154,14 @@ describe('プロジェクトのガント', () => {
     project.projectId!.value = 'p-eng';
     await flushPromises();
 
-    expect(GET).toHaveBeenCalledTimes(1);
-    expect(GET.mock.calls[0]![1].params.query.project_id).toEqual(['p-eng']);
+    // 予定と期間なしの二つの口を、どちらも project_id 付きで一度ずつ引く
+    expect(GET).toHaveBeenCalledTimes(2);
+    expect(
+      GET.mock.calls.map(([path]) => path as string).sort((a, b) => a.localeCompare(b)),
+    ).toEqual(['/v1/tenants/{tenant_id}/schedule', '/v1/tenants/{tenant_id}/schedule/unscheduled']);
+    for (const [, { params }] of GET.mock.calls) {
+      expect(params.query.project_id).toEqual(['p-eng']);
+    }
     const bars = wrapper.getComponent({ name: 'GanttChart' }).props('tasks') as { id: string }[];
     expect(bars.map((bar) => bar.id)).toEqual(['t-eng']);
   });

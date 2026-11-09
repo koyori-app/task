@@ -213,7 +213,11 @@ describe('PreferencesSection（環境設定の画面）', () => {
     seedSettings({ preferences: { emojiFont: 'fluent', showExperiments: true } });
     const { wrapper, pinia } = await mountSection();
 
-    expect(usePreferencesStore(pinia).values).toEqual({ showExperiments: true, emojiFont: 'os' });
+    expect(usePreferencesStore(pinia).values).toEqual({
+      showExperiments: true,
+      emojiFont: 'os',
+      ganttProgressLine: false,
+    });
     expect(wrapper.get<HTMLSelectElement>('[data-setting="emojiFont"] select').element.value).toBe(
       'os',
     );
