@@ -66,6 +66,8 @@ const props = defineProps<{
   /** タスクの作成。同上 */
   onCreate: (input: CreateTaskInput) => Promise<boolean>;
   sorting: TaskListSortingState;
+  /** 環境設定「タスク一覧でサブタスクを最初から展開する」。true なら上書きの無い親行を展開して描く */
+  expandSubtasks?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -240,7 +242,10 @@ watch(
 // 折りたたみは画面内の一時状態。URL には載せない（共有したい情報ではない）
 const collapsed = ref<Record<string, boolean>>({});
 const selectedTaskId = ref<string | null>(null);
+/** 利用者が矢印で変えた行だけを持つ上書き。無い行は expandSubtasks に従う */
 const expandedTaskIds = ref<Record<string, boolean>>({});
+/** 暗黙の展開で子が 0 件だった行（枝は描かず、矢印も閉じた見た目にする） */
+const emptyBranchIds = ref<Record<string, boolean>>({});
 
 function toggle(statusId: string) {
   collapsed.value = { ...collapsed.value, [statusId]: !collapsed.value[statusId] };
@@ -250,13 +255,39 @@ function selectTask(taskId: string) {
   selectedTaskId.value = taskId;
 }
 
+/** 枝を描くか（枝の v-if に使う） */
+function isBranchOpen(task: TaskResponse): boolean {
+  return expandedTaskIds.value[task.id] ?? !!props.expandSubtasks;
+}
+
+/** オプションで開いた枝か（利用者が明示的に開いた枝ではない） */
+function isImplicitBranch(task: TaskResponse): boolean {
+  return expandedTaskIds.value[task.id] === undefined && !!props.expandSubtasks;
+}
+
+/** 行の矢印に渡す見た目の展開。暗黙の枝で子が 0 件なら閉じて見せる */
+function isRowExpanded(task: TaskResponse): boolean {
+  return isBranchOpen(task) && !(isImplicitBranch(task) && emptyBranchIds.value[task.id]);
+}
+
 function toggleSubtasks(task: TaskResponse) {
   selectedTaskId.value = task.id;
-  expandedTaskIds.value = {
-    ...expandedTaskIds.value,
-    [task.id]: !expandedTaskIds.value[task.id],
-  };
+  // 見た目で開いていれば閉じ、閉じていれば明示的に開く（空の暗黙の枝も 1 回で作成欄まで開く）
+  expandedTaskIds.value = { ...expandedTaskIds.value, [task.id]: !isRowExpanded(task) };
 }
+
+function setBranchEmpty(task: TaskResponse, empty: boolean) {
+  emptyBranchIds.value = { ...emptyBranchIds.value, [task.id]: empty };
+}
+
+// 設定を切り替えたら、利用者が個別に変えた行も含めて全行を設定に従わせる
+watch(
+  () => props.expandSubtasks,
+  () => {
+    expandedTaskIds.value = {};
+    emptyBranchIds.value = {};
+  },
+);
 
 // ---- グループ末尾からの追加 ----
 // タイトルだけで作る。他の項目は作った行からそのまま触れる
@@ -478,7 +509,7 @@ async function commitAdding(statusId: string) {
                   :error="errors[task.id]"
                   :comment-pending="!!commentPendingTaskIds?.[task.id]"
                   :selected="selectedTaskId === task.id"
-                  :expanded="!!expandedTaskIds[task.id]"
+                  :expanded="isRowExpanded(task)"
                   @select="selectTask(task.id)"
                   @toggle:subtasks="toggleSubtasks(task)"
                   @open="emit('open', task)"
@@ -493,7 +524,7 @@ async function commitAdding(statusId: string) {
                   :on-comment="(body: string) => onComment(task, body)"
                 />
                 <TaskSubtaskBranch
-                  v-if="expandedTaskIds[task.id]"
+                  v-if="isBranchOpen(task)"
                   :project-key="projectKey"
                   :parent-task="task"
                   :filters="{
@@ -511,6 +542,8 @@ async function commitAdding(statusId: string) {
                   :errors="errors"
                   :comment-pending-task-ids="commentPendingTaskIds"
                   :on-comment="onComment"
+                  :implicit="isImplicitBranch(task)"
+                  @empty="(empty) => setBranchEmpty(task, empty)"
                   @collapse="expandedTaskIds = { ...expandedTaskIds, [task.id]: false }"
                   @open="emit('open', $event)"
                   @update:status="(child, statusId) => emit('update:status', child, statusId)"

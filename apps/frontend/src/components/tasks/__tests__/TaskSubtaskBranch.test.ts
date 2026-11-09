@@ -35,7 +35,7 @@ const parentTask = {
   status_id: 'status-todo',
 } as TaskResponse;
 
-function mountBranch(pending: Record<string, 'status_id' | undefined>) {
+function mountBranch(pending: Record<string, 'status_id' | undefined>, implicit?: boolean) {
   return mount(TaskSubtaskBranch, {
     props: {
       projectKey: 'TEST',
@@ -48,6 +48,7 @@ function mountBranch(pending: Record<string, 'status_id' | undefined>) {
       pending,
       errors: {},
       onComment: vi.fn(async () => true),
+      implicit,
     },
     global: { stubs: { TaskGroupedRow: true } },
   });
@@ -56,6 +57,8 @@ function mountBranch(pending: Record<string, 'status_id' | undefined>) {
 describe('TaskSubtaskBranch', () => {
   beforeEach(() => {
     subtasksState.subtasks.value = [];
+    subtasksState.loading.value = false;
+    subtasksState.error.value = false;
     subtasksState.createSubtask.mockClear();
   });
 
@@ -119,5 +122,65 @@ describe('TaskSubtaskBranch', () => {
     expect(
       wrapper.findAll('button').some((button) => button.text().includes('サブタスクを追加')),
     ).toBe(false);
+  });
+
+  describe('環境設定で開いた枝（implicit）', () => {
+    it('子が 0 件なら作成欄も追加ボタンも出さず、枝そのものを描かない', () => {
+      const wrapper = mountBranch({}, true);
+
+      expect(wrapper.find('[data-subtask-branch]').exists()).toBe(false);
+      expect(wrapper.findComponent(TaskSubtaskComposer).exists()).toBe(false);
+      expect(wrapper.text()).not.toContain('サブタスクを追加');
+    });
+
+    it('子が 1 件以上なら行と「サブタスクを追加」を描く', () => {
+      subtasksState.subtasks.value = [
+        { id: 'child-id', title: '子タスク', status_id: 'status-todo' },
+      ];
+      const wrapper = mountBranch({}, true);
+
+      expect(wrapper.find('[data-subtask-branch]').exists()).toBe(true);
+      expect(wrapper.findAllComponents({ name: 'TaskGroupedRow' })).toHaveLength(1);
+      expect(wrapper.text()).toContain('サブタスクを追加');
+    });
+
+    it('implicit 無しで子が 0 件なら従来どおり作成欄を出す', () => {
+      const wrapper = mountBranch({});
+
+      expect(wrapper.find('[data-subtask-branch]').exists()).toBe(true);
+      expect(wrapper.findComponent(TaskSubtaskComposer).exists()).toBe(true);
+    });
+
+    it('読み込み中は表示を出さない（implicit 無しでは出す）', () => {
+      subtasksState.loading.value = true;
+
+      expect(mountBranch({}, true).text()).not.toContain('サブタスクを読み込み中…');
+      expect(mountBranch({}).text()).toContain('サブタスクを読み込み中…');
+    });
+
+    it('失敗は隠さず、再試行を出す', () => {
+      subtasksState.error.value = true;
+      const wrapper = mountBranch({}, true);
+
+      expect(wrapper.text()).toContain('サブタスクを読み込めませんでした');
+      expect(wrapper.findAll('button').some((b) => b.text() === '再試行')).toBe(true);
+    });
+
+    it('取得が終わると子の有無を empty で返す（0 件なら true、子がいれば false）', () => {
+      const none = mountBranch({}, true);
+      expect(none.emitted('empty')).toEqual([[true]]);
+
+      subtasksState.subtasks.value = [
+        { id: 'child-id', title: '子タスク', status_id: 'status-todo' },
+      ];
+      const some = mountBranch({}, true);
+      expect(some.emitted('empty')).toEqual([[false]]);
+    });
+
+    it('読み込み中は empty を返さない', () => {
+      subtasksState.loading.value = true;
+
+      expect(mountBranch({}, true).emitted('empty')).toBeUndefined();
+    });
   });
 });

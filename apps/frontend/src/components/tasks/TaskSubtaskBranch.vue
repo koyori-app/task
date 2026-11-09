@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Loader2, Plus, RotateCcw } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import TaskGroupedRow from '@/components/tasks/TaskGroupedRow.vue';
 import TaskSubtaskComposer from '@/components/tasks/TaskSubtaskComposer.vue';
@@ -29,11 +29,18 @@ const props = defineProps<{
   errors: Record<string, string | undefined>;
   commentPendingTaskIds?: Record<string, boolean>;
   onComment: (task: TaskResponse, body: string) => Promise<boolean>;
+  /**
+   * 環境設定で開いた枝。利用者が開いた枝と違い、子が 0 件なら作成欄を出さず何も描かない。
+   * 読み込み中の表示も出さない（行ごとに並ぶため）。失敗は出す
+   */
+  implicit?: boolean;
 }>();
 
 const emit = defineEmits<{
   open: [task: TaskResponse];
   collapse: [];
+  /** 取得が終わるたびに、子が 0 件かを返す（暗黙の枝を描くかの判断は親に任せる） */
+  empty: [empty: boolean];
   'update:status': [task: TaskResponse, statusId: string];
   'update:priority': [task: TaskResponse, priority: TaskResponse['priority']];
   'update:softDeadline': [task: TaskResponse, iso: string | null];
@@ -51,6 +58,23 @@ const subtasks = useTaskSubtasks({
   parentTaskId: () => props.parentTask.parent_task_id,
   filters: () => ({ is_archived: false, ...props.filters }),
 });
+
+// 暗黙の枝は子が無いと何も描かない。親の矢印を閉じた見た目にするため、子の有無を返す
+const hidden = computed(
+  () =>
+    !!props.implicit &&
+    !subtasks.loading.value &&
+    !subtasks.error.value &&
+    !subtasks.subtasks.value.length,
+);
+
+watch(
+  [() => subtasks.loading.value, () => subtasks.subtasks.value.length],
+  ([loading, count]) => {
+    if (!loading) emit('empty', count === 0);
+  },
+  { immediate: true },
+);
 
 function openComposer() {
   if (props.parentTask.parent_task_id || statusUpdating.value) return;
@@ -73,14 +97,17 @@ function createSubtask(title: string) {
 </script>
 
 <template>
-  <div class="ml-5 border-l border-border/70 bg-muted/10" data-subtask-branch>
+  <div v-if="!hidden" class="ml-5 border-l border-border/70 bg-muted/10" data-subtask-branch>
     <div
-      v-if="subtasks.loading.value"
+      v-if="subtasks.loading.value && !implicit"
       class="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground"
     >
       <Loader2 class="size-4 animate-spin" aria-hidden="true" />
       サブタスクを読み込み中…
     </div>
+
+    <!-- 暗黙の枝は読み込み中に何も出さない -->
+    <template v-else-if="subtasks.loading.value" />
 
     <div v-else-if="subtasks.error.value" class="flex items-center gap-2 px-3 py-2">
       <p class="text-sm text-destructive">サブタスクを読み込めませんでした</p>
