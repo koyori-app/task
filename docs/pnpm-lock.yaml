@@ -10,7 +10,7 @@ importers:
     dependencies:
       '@cloudflare/nimbus-docs':
         specifier: ^0.19.2
-        version: 0.19.2(@resvg/resvg-js@2.6.2)(@types/node@24.19.2)(astro@7.3.3(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(esbuild@0.28.2)(jiti@2.7.0)(satori@0.26.0)
+        version: 0.19.4(@resvg/resvg-js@2.6.2)(@types/node@24.19.2)(astro@7.3.3(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(esbuild@0.28.2)(jiti@2.7.0)(satori@0.26.0)
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.3.0
@@ -317,8 +317,8 @@ packages:
     resolution: {integrity: sha512-dlT1m5e/0yUL0kRNcQn7yGLVThkgbB0Ga/1AmfDDC/8ik6AIiSf2QLQO2zPYvefsHP0aFgxO93cVLCCfDp7kzQ==}
     engines: {node: '>= 20.12.0'}
 
-  '@cloudflare/nimbus-docs@0.19.2':
-    resolution: {integrity: sha512-qlmwCcgI6sNdGAgbd8OGbH4asfxYy965DThKxrO6ek88JCnj5v/d+WxxYRghCkXEC1B6C4ZOcoPkMQHyHEOPCA==}
+  '@cloudflare/nimbus-docs@0.19.4':
+    resolution: {integrity: sha512-4GD6kGbH4cKtTwx7UxmtTYrIW7zjy3y3v8iMFgzNv0nKLqWVDfezyWXBSXS1QpzJh3hjrOfwNXdz/wSHoX/VtA==}
     engines: {node: '>=22.12.0'}
     hasBin: true
     peerDependencies:
@@ -3253,7 +3253,7 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
 
-  '@cloudflare/nimbus-docs@0.19.2(@resvg/resvg-js@2.6.2)(@types/node@24.19.2)(astro@7.3.3(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(esbuild@0.28.2)(jiti@2.7.0)(satori@0.26.0)':
+  '@cloudflare/nimbus-docs@0.19.4(@resvg/resvg-js@2.6.2)(@types/node@24.19.2)(astro@7.3.3(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(esbuild@0.28.2)(jiti@2.7.0)(satori@0.26.0)':
     dependencies:
       '@astrojs/markdown-satteri': 0.4.6
       '@astrojs/mdx': 8.0.3(@astrojs/markdown-satteri@0.4.6)(astro@7.3.3(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
@@ -3276,6 +3276,7 @@ snapshots:
       hast-util-sanitize: 5.0.2
       hast-util-to-html: 9.0.6
       jsonc-parser: 3.3.1
+      mdast-util-from-markdown: 2.1.0
       mdast-util-gfm: 3.1.0
       mdast-util-math: 3.0.0
       mdast-util-mdx: 3.0.0
