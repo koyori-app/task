@@ -24,17 +24,17 @@ const SAVED_NOTICE_MS = 2000;
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type UpdateTaskRequest = components['schemas']['UpdateTaskRequest'];
 
+/** 遅い方の日時を返す。別フィールドの古い応答が後から届いても更新日を巻き戻さない */
+function laterIso(current: string, next: string) {
+  return Date.parse(next) > Date.parse(current) ? next : current;
+}
+
 /**
  * コードポイント順の文字列比較。
  * JS の `<` / `>` は UTF-16 コードユニット順で、サーバ（Rust の `String::cmp` =
  * コードポイント順）と非 BMP 文字（絵文字など）の並びがずれるため、
  * サロゲートペアを 1 文字として比較して両者を一致させる。
  */
-/** 遅い方の日時を返す。別フィールドの古い応答が後から届いても更新日を巻き戻さない */
-function laterIso(current: string, next: string) {
-  return Date.parse(next) > Date.parse(current) ? next : current;
-}
-
 function compareStrings(left: string, right: string) {
   const l = Array.from(left);
   const r = Array.from(right);
