@@ -7,7 +7,8 @@ import {
   monthDay,
   taskDates,
   taskIdOfRow,
-  warnNote,
+  isPastSoft,
+  pastSoftNote,
   type GanttSource,
   type LayoutOptions,
 } from '../layout';
@@ -41,6 +42,8 @@ function options(over: Partial<LayoutOptions> = {}): LayoutOptions {
       { id: 'u-suzuki', username: '鈴木' },
     ],
     timeZone: TZ,
+    // rel1 の目安の期限の日。rel1 はまだ過ぎておらず、mob1 は過ぎた
+    today: '2026-11-10',
     ...over,
   };
 }
@@ -63,7 +66,6 @@ describe('taskDates', () => {
       point: false,
       soft: '2026-11-10',
       hard: '2026-11-12',
-      warn: false,
     });
   });
 
@@ -77,21 +79,7 @@ describe('taskDates', () => {
       task({ id: '1', planned_start_on: '2026-11-02', hard_deadline: at('2026-11-06') }),
       TZ,
     )!;
-    expect(dates).toMatchObject({ last: '2026-11-06', hard: '2026-11-06', warn: false });
-  });
-
-  it('目安が厳守を越えた課題に印を付け、棒は目安で終える', () => {
-    const dates = taskDates(
-      task({
-        id: '1',
-        planned_start_on: '2026-11-09',
-        soft_deadline: at('2026-11-14'),
-        hard_deadline: at('2026-11-12'),
-      }),
-      TZ,
-    )!;
-    expect(dates).toMatchObject({ last: '2026-11-14', warn: true });
-    expect(warnNote(dates)).toBe('目安 11/14 が厳守 11/12 を越えた');
+    expect(dates).toMatchObject({ last: '2026-11-06', hard: '2026-11-06' });
   });
 
   it('予定開始が期限より後でも、逆向きの棒にしない', () => {
@@ -113,6 +101,34 @@ describe('taskDates', () => {
   });
 });
 
+describe('isPastSoft（目安を過ぎた行）', () => {
+  const open = task({ id: '1', planned_start_on: '2026-11-02', soft_deadline: at('2026-11-10') });
+  const dates = taskDates(open, TZ)!;
+
+  it('完了しておらぬのに今日が目安の期限を過ぎた行は、目安を過ぎた', () => {
+    expect(isPastSoft(open, dates, '2026-11-11')).toBe(true);
+    expect(pastSoftNote(dates)).toBe('目安 11/10 を過ぎた');
+  });
+
+  it('今日が目安の期限と同じ日は、まだ過ぎておらぬ', () => {
+    expect(isPastSoft(open, dates, '2026-11-10')).toBe(false);
+  });
+
+  it('完了の行は、目安の期限を過ぎても過ぎた扱いにしない', () => {
+    const done = { ...open, status: { is_done_state: true } };
+    expect(isPastSoft(done, dates, '2026-11-20')).toBe(false);
+  });
+
+  it('目安の期限の無い行は、過ぎた扱いにしない（厳守の期限だけでも）', () => {
+    const hardOnly = task({
+      id: '2',
+      planned_start_on: '2026-11-02',
+      hard_deadline: at('2026-11-05'),
+    });
+    expect(isPastSoft(hardOnly, taskDates(hardOnly, TZ)!, '2026-11-20')).toBe(false);
+  });
+});
+
 describe('layoutGantt', () => {
   const rel1 = task({
     id: '1',
@@ -131,7 +147,7 @@ describe('layoutGantt', () => {
     id: '3',
     seq_key: 'MOB-1',
     project: { id: 'p-mob', key: 'MOB', name: 'Mobile' },
-    soft_deadline: at('2026-11-14'),
+    soft_deadline: at('2026-11-09'),
     hard_deadline: at('2026-11-12'),
   });
   const undated = task({ id: '4' });
@@ -160,16 +176,23 @@ describe('layoutGantt', () => {
     ]);
   });
 
-  it('行の印: 完了は done、目安が厳守を越えたら warn と添えの字、予定開始が無ければ点', () => {
+  it('行の印: 完了は done、目安を過ぎたら warn と添えの字、予定開始が無ければ点', () => {
     const layout = layoutGantt([rel1, rel2, mob1], options());
     const rowOf = (id: string) => layout.rows.find((r) => r.kind === 'task' && r.task_id === id);
+    // rel2 は目安の期限（11/5）を過ぎておるが、完了なので done
     expect(rowOf('2')).toMatchObject({ state: 'done', shape: 'bar', note: null });
-    expect(rowOf('1')).toMatchObject({ state: null, shape: 'bar', hard_deadline: null });
+    // rel1 は今日が目安の期限の日で、まだ過ぎておらぬ
+    expect(rowOf('1')).toMatchObject({
+      state: null,
+      shape: 'bar',
+      hard_deadline: null,
+      note: null,
+    });
     expect(rowOf('3')).toMatchObject({
       state: 'warn',
       shape: 'point',
       hard_deadline: '2026-11-12',
-      note: '目安 11/14 が厳守 11/12 を越えた',
+      note: '目安 11/9 を過ぎた',
     });
   });
 

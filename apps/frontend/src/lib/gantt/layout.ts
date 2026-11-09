@@ -30,13 +30,10 @@ export type TaskDates = {
   point: boolean;
   soft: string | null;
   hard: string | null;
-  /** 目安の期限が厳守の期限を越えた */
-  warn: boolean;
 };
 
 /**
  * 課題の日付を棒の形に読む。予定開始〜目安の期限を棒にし、厳守の期限は棒に含めず菱形で別に描く。
- * 目安と厳守が逆に入っていても（サーバーは検証しない）、棒は目安で終え、越えた印を付ける。
  * 日付が一つも無い課題は `null`（期間なしの数に入る）。
  */
 export function taskDates(task: GanttSource, timeZone: string): TaskDates | null {
@@ -45,10 +42,9 @@ export function taskDates(task: GanttSource, timeZone: string): TaskDates | null
   const start = task.planned_start_on ?? null;
   const end = soft ?? hard ?? start;
   if (!end) return null;
-  const warn = !!soft && !!hard && soft > hard;
-  if (!start) return { start: end, last: end, point: true, soft, hard, warn };
+  if (!start) return { start: end, last: end, point: true, soft, hard };
   // 予定開始が期限より後に入っていても、逆向きの棒にしない
-  return { start, last: end < start ? start : end, point: false, soft, hard, warn };
+  return { start, last: end < start ? start : end, point: false, soft, hard };
 }
 
 /** 月/日（例「11/14」） */
@@ -57,10 +53,17 @@ export function monthDay(date: string): string {
   return `${Number(month)}/${Number(day)}`;
 }
 
-/** 目安が厳守を越えた行に添える字 */
-export function warnNote(dates: TaskDates): string | null {
-  if (!dates.warn || !dates.soft || !dates.hard) return null;
-  return `目安 ${monthDay(dates.soft)} が厳守 ${monthDay(dates.hard)} を越えた`;
+/**
+ * 完了しておらぬのに、今日が目安の期限を過ぎた課題。目安の期限の日はまだ過ぎておらぬ扱い。
+ * 完了かどうかは稲妻線と同じく、状態の `is_done_state` で決める。
+ */
+export function isPastSoft(task: GanttSource, dates: TaskDates, today: string): boolean {
+  return !task.status.is_done_state && !!dates.soft && today > dates.soft;
+}
+
+/** 目安の期限を過ぎた行に添える字 */
+export function pastSoftNote(dates: TaskDates): string | null {
+  return dates.soft ? `目安 ${monthDay(dates.soft)} を過ぎた` : null;
 }
 
 /** 左の一覧の一行 */
@@ -69,6 +72,8 @@ export type GanttListItem = {
   rowId: string;
   task: GanttSource;
   dates: TaskDates;
+  /** 完了しておらぬのに目安の期限を過ぎた（赤い縁と添えの字） */
+  pastSoft: boolean;
 };
 
 export type GanttGroup = {
@@ -98,6 +103,8 @@ export type LayoutOptions = {
   memberIds: readonly string[];
   members: readonly GanttMember[];
   timeZone: string;
+  /** 今日（タイムゾーンの暦の日）。目安を過ぎたかを決める */
+  today: string;
 };
 
 const UNASSIGNED_GROUP = UNASSIGNED_MEMBER;
@@ -129,12 +136,18 @@ export function layoutGantt(tasks: readonly GanttSource[], options: LayoutOption
       skipped += 1;
       continue;
     }
+    const pastSoft = isPastSoft(task, dates, options.today);
     if (options.groupBy === 'project') {
-      groupOf(task.project.id, task.project.name).items.push({ rowId: task.id, task, dates });
+      groupOf(task.project.id, task.project.name).items.push({
+        rowId: task.id,
+        task,
+        dates,
+        pastSoft,
+      });
       continue;
     }
     if (!task.assignees.length) {
-      groupOf(UNASSIGNED_GROUP, '担当なし').items.push({ rowId: task.id, task, dates });
+      groupOf(UNASSIGNED_GROUP, '担当なし').items.push({ rowId: task.id, task, dates, pastSoft });
       continue;
     }
     for (const { user_id } of task.assignees) {
@@ -144,6 +157,7 @@ export function layoutGantt(tasks: readonly GanttSource[], options: LayoutOption
         rowId: `${task.id}:${user_id}`,
         task,
         dates,
+        pastSoft,
       });
     }
   }
@@ -187,14 +201,14 @@ function arcTaskOf({ rowId, task, dates }: GanttListItem): GanttTask {
 }
 
 /** arc の行と、その行の印 */
-function arcRowOf({ rowId, task, dates }: GanttListItem): GanttRow {
-  const state = task.status.is_done_state ? 'done' : dates.warn ? 'warn' : null;
+function arcRowOf({ rowId, task, dates, pastSoft }: GanttListItem): GanttRow {
+  const state = task.status.is_done_state ? 'done' : pastSoft ? 'warn' : null;
   return {
     kind: 'task',
     task_id: rowId,
     hard_deadline: dates.hard,
     state,
-    note: warnNote(dates),
+    note: pastSoft ? pastSoftNote(dates) : null,
     shape: dates.point ? 'point' : 'bar',
   };
 }

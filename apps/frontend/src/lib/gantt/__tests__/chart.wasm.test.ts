@@ -81,6 +81,7 @@ function input(over: Partial<ChartInput> = {}): ChartInput {
       memberIds: [],
       members: [],
       timeZone: TZ,
+      today: TODAY,
     }),
     today: TODAY,
     from: FROM,
@@ -189,12 +190,13 @@ describe('ガントの図（本物の wasm）', () => {
     expect(today?.points[0]![0]).toBe(2 * 32);
   });
 
-  it('棒と厳守の菱形と、目安が厳守を越えた行の字を描く', () => {
+  it('棒と厳守の菱形と、目安を過ぎた行の赤い縁と字を描く', () => {
     const warn = task({
       id: 'warn',
       seq_key: 'REL-9',
       planned_start_on: '2026-11-09',
-      soft_deadline: '2026-11-14T00:00:00Z',
+      // 今日（11/11）は目安の期限の翌日
+      soft_deadline: '2026-11-10T00:00:00Z',
       hard_deadline: '2026-11-12T00:00:00Z',
     });
     const layout = layoutGantt([warn], {
@@ -203,9 +205,41 @@ describe('ガントの図（本物の wasm）', () => {
       memberIds: [],
       members: [],
       timeZone: TZ,
+      today: TODAY,
     });
     const { svg } = render({ layout });
     expect(svg).toContain('class="hard-deadline"');
-    expect(svg).toContain('>目安 11/14 が厳守 11/12 を越えた</text>');
+    expect(svg).toContain('>目安 11/10 を過ぎた</text>');
+    // 赤い縁（warn の縁の色の番号は 19）
+    const { buffer } = render({ layout });
+    expect(
+      buffer.ops.some(
+        (op) => (op as { StrokePath?: { color_id: number } }).StrokePath?.color_id === 19,
+      ),
+    ).toBe(true);
+  });
+
+  it('範囲の前に終わった、目安を過ぎた行も、印の右に字を描き、範囲の内の厳守の菱形を描く', () => {
+    // 11/2〜11/6 の課題。範囲は 11/9 から。厳守の期限 11/12 は範囲の内
+    const before = task({
+      id: 'before',
+      seq_key: 'REL-8',
+      planned_start_on: '2026-11-02',
+      soft_deadline: '2026-11-06T00:00:00Z',
+      hard_deadline: '2026-11-12T00:00:00Z',
+      progress_pct: 40,
+    });
+    const layout = layoutGantt([before], {
+      groupBy: 'project',
+      collapsed: new Set(),
+      memberIds: [],
+      members: [],
+      timeZone: TZ,
+      today: TODAY,
+    });
+    const { svg } = render({ layout });
+    expect(svg).toContain('>← 11/6</text>');
+    expect(svg).toContain('>目安 11/6 を過ぎた</text>');
+    expect(svg).toContain('class="hard-deadline"');
   });
 });

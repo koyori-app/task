@@ -33,7 +33,13 @@ import {
 } from '@/lib/calendar/filters';
 import { fetchAllSchedule, SCHEDULE_PAGE_LIMIT, SCHEDULE_PATH } from '@/lib/calendar/schedule';
 import { dateInZone, mondayOf } from '@/lib/calendar/timeline';
-import { layoutGantt, monthDay, taskIdOfRow, type GanttListItem } from '@/lib/gantt/layout';
+import {
+  layoutGantt,
+  monthDay,
+  pastSoftNote,
+  taskIdOfRow,
+  type GanttListItem,
+} from '@/lib/gantt/layout';
 import {
   fetchAllUnscheduled,
   projectScope,
@@ -204,6 +210,7 @@ const layout = computed(() =>
     memberIds: memberIds.value,
     members: members.value,
     timeZone,
+    today,
   }),
 );
 
@@ -285,6 +292,7 @@ function assigneeNames(task: ScheduleTask | GanttListItem['task']): string[] {
 function compactMeta(item: GanttListItem): string {
   const parts = [item.task.seq_key];
   if (item.task.status.is_done_state) parts.push('完了');
+  else if (item.pastSoft) parts.push(pastSoftNote(item.dates)!);
   else if (item.dates.hard) parts.push(`厳守 ${monthDay(item.dates.hard)}`);
   else if (item.dates.soft) parts.push(`目安 ${monthDay(item.dates.soft)}`);
   return parts.join('　');
@@ -463,7 +471,7 @@ function retryFailed() {
           "
           aria-hidden="true"
         />
-        目安が厳守を越えた
+        目安を過ぎた
       </span>
       <span class="inline-flex items-center gap-1">
         <span

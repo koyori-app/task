@@ -74,12 +74,13 @@ const sampleTasks: ScheduleTask[] = [
       { user_id: 'u-alice', role: 'assignee' },
     ],
   }),
-  // 目安が厳守を越えた
+  // 完了しておらぬのに、今日（7/15）が目安の期限を過ぎた
   task(4, {
     title: '配布物の準備',
-    planned_start_on: '2026-07-16',
-    soft_deadline: '2026-07-24T00:00:00Z',
+    planned_start_on: '2026-07-08',
+    soft_deadline: '2026-07-14T00:00:00Z',
     hard_deadline: '2026-07-22T00:00:00Z',
+    progress_pct: 60,
     assignees: [{ user_id: 'u-alice', role: 'primary' }],
   }),
   // 範囲の後ろへ続く
@@ -205,7 +206,7 @@ export const WithTasks: Story = {
     await expect(canvas.findByText('認証フローの設計')).resolves.toBeInTheDocument();
     await expect(canvas.getByText('2026/7/13 〜 2026/8/2')).toBeInTheDocument();
     await expect(canvas.findByText('期間なし 2 件')).resolves.toBeInTheDocument();
-    await expect(canvas.findByText('目安 7/24 が厳守 7/22 を越えた')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('目安 7/14 を過ぎた')).resolves.toBeInTheDocument();
     await expect(canvasElement.querySelector('.progress-point')).toBeNull();
   },
 };
