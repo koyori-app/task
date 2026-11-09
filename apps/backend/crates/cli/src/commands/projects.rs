@@ -56,7 +56,13 @@ pub async fn run(
         ProjectsCommand::Labels { project } => {
             let project = resolve_project(api, &project).await?;
             let mut labels = list_labels(api, project.id).await?;
-            labels.sort_by(|a, b| a.name.cmp(&b.name));
+            // `--label` の名前の照合は大文字小文字を区別しないので、並びも同じ基準にする
+            labels.sort_by(|a, b| {
+                a.name
+                    .to_lowercase()
+                    .cmp(&b.name.to_lowercase())
+                    .then_with(|| a.name.cmp(&b.name))
+            });
             if output.json {
                 print(&labels, output);
             } else {
@@ -72,15 +78,22 @@ pub async fn run(
 }
 
 /// 人間向けの 1 行: `{name}\t{color}\t{description}`。
-/// 説明は複数行になりうるので、1 件 1 行を崩さないよう改行は空白に畳む。
+/// API は名前と説明の改行・タブを拒まないので、1 件 1 行・タブ区切りの 3 列を崩さないよう
+/// どちらも改行とタブを空白に畳む。元の文字列は `--json` で取れる。
 fn format_label_line(label: &LabelResponse) -> String {
-    let description = label
-        .description
-        .split(['\r', '\n'])
+    format!(
+        "{}\t{}\t{}",
+        single_line(&label.name),
+        label.color,
+        single_line(&label.description)
+    )
+}
+
+fn single_line(text: &str) -> String {
+    text.split(['\r', '\n', '\t'])
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
-        .join(" ");
-    format!("{}\t{}\t{}", label.name, label.color, description)
+        .join(" ")
 }
 
 #[cfg(test)]
@@ -114,5 +127,12 @@ mod tests {
             "bug\t#112233\t1 行目 2 行目 3 行目"
         );
         assert_eq!(format_label_line(&label("")), "bug\t#112233\t");
+    }
+
+    #[test]
+    fn folds_tabs_and_newlines_in_the_name_and_description_into_spaces() {
+        let mut l = label("a\tb");
+        l.name = "bug\nurgent\tnow".to_string();
+        assert_eq!(format_label_line(&l), "bug urgent now\t#112233\ta b");
     }
 }
