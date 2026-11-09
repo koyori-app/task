@@ -556,6 +556,45 @@ describe('TaskGroupedList のサブタスクの子の有無（実物の枝）', 
     expect(arrowOf(wrapper, 'Doing').attributes('aria-expanded')).toBe('true');
   });
 
+  it('子 0 件の行が前方のグループへ移っても（移動先が取得済みで即 0 件）、矢印は閉じて見え、1 回で作成欄が出る', async () => {
+    const inDoing: TaskGroup[] = [
+      { ...group, tasks: [], total: 0 },
+      { ...doingGroup, tasks: [taskFixture('task-a', 'A')], total: 1 },
+    ];
+    const inTodo: TaskGroup[] = [
+      { ...group, tasks: [taskFixture('task-a', 'A')], total: 1 },
+      { ...doingGroup, tasks: [], total: 0 },
+    ];
+    // 結果 0 件・pending でない（キャッシュが残っていて移動先の枝は mount 直後に空と報告する）
+    const wrapper = mountReal(true, inDoing);
+    await flushPromises();
+    expect(arrowOf(wrapper, 'Doing').attributes('aria-expanded')).toBe('false');
+
+    await wrapper.setProps({ groups: inTodo });
+    await flushPromises();
+    expect(arrowOf(wrapper, 'Todo').attributes('aria-expanded')).toBe('false');
+
+    await arrowOf(wrapper, 'Todo').trigger('click');
+    await flushPromises();
+    expect(arrowOf(wrapper, 'Todo').attributes('aria-expanded')).toBe('true');
+    expect(wrapper.find('[data-subtask-branch]').exists()).toBe(true);
+  });
+
+  it('子 0 件の行が後方のグループへ移っても（移動先が即 0 件）、矢印は閉じて見え、1 回で作成欄が出る', async () => {
+    const wrapper = mountReal(true);
+    await flushPromises();
+    expect(arrowOf(wrapper).attributes('aria-expanded')).toBe('false');
+
+    await wrapper.setProps({ groups: doingMoved });
+    await flushPromises();
+    expect(arrowOf(wrapper, 'Doing').attributes('aria-expanded')).toBe('false');
+
+    await arrowOf(wrapper, 'Doing').trigger('click');
+    await flushPromises();
+    expect(arrowOf(wrapper, 'Doing').attributes('aria-expanded')).toBe('true');
+    expect(wrapper.find('[data-subtask-branch]').exists()).toBe(true);
+  });
+
   it('手動で開いた子 0 件の行は、設定を有効にしても矢印を 1 回で作成欄まで開ける', async () => {
     const wrapper = mountReal(false);
     // 手動で開く。明示的な展開なので 0 件でも作成欄を出す
