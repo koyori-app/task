@@ -6,7 +6,7 @@ const TODAY = '2026-11-11';
 
 function state(over: Partial<GanttUrlState> = {}): GanttUrlState {
   return {
-    from: '2026-11-09',
+    from: null,
     memberIds: [],
     scale: 'day',
     groupBy: 'project',
@@ -20,7 +20,7 @@ function urlOf(s: GanttUrlState, base = 'https://example.test/t/gantt'): URL {
 }
 
 describe('parseGanttUrlState', () => {
-  it('何も無ければ今週・日の目盛り・プロジェクトの群れ・稲妻線は覚えた値に任せる', () => {
+  it('何も無ければ範囲は今日に従い、日の目盛り・プロジェクトの群れ・稲妻線は覚えた値に任せる', () => {
     expect(parseGanttUrlState(undefined, TODAY)).toEqual(state());
   });
 
@@ -41,8 +41,16 @@ describe('parseGanttUrlState', () => {
 });
 
 describe('applyGanttUrlState', () => {
-  it('既定の値は書かず、URL を短く保つ', () => {
+  it('既定の値は書かず、URL を短く保つ（今日に従う範囲も書かぬ）', () => {
     expect(urlOf(state()).search).toBe('');
+  });
+
+  it('選んだ範囲は、今週でも書く（今日に従う範囲と分ける）', () => {
+    expect(urlOf(state({ from: '2026-11-09' })).searchParams.get('from')).toBe('2026-11-09');
+  });
+
+  it('読めない from は今日に従う範囲へ倒す', () => {
+    expect(parseGanttUrlState({ from: ['11/9'] }, TODAY).from).toBeNull();
   });
 
   it('稲妻線は点けても切っても明に書く（覚えた値と違う者にも伝わる）', () => {

@@ -24,7 +24,8 @@ export const WEEKEND_DAYS = [5, 6];
 export const GANTT_PALETTE: PaletteOverrides = {
   HeaderBg: 'var(--koyori-color-surface)',
   GroupRow: 'var(--koyori-color-surface-disabled)',
-  Weekend: 'var(--koyori-color-surface-disabled)',
+  // 群れの見出しの行の上でも土日が途切れて見えぬよう、群れの帯より一段濃い色にする
+  Weekend: 'var(--koyori-color-surface-hover)',
   Grid: 'var(--koyori-color-border)',
   GridLabel: 'var(--koyori-color-text-muted)',
   BarBg: 'var(--koyori-color-accent-subtle)',

@@ -32,7 +32,7 @@ import {
   UNASSIGNED_MEMBER,
 } from '@/lib/calendar/filters';
 import { fetchAllSchedule, SCHEDULE_PAGE_LIMIT, SCHEDULE_PATH } from '@/lib/calendar/schedule';
-import { dateInZone, mondayOf } from '@/lib/calendar/timeline';
+import { dateInZone } from '@/lib/calendar/timeline';
 import {
   layoutGantt,
   monthDay,
@@ -51,6 +51,7 @@ import { applyGanttUrlState, parseGanttUrlState } from '@/lib/gantt/url-state';
 import {
   chartBackend,
   fitDayWidth,
+  defaultFrom,
   shiftView,
   viewTo,
   type GanttGroupBy,
@@ -112,12 +113,14 @@ const compact = computed(() => !wide.value);
 const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const today = dateInZone(new Date(), timeZone);
 const initial = parseGanttUrlState(pageContext.urlParsed?.searchAll, today);
-const from = ref(initial.from);
+// 範囲を選んでおらねば null で、今日に従う（今日の前に数日を残した範囲）
+const from = ref<string | null>(initial.from);
 const memberIds = ref<string[]>(initial.memberIds);
 const scale = ref<GanttScale>(initial.scale);
 const groupBy = ref<GanttGroupBy>(initial.groupBy);
 const urlProgressLine = ref<boolean | null>(initial.progressLine);
-const to = computed(() => viewTo(from.value, scale.value, compact.value));
+const viewFrom = computed(() => from.value ?? defaultFrom(today, scale.value, compact.value));
+const to = computed(() => viewTo(viewFrom.value, scale.value, compact.value));
 
 // 稲妻線は既定で切れ。URL に `line` があればそれに従い、無ければ利用者が最後に選んだ値を使う
 const preferences = usePreferencesStore();
@@ -155,7 +158,7 @@ const scheduleQuery = useQuery({
           params: {
             path: { tenant_id: tenantId.value! },
             query: {
-              from: from.value,
+              from: viewFrom.value,
               to: to.value,
               timezone: timeZone,
               limit: SCHEDULE_PAGE_LIMIT,
@@ -255,7 +258,7 @@ const chart = computed(() =>
   chartProps({
     layout: layout.value,
     today,
-    from: from.value,
+    from: viewFrom.value,
     to: to.value,
     scale: scale.value,
     pxPerDay: dayWidth.value,
@@ -380,20 +383,20 @@ function retryFailed() {
       <Button
         variant="tertiary"
         ariaLabel="前の期間"
-        @click="from = shiftView(from, scale, compact, -1)"
+        @click="from = shiftView(viewFrom, scale, compact, -1)"
       >
         <template #icon><ChevronLeft class="size-4" aria-hidden="true" /></template>
       </Button>
-      <Button variant="tertiary" label="今日" @click="from = mondayOf(today)" />
+      <Button variant="tertiary" label="今日" @click="from = null" />
       <Button
         variant="tertiary"
         ariaLabel="次の期間"
-        @click="from = shiftView(from, scale, compact, 1)"
+        @click="from = shiftView(viewFrom, scale, compact, 1)"
       >
         <template #icon><ChevronRight class="size-4" aria-hidden="true" /></template>
       </Button>
       <span class="text-sm font-medium" aria-live="polite" data-testid="gantt-range">
-        {{ formatRangeDate(from) }} 〜 {{ formatRangeDate(to) }}
+        {{ formatRangeDate(viewFrom) }} 〜 {{ formatRangeDate(to) }}
       </span>
 
       <ButtonGroup label="目盛り">
@@ -534,14 +537,14 @@ function retryFailed() {
       data-testid="gantt-body"
     >
       <!-- 広い画面: 左の一覧（キー・題・担当・厳守の期限）。行の高さは図と同じ -->
-      <div v-if="!compact" class="w-72 shrink-0 border-r border-border" data-testid="gantt-list">
+      <div v-if="!compact" class="w-80 shrink-0 border-r border-border" data-testid="gantt-list">
         <div
-          class="flex items-end gap-2 px-3 pb-1 text-xs text-muted-foreground"
+          class="flex items-end gap-1.5 px-2 pb-1 text-xs text-muted-foreground"
           :style="{ height: `${HEADER_H}px` }"
         >
           <span class="flex-1">タスク</span>
-          <span class="w-12 text-center">担当</span>
-          <span class="w-10 text-right">厳守</span>
+          <span class="w-7 text-center">担当</span>
+          <span class="w-9 text-right">厳守</span>
         </div>
         <template v-for="group in layout.groups" :key="group.key">
           <button
@@ -565,7 +568,7 @@ function retryFailed() {
               v-for="item in group.items"
               :key="item.rowId"
               type="button"
-              class="flex w-full items-center gap-2 border-t border-border/60 px-3 text-left hover:bg-muted/40"
+              class="flex w-full items-center gap-1.5 border-t border-border/60 px-2 text-left hover:bg-muted/40"
               :style="{ height: `${rowH}px` }"
               :title="item.task.title"
               @click="openTask(byId.get(item.task.id)!)"
@@ -576,14 +579,14 @@ function retryFailed() {
                 </span>
                 <span class="block truncate text-sm leading-tight">{{ item.task.title }}</span>
               </span>
-              <span class="flex w-12 justify-center" :title="assigneeNames(item.task).join('、')">
+              <span class="flex w-7 justify-center" :title="assigneeNames(item.task).join('、')">
                 <Avatar
                   v-if="item.task.assignees.length"
                   :name="assigneeNames(item.task)[0]!"
                   :size="20"
                 />
               </span>
-              <span class="w-10 text-right text-xs text-destructive">
+              <span class="w-9 text-right text-xs text-destructive">
                 {{ item.dates.hard ? monthDay(item.dates.hard) : '' }}
               </span>
             </button>

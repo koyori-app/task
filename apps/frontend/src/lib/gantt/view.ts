@@ -1,4 +1,4 @@
-import { addDays } from '@/lib/calendar/timeline';
+import { addDays, mondayOf } from '@/lib/calendar/timeline';
 
 /** 目盛りの段。日は日ごとの数字と曜日、週は週の頭、月は月の頭に札を描く */
 export type GanttScale = 'day' | 'week' | 'month';
@@ -26,11 +26,14 @@ export function viewDays(scale: GanttScale, compact: boolean): number {
   }
 }
 
-/** 一日の幅の下限（px）。日の段の 32px は、日の数字と曜日が二字まで収まる幅 */
+/**
+ * 一日の幅の下限（px）。日の段の 30px は、日の数字と曜日が二字まで収まる幅で、幅 1280 の画面で
+ * 左の一覧（320px）の右に 3 週が横に転がさずに収まる幅
+ */
 export function pxPerDay(scale: GanttScale): number {
   switch (scale) {
     case 'day':
-      return 32;
+      return 30;
     case 'week':
       return 12;
     case 'month':
@@ -79,4 +82,25 @@ export function chartBackend(options: {
   if (!options.compact) return 'svg';
   const tall = options.screenHeight > 0 && options.chartHeight > options.screenHeight * 3;
   return options.rowCount > COMPACT_SVG_MAX_ROWS || tall ? 'canvas' : 'svg';
+}
+
+/**
+ * 今日より前に残す日数。今日の線を範囲の左の端に貼り付けず、過ぎた事（遅れた棒、過ぎた期限）も
+ * 見えるようにする。案 A の板は 11/2〜11/22 に今日 11/8 を置き、今日の前に一週を残していた。
+ * 狭い画面の日の段は一週しか描かぬので、今日の週を描く（案 A の 375 の板と同じ）。
+ */
+export function leadDays(scale: GanttScale, compact: boolean): number {
+  switch (scale) {
+    case 'day':
+      return compact ? 0 : 7;
+    case 'week':
+      return compact ? 7 : 14;
+    case 'month':
+      return compact ? 14 : 28;
+  }
+}
+
+/** 範囲を選んでおらぬ時（「今日」の button と既定）の範囲の頭。今日の週の月曜から前へ残す */
+export function defaultFrom(today: string, scale: GanttScale, compact: boolean): string {
+  return addDays(mondayOf(today), -leadDays(scale, compact));
 }

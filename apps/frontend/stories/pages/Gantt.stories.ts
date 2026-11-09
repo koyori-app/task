@@ -10,7 +10,7 @@ type ScheduleTask = components['schemas']['ScheduleTask'];
 
 const PAGE_CONTEXT_KEY = 'vike-vue:usePageContext';
 
-// preview.ts で現在時刻は 2026-07-15（水）に固定。日の目盛りの表示は 7/13（月）〜 8/2 の 3 週
+// preview.ts で現在時刻は 2026-07-15（水）に固定。日の目盛りの表示は 7/6（月）〜 7/26 の 3 週
 function pageContext(searchAll: Record<string, string[]> = {}) {
   return {
     urlPathname: '/tenant-123/gantt',
@@ -204,7 +204,8 @@ export const WithTasks: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByText('認証フローの設計')).resolves.toBeInTheDocument();
-    await expect(canvas.getByText('2026/7/13 〜 2026/8/2')).toBeInTheDocument();
+    // 今日（7/15）の週の前に一週を残した 3 週
+    await expect(canvas.getByText('2026/7/6 〜 2026/7/26')).toBeInTheDocument();
     await expect(canvas.findByText('期間なし 2 件')).resolves.toBeInTheDocument();
     await expect(canvas.findByText('目安 7/14 を過ぎた')).resolves.toBeInTheDocument();
     await expect(canvasElement.querySelector('.progress-point')).toBeNull();

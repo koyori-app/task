@@ -4,6 +4,7 @@ import { diffDays, mondayOf } from '@/lib/calendar/timeline';
 
 import {
   chartBackend,
+  defaultFrom,
   fitDayWidth,
   GANTT_SCALES,
   SCHEDULE_MAX_DAYS,
@@ -62,7 +63,7 @@ describe('fitDayWidth', () => {
     // 3 週で 692px の箱なら (692 - 20) / 21 = 32
     expect(fitDayWidth(692, 'day', false)).toBe(32);
     expect(fitDayWidth(1000, 'day', false)).toBe(46);
-    expect(fitDayWidth(300, 'day', false)).toBe(32);
+    expect(fitDayWidth(300, 'day', false)).toBe(30);
   });
 
   it('狭い画面は箱に収めるのを先にする', () => {
@@ -72,5 +73,26 @@ describe('fitDayWidth', () => {
 
   it('箱の幅が測れる前は下限の幅', () => {
     expect(fitDayWidth(0, 'week', false)).toBe(12);
+  });
+});
+
+describe('defaultFrom（「今日」と既定の範囲）', () => {
+  it('広い画面の日の目盛りは、今日の週の前に一週を残す（案 A の板は今日 11/8 を 11/2 からの範囲に置く）', () => {
+    // 2026-11-11（水）の週の月曜は 11/9。その前の一週から
+    expect(defaultFrom('2026-11-11', 'day', false)).toBe('2026-11-02');
+    expect(defaultFrom('2026-11-08', 'day', false)).toBe('2026-10-26');
+  });
+
+  it('今日はどの目盛りでも範囲の内にあり、範囲の頭ではない（狭い画面の日の目盛りは今日の週）', () => {
+    const today = '2026-11-11';
+    for (const scale of GANTT_SCALES) {
+      for (const compact of [false, true]) {
+        const from = defaultFrom(today, scale, compact);
+        expect(mondayOf(from)).toBe(from);
+        expect(diffDays(from, today)).toBeGreaterThan(0);
+        expect(diffDays(today, viewTo(from, scale, compact))).toBeGreaterThan(0);
+      }
+    }
+    expect(defaultFrom(today, 'day', true)).toBe('2026-11-09');
   });
 });
