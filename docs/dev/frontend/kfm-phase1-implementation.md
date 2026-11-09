@@ -190,7 +190,7 @@ http / https の絶対 URL を持つリンクの先頭に、リンク先サイ�
 - 明示リンク、GFM の autolink、参照リンク（`[x][r]`）を同じ場所で扱うため、href が決まった後の rehype 層で `a` を見る。rehype 層の最後に置き、starry-night と kfm-code には干渉しない
 - 付けないもの: 相対 href（KEY-N、メンション、アプリ内のパス）、`#…`（脚注の戻りリンク）、`mailto:` など http / https 以外、`//…` のプロトコル相対、ドットを含まない host（`localhost`）、IPv6 リテラル、中身の無いリンク、画像を含むリンク（バッジ）。自アプリ宛ての絶対 URL は外部と同じ扱いにする
 - host は WHATWG URL の `hostname`（小文字、punycode）で、ポートと認証情報は捨てる。ラベル 63 文字以下、全長 253 文字以下に合わないものは付けない。backend の `service::favicon::parse_host` と同じ規則である
-- 画像は backend の `GET /v1/favicons/{host}` が取得して配信する（[タスクの基本機能](/dev/features/tasks/core)）。ブラウザは外部サイトを直接読まない。取れない時は backend が汎用アイコンを返すので、client に失敗時の処理は無い
+- 画像は backend の `GET /v1/favicons/{host}` が取得して配信する（[タスクの基本機能](/dev/features/tasks/core)）。ブラウザは外部サイトを直接読まない。取れない時は backend が汎用アイコンを返すので、client に失敗時の処理は無い。backend は全ホップ合わせて 8 秒、64 KiB、利用者ごとに 10 分で 30 host までの取得回数で抑え、超えた分も汎用アイコンを返す（上限の理由はタスクの基本機能の決定事項）
 - options を持たないので、キャッシュキーと `RenderOptions` は変わらない。rehype 層へ足しただけで旧 HTML のキャッシュは失効する
 - 見た目は `rehype-kfm-link-favicon/style.css`（`img.kfm-link-favicon`）を呼び出し側が import して当てる
 

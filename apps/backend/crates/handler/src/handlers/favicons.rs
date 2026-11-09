@@ -10,14 +10,17 @@ use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use service::favicon::{FALLBACK_MIME, FALLBACK_SVG, Favicon, favicon_for_host, parse_host};
 
-/// 本文の外部リンクの先頭に出す favicon をサーバーが取って配信する（TASK-362）。
+/// リンク先サイトの favicon を配信する。
 ///
-/// 認証を必須にする理由: host は誰でも列挙できる値で、無認証だと誰でもこのサーバーを
-/// 「任意ホストへの GET」の踏み台にできる。`<img>` は same-origin（`/api` プロキシ経由）なので
-/// Cookie が付き、ログイン中の画面からは問題なく読める。
-/// `Cache-Control` を `private` にするのは、認証付きの応答を共有キャッシュに置かせないため。
-/// 取れない時は 404 ではなく 200 で汎用アイコンを返す（404 はブラウザがキャッシュしにくく、
-/// 閲覧のたびに再要求になる）。
+/// 取れないときや、取得回数の上限を超えたときは、汎用アイコン（`image/svg+xml`）を返す。
+// 認証を必須にする理由: host は誰でも列挙できる値で、無認証だと誰でもこのサーバーを
+// 「任意ホストへの GET」の踏み台にできる。`<img>` は same-origin（`/api` プロキシ経由）なので
+// Cookie が付き、ログイン中の画面からは問題なく読める。
+// `Cache-Control` を `private` にするのは、認証付きの応答を共有キャッシュに置かせないため。
+// 取れない時は 404 ではなく 200 で汎用アイコンを返す（404 はブラウザがキャッシュしにくく、
+// 閲覧のたびに再要求になる）。
+// キャッシュに無い host の取得は利用者ごとに回数を制限し、超えた分は外へ取りに行かず
+// `no-store` で汎用アイコンを返す（`service::favicon::FETCH_RATE_LIMIT`）。
 #[axum::debug_handler]
 #[utoipa::path(
     get,
@@ -36,11 +39,11 @@ use service::favicon::{FALLBACK_MIME, FALLBACK_SVG, Favicon, favicon_for_host, p
 )]
 pub async fn get_favicon(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Path(host): Path<String>,
 ) -> Result<Response, AppError> {
     let host = parse_host(&host).ok_or(AppError::NotFound)?;
-    let favicon = favicon_for_host(&state.redis_client, &host)
+    let favicon = favicon_for_host(&state.redis_client, auth.user_id, &host)
         .await
         .map_err(AppError::Internal)?;
 

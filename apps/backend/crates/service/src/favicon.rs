@@ -7,9 +7,17 @@
 //! - https 固定、`/favicon.ico` 固定、GET のみ。
 //! - 名前解決は一度だけ行い、[`crate::webhooks::validate_addresses`]（Webhook と同じ規則）で
 //!   private / link-local / メタデータ / loopback を拒否し、接続はその IP に固定する。
-//! - リダイレクトは自分で追い、各ホップで同じ検査をする（3 回まで）。
-//! - 5 秒・256 KiB・同時 16 件の上限。取得した本文は先頭バイトで画像と確かめたものだけ返す。
-//!   SVG は返さない（自オリジンから配信する画像に script を含み得る形式を入れない）。
+//! - リダイレクトは自分で追い、各ホップで同じ検査をする（3 回まで）。接続先のポートは常に 443
+//!   （リダイレクト先で任意のポートを指せると、応答時間から公開 IP のポートの開閉を探れる）。
+//! - 1 ホップ 5 秒、全ホップ合わせて 8 秒、64 KiB、同時 16 件の上限。取得した本文は先頭バイトで
+//!   画像と確かめたものだけ返す。SVG は返さない（自オリジンから配信する画像に script を含み得る
+//!   形式を入れない）。
+//!
+//! 認証済みの利用者なら誰でも任意の host を要求できるので、Redis を埋められないようにも抑える。
+//! - キャッシュに残す画像は 64 KiB まで。超える応答は取れなかった扱い（汎用アイコン）にする。
+//! - キャッシュに無い host を外へ取りに行く回数は、利用者ごとに [`FETCH_RATE_LIMIT`] 回 /
+//!   [`FETCH_RATE_WINDOW_SECS`] 秒まで。超えた分は取りに行かず、保存もしない汎用アイコンを返す。
+//!   キャッシュ済みの host は数えない。
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -19,14 +27,28 @@ use bytes::Bytes;
 use common::cache::redis::RedisConnection;
 use reqwest::redirect::Policy;
 use url::Url;
+use uuid::Uuid;
 
-pub const FAVICON_MAX_BYTES: usize = 256 * 1024;
+/// キャッシュに残す画像の上限。実在の favicon の大半は数 KB〜数十 KB で、これを超える物は
+/// 取れなかった扱いにする（Redis に 1 host あたり残す量を抑えるため）。
+pub const FAVICON_MAX_BYTES: usize = 64 * 1024;
+/// 1 ホップ（名前解決、または 1 回の GET）の上限。
 const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
+/// 全ホップ合わせた上限。1 ホップずつの上限だけだと、リダイレクトのたびに掛け直されて
+/// 同時取得の枠を数十秒占有できてしまう。
+const TOTAL_FETCH_TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_REDIRECTS: usize = 3;
 const CACHE_TTL_HIT_SECS: u64 = 7 * 24 * 60 * 60;
 const CACHE_TTL_MISS_SECS: u64 = 60 * 60;
 const MAX_IN_FLIGHT_FETCHES: usize = 16;
 pub const CACHE_KEY_PREFIX: &str = "favicon:v1:";
+pub const RATE_LIMIT_KEY_PREFIX: &str = "favicon:rl:";
+/// 利用者 1 人あたり、キャッシュに無い host を外へ取りに行ける回数と窓。
+/// 初めて開いた長い文書の外部リンク（30 host 程度）が通り、ワイルドカード DNS の host を
+/// 連番で叩く使い方は 1 時間に 180 件ほどで止まる値にする。超えた分は窓が明けるまで汎用アイコンで、
+/// 画面を開き直せば（キャッシュが育つので）残りも取れる。
+pub const FETCH_RATE_LIMIT: i64 = 30;
+pub const FETCH_RATE_WINDOW_SECS: i64 = 600;
 
 /// 取れなかった時に返す汎用アイコン（自前の静的 SVG。script も外部参照も含めない）。
 pub const FALLBACK_MIME: &str = "image/svg+xml";
@@ -137,9 +159,31 @@ impl Drop for InFlightGuard {
     }
 }
 
+/// 利用者ごとの外部取得の回数を 1 つ数え、上限内なら true を返す（固定窓）。
+async fn try_acquire_fetch_slot(
+    conn: &mut impl redis::aio::ConnectionLike,
+    user_id: Uuid,
+) -> Result<bool, anyhow::Error> {
+    let key = format!("{RATE_LIMIT_KEY_PREFIX}{user_id}");
+    let (count, _): (i64, i64) = redis::pipe()
+        .atomic()
+        .cmd("INCR")
+        .arg(&key)
+        .cmd("EXPIRE")
+        .arg(&key)
+        .arg(FETCH_RATE_WINDOW_SECS)
+        .arg("NX")
+        .query_async(conn)
+        .await
+        .map_err(|e| anyhow::anyhow!("redis favicon rate limit: {e}"))?;
+    Ok(count <= FETCH_RATE_LIMIT)
+}
+
 /// host の favicon をキャッシュ経由で返す。`host` は [`parse_host`] を通した値。
+/// `user_id` は、キャッシュに無い host を取りに行く回数を数える相手。
 pub async fn favicon_for_host(
     redis: &RedisConnection,
+    user_id: Uuid,
     host: &str,
 ) -> Result<Favicon, anyhow::Error> {
     let key = format!("{CACHE_KEY_PREFIX}{host}");
@@ -160,6 +204,9 @@ pub async fn favicon_for_host(
     let Some(_guard) = InFlightGuard::acquire() else {
         return Ok(Favicon::Fallback { cacheable: false });
     };
+    if !try_acquire_fetch_slot(&mut conn, user_id).await? {
+        return Ok(Favicon::Fallback { cacheable: false });
+    }
     let favicon = match fetch_from_host(host).await {
         Some((mime, bytes)) => Favicon::Image { mime, bytes },
         None => Favicon::Fallback { cacheable: true },
@@ -184,24 +231,54 @@ pub async fn favicon_for_host(
 /// `https://{host}/favicon.ico` を、リダイレクトを各ホップで検査しながら取る。
 /// 失敗の理由は呼び出し側に要らない（汎用アイコンになるだけ）ので None にまとめる。
 async fn fetch_from_host(host: &str) -> Option<(&'static str, Bytes)> {
-    let mut url = Url::parse(&format!("https://{host}/favicon.ico")).ok()?;
-    for _ in 0..=MAX_REDIRECTS {
-        let addrs = resolve_public(&url).await?;
-        match fetch_icon_at(&url, &addrs).await {
-            Hop::Icon(mime, bytes) => return Some((mime, bytes)),
-            Hop::Redirect(next) => url = next,
-            Hop::Miss => return None,
+    let url = Url::parse(&format!("https://{host}/favicon.ico")).ok()?;
+    fetch_chain(url, TOTAL_FETCH_TIMEOUT, |url| async move {
+        match resolve_public(&url).await {
+            Some(addrs) => fetch_icon_at(&url, &addrs).await,
+            None => Hop::Miss,
         }
-    }
-    None
+    })
+    .await
 }
 
-/// 一度だけ名前解決し、公開アドレスだけなら接続先を返す。https 以外・private 宛ては None。
+/// `step`（1 ホップ分の取得）をリダイレクトの数だけ繰り返す。全ホップ合わせて `total` を超えたら
+/// 取れなかったものとして打ち切る（同時取得の枠を長く占有させない）。
+async fn fetch_chain<F, Fut>(
+    first: Url,
+    total: Duration,
+    mut step: F,
+) -> Option<(&'static str, Bytes)>
+where
+    F: FnMut(Url) -> Fut,
+    Fut: std::future::Future<Output = Hop>,
+{
+    let chain = async {
+        let mut url = first;
+        for _ in 0..=MAX_REDIRECTS {
+            match step(url).await {
+                Hop::Icon(mime, bytes) => return Some((mime, bytes)),
+                Hop::Redirect(next) => url = next,
+                Hop::Miss => return None,
+            }
+        }
+        None
+    };
+    match tokio::time::timeout(total, chain).await {
+        Ok(found) => found,
+        Err(_) => {
+            tracing::debug!("favicon fetch exceeded the total timeout");
+            None
+        }
+    }
+}
+
+/// 一度だけ名前解決し、公開アドレスだけなら接続先を返す。https 以外・443 以外のポート・
+/// private 宛ては None（名前解決の前に判定する）。
 async fn resolve_public(url: &Url) -> Option<Vec<SocketAddr>> {
     if url.scheme() != "https" {
         return None;
     }
-    let port = url.port_or_known_default()?;
+    let port = url.port_or_known_default().filter(|port| *port == 443)?;
     let addrs: Vec<SocketAddr> = match url.host()? {
         url::Host::Ipv4(ip) => vec![SocketAddr::new(ip.into(), port)],
         url::Host::Ipv6(ip) => vec![SocketAddr::new(ip.into(), port)],
@@ -448,6 +525,10 @@ mod tests {
             "https://10.0.0.1/",
             "https://169.254.169.254/",
             "https://[::1]/",
+            // 443 以外のポートは名前解決の前に拒否する（リダイレクト先でポートを探らせない）
+            "https://example.com:8443/favicon.ico",
+            "https://example.com:80/",
+            "https://8.8.8.8:8443/",
         ] {
             let url = Url::parse(raw).unwrap();
             assert!(resolve_public(&url).await.is_none(), "{raw}");
@@ -557,5 +638,69 @@ mod tests {
         let response =
             b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec();
         assert!(matches!(fetch_with_response(response).await, Hop::Miss));
+    }
+
+    #[test]
+    fn resolve_public_accepts_the_default_port_for_ip_literals() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        for raw in ["https://8.8.8.8/", "https://8.8.8.8:443/favicon.ico"] {
+            let url = Url::parse(raw).unwrap();
+            let addrs = rt.block_on(resolve_public(&url)).expect(raw);
+            assert_eq!(addrs, vec!["8.8.8.8:443".parse::<SocketAddr>().unwrap()]);
+        }
+    }
+
+    fn redirect_to(path: &str) -> Hop {
+        Hop::Redirect(Url::parse(&format!("https://example.com{path}")).unwrap())
+    }
+
+    async fn chain_with_hop_delay(total: Duration, hop_delay: Duration) -> Option<&'static str> {
+        let first = Url::parse("https://example.com/favicon.ico").unwrap();
+        let mut hops = 0;
+        fetch_chain(first, total, |_| {
+            hops += 1;
+            let hop = hops;
+            async move {
+                tokio::time::sleep(hop_delay).await;
+                if hop <= MAX_REDIRECTS {
+                    redirect_to("/next")
+                } else {
+                    Hop::Icon("image/png", Bytes::from_static(PNG))
+                }
+            }
+        })
+        .await
+        .map(|(mime, _)| mime)
+    }
+
+    #[tokio::test]
+    async fn fetch_chain_gives_up_when_hops_add_up_past_the_total_timeout() {
+        // 各ホップは 1 ホップの上限（FETCH_TIMEOUT）に収まるが、4 ホップ合わせると total を超える
+        let hop = Duration::from_millis(60);
+        assert!(hop < FETCH_TIMEOUT);
+        assert_eq!(
+            chain_with_hop_delay(Duration::from_millis(150), hop).await,
+            None
+        );
+        // 対照: total に収まるなら最後のホップの画像が取れる
+        assert_eq!(
+            chain_with_hop_delay(Duration::from_secs(5), hop).await,
+            Some("image/png")
+        );
+    }
+
+    #[test]
+    fn in_flight_guard_caps_concurrent_fetches_and_releases_on_drop() {
+        let guards: Vec<_> = (0..MAX_IN_FLIGHT_FETCHES)
+            .map(|_| InFlightGuard::acquire().expect("under the cap"))
+            .collect();
+        assert!(InFlightGuard::acquire().is_none(), "cap + 1 is refused");
+        // 拒否した呼び出しは枠を持ち出さない（戻した後も cap のまま）
+        assert!(InFlightGuard::acquire().is_none());
+        drop(guards);
+        let again = InFlightGuard::acquire();
+        assert!(again.is_some(), "slots come back after drop");
     }
 }

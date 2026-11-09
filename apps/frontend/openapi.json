@@ -4733,7 +4733,7 @@
       "get": {
         "tags": ["Tasks"],
         "summary": "リンク先サイトの favicon を配信",
-        "description": "認証を必須にする理由: host は誰でも列挙できる値で、無認証だと誰でもこのサーバーを\n「任意ホストへの GET」の踏み台にできる。`<img>` は same-origin（`/api` プロキシ経由）なので\nCookie が付き、ログイン中の画面からは問題なく読める。\n`Cache-Control` を `private` にするのは、認証付きの応答を共有キャッシュに置かせないため。\n取れない時は 404 ではなく 200 で汎用アイコンを返す（404 はブラウザがキャッシュしにくく、\n閲覧のたびに再要求になる）。",
+        "description": "取れないときや、取得回数の上限を超えたときは、汎用アイコン（`image/svg+xml`）を返す。",
         "operationId": "get_favicon",
         "parameters": [
           {
