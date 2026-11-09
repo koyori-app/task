@@ -23,8 +23,13 @@ import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts';
 import { Button } from '@koyori-app/ui-vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import DashboardCreateTask from './DashboardCreateTask.vue';
+import DashboardProjectsEmpty from './DashboardProjectsEmpty.vue';
 
-const props = defineProps<{ tenantId: TenantUuid; tenantSlug: string }>();
+const props = defineProps<{
+  tenantId: TenantUuid;
+  tenantSlug: string;
+  canCreateProject?: boolean;
+}>();
 const DASHBOARD_PATH = '/v1/tenants/{tenant_id}/users/me/dashboard' as const;
 const MY_TASKS_PATH = '/v1/tenants/{tenant_id}/users/me/tasks' as const;
 const TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
@@ -249,6 +254,11 @@ async function complete(item: DashboardTask) {
       <Loader2 class="mx-auto mb-3 size-5 animate-spin" />読み込み中…
     </div>
     <template v-if="data">
+      <DashboardProjectsEmpty
+        v-if="!data.projects.length"
+        :tenant-slug="tenantSlug"
+        :can-create-project="!!canCreateProject"
+      />
       <section class="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="自分のタスクの概要">
         <component
           :is="stat.filter ? 'button' : 'div'"
