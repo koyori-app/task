@@ -121,6 +121,8 @@ function createMockFetch({
   };
   globalThis.fetch = fn().mockImplementation(async (req: Request | string) => {
     const url = new URL(typeof req === 'string' ? req : req.url, 'http://localhost');
+    // arc の wasm など、API でない要求は本物の fetch に渡す（JSON を返すと wasm を読めない）
+    if (!url.pathname.includes('/v1/')) return original(req);
     if (/\/v1\/tenants\/?$/.test(url.pathname)) {
       return jsonResponse([
         {
