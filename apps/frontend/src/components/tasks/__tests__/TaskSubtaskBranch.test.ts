@@ -1,18 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
-import { toValue } from 'vue';
+import { nextTick, toValue } from 'vue';
 import type { UseTaskSubtasksParams } from '@/composables/useTaskSubtasks';
 
-const subtasksState = vi.hoisted(() => ({
-  loading: { value: false },
-  error: { value: false },
-  subtasks: { value: [] as Array<{ id: string; title: string; status_id: string }> },
-  createPending: { value: false },
-  createError: { value: null as string | null },
-  createSubtask: vi.fn(async () => true),
-  refetch: vi.fn(),
-  params: null as UseTaskSubtasksParams | null,
-}));
+// 取得結果の変化に枝の watch が追従することも確かめるため、リアクティブな値で持つ
+const subtasksState = await vi.hoisted(async () => {
+  const { ref } = await import('vue');
+  return {
+    loading: ref(false),
+    pending: ref(false),
+    error: ref(false),
+    subtasks: ref([] as Array<{ id: string; title: string; status_id: string }>),
+    createPending: { value: false },
+    createError: { value: null as string | null },
+    createSubtask: vi.fn(async () => true),
+    refetch: vi.fn(),
+    params: null as UseTaskSubtasksParams | null,
+  };
+});
 
 vi.mock('@/composables/useTaskSubtasks', () => ({
   useTaskSubtasks: (params: UseTaskSubtasksParams) => {
@@ -35,7 +40,11 @@ const parentTask = {
   status_id: 'status-todo',
 } as TaskResponse;
 
-function mountBranch(pending: Record<string, 'status_id' | undefined>, implicit?: boolean) {
+function mountBranch(
+  pending: Record<string, 'status_id' | undefined>,
+  implicit?: boolean,
+  onEmpty?: (empty: boolean) => void,
+) {
   return mount(TaskSubtaskBranch, {
     props: {
       projectKey: 'TEST',
@@ -49,6 +58,7 @@ function mountBranch(pending: Record<string, 'status_id' | undefined>, implicit?
       errors: {},
       onComment: vi.fn(async () => true),
       implicit,
+      onEmpty,
     },
     global: { stubs: { TaskGroupedRow: true } },
   });
@@ -58,6 +68,7 @@ describe('TaskSubtaskBranch', () => {
   beforeEach(() => {
     subtasksState.subtasks.value = [];
     subtasksState.loading.value = false;
+    subtasksState.pending.value = false;
     subtasksState.error.value = false;
     subtasksState.createSubtask.mockClear();
   });
@@ -124,6 +135,14 @@ describe('TaskSubtaskBranch', () => {
     ).toBe(false);
   });
 
+  it('implicit 無しでも結果が無い間は作成欄を出さず読み込み中を出す', () => {
+    subtasksState.pending.value = true;
+    const wrapper = mountBranch({});
+
+    expect(wrapper.findComponent(TaskSubtaskComposer).exists()).toBe(false);
+    expect(wrapper.text()).toContain('サブタスクを読み込み中…');
+  });
+
   describe('環境設定で開いた枝（implicit）', () => {
     it('子が 0 件なら作成欄も追加ボタンも出さず、枝そのものを描かない', () => {
       const wrapper = mountBranch({}, true);
@@ -166,7 +185,7 @@ describe('TaskSubtaskBranch', () => {
       expect(wrapper.findAll('button').some((b) => b.text() === '再試行')).toBe(true);
     });
 
-    it('取得が終わると子の有無を empty で返す（0 件なら true、子がいれば false）', () => {
+    it('取得が成功して 0 件なら empty: true、子がいれば false を返す', () => {
       const none = mountBranch({}, true);
       expect(none.emitted('empty')).toEqual([[true]]);
 
@@ -177,10 +196,62 @@ describe('TaskSubtaskBranch', () => {
       expect(some.emitted('empty')).toEqual([[false]]);
     });
 
-    it('読み込み中は empty を返さない', () => {
+    it('読み込み中は empty: true にならない', () => {
       subtasksState.loading.value = true;
 
-      expect(mountBranch({}, true).emitted('empty')).toBeUndefined();
+      expect(mountBranch({}, true).emitted('empty')).toEqual([[false]]);
+    });
+
+    it('取得に失敗したら空とは扱わず（empty: true にならず）、失敗を出す', async () => {
+      subtasksState.error.value = true;
+      const wrapper = mountBranch({}, true);
+
+      expect(wrapper.emitted('empty')).toEqual([[false]]);
+      expect(wrapper.text()).toContain('サブタスクを読み込めませんでした');
+    });
+
+    it('クエリが無効で結果が無い間（pending）は空とは扱わず、結果が 0 件で届いて初めて true にする', async () => {
+      subtasksState.pending.value = true;
+      const wrapper = mountBranch({}, true);
+      expect(wrapper.emitted('empty')).toEqual([[false]]);
+      // 結果が無い間は、暗黙の枝でも作成欄を出さない
+      expect(wrapper.findComponent(TaskSubtaskComposer).exists()).toBe(false);
+
+      subtasksState.pending.value = false;
+      await nextTick();
+      expect(wrapper.emitted('empty')).toEqual([[false], [true]]);
+    });
+
+    it('結果が届いたあとの変化（子が増えた・減った）にも empty が追従する', async () => {
+      const wrapper = mountBranch({}, true);
+      subtasksState.subtasks.value = [
+        { id: 'child-id', title: '子タスク', status_id: 'status-todo' },
+      ];
+      await nextTick();
+      subtasksState.subtasks.value = [];
+      await nextTick();
+
+      expect(wrapper.emitted('empty')).toEqual([[true], [false], [true]]);
+    });
+
+    it('枝が消えるときは empty: false を返し、親の空の記録を残さない', () => {
+      const onEmpty = vi.fn();
+      const wrapper = mountBranch({}, true, onEmpty);
+      expect(onEmpty.mock.calls).toEqual([[true]]);
+
+      wrapper.unmount();
+      expect(onEmpty.mock.calls).toEqual([[true], [false]]);
+    });
+
+    it('取得の再実行条件は implicit の枝だけに渡す（フォーカス復帰で全行を取り直さない）', () => {
+      mountBranch({}, true);
+      expect(toValue(subtasksState.params!.queryOptions)).toEqual({
+        staleTime: 30_000,
+        refetchOnWindowFocus: false,
+      });
+
+      mountBranch({});
+      expect(toValue(subtasksState.params!.queryOptions)).toBeUndefined();
     });
   });
 });

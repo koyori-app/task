@@ -244,7 +244,7 @@ const collapsed = ref<Record<string, boolean>>({});
 const selectedTaskId = ref<string | null>(null);
 /** 利用者が矢印で変えた行だけを持つ上書き。無い行は expandSubtasks に従う */
 const expandedTaskIds = ref<Record<string, boolean>>({});
-/** 暗黙の展開で子が 0 件だった行（枝は描かず、矢印も閉じた見た目にする） */
+/** 枝が「取得が成功して子が 0 件」と報告した行（true だけを持つ。暗黙の枝の矢印を閉じた見た目にする） */
 const emptyBranchIds = ref<Record<string, boolean>>({});
 
 function toggle(statusId: string) {
@@ -277,15 +277,22 @@ function toggleSubtasks(task: TaskResponse) {
 }
 
 function setBranchEmpty(task: TaskResponse, empty: boolean) {
-  emptyBranchIds.value = { ...emptyBranchIds.value, [task.id]: empty };
+  if (!empty) {
+    if (!emptyBranchIds.value[task.id]) return;
+    const { [task.id]: _removed, ...rest } = emptyBranchIds.value;
+    emptyBranchIds.value = rest;
+    return;
+  }
+  emptyBranchIds.value = { ...emptyBranchIds.value, [task.id]: true };
 }
 
-// 設定を切り替えたら、利用者が個別に変えた行も含めて全行を設定に従わせる
+// 設定を切り替えたら、利用者が個別に変えた行も含めて全行を設定に従わせる。
+// 子の有無（emptyBranchIds）は枝が再マウントされず通知し直さないので残す。
+// 枝が消えるとき（閉じる・行の移動）は枝が false を返して記録を消す
 watch(
   () => props.expandSubtasks,
   () => {
     expandedTaskIds.value = {};
-    emptyBranchIds.value = {};
   },
 );
 
