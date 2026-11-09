@@ -8,17 +8,21 @@ function text(event_type: string, payload: unknown) {
 
 // ダッシュボードの「最近のアクティビティ」が文のまま使う
 describe('activityText', () => {
+  // backend の add_relation は blocked_by で追加しても type を "blocks" にして記録する。
+  // 向きは分からないので断定しない
   it.each([
-    [
-      'relation_added',
-      { type: 'blocks', target_seq_id: 55 },
-      'タスク #55 をブロックする関係を追加しました',
-    ],
-    [
-      'relation_added',
-      { type: 'blocked_by', target_seq_id: 55 },
-      'タスク #55 にブロックされる関係を追加しました',
-    ],
+    ['blocks', 'タスク #55 との依存関係を追加しました'],
+    ['blocked_by', 'タスク #55 との依存関係を追加しました'],
+  ])('関係の追加（type: %s）は向きを出さず相手だけを表示する', (type, expected) => {
+    expect(text('relation_added', { type, target_seq_id: 55 })).toBe(expected);
+  });
+
+  it('関係の追加で相手が分からなければ従来の文言を出す', () => {
+    expect(text('relation_added', {})).toBe('関連タスクを追加しました');
+  });
+
+  // remove_relation は実際の向きを記録する
+  it.each([
     [
       'relation_removed',
       { type: 'blocks', target_seq_id: 55 },
@@ -29,9 +33,8 @@ describe('activityText', () => {
       { type: 'blocked_by', target_seq_id: 55 },
       'タスク #55 にブロックされる関係を解除しました',
     ],
-    ['relation_added', {}, '関連タスクを追加しました'],
     ['relation_removed', {}, '関連タスクを外しました'],
-  ])('関係の変更 %s %j を向きと相手つきで表示する', (event_type, payload, expected) => {
+  ])('関係の解除 %s %j を向きと相手つきで表示する', (event_type, payload, expected) => {
     expect(text(event_type, payload)).toBe(expected);
   });
 

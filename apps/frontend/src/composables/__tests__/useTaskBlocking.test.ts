@@ -196,12 +196,28 @@ describe('useTaskBlocking', () => {
     expect(relationGets().length).toBeGreaterThan(getsBefore);
   });
 
-  it('削除の失敗は文言を出し false', async () => {
+  it('削除の失敗は文言を出し false で、relations は取り直さない', async () => {
     mountHost();
     await flushPromises();
+    const getsBefore = relationGets().length;
     control.failStatus = 503;
 
     await expect(blocking.removeRelation('rel-1')).resolves.toBe(false);
     expect(blocking.mutationError.value).toBe('ブロック関係を外せませんでした');
+    await flushPromises();
+    expect(relationGets()).toHaveLength(getsBefore);
+  });
+
+  it('削除が 404（別の人が先に外した）なら実情に合う文言を出し、relations を取り直す', async () => {
+    mountHost();
+    await flushPromises();
+    const getsBefore = relationGets().length;
+    control.failStatus = 404;
+
+    await expect(blocking.removeRelation('rel-1')).resolves.toBe(false);
+
+    expect(blocking.mutationError.value).toBe('この関係は既に外されています');
+    expect(relationGets().length).toBeGreaterThan(getsBefore);
+    expect(blocking.mutating.value).toBe(false);
   });
 });

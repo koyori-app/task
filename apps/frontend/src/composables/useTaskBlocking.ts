@@ -22,10 +22,16 @@ export type UseTaskBlockingParams = {
   enabled?: MaybeRefOrGetter<boolean>;
 };
 
-function relationErrorMessage(status: number | undefined, fallback: string) {
+function addErrorMessage(status: number | undefined) {
   if (status === 409) return '循環する関係や同じ関係は設定できません';
   if (status === 404) return 'タスクが見つかりません。削除された可能性があります';
-  return fallback;
+  return 'ブロック関係を更新できませんでした';
+}
+
+function removeErrorMessage(status: number | undefined) {
+  // 相手のタスクではなく関係そのものが無い。別の人が先に外した場合
+  if (status === 404) return 'この関係は既に外されています';
+  return 'ブロック関係を外せませんでした';
 }
 
 /**
@@ -93,10 +99,7 @@ export function useTaskBlocking(params: UseTaskBlockingParams) {
         body: { type, target_task_id: targetTaskId },
       });
       if (error) {
-        mutationError.value = relationErrorMessage(
-          response.status,
-          'ブロック関係を更新できませんでした',
-        );
+        mutationError.value = addErrorMessage(response.status);
         return false;
       }
       await invalidateAfterMutation();
@@ -118,10 +121,11 @@ export function useTaskBlocking(params: UseTaskBlockingParams) {
         params: { path: { ...path.value, relation_id: relationId } },
       });
       if (error) {
-        mutationError.value = relationErrorMessage(
-          response.status,
-          'ブロック関係を外せませんでした',
-        );
+        mutationError.value = removeErrorMessage(response.status);
+        // 既に外されていた場合、手元の一覧には消えたはずの行が残っている。取り直して揃える
+        if (response.status === 404) {
+          await queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] });
+        }
         return false;
       }
       await invalidateAfterMutation();
