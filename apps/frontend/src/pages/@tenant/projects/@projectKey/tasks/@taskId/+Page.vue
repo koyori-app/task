@@ -10,6 +10,7 @@ import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
 import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
 import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
+import TaskBlockingPanel from '@/components/tasks/TaskBlockingPanel.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
 import { Button } from '@koyori-app/ui-vue';
 import type { ActivityFilter, ActivityLookups } from '@/lib/activity-timeline';
@@ -291,6 +292,15 @@ function openSimilarTask(seqId: number) {
         :project-key="projectKey"
         @open="openRelatedTask"
         @change-parent="onChangeParent"
+      />
+      <TaskBlockingPanel
+        :tenant-id="tenantId"
+        :project-id="projectId"
+        :task-id="taskId"
+        :task-uuid="displayTask.id"
+        :statuses="statuses"
+        :project-key="projectKey"
+        @open="openRelatedTask"
       />
       <SimilarTasksList
         class="border-t pt-5"

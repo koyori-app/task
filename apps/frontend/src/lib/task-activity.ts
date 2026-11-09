@@ -76,9 +76,16 @@ export function activityText(item: ActivityItem): string {
     case 'assignee_removed':
       return '担当者を外しました';
     case 'relation_added':
-      return '関連タスクを追加しました';
-    case 'relation_removed':
-      return '関連タスクを外しました';
+    case 'relation_removed': {
+      const added = item.event_type === 'relation_added';
+      const type = str('type');
+      const target =
+        typeof payload.target_seq_id === 'number' ? `タスク #${payload.target_seq_id} ` : '';
+      const verb = added ? '追加' : '解除';
+      if (type === 'blocks') return `${target}をブロックする関係を${verb}しました`;
+      if (type === 'blocked_by') return `${target}にブロックされる関係を${verb}しました`;
+      return added ? '関連タスクを追加しました' : '関連タスクを外しました';
+    }
     case 'comment_added':
       return 'コメントしました';
     case 'comment_edited':

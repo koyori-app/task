@@ -9,6 +9,33 @@ function text(event_type: string, payload: unknown) {
 // ダッシュボードの「最近のアクティビティ」が文のまま使う
 describe('activityText', () => {
   it.each([
+    [
+      'relation_added',
+      { type: 'blocks', target_seq_id: 55 },
+      'タスク #55 をブロックする関係を追加しました',
+    ],
+    [
+      'relation_added',
+      { type: 'blocked_by', target_seq_id: 55 },
+      'タスク #55 にブロックされる関係を追加しました',
+    ],
+    [
+      'relation_removed',
+      { type: 'blocks', target_seq_id: 55 },
+      'タスク #55 をブロックする関係を解除しました',
+    ],
+    [
+      'relation_removed',
+      { type: 'blocked_by', target_seq_id: 55 },
+      'タスク #55 にブロックされる関係を解除しました',
+    ],
+    ['relation_added', {}, '関連タスクを追加しました'],
+    ['relation_removed', {}, '関連タスクを外しました'],
+  ])('関係の変更 %s %j を向きと相手つきで表示する', (event_type, payload, expected) => {
+    expect(text(event_type, payload)).toBe(expected);
+  });
+
+  it.each([
     ['critical_fire', '緊急'],
     ['critical', '重大'],
     ['high', '高'],
