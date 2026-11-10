@@ -422,3 +422,36 @@ async fn last_viewer_row_of_non_inheriting_project_is_not_removable() {
         .await;
     assert_eq!(res.status(), StatusCode::CONFLICT);
 }
+
+#[tokio::test]
+async fn inheritance_cannot_be_stopped_while_no_one_is_listed() {
+    let f = fixture().await;
+    let empty = insert_extra_project(&f.app, f.tenant_id).await;
+    let path = format!("/v1/tenants/{}/projects/{empty}", f.tenant_id);
+
+    // 載っている人が居ないのに切ると、オーナーのほかは誰も入れなくなるので断る
+    let res = f
+        .app
+        .put_json_with_session(&path, json!({"inherit_tenant_members": false}))
+        .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(json_body(res).await["message"], "inheritance-needs-members");
+    let res = f.app.get_with_bearer(&path, &f.member_token).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(json_body(res).await["inherit_tenant_members"], true);
+
+    // 一人を載せれば切れる
+    let res = f
+        .app
+        .post_json_with_session(
+            &format!("{path}/members"),
+            json!({"user_id": f.listed, "role": "Admin"}),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let res = f
+        .app
+        .put_json_with_session(&path, json!({"inherit_tenant_members": false}))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+}

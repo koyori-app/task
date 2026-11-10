@@ -6,7 +6,8 @@ use axum::{
 use axum_valid::Valid;
 use sea_orm::prelude::Uuid;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
+    TransactionTrait,
 };
 
 use crate::AppState;
@@ -17,7 +18,7 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::handlers::project_members::{lock_membership_changes, require_project_admin};
 use crate::openapi::CrudErrors;
-use entity::{drive_folders, project_statuses, projects, scopes::Scope};
+use entity::{drive_folders, project_members, project_statuses, projects, scopes::Scope};
 use payload::projects::*;
 use service::db::is_postgres_unique_violation;
 
@@ -327,6 +328,18 @@ pub async fn update_project(
         // 入れる人を変える操作なので、メンバーの追加や削除と同じロックの中で、同じ人に許す
         lock_membership_changes(&txn, tenant_id).await?;
         require_project_admin(&txn, tenant_id, id, auth.user_id).await?;
+        // メンバーが一人も載っていないのに継承を切ると、オーナーのほかは誰も入れなくなる
+        if !inherit
+            && project_members::Entity::find()
+                .filter(project_members::Column::ProjectId.eq(id))
+                .count(&txn)
+                .await?
+                == 0
+        {
+            return Err(AppError::BadRequestDetail(
+                "inheritance-needs-members".into(),
+            ));
+        }
         active.inherit_tenant_members = Set(inherit);
     }
     if let Some(name) = payload.name {
