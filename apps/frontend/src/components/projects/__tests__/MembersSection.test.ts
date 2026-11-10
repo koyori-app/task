@@ -566,7 +566,10 @@ describe('MembersSection', () => {
     });
 
     it('切る時は確かめの dialog を出し、確かめた時だけ PUT を送る', async () => {
-      const { projectPuts } = stubFetch({ members: [], tenantMembers: [] });
+      const { projectPuts } = stubFetch({
+        members: [projectMember(ALICE_ID, 'alice', 'Admin')],
+        tenantMembers: [],
+      });
       const wrapper = mountSection();
       await flushPromises();
 
@@ -588,6 +591,41 @@ describe('MembersSection', () => {
       expect(projectPuts).toEqual([{ inherit_tenant_members: false }]);
       expect(wrapper.get('[data-testid="members-rule"]').text()).toBe(
         'ここに載っている人だけが、このプロジェクトに入れます。',
+      );
+    });
+
+    it('誰も載っていない間は継承を切れず、訳を伝える', async () => {
+      const { projectPuts } = stubFetch({ members: [], tenantMembers: [] });
+      const wrapper = mountSection();
+      await flushPromises();
+
+      const toggle = wrapper.get('#member-inherit');
+      expect(toggle.attributes('disabled')).toBeDefined();
+      expect(wrapper.get('#member-inherit-description').text()).toContain(
+        '誰もメンバーに載っていない間は、継承を切れません。',
+      );
+      await toggle.trigger('click');
+      await flushPromises();
+      expect(projectPuts).toEqual([]);
+      expect(openDialogText()).not.toContain('テナントのメンバーの継承を切りますか？');
+    });
+
+    it('切る要求が 400 なら、誰も載っていないので切れないことを伝える', async () => {
+      stubFetch({
+        members: [projectMember(ALICE_ID, 'alice', 'Admin')],
+        tenantMembers: [],
+        projectPutStatus: 400,
+      });
+      const wrapper = mountSection();
+      await flushPromises();
+
+      await wrapper.get('#member-inherit').trigger('click');
+      await flushPromises();
+      clickOpenDialogButton('継承を切る');
+      await flushPromises();
+
+      expect(wrapper.text()).toContain(
+        '誰もメンバーに載っていない間は、継承を切れません。先にメンバーを追加してください。',
       );
     });
 

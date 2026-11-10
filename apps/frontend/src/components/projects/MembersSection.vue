@@ -260,6 +260,8 @@ async function confirmRemove() {
 
 const updateProjectMutation = apiClient.useMutation('put', PROJECT_PATH);
 const inheritError = ref<string | null>(null);
+/** 誰も載っていない間に継承を切ると、オーナーのほかは誰も入れなくなるので切らせない */
+const cannotStopInheriting = computed(() => inherits.value && members.value.length === 0);
 const inheritConfirmOpen = ref(false);
 
 /** 切ると載っていない人が入れなくなるので、確かめてから切る。入れる時はすぐ変える */
@@ -282,10 +284,13 @@ async function applyInherit(value: boolean) {
     await invalidateMembers();
     inheritConfirmOpen.value = false;
   } catch (e) {
+    const status = errorStatus(e);
     inheritError.value =
-      errorStatus(e) === 403
+      status === 403
         ? '継承を切り替えられるのは、テナントオーナー・テナント管理者とこのプロジェクトの管理者だけです。'
-        : '継承を切り替えられませんでした。';
+        : status === 400
+          ? '誰もメンバーに載っていない間は、継承を切れません。先にメンバーを追加してください。'
+          : '継承を切り替えられませんでした。';
     inheritConfirmOpen.value = false;
   }
 }
@@ -330,7 +335,12 @@ function onInheritConfirmClose() {
             >テナントのメンバーを継承する</label
           >
           <p id="member-inherit-description" class="text-sm text-muted-foreground">
-            切ると、ここに載っていない人はこのプロジェクトに入れなくなります。
+            <template v-if="cannotStopInheriting">
+              誰もメンバーに載っていない間は、継承を切れません。切ると、テナントのオーナーのほかは誰も入れなくなります。先にメンバーを追加してください。
+            </template>
+            <template v-else
+              >切ると、ここに載っていない人はこのプロジェクトに入れなくなります。</template
+            >
           </p>
         </div>
         <Switch
@@ -338,7 +348,7 @@ function onInheritConfirmClose() {
           label="テナントのメンバーを継承する"
           hideLabel
           :checked="inherits"
-          :disabled="updateProjectMutation.isPending.value"
+          :disabled="updateProjectMutation.isPending.value || cannotStopInheriting"
           ariaDescribedBy="member-inherit-description"
           class="mt-0.5"
           :on-checked-change="onInheritChange"
