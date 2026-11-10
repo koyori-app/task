@@ -21,7 +21,8 @@ use crate::{
     openapi::CrudErrors,
 };
 use entity::{
-    milestones, project_statuses, projects, scopes::Scope, sprints, task_assignees, tasks, users,
+    milestones, project_statuses, projects, scopes::Scope, sprints, task_assignees, task_relations,
+    tasks, users,
 };
 use payload::{
     my_tasks::{MyTaskProjectInfo, MyTaskStatusInfo},
@@ -168,6 +169,20 @@ pub async fn get_schedule(
         .collect::<Result<Vec<_>, _>>()?;
 
     let task_ids: Vec<Uuid> = page.iter().map(|(t, _)| t.id).collect();
+    let relations = task_relations::Entity::find()
+        .filter(task_relations::Column::BlockerTaskId.is_in(task_ids.clone()))
+        .filter(task_relations::Column::BlockedTaskId.is_in(task_ids.clone()))
+        .order_by_asc(task_relations::Column::CreatedAt)
+        .order_by_asc(task_relations::Column::Id)
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|relation| ScheduleRelation {
+            from_task_id: relation.blocker_task_id,
+            to_task_id: relation.blocked_task_id,
+            r#type: "blocks".to_owned(),
+        })
+        .collect();
     let statuses: HashMap<Uuid, project_statuses::Model> = project_statuses::Entity::find()
         .filter(project_statuses::Column::Id.is_in(page.iter().map(|(t, _)| t.status_id)))
         .all(&state.db)
@@ -268,6 +283,7 @@ pub async fn get_schedule(
             timezone: timezone.to_owned(),
         },
         tasks: items,
+        relations,
         sprints,
         milestones,
         members,

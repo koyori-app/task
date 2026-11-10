@@ -90,10 +90,22 @@ pub struct ScheduleTask {
     pub milestone_id: Option<Uuid>,
 }
 
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ScheduleRelation {
+    #[schema(value_type = String, format = "uuid")]
+    pub from_task_id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub to_task_id: Uuid,
+    /// 関係の向き。`blocked_by` は端点を反転し、常に `blocks` で返す。
+    pub r#type: String,
+}
+
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct ScheduleResponse {
     pub range: ScheduleRange,
     pub tasks: Vec<ScheduleTask>,
+    /// このページのタスク同士のブロッキング関係
+    pub relations: Vec<ScheduleRelation>,
     /// 期間に重なるスプリント（ページングしない）
     pub sprints: Vec<SprintResponse>,
     /// 期日が期間内のマイルストーン（ページングしない）

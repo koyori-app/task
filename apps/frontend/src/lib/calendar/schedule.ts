@@ -3,6 +3,7 @@ import { fetchClient } from '@/lib/api-vue-query';
 
 type ScheduleResponse = components['schemas']['ScheduleResponse'];
 type Member = components['schemas']['UserSummary'];
+type Relation = components['schemas']['ScheduleRelation'];
 
 export const SCHEDULE_PATH = '/v1/tenants/{tenant_id}/schedule' as const;
 /** API の上限。14 日なら実用上 1〜2 ページで済む */
@@ -40,11 +41,26 @@ export async function fetchAllSchedule(
   const first = await fetchPage();
   const tasks = [...first.tasks];
   const members = new Map<string, Member>(first.members.map((m) => [m.id, m]));
+  const relations = new Map<string, Relation>(
+    first.relations.map((relation) => [
+      `${relation.from_task_id}:${relation.to_task_id}:${relation.type}`,
+      relation,
+    ]),
+  );
   for (let cursor = first.next_cursor; cursor;) {
     const page = await fetchPage(cursor);
     tasks.push(...page.tasks);
     for (const member of page.members) members.set(member.id, member);
+    for (const relation of page.relations) {
+      relations.set(`${relation.from_task_id}:${relation.to_task_id}:${relation.type}`, relation);
+    }
     cursor = page.next_cursor;
   }
-  return { ...first, tasks, members: [...members.values()], next_cursor: null };
+  return {
+    ...first,
+    tasks,
+    relations: [...relations.values()],
+    members: [...members.values()],
+    next_cursor: null,
+  };
 }

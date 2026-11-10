@@ -15,7 +15,8 @@ use crate::common::{
 use axum::http::StatusCode;
 use chrono::{DateTime, NaiveDate, Utc};
 use entity::{
-    milestones, project_statuses, scopes::Scope, sprints, task_assignees, tasks, time_logs,
+    milestones, project_statuses, scopes::Scope, sprints, task_assignees, task_relations, tasks,
+    time_logs,
 };
 use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 use serde_json::Value;
@@ -115,6 +116,18 @@ async fn task(
     .await
     .unwrap();
     id
+}
+
+async fn relation(app: &TestApp, blocker: Uuid, blocked: Uuid) {
+    task_relations::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        blocker_task_id: Set(blocker),
+        blocked_task_id: Set(blocked),
+        created_at: Set(Utc::now().into()),
+    }
+    .insert(&app.state.db)
+    .await
+    .unwrap();
 }
 async fn assign(app: &TestApp, task: Uuid, user: Uuid, role: &str) {
     task_assignees::ActiveModel {
@@ -785,4 +798,79 @@ async fn cursor_pages_without_gaps_and_repeats_sprints_and_milestones() {
     let exact = get(&app, t, &format!("{RANGE}&limit=3")).await;
     assert_eq!(ids(&exact).len(), 3);
     assert!(exact["next_cursor"].is_null());
+}
+
+#[tokio::test]
+async fn relations_are_canonical_and_only_include_endpoints_in_the_response() {
+    let mut app = TestApp::new().await;
+    let (owner, tp, open, _) = setup(&mut app).await;
+    let other_project = insert_extra_project(&app, tp.tenant_id).await;
+
+    let from = task(
+        &app,
+        tp.project_id,
+        open,
+        owner.id,
+        Some(d(14)),
+        Some(at(15)),
+        None,
+    )
+    .await;
+    let to = task(
+        &app,
+        tp.project_id,
+        open,
+        owner.id,
+        Some(d(16)),
+        Some(at(17)),
+        None,
+    )
+    .await;
+    let range_hidden = task(
+        &app,
+        tp.project_id,
+        open,
+        owner.id,
+        Some(d(1)),
+        Some(at(2)),
+        None,
+    )
+    .await;
+    let filter_hidden = task(
+        &app,
+        other_project,
+        open,
+        owner.id,
+        Some(d(14)),
+        Some(at(15)),
+        None,
+    )
+    .await;
+
+    relation(&app, from, to).await;
+    relation(&app, from, range_hidden).await;
+    relation(&app, from, filter_hidden).await;
+
+    let body = get(
+        &app,
+        tp.tenant_id,
+        &format!("{RANGE}&project_id={}", tp.project_id),
+    )
+    .await;
+    assert_eq!(
+        body["relations"],
+        serde_json::json!([{
+            "from_task_id": from,
+            "to_task_id": to,
+            "type": "blocks"
+        }])
+    );
+
+    let empty = get(
+        &app,
+        tp.tenant_id,
+        &format!("{RANGE}&project_id={other_project}"),
+    )
+    .await;
+    assert_eq!(empty["relations"], serde_json::json!([]));
 }

@@ -28680,9 +28680,27 @@
           }
         }
       },
+      "ScheduleRelation": {
+        "type": "object",
+        "required": ["from_task_id", "to_task_id", "type"],
+        "properties": {
+          "from_task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "to_task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "description": "関係の向き。`blocked_by` は端点を反転し、常に `blocks` で返す。"
+          }
+        }
+      },
       "ScheduleResponse": {
         "type": "object",
-        "required": ["range", "tasks", "sprints", "milestones", "members"],
+        "required": ["range", "tasks", "relations", "sprints", "milestones", "members"],
         "properties": {
           "members": {
             "type": "array",
@@ -28703,6 +28721,13 @@
           },
           "range": {
             "$ref": "#/components/schemas/ScheduleRange"
+          },
+          "relations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduleRelation"
+            },
+            "description": "このページのタスク同士のブロッキング関係"
           },
           "sprints": {
             "type": "array",
