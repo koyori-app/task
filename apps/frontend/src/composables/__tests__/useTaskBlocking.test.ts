@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { defineComponent } from 'vue';
+import { defineComponent, ref, type Ref } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import type { paths } from '@/generated/api';
@@ -11,7 +11,8 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
     holdPost: boolean;
     releasePost: (() => void) | null;
     failStatus: number | null;
-  } = { holdPost: false, releasePost: null, failStatus: null };
+    networkError: boolean;
+  } = { holdPost: false, releasePost: null, failStatus: null, networkError: false };
   const requestLog: { method: string; url: string; body?: unknown }[] = [];
 
   function response(body: unknown, status = 200) {
@@ -58,6 +59,7 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
           control.releasePost = resolve;
         });
       }
+      if (control.networkError) throw new TypeError('Failed to fetch');
       if (control.failStatus) return response({ message: 'failed' }, control.failStatus);
       return request.method === 'POST'
         ? response({ relation_id: 'rel-new' }, 201)
@@ -85,14 +87,14 @@ describe('useTaskBlocking', () => {
   let queryClient: QueryClient;
   let blocking: ReturnType<typeof useTaskBlocking>;
 
-  function mountHost() {
+  function mountHost(task?: { id: Ref<string>; uuid: Ref<string> }) {
     const Host = defineComponent({
       setup() {
         blocking = useTaskBlocking({
           tenantId: 'tenant-1',
           projectId: 'project-1',
-          taskId: 'TASK-11',
-          taskUuid: 'task-1',
+          taskId: task?.id ?? 'TASK-11',
+          taskUuid: task?.uuid ?? 'task-1',
         });
         return () => null;
       },
@@ -109,6 +111,7 @@ describe('useTaskBlocking', () => {
     control.holdPost = false;
     control.releasePost = null;
     control.failStatus = null;
+    control.networkError = false;
     requestLog.length = 0;
   });
 
@@ -219,5 +222,48 @@ describe('useTaskBlocking', () => {
     expect(blocking.mutationError.value).toBe('この関係は既に外されています');
     expect(relationGets().length).toBeGreaterThan(getsBefore);
     expect(blocking.mutating.value).toBe(false);
+  });
+
+  it.each([
+    ['追加の失敗応答', 'add', false],
+    ['追加の通信失敗', 'add', true],
+    ['削除の失敗応答', 'remove', false],
+    ['削除の通信失敗', 'remove', true],
+  ] as const)(
+    '送信中に別のタスクへ移ると、移る前の%sを移った先に出さない',
+    async (_label, op, networkError) => {
+      const task = { id: ref('TASK-11'), uuid: ref('task-1') };
+      mountHost(task);
+      await flushPromises();
+      control.holdPost = true;
+
+      const result =
+        op === 'add' ? blocking.addRelation('blocks', 'other-1') : blocking.removeRelation('rel-1');
+      await flushPromises();
+      task.id.value = 'TASK-12';
+      task.uuid.value = 'task-2';
+      await flushPromises();
+
+      control.failStatus = 409;
+      control.networkError = networkError;
+      control.releasePost?.();
+      await expect(result).resolves.toBe(false);
+
+      expect(blocking.mutationError.value).toBeNull();
+      expect(blocking.mutating.value).toBe(false);
+    },
+  );
+
+  it('移った先で送った要求の失敗は、そのタスクに出す', async () => {
+    const task = { id: ref('TASK-11'), uuid: ref('task-1') };
+    mountHost(task);
+    await flushPromises();
+    task.id.value = 'TASK-12';
+    task.uuid.value = 'task-2';
+    await flushPromises();
+    control.failStatus = 503;
+
+    await expect(blocking.addRelation('blocks', 'other-1')).resolves.toBe(false);
+    expect(blocking.mutationError.value).toBe('ブロック関係を更新できませんでした');
   });
 });

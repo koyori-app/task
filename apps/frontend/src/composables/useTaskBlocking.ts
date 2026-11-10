@@ -74,10 +74,17 @@ export function useTaskBlocking(params: UseTaskBlockingParams) {
   const pending = ref(false);
   const mutationError = ref<string | null>(null);
 
-  // オーバーレイと右ペインは別のタスクへ移っても同じインスタンス
+  // オーバーレイと右ペインは別のタスクへ移っても同じインスタンス。
+  // 移る前に送った要求の失敗を移った先に出さないよう、表示の世代を数える
+  let viewGeneration = 0;
   watch(taskUuid, () => {
+    viewGeneration += 1;
     mutationError.value = null;
   });
+
+  function reportError(generation: number, message: string) {
+    if (generation === viewGeneration) mutationError.value = message;
+  }
 
   // 相手側のタスクの relations も変わるので、キーは prefix で無効化する
   async function invalidateAfterMutation() {
@@ -91,6 +98,7 @@ export function useTaskBlocking(params: UseTaskBlockingParams) {
     if (!canFetch.value || !targetTaskId || targetTaskId === taskUuid.value || pending.value) {
       return false;
     }
+    const generation = viewGeneration;
     pending.value = true;
     mutationError.value = null;
     try {
@@ -99,13 +107,13 @@ export function useTaskBlocking(params: UseTaskBlockingParams) {
         body: { type, target_task_id: targetTaskId },
       });
       if (error) {
-        mutationError.value = addErrorMessage(response.status);
+        reportError(generation, addErrorMessage(response.status));
         return false;
       }
       await invalidateAfterMutation();
       return true;
     } catch {
-      mutationError.value = 'ブロック関係を更新できませんでした';
+      reportError(generation, 'ブロック関係を更新できませんでした');
       return false;
     } finally {
       pending.value = false;
@@ -114,6 +122,7 @@ export function useTaskBlocking(params: UseTaskBlockingParams) {
 
   async function removeRelation(relationId: string): Promise<boolean> {
     if (!canFetch.value || !relationId || pending.value) return false;
+    const generation = viewGeneration;
     pending.value = true;
     mutationError.value = null;
     try {
@@ -121,7 +130,7 @@ export function useTaskBlocking(params: UseTaskBlockingParams) {
         params: { path: { ...path.value, relation_id: relationId } },
       });
       if (error) {
-        mutationError.value = removeErrorMessage(response.status);
+        reportError(generation, removeErrorMessage(response.status));
         // 既に外されていた場合、手元の一覧には消えたはずの行が残っている。取り直して揃える
         if (response.status === 404) {
           await queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] });
@@ -131,7 +140,7 @@ export function useTaskBlocking(params: UseTaskBlockingParams) {
       await invalidateAfterMutation();
       return true;
     } catch {
-      mutationError.value = 'ブロック関係を外せませんでした';
+      reportError(generation, 'ブロック関係を外せませんでした');
       return false;
     } finally {
       pending.value = false;
