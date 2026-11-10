@@ -43,6 +43,7 @@ mod personal_tokens_list_integration;
 mod profile_update_integration;
 mod project_events_integration;
 mod project_guest_access_integration;
+mod project_member_inheritance_integration;
 mod project_members_integration;
 mod projects_integration;
 mod reactions_integration;

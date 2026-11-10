@@ -21,6 +21,10 @@ pub struct ProjectResponse {
     pub is_personal: bool,
     #[schema(value_type = Option<String>, format = "uuid", nullable)]
     pub personal_owner_id: Option<Uuid>,
+    /// テナントのメンバーを継承するか。真ならテナントのメンバーは全員メンバーの役で入れ、
+    /// プロジェクトのメンバーに載せた人は載せた役で入る。偽なら載せた人だけが入れる。
+    /// 個人プロジェクトでは使わない（本人だけが入れる）
+    pub inherit_tenant_members: bool,
 }
 
 impl From<projects::Model> for ProjectResponse {
@@ -35,6 +39,7 @@ impl From<projects::Model> for ProjectResponse {
             key: model.key,
             is_personal: model.is_personal,
             personal_owner_id: model.personal_owner_id,
+            inherit_tenant_members: model.inherit_tenant_members,
         }
     }
 }
@@ -65,4 +70,7 @@ pub struct UpdateProjectRequest {
     pub clear_icon_emoji: bool,
     #[serde(default)]
     pub clear_icon_url: bool,
+    /// テナントのメンバーを継承するか。変えられるのはプロジェクトのメンバーを変えられる人
+    /// （テナントのオーナー、プロジェクトの Admin、プロジェクトに入れるテナントの Admin）だけ
+    pub inherit_tenant_members: Option<bool>,
 }

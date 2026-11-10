@@ -570,6 +570,8 @@ async fn follows_project_visibility_guest_scope_and_tokens() {
         )
         .await;
     }
+    // TASK-501 より前と同じく、載せた人だけが入れる形にする
+    crate::common::stop_inheriting(&app.state.db, restricted).await;
     // viewer 自身の個人プロジェクト
     let personal = insert_extra_project(&app, t).await;
     let personal_todo = status(&app, personal, false).await;

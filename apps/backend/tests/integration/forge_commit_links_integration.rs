@@ -152,6 +152,7 @@ pub(crate) async fn insert_project(app: &TestApp, tenant_id: Uuid, key: &str) ->
         key: Set(key.into()),
         is_personal: Set(false),
         personal_owner_id: Set(None),
+        inherit_tenant_members: Set(true),
     }
     .insert(&app.state.db)
     .await

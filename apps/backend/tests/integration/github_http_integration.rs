@@ -399,6 +399,7 @@ async fn insert_project_in_tenant(app: &TestApp, tenant_id: Uuid) -> TestTenantP
         key: Set(format!("R{}", &project_id.to_string()[..8].to_uppercase())),
         is_personal: Set(false),
         personal_owner_id: Set(None),
+        inherit_tenant_members: Set(true),
     }
     .insert(&app.state.db)
     .await
@@ -1111,6 +1112,7 @@ async fn github_http_integration_suite() {
             )),
             is_personal: sea_orm::ActiveValue::Set(false),
             personal_owner_id: sea_orm::ActiveValue::Set(None),
+            inherit_tenant_members: sea_orm::ActiveValue::Set(true),
         }
         .insert(&app.state.db)
         .await

@@ -367,6 +367,8 @@ async fn tenant_admin_manages_closed_projects_only_while_inside() {
         )
         .await;
     assert_eq!(closed.status(), StatusCode::CREATED);
+    // TASK-501 より前と同じく、載せた人だけが入れる形にする
+    crate::common::stop_inheriting(&app.state.db, tp.project_id).await;
 
     login(&mut app, &admin).await;
     assert_eq!(
