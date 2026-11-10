@@ -287,6 +287,7 @@ function openSimilarTask(seqId: number) {
         :status-updating="statusUpdating"
         :parent-updating="parentUpdating"
         :parent-error="parentError"
+        :parent-saved="savedField === 'parent_task_id'"
         :statuses="statuses"
         :project-key="projectKey"
         @open="openRelatedTask"
