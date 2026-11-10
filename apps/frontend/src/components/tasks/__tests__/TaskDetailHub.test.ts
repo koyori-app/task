@@ -314,6 +314,39 @@ describe('TaskDetailHub', () => {
     expect(notices[0]!.text()).toBe('保存しました');
   });
 
+  it.each(['status_id', 'priority', 'labels'] as const)(
+    '%s の保存が確定したら「保存しました」を出す',
+    (savedField) => {
+      const wrapper = mount(TaskDetailHub, {
+        props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id, savedField },
+      });
+
+      const notices = wrapper.findAll('[role="status"]');
+      expect(notices).toHaveLength(1);
+      expect(notices[0]!.text()).toBe('保存しました');
+    },
+  );
+
+  it.each([
+    ['status_id', 'statusError'],
+    ['priority', 'priorityError'],
+    ['labels', 'labelsError'],
+  ] as const)('%s の失敗があれば「保存しました」は出さず失敗だけ出す', (savedField, errorProp) => {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task,
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+        savedField,
+        [errorProp]: '更新に失敗しました',
+      },
+    });
+
+    expect(wrapper.text()).not.toContain('保存しました');
+    expect(wrapper.text()).toContain('更新に失敗しました');
+  });
+
   it('同じフィールドの失敗があれば「保存しました」は出さず失敗を出す', () => {
     const wrapper = mount(TaskDetailHub, {
       props: {

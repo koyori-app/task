@@ -24,6 +24,11 @@ const SAVED_NOTICE_MS = 2000;
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type UpdateTaskRequest = components['schemas']['UpdateTaskRequest'];
 
+/** 遅い方の日時を返す。別フィールドの古い応答が後から届いても更新日を巻き戻さない */
+function laterIso(current: string, next: string) {
+  return Date.parse(next) > Date.parse(current) ? next : current;
+}
+
 /**
  * コードポイント順の文字列比較。
  * JS の `<` / `>` は UTF-16 コードユニット順で、サーバ（Rust の `String::cmp` =
@@ -104,9 +109,9 @@ export function useTaskDetail(params: UseTaskDetailParams) {
   const deleteError = ref<string | null>(null);
   const fieldErrors = ref<Partial<Record<EditableField, string>>>({});
   /** 直近に保存が確定したフィールド。一定時間で消える（Hub が「保存しました」を出す） */
-  const savedField = ref<EditableField | null>(null);
+  const savedField = ref<MutatingField | null>(null);
   let savedNoticeTimer: ReturnType<typeof setTimeout> | undefined;
-  function showSavedNotice(field: EditableField) {
+  function showSavedNotice(field: MutatingField) {
     if (savedNoticeTimer) clearTimeout(savedNoticeTimer);
     savedField.value = field;
     savedNoticeTimer = setTimeout(() => (savedField.value = null), SAVED_NOTICE_MS);
@@ -338,6 +343,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
           ? {
               ...current,
               [field]: data[field],
+              updated_at: laterIso(current.updated_at, data.updated_at),
               ...(field === 'status_id' && { completed_at: data.completed_at }),
             }
           : data,
@@ -364,11 +370,10 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       parentError.value = null;
     } else {
       fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
-      // 通知の欄があるのはインライン編集のフィールドだけ。ステータス等の保存で表示中の通知を消さない。
-      // 古いリビジョンの完了（上の早期 return）では出さない。
-      // オーバーレイは別のタスクへ移っても同じインスタンスなので、移る前のタスクの保存も出さない
-      if (queryKey === taskQueryKey.value) showSavedNotice(field);
     }
+    // 古いリビジョンの完了（上の早期 return）では出さない。
+    // オーバーレイは別のタスクへ移っても同じインスタンスなので、移る前のタスクの保存も出さない
+    if (queryKey === taskQueryKey.value) showSavedNotice(field);
   }
 
   function mutateTask(

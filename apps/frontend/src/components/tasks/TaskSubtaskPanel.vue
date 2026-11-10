@@ -24,6 +24,7 @@ const props = defineProps<{
   statusUpdating: boolean;
   parentUpdating: boolean;
   parentError: string | null;
+  parentSaved?: boolean;
   statuses: StatusResponse[];
   projectKey: string;
 }>();
@@ -135,6 +136,9 @@ function createSubtask(title: string) {
       />
     </div>
     <p v-if="parentError" class="mb-4 text-xs text-destructive" role="alert">{{ parentError }}</p>
+    <p v-else-if="parentSaved" class="mb-4 text-xs text-muted-foreground" role="status">
+      保存しました
+    </p>
     <TaskParentPicker
       v-if="pickingParent"
       :tenant-id="tenantId"

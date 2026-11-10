@@ -28,6 +28,7 @@ const task: TaskDetail = {
 
 const confirmDelete = vi.fn();
 const onChangeParent = vi.fn();
+const savedFieldRef = ref<string | null>(null);
 // 既定は未解決（他のテストで取得を走らせない）。似ているタスクのテストだけ値を入れる
 const resolvedIds = {
   tenantId: ref<string | undefined>(undefined),
@@ -60,7 +61,7 @@ vi.mock('@/composables/useTaskDetail', () => ({
       onChangeParent,
       fieldUpdating: computed(() => ({})),
       fieldErrors: ref({}),
-      savedField: ref(null),
+      savedField: savedFieldRef,
       isLoading: computed(() => false),
       isNotFound: computed(() => false),
       isError: computed(() => false),
@@ -113,6 +114,7 @@ describe('TaskDetailPane', () => {
   beforeEach(() => {
     confirmDelete.mockReset();
     capturedParams = null;
+    savedFieldRef.value = null;
     task.description = null;
     resolvedIds.tenantId.value = undefined;
     resolvedIds.projectId.value = undefined;
@@ -141,6 +143,19 @@ describe('TaskDetailPane', () => {
   });
 
   // オーバーレイもこのペインを描くので、ここの配線で右ペインとオーバーレイの両方を見る
+  it('savedField が parent_task_id のときだけサブタスク欄へ parentSaved を渡す', async () => {
+    const wrapper = mountPane();
+    expect(wrapper.getComponent(TaskSubtaskPanel).props('parentSaved')).toBe(false);
+
+    savedFieldRef.value = 'parent_task_id';
+    await nextTick();
+    expect(wrapper.getComponent(TaskSubtaskPanel).props('parentSaved')).toBe(true);
+
+    savedFieldRef.value = 'priority';
+    await nextTick();
+    expect(wrapper.getComponent(TaskSubtaskPanel).props('parentSaved')).toBe(false);
+  });
+
   it('サブタスク欄からの親の変更を useTaskDetail へ渡す', () => {
     onChangeParent.mockReset();
     const wrapper = mountPane();
