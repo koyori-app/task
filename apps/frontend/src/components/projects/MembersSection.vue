@@ -4,7 +4,7 @@ import { PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import UserSelector from '@/components/users/UserSelector.vue';
-import { Button, Dialog, Field, Picker } from '@koyori-app/ui-vue';
+import { Button, Dialog, Field, Picker, Switch } from '@koyori-app/ui-vue';
 import { LIST_PROJECTS_PATH, apiClient, useMeQuery } from '@/lib/api-vue-query';
 import { rolesForAccount } from '@/lib/bot-roles';
 import type { components } from '@/generated/api';
@@ -16,6 +16,7 @@ type ProjectRole = components['schemas']['ProjectRole'];
 const MEMBERS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/members' as const;
 const MEMBER_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/members/{user_id}' as const;
 const TENANT_MEMBERS_PATH = '/v1/tenants/{tenant_id}/members' as const;
+const PROJECT_PATH = '/v1/tenants/{tenant_id}/projects/{id}' as const;
 
 const ROLES: { value: ProjectRole; label: string; description: string }[] = [
   { value: 'Admin', label: '管理者', description: 'メンバーの管理を含むすべての操作' },
@@ -42,6 +43,14 @@ const membersQuery = useQuery(
     retry: false,
   })),
 );
+const projectQuery = useQuery(
+  computed(() => ({
+    ...apiClient.queryOptions('get', PROJECT_PATH, {
+      params: { path: { tenant_id: props.tenantId, id: props.projectId } },
+    }),
+    retry: false,
+  })),
+);
 const tenantMembersQuery = useQuery(
   computed(() => ({
     ...apiClient.queryOptions('get', TENANT_MEMBERS_PATH, {
@@ -55,6 +64,9 @@ const tenantMembersQuery = useQuery(
 // （落としたままだと下流の map / filter が暗黙 any になり、vue-tsc が落ちる）
 const members = computed<ProjectMemberResponse[]>(() => membersQuery.data.value ?? []);
 const tenantMembers = computed<TenantMemberResponse[]>(() => tenantMembersQuery.data.value ?? []);
+const project = computed(() => projectQuery.data.value);
+/** 取得の前は既定（継承する）として扱う。切り替えは取得できるまで触らせない */
+const inherits = computed(() => project.value?.inherit_tenant_members ?? true);
 
 /** 一覧・追加・変更・削除はプロジェクト管理者（またはテナントオーナー・入れるテナント管理者）専用。 */
 const isForbidden = computed(
@@ -99,8 +111,8 @@ function isSelf(member: ProjectMemberResponse) {
 /**
  * メンバーの増減はプロジェクトの見え方も変える。
  *
- * - 自分を外せば、そのプロジェクトは一覧から消える
- * - 最後の 1 人を外せば `project_members` が 0 件になり、テナントメンバー全員に開く
+ * - 継承しないプロジェクトで自分を外せば、そのプロジェクトは一覧から消える
+ * - 継承の切り替えは、載っていないテナントのメンバーが入れるかを変える
  *
  * どちらもプロジェクト一覧の中身が変わるので、メンバーだけでなく一覧も無効化する
  * （しないと、サイドバーや設定の他セクションが古い権限のまま操作できる顔で残る）。
@@ -109,6 +121,7 @@ async function invalidateMembers() {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: ['get', MEMBERS_PATH] }),
     queryClient.invalidateQueries({ queryKey: ['get', LIST_PROJECTS_PATH] }),
+    queryClient.invalidateQueries({ queryKey: ['get', PROJECT_PATH] }),
   ]);
 }
 
@@ -203,8 +216,9 @@ const removeDescription = computed(() => {
   if (!target) return '';
   return [
     `「${target.user.username}」をこのプロジェクトから外します。担当タスクの割り当ては残りますが、ウォッチしていたタスクの通知は解除されます。`,
-    members.value.length === 1 &&
-      'これが最後のメンバーです。外すとメンバー指定が無くなり、このプロジェクトはテナントメンバー全員が開けるようになります。',
+    !inherits.value &&
+      members.value.length === 1 &&
+      'これが最後のメンバーです。継承しないプロジェクトでは、外すとテナントのオーナーのほかは誰もこのプロジェクトに入れなくなるので、外せません。',
     isSelf(target) && '自分をこのプロジェクトから外します。以後この設定画面は開けなくなります。',
   ]
     .filter(Boolean)
@@ -235,10 +249,50 @@ async function confirmRemove() {
     removeTarget.value = null;
   } catch (e) {
     removeError.value =
-      errorStatus(e) === 409
-        ? '最後の管理者は削除できません。'
-        : 'メンバーを削除できませんでした。';
+      errorStatus(e) !== 409
+        ? 'メンバーを削除できませんでした。'
+        : !inherits.value && members.value.length === 1
+          ? '継承しないプロジェクトの最後のメンバーは外せません。'
+          : '最後の管理者は削除できません。';
   }
+}
+// --- テナントのメンバーの継承 ---
+
+const updateProjectMutation = apiClient.useMutation('put', PROJECT_PATH);
+const inheritError = ref<string | null>(null);
+const inheritConfirmOpen = ref(false);
+
+/** 切ると載っていない人が入れなくなるので、確かめてから切る。入れる時はすぐ変える */
+function onInheritChange(value: boolean) {
+  inheritError.value = null;
+  if (value) {
+    void applyInherit(true);
+  } else {
+    inheritConfirmOpen.value = true;
+  }
+}
+
+async function applyInherit(value: boolean) {
+  inheritError.value = null;
+  try {
+    await updateProjectMutation.mutateAsync({
+      params: { path: { tenant_id: props.tenantId, id: props.projectId } },
+      body: { inherit_tenant_members: value },
+    });
+    await invalidateMembers();
+    inheritConfirmOpen.value = false;
+  } catch (e) {
+    inheritError.value =
+      errorStatus(e) === 403
+        ? '継承を切り替えられるのは、テナントオーナー・テナント管理者とこのプロジェクトの管理者だけです。'
+        : '継承を切り替えられませんでした。';
+    inheritConfirmOpen.value = false;
+  }
+}
+
+function onInheritConfirmClose() {
+  if (updateProjectMutation.isPending.value) return;
+  inheritConfirmOpen.value = false;
 }
 </script>
 
@@ -246,9 +300,11 @@ async function confirmRemove() {
   <div>
     <div class="mb-5 border-b pb-4">
       <h2 class="text-xl font-semibold">メンバー</h2>
-      <p class="mt-1 text-sm text-muted-foreground">
-        メンバーを 1 人も指定しない間は、テナントメンバー全員がこのプロジェクトに入れます。
-        指定すると、ここに載っている人だけに絞られます。
+      <p class="mt-1 text-sm text-muted-foreground" data-testid="members-rule">
+        <template v-if="inherits">
+          テナントのメンバーは全員、メンバーの役でこのプロジェクトに入れます。ここに載せた人は、選んだ役になります。
+        </template>
+        <template v-else>ここに載っている人だけが、このプロジェクトに入れます。</template>
       </p>
     </div>
 
@@ -263,6 +319,35 @@ async function confirmRemove() {
     </p>
 
     <template v-else>
+      <!-- テナントのメンバーの継承。個人プロジェクトは本人だけが入れるので出さない -->
+      <div
+        v-if="project && !project.is_personal"
+        class="mb-5 flex items-start justify-between gap-4 rounded-lg border p-4"
+        data-testid="member-inheritance"
+      >
+        <div class="flex min-w-0 flex-col gap-1">
+          <label for="member-inherit" class="text-sm font-medium"
+            >テナントのメンバーを継承する</label
+          >
+          <p id="member-inherit-description" class="text-sm text-muted-foreground">
+            切ると、ここに載っていない人はこのプロジェクトに入れなくなります。
+          </p>
+        </div>
+        <Switch
+          id="member-inherit"
+          label="テナントのメンバーを継承する"
+          hideLabel
+          :checked="inherits"
+          :disabled="updateProjectMutation.isPending.value"
+          ariaDescribedBy="member-inherit-description"
+          class="mt-0.5"
+          :on-checked-change="onInheritChange"
+        />
+      </div>
+      <p v-if="inheritError" role="alert" class="-mt-3 mb-5 text-sm text-destructive">
+        {{ inheritError }}
+      </p>
+
       <!-- 追加フォーム -->
       <div class="mb-5 flex flex-wrap items-end gap-2">
         <Field id="member-candidate" label="テナントメンバーから追加" class="min-w-[220px] flex-1">
@@ -378,6 +463,30 @@ async function confirmRemove() {
           :disabled="removeMutation.isPending.value"
           :label="removeMutation.isPending.value ? '削除中…' : '削除する'"
           @click="confirmRemove"
+        />
+      </template>
+    </Dialog>
+
+    <Dialog
+      :open="inheritConfirmOpen"
+      title="テナントのメンバーの継承を切りますか？"
+      description="ここに載っていない人は、このプロジェクトに入れなくなります。BOT も同じです。テナントのオーナーは、切った後も入れます。"
+      :on-close="onInheritConfirmClose"
+    >
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="updateProjectMutation.isPending.value"
+          label="キャンセル"
+          @click="inheritConfirmOpen = false"
+        />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="updateProjectMutation.isPending.value"
+          :label="updateProjectMutation.isPending.value ? '切り替え中…' : '継承を切る'"
+          @click="applyInherit(false)"
         />
       </template>
     </Dialog>

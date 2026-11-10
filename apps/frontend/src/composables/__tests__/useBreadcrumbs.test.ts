@@ -22,6 +22,7 @@ const project = {
   description: '',
   is_personal: false,
   tenant_id: 'tenant-1',
+  inherit_tenant_members: true,
 };
 const task = { id: 'task-3', seq_id: 3, title: '子タスク', parent_task_id: null as string | null };
 const parent = { id: 'task-2', seq_id: 2, title: '親タスク', parent_task_id: 'task-1' };

@@ -42,6 +42,7 @@ const sampleProject: ProjectResponse = {
   description: 'Shared project',
   key: 'ALPHA',
   is_personal: false,
+  inherit_tenant_members: true,
   icon_emoji: '🎨',
   icon_url: null,
   personal_owner_id: null,

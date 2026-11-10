@@ -56,6 +56,10 @@ type MockState = {
   addStatus?: number;
   updateStatus?: number;
   deleteStatus?: number;
+  /** プロジェクトがテナントのメンバーを継承するか（既定は継承する） */
+  inherit?: boolean;
+  /** 400 以上を設定すると、継承の切り替え（PUT project）が失敗する */
+  projectPutStatus?: number;
 };
 
 const jsonResponse = (data: unknown, status = 200) =>
@@ -68,6 +72,19 @@ function stubFetch(state: MockState) {
   const addBodies: unknown[] = [];
   const putRequests: { path: string; body: unknown }[] = [];
   const deletedPaths: string[] = [];
+  const projectPuts: unknown[] = [];
+  const project = () => ({
+    id: PROJECT_ID,
+    tenant_id: TENANT_ID,
+    name: 'Alpha',
+    description: '',
+    key: 'ALPHA',
+    icon_emoji: null,
+    icon_url: null,
+    is_personal: false,
+    personal_owner_id: null,
+    inherit_tenant_members: state.inherit ?? true,
+  });
   const fetchMock = vi.fn(async (req: Request) => {
     const pathname = new URL(req.url, 'http://localhost').pathname;
     const memberItemMatch = pathname.match(/\/projects\/[^/]+\/members\/([^/]+)$/);
@@ -120,10 +137,22 @@ function stubFetch(state: MockState) {
       state.members = state.members.filter((m) => m.user_id !== memberItemMatch[1]);
       return new Response(null, { status: 204 });
     }
+    if (pathname.endsWith(`/v1/tenants/${TENANT_ID}/projects/${PROJECT_ID}`)) {
+      if (req.method === 'GET') return jsonResponse(project());
+      if (req.method === 'PUT') {
+        const body = (await req.clone().json()) as { inherit_tenant_members?: boolean };
+        projectPuts.push(body);
+        if (state.projectPutStatus) {
+          return jsonResponse({ message: 'error' }, state.projectPutStatus);
+        }
+        state.inherit = body.inherit_tenant_members ?? state.inherit;
+        return jsonResponse(project());
+      }
+    }
     return jsonResponse({ message: 'not-found' }, 404);
   });
   vi.stubGlobal('fetch', fetchMock);
-  return { addBodies, putRequests, deletedPaths };
+  return { addBodies, putRequests, deletedPaths, projectPuts };
 }
 
 function mountSection() {
@@ -260,7 +289,50 @@ describe('MembersSection', () => {
     expect(document.body.textContent).not.toContain('以後この設定画面は開けなくなります');
   });
 
-  it('最後の 1 人を外すときは、テナント全体に開くことを伝える', async () => {
+  it('継承しないプロジェクトの最後の 1 人を外すときは、誰も入れなくなることを伝える', async () => {
+    stubFetch({
+      members: [projectMember(BOB_ID, 'bob', 'Admin')],
+      tenantMembers: [],
+      viewerId: ALICE_ID,
+      inherit: false,
+    });
+    mountSection();
+    await flushPromises();
+
+    document.body
+      .querySelector<HTMLButtonElement>('button[aria-label="メンバー「bob」を削除"]')
+      ?.click();
+    await flushPromises();
+
+    expect(document.body.textContent).toContain(
+      'テナントのオーナーのほかは誰もこのプロジェクトに入れなくなるので、外せません',
+    );
+  });
+
+  it('継承しないプロジェクトの最後の 1 人の削除が 409 なら、外せない訳を伝える', async () => {
+    stubFetch({
+      members: [projectMember(BOB_ID, 'bob', 'Viewer')],
+      tenantMembers: [],
+      viewerId: ALICE_ID,
+      inherit: false,
+      deleteStatus: 409,
+    });
+    mountSection();
+    await flushPromises();
+
+    document.body
+      .querySelector<HTMLButtonElement>('button[aria-label="メンバー「bob」を削除"]')
+      ?.click();
+    await flushPromises();
+    clickBodyButton('削除する');
+    await flushPromises();
+
+    expect(document.body.textContent).toContain(
+      '継承しないプロジェクトの最後のメンバーは外せません。',
+    );
+  });
+
+  it('継承するプロジェクトでは、最後の 1 人を外しても入れる人は変わらないので警告しない', async () => {
     stubFetch({
       members: [projectMember(BOB_ID, 'bob', 'Admin')],
       tenantMembers: [],
@@ -274,8 +346,8 @@ describe('MembersSection', () => {
       ?.click();
     await flushPromises();
 
-    // 「アクセスを絞る画面」の削除が、逆にアクセスを広げる側へ倒れることを伝える
-    expect(document.body.textContent).toContain('テナントメンバー全員が開けるようになります');
+    expect(document.body.textContent).toContain('「bob」をこのプロジェクトから外します');
+    expect(document.body.textContent).not.toContain('最後のメンバーです');
   });
 
   it('ロール変更の 409 は最後の管理者であることを伝える', async () => {
@@ -455,5 +527,93 @@ describe('MembersSection', () => {
     const list = wrapper.get('[data-testid="member-list"]').text();
     expect(list).toContain('bob');
     expect(list).not.toContain('alice');
+  });
+
+  describe('テナントのメンバーの継承', () => {
+    // koyori の Dialog は閉じても DOM に残るので、開いている物の字だけを見る
+    const openDialogText = () =>
+      [...document.body.querySelectorAll('dialog[open]')].map((d) => d.textContent).join('');
+    /** 閉じた dialog のボタンも DOM に残るので、開いている dialog の中のボタンを押す */
+    const clickOpenDialogButton = (label: string) => {
+      const button = [...document.body.querySelectorAll('dialog[open] button')].find(
+        (b) => b.textContent?.trim() === label,
+      );
+      if (!button) throw new Error(`open dialog button "${label}" not found`);
+      (button as HTMLButtonElement).click();
+    };
+
+    it('継承する時は、テナントのメンバーが全員入れることと、載せた人の役が変わることを説明する', async () => {
+      stubFetch({ members: [projectMember(ALICE_ID, 'alice', 'Admin')], tenantMembers: [] });
+      const wrapper = mountSection();
+      await flushPromises();
+
+      expect(wrapper.get('[data-testid="members-rule"]').text()).toBe(
+        'テナントのメンバーは全員、メンバーの役でこのプロジェクトに入れます。ここに載せた人は、選んだ役になります。',
+      );
+      const toggle = wrapper.get('#member-inherit');
+      expect(toggle.attributes('aria-checked')).toBe('true');
+    });
+
+    it('継承しない時は、載っている人だけが入れることを説明する', async () => {
+      stubFetch({ members: [], tenantMembers: [], inherit: false });
+      const wrapper = mountSection();
+      await flushPromises();
+
+      expect(wrapper.get('[data-testid="members-rule"]').text()).toBe(
+        'ここに載っている人だけが、このプロジェクトに入れます。',
+      );
+      expect(wrapper.get('#member-inherit').attributes('aria-checked')).toBe('false');
+    });
+
+    it('切る時は確かめの dialog を出し、確かめた時だけ PUT を送る', async () => {
+      const { projectPuts } = stubFetch({ members: [], tenantMembers: [] });
+      const wrapper = mountSection();
+      await flushPromises();
+
+      await wrapper.get('#member-inherit').trigger('click');
+      await flushPromises();
+      expect(projectPuts).toEqual([]);
+      expect(openDialogText()).toContain('テナントのメンバーの継承を切りますか？');
+
+      clickOpenDialogButton('キャンセル');
+      await flushPromises();
+      expect(projectPuts).toEqual([]);
+      expect(openDialogText()).not.toContain('テナントのメンバーの継承を切りますか？');
+
+      await wrapper.get('#member-inherit').trigger('click');
+      await flushPromises();
+      clickOpenDialogButton('継承を切る');
+      await flushPromises();
+
+      expect(projectPuts).toEqual([{ inherit_tenant_members: false }]);
+      expect(wrapper.get('[data-testid="members-rule"]').text()).toBe(
+        'ここに載っている人だけが、このプロジェクトに入れます。',
+      );
+    });
+
+    it('入れる時は確かめずに PUT を送る', async () => {
+      const { projectPuts } = stubFetch({ members: [], tenantMembers: [], inherit: false });
+      const wrapper = mountSection();
+      await flushPromises();
+
+      await wrapper.get('#member-inherit').trigger('click');
+      await flushPromises();
+
+      expect(projectPuts).toEqual([{ inherit_tenant_members: true }]);
+      expect(openDialogText()).not.toContain('テナントのメンバーの継承を切りますか？');
+    });
+
+    it('切り替えの 403 は、切り替えられる人を伝える', async () => {
+      stubFetch({ members: [], tenantMembers: [], inherit: false, projectPutStatus: 403 });
+      const wrapper = mountSection();
+      await flushPromises();
+
+      await wrapper.get('#member-inherit').trigger('click');
+      await flushPromises();
+
+      expect(wrapper.text()).toContain(
+        '継承を切り替えられるのは、テナントオーナー・テナント管理者とこのプロジェクトの管理者だけです。',
+      );
+    });
   });
 });
