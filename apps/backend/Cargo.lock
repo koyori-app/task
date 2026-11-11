@@ -8078,7 +8078,6 @@ dependencies = [
  "reqwest 0.13.5",
  "ring",
  "rustls",
- "sea-orm",
  "sea-orm-macros",
  "sea-query",
  "serde",
