@@ -55,7 +55,13 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
 }));
 
 import CreateTaskDialog from '../CreateTaskDialog.vue';
-import { pickerOption, pickerTrigger } from '@/components/__tests__/picker';
+import {
+  accessibleText,
+  pickerOption,
+  pickerOptions,
+  pickerTrigger,
+} from '@/components/__tests__/picker';
+import { PRIORITY_CONFIG } from '@/lib/task-display';
 
 const statuses = [
   {
@@ -1253,6 +1259,31 @@ describe('CreateTaskDialog labels query states', () => {
       const trigger = document.body.querySelector(`button[aria-label^="${name}"]`);
       expect(trigger, name).not.toBeNull();
       expect(trigger!.closest('[data-menu-top-layer]'), name).not.toBeNull();
+    }
+    wrapper.unmount();
+  });
+
+  it('優先度メニューの各行に PRIORITY_CONFIG の色の旗が出て、行の名前に旗は混ざらない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    const trigger = pickerTrigger(document.body, '優先度');
+    expect(pickerOptions(trigger)).toHaveLength(Object.keys(PRIORITY_CONFIG).length);
+    for (const config of Object.values(PRIORITY_CONFIG)) {
+      const option = pickerOption(trigger, config.label);
+      // 色を持つ svg が旗。選択中のチェック印（色を持たない）とは区別する
+      const flags = [...option.querySelectorAll<SVGElement>('svg')].filter(
+        (svg) => svg.style.color,
+      );
+      expect(flags, config.label).toHaveLength(1);
+      // 旗は飾りなので読み上げから外れる。行の名前は項目名だけ
+      expect(flags[0].getAttribute('aria-hidden'), config.label).toBe('true');
+      const probe = document.createElement('span');
+      probe.style.color = config.color;
+      expect(flags[0].style.color, config.label).toBe(probe.style.color);
+      // 色の点（color）と旗を二重に出さない
+      expect(option.querySelector('[style*="background-color"]'), config.label).toBeNull();
+      expect(accessibleText(option), config.label).toBe(config.label);
     }
     wrapper.unmount();
   });

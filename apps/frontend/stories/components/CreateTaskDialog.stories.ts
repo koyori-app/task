@@ -294,7 +294,7 @@ export const DateClearThenEscape: Story = {
   },
 };
 
-/** 優先度のメニューを開いたまま（色の点と、選択中のチェック印） */
+/** 優先度のメニューを開いたまま（色の旗と、選択中のチェック印） */
 export const PriorityMenuOpen: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement.ownerDocument.body);
@@ -304,6 +304,11 @@ export const PriorityMenuOpen: Story = {
       'aria-selected',
       'true',
     );
+    // 各行に優先度の色の旗が出る（引き金のチップと同じ旗。行の名前には混ざらない）
+    const high = await canvas.findByRole('option', { name: '高' });
+    const flag = [...high.querySelectorAll<SVGElement>('svg')].find((svg) => svg.style.color);
+    await expect(flag).toBeTruthy();
+    await expect(flag!.style.color).not.toBe('');
   },
 };
 

@@ -13,8 +13,8 @@ catalogs:
       specifier: 0.1.0-alpha.3
       version: 0.1.0-alpha.3
     '@koyori-app/ui-vue':
-      specifier: 0.7.0
-      version: 0.7.0
+      specifier: 0.8.0
+      version: 0.8.0
     '@lezer/highlight':
       specifier: 1.2.5
       version: 1.2.5
@@ -79,7 +79,7 @@ importers:
         version: 0.1.4(@tanstack/vue-query@5.104.0(vue@3.5.44(typescript@6.0.3)))(openapi-fetch@0.17.0)(openapi-typescript-helpers@0.1.0)(vue@3.5.44(typescript@6.0.3))
       '@koyori-app/ui-vue':
         specifier: 'catalog:'
-        version: 0.7.0(vue@3.5.44(typescript@6.0.3))
+        version: 0.8.0(vue@3.5.44(typescript@6.0.3))
       '@lezer/highlight':
         specifier: 'catalog:'
         version: 1.2.5
@@ -1371,8 +1371,8 @@ packages:
       openapi-typescript-helpers: ^0.1.0
       vue: ^3.5.35
 
-  '@koyori-app/ui-vue@0.7.0':
-    resolution: {integrity: sha512-Hd6pluiRMv5N2RKuqh0iuiNx5Cfm8c5GXd6ANLHM0bkZPnJytbzcIQ4uPAwZeBtI4KMI/9WLkD0M8h+RCq+B9g==}
+  '@koyori-app/ui-vue@0.8.0':
+    resolution: {integrity: sha512-PmQsalcSZjfxDg/CNpmpRwz31QSIUv8aRJ4bAO+jElMjz3UznpCeWahUA2JfBb7iM+w3GqClvTHqEjPstIwCwQ==}
     peerDependencies:
       vue: ^3.5.0
 
@@ -8913,7 +8913,7 @@ snapshots:
       openapi-typescript-helpers: 0.1.0
       vue: 3.5.44(typescript@6.0.3)
 
-  '@koyori-app/ui-vue@0.7.0(vue@3.5.44(typescript@6.0.3))':
+  '@koyori-app/ui-vue@0.8.0(vue@3.5.44(typescript@6.0.3))':
     dependencies:
       vue: 3.5.44(typescript@6.0.3)
 

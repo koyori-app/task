@@ -64,14 +64,13 @@ const MAX_PROGRESS_PCT = 100;
 const TITLE_DEBOUNCE_MS = 300;
 
 /**
- * 優先度の Picker の項目。行は優先度の色の点で出す（Picker の項目は任意のアイコンを持てない）。
- * koyori の Picker が項目ごとのアイコンを持てるようになったら、ここを旗のアイコンに差し替える
- * （引き金のチップは今も旗）。優先度の Picker の組み立てはこの定数とテンプレートの 1 か所だけ
+ * 優先度の Picker の項目。`icon` に優先度の色を渡し、`#item-icon` スロットで旗に描く
+ * （色の点を出す `color` は渡さない。点と旗が並んでしまう）。引き金のチップと同じ旗
  */
 const PRIORITY_ITEMS = (Object.keys(PRIORITY_CONFIG) as Priority[]).map((value) => ({
   value,
   label: PRIORITY_CONFIG[value].label,
-  color: PRIORITY_CONFIG[value].color,
+  icon: PRIORITY_CONFIG[value].color,
 }));
 
 const props = defineProps<{
@@ -574,6 +573,9 @@ async function submit(event: SubmitEvent) {
               :on-selection-change="(values: string[]) => (priority = values[0] as Priority)"
               :class="chipTrigger(false)"
             >
+              <template #item-icon="{ item }">
+                <Flag class="size-4" :style="{ color: item.icon }" aria-hidden="true" />
+              </template>
               <template #trigger>
                 <span class="flex items-center gap-1.5">
                   <Flag
