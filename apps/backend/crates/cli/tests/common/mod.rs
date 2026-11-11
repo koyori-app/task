@@ -122,6 +122,7 @@ pub fn project_json() -> serde_json::Value {
         "key": "APP",
         "is_personal": false,
         "personal_owner_id": null,
+        "inherit_tenant_members": true,
     })
 }
 
