@@ -1,5 +1,15 @@
 <script setup lang="ts">
-import { X } from '@lucide/vue';
+import {
+  ChevronRight,
+  CircleDashed,
+  Flag,
+  Folder,
+  Percent,
+  Tag,
+  Timer,
+  User,
+  X,
+} from '@lucide/vue';
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { getActivePinia } from 'pinia';
@@ -9,11 +19,8 @@ import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import {
   Button,
   ConfirmDialog,
-  DatePicker,
   Dialog,
   Dropdown,
-  Field,
-  Input,
   Picker,
   Spinner,
   type DropdownItem,
@@ -21,10 +28,14 @@ import {
 import UserSelector from '@/components/users/UserSelector.vue';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
+import TaskDatesChip from '@/components/tasks/TaskDatesChip.vue';
+import TaskNumberChip from '@/components/tasks/TaskNumberChip.vue';
+import UserAvatar from '@/components/UserAvatar.vue';
 import { useSimilarTasks } from '@/composables/useSimilarTasks';
 import type { components } from '@/generated/api';
 import { apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
 import { PRIORITY_CONFIG, taskDetailHref } from '@/lib/task-display';
+import { chipTrigger } from '@/lib/task-chip';
 import { toIsoDate } from '@/lib/task-date';
 import { useAuthStore } from '@/stores/auth';
 
@@ -46,15 +57,22 @@ const ASSIGNEE_ROLE = 'primary';
  */
 const MAX_ESTIMATE_MINUTES = 2_147_483_647;
 
+/** 進捗（%）の上限。API の `progress_pct` は 0 以上 100 以下の整数 */
+const MAX_PROGRESS_PCT = 100;
+
 /** 似ているタスクの問い合わせを待つ時間。一覧の検索（tasks/+Page.vue）と揃える */
 const TITLE_DEBOUNCE_MS = 300;
 
+/**
+ * 優先度の Picker の項目。行は優先度の色の点で出す（Picker の項目は任意のアイコンを持てない）。
+ * koyori の Picker が項目ごとのアイコンを持てるようになったら、ここを旗のアイコンに差し替える
+ * （引き金のチップは今も旗）。優先度の Picker の組み立てはこの定数とテンプレートの 1 か所だけ
+ */
 const PRIORITY_ITEMS = (Object.keys(PRIORITY_CONFIG) as Priority[]).map((value) => ({
   value,
   label: PRIORITY_CONFIG[value].label,
+  color: PRIORITY_CONFIG[value].color,
 }));
-
-const fieldLabelClass = 'text-xs font-normal text-muted-foreground';
 
 const props = defineProps<{
   open: boolean;
@@ -102,8 +120,10 @@ const description = ref('');
 const plannedStartOn = ref('');
 const softDeadline = ref('');
 const hardDeadline = ref('');
-/** 見積もり（分）。type="number" の v-model は数値でも文字列でも来る */
-const estimate = ref<string | number>('');
+/** 見積もり（分）。自前の number 入力は文字列で返す。空は未入力 */
+const estimate = ref('');
+/** 進捗（%）。見積もりと同じく文字列で持つ。空は未入力（送らず、サーバーの既定 0 に任せる） */
+const progress = ref('');
 const priority = ref<Priority>('Medium');
 const selectedLabelIds = ref<string[]>([]);
 const selectedAssigneeIds = ref<string[]>([]);
@@ -141,13 +161,12 @@ const defaultStatusId = computed(
 const statusItems = computed(() =>
   props.statuses.map((status) => ({ value: status.id, label: status.name, color: status.color })),
 );
+const selectedStatus = computed(() =>
+  props.statuses.find((status) => status.id === statusId.value),
+);
 
 const selectedLabels = computed(() =>
   (props.labels ?? []).filter((label) => selectedLabelIds.value.includes(label.id)),
-);
-/** 引き金の読み上げ名。欄の見出しに、選んだラベル（無ければ「ラベルなし」）を続ける */
-const labelsTriggerLabel = computed(
-  () => `ラベル ${selectedLabels.value.map((label) => label.name).join(' ') || 'ラベルなし'}`,
 );
 const labelItems = computed<DropdownItem[]>(() =>
   (props.labels ?? []).map((label) => ({
@@ -166,11 +185,11 @@ const selectedAssignees = computed(() =>
 );
 
 const createMutation = apiClient.useMutation('post', CREATE_TASK_PATH);
-const titleInputRef = ref<InstanceType<typeof Input> | null>(null);
+const titleInputRef = ref<HTMLInputElement | null>(null);
 
-// 開いて入力欄ができたら当てる（× より先に）。koyori の Input は autofocus を root の span に落とすので中の input に当てる
+// 開いて入力欄ができたら当てる（× より先に）
 watch(titleInputRef, (input) => {
-  (input?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
+  input?.focus();
 });
 
 // 似ているタスク（重複の注意喚起）。作成は妨げない: 取得中・失敗・0 件は何も出さない
@@ -281,7 +300,8 @@ const dirty = computed(
     plannedStartOn.value !== '' ||
     softDeadline.value !== '' ||
     hardDeadline.value !== '' ||
-    String(estimate.value) !== '' ||
+    estimate.value !== '' ||
+    progress.value !== '' ||
     priority.value !== 'Medium' ||
     selectedLabelIds.value.length > 0 ||
     !sameIds(selectedAssigneeIds.value, appliedAssigneeIds.value),
@@ -328,17 +348,6 @@ function toggleLabel(labelId: string) {
     : [...selectedLabelIds.value, labelId];
 }
 
-/**
- * shortcut: WebKit はボタンを押してもフォーカスせず dialog へ移すので、koyori の DatePicker が
- * 外へ出たと見てカレンダーを閉じ、月送りとクリアが効かない。koyori 側で直ったら外す
- */
-function focusPressedButton(event: MouseEvent) {
-  const button = (event.target as Element).closest('button');
-  if (!button) return;
-  event.preventDefault();
-  button.focus();
-}
-
 function resetForm() {
   title.value = '';
   statusId.value = defaultStatusId.value;
@@ -347,6 +356,7 @@ function resetForm() {
   softDeadline.value = '';
   hardDeadline.value = '';
   estimate.value = '';
+  progress.value = '';
   priority.value = 'Medium';
   selectedLabelIds.value = [];
   selectedAssigneeIds.value = [];
@@ -377,12 +387,11 @@ async function submit(event: SubmitEvent) {
     validationMessage.value = '開始予定日は期限以前の日付にしてください';
     return;
   }
-  const normalizedEstimate = String(estimate.value).trim();
+  const normalizedEstimate = estimate.value.trim();
   const estimatedMinutes = normalizedEstimate ? Number(normalizedEstimate) : undefined;
   // 「1e」のように数値にならない入力は value が空で届き、未入力と区別できない
-  const estimateInput = (event.target as HTMLFormElement).elements.namedItem(
-    'estimated_minutes',
-  ) as HTMLInputElement;
+  const { elements } = event.target as HTMLFormElement;
+  const estimateInput = elements.namedItem('estimated_minutes') as HTMLInputElement;
   if (
     estimateInput.validity.badInput ||
     (estimatedMinutes !== undefined &&
@@ -391,6 +400,17 @@ async function submit(event: SubmitEvent) {
         estimatedMinutes > MAX_ESTIMATE_MINUTES))
   ) {
     validationMessage.value = `見積もりは 1 以上 ${MAX_ESTIMATE_MINUTES} 以下の整数（分）で入力してください`;
+    return;
+  }
+  const normalizedProgress = progress.value.trim();
+  const progressPct = normalizedProgress ? Number(normalizedProgress) : undefined;
+  const progressInput = elements.namedItem('progress_pct') as HTMLInputElement;
+  if (
+    progressInput.validity.badInput ||
+    (progressPct !== undefined &&
+      (!Number.isInteger(progressPct) || progressPct < 0 || progressPct > MAX_PROGRESS_PCT))
+  ) {
+    validationMessage.value = `進捗は 0 以上 ${MAX_PROGRESS_PCT} 以下の整数（%）で入力してください`;
     return;
   }
 
@@ -405,6 +425,8 @@ async function submit(event: SubmitEvent) {
   if (softDeadline.value) body.soft_deadline = toIsoDate(softDeadline.value);
   if (hardDeadline.value) body.hard_deadline = toIsoDate(hardDeadline.value);
   if (estimatedMinutes !== undefined) body.estimated_minutes = estimatedMinutes;
+  // 0 も送る。未入力は送らず、サーバーの既定（0）に任せる
+  if (progressPct !== undefined) body.progress_pct = progressPct;
   if (selectedLabelIds.value.length) body.label_ids = selectedLabelIds.value;
   // role は仕様書が使っている primary に揃える（役割を使い分ける UI はまだ無い）
   if (selectedAssigneeIds.value.length) {
@@ -434,13 +456,16 @@ async function submit(event: SubmitEvent) {
 
 <template>
   <div
-    class="contents [--koyori-dialog-width:1040px] md:[--koyori-dialog-height:min(720px,90vh)]"
+    class="contents [--koyori-dialog-width:760px] max-md:[--koyori-dialog-height:100dvh] md:[--koyori-dialog-height:fit-content]"
     @keydown="onKeydown"
   >
     <!--
-      左に本文（タイトル・説明）、右にプロパティを置く 2 列。説明を広く書けるよう
-      ダイアログを大きく取り、狭い画面では縦に積んで全体をスクロールさせる。
-      見出しは画面に出さない（タイトル欄が見出しの役をする）。plain の title はダイアログの名前として残る
+      1 列の構成: 上部バー（パンくずと ×）、本文（タイトル・似ているタスク・説明）、プロパティのチップ列、
+      メッセージ、フッター。広い画面は中身に合わせて高さが縮み、あふれたら本文だけがスクロールする。
+      狭い画面は高さを画面いっぱいにし、本文だけがスクロールしてチップ列とフッターが下に留まる。
+      見出しは画面に出さない（パンくずが見出しの役をする）。plain の title はダイアログの名前として残る。
+      広い画面の高さは fit-content にする（plain の Dialog は height: auto だと、位置指定の dialog が
+      max-height まで引き伸ばされて、中身より下に余白ができる）
     -->
     <Dialog
       :open="open"
@@ -449,181 +474,185 @@ async function submit(event: SubmitEvent) {
       plain
       :on-close="onClose"
     >
-      <!--
-        閉じるボタンはダイアログの右上に 1 個だけ絶対配置する。右列の中に置くと、
-        狭い画面で右列が本文の下に積まれて × が画面の途中に現れる
-      -->
-      <Button
-        type="button"
-        variant="ghost"
-        class="absolute top-2 right-3 z-10"
-        ariaLabel="閉じる"
-        :disabled="createMutation.isPending.value"
-        @click="onClose"
-      >
-        <template #icon><X class="size-4" /></template>
-      </Button>
-
       <!-- 本文は開いている間だけ置く（閉じた Dialog も DOM に残るので、Markdown エディタを常駐させない） -->
       <HydrationSafeForm
         v-if="open"
         v-slot="{ isHydrated }"
-        class="flex flex-col md:min-h-0 md:flex-1 md:flex-row"
+        class="flex min-h-0 flex-col max-md:flex-1 md:max-h-[calc(100dvh-2rem-2px)]"
         @submit="submit"
       >
-        <div class="flex min-w-0 flex-col md:min-h-0 md:flex-1">
-          <!-- 狭い画面ではタイトル欄の右上に × が重なるので、その分だけ右を空ける -->
-          <div class="shrink-0 px-5 pt-5 pr-14 md:pr-5">
-            <Input
-              id="task-title"
-              ref="titleInputRef"
-              class="font-semibold [--koyori-font-size-sm:1.25rem]"
-              aria-label="タイトル（必須）"
-              name="title"
-              autocomplete="off"
-              placeholder="タイトルを入力"
-              :value="title"
-              :on-value-change="(v: string) => (title = v)"
-            />
-            <SimilarTasksList
-              class="pt-3"
-              :tasks="similarTasks"
-              :tenant-display-id="tenantDisplayId"
-              :project-key="projectKey"
-              @select="openSimilarTask"
-            />
+        <header class="flex h-12 shrink-0 items-center gap-1 border-b pr-2 pl-4 md:px-3">
+          <div class="flex min-w-0 items-center gap-1.5 text-[0.8125rem] text-muted-foreground">
+            <Folder class="size-3.5 shrink-0" aria-hidden="true" />
+            <span class="truncate">{{ projectKey }}</span>
+            <ChevronRight class="size-3.5 shrink-0" aria-hidden="true" />
+            <strong class="font-medium text-foreground">新規タスク</strong>
           </div>
+          <Button
+            type="button"
+            variant="ghost"
+            class="ml-auto"
+            ariaLabel="閉じる"
+            :disabled="createMutation.isPending.value"
+            @click="onClose"
+          >
+            <template #icon><X class="size-4" /></template>
+          </Button>
+        </header>
 
-          <div class="flex flex-col gap-3 px-5 py-4 md:min-h-0 md:flex-1 md:overflow-y-auto">
-            <!-- CodeMirror の実体は contenteditable で label の for が効かないため、
-                 名前は editor 側の aria-label で与える -->
-            <MarkdownEditor
-              v-model="description"
-              aria-label="説明"
-              placeholder="説明を入力（Markdown で書けます）"
-              :candidates="members ?? []"
-              min-height-class="min-h-56"
-            />
-
-            <p v-if="validationMessage" role="alert" class="text-sm text-destructive">
-              {{ validationMessage }}
-            </p>
-            <p v-if="requestError" role="alert" class="text-sm text-destructive">
-              {{ requestError }}
-            </p>
-            <p v-if="successMessage" role="status" class="text-sm text-emerald-600">
-              {{ successMessage }}
-            </p>
-          </div>
-
-          <div class="flex shrink-0 items-center gap-2 border-t px-5 py-3.5">
-            <Button
-              type="submit"
-              :disabled="createMutation.isPending.value || !isHydrated || !statusId"
-              :label="createMutation.isPending.value ? '作成中...' : '作成'"
-            >
-              <template #icon>
-                <Spinner v-if="createMutation.isPending.value" hide-label />
-              </template>
-            </Button>
-            <Button
-              type="button"
-              variant="tertiary"
-              :disabled="createMutation.isPending.value"
-              label="取り消す"
-              @click="onClose"
-            />
-          </div>
+        <div
+          class="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-4 md:px-6 md:pt-5 md:pb-3"
+        >
+          <input
+            id="task-title"
+            ref="titleInputRef"
+            v-model="title"
+            name="title"
+            autocomplete="off"
+            aria-label="タイトル（必須）"
+            placeholder="タスクのタイトル"
+            class="-mx-1 w-[calc(100%+0.5rem)] rounded bg-transparent px-1 py-0.5 text-xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground/60 hover:bg-muted/40 focus-visible:bg-muted/40 md:text-2xl"
+          />
+          <SimilarTasksList
+            class="rounded-md bg-muted/60 px-2.5 py-2"
+            :tasks="similarTasks"
+            :tenant-display-id="tenantDisplayId"
+            :project-key="projectKey"
+            @select="openSimilarTask"
+          />
+          <!-- CodeMirror の実体は contenteditable で label の for が効かないため、
+               名前は editor 側の aria-label で与える -->
+          <MarkdownEditor
+            v-model="description"
+            variant="plain"
+            aria-label="説明"
+            placeholder="説明を入力（Markdown で書けます）"
+            :candidates="members ?? []"
+            min-height-class="min-h-44"
+          />
         </div>
 
-        <div class="flex shrink-0 flex-col border-t bg-sidebar md:w-72 md:border-t-0 md:border-l">
-          <!-- 広い画面で右上の × が載る余白。狭い画面では × が本文側に載るので出さない -->
-          <div class="hidden h-12 shrink-0 border-b md:block" />
+        <!--
+          チップ列は本文の外（スクロールしない位置）に置く。説明が長くてもチップが隠れず、DOM も 1 本で済む。
+          狭い画面は 1 行で横にスクロールさせ、右端をフェードで示す（最後のチップが隠れたままにならないよう右を空ける）。
+          横スクロールの器で一覧が切れないよう、Picker / Dropdown / UserSelector は top-layer で出す
+        -->
+        <div
+          class="relative shrink-0 max-md:border-t max-md:after:pointer-events-none max-md:after:absolute max-md:after:inset-y-0 max-md:after:right-0 max-md:after:w-10 max-md:after:bg-linear-to-r max-md:after:from-transparent max-md:after:to-(--koyori-color-surface-raised)"
+        >
+          <div
+            data-task-chips
+            class="flex items-center gap-1.5 px-4 py-2.5 max-md:overflow-x-auto max-md:pr-10 max-md:[scrollbar-width:none] md:flex-wrap md:px-6 md:pt-0 md:pb-4"
+          >
+            <Picker
+              top-layer
+              label="ステータス"
+              :icon="null"
+              :searchable="false"
+              :items="statusItems"
+              :selected-values="statusId ? [statusId] : []"
+              :on-selection-change="(values: string[]) => (statusId = values[0] ?? '')"
+              :class="chipTrigger(false)"
+            >
+              <template #trigger>
+                <span class="flex items-center gap-1.5">
+                  <CircleDashed class="size-3.5 shrink-0" aria-hidden="true" />
+                  {{ selectedStatus?.name ?? 'ステータス' }}
+                </span>
+              </template>
+            </Picker>
+            <input type="hidden" name="status_id" :value="statusId" />
 
-          <div class="flex flex-col gap-3 px-3 py-3.5 md:min-h-0 md:flex-1 md:overflow-y-auto">
-            <div class="space-y-1">
-              <p :class="fieldLabelClass">プロジェクト</p>
-              <p class="flex h-9 items-center px-3 text-sm">{{ projectKey }}</p>
-            </div>
-
-            <Field id="task-priority" label="優先度">
-              <Picker
-                top-layer
-                label="優先度"
-                :searchable="false"
-                :items="PRIORITY_ITEMS"
-                :selected-values="[priority]"
-                :on-selection-change="(values: string[]) => (priority = values[0] as Priority)"
-              />
-              <input type="hidden" name="priority" :value="priority" />
-            </Field>
-
-            <Field id="task-status" label="ステータス" required>
-              <Picker
-                top-layer
-                label="ステータス"
-                :searchable="false"
-                :items="statusItems"
-                :selected-values="statusId ? [statusId] : []"
-                :on-selection-change="(values: string[]) => (statusId = values[0] ?? '')"
-              />
-              <input type="hidden" name="status_id" :value="statusId" />
-            </Field>
+            <!-- Field で包まない（包むと枠付きの入力欄の見た目になる）。読み上げ名は Picker が「優先度: 中」の形で付ける -->
+            <Picker
+              top-layer
+              label="優先度"
+              :icon="null"
+              :searchable="false"
+              :items="PRIORITY_ITEMS"
+              :selected-values="[priority]"
+              :on-selection-change="(values: string[]) => (priority = values[0] as Priority)"
+              :class="chipTrigger(false)"
+            >
+              <template #trigger>
+                <span class="flex items-center gap-1.5">
+                  <Flag
+                    class="size-3.5 shrink-0"
+                    :style="{ color: PRIORITY_CONFIG[priority].color }"
+                    aria-hidden="true"
+                  />
+                  {{ PRIORITY_CONFIG[priority].label }}
+                </span>
+              </template>
+            </Picker>
+            <input type="hidden" name="priority" :value="priority" />
 
             <div
               v-if="membersLoading || membersError || members?.length"
               role="group"
               aria-labelledby="task-assignees-label"
+              class="flex shrink-0 items-center gap-2"
             >
-              <!-- 見出しは Field が task-assignees-label の id で描く -->
-              <Field id="task-assignees" label="担当者">
-                <p
-                  v-if="membersLoading"
-                  class="flex h-9 items-center text-xs text-muted-foreground"
-                >
-                  メンバーを読み込み中...
-                </p>
-                <div v-else-if="membersError" class="flex items-center gap-2">
-                  <p role="alert" class="text-xs text-destructive">メンバーの取得に失敗しました</p>
-                  <Button
-                    type="button"
-                    variant="tertiary"
-                    label="再試行"
-                    @click="emit('retryMembers')"
-                  />
-                </div>
-                <UserSelector
-                  top-layer
-                  v-else
-                  v-model="selectedAssigneeIds"
-                  label="担当者"
-                  :users="members ?? []"
-                  :current-user-id="currentUserId"
-                  search-label="メンバーを検索"
-                  empty-text="担当者に指定できる利用者がいません"
-                  no-match-text="一致するメンバーがいません"
-                >
-                  <template #trigger>
-                    <span :class="selectedAssignees.length ? '' : 'text-muted-foreground'">
-                      {{
-                        selectedAssignees.length
-                          ? selectedAssignees.map((user) => user.username).join('、')
-                          : '未割り当て'
+              <span id="task-assignees-label" class="sr-only">担当者</span>
+              <p v-if="membersLoading" class="text-xs text-muted-foreground">
+                メンバーを読み込み中...
+              </p>
+              <div v-else-if="membersError" class="flex items-center gap-2">
+                <p role="alert" class="text-xs text-destructive">メンバーの取得に失敗しました</p>
+                <Button
+                  type="button"
+                  variant="tertiary"
+                  label="再試行"
+                  @click="emit('retryMembers')"
+                />
+              </div>
+              <UserSelector
+                v-else
+                v-model="selectedAssigneeIds"
+                top-layer
+                :icon="null"
+                label="担当者"
+                :users="members ?? []"
+                :current-user-id="currentUserId"
+                search-label="メンバーを検索"
+                empty-text="担当者に指定できる利用者がいません"
+                no-match-text="一致するメンバーがいません"
+                :class="chipTrigger(!selectedAssignees.length)"
+              >
+                <template #trigger>
+                  <span class="flex items-center gap-1.5">
+                    <template v-if="selectedAssignees.length">
+                      <UserAvatar
+                        :user="{
+                          id: selectedAssignees[0].id,
+                          username: selectedAssignees[0].username,
+                          avatar_url: selectedAssignees[0].avatar_url,
+                        }"
+                        size="xs"
+                        decorative
+                      />
+                      {{ selectedAssignees[0].username
+                      }}{{
+                        selectedAssignees.length > 1 ? ` +${selectedAssignees.length - 1}` : ''
                       }}
-                    </span>
-                  </template>
-                </UserSelector>
-              </Field>
+                    </template>
+                    <template v-else>
+                      <User class="size-3.5 shrink-0" aria-hidden="true" />
+                      担当者
+                    </template>
+                  </span>
+                </template>
+              </UserSelector>
             </div>
 
             <div
               v-if="labelsLoading || labelsError || labels?.length"
-              class="space-y-1"
               role="group"
               aria-labelledby="task-labels-label"
+              class="flex shrink-0 items-center gap-2"
             >
-              <p id="task-labels-label" :class="fieldLabelClass">ラベル</p>
-              <p v-if="labelsLoading" class="flex h-9 items-center text-xs text-muted-foreground">
+              <span id="task-labels-label" class="sr-only">ラベル</span>
+              <p v-if="labelsLoading" class="text-xs text-muted-foreground">
                 ラベルを読み込み中...
               </p>
               <div v-else-if="labelsError" class="flex items-center gap-2">
@@ -636,24 +665,21 @@ async function submit(event: SubmitEvent) {
                 />
               </div>
               <Dropdown
-                top-layer
                 v-else
-                variant="tertiary"
-                class="w-full [&>button]:w-full"
-                :label="labelsTriggerLabel"
+                top-layer
+                :icon="null"
+                :label="`ラベル ${selectedLabels.map((label) => label.name).join(' ')}`.trim()"
                 :items="labelItems"
                 :on-select="toggleLabel"
+                :class="chipTrigger(!selectedLabels.length)"
               >
                 <template #trigger>
-                  <span
-                    id="task-labels-value"
-                    class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-left"
-                  >
+                  <span id="task-labels-value" class="flex items-center gap-1.5">
                     <template v-if="selectedLabels.length">
                       <span
-                        v-for="label in selectedLabels"
+                        v-for="label in selectedLabels.slice(0, 3)"
                         :key="label.id"
-                        class="inline-flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs"
+                        class="inline-flex items-center gap-1"
                       >
                         <span
                           class="inline-block size-2 rounded-full"
@@ -662,8 +688,12 @@ async function submit(event: SubmitEvent) {
                         />
                         {{ label.name }}
                       </span>
+                      <span v-if="selectedLabels.length > 3">+{{ selectedLabels.length - 3 }}</span>
                     </template>
-                    <span v-else class="text-muted-foreground">ラベルなし</span>
+                    <template v-else>
+                      <Tag class="size-3.5 shrink-0" aria-hidden="true" />
+                      ラベル
+                    </template>
                   </span>
                 </template>
               </Dropdown>
@@ -673,52 +703,70 @@ async function submit(event: SubmitEvent) {
               日付は type="date" の Input にしない。途中までの入力や、WebKit が空欄に出す今日の日付は
               入力済みに見えるのに value が空で、何も送られない。期限より後かは送信時に検証する
             -->
-            <div class="contents" @mousedown="focusPressedButton">
-              <Field
-                id="task-planned-start"
-                label="開始予定日"
-                :error="plannedStartAfterSoft ? '期限より後になっています' : ''"
-              >
-                <DatePicker
-                  label="開始予定日"
-                  :value="plannedStartOn"
-                  :on-value-change="(v: string) => (plannedStartOn = v)"
-                />
-              </Field>
+            <TaskDatesChip
+              v-model:planned-start-on="plannedStartOn"
+              v-model:soft-deadline="softDeadline"
+              v-model:hard-deadline="hardDeadline"
+              :invalid="plannedStartAfterSoft"
+            />
 
-              <Field id="task-soft-deadline" label="期限">
-                <DatePicker
-                  label="期限"
-                  :value="softDeadline"
-                  :on-value-change="(v: string) => (softDeadline = v)"
-                />
-              </Field>
+            <TaskNumberChip
+              v-model="estimate"
+              label="見積"
+              ariaLabel="見積もり"
+              name="estimated_minutes"
+              unit="分"
+              :icon="Timer"
+              :min="1"
+              :max="MAX_ESTIMATE_MINUTES"
+            />
+            <TaskNumberChip
+              v-model="progress"
+              label="進捗"
+              ariaLabel="進捗率"
+              name="progress_pct"
+              unit="%"
+              :icon="Percent"
+              :min="0"
+              :max="MAX_PROGRESS_PCT"
+            />
+          </div>
+        </div>
 
-              <Field id="task-hard-deadline" label="最終期限">
-                <DatePicker
-                  label="最終期限"
-                  :value="hardDeadline"
-                  :on-value-change="(v: string) => (hardDeadline = v)"
-                />
-              </Field>
-            </div>
+        <div
+          v-if="validationMessage || requestError || successMessage"
+          class="shrink-0 px-4 pb-3 md:px-6"
+        >
+          <p v-if="validationMessage" role="alert" class="text-sm text-destructive">
+            {{ validationMessage }}
+          </p>
+          <p v-if="requestError" role="alert" class="text-sm text-destructive">
+            {{ requestError }}
+          </p>
+          <p v-if="successMessage" role="status" class="text-sm text-emerald-600">
+            {{ successMessage }}
+          </p>
+        </div>
 
-            <Field id="task-estimate" label="見積もり">
-              <div class="flex items-center gap-2">
-                <Input
-                  name="estimated_minutes"
-                  type="number"
-                  :min="1"
-                  :max="MAX_ESTIMATE_MINUTES"
-                  :step="1"
-                  input-mode="numeric"
-                  placeholder="未設定"
-                  :value="String(estimate)"
-                  :on-value-change="(v: string) => (estimate = v)"
-                />
-                <span class="shrink-0 text-sm text-muted-foreground">分</span>
-              </div>
-            </Field>
+        <div class="flex shrink-0 items-center gap-2 border-t px-4 py-2.5 md:px-5 md:py-3">
+          <span class="hidden text-xs text-muted-foreground md:inline">Esc で閉じる</span>
+          <div class="ml-auto flex items-center gap-2">
+            <Button
+              type="button"
+              variant="tertiary"
+              :disabled="createMutation.isPending.value"
+              label="取り消す"
+              @click="onClose"
+            />
+            <Button
+              type="submit"
+              :disabled="createMutation.isPending.value || !isHydrated || !statusId"
+              :label="createMutation.isPending.value ? '作成中...' : '作成'"
+            >
+              <template #icon>
+                <Spinner v-if="createMutation.isPending.value" hide-label />
+              </template>
+            </Button>
           </div>
         </div>
       </HydrationSafeForm>
