@@ -100,12 +100,17 @@ pub struct ScheduleRelation {
     pub r#type: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ScheduleRelationsResponse {
+    pub relations: Vec<ScheduleRelation>,
+    /// 上限を超えた関係があり、`relations` を切り詰めたか。
+    pub truncated: bool,
+}
+
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct ScheduleResponse {
     pub range: ScheduleRange,
     pub tasks: Vec<ScheduleTask>,
-    /// このページのタスク同士のブロッキング関係
-    pub relations: Vec<ScheduleRelation>,
     /// 期間に重なるスプリント（ページングしない）
     pub sprints: Vec<SprintResponse>,
     /// 期日が期間内のマイルストーン（ページングしない）

@@ -24123,6 +24123,202 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/schedule/relations": {
+      "get": {
+        "tags": ["Schedule"],
+        "summary": "期間内のタスク同士のブロッキング関係",
+        "operationId": "get_schedule_relations",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "期間の開始日（含む）",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "期間の終了日（含む）。`to - from` は 92 日まで",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "timezone",
+            "in": "query",
+            "description": "締切を日付に落とす IANA タイムゾーン名。既定 `UTC`",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "プロジェクトで絞る（繰り返し指定可）。見えないプロジェクトは無視する",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "explode": true
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "description": "担当者で絞る（繰り返し指定可）",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "explode": true
+          },
+          {
+            "name": "include_done",
+            "in": "query",
+            "description": "完了ステータスのタスクを含めるか。既定 true",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "include_overdue",
+            "in": "query",
+            "description": "締切超過のタスク（Soft 締切・開始予定日・見積があり、期間より前に終わっている未完了のもの）も\n含めるか。既定 false。\n山積みで締切超過の残工数を今日に積むために、期間に今日を含むときに使う",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "前ページの `next_cursor`",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "タスクの件数。既定 200、上限 500",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "スケジュールの関係",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleRelationsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/users/me/dashboard": {
       "get": {
         "tags": ["My Tasks"],
@@ -28698,9 +28894,25 @@
           }
         }
       },
+      "ScheduleRelationsResponse": {
+        "type": "object",
+        "required": ["relations", "truncated"],
+        "properties": {
+          "relations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduleRelation"
+            }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "上限を超えた関係があり、`relations` を切り詰めたか。"
+          }
+        }
+      },
       "ScheduleResponse": {
         "type": "object",
-        "required": ["range", "tasks", "relations", "sprints", "milestones", "members"],
+        "required": ["range", "tasks", "sprints", "milestones", "members"],
         "properties": {
           "members": {
             "type": "array",
@@ -28721,13 +28933,6 @@
           },
           "range": {
             "$ref": "#/components/schemas/ScheduleRange"
-          },
-          "relations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ScheduleRelation"
-            },
-            "description": "このページのタスク同士のブロッキング関係"
           },
           "sprints": {
             "type": "array",

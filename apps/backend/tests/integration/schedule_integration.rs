@@ -35,10 +35,26 @@ fn at(day: u32) -> DateTime<Utc> {
 fn url(tenant: Uuid, query: &str) -> String {
     format!("/v1/tenants/{tenant}/schedule?{query}")
 }
+
+fn relations_url(tenant: Uuid, query: &str) -> String {
+    format!("/v1/tenants/{tenant}/schedule/relations?{query}")
+}
 async fn get(app: &TestApp, tenant: Uuid, query: &str) -> Value {
     let res = app.get_with_session(&url(tenant, query)).await;
     if res.status() != StatusCode::OK {
         panic!("schedule: {} {}", res.status(), res.text().await.unwrap());
+    }
+    res.json().await.unwrap()
+}
+
+async fn get_relations(app: &TestApp, tenant: Uuid, query: &str) -> Value {
+    let res = app.get_with_session(&relations_url(tenant, query)).await;
+    if res.status() != StatusCode::OK {
+        panic!(
+            "schedule relations: {} {}",
+            res.status(),
+            res.text().await.unwrap()
+        );
     }
     res.json().await.unwrap()
 }
@@ -613,6 +629,7 @@ async fn follows_project_visibility_guest_scope_and_tokens() {
         None,
     )
     .await;
+    relation(&app, public_task, restricted_task).await;
     // 期間に重なるスプリント・マイルストーンも同じ可視範囲に従う
     for project in [tp.project_id, restricted] {
         sprints::ActiveModel {
@@ -648,6 +665,8 @@ async fn follows_project_visibility_guest_scope_and_tokens() {
         by_viewer["sprints"][0]["project_id"],
         tp.project_id.to_string()
     );
+    let viewer_relations = get_relations(&app, t, RANGE).await;
+    assert_eq!(viewer_relations["relations"], serde_json::json!([]));
     // 見えないプロジェクトを指名しても返らない
     let named = get(&app, t, &format!("{RANGE}&project_id={restricted}")).await;
     assert!(ids(&named).is_empty());
@@ -851,10 +870,28 @@ async fn relations_are_canonical_and_only_include_endpoints_in_the_response() {
     relation(&app, from, range_hidden).await;
     relation(&app, from, filter_hidden).await;
 
-    let body = get(
+    let page1 = get(
         &app,
         tp.tenant_id,
-        &format!("{RANGE}&project_id={}", tp.project_id),
+        &format!("{RANGE}&project_id={}&limit=1", tp.project_id),
+    )
+    .await;
+    let cursor = page1["next_cursor"].as_str().expect("next cursor");
+    let page2 = get(
+        &app,
+        tp.tenant_id,
+        &format!(
+            "{RANGE}&project_id={}&limit=1&cursor={cursor}",
+            tp.project_id
+        ),
+    )
+    .await;
+    assert_ne!(ids(&page1), ids(&page2));
+
+    let body = get_relations(
+        &app,
+        tp.tenant_id,
+        &format!("{RANGE}&project_id={}&limit=1", tp.project_id),
     )
     .await;
     assert_eq!(
@@ -865,12 +902,14 @@ async fn relations_are_canonical_and_only_include_endpoints_in_the_response() {
             "type": "blocks"
         }])
     );
+    assert_eq!(body["truncated"], false);
 
-    let empty = get(
+    let empty = get_relations(
         &app,
         tp.tenant_id,
         &format!("{RANGE}&project_id={other_project}"),
     )
     .await;
     assert_eq!(empty["relations"], serde_json::json!([]));
+    assert_eq!(empty["truncated"], false);
 }
