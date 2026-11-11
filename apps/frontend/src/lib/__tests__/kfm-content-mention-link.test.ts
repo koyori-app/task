@@ -24,11 +24,25 @@ const LAST_COMPOUND_IS_A = /(?:^|[\s>+~])a(?![\w-])[^\s>+~]*$/;
 /** 選択子の最後の複合セレクタ（結合子より後ろ） */
 const lastCompound = (selector: string): string => selector.split(/[\s>+~]+/).pop() ?? '';
 
+const CHIP_EXCLUSION = ':not(.koyori-mention)';
+
+/** 複合セレクタが、入れ子の外（括弧の深さ 0）で `:not(.koyori-mention)` を持つか。`:not(:not(.koyori-mention))` などの入れ子は除外と見なさない */
+const excludesChipAtTopLevel = (compound: string): boolean => {
+  for (
+    let at = compound.indexOf(CHIP_EXCLUSION);
+    at !== -1;
+    at = compound.indexOf(CHIP_EXCLUSION, at + 1)
+  ) {
+    const before = compound.slice(0, at);
+    const depth = (before.match(/\(/g) ?? []).length - (before.match(/\)/g) ?? []).length;
+    if (depth === 0) return true;
+  }
+  return false;
+};
+
 /** 最後の複合セレクタが `a` で始まるのに、その複合セレクタで札を除いていない選択子 */
 const linkRulesMissingChipExclusion = (selectors: string[]): string[] =>
-  selectors.filter(
-    (s) => LAST_COMPOUND_IS_A.test(s) && !lastCompound(s).includes(':not(.koyori-mention)'),
-  );
+  selectors.filter((s) => LAST_COMPOUND_IS_A.test(s) && !excludesChipAtTopLevel(lastCompound(s)));
 
 describe('.kfm-content a は札（a.koyori-mention）を外す', () => {
   it('検査器の対照: 札を外さない `.kfm-content a` は違反になる', () => {
@@ -40,6 +54,10 @@ describe('.kfm-content a は札（a.koyori-mention）を外す', () => {
     expect(linkRulesMissingChipExclusion(['.kfm-content a:not(.koyori-mention) span'])).toEqual([]);
     expect(linkRulesMissingChipExclusion(['.kfm-content :not(.koyori-mention) a'])).toEqual([
       '.kfm-content :not(.koyori-mention) a',
+    ]);
+    // 二重否定は札だけに効くので、除外と見なさない
+    expect(linkRulesMissingChipExclusion(['.kfm-content a:not(:not(.koyori-mention))'])).toEqual([
+      '.kfm-content a:not(:not(.koyori-mention))',
     ]);
   });
 
