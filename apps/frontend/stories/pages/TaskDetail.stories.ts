@@ -1453,6 +1453,29 @@ export const ReactionInDialogIdle: Story = {
 };
 
 /**
+ * Dialog の中では本文とアクティビティの列だけがスクロールし、Dialog 自体はスクロールしない。
+ * CodeMirror がメンション候補の器を Dialog 直下に置くので、器が高さを持つと Dialog が
+ * 2 倍の高さにスクロールして下に空白が出る（TASK-505）。
+ */
+export const DialogScrollsOnlyInsideColumns: Story = {
+  name: 'Dialog 自体はスクロールしない',
+  beforeEach: () => createMockFetch({ comments: sampleComments }),
+  render: reactionDialogRender,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).resolves.toBeInTheDocument();
+    // コメント欄（CodeMirror）が起動し、候補の器が dialog に載ってから測る
+    await expect(
+      canvas.findByRole('textbox', { name: 'コメントを入力' }),
+    ).resolves.toBeInTheDocument();
+    const dialog = canvasElement.querySelector('dialog')!;
+    await waitFor(() => expect(dialog.scrollHeight).toBe(dialog.clientHeight));
+  },
+};
+
+/**
  * ピッカーと一覧はタスク詳細の Dialog（`<dialog showModal>`）の中でも、自分だけを閉じる。
  * play の keydown は合成イベントで Chromium の cancel を起こさないので、Dialog を止めている
  * 根拠の `defaultPrevented` を確かめ、札の無い場所の Esc が止まらないことを対照に置く。

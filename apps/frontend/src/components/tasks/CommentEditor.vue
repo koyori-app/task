@@ -103,7 +103,11 @@ function extensions(): Extension[] {
 
 /** 器 (Tailwind) に枠を任せ、CodeMirror 側は寸法・余白・札の見た目だけ持つ */
 const theme = EditorView.theme({
-  '&': { height: '100%', backgroundColor: 'transparent', color: 'inherit', fontSize: 'inherit' },
+  // `&` はテーマ class を持つ要素すべてに当たり、候補の箱の器（tooltipParent の直下に CodeMirror が作る
+  // 空の div）にも付く。高さは編集器本体（.cm-editor）だけに与え、dialog の中で器が dialog と同じ
+  // 高さの空白になって dialog 自体がスクロールしないようにする（TASK-505）
+  '&.cm-editor': { height: '100%' },
+  '&': { backgroundColor: 'transparent', color: 'inherit', fontSize: 'inherit' },
   '&.cm-focused': { outline: 'none' },
   '.cm-content': { padding: '0.5rem 0.75rem', caretColor: 'var(--foreground)' },
   '.cm-line': { padding: '0' },

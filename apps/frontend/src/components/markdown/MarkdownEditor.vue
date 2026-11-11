@@ -126,8 +126,10 @@ function inCode(state: EditorState, pos: number): boolean {
 /** 器 (Tailwind) に配色と枠を任せ、CodeMirror 側は寸法と余白だけ持つ */
 const theme = EditorView.theme({
   // 器 (min-h-*) いっぱいに広がるよう高さを引き取る。器は grid なので子は既定で伸びるが、
-  // cm-editor 自身が内容高で止まらないように height を明示する
-  '&': { height: '100%', backgroundColor: 'transparent', color: 'inherit', fontSize: 'inherit' },
+  // cm-editor 自身が内容高で止まらないように height を明示する。`&` は候補の箱の器（dialog 直下に
+  // CodeMirror が作る空の div）にも当たるので、高さは .cm-editor だけに与える（TASK-505）
+  '&.cm-editor': { height: '100%' },
+  '&': { backgroundColor: 'transparent', color: 'inherit', fontSize: 'inherit' },
   '&.cm-focused': { outline: 'none' },
   '.cm-content': {
     padding: '0.5rem 0.75rem',

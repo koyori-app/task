@@ -165,6 +165,9 @@ export const Default: Story = {
     // 右列の選択欄は未設定を薄い文字で出す
     await expect(canvas.getByRole('button', { name: /^担当者/ })).toHaveTextContent('未割り当て');
     await expect(canvas.getByRole('button', { name: /^ラベル/ })).toHaveTextContent('ラベルなし');
+    // 説明欄の CodeMirror が候補の器を dialog 直下に置いても、dialog 自体はスクロールしない（TASK-505）
+    const dialog = canvasElement.ownerDocument.querySelector('dialog[open]')!;
+    await waitFor(() => expect(dialog.scrollHeight).toBe(dialog.clientHeight));
   },
 };
 
