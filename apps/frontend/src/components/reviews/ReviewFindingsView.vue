@@ -126,7 +126,7 @@ const githubNeedsRelink = computed(
 const prQuery = ref('');
 const prStateFilter = ref<PrStateFilter>(DEFAULT_PR_STATE_FILTER);
 // 一覧の初回到着時に既定の「PR の状態」を 1 回だけ確かめるための印。利用者が先に触ったら確かめない
-let prStateDecided = false;
+const prStateDecided = ref(false);
 // PR 一覧は連携一覧を待たずに出す（連携一覧は外部への問い合わせで遅れることがある）。
 // 連携一覧が要るのは「自分の PR」の判定だけで、その間スイッチは使えない
 const railReady = computed(() => prsQuery.isSuccess.value);
@@ -170,7 +170,14 @@ const railNote = computed<{ kind: 'hidden' } | { kind: 'elsewhere'; page: number
  * URL から来た `mine` と `page` は、一覧と連携の状態が揃ってから確かめる
  * （未連携の `mine=1` と範囲外の `page` は、無視・最後のページに寄せて理由を出す）。
  */
-const urlRailCheckReady = computed(() => railReady.value && !connectionsQuery.isPending.value);
+const urlRailCheckReady = computed(
+  () =>
+    railReady.value &&
+    // 既定の「PR の状態」を確かめた後の一覧でページを数える（暫定の Open で数えると、
+    // 「すべて」に倒れる一覧のページを誤って補正する）。空の一覧は確かめる対象が無い
+    (prStateDecided.value || pullRequests.value.length === 0) &&
+    !connectionsQuery.isPending.value,
+);
 let urlRailCheckPending = true;
 function checkUrlRailState() {
   if (!urlRailCheckPending || !urlRailCheckReady.value) return;
@@ -311,18 +318,23 @@ const summary = computed(() => summaryQuery.data.value ?? null);
  * Open の PR）を開く。絞り込みに合う PR が無ければ全体の先頭を開く。
  * `mine` は連携一覧の到着を待つため、候補には作成者の絞り込みを掛けない。
  */
-watch(pullRequests, (list) => {
-  if (list.length === 0) return;
-  if (!prStateDecided) {
-    prStateDecided = true;
-    prStateFilter.value = initialPrStateFilter(list);
-  }
-  if (selectedPr.value === null) {
-    const first = filterPullRequests(list, '', null, prStateFilter.value)[0] ?? list[0];
-    selectedPr.value = first.pr_number;
-    writeUrl('replace');
-  }
-});
+watch(
+  pullRequests,
+  (list) => {
+    if (list.length === 0) return;
+    if (!prStateDecided.value) {
+      prStateDecided.value = true;
+      prStateFilter.value = initialPrStateFilter(list);
+    }
+    if (selectedPr.value === null) {
+      const first = filterPullRequests(list, '', null, prStateFilter.value)[0] ?? list[0];
+      selectedPr.value = first.pr_number;
+      writeUrl('replace');
+    }
+  },
+  // 同じ QueryClient での再マウントでは一覧がキャッシュで最初から揃っていて、変化として届かない
+  { immediate: true },
+);
 
 /** 絞り込みは画面側で適用する（API は PR 単位で全件返す）。 */
 const allFindings = computed(() => sortFindings(findingsQuery.data.value ?? []));
@@ -442,7 +454,7 @@ function onPrQueryInput() {
 }
 
 function setPrStateFilter(value: unknown) {
-  prStateDecided = true;
+  prStateDecided.value = true;
   prStateFilter.value = value as PrStateFilter;
   onPrQueryInput();
 }
@@ -669,14 +681,18 @@ async function onRoundCreated() {
             class="text-muted-foreground flex flex-col items-start gap-2 text-sm"
             data-testid="no-pr-match"
           >
-            <p v-if="mineApplied && prQuery.trim() === ''">
+            <!-- 状態で絞っているときは、その状態の PR が無いだけで、PR 自体はあるかもしれない -->
+            <p v-if="mineApplied && prQuery.trim() === '' && prStateFilter === 'all'">
               あなた（GitHub @{{ githubLogin }}）が作成した PR
               で、レビューのあるものはまだありません。
             </p>
+            <p v-else-if="mineApplied && prQuery.trim() === ''">
+              あなた（GitHub @{{ githubLogin }}）が作成した、この状態の PR はありません。
+            </p>
             <p v-else-if="prQuery.trim() === ''">この状態の PR はありません。</p>
             <p v-else>
-              「{{ prQuery.trim() }}」に一致する{{ mineApplied ? '、自分が作成した' : '' }} PR
-              はありません。
+              「{{ prQuery.trim() }}」に一致する{{ mineApplied ? '、自分が作成した' : ''
+              }}{{ prStateFilter === 'all' ? '' : '、この状態の' }} PR はありません。
             </p>
             <Button
               v-if="mineApplied"
