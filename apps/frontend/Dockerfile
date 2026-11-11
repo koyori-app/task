@@ -9,7 +9,7 @@
 # Node のバージョンは .github/workflows/frontend-build.yml の node-version と合わせること。
 
 ########## builder ##########
-FROM node:24-bookworm-slim AS builder
+FROM node:26-bookworm-slim AS builder
 # pnpm の版はルート package.json の packageManager フィールドに従わせる（二重管理を避ける）
 RUN corepack enable
 WORKDIR /repo
