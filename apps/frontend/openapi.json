@@ -25662,7 +25662,17 @@
             "type": "boolean"
           },
           "role": {
-            "$ref": "#/components/schemas/TenantRole"
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TenantRole"
+                  }
+                ],
+                "x-or-unknown": true
+              }
+            ],
+            "description": "知らない値（新しいサーバーが足した役）でも、ほかの欄は読めるように包む"
           },
           "tenant_id": {
             "type": "string",
