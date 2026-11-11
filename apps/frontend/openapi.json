@@ -30589,7 +30589,7 @@
       "UserProfileResponse": {
         "type": "object",
         "description": "他の利用者に見せるプロフィール。`UserResponse` からメール等の本人向け項目を落としたもの",
-        "required": ["id", "username"],
+        "required": ["id", "username", "membership"],
         "properties": {
           "account_kind": {
             "type": "string"
@@ -30607,6 +30607,19 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "membership": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TenantMembershipKind"
+                  }
+                ],
+                "x-or-unknown": true
+              }
+            ],
+            "description": "このテナントとの関わり方。オーナー・メンバー・客分（Guest）"
           },
           "position": {
             "type": ["string", "null"],
