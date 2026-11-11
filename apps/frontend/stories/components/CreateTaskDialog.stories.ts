@@ -260,6 +260,40 @@ export const DateMenuOpen: Story = {
   },
 };
 
+/**
+ * 日付を設定して × で消したあとの Esc は、パネルだけ閉じてダイアログを閉じない。
+ * × は消すと DOM から外れるので、フォーカスが body に落ちると Esc がパネルを通らず dialog の cancel になる。
+ * user-event の Esc は合成で cancel を起こさないため、フォーカスがパネルの中に残り、Esc でパネルが閉じることで見る
+ */
+export const DateClearThenEscape: Story = {
+  beforeEach() {
+    openChangeSpy.mockClear();
+    const mock = mockCreate();
+    return mock.restore;
+  },
+  play: async ({ canvasElement }) => {
+    const doc = canvasElement.ownerDocument;
+    const canvas = within(doc.body);
+    const user = userEvent.setup();
+    await canvas.findByLabelText(/タイトル/);
+    await pickDate(user, canvas, 'softDeadline', '2026-07-15');
+    // 日を選んだあとも、フォーカスはパネルの中に残る
+    await waitFor(() =>
+      expect(doc.querySelector(DATE_PANEL)!.contains(doc.activeElement)).toBe(true),
+    );
+
+    await user.click(canvas.getByRole('button', { name: '期限を消す' }));
+    await waitFor(() => expect(canvas.queryByRole('button', { name: '期限を消す' })).toBeNull());
+    await expect(doc.activeElement).toBe(doc.querySelector('[data-date-field="softDeadline"]'));
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(doc.querySelector(DATE_PANEL)).toBeNull());
+    await expect(openChangeSpy).not.toHaveBeenCalled();
+    // 日付チップへ戻る
+    await expect(doc.activeElement).toBe(canvas.getByRole('button', { name: /^日付/ }));
+  },
+};
+
 /** 優先度のメニューを開いたまま（色の点と、選択中のチェック印） */
 export const PriorityMenuOpen: Story = {
   play: async ({ canvasElement }) => {

@@ -27,6 +27,8 @@ const plannedStartOn = defineModel<string>('plannedStartOn', { required: true })
 const softDeadline = defineModel<string>('softDeadline', { required: true });
 const hardDeadline = defineModel<string>('hardDeadline', { required: true });
 defineProps<{
+  /** 引き金の id（ラベルの `for` などが指す）。複数の根を持つので、属性としては落ちてこない */
+  id?: string;
   /** 開始予定が期限より後 */
   invalid?: boolean;
 }>();
@@ -83,21 +85,42 @@ function closeAndRefocus() {
   anchor.value?.focus();
 }
 
+/** 押してフォーカスを受ける要素（日のセルの `td[tabindex]` を含む） */
+const FOCUSABLE = 'button, a[href], input, select, textarea, [tabindex]';
+
+/**
+ * 値を消した行の × は、消えると同時に DOM から外れ、フォーカスが body へ落ちる。次の Esc がパネルを通らず
+ * 作成ダイアログの cancel になるので、× が外れる前に、同じ行の日付ボタンへフォーカスを移す
+ */
+function clearValue(key: Key, event: MouseEvent) {
+  const row = (event.currentTarget as Element).closest('[data-date-row]');
+  row?.querySelector<HTMLElement>(`[data-date-field="${key}"]`)?.focus();
+  setValue(key, '');
+}
+
 /**
  * shortcut: WebKit はボタンを押してもフォーカスせず dialog へ移すので、AnchoredPanel の lightDismiss が
- * 外へ出たと見てパネルを閉じ、月送りとクリアが効かない。koyori 側で直ったら外す
+ * 外へ出たと見てパネルを閉じ、月送りとクリアが効かない。ボタン以外（見出し・曜日・余白・警告文）を押しても
+ * フォーカスが dialog へ移るので、フォーカスを受ける要素以外はフォーカスを動かさない。koyori 側で直ったら外す
  */
-function focusPressedButton(event: MouseEvent) {
-  const button = (event.target as Element).closest('button');
-  if (!button) return;
-  event.preventDefault();
-  button.focus();
+function keepFocusOnPress(event: MouseEvent) {
+  const target = event.target as Element;
+  const focusable = target.closest<HTMLElement>(FOCUSABLE);
+  if (!focusable || !panel.value?.contains(focusable)) {
+    event.preventDefault();
+    return;
+  }
+  // ボタンは WebKit が自分ではフォーカスしないので、ここで移す。それ以外は既定の動作に任せる
+  if (focusable instanceof HTMLButtonElement) {
+    event.preventDefault();
+    focusable.focus();
+  }
 }
 </script>
 
 <template>
   <button
-    id="task-dates"
+    :id="id"
     ref="anchor"
     type="button"
     :class="[
@@ -136,11 +159,12 @@ function focusPressedButton(event: MouseEvent) {
       aria-label="日付"
       class="w-[17rem] rounded-lg border bg-(--koyori-color-surface-raised) p-1.5 text-[0.8125rem] shadow-lg"
       @keydown.esc.prevent.stop="closeAndRefocus"
-      @mousedown="focusPressedButton"
+      @mousedown="keepFocusOnPress"
     >
       <div
         v-for="field in FIELDS"
         :key="field.key"
+        data-date-row
         class="flex items-center rounded-md"
         :class="active === field.key ? 'bg-(--koyori-color-surface-hover)' : ''"
       >
@@ -164,7 +188,7 @@ function focusPressedButton(event: MouseEvent) {
           type="button"
           :aria-label="`${field.label}を消す`"
           class="grid size-[30px] shrink-0 place-items-center opacity-60 hover:opacity-100 focus-visible:outline-2 focus-visible:outline-(--koyori-focus-color)"
-          @click="setValue(field.key, '')"
+          @click="clearValue(field.key, $event)"
         >
           <X class="size-3.5" aria-hidden="true" />
         </button>

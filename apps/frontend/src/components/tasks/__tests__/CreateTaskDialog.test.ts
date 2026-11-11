@@ -911,6 +911,29 @@ describe('CreateTaskDialog dates', () => {
     wrapper.unmount();
   });
 
+  it('行の × を押したあと、フォーカスは同じ行の日付ボタンに残り、Esc はパネルだけ閉じる', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await pickDate('softDeadline', '2026-10-23');
+
+    const clear = document.body.querySelector<HTMLElement>('[aria-label="期限を消す"]')!;
+    clear.focus();
+    clear.click();
+    await nextTick();
+
+    const row = document.body.querySelector<HTMLElement>('[data-date-field="softDeadline"]');
+    expect(document.activeElement).toBe(row);
+    // 実際のフォーカス先から Esc を送る（パネルへ直接送ると、フォーカスが body に落ちる不具合を捉えない）
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    document.activeElement!.dispatchEvent(event);
+    await nextTick();
+
+    expect(document.body.querySelector(DATE_PANEL)).toBeNull();
+    expect(event.defaultPrevented).toBe(true);
+    expect(wrapper.emitted('update:open')).toBeUndefined();
+    wrapper.unmount();
+  });
+
   it('チップは設定した日付を矢印でつないで出し、未設定なら「日付」と出す', async () => {
     const wrapper = mountDialog(queryClient);
     await nextTick();
@@ -959,6 +982,29 @@ describe('CreateTaskDialog dates', () => {
     nextMonth.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
 
     expect(document.activeElement).toBe(nextMonth);
+    wrapper.unmount();
+  });
+
+  it('ボタン以外（見出し・余白・警告文）を押しても、フォーカスは動かさない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    datesChip().click();
+    await nextTick();
+
+    const panel = document.body.querySelector(DATE_PANEL)!;
+    const focused = document.activeElement;
+    for (const target of [panel, panel.querySelector('.border-t')!]) {
+      const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+      target.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+    }
+    expect(document.activeElement).toBe(focused);
+    // 日のセル（td[tabindex]）はフォーカスを受けるので、既定の動作に任せる
+    const cell = document.body.querySelector<HTMLElement>('td[tabindex]');
+    if (!cell) throw new Error('day cell not found');
+    const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    cell.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
     wrapper.unmount();
   });
 

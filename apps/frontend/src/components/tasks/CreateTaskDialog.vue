@@ -704,6 +704,7 @@ async function submit(event: SubmitEvent) {
               入力済みに見えるのに value が空で、何も送られない。期限より後かは送信時に検証する
             -->
             <TaskDatesChip
+              id="task-dates"
               v-model:planned-start-on="plannedStartOn"
               v-model:soft-deadline="softDeadline"
               v-model:hard-deadline="hardDeadline"
