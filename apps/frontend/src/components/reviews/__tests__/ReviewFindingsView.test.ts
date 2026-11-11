@@ -1152,8 +1152,7 @@ describe('ReviewFindingsView の PR 一覧（自分の PR・ページ）', () =>
     await wrapper.get('[data-testid="pr-pager-next"]').trigger('click');
     await flushPromises();
     expect(prRows().map((b) => b.textContent)).toEqual([expect.stringContaining('#701')]);
-    // URL を 1 に書き換えていない（書かれていれば 2 のまま）
-    expect(new URL(window.location.href).searchParams.get('page')).not.toBe('1');
+    expect(new URL(window.location.href).searchParams.get('page')).toBe('2');
 
     await wrapper.get('[data-testid="pr-pager-prev"]').trigger('click');
     await flushPromises();
