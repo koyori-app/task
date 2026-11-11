@@ -306,9 +306,10 @@ export const PriorityMenuOpen: Story = {
     );
     // 各行に優先度の色の旗が出る（引き金のチップと同じ旗。行の名前には混ざらない）
     const high = await canvas.findByRole('option', { name: '高' });
-    const flag = [...high.querySelectorAll<SVGElement>('svg')].find((svg) => svg.style.color);
-    await expect(flag).toBeTruthy();
-    await expect(flag!.style.color).not.toBe('');
+    // 行の中は「旗 → label → チェック印」の順で、最初の装飾の svg が旗。
+    // 高の色（PRIORITY_CONFIG の #f97316）。style.color は rgb に正規化されて返る
+    const flag = high.querySelector<SVGElement>('svg[aria-hidden="true"]');
+    await expect(flag?.style.color).toBe('rgb(249, 115, 22)');
   },
 };
 

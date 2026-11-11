@@ -64,13 +64,14 @@ const MAX_PROGRESS_PCT = 100;
 const TITLE_DEBOUNCE_MS = 300;
 
 /**
- * 優先度の Picker の項目。`icon` に優先度の色を渡し、`#item-icon` スロットで旗に描く
- * （色の点を出す `color` は渡さない。点と旗が並んでしまう）。引き金のチップと同じ旗
+ * 優先度の Picker の項目。`icon: true` は koyori に行頭の `#item-icon` スロットを出させる目印で、
+ * 旗の色はスロットの中で PRIORITY_CONFIG から引く（色の点を出す `color` は渡さない。点と旗が並んでしまう）。
+ * 引き金のチップと同じ旗
  */
 const PRIORITY_ITEMS = (Object.keys(PRIORITY_CONFIG) as Priority[]).map((value) => ({
   value,
   label: PRIORITY_CONFIG[value].label,
-  icon: PRIORITY_CONFIG[value].color,
+  icon: true,
 }));
 
 const props = defineProps<{
@@ -574,7 +575,11 @@ async function submit(event: SubmitEvent) {
               :class="chipTrigger(false)"
             >
               <template #item-icon="{ item }">
-                <Flag class="size-4" :style="{ color: item.icon }" aria-hidden="true" />
+                <Flag
+                  class="size-4"
+                  :style="{ color: PRIORITY_CONFIG[item.value as Priority].color }"
+                  aria-hidden="true"
+                />
               </template>
               <template #trigger>
                 <span class="flex items-center gap-1.5">
