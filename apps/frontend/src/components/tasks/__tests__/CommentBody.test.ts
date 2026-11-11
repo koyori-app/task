@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
+import { config, enableAutoUnmount, mount } from '@vue/test-utils';
 
 import CommentBody from '../CommentBody.vue';
 import type { MentionTable } from '@/lib/comment-mention';
@@ -7,6 +8,14 @@ import type { MentionTable } from '@/lib/comment-mention';
 enableAutoUnmount(afterEach);
 
 beforeAll(async () => {
+  // 札のある本文は HoverCard を置く（プロフィールの取得に QueryClient を使う）
+  config.global.plugins = [[VueQueryPlugin, { queryClient: new QueryClient() }]];
+  // happy-dom に ResizeObserver が無い（HoverCard が位置の追従に使う）
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
   await import('@/lib/markup-renderer');
 }, 30_000);
 
@@ -61,7 +70,10 @@ describe('CommentBody', () => {
     expect(chips[1].classes()).not.toContain('koyori-mention-self');
     expect(chips[2].classes()).toContain('koyori-mention-outside');
     expect(chips[3].classes()).toContain('koyori-mention-gone');
-    expect(wrapper.html()).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
+    // id は札の字に出ず、カードを開く札の data-user-id にだけ出る
+    expect(wrapper.html().replace(/data-user-id="[0-9a-f-]{36}"/g, '')).not.toMatch(
+      /[0-9a-f]{8}-[0-9a-f]{4}-/,
+    );
   }, 30_000);
 
   it('生 HTML と危険な URL を同じ sanitizer で落とし、素の @username は札にしない', async () => {
@@ -166,5 +178,24 @@ describe('CommentBody', () => {
     await waitForKfm(wrapper);
     expect(wrapper.find('a').exists()).toBe(false);
     expect(wrapper.get('span.koyori-mention').text()).toBe('@bob');
+  }, 30_000);
+
+  it('札のある本文には HoverCard を 1 つ置き、札の無い本文には置かぬ', async () => {
+    const withChips = mount(CommentBody, {
+      props: { body: `<@${ME}> <@${GONE}>`, commentId: 'comment-7', mentions },
+      attachTo: document.body,
+    });
+    await waitForKfm(withChips);
+    await vi.waitFor(() => expect(withChips.findAll('[role="dialog"]')).toHaveLength(1));
+    // 容れ物の後ろ（兄弟）に置く
+    expect(withChips.get('[data-comment-body]').element.nextElementSibling).not.toBeNull();
+
+    const plain = mount(CommentBody, {
+      props: { body: '札の無い本文', commentId: 'comment-8', mentions },
+      attachTo: document.body,
+    });
+    await waitForKfm(plain);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(plain.find('[role="dialog"]').exists()).toBe(false);
   }, 30_000);
 });

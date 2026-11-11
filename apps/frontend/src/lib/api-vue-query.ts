@@ -174,10 +174,14 @@ const USER_PROFILE_PATH = '/v1/tenants/{tenant_id}/users/{user_id}' as const;
  *
  * テナントに関わらない利用者も 404 で返る（存在を明かさない）。
  * それ以外の失敗は `status` を付けて投げる（閲覧者が客分なら 403）。
+ *
+ * `options.staleTime` はキャッシュを新鮮と見なす間（ms）。メンションの札のカードは `Infinity` を渡し、
+ * 同じ人を開き直しても取りに行かない。プロフィールの画面は渡さず、開くたびに取り直す。
  */
 export function useUserProfileQuery(
   tenantId: MaybeRefOrGetter<TenantUuid | null | undefined>,
   userId: MaybeRefOrGetter<string>,
+  options?: { staleTime?: number },
 ) {
   return useQuery(
     computed(() => {
@@ -198,6 +202,7 @@ export function useUserProfileQuery(
         },
         enabled: !!tenantUuid && !!userUuid,
         retry: false,
+        ...(options?.staleTime !== undefined ? { staleTime: options.staleTime } : {}),
       };
     }),
   );

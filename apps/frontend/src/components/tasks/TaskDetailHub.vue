@@ -33,6 +33,7 @@ import { computed, nextTick, ref, watch } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import type { components } from '@/generated/api';
 import type { EditableField, MutatingField } from '@/components/tasks/editable-field';
+import MentionHoverCard from '@/components/tasks/MentionHoverCard.vue';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
 import TaskPropertyRow from '@/components/tasks/TaskPropertyRow.vue';
 import {
@@ -46,6 +47,7 @@ import {
 } from '@koyori-app/ui-vue';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import { lookup, toPlainText } from '@/lib/comment-mention';
+import { hasMentionCards } from '@/lib/mention-card';
 import {
   PRIORITY_CONFIG,
   clampProgressPct,
@@ -89,6 +91,10 @@ const props = defineProps<{
   profileHref?: (userId: string) => string;
   /** ログイン中ユーザーの ID。押した人の一覧で「自分」を示す */
   currentUserId?: string | null;
+  /** 説明の札のカードがプロフィール API を引くテナント（UUID）。無ければカードは名前と画像だけ */
+  tenantId?: string | null;
+  /** 説明の札のカードの「プロフィールを見る」の道のテナント（表示用 id） */
+  mentionTenant?: string;
   /** 絵文字リアクションの操作。渡さなければリアクションの UI を出さない */
   reactionController?: ReactionController;
   projectLabels?: LabelOption[];
@@ -219,6 +225,8 @@ const freshDescriptionHtml = computed(() => {
   if (props.descriptionSource !== props.task.description) return null;
   return props.descriptionHtml;
 });
+/** 説明の KFM 表示の容れ物。札のカード（HoverCard）の委譲先。client で mount した後に入る */
+const descriptionHtmlEl = ref<HTMLElement | null>(null);
 const editingField = ref<EditableField | null>(null);
 const draftValue = ref('');
 const editingControlRef = ref<HTMLElement | ComponentPublicInstance | null>(null);
@@ -1151,6 +1159,7 @@ function clearDescription() {
                 v-else-if="freshDescriptionHtml"
                 :class="KFM_CONTENT_CLASS"
                 class="text-sm leading-relaxed"
+                ref="descriptionHtmlEl"
                 data-task-description-html
                 v-html="freshDescriptionHtml"
               />
@@ -1166,6 +1175,16 @@ function clearDescription() {
                 </p>
                 <p v-else class="text-sm text-muted-foreground">説明を追加</p>
               </button>
+              <MentionHoverCard
+                v-if="
+                  freshDescriptionHtml && descriptionHtmlEl && hasMentionCards(freshDescriptionHtml)
+                "
+                :container="descriptionHtmlEl"
+                :mentions="task.mentions"
+                :current-user-id="currentUserId"
+                :tenant-id="tenantId"
+                :mention-tenant="mentionTenant"
+              />
               <div v-if="editingField === 'description'" class="mt-2 flex justify-end gap-2">
                 <Button
                   type="button"

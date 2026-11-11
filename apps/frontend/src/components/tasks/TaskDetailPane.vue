@@ -275,6 +275,8 @@ function onDeleteDialogCancel(event: Event) {
         :current-user-id="currentUserId"
         :layout="layout"
         :profile-href="profileHref"
+        :tenant-id="tenantId"
+        :mention-tenant="tenantDisplayId"
         :task="displayTask"
         :project-key="projectKey"
         :statuses="statuses"

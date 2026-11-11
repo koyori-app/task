@@ -2,7 +2,7 @@
 title: アカウント設定
 description: ログイン中の利用者が自分のプロフィール・アクセストークン・認証方法を管理する画面と API、他の利用者のプロフィール
 status: implemented
-updated: 2026-11-04
+updated: 2026-11-11
 sidebar:
   order: 3
 ---
@@ -104,7 +104,9 @@ Device Token の規則の定義元は [Bearer 認証・認可の「Desktop 認�
 
 テナントのメンバーは、同じテナントに関わる人のプロフィールを見られる（TASK-257）。ユーザー名・自己紹介・アバターは本人がプロフィール設定で編集し、部署・役職・チームはテナント Admin / オーナーがメンバー設定（`PUT /v1/tenants/{id}/members/{user_id}`）で編集する（TASK-334）。
 
-返すのは `id` / `username` / `bio` / `avatar_url` / `department` / `position` / `team` の 7 項目だけである。部署・役職・チームはこのテナントでの値で、未設定・ゲストでは null になる。メールアドレス・管理者フラグ・凍結フラグ・2FA の有効状態・`has_password` は返さない。自分自身を指定しても同じ形で返す。
+返すのは `id` / `username` / `bio` / `avatar_url` / `department` / `position` / `team` と、このテナントとの関わり方の `membership`（`Owner` / `Member` / `Guest`）だけである。部署・役職・チームはこのテナントでの値で、未設定・ゲストでは null になる。メールアドレス・管理者フラグ・凍結フラグ・2FA の有効状態・`has_password` は返さない。自分自身を指定しても同じ形で返す。
+
+このプロフィールは、プロフィールのページのほか、コメント・説明文のメンションのチップのカード（[プロフィールのカード](/dev/features/tasks/collaboration#プロフィールのカード)）にも出る。カードは名前とアバターを先に出し、所属・自己紹介・`membership` から作る「ゲスト」の表示を、このプロフィールが返ってから足す。
 
 ## データ
 

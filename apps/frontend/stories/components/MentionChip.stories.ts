@@ -1,7 +1,8 @@
 import { Mention } from '@koyori-app/ui-vue';
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
+import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import { expect, userEvent, waitFor } from 'storybook/test';
-import { ref } from 'vue';
+import { provide, ref } from 'vue';
 
 import CommentBody from '@/components/tasks/CommentBody.vue';
 import CommentEditor from '@/components/tasks/CommentEditor.vue';
@@ -44,6 +45,15 @@ const BODY = `<@${TARO}> さん、確認をお願いします。<@${ME}> も見�
 const meta = {
   title: 'Tasks/MentionChip',
   parameters: { a11y: { test: 'error' } },
+  decorators: [
+    // コメント本文の札は、プロフィールのカード（HoverCard）が QueryClient を要る（tenantId を渡さぬので取得はせぬ）
+    () => ({
+      setup() {
+        provide(VUE_QUERY_CLIENT, new QueryClient());
+      },
+      template: '<story />',
+    }),
+  ],
 } satisfies Meta;
 
 export default meta;
