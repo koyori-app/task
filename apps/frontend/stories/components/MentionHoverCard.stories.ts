@@ -14,6 +14,7 @@ import '@/lib/remark-gfm/style.css';
  * - メンバー: 所属・自己紹介（2 行で切れる）・プロフィールへのリンク。同じ人を開き直しても取りに行かぬ
  * - 本人は「あなた」、客分は「ゲスト」の印。外れた者は灰色のアバターと注記で、取れた後にリンクが出る
  * - 退会した者は固定の文言だけで取りに行かず、リンクも無い
+ * - 取得の途中で閉じても取得は中断されず、失敗した人も含め、開き直しで取り直さぬ
  * - 読み込み中・取得失敗は名前と画像だけ。名の引けぬ札とタッチではカードを開かぬ
  * 明るい面は `data-theme="light"` の囲みで確かめる（カードの色は koyori のトークンで、囲みに追従する）。
  */
@@ -25,6 +26,8 @@ const HANAKO = '44444444-4444-4444-8444-444444444444';
 const GONE = '55555555-5555-4555-8555-555555555555';
 const STRANGER = '66666666-6666-4666-8666-666666666666';
 const UNKNOWN = '77777777-7777-4777-8777-777777777777';
+/** 名は引けるが、プロフィールの表から外れた者（API は 404） */
+const KEI = '88888888-8888-4888-8888-888888888888';
 
 /** 外へ出ぬ画像（avatar_url に渡す。読み込みに成功して img が出る） */
 const IMAGE = `data:image/svg+xml,${encodeURIComponent(
@@ -38,9 +41,10 @@ const mentions: MentionTable = {
   [HANAKO]: { status: 'outside', name: 'hanako', avatar_url: IMAGE },
   [GONE]: { status: 'gone', name: null },
   [STRANGER]: { status: 'outside', name: null, avatar_url: null },
+  [KEI]: { status: 'outside', name: 'kei', avatar_url: null },
 };
 
-const BODY = `<@${TARO}> さん、確認をお願いします。<@${AKI}> も見ます。<@${SATO}> さんにも共有。前回は <@${HANAKO}> が担当でした。<@${GONE}> の作業は引き継ぎ済み。<@${STRANGER}> <@${UNKNOWN}>`;
+const BODY = `<@${TARO}> さん、確認をお願いします。<@${AKI}> も見ます。<@${SATO}> さんにも共有。前回は <@${HANAKO}> が担当でした。<@${GONE}> の作業は引き継ぎ済み。<@${STRANGER}> <@${UNKNOWN}> <@${KEI}>`;
 
 const BIO =
   '画面と部品のデザインを担当しています。Figma のファイルはプロジェクトの資料にあります。質問があれば気軽に声をかけてください。デザインの相談も歓迎です。';
@@ -92,7 +96,10 @@ const profiles: Record<string, Record<string, unknown>> = {
   },
 };
 
-type FetchMode = 'ok' | 'pending' | 'forbidden';
+type FetchMode = 'ok' | 'pending' | 'forbidden' | 'slow';
+
+/** `slow` の応答が返るまでの時間（ms） */
+const SLOW_MS = 600;
 
 let fetchSpy: ReturnType<typeof fn>;
 
@@ -116,6 +123,8 @@ function mockProfiles(mode: FetchMode) {
           headers: { 'Content-Type': 'application/json' },
         });
       if (mode === 'forbidden') return json({ message: 'forbidden' }, 403);
+      // 取得の途中で閉じる場面のために、少し遅れて返す
+      if (mode === 'slow') await new Promise((resolve) => setTimeout(resolve, SLOW_MS));
       const profile = profiles[id];
       return profile ? json(profile) : json({ message: 'not found' }, 404);
     });
@@ -386,6 +395,97 @@ export const Unavailable: Story = {
   beforeEach: mockProfiles('forbidden'),
   render: bodyStory(false),
   play: namesOnlyPlay(true),
+};
+
+/** 取得の完了前に閉じて、同じ人を開き直しても、取得は 1 回（閉じても進行中の取得は最後まで終えてキャッシュに入る） */
+export const ReopenBeforeLoaded: Story = {
+  name: '取得の完了前に閉じて開き直す',
+  beforeEach: mockProfiles('slow'),
+  render: bodyStory(false),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const { chip } = await openCard(canvasElement, '@taro', 'taro のプロフィール');
+    await waitFor(() => expect(profileCalls(TARO)).toBe(1));
+    // まだ返っていない（遅れて返す応答の途中）うちに閉じる
+    await userEvent.unhover(chip);
+    await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull());
+    // 閉じている間に、取得が終わるのを待つ
+    await new Promise((resolve) => setTimeout(resolve, SLOW_MS + 400));
+    await userEvent.hover(chip);
+    const reopened = await canvas.findByRole('dialog', { name: 'taro のプロフィール' });
+    await waitFor(() => expect(reopened.querySelector('.bio')).not.toBeNull());
+    await expect(profileCalls(TARO)).toBe(1);
+  },
+};
+
+/** 取得に失敗した人（403）を、別の人を挟んで開き直しても、取り直さぬ */
+export const ReopenAfterFailure: Story = {
+  name: '失敗した人を開き直す（403）',
+  beforeEach: mockProfiles('forbidden'),
+  render: bodyStory(false),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const closeCard = async (chip: HTMLElement) => {
+      await userEvent.unhover(chip);
+      await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull());
+    };
+    const taro = await openCard(canvasElement, '@taro', 'taro のプロフィール');
+    await waitFor(() => expect(profileCalls(TARO)).toBe(1));
+    // 失敗の結果が入るまで待つ
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    // 同じ人を開き直す
+    await closeCard(taro.chip);
+    await userEvent.hover(taro.chip);
+    await canvas.findByRole('dialog', { name: 'taro のプロフィール' });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expect(profileCalls(TARO)).toBe(1);
+    await closeCard(taro.chip);
+    // 別の人（これも 403）を挟んで戻る
+    const aki = await openCard(canvasElement, '@aki', 'aki のプロフィール');
+    await waitFor(() => expect(profileCalls(AKI)).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await closeCard(aki.chip);
+    await userEvent.hover(taro.chip);
+    await canvas.findByRole('dialog', { name: 'taro のプロフィール' });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expect(profileCalls(TARO)).toBe(1);
+    await expect(profileCalls(AKI)).toBe(1);
+  },
+};
+
+/** プロフィールの表から外れた者（404）は、リンクも所属も出さず、注記だけ。 */
+export const OutsideNotFound: Story = {
+  name: '外れた者（プロフィールが 404）',
+  beforeEach: mockProfiles('ok'),
+  render: bodyStory(false),
+  play: async ({ canvasElement }) => {
+    const { dialog } = await openCard(canvasElement, '@kei', 'kei のプロフィール');
+    await waitFor(() => expect(profileCalls(KEI)).toBe(1));
+    // 404 の結果が入るまで待つ
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expect(
+      within(dialog).getByText(
+        'このプロジェクトのメンバーではありません。メンションしても通知は届きません。',
+      ),
+    ).toBeVisible();
+    await expect(within(dialog).queryByRole('link')).toBeNull();
+    await expect(dialog.querySelector('.foot')).toBeNull();
+    await expect(dialog.querySelector('.meta')).toBeNull();
+  },
+};
+
+/** 取得が終わらぬ外れた者には、200 が返るまでリンクを出さぬ（メンバーは読み込み中でも出す: Loading）。 */
+export const OutsideLoading: Story = {
+  name: '外れた者（読み込み中）',
+  beforeEach: mockProfiles('pending'),
+  render: bodyStory(false),
+  play: async ({ canvasElement }) => {
+    const { dialog } = await openCard(canvasElement, '@hanako', 'hanako のプロフィール');
+    await waitFor(() => expect(profileCalls(HANAKO)).toBe(1));
+    await expect(within(dialog).getByText('hanako')).toBeVisible();
+    await expect(within(dialog).queryByRole('link')).toBeNull();
+    await expect(dialog.querySelector('.meta')).toBeNull();
+  },
 };
 
 export const NoCard: Story = {

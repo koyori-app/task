@@ -1,7 +1,7 @@
 import createFetchClient, { type Middleware } from 'openapi-fetch';
 import { createClient } from '@koyori-app/openapi-vue-query';
 import { computed, ref, toValue, type MaybeRefOrGetter } from 'vue';
-import { useQuery } from '@tanstack/vue-query';
+import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import type { paths } from '@/generated/api';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
 
@@ -177,20 +177,29 @@ const USER_PROFILE_PATH = '/v1/tenants/{tenant_id}/users/{user_id}' as const;
  *
  * `options.staleTime` はキャッシュを新鮮と見なす間（ms）。メンションの札のカードは `Infinity` を渡し、
  * 同じ人を開き直しても取りに行かない。プロフィールの画面は渡さず、開くたびに取り直す。
+ *
+ * `options.cacheFailures` を立てると、失敗（403・5xx）した人もキャッシュが残る間は取り直さない。
+ * 失敗したクエリは data が無く、staleTime を過ぎた扱いになる。`retryOnMount: false` は observer の
+ * 新規 mount にしか効かず、同じ observer が別の人から戻るとき（キーの切り替え）は取り直すので、
+ * 失敗が残るキーは無効にして止める。
  */
 export function useUserProfileQuery(
   tenantId: MaybeRefOrGetter<TenantUuid | null | undefined>,
   userId: MaybeRefOrGetter<string>,
-  options?: { staleTime?: number },
+  options?: { staleTime?: number; cacheFailures?: boolean },
 ) {
+  const queryClient = useQueryClient();
   return useQuery(
     computed(() => {
       const tenantUuid = toValue(tenantId);
       const userUuid = toValue(userId);
       // 非 null は enabled で担保する（未解決のうちは問い合わせない）
       const params = { params: { path: { tenant_id: tenantUuid!, user_id: userUuid } } };
+      const queryKey = ['get', USER_PROFILE_PATH, params];
+      const failed =
+        !!options?.cacheFailures && queryClient.getQueryState(queryKey)?.status === 'error';
       return {
-        queryKey: ['get', USER_PROFILE_PATH, params],
+        queryKey,
         queryFn: async ({ signal }: { signal: AbortSignal }) => {
           const { data, error, response } = await fetchClient.GET(USER_PROFILE_PATH, {
             ...params,
@@ -200,8 +209,9 @@ export function useUserProfileQuery(
           if (error) throw Object.assign(new Error(error.message), { status: response.status });
           return data;
         },
-        enabled: !!tenantUuid && !!userUuid,
+        enabled: !!tenantUuid && !!userUuid && !failed,
         retry: false,
+        ...(options?.cacheFailures ? { retryOnMount: false } : {}),
         ...(options?.staleTime !== undefined ? { staleTime: options.staleTime } : {}),
       };
     }),

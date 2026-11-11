@@ -35,23 +35,23 @@ const props = defineProps<{
 
 const target = ref<MentionCardTarget | null>(null);
 
+// 取得する人は、表示する対象とは別に、閉じても最後の人のまま保つ。空に戻すと、取得の途中で閉じたとき
+// クエリのキーが替わって取得が中断され（AbortSignal）、キャッシュに入らず開き直しで取り直しになる
+const profileUserId = ref('');
+
 function onOpenChange(open: boolean, trigger: HTMLElement) {
   // 閉じたら中身を空にし、次の札で前の人が一瞬見えるのを防ぐ
   target.value = open
     ? mentionCardTarget(trigger, props.mentions ?? {}, props.currentUserId)
     : null;
+  if (target.value && target.value.kind !== 'gone') profileUserId.value = target.value.userId;
 }
 
-const profileUserId = computed(() => {
-  const current = target.value;
-  return current && current.kind !== 'gone' ? current.userId : '';
-});
-
-// 同じ人は、キャッシュのある間（最後に閉じてから gcTime の既定 5 分）開き直しても取りに行かぬ
+// 同じ人は、キャッシュのある間（最後に閉じてから gcTime の既定 5 分）開き直しても取りに行かぬ。失敗した人も同じ
 const profileQuery = useUserProfileQuery(
   () => (props.tenantId || null) as TenantUuid | null,
   profileUserId,
-  { staleTime: Infinity },
+  { staleTime: Infinity, cacheFailures: true },
 );
 
 const label = computed(() => {
