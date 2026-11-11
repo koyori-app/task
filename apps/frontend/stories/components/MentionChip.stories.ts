@@ -28,7 +28,7 @@ const HANAKO = '33333333-3333-4333-8333-333333333333';
 const STRANGER = '44444444-4444-4444-8444-444444444444';
 const UNKNOWN = '55555555-5555-4555-8555-555555555555';
 
-/** 外へ出ぬ 1px の PNG（画像のある札を見せる）。 */
+/** 外へ出ぬ 1px の PNG（avatar_url を渡しても札に画像が出ないことを見る）。 */
 const IMAGE =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 

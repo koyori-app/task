@@ -158,7 +158,7 @@ GitHub 互換の境界仕様をテストで固定している。
 
 本文中のメンションのマーカー `<@利用者ID>`（ハイフン付き UUID）をチップ `@今の名` にする。形式は入力欄と backend の `payload::mentions` と同じで、壊れたマーカーは素のテキストのまま残す。
 
-- 表（id から状態、名前、アバターを引く）は `renderDescription` の `mentions` で渡し、vfile の `data.kfm.mentions` から読む。`mentions` を渡さない描画では何もせず、マーカーは素の文字のまま残る。空の表を渡すと、マーカーは「不明な利用者」のチップになる
+- 表（id から状態と名前を引く。API の表には `avatar_url` もあるが、チップの描画には使わない）は `renderDescription` の `mentions` で渡し、vfile の `data.kfm.mentions` から読む。`mentions` を渡さない描画では何もせず、マーカーは素の文字のまま残る。空の表を渡すと、マーカーは「不明な利用者」のチップになる
 - text ノードはチップへ分割する。code、inlineCode、link、linkReference の内側ではチップにせず `@今の名` の文字へ戻す。画像の alt、リンクと画像と定義の title、code の meta も同じである。URL と生の HTML は意味を変えない
 - 状態は koyori の固定 class（`koyori-mention-member` / `-outside` / `-gone` / `-unknown`。`mentionClassNames` が決める）で表す。`currentUserId` と同じ member には `koyori-mention-self` も付ける
 - `mentionTenant` を渡すと、今も参加しており名前の引けるチップを `/{tenant}/users/{利用者ID}` への link にする。`taskRef` とは別の引数なのは、コメントでは KEY-N をリンクにせずチップだけを link にするためである。`kfm-mention-tenant-routes.test.ts` が、表を渡す描画は必ずテナントも渡すことを固定している

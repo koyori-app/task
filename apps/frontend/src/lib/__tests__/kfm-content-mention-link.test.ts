@@ -21,14 +21,26 @@ const selectorsOf = (css: string): string[] =>
 /** 選択子の最後の複合セレクタが要素 `a` で始まるか */
 const LAST_COMPOUND_IS_A = /(?:^|[\s>+~])a(?![\w-])[^\s>+~]*$/;
 
-/** 最後の複合セレクタが `a` で始まるのに、札を除いていない選択子 */
+/** 選択子の最後の複合セレクタ（結合子より後ろ） */
+const lastCompound = (selector: string): string => selector.split(/[\s>+~]+/).pop() ?? '';
+
+/** 最後の複合セレクタが `a` で始まるのに、その複合セレクタで札を除いていない選択子 */
 const linkRulesMissingChipExclusion = (selectors: string[]): string[] =>
-  selectors.filter((s) => LAST_COMPOUND_IS_A.test(s) && !s.endsWith(':not(.koyori-mention)'));
+  selectors.filter(
+    (s) => LAST_COMPOUND_IS_A.test(s) && !lastCompound(s).includes(':not(.koyori-mention)'),
+  );
 
 describe('.kfm-content a は札（a.koyori-mention）を外す', () => {
   it('検査器の対照: 札を外さない `.kfm-content a` は違反になる', () => {
     expect(linkRulesMissingChipExclusion(['.kfm-content a'])).toEqual(['.kfm-content a']);
     expect(linkRulesMissingChipExclusion(['.kfm-content a:not(.koyori-mention)'])).toEqual([]);
+    expect(linkRulesMissingChipExclusion(['.kfm-content a:not(.koyori-mention):hover'])).toEqual(
+      [],
+    );
+    expect(linkRulesMissingChipExclusion(['.kfm-content a:not(.koyori-mention) span'])).toEqual([]);
+    expect(linkRulesMissingChipExclusion(['.kfm-content :not(.koyori-mention) a'])).toEqual([
+      '.kfm-content :not(.koyori-mention) a',
+    ]);
   });
 
   it('remark-gfm/style.css の a の規則はすべて :not(.koyori-mention) を持つ', () => {
