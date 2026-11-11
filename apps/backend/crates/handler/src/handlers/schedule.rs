@@ -357,17 +357,25 @@ async fn fetch_schedule_relations<C: ConnectionTrait>(
     db: &C,
     task_ids: Vec<Uuid>,
 ) -> Result<ScheduleRelationsResponse, AppError> {
-    let mut relations = task_relations::Entity::find()
+    let relations = schedule_relations_query(task_ids).all(db).await?;
+    Ok(schedule_relations_response(relations))
+}
+
+fn schedule_relations_query(task_ids: Vec<Uuid>) -> sea_orm::Select<task_relations::Entity> {
+    task_relations::Entity::find()
         .filter(task_relations::Column::BlockerTaskId.is_in(task_ids.clone()))
         .filter(task_relations::Column::BlockedTaskId.is_in(task_ids))
         .order_by_asc(task_relations::Column::CreatedAt)
         .order_by_asc(task_relations::Column::Id)
         .limit(MAX_RELATIONS + 1)
-        .all(db)
-        .await?;
+}
+
+fn schedule_relations_response(
+    mut relations: Vec<task_relations::Model>,
+) -> ScheduleRelationsResponse {
     let truncated = relations.len() as u64 > MAX_RELATIONS;
     relations.truncate(MAX_RELATIONS as usize);
-    Ok(ScheduleRelationsResponse {
+    ScheduleRelationsResponse {
         relations: relations
             .into_iter()
             .map(|relation| ScheduleRelation {
@@ -377,14 +385,45 @@ async fn fetch_schedule_relations<C: ConnectionTrait>(
             })
             .collect(),
         truncated,
-    })
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use sea_orm::{DbBackend, DbErr, ExecResult, QueryResult, QueryTrait, Statement};
 
     use super::*;
+
+    #[derive(Default)]
+    struct CountingConnection {
+        queries: AtomicUsize,
+    }
+
+    #[sea_orm::entity::prelude::async_trait::async_trait]
+    impl ConnectionTrait for CountingConnection {
+        fn get_database_backend(&self) -> DbBackend {
+            DbBackend::Postgres
+        }
+
+        async fn execute_raw(&self, _: Statement) -> Result<ExecResult, DbErr> {
+            Err(DbErr::Custom("execute is not expected".to_owned()))
+        }
+
+        async fn execute_unprepared(&self, _: &str) -> Result<ExecResult, DbErr> {
+            Err(DbErr::Custom("execute is not expected".to_owned()))
+        }
+
+        async fn query_one_raw(&self, _: Statement) -> Result<Option<QueryResult>, DbErr> {
+            Err(DbErr::Custom("query_one is not expected".to_owned()))
+        }
+
+        async fn query_all_raw(&self, _: Statement) -> Result<Vec<QueryResult>, DbErr> {
+            self.queries.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        }
+    }
 
     fn relation(index: usize) -> task_relations::Model {
         task_relations::Model {
@@ -398,36 +437,37 @@ mod tests {
     #[tokio::test]
     async fn relation_query_count_does_not_grow_with_task_count() {
         for task_count in [2, 500] {
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
-                .append_query_results([vec![relation(0)]])
-                .into_connection();
+            let db = CountingConnection::default();
             let task_ids = (0..task_count).map(|_| Uuid::new_v4()).collect();
 
             fetch_schedule_relations(&db, task_ids).await.unwrap();
 
-            assert_eq!(db.into_transaction_log().len(), 1);
+            assert_eq!(db.queries.load(Ordering::SeqCst), 1);
         }
     }
 
-    #[tokio::test]
-    async fn relation_limit_sets_truncated_and_returns_only_the_limit() {
+    #[test]
+    fn relation_limit_sets_truncated_and_returns_only_the_limit() {
         let rows = (0..=MAX_RELATIONS as usize)
             .map(relation)
             .collect::<Vec<_>>();
+        let first = rows[0].clone();
         let task_ids = rows
             .iter()
             .flat_map(|row| [row.blocker_task_id, row.blocked_task_id])
             .collect();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([rows])
-            .into_connection();
 
-        let response = fetch_schedule_relations(&db, task_ids).await.unwrap();
+        let response = schedule_relations_response(rows);
 
         assert_eq!(response.relations.len(), MAX_RELATIONS as usize);
         assert!(response.truncated);
-        let log = db.into_transaction_log();
-        assert_eq!(log.len(), 1);
-        assert!(format!("{log:?}").contains("LIMIT"));
+        assert_eq!(response.relations[0].from_task_id, first.blocker_task_id);
+        assert_eq!(response.relations[0].to_task_id, first.blocked_task_id);
+        assert_eq!(response.relations[0].r#type, "blocks");
+
+        let sql = schedule_relations_query(task_ids)
+            .build(DbBackend::Postgres)
+            .to_string();
+        assert!(sql.contains("LIMIT 1001"));
     }
 }

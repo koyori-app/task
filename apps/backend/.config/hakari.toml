@@ -33,10 +33,3 @@ platforms = [
 third-party = [
     { name = "sentry" },
 ]
-
-# handler の試験だけが使う mock feature を通常 build の workspace-hack へ持ち上げない。
-# final-excludes なら sea-orm 自体だけを外し、他の経路から届く推移依存は統合対象に残せる。
-[final-excludes]
-third-party = [
-    { name = "sea-orm" },
-]
