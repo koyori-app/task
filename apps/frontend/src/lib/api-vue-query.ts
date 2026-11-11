@@ -1,7 +1,7 @@
 import createFetchClient, { type Middleware } from 'openapi-fetch';
 import { createClient } from '@koyori-app/openapi-vue-query';
 import { computed, ref, toValue, type MaybeRefOrGetter } from 'vue';
-import { useQuery, useQueryClient } from '@tanstack/vue-query';
+import { useQuery } from '@tanstack/vue-query';
 import type { paths } from '@/generated/api';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
 
@@ -178,40 +178,35 @@ const USER_PROFILE_PATH = '/v1/tenants/{tenant_id}/users/{user_id}' as const;
  * `options.staleTime` はキャッシュを新鮮と見なす間（ms）。メンションの札のカードは `Infinity` を渡し、
  * 同じ人を開き直しても取りに行かない。プロフィールの画面は渡さず、開くたびに取り直す。
  *
- * `options.cacheFailures` を立てると、失敗（403・5xx）した人もキャッシュが残る間は取り直さない。
- * 失敗したクエリは data が無く、staleTime を過ぎた扱いになる。`retryOnMount: false` は observer の
- * 新規 mount にしか効かず、同じ observer が別の人から戻るとき（キーの切り替え）は取り直すので、
- * 失敗が残るキーは無効にして止める。
+ * `options.abortable` を偽にすると、取得に AbortSignal を渡さない。TanStack Query は signal を使わぬ取得を、
+ * 最後の購読者が外れても（カードを閉じる・別の人へ移る）中断せず、結果をキャッシュに入れる。
+ * 既定は渡す（プロフィールの画面を離れたら中断する）。
  */
 export function useUserProfileQuery(
   tenantId: MaybeRefOrGetter<TenantUuid | null | undefined>,
   userId: MaybeRefOrGetter<string>,
-  options?: { staleTime?: number; cacheFailures?: boolean },
+  options?: { staleTime?: number; abortable?: boolean },
 ) {
-  const queryClient = useQueryClient();
   return useQuery(
     computed(() => {
       const tenantUuid = toValue(tenantId);
       const userUuid = toValue(userId);
       // 非 null は enabled で担保する（未解決のうちは問い合わせない）
       const params = { params: { path: { tenant_id: tenantUuid!, user_id: userUuid } } };
-      const queryKey = ['get', USER_PROFILE_PATH, params];
-      const failed =
-        !!options?.cacheFailures && queryClient.getQueryState(queryKey)?.status === 'error';
       return {
-        queryKey,
-        queryFn: async ({ signal }: { signal: AbortSignal }) => {
+        queryKey: ['get', USER_PROFILE_PATH, params],
+        // signal は context の getter で、触れた時点で「使った」と見なされる（分割代入で受けない）
+        queryFn: async (context: { signal: AbortSignal }) => {
           const { data, error, response } = await fetchClient.GET(USER_PROFILE_PATH, {
             ...params,
-            signal,
+            ...(options?.abortable === false ? {} : { signal: context.signal }),
           });
           if (response.status === 404) return null;
           if (error) throw Object.assign(new Error(error.message), { status: response.status });
           return data;
         },
-        enabled: !!tenantUuid && !!userUuid && !failed,
+        enabled: !!tenantUuid && !!userUuid,
         retry: false,
-        ...(options?.cacheFailures ? { retryOnMount: false } : {}),
         ...(options?.staleTime !== undefined ? { staleTime: options.staleTime } : {}),
       };
     }),

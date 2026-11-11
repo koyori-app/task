@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { config, enableAutoUnmount, mount } from '@vue/test-utils';
+import { createPinia } from 'pinia';
 
 import CommentBody from '../CommentBody.vue';
 import type { MentionTable } from '@/lib/comment-mention';
@@ -8,8 +9,8 @@ import type { MentionTable } from '@/lib/comment-mention';
 enableAutoUnmount(afterEach);
 
 beforeAll(async () => {
-  // 札のある本文は HoverCard を置く（プロフィールの取得に QueryClient を使う）
-  config.global.plugins = [[VueQueryPlugin, { queryClient: new QueryClient() }]];
+  // 札のある本文は HoverCard を置く（プロフィールの取得に QueryClient、閲覧者のゲスト判定にテナントのストアを使う）
+  config.global.plugins = [createPinia(), [VueQueryPlugin, { queryClient: new QueryClient() }]];
   // happy-dom に ResizeObserver が無い（HoverCard が位置の追従に使う）
   globalThis.ResizeObserver ??= class {
     observe() {}

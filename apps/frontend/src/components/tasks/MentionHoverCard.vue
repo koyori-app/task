@@ -13,6 +13,7 @@ import {
   type MentionCardTarget,
 } from '@/lib/mention-card';
 import { userProfileHref } from '@/lib/task-display';
+import { useTenantStore } from '@/stores/tenant';
 
 /**
  * メンションの札のプロフィールカード。本文の容れ物（v-html の要素）1 つにつき 1 つ置く。
@@ -20,8 +21,17 @@ import { userProfileHref } from '@/lib/task-display';
  * 入力欄（CodeMirror）の札には、容れ物の外なので当たらない。
  *
  * 名前・画像・本人かどうかは容れ物が持つ `mentions` の表から読み込みを待たずに出し、
- * 所属・自己紹介・ゲストの印はプロフィール API が返ってから足す。失敗（客分の閲覧者の 403・通信失敗・404）は
+ * 所属・自己紹介・ゲストの印はプロフィール API が返ってから足す。失敗（通信失敗・5xx・404）は
  * 読み込み中と同じ見た目のまま（エラーの文言は出さぬ）。
+ *
+ * 取得の決まり:
+ * - 成功した人は、キャッシュの寿命（最後に購読が外れてから既定の 5 分）の間、開き直しても窓のフォーカスが
+ *   戻っても取り直さぬ（`staleTime: Infinity`）。404 は null として同じくキャッシュされる
+ * - 取得に AbortSignal を渡さぬので、取得の途中でカードを閉じても、別の人へ移っても取得は最後まで終わり、
+ *   キャッシュに入る。同じ人の取得は 1 回で済む
+ * - 失敗（403・5xx）した人は、キャッシュに残らず、次に開いたときに取り直す
+ * - 閲覧者がそのテナントのゲストなら取りに行かぬ（プロフィール API はゲストの閲覧者に 403 を返す）。
+ *   名前とアバターだけのカードを出す
  */
 const props = defineProps<{
   container: HTMLElement | null;
@@ -35,23 +45,27 @@ const props = defineProps<{
 
 const target = ref<MentionCardTarget | null>(null);
 
-// 取得する人は、表示する対象とは別に、閉じても最後の人のまま保つ。空に戻すと、取得の途中で閉じたとき
-// クエリのキーが替わって取得が中断され（AbortSignal）、キャッシュに入らず開き直しで取り直しになる
-const profileUserId = ref('');
-
 function onOpenChange(open: boolean, trigger: HTMLElement) {
   // 閉じたら中身を空にし、次の札で前の人が一瞬見えるのを防ぐ
   target.value = open
     ? mentionCardTarget(trigger, props.mentions ?? {}, props.currentUserId)
     : null;
-  if (target.value && target.value.kind !== 'gone') profileUserId.value = target.value.userId;
 }
 
-// 同じ人は、キャッシュのある間（最後に閉じてから gcTime の既定 5 分）開き直しても取りに行かぬ。失敗した人も同じ
+// テナント一覧（ログイン後に読み込み済み）の membership から、閲覧者がこのテナントのゲストかを引く。
+// 一覧に無い（読み込み前・別テナント）ときはゲストと見なさず取りに行く
+const tenantStore = useTenantStore();
+const viewerIsGuest = computed(
+  () =>
+    !!props.tenantId &&
+    tenantStore.tenants.find((tenant) => tenant.id === props.tenantId)?.membership === 'Guest',
+);
+
+// 取る人は開いているカードの人。閉じる・退会した者では空になり、取得は止まる（購読が外れ、キャッシュは gc まで残る）
 const profileQuery = useUserProfileQuery(
-  () => (props.tenantId || null) as TenantUuid | null,
-  profileUserId,
-  { staleTime: Infinity, cacheFailures: true },
+  () => (props.tenantId && !viewerIsGuest.value ? props.tenantId : null) as TenantUuid | null,
+  () => (target.value && target.value.kind !== 'gone' ? target.value.userId : ''),
+  { staleTime: Infinity, abortable: false },
 );
 
 const label = computed(() => {

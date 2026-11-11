@@ -1,11 +1,13 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
+import { createPinia, setActivePinia } from 'pinia';
 import { expect, fireEvent, fn, userEvent, waitFor, within } from 'storybook/test';
 import { provide } from 'vue';
 
 import CommentBody from '@/components/tasks/CommentBody.vue';
 import type { MentionTable } from '@/lib/comment-mention';
 import '@/lib/remark-gfm/style.css';
+import { useTenantStore, type Tenant } from '@/stores/tenant';
 
 /**
  * メンションの札のプロフィールカード（koyori の HoverCard）。コメント本文の札にポインターを載せると開く。
@@ -14,7 +16,9 @@ import '@/lib/remark-gfm/style.css';
  * - メンバー: 所属・自己紹介（2 行で切れる）・プロフィールへのリンク。同じ人を開き直しても取りに行かぬ
  * - 本人は「あなた」、客分は「ゲスト」の印。外れた者は灰色のアバターと注記で、取れた後にリンクが出る
  * - 退会した者は固定の文言だけで取りに行かず、リンクも無い
- * - 取得の途中で閉じても取得は中断されず、失敗した人も含め、開き直しで取り直さぬ
+ * - 取得の途中で閉じても、別の人に移って戻っても、取得は中断されず同じ人は 1 回で済む。窓のフォーカスの復帰では取り直さぬ
+ * - 失敗した人（403）は、次に開いたときに取り直す
+ * - 閲覧者がそのテナントのゲストなら、取りに行かず名前と画像だけ（プロフィール API はゲストに 403 を返す）
  * - 読み込み中・取得失敗は名前と画像だけ。名の引けぬ札とタッチではカードを開かぬ
  * 明るい面は `data-theme="light"` の囲みで確かめる（カードの色は koyori のトークンで、囲みに追従する）。
  */
@@ -96,10 +100,30 @@ const profiles: Record<string, Record<string, unknown>> = {
   },
 };
 
+/** 閲覧者のテナントでの関わり方。カードはゲストの閲覧者に、プロフィールを取りに行かぬ */
+function setViewer(membership: Tenant['membership']) {
+  return () => {
+    setActivePinia(createPinia());
+    useTenantStore().$patch({
+      tenants: [
+        {
+          id: TENANT,
+          display_id: 'acme',
+          name: 'Acme',
+          description: '',
+          icon_url: '',
+          membership,
+        } as Tenant,
+      ],
+      selectedTenantId: TENANT,
+    });
+  };
+}
+
 type FetchMode = 'ok' | 'pending' | 'forbidden' | 'slow';
 
-/** `slow` の応答が返るまでの時間（ms） */
-const SLOW_MS = 600;
+/** `slow` の応答が返るまでの時間（ms）。別の人へ移って戻る間も返らぬよう、長めにする */
+const SLOW_MS = 2000;
 
 let fetchSpy: ReturnType<typeof fn>;
 
@@ -153,6 +177,8 @@ const anyProfileCalls = () =>
 const meta = {
   title: 'Tasks/MentionHoverCard',
   parameters: { a11y: { test: 'error' } },
+  // 閲覧者は既定でメンバー（ゲストの場面だけ story が差し替える）
+  beforeEach: setViewer('Member'),
   decorators: [
     () => ({
       setup() {
@@ -418,38 +444,89 @@ export const ReopenBeforeLoaded: Story = {
   },
 };
 
-/** 取得に失敗した人（403）を、別の人を挟んで開き直しても、取り直さぬ */
+/** 取得の途中で A → B → A と移っても、A の取得は 1 回（別の人に移っても進行中の取得は中断されない） */
+export const MoveAndBack: Story = {
+  name: '取得の途中で別の人へ移って戻る',
+  beforeEach: mockProfiles('slow'),
+  render: bodyStory(false),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const taro = await openCard(canvasElement, '@taro', 'taro のプロフィール');
+    await waitFor(() => expect(profileCalls(TARO)).toBe(1));
+    // taro の応答が返る前に aki へ移る
+    await userEvent.unhover(taro.chip);
+    await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull());
+    const aki = await openCard(canvasElement, '@aki', 'aki のプロフィール');
+    await waitFor(() => expect(profileCalls(AKI)).toBe(1));
+    await userEvent.unhover(aki.chip);
+    await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull());
+    // taro へ戻る（まだ返っていないか、返った後のどちらでも 1 回）
+    await userEvent.hover(taro.chip);
+    const back = await canvas.findByRole('dialog', { name: 'taro のプロフィール' });
+    await waitFor(() => expect(back.querySelector('.bio')).not.toBeNull());
+    await expect(profileCalls(TARO)).toBe(1);
+    await expect(profileCalls(AKI)).toBe(1);
+  },
+};
+
+/** 取得に失敗した人（403）は、次に開いたときに取り直す。失敗しても名前と画像だけのカードのまま */
 export const ReopenAfterFailure: Story = {
-  name: '失敗した人を開き直す（403）',
+  name: '失敗した人は開き直すと取り直す（403）',
   beforeEach: mockProfiles('forbidden'),
   render: bodyStory(false),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const closeCard = async (chip: HTMLElement) => {
-      await userEvent.unhover(chip);
-      await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull());
-    };
     const taro = await openCard(canvasElement, '@taro', 'taro のプロフィール');
     await waitFor(() => expect(profileCalls(TARO)).toBe(1));
-    // 失敗の結果が入るまで待つ
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    // 同じ人を開き直す
-    await closeCard(taro.chip);
+    await userEvent.unhover(taro.chip);
+    await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull());
     await userEvent.hover(taro.chip);
-    await canvas.findByRole('dialog', { name: 'taro のプロフィール' });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    const reopened = await canvas.findByRole('dialog', { name: 'taro のプロフィール' });
+    await waitFor(() => expect(profileCalls(TARO)).toBe(2));
+    // 現れる動きの間は透明なので、見えるまで待つ
+    await waitFor(() => expect(within(reopened).getByText('taro')).toBeVisible());
+    await expect(reopened.querySelector('.meta')).toBeNull();
+  },
+};
+
+/** 窓のフォーカスの復帰では、取得済みの人を取り直さぬ（開いたままでも、閉じた後でも） */
+export const NoRefetchOnFocus: Story = {
+  name: '窓のフォーカスの復帰で取り直さない',
+  beforeEach: mockProfiles('ok'),
+  render: bodyStory(false),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const taro = await openCard(canvasElement, '@taro', 'taro のプロフィール');
+    await waitFor(() => expect(profileCalls(TARO)).toBe(1));
+    await waitFor(() => expect(taro.dialog.querySelector('.bio')).not.toBeNull());
+    const refocus = async () => {
+      window.dispatchEvent(new Event('focus'));
+      document.dispatchEvent(new Event('visibilitychange'));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    };
+    await refocus();
     await expect(profileCalls(TARO)).toBe(1);
-    await closeCard(taro.chip);
-    // 別の人（これも 403）を挟んで戻る
-    const aki = await openCard(canvasElement, '@aki', 'aki のプロフィール');
-    await waitFor(() => expect(profileCalls(AKI)).toBe(1));
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    await closeCard(aki.chip);
-    await userEvent.hover(taro.chip);
-    await canvas.findByRole('dialog', { name: 'taro のプロフィール' });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await userEvent.unhover(taro.chip);
+    await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull());
+    await refocus();
     await expect(profileCalls(TARO)).toBe(1);
-    await expect(profileCalls(AKI)).toBe(1);
+  },
+};
+
+/** 閲覧者がそのテナントのゲストなら、プロフィールを取りに行かず、名前とアバターだけのカードを出す */
+export const ViewerIsGuest: Story = {
+  name: '閲覧者がゲスト（取りに行かない）',
+  beforeEach: [setViewer('Guest'), mockProfiles('ok')],
+  render: bodyStory(false),
+  play: async ({ canvasElement }) => {
+    const { dialog } = await openCard(canvasElement, '@taro', 'taro のプロフィール');
+    await expect(within(dialog).getByText('taro')).toBeVisible();
+    await waitFor(() => expect(dialog.querySelector('img')).not.toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expect(anyProfileCalls()).toBe(0);
+    await expect(dialog.querySelector('.meta')).toBeNull();
+    await expect(dialog.querySelector('.bio')).toBeNull();
+    await expect(within(dialog).queryByText('ゲスト')).toBeNull();
   },
 };
 
