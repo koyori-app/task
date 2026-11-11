@@ -65,7 +65,7 @@ pub struct UpdateTenantRequest {
     pub icon_emoji: Option<String>,
 }
 
-/// テナント一覧における、この利用者から見た関わり方の印。
+/// テナントとの関わり方（オーナー・メンバー・ゲスト）。テナント一覧では閲覧者の、プロフィールでは対象の利用者の関わり方を表す。
 /// `TenantRole` と同じ流儀（PascalCase の文字列）で返す。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum TenantMembershipKind {
