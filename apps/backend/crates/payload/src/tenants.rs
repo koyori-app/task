@@ -67,7 +67,7 @@ pub struct UpdateTenantRequest {
 
 /// テナント一覧における、この利用者から見た関わり方の印。
 /// `TenantRole` と同じ流儀（PascalCase の文字列）で返す。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum TenantMembershipKind {
     /// `tenants.owner_id` の本人
     Owner,
