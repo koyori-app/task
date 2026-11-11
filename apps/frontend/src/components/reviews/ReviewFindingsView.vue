@@ -48,10 +48,12 @@ import {
 } from '@/lib/review-findings-url-state';
 import { pullRequestState } from '@/lib/forge-pull-request';
 import {
+  DEFAULT_PR_STATE_FILTER,
   PR_PAGE_SIZE,
   PR_STATE_FILTERS,
   filterPullRequests,
   hasGithubConnection,
+  initialPrStateFilter,
   isMyPullRequest,
   pageCount,
   pageOfPullRequest,
@@ -122,7 +124,9 @@ const githubNeedsRelink = computed(
 );
 /** 選択中 PR とは別——サイドバーの見える行だけを絞る。 */
 const prQuery = ref('');
-const prStateFilter = ref<PrStateFilter>('all');
+const prStateFilter = ref<PrStateFilter>(DEFAULT_PR_STATE_FILTER);
+// 一覧の初回到着時に既定の「PR の状態」を 1 回だけ確かめるための印。利用者が先に触ったら確かめない
+let prStateDecided = false;
 // PR 一覧は連携一覧を待たずに出す（連携一覧は外部への問い合わせで遅れることがある）。
 // 連携一覧が要るのは「自分の PR」の判定だけで、その間スイッチは使えない
 const railReady = computed(() => prsQuery.isSuccess.value);
@@ -301,10 +305,21 @@ watch(
 
 const summary = computed(() => summaryQuery.data.value ?? null);
 
-/** 初期 PR の指定が無ければ、最後にレビューされた PR を開く。 */
+/**
+ * 一覧が初めて届いたら、既定の「PR の状態」を確かめる（Open が無ければ「すべて」）。
+ * 初期 PR の指定が無ければ、その絞り込みで一覧の先頭に出る PR（最後にレビューされた
+ * Open の PR）を開く。絞り込みに合う PR が無ければ全体の先頭を開く。
+ * `mine` は連携一覧の到着を待つため、候補には作成者の絞り込みを掛けない。
+ */
 watch(pullRequests, (list) => {
-  if (selectedPr.value === null && list.length > 0) {
-    selectedPr.value = list[0].pr_number;
+  if (list.length === 0) return;
+  if (!prStateDecided) {
+    prStateDecided = true;
+    prStateFilter.value = initialPrStateFilter(list);
+  }
+  if (selectedPr.value === null) {
+    const first = filterPullRequests(list, '', null, prStateFilter.value)[0] ?? list[0];
+    selectedPr.value = first.pr_number;
     writeUrl('replace');
   }
 });
@@ -427,6 +442,7 @@ function onPrQueryInput() {
 }
 
 function setPrStateFilter(value: unknown) {
+  prStateDecided = true;
   prStateFilter.value = value as PrStateFilter;
   onPrQueryInput();
 }
@@ -667,6 +683,12 @@ async function onRoundCreated() {
               variant="tertiary"
               :label="prQuery.trim() === '' ? 'すべての PR を表示' : 'すべての PR から探す'"
               @click="setMineOnly(false)"
+            />
+            <Button
+              v-if="prStateFilter !== 'all'"
+              variant="tertiary"
+              label="すべての状態の PR を表示"
+              @click="setPrStateFilter('all')"
             />
           </div>
 

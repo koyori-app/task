@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import ReviewFindingsView from '../ReviewFindingsView.vue';
-import { pickerOption } from '@/components/__tests__/picker';
+import { pickerOption, pickerTrigger } from '@/components/__tests__/picker';
 import type { components } from '@/generated/api';
 import {
   DEFAULT_REVIEW_FINDINGS_URL_STATE,
@@ -863,11 +863,112 @@ describe('ReviewFindingsView', () => {
     });
     const wrapper = mountView();
     await flushPromises();
+    // 既定は Open だけなので、Merged / 状態不明は「すべて」にして並べる
+    pickerOption(wrapper.get('#filter-pr-state').element, 'すべて').click();
+    await flushPromises();
     expect(wrapper.findAll('[data-testid="pr-state"]').map((b) => b.text())).toEqual([
       'Merged',
       '状態不明',
       'Open',
     ]);
+  });
+
+  describe('PR の状態の既定', () => {
+    const noPrUrlState: ReviewFindingsUrlState = { ...DEFAULT_REVIEW_FINDINGS_URL_STATE };
+
+    afterEach(() => {
+      window.history.replaceState(null, '', '/');
+    });
+
+    it('開いた直後は Open の PR だけを一覧に出し、最後にレビューされた Open の PR を開く', async () => {
+      stubFetch({
+        findings: [finding()],
+        prNumbers: [620, 619, 618],
+        prStates: { '620': 'merged', '619': 'unknown' },
+      });
+      mountView({ initialUrlState: noPrUrlState });
+      await flushPromises();
+
+      expect(prNavButtons().map((b) => b.textContent)).toEqual([expect.stringContaining('#618')]);
+      expect(new URL(window.location.href).searchParams.get('pr')).toBe('618');
+      expect(pickerTrigger(document.body, 'PR の状態').getAttribute('aria-label')).toBe(
+        'PR の状態: Open',
+      );
+    });
+
+    it('Open の PR が 1 件も無ければ「すべて」で開き、一覧を空にしない', async () => {
+      stubFetch({
+        findings: [finding()],
+        prNumbers: [620, 619, 618],
+        prStates: { '620': 'merged', '619': 'unknown', '618': 'closed' },
+      });
+      mountView({ initialUrlState: noPrUrlState });
+      await flushPromises();
+
+      expect(prNavButtons()).toHaveLength(3);
+      expect(new URL(window.location.href).searchParams.get('pr')).toBe('620');
+      expect(pickerTrigger(document.body, 'PR の状態').getAttribute('aria-label')).toBe(
+        'PR の状態: すべて',
+      );
+    });
+
+    it('「すべて」を選ぶと Merged / Closed も並び、状態の絞り込みは URL に載せない', async () => {
+      stubFetch({
+        findings: [finding()],
+        prNumbers: [620, 619, 618],
+        prStates: { '620': 'merged', '619': 'closed' },
+      });
+      const wrapper = mountView({ initialUrlState: noPrUrlState });
+      await flushPromises();
+      expect(prNavButtons()).toHaveLength(1);
+
+      pickerOption(wrapper.get('#filter-pr-state').element, 'すべて').click();
+      await flushPromises();
+
+      expect(prNavButtons()).toHaveLength(3);
+      // 状態の絞り込みは載らない（page は PR 一覧を操作したときに明示される 1 ページ目）
+      expect([...new URL(window.location.href).searchParams.keys()].sort()).toEqual(['page', 'pr']);
+    });
+
+    it('共有リンクでマージ済み PR を開いたとき、その PR の指摘は出し、一覧には出ない理由を添える', async () => {
+      stubFetch({
+        findings: [finding({ pr_number: 620 })],
+        prNumbers: [620, 619, 618],
+        prStates: { '620': 'merged' },
+      });
+      const wrapper = mountView({ initialUrlState: { ...noPrUrlState, pr: 620 } });
+      await flushPromises();
+
+      expect(wrapper.get('[data-testid="pr-rail-note"]').text()).toContain(
+        '表示中の #620 はこの絞り込みでは一覧に出ていません',
+      );
+      expect(prNavButtons().map((b) => b.textContent)).toEqual([
+        expect.stringContaining('#619'),
+        expect.stringContaining('#618'),
+      ]);
+      expect(wrapper.find('[data-testid="finding-list"]').exists()).toBe(true);
+    });
+
+    it('絞った状態に PR が無ければ、すべての状態へ戻すボタンを出す', async () => {
+      stubFetch({ findings: [finding()], prNumbers: [620, 619, 618] });
+      const wrapper = mountView({ initialUrlState: noPrUrlState });
+      await flushPromises();
+
+      pickerOption(wrapper.get('#filter-pr-state').element, 'Closed').click();
+      await flushPromises();
+      expect(prNavButtons()).toHaveLength(0);
+      expect(wrapper.get('[data-testid="no-pr-match"]').text()).toContain(
+        'この状態の PR はありません。',
+      );
+
+      await wrapper
+        .get('[data-testid="no-pr-match"]')
+        .findAll('button')
+        .find((b) => b.text() === 'すべての状態の PR を表示')!
+        .trigger('click');
+      await flushPromises();
+      expect(prNavButtons()).toHaveLength(3);
+    });
   });
 });
 
@@ -1066,6 +1167,7 @@ describe('ReviewFindingsView の PR 一覧（自分の PR・ページ）', () =>
     const empty = wrapper.get('[data-testid="no-pr-match"]');
     expect(empty.text()).toContain('「99999」に一致する PR はありません');
     expect(empty.text()).not.toContain('自分が作成した');
-    expect(empty.find('button').exists()).toBe(false);
+    // 「自分の PR だけ」を解くボタンは出さない（状態を戻すボタンは別）
+    expect(empty.findAll('button').map((b) => b.text())).toEqual(['すべての状態の PR を表示']);
   });
 });

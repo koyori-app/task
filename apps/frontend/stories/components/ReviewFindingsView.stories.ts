@@ -118,6 +118,13 @@ const morePullRequests = Array.from({ length: 11 }, (_, i) => ({
   state: (['merged', 'closed', 'unknown'] as const)[i % 3],
 }));
 
+/** PR 一覧の「PR の状態」を「すべて」にする（既定は Open だけ）。 */
+async function showAllPrStates(canvas: ReturnType<typeof within>) {
+  const user = userEvent.setup();
+  await user.click(await canvas.findByRole('button', { name: /^PR の状態/ }));
+  await user.click(await canvas.findByRole('option', { name: 'すべて' }));
+}
+
 function mockFetch(overrides: { empty?: boolean; manyPrs?: boolean; github?: boolean } = {}) {
   return () => {
     const original = globalThis.fetch;
@@ -310,6 +317,7 @@ export const PullRequestRail: Story = {
   beforeEach: mockFetch({ manyPrs: true, github: true }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    await showAllPrStates(canvas);
     const pager = await canvas.findByTestId('pr-pager');
     await expect(pager).toHaveTextContent('全 12 件 · 1 / 2 ページ');
     // 連携一覧は PR 一覧より後に届くので、待ってから見る
@@ -322,11 +330,25 @@ export const PullRequestRail: Story = {
   },
 };
 
+export const PullRequestRailOpenOnly: Story = {
+  name: 'PR 一覧（既定は Open だけ）',
+  beforeEach: mockFetch({ manyPrs: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // 12 件のうち Open は 1 件だけ。Merged / Closed / 状態不明は既定では並ばない
+    const badges = await canvas.findAllByTestId('pr-state');
+    await expect(badges.map((b) => b.textContent?.trim())).toEqual(['Open']);
+    await expect(canvas.queryByTestId('pr-pager')).not.toBeInTheDocument();
+    await expect(canvas.getByRole('button', { name: 'PR の状態: Open' })).toBeInTheDocument();
+  },
+};
+
 export const PullRequestStates: Story = {
   name: 'PR の状態バッジ',
   beforeEach: mockFetch({ manyPrs: true }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    await showAllPrStates(canvas);
     const badges = await canvas.findAllByTestId('pr-state');
     await expect(badges.map((b) => b.textContent?.trim())).toEqual(
       expect.arrayContaining(['Open', 'Merged', 'Closed', '状態不明']),

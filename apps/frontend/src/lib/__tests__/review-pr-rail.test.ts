@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { ReviewedPullRequest } from '@/lib/review-findings';
 import {
+  DEFAULT_PR_STATE_FILTER,
   filterPullRequests,
   hasGithubConnection,
+  initialPrStateFilter,
   pageCount,
   pageOfPullRequest,
   viewerGithubLogin,
@@ -41,6 +43,23 @@ describe('review PR rail', () => {
     expect(filterPullRequests(list, '', null, 'all')).toHaveLength(3);
     // 検索とは AND
     expect(filterPullRequests(list, '231', null, 'merged')).toEqual([]);
+  });
+
+  it('既定の PR の状態は Open', () => {
+    expect(DEFAULT_PR_STATE_FILTER).toBe('open');
+  });
+
+  it('開いた直後の PR の状態は、Open の PR があれば Open、無ければ「すべて」', () => {
+    expect(initialPrStateFilter(list)).toBe('open');
+    expect(
+      initialPrStateFilter([pr(228, null, null, 'merged'), pr(9, null, null, 'unknown')]),
+    ).toBe('all');
+    // webhook を受けていない CLI 運用は全件 unknown
+    expect(initialPrStateFilter([pr(9, null, null, 'unknown'), pr(8, null, null, 'unknown')])).toBe(
+      'all',
+    );
+    // 空の一覧は既定のまま（画面は「レビューはまだありません」で別扱い）
+    expect(initialPrStateFilter([])).toBe('open');
   });
 
   it('番号・タイトルの部分一致で探し、先頭の # は無視する', () => {
